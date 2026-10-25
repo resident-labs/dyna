@@ -358,8 +358,6 @@ func TestExplicitControlsDisableNudge(t *testing.T) {
 
 func TestExplicitHarnessPermissionsAreNeverAutoBypassed(t *testing.T) {
 	tests := []profile.Profile{
-		{Harness: profile.HarnessMuse, ExtraArgs: []string{"--yolo"}},
-		{Harness: profile.HarnessMuse, ExtraArgs: []string{"--approval-mode", "never"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--permission-mode", "plan"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--allowedTools", "Read,Grep"}},
 	}
@@ -404,71 +402,6 @@ func TestMockReportsCallerTaskWithoutJournalEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(out, "inspect the decoder") || strings.Contains(out, "DYNA WORK JOURNAL") {
 		t.Fatalf("mock output leaked internal envelope: %q", out)
-	}
-}
-
-func TestMuseInvocationIsResumableAndParsesTerminalText(t *testing.T) {
-	inv, err := buildInvocation(profile.Profile{
-		Name: "wonder", Harness: profile.HarnessMuse, Model: "muse-wonder-1.0",
-		ExtraArgs: []string{"--reasoning-effort", "high"},
-	}, "do the task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inv.sessionID == nil || inv.resume == nil || inv.initial.parseOutput == nil {
-		t.Fatalf("muse invocation is not resumable: %#v", inv.initial.argv)
-	}
-	joined := strings.Join(inv.initial.argv, " ")
-	for _, want := range []string{"muse serve", "--disable-sandbox", "--model muse-wonder-1.0"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("missing %s: %v", want, inv.initial.argv)
-		}
-	}
-	sessionID := inv.initial.museSession
-	if sessionID == "" || inv.initial.prompt != "do the task" || inv.initial.museReasoning != "high" {
-		t.Fatalf("wrong MSP request: %+v", inv.initial)
-	}
-	resumed := inv.resume(sessionID, "continue please")
-	if resumed.museSession != sessionID || !resumed.museResume || resumed.prompt != "continue please" {
-		t.Fatalf("wrong continuation: %+v", resumed)
-	}
-	stdout := strings.Join([]string{
-		`{"payload_type":"turn.input.user","stream":{"kind":"session","id":"` + sessionID + `"},"payload":{"prompt":"do the task"}}`,
-		`{"payload_type":"run.output.delta","stream":{"kind":"session","id":"` + sessionID + `"},"payload":{"text":"all done"}}`,
-		`{"payload_type":"run.terminal.completed","stream":{"kind":"session","id":"` + sessionID + `"},"payload":{"terminal":"completed","text":"all done"}}`,
-	}, "\n")
-	if got := inv.initial.parseOutput(stdout); got != "all done" {
-		t.Fatalf("parseOutput = %q, want the terminal text, not raw records", got)
-	}
-	if got := museSessionID(stdout); got != sessionID {
-		t.Fatalf("museSessionID = %q, want %q", got, sessionID)
-	}
-}
-
-func TestMuseRejectsReservedExtraArgs(t *testing.T) {
-	for _, extra := range [][]string{{"--json"}, {"--session-id", "x"}, {"--model", "y"}, {"--output-schema", "s.json"}} {
-		if _, err := buildInvocation(profile.Profile{Harness: profile.HarnessMuse, ExtraArgs: extra}, "task"); err == nil {
-			t.Fatalf("accepted reserved muse extraArgs %v", extra)
-		}
-	}
-	inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessMuse, SafeMode: true}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(strings.Join(inv.initial.argv, " "), "--yolo") {
-		t.Fatalf("safe-mode muse invocation bypassed permissions: %#v", inv.initial.argv)
-	}
-}
-
-func TestOpenCodeExplicitJSONRemainsResumable(t *testing.T) {
-	for _, extra := range [][]string{{"--format", "json"}, {"--format=json"}} {
-		inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessOpenCode, ExtraArgs: extra}, "task")
-		if err != nil {
-			t.Fatalf("buildInvocation(%v) error = %v", extra, err)
-		}
-		if inv.sessionID == nil || inv.resume == nil || inv.initial.parseOutput == nil {
-			t.Fatalf("explicit JSON invocation is not resumable: %#v", inv.initial.argv)
-		}
 	}
 }
 
@@ -522,25 +455,20 @@ func TestLeafExecutionNativeControlsInitialAndResume(t *testing.T) {
 
 func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 	// Dyna owns native delegation on every invocation.
-	for _, p := range []profile.Profile{
-		{Harness: profile.HarnessClaudeCode},
-		{Harness: profile.HarnessOpenCode},
-	} {
-		inv, err := buildInvocation(p, "task")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if inv.cleanup != nil {
-			defer inv.cleanup()
-		}
-		joined := strings.Join(inv.initial.argv, " ")
-		if p.Harness == profile.HarnessClaudeCode && !hasOptionValue(inv.initial.argv, "--disallowedTools", "Agent") {
-			t.Fatalf("profile %#v lacks its native feature policy: %s", p, joined)
-		}
+	p := profile.Profile{Harness: profile.HarnessClaudeCode}
+	inv, err := buildInvocation(p, "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.cleanup != nil {
+		defer inv.cleanup()
+	}
+	if joined := strings.Join(inv.initial.argv, " "); !hasOptionValue(inv.initial.argv, "--disallowedTools", "Agent") {
+		t.Fatalf("profile %#v lacks its native feature policy: %s", p, joined)
 	}
 	// With the leaf option, harnesses without a known control still get none.
 	for _, p := range []profile.Profile{
-		{Harness: profile.HarnessOpenCode},
+		{Harness: profile.HarnessPi},
 	} {
 		inv, err := buildInvocationWithExecution(p, "task", ExecutionOptions{DisableNativeSubagents: true})
 		if err != nil {
@@ -610,24 +538,6 @@ func optionIndex(args []string, option string) int {
 		}
 	}
 	return -1
-}
-
-// configArgs returns the values of the -c/--config options in argv, in order.
-// Muse passes its generated settings this way, one key=value pair per option.
-func configArgs(args []string) []string {
-	var out []string
-	for i := 0; i < len(args); i++ {
-		switch {
-		case (args[i] == "-c" || args[i] == "--config") && i+1 < len(args):
-			out = append(out, args[i+1])
-			i++
-		case strings.HasPrefix(args[i], "-c="):
-			out = append(out, strings.TrimPrefix(args[i], "-c="))
-		case strings.HasPrefix(args[i], "--config="):
-			out = append(out, strings.TrimPrefix(args[i], "--config="))
-		}
-	}
-	return out
 }
 
 func createHarnessJournal(t *testing.T, agentID int) string {
@@ -916,9 +826,7 @@ func TestProfileKnobsReachEveryTurn(t *testing.T) {
 		want           []string
 	}{
 		{profile.HarnessClaudeCode, "haiku", []string{"--effort", "high"}, &profile.Compact{Tokens: 95000}, []string{"--effort\x00high", `"autoCompactWindow":128000`}},
-		{profile.HarnessMuse, "muse-x", []string{"--reasoning-effort", "high"}, &profile.Compact{Tokens: 95000, Windows: map[string]int64{"muse-x": 1000000}}, []string{"-c\x00context_compaction.soft_threshold=0.095"}},
 		{profile.HarnessPi, "anthropic/claude-x", []string{"--thinking", "high"}, nil, []string{"--thinking\x00high"}},
-		{profile.HarnessOpenCode, "opencode/beam-free#low", nil, nil, []string{"opencode", "serve"}},
 	} {
 		inv, err := buildInvocation(profile.Profile{Harness: tc.harness, Model: tc.model, ExtraArgs: tc.extra, Compact: tc.compact}, "task")
 		if err != nil {
@@ -926,9 +834,6 @@ func TestProfileKnobsReachEveryTurn(t *testing.T) {
 		}
 		if inv.resume == nil {
 			t.Fatalf("%s has no resume turn", tc.harness)
-		}
-		if tc.harness == profile.HarnessMuse && (inv.initial.museReasoning != "high" || inv.resume("ses", "again").museReasoning != "high") {
-			t.Fatal("Muse lost native reasoning effort")
 		}
 		for name, argv := range map[string][]string{"first": inv.initial.argv, "resume": inv.resume("ses", "again").argv} {
 			joined := strings.Join(argv, "\x00")
@@ -954,7 +859,6 @@ func TestInstructionsReachEveryTurnNatively(t *testing.T) {
 	}{
 		{profile.HarnessClaudeCode, "--append-system-prompt-file", true},
 		{profile.HarnessPi, "--append-system-prompt", true},
-		{profile.HarnessMuse, "-c", false},
 	} {
 		p := profile.Profile{Harness: tc.harness, Model: "m", RuntimeInstructions: text}
 		if !NativeInstructions(tc.harness) {
@@ -984,12 +888,8 @@ func TestInstructionsReachEveryTurnNatively(t *testing.T) {
 			}
 		}
 	}
-	if NativeInstructions(profile.HarnessMock) || NativeInstructions(profile.HarnessOpenCode) {
-		t.Fatal("custom, mock and OpenCode keep prompt injection")
-	}
-	huge := profile.Profile{Harness: profile.HarnessMuse, RuntimeInstructions: strings.Repeat("x", 70*1024)}
-	if _, err := buildInvocation(huge, "task"); err == nil || !strings.Contains(err.Error(), "64 KB") {
-		t.Fatalf("an instructions argv over 64 KB was accepted: %v", err)
+	if NativeInstructions(profile.HarnessMock) {
+		t.Fatal("custom and mock keep prompt injection")
 	}
 }
 

@@ -475,21 +475,6 @@ func TestCallRunsForTheSessionTheClientNames(t *testing.T) {
 	}
 }
 
-func TestOpenCodeClientSetsTheCapAndNamesItsSession(t *testing.T) {
-	tools := newTools(t, time.Minute)
-	var seen string
-	tools.Resolve = func(id string) (Caller, bool) { seen = id; return Caller{}, false }
-	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"opencode","version":"2.0.32"}}}` + "\n" +
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shell_jobs","arguments":{},"_meta":{"ai.opencode/sessionID":"ses_oc_1"}}}` + "\n")
-	var out strings.Builder
-	if err := Serve(context.Background(), in, &out, tools); err != nil {
-		t.Fatal(err)
-	}
-	if tools.WaitCap != openCodeWaitCap || seen != "ses_oc_1" {
-		t.Errorf("cap = %v, client session = %q", tools.WaitCap, seen)
-	}
-}
-
 func TestLostJobReportsSupervisorErrors(t *testing.T) {
 	tools := newTools(t, time.Second)
 	meta, err := tools.Store.Create(shells.StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir(), Owner: tools.Owner})

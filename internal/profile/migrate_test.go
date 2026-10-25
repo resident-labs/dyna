@@ -13,7 +13,7 @@ func TestProfileV3MigrationPreservesUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	raw := []byte(`{"version":2,"futureRoot":{"keep":42},"profiles":[
  {"name":"claude","harness":"claude-code","taste":5,"intelligence":5,"cost":5,"futureProfile":["keep"]},
- {"name":"muse","harness":"muse","taste":5,"intelligence":5,"cost":5,"output":{"dialect":"muse-jsonl","futureOutput":{"keep":true}},"extraArgs":["--keep"]},
+ {"name":"mock","harness":"mock","taste":5,"intelligence":5,"cost":5,"output":{"dialect":"text","futureOutput":{"keep":true}},"extraArgs":["--keep"]},
  {"name":"pi","harness":"pi","taste":5,"intelligence":5,"cost":5,"output":{"dialect":"pi-json","futureOutput":"keep"}}]}`)
 	if err := os.WriteFile(path, raw, 0644); err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestProfileV3MigrationPreservesUnknownFields(t *testing.T) {
 	if document.FutureRoot["keep"] != 42 || !reflect.DeepEqual(document.Profiles[0]["futureProfile"], []any{"keep"}) {
 		t.Fatal("unknown root or profile field lost")
 	}
-	for i, want := range []string{"claude-stream-json", "muse-jsonl", "pi-json"} {
+	for i, want := range []string{"claude-stream-json", "text", "pi-json"} {
 		out, ok := document.Profiles[i]["output"].(map[string]any)
 		if !ok || out["dialect"] != want {
 			t.Fatalf("output %d = %v", i, out)

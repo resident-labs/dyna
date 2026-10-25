@@ -8,25 +8,21 @@ import (
 	"testing"
 )
 
-// museDeviceSample is what `muse login --device` prints for a piped output,
-// with the color codes it writes anyway.
-const museDeviceSample = "\x1b[1mSign in to Muse\x1b[0m\n\n" +
-	"Open this page to sign in:\n" +
-	"  \x1b[32mhttps://auth.meta.com/oauth/device/?code=ABCD-EF12\x1b[0m\n" +
-	"confirm this code matches:\n" +
-	"  \x1b[33mABCD-EF12\x1b[0m\n"
+// piDeviceSample is one sign-in state that the Pi helper prints, in the same
+// JSON line format it writes for the card.
+const piDeviceSample = "PI_SIGNIN {\"url\":\"https://example.test/oauth\",\"message\":\"Sign in to Pi\"}\n"
 
-// printSampleArgv prints the Muse sample and exits, so the runner sees a
+// printSampleArgv prints the Pi sample and exits, so the runner sees a
 // login that finishes on its own.
 func printSampleArgv([]string) []string {
-	return []string{"/bin/sh", "-c", "printf '" + museDeviceSample + "'"}
+	return []string{"/bin/sh", "-c", "printf '" + piDeviceSample + "'"}
 }
 
 // holdSampleArgv prints the sample, then reads stdin, which the runner keeps
 // open. The process stays alive with no sleep, and each printed line reaches
 // the parser before the test continues.
 func holdSampleArgv([]string) []string {
-	return []string{"/bin/sh", "-c", "printf '" + museDeviceSample + "'; read held"}
+	return []string{"/bin/sh", "-c", "printf '" + piDeviceSample + "'; read held"}
 }
 
 // waitingSignal closes a channel the first time the parser reaches the waiting
@@ -51,8 +47,8 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 		},
 		Cancel: func() error { runs["cancel"]++; return nil },
 	}
-	spec := signInSpec{Argv: printSampleArgv, Parse: parseMuseSignIn}
-	_, err := a.startPrivateSignIn("acct", "muse", spec, flow)
+	spec := signInSpec{Argv: printSampleArgv, Parse: parsePiSignIn}
+	_, err := a.startPrivateSignIn("acct", "pi", spec, flow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +62,8 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Phase != signInSucceeded || st.URL == "" || st.Code != "ABCD-EF12" {
-		t.Fatalf("state = %+v, want a succeeded sign-in with its link and code", st)
+	if st.Phase != signInSucceeded || st.URL == "" {
+		t.Fatalf("state = %+v, want a succeeded sign-in with its link", st)
 	}
 	if runs["complete"] != 1 || runs["cancel"] != 0 {
 		t.Fatalf("complete=%d cancel=%d, want the account saved once", runs["complete"], runs["cancel"])
@@ -91,8 +87,8 @@ func TestPrivateSignInRejectsNonReadyAccount(t *testing.T) {
 		},
 		Cancel: func() error { runs["cancel"]++; return nil },
 	}
-	spec := signInSpec{Argv: printSampleArgv, Parse: parseMuseSignIn}
-	if _, err := a.startPrivateSignIn("acct", "muse", spec, flow); err != nil {
+	spec := signInSpec{Argv: printSampleArgv, Parse: parsePiSignIn}
+	if _, err := a.startPrivateSignIn("acct", "pi", spec, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
@@ -122,10 +118,10 @@ func TestPrivateSignInCancelStopsItsProcess(t *testing.T) {
 	}
 	spec := signInSpec{
 		Argv:         holdSampleArgv,
-		Parse:        waitingSignal(&once, reached, parseMuseSignIn),
+		Parse:        waitingSignal(&once, reached, parsePiSignIn),
 		AcceptsPaste: true,
 	}
-	if _, err := a.startPrivateSignIn("acct", "muse", spec, flow); err != nil {
+	if _, err := a.startPrivateSignIn("acct", "pi", spec, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
@@ -158,7 +154,7 @@ func TestPrivateSignInPasteReachesStdin(t *testing.T) {
 	}
 	// Without a paste box the flow refuses the code.
 	plain := signInSpec{Argv: func([]string) []string { return []string{"/bin/sh", "-c", "printf 'ready'"} }}
-	if _, err := a.startPrivateSignIn("plain", "muse", plain, flow); err != nil {
+	if _, err := a.startPrivateSignIn("plain", "pi", plain, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("plain") })
@@ -177,7 +173,7 @@ func TestPrivateSignInPasteReachesStdin(t *testing.T) {
 		},
 		AcceptsPaste: true,
 	}
-	if _, err := a.startPrivateSignIn("paste", "muse", paste, flow); err != nil {
+	if _, err := a.startPrivateSignIn("paste", "pi", paste, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("paste") })

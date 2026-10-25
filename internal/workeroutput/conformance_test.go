@@ -13,8 +13,6 @@ var conformanceFixtures = map[string][]string{
 	DialectPiJSON:           {"pi-stream.jsonl"},
 	DialectText:             {"plain-text.txt"},
 	DialectClaudeStreamJSON: {"claude-tools.jsonl"},
-	DialectOpenCodeJSON:     {"opencode-stream.jsonl"},
-	DialectMuseJSONL:        {"muse-stream.jsonl"},
 }
 
 func fixtureLines(t *testing.T, path string) []string {
@@ -93,7 +91,7 @@ func TestUnknownCapabilities(t *testing.T) {
 	if c.Transcript || c.ToolEvents || c.SafePoints || c.SessionResume || c.Usage != "no" || c.UsageReason == "" {
 		t.Fatalf("unknown capabilities = %+v", c)
 	}
-	if Capabilities(" "+DialectMuseJSONL+" ") != Capabilities(DialectMuseJSONL) {
+	if Capabilities(" "+DialectPiJSON+" ") != Capabilities(DialectPiJSON) {
 		t.Fatal("dialect spaces not trimmed")
 	}
 }
@@ -110,7 +108,6 @@ func TestReasoningConformance(t *testing.T) {
 			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"s"}]}}`,
 			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"redacted_thinking","data":"x"}]}}`,
 		}},
-		DialectOpenCodeJSON: {`{"type":"reasoning","part":{"type":"reasoning","text":"Plan."}}`, "completed", []string{`{"type":"reasoning","part":{"type":"reasoning","text":""}}`}},
 		DialectPiJSON: {`{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Plan."}]}}`, "completed", []string{
 			`{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","thinkingSignature":"s","redacted":true}]}}`,
 		}},

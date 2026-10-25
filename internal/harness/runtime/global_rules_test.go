@@ -16,9 +16,7 @@ import (
 func TestGenerationRemovesLegacyGlobalRulesFiles(t *testing.T) {
 	targets := map[string]string{
 		"claude-code": "CLAUDE.md",
-		"opencode":    "AGENTS.md",
 		"pi":          "AGENTS.md",
-		"muse":        "~/.config/muse/AGENTS.md",
 	}
 	for _, a := range RuntimeAdapters() {
 		if _, ok := targets[a.Harness]; !ok {

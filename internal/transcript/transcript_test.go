@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -224,45 +223,6 @@ func TestDeliveryTextAndActivity(t *testing.T) {
 	}
 }
 
-// TestMuseEventsRenderTargets covers muse-dialect events as older dyna
-// versions normalized them: starts keyed by task id with no input, results
-// keyed by call id whose output echoes the command or file read. The
-// transcript must still show what ran and what was read, one line per
-// call. Tool lines with nothing recoverable must not render blank groups
-// like "read 3 files (, , , …)".
-func TestMuseEventsRenderTargets(t *testing.T) {
-	bashOut := "{\n  \"chunk_id\": \"exec-1-1\",\n  \"command\": \"echo hello-probe\",\n  \"description\": \"Echo probe\",\n  \"exit_code\": 0,\n  \"terminal_status\": \"completed\",\n  \"output\": \"hello-probe\\n\",\n  \"original_output_bytes\": 12,\n  \"truncated\": false\n}"
-	events := []workeroutput.Event{
-		{V: 1, Kind: "tool", Name: "bash", State: "started", ID: "task-1"},
-		{V: 1, Kind: "tool", Name: "bash", State: "completed", ID: "call-1", Output: bashOut},
-		{V: 1, Kind: "tool", Name: "read_file", State: "started", ID: "task-2"},
-		{V: 1, Kind: "tool", Name: "read_file", State: "completed", ID: "call-2", Output: "Read text file `/x/a.go`.\n1|package x"},
-		{V: 1, Kind: "tool", Name: "read_file", State: "started", ID: "task-3"},
-		{V: 1, Kind: "tool", Name: "read_file", State: "completed", ID: "call-3", Output: "Read text file `/x/b.go`.\n1|package x"},
-		{V: 1, Kind: "tool", Name: "tool", State: "completed", ID: "call-4", Output: bashOut},
-	}
-	items, _ := FromEvents(events)
-	var got []string
-	for _, it := range items {
-		if it.Kind == ToolUse {
-			line := Headline(it.Tool)
-			if it.Tool.Count <= 1 {
-				line += " " + it.Tool.Target
-			}
-			got = append(got, strings.TrimSpace(line)+" "+ToolAside(it.Tool))
-		}
-	}
-	want := []string{"ran echo hello-probe (exit 0)", "read 2 files (x/a.go, x/b.go) ", "ran echo hello-probe (exit 0)"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("lines = %q, want %q", got, want)
-	}
-
-	blank := Tool{Verb: "read", Count: 3, Targets: []string{"", "", ""}}
-	if h := Headline(blank); h != "read 3 files" {
-		t.Fatalf("blank group headline = %q, want %q", h, "read 3 files")
-	}
-}
-
 func TestRepeatedReplyShownOnce(t *testing.T) {
 	answer := "## Fixed Add\n\n- returns a + b now\n- go vet is clean"
 	items, _ := FromEvents([]workeroutput.Event{
@@ -470,52 +430,3 @@ func TestSessionTurnKeepsQuotedFramesInsideTheirPost(t *testing.T) {
 		}
 	}
 }
-
-func TestMuseReplyFragments(t *testing.T) {
-	raw, err := os.ReadFile("../workeroutput/testdata/muse-fragments.jsonl")
-	if os.IsNotExist(err) {
-		t.Skip("muse-fragments.jsonl is missing from this checkout")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	var events []workeroutput.Event
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		events = append(events, workeroutput.NormalizeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectMuseJSONL}, line)...)
-	}
-	want, _ := workeroutput.MuseStreamResult(string(raw))
-	items, _ := FromEvents(events)
-	if len(items) != 1 || strings.TrimSpace(items[0].Text) != want {
-		t.Fatalf("fragment replies = %#v, want %q", items, want)
-	}
-	// Stored records from before the delta marker was introduced.
-	for i := range events {
-		events[i].State = ""
-	}
-	turn := SessionTurn(subagent.Turn{OutputDialect: workeroutput.DialectMuseJSONL}, events, false)
-	var replies []string
-	for _, item := range turn.Items {
-		if item.Kind == Reply {
-			replies = append(replies, item.Text)
-		}
-	}
-	if len(replies) != 1 || strings.TrimSpace(replies[0]) != want {
-		t.Fatalf("legacy replies = %q, want %q", replies, want)
-	}
-}
-
-func TestMusePostHelpSummary(t *testing.T) {
-	raw, err := os.ReadFile("testdata/muse-post-help.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	events := workeroutput.NormalizeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectMuseJSONL}, strings.TrimSpace(string(raw)))
-	if len(events) != 1 {
-		t.Fatalf("events = %#v", events)
-	}
-	got := Summarize(events[0])
-	if got.Verb != "ran" || !strings.Contains(got.Target, "post --help") {
-		t.Fatalf("help summary = %#v", got)
-	}
-}
-

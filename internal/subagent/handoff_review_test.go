@@ -2,9 +2,9 @@ package subagent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -15,49 +15,36 @@ import (
 )
 
 // Exercise the existing native argument builder with real standing instructions.
-// The ProcessRunner replaces only model execution; the harness enforces its
-// actual 64 KiB argument limit before calling it.
+// The ProcessRunner replaces only model execution; Claude Code receives the
+// instructions through its native file channel before that call.
 func assertNativeArgumentsFit(t *testing.T, text, prompt string) {
 	t.Helper()
-	// Muse carries the instructions in argv as a JSON config value, so the
-	// 64 KiB argument limit applies to it.
-	for _, native := range []string{profile.HarnessMuse} {
-		called := false
-		p := profile.Profile{Harness: native, RuntimeInstructions: text}
-		_, err := harness.RunWithOptions(context.Background(), p, prompt, t.TempDir(), false,
-			harness.JournalOptions{}, harness.SteeringOptions{}, harness.SessionOptions{}, harness.ExecutionOptions{
-				ProcessRunner: func(_ context.Context, args []string, stdout, _ io.Writer) error {
-					called = true
-					found := false
-					for _, arg := range args {
-						if len(arg) > 64*1024 {
-							return fmt.Errorf("native argument needs %d bytes, above 64 KiB", len(arg))
+	called := false
+	p := profile.Profile{Harness: profile.HarnessClaudeCode, RuntimeInstructions: text}
+	_, err := harness.RunWithOptions(context.Background(), p, prompt, t.TempDir(), false,
+		harness.JournalOptions{}, harness.SteeringOptions{}, harness.SessionOptions{}, harness.ExecutionOptions{
+			ProcessRunner: func(_ context.Context, args []string, stdout, _ io.Writer) error {
+				called = true
+				found := false
+				for i, arg := range args {
+					if arg == "--append-system-prompt-file" && i+1 < len(args) {
+						raw, err := os.ReadFile(args[i+1])
+						if err != nil {
+							return err
 						}
-						if raw, ok := strings.CutPrefix(arg, "run.developer_prompt="); ok {
-							var decoded string
-							if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-								return err
-							}
-							found = decoded == text
-							t.Logf("%s native instructions argument: %d bytes", native, len(arg))
-						} else if arg == text {
-							found = true
-							t.Logf("%s native instructions argument: %d bytes", native, len(arg))
-						}
-
+						found = string(raw) == text
+						t.Logf("claude native instructions file: %d bytes", len(raw))
 					}
-					if !found {
-						return fmt.Errorf("native instructions were not passed intact")
-					}
-					fmt.Fprintln(stdout, `{"payload_type":"session.run.linked","stream":{"kind":"session","id":"source-review"}}`)
-					fmt.Fprintln(stdout, `{"payload_type":"run.output.delta","payload":{"text":"Sources reviewed"}}`)
-					fmt.Fprintln(stdout, `{"payload_type":"run.terminal.completed","payload":{"text":"Sources reviewed"}}`)
-					return nil
-				},
-			})
-		if err != nil || !called {
-			t.Fatalf("%s rejected native instructions before model execution: %v", native, err)
-		}
+				}
+				if !found {
+					return fmt.Errorf("native instructions were not passed intact")
+				}
+				fmt.Fprintln(stdout, `{"type":"result","subtype":"success","result":"Sources reviewed"}`)
+				return nil
+			},
+		})
+	if err != nil || !called {
+		t.Fatalf("claude rejected native instructions before model execution: %v", err)
 	}
 }
 

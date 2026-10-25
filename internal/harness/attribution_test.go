@@ -89,17 +89,3 @@ func TestClaudeAttributionResolvesSettingsAgainstHarnessCwd(t *testing.T) {
 		t.Fatal("unreadable settings passed instead of failing the launch")
 	}
 }
-
-func TestOpenCodeLaunchNeedsNoAttributionFlags(t *testing.T) {
-	inv, err := buildInvocation(profile.Profile{Name: "o", Harness: profile.HarnessOpenCode}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// OpenCode adds no commit or PR attribution, so no switch exists and the
-	// argv must stay free of attribution flags.
-	for _, arg := range inv.initial.argv {
-		if strings.Contains(arg, "attribution") || strings.Contains(arg, "coauthored") {
-			t.Fatalf("unexpected attribution flag %q in %v", arg, inv.initial.argv)
-		}
-	}
-}

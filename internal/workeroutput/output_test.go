@@ -3,7 +3,6 @@ package workeroutput
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,7 +17,6 @@ func TestAllowlistedAdaptersNormalizeRepresentedDialects(t *testing.T) {
 	}{
 		{name: "text", dialect: DialectText, line: "plain answer", want: Event{V: 1, Kind: "message", Role: "assistant", Text: "plain answer"}},
 		{name: "pi message", dialect: DialectPiJSON, line: `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`, want: Event{V: 1, Kind: "message", Role: "assistant", Text: "done"}},
-		{name: "opencode text", dialect: DialectOpenCodeJSON, line: `{"type":"text","part":{"messageID":"m","text":"answer"}}`, want: Event{V: 1, Kind: "message", Role: "assistant", Text: "answer"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -63,17 +61,6 @@ func TestNormalizerWritesVersionedJSONL(t *testing.T) {
 	}
 	if event.V != SchemaVersion || event.Kind != "message" || event.Text != "hello" {
 		t.Fatalf("event = %#v", event)
-	}
-}
-
-func TestToolCompletionsKeptOnlyWhenPairable(t *testing.T) {
-	// A completion that carries the call id (and exit code) is kept so a reader
-	// can fold it into the start; dialect completions with no id are still
-	// dropped.
-	got := NormalizeLine(&Declaration{Dialect: DialectMuseJSONL},
-		`{"payload_type":"tool.result","payload":{"call_id":"c","correlation_facts":{"tool_name":"bash","outcome":"failure"},"text":"{\"command\":\"go test ./...\",\"terminal_status\":\"failed\",\"output\":\"FAIL\",\"exit_code\":1}"}}`)
-	if len(got) != 1 || got[0].ID != "c" || got[0].State != "failed" || got[0].Exit == nil || *got[0].Exit != 1 {
-		t.Fatalf("tool completion = %#v", got)
 	}
 }
 
@@ -164,7 +151,6 @@ func TestToolTrackerFollowsEachDialect(t *testing.T) {
 	}{
 		// A completion arrives only with its result record: it never opens a call.
 		{DialectClaudeStreamJSON, "claude-tools.jsonl", 2, 2},
-		{DialectMuseJSONL, "muse-stream.jsonl", 1, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.dialect, func(t *testing.T) {
@@ -216,133 +202,6 @@ func TestClaudeStreamAdapterAndResult(t *testing.T) {
 	}
 }
 
-func TestMuseFixtureNormalizesWithoutRaw(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("testdata", "muse-stream.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	decl := &Declaration{Dialect: DialectMuseJSONL}
-	var events []Event
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		events = append(events, NormalizeLine(decl, line)...)
-	}
-	var tools, messages []string
-	for _, e := range events {
-		if e.Kind == "raw" {
-			t.Fatalf("muse record fell back to raw: %#v", e)
-		}
-		switch e.Kind {
-		case "tool":
-			tools = append(tools, e.Name+":"+e.State)
-		case "message":
-			messages = append(messages, e.Role+":"+e.Text)
-		}
-	}
-	if !strings.Contains(strings.Join(tools, ","), "bash:started") || !strings.Contains(strings.Join(tools, ","), "bash:completed") {
-		t.Fatalf("tool events = %v, want a bash started/completed pair", tools)
-	}
-	joined := strings.Join(messages, "|")
-	if !strings.Contains(joined, "user:") || !strings.Contains(joined, "assistant:PROBE-DONE") {
-		t.Fatalf("message events = %v, want the prompt and PROBE-DONE", messages)
-	}
-	result, session := MuseStreamResult(string(b))
-	if result != "PROBE-DONE" || session != "01a132d4-6dc9-7270-b7b4-dd68fff9b304" {
-		t.Fatalf("MuseStreamResult = %q, %q", result, session)
-	}
-}
-
-// TestMuseToolsFixturePairsAndCarriesInputs replays a real `muse exec
-// --json` capture. Muse's stream never reports a tool's input directly:
-// the start record knows only the tool's name, and the input (shell
-// command, file path) echoes back inside the tool result text. Starts and
-// results also use different ids (task id vs call id) unless the adapter
-// starts the call at the side_effect_intent record, which carries the
-// call id. The normalized events must pair into one event per call, with
-// the input recovered from the result text.
-func TestMuseToolsFixturePairsAndCarriesInputs(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("testdata", "muse-tools.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	decl := &Declaration{Dialect: DialectMuseJSONL}
-	var events []Event
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		events = append(events, NormalizeLine(decl, line)...)
-	}
-	for _, e := range events {
-		if e.Kind == "raw" {
-			t.Fatalf("muse record fell back to raw: %#v", e)
-		}
-	}
-	paired, _ := PairTools(events)
-	var tools []Event
-	for _, e := range paired {
-		if e.Kind == "tool" {
-			tools = append(tools, e)
-		}
-	}
-	var names []string
-	for _, e := range tools {
-		if e.State != "completed" {
-			t.Fatalf("tool %s state = %q, want completed (unpaired start?)", e.Name, e.State)
-		}
-		names = append(names, e.Name)
-	}
-	if want := "read_file,read_file,bash,search,edit_file,write_file"; strings.Join(names, ",") != want {
-		t.Fatalf("paired tools = %v, want %s", names, want)
-	}
-	if !strings.Contains(tools[0].Input, "a.txt") || !strings.Contains(tools[1].Input, "b.txt") {
-		t.Fatalf("read inputs = %q, %q, want the file paths", tools[0].Input, tools[1].Input)
-	}
-	bash := tools[2]
-	if !strings.Contains(bash.Input, `"command":"echo hello-probe"`) {
-		t.Fatalf("bash input = %q, want the command JSON", bash.Input)
-	}
-	if bash.Exit == nil || *bash.Exit != 0 {
-		t.Fatalf("bash exit = %v, want 0", bash.Exit)
-	}
-	if bash.Output != "hello-probe\n" {
-		t.Fatalf("bash output = %q, want the command output, not the result envelope", bash.Output)
-	}
-	if !strings.Contains(tools[5].Input, "c.txt") {
-		t.Fatalf("write input = %q, want the file path", tools[5].Input)
-	}
-}
-
-// TestPairToolsFallsBackToOldestSameNameStart covers artifacts written
-// before the muse adapter keyed starts and results by the same id: a
-// completion whose id matches no start folds into the oldest still-open
-// start with the same tool name, and never into a different tool.
-func TestPairToolsFallsBackToOldestSameNameStart(t *testing.T) {
-	events := []Event{
-		{V: 1, Kind: "tool", Name: "bash", State: "started", ID: "task-1", TS: 1000},
-		{V: 1, Kind: "tool", Name: "bash", State: "started", ID: "task-2", TS: 2000},
-		{V: 1, Kind: "tool", Name: "bash", State: "completed", ID: "call-1", Output: "one", TS: 3000},
-		{V: 1, Kind: "tool", Name: "read_file", State: "completed", ID: "call-2", Output: "two", TS: 4000},
-		{V: 1, Kind: "tool", Name: "bash", State: "completed", ID: "call-3", Output: "three", TS: 5000},
-	}
-	got, ended := PairTools(events)
-	if len(got) != 3 {
-		t.Fatalf("paired = %#v, want 3 events", got)
-	}
-	if got[0].Output != "one" || got[0].State != "completed" || ended[0] != 3000 {
-		t.Fatalf("first bash = %#v ended=%v, want folded with output one", got[0], ended)
-	}
-	if got[1].Output != "three" || got[1].State != "completed" {
-		t.Fatalf("second bash = %#v, want folded with output three", got[1])
-	}
-	if got[2].Name != "read_file" || got[2].Output != "two" {
-		t.Fatalf("read_file completion folded into a bash start: %#v", got)
-	}
-}
-
-func TestMuseUnknownRecordFallsBackRaw(t *testing.T) {
-	got := NormalizeLine(&Declaration{Dialect: DialectMuseJSONL}, `{"payload_type":"future.record","payload":{}}`)
-	if len(got) != 1 || got[0].Kind != "raw" {
-		t.Fatalf("unknown muse record = %#v, want one raw event", got)
-	}
-}
-
 func TestExtractUsage(t *testing.T) {
 	tests := []struct {
 		dialect, fixture string
@@ -377,16 +236,6 @@ func TestClaudePlumbingRecordsAreStatus(t *testing.T) {
 		got := NormalizeLine(decl, line)
 		if len(got) != 1 || got[0].Kind != "status" {
 			t.Fatalf("%s → %#v", line, got)
-		}
-	}
-}
-
-func TestMuseDeltaPreservesWhitespace(t *testing.T) {
-	for _, text := range []string{" ", "\n\n", "word"} {
-		line := fmt.Sprintf(`{"payload_type":"run.output.delta","payload":{"text":%q}}`, text)
-		events := NormalizeLine(&Declaration{Dialect: DialectMuseJSONL}, line)
-		if len(events) != 1 || events[0].State != "delta" || events[0].Text != text {
-			t.Errorf("delta %q = %#v", text, events)
 		}
 	}
 }

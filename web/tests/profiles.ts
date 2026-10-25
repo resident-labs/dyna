@@ -31,14 +31,14 @@ api.profileModels = async () => {
  if (scenario === 'error') throw new Error('Fixture discovery error')
  return { models: scenario === 'empty' ? [] : models, compact: { window: true }, source: 'Isolated UI fixture', observedAt: '2026-10-17T17:30:00Z' }
 }
-api.accountsList = async () => ({ checkedAt: '2026-10-17T17:30:00Z', problems: [], providers: [{ provider: 'opencode-go', accounts: [{ ...account({ id: 'fixture-account', harness: 'opencode', provider: 'opencode-go', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] }), activeHere: true }] }] })
+api.accountsList = async () => ({ checkedAt: '2026-10-17T17:30:00Z', problems: [], providers: [{ provider: 'opencode-go', accounts: [{ ...account({ id: 'fixture-account', harness: 'pi', provider: 'opencode-go', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] }), activeHere: true }] }] })
 // What the last save asked for.
 const sent: { saved?: ProfileSave } = {}
 api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }
 const manualScenarios = ['save-error', 'draft-details', 'draft-navigation', 'advanced-details', 'advanced-navigation']
-const initialSelection: ModelSelection | null = scenario === 'harness' ? null : { harness: manualScenarios.includes(scenario) ? 'mock' : 'opencode', ...(['details', 'settings'].includes(scenario) ? { connectionId: 'fixture-account', routeId: need(models[0]).id } : {}) }
+const initialSelection: ModelSelection | null = scenario === 'harness' ? null : { harness: manualScenarios.includes(scenario) ? 'mock' : 'pi', ...(['details', 'settings'].includes(scenario) ? { connectionId: 'fixture-account', routeId: need(models[0]).id } : {}) }
 const app = need(document.getElementById('app'), 'app')
-const wizard = mount(Wizard, { target: app, props: { harnesses: ['opencode', 'pi', 'mock'], initialSelection, onsaved: () => {}, oncancel: () => {}, onusage: (id: string) => { document.body.dataset.usage = id } } })
+const wizard = mount(Wizard, { target: app, props: { harnesses: ['claude-code', 'pi', 'mock'], initialSelection, onsaved: () => {}, oncancel: () => {}, onusage: (id: string) => { document.body.dataset.usage = id } } })
 
 const results: { name: string; pass: boolean }[] = []
 const pause = () => new Promise<void>((r) => setTimeout(r, 80))
@@ -58,7 +58,7 @@ const report = () => {
 if (scenario === 'settings') { await new Promise((r) => setTimeout(r, 100)); button('Use this model').click() }
 if (scenario === 'test') {
  await pause()
- check('OpenCode initial list includes Go and free only', document.querySelectorAll('.model-row').length === 2)
+ check('Initial list shows the fixture models', document.querySelectorAll('.model-row').length === 3)
  button('All models').click(); await tick()
  check('All models reveals API model', document.querySelectorAll('.model-row').length === 3)
  await input('input[aria-label="Search models"]', 'Fixture API')
@@ -155,19 +155,19 @@ if (['advanced-details', 'advanced-navigation'].includes(scenario)) {
  await pause(); button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
  await input('input[placeholder="e.g. quick-research"]', 'advanced-fixture')
  one('details.advanced summary').click(); await pause()
- await input('details.advanced select', 'opencode', 'change')
+ await input('details.advanced select', 'claude-code', 'change')
  await input('input[placeholder="the harness default"]', 'fixture-advanced-model')
  if (scenario === 'advanced-details') button('← Details').click(); else nav('Model').click()
  await tick(); await pause()
  if (scenario === 'advanced-navigation') { button('Enter a model ID').click(); await tick() }
- check('Earlier details show the Advanced harness', document.querySelector('.model-context')?.textContent?.includes('OpenCode'))
+ check('Earlier details show the Advanced harness', document.querySelector('.model-context')?.textContent?.includes('Claude Code'))
  check('Earlier details show the Advanced model', document.querySelector<HTMLInputElement>('input[placeholder="Harness default"]')?.value === 'fixture-advanced-model')
  button('Use this model').click(); await tick()
  check('Advanced model survives return', one<HTMLInputElement>('input[placeholder="the harness default"]').value === 'fixture-advanced-model')
- check('Advanced harness survives return', one<HTMLSelectElement>('details.advanced select').value === 'opencode')
+ check('Advanced harness survives return', one<HTMLSelectElement>('details.advanced select').value === 'claude-code')
  button('Create profile').click(); await pause()
- check('Final save preserves Advanced selection', sent.saved?.profile.harness === 'opencode' && sent.saved.profile.model === 'fixture-advanced-model')
- nav('Harness').click(); await tick(); need([...document.querySelectorAll<HTMLElement>('.harness')].find((el) => el.querySelector('strong')?.textContent === 'OpenCode'), 'OpenCode harness').click(); await tick(); button('Enter a model ID').click(); await tick()
+ check('Final save preserves Advanced selection', sent.saved?.profile.harness === 'claude-code' && sent.saved.profile.model === 'fixture-advanced-model')
+ nav('Harness').click(); await tick(); need([...document.querySelectorAll<HTMLElement>('.harness')].find((el) => el.querySelector('strong')?.textContent === 'Claude Code'), 'Claude Code harness').click(); await tick(); button('Enter a model ID').click(); await tick()
  check('Revisiting the same harness preserves Advanced model', one<HTMLInputElement>('input[placeholder="Harness default"]').value === 'fixture-advanced-model')
  button('Use this model').click(); await tick()
  nav('Model').click(); await tick(); button('Fixture free model').click(); await tick(); button('Use this model').click(); await tick()
