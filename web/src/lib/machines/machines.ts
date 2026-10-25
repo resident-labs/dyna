@@ -61,9 +61,16 @@ export function summaryText(machine: MachineSummary): string {
   return summaryParts(machine).join(' · ')
 }
 
-// ciRunText names one CI run the way its row shows it: the PR's number and
-// title, so a reader never looks a number up.
-export function ciRunText(run: Pick<MachineCIRun, 'number' | 'title'>): string {
+// ciRunText names one CI run the way its row shows it. A pull request shows its
+// number and title; a local branch change and an integration sync have no number,
+// so they show their own name.
+export function ciRunText(run: Pick<MachineCIRun, 'kind' | 'number' | 'title' | 'branch'>): string {
+  switch (run.kind) {
+    case 'local-change':
+      return run.title || run.branch || 'Local branch change'
+    case 'sync':
+      return 'Integration sync'
+  }
   return run.title ? `#${run.number} ${run.title}` : `#${run.number}`
 }
 

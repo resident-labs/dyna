@@ -45,16 +45,48 @@ func TestLocalMergeQueueUsesExactApproval(t *testing.T) {
 	}
 }
 
+// fakeLocalCI is the local lane's machine, run set and result store. It saves
+// what a run produced, as the node runner does, and it holds a run when the test
+// wants to observe it in flight.
 type fakeLocalCI struct {
 	mu        sync.Mutex
 	results   map[string]localci.Result
 	completed chan struct{}
+	saved     chan struct{}
+	requests  []localci.Request
 	bad       bool
 	started   chan struct{}
 	release   chan struct{}
 }
 
-func (f *fakeLocalCI) Show(repo, sha string) (localci.Result, error) {
+func (f *fakeLocalCI) Nodes(context.Context) ([]localci.Node, error) {
+	return []localci.Node{{Name: "hermes", Slots: 16, Enabled: true}}, nil
+}
+func (f *fakeLocalCI) Mode(context.Context, string) (string, error) { return localci.ModeLocal, nil }
+func (f *fakeLocalCI) SaveResult(_ context.Context, result localci.Result) error {
+	f.mu.Lock()
+	f.results[result.SHA] = result
+	f.mu.Unlock()
+	if f.saved != nil {
+		f.saved <- struct{}{}
+	}
+	return nil
+}
+
+// requestFor returns the request of the run that checked a head.
+func (f *fakeLocalCI) requestFor(t *testing.T, sha string) localci.Request {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, req := range f.requests {
+		if req.SHA == sha {
+			return req
+		}
+	}
+	t.Fatalf("no run checked %s", sha)
+	return localci.Request{}
+}
+func (f *fakeLocalCI) LoadResult(_ context.Context, _, sha string) (localci.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if result, ok := f.results[sha]; ok {
@@ -62,7 +94,17 @@ func (f *fakeLocalCI) Show(repo, sha string) (localci.Result, error) {
 	}
 	return localci.Result{}, os.ErrNotExist
 }
-func (f *fakeLocalCI) Run(ctx context.Context, req localci.Request) (localci.Result, error) {
+func (f *fakeLocalCI) LoadHostedRuns(context.Context, string, string) (localci.HostedRuns, error) {
+	return localci.HostedRuns{}, nil
+}
+func (f *fakeLocalCI) SaveHostedRuns(context.Context, string, string, localci.HostedRuns) error {
+	return nil
+}
+
+func (f *fakeLocalCI) run(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
+	f.mu.Lock()
+	f.requests = append(f.requests, req)
+	f.mu.Unlock()
 	if f.started != nil {
 		f.started <- struct{}{}
 		select {
@@ -88,9 +130,6 @@ func (f *fakeLocalCI) Run(ctx context.Context, req localci.Request) (localci.Res
 		errText = "bad change failed"
 	}
 	result := localci.Result{Repo: req.Repo, SHA: req.SHA, Node: "local", Status: status, Suites: checks, Checks: checks, Error: errText}
-	f.mu.Lock()
-	f.results[req.SHA] = result
-	f.mu.Unlock()
 	f.completed <- struct{}{}
 	return result, nil
 }
@@ -115,8 +154,9 @@ func localMergeEnvFor(t *testing.T, bad bool, names ...string) (*testEnv, string
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	ci := &fakeLocalCI{results: map[string]localci.Result{}, completed: make(chan struct{}, 20), bad: bad}
-	e.s.LocalCI = ci
+	ci := &fakeLocalCI{results: map[string]localci.Result{}, completed: make(chan struct{}, 20), saved: make(chan struct{}, 20), bad: bad}
+	e.s.LocalCIRegistry = ci
+	e.s.RunNodeCI = ci.run
 	e.s.GH.run = func(context.Context, *exec.Cmd) error {
 		t.Error("local merge contacted GitHub")
 		return fmt.Errorf("unexpected GitHub call")
@@ -146,6 +186,26 @@ func localMergeEnvFor(t *testing.T, bad bool, names ...string) (*testEnv, string
 		records = append(records, r)
 	}
 	return e, dir, records, ci
+}
+
+// admittedRun reports whether the run set holds this job.
+func admittedRun(s *Service, job registeredCIJob) bool {
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	return runs.runs[registeredJobKey(job)] != nil
+}
+
+// runningLocalCIHead names the head of a run in flight, or "" when the run set
+// is empty.
+func runningLocalCIHead(s *Service) string {
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	for _, run := range runs.runs {
+		return run.head
+	}
+	return ""
 }
 
 func localTick(t *testing.T, e *testEnv) {
@@ -179,20 +239,13 @@ func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
 				bisect = false
 			}
 		}
-		// Wait only when the current tick started asynchronous CI work.
-		pending := false
-		for _, run := range e.s.localRuns().snapshot() {
+		// Wait for the result a run in flight is about to save, so the next tick
+		// reads evidence instead of starting the same head again.
+		if head := runningLocalCIHead(e.s); head != "" {
 			select {
-			case <-run.done:
-			default:
-				pending = true
-			}
-		}
-		if pending {
-			select {
-			case <-ci.completed:
+			case <-ci.saved:
 			case <-deadline.Done():
-				t.Fatal("local CI did not complete")
+				t.Fatalf("local CI for %s did not save its result", head)
 			}
 		}
 	}
@@ -201,6 +254,8 @@ func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
 
 func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	e, dir, records, ci := localMergeEnv(t, false)
+	ci.started = make(chan struct{}, 4)
+	ci.release = make(chan struct{})
 	if err := statewrite.MigrateMirrors(store.DataDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -214,6 +269,16 @@ func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
 		t.Fatal("integration moved before CI result")
 	}
+	// Admission registers the run before it starts, so a run in flight is
+	// visible here without waiting on a clock.
+	if runningLocalCIHead(e.s) == "" {
+		t.Fatal("local trial CI did not start")
+	}
+	localTick(t, e)
+	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
+		t.Fatal("integration moved while local CI ran")
+	}
+	close(ci.release)
 	finishLocalTrials(t, e, ci, false)
 	head := changeGit(t, dir, "rev-parse", "dyna/integration")
 	for _, r := range records {
@@ -369,14 +434,10 @@ func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
 		t.Fatalf("running = %s %v", trial.Status, err)
 	}
 	close(ci.release)
-	value, ok := e.s.localRuns().load(r.RepoPath + "\x00" + r.Head)
-	if !ok {
-		t.Fatal("missing active run")
-	}
 	select {
-	case <-value.done:
+	case <-ci.saved:
 	case <-deadline.Done():
-		t.Fatal("CI did not finish")
+		t.Fatal("CI did not save its result")
 	}
 	select {
 	case <-ci.started:
@@ -389,10 +450,57 @@ func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
 	}
 }
 
+// A local head's run is the same work a pull request head gets: the room's
+// test budget, a share of the machine's slots, and a run the machine view names.
+func TestLocalTrialUsesTheRoomTestBudgetAndMachine(t *testing.T) {
+	e, _, records, ci := localMergeEnv(t, false)
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	ci.saved = make(chan struct{}, 1)
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+	})
+	policy := RoomPolicy(State{}, e.author.RoomID)
+	policy.CITimeBudget = "enforce"
+	policy.CITestMax = "1s"
+	policy.CITestAllow = []string{"pkg/slow"}
+	if err := e.s.SetRoomChangePolicy(e.author.RoomID, authority.Actor{Role: authority.Owner}, policy); err != nil {
+		t.Fatal(err)
+	}
+	r := records[0]
+	trial, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || trial.Status != "pending" {
+		t.Fatalf("start = %s %v", trial.Status, err)
+	}
+	// Admission registers the run before it starts, and the fake records the
+	// request before it signals, so no clock decides what this test sees.
+	if runs := e.s.RunningCI(); len(runs) != 1 || runs[0].Machine != "hermes" || runs[0].Head != r.Head[:7] {
+		t.Fatalf("machine view does not name the local run: %+v", runs)
+	}
+	<-ci.started
+	req := ci.requestFor(t, r.Head)
+	if req.MaxTest != time.Second || !req.Allowed["pkg/slow"] {
+		t.Fatalf("run used max test %s and allowlist %v, want the room budget", req.MaxTest, req.Allowed)
+	}
+	if req.Parallelism != registeredCIRunSlots || !req.DeferSave {
+		t.Fatalf("run asked for %d parallel slots and defer=%t", req.Parallelism, req.DeferSave)
+	}
+	close(ci.release)
+	released = true
+	<-ci.saved
+	if trial, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head); err != nil || trial.Status != "passed" {
+		t.Fatalf("finished = %s %v", trial.Status, err)
+	}
+}
+
 func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
 	e, _, records, ci := localMergeEnv(t, false)
 	ci.started = make(chan struct{}, 1)
 	ci.release = make(chan struct{})
+	ci.saved = make(chan struct{}, 1)
 	r := records[0]
 	ci.results[r.Head] = localci.Result{Repo: r.RepoPath, SHA: r.Head, Status: "passed", Suites: []localci.SuiteResult{{Suite: "frontend", Status: "passed"}}}
 	trial, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
@@ -406,12 +514,11 @@ func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
 	case <-deadline.Done():
 		t.Fatal("full trial CI did not start")
 	}
-	value, _ := e.s.localRuns().load(r.RepoPath + "\x00" + r.Head)
 	close(ci.release)
 	select {
-	case <-value.done:
+	case <-ci.saved:
 	case <-deadline.Done():
-		t.Fatal("full CI did not finish")
+		t.Fatal("full CI did not save its result")
 	}
 	trial, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
 	if err != nil || trial.Status != "passed" {
