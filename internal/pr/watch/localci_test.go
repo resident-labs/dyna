@@ -300,50 +300,6 @@ type interruptedCIContext struct {
 
 func (c interruptedCIContext) Err() error { return c.reason }
 
-func TestRegisteredCIRepublishesReplacementResultsAndBudgets(t *testing.T) {
-	head := strings.Repeat("a", 40)
-	registry := &hostedCIRegistry{hosted: localci.HostedRuns{Published: true}}
-	var states []string
-	s := &Service{LocalCIRegistry: registry}
-	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
-		for _, arg := range cmd.Args {
-			if strings.HasPrefix(arg, "state=") {
-				states = append(states, strings.TrimPrefix(arg, "state="))
-			}
-		}
-		_, err := fmt.Fprint(cmd.Stdout, "HTTP/2.0 201 Created\r\n\r\n{}")
-		return err
-	}
-	job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo"}, head: head}
-	result := localci.Result{Repo: "repo", SHA: head, Node: "node", Status: "failed", Started: time.Unix(100, 0), Checks: []localci.SuiteResult{{CheckName: "go-test", Status: "failed"}}}
-	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
-		t.Fatal(err)
-	}
-	if len(states) != 1 {
-		t.Fatalf("legacy publication marker hid current result: %v", states)
-	}
-	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
-		t.Fatal(err)
-	}
-	if len(states) != 1 {
-		t.Fatalf("unchanged result posted again: %v", states)
-	}
-	result.Started = result.Started.Add(time.Second)
-	result.Status = "passed"
-	result.Checks[0].Status = "passed"
-	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
-		t.Fatal(err)
-	}
-	result.Checks[0].Duration = 4 * time.Minute
-	applyLocalBudgets(&result, ChangePolicy{CITimeBudget: "enforce"})
-	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(states, []string{"failure", "success", "failure"}) {
-		t.Fatalf("replacement and budget statuses: %v", states)
-	}
-}
-
 func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	r := Record{Head: head, CI: "passed", Polling: Polling{PullHead: head}}
@@ -479,8 +435,9 @@ func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
 	}
 }
 
-// A completed manual rerun must reach GitHub even while automatic work holds
-// every node slot, including an older job that is still waiting for a slot.
+// A completed local run stays in Dyna: no commit status reaches GitHub, so no
+// private machine name is published and the evidence is Dyna's own record.
+// Automatic work that holds every node slot still keeps its reservation.
 type savedCIRegistry struct {
 	occupiedCIRegistry
 	result localci.Result
@@ -493,7 +450,7 @@ func (r *savedCIRegistry) LoadResult(_ context.Context, _, sha string) (localci.
 	return localci.Result{}, os.ErrNotExist
 }
 
-func TestRegisteredCIPublishesSavedResultWhileNodesAreBusy(t *testing.T) {
+func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 	repo := t.TempDir()
 	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
 		t.Fatalf("init repository: %v: %s", err, raw)
@@ -507,14 +464,9 @@ func TestRegisteredCIPublishesSavedResultWhileNodesAreBusy(t *testing.T) {
 			cancelled := false
 			run := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
 			s := &Service{LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{key: run}}}
-			posts := 0
 			s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
-				if !strings.Contains(strings.Join(cmd.Args, " "), "state=failure") {
-					return fmt.Errorf("unexpected GitHub call: %v", cmd.Args)
-				}
-				posts++
-				_, err := fmt.Fprint(cmd.Stdout, "HTTP/2.0 201 Created\r\n\r\n{}")
-				return err
+				t.Fatalf("a local CI result reached GitHub: %v", cmd.Args)
+				return nil
 			}
 			st := State{Records: map[string]*Record{r.Key: r}}
 			if earlierWaiting {
@@ -525,11 +477,8 @@ func TestRegisteredCIPublishesSavedResultWhileNodesAreBusy(t *testing.T) {
 			if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
 				t.Fatal(err)
 			}
-			if posts != 1 || registry.hosted.PublishedKey == "" {
-				t.Fatalf("busy slots blocked saved result publication: posts=%d marker=%q", posts, registry.hosted.PublishedKey)
-			}
 			if cancelled || len(s.registeredRuns.runs) != 1 || s.registeredRuns.runs[key] != run {
-				t.Fatal("publishing a saved result changed the active slot reservation")
+				t.Fatal("a saved local result changed the active slot reservation")
 			}
 		})
 	}
