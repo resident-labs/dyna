@@ -15,8 +15,8 @@ const settle = () => new Promise<void>(resolve => setImmediate(resolve))
 
 // Two profiles on one model: only the tier in the hint tells them apart.
 const profiles = [
-  { name: 'sol', harness: 'codex', model: 'gpt-6.1-sol' },
-  { name: 'sol-ultrafast', harness: 'codex', model: 'gpt-6.1-sol', default: true },
+  { name: 'sol', harness: 'pi', model: 'gpt-6.1-sol' },
+  { name: 'sol-ultrafast', harness: 'pi', model: 'gpt-6.1-sol', default: true },
 ]
 
 test('the slash menu names each profile and explains an empty result', async () => {
@@ -36,7 +36,7 @@ test('the slash menu names each profile and explains an empty result', async () 
     }
     await type('/')
     const hints = [...target.querySelectorAll('[role="option"]')].map((row) => row.getAttribute('title'))
-    assert.deepEqual(hints, ['Codex · GPT 6.1 Sol', 'Codex · GPT 6.1 Sol · Ultrafast · default'])
+    assert.deepEqual(hints, ['Pi · GPT 6.1 Sol', 'Pi · GPT 6.1 Sol · Ultrafast · default'])
     await type('/zz')
     assert.equal(target.querySelector('.pop.status')?.textContent, 'No session or command matches “/zz”.')
   } finally {

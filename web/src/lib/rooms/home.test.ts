@@ -33,13 +33,13 @@ test('updates list dyna and installed harnesses with a newer recommended version
   const runtimes = {
     bundles: [
       { harness: 'claude-code', version: '2.4.1', executable: 'claude', directory: '/home/claude' },
-      { harness: 'codex', version: '0.63.2', executable: 'codex', directory: '/home/codex' },
+      { harness: 'pi', version: '0.63.2', executable: 'pi', directory: '/home/pi' },
       { harness: 'opencode', version: '1.10.0', executable: 'opencode', directory: '/home/opencode' },
     ],
-    selectedVersions: { 'claude-code': '2.4.1', codex: '0.63.2', opencode: '1.10.0' },
+    selectedVersions: { 'claude-code': '2.4.1', pi: '0.63.2', opencode: '1.10.0' },
     recommendedVersions: [
       { harness: 'claude-code', version: '2.10.0', status: 'resolved', source: 'npm' },
-      { harness: 'codex', version: '0.63.2', status: 'resolved', source: 'npm' },
+      { harness: 'pi', version: '0.63.2', status: 'resolved', source: 'npm' },
       { harness: 'opencode', version: '1.9.0', status: 'resolved', source: 'npm' },
     ],
   }

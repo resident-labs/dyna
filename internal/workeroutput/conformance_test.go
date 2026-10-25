@@ -12,7 +12,6 @@ import (
 var conformanceFixtures = map[string][]string{
 	DialectPiJSON:           {"pi-stream.jsonl"},
 	DialectText:             {"plain-text.txt"},
-	DialectCodexJSONL:       {"codex-tools.jsonl"},
 	DialectClaudeStreamJSON: {"claude-tools.jsonl"},
 	DialectOpenCodeJSON:     {"opencode-stream.jsonl"},
 	DialectMuseJSONL:        {"muse-stream.jsonl"},
@@ -111,7 +110,6 @@ func TestReasoningConformance(t *testing.T) {
 			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"s"}]}}`,
 			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"redacted_thinking","data":"x"}]}}`,
 		}},
-		DialectCodexJSONL:   {`{"type":"item.completed","item":{"id":"i","type":"reasoning","text":"Plan."}}`, "completed", []string{`{"type":"item.completed","item":{"id":"i","type":"reasoning","text":""}}`}},
 		DialectOpenCodeJSON: {`{"type":"reasoning","part":{"type":"reasoning","text":"Plan."}}`, "completed", []string{`{"type":"reasoning","part":{"type":"reasoning","text":""}}`}},
 		DialectPiJSON: {`{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Plan."}]}}`, "completed", []string{
 			`{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","thinkingSignature":"s","redacted":true}]}}`,

@@ -53,15 +53,15 @@ func rewriteFixtureExecutable(t *testing.T, root, script string) {
 // agent on that harness.
 func TestInstallAndSelectRejectsNewVersionThatCannotStart(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\nexit 3\n")
-	old := install(t, m, "codex", "1.0.0")
-	if err := m.Select("codex", old.Version); err != nil {
+	old := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	_, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0")
+	_, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0")
 	if err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("broken update accepted: %v", err)
 	}
-	got, err := m.Resolve("codex", "")
+	got, err := m.Resolve("pi", "")
 	if err != nil || got.Version != old.Version {
 		t.Fatalf("selection changed to a broken version: %+v %v", got, err)
 	}
@@ -71,14 +71,14 @@ func TestInstallAndSelectRejectsNewVersionThatCannotStart(t *testing.T) {
 // and answer with a version. Silence counts as broken.
 func TestInstallAndSelectRejectsNewVersionWithoutVersionAnswer(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho no-version-here\n")
-	old := install(t, m, "codex", "1.0.0")
-	if err := m.Select("codex", old.Version); err != nil {
+	old := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("silent update accepted: %v", err)
 	}
-	if got, err := m.Resolve("codex", ""); err != nil || got.Version != old.Version {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != old.Version {
 		t.Fatalf("selection changed: %+v %v", got, err)
 	}
 }
@@ -104,14 +104,14 @@ func TestInstallAndSelectRejectsUnsupportedReportedVersion(t *testing.T) {
 func TestProbeRejectsHangingVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\nsleep 30\n")
 	m.ProbeTimeout = 200 * time.Millisecond
-	old := install(t, m, "codex", "1.0.0")
-	if err := m.Select("codex", old.Version); err != nil {
+	old := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err == nil || !strings.Contains(err.Error(), "did not answer") {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err == nil || !strings.Contains(err.Error(), "did not answer") {
 		t.Fatalf("hanging update accepted: %v", err)
 	}
-	if got, err := m.Resolve("codex", ""); err != nil || got.Version != old.Version {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != old.Version {
 		t.Fatalf("selection changed: %+v %v", got, err)
 	}
 }
@@ -120,45 +120,45 @@ func TestProbeRejectsHangingVersion(t *testing.T) {
 // keeps it on disk, and one rollback command restores it.
 func TestRollbackRestoresLastGoodVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 2.0.0\n")
-	first := install(t, m, "codex", "1.0.0")
-	if err := m.Select("codex", first.Version); err != nil {
+	first := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", first.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err != nil {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := m.LastGoodVersion("codex"); err != nil || got != first.Version {
+	if got, err := m.LastGoodVersion("pi"); err != nil || got != first.Version {
 		t.Fatalf("rollback target = %q, %v; want %q", got, err, first.Version)
 	}
 	// Reinstalling the selected version must not move the target.
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err != nil {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := m.LastGoodVersion("codex"); got != first.Version {
+	if got, _ := m.LastGoodVersion("pi"); got != first.Version {
 		t.Fatalf("rollback target moved to %q", got)
 	}
-	back, err := m.Rollback(context.Background(), "codex")
+	back, err := m.Rollback(context.Background(), "pi")
 	if err != nil || back.Version != first.Version {
 		t.Fatalf("rollback: %+v %v", back, err)
 	}
-	if got, err := m.Resolve("codex", ""); err != nil || got.Version != first.Version {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != first.Version {
 		t.Fatalf("selection after rollback: %+v %v", got, err)
 	}
-	if _, err := m.Rollback(context.Background(), "codex"); err == nil || !strings.Contains(err.Error(), "No earlier good version") {
+	if _, err := m.Rollback(context.Background(), "pi"); err == nil || !strings.Contains(err.Error(), "No earlier good version") {
 		t.Fatalf("second rollback: %v", err)
 	}
 }
 
 // Rolling back with no update on record has no target and changes nothing.
 func TestRollbackWithoutUpdateFails(t *testing.T) {
-	m := scriptedManager(t, "#!/bin/sh\necho 1.0.0\n")
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "1.0.0"); err != nil {
+	m := scriptedManager(t, "#!/bin/sh\necho 1.1.0\n")
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.1.0"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Rollback(context.Background(), "codex"); err == nil || !strings.Contains(err.Error(), "No earlier good version") {
+	if _, err := m.Rollback(context.Background(), "pi"); err == nil || !strings.Contains(err.Error(), "No earlier good version") {
 		t.Fatalf("rollback without update: %v", err)
 	}
-	if got, err := m.Resolve("codex", ""); err != nil || got.Version != "1.0.0" {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "1.1.0" {
 		t.Fatalf("selection changed: %+v %v", got, err)
 	}
 }
@@ -167,26 +167,26 @@ func TestRollbackWithoutUpdateFails(t *testing.T) {
 // sits outside the newest two.
 func TestGCKeepsLastGoodVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 4.0.0\n")
-	oldest := install(t, m, "codex", "1.0.0")
-	install(t, m, "codex", "2.0.0")
-	install(t, m, "codex", "3.0.0")
-	install(t, m, "codex", "4.0.0")
-	if err := m.Select("codex", oldest.Version); err != nil {
+	oldest := install(t, m, "pi", "1.1.0")
+	install(t, m, "pi", "2.0.0")
+	install(t, m, "pi", "3.0.0")
+	install(t, m, "pi", "4.0.0")
+	if err := m.Select("pi", oldest.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "4.0.0"); err != nil {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "4.0.0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.GC(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Resolve("codex", "2.0.0"); err == nil {
+	if _, err := m.Resolve("pi", "2.0.0"); err == nil {
 		t.Fatal("GC kept an unprotected version outside the newest two")
 	}
-	if _, err := m.Resolve("codex", oldest.Version); err != nil {
+	if _, err := m.Resolve("pi", oldest.Version); err != nil {
 		t.Fatal("GC removed the rollback target:", err)
 	}
-	if _, err := m.Rollback(context.Background(), "codex"); err != nil {
+	if _, err := m.Rollback(context.Background(), "pi"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -194,14 +194,14 @@ func TestGCKeepsLastGoodVersion(t *testing.T) {
 // Remove must not delete the rollback target.
 func TestRemoveKeepsLastGoodVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 2.0.0\n")
-	old := install(t, m, "codex", "1.0.0")
-	if err := m.Select("codex", old.Version); err != nil {
+	old := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err != nil {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Remove(context.Background(), "codex", old.Version, nil, true); err == nil || !strings.Contains(err.Error(), "rollback target") {
+	if err := m.Remove(context.Background(), "pi", old.Version, nil, true); err == nil || !strings.Contains(err.Error(), "rollback target") {
 		t.Fatalf("rollback target removed: %v", err)
 	}
 }
@@ -212,19 +212,19 @@ func TestRemoveKeepsLastGoodVersion(t *testing.T) {
 // not even during the probe.
 func TestFailedUpdateLeavesFirstUseDefaultAlone(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\nexit 3\n")
-	if _, err := m.Install(context.Background(), "codex", "1.0.0"); err != nil {
+	if _, err := m.Install(context.Background(), "pi", "1.1.0"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("broken update accepted: %v", err)
 	}
-	if got, err := m.Resolve("codex", ""); err != nil || got.Version != "1.0.0" {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "1.1.0" {
 		t.Fatalf("effective default changed: %+v %v", got, err)
 	}
-	if got, err := m.LastGoodVersion("codex"); err != nil || got != "" {
+	if got, err := m.LastGoodVersion("pi"); err != nil || got != "" {
 		t.Fatalf("failed update recorded a rollback target: %q %v", got, err)
 	}
-	if _, err := m.Resolve("codex", "2.0.0"); err == nil {
+	if _, err := m.Resolve("pi", "2.0.0"); err == nil {
 		t.Fatal("broken candidate stayed published")
 	}
 }
@@ -233,17 +233,17 @@ func TestFailedUpdateLeavesFirstUseDefaultAlone(t *testing.T) {
 // prior default as its rollback target.
 func TestUpdateFromFirstUseStateRecordsRollbackTarget(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 2.0.0\n")
-	if _, err := m.Install(context.Background(), "codex", "1.0.0"); err != nil {
+	if _, err := m.Install(context.Background(), "pi", "1.1.0"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "codex", "2.0.0"); err != nil {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := m.LastGoodVersion("codex"); err != nil || got != "1.0.0" {
-		t.Fatalf("rollback target = %q, %v; want the prior effective default 1.0.0", got, err)
+	if got, err := m.LastGoodVersion("pi"); err != nil || got != "1.1.0" {
+		t.Fatalf("rollback target = %q, %v; want the prior effective default 1.1.0", got, err)
 	}
-	back, err := m.Rollback(context.Background(), "codex")
-	if err != nil || back.Version != "1.0.0" {
+	back, err := m.Rollback(context.Background(), "pi")
+	if err != nil || back.Version != "1.1.0" {
 		t.Fatalf("rollback: %+v %v", back, err)
 	}
 }
@@ -269,10 +269,10 @@ func (c *lockWaitCtx) Done() <-chan struct{} {
 func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := manager(t)
-	// 1.0.0 is only the implicit default: no selection marker exists. Seed it
+	// 1.1.0 is only the implicit default: no selection marker exists. Seed it
 	// before the notification wrapper, so the seed sends no notification.
 	m.Run = fixtureInstall
-	if _, err := m.Install(context.Background(), "codex", "1.0.0"); err != nil {
+	if _, err := m.Install(context.Background(), "pi", "1.1.0"); err != nil {
 		t.Fatal(err)
 	}
 	started := make(chan string, 2)
@@ -308,7 +308,7 @@ func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, err := m.InstallAndSelect(ctx, "codex", "2.0.0")
+		_, err := m.InstallAndSelect(ctx, "pi", "2.0.0")
 		failures <- err
 	}()
 	if got := <-started; got != "2.0.0" {
@@ -317,7 +317,7 @@ func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, err := m.InstallAndSelect(second, "codex", "3.0.0")
+		_, err := m.InstallAndSelect(second, "pi", "3.0.0")
 		failures <- err
 	}()
 	// The second update now blocks on the harness lock the first one holds.
@@ -332,13 +332,13 @@ func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got, err := m.Resolve("codex", ""); err != nil || got.Version != "3.0.0" {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "3.0.0" {
 		t.Fatalf("final selection: %+v %v", got, err)
 	}
-	if got, err := m.LastGoodVersion("codex"); err != nil || got != "2.0.0" {
+	if got, err := m.LastGoodVersion("pi"); err != nil || got != "2.0.0" {
 		t.Fatalf("rollback target = %q, %v; want 2.0.0, the default the second update replaced", got, err)
 	}
-	if back, err := m.Rollback(context.Background(), "codex"); err != nil || back.Version != "2.0.0" {
+	if back, err := m.Rollback(context.Background(), "pi"); err != nil || back.Version != "2.0.0" {
 		t.Fatalf("rollback: %+v %v", back, err)
 	}
 }
@@ -348,11 +348,11 @@ func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 func TestProbeCleansUpItsScope(t *testing.T) {
 	for _, script := range []string{"#!/bin/sh\necho 2.0.0\n", "#!/bin/sh\nexit 3\n"} {
 		m := scriptedManager(t, script)
-		old := install(t, m, "codex", "1.0.0")
-		if err := m.Select("codex", old.Version); err != nil {
+		old := install(t, m, "pi", "1.1.0")
+		if err := m.Select("pi", old.Version); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = m.InstallAndSelect(context.Background(), "codex", "2.0.0")
+		_, _ = m.InstallAndSelect(context.Background(), "pi", "2.0.0")
 		entries, err := os.ReadDir(m.Root)
 		if err != nil {
 			t.Fatal(err)
@@ -370,7 +370,7 @@ func TestProbeCleansUpItsScope(t *testing.T) {
 func TestProbeEnvironmentIsPrivate(t *testing.T) {
 	t.Setenv("HOME", "/owner-home")
 	t.Setenv("PATH", "/usr/bin:/bin")
-	a, err := Adapter("codex")
+	a, err := Adapter("pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,8 +390,8 @@ func TestProbeEnvironmentIsPrivate(t *testing.T) {
 		"HOME=/private-scope.home",
 		"XDG_CONFIG_HOME=/private-scope.home/.config",
 		"XDG_DATA_HOME=/private-scope.home/.local/share",
-		"CODEX_HOME=/private-scope",
-		"CODEX_SQLITE_HOME=/private-scope/sqlite",
+		"PI_CODING_AGENT_DIR=/private-scope",
+		"PI_CODING_AGENT_SESSION_DIR=/private-scope/sessions",
 		"PATH=/usr/bin:/bin",
 	} {
 		if !has(pair) {

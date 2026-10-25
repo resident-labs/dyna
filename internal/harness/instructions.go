@@ -28,7 +28,7 @@ const maxInstructionsArg = 64 * 1024
 // Grok over ACP has no per-launch flag, so it uses the prompt path on
 // a session's first turn.
 var nativeInstructions = map[string]bool{
-	profile.HarnessClaudeCode: true, profile.HarnessCodex: true, profile.HarnessPi: true,
+	profile.HarnessClaudeCode: true, profile.HarnessPi: true,
 	profile.HarnessMuse: true,
 }
 
@@ -90,7 +90,6 @@ func writeFileOnce(path string, data []byte) error {
 // instructionsNative returns the args that pass
 // p.RuntimeInstructions to p's harness. Each verified on 2026-10-18:
 //   - Claude Code: --append-system-prompt-file.
-//   - Codex: -c developer_instructions (a TOML string).
 //   - Pi: --append-system-prompt, which reads a file's contents.
 //   - Muse: -c run.developer_prompt (a JSON string).
 //   - Grok over ACP: the first prompt of a session
@@ -113,8 +112,6 @@ func instructionsNative(p profile.Profile) ([]string, error) {
 			flag = "--append-system-prompt"
 		}
 		args = []string{flag, file}
-	case profile.HarnessCodex:
-		args = []string{"-c", "developer_instructions=" + quotedString(text)}
 	case profile.HarnessMuse:
 		args = []string{"-c", "run.developer_prompt=" + quotedString(text)}
 
@@ -127,8 +124,8 @@ func instructionsNative(p profile.Profile) ([]string, error) {
 	return args, nil
 }
 
-// quotedString is a JSON string. Codex parses -c values as TOML and Muse as
-// JSON; a JSON string without HTML escaping is valid in both.
+// quotedString is a JSON string. Muse parses -c values as
+// JSON; a JSON string without HTML escaping is valid.
 func quotedString(s string) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)

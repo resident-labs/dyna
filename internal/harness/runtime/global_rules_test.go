@@ -16,7 +16,6 @@ import (
 func TestGenerationRemovesLegacyGlobalRulesFiles(t *testing.T) {
 	targets := map[string]string{
 		"claude-code": "CLAUDE.md",
-		"codex":       "AGENTS.md",
 		"opencode":    "AGENTS.md",
 		"pi":          "AGENTS.md",
 		"muse":        "~/.config/muse/AGENTS.md",

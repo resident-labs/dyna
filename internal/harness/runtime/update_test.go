@@ -17,8 +17,8 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 	m := a.Bundles
 	t.Cleanup(func() { _ = removeBundle(m.Root) })
 	m.Run = fixtureInstall
-	old := install(t, m, "codex", "1.0.0")
-	if err := m.Select("codex", old.Version); err != nil {
+	old := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
 	pinned, err := os.Open(old.Executable)
@@ -48,40 +48,40 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 	done := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go func() { _, err := a.InstallPrivateRuntime(ctx, "codex", "2.0.0"); done <- err }()
+	go func() { _, err := a.InstallPrivateRuntime(ctx, "pi", "2.0.0"); done <- err }()
 	select {
 	case <-started:
 	case <-ctx.Done():
 		t.Fatal("installer did not start")
 	}
-	got, err := m.Resolve("codex", "")
+	got, err := m.Resolve("pi", "")
 	if err != nil || got != old {
 		t.Fatal("selection changed during download", got, err)
 	}
-	if _, err := m.Resolve("codex", "2.0.0"); err == nil {
+	if _, err := m.Resolve("pi", "2.0.0"); err == nil {
 		t.Fatal("partial bundle was published")
 	}
 	close(finish)
 	if err := <-done; err == nil {
 		t.Fatal("failed download succeeded")
 	}
-	got, err = m.Resolve("codex", "")
+	got, err = m.Resolve("pi", "")
 	if err != nil || got != old {
 		t.Fatal("failure changed selection", got, err)
 	}
-	entries, err := os.ReadDir(filepath.Join(m.Root, "codex"))
+	entries, err := os.ReadDir(filepath.Join(m.Root, "pi"))
 	if err != nil || len(entries) != 1 {
 		t.Fatal("failed download left staging files", entries, err)
 	}
 	m.Run = fixtureInstall
-	snapshot, err := a.InstallPrivateRuntime(context.Background(), "codex", "2.0.0")
+	snapshot, err := a.InstallPrivateRuntime(context.Background(), "pi", "2.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.SelectedVersions["codex"] != "2.0.0" {
+	if snapshot.SelectedVersions["pi"] != "2.0.0" {
 		t.Fatal("update did not select installed version", snapshot.SelectedVersions)
 	}
-	got, err = m.Resolve("codex", old.Version)
+	got, err = m.Resolve("pi", old.Version)
 	if err != nil || got != old {
 		t.Fatal("update changed the pinned bundle", got, err)
 	}

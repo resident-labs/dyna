@@ -1,12 +1,12 @@
 # Voice (experimental)
 
 Voice lets the owner talk to a room's root by voice.
-The engine runs the call itself, in Go, against a realtime voice provider. By default, it uses OpenAI Realtime through the Codex sign-in.
+The engine runs the call itself, in Go, against a realtime voice provider. By default, it uses OpenAI Realtime through the ChatGPT sign-in of a Pi account.
 
 ## Set up
 
-1. Sign in to Codex in Settings > Harnesses. Voice uses the active Codex account.
-2. In the app, open the room and click **Call Voice** in the room header. The button shows once a Codex account is active.
+1. Sign in to ChatGPT in Settings > Accounts. Voice uses the active ChatGPT account.
+2. In the app, open the room and click **Call Voice** in the room header. The button shows once a ChatGPT account is active.
 
 ## The call widget
 
@@ -28,18 +28,18 @@ The call is a floating widget above every view, so it stays while you move betwe
 
 ## How it works
 
-- **Speech.** The engine opens one OpenAI Realtime connection per call, to `gpt-realtime-2.1` with the voice `marin` (Codex's default). It sends the Codex account's access token, with `ChatGPT-Account-ID` and `originator: codex_cli_rs` headers. A token that expires within five minutes is refreshed first. The token is never logged or written by voice.
+- **Speech.** The engine opens one OpenAI Realtime connection per call, to `gpt-realtime-2.1` with the voice `marin` (the provider's default). It sends the ChatGPT account's access token, with `ChatGPT-Account-ID` and `originator: codex_cli_rs` headers. A token that expires within five minutes is renewed first through the account refresh, which holds the account gate and lock and is the only writer of the saved login. The token is never logged or written by voice.
   The session is built in Go (`internal/voice/session.go` and `prompt.md`): English input transcription with a prompt that lists Dyna's words, near-field noise reduction, and semantic turn detection that neither creates nor cancels responses. The engine does both.
 - **Providers.** `internal/voice/realtime` describes each provider: where to dial, its session, its sample rates, its capabilities, and how its events map to Dyna's. It is ported from qwen-audio-agent's provider architecture (Apache-2.0; see `NOTICE`). OpenAI is the one in use.
 - **The call.** The owner talks to Voice, at the reserved address `<room>:voice-call`. Voice is not a session and never takes a turn. Each finished line, the owner's and Voice's, becomes a post between the owner and Voice, with `source=voice` and `spoken`. A line the transcription model writes for noise is dropped. These posts never wake root, and they stay out of the room feed. Root reads them in its `[OWNER DMS]` block at its next turn.
-- **Tools.** Voice follows Codex's conversational tool model with exactly two tools, each bounded to 10 seconds:
+- **Tools.** Voice follows the provider's conversational tool model with exactly two tools, each bounded to 10 seconds:
   - `dispatch({prompt})` sends the owner's exact words to `@root`. It starts root when idle and steers its running turn otherwise. Work, status checks, later work, and answers to open questions all use it. Repeated words are valid steering. Acceptance adds no spoken acknowledgement.
   - `remain_silent({})` returns an empty tool result and requests no reply. Voice uses it when speaking would add nothing useful. A deliberate silent result also completes its pending speech batch without retries. Google Live declares quiet tools as non-blocking and completes them with [silent scheduling](https://ai.google.dev/gemini-api/docs/live-api/tools#asynchronous-function-calling), so the server does not resume generation.
 - **Questions.** Voice reads root's open questions and their options. The owner's answer goes through `dispatch`. Root matches the question and records the owner's words with `dyna ask answer <id> "<owner words>"`, or uses `--choice` for an option the owner selected. Root asks for clarification when the answer is ambiguous.
 - **Execution context.** While a dispatched request is open, root's own posts and posts addressed to root enter the call as `[BACKEND]` conversation text. Voice transcripts, posts addressed to `@voice-call`, and traffic between other agents stay out. They never request speech or start progress timers. Each open request shares a 4000-byte budget, including prefixes and a truncation marker. Voice receives the head as it arrives; completion, failure or stop flushes the retained latest tail and ends this window. Steering shares the same budget. Providers that cannot add text without speech, such as Doubao and MiniCPM-o, skip silent context.
 - **Speaking for Dyna.** Root's explicit `@voice-call` posts and open owner questions request a response. Root's turn result stays in the room. Posts provide conversation context rather than instructions to read a full report. Voice gives only the key new point, follows the owner's update preferences, combines pending facts, and corrects only the changed point. Multiple posts per request are normal; distinct results and questions remain available.
   One response can run or be on its way. Posts arriving during speech wait together for one later reply after playback ends. They do not interrupt Voice. The existing speak queue keeps playback receipts, question replacement, and connection retries. A batch counts as handled when its audio starts or the model chooses `remain_silent`. A batch with no response is retried after 15 seconds of silence, up to 3 times; then the page marks it "not spoken". An unsupported provider marks requested speech as unspoken.
-  Dyna uses explicit root posts as speech triggers instead of inferring whether arbitrary room posts are progress or final results. This adapts Codex's completion signal to the room interface without adding request tracking.
+  Dyna uses explicit root posts as speech triggers instead of inferring whether arbitrary room posts are progress or final results. This adapts the provider's completion signal to the room interface without adding request tracking.
 - **Barge-in.** When the owner starts to speak, the engine cancels Voice's response, tells the page to stop playback, and cuts Voice's words in the conversation to what the page played, so Voice never remembers words the owner did not hear.
 - **From the app.** `VoiceStart(room)` connects the call; `VoiceStatus()` and `VoiceStop()` read and end it. The engine runs one call at a time. A start for another room fails and names the room whose call is live.
   The page opens `/api/voice/realtime?v=2` on the app origin. The engine checks the device or Connect session and the Origin, then attaches the page to the call. Version 2 sends microphone audio as binary PCM16 mono at 24 kHz; the engine converts it to provider base64. Legacy JSON microphone audio remains supported. An older engine rejects version 2 instead of dropping its audio. Controls and output keep the JSON protocol (`internal/voice/realtime/testdata/page-protocol.json`), including base64 output audio, response IDs and playback receipts. A newer page takes over the call and the older one closes with code 4001.
@@ -50,4 +50,4 @@ The call is a floating widget above every view, so it stays while you move betwe
 ## Limits
 
 - If the provider connection drops, the call ends; the page can start a new one.
-- The Codex sign-in is not an official OpenAI Realtime credential and could stop working.
+- The ChatGPT sign-in is not an official OpenAI Realtime credential and could stop working.

@@ -368,7 +368,7 @@ func privateHomeWarnings(nativeHome, harness string, tools []string) []string {
 		"Cloud and registry configuration is unavailable by default. Add trusted CLI names to toolHomeBridges in harness-config.json to use owner configuration.",
 	}
 	switch harness {
-	case "claude-code", "codex", "muse":
+	case "claude-code", "muse":
 		warnings = append(warnings, "A copied login shares its refresh-token family with the personal login. A refresh on either side can require a new sign-in on the other side. Dyna does not repeat the import.")
 	}
 	if harness == "opencode" {

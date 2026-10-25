@@ -35,8 +35,17 @@ func TestUnsupportedCredentialExpiryOffersSignIn(t *testing.T) {
 			}
 		})
 	}
-	a := Account{Harness: "codex", Status: "ready"}
-	setCredentialExpiry(&a, native.Captured{ExpiresAt: time.Now().Add(-time.Hour)})
+	// A grok sign-in that can refresh needs no sign-in for a past expiry.
+	expired := time.Now().Add(-time.Hour)
+	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828": map[string]any{
+		"auth_mode": "oidc", "oidc_issuer": "https://auth.x.ai", "oidc_client_id": "b1a00492-073a-47ea-816f-4c329264a828",
+		"user_id": "fixture-user", "key": "fixture-access", "refresh_token": "fixture-refresh", "expires_at": expired,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := Account{Harness: "grok", Status: "ready"}
+	setCredentialExpiry(&a, native.Captured{Identity: "grok:native", ExpiresAt: expired, Credential: store.Credential{Schema: "grok/native-files@1", Payload: payload}})
 	if a.NeedsLogin {
 		t.Fatal("refreshable token incorrectly required sign-in")
 	}
@@ -399,5 +408,36 @@ func TestKimiRetiredAccountUsesAndRenewsWithoutBundle(t *testing.T) {
 	}
 	if renewedToken.AccessToken != "rotated-access" || renewedToken.RefreshToken != "rotated-refresh" {
 		t.Fatalf("saved credential = %+v", renewedToken)
+	}
+}
+
+// A Pi account renews its OpenAI grant through the shared refresh, so an expired
+// access token must not mark the account as signed out.
+func TestExpiredPiAccessTokenIsNotASignOut(t *testing.T) {
+	type piEntry struct {
+		Type      string `json:"type"`
+		Access    string `json:"access"`
+		Refresh   string `json:"refresh"`
+		Expires   int64  `json:"expires"`
+		AccountID string `json:"accountId"`
+	}
+	entry, err := json.Marshal(map[string]piEntry{"openai-codex": {
+		Type: "oauth", Access: "access-token", Refresh: "refresh-token", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]json.RawMessage{"auth.json": entry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := &Account{Harness: "pi"}
+	credential := native.Captured{Identity: "pi:openai-codex", Credential: store.Credential{Schema: "pi/native-files@1", Payload: payload}}
+	setCredentialExpiry(account, credential)
+	if account.NeedsLogin || account.Status == "needs_auth" {
+		t.Fatalf("an expired Pi access token asked for a new sign-in: %+v", account)
+	}
+	if account.ExpiresAt == nil {
+		t.Fatal("the access-token expiry was not shown")
 	}
 }

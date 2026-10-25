@@ -52,7 +52,7 @@ func Score(o *Observation, now time.Time) float64 {
 	return spare * planSize(o.Plan) / (days * days)
 }
 
-// WeeklyWindow returns the 7-day usage window: seven_day (Claude, Codex),
+// WeeklyWindow returns the 7-day usage window: seven_day (Claude),
 // weekly (Muse), grok-weekly (Grok) or week (OpenCode). Nil when the reading
 // has none.
 func WeeklyWindow(o *Observation) *Window {
@@ -67,7 +67,7 @@ func WeeklyWindow(o *Observation) *Window {
 	return nil
 }
 
-// SessionWindow returns the 5-hour session window: five_hour (Claude, Codex),
+// SessionWindow returns the 5-hour session window: five_hour (Claude),
 // fiveHour (OpenCode) or subscription (Muse).
 func SessionWindow(o *Observation) *Window {
 	if o == nil {

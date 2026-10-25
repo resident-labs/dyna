@@ -25,25 +25,42 @@ import (
 func runtimeFixture(t *testing.T, h string) (*Runtime, profile.Profile) {
 	t.Helper()
 	accounts := testAccounts(t)
-	n, err := accounts.Create(h, "private")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeAccountFixture(t, n)
-	n, err = accounts.Capture(context.Background(), n.ID, "/fake/native")
-	if err != nil {
-		t.Fatal(err)
+	var n NativeAccount
+	p := profile.Profile{Name: "private", Harness: h}
+	if h == "pi" {
+		// Pi keeps one account per provider, and its model names the provider.
+		n = signedPiAccount(t, &Runtime{Accounts: accounts}, store.ProviderZAI, "fixture-key")
+		p.Model = "zai/glm-5.3"
+	} else {
+		var err error
+		n, err = accounts.Create(h, "private")
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeAccountFixture(t, n)
+		n, err = accounts.Capture(context.Background(), n.ID, "/fake/native")
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	bundles := manager(t)
-	bundle := install(t, bundles, h, "1.0.0")
+	bundle := install(t, bundles, h, fixtureVersion(h))
 	if err := accounts.Switch(context.Background(), n.ID, bundle.Executable); err != nil {
 		t.Fatal(err)
 	}
 	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
-	return r, profile.Profile{Name: "private", Harness: n.Harness}
+	return r, p
+}
+
+// fixtureVersion is the oldest version the harness's verified recipe accepts.
+func fixtureVersion(h string) string {
+	if h == "pi" {
+		return "1.1.0"
+	}
+	return "1.0.0"
 }
 func TestPreparePrivateProfilePinsGenerationAndIsolatesHome(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex"} {
+	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			r, p := runtimeFixture(t, h)
 			if h == "claude-code" {
@@ -98,26 +115,35 @@ func TestPreparePrivateProfilePinsGenerationAndIsolatesHome(t *testing.T) {
 	}
 }
 
-// Codex turns must keep preparing after Dyna links its skills into the
-// account home and after Codex adds its own links there. A regeneration
+// Pi turns must keep preparing after Dyna links its skills into the
+// account home and after Pi adds its own links there. A regeneration
 // between turns relinks the skills to the new generation.
-func TestCodexPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+func TestPiPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
+	r, p := runtimeFixture(t, "pi")
 	source := t.TempDir()
 	skill := filepath.Join(source, "SKILL.md")
 	if err := os.WriteFile(skill, []byte("first"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"codex"}}); err != nil {
+	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"pi"}}); err != nil {
 		t.Fatal(err)
 	}
 	_, first, err := r.Prepare(context.Background(), p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, _ := r.Accounts.HarnessHome("codex")
-	// Codex links helper names to its own binary on every start.
-	arg0 := filepath.Join(home, "tmp", "arg0-linux", "codex-arg0fixture")
+	activeID, err := (&store.Store{Root: r.Accounts.Root}).Active(store.ProviderZAI, "pi", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := r.Accounts.Find(activeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pi reads its whole agent directory from the account home, and adds its
+	// own files there.
+	home := account.Home
+	arg0 := filepath.Join(home, "tmp", "arg0-linux", "pi-arg0fixture")
 	if err = os.MkdirAll(arg0, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +156,7 @@ func TestCodexPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
 	if err = os.WriteFile(skill, []byte("second"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = r.Regenerate("codex"); err != nil {
+	if err = r.Regenerate("pi"); err != nil {
 		t.Fatal(err)
 	}
 	_, next, err := r.Prepare(context.Background(), p, nil)
@@ -146,7 +172,7 @@ func TestCodexPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
 	}
 }
 func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex"} {
+	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			r, p := runtimeFixture(t, h)
 			active, err := r.Accounts.Active(ProviderForModel(p.Harness, p.Model), p.Harness)
@@ -171,7 +197,7 @@ func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
 	}
 }
 func TestMissingPrivateLoginAndProtectedEnvironment(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	r, p := runtimeFixture(t, "pi")
 	p.Env = map[string]string{"HOME": "/another-home"}
 	if _, _, err := r.Prepare(context.Background(), p, nil); err == nil {
 		t.Fatal("accepted HOME override")
@@ -181,13 +207,7 @@ func TestMissingPrivateLoginAndProtectedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := func() error {
-		home, err := r.Accounts.HarnessHome(n.Harness)
-		if err != nil {
-			return err
-		}
-		return os.Remove(filepath.Join(home, "auth.json"))
-	}(); err != nil {
+	if err := os.Remove(filepath.Join(n.Home, "auth.json")); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := r.Prepare(context.Background(), p, nil); err == nil {
@@ -199,7 +219,7 @@ func TestMissingPrivateLoginAndProtectedEnvironment(t *testing.T) {
 }
 
 func TestPrivateRuntimeLaunchLetsDynaRestoreOwnerRoots(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	r, p := runtimeFixture(t, "pi")
 	ownerHome, ownerConfig, ownerData := os.Getenv("HOME"), os.Getenv("XDG_CONFIG_HOME"), os.Getenv("XDG_DATA_HOME")
 	realDyna := filepath.Join(t.TempDir(), "real dyna")
 	p.Env = map[string]string{"DYNA_BIN": realDyna, "DYNA_ROOM": "owner-room"}
@@ -222,16 +242,19 @@ func TestPrivateRuntimeLaunchLetsDynaRestoreOwnerRoots(t *testing.T) {
 }
 
 func TestDoctorReportsPrivateHomeAndRemainingLimits(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
-	nativeHome, _ := r.Accounts.HarnessHome("codex")
+	// Doctor reads the active account of the harness, which resolves for
+	// Claude Code; a Pi account is selected per provider (see the known gap).
+	r, p := runtimeFixture(t, "claude-code")
+	nativeHome, _ := r.Accounts.HarnessHome("claude-code")
 	doctor := r.Doctor(context.Background(), p)
 	if doctor.Home != harnesshome.Home(nativeHome) || doctor.Status != "ready" || doctor.Reason != "" {
 		t.Fatalf("unexpected private doctor state: %+v", doctor)
 	}
-	// The account-home skill view is a capability flag, not a partial reason.
+	// Claude Code pins its skill set per generation, and that is a capability
+	// flag, not a partial reason.
 	for _, c := range Capabilities() {
-		if c.Harness == "codex" && (c.Status != "ready" || c.SkillsPinned) {
-			t.Fatalf("codex capability = %+v", c)
+		if c.Harness == "claude-code" && (c.Status != "ready" || !c.SkillsPinned) {
+			t.Fatalf("claude-code capability = %+v", c)
 		}
 	}
 	warnings := strings.Join(doctor.Warnings, "\n")
@@ -252,7 +275,7 @@ func TestDoctorReportsPrivateHomeAndRemainingLimits(t *testing.T) {
 }
 
 func TestPrivateRuntimeOwnerToolPolicyOverridesProfile(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	r, p := runtimeFixture(t, "pi")
 	ownerHome := os.Getenv("HOME")
 	tools := t.TempDir()
 	if err := fsutil.WriteExecutable(filepath.Join(tools, "owner-helper"), []byte("#!/bin/sh\nprintf '%s' \"$HOME\"\n"), 0700); err != nil {
@@ -290,7 +313,7 @@ func TestPrivateRuntimeOwnerToolPolicyOverridesProfile(t *testing.T) {
 	}
 }
 func TestSessionPinsProtectOnlyOpenBundles(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	r, p := runtimeFixture(t, "pi")
 	_, pin, err := r.Prepare(context.Background(), p, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -309,19 +332,12 @@ func TestSessionPinsProtectOnlyOpenBundles(t *testing.T) {
 }
 
 func TestResumeUsesCurrentActiveAccountAndSharedHistoryHome(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	r, p := runtimeFixture(t, "pi")
 	selected, pin, err := r.Prepare(context.Background(), p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err := r.Accounts.Create("codex", "second")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeAccountFixture(t, next)
-	if _, err := r.Accounts.Capture(context.Background(), next.ID, pin.Bundle.Executable); err != nil {
-		t.Fatal(err)
-	}
+	next := signedPiAccount(t, r, store.ProviderZAI, "second-key")
 	if err := r.Accounts.Switch(context.Background(), next.ID, pin.Bundle.Executable); err != nil {
 		t.Fatal(err)
 	}
@@ -332,8 +348,11 @@ func TestResumeUsesCurrentActiveAccountAndSharedHistoryHome(t *testing.T) {
 	if newPin.AccountID != next.ID {
 		t.Fatal("resume retained the old account")
 	}
-	if selected.Env["CODEX_HOME"] != resumed.Env["CODEX_HOME"] {
-		t.Fatal("resume lost the shared native history home")
+	if selected.Env[piSessionDirKey] != resumed.Env[piSessionDirKey] {
+		t.Fatal("resume lost the shared session history home")
+	}
+	if resumed.Env[piAgentDirKey] != next.Home {
+		t.Fatal("resume did not follow the active account's home")
 	}
 	if newPin.Generation != pin.Generation {
 		t.Fatal("account swap unexpectedly changed immutable config generation")
@@ -342,22 +361,22 @@ func TestResumeUsesCurrentActiveAccountAndSharedHistoryHome(t *testing.T) {
 
 func TestPrepareNeverCopiesPersonalLogin(t *testing.T) {
 	accounts := testAccounts(t)
-	ownerImportSeed(t, os.Getenv("HOME"), "codex")
+	ownerImportSeed(t, os.Getenv("HOME"), "claude-code")
 	bundles := manager(t)
-	install(t, bundles, "codex", "1.0.0")
+	install(t, bundles, "claude-code", "1.0.0")
 	r := &Runtime{Accounts: accounts, Bundles: bundles, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
-	_, _, err := r.Prepare(context.Background(), profile.Profile{Harness: "codex"}, nil)
-	if err == nil || err.Error() != "Sign in to codex in Dyna." {
+	_, _, err := r.Prepare(context.Background(), profile.Profile{Harness: "claude-code"}, nil)
+	if err == nil || err.Error() != "Sign in to claude-code in Dyna." {
 		t.Fatalf("got %v, want the sign-in message", err)
 	}
 	if list, _ := accounts.List(); len(list) != 0 {
 		t.Fatalf("prepare copied the personal login: %+v", list)
 	}
 	// The user's explicit choice is the only way the personal login gets in.
-	if _, err := r.UsePersonalLogin(context.Background(), "codex"); err != nil {
+	if _, err := r.UsePersonalLogin(context.Background(), "claude-code"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Prepare(context.Background(), profile.Profile{Harness: "codex"}, nil); err != nil {
+	if _, _, err := r.Prepare(context.Background(), profile.Profile{Harness: "claude-code"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -365,29 +384,29 @@ func TestPrepareNeverCopiesPersonalLogin(t *testing.T) {
 func TestPrepareIgnoresStoredSystemRuntime(t *testing.T) {
 	// This test covers stored profile selection. Owner-login import and
 	// first-use installation have separate integration coverage.
-	r, _ := runtimeFixture(t, "codex")
+	r, _ := runtimeFixture(t, "pi")
 	var stored profile.Profile
-	if err := json.Unmarshal([]byte(`{"name":"old","harness":"codex","runtime":"system","runtimeVersion":"1.0.0"}`), &stored); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"old","harness":"pi","model":"zai/glm-5.3","runtime":"system","runtimeVersion":"1.1.0"}`), &stored); err != nil {
 		t.Fatal(err)
 	}
 	selected, pin, err := r.Prepare(context.Background(), stored, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin.Bundle.Version != "1.0.0" || selected.RuntimeExecutable != pin.Bundle.Executable {
+	if pin.Bundle.Version != "1.1.0" || selected.RuntimeExecutable != pin.Bundle.Executable {
 		t.Fatalf("a stored system runtime must run Dyna-managed: %#v", pin.Bundle)
 	}
 }
 
 func TestPrepareInstallsMissingPrivateCopyOnFirstUse(t *testing.T) {
 	accounts := testAccounts(t)
-	ownerImportSeed(t, os.Getenv("HOME"), "codex")
+	ownerImportSeed(t, os.Getenv("HOME"), "claude-code")
 	bundles := manager(t)
 	r := &Runtime{Accounts: accounts, Bundles: bundles, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
-	if err := r.copyPersonalLogin(context.Background(), "codex"); err != nil {
+	if err := r.copyPersonalLogin(context.Background(), "claude-code"); err != nil {
 		t.Fatal(err)
 	}
-	selected, pin, err := r.Prepare(context.Background(), profile.Profile{Harness: "codex", RuntimeVersion: "1.0.0"}, nil)
+	selected, pin, err := r.Prepare(context.Background(), profile.Profile{Harness: "claude-code", RuntimeVersion: "1.0.0"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

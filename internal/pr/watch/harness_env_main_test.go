@@ -16,7 +16,6 @@ func TestMain(m *testing.M) {
 	for _, key := range []string{"DYNA_AGENT_JOURNAL", "DYNA_AGENT_JOURNAL_ROOT"} {
 		os.Unsetenv(key)
 	}
-	os.Unsetenv("CODEX_THREAD_ID")
 	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
 	os.Unsetenv("MUSE_SESSION_ID")
 	// Test repositories are tiny and short-lived: skip background maintenance and fsync.

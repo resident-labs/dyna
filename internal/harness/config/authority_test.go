@@ -15,7 +15,7 @@ func TestCatalogChecksAuthorityBeforeValidation(t *testing.T) {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		for _, err := range []error{
 			manager.AddMCP(ctx, ManagedMCP{}), manager.AddSkill(ctx, ManagedSkill{}),
-			manager.Remove(ctx, "mcp", "", ""), manager.Remove(ctx, "skill", "", "codex"),
+			manager.Remove(ctx, "mcp", "", ""), manager.Remove(ctx, "skill", "", "claude-code"),
 			manager.SetEnabled(ctx, "mcp", "", "", true), manager.SetEnabled(ctx, "skill", "", "", false),
 		} {
 			if err == nil || !strings.Contains(err.Error(), "is owner or root only") {

@@ -34,6 +34,11 @@ var errGenerationLifecycle = errors.New("private generation lifecycle data is un
 // content address is still valid, so generateLocked rebuilds it in place.
 var errGenerationChanged = errors.New("generation changed after publication")
 
+// errGenerationUnsupported marks a generation of a harness this release no
+// longer runs. A turn cannot load it, but the directory is still Dyna's, so
+// cleanup may delete it instead of failing for every other harness.
+var errGenerationUnsupported = errors.New("generation names a harness this release does not run")
+
 // lifecycleError names the failed check and the path it checked.
 func lifecycleError(reason, path string) error {
 	return fmt.Errorf("%w: %s: %s", errGenerationLifecycle, reason, path)
@@ -144,10 +149,10 @@ func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup fu
 		d.EnvKeys = slices.Clone(d.EnvKeys)
 		slices.Sort(d.EnvKeys)
 		d.EnvKeys = slices.Compact(d.EnvKeys)
-		for _, name := range d.EnvKeys {
-			if h != "claude-code" && (h != "codex" || harnessmgr.MCPEnvironmentName(name) != name) {
-				needsCLI = true
-			}
+		// A harness without its own CLI materializer needs Dyna's binary for
+		// the shell MCP server it starts.
+		if h != "claude-code" && len(d.EnvKeys) > 0 {
+			needsCLI = true
 		}
 		snapshot.MCP = append(snapshot.MCP, harnessmgr.ManagedMCP{Name: entry.Name, MCPDefinition: d, EnabledHarnesses: []string{h}})
 	}
@@ -273,7 +278,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	}
 	defer removeBundle(staging)
 	var g harnessmgr.ConfigGeneration
-	if h == "claude-code" || h == "codex" {
+	if h == "claude-code" {
 		g, err = r.Config.GenerateSnapshotAt(h, home, staging, published, snapshot, resolvedLookup, inputs.Preferences)
 	} else {
 		g, err = materializeNative(h, home, staging, published, inputs.CLI, snapshot, inputs.Preferences, resolvedLookup)
@@ -285,7 +290,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if err = os.WriteFile(filepath.Join(staging, nativeFeatureFile), nativeFeaturePolicyBytes(h), 0600); err != nil {
 		return g, err
 	}
-	// The shared Claude/Codex materializer retains its native manifest format.
+	// The shared Claude materializer retains its native manifest format.
 	// This separate, hashed marker gives every harness the same HOME contract.
 	if err = writeNativeGeneration(filepath.Join(staging, "private-home.json"), privateGenerationHome{Version: 1, Home: home}); err != nil {
 		return g, err
@@ -365,7 +370,6 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 // instructions. Remove once no account home holds a Dyna-marked file.
 var legacyGlobalRulesFiles = map[string]func(home string) string{
 	"claude-code": func(home string) string { return filepath.Join(home, "CLAUDE.md") },
-	"codex":       func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"grok":        func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"opencode":    func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"pi":          func(home string) string { return filepath.Join(home, "AGENTS.md") },
@@ -519,7 +523,7 @@ func validateOwnedGeneration(dir string) (generationOwnership, error) {
 		return meta, lifecycleError("lifecycle.json does not match the generation", dir)
 	}
 	if _, err := Adapter(meta.Harness); err != nil {
-		return meta, lifecycleError("lifecycle.json names an unknown harness", dir)
+		return meta, fmt.Errorf("%w: %s", errGenerationUnsupported, dir)
 	}
 	hash, err := generationTreeHash(dir, true)
 	if err != nil {
@@ -530,7 +534,7 @@ func validateOwnedGeneration(dir string) (generationOwnership, error) {
 	}
 	// A complete native manifest is mandatory even for a generation with no skills.
 	name := "native-generation.json"
-	if meta.Harness == "claude-code" || meta.Harness == "codex" {
+	if meta.Harness == "claude-code" {
 		name = "generation.json"
 	}
 	var manifest struct {
@@ -682,8 +686,9 @@ func (r *Runtime) GCGenerationsWithProbe(ctx context.Context, probe GenerationPr
 			continue
 		}
 		dir := filepath.Join(r.Generations, entry.Name())
-		// A changed generation is still ours to delete when nothing pins it.
-		if _, err = validateOwnedGeneration(dir); err != nil && !errors.Is(err, errGenerationChanged) {
+		// A changed generation, or one of a harness this release no longer
+		// runs, is still ours to delete when nothing pins it.
+		if _, err = validateOwnedGeneration(dir); err != nil && !errors.Is(err, errGenerationChanged) && !errors.Is(err, errGenerationUnsupported) {
 			return err
 		}
 		candidates = append(candidates, dir)
@@ -941,7 +946,13 @@ func (r *Runtime) currentGenerationPins(keep map[string]bool) error {
 			return err
 		}
 		if _, err = Adapter(view.Harness); err != nil {
-			return lifecycleError("generation view names an unknown harness", filepath.Join(root, entry.Name()))
+			// A view of a harness this release no longer runs cannot protect
+			// anything, and leaving it would stop cleanup for every harness. Drop
+			// it; its generations are collected as unsupported below.
+			if err = os.Remove(filepath.Join(root, entry.Name())); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			continue
 		}
 		home, e := r.Accounts.HarnessHome(view.Harness)
 		if e != nil || view.Home != home && !equivalentAccountHome(r.Accounts.Root, view.Harness, ".runtime", view.Home) {

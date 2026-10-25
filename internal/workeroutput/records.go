@@ -110,29 +110,6 @@ func decodeText(line []byte) Record {
 	return Record{Events: events, recognized: ok, valid: true}
 }
 
-func decodeCodex(line []byte) Record {
-	p, ok := parseRecord[codexRecord](line)
-	if !ok {
-		return Record{}
-	}
-	events, known := adaptCodexJSONL(p)
-	p.recordUsage.Type, p.recordUsage.ThreadID = p.Type, p.ThreadID
-	r := Record{Events: events, Signals: codexToolSignals(p), valid: true, recognized: known, recordUsage: p.recordUsage}
-	if p.Type == "thread.started" {
-		r.SessionID = p.ThreadID
-	}
-	// A completed compaction item is the only Codex success signal.
-	if p.Type == "item.completed" && (p.Item.Type == "context_compaction" || p.Item.Type == "contextCompaction") {
-		r.Compaction = true
-	}
-	// An accepted turn or item start is model work before it has display text.
-	// Session creation alone does not show that the model started working.
-	if p.Type == "turn.started" || (strings.HasPrefix(p.Type, "item.") && codexItemGenerates(p.Item.Type)) {
-		r.Generation = true
-	}
-	return r
-}
-
 func decodeOpenCode(line []byte) Record {
 	p, ok := parseRecord[openCodeRecord](line)
 	if !ok {
@@ -182,33 +159,6 @@ func decodeMuse(line []byte) Record {
 	r.ContextTokens = p.Payload.ContextTokens
 	r.Generation = p.PayloadType == "run.reasoning.delta" || p.PayloadType == "run.lifecycle.started" || p.PayloadType == "run.usage"
 	return r
-}
-
-type codexRecord struct {
-	recordUsage
-	Type     string      `json:"type"`
-	ThreadID string      `json:"thread_id"`
-	Message  string      `json:"message"`
-	Error    recordError `json:"error"`
-	Item     struct {
-		ID               string          `json:"id"`
-		ExitCode         *int            `json:"exit_code"`
-		Status           string          `json:"status"`
-		Type             string          `json:"type"`
-		Text             string          `json:"text"`
-		Command          string          `json:"command"`
-		AggregatedOutput string          `json:"aggregated_output"`
-		Server           string          `json:"server"`
-		Tool             string          `json:"tool"`
-		Query            string          `json:"query"`
-		Message          string          `json:"message"`
-		Arguments        json.RawMessage `json:"arguments"`
-		Result           json.RawMessage `json:"result"`
-		Changes          []struct {
-			Kind string `json:"kind"`
-			Path string `json:"path"`
-		} `json:"changes"`
-	} `json:"item"`
 }
 
 type openCodeRecord struct {

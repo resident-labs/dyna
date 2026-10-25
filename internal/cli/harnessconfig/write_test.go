@@ -36,7 +36,7 @@ func TestWriteCommandsCatalog(t *testing.T) {
 	for _, args := range [][]string{
 		{"add", "tool", "--command", "node", "--arg", "first", "--arg", "second", "--env-key", "CLI_TEST_SECRET", "--harness", "claude"},
 		{"disable", "tool", "--harness", "claude"},
-		{"enable", "tool", "--harness", "codex"},
+		{"enable", "tool", "--harness", "pi"},
 	} {
 		if _, e := executeWrite("mcp", args...); e != nil {
 			t.Fatal(e)
@@ -46,7 +46,7 @@ func TestWriteCommandsCatalog(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(c.MCP) != 1 || strings.Join(c.MCP[0].Args, ",") != "first,second" || strings.Join(c.MCP[0].EnabledHarnesses, ",") != "codex" {
+	if len(c.MCP) != 1 || strings.Join(c.MCP[0].Args, ",") != "first,second" || strings.Join(c.MCP[0].EnabledHarnesses, ",") != "pi" {
 		t.Fatalf("unexpected catalog: %+v", c)
 	}
 	if b, e := os.ReadFile(personal); e != nil || string(b) != "personal-canary" {

@@ -1,7 +1,7 @@
 # Saved login refresh
 
 Dyna desktop and the desktop web server check saved logins every minute.
-Claude and Codex refresh when access tokens have five minutes
+Claude refreshes when its access token has five minutes
 or less left. Active and inactive accounts use the same account lock. The
 registry lock also serializes account changes across Dyna processes.
 
@@ -16,7 +16,7 @@ explains unsupported refresh through `refreshMessage`. An unknown expiry is
 reported as unknown. Dyna does not guess provider OAuth endpoints.
 
 Native harness processes can also renew credentials. Claude refresh honors
-its native locks. Codex does not expose a shared token lock;
+its native locks. A harness without a shared token lock
 stop external native writers when Dyna manages those credentials.
 
 The legacy Claude helper can invalidate Dyna's refresh tokens. Disable its

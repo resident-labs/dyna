@@ -17,7 +17,6 @@ const SchemaVersion = 1
 
 const (
 	DialectText         = "text"
-	DialectCodexJSONL   = "codex-jsonl"
 	DialectOpenCodeJSON = "opencode-json"
 )
 
@@ -85,7 +84,6 @@ type adapter func([]byte) Record
 var adapters = map[string]adapter{
 	DialectPiJSON:           decodePi,
 	DialectText:             decodeText,
-	DialectCodexJSONL:       decodeCodex,
 	DialectOpenCodeJSON:     decodeOpenCode,
 	DialectClaudeStreamJSON: decodeClaude,
 	DialectMuseJSONL:        decodeMuse,

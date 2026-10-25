@@ -29,12 +29,12 @@ func TestBrowserRuntimeSyncRefusesBeforeConfigAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, role := range []authority.Role{authority.Session, authority.Worker, ""} {
-		_, err := r.SyncPrivateRuntime(authority.WithActor(t.Context(), authority.Actor{Role: role}), "codex")
+		_, err := r.SyncPrivateRuntime(authority.WithActor(t.Context(), authority.Actor{Role: role}), "pi")
 		if err == nil || !strings.Contains(err.Error(), "SyncPrivateRuntime is owner or root only") {
 			t.Errorf("browser sync as %q reached config: %v", role, err)
 		}
 		for _, kind := range []string{"mcp", "skill"} {
-			_, err := r.SyncCatalogAccount(authority.WithActor(t.Context(), authority.Actor{Role: role}), kind, "codex", "account")
+			_, err := r.SyncCatalogAccount(authority.WithActor(t.Context(), authority.Actor{Role: role}), kind, "pi", "account")
 			if err == nil || !strings.Contains(err.Error(), kind+" sync is owner or root only") {
 				t.Errorf("account sync as %q reached config: %v", role, err)
 			}
@@ -58,7 +58,7 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 		}
 	}
 	r := New()
-	selected, err := r.Accounts.Create("codex", "explicit inactive account")
+	selected, err := r.Accounts.Create("pi", "explicit inactive account")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 	if err := r.Accounts.setActive("claude-code", unrelated.ID); err != nil {
 		t.Fatal(err)
 	}
-	home, err := r.Accounts.HarnessHome("codex")
+	home, err := r.Accounts.HarnessHome("pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +87,11 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	if err := r.Config.AddMCP(owner, config.ManagedMCP{Name: "redaction", MCPDefinition: config.MCPDefinition{Command: "node", EnvKeys: []string{"SYNC_TEST_SECRET"}}, EnabledHarnesses: []string{"codex"}}); err != nil {
+	if err := r.Config.AddMCP(owner, config.ManagedMCP{Name: "redaction", MCPDefinition: config.MCPDefinition{Command: "node", EnvKeys: []string{"SYNC_TEST_SECRET"}}, EnabledHarnesses: []string{"pi"}}); err != nil {
 		t.Fatal(err)
 	}
 	// Internal generation remains available without a user-operation rule.
-	generation, err := r.RegenerateAccount("codex", selected.ID)
+	generation, err := r.RegenerateAccount("pi", selected.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 	for _, role := range []authority.Role{authority.Owner, authority.Root} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		for _, kind := range []string{"mcp", "skill"} {
-			result, err := r.SyncCatalogAccount(ctx, kind, "codex", selected.ID)
+			result, err := r.SyncCatalogAccount(ctx, kind, "pi", selected.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,10 +132,10 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 	for _, tc := range []struct{ kind, harness, account, want string }{
 		{"mcp", "claude", selected.ID, "private account belongs to another harness"},
 		{"skill", "unknown-harness", selected.ID, "adapter is not available"},
-		{"mcp", "codex", "missing", "does not exist"},
-		{"mcp", "codex", "", "sync requires --account"},
+		{"mcp", "pi", "missing", "does not exist"},
+		{"mcp", "pi", "", "sync requires --account"},
 		{"skill", "", selected.ID, "sync requires --harness"},
-		{"other", "codex", selected.ID, "unsupported config kind"},
+		{"other", "pi", selected.ID, "unsupported config kind"},
 	} {
 		_, err := r.SyncCatalogAccount(owner, tc.kind, tc.harness, tc.account)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -149,7 +149,7 @@ func TestBrowserRuntimeSyncKeepsActiveScopeAndSnapshot(t *testing.T) {
 	r.privateRecommendations = func(context.Context) []RecommendedVersion { return []RecommendedVersion{} }
 	for _, role := range []authority.Role{authority.Owner, authority.Root} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
-		snapshot, err := r.SyncPrivateRuntime(ctx, "codex")
+		snapshot, err := r.SyncPrivateRuntime(ctx, "pi")
 		if err != nil {
 			t.Fatalf("scoped browser sync reached unrelated Claude: %v", err)
 		}

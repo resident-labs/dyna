@@ -11,9 +11,9 @@ import (
 
 func TestCatalogDropsRetiredMetadata(t *testing.T) {
 	m, _, _ := editManager(t)
-	raw := `{"mcp":[{"name":"tool","command":"node","enabledHarnesses":["codex"],"imported":true,"references":{"codex":"old-config"},"importedHashes":{"codex":"old-hash"},"variants":{"codex":{"command":"retired"}}}],"skills":[{"name":"review","source":"/source","enabledHarnesses":["codex"],"imported":true,"variants":{"codex":"/retired"},"importedHashes":{"codex":"old-hash"}}]}`
+	raw := `{"mcp":[{"name":"tool","command":"node","enabledHarnesses":["claude-code"],"imported":true,"references":{"claude-code":"old-config"},"importedHashes":{"claude-code":"old-hash"},"variants":{"claude-code":{"command":"retired"}}}],"skills":[{"name":"review","source":"/source","enabledHarnesses":["claude-code"],"imported":true,"variants":{"claude-code":"/retired"},"importedHashes":{"claude-code":"old-hash"}}]}`
 	mustEdit(t, os.WriteFile(m.Path, []byte(raw), 0600))
-	mustEdit(t, m.SetEnabled(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", "codex", false))
+	mustEdit(t, m.SetEnabled(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", "claude-code", false))
 	saved := string(fileBytes(t, m.Path))
 	for _, key := range []string{"imported", "references", "importedHashes", "variants"} {
 		if strings.Contains(saved, `"`+key+`"`) {

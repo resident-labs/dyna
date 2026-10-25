@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,7 +12,10 @@ import (
 	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/fsutil"
+	harnessmgr "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/home"
+	"dyna-agent/internal/profile"
+	defaultstore "dyna-agent/internal/store"
 )
 
 func TestOpenCodeUnusableNativeLoginBlocksObservation(t *testing.T) {
@@ -94,7 +98,32 @@ func (m captureFailureManager) Capture(context.Context, string) ([]native.Captur
 }
 
 func TestNativeProbeFailureDoesNotRequestSignIn(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	// OpenCode keeps a shared login, so turn preparation reads the active
+	// account through the generic capture path this test fails.
+	accounts := testAccounts(t)
+	n, err := accounts.Create("opencode", "probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := "opencode:opencode-go:fixture"
+	login := native.Captured{Identity: identity, Integration: "opencode-go", Credential: store.Credential{Schema: "opencode/v2-ref@1", Payload: json.RawMessage(`{"ref":{"integration":"opencode-go","credentialID":"fixture","scope":{},"credentialType":"oauth","expires":1}}`)}}
+	if err = writeAccountLogin(n.Home, login); err != nil {
+		t.Fatal(err)
+	}
+	if err = (&store.Store{Root: accounts.Root}).Update(func(state *store.State) error {
+		entry := state.Find(n.ID)
+		entry.Identity, entry.Integration, entry.NeedsLogin = identity, login.Integration, false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = (&store.Store{Root: accounts.Root}).SetActive(store.ProviderOpenCodeGo, "opencode", "", n.ID); err != nil {
+		t.Fatal(err)
+	}
+	bundles := manager(t)
+	install(t, bundles, "opencode", "2.0.32")
+	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
+	p := profile.Profile{Name: "probe", Harness: "opencode"}
 	probeErr := context.DeadlineExceeded
 	r.Accounts.NativeManager = func(h string, host native.Host) (native.Manager, bool) {
 		manager, ok := NativeRuntimeManager(h, host)

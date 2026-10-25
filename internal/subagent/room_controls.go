@@ -22,6 +22,7 @@ type RoomSessionState struct {
 	Held      int       `json:"held"`
 	Dormant   int       `json:"dormant"`
 }
+
 // RoomSessionKeptReason says why a room action left a session as it was. The
 // web maps these named reasons to text, so it never matches an error message.
 // Only RoomSessionKeptFailed is a real failure.

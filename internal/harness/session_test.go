@@ -44,7 +44,7 @@ func TestClaudeStreamJSONInvocationAndResume(t *testing.T) {
 
 func TestResumableReflectsHarnessSessionSupport(t *testing.T) {
 	for p, want := range map[string]bool{
-		profile.HarnessClaudeCode: true, profile.HarnessCodex: true, profile.HarnessMock: true,
+		profile.HarnessClaudeCode: true, profile.HarnessPi: true, profile.HarnessMock: true,
 	} {
 		prof := profile.Profile{Harness: p}
 		if got := Resumable(prof); got != want {

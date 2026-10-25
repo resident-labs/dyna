@@ -1,5 +1,5 @@
 // Package harness executes a single worker turn on a concrete agent CLI
-// (claude-code, codex, opencode, muse, grok, pi, a custom argv, or
+// (claude-code, opencode, muse, grok, pi, a custom argv, or
 // the built-in mock).
 package harness
 
@@ -201,11 +201,6 @@ type commandSpec struct {
 	// acpPrompt runs the text as a session/prompt over the session's
 	// long-lived ACP agent process instead of spawning a CLI per turn.
 	acpPrompt string
-	// codex runs a native turn on a persistent app-server process.
-	codex       bool
-	codexKey    string
-	codexThread string
-	codexPolicy codexTurnPolicy
 	// openCode runs the pinned v2 HTTP protocol on a retained server.
 	openCode                     bool
 	openCodeKey, openCodeSession string
@@ -585,12 +580,12 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 	result.UsageNormalization = state.normalizer.Normalization()
 	result.UsageBaseline = state.normalizer.Baseline()
 	result.ContextTokens, result.CompactError = state.compactValues()
-	if p.Harness == profile.HarnessCodex && result.UsageBaseline == nil {
-		result.UsageNormalization.MarkPartial("latest process has no usable usage checkpoint")
-	}
 	if err != nil {
 		result.UsageNormalization.MarkPartial("invocation did not complete")
-		result.UsageBaseline = nil // unreported tail usage must not spill into the next turn
+		// A failed turn cannot prove what the provider billed, so the saved
+		// checkpoint must not survive it: the next turn would subtract it and
+		// report the missing spend as its own, complete.
+		result.UsageBaseline = nil
 	}
 	// Stop the progress writer before publishing the completed observation, so
 	// a late progress write cannot replace the final health result.
@@ -727,13 +722,9 @@ func (r *journaledRun) runMockTurn() (Result, error) {
 	return Result{Output: out, Duration: time.Since(r.start)}, err
 }
 
-// prepareInvocation grants journal permissions and builds the first command.
+// prepareInvocation builds the first command.
 func (r *journaledRun) prepareInvocation() error {
 	var err error
-	r.p, err = withJournalPermissions(r.p, r.journal.Path)
-	if err != nil {
-		return err
-	}
 	r.inv, err = buildInvocationInDirExec(r.p, r.prompt, r.cwd, r.exec)
 	return err
 }
@@ -1262,7 +1253,6 @@ func (r *runState) beginProcess() {
 	if r.normalizer == nil {
 		r.normalizer = workeroutput.NewUsageNormalizer("", nil)
 	}
-	r.normalizer.BeginProcess()
 	r.sealed = false
 	r.emptySteps = 0
 	r.startupActivity = false
@@ -1393,7 +1383,7 @@ func finishAttempt(spec commandSpec, stdout, stderr string, runErr error, starte
 }
 
 // sessionTracker learns a harness session id from streaming JSON output. This
-// is what makes a journal reminder safe for Codex/OpenCode: the current turn is
+// is what makes a journal reminder safe: the current turn is
 // not interrupted until its exact session is known.
 type sessionTracker struct {
 	mu        sync.RWMutex
@@ -1512,8 +1502,6 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 	}
 	var protocolErr error
 	switch p.Harness {
-	case profile.HarnessCodex:
-		protocolErr = workeroutput.CodexTurnError(a.stdout)
 	case profile.HarnessPi:
 		protocolErr = workeroutput.PiResultError(a.stdout)
 	case profile.HarnessMuse:
@@ -1554,13 +1542,7 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		// A process's own stderr is the only text a turn may name a reason from.
 		return providerfailure.TagStderr(err, a.stderr)
 	}
-	if a.output == "" && p.Harness == profile.HarnessCodex && !workeroutput.CodexTurnCompleted(a.stdout) {
-		return fmt.Errorf("worker %s returned no final response without turn.completed", p.Name)
-	}
 	if a.output == "" && !a.allowEmptyOutput {
-		if p.Harness == profile.HarnessCodex {
-			return fmt.Errorf("worker %s completed Codex turn without required final response", p.Name)
-		}
 		return fmt.Errorf("worker %s returned empty output", p.Name)
 	}
 	return nil
@@ -1589,10 +1571,6 @@ func newSessionID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
-func codexSessionID(stdout string) string {
-	return workeroutput.CodexSessionID(stdout)
-}
-
 func museSessionID(stdout string) string {
 	_, sessionID := workeroutput.MuseStreamResult(stdout)
 	return sessionID
@@ -1614,17 +1592,6 @@ func openCodeOutput(stdout string) string {
 func hasArg(args []string, flag string) bool {
 	for _, a := range args {
 		if a == flag {
-			return true
-		}
-	}
-	return false
-}
-
-func hasCodexOutputArg(args []string) bool {
-	for _, arg := range args {
-		if arg == "-o" || strings.HasPrefix(arg, "-o=") ||
-			(len(arg) > 2 && strings.HasPrefix(arg, "-o") && !strings.HasPrefix(arg, "--")) ||
-			arg == "--output-last-message" || strings.HasPrefix(arg, "--output-last-message=") {
 			return true
 		}
 	}

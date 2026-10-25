@@ -284,6 +284,17 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 // reports whether that login lives in native files: the active account's
 // shared home, or a pinned account's own folder.
 func (a *Accounts) refreshManager(n NativeAccount, executable string) (accountnative.Manager, bool, error) {
+	// A Pi account keeps its own login file, one provider entry per account, so a
+	// refresh works in that account's home and never in the shared Pi home. An
+	// inactive account is renewed there too, because that is where its login is.
+	if n.Harness == "pi" {
+		// Only an account that holds its own login file is renewed there; one
+		// without it has no grant to renew in this home.
+		if _, statErr := os.Lstat(filepath.Join(n.Home, "auth.json")); statErr == nil {
+			m, _, err := a.scopedManager(n.Harness, n.Home, executable)
+			return m, true, err
+		}
+	}
 	if pinnedLogin(n) {
 		m, err := a.pinManager(n, executable)
 		return m, true, err

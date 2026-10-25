@@ -113,7 +113,7 @@ func TestCatalogEngineFailureHasNoLocalFallback(t *testing.T) {
 		for _, verb := range []string{"add", "rm", "enable", "disable"} {
 			t.Run(kind+"/"+verb, func(t *testing.T) {
 				source, before := catalogFixture(t)
-				out, err := runCatalog(t.Context(), kind, catalogArgs(kind, verb, source, "codex"))
+				out, err := runCatalog(t.Context(), kind, catalogArgs(kind, verb, source, "pi"))
 				if !errors.Is(err, engineclient.ErrNotRunning) || out != "" {
 					t.Errorf("engine failure = %v, output = %q", err, out)
 				}
@@ -199,7 +199,7 @@ func TestCatalogTransportPreservesPendingError(t *testing.T) {
 	enginetest.Serve(t, store.DataDir(), calls)
 	for _, kind := range []string{"mcp", "skill"} {
 		for _, verb := range []string{"add", "rm", "enable", "disable"} {
-			out, err := runCatalog(t.Context(), kind, catalogArgs(kind, verb, source, "codex"))
+			out, err := runCatalog(t.Context(), kind, catalogArgs(kind, verb, source, "pi"))
 			if err == nil || err.Error() != cause || strings.Contains(out, "Dyna catalog updated.") {
 				t.Errorf("pending generation error = %v, output = %q", err, out)
 			}

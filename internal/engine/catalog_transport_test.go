@@ -24,15 +24,15 @@ func TestCatalogCallsRejectUnverifiedClaims(t *testing.T) {
 		name string
 		args []json.RawMessage
 	}{
-		{"AddCatalogMCP", cliArgs(t, entry, "codex")},
+		{"AddCatalogMCP", cliArgs(t, entry, "pi")},
 		{"AddCatalogSkill", cliArgs(t, config.ManagedSkill{}, "")},
 		{"RemoveCatalogEntry", cliArgs(t, "mcp", "fixture", "")},
-		{"SetCatalogEntryEnabled", cliArgs(t, "skill", "fixture", "codex", true)},
+		{"SetCatalogEntryEnabled", cliArgs(t, "skill", "fixture", "pi", true)},
 		// Existing browser argument shapes still meet the shared manager policy.
 		{"AddHarnessMCP", cliArgs(t, entry)},
 		{"AddHarnessSkill", cliArgs(t, config.ManagedSkill{})},
 		{"RemoveHarnessConfig", cliArgs(t, "mcp", "fixture", "")},
-		{"SetHarnessConfigEnabled", cliArgs(t, "skill", "fixture", "codex", false)},
+		{"SetHarnessConfigEnabled", cliArgs(t, "skill", "fixture", "pi", false)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := calls[tc.name](ctx, tc.args)

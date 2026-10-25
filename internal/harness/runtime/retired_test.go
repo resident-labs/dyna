@@ -13,13 +13,13 @@ import (
 func TestGCDropsRetiredCursorAccountsAndFolders(t *testing.T) {
 	a := testAccounts(t)
 	bundles := &BundleManager{Root: filepath.Join(filepath.Dir(a.Root), "harnesses")}
-	codex, err := a.Create("codex", "work")
+	survivor, err := a.Create("pi", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cursorHome := filepath.Join(a.Root, "cursor-agent", "0123456789abcdef0123456789abcdef")
 	bundle := filepath.Join(bundles.Root, "cursor-agent", "2026.10.16-e3cb207")
-	for _, dir := range []string{cursorHome, bundle, filepath.Join(bundles.Root, "codex", "1.0.0")} {
+	for _, dir := range []string{cursorHome, bundle, filepath.Join(bundles.Root, "pi", "1.1.0")} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +37,7 @@ func TestGCDropsRetiredCursorAccountsAndFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, err := s.Read()
-	if err != nil || len(state.Entries) != 1 || state.Entries[0].ID != codex.ID {
+	if err != nil || len(state.Entries) != 1 || state.Entries[0].ID != survivor.ID {
 		t.Fatalf("store after gc = %+v, %v", state.Entries, err)
 	}
 	for _, dir := range []string{filepath.Join(a.Root, "cursor-agent"), filepath.Join(bundles.Root, "cursor-agent")} {
@@ -45,7 +45,7 @@ func TestGCDropsRetiredCursorAccountsAndFolders(t *testing.T) {
 			t.Fatalf("%s still exists: %v", dir, err)
 		}
 	}
-	for _, dir := range []string{codex.Home, filepath.Join(bundles.Root, "codex", "1.0.0")} {
+	for _, dir := range []string{survivor.Home, filepath.Join(bundles.Root, "pi", "1.1.0")} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Fatalf("removed %s: %v", dir, err)
 		}
@@ -58,8 +58,8 @@ func TestGCRemovesTheRetiredQwenBundle(t *testing.T) {
 	a := testAccounts(t)
 	bundles := &BundleManager{Root: filepath.Join(filepath.Dir(a.Root), "harnesses")}
 	qwen := filepath.Join(bundles.Root, "qwen-audio-agent", "2.0.1")
-	codex := filepath.Join(bundles.Root, "codex", "1.0.0")
-	for _, dir := range []string{qwen, codex} {
+	survivor := filepath.Join(bundles.Root, "pi", "1.1.0")
+	for _, dir := range []string{qwen, survivor} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestGCRemovesTheRetiredQwenBundle(t *testing.T) {
 	if _, err := os.Lstat(filepath.Dir(qwen)); !os.IsNotExist(err) {
 		t.Fatalf("the qwen bundle folder is still there: %v", err)
 	}
-	if _, err := os.Lstat(codex); err != nil {
+	if _, err := os.Lstat(survivor); err != nil {
 		t.Fatalf("gc removed another bundle: %v", err)
 	}
 }
@@ -82,7 +82,7 @@ func TestGCRemovesTheRetiredQwenBundle(t *testing.T) {
 // lookup for the accounts that survive. gc then drops the record and folders.
 func TestRetiredAntigravityAccountIsSkippedUntilGC(t *testing.T) {
 	a := testAccounts(t)
-	codex, err := a.Create("codex", "work")
+	survivor, err := a.Create("pi", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestRetiredAntigravityAccountIsSkippedUntilGC(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := a.List()
-	if err != nil || len(rows) != 1 || rows[0].ID != codex.ID {
+	if err != nil || len(rows) != 1 || rows[0].ID != survivor.ID {
 		t.Fatalf("list = %+v, %v", rows, err)
 	}
 	if _, err := a.Find(oldID); !errors.Is(err, errAccountMissing) {
@@ -107,7 +107,7 @@ func TestRetiredAntigravityAccountIsSkippedUntilGC(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, err := s.Read()
-	if err != nil || len(state.Entries) != 1 || state.Entries[0].ID != codex.ID {
+	if err != nil || len(state.Entries) != 1 || state.Entries[0].ID != survivor.ID {
 		t.Fatalf("store after gc = %+v, %v", state.Entries, err)
 	}
 	if _, err := os.Lstat(filepath.Join(a.Root, "antigravity")); !os.IsNotExist(err) {

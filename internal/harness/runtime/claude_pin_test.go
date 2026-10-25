@@ -244,16 +244,16 @@ func (deadlineCapture) Capture(context.Context, string) ([]native.Captured, erro
 // An activation timeout with no turn running is not a running-turn refusal.
 func TestSwitchIfIdleKeepsActivationTimeouts(t *testing.T) {
 	a := testAccounts(t)
-	first := signedCodex(t, a, "first", "first-canary")
-	second := signedCodex(t, a, "second", "second-canary")
-	if err := a.Switch(context.Background(), first.ID, "/fake/codex"); err != nil {
+	first := signedSharedGrok(t, a, "first", "first-canary")
+	second := signedSharedGrok(t, a, "second", "second-canary")
+	if err := a.Switch(context.Background(), first.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
 	a.NativeManager = func(h string, host native.Host) (native.Manager, bool) {
 		m, ok := NativeRuntimeManager(h, host)
 		return deadlineCapture{m}, ok
 	}
-	err := a.SwitchIfIdle(context.Background(), second.ID, "/fake/codex")
+	err := a.SwitchIfIdle(context.Background(), second.ID, "/fake/grok")
 	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "turns running") {
 		t.Fatal("activation timeout was reported as running turns", err)
 	}

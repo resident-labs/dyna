@@ -41,16 +41,16 @@ test('sameChanges gives each group a unique key, even for one session with two n
 
 test('seat notices stay separate and carry their label and handoff body', () => {
  const row = (kind: string, id: string, text: string) => ({ post: { kind, id, text, to: ['alpha:root'], ts: 1 } })
- const rows = [row('instructions', 'i', notice('- Room rules: now:\nx')), row('seat', 'a', 'codex (external) took the root seat'), row('seat', 'b', 'Internal root took back the seat\n\n[ROOT SEAT] context\n\n[ROOT SEAT HANDOFF] The external orchestrator left this note:\n\nPR 12 waits for CI.'), row('instructions', 'j', notice('- Room rules: now:\ny'))]
+ const rows = [row('instructions', 'i', notice('- Room rules: now:\nx')), row('seat', 'a', 'pi (external) took the root seat'), row('seat', 'b', 'Internal root took back the seat\n\n[ROOT SEAT] context\n\n[ROOT SEAT HANDOFF] The external orchestrator left this note:\n\nPR 12 waits for CI.'), row('instructions', 'j', notice('- Room rules: now:\ny'))]
  const groups = noteGroups(rows, 'alpha')
  assert.deepEqual([...groups.values()].map((g) => g?.length), [1, 1, 1, 1])
- assert.equal(groups.get(1)?.[0]?.label, 'codex (external) took the root seat')
+ assert.equal(groups.get(1)?.[0]?.label, 'pi (external) took the root seat')
  assert.equal(groups.get(1)?.[0]?.body, '')
  assert.equal(groups.get(2)?.[0]?.body, 'PR 12 waits for CI.')
 })
 
 test('an attach handoff preserves quoted detach context in its body', () => {
  const body = '[DYNA ROOT SEAT HANDOFF]\nRecent input:\n[ROOT SEAT HANDOFF] The external orchestrator left this note:\n\nEarlier note.'
- const groups = noteGroups([{ post: { id: 'attach', kind: 'seat', text: 'codex (external) took the root seat\n\n' + body } }], 'alpha')
+ const groups = noteGroups([{ post: { id: 'attach', kind: 'seat', text: 'pi (external) took the root seat\n\n' + body } }], 'alpha')
  assert.equal(groups.get(0)?.[0]?.body, body)
 })

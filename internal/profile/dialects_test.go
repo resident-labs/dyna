@@ -11,7 +11,7 @@ import (
 
 func TestHarnessDefaultDialects(t *testing.T) {
 	for harness, want := range map[string]string{
-		HarnessClaudeCode: "claude-stream-json", HarnessCodex: "codex-jsonl",
+		HarnessClaudeCode: "claude-stream-json",
 		HarnessOpenCode: "opencode-json", HarnessMuse: "muse-jsonl",
 		HarnessPi:   "pi-json",
 		HarnessMock: "text",
@@ -58,7 +58,7 @@ func TestDialectMustMatchHarness(t *testing.T) {
 		}
 		p.Output.Dialect = workeroutput.DialectMuseJSONL
 		if p.Output.Dialect == definition.Dialect {
-			p.Output.Dialect = workeroutput.DialectCodexJSONL
+			p.Output.Dialect = workeroutput.DialectOpenCodeJSON
 		}
 		err := p.Validate()
 		if err == nil || !strings.Contains(err.Error(), "emits") {

@@ -39,7 +39,6 @@ const claudeCompactBuffer = 33000
 
 var compactRules = map[string]CompactRule{
 	HarnessClaudeCode: {Min: 100000 - claudeCompactBuffer, Max: 1000000 - claudeCompactBuffer},
-	HarnessCodex:      {Min: 1},
 	HarnessMuse:       {Window: true, Min: 1},
 	HarnessOpenCode:   {Trigger: true, Min: 1},
 	HarnessPi:         {Trigger: true, Min: 1},
@@ -109,8 +108,6 @@ func CompactNative(p Profile) ([]string, map[string]string, error) {
 	case HarnessClaudeCode:
 		// The harness merges this --settings layer with the profile's own.
 		return []string{"--settings", fmt.Sprintf(`{"autoCompactWindow":%d}`, c.Tokens+claudeCompactBuffer)}, nil, nil
-	case HarnessCodex:
-		return []string{"-c", fmt.Sprintf("model_auto_compact_token_limit=%d", c.Tokens)}, nil, nil
 	case HarnessMuse:
 		// Muse takes the soft threshold as a fraction of the window, in (0, 1].
 		return []string{"-c", "context_compaction.soft_threshold=" + strconv.FormatFloat(float64(c.Tokens)/float64(window), 'g', 6, 64)}, nil, nil

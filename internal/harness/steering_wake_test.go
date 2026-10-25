@@ -178,14 +178,14 @@ func TestIdleDoorbellToolBoundaryDoesNotWaitForInputDeadline(t *testing.T) {
 	tracker.preset("boundary-session")
 	spec := commandSpec{argv: []string{"/bin/sh", "-c", `
 read -r command < "$BOUNDARY_CONTROL"
-printf '%s\n' '{"type":"item.started","item":{"id":"tool-1","type":"command_execution","command":"true","status":"in_progress"}}'
-printf '%s\n' '{"type":"item.completed","item":{"id":"tool-1","type":"command_execution","command":"true","status":"completed","exit_code":0}}'
+printf '%s\n' '{"type":"tool_execution_start","toolCallId":"tool-1","toolName":"bash"}'
+printf '%s\n' '{"type":"tool_execution_end","toolCallId":"tool-1","toolName":"bash","result":{"content":[{"type":"text","text":"ok"}]}}'
 read -r command < "$BOUNDARY_CONTROL"
-printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}'
+printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'
 `}}
 	done := make(chan attempt, 1)
 	go func() {
-		done <- runOnce(ctx, profile.Profile{Harness: profile.HarnessMock, Env: map[string]string{"BOUNDARY_CONTROL": path}}, dir, spec, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
+		done <- runOnce(ctx, profile.Profile{Harness: profile.HarnessMock, Env: map[string]string{"BOUNDARY_CONTROL": path}}, dir, spec, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
 	}()
 	awaitDoorbell(t, "the session observation", source.observed)
 	if _, err := control.WriteString("boundary\n"); err != nil {

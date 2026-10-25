@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"dyna-agent/internal/account/store"
@@ -259,8 +258,7 @@ type ConfigGeneration struct {
 
 // Generate materializes only enabled catalog entries. Both paths must already
 // exist as private directories. The caller validates their account scope.
-// No HOME or XDG variable is changed. Codex atomically updates accountHome/skills
-// to the new generation copy. This shared skill view is not pinned per session.
+// No HOME or XDG variable is changed.
 func (m *ConfigManager) Generate(harness, accountHome, generationRoot string) (ConfigGeneration, error) {
 	return m.GenerateWithEnv(harness, accountHome, generationRoot, os.LookupEnv)
 }
@@ -291,8 +289,8 @@ type generationDestination struct {
 
 func (m *ConfigManager) generateWithPreferences(harness, accountHome, generationRoot string, lookup func(string) (string, bool), preferences map[string]any, destination *generationDestination) (out ConfigGeneration, err error) {
 	hs, err := selectedHarnesses(harness)
-	if err != nil || len(hs) != 1 || (hs[0] != "claude-code" && hs[0] != "codex") {
-		return out, errors.New("native config generation supports only Claude Code and Codex")
+	if err != nil || len(hs) != 1 || hs[0] != "claude-code" {
+		return out, errors.New("native config generation supports only Claude Code")
 	}
 	h := hs[0]
 	if err := m.validatePrivateDir(accountHome); err != nil {
@@ -454,76 +452,39 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 			return ConfigGeneration{}, err
 		}
 	}
-	if h == "claude-code" {
-		if err := write("mcp.json", map[string]any{"mcpServers": servers}); err != nil {
+	if err := write("mcp.json", map[string]any{"mcpServers": servers}); err != nil {
+		return ConfigGeneration{}, err
+	}
+	settings := map[string]any{}
+	for k, v := range preferences {
+		putPreference(settings, k, v)
+	}
+	settings["attribution"] = map[string]string{"commit": "", "pr": ""}
+	if err := write("settings.json", settings); err != nil {
+		return ConfigGeneration{}, err
+	}
+	out.Env["CLAUDE_CONFIG_DIR"] = accountHome
+	// The user source is the private CLAUDE_CONFIG_DIR. It loads the
+	// CLAUDE.md that carries Dyna's global rules; --settings still wins.
+	out.Args = []string{"--mcp-config", filepath.Join(published, "mcp.json"), "--strict-mcp-config", "--settings", filepath.Join(published, "settings.json"), "--setting-sources", "user"}
+	if len(skills) > 0 {
+		plugin := filepath.Join(directory, "plugin")
+		if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0700); err != nil {
+			return ConfigGeneration{}, errors.New("cannot create skill plugin")
+		}
+		if err := write("plugin/.claude-plugin/plugin.json", map[string]string{"name": "dyna", "version": "1.0.0"}); err != nil {
 			return ConfigGeneration{}, err
-		}
-		settings := map[string]any{}
-		for k, v := range preferences {
-			putPreference(settings, k, v)
-		}
-		settings["attribution"] = map[string]string{"commit": "", "pr": ""}
-		if err := write("settings.json", settings); err != nil {
-			return ConfigGeneration{}, err
-		}
-		out.Env["CLAUDE_CONFIG_DIR"] = accountHome
-		// The user source is the private CLAUDE_CONFIG_DIR. It loads the
-		// CLAUDE.md that carries Dyna's global rules; --settings still wins.
-		out.Args = []string{"--mcp-config", filepath.Join(published, "mcp.json"), "--strict-mcp-config", "--settings", filepath.Join(published, "settings.json"), "--setting-sources", "user"}
-		if len(skills) > 0 {
-			plugin := filepath.Join(directory, "plugin")
-			if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0700); err != nil {
-				return ConfigGeneration{}, errors.New("cannot create skill plugin")
-			}
-			if err := write("plugin/.claude-plugin/plugin.json", map[string]string{"name": "dyna", "version": "1.0.0"}); err != nil {
-				return ConfigGeneration{}, err
-			}
-			for name, src := range skills {
-				if err := copyGenerationSkill(src, filepath.Join(plugin, "skills", name)); err != nil {
-					return ConfigGeneration{}, err
-				}
-			}
-			out.Args = append(out.Args, "--plugin-dir", filepath.Join(published, "plugin"))
-		}
-	} else {
-		// env_vars keeps secret values out of argv. Override the entire server map,
-		// including an empty map, so removed definitions cannot survive from a home.
-		preferenceKeys := make([]string, 0, len(preferences))
-		for k := range preferences {
-			preferenceKeys = append(preferenceKeys, k)
-		}
-		sort.Strings(preferenceKeys)
-		for _, k := range preferenceKeys {
-			out.Args = append(out.Args, "-c", k+"="+inlineTOML(preferences[k]))
-		}
-		out.Args = append(out.Args, []string{"-c", "mcp_servers=" + inlineTOML(servers), "-c", "check_for_update_on_startup=false", "-c", `cli_auth_credentials_store="file"`}...)
-		out.Env["CODEX_HOME"] = accountHome
-		out.Env["CODEX_SQLITE_HOME"] = filepath.Join(accountHome, "sqlite")
-		// Codex runs with a private HOME, so ~/.agents/skills is Dyna's own;
-		// only the unpinned skill view remains.
-		_, skillReason := NativeSkillCapability("codex")
-		out.PartialReasons = []string{skillReason}
-		skillDirectory := filepath.Join(directory, "skills")
-		if err := os.Mkdir(skillDirectory, 0700); err != nil {
-			return ConfigGeneration{}, errors.New("cannot create Codex skill generation")
 		}
 		for name, src := range skills {
-			if err := copyGenerationSkill(src, filepath.Join(skillDirectory, name)); err != nil {
+			if err := copyGenerationSkill(src, filepath.Join(plugin, "skills", name)); err != nil {
 				return ConfigGeneration{}, err
 			}
 		}
-		if err := write("mcp.json", map[string]any{"mcp_servers": servers}); err != nil {
-			return ConfigGeneration{}, err
-		}
+		out.Args = append(out.Args, "--plugin-dir", filepath.Join(published, "plugin"))
 	}
 	sort.Strings(out.EnvKeys)
 	if err := write("generation.json", generationManifest{Version: 1, Harness: h, AccountHome: accountHome, CLI: dynaServerCommand(servers), Args: out.Args, EnvKeys: out.EnvKeys, PartialReasons: out.PartialReasons, EnvReferences: envRefs}); err != nil {
 		return ConfigGeneration{}, err
-	}
-	if h == "codex" && destination == nil {
-		if err := PublishSkillView(filepath.Join(accountHome, "skills"), filepath.Join(directory, "skills")); err != nil {
-			return ConfigGeneration{}, err
-		}
 	}
 	complete = true
 	return out, nil
@@ -560,7 +521,7 @@ func (m *ConfigManager) validatePrivateDir(path string) error {
 		if path == home {
 			return errors.New("owner HOME is not a private runtime directory")
 		}
-		for _, personal := range []string{".claude", ".codex", ".agents", ".config"} {
+		for _, personal := range []string{".claude", ".agents", ".config"} {
 			if pathWithin(filepath.Join(home, personal), path) {
 				return errors.New("personal config directories are not runtime directories")
 			}
@@ -581,40 +542,6 @@ func (m *ConfigManager) validatePrivateDir(path string) error {
 	return nil
 }
 
-// inlineTOML encodes native MCP values and preference scalars as one TOML value.
-// JSON string escaping is also valid for these TOML basic strings.
-func inlineTOML(v any) string {
-	switch x := v.(type) {
-	case bool:
-		return strconv.FormatBool(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case float64:
-		return strconv.FormatFloat(x, 'g', -1, 64)
-	case string:
-		b, _ := json.Marshal(x)
-		return string(b)
-	case []string:
-		parts := make([]string, len(x))
-		for i, s := range x {
-			parts[i] = inlineTOML(s)
-		}
-		return "[" + strings.Join(parts, ",") + "]"
-	case map[string]any:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
-		for _, k := range keys {
-			parts = append(parts, inlineTOML(k)+"="+inlineTOML(x[k]))
-		}
-		return "{" + strings.Join(parts, ",") + "}"
-	default:
-		panic("unsupported native MCP TOML type")
-	}
-}
 func copyGenerationSkill(source, target string) error {
 	// Resolve only the explicitly selected source root. Reject links inside it so
 	// a session's immutable copy cannot point back to mutable external content.
@@ -663,14 +590,10 @@ func NativeSkillCapability(harness string) (supported bool, reason string) {
 	if err != nil || len(hs) != 1 {
 		return false, "select one supported harness"
 	}
-	switch hs[0] {
-	case "claude-code":
+	if hs[0] == "claude-code" {
 		return true, ""
-	case "codex":
-		return true, "Codex uses the shared CODEX_HOME/skills view; Dyna skills are not pinned per generation and change when Dyna generates config"
-	default:
-		return false, "private skill generation is not implemented for this harness"
 	}
+	return false, "private skill generation is not implemented for this harness"
 }
 
 type generationManifest struct {
@@ -686,7 +609,6 @@ type generationManifest struct {
 
 // LoadGeneration restores a launch snapshot without reading today's catalog.
 // It resolves key references again and never modifies the retained generation.
-// Loading a Codex generation leaves the current shared account skill view unchanged.
 func LoadGeneration(directory string) (ConfigGeneration, error) {
 	return LoadGenerationWithEnv(directory, os.LookupEnv)
 }
@@ -710,7 +632,7 @@ func LoadGenerationWithEnv(directory string, lookup func(string) (string, bool))
 	}
 	// TODO: legacy/shim remove later — accepts Claude manifests written with the old ID until their generation pins expire.
 	manifest.Harness = CanonicalHarnessID(manifest.Harness)
-	if manifest.Version != 1 || (manifest.Harness != "claude-code" && manifest.Harness != "codex") {
+	if manifest.Version != 1 || manifest.Harness != "claude-code" {
 		return ConfigGeneration{}, errors.New("invalid private generation manifest")
 	}
 	if err := m.validatePrivateDir(manifest.AccountHome); err != nil {
@@ -750,23 +672,18 @@ func LoadGenerationWithEnv(directory string, lookup func(string) (string, bool))
 	}); err != nil {
 		return ConfigGeneration{}, err
 	}
-	if manifest.Harness == "claude-code" {
-		g.Env["CLAUDE_CONFIG_DIR"] = manifest.AccountHome
-		for _, name := range []string{"mcp.json", "settings.json"} {
-			if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
-				return ConfigGeneration{}, errors.New("retained generation file is missing")
-			}
+	g.Env["CLAUDE_CONFIG_DIR"] = manifest.AccountHome
+	for _, name := range []string{"mcp.json", "settings.json"} {
+		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+			return ConfigGeneration{}, errors.New("retained generation file is missing")
 		}
-	} else {
-		g.Env["CODEX_HOME"] = manifest.AccountHome
-		g.Env["CODEX_SQLITE_HOME"] = filepath.Join(manifest.AccountHome, "sqlite")
 	}
 	return g, nil
 }
 
 // Keep MCP references from replacing native scope or the owner environment.
 func reservedRuntimeEnvKey(key string) bool {
-	return key == "HOME" || strings.HasPrefix(key, "XDG_") || key == "CODEX_HOME" || key == "CODEX_SQLITE_HOME" || key == "CLAUDE_CONFIG_DIR"
+	return key == "HOME" || strings.HasPrefix(key, "XDG_") || key == "CLAUDE_CONFIG_DIR"
 }
 
 func putPreference(root map[string]any, key string, value any) {

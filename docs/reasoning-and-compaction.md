@@ -1,6 +1,6 @@
 # Reasoning and compaction output contract
 
-Research checked on 2026-10-18 against Claude Code 2.1.302, Codex 0.163.0,
+Research checked on 2026-10-18 against Claude Code 2.1.302,
 OpenCode 2.0.32 and Pi 1.3.0, plus real Dyna session captures.
 Each adapter in `internal/workeroutput` turns one harness's stdout into
 normalized events. This page says what every adapter must emit for reasoning
@@ -73,7 +73,6 @@ wizard's last step is the same editor.
 
 | Harness | Native setting |
 | --- | --- |
-| `codex` | `-c model_auto_compact_token_limit=N` |
 | `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 compacts 33K below the window, and the window must be 100K to 1M, so N is 67K to 967K. |
 | `muse` | `-c context_compaction.soft_threshold=N/window` |
 | `opencode` | Before a resumed turn, Dyna reads the stored context size with `session.context`. At N tokens, it admits `session.compact` and waits with `experimental.session.wait`. The shared service keeps its default automatic compaction. |
@@ -106,7 +105,6 @@ The table lists what each harness sends.
 | Dialect | Reasoning source | Shape | Compaction source |
 | --- | --- | --- | --- |
 | `claude-stream-json` | `thinking` content block, one per assistant record | whole | `system` `status` `compacting` (started); `status` null with `compact_result: "failed"` (failed); `compact_boundary` (completed, with `compact_metadata.trigger`, `pre_tokens` and `post_tokens`) |
-| `codex-jsonl` | `item.completed` with item type `reasoning`; text is a summary such as `**Title**\n\nbody` | whole | `item.started` and `item.completed` with item type `context_compaction` (exec) or `contextCompaction` (app-server); trigger auto |
 | `opencode-json` | `reasoning` part when `--thinking` is set | whole | none on stdout; Dyna's own `session.compact` request shows as trigger `dyna` |
 | `pi-json` | `thinking` blocks in `message_end`; `message_update` deltas are ignored | whole | `compaction_start` and `compaction_end` with `reason` (rate), `result.tokensBefore` and `result.estimatedTokensAfter` |
 | `muse-jsonl` | none seen | none | none in the MSP records Dyna captures |

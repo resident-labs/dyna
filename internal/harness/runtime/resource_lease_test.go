@@ -67,7 +67,7 @@ func TestAccountSwitchWaitsForGuardAfterRunnerLeaseCloses(t *testing.T) {
 	a := testAccounts(t)
 	alive := true
 	fakeResourceProbe(t, func(json.RawMessage) (bool, error) { return alive, nil })
-	lease, err := a.TurnLeaseManaged(context.Background(), "codex")
+	lease, err := a.TurnLeaseManaged(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,18 +77,18 @@ func TestAccountSwitchWaitsForGuardAfterRunnerLeaseCloses(t *testing.T) {
 	if err = lease.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, running := a.SwitchStatus("codex")
+	_, running := a.SwitchStatus("pi")
 	if running != 1 {
 		t.Fatal("native guard not counted", running)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	if release, err := a.switchGate(ctx, "codex"); err == nil {
+	if release, err := a.switchGate(ctx, "pi"); err == nil {
 		release()
 		t.Fatal("switch bypassed crash cleanup")
 	}
 	alive = false
-	release, err := a.switchGate(context.Background(), "codex")
+	release, err := a.switchGate(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,9 +96,9 @@ func TestAccountSwitchWaitsForGuardAfterRunnerLeaseCloses(t *testing.T) {
 }
 func TestSwitchActivationBoundaryIgnoresLateCancellation(t *testing.T) {
 	a := testAccounts(t)
-	first := signedCodex(t, a, "first", "first-fixture")
-	second := signedCodex(t, a, "second", "second-fixture")
-	if err := a.Switch(context.Background(), first.ID, "/fake/codex"); err != nil {
+	first := signedSharedGrok(t, a, "first", "first-fixture")
+	second := signedSharedGrok(t, a, "second", "second-fixture")
+	if err := a.Switch(context.Background(), first.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,17 +107,17 @@ func TestSwitchActivationBoundaryIgnoresLateCancellation(t *testing.T) {
 		return cancelDuringNativeActivation{Manager: manager, cancel: cancel}, ok
 	}
 	called := false
-	if err := a.SwitchWithProgress(ctx, second.ID, "/fake/codex", func() { called = true }); err != nil {
+	if err := a.SwitchWithProgress(ctx, second.ID, "/fake/grok", func() { called = true }); err != nil {
 		t.Fatal(err)
 	}
-	active, err := a.Active(accountProvider("codex"), "codex")
+	active, err := a.Active(accountProvider("grok"), "grok")
 	if err != nil || active.ID != second.ID || !called {
 		t.Fatal(active, called, err)
 	}
 	before, cancelBefore := context.WithCancel(context.Background())
 	cancelBefore()
 	called = false
-	if err = a.SwitchWithProgress(before, first.ID, "/fake/codex", func() { called = true }); err == nil || called {
+	if err = a.SwitchWithProgress(before, first.ID, "/fake/grok", func() { called = true }); err == nil || called {
 		t.Fatal("canceled switch crossed activation boundary", called, err)
 	}
 }

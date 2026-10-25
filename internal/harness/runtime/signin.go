@@ -81,7 +81,6 @@ type signInSpec struct {
 var signInSpecs = map[string]signInSpec{
 	"pi":          {Argv: piOAuthArgv, Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
-	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"muse":        {Argv: museDeviceArgv, Parse: parseMuseSignIn},
 	"opencode":    {Argv: openCodeDeviceArgv, Parse: parseOpenCodeSignIn},
 }
@@ -90,37 +89,11 @@ var (
 	// ansiPattern matches the color and cursor sequences a CLI writes when it
 	// cannot tell that its output is a pipe.
 	ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]`)
-	// codexDeviceURL accepts only OpenAI's device page, so a stray line is
-	// never shown as a sign-in link.
-	codexDeviceURL  = regexp.MustCompile(`^https://auth\.openai\.com/codex/device/?$`)
-	codexDeviceCode = regexp.MustCompile(`^[A-Z0-9]{4,8}(?:-[A-Z0-9]{4,8})+$`)
 )
 
-// plainOutput strips terminal sequences and the indentation codex adds.
+// plainOutput strips terminal sequences and indentation from a CLI line.
 func plainOutput(line string) string {
 	return strings.TrimSpace(ansiPattern.ReplaceAllString(line, ""))
-}
-
-// codexDeviceArgv asks codex for device-code sign-in, which prints a link and
-// a code instead of starting a loopback callback.
-func codexDeviceArgv(argv []string) []string {
-	return append(append([]string(nil), argv...), "--device-auth")
-}
-
-// parseCodexSignIn reads the link and the one-time code that
-// `codex login --device-auth` prints, then waits for the owner to approve.
-func parseCodexSignIn(st *SignInState, line string) {
-	switch {
-	case codexDeviceURL.MatchString(line):
-		st.URL = line
-	case codexDeviceCode.MatchString(line):
-		st.Code = line
-	default:
-		return
-	}
-	if st.URL != "" && st.Code != "" {
-		st.Phase = signInWaiting
-	}
 }
 
 // privateSignIn owns one login child process and the state its card shows.

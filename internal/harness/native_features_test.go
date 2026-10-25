@@ -22,7 +22,6 @@ func TestNativeFeaturePolicyInitialAndResume(t *testing.T) {
 		tools   []string
 	}{
 		{profile.HarnessClaudeCode, "--disallowedTools", []string{"Agent", "Workflow", "SendMessage", "ListAgents", "TeamCreate", "TeamDelete", "CronCreate", "CronList", "CronDelete"}},
-		{profile.HarnessCodex, "--disable", []string{"memories", "multi_agent", "multi_agent_v2", "agent_message_board", "goals", "in_app_local_automation", "remote_plugin"}},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			inv, err := buildInvocation(profile.Profile{Harness: tc.harness}, "task")
@@ -135,43 +134,6 @@ func TestDynaShellRemovesNativeShellOnlyForSessions(t *testing.T) {
 	}
 }
 
-func TestDynaShellServerGetsTheFinalLaunchEnvironment(t *testing.T) {
-	t.Setenv("DYNA_TEST_INHERITED", "1")
-	for _, dynaShell := range []bool{true, false} {
-		p := profile.Profile{Harness: profile.HarnessCodex, RuntimeExecutable: "/bin/codex", ExtraArgs: []string{"-c", `mcp_servers={dyna={command="/fake/dyna",args=["mcp","shell"]}}`}, Env: map[string]string{"DYNA_SCRATCH": "/s", "GH_TOKEN": "x"}}
-		inv, err := buildInvocationWithExecution(p, "task", ExecutionOptions{DynaShell: dynaShell})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, spec := range []commandSpec{inv.initial, inv.resume("session-id", "next")} {
-			cmd, err := harnessCommand(context.Background(), p, t.TempDir(), spec.argv, ExecutionOptions{DynaShell: dynaShell, SkipComputer: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var list string
-			for _, arg := range cmd.Args {
-				if v, ok := strings.CutPrefix(arg, "mcp_servers.dyna.env_vars="); ok {
-					list = v
-				}
-			}
-			if list == "" {
-				t.Fatalf("DynaShell=%v: missing env_vars in %v", dynaShell, cmd.Args)
-			}
-			// Global -c options must precede the subcommand.
-			if cmd.Args[len(cmd.Args)-1] != "app-server" {
-				t.Errorf("app-server subcommand is not last: %v", cmd.Args)
-			}
-			// Every variable of the final launch environment reaches the server.
-			for _, pair := range cmd.Env {
-				name, _, _ := strings.Cut(pair, "=")
-				if !strings.Contains(list, `"`+name+`"`) {
-					t.Errorf("%s missing from %s", name, list)
-				}
-			}
-		}
-	}
-}
-
 // Muse gives a stdio MCP server only a small default environment, and Dyna's
 // shell jobs run with the shell server's own launch environment. The launch
 // completes the generated server pair with the whole final environment, so a
@@ -266,15 +228,12 @@ func museDynaServerEnv(args []string) (map[string]string, int) {
 }
 
 // A keeper or a generation without Dyna's server must not acquire an env-only
-// server table. Codex rejects that table because it defines no transport.
+// server table: Muse rejects a server entry that defines no transport.
 func TestShellEnvironmentDoesNotCreateMissingServer(t *testing.T) {
-	for _, h := range []string{profile.HarnessCodex, profile.HarnessMuse} {
+	for _, h := range []string{profile.HarnessMuse} {
 		for _, dynaShell := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/DynaShell=%v", h, dynaShell), func(t *testing.T) {
-				extra := []string{"-c", `mcp_servers={other={command="/fake/other"}}`}
-				if h == profile.HarnessMuse {
-					extra = []string{"-c", `mcpServers.other={"command":"/fake/other"}`}
-				}
+				extra := []string{"-c", `mcpServers.other={"command":"/fake/other"}`}
 				p := profile.Profile{Harness: h, RuntimeExecutable: "/bin/" + h, ExtraArgs: extra}
 				inv, err := buildInvocationWithExecution(p, "task", ExecutionOptions{DynaShell: dynaShell})
 				if err != nil {
@@ -285,7 +244,7 @@ func TestShellEnvironmentDoesNotCreateMissingServer(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					for _, pair := range codexConfigArgs(cmd.Args) {
+					for _, pair := range configArgs(cmd.Args) {
 						if strings.HasPrefix(pair, "mcp_servers.dyna.") || strings.HasPrefix(pair, "mcpServers.dyna=") {
 							t.Fatalf("created a Dyna server without a transport: %s", pair)
 						}

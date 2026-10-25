@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/voice/realtime"
 )
@@ -56,7 +57,7 @@ const AbandonAfter = 60 * time.Second
 
 // CallStatus is the engine's voice call, as the app sees it.
 type CallStatus struct {
-	// Available is true once a Codex account is active: the owner's opt-in
+	// Available is true once a ChatGPT account is active: the owner's opt-in
 	// to voice. The app offers calls only then; Unavailable says what is
 	// missing.
 	Available   bool   `json:"available"`
@@ -189,10 +190,10 @@ func (c *Calls) statusLocked() CallStatus {
 }
 
 // voiceReady checks, without starting anything, what a call needs first:
-// an active Codex account.
+// an active ChatGPT account.
 func voiceReady() string {
-	if _, err := runtime.NewAccounts().Active(runtime.ProviderForModel("codex", ""), "codex"); err != nil {
-		return "Sign in to Codex in Settings > Harnesses to call Voice."
+	if _, err := runtime.NewAccounts().Active(store.ProviderChatGPT, "pi"); err != nil {
+		return "Sign in to a ChatGPT account in Settings > Accounts to call Voice."
 	}
 	return ""
 }

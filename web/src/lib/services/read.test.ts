@@ -23,7 +23,7 @@ test('a failed or malformed result reads as null, never as an empty success', ()
 test('voice reads live, idle or unavailable', () => {
   assert.equal(readVoice({ available: true, live: true }), 'live')
   assert.equal(readVoice({ available: true, live: false }), 'idle')
-  assert.equal(readVoice({ available: false, unavailable: 'No Codex account' }), 'unavailable: No Codex account')
+  assert.equal(readVoice({ available: false, unavailable: 'No ChatGPT account' }), 'unavailable: No ChatGPT account')
 })
 
 test('hook and merge readers keep pending, disabled, trial identity and an empty paused queue', () => {

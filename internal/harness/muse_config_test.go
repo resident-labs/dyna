@@ -27,7 +27,7 @@ func TestMuseGeneratedConfigAndInstructionsHaveNoPrefixConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, spec := range []commandSpec{inv.initial, inv.resume("session-id", "Reply pong.")} {
-		configs := codexConfigArgs(spec.argv)
+		configs := configArgs(spec.argv)
 		var keys []string
 		for _, pair := range configs {
 			key, _, _ := strings.Cut(pair, "=")

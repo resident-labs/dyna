@@ -4,7 +4,7 @@ This directory builds an x86_64 Arch Linux root filesystem. It runs one Dyna
 environment under systemd-nspawn or WSL2. The archive contains systemd, Dyna,
 the web service, Chromium, and the computer runtime.
 
-The archive does not contain Claude Code or Codex. Dyna installs a harness CLI
+The archive does not contain Claude Code. Dyna installs a harness CLI
 the first time sign-in or a session needs it. See
 [first-use install](../docs/private-harness-runtimes.md#first-use-install).
 The image keeps nodejs and npm because that installer runs npm.
@@ -139,7 +139,7 @@ unused packages, and recreates the plain and Zstandard archives.
 
 ## Measured size and remaining work
 
-The image no longer contains Claude Code or Codex. Dyna installs them on
+The image no longer contains Claude Code. Dyna installs it on
 first use. One full build ran with nice -n 19 and Zstandard. A
 --finalize-only repack then applied the content cuts below.
 
@@ -196,7 +196,7 @@ private pacman keyring from those public keys.
 
 Validation passed on the retained package snapshot: systemd, user manager,
 passwordless sudo, pacman -Dk, the fresh private keyring, both agents,
-headless Chromium, Python, the Codex code-mode host, Dyna HTTP service,
+headless Chromium, Python, Dyna HTTP service,
 pixman labwc, foot fonts, grim, and wayvnc. A separate surfaceless EGL check
 confirmed llvmpipe with LLVM 23.1.1. The Zstandard checksum and import passed;
 imported LLVM, public keyring, and Dyna payload hashes matched the rootfs.

@@ -315,8 +315,8 @@ func TestSessionTurnShowsWakingPostOnce(t *testing.T) {
 
 func TestSessionTurnPreservesUsageProvenance(t *testing.T) {
 	normalization := workeroutput.UsageNormalization{Version: 1, Source: "harness-reported", Input: "partial", CachedInput: "unknown", Output: "complete", Cost: "unknown"}
-	got := SessionTurn(subagent.Turn{Harness: "codex", OutputDialect: workeroutput.DialectCodexJSONL, UsageNormalization: normalization}, nil, false)
-	if got.Harness != "codex" || got.OutputDialect != workeroutput.DialectCodexJSONL || got.UsageNormalization != normalization {
+	got := SessionTurn(subagent.Turn{Harness: "pi", OutputDialect: workeroutput.DialectPiJSON, UsageNormalization: normalization}, nil, false)
+	if got.Harness != "pi" || got.OutputDialect != workeroutput.DialectPiJSON || got.UsageNormalization != normalization {
 		t.Fatalf("provenance lost: %#v", got)
 	}
 }

@@ -8,46 +8,25 @@ import (
 	"testing"
 )
 
-// codexDeviceSample is what `codex login --device-auth` prints when its output
-// is a pipe, with the color codes it writes anyway.
-const codexDeviceSample = "\x1b[1mWelcome to Codex\x1b[0m\n\n" +
-	"\x1b[32m1. Open this link in your browser and sign in to your account\x1b[0m\n" +
-	"   https://auth.openai.com/codex/device\n\n" +
-	"2. Enter this one-time code (expires in 15 minutes)\n" +
-	"   \x1b[33mC7ST-5VI73\x1b[0m\n"
+// museDeviceSample is what `muse login --device` prints for a piped output,
+// with the color codes it writes anyway.
+const museDeviceSample = "\x1b[1mSign in to Muse\x1b[0m\n\n" +
+	"Open this page to sign in:\n" +
+	"  \x1b[32mhttps://auth.meta.com/oauth/device/?code=ABCD-EF12\x1b[0m\n" +
+	"confirm this code matches:\n" +
+	"  \x1b[33mABCD-EF12\x1b[0m\n"
 
-func TestCodexSignInParserReadsLinkAndCode(t *testing.T) {
-	st := SignInState{Phase: signInStarting}
-	for _, line := range strings.Split(codexDeviceSample, "\n") {
-		if line = plainOutput(line); line != "" {
-			parseCodexSignIn(&st, line)
-		}
-	}
-	if st.URL != "https://auth.openai.com/codex/device" || st.Code != "C7ST-5VI73" {
-		t.Fatalf("sign-in state = %+v, want the device link and code", st)
-	}
-	if st.Phase != signInWaiting {
-		t.Fatalf("phase = %q, want %q once the link and code are known", st.Phase, signInWaiting)
-	}
-	// A stray line, or a link to another host, is not a sign-in link.
-	for _, line := range []string{"https://example.com/codex/device", "C7ST", "code=C7ST-5VI73"} {
-		if st.URL != "https://auth.openai.com/codex/device" || st.Code != "C7ST-5VI73" {
-			t.Fatalf("%q changed the sign-in state: %+v", line, st)
-		}
-	}
-}
-
-// printSampleArgv prints the codex sample and exits, so the runner sees a
+// printSampleArgv prints the Muse sample and exits, so the runner sees a
 // login that finishes on its own.
 func printSampleArgv([]string) []string {
-	return []string{"/bin/sh", "-c", "printf '" + codexDeviceSample + "'"}
+	return []string{"/bin/sh", "-c", "printf '" + museDeviceSample + "'"}
 }
 
 // holdSampleArgv prints the sample, then reads stdin, which the runner keeps
 // open. The process stays alive with no sleep, and each printed line reaches
 // the parser before the test continues.
 func holdSampleArgv([]string) []string {
-	return []string{"/bin/sh", "-c", "printf '" + codexDeviceSample + "'; read held"}
+	return []string{"/bin/sh", "-c", "printf '" + museDeviceSample + "'; read held"}
 }
 
 // waitingSignal closes a channel the first time the parser reaches the waiting
@@ -72,8 +51,8 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 		},
 		Cancel: func() error { runs["cancel"]++; return nil },
 	}
-	spec := signInSpec{Argv: printSampleArgv, Parse: parseCodexSignIn}
-	_, err := a.startPrivateSignIn("acct", "codex", spec, flow)
+	spec := signInSpec{Argv: printSampleArgv, Parse: parseMuseSignIn}
+	_, err := a.startPrivateSignIn("acct", "muse", spec, flow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +66,7 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Phase != signInSucceeded || st.URL == "" || st.Code != "C7ST-5VI73" {
+	if st.Phase != signInSucceeded || st.URL == "" || st.Code != "ABCD-EF12" {
 		t.Fatalf("state = %+v, want a succeeded sign-in with its link and code", st)
 	}
 	if runs["complete"] != 1 || runs["cancel"] != 0 {
@@ -112,8 +91,8 @@ func TestPrivateSignInRejectsNonReadyAccount(t *testing.T) {
 		},
 		Cancel: func() error { runs["cancel"]++; return nil },
 	}
-	spec := signInSpec{Argv: printSampleArgv, Parse: parseCodexSignIn}
-	if _, err := a.startPrivateSignIn("acct", "codex", spec, flow); err != nil {
+	spec := signInSpec{Argv: printSampleArgv, Parse: parseMuseSignIn}
+	if _, err := a.startPrivateSignIn("acct", "muse", spec, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
@@ -143,10 +122,10 @@ func TestPrivateSignInCancelStopsItsProcess(t *testing.T) {
 	}
 	spec := signInSpec{
 		Argv:         holdSampleArgv,
-		Parse:        waitingSignal(&once, reached, parseCodexSignIn),
+		Parse:        waitingSignal(&once, reached, parseMuseSignIn),
 		AcceptsPaste: true,
 	}
-	if _, err := a.startPrivateSignIn("acct", "codex", spec, flow); err != nil {
+	if _, err := a.startPrivateSignIn("acct", "muse", spec, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
@@ -179,11 +158,11 @@ func TestPrivateSignInPasteReachesStdin(t *testing.T) {
 	}
 	// Without a paste box the flow refuses the code.
 	plain := signInSpec{Argv: func([]string) []string { return []string{"/bin/sh", "-c", "printf 'ready'"} }}
-	if _, err := a.startPrivateSignIn("plain", "codex", plain, flow); err != nil {
+	if _, err := a.startPrivateSignIn("plain", "muse", plain, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("plain") })
-	if err := a.RespondPrivateRuntimeLogin("plain", "C7ST-5VI73"); err == nil {
+	if err := a.RespondPrivateRuntimeLogin("plain", "ABCD-EF12"); err == nil {
 		t.Fatal("a flow without a paste box took a code")
 	}
 	// With a paste box the login reads the code and finishes.
@@ -198,15 +177,15 @@ func TestPrivateSignInPasteReachesStdin(t *testing.T) {
 		},
 		AcceptsPaste: true,
 	}
-	if _, err := a.startPrivateSignIn("paste", "codex", paste, flow); err != nil {
+	if _, err := a.startPrivateSignIn("paste", "muse", paste, flow); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("paste") })
 	running := a.findPrivateLogin("paste")
-	if err := a.RespondPrivateRuntimeLogin("paste", " C7ST-5VI73 "); err != nil {
+	if err := a.RespondPrivateRuntimeLogin("paste", " ABCD-EF12 "); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-echoed; got != "C7ST-5VI73" {
+	if got := <-echoed; got != "ABCD-EF12" {
 		t.Fatalf("login read %q, want the pasted code", got)
 	}
 	<-running.signIn.done

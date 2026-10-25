@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/account/service/adapters"
 	accountstore "dyna-agent/internal/account/store"
@@ -17,7 +17,7 @@ import (
 )
 
 // Model discovery runs Dyna's private copy with the active account's home.
-func privateCodexAccount(t *testing.T) (*runtime.Accounts, runtime.Bundle, runtime.NativeAccount, *accountstore.Store) {
+func privateClaudeAccount(t *testing.T) (*runtime.Accounts, runtime.Bundle, runtime.NativeAccount, *accountstore.Store) {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "owner"))
@@ -31,7 +31,7 @@ func privateCodexAccount(t *testing.T) (*runtime.Accounts, runtime.Bundle, runti
 	})
 	bundles := &runtime.BundleManager{Root: filepath.Join(root, "harnesses"), Run: func(_ context.Context, args, _ []string) error {
 		prefix := args[4]
-		pkg := filepath.Join(prefix, "lib", "node_modules", "@openai", "codex")
+		pkg := filepath.Join(prefix, "lib", "node_modules", "@anthropic-ai", "claude-code")
 		if err := os.MkdirAll(pkg, 0700); err != nil {
 			return err
 		}
@@ -41,29 +41,25 @@ func privateCodexAccount(t *testing.T) (*runtime.Accounts, runtime.Bundle, runti
 		if err := os.WriteFile(filepath.Join(pkg, "cli.js"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 			return err
 		}
-		if err := os.Symlink("../lib/node_modules/@openai/codex/cli.js", filepath.Join(prefix, "bin", "codex")); err != nil {
+		if err := os.Symlink("../lib/node_modules/@anthropic-ai/claude-code/cli.js", filepath.Join(prefix, "bin", "claude")); err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"name":"@openai/codex","version":"1.0.0"}`), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"name":"@anthropic-ai/claude-code","version":"1.0.0"}`), 0600); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(prefix, "package-lock.json"), []byte(`{"packages":{"node_modules/@openai/codex":{"version":"1.0.0","integrity":"sha512-Zml4dHVyZQ=="}}}`), 0600)
+		return os.WriteFile(filepath.Join(prefix, "package-lock.json"), []byte(`{"packages":{"node_modules/@anthropic-ai/claude-code":{"version":"1.0.0","integrity":"sha512-Zml4dHVyZQ=="}}}`), 0600)
 	}}
-	bundle, err := bundles.Install(context.Background(), "codex", "1.0.0")
+	bundle, err := bundles.Install(context.Background(), "claude-code", "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	store := &accountstore.Store{Root: filepath.Join(root, "accounts")}
 	accounts := &runtime.Accounts{Root: store.Root}
-	account, err := accounts.Create("codex", "Work")
+	account, err := accounts.Create("claude-code", "Work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"fixture-user","chatgpt_account_id":"fixture-workspace"}}`))
-	auth, _ := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": "header." + claims + ".signature", "access_token": "fixture-access", "refresh_token": "fixture-refresh", "account_id": "fixture-workspace"}})
-	if err := os.WriteFile(filepath.Join(account.Home, "auth.json"), auth, 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeClaudeFixtureWithAccount(t, account.Home, "fixture-access", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "fixture@example.test")
 	if _, err := accounts.Capture(context.Background(), account.ID, bundle.Executable); err != nil {
 		t.Fatal(err)
 	}
@@ -73,30 +69,60 @@ func privateCodexAccount(t *testing.T) (*runtime.Accounts, runtime.Bundle, runti
 	return accounts, bundle, account, store
 }
 
+// writeClaudeFixture saves one Claude Code login in its native files.
+func writeClaudeFixture(t *testing.T, home, access string, expiry time.Time) {
+	t.Helper()
+	writeClaudeFixtureWithAccount(t, home, access, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "fixture@example.test")
+	_ = expiry
+}
+
+// writeClaudeFixtureWithAccount saves one Claude Code login with an exact
+// account identity and access token expiry.
+func writeClaudeFixtureWithAccount(t *testing.T, home, access, uuid, email string) {
+	t.Helper()
+	writeClaudeFixtureTokens(t, home, access, uuid, email, time.Now().Add(time.Hour))
+}
+
+func writeClaudeFixtureTokens(t *testing.T, home, access, uuid, email string, expiry time.Time) {
+	t.Helper()
+	credentials, err := json.Marshal(map[string]any{"claudeAiOauth": map[string]any{
+		"accessToken": access, "refreshToken": "fixture-refresh", "expiresAt": expiry.UnixMilli(), "scopes": []string{"user:inference"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(home, ".credentials.json"), credentials, 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(map[string]any{"oauthAccount": map[string]string{"accountUuid": uuid, "emailAddress": email}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(home, ".claude.json"), config, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestModelsUsePrivateCopyAndActiveAccount(t *testing.T) {
-	accounts, bundle, _, store := privateCodexAccount(t)
+	_, bundle, account, store := privateClaudeAccount(t)
 	var executable string
 	var env []string
 	s := New(Options{Store: store, Models: func(_ context.Context, _, exe string, e []string) ([]adapters.Model, error) {
 		executable, env = exe, e
-		return []adapters.Model{{ID: "gpt-fixture"}}, nil
+		return []adapters.Model{{ID: "claude-fixture"}}, nil
 	}})
-	if _, err := s.ProfileModels(context.Background(), "codex", true); err != nil {
+	if _, err := s.ProfileModels(context.Background(), "claude-code", true); err != nil {
 		t.Fatal(err)
 	}
-	home, _ := accounts.HarnessHome("codex")
-	if executable != bundle.Executable || !slices.ContainsFunc(env, func(pair string) bool { return strings.HasPrefix(pair, "CODEX_HOME=") && strings.Contains(pair, home) }) {
+	home := "CLAUDE_SECURESTORAGE_CONFIG_DIR=" + account.Home
+	if executable != bundle.Executable || !slices.Contains(env, home) {
 		t.Fatalf("Models ran %q with env %v; want the private copy and the active account's home", executable, env)
 	}
 }
 
 func TestNativeAccountProbeFailureDoesNotRequestSignIn(t *testing.T) {
-	accounts, _, _, store := privateCodexAccount(t)
-	home, err := accounts.HarnessHome("codex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(home, "auth.json"), []byte("{"), 0600); err != nil {
+	_, _, account, store := privateClaudeAccount(t)
+	if err := os.WriteFile(filepath.Join(account.Home, ".credentials.json"), []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	s := New(Options{Store: store})
@@ -111,11 +137,11 @@ func TestNativeAccountProbeFailureDoesNotRequestSignIn(t *testing.T) {
 
 // A failed refresh must say why, not just "could not be refreshed".
 func TestProfileModelsNamesWhyTheRefreshFailed(t *testing.T) {
-	_, _, _, store := privateCodexAccount(t)
+	_, _, _, store := privateClaudeAccount(t)
 	s := New(Options{Store: store, Models: func(context.Context, string, string, []string) ([]adapters.Model, error) {
 		return nil, fmt.Errorf("%w: the harness exited with status 1", adapters.ErrProbe)
 	}})
-	out, err := s.ProfileModels(context.Background(), "codex", true)
+	out, err := s.ProfileModels(context.Background(), "claude-code", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +153,7 @@ func TestProfileModelsNamesWhyTheRefreshFailed(t *testing.T) {
 // The probe runs the private copy with the same owner tool roots a turn
 // gets, so a node shim in PATH (mise) finds the owner state it trusts.
 func TestProbeEnvironmentCarriesOwnerToolRoots(t *testing.T) {
-	_, _, _, store := privateCodexAccount(t)
+	_, _, _, store := privateClaudeAccount(t)
 	owner := os.Getenv("HOME")
 	for _, key := range []string{"XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"} {
 		t.Setenv(key, "")
@@ -148,9 +174,9 @@ func TestProbeEnvironmentCarriesOwnerToolRoots(t *testing.T) {
 	var env []string
 	s := New(Options{Store: store, Models: func(_ context.Context, _ string, _ string, e []string) ([]adapters.Model, error) {
 		env = e
-		return []adapters.Model{{ID: "gpt-fixture"}}, nil
+		return []adapters.Model{{ID: "claude-fixture"}}, nil
 	}})
-	if _, err := s.ProfileModels(context.Background(), "codex", true); err != nil {
+	if _, err := s.ProfileModels(context.Background(), "claude-code", true); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{

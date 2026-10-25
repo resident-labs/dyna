@@ -4,20 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	harnessmgr "dyna-agent/internal/harness/config"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 // Dyna owns memory, delegation, messaging, and session wakeups. Keep every
 // verified native control here, including explicit gaps. Evidence applies to
-// Claude 2.1.302, Codex 0.163.0, Grok 1.0.62, Pi 1.3.0, OpenCode 2.0.32,
+// Claude 2.1.302, Grok 1.0.62, Pi 1.3.0, OpenCode 2.0.32,
 // and Muse 1.4.10-R6427.1.
 type nativeFeaturePolicy struct {
 	Env       map[string]string
@@ -50,30 +47,6 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 		// KillShell, KillBash) and Monitor, which watches a shell command.
 		DynaShell: true,
 		Shell:     []string{"Bash", "GetTask", "TaskOutput", "TaskStop", "Monitor"},
-	},
-	"codex": {
-		// learn.chatgpt.com/docs/config-file/config-reference and features list.
-		Config: map[string]any{
-			// Feature flags alone defer to the model catalog's agent version.
-			"agents.enabled": false,
-			"tools.experimental_request_user_input.enabled": false,
-			"tools.update_plan.enabled":                     false,
-			"features.apps":                                 false,
-			"features.plugins":                              false,
-			"features.memories":                             false,
-			"features.external_agent_memory_import":         false,
-			"features.multi_agent":                          false,
-			"features.multi_agent_v2":                       false,
-			"features.agent_message_board":                  false,
-			"features.goals":                                false,
-			"features.in_app_local_automation":              false,
-			"features.remote_plugin":                        false,
-		},
-		// Shell lists the features to --disable: exec_command and write_stdin
-		// (unified_exec) and the shell tool. Every catalog model uses unified_exec,
-		// so no local_shell tool stays offered (`codex debug models`).
-		DynaShell: true,
-		Shell:     []string{"shell_tool", "unified_exec"},
 	},
 	// Pi's base package has no native memory, messaging, delegation, or cron
 	// tools. Do not disable its extension system to address absent features.
@@ -206,7 +179,7 @@ func NativeFeatureArgs(h string, args []string, dynaShell bool) []string {
 		case len(policy.Shell) != 0 && strings.HasPrefix(policy.Shell[0], "-"):
 			// Muse has no tool denylist: its Shell entries are the flags
 			// that remove both native shell tools, merged like the forced
-			// args. Codex lists feature names instead, handled below.
+			// args.
 			policy.Args = append(slices.Clone(policy.Args), policy.Shell...)
 		}
 	}
@@ -224,41 +197,6 @@ func NativeFeatureArgs(h string, args []string, dynaShell bool) []string {
 	// when the policy adds no tools of its own.
 	if len(denied) != 0 && len(policy.DenyFlags) != 0 {
 		out = append(out, policy.DenyFlags[0], strings.Join(denied, ","))
-	}
-	if h == "codex" {
-		var disabled []string
-		for key, value := range policy.Config {
-			if strings.HasPrefix(key, "features.") && value == false {
-				disabled = append(disabled, strings.TrimPrefix(key, "features."))
-			}
-		}
-		if dynaShell {
-			disabled = append(disabled, policy.Shell...)
-		}
-		slices.Sort(disabled)
-		// Codex lowers --enable after -c overrides. Remove conflicting enables
-		// before appending forced disables, including mixed feature lists.
-		var filtered []string
-		for i := 0; i < len(out); i++ {
-			option, value, equal := strings.Cut(out[i], "=")
-			if option != "--enable" && option != "--disable" {
-				filtered = append(filtered, out[i])
-				continue
-			}
-			if !equal && i+1 < len(out) {
-				i++
-				value = out[i]
-			}
-			for _, feature := range strings.Split(value, ",") {
-				if !slices.Contains(disabled, feature) {
-					filtered = append(filtered, option, feature)
-				}
-			}
-		}
-		out = filtered
-		for _, feature := range disabled {
-			out = append(out, "--disable", feature)
-		}
 	}
 	return out
 }
@@ -281,40 +219,6 @@ func DynaShellEnvNames(launchEnv []string) []string {
 	}
 	slices.Sort(names)
 	return names
-}
-
-// DynaShellEnvArgs makes Codex pass the whole launch environment to the "dyna"
-// MCP server, as the native shell gets it. Codex otherwise starts a server with
-// only a small default set. It must follow the generation's arguments: a later
-// dotted -c override merges into its server.
-func DynaShellEnvArgs(launchEnv []string) []string {
-	return []string{"-c", "mcp_servers." + dynaMCPName + ".env_vars=" + strings.ReplaceAll(fmt.Sprintf("%q", DynaShellEnvNames(launchEnv)), " ", ",")}
-}
-
-// DynaShellCodexArgs forwards the launch environment only when the generated
-// mcp_servers={...} table defines Dyna. Dotted server keys are not recognized.
-// An env-only table has no transport and Codex rejects it.
-func DynaShellCodexArgs(argv, launchEnv []string) ([]string, error) {
-	configured := false
-	for i := 1; i+1 < len(argv); i++ {
-		if argv[i] != "-c" || !strings.HasPrefix(argv[i+1], "mcp_servers=") {
-			continue
-		}
-		var config struct {
-			Servers map[string]map[string]any `toml:"mcp_servers"`
-		}
-		if err := toml.Unmarshal([]byte(argv[i+1]), &config); err != nil {
-			return nil, fmt.Errorf("read generated Codex MCP servers: %w", err)
-		}
-		_, configured = config.Servers[dynaMCPName]
-	}
-	if !configured {
-		return argv, nil
-	}
-	// Insert before the final subcommand (app-server), or the prompt marker
-	// of another Codex invocation. Config options are global.
-	at := len(argv) - 1
-	return slices.Concat(argv[:at], DynaShellEnvArgs(launchEnv), argv[at:]), nil
 }
 
 // DynaShellMuseArgs completes Muse's generated "mcpServers.dyna" -c pair with

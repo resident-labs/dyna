@@ -37,8 +37,8 @@ func TestProfileModelsPreservesEarlierRequestDeadline(t *testing.T) {
 		}
 		return []adapters.Model{{ID: "fixture"}}, nil
 	}})
-	s.installed = func() []Installation { return []Installation{{Harness: "codex", Executable: "/fixture"}} }
-	got, err := s.ProfileModels(ctx, "codex", true)
+	s.installed = func() []Installation { return []Installation{{Harness: "claude-code", Executable: "/fixture"}} }
+	got, err := s.ProfileModels(ctx, "claude-code", true)
 	if err != nil || !called || len(got.Models) != 1 {
 		t.Fatalf("ProfileModels = %+v, %v; called = %v", got, err, called)
 	}

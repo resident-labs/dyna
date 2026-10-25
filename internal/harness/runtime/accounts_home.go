@@ -200,9 +200,6 @@ func validateAccountManagerEnvAt(h, scope, credentialHome string, env map[string
 		expected["CLAUDE_CONFIG_DIR"] = scope
 		expected["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = credentialHome
 		expected["ANTHROPIC_CONFIG_DIR"] = filepath.Join(scope, "anthropic")
-	case "codex":
-		expected["CODEX_HOME"] = scope
-		expected["CODEX_SQLITE_HOME"] = filepath.Join(scope, "sqlite")
 	case "grok":
 		expected["GROK_HOME"] = scope
 	case "pi":

@@ -41,8 +41,6 @@ func preferenceAllowlist(a RuntimeAdapter) []string {
 	switch a.Harness {
 	case "claude-code":
 		return []string{"language", "spinnerTipsEnabled", "showTurnDuration", "terminalProgressBarEnabled", "prefersReducedMotion"}
-	case "codex":
-		return []string{"hide_agent_reasoning", "show_raw_agent_reasoning", "history.max_bytes", "history.persistence", "tui.animations", "tui.alternate_screen"}
 	}
 	return nil
 }
@@ -140,25 +138,6 @@ func preferenceValueSafe(h, key string, value any) bool {
 			return ok
 		}
 	}
-	if h == "codex" {
-		switch key {
-		case "hide_agent_reasoning", "show_raw_agent_reasoning", "tui.animations":
-			_, ok := value.(bool)
-			return ok
-		case "history.persistence":
-			return value == "save-all" || value == "none"
-		case "tui.alternate_screen":
-			return value == "auto" || value == "always" || value == "never"
-		case "history.max_bytes":
-			switch v := value.(type) {
-			case int64:
-				return v >= 0 && v <= 9007199254740991
-			case float64:
-				return v >= 0 && v <= 9007199254740991 && math.Trunc(v) == v
-			}
-			return false
-		}
-	}
 	return true
 }
 func flattenPreferences(root map[string]any) (map[string]any, error) {
@@ -220,8 +199,6 @@ func (r *Runtime) preferenceSource(accountID string) (PreferencePreview, map[str
 		switch a.Harness {
 		case "claude-code":
 			files = []string{".claude/settings.json"}
-		case "codex":
-			files = []string{".codex/config.toml"}
 		}
 	}
 	allowed := map[string]bool{}
@@ -436,7 +413,7 @@ func (r *Runtime) PreferenceValues(accountID string) (map[string]any, error) {
 
 func preferenceLayerSupported(h string) bool {
 	switch canonicalRuntimeID(h) {
-	case "claude-code", "codex", "opencode", "muse":
+	case "claude-code", "opencode", "muse":
 		return true
 	}
 	return false

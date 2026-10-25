@@ -16,11 +16,11 @@ func TestSnapshotListsOnlyPrivateAccounts(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	store := &accountstore.Store{Root: filepath.Join(t.TempDir(), "accounts")}
 	s := New(Options{Store: store})
-	s.installed = func() []Installation { return []Installation{{Harness: "codex", Executable: "/fixture/codex"}} }
+	s.installed = func() []Installation { return []Installation{{Harness: "claude-code", Executable: "/fixture/claude"}} }
 	if got := s.Snapshot(context.Background(), false).Accounts; len(got) != 0 {
 		t.Fatalf("Snapshot() listed personal rows: %+v", got)
 	}
-	n, err := (&runtime.Accounts{Root: store.Root}).Create("codex", "Work")
+	n, err := (&runtime.Accounts{Root: store.Root}).Create("claude-code", "Work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestAccountUsageCachedShowsPrivateObservationsAndResets(t *testing.T) {
 				Windows:    []Window{{ID: "subscription", UsedPercent: &used, Unit: "percent", ResetsAt: reset.Format(time.RFC3339Nano)}},
 				ObservedAt: now, RateLimitedUntil: &reset,
 			}}},
-			accountstore.Entry{Metadata: accountstore.Metadata{ID: grantID, Harness: "codex", Identity: "codex:grant"}, Credential: accountstore.Credential{Schema: "codex/auth-file@1"}})
+			accountstore.Entry{Metadata: accountstore.Metadata{ID: grantID, Harness: "muse", Identity: "meta:grant"}, Credential: accountstore.Credential{Schema: "muse/auth-file@1"}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)

@@ -139,8 +139,8 @@ Open a shell in the distro and sign in to each agent tool through Dyna:
 
 ```powershell
 wsl -d dyna
-dyna harness login codex
-dyna profiles add --name my-builder --harness codex --model <model-id> --taste 7 --intelligence 9 --cost 6
+dyna harness login pi
+dyna profiles add --name my-builder --harness pi --model <model-id> --taste 7 --intelligence 9 --cost 6
 ```
 
 You can also add profiles in the app under Settings > Profiles.
@@ -245,6 +245,6 @@ and ports 17467 and 17468.
 | Live view stream encoder | software |
 | Uninstall | 2.1 seconds |
 
-One Codex agent session ran in the distro. It opened `foot` on its
+One Pi agent session ran in the distro. It opened `foot` on its
 computer and typed text. A headless Chromium watched that computer live
 through the web app.
