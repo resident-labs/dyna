@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/room"
 )
 
 // The fake gh is a shell script, so each probe starts in milliseconds. It
@@ -96,6 +98,9 @@ type probeEnv struct {
 func probeRoom(t *testing.T) probeEnv {
 	t.Helper()
 	records := setupRooms(t, "resident-labs/project")
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
 	exe := filepath.Join(t.TempDir(), "gh")
 	if err := os.WriteFile(exe, []byte(fakeGH), 0700); err != nil {
 		t.Fatal(err)

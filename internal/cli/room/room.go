@@ -46,22 +46,28 @@ func RoomCmd() *cobra.Command {
 
 func createCmd() *cobra.Command {
 	var jsonOut bool
-	var repo string
+	var repo, githubAccess string
 	var rootProfile string
 	cmd := &cobra.Command{
-		Use:   "create [<name>] [--repo <path>]",
+		Use:   "create [<name>] [--repo <path>] [--github read-only|read-write]",
 		Short: "Create or reuse a room and print its name",
 		Long: "A repo names its room. --repo <path> derives the name from the git repo at path, using " +
 			"the main worktree so every linked worktree maps to the same room. <name> sets an explicit " +
 			"name. Without --repo, the current directory supplies the repo when it is inside Git. " +
 			"Outside Git, an explicit name creates a room without a repo.\n\n" +
 			"Create is idempotent: the same repo returns its existing room, regardless of the requested name, " +
-			"and revives it if archived. Without a matching repo, a name held by a different repo is an error.",
+			"and revives it if archived. Without a matching repo, a name held by a different repo is an error. " +
+			"New rooms default to read-only GitHub access. Use --github read-write to allow writes; " +
+			"reusing a room keeps its saved policy.",
 		Example: "  room=$(dyna room create --repo \"$PWD\")\n  dyna room create design-notes",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in, err := createInput(args, repo, cmd.Flags().Changed("repo"))
 			if err != nil {
+				return err
+			}
+			in.GitHubAccess = room.GitHubAccess(githubAccess)
+			if err := room.ValidateGitHubAccess(in.GitHubAccess); err != nil {
 				return err
 			}
 			// The engine keeps this only for the owner; it names a session or
@@ -79,6 +85,7 @@ func createCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&githubAccess, "github", string(room.GitHubReadOnly), "GitHub access for a new room: read-only or read-write (existing rooms keep their policy)")
 	cmd.Flags().StringVar(&repo, "repo", "", "derive the room from the git repo at this path")
 	cmd.Flags().StringVar(&rootProfile, "root-profile", "", "profile for a new room's internal root (empty uses the global default)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the full room record as JSON")

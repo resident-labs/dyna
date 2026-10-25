@@ -13,8 +13,10 @@ import (
 
 func TestRoomPolicyDefaultsAndOverride(t *testing.T) {
 	records := setupRooms(t, "resident-labs/project", "acme/cloudportal")
-	if got := Access(context.Background(), records[0]); got != ReadWrite {
-		t.Fatalf("personal repo policy = %s", got)
+	for _, rec := range []room.Record{records[1], records[0]} {
+		if got := Access(context.Background(), rec); got != ReadOnly || rec.GitHubAccess != ReadOnly {
+			t.Fatalf("new room policy = %s, stored = %s; want read-only", got, rec.GitHubAccess)
+		}
 	}
 	if got := Access(context.Background(), records[1]); got != ReadOnly {
 		t.Fatalf("work repo policy = %s", got)
@@ -35,6 +37,10 @@ func TestRoomPolicyDefaultsAndOverride(t *testing.T) {
 	}
 	if err := room.DefaultStore().UpdatePreferences(records[1].ID, func(r *room.Record) error { r.GitHubAccess = ReadWrite; return nil }); err != nil {
 		t.Fatal(err)
+	}
+	stored, err := room.DefaultStore().Resolve(records[1].ID)
+	if err != nil || stored.GitHubAccess != ReadWrite || Access(ctx, stored) != ReadWrite {
+		t.Fatalf("non-resident repository did not use its stored write policy: %+v, %v", stored, err)
 	}
 	cmd = Command(ctx, exe, "", "pr", "merge", "https://github.com/acme/cloudportal/pull/1")
 	if err := Run(ctx, cmd); err != nil {

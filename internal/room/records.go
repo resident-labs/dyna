@@ -68,7 +68,9 @@ func (s *Store) migrateRecords() error {
 	if err != nil {
 		return err
 	}
-	return nil
+	return database.Migrate(db, "room.github_access", 1, func(conn *sql.Conn, _ int) error {
+		return backfillGitHubAccess(context.Background(), conn)
+	})
 }
 
 // TODO: legacy/shim remove later — imports retained room.json and seat.json

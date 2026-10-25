@@ -16,6 +16,7 @@ import (
 	prfacts "dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/watch"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 	"strings"
 )
@@ -170,7 +171,7 @@ func (s *Service) SetPRSettings(ctx context.Context, roomRef string, cfg PRConfi
 		if err := ghclient.SetAccess(s.Notify.Rooms, rec.ID, cfg.GitHubAccess); err != nil {
 			return PRConfig{}, err
 		}
-		rec.GitHubAccess = cfg.GitHubAccess
+		rec.GitHubAccess = room.GitHubAccess(cfg.GitHubAccess)
 	}
 	if cfg.MergeMaxParallel > 0 {
 		if err := p.SetMergeMaxParallel(rec.ID, cfg.MergeMaxParallel); err != nil {

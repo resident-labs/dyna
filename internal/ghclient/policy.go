@@ -3,7 +3,6 @@ package ghclient
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,10 +31,7 @@ const ReadWrite = "read-write"
 
 // ValidateAccess checks the room write policy.
 func ValidateAccess(value string) error {
-	if value != ReadOnly && value != ReadWrite {
-		return fmt.Errorf("GitHub access must be read-only or read-write")
-	}
-	return nil
+	return room.ValidateGitHubAccess(room.GitHubAccess(value))
 }
 
 // SetAccess saves the one room write policy shared by the UI and CLI.
@@ -46,20 +42,13 @@ func SetAccess(rooms *room.Store, ref, value string) error {
 	if err := ValidateAccess(value); err != nil {
 		return err
 	}
-	return rooms.UpdatePreferences(ref, func(r *room.Record) error { r.GitHubAccess = value; return nil })
+	return rooms.UpdatePreferences(ref, func(r *room.Record) error { r.GitHubAccess = room.GitHubAccess(value); return nil })
 }
 
-// Access returns the stored policy or the safe default for this room's owner.
-func Access(ctx context.Context, rec room.Record) string {
-	if rec.GitHubAccess != "" {
-		return rec.GitHubAccess
-	}
-	remote, err := repoid.Git(ctx, rec.Repo, "remote", "get-url", "origin")
-	if err == nil {
-		identity, err := repoid.RemoteIdentity(rec.Repo, remote)
-		if err == nil && strings.HasPrefix(strings.ToLower(identity), "github.com/resident-labs/") {
-			return ReadWrite
-		}
+// Access returns the room's stored policy. Missing or invalid values deny writes.
+func Access(_ context.Context, rec room.Record) string {
+	if rec.GitHubAccess == room.GitHubReadWrite {
+		return ReadWrite
 	}
 	return ReadOnly
 }

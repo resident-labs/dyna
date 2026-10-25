@@ -314,7 +314,7 @@
           <Row title="Required checks" help="GitHub check names, separated by commas.">
             {#snippet control()}{#if form}<input class="field" aria-label="Required checks" type="text" bind:value={form.requiredChecks} disabled={busy} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />{/if}{/snippet}
           </Row>
-          <Row title="GitHub access" help="Read-only lets Dyna read PRs, CI and issues. Read and write also lets Dyna comment, change PRs and merge. New agent turns use this access." error={publishError}>
+          <Row title="GitHub access" help="Read-only lets Dyna read pull requests, checks and issues. Read and write also lets Dyna push, comment, change pull requests and merge. This policy applies to this room." error={publishError}>
             {#snippet control()}<select class="field" aria-label="GitHub access" bind:value={githubAccess} onchange={savePublishing} disabled={!prSettings}><option value="read-only">Read-only</option><option value="read-write">Read and write</option></select>{/snippet}
           </Row>
           <Row title="Parallel prefix trials" help="Maximum active prefix CI runs after a batch fails. Default: 3." error={publishError}>

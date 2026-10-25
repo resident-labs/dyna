@@ -24,9 +24,9 @@ func Repository(t *testing.T, rooms *room.Store, ref, host, repo, access string)
 			t.Fatalf("git: %v: %s", err, out)
 		}
 	}
-	if err := rooms.UpdatePreferences(rec.ID, func(r *room.Record) error { r.Repo = root; r.GitHubAccess = access; return nil }); err != nil {
+	if err := rooms.UpdatePreferences(rec.ID, func(r *room.Record) error { r.Repo = root; r.GitHubAccess = room.GitHubAccess(access); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	rec.Repo, rec.GitHubAccess = root, access
+	rec.Repo, rec.GitHubAccess = root, room.GitHubAccess(access)
 	return rec
 }
