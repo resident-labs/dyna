@@ -224,6 +224,9 @@ type StartOptions struct {
 	Fixes     []int     // room issue numbers linked to the session's goal
 	Task      string    // brief: context, owned files, checks and limits
 	MessageID string    // stored input for the first turn, instead of a task brief
+	// OwnerDisplay lets this session's own shells use the owner's display.
+	// Only the owner or root grants it, and no session inherits it.
+	OwnerDisplay bool
 }
 
 // ErrNameTaken matches the error Start returns when an open session in the
@@ -250,6 +253,13 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (Info, Turn, err
 	if isServiceRole(opts.Role) && actor.Role != authority.Owner && actor.Role != authority.Root {
 		return Info{}, Turn{}, errors.New("only the owner or root may start a service role")
 	}
+	// The owner display is the human owner's, so an agent session never grants
+	// it, even to a child and even when the caller already holds a grant.
+	if opts.OwnerDisplay {
+		if err := authority.Check("owner display grant", actor, nil); err != nil {
+			return Info{}, Turn{}, err
+		}
+	}
 	parent, owner := "", actor.Session
 	switch {
 	case actor.Session != "" && !isServiceRole(opts.Role):
@@ -265,6 +275,9 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (Info, Turn, err
 // PR notice escalates to. It checks no caller and sets no parent. It must never be an engine call
 // (TestEngineMaintenanceIsNeverACall).
 func (m *Manager) StartForEngine(opts StartOptions) (Info, Turn, error) {
+	if opts.OwnerDisplay {
+		return Info{}, Turn{}, errors.New("the engine starts no session with the owner display: only a caller may grant it")
+	}
 	return m.start(context.Background(), opts, "", "")
 }
 
@@ -426,6 +439,7 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 		ID: id, Name: name, Role: opts.Role, Service: service || opts.Role == RoleRoot, RoomID: roomRec.ID, Room: roomRec.Name, RoomCursor: roomCursor,
 		Profile: prof.Name, Model: prof.Model, Dir: dir, Depth: depth, ParentSession: parent,
 		Owner: owner, SpawnBrief: task, Created: now, LastActivity: now, Resumable: harness.Resumable(*prof),
+		OwnerDisplay: opts.OwnerDisplay,
 	}
 	if err := store.writeMeta(meta); err != nil {
 		return Info{}, Turn{}, err
