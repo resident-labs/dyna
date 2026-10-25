@@ -167,6 +167,7 @@ export interface GoalEvent {
   title: string
   actor: string
   state: GoalState
+  itemsClosed?: number
   summary?: string
   amendment?: number
 }
@@ -1208,6 +1209,7 @@ export function isGoalEvent(v: unknown): v is GoalEvent {
     typeof v.title === "string" &&
     typeof v.actor === "string" &&
     GOAL_STATE.has(v.state) &&
+    (v.itemsClosed === undefined || Number.isInteger(v.itemsClosed)) &&
     (v.summary === undefined || typeof v.summary === "string") &&
     (v.amendment === undefined || Number.isInteger(v.amendment))
 }

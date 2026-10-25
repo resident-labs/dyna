@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -87,13 +88,59 @@ func TestAddItemListOrder(t *testing.T) {
 	}
 }
 
+// TestOneCloseReportsTheLastItem runs two closes at once. Exactly one call
+// closes the goal's last open item, so the holders get one notice rather than
+// two.
+func TestOneCloseReportsTheLastItem(t *testing.T) {
+	s := itemStore(t)
+	for _, text := range []string{"one", "two"} {
+		if _, err := s.AddItem("r", "g1", "owner", text, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := []string{"i1", "i2"}
+	changes := make([]ItemChange, len(ids))
+	errs := make([]error, len(ids))
+	gate := make(chan struct{})
+	var ready, done sync.WaitGroup
+	ready.Add(len(ids))
+	done.Add(len(ids))
+	for i, id := range ids {
+		go func() {
+			defer done.Done()
+			ready.Done()
+			<-gate
+			changes[i], errs[i] = s.SetItemState("r", "g1", id, "owner", ItemDone)
+		}()
+	}
+	ready.Wait()
+	close(gate)
+	done.Wait()
+	closed := 0
+	for i := range ids {
+		if errs[i] != nil {
+			t.Fatalf("close %s: %v", ids[i], errs[i])
+		}
+		if changes[i].Closed {
+			closed++
+		}
+	}
+	if closed != 1 {
+		t.Fatalf("%d closes reported the last item, want 1", closed)
+	}
+	g, err := s.Get("r", "g1")
+	if err != nil || g.ItemsClosed != 1 {
+		t.Fatalf("the goal counts %d closes: %+v, %v", g.ItemsClosed, g, err)
+	}
+}
+
 func TestItemStatesAndEdit(t *testing.T) {
 	s := itemStore(t)
 	if _, err := s.AddItem("r", "g1", "owner", "task", ""); err != nil {
 		t.Fatal(err)
 	}
 	done, err := s.SetItemState("r", "g1", "i1", "owner", ItemDone)
-	if err != nil || done.State != ItemDone {
+	if err != nil || done.Item.State != ItemDone || !done.Closed || done.Sequence != 1 {
 		t.Fatal(done, err)
 	}
 	if _, err := s.SetItemState("r", "g1", "i1", "owner", "bogus"); err == nil {
@@ -118,7 +165,7 @@ func TestItemStatesAndEdit(t *testing.T) {
 	}
 	// Reopen returns the item to open with its text intact.
 	open, err := s.SetItemState("r", "g1", "i1", "owner", ItemOpen)
-	if err != nil || open.State != ItemOpen || open.Text != "task two" {
+	if err != nil || open.Item.State != ItemOpen || open.Item.Text != "task two" || open.Closed {
 		t.Fatal(open, err)
 	}
 	items, err := s.Items("r", "g1")

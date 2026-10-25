@@ -35,23 +35,40 @@ func TestAChildsLastItemLeavesTheGoalOpen(t *testing.T) {
 	if stored, err := store.Get(r.ID, g.ID); err != nil || !stored.Open() {
 		t.Fatalf("a child's finished item ended the goal: %+v, %v", stored, err)
 	}
-	messages, err := e.svc.rooms().Messages(r.ID)
-	if err != nil {
+	lastItemPosts := func() int {
+		messages, err := e.svc.rooms().Messages(r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted := 0
+		for _, msg := range messages {
+			ev, ok := msg.Goal()
+			if !ok || ev.Type != room.GoalItemsDone || ev.GoalID != g.ID {
+				continue
+			}
+			posted++
+			if len(msg.To) != 1 || msg.To[0] != lead.Address() {
+				t.Fatalf("the last-item post did not reach the holder: %+v", msg)
+			}
+		}
+		return posted
+	}
+	if posted := lastItemPosts(); posted != 1 {
+		t.Fatalf("the holder got %d last-item posts, want 1", posted)
+	}
+	// A reopened item that closes again is a second close of the goal's last
+	// item, so the holder is told again instead of keeping the first post.
+	if _, err := e.svc.SetGoalItemState(as(lead.ID), r.ID, g.ID, it.ID, goals.ItemOpen); err != nil {
 		t.Fatal(err)
 	}
-	posted := 0
-	for _, msg := range messages {
-		ev, ok := msg.Goal()
-		if !ok || ev.Type != room.GoalItemsDone || ev.GoalID != g.ID {
-			continue
-		}
-		posted++
-		if len(msg.To) != 1 || msg.To[0] != lead.Address() {
-			t.Fatalf("the last-item post did not reach the holder: %+v", msg)
-		}
+	if _, err := e.svc.SetGoalItemState(as(child.ID), r.ID, g.ID, it.ID, goals.ItemDone); err != nil {
+		t.Fatal(err)
 	}
-	if posted != 1 {
-		t.Fatalf("the holder got %d last-item posts, want 1", posted)
+	if posted := lastItemPosts(); posted != 2 {
+		t.Fatalf("the second close posted %d last-item posts, want 2", posted)
+	}
+	if stored, err := store.Get(r.ID, g.ID); err != nil || !stored.Open() || stored.ItemsClosed != 2 {
+		t.Fatalf("the goal left its items closed: %+v, %v", stored, err)
 	}
 	if _, err := e.svc.FinishGoal(as(child.ID), r.ID, g.ID, "Reviewed", false); err == nil {
 		t.Fatal("a child ended the goal of its holder")
