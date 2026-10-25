@@ -104,6 +104,41 @@ func TestGCContinuesAfterRemovingItsStartingWorktree(t *testing.T) {
 	}
 }
 
+func TestGCKeepsUnpublishedWorktreeWithoutOriginHead(t *testing.T) {
+	repo := gcRepo(t)
+	useTrunk(t, repo)
+	git(t, repo, "config", "remote.origin.followRemoteHEAD", "never")
+	git(t, repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+	path := gcTreeAt(t, repo, "unpublished", "origin/trunk", "closed-owner")
+	git(t, path, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "unpublished")
+	git(t, repo, "merge", "--ff-only", "unpublished")
+	opts := GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}
+	trees, err := GC(context.Background(), repo, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tree := range trees {
+		if tree.Path == path {
+			found = tree.Action == "kept" && !tree.Merged && tree.Ahead == 1 && tree.Reason == ReasonNotMerged
+		}
+	}
+	if !found {
+		t.Fatalf("cleanup did not preserve unpublished work: %+v", trees)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("unpublished worktree was removed: %v", err)
+	}
+
+	git(t, repo, "push", "origin", "trunk")
+	if _, err := GC(context.Background(), repo, opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("published worktree was not removed after the ancestry recheck: %v", err)
+	}
+}
+
 func TestGCKeepsLiveProcessWorktree(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("requires Linux /proc working directories")
