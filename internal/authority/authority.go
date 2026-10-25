@@ -181,6 +181,7 @@ var Rules = []Rule{
 	{Action: "ask", Allowed: []Role{Root}, Instead: "the human owner only answers questions; use dyna post @parent for questions to root"},
 	{Action: "ask withdraw", Allowed: []Role{Root, Session, Worker}, Instead: "the human owner only answers questions; root asks and withdraws with dyna ask"},
 	{Action: "room create", Allowed: []Role{Owner, Root}, Instead: "use dyna post @parent for room changes"},
+	{Action: "room edit", Allowed: []Role{Owner, Root}, Instead: "use dyna post @parent for room changes"},
 	{Action: "room delete", Allowed: []Role{Owner, Root}, Instead: "use dyna post @parent for room changes"},
 	{Action: "room watch", Allowed: []Role{Owner}, Instead: "posts arrive as turn input; use dyna post @<mention> for coordination"},
 	{Action: "root attach", Allowed: []Role{Owner}, Instead: "run dyna root attach from an external shell"},

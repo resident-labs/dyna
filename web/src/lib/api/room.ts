@@ -13,6 +13,7 @@ export interface Room {
   name: string
   displayName?: string
   repo?: string
+  rootProfile?: string
   lastActivity: string
   unread: number
   running: number
