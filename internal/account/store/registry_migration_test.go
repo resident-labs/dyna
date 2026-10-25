@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -142,5 +143,97 @@ CREATE TABLE accounts_registry (
 	}
 	if left != 0 {
 		t.Fatal("the retired registry version table stayed")
+	}
+}
+
+// A Muse or OpenCode row written between the version-8 cleanup and this release
+// must not survive: the version-9 step drops it, and only Pi provider accounts
+// stay.
+func TestRegistryMigrationDropsHarnessRowsWrittenAfterVersionEight(t *testing.T) {
+	dataDir := t.TempDir()
+	ctx := context.Background()
+	for _, harness := range []string{"muse", "opencode"} {
+		if KnownHarness(harness) {
+			t.Fatalf("this release still runs %q", harness)
+		}
+	}
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE accounts (
+ id TEXT PRIMARY KEY,
+ ord INTEGER NOT NULL,
+ metadata BLOB NOT NULL CHECK(json_valid(metadata)),
+ credential_schema TEXT NOT NULL DEFAULT ''
+);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, activeSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE account_repo_scopes (account_id TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY (account_id, repo));
+CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct{ id, harness, provider string }{
+		{"pi-chatgpt", "pi", "chatgpt"},
+		{"pi-muse", "pi", "meta-muse"},
+		{"pi-opencode", "pi", "opencode-go"},
+		{"muse", "muse", "meta-muse"},
+		{"opencode", "opencode", "opencode-go"},
+	} {
+		metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES(?, 0, ?)", row.id, metadata); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, "INSERT INTO account_active(provider, harness, scope, account) VALUES(?,?,?,?)", row.provider, row.harness, "", row.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO account_repo_scopes(account_id, repo) VALUES('muse', 'resident-labs/dyna')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO account_limits(account_id, until) VALUES('opencode', 1)"); err != nil {
+		t.Fatal(err)
+	}
+	// The database is at the version the previous release left.
+	if _, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO meta(key, value) VALUES('account.registry', '8')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	rows, err := db.QueryContext(ctx, "SELECT id FROM accounts ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		kept = append(kept, id)
+	}
+	rows.Close()
+	if want := []string{"pi-chatgpt", "pi-muse", "pi-opencode"}; !reflect.DeepEqual(kept, want) {
+		t.Fatalf("accounts kept = %v, want %v", kept, want)
+	}
+	for _, query := range []string{
+		"SELECT count(*) FROM account_active WHERE account IN ('muse','opencode')",
+		"SELECT count(*) FROM account_repo_scopes WHERE account_id IN ('muse','opencode')",
+		"SELECT count(*) FROM account_limits WHERE account_id IN ('muse','opencode')",
+	} {
+		var left int
+		if err := db.QueryRowContext(ctx, query).Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left != 0 {
+			t.Fatalf("%q kept %d rows", query, left)
+		}
 	}
 }

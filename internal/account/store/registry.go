@@ -53,7 +53,7 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 8, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 9, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
@@ -79,15 +79,19 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 			return err
 		}
 		// Version 8 drops the leftover tables of the retired JSON registry: its
-		// version row and the mirrored accounts.json.
+		// version row and the mirrored accounts.json. Version 9 drops the rows of
+		// a harness this release stopped running, so a row written between the two
+		// versions cannot survive to fail activation.
 		if _, err := conn.ExecContext(ctx, "DROP TABLE IF EXISTS accounts_registry"); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM state_mirrors WHERE key = 'accounts/registry'"); err != nil {
 			return err
 		}
-		if err := dropRemovedHarnessRows(ctx, conn); err != nil {
-			return err
+		if old < 9 {
+			if err := dropRemovedHarnessRows(ctx, conn); err != nil {
+				return err
+			}
 		}
 		_, err = conn.ExecContext(ctx, piSplitSchema)
 		return err

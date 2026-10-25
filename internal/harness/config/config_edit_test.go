@@ -380,3 +380,16 @@ func TestClaudeGenerationLoadsPrivateUserInstructions(t *testing.T) {
 		t.Fatalf("Claude skips its private CLAUDE.md without the user setting source: %q", g.Args)
 	}
 }
+
+// Pi clears OPENCODE_API_KEY before it starts, so an MCP server that asks for it
+// must receive it under a translated name. That holds although Dyna no longer
+// runs the OpenCode harness: the variable is one of Pi's provider keys.
+func TestOpenCodeProviderKeyKeepsItsServerScope(t *testing.T) {
+	alias := MCPEnvironmentName("OPENCODE_API_KEY")
+	if alias == "OPENCODE_API_KEY" {
+		t.Fatal("Pi's OPENCODE_API_KEY would reach an MCP server as an empty value")
+	}
+	if MCPEnvironmentName("OPENCODE_CONFIG_DIR") != "OPENCODE_CONFIG_DIR" {
+		t.Fatal("a variable Pi does not clear was translated")
+	}
+}
