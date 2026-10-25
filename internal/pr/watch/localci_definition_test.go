@@ -39,7 +39,7 @@ suites:
 `)
 	head := changeCommit(t, repo, "head definition\n")
 	record := Record{Kind: "github", Head: head, Base: base, Branch: "dyna/merge-trial/1", RepoPath: repo}
-	plan, err := (&Service{}).planRegisteredCI(t.Context(), registeredCIJob{record: record, head: head, base: base, trial: true})
+	plan, err := (&Service{}).planRegisteredCI(t.Context(), registeredCIJob{record: record, head: head, base: base, trial: true, wholeSuite: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,11 @@ suites:
 			}); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := service.planLocalLaneCI(t.Context(), record, second)
+			job, err := service.localTrialJob(record, second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := service.planRegisteredCI(t.Context(), job)
 			if err != nil {
 				t.Fatal(err)
 			}

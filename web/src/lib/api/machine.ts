@@ -23,11 +23,19 @@ export interface MachineCISlots {
   slots: number
 }
 
-// MachineCIRun is one local CI run in flight on a machine. number, title and
-// url name the PR it checks, so a row shows the PR and not only a number.
+// MachineCIRunKind is watch.RunningCIKind: the work a run checks. A local branch
+// change and an integration sync have no pull request number, so the row words
+// the kind instead of a number.
+export type MachineCIRunKind = 'pull-request' | 'local-change' | 'sync'
+
+// MachineCIRun is one local CI run in flight on a machine. kind says what it
+// checks; number, title and url name a pull request, and branch names a local
+// change, so a row never shows a number alone.
 export interface MachineCIRun {
   machine: string
   number: number
+  kind: MachineCIRunKind
+  branch?: string
   title: string
   url: string
   slots: number

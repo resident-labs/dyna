@@ -25,7 +25,8 @@ func (p localCIPlan) runnable() bool {
 }
 
 func (s *Service) registeredJobForRecord(r Record) (registeredCIJob, error) {
-	job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, base: r.Base, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
+	trial := strings.HasPrefix(r.Branch, "dyna/merge-trial/")
+	job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, base: r.Base, trial: trial, wholeSuite: trial}
 	if !job.trial {
 		return job, nil
 	}
@@ -81,7 +82,7 @@ func (s *Service) planRegisteredCI(ctx context.Context, job registeredCIJob) (lo
 		return plan, err
 	}
 	plan.execution = execution
-	if job.trial {
+	if job.wholeSuite {
 		plan.suites = required.WorkflowSuites()
 		return plan, nil
 	}

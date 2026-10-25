@@ -7,6 +7,7 @@ import (
 
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/websvc"
 )
@@ -32,11 +33,24 @@ func (s services) machineCI() []websvc.MachineCIRun {
 	out := make([]websvc.MachineCIRun, 0, len(runs))
 	for _, run := range runs {
 		out = append(out, websvc.MachineCIRun{
-			Machine: run.Machine, Number: run.Number, Title: run.Title, URL: run.URL,
-			Slots: run.Slots, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
+			Machine: run.Machine, Number: run.Number, Kind: machineCIRunKind(run.Kind), Branch: run.Branch,
+			Title: run.Title, URL: run.URL, Slots: run.Slots, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
 		})
 	}
 	return out
+}
+
+// machineCIRunKind names the page's kind for a run. An unknown kind reads as a
+// pull request, which is the only kind this engine made before local heads and
+// syncs reached the machine view.
+func machineCIRunKind(kind watch.RunningCIKind) websvc.MachineCIRunKind {
+	switch kind {
+	case watch.RunningCILocalChange:
+		return websvc.MachineCIRunLocalChange
+	case watch.RunningCISync:
+		return websvc.MachineCIRunSync
+	}
+	return websvc.MachineCIRunPullRequest
 }
 
 // machineRunning lists the sessions that run on this machine now: every open

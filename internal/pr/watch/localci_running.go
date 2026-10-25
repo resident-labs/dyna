@@ -13,9 +13,24 @@ import (
 // PR holds the whole value.
 const shortHeadLength = 7
 
+// RunningCIKind names what a machine run belongs to. A client words the kind
+// itself, so a run that has no pull request number still reads clearly.
+type RunningCIKind string
+
+const (
+	// RunningCIPullRequest checks a pull request head.
+	RunningCIPullRequest RunningCIKind = "pull-request"
+	// RunningCILocalChange checks a change on a local branch. Such a change has
+	// no pull request number.
+	RunningCILocalChange RunningCIKind = "local-change"
+	// RunningCISync checks the integration branch after Dyna merges the default
+	// branch into it.
+	RunningCISync RunningCIKind = "sync"
+)
+
 // RunningCI is one local CI run in flight: the machine it holds slots on, the
-// PR it checks, and the suites it runs once they are known. It is a copy, so a
-// reader never shares state with the scheduler.
+// work it checks, and the suites it runs once they are known. It is a copy, so
+// a reader never shares state with the scheduler.
 type RunningCI struct {
 	// Machine is the name of the CI node, which is a machine with the CI role.
 	Machine string `json:"machine"`
@@ -23,6 +38,10 @@ type RunningCI struct {
 	Slots  int    `json:"slots"`
 	Repo   string `json:"repo"`
 	Number int    `json:"number"`
+	// Kind is the work the run checks, which a client words without a number.
+	Kind RunningCIKind `json:"kind"`
+	// Branch names the branch of a local change, which has no pull request.
+	Branch string `json:"branch,omitempty"`
 	// Trial marks a merge trial, which checks a merge of several heads.
 	Trial bool `json:"trial"`
 	// Head is the short head SHA the run checks.
@@ -86,7 +105,7 @@ func (r *registeredCIRun) runningCI() RunningCI {
 	}
 	return RunningCI{
 		Machine: r.node, Slots: r.slots, Repo: r.repo, Number: r.number,
-		Trial: r.trial, Head: head, Title: r.title, URL: r.url,
+		Kind: r.kind, Branch: r.branch, Trial: r.trial, Head: head, Title: r.title, URL: r.url,
 		Suites: localci.SuiteNames(r.suites), Started: r.started,
 	}
 }
