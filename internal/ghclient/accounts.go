@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -32,6 +33,10 @@ func AccountFor(ctx context.Context, executable, host, repo string) (string, err
 }
 
 type repository struct{ host, name string }
+
+// ErrNoSignedInAccount marks a room whose saved GitHub logins cannot act.
+// It costs the turn its GitHub commands, never the turn.
+var ErrNoSignedInAccount = errors.New("no logged-in GitHub account")
 
 const accountCacheTTL = 30 * time.Minute
 
@@ -463,7 +468,7 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 	if write {
 		operation = "write"
 	}
-	return "", errors.New("no logged-in GitHub account can " + operation + " " + r.host + "/" + r.name)
+	return "", fmt.Errorf("%w can %s %s/%s", ErrNoSignedInAccount, operation, r.host, r.name)
 }
 
 // Account reports the cached account for the same repository command context.
