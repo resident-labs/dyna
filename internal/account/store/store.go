@@ -305,6 +305,11 @@ func (state *State) Save(harness, integration, identity, label string, credentia
 		entry.Credential = credential
 		entry.NeedsLogin = false
 		entry.UpdatedAt = now
+		// A row saved before the provider model names no provider, so claim it
+		// here. A row that already names one keeps it.
+		if entry.Provider == "" && entry.Kind == "" {
+			entry.Provider, entry.Kind = ProviderFor(harness, integration)
+		}
 		if entry.Label == "" {
 			entry.Label = label
 		}
