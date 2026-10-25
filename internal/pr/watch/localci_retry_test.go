@@ -63,3 +63,25 @@ func TestMachineFailureMovesTheRunToAnotherMachineOnce(t *testing.T) {
 		t.Fatalf("a fleet of one machine retried on itself: %+v", chosen)
 	}
 }
+
+// A suite group adds a derived row with the group's status and no cause of its
+// own. Only its members prove why they failed, so a grouped machine failure must
+// still retry on another machine.
+func TestGroupedMachineFailureRetriesOnAnotherMachine(t *testing.T) {
+	grouped := localci.Result{Node: "arch", Status: localci.OutcomeError, Checks: []localci.SuiteResult{
+		{CheckName: "relay", Status: localci.OutcomeError, Cause: localci.CauseContainerFailure, Group: "go-test"},
+		{CheckName: "go-test", Status: localci.OutcomeError, Aggregate: true, Group: "go-test"},
+	}}
+	if got := machineFailureRetryFrom(grouped); got != "arch" {
+		t.Fatalf("a grouped machine failure started from %q, want arch", got)
+	}
+
+	failedGroup := grouped
+	failedGroup.Checks = []localci.SuiteResult{
+		{CheckName: "relay", Status: localci.OutcomeFailed, Cause: localci.CauseTestFailure, Group: "go-test"},
+		{CheckName: "go-test", Status: localci.OutcomeFailed, Aggregate: true, Group: "go-test"},
+	}
+	if got := machineFailureRetryFrom(failedGroup); got != "" {
+		t.Fatalf("a grouped test failure retried from %q, want no retry", got)
+	}
+}
