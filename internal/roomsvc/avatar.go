@@ -27,6 +27,10 @@ var emojiPool = []string{
 type avatarBook struct {
 	byID   map[string]string
 	byAddr map[string][]addrAvatar // address -> sessions that held it, oldest first
+	// addrByID and heldBy name sessions of every room, not only this one, so a
+	// reply finds the session that wrote a post after a rename or a move.
+	addrByID map[string]string   // session -> the address it answers at now
+	heldBy   map[string][]string // address -> sessions that hold it, oldest first
 }
 
 type addrAvatar struct {
@@ -36,19 +40,24 @@ type addrAvatar struct {
 }
 
 func newAvatarBook(sessions []subagent.Info, roomID string) avatarBook {
+	ordered := append([]subagent.Info{}, sessions...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if !ordered[i].Created.Equal(ordered[j].Created) {
+			return ordered[i].Created.Before(ordered[j].Created)
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	b := avatarBook{byID: map[string]string{}, byAddr: map[string][]addrAvatar{}, addrByID: map[string]string{}, heldBy: map[string][]string{}}
+	for _, s := range ordered {
+		b.addrByID[s.ID] = s.Address()
+		b.heldBy[s.Address()] = append(b.heldBy[s.Address()], s.ID)
+	}
 	var in []subagent.Info
-	for _, s := range sessions {
+	for _, s := range ordered {
 		if s.RoomID == roomID {
 			in = append(in, s)
 		}
 	}
-	sort.SliceStable(in, func(i, j int) bool {
-		if !in[i].Created.Equal(in[j].Created) {
-			return in[i].Created.Before(in[j].Created)
-		}
-		return in[i].ID < in[j].ID
-	})
-	b := avatarBook{byID: map[string]string{}, byAddr: map[string][]addrAvatar{}}
 	used := map[int]bool{}
 	for _, s := range in {
 		h := fnv.New32a()
@@ -88,6 +97,22 @@ func (b avatarBook) sessionsFor(addr string) []string {
 		out = append(out, h.id)
 	}
 	return out
+}
+
+// address is the address session id answers at now, wherever the session's
+// room is. ok is false when the snapshot does not hold the session, or when a
+// newer session holds its address: a name reused after a close now belongs to
+// that newer session, so a reply must not name it.
+func (b avatarBook) address(id string) (string, bool) {
+	cur, ok := b.addrByID[id]
+	if !ok {
+		return "", false
+	}
+	held := b.heldBy[cur]
+	if len(held) == 0 || held[len(held)-1] != id {
+		return "", false
+	}
+	return cur, true
 }
 
 // avatars returns the book for one room, from the cached session snapshot.
