@@ -8,12 +8,13 @@
   // selected is the open room's ID, or '' for the machines list, the rail's
   // own tile.
   interface Props {
+    narrow?: boolean
     rooms?: Room[]
     selected?: string
     onselect: (id: string) => void
     onmenu?: ((room: Room, x: number, y: number, anchor?: HTMLElement) => void) | null
   }
-  let { rooms = [], selected = '', onselect, onmenu = null }: Props = $props()
+  let { narrow = false, rooms = [], selected = '', onselect, onmenu = null }: Props = $props()
   // Pinned rooms first, in pin order, then the rest as Go sorts them. A
   // pinned room stays on the rail even after it goes quiet.
   let pinned = $derived(rooms.filter((r) => r.pinned).sort((a, b) => (a.pinOrder || 0) - (b.pinOrder || 0)))
@@ -36,14 +37,21 @@
     <span class="pill"></span>
     <button class="tile" onclick={() => onselect(r.id)} oncontextmenu={(e) => menu(e, r)} onkeydown={(e) => key(e, r)} aria-label={roomLabel(r)}>
       <span class="ini">{initials(roomLabel(r))}</span>
+      {#if narrow}<span class="room-name">{roomLabel(r)}</span>{/if}
       {#if r.unread > 0}<span class="badge">{r.unread > 99 ? '99+' : r.unread}</span>{/if}
       {#if r.running > 0}<span class="live" title="{r.running} running"></span>{/if}
     </button>
-    <span class="tip" role="tooltip">{roomLabel(r)}{#if r.pinned}<em class="pin">pinned</em>{/if}{#if r.paused}<em>paused</em>{/if}{#if r.running}<em>{r.running} running</em>{/if}</span>
+    {#if narrow}
+      <button class="room-actions" onclick={(e) => menu(e, r)} onkeydown={(e) => key(e, r)} aria-label="Actions for {roomLabel(r)}" aria-haspopup="menu" title="Room actions">
+        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="5" cy="10" r="1.6" fill="currentColor" /><circle cx="10" cy="10" r="1.6" fill="currentColor" /><circle cx="15" cy="10" r="1.6" fill="currentColor" /></svg>
+      </button>
+    {:else}
+      <span class="tip" role="tooltip">{roomLabel(r)}{#if r.pinned}<em class="pin">pinned</em>{/if}{#if r.paused}<em>paused</em>{/if}{#if r.running}<em>{r.running} running</em>{/if}</span>
+    {/if}
   </div>
 {/snippet}
 
-<nav class="rail" aria-label="Rooms">
+<nav class="rail" class:phone={narrow} aria-label="Rooms">
   <div class="slot" class:sel={selected === ''}>
     <span class="pill"></span>
     <button class="tile home" aria-label="Machines" title="Machines" onclick={() => onselect('')}>
@@ -52,6 +60,7 @@
         <rect x="4" y="13.5" width="16" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8" />
         <path d="M7.5 7.5h.01M7.5 16.5h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
       </svg>
+      {#if narrow}<span class="room-name">Machines</span>{/if}
     </button>
   </div>
   <div class="sep"></div>
@@ -173,4 +182,24 @@
   .tip em.pin { color: var(--muted); }
   .slot:has(:focus-visible) .tip { display: block; }
   .slot:hover .tip { display: block; }
+
+  .rail.phone { width: 100%; flex: 1 1 45%; min-height: 144px; align-items: stretch; padding: var(--s2) 0; overflow: hidden; }
+  .rail.phone .list { flex: 1; min-height: 0; align-items: stretch; gap: 2px; overflow-x: hidden; }
+  .rail.phone .slot { width: 100%; align-items: center; justify-content: stretch; gap: var(--s1); padding: 0 var(--s1) 0 var(--s2); }
+  .rail.phone .tile { flex: 1; display: flex; align-items: center; justify-content: flex-start; gap: var(--s2); width: auto; min-width: 0; height: auto; min-height: 44px; padding: 5px var(--s2); border-radius: 8px; background: transparent; text-align: left; }
+  .rail.phone .ini { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--main); font-size: var(--t-body); }
+  .rail.phone .home > svg { flex: none; box-sizing: border-box; width: 32px; height: 32px; padding: 4px; border-radius: 50%; background: var(--main); }
+  .rail.phone .room-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; line-height: var(--leading-tight); }
+  .rail.phone .badge { position: static; flex: none; min-width: 20px; height: 20px; border: 0; }
+  .rail.phone .live { position: static; flex: none; width: 8px; height: 8px; border: 0; }
+  .rail.phone .room-actions { display: grid; place-items: center; flex: none; width: 40px; height: 44px; border-radius: 8px; color: var(--muted); transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  .rail.phone .sep { width: calc(100% - 16px); margin: var(--s1) var(--s2); align-self: center; }
+  .rail.phone .slot.sel .tile { border-radius: 8px; background: var(--select); color: var(--ink); }
+  .rail.phone .slot.sel .home { color: var(--iris); }
+  .rail.phone .slot:active .tile { background: var(--select); }
+  @media (hover: hover) {
+    .rail.phone .slot:hover .tile { border-radius: 8px; background: var(--hover); color: var(--ink); }
+    .rail.phone .room-actions:hover { background: var(--hover); color: var(--ink); }
+  }
+  .rail.phone .room-actions:active { background: var(--select); color: var(--ink); }
 </style>
