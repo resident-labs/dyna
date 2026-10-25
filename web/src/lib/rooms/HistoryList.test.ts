@@ -16,37 +16,11 @@ function deferred<T = boolean>() {
 }
 const rows = (start: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `p${start + i}` }))
 
-async function harness(thread = false) {
-  const dom = installDom()
-  Reflect.set(globalThis, 'matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
-  const observed = new Set<Element>()
-  globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
-  globalThis.DOMParser = dom.window.DOMParser
-  globalThis.NodeFilter = dom.window.NodeFilter
-  interface SizeEntry { target: Element; borderBoxSize: { inlineSize: number; blockSize: number }[] }
-  Reflect.set(globalThis, 'ResizeObserver', class {
-    cb?: (entries: SizeEntry[]) => void
-    observe(el: Element) { observed.add(el); this.cb?.([{ target: el, borderBoxSize: [{ inlineSize: 800, blockSize: (el as HTMLElement).offsetHeight }] }]) }
-    unobserve(el: Element) { observed.delete(el) }
-    disconnect() {}
-    constructor(cb: (entries: SizeEntry[]) => void) { this.cb = cb }
-  })
-  dom.window.ResizeObserver = globalThis.ResizeObserver
-  const proto = dom.window.HTMLElement.prototype
-  // The mount root and the scroller are separate elements, as in the app: the
-  // list sits in a scroller that a pane holds.
-  const scrollRoot = (el: Element) => el.id === 'app' || el.classList.contains('feed')
-  for (const name of ['offsetHeight', 'clientHeight']) Object.defineProperty(proto, name, { configurable: true, get() { return (scrollRoot(this) || this.classList.contains('thread-log') || this.classList.contains('log')) ? 500 : this.classList.contains('vlist') ? parseFloat(this.style.height) || 0 : 40 } })
-  for (const name of ['offsetWidth', 'clientWidth']) Object.defineProperty(proto, name, { configurable: true, get: () => 800 })
-  Object.defineProperty(proto, 'offsetTop', { configurable: true, get() { return this.classList.contains('vlist') ? 36 : 0 } })
-  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { if (this.classList.contains('log')) return 2000; return (scrollRoot(this) || this.classList.contains('thread-log')) ? 36 + (parseFloat(this.querySelector('.vlist')?.style.height) || 0) : this.offsetHeight } })
-  Reflect.set(proto, 'scrollTo', function(this: HTMLElement, options?: ScrollToOptions) { const top = options?.top ?? 0; this.scrollTop = top; queueMicrotask(() => this.dispatchEvent(new Event('scroll'))) })
-  proto.getBoundingClientRect = function() {
-    const scrolled = document.querySelector<HTMLElement>('.feed')?.scrollTop ?? document.getElementById('app')?.scrollTop ?? 0
-    const y = this.classList.contains('vrow') ? 36 + Number(this.style.transform.match(/translateY\(([-.\d]+)px\)/)?.[1] || 0) - scrolled : 0
-    return { x: 0, y, top: y, left: 0, width: 800, height: this.offsetHeight, bottom: y + this.offsetHeight, right: 800 } as DOMRect
-  }
-  const dir = await mkdtemp(join(tmpdir(), 'dyna-history-test-'))
+// Every test mounts the same wrapper, so the file builds each variant once, at
+// load, and writes the bytes per test. The build is setup for the whole file:
+// when it ran inside each test, its work counted against that test's time
+// budget and hid what the test itself does.
+async function buildBundle(thread: boolean): Promise<Uint8Array> {
   const direct = `<script>
     import HistoryList from '${new URL('./HistoryList.svelte', import.meta.url).pathname}'
     let { model, load } = $props()
@@ -78,7 +52,43 @@ async function harness(thread = false) {
   })
   const built = compiled.outputFiles?.[0]
   assert.ok(built, 'the history list built')
-  const file = join(dir, 'history.mjs'); await writeFile(file, built.contents)
+  return built.contents
+}
+
+const [viewBundle, threadBundle] = await Promise.all([buildBundle(false), buildBundle(true)])
+
+async function harness(thread = false) {
+  const dom = installDom()
+  Reflect.set(globalThis, 'matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
+  const observed = new Set<Element>()
+  globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+  globalThis.DOMParser = dom.window.DOMParser
+  globalThis.NodeFilter = dom.window.NodeFilter
+  interface SizeEntry { target: Element; borderBoxSize: { inlineSize: number; blockSize: number }[] }
+  Reflect.set(globalThis, 'ResizeObserver', class {
+    cb?: (entries: SizeEntry[]) => void
+    observe(el: Element) { observed.add(el); this.cb?.([{ target: el, borderBoxSize: [{ inlineSize: 800, blockSize: (el as HTMLElement).offsetHeight }] }]) }
+    unobserve(el: Element) { observed.delete(el) }
+    disconnect() {}
+    constructor(cb: (entries: SizeEntry[]) => void) { this.cb = cb }
+  })
+  dom.window.ResizeObserver = globalThis.ResizeObserver
+  const proto = dom.window.HTMLElement.prototype
+  // The mount root and the scroller are separate elements, as in the app: the
+  // list sits in a scroller that a pane holds.
+  const scrollRoot = (el: Element) => el.id === 'app' || el.classList.contains('feed')
+  for (const name of ['offsetHeight', 'clientHeight']) Object.defineProperty(proto, name, { configurable: true, get() { return (scrollRoot(this) || this.classList.contains('thread-log') || this.classList.contains('log')) ? 500 : this.classList.contains('vlist') ? parseFloat(this.style.height) || 0 : 40 } })
+  for (const name of ['offsetWidth', 'clientWidth']) Object.defineProperty(proto, name, { configurable: true, get: () => 800 })
+  Object.defineProperty(proto, 'offsetTop', { configurable: true, get() { return this.classList.contains('vlist') ? 36 : 0 } })
+  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { if (this.classList.contains('log')) return 2000; return (scrollRoot(this) || this.classList.contains('thread-log')) ? 36 + (parseFloat(this.querySelector('.vlist')?.style.height) || 0) : this.offsetHeight } })
+  Reflect.set(proto, 'scrollTo', function(this: HTMLElement, options?: ScrollToOptions) { const top = options?.top ?? 0; this.scrollTop = top; queueMicrotask(() => this.dispatchEvent(new Event('scroll'))) })
+  proto.getBoundingClientRect = function() {
+    const scrolled = document.querySelector<HTMLElement>('.feed')?.scrollTop ?? document.getElementById('app')?.scrollTop ?? 0
+    const y = this.classList.contains('vrow') ? 36 + Number(this.style.transform.match(/translateY\(([-.\d]+)px\)/)?.[1] || 0) - scrolled : 0
+    return { x: 0, y, top: y, left: 0, width: 800, height: this.offsetHeight, bottom: y + this.offsetHeight, right: 800 } as DOMRect
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'dyna-history-test-'))
+  const file = join(dir, 'history.mjs'); await writeFile(file, thread ? threadBundle : viewBundle)
   const api = await import(pathToFileURL(file).href)
   const target = document.getElementById('app')
   assert.ok(target)
@@ -185,17 +195,23 @@ test('beginning marker appears only after older pages end', { timeout: 9000 }, a
   } finally { await h.close() }
 })
 
+// The thread panel draws each message through markdown, so a shorter page still
+// fills its viewport, at a fraction of the cost of fifty rows. The flat view
+// renders plain rows and keeps the longer page it always had.
+const pagingRows = (start: number, thread: boolean) => thread ? rows(start, 30) : rows(start, 50)
+
 for (const thread of [false, true]) test((thread ? 'selected thread' : 'view') + ' continues past an empty filtered page at the top of a full viewport', { timeout: 9000 }, async () => {
   const h = await harness(thread), empty = deferred()
   let calls = 0
   try {
+    h.update({ items: pagingRows(10, thread) })
     h.mount(() => {
       calls++
       if (calls === 1) return empty.promise
-      h.update({ items: rows(0, 60), earlier: false })
+      h.update({ items: pagingRows(20, thread), earlier: false })
       return Promise.resolve(true)
     })
-    h.scroll(700); h.scroll(350)
+    h.scroll(600); h.scroll(350)
     await h.tick()
     assert.equal(calls, 1)
     h.scroll(0)
