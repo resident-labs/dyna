@@ -1,7 +1,9 @@
 package harness
 
 import (
+	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,5 +65,58 @@ func TestKimiPromptJournalIgnoresOldAndUnrelatedFailures(t *testing.T) {
 	}
 	if err := acpStopReasonError(profile.HarnessKimiCode, "max_turn_requests"); err == nil || !strings.Contains(err.Error(), "step limit") {
 		t.Fatalf("step-limit stop reason = %v", err)
+	}
+}
+
+func TestKimiACPCanceledCloseConfirmsOrReplacesChild(t *testing.T) {
+	for _, mode := range []string{"success", "error"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := acpScript(t, map[string]string{
+				"task": `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"first answer"}}}|{"stopReason":"end_turn"}`,
+				"next": `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"next answer"}}}|{"stopReason":"end_turn"}`,
+			})
+			if err := os.WriteFile(filepath.Join(dir, "hold-close"), []byte(mode), 0600); err != nil {
+				t.Fatal(err)
+			}
+			env, mark := acpTestEnv(t, dir)
+			p := kimiACPProfile(env)
+			cwd := t.TempDir()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				_, err := RunWithOptions(ctx, p, "task", cwd, false, JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{HealthProbe: true})
+				done <- err
+			}()
+			waitForMark(t, mark, "session/close fake-session-1")
+			cancel()
+			gate, err := net.Dial("unixgram", mark+".close")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = gate.Write([]byte{1})
+			_ = gate.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err == nil {
+				t.Fatal("canceled turn succeeded")
+			}
+			result, err := RunWithOptions(t.Context(), p, "next", cwd, false, JournalOptions{}, SteeringOptions{}, SessionOptions{ResumeID: "fake-session-1"}, ExecutionOptions{HealthProbe: true})
+			if err != nil || result.Output != "next answer" {
+				t.Fatalf("next turn = %q, %v", result.Output, err)
+			}
+			body, err := os.ReadFile(mark)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBoots := 1
+			if mode == "error" {
+				wantBoots = 2
+			}
+			if boots := strings.Count(string(body), "boot "); boots != wantBoots {
+				t.Fatalf("boots = %d, want %d; close must be confirmed before reuse\n%s", boots, wantBoots, body)
+			}
+		})
 	}
 }

@@ -20,6 +20,7 @@ import (
 
 	"dyna-agent/internal/acp"
 	"dyna-agent/internal/harness/sessionhost"
+	"dyna-agent/internal/jsonrpc"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
@@ -54,7 +55,7 @@ func fakeMark(text string) {
 		if err == nil {
 			_, _ = f.WriteString(text + "\n")
 			_ = f.Close()
-			if strings.HasPrefix(text, "prompt ") || text == "cancel" {
+			if strings.HasPrefix(text, "prompt ") || strings.HasPrefix(text, "session/close ") || text == "cancel" {
 				if conn, err := net.Dial("unixgram", path+".sock"); err == nil {
 					_, _ = conn.Write([]byte(text))
 					_ = conn.Close()
@@ -176,7 +177,27 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 			write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": session, "update": map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "starting"}}}})
 			reply(msg.ID, map[string]any{"sessionId": session, "models": map[string]any{"currentModelId": "fake-model"}, "modes": map[string]any{"currentModeId": "default", "availableModes": []any{}}})
 		case "session/close":
-			fakeMark("session/close " + session)
+			if mode, err := os.ReadFile(filepath.Join(s.scriptDir, "hold-close")); err == nil {
+				_ = os.Remove(filepath.Join(s.scriptDir, "hold-close"))
+				gate, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: os.Getenv("FAKE_MARK") + ".close", Net: "unixgram"})
+				if err != nil {
+					return
+				}
+				fakeMark("session/close " + session)
+				var signal [1]byte
+				_, _ = gate.Read(signal[:])
+				_ = gate.Close()
+				if string(mode) == "error" {
+					write(struct {
+						JSONRPC string          `json:"jsonrpc"`
+						ID      json.RawMessage `json:"id"`
+						Error   *jsonrpc.Error  `json:"error"`
+					}{JSONRPC: "2.0", ID: msg.ID, Error: &jsonrpc.Error{Code: jsonrpc.CodeInternal, Message: "close is unconfirmed"}})
+					continue
+				}
+			} else {
+				fakeMark("session/close " + session)
+			}
 			if body, err := os.ReadFile(filepath.Join(s.scriptDir, "pending-kimi-wire.jsonl")); err == nil {
 				path := filepath.Join(os.Getenv("KIMI_CODE_HOME"), "sessions", "fixture", session, "agents", "main", "wire.jsonl")
 				_ = os.MkdirAll(filepath.Dir(path), 0700)
