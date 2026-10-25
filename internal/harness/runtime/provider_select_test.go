@@ -13,6 +13,27 @@ import (
 	state "dyna-agent/internal/state"
 )
 
+// Pi names an OAuth provider differently from its API-key provider for ChatGPT.
+func TestPiOAuthProviderIDMapsTheSignInNames(t *testing.T) {
+	want := map[store.Provider]string{
+		store.ProviderAnthropic: "anthropic",
+		store.ProviderChatGPT:   "openai-codex",
+		store.ProviderKimiCode:  "kimi-coding",
+		store.ProviderXAI:       "xai",
+		store.ProviderMetaMuse:  "meta",
+	}
+	for provider, id := range want {
+		if got, ok := PiOAuthProviderID(provider); !ok || got != id {
+			t.Fatalf("PiOAuthProviderID(%q) = %q, %v; want %q", provider, got, ok, id)
+		}
+	}
+	for _, provider := range []store.Provider{store.ProviderDeepSeek, store.ProviderZAI, store.ProviderOpenCodeGo} {
+		if _, ok := PiOAuthProviderID(provider); ok {
+			t.Fatalf("PiOAuthProviderID(%q) accepted a provider without Pi OAuth", provider)
+		}
+	}
+}
+
 // Only Pi picks its provider from the model. Another harness keeps its own
 // selection, because its provider keys live in its own store, not in accounts.
 func TestProviderForModelKeepsOtherHarnessesOnTheirProvider(t *testing.T) {
