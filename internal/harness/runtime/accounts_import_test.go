@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,8 +144,12 @@ func TestImportKeepsTheSourceWhenThePiWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	im := &importer.Importer{Store: st, Host: PiImportHost{Runtime: r}}
-	if _, err := im.Run(context.Background(), importer.Request{Harness: "codex"}); err == nil {
-		t.Fatal("a failed write reported success")
+	result, err := im.Run(context.Background(), importer.Request{Harness: "codex"})
+	if err != nil {
+		t.Fatalf("a per-row failure ended the import: %v", err)
+	}
+	if len(result.Refused) != 1 || result.Refused[0].Reason != importer.ReasonMoveFailed {
+		t.Fatalf("refused = %+v", result.Refused)
 	}
 	after, err := st.Read()
 	if err != nil {
@@ -159,5 +164,52 @@ func TestImportKeepsTheSourceWhenThePiWriteFails(t *testing.T) {
 		if account.Harness == "pi" {
 			t.Fatalf("a failed write left a Pi account: %+v", account)
 		}
+	}
+}
+
+// TestImportRemovesThePiAccountWhenItReadsBackNotReady covers the rollback that
+// runs after the account exists: the lock must be free so the removal can take
+// it, and no Pi copy of the refresh token may stay.
+func TestImportRemovesThePiAccountWhenItReadsBackNotReady(t *testing.T) {
+	st, r, source := importFixture(t)
+	before, _ := st.Read()
+	readBack := piImportConfirm
+	var createdID string
+	piImportConfirm = func(_ string, saved NativeAccount, _ importer.PiLogin) error {
+		createdID = saved.ID
+		return errors.New("Pi read the moved sign-in as not signed in.")
+	}
+	t.Cleanup(func() { piImportConfirm = readBack })
+	im := &importer.Importer{Store: st, Host: PiImportHost{Runtime: r}}
+	result, err := im.Run(context.Background(), importer.Request{Harness: "codex"})
+	if err != nil {
+		t.Fatalf("a per-row failure ended the import: %v", err)
+	}
+	if len(result.Refused) != 1 || result.Refused[0].Reason != importer.ReasonMoveFailed {
+		t.Fatalf("refused = %+v", result.Refused)
+	}
+	accounts, err := r.Accounts.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range accounts {
+		if account.Harness == "pi" {
+			t.Fatalf("the rollback left a Pi account: %+v", account)
+		}
+	}
+	if createdID == "" {
+		t.Fatal("the test never reached the read-back")
+	}
+	if _, err := os.Stat(filepath.Join(st.Root, "pi", createdID)); !os.IsNotExist(err) {
+		t.Fatalf("the rollback left the Pi home %s", createdID)
+	}
+	after, err := st.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawBefore, _ := json.Marshal(before)
+	rawAfter, _ := json.Marshal(after)
+	if string(rawBefore) != string(rawAfter) || after.Find(source) == nil {
+		t.Fatal("the rollback changed the source")
 	}
 }

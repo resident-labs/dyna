@@ -1,7 +1,7 @@
 // Package importer moves a saved native harness sign-in into a Pi provider
 // account. A move creates the Pi account with its own home, verifies the saved
-// login, then retires the source row, so two copies never renew one refresh
-// token.
+// login, then retires the source row, so Dyna never keeps two saved copies that
+// renew one refresh token.
 package importer
 
 import (
@@ -32,13 +32,18 @@ const (
 	ReasonUnreadable Reason = "unreadable-credential"
 	// ReasonNoAPIKey marks a saved key account whose key is missing.
 	ReasonNoAPIKey Reason = "no-saved-key"
+	// ReasonMoveFailed marks a saved sign-in whose Pi write or retirement
+	// failed. Detail says what failed; the source stayed in place.
+	ReasonMoveFailed Reason = "move-failed"
 )
 
 // Refused names one sign-in or one harness that the import left in place.
 // Profiles and Sessions name the users of a harness that is still in use.
+// Detail explains a failed move, and never carries a secret.
 type Refused struct {
 	Source   string   `json:"source,omitempty"`
 	Label    string   `json:"label,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
 	Reason   Reason   `json:"reason"`
 	Profiles []string `json:"profiles,omitempty"`
 	Sessions []string `json:"sessions,omitempty"`
@@ -55,6 +60,8 @@ func (r Refused) Describe(harness string) string {
 		return fmt.Sprintf("Dyna cannot import %s: it has no Pi provider for that sign-in.", harness)
 	case ReasonNoAPIKey:
 		return fmt.Sprintf("%s holds no saved API key to move.", sourceName(r))
+	case ReasonMoveFailed:
+		return fmt.Sprintf("%s did not move and stays in place: %s", sourceName(r), r.Detail)
 	default:
 		return fmt.Sprintf("Dyna could not read the saved sign-in of %s.", sourceName(r))
 	}
@@ -206,7 +213,10 @@ func (im *Importer) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		account, err := im.move(ctx, source, login)
 		if err != nil {
-			return result, err
+			// One sign-in that fails does not hide the others: it becomes a
+			// refusal, and the sign-ins that moved stay reported.
+			result.Refused = append(result.Refused, Refused{Source: source.ID, Label: source.Label, Reason: ReasonMoveFailed, Detail: err.Error()})
+			continue
 		}
 		result.Moved = append(result.Moved, Moved{Source: source.ID, Label: source.Label, Account: account.ID, Provider: login.Provider, Kind: login.Kind})
 	}

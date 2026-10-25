@@ -44,19 +44,23 @@ func newFixture(t *testing.T) *fixture {
 
 // fakeHost records the order of the move and can stop any write step.
 type fakeHost struct {
-	store          *store.Store
-	source         string
-	calls          []string
-	login          PiLogin
-	sourceAtCreate bool
-	failCreate     error
-	failRepos      error
+	store             *store.Store
+	source            string
+	calls             []string
+	login             PiLogin
+	sourceAtCreate    bool
+	failCreate        error
+	failCreateForName string
+	failRepos         error
 }
 
 func (h *fakeHost) CreatePiAccount(_ context.Context, provider store.Provider, kind store.Kind, label string, login PiLogin) (PiAccount, error) {
 	h.calls = append(h.calls, "create")
 	if h.failCreate != nil {
 		return PiAccount{}, h.failCreate
+	}
+	if h.failCreateForName != "" && h.failCreateForName == label {
+		return PiAccount{}, errors.New("Pi's home is not writable")
 	}
 	state, err := h.store.Read()
 	if err != nil {
@@ -125,14 +129,18 @@ func TestImportMovesTheSignInOnlyAfterThePiAccountReadsBack(t *testing.T) {
 }
 
 // TestImportLeavesTheSourceOnAFailedWrite keeps the only copy when the Pi write
-// fails.
+// fails, and reports the failure without hiding the other sign-ins.
 func TestImportLeavesTheSourceOnAFailedWrite(t *testing.T) {
 	f := newFixture(t)
 	before, _ := f.store.Read()
 	f.host.failCreate = errors.New("Pi's home is not writable")
 	im := &Importer{Store: f.store, Host: f.host}
-	if _, err := im.Run(context.Background(), Request{Harness: "codex"}); err == nil {
-		t.Fatal("a failed write reported success")
+	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	if err != nil {
+		t.Fatalf("a per-row failure ended the import: %v", err)
+	}
+	if len(result.Refused) != 1 || result.Refused[0].Reason != ReasonMoveFailed || result.Refused[0].Detail == "" {
+		t.Fatalf("refused = %+v", result.Refused)
 	}
 	after, _ := f.store.Read()
 	if !reflect.DeepEqual(before, after) {
@@ -149,14 +157,45 @@ func TestImportRollsBackWhenALaterStepFails(t *testing.T) {
 	f := newFixture(t)
 	f.host.failRepos = errors.New("the rules could not be copied")
 	im := &Importer{Store: f.store, Host: f.host}
-	if _, err := im.Run(context.Background(), Request{Harness: "codex"}); err == nil {
-		t.Fatal("a failed step reported success")
+	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	if err != nil {
+		t.Fatalf("a per-row failure ended the import: %v", err)
+	}
+	if len(result.Refused) != 1 || result.Refused[0].Reason != ReasonMoveFailed {
+		t.Fatalf("refused = %+v", result.Refused)
 	}
 	if !reflect.DeepEqual(f.host.calls, []string{"create", "repos", "remove-account"}) {
 		t.Fatalf("steps = %v", f.host.calls)
 	}
 	if f.entry(t) == nil {
 		t.Fatal("the source row was retired")
+	}
+}
+
+// TestImportReportsTheMovesBeforeAFailedSignIn keeps a successful move in the
+// answer when another saved sign-in of the same harness fails.
+func TestImportReportsTheMovesBeforeAFailedSignIn(t *testing.T) {
+	f := newFixture(t)
+	if err := f.store.Update(func(state *store.State) error {
+		_, err := state.Save("codex", "chatgpt", "openai:other:workspace", "Home", codexCredential(1_800_000_001))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.host.failCreateForName = "Work"
+	im := &Importer{Store: f.store, Host: f.host}
+	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Moved) != 1 || result.Moved[0].Label != "Home" {
+		t.Fatalf("moved = %+v, want the working sign-in", result.Moved)
+	}
+	if len(result.Refused) != 1 || result.Refused[0].Label != "Work" || result.Refused[0].Reason != ReasonMoveFailed {
+		t.Fatalf("refused = %+v, want the failed sign-in", result.Refused)
+	}
+	if f.entry(t) == nil {
+		t.Fatal("the failed source row was retired")
 	}
 }
 
