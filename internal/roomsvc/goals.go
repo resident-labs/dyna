@@ -258,12 +258,24 @@ func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holder
 	}
 	return g, err
 }
+
+// FinishGoal marks a goal done or dropped. Only the goal's holders end it:
+// a session that holds one item of a goal finishes that item and leaves the
+// goal to its holder. Root and the owner act for the room, and any member
+// ends a goal the whole room holds.
 func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, drop bool) (goals.Goal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
 		return goals.Goal{}, err
 	}
 	service := s.goalService()
+	before, err := service.Store.Get(r.ID, id)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	if err := checkGoalEnder(authority.Of(ctx), author, before); err != nil {
+		return goals.Goal{}, err
+	}
 	g, err := service.Store.Finish(r.ID, id, author.ID, summary, drop)
 	if err != nil {
 		return g, err
@@ -273,6 +285,21 @@ func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, d
 		verb = "dropped"
 	}
 	return g, service.Milestone(g, author.ID, verb)
+}
+
+// checkGoalEnder refuses a session that does not hold the goal. A session
+// that holds one item of a goal closes that item and reports back; the goal
+// ends only when its holder marks it done. Root and the owner act for the
+// room, and any member ends a goal the whole room holds. A workflow worker
+// reports itself by name and not by session, so its goal is not in the holder
+// list it shows; it keeps its right to end that goal.
+func checkGoalEnder(actor authority.Actor, author goalAuthor, g goals.Goal) error {
+	held := g.HeldBy(author.ID) || (actor.Session != "" && g.HeldBy(actor.Session))
+	switch {
+	case actor.Role == authority.Owner, actor.Role == authority.Root, actor.Role == authority.Worker, g.Shared, held:
+		return nil
+	}
+	return fmt.Errorf("only a holder ends goal %s; finish the item you hold with `dyna goal item done %s <item>`, and its holder ends the goal", g.ID, g.ID)
 }
 
 // ExpediteGoal makes goal id the room's one expedited goal, for goals.ExpediteTTL.
@@ -437,7 +464,38 @@ func (s *Service) SetGoalItemState(ctx context.Context, roomRef, goal, item, sta
 	if err != nil {
 		return goals.Item{}, err
 	}
-	return s.goalService().Store.SetItemState(r.ID, goal, item, author.ID, state)
+	service := s.goalService()
+	it, err := service.Store.SetItemState(r.ID, goal, item, author.ID, state)
+	if err != nil {
+		return it, err
+	}
+	if state != goals.ItemOpen {
+		s.postLastItem(service, r, author, goal, it)
+	}
+	return it, nil
+}
+
+// postLastItem tells a goal's holders that the goal's last open item is
+// closed, so a holder can finish the goal itself. The post belongs to the
+// holders alone, so a shared goal, which the room holds, sends nothing. The
+// item is already closed, so a lost post costs a nudge and not the change.
+func (s *Service) postLastItem(service *goalsvc.Service, rec room.Record, author goalAuthor, goal string, it goals.Item) {
+	g, err := service.Store.Get(rec.ID, goal)
+	if err != nil || !g.Open() || g.Shared || g.HeldBy(author.ID) {
+		return
+	}
+	items, err := service.Store.Items(rec.ID, goal)
+	if err != nil {
+		return
+	}
+	for _, other := range items {
+		if other.State == goals.ItemOpen {
+			return
+		}
+	}
+	to, bound := s.holderAddresses(g, rec.Name)
+	ev := room.GoalEvent{Type: room.GoalItemsDone, GoalID: g.ID, Title: goals.Clip(g.Text, 60), Actor: author.Name, State: room.GoalState(g.State), Summary: it.ID + " " + it.State + "; the goal stays open until its holder finishes it"}
+	_, _ = s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, To: to, SessionIDs: bound})
 }
 
 // NoteGoal appends one holder note to the room's goal journal.
