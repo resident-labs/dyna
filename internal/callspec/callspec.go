@@ -80,7 +80,7 @@ var LongCalls = map[string]time.Duration{
 	// Item 8 will make fetch asynchronous and remove this long call.
 	"SyncFetch": 2 * time.Minute,
 	// Provider and model requests, hooks and updates.
-	"AccountsList": 2 * time.Minute, "AccountsAdd": 2 * time.Minute, "ProfileModels": 2 * time.Minute, "ConfigCheckProfile": 2 * time.Minute,
+	"AccountsList": 2 * time.Minute, "AccountsAdd": 2 * time.Minute, "AccountsImport": 2 * time.Minute, "ProfileModels": 2 * time.Minute, "ConfigCheckProfile": 2 * time.Minute,
 	"RunHook": 2 * time.Minute, "TestHook": 2 * time.Minute, "UpdateDyna": 2 * time.Minute,
 	"VoiceStart": 2 * time.Minute, "VoiceResume": 2 * time.Minute, "VoiceStop": 30 * time.Second,
 	// Stopping a shell waits up to 10 s for it to start, 5 s for SIGTERM

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/account/importer"
 	"dyna-agent/internal/account/service"
 	"dyna-agent/internal/account/store"
 )
@@ -18,6 +19,8 @@ type fakeEngine struct {
 	root     string
 	accounts []service.ScopeAccount
 	used     [][2]string
+	imported []any
+	result   importer.Result
 }
 
 func newFake(t *testing.T) *fakeEngine {
@@ -48,6 +51,11 @@ func (f *fakeEngine) Call(_ context.Context, method string, args []any, out any)
 		scope, _ := args[1].(string)
 		f.used = append(f.used, [2]string{id, scope})
 		return (&store.Store{Root: f.root}).SetActive(store.ProviderAnthropic, "claude-code", scope, id)
+	case "AccountsImport":
+		f.imported = args
+		if target, ok := out.(*importer.Result); ok {
+			*target = f.result
+		}
 	}
 	return nil
 }
@@ -97,6 +105,42 @@ func TestUseRoomChangesOnlyThatRoom(t *testing.T) {
 	}
 	if len(fake.used) != 2 || fake.used[0][1] != "room-a" || fake.used[1][1] != "" {
 		t.Fatalf("engine calls = %v, want a room use then a global use", fake.used)
+	}
+}
+
+// A dry-run import renders the typed refusal and names the profile that still
+// runs the harness, and a move names the account it went to.
+func TestImportRendersTheTypedAnswer(t *testing.T) {
+	fake := newFake(t)
+	fake.result = importer.Result{Harness: "codex", DryRun: true, Moved: []importer.Moved{}, Refused: []importer.Refused{{
+		Reason: importer.ReasonInUse, Profiles: []string{"sol"},
+	}}}
+	cmd := Command(Options{Client: fake})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"add", "--import", "codex", "--dry-run"})
+	if err := cmd.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("a refused import reported success")
+	}
+	if len(fake.imported) != 3 || fake.imported[0] != "codex" || fake.imported[2] != true {
+		t.Fatalf("engine call = %v, want harness, account, dry run", fake.imported)
+	}
+	if text := out.String(); !strings.Contains(text, "sol") || !strings.Contains(text, "enabled profile") {
+		t.Fatalf("import output = %q, want the profile named", text)
+	}
+
+	fake.result = importer.Result{Harness: "codex", Moved: []importer.Moved{{Source: "source", Label: "Work", Account: "pi-account", Provider: store.ProviderChatGPT, Kind: store.KindOAuth}}}
+	cmd = Command(Options{Client: fake})
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"add", "--import", "codex"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("a move failed: %v", err)
+	}
+	if text := out.String(); !strings.Contains(text, "pi-account") || !strings.Contains(text, "Work") {
+		t.Fatalf("import output = %q, want the moved account", text)
 	}
 }
 
