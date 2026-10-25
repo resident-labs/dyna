@@ -42,12 +42,43 @@ type PermissionOption struct {
 	Name     string `json:"name"`
 }
 
-// PermissionResponse answers a permission request. Behavior is the option
-// kind to take ("allow_once", "allow_always", "reject_once", "cancel").
+// PermissionBehavior is the outcome a client takes on a permission request.
+type PermissionBehavior string
+
+const (
+	// PermissionAllowOnce allows this one call.
+	PermissionAllowOnce PermissionBehavior = "allow_once"
+	// PermissionAllowAlways allows every call of this kind.
+	PermissionAllowAlways PermissionBehavior = "allow_always"
+	// PermissionRejectOnce rejects this one call.
+	PermissionRejectOnce PermissionBehavior = "reject_once"
+	// PermissionCancel cancels the question itself.
+	PermissionCancel PermissionBehavior = "cancel"
+	// PermissionCancelled is the outcome Dyna sends when nothing decides.
+	PermissionCancelled PermissionBehavior = "cancelled"
+)
+
+// PermissionResponse answers a permission request with one behavior kind.
 type PermissionResponse struct {
-	Behavior string
+	Behavior PermissionBehavior
 	OptionID string
 	Updated  json.RawMessage
+}
+
+// PermissionOutcome is the outcome of a permission request on the wire.
+type PermissionOutcome struct {
+	Behavior PermissionBehavior `json:"behavior"`
+	OptionID string             `json:"optionId,omitempty"`
+}
+
+// PermissionResult is the reply to session/request_permission.
+type PermissionResult struct {
+	Outcome PermissionOutcome `json:"outcome"`
+}
+
+// ElicitationCancel is the default reply to an unanswered elicitation request.
+type ElicitationCancel struct {
+	Action string `json:"action"`
 }
 
 // Handlers answers the requests an ACP agent sends its client. Every field is
@@ -114,18 +145,14 @@ func (h Handlers) answerRequest(ctx context.Context, method string, params json.
 		}
 		if h.Permission != nil {
 			resp := h.Permission(ctx, req)
-			outcome := map[string]any{"behavior": resp.Behavior}
-			if resp.OptionID != "" {
-				outcome["optionId"] = resp.OptionID
-			}
-			return map[string]any{"outcome": outcome}, nil
+			return PermissionResult{Outcome: PermissionOutcome{Behavior: resp.Behavior, OptionID: resp.OptionID}}, nil
 		}
-		return map[string]any{"outcome": map[string]any{"behavior": "cancelled"}}, nil
+		return PermissionResult{Outcome: PermissionOutcome{Behavior: PermissionCancelled}}, nil
 	case "session/elicitation", "elicitation/create", "_session/elicitation":
 		if h.Elicitation != nil {
 			return h.Elicitation(ctx, params), nil
 		}
-		return map[string]any{"action": "cancel"}, nil
+		return ElicitationCancel{Action: "cancel"}, nil
 	}
 	if h.UnknownRequest != nil {
 		return h.UnknownRequest(ctx, method, params)

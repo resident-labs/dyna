@@ -13,7 +13,7 @@ func TestSessionMetadataSurvivesNewLoadAndResume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	agent := ConnectedAgent(conn)
-	agent.SessionMeta = map[string]any{"agy": map[string]any{"disabledTools": []string{"start_subagent", "schedule", "run_command"}}}
+	agent.SessionMeta = json.RawMessage(`{"agy":{"disabledTools":["start_subagent","schedule","run_command"]}}`)
 	requests := make(chan map[string]any, 3)
 	go func() {
 		for _, method := range []string{"session/new", "session/load", "session/resume"} {

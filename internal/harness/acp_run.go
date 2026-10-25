@@ -111,7 +111,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	s := &acpSession{host: child, antigravity: p.Harness == profile.HarnessAntigravity}
 
 	handlers := acp.Handlers{Update: onUpdate, Stderr: onStderr, Permission: func(context.Context, acp.PermissionRequest) acp.PermissionResponse {
-		return acp.PermissionResponse{Behavior: "cancelled"}
+		return acp.PermissionResponse{Behavior: acp.PermissionCancelled}
 	}}
 	s.conn = acp.AttachTransport(newNativeSessionTransport(child), handlers)
 	handshakeCtx, hcancel := context.WithTimeout(ctx, 60*time.Second)
@@ -136,7 +136,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 		}
 	}
 	if s.antigravity {
-		s.agent.SessionMeta = map[string]any{"agy": map[string]any{"disabledTools": harnessruntime.NativeFeatureDenyTools(p.Harness, execution.DynaShell)}}
+		s.agent.SessionMeta = antigravitySessionMeta(harnessruntime.NativeFeatureDenyTools(p.Harness, execution.DynaShell))
 	}
 	var setup acp.SessionSetup
 	servers, err := acpMCPServers(p, launch.Env)

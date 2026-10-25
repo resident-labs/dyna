@@ -42,6 +42,25 @@ func validateAntigravityACPBundle(cli string) error {
 	return nil
 }
 
+// antigravityMeta is Antigravity's session _meta extension, which disables the
+// native tools Dyna already serves itself.
+type antigravityMeta struct {
+	Antigravity antigravitySessionTools `json:"agy"`
+}
+
+type antigravitySessionTools struct {
+	DisabledTools []string `json:"disabledTools"`
+}
+
+// antigravitySessionMeta builds the raw extension data for a session request.
+func antigravitySessionMeta(disabledTools []string) json.RawMessage {
+	raw, err := json.Marshal(antigravityMeta{Antigravity: antigravitySessionTools{DisabledTools: disabledTools}})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
 // acpMCPServers carries the immutable catalog into Antigravity's ACP session.
 // Grok reads its generated account config directly.
 func acpMCPServers(p profile.Profile, launchEnv []string) ([]acp.McpServer, error) {

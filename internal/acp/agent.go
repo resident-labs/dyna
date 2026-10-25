@@ -8,15 +8,97 @@ import (
 	"dyna-agent/internal/jsonrpc"
 )
 
-// ClientInfo identifies Dyna to the agent.
-var ClientInfo = map[string]any{"name": "dyna", "version": "1"}
+// ClientInfo identifies Dyna to an ACP agent on initialize.
+type ClientInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
 
-// InitializeMeta is sent with initialize. Grok 1.0.62 only surfaces permission
-// prompts to clients that declare an extension client type.
-var InitializeMeta = map[string]any{"clientType": "extension"}
+// DynaClientInfo is the client identity Dyna sends on initialize.
+var DynaClientInfo = ClientInfo{Name: "dyna", Version: "1"}
 
-// CancelInterruptMeta marks Dyna's cancel as the interactive interrupt.
-var CancelInterruptMeta = map[string]any{"cancelTrigger": "ctrl_c"}
+// FileSystemCapabilities declares the file methods the client serves. Dyna
+// serves none of them itself, so both fields stay false.
+type FileSystemCapabilities struct {
+	ReadTextFile  bool `json:"readTextFile"`
+	WriteTextFile bool `json:"writeTextFile"`
+}
+
+// ClientCapabilities is what Dyna offers an agent on initialize.
+type ClientCapabilities struct {
+	FS       FileSystemCapabilities `json:"fs"`
+	Terminal bool                   `json:"terminal"`
+}
+
+// ClientMeta is client extension data on initialize. Grok 1.0.62 only surfaces
+// permission prompts to clients that declare an extension client type.
+type ClientMeta struct {
+	ClientType string `json:"clientType"`
+}
+
+// ExtensionClientType declares a client that reads agent extensions.
+const ExtensionClientType = "extension"
+
+// InitializeParams is the initialize request.
+type InitializeParams struct {
+	ProtocolVersion    int                `json:"protocolVersion"`
+	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
+	ClientInfo         ClientInfo         `json:"clientInfo"`
+	Meta               ClientMeta         `json:"_meta"`
+}
+
+// CancelMeta marks Dyna's cancel as the interactive interrupt.
+type CancelMeta struct {
+	CancelTrigger string `json:"cancelTrigger"`
+}
+
+// CancelTriggerInterrupt is the interrupt trigger Dyna reports on cancel.
+const CancelTriggerInterrupt = "ctrl_c"
+
+// CancelParams is the session/cancel notification.
+type CancelParams struct {
+	SessionID string     `json:"sessionId"`
+	Meta      CancelMeta `json:"_meta"`
+}
+
+// AuthenticateParams is the authenticate request.
+type AuthenticateParams struct {
+	MethodID string `json:"methodId"`
+}
+
+// SessionParams is the shared shape of the session/new, session/load and
+// session/resume requests. Meta carries the provider's raw extension data.
+type SessionParams struct {
+	SessionID  string          `json:"sessionId,omitempty"`
+	Cwd        string          `json:"cwd"`
+	McpServers []McpServer     `json:"mcpServers"`
+	Meta       json.RawMessage `json:"_meta,omitempty"`
+}
+
+// PromptParams is the session/prompt request.
+type PromptParams struct {
+	SessionID string        `json:"sessionId"`
+	Prompt    []PromptBlock `json:"prompt"`
+}
+
+// SetModelParams is grok's session/set_model request.
+type SetModelParams struct {
+	SessionID string `json:"sessionId"`
+	ModelID   string `json:"modelId"`
+}
+
+// SetModeParams is the session/set_mode request.
+type SetModeParams struct {
+	SessionID string `json:"sessionId"`
+	ModeID    string `json:"modeId"`
+}
+
+// SetConfigOptionParams is the session/set_config_option request.
+type SetConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
 
 // InitializeResult carries the negotiated agent capabilities.
 type InitializeResult struct {
@@ -140,8 +222,10 @@ type Agent struct {
 	c       *jsonrpc.Conn
 	Init    InitializeResult
 	Session SessionSetup
-	// SessionMeta carries provider session configuration on both creation and restore.
-	SessionMeta map[string]any
+	// SessionMeta carries provider extension data on both session creation and
+	// restore. Agents reject fields they do not know, so each provider's
+	// adapter owns this shape and passes it as raw JSON.
+	SessionMeta json.RawMessage
 }
 
 // Handshake performs initialize + initialized on a fresh connection.
@@ -154,14 +238,11 @@ func ConnectedAgent(c *jsonrpc.Conn) *Agent { return &Agent{c: c} }
 
 // HandshakeVersion offers the protocol version supported by the native agent.
 func HandshakeVersion(ctx context.Context, c *jsonrpc.Conn, version int) (*Agent, error) {
-	params := map[string]any{
-		"protocolVersion": version,
-		"clientCapabilities": map[string]any{
-			"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
-			"terminal": false,
-		},
-		"clientInfo": ClientInfo,
-		"_meta":      InitializeMeta,
+	params := InitializeParams{
+		ProtocolVersion:    version,
+		ClientCapabilities: ClientCapabilities{FS: FileSystemCapabilities{}, Terminal: false},
+		ClientInfo:         DynaClientInfo,
+		Meta:               ClientMeta{ClientType: ExtensionClientType},
 	}
 	a := &Agent{c: c}
 	if err := c.Request(ctx, "initialize", params, &a.Init); err != nil {
@@ -178,7 +259,7 @@ func (a *Agent) Authenticate(ctx context.Context, methodID string) error {
 	if methodID == "" {
 		return nil
 	}
-	return a.c.Request(ctx, "authenticate", map[string]any{"methodId": methodID}, nil)
+	return a.c.Request(ctx, "authenticate", AuthenticateParams{MethodID: methodID}, nil)
 }
 
 // DefaultAuthMethod picks the agent's default authentication method id.
@@ -193,11 +274,7 @@ func (a *Agent) DefaultAuthMethod() string {
 // per-session: grok spawns each with the session id in its environment.
 func (a *Agent) NewSession(ctx context.Context, cwd string, mcpServers []McpServer) (SessionSetup, error) {
 	var setup SessionSetup
-	params := map[string]any{"cwd": cwd, "mcpServers": mcpServerParam(mcpServers)}
-	if a.SessionMeta != nil {
-		params["_meta"] = a.SessionMeta
-	}
-	if err := a.c.Request(ctx, "session/new", params, &setup); err != nil {
+	if err := a.c.Request(ctx, "session/new", a.sessionParams("", cwd, mcpServers), &setup); err != nil {
 		return setup, fmt.Errorf("acp session/new: %w", err)
 	}
 	a.Session = setup
@@ -210,11 +287,7 @@ func (a *Agent) NewSession(ctx context.Context, cwd string, mcpServers []McpServ
 // the turn's update stream.
 func (a *Agent) LoadSession(ctx context.Context, sessionID, cwd string, mcpServers []McpServer) (SessionSetup, error) {
 	var setup SessionSetup
-	params := map[string]any{"sessionId": sessionID, "cwd": cwd, "mcpServers": mcpServerParam(mcpServers)}
-	if a.SessionMeta != nil {
-		params["_meta"] = a.SessionMeta
-	}
-	if err := a.c.Request(ctx, "session/load", params, &setup); err != nil {
+	if err := a.c.Request(ctx, "session/load", a.sessionParams(sessionID, cwd, mcpServers), &setup); err != nil {
 		return setup, fmt.Errorf("acp session/load: %w", err)
 	}
 	a.Session = setup
@@ -224,28 +297,26 @@ func (a *Agent) LoadSession(ctx context.Context, sessionID, cwd string, mcpServe
 // ResumeSession restores a session through the ACP v2 resume method.
 func (a *Agent) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []McpServer) (SessionSetup, error) {
 	var setup SessionSetup
-	params := map[string]any{"sessionId": sessionID, "cwd": cwd, "mcpServers": mcpServerParam(mcpServers)}
-	if a.SessionMeta != nil {
-		params["_meta"] = a.SessionMeta
-	}
-	if err := a.c.Request(ctx, "session/resume", params, &setup); err != nil {
+	if err := a.c.Request(ctx, "session/resume", a.sessionParams(sessionID, cwd, mcpServers), &setup); err != nil {
 		return setup, fmt.Errorf("acp session/resume: %w", err)
 	}
 	a.Session = setup
 	return setup, nil
 }
 
-func mcpServerParam(servers []McpServer) any {
+// sessionParams builds a session request. An absent MCP list must reach the
+// agent as an empty array, not null, and provider meta only when it is set.
+func (a *Agent) sessionParams(sessionID, cwd string, servers []McpServer) SessionParams {
 	if servers == nil {
-		return []any{}
+		servers = []McpServer{}
 	}
-	return servers
+	return SessionParams{SessionID: sessionID, Cwd: cwd, McpServers: servers, Meta: a.SessionMeta}
 }
 
 // Prompt sends one prompt and waits for its reply.
 func (a *Agent) Prompt(ctx context.Context, sessionID string, blocks []PromptBlock) (PromptResult, error) {
 	var result PromptResult
-	params := map[string]any{"sessionId": sessionID, "prompt": blocks}
+	params := PromptParams{SessionID: sessionID, Prompt: blocks}
 	if err := a.c.Request(ctx, "session/prompt", params, &result); err != nil {
 		return result, fmt.Errorf("acp session/prompt: %w", err)
 	}
@@ -254,7 +325,7 @@ func (a *Agent) Prompt(ctx context.Context, sessionID string, blocks []PromptBlo
 
 // Cancel asks the agent to interrupt the running prompt for sessionID.
 func (a *Agent) Cancel(sessionID string) error {
-	return a.c.Notify("session/cancel", map[string]any{"sessionId": sessionID, "_meta": CancelInterruptMeta})
+	return a.c.Notify("session/cancel", CancelParams{SessionID: sessionID, Meta: CancelMeta{CancelTrigger: CancelTriggerInterrupt}})
 }
 
 // SetModel switches the session model (grok session/set_model extension).
@@ -262,20 +333,16 @@ func (a *Agent) SetModel(ctx context.Context, sessionID, modelID string) error {
 	if modelID == "" {
 		return nil
 	}
-	return a.c.Request(ctx, "session/set_model", map[string]any{"sessionId": sessionID, "modelId": modelID}, nil)
+	return a.c.Request(ctx, "session/set_model", SetModelParams{SessionID: sessionID, ModelID: modelID}, nil)
 }
 
 // SetMode selects the advertised native permission mode.
 func (a *Agent) SetMode(ctx context.Context, sessionID, modeID string) error {
-	return a.c.Request(ctx, "session/set_mode", map[string]any{"sessionId": sessionID, "modeId": modeID}, nil)
+	return a.c.Request(ctx, "session/set_mode", SetModeParams{SessionID: sessionID, ModeID: modeID}, nil)
 }
 
 // SetConfigOption changes one ACP session config option, such as thinking.
 func (a *Agent) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
-	params := struct {
-		SessionID string `json:"sessionId"`
-		ConfigID  string `json:"configId"`
-		Value     string `json:"value"`
-	}{SessionID: sessionID, ConfigID: configID, Value: value}
+	params := SetConfigOptionParams{SessionID: sessionID, ConfigID: configID, Value: value}
 	return a.c.Request(ctx, "session/set_config_option", params, nil)
 }
