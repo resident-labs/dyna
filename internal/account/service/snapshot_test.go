@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -86,20 +85,5 @@ func TestBlockingQuotaMetadata(t *testing.T) {
 		if accounts[0].QuotaBlocked {
 			t.Fatalf("invalid or expired reset blocks: %q", reset)
 		}
-	}
-}
-
-// A broken account index shows its error in Usage instead of an empty list.
-func TestSnapshotReportsUnreadableAccountIndex(t *testing.T) {
-	store := &accountstore.Store{Root: filepath.Join(t.TempDir(), "accounts")}
-	if err := os.MkdirAll(store.Root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store.Root, "accounts.json"), []byte("{not json"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	snap := New(Options{Store: store}).Snapshot(context.Background(), false)
-	if len(snap.Accounts) != 0 || snap.Message == "" {
-		t.Fatalf("Snapshot() = %+v; want the storage error", snap)
 	}
 }

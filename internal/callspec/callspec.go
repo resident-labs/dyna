@@ -96,9 +96,9 @@ var LongCalls = map[string]time.Duration{
 	"SyncPrivateRuntime": 10 * time.Minute, "RemovePrivateRuntime": 10 * time.Minute, "BeginPrivateRuntimeLogin": 10 * time.Minute,
 	"FinishPrivateRuntimeLogin": 10 * time.Minute, "RestartPrivateRuntimeLogin": 10 * time.Minute, "FindPersonalLogin": 10 * time.Minute,
 	"UsePersonalLogin": 10 * time.Minute, "ImportPrivateConfig": 10 * time.Minute,
-	"ActivatePrivateRuntimeAccount": 10 * time.Minute, "GCPrivateRuntime": 10 * time.Minute,
+	"GCPrivateRuntime": 10 * time.Minute,
 	"AccountsUse": 10 * time.Minute, "AccountsRemove": 10 * time.Minute,
-	"ConfirmPrivateRuntimeAccountSwitch": 10 * time.Minute, "AddHarnessMCP": 10 * time.Minute, "AddHarnessSkill": 10 * time.Minute,
+	"AddHarnessMCP": 10 * time.Minute, "AddHarnessSkill": 10 * time.Minute,
 	// CLI catalog edits generate private harness files synchronously, like the
 	// browser add calls above. Item 8 will move generation to a background job.
 	"AddCatalogMCP": 10 * time.Minute, "AddCatalogSkill": 10 * time.Minute,

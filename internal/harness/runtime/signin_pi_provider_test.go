@@ -36,7 +36,7 @@ func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 	r := providerKeysRuntime(t)
 	bundle := install(t, r.Bundles, "pi", "1.3.0")
 	ctx := context.Background()
-	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err != nil {
+	if _, err := r.AddProviderKey(ctx, "pi", store.ProviderZAI, "", testProviderKey); err != nil {
 		t.Fatal(err)
 	}
 	flow, err := r.piProviderFlow(bundle.Executable, "")
@@ -74,9 +74,16 @@ func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 	if _, err = os.Stat(flow.Cwd); !os.IsNotExist(err) {
 		t.Fatalf("scratch home stayed: %v", err)
 	}
-	got, err := r.HarnessProviderKeys(ctx, "pi", "remove", "kimi-coding", "")
-	if err != nil || len(got.Providers) != 1 || got.Providers[0].ID != "zai" {
-		t.Fatalf("remove a sign-in: %+v %v", got, err)
+	for _, n := range accounts {
+		if n.Provider == store.ProviderKimiCode {
+			if err := r.Accounts.Remove(n.ID, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	accounts, _ = r.Accounts.List()
+	if len(accounts) != 1 || accounts[0].Provider != store.ProviderZAI {
+		t.Fatalf("accounts after removing the sign-in: %+v", accounts)
 	}
 }
 

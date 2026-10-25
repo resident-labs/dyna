@@ -106,11 +106,6 @@ func TestOwnerLoginImportNativeFiles(t *testing.T) {
 			if err != nil || !sameNativeLogin(actual[0], saved) {
 				t.Fatal("snapshot differs from private login")
 			}
-			if requirePrivateAccount(h) {
-				if err := requirePrivateSnapshot(n); err != nil {
-					t.Fatal(err)
-				}
-			}
 			if env["HOME"] != harnesshome.Home(scope) {
 				t.Fatal("private HOME missing")
 			}

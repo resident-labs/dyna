@@ -20,7 +20,6 @@ import (
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/modelcooldown"
 	"dyna-agent/internal/harness/preferences"
-	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/lanesync"
@@ -58,7 +57,6 @@ var migrations = []func(dataDir string) error{
 	state.MigrateMirrors,
 	reposcope.Migrate,
 	accountstore.Migrate,
-	harnessruntime.MigratePrivateHomes,
 	devicegrant.Migrate,
 	devicestore.Migrate,
 	callerid.Migrate,
