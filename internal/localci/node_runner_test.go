@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -40,6 +41,9 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				if fakeSystemdVersion(out, name, args) {
+					return nil
+				}
 				if fakeNodeGit(dir, out, name, args) {
 					return nil
 				}
@@ -153,6 +157,60 @@ func exitError(t *testing.T, code int) error {
 	return err
 }
 
+// fakeSystemdVersion answers the version the runner reads before it bounds a
+// check, so a fake command answers for the check itself. The version matches
+// the systemd that expands a command's arguments and knows the argument that
+// stops it.
+func fakeSystemdVersion(out io.Writer, name string, args []string) bool {
+	joined := strings.Join(append([]string{name}, args...), " ")
+	if !strings.Contains(joined, "systemd-run") || !strings.Contains(joined, "--version") {
+		return false
+	}
+	fmt.Fprintln(out, "systemd 259 (259.5-0ubuntu3.4)")
+	return true
+}
+
+// --expand-environment=no arrived in systemd 254. An older systemd rejects it
+// and expands nothing of its own, so the scope runs without it; from 254 Dyna
+// keeps it, because a systemd that expands $ would rewrite the check script.
+// The script reaches bash as written either way.
+func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		version  string
+		noExpand bool
+	}{
+		{"debian 12", "systemd 252 (252.39-1~deb12u1)", false},
+		{"systemd 253", "systemd 253.5-1", false},
+		{"systemd 254", "systemd 254.5-1", true},
+		{"arch", "systemd 262 (262-1-arch)", true},
+		{"unreadable", "systemd-run: no version here\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls [][]string
+			runner := Runner{Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				calls = append(calls, append([]string{name}, args...))
+				if name == "systemd-run" && len(args) == 1 && args[0] == "--version" {
+					_, err := io.WriteString(out, tc.version+"\n")
+					return err
+				}
+				return nil
+			}
+			if err := runner.nodeCommand(t.Context(), io.Discard, io.Discard, "dyna-ci-run", "echo $isolated"); err != nil {
+				t.Fatal(err)
+			}
+			scope := calls[len(calls)-1]
+			if got := slices.Contains(scope, "--expand-environment=no"); got != tc.noExpand {
+				t.Fatalf("scope args = %v, want the no-expand argument %t", scope, tc.noExpand)
+			}
+			if last := scope[len(scope)-1]; last != "echo $isolated" {
+				t.Fatalf("script argument = %q, want it unchanged", last)
+			}
+		})
+	}
+}
+
 func fakeNodeGit(dir string, out io.Writer, name string, args []string) bool {
 	if name != "git" {
 		return false
@@ -202,6 +260,9 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	release := make(chan struct{})
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 8, Enabled: true}}
 	runner.Command = func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
@@ -328,6 +389,9 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 			var sawSSH, sawPush, sawCleanup, sawRemove, reportsCopied bool
 			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				if fakeSystemdVersion(out, name, args) {
+					return nil
+				}
 				if fakeNodeGit(dir, out, name, args) {
 					if strings.Contains(strings.Join(args, " "), "push") {
 						sawPush = strings.Contains(strings.Join(args, " "), "push pip@host:")
@@ -453,6 +517,9 @@ func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
 	defer cancel()
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
@@ -531,6 +598,9 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 			var attempts, cleans atomic.Int32
 			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				if fakeSystemdVersion(out, name, args) {
+					return nil
+				}
 				if fakeNodeGit(dir, out, name, args) {
 					return nil
 				}
@@ -588,6 +658,9 @@ func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
@@ -648,6 +721,9 @@ func writeCheckReports(out io.Writer, files map[string]string) error {
 func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
