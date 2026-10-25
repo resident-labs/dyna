@@ -48,7 +48,7 @@ func TestSelectForRepoSwitchesToTheAllowedAccount(t *testing.T) {
 		if err := a.SelectForRepo(context.Background(), "claude-code", store.ProviderAnthropic, "", c.repo, "/fake/native"); err != nil {
 			t.Fatalf("repo %q: %v", c.repo, err)
 		}
-		if active, err := a.Active("claude-code"); err != nil || active.ID != c.want {
+		if active, err := a.Active(accountProvider("claude-code"), "claude-code"); err != nil || active.ID != c.want {
 			t.Fatalf("repo %q: active = %v, %v; want %s", c.repo, active.ID, err, c.want)
 		}
 	}
@@ -63,7 +63,7 @@ func TestSelectForRepoNeverPicksARefusedAccount(t *testing.T) {
 	if err == nil {
 		t.Fatal("the personal account was allowed into a protected repo")
 	}
-	if active, _ := a.Active("claude-code"); active.ID != personal.ID {
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != personal.ID {
 		t.Fatalf("active changed to %s", active.ID)
 	}
 }
@@ -115,7 +115,7 @@ func TestFailoverMovesToTheAllowedAccountAndNeverToARefusedOne(t *testing.T) {
 	if _, _, err := a.Failover(context.Background(), store.ProviderAnthropic, work.ID, workRepo, "/fake/native", until); err == nil || !strings.Contains(err.Error(), "resets") {
 		t.Fatalf("err = %v, want the reset time", err)
 	}
-	if active, _ := a.Active("claude-code"); active.ID != work.ID {
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != work.ID {
 		t.Fatalf("active moved to %s", active.ID)
 	}
 	// In another repo the personal account is allowed and takes over.
@@ -127,7 +127,7 @@ func TestFailoverMovesToTheAllowedAccountAndNeverToARefusedOne(t *testing.T) {
 	if err != nil || from.ID != personal.ID || to.ID != second.ID {
 		t.Fatalf("from=%v to=%v err=%v", from.ID, to.ID, err)
 	}
-	if active, _ := a.Active("claude-code"); active.ID != second.ID {
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID != second.ID {
 		t.Fatal("the account did not switch")
 	}
 }

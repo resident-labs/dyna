@@ -110,7 +110,7 @@ func TestSwitchActivationBoundaryIgnoresLateCancellation(t *testing.T) {
 	if err := a.SwitchWithProgress(ctx, second.ID, "/fake/codex", func() { called = true }); err != nil {
 		t.Fatal(err)
 	}
-	active, err := a.Active("codex")
+	active, err := a.Active(accountProvider("codex"), "codex")
 	if err != nil || active.ID != second.ID || !called {
 		t.Fatal(active, called, err)
 	}

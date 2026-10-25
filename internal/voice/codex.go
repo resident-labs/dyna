@@ -14,7 +14,7 @@ import (
 // account refresh, which is the only writer of the login.
 func CodexCredentials(ctx context.Context) (token, account string, err error) {
 	accounts := runtime.NewAccounts()
-	n, err := accounts.Active("codex")
+	n, err := accounts.Active(runtime.ProviderForModel("codex", ""), "codex")
 	if err != nil {
 		return "", "", errors.New("sign in to Codex in Settings > Harnesses first")
 	}
