@@ -1,7 +1,5 @@
 package runtime
 
-import "path/filepath"
-
 // kimiCodeInheritedEnv lists Kimi settings that could inject an owner's
 // credentials, provider endpoint, model, headers, or region into a private
 // account. NativeEnvironmentBase removes them before profile and native
@@ -19,17 +17,14 @@ var kimiCodeInheritedEnv = []string{
 }
 
 func init() {
+	// Kimi Code's harness is retired, but its saved accounts still refresh and
+	// report usage from config.toml and credentials/ in the account home, so
+	// the account keeps the native files and environment its reader needs. No
+	// harness lists, installs, leases or runs it.
 	RegisterRuntimeAdapter(RuntimeAdapter{
-		Harness:      "kimi-code",
-		Binary:       "kimi",
-		ConfigFormat: "json",
-		MCPKey:       "mcpServers",
-		// config.toml contains the managed OAuth reference and model catalog.
-		// Generations must never replace it. ACP receives the generated MCP
-		// catalog directly; only skills use the shared account-home view.
-		ConfigFile: "",
-		SkillDir:   "skills",
-		AuthFiles:  []string{"config.toml", "credentials/kimi-code.json"},
+		Harness:     "kimi-code",
+		AccountOnly: true,
+		AuthFiles:   []string{"config.toml", "credentials/kimi-code.json"},
 		NativeEnv: func(home string) map[string]string {
 			return map[string]string{
 				"KIMI_CODE_HOME":           home,
@@ -38,14 +33,8 @@ func init() {
 			}
 		},
 		UnsetEnv: kimiCodeInheritedEnv,
-		// Kimi ACP has no catalog-path flag. The shared ACP launcher consumes
-		// this internal generation marker and never forwards it to the CLI.
-		ConfigArgs: func(_ string, configPath, _ string) []string {
-			return []string{"--add-dir", filepath.Dir(configPath)}
-		},
+		// Nothing starts this login any more; the command only satisfies the
+		// manager contract that builds the private environment.
 		LoginArgs: func(executable, _ string) []string { return []string{executable, "login"} },
-		PartialReasons: []string{
-			"Native settings use the shared Kimi home and are not pinned per generation.",
-		},
 	})
 }

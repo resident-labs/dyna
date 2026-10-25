@@ -30,9 +30,7 @@ var harnessDefinitions = []HarnessDefinition{
 	{HarnessCodex, "codex", []string{"--version"}, workeroutput.DialectCodexJSONL, "codex-app-server", "thread/resume", harnessProbePrompt, []string{"codex-tools.jsonl"}},
 	{HarnessOpenCode, "opencode", []string{"--version"}, workeroutput.DialectOpenCodeJSON, "opencode-run", "--session", harnessProbePrompt, []string{"opencode-stream.jsonl"}},
 	{HarnessMuse, "muse", []string{"--version"}, workeroutput.DialectMuseJSONL, "muse-exec", "--session-id", harnessProbePrompt, []string{"muse-stream.jsonl"}},
-	{HarnessGrok, "grok", []string{"--version"}, workeroutput.DialectAcpJSON, "grok-acp", "load", harnessProbePrompt, []string{"acp-grok.jsonl"}},
 	{HarnessPi, "pi", []string{"--version"}, workeroutput.DialectPiJSON, "pi-print", "--session", harnessProbePrompt, []string{"pi-stream.jsonl"}},
-	{HarnessKimiCode, "kimi", []string{"--version"}, workeroutput.DialectAcpJSON, "kimi-acp", "load", harnessProbePrompt, []string{"acp-grok.jsonl"}},
 	{HarnessCustom, "", nil, workeroutput.DialectText, "command", "", harnessProbePrompt, []string{"plain-text.txt"}},
 	{HarnessMock, "", nil, workeroutput.DialectText, "mock", "mock", harnessProbePrompt, []string{"plain-text.txt"}},
 }

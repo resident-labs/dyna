@@ -96,7 +96,7 @@ func writeGenerationSession(t *testing.T, name string, pin Pin, closed bool) {
 }
 
 func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "grok", "pi", "muse"} {
+	for _, h := range []string{"claude-code", "codex", "opencode", "pi", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
 			t.Setenv("MCP_TOKEN", "first-secret-canary")
@@ -600,14 +600,14 @@ func writeGenerationJSON(path string, value any, mode os.FileMode) error {
 }
 
 func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
-	r, home, id := generationFixture(t, "grok")
-	a := buildGeneration(t, r, "grok", home, id)
+	r, home, id := generationFixture(t, "pi")
+	a := buildGeneration(t, r, "pi", home, id)
 	// The old skill view can disappear while the shared config still refers to A.
 	// A failed config replacement must preserve both the old and pending targets.
 	if err := os.RemoveAll(filepath.Join(home, "skills")); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(home, "config.toml")
+	config := filepath.Join(home, "mcp.json")
 	if err := os.Remove(config); err != nil {
 		t.Fatal(err)
 	}
@@ -618,8 +618,8 @@ func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
 	if err := os.Symlink(outside, config); err != nil {
 		t.Fatal(err)
 	}
-	addGenerationMCP(t, r, "grok", "changed")
-	pending, err := r.generate("grok", home, id, os.LookupEnv)
+	addGenerationMCP(t, r, "pi", "changed")
+	pending, err := r.generate("pi", home, id, os.LookupEnv)
 	if err == nil {
 		t.Fatal("unsafe shared config publication succeeded")
 	}

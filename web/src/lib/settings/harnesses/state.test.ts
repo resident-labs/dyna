@@ -75,12 +75,12 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
   assert.equal(codex.runningTurns, 2)
   assert.match(codex.reason, /switch pending: 2 turns running/)
 
-  const grok = harnessRowState('grok', snapshot)
-  assert.equal(grok.status, 'not installed')
-  assert.equal(grok.needsSignIn, false)
-  assert.equal(grok.needsInstall, true)
+  const pi = harnessRowState('pi', snapshot)
+  assert.equal(pi.status, 'not installed')
+  assert.equal(pi.needsSignIn, false)
+  assert.equal(pi.needsInstall, true)
 
-  const installing = harnessRowState('grok', { ...snapshot, installing: ['grok'] })
+  const installing = harnessRowState('pi', { ...snapshot, installing: ['pi'] })
   assert.equal(installing.status, 'installing')
   assert.match(installing.reason, /installing its copy/)
 })
@@ -94,7 +94,7 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
   assert.equal(toolSummary('mcp', { command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
-  assert.equal(HARNESS_ORDER.length, 7)
+  assert.equal(HARNESS_ORDER.length, 5)
 })
 
 test('tool selection sends the runtime harness ID to the catalog', async () => {

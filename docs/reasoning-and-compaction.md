@@ -1,7 +1,7 @@
 # Reasoning and compaction output contract
 
 Research checked on 2026-10-18 against Claude Code 2.1.302, Codex 0.163.0,
-OpenCode 2.0.32, Grok 1.0.62 and Pi 1.3.0, plus real Dyna session captures.
+OpenCode 2.0.32 and Pi 1.3.0, plus real Dyna session captures.
 Each adapter in `internal/workeroutput` turns one harness's stdout into
 normalized events. This page says what every adapter must emit for reasoning
 and for context compaction. `internal/transcript` and the session DM rely on it.
@@ -16,8 +16,8 @@ This page is the target contract. Until the PRs below land, Dyna has these gaps:
 - Muse reports no compaction in its MSP output, and the OpenCode CLI prints
   none, so their compaction shows only when Dyna ran the compact command
   itself (trigger `dyna`).
-- Pi emits a message's thinking after its text (#467). Grok and OpenCode can
-  emit empty reasoning events (#468).
+- Pi emits a message's thinking after its text (#467). OpenCode can emit
+  empty reasoning events (#468).
 
 Remove this section when those PRs have landed.
 
@@ -76,7 +76,6 @@ wizard's last step is the same editor.
 | `codex` | `-c model_auto_compact_token_limit=N` |
 | `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 compacts 33K below the window, and the window must be 100K to 1M, so N is 67K to 967K. |
 | `muse` | `-c context_compaction.soft_threshold=N/window` |
-| `grok` | `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`, a whole percent of the window, rounded down |
 | `opencode` | Before a resumed turn, Dyna reads the stored context size with `session.context`. At N tokens, it admits `session.compact` and waits with `experimental.session.wait`. The shared service keeps its default automatic compaction. |
 | `pi` | none; Dyna runs `pi --mode rpc --session <id>` with `{"type":"compact"}` |
 
@@ -109,9 +108,7 @@ The table lists what each harness sends.
 | `claude-stream-json` | `thinking` content block, one per assistant record | whole | `system` `status` `compacting` (started); `status` null with `compact_result: "failed"` (failed); `compact_boundary` (completed, with `compact_metadata.trigger`, `pre_tokens` and `post_tokens`) |
 | `codex-jsonl` | `item.completed` with item type `reasoning`; text is a summary such as `**Title**\n\nbody` | whole | `item.started` and `item.completed` with item type `context_compaction` (exec) or `contextCompaction` (app-server); trigger auto |
 | `opencode-json` | `reasoning` part when `--thinking` is set | whole | none on stdout; Dyna's own `session.compact` request shows as trigger `dyna` |
-| `grok-json` | `thought` records, a few tokens each | delta | `auto_compact_started`, `auto_compact_completed`, `auto_compact_failed`, `auto_compact_cancelled`; trigger auto |
 | `pi-json` | `thinking` blocks in `message_end`; `message_update` deltas are ignored | whole | `compaction_start` and `compaction_end` with `reason` (rate), `result.tokensBefore` and `result.estimatedTokensAfter` |
-| `acp-json` (Kimi Code ACP) | none seen | none | none; the ACP server compacts on its own |
 | `muse-jsonl` | none seen | none | none in the MSP records Dyna captures |
 | `text` | none | none | none |
 

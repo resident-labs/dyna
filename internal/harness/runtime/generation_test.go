@@ -13,7 +13,7 @@ import (
 )
 
 func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
-	for _, h := range []string{"opencode", "pi", "grok", "muse"} {
+	for _, h := range []string{"opencode", "pi", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			accounts := testAccounts(t)
 			t.Setenv("DYNA_BIN", "/fake/dyna")
@@ -41,8 +41,8 @@ func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
 			switch h {
 			case "pi":
 				target = filepath.Join(home, "mcp.json")
-			case "grok", "muse":
-				target = filepath.Join(gen.Directory, "settings."+map[string]string{"grok": "toml", "muse": "json"}[h])
+			case "muse":
+				target = filepath.Join(gen.Directory, "settings.json")
 			case "opencode":
 				target = filepath.Join(gen.Directory, "settings.json")
 			}

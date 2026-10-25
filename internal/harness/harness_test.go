@@ -1405,19 +1405,3 @@ func TestUsageLimitAndUnknownErrorsAreNotRetried(t *testing.T) {
 	}
 }
 
-func TestACPInstructionsUsePromptSnapshot(t *testing.T) {
-	for _, h := range []string{profile.HarnessGrok, profile.HarnessKimiCode} {
-		p := profile.Profile{Harness: h, RuntimeInstructions: "ACP_RULE_CANARY"}
-		if NativeInstructions(h) {
-			t.Fatalf("%s still uses a CLI instruction flag", h)
-		}
-		prompt := WithPromptInstructions(p, "task")
-		if !strings.Contains(prompt, "ACP_RULE_CANARY") || WithPromptInstructions(p, prompt) != prompt {
-			t.Fatalf("%s lost or duplicated prompt instructions: %q", h, prompt)
-		}
-		inv, err := buildInvocation(p, prompt)
-		if err != nil || inv.initial.acpPrompt != prompt {
-			t.Fatalf("%s did not deliver the snapshot through ACP: %+v, %v", h, inv.initial, err)
-		}
-	}
-}
