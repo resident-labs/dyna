@@ -27,8 +27,10 @@ test('close rows name the work, what happened and where it went', () => {
 })
 
 // Work that became top level says so, instead of leaving the destination out.
+// The engine sends an empty destination for a top-level move, which is the
+// value handOverChildren reports when the heir is empty.
 test('a moved row without a receiver is top level', () => {
-  const rows = closeRows([{ kind: 'child', result: 'moved', id: 'ses_z', name: 'worker-4' }])
+  const rows = closeRows([{ kind: 'child', result: 'moved', id: 'ses_z', name: 'worker-4', to: '' }])
   assert.equal(rows[0]?.result, 'handed over to top level')
 })
 
