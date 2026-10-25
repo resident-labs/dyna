@@ -82,7 +82,6 @@ const (
 	ProviderOpenCodeGo Provider = "opencode-go"
 	ProviderDeepSeek   Provider = "deepseek"
 	ProviderZAI        Provider = "zai"
-	ProviderGoogle     Provider = "google"
 )
 
 // Kind is how an account signed in: an interactive sign-in or a pasted key.
@@ -109,8 +108,6 @@ func ProviderFor(harness, integration string) (Provider, Kind) {
 		return ProviderXAI, KindOAuth
 	case "muse":
 		return ProviderMetaMuse, KindOAuth
-	case "antigravity":
-		return ProviderGoogle, KindOAuth
 	case "opencode":
 		switch integration {
 		case "", "opencode", "opencode-go":

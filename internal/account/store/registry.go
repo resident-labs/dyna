@@ -61,7 +61,7 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 5, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 6, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
@@ -83,6 +83,11 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 		if err := fillProviders(ctx, conn); err != nil {
 			return err
 		}
+		if old < 6 {
+			if err := dropRetiredHarnessRows(ctx, conn); err != nil {
+				return err
+			}
+		}
 		return fillActiveSelections(ctx, conn, legacyActive)
 	})
 	return db, err
@@ -101,6 +106,14 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 	}
 	_, err := conn.ExecContext(ctx, "ALTER TABLE account_active RENAME TO account_active_harness")
 	return err == nil, err
+}
+
+// TODO: legacy/shim remove later — Antigravity was removed on 2026-10-25. Its
+// saved rows predate that and nothing can sign in or refresh them, so version 6
+// drops them instead of leaving a provider no code names.
+func dropRetiredHarnessRows(ctx context.Context, conn *sql.Conn) error {
+	_, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE json_extract(CAST(metadata AS TEXT), '$.harness') = 'antigravity'")
+	return err
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the
