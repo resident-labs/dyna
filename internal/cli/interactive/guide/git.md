@@ -373,6 +373,11 @@ When you find an architectural smell outside your current task, file it with `dy
 ```bash
 dyna issue "Unify the parser paths" --at internal/parser.go:12 --note "Two callers use different rules."
 dyna issue list --json
+dyna issue show D-12                 # or just: dyna issue D-12
+dyna issue msg_c0181ec6ea9acc8a      # the message it was filed with
 ```
+
+A lone issue reference reads that issue and files nothing. A new issue whose whole
+title is an issue number is refused, with the `dyna issue show` command to run.
 
 Root or the owner can triage an issue with `dyna issue close <id> --reason "..."` or `dyna issue export <id>`. Start work with `dyna goal --fixes D-N [--for @name]`, or link an existing goal with `dyna goal edit gN --fixes D-N`. Export uses the room GitHub account and requires read-write access.
