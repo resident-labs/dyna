@@ -54,9 +54,9 @@ test('the conversation is a timeline with the review round inline and a pinned o
   assert.match(t, /Round 1 · 2 open/)
   assert.match(html, /class="pin"[^>]*>|class="pin /)
   assert.match(html, /id="latest-round"/)
-  assert.match(t, /Show review/)
-  assert.match(t, /should-fix · a\.go:7 — why f2/)
-  assert.doesNotMatch(t, /fix f2/)
+  assert.match(t, /Hide review/)
+  assert.match(t, /why f2/)
+  assert.match(t, /fix f2/)
   assert.doesNotMatch(t, /Review rounds/i)
   assert.equal((t.match(/Changes requested/g) ?? []).length, 0)
   assert.match(t, /sol changes requested · round 1 · 3 findings/)
@@ -65,6 +65,20 @@ test('the conversation is a timeline with the review round inline and a pinned o
   assert.match(t, /coderabbitai/)
   assert.ok(t.indexOf('Removes the old runner') < t.indexOf('Fixed the hook import'))
   assert.ok(t.indexOf('Fixed the hook import') < t.indexOf('coderabbitai'))
+})
+
+test('a review with findings renders each finding once and starts expanded', async () => {
+  const render = await load()
+  // The summary repeats the findings in markdown, as a reviewer writes them.
+  const copied = round(1, { summary: 'Good removal.\n\n- should-fix · a.go:7 — why f2\n- should-fix · a.go:7 — why f3', findings: [finding('f1', [reply('fixed')]), finding('f2'), finding('f3', [reply('question')])] })
+  const html = render({ detail, events: [{ kind: 'round', at: copied.at, round: copied }], bots: [], change: full([copied]), names: { rv: 'sol' }, checks: [] })
+  const t = text(html)
+  assert.equal((t.match(/why f2/g) ?? []).length, 1)
+  assert.equal((t.match(/why f3/g) ?? []).length, 1)
+  assert.equal((t.match(/fix f2/g) ?? []).length, 1)
+  assert.match(t, /Good removal\./)
+  assert.match(t, /Hide review/)
+  assert.match(html, /class="findings/)
 })
 
 test('with no open findings the pinned card is gone', async () => {
@@ -80,7 +94,7 @@ test('a reviewed local change shows its round with no GitHub detail', async () =
   const html = render({ detail: null, events: [{ kind: 'round', at: round1.at, round: round1 }], bots: [], change: full([round1]), names: {}, checks: [] })
   const t = text(html)
   assert.match(t, /round 1 · 3 findings/)
-  assert.match(t, /Show review/)
+  assert.match(t, /Hide review/)
   assert.match(t, /Round 1 · 2 open/)
 })
 
@@ -116,14 +130,14 @@ test('firstSentence keeps the opening sentence of a long review', () => {
   assert.equal(firstSentence(''), '')
 })
 
-test('an approved round with no findings shows only the first sentence until opened', async () => {
+test('an approved round with no findings shows its whole summary and no control', async () => {
   const render = await load()
   const done = round(1, { verdict: 'approve', summary: 'Approved. The removal is clean.\n\nSecond paragraph with detail.\n\nThird paragraph.' })
   const html = render({ detail, events: [{ kind: 'round', at: done.at, round: done }], bots: [], change: full([done]), names: {}, checks: [] })
   const t = text(html)
   assert.match(t, /Approved\./)
-  assert.doesNotMatch(t, /Second paragraph/)
-  assert.match(t, /Show review/)
+  assert.match(t, /Second paragraph/)
+  assert.doesNotMatch(t, /Show review|Hide review/)
   assert.match(html, /class="rcard[^"]* ok/)
 })
 
