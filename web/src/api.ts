@@ -76,7 +76,7 @@ export const api = {
   accountsView: (scope = '') => app.AccountsView(scope),
   accountsList: (scope = '', refresh = false) => app.AccountsList(scope, refresh),
   accountsUse: (id: string, scope = '') => app.AccountsUse(id, scope),
-  accountsAdd: (provider: string, label: string, key: string, harness = 'pi') => app.AccountsAdd(provider, label, key, harness),
+  accountsAdd: (harness: string, provider: string, label: string, key: string) => app.AccountsAdd(harness, provider, label, key),
   accountsRemove: (id: string) => app.AccountsRemove(id),
   profileModels: (harness: string, refresh = false) => app.ProfileModels(harness, refresh),
   usageRollup: (roomId = '', from: string, to: string) => app.UsageRollup(roomId, from, to),
