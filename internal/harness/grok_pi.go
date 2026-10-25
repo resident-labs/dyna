@@ -30,7 +30,9 @@ func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv 
 		// extension (shipped docs/cli.md), so load that one alone: without it
 		// a session loses every MCP tool, Dyna's shell included.
 		if exec.DisableNativeSubagents {
-			args = append(args, "--no-extensions", "-e", "builtin:mcp")
+			// builtin:codemode is how Pi reaches catalog MCP tools that keep its
+			// default exposure; Dyna's own shell is exposed directly.
+			args = append(args, "--no-extensions", "-e", "builtin:mcp", "-e", "builtin:codemode")
 		}
 		if p.Model != "" {
 			args = append(args, "--model", p.Model)
