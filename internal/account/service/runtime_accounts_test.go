@@ -377,9 +377,9 @@ func TestKimiRetiredAccountUsesAndRenewsWithoutBundle(t *testing.T) {
 	// A due saved login renews and checkpoints the rotated grant.
 	writeKimiLogin(t, accounts, now.Add(-time.Minute))
 	writeSavedLogin(t, n.Home, kimiLogin(captured[0].Identity, now.Add(-time.Minute)))
-	result, err := accounts.RefreshCredentials(t.Context(), n.ID, "")
-	if err != nil || !result.Refreshed {
-		t.Fatalf("refresh = %+v, %v", result, err)
+	// The scheduled pass is what must reach a retired harness.
+	if next := s.RefreshCredentials(t.Context(), now); !next.Equal(now.Add(time.Minute)) {
+		t.Fatalf("next credential check = %v, want one minute after a renewal", next)
 	}
 	saved, err := os.ReadFile(filepath.Join(n.Home, ".login.json"))
 	if err != nil {
