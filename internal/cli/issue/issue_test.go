@@ -100,6 +100,13 @@ func TestIssueStampedCaller(t *testing.T) {
 	if _, err = sessions.UpdateMeta(meta.ID, func(m *subagent.Meta) { m.Name = "root" }); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = run("close", i.ID, "--reason", "done"); err == nil {
+		t.Fatal("a session named root closed an issue without the root role")
+	}
+	// The room's root seat is the stored role, not the name an address shows.
+	if _, err = sessions.UpdateMeta(meta.ID, func(m *subagent.Meta) { m.Role = subagent.RoleRoot }); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = run("close", i.ID, "--reason", "done"); err != nil {
 		t.Fatal(err)
 	}

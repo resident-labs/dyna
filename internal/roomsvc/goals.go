@@ -182,7 +182,7 @@ func (s *Service) startGoal(ctx context.Context, roomRef string, req goalStart) 
 	if author.ID == "owner" {
 		actor = r.Name
 	}
-	g, err := service.Store.AddWithIssues(r.ID, author.ID, actor, in, req.Fixes, req.Claim)
+	g, err := service.Store.AddWithIssues(ctx, r.ID, author.ID, actor, in, req.Fixes, req.Claim)
 	if err != nil {
 		return g, err
 	}
@@ -220,7 +220,7 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 	if author.ID == "owner" {
 		actor = r.Name
 	}
-	links, err := s.goalService().Store.PrepareIssueLinks(r.ID, actor, fixes)
+	links, err := s.goalService().Store.PrepareIssueLinks(ctx, r.ID, fixes)
 	if err != nil {
 		return goals.Goal{}, err
 	}
@@ -228,7 +228,7 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 	if err != nil || len(fixes) == 0 {
 		return g, err
 	}
-	return g, s.goalService().Store.LinkPreparedIssues(r.ID, g.ID, actor, links, goals.ClaimAny)
+	return g, s.goalService().Store.LinkPreparedIssues(ctx, r.ID, g.ID, actor, links, goals.ClaimAny)
 }
 
 func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holders *[]string, shared bool) (goals.Goal, error) {
