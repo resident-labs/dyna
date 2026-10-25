@@ -58,6 +58,10 @@ type registeredCIRun struct {
 
 	repo   string
 	number int
+	// kind is the work the run checks, which the machine view words.
+	kind RunningCIKind
+	// branch names a local change's branch, which has no pull request number.
+	branch string
 	trial  bool
 	// local marks a run for a local head. No hosted poll decides that head: the
 	// trial or the sync operation that admitted the run reads its own saved
@@ -74,13 +78,27 @@ type registeredCIJob struct {
 	head, branch string
 	base         string
 	trial        bool
-	created      time.Time
+	// sync marks the CI of an integration sync, which has no change of its own.
+	sync    bool
+	created time.Time
 }
 
 // hosted reports whether this job's CI evidence comes from GitHub. A local
 // change has no hosted provider, so its evidence and publication stay in the
 // local lane and the job skips every GitHub step.
 func (j registeredCIJob) hosted() bool { return changeKind(j.record) == "github" }
+
+// kind names the work the job checks, so the machine view words a run that has
+// no pull request number.
+func (j registeredCIJob) kind() RunningCIKind {
+	switch {
+	case j.sync:
+		return RunningCISync
+	case j.hosted():
+		return RunningCIPullRequest
+	}
+	return RunningCILocalChange
+}
 
 // nodeRuns returns the run set for this service. Every service over the same
 // PR store shares the set of the process, so a read-only service reports the
@@ -457,7 +475,8 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
 	run := &registeredCIRun{
 		node: chosen.Name, slots: slots, cancel: cancel, stopped: make(chan struct{}),
-		repo: job.record.Repo, number: job.record.Number, trial: job.trial, local: !job.hosted(),
+		repo: job.record.Repo, number: job.record.Number, kind: job.kind(), branch: job.branch,
+		trial: job.trial, local: !job.hosted(),
 		head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
 	}
 	runs.runs[key] = run
