@@ -43,8 +43,9 @@ func rootSelfPost(msg Message, roomName string) bool {
 // row instead of classifying the post again. The root's own posts and the
 // Voice call's transcript lines are never root context, and the owner's posts
 // to agents stay quiet: the agents answer them, and root only learns what was
-// said. Wake intent is the post's own Wake field; passive turn input has no
-// quiet category, because the internal root reads it in full.
+// said. A session of another room that posts to the seat asks it to act, so
+// that post wakes. Wake intent is the post's own Wake field; passive turn
+// input has no quiet category, because the internal root reads it in full.
 func RootContext(msg Message, roomName string) (RootDecision, string) {
 	// The Voice call's lines stay in the call, and the seat's own posts never
 	// come back to it. An orchestrator's own post as the owner is an echo too,
@@ -107,6 +108,15 @@ func rootWakes(msg Message, roomName string) bool {
 		}
 		return msg.NeedsRoot
 	}
+	// A post from a session of another room asks this seat to act. The sender
+	// named this room's root because its own root does not read this room's
+	// work, so a quiet copy would wait for a wake that never comes. A session
+	// address is <room>:<agent>, and notify binds the sender's own address to
+	// its session when it stores the post. The engine, a shell and a workflow
+	// run bind no sender, so their posts keep the kind rules below.
+	if senderFromAnotherRoom(msg, roomName) {
+		return msg.Wake
+	}
 	switch msg.Kind {
 	case "", "message":
 		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice
@@ -124,4 +134,15 @@ func rootWakes(msg Message, roomName string) bool {
 		return msg.OwnerReport
 	}
 	return false
+}
+
+// senderFromAnotherRoom reports a post whose sender is a session of a room
+// other than roomName: a bound sender names its own session, and its room is
+// the part of its address before the agent name.
+func senderFromAnotherRoom(msg Message, roomName string) bool {
+	if msg.SessionIDs[msg.From] == "" {
+		return false
+	}
+	room, agent, ok := strings.Cut(msg.From, ":")
+	return ok && agent != "" && room != roomName
 }
