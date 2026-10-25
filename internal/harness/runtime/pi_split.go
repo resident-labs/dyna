@@ -221,6 +221,11 @@ func (r *Runtime) SplitPiAccounts(ctx context.Context) {
 		log.Printf("pi accounts: the shared login could not be read: %v", err)
 		return
 	}
+	// A credential added to the shared login after the plan was saved joins the plan.
+	if sources, err = r.addSharedEntries(ctx, db, sources, sharedEntries, shared); err != nil {
+		log.Printf("pi accounts: the split plan could not be extended: %v", err)
+		return
+	}
 	activeLegacy, _ := db.Active("", "pi", "")
 	var firstErr error
 	for _, source := range sources {
@@ -271,13 +276,18 @@ func (r *Runtime) planPiSplit(ctx context.Context) ([]store.PiSplitSource, error
 		sources = append(sources, store.PiSplitSource{Account: n.ID, Home: n.Home, Label: n.Label,
 			Repos: slices.Clone(n.Repos), Entries: slices.Sorted(maps.Keys(entries))})
 	}
-	// A shared entry that a source account also holds belongs to that account and
-	// moves under its rules. An entry only the shared login holds ran under the
-	// account that was selected for Pi, so it keeps that account's limits; giving
-	// it another account's rules, or no rules at all, would let a credential run
-	// where its account was limited. With one account, the shared login was that
-	// account's login, so all of it moves under its rules.
 	selected, _ := (&store.Store{Root: r.Accounts.Root}).Active("", "pi", "")
+	return assignSharedEntries(sources, sharedEntries, owned, selected, shared), nil
+}
+
+// assignSharedEntries gives each shared-login entry that no source holds to a
+// source. An entry that a source account also holds belongs to that account and
+// moves under its rules. An entry only the shared login holds ran under the
+// account that was selected for Pi, so it keeps that account's limits; giving
+// it another account's rules, or no rules at all, would let a credential run
+// where its account was limited. With one account, the shared login was that
+// account's login, so all of it moves under its rules.
+func assignSharedEntries(sources []store.PiSplitSource, sharedEntries map[string]json.RawMessage, owned map[string]bool, selected, shared string) []store.PiSplitSource {
 	var owner *store.PiSplitSource
 	for i := range sources {
 		if len(sources) == 1 || sources[i].Account == selected {
@@ -303,10 +313,16 @@ func (r *Runtime) planPiSplit(ctx context.Context) ([]store.PiSplitSource, error
 	if len(orphan) > 0 {
 		// No account was selected, so no account's limits are known for these.
 		log.Printf("pi accounts: %d shared credentials have no selected account and move without repository limits", len(orphan))
-		sources = append(sources, store.PiSplitSource{Account: "", Home: shared, Label: "shared login",
-			Entries: slices.Sorted(slices.Values(orphan))})
+		slices.Sort(orphan)
+		for i := range sources {
+			if sources[i].Account == "" {
+				sources[i].Entries = slices.Sorted(slices.Values(append(sources[i].Entries, orphan...)))
+				return sources
+			}
+		}
+		sources = append(sources, store.PiSplitSource{Account: "", Home: shared, Label: "shared login", Entries: orphan})
 	}
-	return sources, nil
+	return sources
 }
 
 // splitPiSource moves every provider entry of one source. The source row itself
@@ -433,4 +449,28 @@ func piSavedEntries(ctx context.Context, home string) map[string]json.RawMessage
 		return entries
 	}
 	return piSnapshotEntries(home)
+}
+
+// addSharedEntries adds the shared-login entries that the saved plan lacks to
+// the plan, and saves each source it changed.
+func (r *Runtime) addSharedEntries(ctx context.Context, db *store.Store, sources []store.PiSplitSource, sharedEntries map[string]json.RawMessage, shared string) ([]store.PiSplitSource, error) {
+	owned := map[string]bool{}
+	before := map[string]int{}
+	for _, source := range sources {
+		before[source.Account] = len(source.Entries)
+		for _, id := range source.Entries {
+			owned[id] = true
+		}
+	}
+	selected, _ := db.Active("", "pi", "")
+	sources = assignSharedEntries(sources, sharedEntries, owned, selected, shared)
+	for _, source := range sources {
+		if n, planned := before[source.Account]; planned && n == len(source.Entries) {
+			continue
+		}
+		if err := db.SavePiSplitSource(ctx, source); err != nil {
+			return sources, err
+		}
+	}
+	return sources, nil
 }

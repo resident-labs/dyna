@@ -449,3 +449,48 @@ func TestPiSplitKeepsEachSourcesCredentialAndRules(t *testing.T) {
 		}
 	}
 }
+
+// A credential added to the shared login after the split ran becomes an account
+// of its provider at the next start, and earlier accounts are not made twice.
+func TestPiSplitPicksUpACredentialAddedLater(t *testing.T) {
+	r := providerKeysRuntime(t)
+	install(t, r.Bundles, "pi", "1.3.0")
+	ctx := context.Background()
+	shared, err := r.Accounts.HarnessHome("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(shared, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(shared, "auth.json"), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"zai":{"type":"api_key","key":"z"}}`)
+	if _, err = r.Accounts.Create("pi", "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	r.SplitPiAccounts(ctx)
+	first, err := r.Accounts.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	write(`{"zai":{"type":"api_key","key":"z"},"openai-codex":{"type":"oauth","access":"a","refresh":"r","expires":1}}`)
+	r.SplitPiAccounts(ctx)
+	r.SplitPiAccounts(ctx)
+	after, err := r.Accounts.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(first)+1 {
+		t.Fatalf("accounts went from %d to %d, want one new account", len(first), len(after))
+	}
+	active, err := (&store.Store{Root: r.Accounts.Root}).Active(store.ProviderChatGPT, "pi", "")
+	if err != nil || active == "" {
+		t.Fatalf("the new ChatGPT account is not active: %q %v", active, err)
+	}
+}
