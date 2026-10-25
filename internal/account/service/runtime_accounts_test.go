@@ -1,13 +1,17 @@
 package service
 
 import (
-	"dyna-agent/internal/account/native"
-	"dyna-agent/internal/account/store"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/account/store"
+	"dyna-agent/internal/harness/runtime"
 )
 
 func TestUnsupportedCredentialExpiryOffersSignIn(t *testing.T) {
@@ -153,4 +157,61 @@ func TestOpenCodeSavedReferenceExpiryIsInformational(t *testing.T) {
 	if a.NeedsLogin || a.Status != "ready" || a.ExpiresAt.UnixMilli() != 1999999999999 {
 		t.Fatal("current native expiry lost", a)
 	}
+}
+
+// A saved login of a retired harness keeps reporting usage and renewing: the
+// bundle and executable a turn would need are no longer required.
+func TestRetiredHarnessAccountRefreshesAndReportsUsageWithoutBundle(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	root := filepath.Join(t.TempDir(), "accounts")
+	accounts := &runtime.Accounts{Root: root}
+	n, err := accounts.Create("grok", "saved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const client = "b1a00492-073a-47ea-816f-4c329264a828"
+	auth, err := json.Marshal(map[string]any{"https://auth.x.ai::" + client: map[string]any{
+		"auth_mode": "oidc", "key": "fixture-access", "refresh_token": "fixture-refresh", "user_id": "fixture-user",
+		"oidc_issuer": "https://auth.x.ai", "oidc_client_id": client, "expires_at": now.Add(time.Hour).UTC().Format(time.RFC3339Nano),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := accounts.HarnessHome("grok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The account slot holds the saved login; the shared home holds the login
+	// the usage reader captures.
+	for _, dir := range []string{home, n.Home} {
+		if err := os.WriteFile(filepath.Join(dir, "auth.json"), auth, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := accounts.Capture(t.Context(), n.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	// A signed-in account; activation would clear this flag.
+	if err := (&store.Store{Root: root}).Update(func(state *store.State) error {
+		state.Find(n.ID).NeedsLogin = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&store.Store{Root: root}).SetActive(store.ProviderXAI, "", n.ID); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Store: &store.Store{Root: root}, Now: func() time.Time { return now }})
+	rows, err := s.nativeHomeAccounts(t.Context(), false)
+	if err != nil || len(rows) != 1 || rows[0].Status != "ready" {
+		t.Fatalf("retired harness account = %+v, %v", rows, err)
+	}
+	if runtime.RunsAsHarness("grok") || runtime.RunsAsHarness("kimi-code") {
+		t.Fatal("a retired harness is still runnable")
+	}
+	// Renewal reaches the saved login: the next check is its refresh time, not
+	// the retry ceiling a skipped account would leave.
 }
