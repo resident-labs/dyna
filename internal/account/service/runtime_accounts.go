@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -258,6 +259,7 @@ func (s *Service) refreshNativeUsage(ctx context.Context, a *Account, prober nat
 
 // Both credential refresh and usage probe failures use the same saved result.
 func (s *Service) saveNativeUsageObservation(a *Account, captured native.Captured, observation store.Observation, probeErr error) error {
+	observation, probeErr = guardUsageResult(observation, probeErr, captured)
 	if errors.Is(probeErr, native.ErrUsageIdle) {
 		// Idle mint responses omit quota. Keep its real observation time and values.
 		return s.o.Store.Update(func(state *store.State) error {
@@ -281,6 +283,7 @@ func (s *Service) saveNativeUsageObservation(a *Account, captured native.Capture
 				}
 			}
 			saved.UsageError = ""
+			saved.Reason = ""
 			saved.Unavailable = false
 			saved.Failures = 0
 			saved.LastAttemptAt = s.o.Now().UTC()
@@ -302,20 +305,23 @@ func (s *Service) saveNativeUsageObservation(a *Account, captured native.Capture
 				observation = *entry.Observation
 			}
 			observation.UsageError = a.UsageError
+			observation.Reason = usageReason(probeErr)
 			observation.Failures++
 			observation.Unavailable = true
-			if errors.Is(probeErr, native.ErrInvalidGrant) {
+			if errors.Is(probeErr, native.ErrInvalidGrant) || isReaderSecret(probeErr) {
 				observation.Windows, observation.Plan = []store.Window{}, nil
 			}
 		} else {
 			observation.UsageError = ""
+			observation.Reason = ""
 			observation.RateLimitedUntil = nil
 		}
 		observation.LastAttemptAt = s.o.Now().UTC()
 		var quota *native.QuotaError
-		if errors.As(probeErr, &quota) && quota.Status == 429 {
+		if errors.As(probeErr, &quota) && quota.Status == http.StatusTooManyRequests {
 			next := observation.LastAttemptAt.Add(max(quota.RetryAfter, activeUsageTTL))
 			observation.RateLimitedUntil = &next
+			observation.Reason = store.UsageReasonRateLimited
 			observation.UsageError = "rate limited"
 			if !observation.ObservedAt.IsZero() {
 				observation.UsageError += "; showing the reading from " + observation.ObservedAt.UTC().Format(time.RFC3339)
@@ -337,14 +343,40 @@ func (s *Service) saveNativeUsageObservation(a *Account, captured native.Capture
 // Apply only after native capture has proved the saved account identity.
 func applyNativeUsageObservation(a *Account, observation store.Observation, err error) {
 	if err == nil {
-		a.UsageError = ""
+		a.UsageError, a.UsageReason = "", ""
 		a.Status, a.NeedsLogin, a.Stale = "ready", false, false
 		a.Plan, a.Windows, a.ObservedAt = observation.Plan, observation.Windows, observation.ObservedAt
 	} else {
 		a.UsageError, a.Stale = err.Error(), true
+		a.UsageReason = usageReason(err)
+		if isReaderSecret(err) {
+			a.Windows, a.Plan = []Window{}, nil
+		}
 		if errors.Is(err, native.ErrInvalidGrant) {
 			a.Status, a.NeedsLogin = "needs_auth", true
 			a.Windows, a.Plan = []Window{}, nil
 		}
 	}
+}
+
+// usageReason classifies a failed usage reading for the account view.
+func usageReason(err error) store.UsageReason {
+	var unavailable *native.UsageUnavailableError
+	if errors.As(err, &unavailable) {
+		return unavailable.Reason
+	}
+	var quota *native.QuotaError
+	if errors.As(err, &quota) {
+		if quota.Status == http.StatusTooManyRequests {
+			return store.UsageReasonRateLimited
+		}
+		return store.UsageReasonProviderError
+	}
+	if errors.Is(err, native.ErrInvalidGrant) {
+		return store.UsageReasonExpired
+	}
+	if errors.Is(err, native.ErrUnsupported) {
+		return store.UsageReasonNotReadable
+	}
+	return store.UsageReasonProviderError
 }

@@ -61,6 +61,16 @@ export function percent(value?: number | null): string {
   return finite(value) ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%` : 'Not reported'
 }
 
+// money formats a balance in its currency. A balance is money, not a percent.
+export function money(value?: number | null, unit?: string): string {
+  if (!finite(value)) return 'Not reported'
+  if (['USD', 'usd'].includes(unit ?? '')) {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value)
+  }
+  const formatted = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)
+  return unit ? `${formatted} ${unit.toUpperCase()}` : formatted
+}
+
 export function dateTime(value?: string | null): string {
   if (!value) return ''
   const date = new Date(value)
@@ -106,14 +116,28 @@ function blockedNow(account: AccountLike | null | undefined, now: number): { ids
   return { ids: account?.blockingQuotaWindows ?? [], reset: account?.quotaBlockedUntil ?? '' }
 }
 
-// usageUnavailableText says why an account shows no meters. A key account gets
-// its own words: the provider publishes no quota for a key, so an empty meter
-// there is expected, not a fault.
+// usageUnavailableText says why an account shows no meters. It uses the typed
+// reason, never raw reader text. A key account gets its own words: the
+// provider publishes no quota for a key, so an empty meter there is expected.
 export function usageUnavailableText(account?: AccountLike | null): string {
   if (needsSignIn(account)) return 'Sign in to read usage'
+  switch (account?.usageReason) {
+    case 'expired': return 'Sign in again to read usage'
+    case 'secret': return 'Reader output rejected: contained a secret'
+    case 'not-readable': return notReadableUsage(account?.provider)
+    case 'rate-limited': return 'Usage is rate limited. Try again later'
+    case 'provider-error': return 'Usage is temporarily unavailable'
+    case 'no-windows': return 'The provider reported no usage windows'
+  }
   if (account?.kind === 'api_key') return 'Usage unavailable for an API key'
   if (account?.status === 'not-installed') return 'Not installed'
   return 'Usage unavailable'
+}
+
+// notReadableUsage names the provider when Dyna cannot read its plan usage.
+function notReadableUsage(provider?: string | null): string {
+  if (provider === 'meta-muse') return 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse to read it.'
+  return 'This provider does not publish usage that Dyna can read.'
 }
 
 // Every async read uses a ticket. Invalidating on close/context change also rejects

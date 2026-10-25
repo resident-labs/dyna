@@ -7,6 +7,13 @@ const vite = await createTestServer({ after })
 const { render } = await vite.ssrLoadModule('svelte/server')
 const { default: Meter } = await vite.ssrLoadModule('/src/lib/settings/accounts/UsageMeter.svelte')
 
+test('a balance meter shows money without a percent', () => {
+  const window = { id: 'balance-usd', label: 'Balance (USD)', balance: 53.78, unit: 'USD' }
+  const html = render(Meter, { props: { window, observedAt: '2026-10-25T00:00:00Z' } }).body
+  assert.match(html, /\$53\.78/)
+  assert.doesNotMatch(html, /left|Not reported|role="meter"/)
+})
+
 test('usage meters show uncertain resets without a numeric meter in both layouts', () => {
   for (const compact of [false, true]) {
     const window = { label: 'Weekly', usedPercent: 99, resetsAt: '2020-01-02T00:00:00Z' }

@@ -28,7 +28,9 @@ An account is named by ID, an ID prefix, or a label that names one account only.
 
 ## Usage
 
-**Settings → Usage** lists the private accounts with their plan and usage windows. It first shows the last saved observation, with its checked time. **Refresh** asks each provider for the active account's current usage. A window whose reset time has passed shows reset usage. Missing quota stays unknown; it is never zero or unlimited.
+**Settings → Accounts** lists the private accounts with their plan and usage windows. It first shows the last saved observation, with its checked time. **Refresh** asks each provider for the active account's current usage. A window whose reset time has passed shows reset usage. Missing quota stays unknown; it is never zero or unlimited.
+
+Pi keeps one account for each provider. A usage reader runs for the provider, not the harness, and reads the credential from that account's own Pi home: the ChatGPT plan, Kimi Code, xAI Grok credits, OpenCode Go, the DeepSeek balance, and the z.ai Coding Plan. Muse and an Anthropic API key publish no usage a Pi key can read, so they show that typed reason. A reader that returns the account's credential, or a value that looks like a key or token, has its result rejected.
 
 **Sign in** on a Usage row opens the Harnesses page. **Create profile** in an account's details starts a profile for that account's harness.
 

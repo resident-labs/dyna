@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+func TestSummaryShowsABalanceWithoutAPercent(t *testing.T) {
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	amount := 53.78
+	got := windowsSummary(Account{ObservedAt: now, Windows: []Window{{ID: "balance-usd", Label: "Balance (USD)", Balance: &amount, Unit: "USD"}}}, now)
+	if got != "Balance (USD) $53.78" {
+		t.Fatalf("balance summary = %q", got)
+	}
+}
+
 func TestSummaryNeverShowsAPastResetTime(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	past := now.Add(-49 * time.Hour).Format(time.RFC3339)
