@@ -12,7 +12,7 @@
   import AddAccount from './AddAccount.svelte'
   import LocalActivity from './LocalActivity.svelte'
   import { accountLabel, accountsOf, problemText, providerName, requestGate } from './state.ts'
-  import type { AccountsSnapshot, ScopeAccount } from '../../api/account.ts'
+  import type { AccountsSnapshot, Provider, ScopeAccount } from '../../api/account.ts'
   import type { ModelSelection } from '../profiles/state.ts'
 
   // The Accounts page: every saved provider sign-in, grouped by provider, with
@@ -33,7 +33,7 @@
   let tab = $state('accounts')
   let roomScope = $state(false)
   let adding = $state(false)
-  let signInFor = $state<{ id: string; label: string } | null>(null)
+  let signInFor = $state<{ id: string; label: string; provider?: Provider; harness?: string } | null>(null)
   let removing = $state<ScopeAccount | null>(null)
   let busy = $state(false)
   let detail = $state<{ account: ScopeAccount; key: number } | null>(null)
@@ -84,11 +84,20 @@
     void load(false)
   }
 
+  // use chooses an account for the scope the owner sees. The scope can change
+  // while the engine answers, so a late answer for the old scope is dropped and
+  // the current scope is read again instead.
+  let useTicket = 0
   async function use(account: ScopeAccount) {
     if (busy) return
+    const wanted = scope
+    const ticket = ++useTicket
     busy = true; error = ''; notice = ''
     try {
-      snapshot = await api.accountsUse(account.id, scope)
+      const next = await api.accountsUse(account.id, wanted)
+      if (!mounted || ticket !== useTicket) return
+      if (wanted !== scope) { await load(false); return }
+      snapshot = next
       notice = `${accountLabel(account)} is now in use.`
     } catch (e) { if (mounted) error = errorText(e) || 'Could not choose the account.' }
     finally { if (mounted) busy = false }
@@ -120,7 +129,7 @@
 
   function startSignIn(account: ScopeAccount) {
     detail = null
-    signInFor = { id: account.id, label: accountLabel(account) }
+    signInFor = { id: account.id, label: accountLabel(account), provider: account.provider, harness: account.harness }
   }
 
   function open(account: ScopeAccount, event?: MouseEvent) {

@@ -75,14 +75,14 @@ interface Usage {
 interface CloseState {
   usage: Usage | null
   runtimes: { v: string } | null
-  api: { accountsList: () => Promise<Usage>; privateRuntimes: () => Promise<{ v: string }> }
+  api: { accountsView: () => Promise<Usage>; privateRuntimes: () => Promise<{ v: string }> }
   refresh: () => Promise<void>
 }
 
 test('closing Settings reloads the home screen accounts and runtimes', async () => {
   let n = 0
   const state = { usage: { providers: [{ provider: 'zai', accounts: [{ id: 'g', needsLogin: true }] }] } as Usage, runtimes: { v: 'old' }, api: {
-    accountsList: () => Promise.resolve({ providers: [{ provider: 'zai', accounts: [{ id: 'g', needsLogin: false }] }], n: ++n }),
+    accountsView: () => Promise.resolve({ providers: [{ provider: 'zai', accounts: [{ id: 'g', needsLogin: false }] }], n: ++n }),
     privateRuntimes: () => Promise.resolve({ v: 'new' }),
   } }
   const c: CloseState = Object.assign(state, homeFunctions<Pick<CloseState, 'refresh'>>(refreshCode, state, ['refresh']))
@@ -105,7 +105,7 @@ test('a late account answer cannot replace a newer one', async () => {
   const old = new Promise<Usage>((r) => { resolveOld = r })
   let calls = 0
   const state = { usage: null as Usage | null, runtimes: null as { v: string } | null, api: {
-    accountsList: () => (++calls === 1 ? old : Promise.resolve({ id: 'new' })),
+    accountsView: () => (++calls === 1 ? old : Promise.resolve({ id: 'new' })),
     privateRuntimes: () => new Promise<{ v: string }>(() => {}),
   } }
   const c: CloseState = Object.assign(state, homeFunctions<Pick<CloseState, 'refresh'>>(refreshCode, state, ['refresh']))

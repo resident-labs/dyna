@@ -39,7 +39,7 @@ func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err != nil {
 		t.Fatal(err)
 	}
-	flow, err := r.piProviderFlow(bundle.Executable)
+	flow, err := r.piProviderFlow(bundle.Executable, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +77,54 @@ func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 	got, err := r.HarnessProviderKeys(ctx, "pi", "remove", "kimi-coding", "")
 	if err != nil || len(got.Providers) != 1 || got.Providers[0].ID != "zai" {
 		t.Fatalf("remove a sign-in: %+v %v", got, err)
+	}
+}
+
+// A sign-in again of one Pi account writes that account, even when the provider
+// uses another account: an expired inactive account must never replace the
+// active account's credential, and the selection must not move.
+func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
+	r := providerKeysRuntime(t)
+	// Restart installs Pi's copy on first use, and this tree is read-only.
+	t.Cleanup(func() { _ = removeBundle(filepath.Join(os.Getenv("XDG_DATA_HOME"), "dyna", "harnesses")) })
+	install(t, r.Bundles, "pi", "1.3.0")
+	ctx := context.Background()
+	expired := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"old"}`)
+	active := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep"}`)
+	info, err := r.RestartPrivateRuntimeLogin(ctx, expired.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.AccountID != piProviderSignInID || info.Target != expired.ID {
+		t.Fatalf("restart login = %+v, want the card aimed at %s", info, expired.ID)
+	}
+	login := r.findPrivateLogin(piProviderSignInID)
+	if login == nil || login.flow == nil {
+		t.Fatal("the sign-in flow is not running")
+	}
+	body := `{"anthropic":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
+	if err = os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.FinishPrivateRuntimeLogin(ctx, piProviderSignInID); err != nil {
+		t.Fatal(err)
+	}
+	gotExpired, err := r.Accounts.Find(expired.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if piAuthTypes(t, gotExpired.Home)["anthropic"] != "oauth" {
+		t.Fatalf("the named account kept %v", piAuthTypes(t, gotExpired.Home))
+	}
+	gotActive, err := r.Accounts.Find(active.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if piAuthTypes(t, gotActive.Home)["anthropic"] != "api_key" {
+		t.Fatalf("the active account was overwritten: %v", piAuthTypes(t, gotActive.Home))
+	}
+	if !gotActive.Active || gotExpired.Active {
+		t.Fatalf("the selection moved: expired active=%v, active active=%v", gotExpired.Active, gotActive.Active)
 	}
 }
 
