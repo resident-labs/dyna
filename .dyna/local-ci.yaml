@@ -1,0 +1,205 @@
+version: 1
+
+# Pull requests select only the trial suites whose file patterns match. Merge
+# trials run every suite in this list. The other suites remain available to
+# `dyna git ci run --suite` for focused manual runs.
+trial: [relay, go, cross-build, computer-smoke]
+
+caches:
+  - name: go-build
+    target: /cache/build
+    env: GOCACHE
+  - name: go-mod
+    target: /cache/mod
+    env: GOMODCACHE
+  - name: npm
+    target: /cache/npm
+    env: npm_config_cache
+
+checks:
+  - id: relay
+    image: node:22
+    command: bash scripts/ci.sh relay
+    caches: [npm]
+    reports: junit
+
+  - id: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test
+    caches: [npm]
+    reports: junit
+
+  - id: frontend-check
+    image: node:22
+    command: bash scripts/ci.sh frontend check
+    caches: [npm]
+    reports: none
+
+  - id: go-static
+    image: golang:1.26.3
+    hostUser: true
+    setup: timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69
+    command: bash scripts/ci.sh go modules && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+
+  - id: cross-build
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+    priority: 1
+
+  - id: computer-smoke
+    host: true
+    command: >-
+      for tool in go labwc Xwayland sqlite3 agent-browser; do command -v "$tool" >/dev/null || { echo "Missing computer-smoke prerequisite: $tool" >&2; exit 69; }; done; go test -count=1 -timeout 5m ./internal/computers
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOFLAGS: -p=2
+      DYNA_COMPUTERS_ENABLED: "0"
+      DYNA_COMPUTERS_REQUIRE_LIVE: "1"
+    reports: none
+
+  - id: go-test-shard-0
+    name: go-test-shard (0)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env: &go-test-env
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+      CI_SHARD: 0/8
+      CI_SLICE: 0/2
+    reports: go
+
+  - id: go-test-shard-1
+    name: go-test-shard (1)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 1/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-2
+    name: go-test-shard (2)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 2/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-3
+    name: go-test-shard (3)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 3/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-4
+    name: go-test-shard (4)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test && touch web/dist/index.html && bash scripts/ci.sh go desktop
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 4/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-5
+    name: go-test-shard (5)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 5/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-6
+    name: go-test-shard (6)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 6/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-7
+    name: go-test-shard (7)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 7/8
+      CI_SLICE: 1/2
+    reports: go
+
+suites:
+  - id: relay
+    files: ['^\.github/', '^scripts/ci\.sh$', '^relay/']
+    checks: [relay]
+
+  - id: frontend
+    checks: [frontend]
+
+  - id: frontend-check
+    checks: [frontend-check]
+
+  - id: go-static
+    checks: [go-static]
+
+  - id: cross-build
+    files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
+    checks: [cross-build]
+
+  - id: computer-smoke
+    files: ['^\.github/', '^internal/(computers|computerweb)/']
+    checks: [computer-smoke]
+
+  - id: go
+    group: go-test
+    files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
+    checks: [frontend, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7]
