@@ -46,13 +46,14 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		git("add", name)
+		git("add", ".")
 		git("commit", "--quiet", "-m", name)
 		return git("rev-parse", "HEAD")
 	}
 	git("init", "--quiet")
 	git("config", "user.email", "ci@example.com")
 	git("config", "user.name", "CI")
+	writeWatchDefinition(t, repo)
 	base := commit("README", "before\n")
 	head := commit("main.go", "package main\n")
 

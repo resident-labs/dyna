@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,11 +131,11 @@ func registeredTestFailure(result localci.Result, check localci.SuiteResult) boo
 	if check.Status != localci.OutcomeFailed {
 		return false
 	}
-	if check.CheckName != localci.GroupGoTest.Name() || !localInfrastructureError(result) {
+	if !localAggregate(result, check) || !localInfrastructureError(result) {
 		return true
 	}
 	for _, other := range result.Checks {
-		if other.CheckName != localci.GroupGoTest.Name() && other.Status == localci.OutcomeFailed {
+		if other.Name() != check.Name() && other.Status == localci.OutcomeFailed {
 			return true
 		}
 	}
@@ -174,24 +175,40 @@ func applyLocalBudgets(result *localci.Result, policy ChangePolicy) string {
 			}
 		}
 	}
-	goFailed := false
+	failedGroups := map[localci.Group]bool{}
 	for _, check := range result.Checks {
-		if check.Status == localci.OutcomeFailed && localci.GroupOf(check.CheckName) == localci.GroupGoTest {
-			goFailed = true
+		if check.Status == localci.OutcomeFailed && check.Group != "" {
+			failedGroups[check.Group] = true
 		}
 	}
-	if goFailed {
-		for i := range result.Checks {
-			if result.Checks[i].CheckName == localci.GroupGoTest.Name() && result.Checks[i].Status == localci.OutcomePassed {
-				result.Checks[i].Status = localci.OutcomeFailed
-				result.Checks[i].Error = "a required local CI check failed"
-			}
+	for i := range result.Checks {
+		check := &result.Checks[i]
+		if localAggregate(*result, *check) && failedGroups[localci.Group(check.Name())] && check.Status == localci.OutcomePassed {
+			check.Status = localci.OutcomeFailed
+			check.Error = "a required local CI check failed"
 		}
 	}
 	if len(notes) == 0 {
 		return ""
 	}
 	return "Local CI on " + result.Node + ": " + clip(strings.Join(notes, "; "), 3000)
+}
+
+func localAggregate(result localci.Result, check localci.SuiteResult) bool {
+	if check.Aggregate {
+		return true
+	}
+	// Results written before group metadata used go-test as both the suite and
+	// aggregate identity. Preserve their infrastructure-error classification.
+	if check.Suite == localci.SuiteGoTest && check.Name() == localci.CheckName(localci.SuiteGoTest) {
+		return true
+	}
+	for _, other := range result.Checks {
+		if other.Group != "" && other.Group.Name() == check.Name() {
+			return true
+		}
+	}
+	return false
 }
 
 // withRegisteredCI keeps the hosted and local evidence separate. A provider's
@@ -229,11 +246,72 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
 	}
+	var job registeredCIJob
+	if mode == localci.ModeLocal || mode == localci.ModeBoth || len(saved.IDs) > 0 {
+		job, err = s.registeredJobForRecord(r)
+		if err != nil {
+			return snap, err
+		}
+	}
+	var plan localCIPlan
+	var result localci.Result
+	conclusiveLocal := false
+	if mode == localci.ModeLocal || mode == localci.ModeBoth {
+		result, err = registry.LoadResult(ctx, repo, r.Head)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return snap, err
+		}
+		if result.Repo != repo || result.SHA != r.Head {
+			result = localci.Result{}
+		}
+		conclusiveLocal = result.Node != "" && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError)
+	}
+	if mode == localci.ModeLocal || mode == localci.ModeBoth {
+		if !conclusiveLocal {
+			plan, err = s.planRegisteredCI(ctx, job)
+			if err != nil {
+				return snap, err
+			}
+		}
+		if plan.baseMissing {
+			snap.localCIConfig = localCIConfigNotConfigured
+			snap = withoutLocalHostedCancellations(snap, saved, nil)
+			if len(saved.IDs) > 0 {
+				if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+					return snap, err
+				}
+			}
+			return snap, nil
+		}
+		if plan.headMissing {
+			snap.localCIConfig = localCIConfigHeadMissing
+		}
+	} else if len(saved.IDs) > 0 {
+		needsDefinition := false
+		for _, run := range snap.Runs {
+			attempt, ours := saved.Attempts[run.ID]
+			needsDefinition = needsDefinition || ours && run.Attempt <= attempt && run.CheckSuiteID != 0 && run.Conclusion != "cancelled"
+		}
+		if needsDefinition {
+			plan.execution, err = localci.LoadDefinition(ctx, r.RepoPath, r.Head)
+			if errors.Is(err, localci.ErrDefinitionNotFound) {
+				err = nil
+			}
+			if err != nil {
+				return snap, err
+			}
+		}
+	}
+	cancellationDefinition := plan.execution
+	if conclusiveLocal {
+		// Saved failures stay readable without their old commits. Cancellation
+		// classification gets the head graph separately when that graph is available.
+		cancellationDefinition, _ = localci.LoadDefinition(ctx, r.RepoPath, r.Head)
+	}
 	// A run Dyna cancelled for local CI never tested the head. Drop it here,
 	// so no later step spends an artifact read or a log excerpt on it.
-	snap = withoutLocalHostedCancellations(snap, saved)
+	snap = withoutLocalHostedCancellations(snap, saved, cancellationDefinition)
 	if !enabled {
-		job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
 		// In local mode a saved local result can decide the head without a ready
 		// node. A host that is briefly unavailable must not restart the hosted
 		// run that local CI replaced: that wait costs a full hosted run and holds
@@ -242,8 +320,8 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		// partial or unproven suite cannot release a merge. GitHub mode keeps the
 		// hosted fallback untouched.
 		if mode == localci.ModeLocal || mode == localci.ModeBoth {
-			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(ctx, job, local, policy) {
-				snap.localCI = s.registeredLocalObservation(ctx, r, snap, policy, job, local)
+			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(plan, local, policy) {
+				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local)
 				return snap, nil
 			}
 		}
@@ -257,15 +335,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		snap.localCI = &registeredCIObservation{Status: verdictFromHosted(ci), Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
-	result, err := registry.LoadResult(ctx, repo, r.Head)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return snap, err
-	}
-	if result.Repo != repo || result.SHA != r.Head {
-		result = localci.Result{}
-	}
-	job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
-	snap.localCI = s.registeredLocalObservation(ctx, r, snap, policy, job, result)
+	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result)
 	return snap, nil
 }
 
@@ -273,11 +343,11 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 // hosted read. Either provider's failure vetoes a pass, a local pass needs its
 // whole suite and the required checks, and a pending provider does not block a
 // conclusive pass.
-func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap Snapshot, policy ChangePolicy, job registeredCIJob, result localci.Result) *registeredCIObservation {
+func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result) *registeredCIObservation {
 	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	budgetNote := applyLocalBudgets(&result, policy)
 	localState, localJobs, logs := registeredResultStatus(result)
-	if result.Status == localci.OutcomePassed && !s.registeredJobResultComplete(ctx, job, result) {
+	if result.Status == localci.OutcomePassed && (!plan.runnable() || !plan.required.CoversSuites(result, plan.suites)) {
 		localState = VerdictPending
 	}
 	// A hosted failure that only cancellations caused never tested the head, so
@@ -301,8 +371,16 @@ func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap
 			runs.Unlock()
 		}
 	}
-	if observation.Status == VerdictPassed {
-		missing := missingRequiredCIChecks(policy.RequiredChecks, result, snap)
+	if observation.Status == VerdictPassed || observation.Status == VerdictPending && result.Status == localci.OutcomePassed {
+		required := append([]string(nil), policy.RequiredChecks...)
+		if plan.required != nil {
+			for _, name := range plan.required.RequiredChecks(plan.suites) {
+				if !slices.Contains(required, string(name)) {
+					required = append(required, string(name))
+				}
+			}
+		}
+		missing := missingRequiredCIChecks(required, result, snap)
 		if len(missing) > 0 {
 			observation.Status = VerdictPending
 			observation.Key = "required:" + r.Head + ":" + digest(strings.Join(missing, "\n"))
@@ -318,14 +396,14 @@ func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap
 // savedLocalSettles reports whether a saved local result can decide a head with
 // no ready node. A conclusive failure always can; a pass must cover the whole
 // suite this job runs, so a manual subset run cannot release a merge.
-func (s *Service) savedLocalSettles(ctx context.Context, job registeredCIJob, result localci.Result, policy ChangePolicy) bool {
+func (s *Service) savedLocalSettles(plan localCIPlan, result localci.Result, policy ChangePolicy) bool {
 	budgeted := result
 	applyLocalBudgets(&budgeted, policy)
 	state, _, _ := registeredResultStatus(budgeted)
 	if !state.Conclusive() {
 		return false
 	}
-	return state != VerdictPassed || s.registeredJobResultComplete(ctx, job, budgeted)
+	return state != VerdictPassed || plan.runnable() && plan.required.CoversSuites(budgeted, plan.suites)
 }
 
 func (s *Service) mergeLocalCIChecks(ctx context.Context, st State, roomID string, out *MergeControlStatus) error {
@@ -391,20 +469,11 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 	if result.Status == localci.OutcomeFailed && result.Node != "" {
 		return true
 	}
-	var suites []localci.Suite
-	if job.trial {
-		suites = localci.WorkflowSuites()
-	} else {
-		if !headSHAPattern.MatchString(job.record.Base) {
-			return false
-		}
-		files, err := gitRead(ctx, job.record.RepoPath, "diff", "--name-only", job.record.Base+"..."+job.head)
-		if err != nil {
-			return false
-		}
-		suites = localci.SuitesForFiles(strings.Split(files, "\n"))
+	plan, err := s.planRegisteredCI(ctx, job)
+	if err != nil || !plan.runnable() {
+		return false
 	}
-	return localci.CoversSuites(result, suites)
+	return plan.required.CoversSuites(result, plan.suites)
 }
 
 // A finished failing check is conclusive even while another hosted job runs.

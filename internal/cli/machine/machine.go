@@ -3,6 +3,7 @@
 package machine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,8 +16,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"dyna-agent/internal/cli/jsonout"
+	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/websvc"
 )
 
 // NewCommand builds the `dyna machine` group.
@@ -38,6 +41,10 @@ func NewCommand() *cobra.Command {
 }
 
 func store() machines.Store { return machines.Store{} }
+
+var saveMachine = func(ctx context.Context, id string, patch websvc.MachinePatch) error {
+	return engineclient.New("").Call(ctx, "SaveMachine", []any{id, patch}, nil)
+}
 
 // prober is the prober the CLI saves through. It reads the same disk floor as
 // the engine, so a probe from the command line marks a CI machine that is low
@@ -119,6 +126,9 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "Roles:    %s\n", m.RoleNames())
 			fmt.Fprintf(out, "SSH:      %s\n", ssh)
 			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
+			if m.HasRole(machines.RoleCI) {
+				fmt.Fprintf(out, "Host checks: %t\n", m.AllowHostChecks)
+			}
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
 			fmt.Fprintf(out, "Status:   %s\n", m.Status())
@@ -299,6 +309,7 @@ func editCommand() *cobra.Command {
 	var roleNames []string
 	var slots int
 	var enable, disable bool
+	var allowHostChecks, disallowHostChecks bool
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
 		Short: "Change a machine",
@@ -340,11 +351,25 @@ func editCommand() *cobra.Command {
 			if disable {
 				m.Enabled, changed = false, true
 			}
+			if allowHostChecks {
+				m.AllowHostChecks, changed = true, true
+			}
+			if disallowHostChecks {
+				m.AllowHostChecks, changed = false, true
+			}
 			if !changed {
-				return fmt.Errorf("edit %s: give at least one of --rename, --ssh, --role, --ci-slots, --enable or --disable", args[0])
+				return fmt.Errorf("edit %s: give a machine or host-check setting to change", args[0])
+			}
+			if allowHostChecks && !m.HasRole(machines.RoleCI) {
+				return fmt.Errorf("host checks require the ci role")
 			}
 			if m.HasRole(machines.RoleCI) && m.CISlots < 1 {
 				m.CISlots = 1
+			}
+			if allowHostChecks || disallowHostChecks {
+				if err := saveMachine(c.Context(), m.ID, websvc.MachinePatch{AllowHostChecks: &m.AllowHostChecks}); err != nil {
+					return err
+				}
 			}
 			saved, err := s.Save(c.Context(), m)
 			if err != nil {
@@ -360,7 +385,10 @@ func editCommand() *cobra.Command {
 	cmd.Flags().IntVar(&slots, "ci-slots", 0, "maximum concurrent CI checks; a positive value adds the ci role")
 	cmd.Flags().BoolVar(&enable, "enable", false, "allow work on the machine")
 	cmd.Flags().BoolVar(&disable, "disable", false, "stop new work on the machine")
+	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
+	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
+	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
 }
 

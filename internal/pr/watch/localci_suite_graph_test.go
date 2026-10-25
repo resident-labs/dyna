@@ -1,11 +1,36 @@
 package watch
 
 import (
-	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/localci"
 )
+
+func watchDynaDefinition(t *testing.T) *localci.Definition {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", filepath.FromSlash(localci.DefinitionPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := localci.ParseDefinition(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return definition
+}
+
+func watchDynaWorkflowSuites(t *testing.T) []localci.Suite {
+	t.Helper()
+	return watchDynaDefinition(t).WorkflowSuites()
+}
+
+func watchDynaRequiredChecks(t *testing.T) []localci.CheckName {
+	t.Helper()
+	definition := watchDynaDefinition(t)
+	return definition.RequiredChecks(definition.WorkflowSuites())
+}
 
 // expectedChecks is this test's own statement of the suite graph: the check names
 // each suite must report, with the go suite's eight shards spelled out. It is a
@@ -32,9 +57,9 @@ var expectedTrials = []localci.Suite{
 
 // reportedChecks is what a run of one suite leaves in a saved result: the name of
 // every check the suite expands into, plus the aggregate each one feeds.
-func reportedChecks(t *testing.T, suite localci.Suite) []localci.CheckName {
+func reportedChecks(t *testing.T, definition *localci.Definition, suite localci.Suite) []localci.CheckName {
 	t.Helper()
-	checks, ok := localci.Checks(suite)
+	checks, ok := definition.Checks(suite)
 	if !ok || len(checks) == 0 {
 		t.Fatalf("suite %q has no executable checks", suite)
 	}
@@ -101,7 +126,8 @@ func sameSet[T comparable](got, want []T) bool {
 // description therefore fails this test in the runner comparison and in the gate
 // comparison, not only in the code that dropped it.
 func TestOneSuiteDescriptionDrivesExecutionGateAndTrial(t *testing.T) {
-	described := localci.Suites()
+	definition := watchDynaDefinition(t)
+	described := definition.Suites()
 	for _, suite := range described {
 		if _, ok := expectedChecks[suite]; !ok {
 			t.Fatalf("the description names suite %q, which this test does not expect", suite)
@@ -113,35 +139,39 @@ func TestOneSuiteDescriptionDrivesExecutionGateAndTrial(t *testing.T) {
 		}
 	}
 	for suite, want := range expectedChecks {
-		if got := reportedChecks(t, suite); !sameSet(got, want) {
+		if got := reportedChecks(t, definition, suite); !sameSet(got, want) {
 			t.Fatalf("suite %q reports %v, want %v", suite, got, want)
 		}
 		suites := []localci.Suite{suite}
-		if !localci.CoversSuites(passedResult(want), suites) {
+		if !definition.CoversSuites(passedResult(want), suites) {
 			t.Fatalf("suite %q: the gate rejected a result holding every expected check", suite)
 		}
 		for _, name := range want {
-			if localci.CoversSuites(passedResult(withoutNames(want, name)), suites) {
+			if definition.CoversSuites(passedResult(withoutNames(want, name)), suites) {
 				t.Fatalf("suite %q: the gate accepted a result without %q", suite, name)
 			}
 		}
 	}
-	if got := localci.WorkflowSuites(); !sameSet(got, expectedTrials) {
+	if got := definition.WorkflowSuites(); !sameSet(got, expectedTrials) {
 		t.Fatalf("trial selection runs %v, want %v", got, expectedTrials)
 	}
 	// The merge gate reaches the same graph through its own entry point: a
 	// complete trial passes, and the same trial without one check waits.
 	service := &Service{}
-	job := registeredCIJob{trial: true, head: "0000000000000000000000000000000000000000"}
+	plan := localCIPlan{execution: definition, required: definition, suites: expectedTrials}
 	var trial []localci.CheckName
 	for _, suite := range expectedTrials {
 		trial = append(trial, expectedChecks[suite]...)
 	}
-	if !service.registeredJobResultComplete(context.Background(), job, passedResult(trial)) {
+	complete := func(result localci.Result) bool {
+		observation := service.registeredLocalObservation(Record{}, Snapshot{}, ChangePolicy{}, plan, result)
+		return observation.Status == VerdictPassed
+	}
+	if !complete(passedResult(trial)) {
 		t.Fatal("a complete trial result was rejected")
 	}
 	for _, name := range trial {
-		if service.registeredJobResultComplete(context.Background(), job, passedResult(withoutNames(trial, name))) {
+		if complete(passedResult(withoutNames(trial, name))) {
 			t.Fatalf("a trial result without %q passed the gate", name)
 		}
 	}

@@ -145,7 +145,10 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved.Name, saved.Enabled = "hermeslab", false
+	if saved.AllowHostChecks {
+		t.Fatal("host checks were enabled by default")
+	}
+	saved.Name, saved.Enabled, saved.AllowHostChecks = "hermeslab", false, true
 	renamed, err := s.Save(ctx, saved)
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +160,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 		t.Fatalf("old name remains: %v", err)
 	}
 	stored, err := s.Get(ctx, "hermeslab")
-	if err != nil || stored.Enabled || stored.CISlots != 2 {
+	if err != nil || stored.Enabled || stored.CISlots != 2 || !stored.AllowHostChecks {
 		t.Fatalf("stored machine = %#v, %v", stored, err)
 	}
 	if _, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
@@ -175,6 +178,18 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	}
 	if err := s.Remove(ctx, local.Name); !errors.Is(err, ErrLocal) {
 		t.Fatalf("removed this machine: %v", err)
+	}
+	local.Roles = append(local.Roles, RoleCI)
+	local.CISlots, local.AllowHostChecks = 1, true
+	if _, err := s.Save(ctx, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveRole(ctx, local.Name, RoleCI); err != nil {
+		t.Fatal(err)
+	}
+	local, err = s.GetLocal(ctx)
+	if err != nil || local.AllowHostChecks {
+		t.Fatalf("removing the CI role kept host permission: %#v, %v", local, err)
 	}
 	local.Roles = []Role{RoleAgents}
 	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
@@ -232,5 +247,53 @@ func TestMigrateAddsProbeColumns(t *testing.T) {
 	}
 	if stored.Status() != HealthOnline || stored.Capabilities.CPUs != 4 || stored.LastSeen.IsZero() {
 		t.Fatalf("stored probe = %#v", stored)
+	}
+}
+
+func TestMigrateInheritsHostCheckPermissionFromComputerSmoke(t *testing.T) {
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	_, err = db.Exec(machinesVersionOneSchema + `
+INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms) VALUES
+ ('m_other','other','["ci"]','ari@other',1,1,0,1000,1000),
+ ('m_setup','setup','["ci"]','ari@setup',1,1,0,1000,1000);
+CREATE TABLE local_ci_results(repo TEXT, sha TEXT, payload BLOB NOT NULL);
+INSERT INTO local_ci_results VALUES('repo','abc','{"node":"hermes","sha":"abc","status":"passed","suites":[{"suite":"computer-smoke","node":"hermes","status":"passed"}]}');
+INSERT INTO local_ci_results VALUES('repo','def','{"node":"setup","sha":"def","status":"error","suites":[{"suite":"computer-smoke","node":"setup","status":"error","cause":"container-failure"}]}');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := Store{DataDir: dir}
+	hermes, err := s.Get(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hermes.AllowHostChecks {
+		t.Fatal("migration did not preserve an existing computer-smoke machine's host permission")
+	}
+	other, err := s.Get(context.Background(), "other")
+	if err != nil || other.AllowHostChecks {
+		t.Fatalf("unrelated machine gained host permission: %#v, %v", other, err)
+	}
+	setup, err := s.Get(context.Background(), "setup")
+	if err != nil || setup.AllowHostChecks {
+		t.Fatalf("failed setup granted host permission: %#v, %v", setup, err)
+	}
+	added, err := s.Save(context.Background(), Machine{Name: "added", Roles: []Role{RoleCI}, SSH: "ari@added", CISlots: 1, Enabled: true})
+	if err != nil || added.AllowHostChecks {
+		t.Fatalf("new machine gained host permission: %#v, %v", added, err)
+	}
+	hermes.AllowHostChecks = false
+	if _, err := s.Save(context.Background(), hermes); err != nil {
+		t.Fatal(err)
+	}
+	hermes, err = s.Get(context.Background(), "hermes")
+	if err != nil || hermes.AllowHostChecks {
+		t.Fatalf("migration re-enabled an explicit owner decision: %#v, %v", hermes, err)
 	}
 }

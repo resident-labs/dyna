@@ -4,7 +4,7 @@ import { computersText, diskText, loadText, machinesSub, memoryPct, reasonText, 
 import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
-  id: 'm_1', name: 'this-machine', roles: ['engine', 'agents'], local: true, enabled: true, status: 'online', ciSlots: 0, ...over,
+  id: 'm_1', name: 'this-machine', roles: ['engine', 'agents'], local: true, enabled: true, status: 'online', ciSlots: 0, allowHostChecks: false, ...over,
 })
 
 test('a machine row shows one count for each figure the machine reports', () => {
