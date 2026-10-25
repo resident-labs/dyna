@@ -579,6 +579,13 @@ func (s services) accountsUse(ctx context.Context, id, scope string) (service.Ac
 	if err != nil {
 		return service.AccountsSnapshot{}, err
 	}
+	if roomID != "" {
+		// A room choice changes that room's future turns, so a session may choose
+		// only for its own room. The owner may choose for any room.
+		if _, err := authority.ActorIn(ctx, roomID); err != nil {
+			return service.AccountsSnapshot{}, err
+		}
+	}
 	if _, err := s.runtime.UseAccount(ctx, id, roomID); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
