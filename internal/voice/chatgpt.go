@@ -21,7 +21,13 @@ func ChatGPTCredentials(ctx context.Context) (token, account string, err error) 
 		return "", "", err
 	}
 	if expiry := native.CredentialExpiry(login.Credential); !expiry.IsZero() && time.Until(expiry) < 5*time.Minute {
-		if _, err := accounts.RefreshCredentials(ctx, id, ""); err != nil {
+		// Pi renews the grant with its own package, so the account refresh needs
+		// the managed Pi executable, not an empty path.
+		bundle, err := runtime.NewBundleManager().Resolve("pi", "")
+		if err != nil {
+			return "", "", errors.New("Dyna's copy of Pi is not installed; Voice cannot renew the ChatGPT sign-in")
+		}
+		if _, err := accounts.RefreshCredentials(ctx, id, bundle.Executable); err != nil {
 			return "", "", errors.New("the ChatGPT sign-in expired and could not be renewed; sign in again")
 		}
 		if _, login, err = chatgptLogin(ctx, accounts); err != nil {
