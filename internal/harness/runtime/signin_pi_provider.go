@@ -6,21 +6,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"sync"
 )
 
-// piProviderSignInID names the one Pi provider sign-in card. Pi keeps every
-// provider's credentials in one login file, so a provider sign-in is not an
-// account of its own: it adds the provider to Pi's single login.
+// piProviderSignInID names Pi's provider sign-in card. Pi saves the credentials
+// of each provider it signs into, and every provider gets its own account with a
+// home that holds only its entry.
 const piProviderSignInID = "pi:provider"
 
 // beginPiProviderSignIn runs Pi's provider login in a scratch home, then adds
-// the new entries to the active account and the runtime home.
+// the signed-in providers as accounts.
 func (a *Runtime) beginPiProviderSignIn(exe string) (PrivateLogin, error) {
 	if login := a.findPrivateLogin(piProviderSignInID); login != nil && login.signIn != nil && !login.signIn.snapshot().final() {
 		state := login.signIn.snapshot()
@@ -81,8 +79,8 @@ func (a *Runtime) piProviderFlow(exe string) (*NativeLogin, error) {
 			}
 			finished = true
 			defer cleanup()
-			if resultErr = a.addPiSignIn(ctx, scratch); resultErr == nil {
-				result, resultErr = a.Accounts.Active("pi")
+			if result, resultErr = a.addPiSignIn(ctx, scratch); resultErr == nil {
+				result, resultErr = a.Accounts.Find(result.ID)
 			}
 			return result, resultErr
 		},
@@ -99,39 +97,24 @@ func (a *Runtime) piProviderFlow(exe string) (*NativeLogin, error) {
 	}, nil
 }
 
-// addPiSignIn copies the entries a finished sign-in saved in scratch into the
-// active account and the runtime home. A provider it names replaces the old entry.
-func (a *Runtime) addPiSignIn(ctx context.Context, scratch string) error {
+// addPiSignIn stores each provider a finished sign-in saved in scratch in that
+// provider's own account. It returns one of them, for the card that started it.
+func (a *Runtime) addPiSignIn(ctx context.Context, scratch string) (NativeAccount, error) {
 	entries, err := piEditAuth(ctx, scratch, nil)
 	if err != nil {
-		return err
+		return NativeAccount{}, err
 	}
 	if len(entries) == 0 {
-		return errors.New("Pi did not save a sign-in.")
+		return NativeAccount{}, errors.New("Pi did not save a sign-in.")
 	}
-	return a.addPiEntries(ctx, entries, true)
-}
-
-// addPiEntries merges entries into Pi's one login. With replace false an entry
-// the login already has stays as it is.
-func (a *Runtime) addPiEntries(ctx context.Context, entries map[string]json.RawMessage, replace bool) error {
-	home, err := a.Accounts.HarnessHome("pi")
+	saved, err := a.savePiProviderEntries(ctx, entries)
 	if err != nil {
-		return err
+		return NativeAccount{}, err
 	}
-	_, err = a.piEditAccount(ctx, home, func(current map[string]json.RawMessage) {
-		for id, entry := range entries {
-			if _, have := current[id]; replace || !have {
-				current[id] = entry
-			}
-		}
-	})
-	return err
-}
-
-func sameRepos(a, b []string) bool {
-	a, b = slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b))
-	return slices.Equal(a, b)
+	if len(saved) == 0 {
+		return NativeAccount{}, errors.New("Pi did not save a usable sign-in.")
+	}
+	return saved[0], nil
 }
 
 // piSnapshotEntries reads the provider entries of an account's saved login.
@@ -146,54 +129,4 @@ func piSnapshotEntries(home string) map[string]json.RawMessage {
 		return nil
 	}
 	return entries
-}
-
-// MigratePiAccounts folds every extra Pi account into Pi's one login and removes
-// the account, without losing a credential.
-// TODO: legacy/shim remove later — Pi provider sign-ins used to create an
-// account each. A busy account stays and the next engine start retries it.
-func (a *Runtime) MigratePiAccounts(ctx context.Context) {
-	accounts, err := a.Accounts.List()
-	if err != nil {
-		return
-	}
-	current, err := a.Accounts.Active("pi")
-	if err != nil {
-		return
-	}
-	// Active does not fill in the repo rules; the list does.
-	var active NativeAccount
-	for _, n := range accounts {
-		if n.ID == current.ID {
-			active = n
-		}
-	}
-	for _, n := range accounts {
-		if n.Harness != "pi" || n.Active || AccountInUse(n.ID) {
-			continue
-		}
-		// An account limited to other repos than the active one would lend its
-		// credentials to repos it was closed to, and removal drops its rules.
-		if !sameRepos(n.Repos, active.Repos) {
-			continue
-		}
-		entries, err := piEditAuth(ctx, n.Home, nil)
-		if err != nil {
-			log.Printf("pi accounts: %s was not read: %v", n.ID, err)
-			continue
-		}
-		// The saved snapshot can hold providers the account's own file lacks.
-		for id, entry := range piSnapshotEntries(n.Home) {
-			if _, have := entries[id]; !have {
-				entries[id] = entry
-			}
-		}
-		if err = a.addPiEntries(ctx, entries, false); err != nil {
-			log.Printf("pi accounts: %s was not merged: %v", n.ID, err)
-			continue
-		}
-		if err = a.Accounts.Remove(n.ID, true); err != nil {
-			log.Printf("pi accounts: %s was not removed: %v", n.ID, err)
-		}
-	}
 }

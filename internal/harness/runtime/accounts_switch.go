@@ -34,7 +34,7 @@ func (a *Accounts) activeID(h string) (string, error) {
 	if err := safeAccountPath(filepath.Join(a.Root, h, ".active.json")); err != nil {
 		return "", err
 	}
-	return (&store.Store{Root: a.Root}).Active(accountProvider(h), "")
+	return (&store.Store{Root: a.Root}).Active(accountProvider(h), h, "")
 }
 
 // setActive records the account that harness h uses, in the registry.
@@ -42,7 +42,57 @@ func (a *Accounts) setActive(h, id string) error {
 	if err := safeAccountPath(filepath.Join(a.Root, h, ".active.json")); err != nil {
 		return err
 	}
-	return (&store.Store{Root: a.Root}).SetActive(accountProvider(h), "", id)
+	return (&store.Store{Root: a.Root}).SetActive(accountProvider(h), h, "", id)
+}
+
+// setActiveAccount records that harness n.Harness uses n for its provider. Each
+// harness keeps its own selection, so two harnesses that run one provider never
+// take each other's account.
+func (a *Accounts) setActiveAccount(n NativeAccount) error {
+	return (&store.Store{Root: a.Root}).SetActive(selectionProvider(n.Harness, n.Provider), n.Harness, "", n.ID)
+}
+
+// clearActive records that the account's harness has no selection for its
+// provider.
+func (a *Accounts) clearActive(n NativeAccount) error {
+	return (&store.Store{Root: a.Root}).SetActive(selectionProvider(n.Harness, n.Provider), n.Harness, "", "")
+}
+
+// selectPinned makes an account the active one of its provider without copying
+// any credential: the harness reads that account's own home. Pi keeps one
+// provider login per account, so its turns need no swap and no drain.
+func (a *Accounts) selectPinned(n NativeAccount) error {
+	if n.Status != "ready" {
+		return native.ErrNoIdentity
+	}
+	return a.setActiveAccount(n)
+}
+
+// activeAccount returns the account that harness h runs for provider p in
+// roomID. The room's own selection wins over the global one, and each harness
+// keeps its own selection: two harnesses that run one provider, such as Claude
+// Code and Pi for anthropic, never take each other's account away.
+func (a *Accounts) activeAccount(h string, p store.Provider, roomID string) (NativeAccount, error) {
+	canonical, err := canonicalAccountHarness(h)
+	if err != nil {
+		return NativeAccount{}, err
+	}
+	p = selectionProvider(canonical, p)
+	id, err := (&store.Store{Root: a.Root}).ActiveFor(p, canonical, roomID)
+	if err != nil {
+		return NativeAccount{}, err
+	}
+	if id == "" {
+		return NativeAccount{}, errAccountMissing
+	}
+	n, err := a.Find(id)
+	if err != nil {
+		return n, err
+	}
+	if !accountRuns(canonical, n, p) {
+		return NativeAccount{}, errAccountMissing
+	}
+	return n, nil
 }
 
 func (a *Accounts) Active(harness string) (NativeAccount, error) {
@@ -146,6 +196,11 @@ func releaseAccountLock(f *os.File) {
 		f.Close()
 	}
 }
+
+// pinsPerAccount reports whether each account of harness h keeps its
+// credentials in its own home. Such a harness needs no drain and no shared
+// credential swap: a turn reads the home of the account it started on.
+func pinsPerAccount(h string) bool { return pinsCredentials(h) || h == "pi" }
 
 // TurnLease protects one native process lifetime, including its retries.
 // The admission gate prevents new shared turns from bypassing a waiting switch.
@@ -394,7 +449,7 @@ func (a *Accounts) SwitchIfIdle(ctx context.Context, id, executable string) erro
 	if err != nil {
 		return err
 	}
-	if pinsCredentials(n.Harness) {
+	if pinsPerAccount(n.Harness) {
 		return a.Switch(ctx, id, executable)
 	}
 	if _, running := a.SwitchStatus(n.Harness); running > 0 {
@@ -426,7 +481,7 @@ func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string
 	if err != nil {
 		return err
 	}
-	if pinsCredentials(target.Harness) {
+	if pinsPerAccount(target.Harness) {
 		return a.switchPinned(ctx, id, executable, onActivate)
 	}
 	release, err := a.switchGate(ctx, target.Harness)
@@ -628,7 +683,7 @@ func (a *Accounts) Remove(id string, confirmed bool) error {
 			return e
 		}
 		if current.Active {
-			if e = a.setActive(n.Harness, ""); e != nil {
+			if e = a.clearActive(current); e != nil {
 				return e
 			}
 		}

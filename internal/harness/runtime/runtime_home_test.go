@@ -138,7 +138,13 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			accounts.NativeManager = func(h string, _ native.Host) (native.Manager, bool) {
 				return launchEnvironmentManager{sharedLoginManager{h, state}}, true
 			}
-			n, err := accounts.Create(h, "environment fixture")
+			var n NativeAccount
+			if h == "pi" {
+				// Pi keeps one login per provider, so its fixture account names one.
+				n, err = accounts.CreateProvider("pi", accountstore.ProviderZAI, accountstore.KindAPIKey, "environment fixture")
+			} else {
+				n, err = accounts.Create(h, "environment fixture")
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -165,7 +171,7 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			}, true); err != nil {
 				t.Fatal(err)
 			}
-			if err = accounts.setActive(h, n.ID); err != nil {
+			if err = accounts.setActiveAccount(n); err != nil {
 				t.Fatal(err)
 			}
 			bundles := manager(t)
@@ -191,7 +197,11 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			}
 			r := &Runtime{Bundles: bundles, Accounts: accounts, Config: config.NewConfigManager(), Generations: filepath.Join(store.DataDir(), "harnesses", "generations")}
 			t.Cleanup(func() { _ = removeBundle(r.Generations) })
-			p, _, err := r.Prepare(context.Background(), profile.Profile{Harness: h, Env: map[string]string{"DYNA_BIN": "/fake/dyna"}}, nil)
+			model := ""
+			if h == "pi" {
+				model = "zai/glm-5.3"
+			}
+			p, _, err := r.Prepare(context.Background(), profile.Profile{Harness: h, Model: model, Env: map[string]string{"DYNA_BIN": "/fake/dyna"}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -217,6 +227,8 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 				}
 				// Claude credentials stay in the active account's own home.
 				managed = managed || key == pinnedSecretKey && pinsCredentials(h) && pinnedSecretOf(scope, path)
+				// A Pi turn reads its whole agent directory from the account home.
+				managed = managed || key == piAgentDirKey && h == "pi" && pinnedSecretOf(scope, path)
 				if !managed {
 					t.Fatalf("active credential path %s is outside native scope and known auth files: %s", key, path)
 				}

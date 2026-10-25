@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/account/store"
 	harnesshome "dyna-agent/internal/harness/home"
 )
 
@@ -49,14 +50,14 @@ func (a *Runtime) HarnessProviderKeys(ctx context.Context, harness, action, prov
 	if action == "add" && (key == "" || len(key) > maxProviderKey || strings.ContainsAny(key, "\r\n\x00")) {
 		return ProviderKeysResult{}, errors.New("Enter the API key on one line.")
 	}
-	home, err := a.Accounts.HarnessHome(h)
-	if err != nil {
-		return ProviderKeysResult{}, err
-	}
 	var result ProviderKeysResult
 	if h == "pi" {
-		result, err = a.piProviderKeysEdit(ctx, home, action, provider, key)
+		result, err = a.piProviderKeysEdit(ctx, action, provider, key)
 	} else {
+		var home string
+		if home, err = a.Accounts.HarnessHome(h); err != nil {
+			return ProviderKeysResult{}, err
+		}
 		result, err = a.openCodeProviderKeys(ctx, home, action, provider, key)
 	}
 	if err != nil {
@@ -242,18 +243,33 @@ func piEditAuth(ctx context.Context, home string, edit piAuthEdit) (map[string]j
 	return entries, nil
 }
 
-func (a *Runtime) piProviderKeys(ctx context.Context, home, action, provider, key string) (ProviderKeysResult, error) {
+// piProviderKeys answers choices and list for Pi. The list reads the accounts,
+// because each account holds the login of its own provider.
+func (a *Runtime) piProviderKeys(ctx context.Context, action, provider, key string) (ProviderKeysResult, error) {
 	if action == "choices" {
 		choices, err := a.piChoices()
 		return ProviderKeysResult{Choices: choices}, err
 	}
-	edit, err := piActionEdit(action, provider, key)
+	if _, err := piActionEdit(action, provider, key); err != nil {
+		return ProviderKeysResult{}, err
+	}
+	return a.piProviderKeysList(ctx)
+}
+
+// piProviderKeysList names the provider entries of every Pi account.
+func (a *Runtime) piProviderKeysList(ctx context.Context) (ProviderKeysResult, error) {
+	accounts, err := a.Accounts.List()
 	if err != nil {
 		return ProviderKeysResult{}, err
 	}
-	entries, err := piEditAuth(ctx, home, edit)
-	if err != nil {
-		return ProviderKeysResult{}, err
+	entries := map[string]json.RawMessage{}
+	for _, n := range accounts {
+		if n.Harness != "pi" || n.Provider == "" {
+			continue
+		}
+		for id, entry := range piSavedEntries(ctx, n.Home) {
+			entries[id] = entry
+		}
 	}
 	return piProviderList(entries), nil
 }
@@ -271,54 +287,55 @@ func piProviderList(entries map[string]json.RawMessage) ProviderKeysResult {
 	return result
 }
 
-// piKeysMu serializes Dyna's own Pi key edits, so the saved account and the
-// runtime home never take two concurrent edits in different orders.
+// piKeysMu serializes Dyna's own Pi key edits, so two edits of one account
+// never take two concurrent writes in different orders.
 var piKeysMu sync.Mutex
 
-// piProviderKeysEdit applies an add or remove to the active Pi account's own
-// login file and to the runtime home as one operation: a failure in the runtime
-// write restores the account file. Pi needs an active account to start a turn,
-// so the first key creates and activates one.
-func (a *Runtime) piProviderKeysEdit(ctx context.Context, home, action, provider, key string) (ProviderKeysResult, error) {
+// piProviderKeysEdit applies an add or remove to the login of the account of
+// that provider, creating the account for a new key. A failed write restores the
+// account's earlier login. Pi reads one provider per account, so the edit never
+// touches another provider's credentials.
+func (a *Runtime) piProviderKeysEdit(ctx context.Context, action, provider, key string) (ProviderKeysResult, error) {
 	if action != "add" && action != "remove" {
-		return a.piProviderKeys(ctx, home, action, provider, key)
+		return a.piProviderKeys(ctx, action, provider, key)
 	}
 	edit, err := piActionEdit(action, provider, key)
 	if err != nil {
 		return ProviderKeysResult{}, err
 	}
-	entries, err := a.piEditAccount(ctx, home, edit)
-	if err != nil {
+	if err = a.editPiProviderAccount(ctx, piProvider(provider), edit, action == "add"); err != nil {
 		return ProviderKeysResult{}, err
 	}
-	return piProviderList(entries), nil
+	return a.piProviderKeysList(ctx)
 }
 
-// piEditAccount applies edit to the active account's login file and to the
-// runtime home, as piProviderKeysEdit describes. It returns the runtime entries.
-func (a *Runtime) piEditAccount(ctx context.Context, home string, edit piAuthEdit) (map[string]json.RawMessage, error) {
+// editPiProviderAccount applies edit to the login of the account of provider,
+// inside the Pi account gate so no switch moves the account during the write.
+// With create it makes the account first, so a pasted key gets its own account.
+func (a *Runtime) editPiProviderAccount(ctx context.Context, provider store.Provider, edit piAuthEdit, create bool) error {
 	piKeysMu.Lock()
 	defer piKeysMu.Unlock()
 	// The first lock of an account switch or native login. Holding it keeps the
 	// active account fixed through the edit without waiting for running turns.
 	dir, err := a.Accounts.harnessDirectory("pi")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	gate, err := acquireAccountLock(ctx, filepath.Join(dir, ".switch.lock"), syscall.LOCK_EX)
 	if err != nil {
-		return nil, errors.New("Pi's account is changing. Try again in a moment.")
+		return errors.New("Pi's account is changing. Try again in a moment.")
 	}
 	defer releaseAccountLock(gate)
-	bundle, err := a.Bundles.Resolve("pi", "")
+	account, found, err := a.piAccountForProvider(ctx, provider)
 	if err != nil {
-		return nil, errors.New("Install Dyna's copy of Pi first.")
+		return err
 	}
-	account, err := a.Accounts.Active("pi")
-	created := err != nil
-	if created {
-		if account, err = a.Accounts.Create("pi", "Pi login"); err != nil {
-			return nil, err
+	if !found {
+		if !create {
+			return nil
+		}
+		if account, err = a.Accounts.CreateProvider("pi", provider, store.KindAPIKey, string(provider)+" key"); err != nil {
+			return err
 		}
 	}
 	file := filepath.Join(account.Home, "auth.json")
@@ -327,7 +344,7 @@ func (a *Runtime) piEditAccount(ctx context.Context, home string, edit piAuthEdi
 	restore := func(cause error) error {
 		err := restorePiAuth(file, before, readErr == nil, nil)
 		if err == nil {
-			_, err = a.Accounts.Capture(context.Background(), account.ID, bundle.Executable)
+			_, err = a.Accounts.Capture(context.Background(), account.ID, "")
 		}
 		if err != nil {
 			return errors.Join(cause, errors.New("Pi's saved login could not be restored. Add or remove the key again."))
@@ -335,21 +352,17 @@ func (a *Runtime) piEditAccount(ctx context.Context, home string, edit piAuthEdi
 		return cause
 	}
 	if _, err = piEditAuth(ctx, account.Home, edit); err != nil {
-		return nil, err
+		return err
 	}
-	if _, err = a.Accounts.Capture(ctx, account.ID, bundle.Executable); err != nil {
-		return nil, restore(errors.New("Pi's login could not be recorded."))
-	}
-	result, err := piEditAuth(ctx, home, edit)
+	captured, err := a.Accounts.Capture(ctx, account.ID, "")
 	if err != nil {
-		return nil, restore(err)
-	}
-	if created {
-		if err = a.Accounts.setActive("pi", account.ID); err != nil {
-			return nil, err
+		if errors.Is(err, native.ErrNotSignedIn) {
+			// The last entry is gone, so the account is signed out now.
+			return nil
 		}
+		return restore(errors.New("Pi's login could not be recorded."))
 	}
-	return result, nil
+	return a.Accounts.setActiveAccount(captured)
 }
 
 // restorePiAuth puts back the file's earlier content, or removes it when it did

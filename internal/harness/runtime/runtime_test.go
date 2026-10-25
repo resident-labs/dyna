@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/fsutil"
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife/recordtest"
-	"dyna-agent/internal/store"
+	defaultstore "dyna-agent/internal/store"
 )
 
 func runtimeFixture(t *testing.T, h string) (*Runtime, profile.Profile) {
@@ -38,7 +39,7 @@ func runtimeFixture(t *testing.T, h string) (*Runtime, profile.Profile) {
 	if err := accounts.Switch(context.Background(), n.ID, bundle.Executable); err != nil {
 		t.Fatal(err)
 	}
-	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(store.DataDir(), "harnesses", "generations")}
+	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
 	return r, profile.Profile{Name: "private", Harness: n.Harness}
 }
 func TestPreparePrivateProfilePinsGenerationAndIsolatesHome(t *testing.T) {
@@ -260,7 +261,7 @@ func TestPrivateRuntimeOwnerToolPolicyOverridesProfile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(r.Config.Path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteJSON(r.Config.Path, harnessmgr.HarnessConfig{ToolHomeBridges: []string{"owner-helper"}}, 0600); err != nil {
+	if err := defaultstore.WriteJSON(r.Config.Path, harnessmgr.HarnessConfig{ToolHomeBridges: []string{"owner-helper"}}, 0600); err != nil {
 		t.Fatal(err)
 	}
 	p.Env = map[string]string{
@@ -294,7 +295,7 @@ func TestSessionPinsProtectOnlyOpenBundles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(store.DataDir(), "sessions")
+	root := filepath.Join(defaultstore.DataDir(), "sessions")
 	recordtest.Write(t, root, "open", map[string]any{"runtimePin": pin})
 	got, err := OpenPins()
 	if err != nil || len(got) != 1 {
@@ -344,7 +345,7 @@ func TestPrepareNeverCopiesPersonalLogin(t *testing.T) {
 	ownerImportSeed(t, os.Getenv("HOME"), "codex")
 	bundles := manager(t)
 	install(t, bundles, "codex", "1.0.0")
-	r := &Runtime{Accounts: accounts, Bundles: bundles, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(store.DataDir(), "harnesses", "generations")}
+	r := &Runtime{Accounts: accounts, Bundles: bundles, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
 	_, _, err := r.Prepare(context.Background(), profile.Profile{Harness: "codex"}, nil)
 	if err == nil || err.Error() != "Sign in to codex in Dyna." {
 		t.Fatalf("got %v, want the sign-in message", err)
@@ -382,7 +383,7 @@ func TestPrepareInstallsMissingPrivateCopyOnFirstUse(t *testing.T) {
 	accounts := testAccounts(t)
 	ownerImportSeed(t, os.Getenv("HOME"), "codex")
 	bundles := manager(t)
-	r := &Runtime{Accounts: accounts, Bundles: bundles, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(store.DataDir(), "harnesses", "generations")}
+	r := &Runtime{Accounts: accounts, Bundles: bundles, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
 	if err := r.copyPersonalLogin(context.Background(), "codex"); err != nil {
 		t.Fatal(err)
 	}
@@ -392,5 +393,81 @@ func TestPrepareInstallsMissingPrivateCopyOnFirstUse(t *testing.T) {
 	}
 	if pin.Bundle.Version != "1.0.0" || selected.RuntimeExecutable != pin.Bundle.Executable {
 		t.Fatalf("prepare did not install and select the private copy: %#v", pin.Bundle)
+	}
+}
+
+// signedPiAccount makes a signed-in Pi account of one provider. Pi stores one
+// provider entry per account home.
+func signedPiAccount(t *testing.T, r *Runtime, provider store.Provider, key string) NativeAccount {
+	t.Helper()
+	account, err := r.Accounts.CreateProvider("pi", provider, store.KindAPIKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{string(provider): map[string]string{"type": "api_key", "key": key}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(account.Home, "auth.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	account, err = r.Accounts.Capture(context.Background(), account.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Accounts.setActiveAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	return account
+}
+
+// A Pi turn runs from the home of the active account of the provider its model
+// names. A resume keeps the shared session history and the generation, and only
+// the credential home follows the account.
+func TestPiPrepareUsesTheActiveProviderAccountHome(t *testing.T) {
+	r := &Runtime{Bundles: manager(t), Accounts: testAccounts(t), Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
+	install(t, r.Bundles, "pi", "1.4.0")
+	shared, err := r.Accounts.HarnessHome("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := signedPiAccount(t, r, store.ProviderZAI, "first")
+	p := profile.Profile{Name: "pi-private", Harness: "pi", Model: "zai/glm-5.3"}
+	selected, pin, err := r.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin.AccountID != first.ID || selected.Env[piAgentDirKey] != first.Home {
+		t.Fatalf("first turn ran from %q on account %q", selected.Env[piAgentDirKey], pin.AccountID)
+	}
+	if selected.Env[piSessionDirKey] != filepath.Join(shared, "sessions") {
+		t.Fatalf("session history is not shared: %q", selected.Env[piSessionDirKey])
+	}
+	second := signedPiAccount(t, r, store.ProviderZAI, "second")
+	if second.Home == first.Home {
+		t.Fatal("two accounts of one provider share a home")
+	}
+	resumed, next, err := r.Prepare(context.Background(), p, &pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.AccountID != second.ID || resumed.Env[piAgentDirKey] != second.Home {
+		t.Fatalf("resumed turn ran from %q on account %q", resumed.Env[piAgentDirKey], next.AccountID)
+	}
+	if resumed.Env[piSessionDirKey] != selected.Env[piSessionDirKey] || !reflect.DeepEqual(resumed.ExtraArgs, selected.ExtraArgs) {
+		t.Fatalf("the account changed the shared session history: %q / %v", resumed.Env[piSessionDirKey], resumed.ExtraArgs)
+	}
+	if next.Generation != pin.Generation {
+		t.Fatal("the account changed the immutable config generation")
+	}
+	// The account home holds the Dyna-managed part of Pi's agent directory, so
+	// the turn keeps its MCP servers, skills and model definitions.
+	for _, name := range []string{"settings.json", "mcp.json", "skills"} {
+		if _, err = os.Lstat(filepath.Join(second.Home, name)); err != nil {
+			t.Fatalf("the account home lacks %s: %v", name, err)
+		}
+	}
+	if raw, err := os.ReadFile(filepath.Join(second.Home, "auth.json")); err != nil || !strings.Contains(string(raw), "second") {
+		t.Fatalf("the account lost its own login: %s %v", raw, err)
 	}
 }
