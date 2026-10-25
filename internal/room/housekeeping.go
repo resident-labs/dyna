@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-// UpdatePreferences changes presentation without changing routing addresses.
+// UpdatePreferences changes room settings without changing routing addresses.
 // The root lock serializes changes with room creation and deletion.
 func (s *Store) UpdatePreferences(ref string, fn func(*Record) error) error {
 	rec, err := s.Resolve(ref)
@@ -33,6 +33,15 @@ func (s *Store) SetArchived(ref string, archived bool) error {
 		if !archived {
 			r.LastActivity = s.now()
 		}
+		return nil
+	})
+}
+
+// SetRootProfile chooses the next internal root's profile. Empty inherits the
+// global root.profile setting; existing sessions keep their current profile.
+func (s *Store) SetRootProfile(ref, name string) error {
+	return s.UpdatePreferences(ref, func(r *Record) error {
+		r.RootProfile = strings.TrimSpace(name)
 		return nil
 	})
 }

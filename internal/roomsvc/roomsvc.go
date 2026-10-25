@@ -223,6 +223,7 @@ type Room struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	Repo         string    `json:"repo,omitempty"`
+	RootProfile  string    `json:"rootProfile,omitempty"`
 	LastActivity time.Time `json:"lastActivity"`
 	Unread       int       `json:"unread"`
 	Running      int       `json:"running"`
@@ -249,7 +250,7 @@ func (s *Service) Rooms() ([]Room, error) {
 	live := s.Notify.ActiveRoomIDs()
 	var out []Room
 	for _, rec := range records {
-		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
+		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
 		ids, err := s.ownerPosts(rec)
 		if err != nil {
 			return nil, err
@@ -670,7 +671,7 @@ func (s *Service) feedOf(rec room.Record, msgs []room.Message, offset int64, boo
 	if err != nil {
 		return Feed{}, err
 	}
-	return Feed{Room: Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
+	return Feed{Room: Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
 }
 
 // postsOf decorates messages as posts. full replaces a completion's stored
