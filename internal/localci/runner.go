@@ -144,6 +144,11 @@ type FailureCause string
 const (
 	// CauseTestFailure is a check that ran its tests and failed them.
 	CauseTestFailure FailureCause = "test-failure"
+	// CauseOverBudget is a check whose tests all passed but one of them ran over
+	// the room's per-test time budget. The check fails, yet no test is broken:
+	// the cause keeps a person from debugging a test that only needs to be
+	// faster, or needs its fixture shrunk.
+	CauseOverBudget FailureCause = "over-budget"
 	// CauseContainerFailure is a check that stopped before its command ran: the
 	// container, its setup, or the worktree it needs was unavailable. A process
 	// that something killed is a container failure inside a container, where the
@@ -172,6 +177,8 @@ func (c FailureCause) Label() string {
 	switch c {
 	case CauseTestFailure:
 		return "failed tests"
+	case CauseOverBudget:
+		return "over the time budget"
 	case CauseContainerFailure:
 		return "container failure"
 	case CauseSSHDrop:
@@ -395,10 +402,17 @@ func checkReports(sr *SuiteResult, mode ReportMode, dir string, max time.Duratio
 			sr.Status = "failed"
 		}
 		sr.Failures = append(sr.Failures, report.Failures...)
+		overBudget := 0
 		for _, test := range report.BudgetTests() {
 			if test.Duration > max && !test.Allowed(allowed) {
 				sr.Failures = append(sr.Failures, "OVER BUDGET "+test.ID())
+				overBudget++
 			}
+		}
+		// A test that only ran too long did not fail. Its own cause says the
+		// budget was missed, so nothing points a person at a broken test.
+		if len(report.Failures) == 0 && overBudget > 0 && sr.Cause == "" {
+			sr.Cause = CauseOverBudget
 		}
 	}
 	tests := report.BudgetTests()
