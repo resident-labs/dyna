@@ -28,7 +28,7 @@ func TestRoomRecordsMigrateBeforeAnyRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			files := map[string]string{"room.json": `{"id":"` + id + `","name":"retained","seat":` + attached + `}`}
-			want := Record{ID: id, Name: "retained", Seat: Seat{External: true, Harness: "fixture"}}
+			want := Record{ID: id, Name: "retained", GitHubAccess: GitHubReadOnly, Seat: Seat{External: true, Harness: "fixture"}}
 			if mode != "embedded seat" {
 				files["seat.json"] = attached
 			}

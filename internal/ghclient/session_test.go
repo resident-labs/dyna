@@ -37,6 +37,9 @@ func gitConfigValue(env map[string]string, key string) string {
 
 func TestSessionUsesTheRoomAccount(t *testing.T) {
 	records := setupRooms(t, "resident-labs/personal", "work/private")
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("GH_REPO", "unscoped/other")
 	bin := installFakeGH(t, `#!/bin/sh
 case "$1 $2" in
