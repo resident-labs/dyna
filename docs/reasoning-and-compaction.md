@@ -78,7 +78,6 @@ wizard's last step is the same editor.
 | `muse` | `-c context_compaction.soft_threshold=N/window` |
 | `grok` | `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`, a whole percent of the window, rounded down |
 | `opencode` | Before a resumed turn, Dyna reads the stored context size with `session.context`. At N tokens, it admits `session.compact` and waits with `experimental.session.wait`. The shared service keeps its default automatic compaction. |
-| `antigravity` | ACP 1.3.0 uses native automatic compaction. Manual thresholds are not supported. |
 | `pi` | none; Dyna runs `pi --mode rpc --session <id>` with `{"type":"compact"}` |
 
 OpenCode uses its stored session context because a fast service response can
@@ -90,10 +89,6 @@ each model call. The session stores the last one, and before the next resumed
 turn `profile.CompactDue` decides whether Dyna runs the compact command first.
 The harness still does the compaction; Dyna only chooses when to ask. A failed
 compact command becomes a `compact_failed` session event, and the turn runs.
-
-Antigravity ACP 1.3.0 has no manual compaction method. Dyna refuses a manual
-threshold with "not supported by Antigravity ACP 1.3.0" and never sends
-`/compact` as model text. Native automatic compaction stays enabled.
 
 ## Rendering
 
@@ -116,7 +111,7 @@ The table lists what each harness sends.
 | `opencode-json` | `reasoning` part when `--thinking` is set | whole | none on stdout; Dyna's own `session.compact` request shows as trigger `dyna` |
 | `grok-json` | `thought` records, a few tokens each | delta | `auto_compact_started`, `auto_compact_completed`, `auto_compact_failed`, `auto_compact_cancelled`; trigger auto |
 | `pi-json` | `thinking` blocks in `message_end`; `message_update` deltas are ignored | whole | `compaction_start` and `compaction_end` with `reason` (rate), `result.tokensBefore` and `result.estimatedTokensAfter` |
-| `acp-json` (Antigravity ACP) | none seen | none | none; ACP 1.3.0 compacts automatically and Dyna refuses a manual threshold |
+| `acp-json` (Kimi Code ACP) | none seen | none | none; the ACP server compacts on its own |
 | `muse-jsonl` | none seen | none | none in the MSP records Dyna captures |
 | `text` | none | none | none |
 

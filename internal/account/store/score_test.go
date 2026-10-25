@@ -129,7 +129,7 @@ func TestScoreFindsWindowsAcrossHarnesses(t *testing.T) {
 			t.Fatalf("%s: WeeklyWindow = %v, want %s", tc.name, WeeklyWindow(o), tc.weekly)
 		}
 	}
-	// Buckets without a weekly window (Antigravity) have no score.
+	// Buckets without a weekly window have no score.
 	if WeeklyWindow(&Observation{Windows: []Window{{ID: "requests"}}}) != nil {
 		t.Fatal("a non-weekly window must not read as weekly")
 	}

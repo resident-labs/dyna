@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"dyna-agent/internal/acp"
-	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/jsonrpc"
 	"dyna-agent/internal/profile"
@@ -23,7 +22,7 @@ import (
 	"dyna-agent/internal/workeroutput"
 )
 
-// Grok and Antigravity share ACP over one stdio child per Dyna session.
+// Grok and Kimi Code share ACP over one stdio child per Dyna session.
 // The session host owns each child; this codec owns its JSON-RPC connection.
 
 // acpCancelWait bounds how long Dyna waits for the agent to confirm a cancel
@@ -41,13 +40,12 @@ func validateGrokAcpArgs(p profile.Profile) error {
 
 // acpSession attaches one turn to a hosted native session.
 type acpSession struct {
-	conn        *jsonrpc.Conn
-	agent       *acp.Agent
-	session     string
-	model       string
-	host        sessionhost.Session
-	antigravity bool
-	settled     bool
+	conn    *jsonrpc.Conn
+	agent   *acp.Agent
+	session string
+	model   string
+	host    sessionhost.Session
+	settled bool
 }
 
 func (s *acpSession) close() {
@@ -72,28 +70,11 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	if err != nil {
 		return nil, err
 	}
-	if p.Harness == profile.HarnessAntigravity {
-		if err := validateAntigravityACPBundle(p.RuntimeExecutable); err != nil {
-			return nil, err
-		}
-		env := make(map[string]string, len(p.Env))
-		for k, v := range p.Env {
-			env[k] = v
-		}
-		for k, v := range harnessruntime.AntigravityACPEnv(p.RuntimeExecutable, p.Env["HOME"]) {
-			env[k] = v
-		}
-		p.Env = env
-		p.RuntimeExecutable = harnessruntime.AntigravityACPExecutable(p.RuntimeExecutable)
-	}
 	launch, err := nativeSessionLaunch(p, cwd, commandSpec{argv: argv}, execution)
 	if err != nil {
 		return nil, err
 	}
 	home := p.Env["GROK_HOME"]
-	if p.Harness == profile.HarnessAntigravity {
-		home = p.Env["HOME"]
-	}
 	if p.Harness == profile.HarnessKimiCode {
 		home = p.Env["KIMI_CODE_HOME"]
 	}
@@ -110,7 +91,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	if err != nil {
 		return nil, err
 	}
-	s := &acpSession{host: child, antigravity: p.Harness == profile.HarnessAntigravity}
+	s := &acpSession{host: child}
 
 	handlers := acp.Handlers{Update: onUpdate, Stderr: onStderr, Permission: func(context.Context, acp.PermissionRequest) acp.PermissionResponse {
 		return acp.PermissionResponse{Behavior: acp.PermissionCancelled}
@@ -120,25 +101,14 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	defer hcancel()
 	s.agent = acp.ConnectedAgent(s.conn)
 	if cold {
-		version := 1
-		if s.antigravity {
-			version = 2
-		}
-		s.agent, err = acp.HandshakeVersion(handshakeCtx, s.conn, version)
+		s.agent, err = acp.HandshakeVersion(handshakeCtx, s.conn, 1)
 		if err == nil {
-			method := s.agent.DefaultAuthMethod()
-			if s.antigravity {
-				method = "oauth-personal"
-			}
-			err = s.agent.Authenticate(handshakeCtx, method)
+			err = s.agent.Authenticate(handshakeCtx, s.agent.DefaultAuthMethod())
 		}
 		if err != nil {
 			s.close()
 			return nil, err
 		}
-	}
-	if s.antigravity {
-		s.agent.SessionMeta = antigravitySessionMeta(harnessruntime.NativeFeatureDenyTools(p.Harness, execution.DynaShell))
 	}
 	var setup acp.SessionSetup
 	servers, err := acpMCPServers(p, launch.Env)
@@ -148,11 +118,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	}
 	if sessionID != "" {
 		s.conn.SetNotification(func(jsonrpc.Notification) {})
-		if s.antigravity {
-			setup, err = s.agent.ResumeSession(handshakeCtx, sessionID, cwd, servers)
-		} else {
-			setup, err = s.agent.LoadSession(handshakeCtx, sessionID, cwd, servers)
-		}
+		setup, err = s.agent.LoadSession(handshakeCtx, sessionID, cwd, servers)
 		s.conn.SetNotification(acp.NotificationHandler(onUpdate))
 		s.session = sessionID
 	} else {
@@ -163,7 +129,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 		s.close()
 		return nil, err
 	}
-	if s.antigravity || p.Harness == profile.HarnessKimiCode {
+	if p.Harness == profile.HarnessKimiCode {
 		mode := "yolo"
 		if p.SafeMode {
 			mode = "default"
@@ -185,12 +151,6 @@ func acpArgv(p profile.Profile) ([]string, error) {
 			return nil, errors.New("Kimi Code ACP needs the private KIMI_CODE_HOME")
 		}
 		return []string{"kimi", "acp"}, nil
-	}
-	if p.Harness == profile.HarnessAntigravity {
-		if err := validateAntigravityACPLogin(p.Env["HOME"]); err != nil {
-			return nil, err
-		}
-		return []string{"agy", "--uid="}, nil
 	}
 	if p.Env["GROK_HOME"] == "" {
 		return nil, errors.New("Grok ACP needs the private GROK_HOME")
@@ -509,7 +469,7 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 				return finishAttempt(spec, rawLines.String(), stderr.String(), nil, true, false, false, false, nil, steering.errValue()), true
 			}
 			if steering.hasPending() && canDeliver(DeliverySteering) {
-				if p.Harness == profile.HarnessAntigravity || p.Harness == profile.HarnessKimiCode {
+				if p.Harness == profile.HarnessKimiCode {
 					if err := cancelAndDrain(); err != nil {
 						return finishAttempt(spec, rawLines.String(), stderr.String(), err, true, false, false, false, nil, nil), true
 					}
@@ -554,10 +514,6 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 				}
 				return finishAttempt(spec, rawLines.String(), stderr.String(), acpPromptError(st.err), true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
 			}
-			finalStderr := s.finishStderr()
-			if finalStderr != "" {
-				stderr.line(finalStderr)
-			}
 			// Kimi flushes its native journal on session/close. Its prompt
 			// reply can arrive before the terminal record reaches disk.
 			var kimiCloseErr error
@@ -577,9 +533,6 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 				if runErr == nil && kimiCloseErr != nil {
 					runErr = fmt.Errorf("kimi-code could not close the native turn: %w", kimiCloseErr)
 				}
-			}
-			if runErr == nil && s.antigravity {
-				runErr = antigravityACPPromptError(s.session, finalStderr)
 			}
 			at := finishAttempt(spec, rawLines.String(), stderr.String(), runErr, true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
 			// The final reply names its prompt; that prompt's answer is the

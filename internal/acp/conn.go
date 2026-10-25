@@ -1,7 +1,7 @@
 // Package acp implements the client half of the Agent Client Protocol
 // (ACP) on top of the shared JSON-RPC connection in internal/jsonrpc. Grok
 // is driven over a WebSocket connection to its `grok agent serve` process;
-// Antigravity's server speaks the same messages over stdio. One connection
+// Kimi Code's server speaks the same messages over stdio. One connection
 // runs one agent conversation; a caller that keeps the agent process alive
 // gets one long-lived agent per Dyna session.
 package acp

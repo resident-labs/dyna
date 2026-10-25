@@ -787,8 +787,8 @@ func SessionTurn(t subagent.Turn, events []workeroutput.Event, omitted bool) Tur
 	if !t.Started.IsZero() {
 		promptTS = t.Started
 	}
-	// TODO: legacy/shim remove later — marks deltas in old normalized Antigravity, Grok and Muse output; remove after affected artifacts expire or migrate
-	if t.OutputDialect == workeroutput.DialectAntigravityStreamJSON || t.OutputDialect == workeroutput.DialectGrokJSON || t.OutputDialect == workeroutput.DialectMuseJSONL {
+	// TODO: legacy/shim remove later — marks deltas in old normalized Grok and Muse output; remove after affected artifacts expire or migrate
+	if t.OutputDialect == workeroutput.DialectGrokJSON || t.OutputDialect == workeroutput.DialectMuseJSONL {
 		events = append([]workeroutput.Event(nil), events...)
 		for i := range events {
 			if events[i].Kind == "message" && events[i].Role == "assistant" && events[i].State == "" {

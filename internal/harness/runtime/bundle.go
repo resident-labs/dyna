@@ -224,7 +224,7 @@ type hashKey struct {
 var executableHashes sync.Map
 
 // errBundleUnusable marks a published bundle that lacks a file its harness
-// runs beside the executable, such as Antigravity's ACP server.
+// runs beside the executable, such as a companion server.
 var errBundleUnusable = errors.New("bundle cannot be used")
 
 // read returns a verified published bundle. A bundle without the files its

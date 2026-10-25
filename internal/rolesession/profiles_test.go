@@ -244,13 +244,13 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	}
 }
 
-// Antigravity gave a reset time six days away. A one-hour ban let the pool
+// Provider quota reset times can be days away. A one-hour ban let the pool
 // choose the exhausted profile again, and its reviews never started.
 func TestQuotaResetKeepsProfileOut(t *testing.T) {
 	storetest.Isolate(t)
 	now := time.Date(2026, 10, 18, 10, 0, 0, 0, time.UTC)
 	info := subagent.Info{Meta: subagent.Meta{Profile: "argon"}}
-	turn := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Quota, Error: "worker argon: Antigravity protocol result ERROR: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 152h54m19s."}
+	turn := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Quota, Error: "worker argon: protocol result ERROR: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 152h54m19s."}
 	failures := RecordFailure(nil, info, turn, now)
 	if want := now.Add(152*time.Hour + 54*time.Minute + 19*time.Second); !failures["argon"].Equal(want) {
 		t.Fatalf("until = %v, want %v", failures["argon"], want)
@@ -273,34 +273,6 @@ func TestQuotaResetKeepsProfileOut(t *testing.T) {
 	got, err := cache.Recent(now.Add(2*time.Hour), func() ([]subagent.Info, error) { return infos, nil }, func(id string, _ int) (subagent.Turn, error) { return turns[id], nil })
 	if err != nil || !got["argon"].After(now.Add(152*time.Hour)) {
 		t.Fatalf("cache lost the quota failure: %v %v", got, err)
-	}
-}
-
-func TestBusySerialAccountFallsBackAndRecovers(t *testing.T) {
-	storetest.Isolate(t)
-	profiles := []profile.Profile{
-		{Name: "serial", Harness: "antigravity", Taste: 10},
-		{Name: "disabled", Harness: "codex", Taste: 100, Disabled: true},
-		{Name: "spare", Harness: "codex", Taste: 1},
-	}
-	now := time.Now()
-	lease, err := runtime.NewAccounts().TurnLeaseManaged(context.Background(), "antigravity")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lease.Close() })
-	for _, pin := range []string{"", "serial"} {
-		got, _, err := ChooseProfile(profiles, pin, nil, now, "reviewer")
-		if err != nil || got != "spare" {
-			t.Fatalf("busy serial account selected: pin=%q profile=%q error=%v", pin, got, err)
-		}
-	}
-	if err := lease.Close(); err != nil {
-		t.Fatal(err)
-	}
-	got, _, err := ChooseProfile(profiles, "", nil, now, "reviewer")
-	if err != nil || got != "serial" {
-		t.Fatalf("released account not selectable: profile=%q error=%v", got, err)
 	}
 }
 

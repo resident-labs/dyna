@@ -6,7 +6,7 @@ import (
 )
 
 // DialectAcpJSON is ACP session traffic: JSON-RPC notifications from an agent
-// Dyna drives over stdio (Grok `agent stdio`; Antigravity's ACP server). The
+// Dyna drives over stdio (Grok `agent stdio`; Kimi Code's ACP server). The
 // records are grok's streaming-json shapes wrapped in JSON-RPC envelopes, so
 // the decoder unwraps and reuses the grok record decoding.
 const DialectAcpJSON = "acp-json"
@@ -86,7 +86,7 @@ func decodeAcp(line []byte) Record {
 			record.Type = "auto_compact_failed"
 		}
 	case "usage_update":
-		// Antigravity reports current context occupancy, not billable token deltas.
+		// ACP reports current context occupancy, not billable token deltas.
 		used := update.Used
 		if used < 0 {
 			used = 0

@@ -134,15 +134,12 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 	case "muse-exec":
 		return museInvocation(p, prompt, exec)
 
-	case "grok-acp", "antigravity-acp", "kimi-acp":
+	case "grok-acp", "kimi-acp":
 		if p.Harness == profile.HarnessGrok {
 			if err := validateGrokAcpArgs(p); err != nil {
 				return invocation{}, err
 			}
 		} else if len(permissionArgs) != 0 {
-			if p.Harness == profile.HarnessAntigravity {
-				return invocation{}, fmt.Errorf("Antigravity ACP does not support CLI extraArgs; use the profile model, SafeMode, Dyna session controls, and the managed catalog")
-			}
 			return invocation{}, fmt.Errorf("%s ACP does not support CLI extraArgs; use the profile model, SafeMode, Dyna session controls, and the managed catalog", p.Harness)
 		}
 

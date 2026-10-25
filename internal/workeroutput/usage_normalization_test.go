@@ -118,7 +118,7 @@ func TestClaudeCacheReadsAreSubsetAndCostIsCumulativeAcrossProcesses(t *testing.
 }
 
 func TestUnsupportedUsageAndLegacyCoverageStayUnknown(t *testing.T) {
-	for _, dialect := range []string{DialectMuseJSONL, DialectAntigravityStreamJSON, "opencode"} {
+	for _, dialect := range []string{DialectMuseJSONL, "opencode"} {
 		n := NewUsageNormalizer("", nil)
 		u, ok := n.Observe(&Declaration{Dialect: dialect}, codexUsageLine(100, 80, 10))
 		if ok || u.Total() != 0 || n.Normalization().Input != "unknown" {

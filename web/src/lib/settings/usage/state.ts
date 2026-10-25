@@ -10,7 +10,7 @@ const ICON_IDS: Record<string, string> = { 'claude-code': 'claude' }
 export function harnessIcon(harness: string): string {
   return ICON_IDS[harness] ?? harness
 }
-const HARNESS_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', grok: 'Grok', opencode: 'OpenCode', antigravity: 'Antigravity', muse: 'Muse', 'kimi-code': 'Kimi Code', custom: 'Custom harness', mock: 'Mock' }
+const HARNESS_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', grok: 'Grok', opencode: 'OpenCode', muse: 'Muse', 'kimi-code': 'Kimi Code', custom: 'Custom harness', mock: 'Mock' }
 export function harnessName(harness: string | undefined): string {
   return HARNESS_NAMES[harness ?? ''] ?? harness ?? ''
 }
