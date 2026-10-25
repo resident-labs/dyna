@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/runtime"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/workeroutput"
 )
@@ -345,6 +346,7 @@ type TurnEnd struct {
 	Status             string                          `json:"status"`
 	Result             json.RawMessage                 `json:"result,omitempty"`
 	Error              string                          `json:"error,omitempty"`
+	FailureReason      providerfailure.Reason          `json:"failureReason,omitempty"` // named by the runner's trusted boundary; Error is display text
 	Ended              time.Time                       `json:"ended"`
 	InputCutoff        *int64                          `json:"inputCutoff,omitempty"`
 	Model              string                          `json:"model,omitempty"`
@@ -394,8 +396,9 @@ func (m *Manager) endTurn(ctx context.Context, id string, e TurnEnd) error {
 	}
 	finished, err := store.updateTurnContext(ctx, id, e.Turn, func(t *Turn) {
 		t.Status, t.Error, t.Ended = e.Status, e.Error, e.Ended
+		t.FailureReason = e.FailureReason
 		if t.StopReason == transferStartupTimeout {
-			t.Status, t.Error = TurnError, transferStartupTimeout
+			t.Status, t.Error, t.FailureReason = TurnError, transferStartupTimeout, ""
 		}
 		t.Result = nil
 		if len(e.Result) > 0 {
@@ -421,7 +424,7 @@ func (m *Manager) endTurn(ctx context.Context, id string, e TurnEnd) error {
 	if err != nil {
 		return err
 	}
-	if finished.Status == TurnError && harness.IsProviderFailure(finished.Error) && finished.Profile != "" {
+	if finished.Status == TurnError && finished.FailureReason.BlocksProfile() && finished.Profile != "" {
 		if err := postCooldownNotice(m.notices(), finished.Profile, finished.Error, finished.Ended); err != nil {
 			log.Printf("provider notice: %v", err)
 		}

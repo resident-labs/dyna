@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // DialectClaudeStreamJSON is `claude -p --input-format stream-json
@@ -292,7 +294,10 @@ func ClaudeResultError(line string) error {
 	}
 
 	detail := strings.TrimSpace(strings.Join(append([]string{r.Result}, r.Errors...), " "))
-	return fmt.Errorf("Claude protocol result %s: %s", r.Subtype, detail)
+	// Only a failed result reaches here, and there the result field holds the
+	// CLI's own error text. A successful result returns above, so the model's
+	// answer can never name a reason.
+	return providerfailure.TagDetail(fmt.Errorf("Claude protocol result %s: %s", r.Subtype, detail), detail)
 }
 
 // ClaudeGenerationStarted recognizes affirmative generation activity. This is

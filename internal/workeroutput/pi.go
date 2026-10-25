@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // DialectPiJSON is @earendil-works/pi-coding-agent --print --mode json.
@@ -189,7 +191,7 @@ func PiResultError(stdout string) error {
 			failure = nil
 			switch p.Message.StopReason {
 			case "error", "aborted", "length":
-				failure = fmt.Errorf("Pi response %s: %s", p.Message.StopReason, p.Message.ErrorMessage)
+				failure = providerfailure.TagDetail(fmt.Errorf("Pi response %s: %s", p.Message.StopReason, p.Message.ErrorMessage), p.Message.ErrorMessage)
 			}
 		}
 		if p.Type == "agent_settled" && p.Aborted {

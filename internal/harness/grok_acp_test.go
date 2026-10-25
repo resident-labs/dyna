@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/jsonrpc"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
 )
@@ -621,7 +622,7 @@ func TestGrokAcpStopReasonBecomesUsageLimit(t *testing.T) {
 	acpPrepare(t)
 	zero := time.Duration(0)
 	_, err := RunWithOptions(t.Context(), acpProfile(env), "task", t.TempDir(), false, JournalOptions{}, SteeringOptions{}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true, startupLimit: 30 * time.Second})
-	if err == nil || !IsUsageLimit(err.Error()) {
+	if err == nil || !providerfailure.Is(err, providerfailure.Quota) {
 		t.Fatalf("rate_limit classified as %v", err)
 	}
 }
@@ -1002,7 +1003,7 @@ func TestAntigravityACPReadsBackendErrorMarkersBeforeSuccess(t *testing.T) {
 			if (result.runErr != nil) != tc.wantError {
 				t.Fatalf("backend error=%v, want error=%v", result.runErr, tc.wantError)
 			}
-			if tc.wantError && !IsUsageLimit(result.runErr.Error()) {
+			if tc.wantError && !providerfailure.Is(result.runErr, providerfailure.Quota) {
 				t.Fatalf("quota classification lost: %v", result.runErr)
 			}
 		})
