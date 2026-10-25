@@ -24,7 +24,7 @@ checks:
     reports: junit
 
   - id: frontend-0
-    name: frontend (0)
+    name: frontend test (0)
     providerGroup: frontend
     image: node:22
     command: bash scripts/ci.sh frontend test-shard
@@ -34,7 +34,7 @@ checks:
       FRONTEND_SHARD: 1/6
 
   - id: frontend-1
-    name: frontend (1)
+    name: frontend test (1)
     providerGroup: frontend
     image: node:22
     command: bash scripts/ci.sh frontend test-shard
@@ -45,7 +45,7 @@ checks:
       FRONTEND_SHARD: 2/6
 
   - id: frontend-2
-    name: frontend (2)
+    name: frontend test (2)
     providerGroup: frontend
     image: node:22
     command: bash scripts/ci.sh frontend test-shard
@@ -56,7 +56,7 @@ checks:
       FRONTEND_SHARD: 3/6
 
   - id: frontend-3
-    name: frontend (3)
+    name: frontend test (3)
     providerGroup: frontend
     image: node:22
     command: bash scripts/ci.sh frontend test-shard
@@ -67,7 +67,7 @@ checks:
       FRONTEND_SHARD: 4/6
 
   - id: frontend-4
-    name: frontend (4)
+    name: frontend test (4)
     providerGroup: frontend
     image: node:22
     command: bash scripts/ci.sh frontend test-shard
@@ -78,7 +78,7 @@ checks:
       FRONTEND_SHARD: 5/6
 
   - id: frontend-5
-    name: frontend (5)
+    name: frontend test (5)
     providerGroup: frontend
     image: node:22
     command: bash scripts/ci.sh frontend test-shard
