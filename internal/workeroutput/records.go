@@ -3,6 +3,8 @@ package workeroutput
 import (
 	"encoding/json"
 	"strings"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // Record separates execution signals from filtered presentation events.
@@ -293,14 +295,25 @@ type antigravityRecord struct {
 }
 
 // recordError accepts both protocol error shapes without rejecting the envelope.
-type recordError struct{ Message string }
+// It keeps the provider's structured type, code and status, because they name a
+// failure on their own; the message is only a fallback.
+type recordError struct {
+	Message string
+	Type    string
+	Code    string
+	Status  string
+}
 
 func (e *recordError) UnmarshalJSON(raw []byte) error {
 	var object struct {
-		Message string `json:"message"`
+		Message string          `json:"message"`
+		Type    json.RawMessage `json:"type"`
+		Code    json.RawMessage `json:"code"`
+		Status  json.RawMessage `json:"status"`
 	}
 	if json.Unmarshal(raw, &object) == nil {
 		e.Message = object.Message
+		e.Type, e.Code, e.Status = scalarText(object.Type), scalarText(object.Code), scalarText(object.Status)
 		return nil
 	}
 	var text string
@@ -308,4 +321,31 @@ func (e *recordError) UnmarshalJSON(raw []byte) error {
 		e.Message = text
 	}
 	return nil
+}
+
+// Reason returns the provider reason of this error. A structured type, code or
+// status is preferred, because the message alone may use no provider words. The
+// fields are a provider diagnostic, not model output, so this is a trusted
+// boundary.
+func (e recordError) Reason() (providerfailure.Reason, bool) {
+	for _, field := range []string{e.Type, e.Code, e.Status} {
+		if reason, ok := providerfailure.ClassifyField(field); ok {
+			return reason, true
+		}
+	}
+	return providerfailure.Classify(e.Message)
+}
+
+// scalarText reads a structured field that is a JSON string or number. A field
+// that is an object or array names nothing by itself.
+func scalarText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		return number.String()
+	}
+	return ""
 }

@@ -3,8 +3,9 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // Translate v2 events into the existing OpenCode CLI JSONL contract. Quota,
@@ -21,6 +22,24 @@ type openCodeTurnNotifications struct {
 type openCodeTool struct {
 	name  string
 	input json.RawMessage
+}
+
+// openCodeErrorRecord is the translated execution-failure event. Its fields are
+// concrete, so the status the provider reported survives into the record.
+type openCodeErrorRecord struct {
+	Type      string            `json:"type"`
+	SessionID string            `json:"sessionID"`
+	Error     openCodeErrorBody `json:"error"`
+}
+
+type openCodeErrorBody struct {
+	Name   string              `json:"name"`
+	Status int                 `json:"status"`
+	Data   openCodeErrorDetail `json:"data"`
+}
+
+type openCodeErrorDetail struct {
+	Message string `json:"message"`
 }
 
 func (n *openCodeTurnNotifications) observe(event openCodeEvent) []string {
@@ -112,11 +131,22 @@ func (n *openCodeTurnNotifications) observe(event openCodeEvent) []string {
 	case "session.execution.failed":
 		n.done = true
 		detail := d.Error.Message
-		if d.Error.Status == 429 || strings.Contains(d.Error.Type, "rate-limit") || d.Error.Type == "provider.quota" && d.Error.Status != 402 {
+		// The provider's own status and type name the reason; its text is only the
+		// fallback. A 402 asks for payment, so it names no provider failure.
+		reason, _ := providerfailure.StatusReason(d.Error.Status)
+		if reason == "" {
+			reason, _ = providerfailure.ClassifyField(d.Error.Type)
+		}
+		if d.Error.Status == 402 {
+			reason = ""
+		}
+		if reason == providerfailure.Quota {
 			detail = "429 " + detail
 		}
-		n.err = fmt.Errorf("OpenCode turn failed: %s", detail)
-		raw, _ := json.Marshal(map[string]any{"type": "error", "sessionID": n.session, "error": map[string]any{"name": d.Error.Type, "data": map[string]any{"message": detail}}})
+		n.err = providerfailure.Tag(reason, fmt.Errorf("OpenCode turn failed: %s", detail))
+		raw, _ := json.Marshal(openCodeErrorRecord{Type: "error", SessionID: n.session, Error: openCodeErrorBody{
+			Name: d.Error.Type, Status: d.Error.Status, Data: openCodeErrorDetail{Message: detail},
+		}})
 		return []string{string(raw)}
 	}
 	if kind == "" {

@@ -34,6 +34,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
@@ -232,6 +233,7 @@ type Turn struct {
 	Ended              time.Time                       `json:"ended,omitempty"`
 	Result             any                             `json:"result,omitempty"`
 	Error              string                          `json:"error,omitempty"`
+	FailureReason      providerfailure.Reason          `json:"failureReason,omitempty"` // the provider failure a trusted boundary named; Error is display text
 	HarnessSession     string                          `json:"harnessSession,omitempty"`
 	Steering           []Steer                         `json:"steering,omitempty"`
 	Deliveries         []Delivery                      `json:"deliveries,omitempty"`

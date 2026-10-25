@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 )
 
 // ModelCooldownDuration is the retry delay after a provider rejects a model.
@@ -98,55 +99,20 @@ const notReadyText = "runtime is not ready:"
 
 func IsNotReady(text string) bool { return strings.Contains(text, notReadyText) }
 
-// IsProviderFailure matches provider quota, rate limit, auth, and 5xx errors.
-func IsProviderFailure(text string) bool {
-	text = strings.ToLower(text)
-	for _, term := range []string{
-		"quota", "credit balance", "insufficient credit", "out of credit", "429", "rate limit", "rate_limit", "overloaded", "at capacity", "usage limit", "usage_limit", "session limit", "weekly limit",
-		"authentication_error", "invalid api key", "invalid_api_key", "not logged in",
-		"internal server error", "bad gateway", "service unavailable",
-	} {
-		if strings.Contains(text, term) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsCapacityFailure matches a provider that is busy for now, not one that
-// rejects the account: the same request can succeed a few minutes later.
-func IsCapacityFailure(text string) bool {
-	text = strings.ToLower(text)
-	for _, term := range []string{"at capacity", "overloaded", "service unavailable"} {
-		if strings.Contains(text, term) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsUsageLimit matches a quota, credit or rate limit. Waiting a few minutes
-// does not lift it, so the session needs another model.
-func IsUsageLimit(text string) bool {
-	text = strings.ToLower(text)
-	for _, term := range []string{"quota", "credit", "429", "rate limit", "rate_limit", "usage limit", "usage_limit", "session limit", "weekly limit"} {
-		if strings.Contains(text, term) {
-			return true
-		}
-	}
-	return false
-}
-
 // classifyFailure tells the owner what kind of provider failure ended a run and
-// what to do. Other errors, including unclassified provider ones, pass as they are.
+// what to do. Only a reason a trusted boundary named selects the advice; other
+// errors, including unclassified ones, pass as they are.
 func classifyFailure(err error, capacityRetries int) error {
+	reason, ok := providerfailure.ReasonOf(err)
 	switch {
-	case err == nil:
-		return nil
-	case IsCapacityFailure(err.Error()):
+	case err == nil || !ok:
+		return err
+	case reason == providerfailure.Capacity:
 		return fmt.Errorf("%w; the model stayed at capacity after %d retries with backoff (%v); ask root to investigate or move the session to another model", err, capacityRetries, capacityBackoff[:min(capacityRetries, len(capacityBackoff))])
-	case IsUsageLimit(err.Error()):
+	case reason == providerfailure.Quota:
 		return fmt.Errorf("%w; usage limit reached, so this session needs another model", err)
+	case reason == providerfailure.Auth:
+		return fmt.Errorf("%w; the provider rejected the account's sign-in, so another model cannot help and the account needs a new sign-in", err)
 	}
 	return err
 }

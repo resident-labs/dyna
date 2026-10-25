@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // TODO: legacy/shim remove when Kimi reports failed turns through ACP instead
@@ -27,6 +29,17 @@ func (e *kimiTurnError) Error() string {
 		return "kimi-code turn stopped: step limit"
 	}
 	return fmt.Sprintf("kimi-code turn failed (%s): %s", e.Code, e.Message)
+}
+
+// kimiFailure tags a native Kimi turn failure with the reason its own code
+// names. A provider connection error is the provider's failure; a step limit is
+// Kimi's own limit, not the provider's, so it stays untagged. The tag wraps the
+// error, so errors.As still finds the native failure.
+func kimiFailure(failure *kimiTurnError) error {
+	if failure.Code == "provider.connection_error" {
+		return providerfailure.Tag(providerfailure.Unavailable, failure)
+	}
+	return failure
 }
 
 func newKimiPromptJournal(home, session string) kimiPromptJournal {
@@ -110,7 +123,7 @@ func kimiJournalError(path string, offset int64) error {
 			if event.Error != nil {
 				failure.Code, failure.Message = event.Error.Code, event.Error.Message
 			}
-			result = failure
+			result = kimiFailure(failure)
 		}
 	}
 	return result
