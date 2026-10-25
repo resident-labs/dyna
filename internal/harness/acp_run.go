@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/jsonrpc"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
 )
@@ -637,7 +638,7 @@ func acpStopReasonError(harness, stopReason string) error {
 	case "refusal":
 		return fmt.Errorf("%s refused the turn", harness)
 	case "rate_limit":
-		return fmt.Errorf("%s usage limit reached (rate_limit); try again later", harness)
+		return providerfailure.Tag(providerfailure.Quota, fmt.Errorf("%s usage limit reached (rate_limit); try again later", harness))
 	case "error":
 		return fmt.Errorf("%s ended the turn with an error", harness)
 	default:

@@ -12,21 +12,31 @@ import (
 	"dyna-agent/internal/harness"
 	runtime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/subagent"
 )
 
-// ProviderFailure reports a turn error that makes its profile unavailable: a
-// provider error, or a runtime that failed before the model ran.
-func ProviderFailure(text string) bool {
-	return harness.IsProviderFailure(text) || harness.IsNotReady(text)
+// ProviderFailure reports a turn that the provider or the runtime caused, so a
+// replacement session would fail the same way. Recovery routes on the reason
+// the turn recorded; this never reads the display text for a provider error.
+func ProviderFailure(turn subagent.Turn) bool {
+	return turn.FailureReason != "" || harness.IsNotReady(turn.Error)
+}
+
+// unavailable reports whether a failed turn keeps its profile out until it
+// recovers. A capacity failure does not: that provider was busy for a moment,
+// and the turn already retried it with backoff.
+func unavailable(turn subagent.Turn) bool {
+	return harness.IsNotReady(turn.Error) || turn.FailureReason.BlocksProfile()
 }
 
 // failureKey names the failure entry for a turn. A runtime that is not ready
-// fails before any model runs, so it blocks the whole profile under its own
-// key. Provider errors stay under the profile name, which multi-model profiles
-// replace with their model cooldowns.
-func failureKey(profileName, text string) string {
-	if harness.IsNotReady(text) {
+// fails before any model runs, and a rejected sign-in rejects the whole account,
+// so neither can be fixed by picking another model: both block every model of
+// the profile under its own key. A model failure stays under the profile name,
+// which multi-model profiles replace with their model cooldowns.
+func failureKey(profileName string, turn subagent.Turn) string {
+	if harness.IsNotReady(turn.Error) || turn.FailureReason == providerfailure.Auth {
 		return notReadyKey(profileName)
 	}
 	return profileName
@@ -135,12 +145,12 @@ func MergeFailures(sets ...map[string]time.Time) map[string]time.Time {
 // earlier time cannot replace a later one.
 func RecordFailure(failures map[string]time.Time, info subagent.Info, turn subagent.Turn, now time.Time) map[string]time.Time {
 	out := MergeFailures(failures)
-	if turn.Status == subagent.TurnError && ProviderFailure(turn.Error) {
+	if turn.Status == subagent.TurnError && unavailable(turn) {
 		at := turn.Ended
 		if at.IsZero() {
 			at = now
 		}
-		if key, until := failureKey(info.Profile, turn.Error), harness.UnavailableUntil(turn.Error, at); until.After(out[key]) {
+		if key, until := failureKey(info.Profile, turn), harness.UnavailableUntil(turn.Error, at); until.After(out[key]) {
 			out[key] = until
 		}
 	}
@@ -170,7 +180,7 @@ func (c *FailureCache) Recent(now time.Time, snapshot func() ([]subagent.Info, e
 	latest := map[string]subagent.Turn{}
 	for _, info := range infos {
 		t, err := read(info.ID, info.Turns)
-		failed := t.Status == subagent.TurnError && ProviderFailure(t.Error)
+		failed := t.Status == subagent.TurnError && unavailable(t)
 		if err != nil || (t.Status != subagent.TurnOK && !failed) {
 			continue
 		}
@@ -186,7 +196,7 @@ func (c *FailureCache) Recent(now time.Time, snapshot func() ([]subagent.Info, e
 	for name, t := range latest {
 		if t.Status == subagent.TurnError {
 			if until := harness.UnavailableUntil(t.Error, t.Ended); now.Before(until) {
-				failures[failureKey(name, t.Error)] = until
+				failures[failureKey(name, t)] = until
 			}
 		}
 	}
