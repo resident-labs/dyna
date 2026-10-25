@@ -187,14 +187,33 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 		return &v
 	}
 	in, cached, out := read("input_tokens"), read("cached_input_tokens"), read("output_tokens")
-	if dialect == DialectOpenCodeJSON {
-		if in == nil {
-			in = read("inputTokens")
+	if dialect == DialectClaudeStreamJSON || dialect == DialectOpenCodeJSON {
+		readCache, writeCache := read("cache_read_input_tokens"), read("cache_creation_input_tokens")
+		cached = readCache
+		if in != nil {
+			v := *in
+			if readCache != nil {
+				v += *readCache
+			} else {
+				n.input.missing = true
+			}
+			if writeCache != nil {
+				v += *writeCache
+			} else {
+				n.input.missing = true
+			}
+			in = &v
 		}
-		if out == nil {
-			out = read("outputTokens")
+		if dialect == DialectOpenCodeJSON && out != nil {
+			// OpenCode separates visible output from reasoning tokens, and
+			// uncached input from cache reads and writes. Dyna totals include both.
+			if reasoning := read("reasoning_tokens"); reasoning != nil {
+				v := *out + *reasoning
+				out = &v
+			} else {
+				n.output.missing = true
+			}
 		}
-		cached = nil
 	}
 	value := func(v *int64, c *metricCoverage) int64 {
 		if v == nil {
