@@ -8,14 +8,20 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
-func TestChatGPTTokensReadsAPiAccount(t *testing.T) {
-	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{"openai-codex": map[string]any{
-		"type": "oauth", "access": "access-token", "refresh": "refresh-token", "expires": int64(1) << 50, "accountId": "workspace",
-	}}})
+// piCapturedOf builds the credential of a Pi account that signed in to one
+// provider, in the shape the Pi capture writes.
+func piCapturedOf(t *testing.T, id string, entry piAuthEntry) Captured {
+	t.Helper()
+	payload, err := json.Marshal(map[string]json.RawMessage{"auth.json": mustJSON(map[string]piAuthEntry{id: entry})})
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, account, err := ChatGPTTokens(store.Credential{Schema: piNativeFilesSchema, Payload: payload})
+	return Captured{Identity: "pi:" + id, Credential: store.Credential{Schema: piNativeFilesSchema, Payload: payload}}
+}
+
+func TestChatGPTTokensReadsAPiAccount(t *testing.T) {
+	login := piCapturedOf(t, "openai-codex", piAuthEntry{Type: "oauth", Access: "access-token", Refresh: "refresh-token", Expires: int64(1) << 50, AccountID: "workspace"})
+	access, account, err := ChatGPTTokens(login.Credential)
 	if err != nil || access != "access-token" || account != "workspace" {
 		t.Fatalf("tokens = %q %q %v", access, account, err)
 	}
@@ -24,7 +30,7 @@ func TestChatGPTTokensReadsAPiAccount(t *testing.T) {
 func TestChatGPTTokensRejectsAnotherCredential(t *testing.T) {
 	for _, c := range []store.Credential{
 		{Schema: "muse/auth@1", Payload: json.RawMessage(`{}`)},
-		{Schema: piNativeFilesSchema, Payload: json.RawMessage(`{"auth.json":{"zai":{"type":"api_key","key":"sk-private"}}}`)},
+		piCapturedOf(t, "zai", piAuthEntry{Type: "api_key", Key: "sk-private"}).Credential,
 		{Schema: piNativeFilesSchema, Payload: json.RawMessage(`{"auth.json":{}}`)},
 	} {
 		if _, _, err := ChatGPTTokens(c); err == nil {
@@ -33,22 +39,12 @@ func TestChatGPTTokensRejectsAnotherCredential(t *testing.T) {
 	}
 }
 
-// A Pi account reports its access-token expiry, which the service reads to show
-// when Pi will renew the grant; the token itself stays readable while the grant
-// is there.
+// A Pi account reports its access-token expiry, which Voice reads to decide
+// whether to renew the grant.
 func TestPiAccountReportsItsAccessTokenExpiry(t *testing.T) {
-	expiry := time.Now().Add(time.Hour)
-	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{"openai-codex": map[string]any{
-		"type": "oauth", "access": "access-token", "refresh": "refresh-token", "expires": expiry.UnixMilli(), "accountId": "workspace",
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := Captured{Identity: "pi:openai-codex", Credential: store.Credential{Schema: piNativeFilesSchema, Payload: payload}}
-	if got := CredentialExpiry(c.Credential); !got.Equal(expiry.UTC().Truncate(time.Millisecond)) {
+	expiry := time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond)
+	login := piCapturedOf(t, "openai-codex", piAuthEntry{Type: "oauth", Access: "access-token", Refresh: "refresh-token", Expires: expiry.UnixMilli(), AccountID: "workspace"})
+	if got := CredentialExpiry(login.Credential); !got.Equal(expiry) {
 		t.Fatalf("expiry = %v, want %v", got, expiry)
-	}
-	if _, _, err := ChatGPTTokens(c.Credential); err != nil {
-		t.Fatalf("a Pi account with a refresh grant lost its tokens: %v", err)
 	}
 }
