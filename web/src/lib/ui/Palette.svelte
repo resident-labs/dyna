@@ -92,6 +92,7 @@
   let error = $state('')
   let target = $state('') // the path being confirmed
   let name = $state('')
+  let githubAccess = $state<'read-only' | 'read-write'>('read-only')
   let results = $state<SearchResults | null>(null)
   let searchError = $state('')
   let searching = $state(false)
@@ -297,6 +298,7 @@
       check = { path, ...c }
       target = path
       name = c.name ?? ''
+      githubAccess = 'read-only'
       step = 'confirm'
       await tick()
       input?.blur()
@@ -311,7 +313,7 @@
     busy = true
     error = ''
     try {
-      const made = await api.createRoom({ path: target, name: name.trim(), gitInit })
+      const made = await api.createRoom({ path: target, name: name.trim(), gitInit, githubAccess })
       onroom(made.id, true)
       onclose()
     } catch (e) {
@@ -375,6 +377,12 @@
         <label class="lab" for="room-name">Room name</label>
         <!-- svelte-ignore a11y_autofocus -->
         <input id="room-name" class="field" bind:value={name} placeholder="from the folder name" autofocus autocomplete="off" autocapitalize="off" spellcheck="false" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); create(check?.state !== 'repo') } }} />
+        <label class="lab" for="room-github-access">GitHub access</label>
+        <select id="room-github-access" class="field" bind:value={githubAccess} disabled={busy} aria-describedby="room-github-help">
+          <option value="read-only">Read-only</option>
+          <option value="read-write">Read and write</option>
+        </select>
+        <p id="room-github-help" class="help">Read-only lets Dyna read pull requests, checks and issues. Read and write also lets Dyna push, comment, change pull requests and merge.</p>
         {#if error}<p class="err">{error}</p>{/if}
         <div class="actions">
           {#if check?.state === 'repo'}
