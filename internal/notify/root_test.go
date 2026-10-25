@@ -572,3 +572,33 @@ func TestParentOfRootSessionAddressesTheSeat(t *testing.T) {
 		t.Fatalf("marked seat post is not root's input: %s", input)
 	}
 }
+
+// A room's root that posts to another room's root reaches that room's seat.
+// The post is stored in the other room and wakes its root, which starts when
+// none is open: no root of the sender's room reads that room's context in its
+// place, so a quiet copy would wait for a wake that never comes.
+func TestCrossRoomRootPostWakesTheOtherRoomsSeat(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	senderRoom, seatRoom := e.room(), e.room()
+	e.human(senderRoom, "RESPOND: ready", "@root")
+	sender := e.wait(e.rootSession(senderRoom).ID, 1)
+
+	out, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: senderRoom.Name, Session: sender}, Mentions: []string{"@" + seatRoom.Name + ":root"}, Text: "Take the release from here."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Message.RoomID != seatRoom.ID || !reflect.DeepEqual(out.Message.To, []string{seatRoom.Name}) {
+		t.Fatalf("the post went to %s as %v, want the other room's seat %q", out.Message.RoomID, out.Message.To, seatRoom.Name)
+	}
+	seat, ok, err := e.svc.Rooms.SeatDelivery(seatRoom.ID, out.Message.ID)
+	if err != nil || !ok || seat.Mode != room.DeliveryWake {
+		t.Fatalf("the other room's seat row = %+v, %v, %v; want a wake", seat, ok, err)
+	}
+	if got := rootDelivery(out, seatRoom); got != "root-started" {
+		t.Fatalf("the other room's root was not started: %+v", out.Deliveries)
+	}
+	root := e.wait(e.rootSession(seatRoom).ID, 1)
+	if input := e.turnInput(root.ID, 1); !strings.Contains(input, out.Message.ID) {
+		t.Fatalf("the post is not the other room's root input: %s", input)
+	}
+}
