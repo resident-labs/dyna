@@ -25,8 +25,10 @@ worktree and branch hints, and exact commands to read the old turns.
 A move between two Pi profiles needs no handoff: Pi keeps one session file per
 conversation, so the transfer resumes that exact session with the new profile's
 model, thinking level and provider account. It keeps the conversation and the
-worktree, waits for no handoff, and runs no fresh conversation. Every other
-pair starts a fresh conversation as described above.
+worktree, waits for no handoff, and runs no fresh conversation. If Pi cannot
+resume that session on the new model, the transfer starts the fresh
+conversation instead. Every other pair starts a fresh conversation as described
+above.
 
 The handoff wait is bounded (default 30 seconds). A failed old agent uses the
 transcript immediately. Status and cancel are durable; repeating the same
