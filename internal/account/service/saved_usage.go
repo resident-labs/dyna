@@ -111,8 +111,8 @@ func CachedUsage(store *accountstore.Store, now time.Time) Snapshot {
 		if e.NativeHome == "" {
 			continue
 		}
-		active, _ := accounts.Active(e.Harness)
-		a := Account{ID: e.ID, Harness: e.Harness, Label: e.Label, Integration: e.Integration, ProviderID: e.Harness, NeedsLogin: e.NeedsLogin, Status: "ready", Source: "Dyna private native account", Active: active.ID == e.ID, Windows: []Window{}, Profiles: []string{}}
+		active, _ := accounts.Active(runtime.SelectionProvider(e.Harness, e.Provider), e.Harness)
+		a := Account{ID: e.ID, Harness: e.Harness, Provider: e.Provider, Label: e.Label, Integration: e.Integration, ProviderID: e.Harness, NeedsLogin: e.NeedsLogin, Status: "ready", Source: "Dyna private native account", Active: active.ID == e.ID, Windows: []Window{}, Profiles: []string{}}
 		if e.NeedsLogin {
 			a.Status = "needs_auth"
 		}

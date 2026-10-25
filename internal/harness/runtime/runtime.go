@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"dyna-agent/internal/account/native"
+	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/fsutil"
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
@@ -96,7 +97,7 @@ func (r *Runtime) Doctor(ctx context.Context, p profile.Profile) Doctor {
 		return d
 	}
 	d.Warnings = privateHomeWarnings(nativeHome, a.Harness, catalog.ToolHomeBridges)
-	active, err := r.Accounts.Active(a.Harness)
+	active, err := r.Accounts.Active(ProviderForModel(p.Harness, p.Model), a.Harness)
 	if err != nil {
 		d.Status = "not signed in"
 		d.Reason = "Sign in and activate an account for this harness."
@@ -405,16 +406,22 @@ func (r *Runtime) Regenerate(harness string) error {
 		return err
 	}
 	failures := []string{}
+	selections, _ := (&accountstore.Store{Root: r.Accounts.Root}).Selections()
 	for _, a := range RuntimeAdapters() {
 		if harness != "" && canonicalRuntimeID(harness) != a.Harness {
 			continue
 		}
-		active, err := r.Accounts.Active(a.Harness)
-		if err != nil {
-			continue
-		}
-		if _, err := r.regenerateAccount(active); err != nil {
-			failures = append(failures, a.Harness)
+		for _, selection := range selections {
+			if selection.Harness != a.Harness || selection.Scope != "" || selection.Account == "" {
+				continue
+			}
+			active, err := r.Accounts.Find(selection.Account)
+			if err != nil {
+				continue
+			}
+			if _, err := r.regenerateAccount(active); err != nil {
+				failures = append(failures, a.Harness)
+			}
 		}
 	}
 	if len(failures) > 0 {
@@ -505,7 +512,7 @@ func AccountInUse(id string) bool {
 	if err != nil {
 		return false
 	}
-	active, err := NewAccounts().Active(n.Harness)
+	active, err := NewAccounts().Active(SelectionProvider(n.Harness, n.Provider), n.Harness)
 	if err != nil || active.ID != id {
 		return false
 	}

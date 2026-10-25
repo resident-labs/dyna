@@ -191,7 +191,7 @@ func (c *Calls) statusLocked() CallStatus {
 // voiceReady checks, without starting anything, what a call needs first:
 // an active Codex account.
 func voiceReady() string {
-	if _, err := runtime.NewAccounts().Active("codex"); err != nil {
+	if _, err := runtime.NewAccounts().Active(runtime.ProviderForModel("codex", ""), "codex"); err != nil {
 		return "Sign in to Codex in Settings > Harnesses to call Voice."
 	}
 	return ""
