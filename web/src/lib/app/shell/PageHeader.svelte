@@ -32,6 +32,7 @@
     /** The screen is narrow: the room list is a drawer and the bar loses its labels. */
     narrow: boolean
     navOpen: boolean
+    backgroundInert?: boolean
     showSide: boolean
     roomId: string
     room: Room | null
@@ -83,10 +84,10 @@
     onreview: () => void
     ontogglemembers: () => void
   }
-  let { narrow, navOpen, showSide, roomId, room, current, drill, session, machines, machineId, machineDetail, readOnlyDm, reviewOpen, people, live, pins, sessionTab = $bindable(), sessionComputer, drillComputer, shells, isRootDm, threadsOpen, threadCount, sessionTrail, view, openRun, runTrail, runDetail, workRow, workTabs, syncRemotes, syncRepo, syncNote, showPins, showMembers, onnavopen, ontoggleside, onback, onsession, onmember, onthreads, oncloserun, onview, onsyncrefresh, onsyncexport, onsearch, ontogglepins, onreview, ontogglemembers }: Props = $props()
+  let { narrow, navOpen, backgroundInert = false, showSide, roomId, room, current, drill, session, machines, machineId, machineDetail, readOnlyDm, reviewOpen, people, live, pins, sessionTab = $bindable(), sessionComputer, drillComputer, shells, isRootDm, threadsOpen, threadCount, sessionTrail, view, openRun, runTrail, runDetail, workRow, workTabs, syncRemotes, syncRepo, syncNote, showPins, showMembers, onnavopen, ontoggleside, onback, onsession, onmember, onthreads, oncloserun, onview, onsyncrefresh, onsyncexport, onsearch, ontogglepins, onreview, ontogglemembers }: Props = $props()
 </script>
 
-<header class="bar" class:dm-bar={!!drill} inert={narrow && reviewOpen}>
+<header class="bar" class:dm-bar={!!drill} inert={narrow && (reviewOpen || backgroundInert)}>
   {#if narrow}
     <button class="icon" onclick={onnavopen} title="Rooms and views" aria-label="Open the room list" aria-expanded={navOpen}>
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
