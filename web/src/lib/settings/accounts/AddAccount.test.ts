@@ -95,11 +95,26 @@ test('the native path offers a saved login and starts Claude Code', async (t) =>
   const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
   try {
+    const options = [...element<HTMLSelectElement>(target, 'select[aria-label="Harness"]').options].map((option) => option.value)
+    assert.deepEqual(options, ['', 'claude-code', 'codex', 'muse', 'opencode', 'pi'], 'the other native harnesses keep their sign-in path')
     selectHarness(target, 'claude-code')
     flushSync()
     submit(target)
     await settle(flushSync)
     assert.deepEqual(calls, [['find', 'claude-code', '2.1.302'], ['begin', 'claude-code', '2.1.302', '', '', false]])
+  } finally { await unmount(app) }
+})
+
+test('Pi offers an API key for every supported provider', async (t) => {
+  const dom = installDom({ addCalls: [], addRuntimes: runtimes, addSnapshot: snapshot })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom)
+  try {
+    selectHarness(target, 'pi')
+    flushSync()
+    chooseMethod(target, 'key')
+    flushSync()
+    const options = [...element<HTMLSelectElement>(target, 'select[aria-label="Provider"]').options].map((option) => option.value)
+    assert.deepEqual(options, ['anthropic', 'chatgpt', 'kimi-code', 'xai', 'meta-muse', 'opencode-go', 'deepseek', 'zai'])
   } finally { await unmount(app) }
 })
 

@@ -97,13 +97,18 @@ func (r *Runtime) Doctor(ctx context.Context, p profile.Profile) Doctor {
 		return d
 	}
 	d.Warnings = privateHomeWarnings(nativeHome, a.Harness, catalog.ToolHomeBridges)
-	active, err := r.Accounts.Active(ProviderForModel(p.Harness, p.Model), a.Harness)
+	provider := ProviderForModel(p.Harness, p.Model)
+	active, err := r.Accounts.Active(provider, a.Harness)
 	if err != nil {
 		d.Status = "not signed in"
 		d.Reason = "Sign in and activate an account for this harness."
 		return d
 	}
 	d.AccountID = active.ID
+	if a.Harness == "pi" && provider == accountstore.ProviderAnthropic && active.Kind != accountstore.KindAPIKey {
+		d.Status, d.Reason = "blocked", ErrPiAnthropicOAuth.Error()
+		return d
+	}
 	if a.AccountBlocked != "" {
 		d.Status = "blocked"
 		d.Reason = a.AccountBlocked
@@ -173,10 +178,13 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	// chooses the personal login, on the Harnesses page or with dyna harness login.
 	active, err := r.Accounts.activeFor(a.Harness, provider, p.Env[mode.EnvRoomID], p.RuntimeRepo)
 	if err != nil {
-		if errors.Is(err, errScopeRefused) {
+		if errors.Is(err, errScopeRefused) || errors.Is(err, ErrPiAnthropicOAuth) {
 			return p, Pin{}, err
 		}
 		return p, Pin{}, fmt.Errorf("Sign in to %s in Dyna.", a.Harness)
+	}
+	if a.Harness == "pi" && provider == accountstore.ProviderAnthropic && active.Kind != accountstore.KindAPIKey {
+		return p, Pin{}, ErrPiAnthropicOAuth
 	}
 	b, err := r.Bundles.Resolve(a.Harness, p.RuntimeVersion)
 	pin := Pin{AccountID: active.ID}

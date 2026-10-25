@@ -5,7 +5,7 @@
   import { dialog } from '../../ui/dialog.ts'
   import SignInCard from './SignInCard.svelte'
   import { PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, providerName } from './state.ts'
-  import { harnessLabel, harnessPin, runningFlow, sharedLogin } from './signin.ts'
+  import { harnessLabel, harnessPin, NATIVE_HARNESSES, runningFlow, sharedLogin } from './signin.ts'
   import type { AccountsSnapshot, Provider } from '../../api/account.ts'
   import type { HarnessSnapshot, PersonalLogin, PrivateLogin, SignInState } from '../../api/harness.ts'
 
@@ -20,7 +20,7 @@
     onsaved: (snapshot: AccountsSnapshot) => void
   }
   let { scope, account = null, onclose, onsaved }: Props = $props()
-  type HarnessChoice = 'claude-code' | 'pi'
+  type HarnessChoice = (typeof NATIVE_HARNESSES)[number] | 'pi'
   type PiMethod = 'oauth' | 'key'
   let provider = $state<Provider>(untrack(() => account?.provider ?? 'anthropic'))
   let harnessChoice = $state<HarnessChoice | ''>(untrack(() => account ? (account.harness === 'pi' ? 'pi' : 'claude-code') : ''))
@@ -43,7 +43,7 @@
     const fallback = piProviders[0]
     if (fallback && !piProviders.includes(provider)) provider = fallback
   })
-  const canSubmit = $derived(account !== null || harnessChoice === 'claude-code' || (harnessChoice === 'pi' && (piMethod === 'oauth' || key.length > 0)))
+  const canSubmit = $derived(account !== null || (harnessChoice !== '' && harnessChoice !== 'pi') || (harnessChoice === 'pi' && (piMethod === 'oauth' || key.length > 0)))
   const title = $derived(account ? `Sign in again to ${account.label}` : 'Add account')
 
   // The pane polls the native sign-in step and collects the finished account.
@@ -130,8 +130,8 @@
   // startNative offers the owner's own saved login first, as the harness page
   // did, then starts the native sign-in.
   async function startNative() {
-    if (harnessChoice !== 'claude-code' || busy) return
-    const harness = 'claude-code'
+    if (!harnessChoice || harnessChoice === 'pi' || busy) return
+    const harness = harnessChoice
     busy = true; error = ''
     try {
       const snapshot = await snapshotOfHarness()
@@ -274,16 +274,16 @@
         <span class="muted small">Step 1 · Harness</span>
         <select class="field" bind:this={first} bind:value={harnessChoice} disabled={busy} aria-label="Harness">
           <option value="">Choose a harness</option>
-          <option value="claude-code">Claude Code</option>
+          {#each NATIVE_HARNESSES as h (h)}<option value={h}>{harnessLabel(h)}</option>{/each}
           <option value="pi">Pi</option>
         </select>
       </label>
-      {#if harnessChoice === 'claude-code'}
+      {#if harnessChoice && harnessChoice !== 'pi'}
         <label>
           <span class="muted small">Label (optional)</span>
           <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
         </label>
-        <p class="muted small">Claude Code signs in to Anthropic with its own sign-in.</p>
+        <p class="muted small">Dyna uses its own copy of {harnessLabel(harnessChoice)}. If it finds your saved login, it offers to copy it once.</p>
       {:else if harnessChoice === 'pi'}
         <fieldset class="how">
           <legend class="muted small">Step 2 · Sign-in method</legend>
