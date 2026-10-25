@@ -125,7 +125,7 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionc
 				errs = append(errs, err)
 				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultFailed, ID: item.ID, Failure: sessionclose.FailureHandoff})
 			} else if moved {
-				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultMoved, ID: item.ID, To: heir.Address()})
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultMoved, ID: item.ID, To: heirAddress(heir)})
 			}
 		case "item":
 			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityItem, Result: sessionclose.ResultReturned, ID: item.ID})
@@ -147,6 +147,16 @@ func failedOutcome(outcomes []sessionclose.Outcome) bool {
 		}
 	}
 	return false
+}
+
+// heirAddress is the session that takes handed-over work, or empty when the
+// work became top level. An empty heir has no address to name: Address alone
+// would give a bare colon.
+func heirAddress(heir Info) string {
+	if heir.ID == "" {
+		return ""
+	}
+	return heir.Address()
 }
 
 // closeJournalLines records the typed outcomes as the journal's log text, so a

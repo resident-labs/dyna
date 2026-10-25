@@ -346,7 +346,7 @@ func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) 
 			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, ID: child.ID, Name: child.Name, Failure: sessionclose.FailureChildHandoff})
 			return closeNext, summary, err
 		} else {
-			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultMoved, ID: child.ID, Name: child.Name, To: heir.Address()})
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultMoved, ID: child.ID, Name: child.Name, To: heirAddress(heir)})
 		}
 	}
 	return closeNext, summary, nil
