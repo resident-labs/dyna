@@ -61,7 +61,7 @@ diff --git a/web/src/lib/prs/prTabMotion.test.js b/web/src/lib/prs/prTabMotion.t
 +import assert from 'node:assert/strict'
 +// Tab switches fade the new panel in.
 `
-const rounds: ReviewRound[] = [{ round: 1, at: at(20), head: '', verdict: 'changes', summary: 'The underline snaps on a fast click.', findings: [{ id: 'f1', severity: 'should-fix', file: 'web/src/lib/prs/PRDetail.svelte', line: 136, why: 'Ease the underline colour too.', fix: 'Add border-color to the transition.', replies: null }] }]
+const rounds: ReviewRound[] = [{ round: 1, at: at(20), head: '', verdict: 'changes', summary: 'The underline snaps on a fast click.\n\n- **Should fix** (`PRDetail.svelte:136`): Ease the underline colour too.', findings: [{ id: 'f1', severity: 'should-fix', file: 'web/src/lib/prs/PRDetail.svelte', line: 136, why: 'Ease the underline colour too.', fix: 'Add border-color to the transition.', replies: null }] }]
 
 // Demo answers for the calls the page makes; every other api method returns
 // nothing. Each call is recorded, and so is any /api request that slips past.
@@ -84,15 +84,22 @@ mount(PRDetail, { target: need(document.getElementById('app'), 'app'), props })
 // The page exposes its tab so a browser check can switch tabs directly.
 Reflect.set(window, 'showTab', (tab: string) => { props.tab = tab })
 
-// ?screen=test: open the rules drawer, open the review, and report.
+// ?screen=test: open the rules drawer, fold and unfold the review, and report.
 if (new URLSearchParams(location.search).get('screen') === 'test') {
   const wait = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)
+  const pageText = () => need(document.getElementById('app'), 'app').textContent ?? ''
+  const copies = (text: string) => pageText().split(text).length - 1
   await wait()
   button('Rules for this PR')?.click(); await wait()
   document.querySelector<HTMLElement>('[aria-label^="Close"]')?.click(); await wait()
+  // The review starts open with each finding once. One control folds it and opens it again.
+  const expanded = copies('Ease the underline colour too.') === 1 && copies('Add border-color to the transition.') === 1
+  button('Hide review')?.click(); await wait()
+  const folded = copies('Add border-color to the transition.') === 0
   button('Show review')?.click(); await wait()
-  // pass: the drawer reached its stub, and nothing reached the engine.
-  const pass = engine.length === 0 && calls.includes('roomChangePolicy')
+  const reopened = copies('Add border-color to the transition.') === 1
+  // pass: the drawer and review reached their stubs, and nothing reached the engine.
+  const pass = engine.length === 0 && calls.includes('roomChangePolicy') && expanded && folded && reopened
   Reflect.set(window, 'fixtureResult', { pass, calls: [...calls], engineRequests: [...engine] })
 }
