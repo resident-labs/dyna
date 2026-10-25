@@ -441,8 +441,10 @@ func bindings(s services) []websvc.Binding {
 		// AccountsList is a write call because refresh asks each provider for
 		// usage and saves the answer. AccountsView reads the saved view only, so
 		// a read-only page (or a read-only QA pass) can still show the accounts.
+		// It keeps the read scope of the retired AccountUsageCached call, because
+		// the summary is the same data a paired read-only client already read.
 		{Name: "AccountsList", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsList},
-		{Name: "AccountsView", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.accountsView},
+		{Name: "AccountsView", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.accountsView},
 		{Name: "AccountsUse", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsUse},
 		{Name: "AccountsRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsRemove},
 		// AccountsAdd saves an API key from the Accounts add form and the CLI,
