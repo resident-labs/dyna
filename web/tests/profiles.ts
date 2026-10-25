@@ -59,8 +59,6 @@ if (scenario === 'settings') { await new Promise((r) => setTimeout(r, 100)); but
 if (scenario === 'test') {
  await pause()
  check('Initial list shows the fixture models', document.querySelectorAll('.model-row').length === 3)
- button('All models').click(); await tick()
- check('All models reveals API model', document.querySelectorAll('.model-row').length === 3)
  await input('input[aria-label="Search models"]', 'Fixture API')
  check('Search filters discovered rows', document.querySelectorAll('.model-row').length === 1)
  button('Fixture API model').click(); await tick()

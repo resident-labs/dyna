@@ -235,7 +235,7 @@
                 {#each filtered as m (m.id)}
                   <button class="model-row" onclick={() => chooseModel(m)}>{#if publisherIcon(m)}<HarnessIcon id={publisherIcon(m)} />{/if}<div class="model-info"><strong>{m.label || m.id}</strong><small>{m.publisher || m.providerId || 'Provider not reported'}</small></div><span class="tag" class:gold={m.category === 'go'} class:sage={m.category === 'free'}>{accessLabel(m)}</span><span class="arrow">›</span></button>
                 {:else}
-                  <div class="empty"><h3>{models.length ? 'No matching models' : 'No model catalog reported'}</h3><p>{models.length ? 'Try another search or choose All models.' : 'Enter an exact model ID or use the harness default.'}</p>{#if search || provider}<button class="text" onclick={() => { search = ''; provider = '' }}>Clear search and provider</button>{/if}</div>
+                  <div class="empty"><h3>{models.length ? 'No matching models' : 'No model catalog reported'}</h3><p>{models.length ? 'Try another search or clear the search and provider.' : 'Enter an exact model ID or use the harness default.'}</p>{#if search || provider}<button class="text" onclick={() => { search = ''; provider = '' }}>Clear search and provider</button>{/if}</div>
                 {/each}
               </div>
             {/if}
