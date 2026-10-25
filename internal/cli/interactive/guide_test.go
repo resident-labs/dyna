@@ -102,7 +102,7 @@ func TestGuideTopicContracts(t *testing.T) {
 		"git":              {"worktree-created", "before-land", "after-land", "pr-merged", "main-updated", "session-finish", "schedule", "dyna git hooks list", "dyna git hooks log", "dyna git hooks add", "dyna git hooks edit", "dyna git hooks test", "dyna git hooks run", "dyna git hooks rm", "dyna post @parent", "one-off", "generic repo event", "outside the repo", "can change files or services", "dyna git pr track", "dyna git pr verdict", "--head <assigned-sha>", "dyna git pr admit", "dyna git pr review", "dyna git pr comment", "Never add HTML markers or agent attribution", "Agent reviews stay in Dyna", "cannot publish GitHub PR comments or reviews", "dyna git pr resume", "dyna git pr noise", "agents never run merge commands", "dyna git change open", "dyna git change reply", "--findings-file", "dyna git pr budget", "10 seconds", "No stamp means root", "no acting `--session` flag", "outside commenter", "CI and land notices never start an agent", "then the current repo", "Reviewers never run the test suite", "in parallel with CI", "steer the live reviewer", "answers each comment", "dyna git change policy", "dyna git pr merge-status", "No stamp means root", "exact-head approval", "--reason", "automatically", "oldest-ready", "retargets children"},
 		"delegation":       {"dyna subagent start", "Manage sessions with `dyna session`", "dyna subagent output", "--schema", "subagent.maxDepth", "DYNA_MODE", "DYNA_SESSION", "DYNA_DEPTH", "DYNA_ROOM", "DYNA_ADDRESS", "--use agents,services", "no timeout, no idle expiry, no turn cap", "never through harness subagents or workflows", "Workflow workers are leaves", "hands PR authorship and held goals to its nearest open ancestor", "Reviewer roles return to the pool", "A failed handoff keeps the session open", "Stored hierarchy controls parent selectors and depth", "validates the first turn as JSON", "--goal \"<outcome; done when>\"", "Context:", "Owned files:", "Checks:", "Return: At most 1200 characters", "goes dormant by itself", "dyna goal", "dyna ask", "parent-checkins", "Dormant and closed children do not count", "Dyna closes a dormant session after 7 dormant days", "| `DYNA_AGENT_JOURNAL` | journal path | not set |"},
 		"posting":          {"A room has no private messages", "Mentions decide who wakes, not who can read", "not a security boundary", "Records without `roomId` fail closed", "mention := @<local> | @<room>:<local> | @<room> | @run:<id>/agent:<n>", "| Sender | `@team` | `@parent` | `@siblings` | `@children` |", "unstamped external shell must qualify every mention", "Mixed rooms are rejected", "The sender is removed from groups", "Resolution errors store nothing", "non-resumable explicit names", "skipped[]", "{to, reason}", "{message, deliveries, skipped?}", "{to, delivery, turn?, pointer?, error?}", "session-steered", "session-queued", "session-followup", "worker-steered", "CLI exits nonzero", "successful deliveries remain", "script reaches sessions with `post()`", "workers of their own run", "including depth-1 `@parent`, wake root", "--html", "--attach", "dyna attachment get", "dyna room pin", "dyna room list", "dyna room log <room>", "--all", "--tail N", "--json", "dyna room read <room> <id>", "dyna room members <room>", "dyna room search <words>", "--sessions", "the last 14 days"},
-		"steering":         {"[Truncated: N of M bytes. Full text: dyna room read <room> <id>]", "[dyna message msg_ab12", "To: @siblings =", "Reply: dyna post @", "Selectors: @parent =", "A reply goes only to the sender", "next tool-call completion", "steering.maxToolWait", "with a schema", "names the session", "A group mention alone", "only by group mentions such as `@team`, end silently", "Failed and stopped turns always report", "Keep working while a useful next step is available", "End your turn when no useful work remains", "cancel a waiting steering post", "Encourage useful debate", "Known tool calls are never killed for steering", "trust checks for all configured hooks"},
+		"steering":         {"[Truncated: N of M bytes. Full text: dyna room read <room> <id>]", "[dyna message msg_ab12", "To: @siblings =", "Reply: dyna post @", "Selectors: @parent =", "A reply goes only to the sender", "next tool-call completion", "steering.maxToolWait", "with a schema", "names the session", "A group mention alone", "only by group mentions such as `@team`, end silently", "Failed and stopped turns always report", "Keep working while a useful next step is available", "End your turn when no useful work remains", "cancel a waiting steering post", "Encourage useful debate", "Known tool calls are never killed for steering", "Muse keeps its memory-tool denial hook", "steering uses MSP"},
 		"computers":        {"dyna computer open", "-- foot", "waits for a new window", "returned log path", "dyna computer env", "dyna computer status", "dyna computer shot", "dyna computer act", "No stamp means root", "root-<room id>", "create it on first use", "no acting `--session` flag", "secret:true", "Use `dyna browser` for web work", "dyna browser open", "chromium.connectOverCDP", "newCDPSession(page)", "Performance.getMetrics", "dyna browser stop", "same Unix account", "`status` and `stop` do not", "`status` takes no session argument"},
 		"recovery":         {"dyna subagent transfer", "dyna subagent history", "dyna subagent consolidate", "30-second", "--token <requested-token>", "dyna room pause", "dyna room resume", "dyna room clear-dormant", "backups/pre-migration/", "no idle timer ever makes a session dormant", "429", "same room", "source worktrees", "without asking approval", "Live PR guards still apply", "independent reviewer"},
 		guidance.RootTopic: {"one root seat", "dyna root attach --room <room>", "dyna root detach --room <room>", "dyna root status --room <room>", "wait in the room log", "one JSON block", "Attaching twice changes nothing", "`--handoff <file>`", "`--handoff -`", "next turn input", "waits up to 30 seconds", "transcript fallback", "then stops its turn", "never reach the internal root"},
@@ -171,7 +171,7 @@ func TestGuideIndexAndTopicRoutes(t *testing.T) {
 		}
 	}
 	for internal, wants := range map[bool][]string{
-		false: {"**You are root,**", "Do not pass these decisions to the owner", "ask it with `dyna ask`", `dyna room create --repo "$PWD"`, "`dyna root attach --room <room> --harness <name>`", "`dyna root detach --room <room>`", "`--claude`, `--codex`, `--muse` or `--other`"},
+		false: {"**You are root,**", "Do not pass these decisions to the owner", "ask it with `dyna ask`", `dyna room create --repo "$PWD"`, "`dyna root attach --room <room> --harness <name>`", "`dyna root detach --room <room>`", "`--claude`", "`--muse`", "`--other`"},
 		true:  {"**You are root,**", "Do not pass these decisions to the owner", "ask it with `dyna ask`", "internal root", "Never run `dyna room watch`", "`dyna rules list`", "`dyna rules list --global`", "`dyna root attach`", "`dyna root detach`"},
 	} {
 		for _, want := range wants {
@@ -197,7 +197,7 @@ func TestGuideIndexAndTopicRoutes(t *testing.T) {
 
 func TestExternalOrchestrationPrintsOneHarnessRecipe(t *testing.T) {
 	storetest.ClearStamp(t)
-	recipes := map[string]string{"claude": "Monitor tool with the command", "codex": "notify(line)", "muse": "persistent: true", "other": "Print one complete JSON line and exit"}
+	recipes := map[string]string{"claude": "Monitor tool with the command", "muse": "persistent: true", "other": "Print one complete JSON line and exit"}
 	list, err := guideOutput(t, guidance.RootTopic)
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestExternalOrchestrationPrintsOneHarnessRecipe(t *testing.T) {
 	if _, err := guideOutput(t, "git", "--claude"); err == nil {
 		t.Error("harness flag accepted on another topic")
 	}
-	if _, err := guideOutput(t, guidance.RootTopic, "--claude", "--codex"); err == nil {
+	if _, err := guideOutput(t, guidance.RootTopic, "--claude", "--muse"); err == nil {
 		t.Error("two harness flags accepted")
 	}
 }
@@ -247,7 +247,7 @@ func TestGuideLinksAndSharedContracts(t *testing.T) {
 				t.Errorf("%s has broken link: %s", topic.Name, match[0])
 			}
 		}
-		for _, text := range []string{"mention :=", "A session turn reports once", "## Questions", "## Goals", "Codex workers are launched with", "Session progress shows in the session transcript and in room posts.", "Each delivery is", "## Room history", "## Finishing"} {
+		for _, text := range []string{"mention :=", "A session turn reports once", "## Questions", "## Goals", "A profile's explicit `code_mode` setting takes priority.", "Session progress shows in the session transcript and in room posts.", "Each delivery is", "## Room history", "## Finishing"} {
 			counts[text] += strings.Count(doc, text)
 		}
 		for _, term := range []string{"dyna msg", "dyna inbox", "dyna subagent wait", "Every session has a work journal"} {

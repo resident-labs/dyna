@@ -21,7 +21,7 @@ func TestDynaByPathInPrivateHomeUsesOwnerData(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	owner := t.TempDir()
-	scope := filepath.Join(owner, ".local", "share", "dyna", "accounts", "codex", ".runtime")
+	scope := filepath.Join(owner, ".local", "share", "dyna", "accounts", "pi", ".runtime")
 	ownerEnv := []string{"HOME=" + owner, "PATH=" + filepath.Dir(git), "DYNA_NO_AUTO_UPDATE=1", "DYNA_COMPUTERS_ENABLED=0", "DYNA_SLICE=off"}
 	private, err := home.Prepare(scope, bin, ownerEnv)
 	if err != nil {

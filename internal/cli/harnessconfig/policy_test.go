@@ -35,7 +35,7 @@ func testCatalogEnginePower(t *testing.T, role authority.Role) {
 					ctx = authority.WithActor(ctx, authority.Actor{Role: authority.Owner})
 				}
 				// The session case has cleared stamps and no CLI actor.
-				out, err := runCatalog(ctx, kind, catalogArgs(kind, verb, source, "codex"))
+				out, err := runCatalog(ctx, kind, catalogArgs(kind, verb, source, "pi"))
 				if allowed {
 					if err != nil || out != "Dyna catalog updated.\n" {
 						t.Fatalf("allowed edit = %v, output = %q", err, out)

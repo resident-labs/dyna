@@ -596,9 +596,9 @@ func TestStartSubagentActsForTheCaller(t *testing.T) {
 		}
 		e.wait(kid.ID, 1)
 	}
-	in.Name, in.Owner = "top", "codex:thread"
+	in.Name, in.Owner = "top", "pi:thread"
 	top, err := e.svc.StartSubagent(as(authority.Actor{Role: authority.Owner}), beta.Name, in)
-	if err != nil || top.ParentSession != "" || top.Owner != "codex:thread" || top.Dir != in.Cwd {
+	if err != nil || top.ParentSession != "" || top.Owner != "pi:thread" || top.Dir != in.Cwd {
 		t.Fatalf("owner's session = parent %q owner %q dir %q, %v; want top-level in %s", top.ParentSession, top.Owner, top.Dir, err, in.Cwd)
 	}
 	e.wait(top.ID, 1)

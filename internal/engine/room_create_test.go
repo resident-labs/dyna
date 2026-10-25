@@ -50,7 +50,7 @@ func TestRoomCreatorComesFromTheCaller(t *testing.T) {
 		want    string // the recorded creator, or "error"
 		logged  bool
 	}{
-		{"the owner keeps its harness session", websvc.Caller{Kind: websvc.Owner}, true, owner, "codex:thread-1", false, "codex:thread-1", false},
+		{"the owner keeps its harness session", websvc.Caller{Kind: websvc.Owner}, true, owner, "pi:thread-1", false, "pi:thread-1", false},
 		{"a paired device keeps its claim", websvc.Caller{}, false, owner, "", false, "", false},
 		{"a session is its ID, whatever it claims", alice, true, authority.Actor{Role: authority.Root, Session: "ses_alice"}, "ses_bob", false, "ses_alice", false},
 		{"a workflow worker is its run and agent", worker, true, authority.Actor{Role: authority.Worker, Run: "wf_1", Agent: 2}, "ses_parent", false, "run wf_1 agent 2", false},
