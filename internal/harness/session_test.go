@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/workeroutput"
 )
@@ -58,7 +59,9 @@ func TestResumableReflectsHarnessSessionSupport(t *testing.T) {
 }
 
 func TestRunSessionTurnRefusesToResumeNonResumableHarness(t *testing.T) {
-	p := profile.Profile{Name: "plain", Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--no-session-persistence"}}
+	p := fakeworker.InstallClaude(t, "printf done")
+	p.Name = "plain"
+	p.ExtraArgs = []string{"--no-session-persistence"}
 	_, err := RunSessionTurn(context.Background(), p, "x", t.TempDir(), true, JournalOptions{}, SteeringOptions{},
 		SessionOptions{ResumeID: "abc"})
 	if err == nil || !strings.Contains(err.Error(), "cannot resume") {
