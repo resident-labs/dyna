@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1138,15 +1140,39 @@ func TestModelFallbackDoesNotReplayUnresumableActivity(t *testing.T) {
 // A worker that never acknowledges its prompt is stopped at the startup bound,
 // so a hung harness fails fast instead of running until the turn deadline.
 func TestStartupLimitFailsSilentWorker(t *testing.T) {
+	// The worker signals that it is running, and then produces no harness event.
+	// The test fires the startup bound when it reads that signal, so nothing here
+	// waits on real time or on how busy the machine is.
+	dir := t.TempDir()
+	readyPath := filepath.Join(dir, "ready")
+	if err := syscall.Mkfifo(readyPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := os.OpenFile(readyPath, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ready.Close()
 	p := fakeworker.MarkSilent(fakeworker.InstallClaude(t, `
+printf ready > "$READY_FIFO"
 echo "slow init: no model events" >&2
 while :; do sleep 0.05; done
 `))
+	p.Env = mergedEnv(p.Env, map[string]string{"READY_FIFO": readyPath})
 	p.Name, p.Model = "silent", "hangs"
+	// A hang guard only. The startup bound fires from below.
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	_, err := RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{},
-		ExecutionOptions{DisableNativeSubagents: true, startupLimit: 500 * time.Millisecond})
+	fired := make(chan time.Time, 1)
+	go func() {
+		var signal [1]byte
+		if _, err := io.ReadFull(ready, signal[:]); err != nil {
+			return
+		}
+		fired <- time.Now()
+	}()
+	_, err = RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{},
+		ExecutionOptions{DisableNativeSubagents: true, startupFired: fired})
 	if err == nil {
 		t.Fatal("a worker that produced no harness event did not fail")
 	}
