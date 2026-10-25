@@ -1,7 +1,9 @@
 package workeroutput
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"dyna-agent/internal/providerfailure"
@@ -38,7 +40,40 @@ func OpenCodeError(stdout string) error {
 		if !ok || record.Type != "error" {
 			continue
 		}
-		failure = providerfailure.TagDetail(fmt.Errorf("OpenCode protocol error: %s", record.Error), string(record.Error))
+		failure = fmt.Errorf("OpenCode protocol error: %s", record.Error)
+		if reason, ok := openCodeFailureReason(record.Error); ok {
+			failure = providerfailure.Tag(reason, failure)
+		}
 	}
 	return failure
+}
+
+// openCodeFailureReason reads the provider reason from the structured error
+// event: its status, its name, the status and type of its data, and only then
+// the text of the diagnostic.
+func openCodeFailureReason(raw json.RawMessage) (providerfailure.Reason, bool) {
+	var event struct {
+		Name   string          `json:"name"`
+		Status json.RawMessage `json:"status"`
+		Data   struct {
+			Message string          `json:"message"`
+			Status  json.RawMessage `json:"status"`
+			Type    string          `json:"type"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &event) == nil {
+		for _, status := range []json.RawMessage{event.Status, event.Data.Status} {
+			if code, err := strconv.Atoi(strings.TrimSpace(scalarText(status))); err == nil {
+				if reason, ok := providerfailure.StatusReason(code); ok {
+					return reason, true
+				}
+			}
+		}
+		for _, field := range []string{event.Name, event.Data.Type} {
+			if reason, ok := providerfailure.ClassifyField(field); ok {
+				return reason, true
+			}
+		}
+	}
+	return providerfailure.Classify(string(raw))
 }

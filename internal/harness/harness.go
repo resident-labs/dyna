@@ -1518,9 +1518,14 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		protocolErr = workeroutput.OpenCodeError(a.stdout)
 	}
 	if protocolErr != nil {
-		// A parser can report an opaque protocol failure. The process's own stderr
-		// is still narrow evidence of its reason, so the error keeps one.
-		return providerfailure.TagStderr(fmt.Errorf("worker %s: %w", p.Name, protocolErr), a.stderr)
+		err := fmt.Errorf("worker %s: %w", p.Name, protocolErr)
+		// The parser can report an opaque protocol record while the harness
+		// already reported why the turn failed. Keep that reason.
+		if reason, ok := providerfailure.ReasonOf(a.runErr); ok {
+			return providerfailure.Tag(reason, err)
+		}
+		// Otherwise the process's own stderr is the remaining narrow evidence.
+		return providerfailure.TagStderr(err, a.stderr)
 	}
 	if a.runErr != nil {
 		var cwdErr *workingDirectoryError

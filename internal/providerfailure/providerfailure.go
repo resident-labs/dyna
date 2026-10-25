@@ -4,6 +4,7 @@
 package providerfailure
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
@@ -174,6 +175,21 @@ func ClassifyField(field string) (Reason, bool) {
 		return reason, true
 	}
 	return Classify(strings.NewReplacer("_", " ", "-", " ").Replace(field))
+}
+
+// ClassifyJSONField returns the reason a raw JSON scalar field names: a string
+// is read as a provider token or word, and a number as an HTTP status. Callers
+// pass only a field of a structured provider error.
+func ClassifyJSONField(raw []byte) (Reason, bool) {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return ClassifyField(text)
+	}
+	var status int
+	if json.Unmarshal(raw, &status) == nil {
+		return StatusReason(status)
+	}
+	return "", false
 }
 
 // StatusReason returns the reason a provider HTTP status names. A status a
