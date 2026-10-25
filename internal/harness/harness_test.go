@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -1049,8 +1050,7 @@ func TestClaudeScopedDenialsStillAddBlanketDenials(t *testing.T) {
 }
 
 func TestModelCooldownSelection(t *testing.T) {
-	ResetModelCooldownsForTest()
-	t.Cleanup(ResetModelCooldownsForTest)
+	storetest.DataDir(t)
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	p := profile.Profile{Name: "chain", Model: "a", Models: []string{"a", "b", "c"}}
 	check := func(at time.Time, want string) {
@@ -1095,8 +1095,7 @@ func TestModelFallbackExhaustionAndUnrelatedErrors(t *testing.T) {
 		{"local configuration failed", "Task: handle quota, credit, and HTTP 429 responses", 1},
 	} {
 		t.Run(tc.message, func(t *testing.T) {
-			ResetModelCooldownsForTest()
-			t.Cleanup(ResetModelCooldownsForTest)
+			storetest.DataDir(t)
 			// The chain logic is harness-neutral; a shell CLI keeps each attempt
 			// cheap. TestCodexAppServerLaunchChangeResumesThread covers the
 			// Codex process replacement a model change causes.
@@ -1140,8 +1139,7 @@ func TestModelResultIncludesSingleAndMockModels(t *testing.T) {
 }
 
 func TestModelFallbackCancellation(t *testing.T) {
-	ResetModelCooldownsForTest()
-	t.Cleanup(ResetModelCooldownsForTest)
+	storetest.DataDir(t)
 	p := profile.Profile{Name: "canceled", Harness: profile.HarnessCustom, Models: []string{"a", "b"},
 		Command: []string{"/bin/sh", "-c", "printf '429 quota' >&2; exit 1"}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1154,8 +1152,7 @@ func TestModelFallbackCancellation(t *testing.T) {
 }
 
 func TestModelFallbackDoesNotReplayUnresumableActivity(t *testing.T) {
-	ResetModelCooldownsForTest()
-	t.Cleanup(ResetModelCooldownsForTest)
+	storetest.DataDir(t)
 	p := profile.Profile{
 		Name: "unresumable", Harness: profile.HarnessCustom, Models: []string{"a", "b"},
 		Output: &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
@@ -1207,8 +1204,7 @@ while :; do sleep 0.05; done
 }
 
 func TestEmptyStepsOnLastModelFail(t *testing.T) {
-	ResetModelCooldownsForTest()
-	t.Cleanup(ResetModelCooldownsForTest)
+	storetest.DataDir(t)
 	logPath := installFakeCLI(t, "opencode", `#!/bin/sh
 printf 'CALL %s\n' "$*" >> "$DYNA_FAKE_LOG"
 while :; do
@@ -1362,8 +1358,7 @@ func TestCapacityErrorRetriesSameModelWithBackoff(t *testing.T) {
 		{"fails after every pause", 99, 4, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ResetModelCooldownsForTest()
-			t.Cleanup(ResetModelCooldownsForTest)
+			storetest.DataDir(t)
 			var waits []time.Duration
 			old, oldWait := capacityBackoff, capacityWait
 			capacityBackoff = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute}
@@ -1412,8 +1407,7 @@ func TestUsageLimitAndUnknownErrorsAreNotRetried(t *testing.T) {
 		{"disk exploded", ""},
 	} {
 		t.Run(tc.message, func(t *testing.T) {
-			ResetModelCooldownsForTest()
-			t.Cleanup(ResetModelCooldownsForTest)
+			storetest.DataDir(t)
 			oldWait := capacityWait
 			capacityWait = func(context.Context, time.Duration) error { t.Fatal("waited before retrying"); return nil }
 			t.Cleanup(func() { capacityWait = oldWait })
