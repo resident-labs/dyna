@@ -24,10 +24,14 @@ case "$suite" in
     npm test -- --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/relay-test.xml}"
     ;;
   frontend)
-    # Phases: check (type checks only), test (build, tests, clean tree), all.
+    # Phases: check (type checks only), build (production build and a clean tree),
+    # test (build, tests, clean tree), test-shard (tests of one shard), all.
+    # A local CI run gives each test shard its own machine slot, so it runs
+    # test-shard with FRONTEND_SHARD set instead of one long test. Without
+    # FRONTEND_SHARD the test runner runs every file.
     cd web
     npm ci --prefer-offline --no-audit
-    if [[ $phase == all || $phase == check ]]; then
+    type_checks() {
       # The four checks do not depend on each other, so they run side by side.
       pids=()
       npm exec -- node scripts/check-typescript.ts & pids+=($!)
@@ -37,18 +41,29 @@ case "$suite" in
       failed=0
       for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
       if ((failed)); then echo "Frontend type check failed" >&2; exit 1; fi
-    fi
-    if [[ $phase == all || $phase == test ]]; then
-      npm run build
+    }
+    clean_tree() {
+      git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
+      test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
+    }
+    run_tests() {
+      # test:ci hands FRONTEND_SHARD to node --test --test-shard, which splits
+      # the test files, so a shard reporting here still runs its whole share.
       TEST_FILES_PATH="$RUNNER_TEMP/frontend-test-files.jsonl" npm run test:ci
       # A loaded runner makes fast web tests look slow. Re-measure each one alone and
       # keep the shorter time in the report. The local lane has no checker binary.
       if [[ -x "$RUNNER_TEMP/dyna-ci" ]]; then
         "$RUNNER_TEMP/dyna-ci" git ci tests --junit "$JUNIT_REPORT_PATH" --test-files "$RUNNER_TEMP/frontend-test-files.jsonl" --isolate-over 1s --junit-output "$JUNIT_REPORT_PATH"
       fi
-      git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
-      test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
-    fi
+    }
+    case "$phase" in
+      check) type_checks ;;
+      build) npm run build; clean_tree ;;
+      test) npm run build; run_tests; clean_tree ;;
+      test-shard) run_tests; clean_tree ;;
+      all) type_checks; npm run build; run_tests; clean_tree ;;
+      *) echo "Unknown frontend phase: $phase" >&2; exit 2 ;;
+    esac
     ;;
   android)
     # TODO: legacy/shim remove later — engines released before the Android app
