@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 )
 
 // fallbackChainLimit caps how many profiles one session's automatic moves may
@@ -18,18 +19,16 @@ import (
 const fallbackChainLimit = 8
 
 // fallbackAfterLimit moves a session to its profile's fallback when a turn
-// hits a usage limit and no account on the current harness can take it. It
-// returns true when the durable transfer is saved: the turn then ends and the
+// hits a quota failure and no account on the current harness can take it. A
+// rejected sign-in and a busy provider never move a profile.
+// It returns true when the durable transfer is saved: the turn then ends and the
 // replacement turn continues the work there with the shared handoff packet.
 // Chains never loop, because the session records every profile it left.
 func (m *Manager) fallbackAfterLimit(ctx context.Context, meta Meta, cause error) bool {
-	if cause == nil {
+	if cause == nil || !providerfailure.Is(cause, providerfailure.Quota) {
 		return false
 	}
 	text := cause.Error()
-	if !harness.IsUsageLimit(text) || harness.IsCapacityFailure(text) {
-		return false
-	}
 	ps, err := m.profiles()
 	if err != nil {
 		return false

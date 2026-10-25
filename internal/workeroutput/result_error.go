@@ -3,6 +3,8 @@ package workeroutput
 import (
 	"fmt"
 	"strings"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // AntigravityResultError follows the explicit result status. Partial text
@@ -16,9 +18,10 @@ func AntigravityResultError(stdout string) error {
 		}
 		switch strings.ToUpper(strings.TrimSpace(record.Result.Status)) {
 		case "ERROR", "FAILED":
-			// A failed result can carry its diagnostic only in error.
+			// A failed result can carry its diagnostic only in error. The reason
+			// comes from that structured field, never from free response text.
 			detail := strings.TrimSpace(record.Result.Response + " " + record.Result.Error)
-			failure = fmt.Errorf("Antigravity protocol result %s: %s", record.Result.Status, detail)
+			failure = providerfailure.TagDetail(fmt.Errorf("Antigravity protocol result %s: %s", record.Result.Status, detail), record.Result.Error)
 		case "SUCCESS", "COMPLETED":
 			failure = nil
 		}
@@ -35,7 +38,7 @@ func OpenCodeError(stdout string) error {
 		if !ok || record.Type != "error" {
 			continue
 		}
-		failure = fmt.Errorf("OpenCode protocol error: %s", record.Error)
+		failure = providerfailure.TagDetail(fmt.Errorf("OpenCode protocol error: %s", record.Error), string(record.Error))
 	}
 	return failure
 }

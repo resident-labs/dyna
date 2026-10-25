@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/harness/sessionhost"
+	"dyna-agent/internal/providerfailure"
 )
 
 var antigravityACPLogPrefix = regexp.MustCompile(`^[EF][0-9]{4} [0-9:.]+[ \t]+[0-9]+ [^\r\n]+:[0-9]+\] `)
@@ -27,7 +28,9 @@ func antigravityACPPromptError(session, stderr string) error {
 		}
 		message = strings.TrimPrefix(message, "ERROR:root:")
 		if markers[message] {
-			return fmt.Errorf("Antigravity ACP prompt failed: %s", tail(strings.TrimSpace(stderr), 2000))
+			// The server names no reason, so the marker line and the stderr tail
+			// around it are the evidence. Model output is not involved.
+			return providerfailure.TagStderr(fmt.Errorf("Antigravity ACP prompt failed: %s", tail(strings.TrimSpace(stderr), 2000)), stderr)
 		}
 	}
 	return nil

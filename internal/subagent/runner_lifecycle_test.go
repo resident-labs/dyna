@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/state"
 )
 
@@ -27,7 +28,7 @@ func TestTurnEndPostsCooldownNoticeOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
-	end := TurnEnd{Turn: 1, Status: TurnError, Error: "429 usage limit reached", Ended: time.Now()}
+	end := TurnEnd{Turn: 1, Status: TurnError, Error: "429 usage limit reached", FailureReason: providerfailure.Quota, Ended: time.Now()}
 	request := func() context.Context { return state.ForRequest(actor, "runner/cooldown") }
 	if err := e.m.RunnerTurnEnd(request(), end); err != nil {
 		t.Fatal(err)
@@ -55,10 +56,10 @@ func TestTurnEndCooldownUsesTheStoredOutcome(t *testing.T) {
 		t.Run(which, func(t *testing.T) {
 			e := newTestEnv(t)
 			info := completedFixtureSession(t, e)
-			end := TurnEnd{Turn: 1, Status: TurnError, Error: "429 usage limit reached", Ended: time.Now()}
+			end := TurnEnd{Turn: 1, Status: TurnError, Error: "429 usage limit reached", FailureReason: providerfailure.Quota, Ended: time.Now()}
 			switch which {
 			case "ordinary-error":
-				end.Error = "invalid input"
+				end.Error, end.FailureReason = "invalid input", ""
 			case "stopped":
 				end.Status = TurnStopped
 			case "no-profile":
