@@ -26,25 +26,6 @@ func fakeJWT(exp int64) string {
 	}{Exp: exp}) + ".signature"
 }
 
-// codexCredential is Codex's saved ChatGPT login in its native shape.
-func codexCredential(exp int64) store.Credential {
-	auth, _ := json.Marshal(struct {
-		Tokens struct {
-			Access    string `json:"access_token"`
-			Refresh   string `json:"refresh_token"`
-			AccountID string `json:"account_id"`
-		} `json:"tokens"`
-	}{Tokens: struct {
-		Access    string `json:"access_token"`
-		Refresh   string `json:"refresh_token"`
-		AccountID string `json:"account_id"`
-	}{Access: fakeJWT(exp), Refresh: "codex-refresh", AccountID: "account-1"}})
-	payload, _ := json.Marshal(struct {
-		Auth json.RawMessage `json:"auth.json"`
-	}{Auth: auth})
-	return store.Credential{Schema: "codex/auth-file@1", Payload: payload}
-}
-
 // openCodeCredential writes one OpenCode credential row and returns the saved
 // reference that names it.
 func openCodeCredential(t *testing.T, integration, value string) store.Credential {
@@ -135,11 +116,6 @@ func TestConvertMapsEachSavedSignIn(t *testing.T) {
 		entryID   string
 		wantEntry string
 	}{
-		{
-			name: "codex", harness: "codex", provider: store.ProviderChatGPT, kind: store.KindOAuth, entryID: "openai-codex",
-			cred:      codexCredential(exp),
-			wantEntry: `{"type":"oauth","access":"` + fakeJWT(exp) + `","refresh":"codex-refresh","expires":1800000000000,"accountId":"account-1"}`,
-		},
 		{
 			name: "kimi-code", harness: "kimi-code", provider: store.ProviderKimiCode, kind: store.KindOAuth, entryID: "kimi-coding",
 			cred:      store.Credential{Schema: "kimi-code/native-files@1", Payload: kimi},
@@ -245,7 +221,6 @@ func TestConvertRefusesWhatPiCannotTake(t *testing.T) {
 		{name: "muse without a key", harness: "muse", cred: store.Credential{Schema: "muse/auth-file@1", Payload: museWithoutKey}, reason: ReasonNoAPIKey},
 		{name: "unknown key type", harness: "opencode", cred: openCodeCredential(t, "opencode-go", `{"type":"oauth","key":"x"}`), reason: ReasonNoAPIKey},
 		{name: "claude without inference", harness: "claude-code", cred: store.Credential{Schema: "claude-code/oauth-file@1", Payload: claudeWithoutScope}, reason: ReasonUnreadable},
-		{name: "unreadable codex", harness: "codex", cred: store.Credential{Schema: "codex/auth-file@1", Payload: json.RawMessage(`{}`)}, reason: ReasonUnreadable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -260,7 +235,7 @@ func TestConvertRefusesWhatPiCannotTake(t *testing.T) {
 // TestImportableNamesTheMovedHarnesses keeps an unknown harness from silently
 // importing nothing.
 func TestImportableNamesTheMovedHarnesses(t *testing.T) {
-	for _, harness := range []string{"claude-code", "codex", "kimi-code", "grok", "muse", "opencode", "antigravity"} {
+	for _, harness := range []string{"claude-code", "kimi-code", "grok", "muse", "opencode", "antigravity"} {
 		if !Importable(harness) {
 			t.Fatalf("%s is not importable", harness)
 		}
