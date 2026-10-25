@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,13 +14,18 @@ import (
 	"dyna-agent/internal/pr/state"
 )
 
+func trialRepoWithDefinition(t *testing.T) (repoDir, base, head, prHead string) {
+	t.Helper()
+	repoDir, base = changeRepo(t)
+	head = changeCommit(t, repoDir, "trial\n")
+	prHead = changeCommit(t, repoDir, "pull request\n")
+	return repoDir, base, head, prHead
+}
+
 func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	repoDir := filepath.Join(t.TempDir(), "repo")
-	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
-		t.Fatalf("init repository: %v: %s", err, raw)
-	}
+	repoDir, base, head, prHead := trialRepoWithDefinition(t)
 	repo, err := localci.CanonicalRepo(ctx, repoDir)
 	if err != nil {
 		t.Fatal(err)
@@ -32,13 +38,12 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
 	}
-	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	branch := "dyna/merge-trial/1"
-	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Base: base, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[r.Key] = &r
-		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Base: base, Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -49,6 +54,9 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	run := Run{ID: 81, Attempt: 1, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "completed", Conclusion: "cancelled"}
 	jobReads, reruns := 0, 0
 	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		if filepath.Base(cmd.Path) == "git" {
+			return nil
+		}
 		endpoint := ""
 		for _, arg := range cmd.Args {
 			if strings.HasPrefix(arg, "repos/") {
@@ -94,7 +102,7 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 		t.Fatalf("local queue: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
-	for _, name := range localci.RequiredChecks(localci.WorkflowSuites()) {
+	for _, name := range watchDynaRequiredChecks(t) {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	if err := registry.SaveResult(ctx, result); err != nil {
@@ -149,10 +157,7 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	repoDir := filepath.Join(t.TempDir(), "repo")
-	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
-		t.Fatalf("init repository: %v: %s", err, raw)
-	}
+	repoDir, base, head, prHead := trialRepoWithDefinition(t)
 	registry := localci.Store{DataDir: dataDir}
 	ciMachine := machines.Store{DataDir: dataDir}
 	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
@@ -161,13 +166,12 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
 	}
-	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	branch := "dyna/merge-trial/1"
-	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Base: base, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[r.Key] = &r
-		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Base: base, Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -214,10 +218,17 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 	t.Helper()
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	repoDir := filepath.Join(t.TempDir(), "repo")
-	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
-		t.Fatalf("init repository: %v: %s", err, raw)
+	repoDir := t.TempDir()
+	changeGit(t, repoDir, "init", "-b", "main")
+	writeWatchDefinition(t, repoDir)
+	if err := os.WriteFile(filepath.Join(repoDir, "code.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
+	changeGit(t, repoDir, "add", ".")
+	changeGit(t, repoDir, "commit", "-m", "base")
+	base := changeGit(t, repoDir, "rev-parse", "HEAD")
+	head := changeCommit(t, repoDir, "trial\n")
+	prHead := changeCommit(t, repoDir, "pull request\n")
 	repo, err := localci.CanonicalRepo(ctx, repoDir)
 	if err != nil {
 		t.Fatal(err)
@@ -232,14 +243,13 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 			t.Fatal(err)
 		}
 	}
-	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	branch := "dyna/merge-trial/1"
-	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Base: base, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
 	r.PolicyOverride.RequiredChecks = required
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[r.Key] = &r
-		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "publishing", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Base: base, Head: head, Branch: branch, Phase: "publishing", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -288,11 +298,24 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 	return s, r, repo, branch, &reruns
 }
 
+func savedTrialHead(t *testing.T, s *Service, r Record) string {
+	t.Helper()
+	st, err := s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := st.MergeTrials[defaultRepo(r)]
+	if batch == nil || batch.Head == "" {
+		t.Fatal("saved trial has no head")
+	}
+	return batch.Head
+}
+
 // fullLocalPass is a saved local result that covers every trial suite.
 func fullLocalPass(t *testing.T) localci.Result {
 	t.Helper()
 	result := localci.Result{Node: "worker", Status: "passed"}
-	for _, name := range localci.RequiredChecks([]localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
+	for _, name := range watchDynaRequiredChecks(t) {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	return result
@@ -307,6 +330,25 @@ func cancelledTrialRun() Run {
 // runningTrialRun is a hosted replacement that is still going.
 func runningTrialRun() Run {
 	return Run{ID: 81, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", Event: "push", Status: "in_progress"}
+}
+
+// A saved infrastructure error must not hide the graph that distinguishes a
+// cancellation-only hosted aggregate from a real failure.
+func TestSavedInfraErrorKeepsCancellationGraphForHostedFallback(t *testing.T) {
+	result := localci.Result{Node: "worker", Status: localci.OutcomeError, Error: "node unavailable"}
+	run := cancelledTrialRun()
+	run.Conclusion = "cancelled"
+	s, r, _, branch, reruns := savedLocalEnv(t, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}, &result, []Run{run}, cancelledTrialChecks(), nil, false)
+	got, err := s.mergeTrialCI(t.Context(), r, branch, result.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != VerdictPending {
+		t.Fatalf("ci=%s reason=%q; a cancellation-only aggregate became a test failure", got.Status, got.Reason)
+	}
+	if *reruns != 1 {
+		t.Fatalf("reran hosted CI %d times, want one fallback run", *reruns)
+	}
 }
 
 // A saved local pass decides a head on its own. A host that is briefly
@@ -389,10 +431,7 @@ func TestSavedLocalPassKeepsTheCIGates(t *testing.T) {
 func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	repoDir := filepath.Join(t.TempDir(), "repo")
-	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
-		t.Fatalf("init repository: %v: %s", err, raw)
-	}
+	repoDir, base, head, prHead := trialRepoWithDefinition(t)
 	repo, err := localci.CanonicalRepo(ctx, repoDir)
 	if err != nil {
 		t.Fatal(err)
@@ -405,19 +444,18 @@ func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
 	}
-	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	branch := "dyna/merge-trial/159"
-	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Base: base, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[r.Key] = &r
-		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Base: base, Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
-	for _, name := range localci.RequiredChecks([]localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
+	for _, name := range watchDynaRequiredChecks(t) {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	if err := registry.SaveResult(ctx, result); err != nil {
@@ -498,7 +536,8 @@ func TestCancelledHostedWorkflowCannotPassAHead(t *testing.T) {
 	checks := append(cancelledTrialChecks(), independentCheck())
 	runs := []Run{cancelledTrialRun(), independentWorkflow(strings.Repeat("a", 40), "dyna/merge-trial/1")}
 	s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, runs, checks, nil, false)
-	got, err := s.mergeTrialCI(t.Context(), r, branch, strings.Repeat("a", 40))
+	head := savedTrialHead(t, s, r)
+	got, err := s.mergeTrialCI(t.Context(), r, branch, head)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +552,8 @@ func TestCompleteLocalPassIgnoresACancelledWorkflow(t *testing.T) {
 	checks := append(cancelledTrialChecks(), independentCheck())
 	runs := []Run{cancelledTrialRun(), independentWorkflow(strings.Repeat("a", 40), "dyna/merge-trial/1")}
 	s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, &result, runs, checks, nil, false)
-	got, err := s.mergeTrialCI(t.Context(), r, branch, strings.Repeat("a", 40))
+	head := savedTrialHead(t, s, r)
+	got, err := s.mergeTrialCI(t.Context(), r, branch, head)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,10 +566,10 @@ func TestCompleteLocalPassIgnoresACancelledWorkflow(t *testing.T) {
 // cancelled workflow: treating it as settled would skip local execution and
 // leave the trial waiting for CI that never comes.
 func TestSchedulerRunsLocalCIAfterHostedCancellation(t *testing.T) {
-	head := strings.Repeat("a", 40)
 	s, r, repo, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, []Run{cancelledTrialRun()}, cancelledTrialChecks(), nil, false)
+	head := savedTrialHead(t, s, r)
 	job := registeredCIJob{record: r, head: head, branch: branch, trial: true}
-	conclusive, err := s.scheduledCIConclusive(t.Context(), job, repo)
+	conclusive, err := s.scheduledCIConclusive(t.Context(), job, repo, watchDynaDefinition(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +584,7 @@ func TestSchedulerRunsLocalCIAfterHostedCancellation(t *testing.T) {
 // decides the head.
 func TestEnabledNodeWaitsForLocalCIAfterHostedCancellation(t *testing.T) {
 	s, r, repo, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, []Run{cancelledTrialRun()}, cancelledTrialChecks(), nil, true)
-	head := strings.Repeat("a", 40)
+	head := savedTrialHead(t, s, r)
 	got, err := s.mergeTrialCI(t.Context(), r, branch, head)
 	if err != nil {
 		t.Fatal(err)

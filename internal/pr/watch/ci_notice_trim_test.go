@@ -2,10 +2,8 @@ package watch
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +21,7 @@ func (r *cancelledCIRegistry) Mode(context.Context, string) (string, error) {
 }
 func (r *cancelledCIRegistry) SaveResult(context.Context, localci.Result) error { return nil }
 func (r *cancelledCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {
-	return localci.Result{}, errors.New("no local result")
+	return localci.Result{}, os.ErrNotExist
 }
 func (r *cancelledCIRegistry) LoadHostedRuns(context.Context, string, string) (localci.HostedRuns, error) {
 	return r.hosted, nil
@@ -37,17 +35,16 @@ func (r *cancelledCIRegistry) SaveHostedRuns(_ context.Context, _, _ string, run
 // only because Dyna cancelled a hosted shard for its own local CI.
 func cancelledAggregateFixture(t *testing.T, e *testEnv) {
 	t.Helper()
-	repo := t.TempDir()
-	for _, args := range [][]string{{"init", "--quiet", repo}, {"-C", repo, "remote", "add", "origin", "https://github.com/owner/repo"}} {
-		if raw, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			t.Fatalf("prepare repository: %v: %s", err, raw)
-		}
-	}
+	repo, base := changeRepo(t)
+	changeGit(t, repo, "remote", "add", "origin", "https://github.com/owner/repo")
+	head := changeCommit(t, repo, "head\n")
 	e.author.Dir = repo
 	testReportFixture(t, e, nil)
+	e.f.Pull.Base.SHA = base
+	e.f.Pull.Head.SHA = head
 	e.f.Runs[0] = Run{
 		ID: 81, Attempt: 1, CheckSuiteID: 7, Path: ".github/workflows/ci.yml",
-		Event: "pull_request", HeadSHA: strings.Repeat("a", 40), HeadBranch: "feature",
+		Event: "pull_request", HeadSHA: head, HeadBranch: "feature",
 		Name: "CI", Status: "completed", Conclusion: "failure",
 		Started: e.clock.Format(time.RFC3339),
 	}
@@ -64,6 +61,7 @@ func cancelledAggregateFixture(t *testing.T, e *testEnv) {
 		}
 		e.f.Checks = append(e.f.Checks, check)
 	}
+	e.write()
 }
 
 // A hosted run that Dyna cancelled for local CI never tested the head, so its
@@ -71,7 +69,10 @@ func cancelledAggregateFixture(t *testing.T, e *testEnv) {
 func TestLocalCancelledHostedRunSkipsLogAndReportInspection(t *testing.T) {
 	e := newEnv(t)
 	cancelledAggregateFixture(t, e)
-	e.track()
+	tracked := e.track()
+	if !headSHAPattern.MatchString(tracked.Base) {
+		t.Fatalf("fixture did not track a verified base: %+v", tracked)
+	}
 	e.s.LocalCIRegistry = &cancelledCIRegistry{hosted: localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}}
 	e.tick()
 	calls, _ := os.ReadFile(e.calls)

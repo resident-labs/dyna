@@ -20,6 +20,7 @@ import (
 
 	"dyna-agent/internal/boundedio"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/textutil"
@@ -128,6 +129,8 @@ type Status struct {
 type Snapshot struct {
 	OwnerLogin    string
 	localCI       *registeredCIObservation
+	localCIConfig localCIConfigState
+	localCIDef    *localci.Definition
 	ciReused      bool // A discussion refresh does not advance the full CI safety clock.
 	headConfirmed bool
 	ciProbe       string

@@ -67,6 +67,7 @@ type ExecutableCheck struct {
 // Definition is the validated local CI graph at one repository revision.
 // Its methods replace repository-specific suite tables with repository data.
 type Definition struct {
+	revision   string
 	trial      []Suite
 	suites     []definitionSuite
 	bySuite    map[Suite]definitionSuite
@@ -159,6 +160,7 @@ func LoadDefinition(ctx context.Context, repo, ref string) (*Definition, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s at %.12s: %w", DefinitionPath, sha, err)
 	}
+	definition.revision = sha
 	return definition, nil
 }
 
@@ -188,6 +190,10 @@ func ParseDefinition(body []byte) (*Definition, error) {
 	for _, cache := range file.Caches {
 		if !definitionID.MatchString(cache.Name) {
 			return nil, fmt.Errorf("invalid cache name %q", cache.Name)
+		}
+		switch cache.Name {
+		case "runs", "slots", "diagnostics", "caches":
+			return nil, fmt.Errorf("cache name %q is reserved for runner state", cache.Name)
 		}
 		if _, exists := caches[cache.Name]; exists {
 			return nil, fmt.Errorf("duplicate cache %q", cache.Name)
