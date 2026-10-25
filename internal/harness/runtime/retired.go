@@ -13,6 +13,8 @@ var retiredHarnesses = []string{
 	"cursor-agent",
 	// TODO: legacy/shim remove later — qwen-audio-agent, the old voice gateway, was replaced by the Go voice service on 2026-10-19; gc deletes its leftover bundle folder, until no data directory still has one
 	"qwen-audio-agent",
+	// TODO: legacy/shim remove later — Antigravity was removed on 2026-10-25; gc drops its account records and deletes Dyna's leftover bundle and account folders, until no data directory still has them
+	"antigravity",
 }
 
 func retiredHarness(h string) bool { return slices.Contains(retiredHarnesses, h) }

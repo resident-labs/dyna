@@ -211,6 +211,9 @@ func (a *Accounts) Create(harness, label string) (result NativeAccount, err erro
 
 func (a *Accounts) Find(id string) (result NativeAccount, err error) {
 	err = a.transaction(func(state *store.State) error {
+		if e := state.Find(id); e != nil && retiredHarness(e.Harness) {
+			return errAccountMissing
+		}
 		result, err = a.native(state.Find(id))
 		return err
 	}, false)
@@ -225,7 +228,7 @@ func (a *Accounts) List() (result []NativeAccount, err error) {
 	}
 	err = a.transaction(func(state *store.State) error {
 		for i := range state.Entries {
-			if state.Entries[i].NativeHome == "" {
+			if state.Entries[i].NativeHome == "" || retiredHarness(state.Entries[i].Harness) {
 				continue
 			}
 			n, err := a.native(&state.Entries[i])
