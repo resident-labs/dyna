@@ -69,6 +69,53 @@ func TestIssueGoalPostsGoalMilestone(t *testing.T) {
 	}
 }
 
+// Two assignments of one open issue start one goal. The claim takes only an
+// issue still open, so a request that read the issue before the other claim
+// fails its link, and its new goal is deleted.
+func TestIssueGoalClaimsIssueOnce(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	issue, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Two tabs", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		issue room.Issue
+		err   error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			got, err := e.svc.IssueGoal(context.Background(), r.ID, issue.ID)
+			results <- result{issue: got, err: err}
+		}()
+	}
+	close(start)
+	var started room.Issue
+	refused := 0
+	for range 2 {
+		res := <-results
+		if res.err != nil {
+			refused++
+			continue
+		}
+		started = res.issue
+	}
+	if refused != 1 {
+		t.Fatalf("refused = %d, want one winner and one refusal", refused)
+	}
+	goals, err := e.svc.goalService().Store.List(r.ID)
+	if err != nil || len(goals) != 1 {
+		t.Fatalf("goals = %+v, %v, want one", goals, err)
+	}
+	saved, err := e.svc.rooms().Issue(r.ID, issue.ID)
+	if err != nil || saved.State != "goal" || saved.GoalID != goals[0].ID || started.GoalID != goals[0].ID {
+		t.Fatalf("issue = %+v, %v, want its one goal %s", saved, err, goals[0].ID)
+	}
+}
+
 func TestIssueProgressUsesOpenGoalAndPR(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
