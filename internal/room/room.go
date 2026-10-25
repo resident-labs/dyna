@@ -887,6 +887,14 @@ func newMessageID() string {
 	return "msg_" + hex.EncodeToString(b[:])
 }
 
+// messageIDShape is the form of a stored post ID: msg_ and eight random bytes
+// in hex. A caller that names its own ID must match it.
+var messageIDShape = regexp.MustCompile(`^msg_[a-f0-9]{16}$`)
+
+// IsMessageID reports whether id has the form of a stored post ID, so a caller
+// can tell an ID from text that merely starts with msg_.
+func IsMessageID(id string) bool { return messageIDShape.MatchString(id) }
+
 // ErrPostIDConflict means a post ID is stored with other content. A caller
 // that derives the ID from what it reports reads it as "already posted".
 var ErrPostIDConflict = errors.New("post ID already belongs to different content")
@@ -910,7 +918,7 @@ func postConflicts(m Message, in PostInput, supplied Conversation) bool {
 // post appends a message. event lets PostEvent write a sealed family, which
 // no other caller can do.
 func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
-	if in.ID != "" && !regexp.MustCompile(`^msg_[a-f0-9]{16}$`).MatchString(in.ID) {
+	if in.ID != "" && !IsMessageID(in.ID) {
 		return Message{}, fmt.Errorf("invalid post ID")
 	}
 	in.From = strings.TrimSpace(in.From)
