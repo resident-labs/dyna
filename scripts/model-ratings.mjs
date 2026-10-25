@@ -17,7 +17,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { num, pickColumns } from './model-ratings-columns.mjs';
+import { num, pickColumns, slugOf } from './model-ratings-columns.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dyna = (...args) => execFileSync('dyna', args, { encoding: 'utf8', cwd: repo });
@@ -33,10 +33,6 @@ if (!models.length) {
   console.error('usage: node scripts/model-ratings.mjs [--baseline <slug>] <slug|url> ...');
   process.exit(2);
 }
-const slugOf = (arg) => {
-  const m = arg.match(/comparisons\/(.+?)-vs-/);
-  return m ? m[1] : arg;
-};
 
 const TRAITS = ['Truthful', 'Admits Uncertainty', 'Flags Nuances', 'Sycophantic', 'Constructive Pushback', 'Slop'];
 const TABS = ['Transparency', 'Conviction', 'Slop'];
