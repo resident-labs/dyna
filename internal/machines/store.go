@@ -282,9 +282,13 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 	}
-	_, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))`)
-	if err != nil {
-		return err
+	if old < 4 {
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))`); err != nil {
+			return err
+		}
+		if err := inheritHostChecks(ctx, conn); err != nil {
+			return err
+		}
 	}
 	if old < 5 {
 		// A machine with no room list takes work from every room, which is
@@ -293,7 +297,7 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 	}
-	return inheritHostChecks(ctx, conn)
+	return nil
 }
 
 // inheritHostChecks is a one-time migration for machines with proof that the

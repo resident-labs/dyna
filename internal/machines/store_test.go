@@ -215,6 +215,60 @@ INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated
  ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000);
 INSERT INTO meta(key,value) VALUES('machines.version','1');`
 
+// machinesVersionFourSchema is the registry with probes and explicit host-check
+// permission but no room list, so a data folder from that version still
+// migrates.
+const machinesVersionFourSchema = `CREATE TABLE machines (
+	id             TEXT    PRIMARY KEY,
+	name           TEXT    NOT NULL UNIQUE,
+	roles          TEXT    NOT NULL CHECK(json_valid(roles)),
+	ssh            TEXT    NOT NULL,
+	ci_slots       INTEGER NOT NULL CHECK(ci_slots >= 0),
+	enabled        INTEGER NOT NULL CHECK(enabled IN (0,1)),
+	local          INTEGER NOT NULL CHECK(local IN (0,1)),
+	created_ms     INTEGER NOT NULL,
+	updated_ms     INTEGER NOT NULL,
+	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
+	health         TEXT    NOT NULL DEFAULT 'unknown',
+	health_reason  TEXT    NOT NULL DEFAULT '',
+	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
+	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
+	probe_error    TEXT    NOT NULL DEFAULT '',
+	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
+	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))
+);
+CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
+INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms,allow_host_checks) VALUES
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,1);
+INSERT INTO meta(key,value) VALUES('machines.version','4');`
+
+// A version 4 registry reaches the version 5 step, which must add only the room
+// list: the columns the earlier steps added are already there.
+func TestMigrateAddsRoomListToVersionFour(t *testing.T) {
+	ctx := context.Background()
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := db.Exec(machinesVersionFourSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := Store{DataDir: dir}.Get(ctx, "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.AllowHostChecks || m.SSH != "pip@hermeslab" || m.CISlots != 2 {
+		t.Fatalf("migrated machine = %#v", m)
+	}
+	// The machine named no room before it could, so it takes every room.
+	if len(m.Rooms) != 0 || !m.AllowsRoom("room_any") {
+		t.Fatalf("migrated machine rooms = %v", m.Rooms)
+	}
+}
+
 func TestMigrateAddsProbeColumns(t *testing.T) {
 	ctx := context.Background()
 	dir := storetest.DataDir(t)
