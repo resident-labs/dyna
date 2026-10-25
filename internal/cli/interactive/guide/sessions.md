@@ -43,7 +43,7 @@ A session's standing instructions come from one snapshot. The first turn builds
 it from live state, and later turns receive the same bytes until a refresh, so
 the cached prompt prefix holds. The snapshot holds:
 
-- Dyna's session rules, and the worker context with the identity and selectors.
+- Dyna's session rules, and the worker context with the identity and depth.
 - The global rules and the room rules.
 - The subagent profiles the session may use.
 - The room's feature index, from its library map.
