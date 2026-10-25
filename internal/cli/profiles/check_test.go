@@ -50,6 +50,31 @@ func TestCheckSelection(t *testing.T) {
 	}
 }
 
+func TestCheckReportsAccountReadiness(t *testing.T) {
+	storetest.Isolate(t)
+	// A managed profile needs Dyna's private copy and an active sign-in.
+	reg := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "native", Harness: profile.HarnessCodex, Taste: 5, Intelligence: 5, Cost: 5}}}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewCommand()
+	cmd.SetArgs([]string{"check", "native"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "1 profile check(s) failed") {
+		t.Fatalf("error = %v, want a failed check for a profile that cannot start", err)
+	}
+	for _, want := range []string{"account: ", "next: dyna harness login codex"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("check output missing %q: %s", want, out.String())
+		}
+	}
+}
+
 func TestCheckMissingBinaryFailsWithoutStartingCommand(t *testing.T) {
 	isolateProfiles(t)
 	marker := filepath.Join(t.TempDir(), "started")
