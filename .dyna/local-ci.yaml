@@ -23,11 +23,79 @@ checks:
     caches: [npm]
     reports: junit
 
-  - id: frontend
+  - id: frontend-0
+    name: frontend (0)
+    providerGroup: frontend
     image: node:22
-    command: bash scripts/ci.sh frontend test
+    command: bash scripts/ci.sh frontend test-shard
     caches: [npm]
     reports: junit
+    env: &frontend-shard-env
+      FRONTEND_SHARD: 1/6
+
+  - id: frontend-1
+    name: frontend (1)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 2/6
+
+  - id: frontend-2
+    name: frontend (2)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 3/6
+
+  - id: frontend-3
+    name: frontend (3)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 4/6
+
+  - id: frontend-4
+    name: frontend (4)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 5/6
+
+  - id: frontend-5
+    name: frontend (5)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 6/6
+
+  - id: frontend-build
+    # The hosted frontend job builds and tests, so both provider names stay the
+    # same for the aggregate that classifies a cancelled hosted run.
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend build
+    caches: [npm]
+    reports: none
 
   - id: frontend-check
     image: node:22
@@ -183,7 +251,7 @@ suites:
     checks: [relay]
 
   - id: frontend
-    checks: [frontend]
+    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build]
 
   - id: frontend-check
     checks: [frontend-check]
@@ -202,4 +270,4 @@ suites:
   - id: go
     group: go-test
     files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
-    checks: [frontend, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7]
+    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7]

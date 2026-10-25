@@ -173,7 +173,7 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 		files := map[string]string{"execution.json": `{"durationNanos":1000000000}`}
 		if check.reports == ReportJUnit || check.reports == ReportGo {
 			xml := `<testsuite><testcase name="fast" time="0.1"/></testsuite>`
-			if check.id == SuiteFrontend && failFrontend {
+			if check.id == Suite("frontend-0") && failFrontend {
 				xml = `<testsuite><testcase name="broken"><failure message="bad"/></testcase></testsuite>`
 			}
 			files["test.xml"] = xml
@@ -294,7 +294,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
 		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
 	}
-	wanted := map[CheckName]bool{"frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
+	wanted := map[CheckName]bool{"frontend (0)": true, "frontend (1)": true, "frontend (2)": true, "frontend (3)": true, "frontend (4)": true, "frontend (5)": true, "frontend-build": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
 	for i := 0; i < 8; i++ {
 		wanted[CheckName(fmt.Sprintf("go-test-shard (%d)", i))] = true
 	}
@@ -311,7 +311,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		}
 		// This check's command passed; the reports proved the failure, and the
 		// log must end with that cause too.
-		if check.CheckName == "frontend" {
+		if check.CheckName == "frontend (0)" {
 			if cause := loggedExit(t, check).Cause; cause != CauseTestFailure {
 				t.Fatalf("frontend log lost the cause the reports proved: %q", cause)
 			}
