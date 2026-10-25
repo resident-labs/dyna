@@ -13,7 +13,10 @@ const (
 	SuiteGo            Suite = "go"
 	SuiteGoTest        Suite = "go-test"
 	SuiteGoStatic      Suite = "go-static"
-	SuiteCrossBuild    Suite = "cross-build"
+	// SuiteCross is the per-target cross-build suite. Its group and the name
+	// users pass to `git ci run --suite` stay cross-build, which is also the
+	// aggregate check name a base requires.
+	SuiteCross         Suite = "cross"
 	SuiteComputerSmoke Suite = "computer-smoke"
 	// SuiteChanges is the placeholder for a diff that needs no suite reports.
 	SuiteChanges Suite = "changes"

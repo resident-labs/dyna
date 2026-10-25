@@ -250,7 +250,7 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 
 func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T) {
 	const slots = 4
-	checks, _, err := nodeChecks(testDynaDefinition(t), []Suite{SuiteGo, SuiteCrossBuild}, true)
+	checks, _, err := nodeChecks(testDynaDefinition(t), []Suite{SuiteGo, SuiteCross}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
