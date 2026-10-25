@@ -257,8 +257,10 @@ a merge trial runs and the suites a pull request can select.
 
 A `host: true` check runs on the machine without a container. It cannot set
 `image`, `hostUser` or `setup`. Host checks stay off even when the file asks
-for them: only the machine owner can allow them, with
-`dyna machine edit <name> --allow-host-checks`.
+for them: only the owner, or the root of a room, can allow them, with
+`dyna machine edit <name> --allow-host-checks`. A room root's permission covers
+that room's work only. The machine record and the Machine page name who allows
+them.
 
 A check gets 2 CPUs and 4 GiB of memory in a container, and 5 GiB as a host
 check. `cpus` and `memory` raise that: `cpus: 8` and `memory: 16g`. A memory

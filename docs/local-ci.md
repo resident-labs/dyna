@@ -188,12 +188,18 @@ Host execution is off by default on every machine. A one-time upgrade
 migration preserves permission only when saved `computer-smoke` evidence proves
 that the old command started. A passed result or a test failure provides that
 proof. A setup failure does not. Every other existing machine and every machine
-added later starts off. The repository cannot turn it on. Only the machine owner
-can explicitly allow it:
+added later starts off. The repository cannot turn it on, and neither can a
+session or a workflow worker. The owner allows it for every room, and the root
+of a room allows it for its own room:
 
 ```sh
 dyna machine edit build-machine --allow-host-checks
 ```
+
+A room root's permission covers that room's CI work only, so it never lets
+another room's repositories run outside a container. The machine record names
+who allows host checks, the owner or the roots of rooms, and the Machine page
+shows those names.
 
 Use this only for repositories you trust with the machine account. Host commands
 run outside container isolation, although Dyna still applies the check's

@@ -48,7 +48,7 @@ func find(list []machines.Machine, name string) (machines.Machine, bool) {
 
 func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	storetest.DataDir(t)
-	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) error { return nil })
+	stubEngine(t)
 	ctx := context.Background()
 	localName := localMachineName(t)
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab", "--ci-slots", "2"); err != nil {
@@ -126,6 +126,44 @@ func localMachineName(t *testing.T) string {
 	return local.Name
 }
 
+// stubEngine applies a host-check patch to the registry as the engine does, so
+// a test can check what the command writes beside it.
+func stubEngine(t *testing.T) {
+	t.Helper()
+	stubSaveMachine(t, func(ctx context.Context, id string, patch websvc.MachinePatch) error {
+		if patch.AllowHostChecks == nil {
+			return nil
+		}
+		_, err := (machines.Store{}).UpdateHostChecksGrants(ctx, id, func(m machines.Machine) ([]machines.HostChecksGrant, error) {
+			if !*patch.AllowHostChecks {
+				return nil, nil
+			}
+			return append(m.HostChecksGrants, machines.HostChecksGrant{By: machines.GrantorRoot, Room: "room_dyna"}), nil
+		})
+		return err
+	})
+}
+
+// A machine that gains the ci role in the same command takes the host-check
+// permission with it, instead of losing it to the role save.
+func TestMachineEditTakesCIRoleAndHostChecksTogether(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "build", "--ssh", "ari@build", "--role", "agents"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "build", "--ci-slots", "1", "--allow-host-checks"); err != nil {
+		t.Fatal(err)
+	}
+	build, err := (machines.Store{}).Get(context.Background(), "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !build.HasRole(machines.RoleCI) || build.CISlots != 1 || !build.HostChecksAllowed("room_dyna") {
+		t.Fatalf("edited machine = %#v, want the ci role and the room's host checks", build)
+	}
+}
+
 func stubSaveMachine(t *testing.T, save func(context.Context, string, websvc.MachinePatch) error) {
 	t.Helper()
 	previous := saveMachine
@@ -153,7 +191,7 @@ func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.AllowHostChecks {
+	if saved.HasHostChecksGrants() {
 		t.Fatal("denied host-check edit changed the registry")
 	}
 }

@@ -34,9 +34,10 @@ type Node struct {
 	SSH     string `json:"ssh,omitempty"`
 	Slots   int    `json:"slots"`
 	Enabled bool   `json:"enabled"`
-	// AllowHostChecks lets repository-defined checks run outside a container.
-	// It is a machine owner's decision and defaults to false.
-	AllowHostChecks bool `json:"allowHostChecks,omitempty"`
+	// HostChecksGrants is who allows host checks on this machine: the owner for
+	// every room, or the root of one room for that room only. It is empty
+	// unless someone allows them.
+	HostChecksGrants []machines.HostChecksGrant `json:"hostChecksGrants,omitempty"`
 	// LowDisk marks a machine whose last probe found less free space than the
 	// floor on the filesystem that holds its /var/tmp, so Dyna starts no CI
 	// work there until space is freed.
@@ -56,6 +57,12 @@ type Node struct {
 // that names no room takes work from every room.
 func (n Node) AllowsRoom(roomID string) bool {
 	return len(n.Rooms) == 0 || slices.Contains(n.Rooms, roomID)
+}
+
+// HostChecksAllowed reports whether host checks run on this node for the CI
+// work of a room.
+func (n Node) HostChecksAllowed(room string) bool {
+	return machines.HostChecksAllowed(n.HostChecksGrants, room)
 }
 
 type Store struct{ DataDir string }
@@ -161,7 +168,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, AllowHostChecks: m.AllowHostChecks, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms}
+		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil

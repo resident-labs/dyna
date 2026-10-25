@@ -103,6 +103,33 @@ func writeTable(w io.Writer, list []machines.Machine) error {
 	return out.Flush()
 }
 
+// hostChecksWho names who allows host checks, for `dyna machine show`. A room
+// root's grant names its room, which this command reads by name where it can.
+func hostChecksWho(m machines.Machine) string {
+	if len(m.HostChecksGrants) == 0 {
+		return "no one"
+	}
+	who := make([]string, 0, len(m.HostChecksGrants))
+	for _, grant := range m.HostChecksGrants {
+		if grant.By == machines.GrantorOwner {
+			who = append(who, "owner")
+			continue
+		}
+		who = append(who, "root of room "+roomName(grant.Room))
+	}
+	return strings.Join(who, ", ")
+}
+
+// roomName names a room by its readable name, and keeps its ID when no such
+// room is stored.
+func roomName(id string) string {
+	rec, err := room.DefaultStore().Resolve(id)
+	if err != nil || rec.Name == "" {
+		return id
+	}
+	return rec.Name
+}
+
 func showCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
@@ -128,7 +155,7 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "SSH:      %s\n", ssh)
 			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
 			if m.HasRole(machines.RoleCI) {
-				fmt.Fprintf(out, "Host checks: %t\n", m.AllowHostChecks)
+				fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
 				fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
 			}
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
@@ -354,19 +381,13 @@ func editCommand() *cobra.Command {
 			if disable {
 				m.Enabled, changed = false, true
 			}
-			if allowHostChecks {
-				m.AllowHostChecks, changed = true, true
-			}
-			if disallowHostChecks {
-				m.AllowHostChecks, changed = false, true
-			}
 			if c.Flags().Changed("rooms") {
 				if m.Rooms, err = resolveRooms(rooms); err != nil {
 					return err
 				}
 				changed = true
 			}
-			if !changed {
+			if !changed && !allowHostChecks && !disallowHostChecks {
 				return fmt.Errorf("edit %s: give a machine, host-check or room setting to change", args[0])
 			}
 			if len(m.Rooms) > 0 && !m.HasRole(machines.RoleCI) && c.Flags().Changed("rooms") {
@@ -378,16 +399,18 @@ func editCommand() *cobra.Command {
 			if m.HasRole(machines.RoleCI) && m.CISlots < 1 {
 				m.CISlots = 1
 			}
+			// The registry goes first, so a machine that gains the ci role in this
+			// command can take the host-check permission too. The engine owns that
+			// permission, and a registry save never writes it.
+			if _, err := s.Save(c.Context(), m); err != nil {
+				return err
+			}
 			if allowHostChecks || disallowHostChecks {
-				if err := saveMachine(c.Context(), m.ID, websvc.MachinePatch{AllowHostChecks: &m.AllowHostChecks}); err != nil {
+				if err := saveMachine(c.Context(), m.ID, websvc.MachinePatch{AllowHostChecks: &allowHostChecks}); err != nil {
 					return err
 				}
 			}
-			saved, err := s.Save(c.Context(), m)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", saved.Name, saved.RoleNames())
+			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", m.Name, m.RoleNames())
 			return nil
 		},
 	}
