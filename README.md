@@ -130,6 +130,15 @@ dyna profiles add --name my-builder --harness codex --model <model-id> \
   --taste 7 --diagnostics 6 --intelligence 9 --cost 6 --desc "Your routing notes."
 ```
 
+The ratings are your own judgment, and one helper suggests three of them from
+published measurements: `node scripts/model-ratings.mjs <slug|url> ...` opens the
+Artificial Analysis comparison page for each model against a baseline (default
+`claude-opus-5-5`) in your Dyna browser, then prints intelligence from the
+agentic benchmarks, thrift from cost per task and speed from time per task,
+plus the personality traits that inform taste and diagnostics. A cell prints
+`n/a` when the page has no value, and the report names the column or field that
+was missing.
+
 By default workers run headless with the CLI's permission prompts bypassed.
 `--safe-mode` keeps the harness's own prompts.
 
