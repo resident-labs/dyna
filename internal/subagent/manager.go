@@ -31,6 +31,7 @@ import (
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
 	storepkg "dyna-agent/internal/store"
@@ -83,7 +84,7 @@ type Manager struct {
 	TransferSleep       func(context.Context, time.Duration) error
 
 	// ClosePRs hands live PR roles to the heir through the PR service.
-	ClosePRs func(context.Context, Info, Info) ([]string, error)
+	ClosePRs func(context.Context, Info, Info) ([]sessionclose.Outcome, error)
 
 	WrapUpProviders []WrapUpProvider
 
@@ -1035,7 +1036,7 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 			message := fmt.Sprintf("responsibilities: cannot close: %v; retry or use --force to close anyway", err)
 			return info, newCloseRefusal(message, err, CloseReasonResponsibilities, []CloseAction{CloseActionRetry, CloseActionForce}, items)
 		}
-		summary = append(summary, "Handoff failed: "+err.Error())
+		summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureHandoff})
 	}
 	// Serialize the final close with child creation and promotion. Children
 	// created while Stop was in progress are included in this choice.
@@ -1095,19 +1096,19 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	// the ancestor selected before the handoff.
 	heir, err = m.closeHeir(Info{Meta: fresh})
 	if err != nil {
-		summary = append(summary, "Child heir lookup failed: "+err.Error())
+		summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureChildHeir})
 	}
 	// The session is closed now. A hand-over failure leaves that child open
 	// under a closed parent, so record it and finish the close.
-	var children []string
+	var children []sessionclose.Outcome
 	if cascade, children, err = m.handOverChildren(ctx, fresh, heir); err != nil {
 		store.appendJournal(info.ID, ChildHandoverFailedJournal{Error: err.Error()})
-		summary = append(summary, "Child handoff failed: "+err.Error())
+		summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureChildHandoff})
 	}
 	summary = append(summary, children...)
 	for _, key := range []string{"session/" + info.ID, info.ID} {
 		if err := sessionhost.CloseKey(ctx, key); err != nil {
-			summary = append(summary, "Native process cleanup failed: "+err.Error())
+			summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureProcessCleanup})
 		}
 	}
 	destroyComputer(info.ID)
@@ -1116,7 +1117,7 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		return info, err
 	}
 	m.closeGoals(info, heir.ID)
-	store.appendJournal(info.ID, SessionClosedJournal{By: opts.by, Handoff: summary})
+	store.appendJournal(info.ID, SessionClosedJournal{By: opts.by, Handoff: closeJournalLines(summary)})
 	closed, err := store.Info(info.ID)
 	closed.CloseSummary = summary
 	return closed, err

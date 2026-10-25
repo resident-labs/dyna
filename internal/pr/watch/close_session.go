@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/pr/facts"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/subagent"
 )
 
@@ -63,8 +64,8 @@ func releaseReviewer(r *Record, id string) {
 // CloseSession releases reviewer roles and uses the normal author transfer,
 // including notice successors and author history. A reviewer with a
 // saved verdict keeps its role until the replay applies or rejects it.
-func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([]string, error) {
-	var summary []string
+func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([]sessionclose.Outcome, error) {
+	var summary []sessionclose.Outcome
 	err := s.Store.update(func(st *State) error {
 		for _, r := range st.Records {
 			if r.RoomID != from.RoomID || r.State != "open" || !r.Watching {
@@ -78,11 +79,11 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 				if !slices.Contains(r.ReleaseReviewersAfterReplay, from.ID) {
 					r.ReleaseReviewersAfterReplay = append(r.ReleaseReviewersAfterReplay, from.ID)
 				}
-				summary = append(summary, fmt.Sprintf("PR #%d reviewer release waits for its saved verdict", r.Number))
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultDeferred, Number: r.Number})
 				continue
 			}
 			releaseReviewer(r, from.ID)
-			summary = append(summary, fmt.Sprintf("PR #%d reviewer released to the pool", r.Number))
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultReleased, Number: r.Number})
 		}
 		return nil
 	})
@@ -106,7 +107,7 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 		if err != nil {
 			errs = append(errs, fmt.Errorf("PR #%d author handoff: %w", r.Number, err))
 		} else if moved {
-			summary = append(summary, fmt.Sprintf("PR #%d author → %s", r.Number, heir.Name))
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultMoved, Number: r.Number, To: heir.Address()})
 		}
 	}
 	return summary, errors.Join(errs...)

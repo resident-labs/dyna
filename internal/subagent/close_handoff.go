@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionclose"
 )
 
 // closeHeir follows stored parents, skipping closed ancestors, then uses the
@@ -78,13 +79,18 @@ func (m *Manager) refuseGoalsForHeir(info, heir Info) error {
 
 // handoffClose runs after the turn stops and new assignments are fenced off.
 // Each move commits through its existing store, so a retry moves only work left.
-func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, error) {
-	var summary []string
+// Every step reports a typed outcome, so a client draws what moved, what stayed
+// and what failed without reading engine wording.
+func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionclose.Outcome, error) {
+	var summary []sessionclose.Outcome
 	var errs []error
 	if m.ClosePRs != nil {
 		moved, err := m.ClosePRs(ctx, info, heir)
 		summary = append(summary, moved...)
-		errs = append(errs, err)
+		if err != nil {
+			errs = append(errs, err)
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureHandoff})
+		}
 	}
 	items, err := m.Responsibilities(ctx, info)
 	if err != nil {
@@ -95,8 +101,9 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 		case "workflow":
 			if err := runstore.Cancel(item.ID); err != nil {
 				errs = append(errs, fmt.Errorf("cancel workflow %s: %w", item.ID, err))
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityWorkflow, Result: sessionclose.ResultFailed, ID: item.ID, Failure: sessionclose.FailureHandoff})
 			} else {
-				summary = append(summary, "Workflow "+item.ID+" canceled")
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityWorkflow, Result: sessionclose.ResultCanceled, ID: item.ID})
 			}
 		case "goal":
 			if m.checkpoint != nil {
@@ -106,21 +113,33 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 			// goals, so a goal that would reach them is refused, never assigned.
 			if heir.ID == "" || heir.Role == RoleRoot {
 				errs = append(errs, fmt.Errorf("%w: %s; ask the owner with dyna ask, then drop or finish it, or hand it to an open agent", errGoalNeedsRoot, item.ID))
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultFailed, ID: item.ID, Failure: sessionclose.FailureGoalNeedsAgent})
 				continue
 			}
 			moved, err := m.goalStore().HandoffHolder(info.RoomID, item.ID, info.ID, heir.ID)
 			if err != nil {
 				errs = append(errs, err)
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultFailed, ID: item.ID, Failure: sessionclose.FailureHandoff})
 			} else if moved {
-				summary = append(summary, "Goal "+item.ID+" → "+heir.Name)
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultMoved, ID: item.ID, To: heir.Address()})
 			}
 		case "item":
-			summary = append(summary, "Goal item "+item.ID+" returned to its goal")
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityItem, Result: sessionclose.ResultReturned, ID: item.ID})
 		case "question":
-			summary = append(summary, "Question "+item.ID+" withdrawn")
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityQuestion, Result: sessionclose.ResultWithdrawn, ID: item.ID})
 		case "shell":
-			summary = append(summary, "Shell "+item.ID+" stops unless kept")
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityShell, Result: sessionclose.ResultStopped, ID: item.ID})
 		}
 	}
 	return summary, errors.Join(errs...)
+}
+
+// closeJournalLines records the typed outcomes as the journal's log text, so a
+// stored session history stays readable without a migration.
+func closeJournalLines(outcomes []sessionclose.Outcome) []string {
+	lines := make([]string, len(outcomes))
+	for i, outcome := range outcomes {
+		lines[i] = outcome.Text()
+	}
+	return lines
 }
