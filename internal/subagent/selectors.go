@@ -59,7 +59,7 @@ func selectorGroup(members []Info, room string) string {
 // session's own address, what each selector resolves to now, and where the
 // room's history is.
 func (s *Store) SelectorContext(meta Meta) string {
-	parent := "@root (quiet unless --needs-root)"
+	parent := "@root"
 	if meta.ParentSession != "" {
 		if info, err := s.Inspect(meta.ParentSession); err == nil {
 			parent = info.Address()

@@ -63,7 +63,7 @@ Never wait or poll for children. Success goes to the current parent; failures al
 
 ` + parentCheckInPrompt + `
 
-Post using ` + "`" + `dyna post @<mention>... "..."` + "`" + `. Mentions: @<name>, @parent, @siblings, @children, @root (owner) and @<room>:<name>. Use --needs-root only when root must act. A recorded verdict, a tracked PR, and a finished goal need no extra post. Never post secrets. Only root uses dyna ask; ask @parent otherwise, and post @root with --needs-root when only the owner can unblock you. Turns started only by child, sibling or group posts end silently.
+Post using ` + "`" + `dyna post @<mention>... "..."` + "`" + `. Mentions: @<name>, @parent, @siblings, @children, @root (owner) and @<room>:<name>. A post to @root, or to your parent root, wakes root. A recorded verdict, a tracked PR, and a finished goal need no extra post. Never post secrets. Only root uses dyna ask; ask @parent otherwise, and post @root when only the owner can unblock you. Turns started only by child, sibling or group posts end silently.
 ` + postOnChangePrompt + `
 
 For requested visuals or "viz", post ` + "`" + `dyna post @parent --html <file.html> "<summary>"` + "`" + ` before ending; address the session that asked.
