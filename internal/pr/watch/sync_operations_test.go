@@ -49,6 +49,17 @@ func syncEnv(t *testing.T) (*testEnv, string, string, *fakeLocalCI) {
 	changeGit(t, dir, "update-ref", "refs/remotes/origin/main", "main")
 	return e, dir, remote, ci
 }
+
+func useSyncTrunk(t *testing.T, repo, remote string) {
+	t.Helper()
+	changeGit(t, repo, "branch", "-M", "trunk")
+	changeGit(t, remote, "branch", "-m", "main", "trunk")
+	changeGit(t, remote, "symbolic-ref", "HEAD", "refs/heads/trunk")
+	changeGit(t, repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+	changeGit(t, repo, "update-ref", "-d", "refs/remotes/origin/main")
+	changeGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+}
+
 func savedOperation(t *testing.T, repo string) lanesync.Operation {
 	t.Helper()
 	common := changeGit(t, repo, "rev-parse", "--absolute-git-dir")
@@ -182,7 +193,7 @@ func TestSyncReadOnlyRoomRefusesStart(t *testing.T) {
 
 type exportGitHubFixture struct {
 	creates, edits, pushes int
-	bodies                 []string
+	bodies, bases          []string
 	open                   bool
 	failCreateOnce         bool
 	failCreateAlways       bool
@@ -198,7 +209,7 @@ func fakeExportGitHub(t *testing.T, e *testEnv, repo, remote string) *exportGitH
 	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
 		if filepath.Base(cmd.Path) == "git" {
 			if strings.Contains(strings.Join(cmd.Args, " "), "fetch") {
-				real := exec.CommandContext(ctx, "/usr/bin/git", "-C", repo, "fetch", "--prune", remote, "+refs/heads/main:refs/remotes/origin/main")
+				real := exec.CommandContext(ctx, "/usr/bin/git", "-C", repo, "fetch", "--prune", remote)
 				real.Stdout, real.Stderr = cmd.Stdout, cmd.Stderr
 				return real.Run()
 			}
@@ -231,6 +242,9 @@ func fakeExportGitHub(t *testing.T, e *testEnv, repo, remote string) *exportGitH
 				}
 				fake.bodies = append(fake.bodies, string(data))
 			}
+			if arg == "--base" && i+1 < len(cmd.Args) && strings.Contains(joined, "pr create") {
+				fake.bases = append(fake.bases, cmd.Args[i+1])
+			}
 		}
 		switch {
 		case strings.Contains(joined, "pr list"):
@@ -262,6 +276,7 @@ func fakeExportGitHub(t *testing.T, e *testEnv, repo, remote string) *exportGitH
 
 func TestExportPushesTestedHeadAndUpdatesOpenPR(t *testing.T) {
 	e, repo, remote, _ := syncEnv(t)
+	useSyncTrunk(t, repo, remote)
 	fake := fakeExportGitHub(t, e, repo, remote)
 	common := changeGit(t, repo, "rev-parse", "--absolute-git-dir")
 	before := changeGit(t, repo, "rev-parse", "dyna/integration")
@@ -295,6 +310,9 @@ func TestExportPushesTestedHeadAndUpdatesOpenPR(t *testing.T) {
 		if got := changeGit(t, remote, "rev-parse", export.Branch); got != op.Head {
 			t.Fatal("export did not push tested commit")
 		}
+	}
+	if len(fake.bases) != 1 || fake.bases[0] != "trunk" {
+		t.Fatalf("export bases = %v, want trunk", fake.bases)
 	}
 	if fake.creates != 1 || fake.edits != 1 || len(fake.bodies) != 2 || !strings.Contains(fake.bodies[1], fake.bodies[0]) || !strings.Contains(fake.bodies[1], "Next exported change") || !strings.Contains(fake.bodies[1], "Add next feature") || !strings.Contains(fake.bodies[1], "No migration") || !strings.Contains(fake.bodies[1], "Focused tests") {
 		t.Fatalf("create/edit=%d/%d bodies=%v", fake.creates, fake.edits, fake.bodies)

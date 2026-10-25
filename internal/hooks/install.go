@@ -244,7 +244,7 @@ func (s Service) clearNotices(id string, h Hook) {
 }
 
 // LibrarianHooks wake the repository's librarian after a merge, after
-// origin/main moves, and on a schedule that runs merges batched inside the
+// the repository default branch moves, and on a schedule that runs merges batched inside the
 // librarian's interval. dyna library enable adds them; disable removes them.
 func LibrarianHooks(exe, main string) []Hook {
 	command := shellquote.Quote(exe) + " library wake --repo " + shellquote.Quote(main)

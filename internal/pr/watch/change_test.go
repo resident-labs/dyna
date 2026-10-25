@@ -68,12 +68,32 @@ func localChange(t *testing.T, e *testEnv) (Record, string) {
 	changeGit(t, dir, "checkout", "-b", "feature")
 	changeCommit(t, dir, "feature\n")
 	e.author.Dir = dir
-	r, created, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir, Notes: ChangeNotes{Intent: "Fix parser", Testing: "unit tests"}, Category: "fix"})
+	r, created, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir, Base: "main", Notes: ChangeNotes{Intent: "Fix parser", Testing: "unit tests"}, Category: "fix"})
 	if err != nil || !created {
 		t.Fatalf("open change: %+v %v", r, err)
 	}
 	return r, dir
 }
+
+func TestLocalChangeUsesDefaultBranchAndExplicitBase(t *testing.T) {
+	e := newEnv(t)
+	dir, base := changeRepo(t)
+	changeGit(t, dir, "branch", "-M", "trunk")
+	changeGit(t, dir, "update-ref", "refs/remotes/origin/trunk", base)
+	changeGit(t, dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	changeGit(t, dir, "checkout", "-b", "feature")
+	changeCommit(t, dir, "feature\n")
+	e.author.Dir = dir
+	r, created, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir})
+	if err != nil || !created || r.Base != base || r.BaseRef != "origin/trunk" {
+		t.Fatalf("default base: %+v, created %t, %v", r, created, err)
+	}
+	explicit, created, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir, Base: "trunk"})
+	if err != nil || created || explicit.Base != base || explicit.BaseRef != "trunk" {
+		t.Fatalf("explicit base: %+v, created %t, %v", explicit, created, err)
+	}
+}
+
 func TestLocalChangeOpenQueueHeadReplacementAndClose(t *testing.T) {
 	e := newEnv(t)
 	r, dir := localChange(t, e)
