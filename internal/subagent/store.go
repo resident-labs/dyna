@@ -127,7 +127,7 @@ type Meta struct {
 	// brief when the session joins a goal that already has different detail.
 	SpawnBrief string `json:"spawnBrief,omitempty"`
 	// Owner is the agent session that started this one (runstore.OwnerFromEnv:
-	// the parent session id, or codex:<thread>/claude:<session> for a harness
+	// the parent session id, or claude:<session> for a harness
 	// session outside dyna). Events and hooks follow "my children" by it.
 	Owner        string    `json:"owner,omitempty"`
 	Created      time.Time `json:"created"`

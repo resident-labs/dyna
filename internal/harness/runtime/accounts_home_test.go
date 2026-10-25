@@ -16,7 +16,7 @@ import (
 )
 
 func TestAccountPrivateManagerAndLoginRoots(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "pi", "muse", "opencode"} {
+	for _, h := range []string{"claude-code", "pi", "muse", "opencode"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			for key := range harnesshome.Discovery(filepath.Join(a.Root, h, ".runtime")) {
@@ -63,7 +63,7 @@ func TestAccountPrivateManagerAndLoginRoots(t *testing.T) {
 					t.Fatalf("inherited %s escaped private scope", key)
 				}
 			}
-			nativeKeys := map[string]string{"claude-code": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_CONFIG_DIR"}
+			nativeKeys := map[string]string{"claude-code": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_CONFIG_DIR"}
 			if key := nativeKeys[h]; key != "" && env[key] != scope {
 				t.Fatalf("native scope changed: %s = %q", key, env[key])
 			}
@@ -133,14 +133,14 @@ func TestPrivateHomeKnownPathsAndNativeTreeBoundary(t *testing.T) {
 	if err = os.Symlink(t.TempDir(), filepath.Join(harnesshome.Home(scope), "tool-link")); err != nil {
 		t.Fatal(err)
 	}
-	if err = checkAccountFiles("codex", scope, true); err != nil {
+	if err = checkAccountFiles("pi", scope, true); err != nil {
 		t.Fatal("native scan entered paired HOME", err)
 	}
 }
 
 func TestRemoveDeletesSavedPairedHomeOnly(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("codex", "remove")
+	n, err := a.Create("pi", "remove")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestRemoveDeletesSavedPairedHomeOnly(t *testing.T) {
 	if !IsAccountPath(filepath.Join(harnesshome.Home(n.Home), "export-canary")) {
 		t.Fatal("paired HOME escaped account export protection")
 	}
-	scope, _ := a.HarnessHome("codex")
+	scope, _ := a.HarnessHome("pi")
 	os.MkdirAll(scope, 0700)
 	harnesshome.Ensure(scope)
 	history := filepath.Join(scope, "history")
@@ -329,21 +329,21 @@ func TestTrustedDataRootDoesNotTrustOwnedSymlinks(t *testing.T) {
 				if err := os.Symlink(target, a.Root); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := a.Create("codex", "reject"); !errors.Is(err, errAccountPath) {
+				if _, err := a.Create("pi", "reject"); !errors.Is(err, errAccountPath) {
 					t.Fatal(err)
 				}
 			case "harness":
 				if err := os.MkdirAll(a.Root, 0700); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Symlink(target, filepath.Join(a.Root, "codex")); err != nil {
+				if err := os.Symlink(target, filepath.Join(a.Root, "pi")); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := a.Create("codex", "reject"); !errors.Is(err, errAccountPath) {
+				if _, err := a.Create("pi", "reject"); !errors.Is(err, errAccountPath) {
 					t.Fatal(err)
 				}
 			case "slot":
-				n, err := a.Create("codex", "reject")
+				n, err := a.Create("pi", "reject")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -357,13 +357,13 @@ func TestTrustedDataRootDoesNotTrustOwnedSymlinks(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "runtime":
-				if err := os.MkdirAll(filepath.Join(a.Root, "codex"), 0700); err != nil {
+				if err := os.MkdirAll(filepath.Join(a.Root, "pi"), 0700); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Symlink(target, filepath.Join(a.Root, "codex", ".runtime")); err != nil {
+				if err := os.Symlink(target, filepath.Join(a.Root, "pi", ".runtime")); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := a.HarnessHome("codex"); !errors.Is(err, errAccountPath) {
+				if _, err := a.HarnessHome("pi"); !errors.Is(err, errAccountPath) {
 					t.Fatal(err)
 				}
 			}
@@ -372,7 +372,7 @@ func TestTrustedDataRootDoesNotTrustOwnedSymlinks(t *testing.T) {
 }
 
 func TestFinalAccountManagerCredentialRootGuard(t *testing.T) {
-	keys := map[string]string{"claude-code": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "codex": "CODEX_HOME", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_DB", "muse": "MUSE_AUTH_PATH"}
+	keys := map[string]string{"claude-code": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_DB", "muse": "MUSE_AUTH_PATH"}
 	for h, key := range keys {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)

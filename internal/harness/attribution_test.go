@@ -90,26 +90,6 @@ func TestClaudeAttributionResolvesSettingsAgainstHarnessCwd(t *testing.T) {
 	}
 }
 
-func TestCodexLaunchDisablesGitCommitAttributionFeature(t *testing.T) {
-	inv, err := buildInvocation(profile.Profile{Name: "x", Harness: profile.HarnessCodex}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, argv := range map[string][]string{"initial": inv.initial.argv, "resume": inv.resume("ses", "again").argv} {
-		joined := strings.Join(argv, " ")
-		if !strings.Contains(joined, "-c features.codex_git_commit=false") {
-			t.Fatalf("%s lacks the attribution feature off switch: %v", name, argv)
-		}
-	}
-	profiled, err := buildInvocation(profile.Profile{Name: "x", Harness: profile.HarnessCodex, ExtraArgs: []string{"-c", "features.codex_git_commit=true"}}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(strings.Join(profiled.initial.argv, " "), "features.codex_git_commit=false") {
-		t.Fatalf("profile feature setting was overridden: %v", profiled.initial.argv)
-	}
-}
-
 func TestOpenCodeLaunchNeedsNoAttributionFlags(t *testing.T) {
 	inv, err := buildInvocation(profile.Profile{Name: "o", Harness: profile.HarnessOpenCode}, "task")
 	if err != nil {

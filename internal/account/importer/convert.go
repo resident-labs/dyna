@@ -20,7 +20,6 @@ import (
 // pi-ai/dist/providers under the installed Pi agent directory.
 const (
 	piProviderAnthropic  = "anthropic"
-	piProviderCodex      = "openai-codex"
 	piProviderKimi       = "kimi-coding"
 	piProviderXAI        = "xai"
 	piProviderMeta       = "meta"
@@ -66,7 +65,7 @@ type piSignIn struct {
 // Antigravity is named here so its rows are refused instead of ignored.
 func Importable(harness string) bool {
 	switch harness {
-	case "claude-code", "codex", "kimi-code", "grok", "muse", "opencode", "antigravity":
+	case "claude-code", "kimi-code", "grok", "muse", "opencode", "antigravity":
 		return true
 	}
 	return false
@@ -83,8 +82,6 @@ func convert(ctx context.Context, source store.Entry, repos []string) (piSignIn,
 	switch source.Harness {
 	case "claude-code":
 		login, err = convertClaude(source.Credential)
-	case "codex":
-		login, err = convertCodex(source.Credential)
 	case "kimi-code":
 		login, err = convertKimi(source.Credential)
 	case "grok":
@@ -145,39 +142,6 @@ func inferenceScope(scopes []string) bool {
 		}
 	}
 	return false
-}
-
-// convertCodex maps Codex's saved ChatGPT login to Pi's openai-codex provider.
-// Pi needs the account ID and an expiry, which it takes from the access token's
-// JWT expiry.
-func convertCodex(c store.Credential) (piSignIn, error) {
-	if c.Schema != "codex/auth-file@1" {
-		return piSignIn{}, errUnreadable
-	}
-	var files struct {
-		Auth json.RawMessage `json:"auth.json"`
-	}
-	if json.Unmarshal(c.Payload, &files) != nil || len(files.Auth) == 0 {
-		return piSignIn{}, errUnreadable
-	}
-	var auth struct {
-		Tokens struct {
-			Access    string `json:"access_token"`
-			Refresh   string `json:"refresh_token"`
-			AccountID string `json:"account_id"`
-		} `json:"tokens"`
-	}
-	if json.Unmarshal(files.Auth, &auth) != nil {
-		return piSignIn{}, errUnreadable
-	}
-	expiry, err := jwtExpiryMillis(auth.Tokens.Access)
-	if err != nil {
-		return piSignIn{}, err
-	}
-	if auth.Tokens.Refresh == "" || auth.Tokens.AccountID == "" {
-		return piSignIn{}, errUnreadable
-	}
-	return oauthLogin(store.ProviderChatGPT, piProviderCodex, auth.Tokens.Access, auth.Tokens.Refresh, expiry, auth.Tokens.AccountID)
 }
 
 // convertKimi maps Kimi Code's saved token to Pi's kimi-coding provider. Kimi

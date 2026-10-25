@@ -2,10 +2,8 @@ package runtime
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,23 +17,40 @@ import (
 	"dyna-agent/internal/store"
 )
 
-func signedCodex(t *testing.T, a *Accounts, user, token string) NativeAccount {
+// signedSharedGrok saves one Grok sign-in. Grok is a shared harness that keeps
+// its credential in a native file, and each account has its own identity, so it
+// stands in for the old Codex fixture in the switch tests.
+func signedSharedGrok(t *testing.T, a *Accounts, user, refresh string) NativeAccount {
 	t.Helper()
-	n, err := a.Create("codex", user)
+	n, err := a.Create("grok", user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	jwt := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"`+user+`","chatgpt_account_id":"workspace"}}`)) + ".signature"
-	raw, _ := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": jwt, "access_token": "fake-access", "refresh_token": token, "account_id": "workspace"}})
+	raw, _ := json.Marshal(map[string]any{grokTestSlot: map[string]any{
+		"auth_mode":     "oidc",
+		"oidc_issuer":   grokTestIssuer,
+		"oidc_client_id": grokTestClient,
+		"user_id":       user,
+		"key":           "grok-access-" + user,
+		"refresh_token": refresh,
+		"expires_at":    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	}})
 	if err = os.WriteFile(filepath.Join(n.Home, "auth.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	n, err = a.Capture(context.Background(), n.ID, "/fake/codex")
+	n, err = a.Capture(context.Background(), n.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return n
 }
+
+const (
+	grokTestIssuer = "https://auth.x.ai"
+	grokTestClient = "b1a00492-073a-47ea-816f-4c329264a828"
+)
+
+var grokTestSlot = grokTestIssuer + "::" + grokTestClient
 
 func awaitAccountCondition(t *testing.T, fn func() bool) {
 	t.Helper()
@@ -52,49 +67,8 @@ func awaitAccountCondition(t *testing.T, fn func() bool) {
 	}
 }
 
-// This helper is a separate process. Its kernel lease survives no process exit.
-func TestAccountLeaseProcess(t *testing.T) {
-	if os.Getenv("TEST_NATIVE_ACCOUNT_HELPER") != "1" {
-		return
-	}
-	a := &Accounts{Root: os.Getenv("TEST_NATIVE_ACCOUNT_ROOT")}
-	release, err := a.TurnLease(context.Background(), "codex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = os.Stdout.WriteString("ready\n"); err != nil {
-		t.Fatal(err)
-	}
-	if os.Getenv("TEST_NATIVE_ACCOUNT_CRASH") == "1" {
-		os.Exit(0)
-	}
-	control := make([]byte, 1)
-	if _, err = io.ReadFull(os.Stdin, control); err != nil {
-		t.Fatal(err)
-	}
-	home, err := a.HarnessHome("codex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(home, "auth.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc map[string]any
-	if err = json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	doc["tokens"].(map[string]any)["refresh_token"] = "rotated-native-canary"
-	raw, _ = json.Marshal(doc)
-	if err = os.WriteFile(path, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	release()
-}
-
 func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "pi"} {
+	for _, h := range []string{"claude-code", "opencode", "muse", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			release, err := a.TurnLease(context.Background(), h)
@@ -132,25 +106,25 @@ func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
 		})
 	}
 	a := testAccounts(t)
-	n := signedCodex(t, a, "target", "fake-native")
-	release, err := a.TurnLease(context.Background(), "codex")
+	n := signedSharedGrok(t, a, "target", "fake-native")
+	release, err := a.TurnLease(context.Background(), "grok")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- a.Switch(ctx, n.ID, "/fake/codex") }()
-	awaitAccountCondition(t, func() bool { pending, _ := a.SwitchStatus("codex"); return pending })
+	go func() { done <- a.Switch(ctx, n.ID, "/fake/grok") }()
+	awaitAccountCondition(t, func() bool { pending, _ := a.SwitchStatus("grok"); return pending })
 	cancel()
 	if err = <-done; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	pending, running := a.SwitchStatus("codex")
+	pending, running := a.SwitchStatus("grok")
 	if pending || running != 1 {
 		t.Fatal(pending, running)
 	}
-	more, err := a.TurnLease(context.Background(), "codex")
+	more, err := a.TurnLease(context.Background(), "grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,29 +148,29 @@ func (m partialAccountManager) Activate(ctx context.Context, integration string,
 }
 func TestSwitchRestoresPreviousLoginAfterPartialActivation(t *testing.T) {
 	a := testAccounts(t)
-	first := signedCodex(t, a, "first", "outgoing-login")
-	second := signedCodex(t, a, "second", "target-login")
-	if err := a.Switch(context.Background(), first.ID, "/fake/codex"); err != nil {
+	first := signedSharedGrok(t, a, "first", "outgoing-login")
+	second := signedSharedGrok(t, a, "second", "target-login")
+	if err := a.Switch(context.Background(), first.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
-	home, _ := a.HarnessHome("codex")
+	home, _ := a.HarnessHome("grok")
 	fail := &atomic.Bool{}
 	fail.Store(true)
 	a.NativeManager = func(h string, host accountnative.Host) (accountnative.Manager, bool) {
-		m, ok := accountnative.For(h, host)
-		if ok && host.Getenv("CODEX_HOME") == home {
+		m, ok := NativeRuntimeManager(h, host)
+		if ok && host.Getenv("GROK_HOME") == home {
 			return partialAccountManager{m, fail}, true
 		}
 		return m, ok
 	}
-	if err := a.Switch(context.Background(), second.ID, "/fake/codex"); !errors.Is(err, accountnative.ErrPartialActivation) {
+	if err := a.Switch(context.Background(), second.ID, "/fake/grok"); !errors.Is(err, accountnative.ErrPartialActivation) {
 		t.Fatal(err)
 	}
-	active, err := a.Active(accountProvider("codex"), "codex")
+	active, err := a.Active(accountProvider("grok"), "grok")
 	if err != nil || active.ID != first.ID {
 		t.Fatal(active, err)
 	}
-	m, err := a.Manager(first.ID, "/fake/codex")
+	m, err := a.Manager(first.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,11 +182,11 @@ func TestSwitchRestoresPreviousLoginAfterPartialActivation(t *testing.T) {
 
 func TestRuntimeSkillsLinkDoesNotExposeCredentialReads(t *testing.T) {
 	a := testAccounts(t)
-	n := signedCodex(t, a, "first", "fixture-native")
-	if err := a.Switch(context.Background(), n.ID, "/fake/codex"); err != nil {
+	n := signedSharedGrok(t, a, "first", "fixture-native")
+	if err := a.Switch(context.Background(), n.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
-	home, _ := a.HarnessHome("codex")
+	home, _ := a.HarnessHome("grok")
 	skills := filepath.Join(store.DataDir(), "harnesses", "generations", "fixture", "skills")
 	if err := os.MkdirAll(skills, 0700); err != nil {
 		t.Fatal(err)
@@ -224,11 +198,11 @@ func TestRuntimeSkillsLinkDoesNotExposeCredentialReads(t *testing.T) {
 	if err := os.Symlink(skills, filepath.Join(home, "skills")); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkAccountFiles("codex", home, true); err != nil {
+	if err := checkAccountFiles("grok", home, true); err != nil {
 		t.Fatal("generated skills link rejected", err)
 	}
 	checkMode(t, source, 0644)
-	m, err := a.Manager(n.ID, "/fake/codex")
+	m, err := a.Manager(n.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,16 +391,16 @@ func TestSharedServiceNativeLoginCompleteAndCancel(t *testing.T) {
 
 func TestSavedSlotLoginDoesNotDrainLiveTurns(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("codex", "")
+	n, err := a.Create("pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := a.TurnLease(context.Background(), "codex")
+	release, err := a.TurnLease(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	flow, err := a.BeginLogin(context.Background(), n.ID, "/fake/codex")
+	flow, err := a.BeginLogin(context.Background(), n.ID, "/fake/pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +409,7 @@ func TestSavedSlotLoginDoesNotDrainLiveTurns(t *testing.T) {
 	if err != nil || signed.Active {
 		t.Fatal("saved-slot login implicitly switched", signed, err)
 	}
-	pending, running := a.SwitchStatus("codex")
+	pending, running := a.SwitchStatus("pi")
 	if pending || running != 1 {
 		t.Fatal(pending, running)
 	}
@@ -540,8 +514,8 @@ func accountHomes(t *testing.T, root, harness string) []string {
 
 func TestActiveAccountCanSignInAgainBeforeSwitch(t *testing.T) {
 	a := testAccounts(t)
-	n := signedCodex(t, a, "original", "original-canary")
-	if err := a.Switch(context.Background(), n.ID, "/fake/codex"); err != nil {
+	n := signedSharedGrok(t, a, "original", "original-canary")
+	if err := a.Switch(context.Background(), n.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(n.Home, "auth.json")
@@ -549,25 +523,28 @@ func TestActiveAccountCanSignInAgainBeforeSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc map[string]any
+	var doc map[string]map[string]any
 	if err = json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	jwt := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"replacement","chatgpt_account_id":"workspace"}}`)) + ".signature"
-	doc["tokens"].(map[string]any)["id_token"] = jwt
-	doc["tokens"].(map[string]any)["refresh_token"] = "replacement-canary"
+	session := doc[grokTestSlot]
+	session["user_id"] = "replacement"
+	session["refresh_token"] = "replacement-canary"
 	raw, _ = json.Marshal(doc)
 	if err = os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	refreshed, err := a.Capture(context.Background(), n.ID, "/fake/codex")
+	refreshed, err := a.Capture(context.Background(), n.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = a.Switch(context.Background(), n.ID, "/fake/codex"); err != nil {
+	if refreshed.Identity == n.Identity {
+		t.Fatal("the fixture did not change the native identity")
+	}
+	if err = a.Switch(context.Background(), n.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
-	m, err := a.Manager(n.ID, "/fake/codex")
+	m, err := a.Manager(n.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,16 +576,16 @@ func TestAccountDiscoveryDoesNotCreateStorage(t *testing.T) {
 	if rows, err := a.List(); err != nil || len(rows) != 0 {
 		t.Fatal(rows, err)
 	}
-	if _, err := a.Active(accountProvider("codex"), "codex"); err == nil {
+	if _, err := a.Active(accountProvider("grok"), "grok"); err == nil {
 		t.Fatal("missing active selection accepted")
 	}
-	if _, err := a.HarnessHome("codex"); err != nil {
+	if _, err := a.HarnessHome("pi"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Manager("missing", "/fake/native"); err == nil {
 		t.Fatal("missing account accepted")
 	}
-	if pending, running := a.SwitchStatus("codex"); pending || running != 0 {
+	if pending, running := a.SwitchStatus("pi"); pending || running != 0 {
 		t.Fatal(pending, running)
 	}
 	if _, err := os.Stat(a.Root); !os.IsNotExist(err) {
@@ -618,15 +595,15 @@ func TestAccountDiscoveryDoesNotCreateStorage(t *testing.T) {
 
 func TestSavedManagerReadsInactiveSnapshotWithoutNativeChanges(t *testing.T) {
 	a := testAccounts(t)
-	first := signedCodex(t, a, "first", "inactive-native-canary")
-	second := signedCodex(t, a, "second", "active-native-canary")
-	if err := a.Switch(context.Background(), second.ID, "/fake/codex"); err != nil {
+	first := signedSharedGrok(t, a, "first", "inactive-native-canary")
+	second := signedSharedGrok(t, a, "second", "active-native-canary")
+	if err := a.Switch(context.Background(), second.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Manager(first.ID, "/fake/codex"); err == nil {
+	if _, err := a.Manager(first.ID, "/fake/grok"); err == nil {
 		t.Fatal("inactive row received runtime manager")
 	}
-	m, err := a.SavedManager(first.ID, "/fake/codex")
+	m, err := a.SavedManager(first.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +617,7 @@ func TestSavedManagerReadsInactiveSnapshotWithoutNativeChanges(t *testing.T) {
 	if _, err = m.Activate(context.Background(), "", captured[0].Credential); !errors.Is(err, accountnative.ErrUnsupported) {
 		t.Fatal("saved activation allowed", err)
 	}
-	active, err := a.Active(accountProvider("codex"), "codex")
+	active, err := a.Active(accountProvider("grok"), "grok")
 	if err != nil || active.ID != second.ID {
 		t.Fatal("saved capture changed runtime selection", err)
 	}
@@ -648,17 +625,17 @@ func TestSavedManagerReadsInactiveSnapshotWithoutNativeChanges(t *testing.T) {
 
 func TestNativeCaptureDuringSkillPublicationAndAuthReplacement(t *testing.T) {
 	a := testAccounts(t)
-	n := signedCodex(t, a, "fixture", "native-canary")
-	if err := a.Switch(context.Background(), n.ID, "/fake/codex"); err != nil {
+	n := signedSharedGrok(t, a, "fixture", "native-canary")
+	if err := a.Switch(context.Background(), n.ID, "/fake/grok"); err != nil {
 		t.Fatal(err)
 	}
-	home, _ := a.HarnessHome("codex")
+	home, _ := a.HarnessHome("grok")
 	auth := filepath.Join(home, "auth.json")
 	raw, err := os.ReadFile(auth)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := a.Manager(n.ID, "/fake/codex")
+	manager, err := a.Manager(n.ID, "/fake/grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +678,7 @@ func TestNativeCaptureDuringSkillPublicationAndAuthReplacement(t *testing.T) {
 	}()
 	var captureErr error
 	for range 200 {
-		if err = checkAccountFiles("codex", home, true); err != nil {
+		if err = checkAccountFiles("grok", home, true); err != nil {
 			captureErr = errors.Join(errors.New("tree permissions"), err)
 			break
 		}
@@ -955,7 +932,7 @@ func TestActiveReportsTheStoreError(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &Accounts{Root: filepath.Join(dir, "accounts")}
-	if _, err := a.activeID("codex"); err == nil || errors.Is(err, errAccountPath) {
+	if _, err := a.activeID("grok"); err == nil || errors.Is(err, errAccountPath) {
 		t.Fatalf("activeID with a broken dyna.db = %v, want the store's error", err)
 	}
 }

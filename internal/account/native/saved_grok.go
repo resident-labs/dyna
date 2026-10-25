@@ -158,7 +158,7 @@ type grokSession struct {
 }
 
 func (s grokSession) label() string {
-	claims, _ := codexClaims(s.Key)
+	claims, _ := jwtClaims(s.Key)
 	return identityLabel(s.Email, jsonString(claims["tier"]))
 }
 

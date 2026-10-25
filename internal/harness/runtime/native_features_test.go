@@ -129,7 +129,6 @@ func TestNativeFeatureArgumentsAreIdempotentAndPreserveUserDenials(t *testing.T)
 		dynaShell bool
 	}{
 		{"claude-code", []string{"--disallowedTools", "Bash(git *)", "Agent(reviewer)", "--disallowed-tools=WebFetch"}, true},
-		{"codex", []string{"--enable", "multi_agent,web_search_cached", "-c", "features.multi_agent=true"}, false},
 		{"pi", []string{"-xt", "find,extra", "--exclude-tools", "extra"}, true},
 		{"muse", []string{"--disable-approval", "--disable-shell"}, true},
 	} {
@@ -139,13 +138,10 @@ func TestNativeFeatureArgumentsAreIdempotentAndPreserveUserDenials(t *testing.T)
 				t.Fatalf("policy is not idempotent: %v then %v", once, twice)
 			}
 			joined := strings.Join(once, " ")
-			for _, want := range map[string][]string{"claude-code": {"Bash(git *)", "Agent(reviewer)", "WebFetch"}, "codex": {"--enable web_search_cached", "--disable multi_agent"}, "pi": {"--exclude-tools find,extra,bash"}, "muse": {"--disable-approval --disable-request-user-input --no-foreign-personal-context --disable-shell"}}[tc.h] {
+			for _, want := range map[string][]string{"claude-code": {"Bash(git *)", "Agent(reviewer)", "WebFetch"}, "pi": {"--exclude-tools find,extra,bash"}, "muse": {"--disable-approval --disable-request-user-input --no-foreign-personal-context --disable-shell"}}[tc.h] {
 				if !strings.Contains(joined, want) {
 					t.Errorf("lost %s: %s", want, joined)
 				}
-			}
-			if tc.h == "codex" && strings.Contains(joined, "--enable multi_agent") {
-				t.Fatal("profile reenabled native delegation")
 			}
 		})
 	}
@@ -220,7 +216,7 @@ func TestMuseKeepsMemoryGaps(t *testing.T) {
 }
 
 func TestNativeFeaturesInFreshAndRestoredGenerations(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "pi", "opencode", "muse"} {
+	for _, h := range []string{"claude-code", "pi", "opencode", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
 			fresh := buildGeneration(t, r, h, home, id)
@@ -243,17 +239,6 @@ func TestNativeFeaturesInFreshAndRestoredGenerations(t *testing.T) {
 					}
 					if g.env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] != "0" {
 						t.Errorf("%s enables agent teams", g.name)
-					}
-				case "codex":
-					for _, key := range []string{"agents.enabled", "tools.experimental_request_user_input.enabled", "tools.update_plan.enabled", "features.apps", "features.plugins"} {
-						if !strings.Contains(joined, key+"=false") {
-							t.Errorf("%s still enables %s", g.name, key)
-						}
-					}
-					for _, feature := range []string{"memories", "external_agent_memory_import", "multi_agent", "multi_agent_v2", "agent_message_board", "goals", "in_app_local_automation", "remote_plugin"} {
-						if !strings.Contains(joined, "features."+feature+"=false") {
-							t.Errorf("%s lacks forced %s=false: %s", g.name, feature, joined)
-						}
 					}
 				case "pi":
 					if strings.Contains(joined, "--no-extensions") {
@@ -444,47 +429,6 @@ func TestDynaShellServerJoinsDynaShellGenerations(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestDynaShellServerJoinsCodexGenerations(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
-	g := buildGeneration(t, r, "codex", home, id)
-	joined := strings.Join(g.Args, " ")
-	if !strings.Contains(joined, `"command"="/fake/dyna"`) || !strings.Contains(joined, `"args"=["mcp","shell"]`) {
-		t.Fatalf("no dyna shell server in %v", g.Args)
-	}
-	// A generation is shared by every launch, so it keeps the native shell.
-	if strings.Contains(joined, "unified_exec") {
-		t.Fatalf("generation disables the native shell: %v", g.Args)
-	}
-}
-
-func TestDynaShellEnvArgsPassEveryLaunchVariable(t *testing.T) {
-	got := DynaShellEnvArgs([]string{"DYNA_SCRATCH=/s", "GH_TOKEN=x", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=a", "GH_TOKEN=y", "BAD-NAME=1", "EMPTY"})
-	want := []string{"-c", `mcp_servers.dyna.env_vars=["DYNA_SCRATCH","EMPTY","GH_TOKEN","GIT_CONFIG_COUNT","GIT_CONFIG_KEY_0"]`}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v", got)
-	}
-}
-
-func TestCodexDynaShellLaunchDisablesNativeShellFeatures(t *testing.T) {
-	args := []string{"--enable", "unified_exec,web_search_cached", "-c", "features.shell_tool=true"}
-	if got := strings.Join(NativeFeatureArgs("codex", args, false), " "); strings.Contains(got, "--disable unified_exec") || strings.Contains(got, "--disable shell_tool") {
-		t.Fatalf("native shell disabled without DynaShell: %s", got)
-	}
-	once := NativeFeatureArgs("codex", args, true)
-	got := strings.Join(once, " ")
-	for _, want := range []string{"--disable shell_tool", "--disable unified_exec", "--enable web_search_cached"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in %s", want, got)
-		}
-	}
-	if strings.Contains(got, "--enable unified_exec") {
-		t.Errorf("profile enable survived: %s", got)
-	}
-	if twice := NativeFeatureArgs("codex", once, true); !reflect.DeepEqual(once, twice) {
-		t.Errorf("not idempotent: %v then %v", once, twice)
 	}
 }
 

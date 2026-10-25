@@ -55,7 +55,6 @@ systemctl is-active user@1000.service
 test "$(systemctl --global is-enabled dyna-engine.service)" = disabled
 dyna --version
 ! command -v claude
-! command -v codex
 npm --version
 labwc --version
 command -v foot

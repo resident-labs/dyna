@@ -1,0 +1,69 @@
+package voice
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/account/store"
+	"dyna-agent/internal/harness/runtime"
+)
+
+// ChatGPTCredentials reads the sign-in of the ChatGPT account that Pi uses.
+// Voice runs on that account's OpenAI grant. A token that expires within five
+// minutes is renewed first through the shared account refresh, which holds the
+// account's gate and lock and is the only writer of a saved login.
+func ChatGPTCredentials(ctx context.Context) (token, account string, err error) {
+	accounts := runtime.NewAccounts()
+	id, login, err := chatgptLogin(ctx, accounts)
+	if err != nil {
+		return "", "", err
+	}
+	if expiry := native.CredentialExpiry(login.Credential); !expiry.IsZero() && time.Until(expiry) < 5*time.Minute {
+		// Pi renews the grant with its own package, so the account refresh needs
+		// the managed Pi executable, not an empty path.
+		bundle, err := runtime.NewBundleManager().Resolve("pi", "")
+		if err != nil {
+			return "", "", errors.New("Dyna's copy of Pi is not installed; Voice cannot renew the ChatGPT sign-in")
+		}
+		if _, err := accounts.RefreshCredentials(ctx, id, bundle.Executable); err != nil {
+			return "", "", errors.New("the ChatGPT sign-in expired and could not be renewed; sign in again")
+		}
+		if _, login, err = chatgptLogin(ctx, accounts); err != nil {
+			return "", "", err
+		}
+	}
+	token, account, err = native.ChatGPTTokens(login.Credential)
+	if err != nil {
+		return "", "", errors.New("the ChatGPT account has no usable sign-in; sign in again")
+	}
+	return token, account, nil
+}
+
+// chatgptLogin captures the live login of the ChatGPT account that Pi uses.
+func chatgptLogin(ctx context.Context, accounts *runtime.Accounts) (string, native.Captured, error) {
+	id := activeChatGPTAccount(accounts)
+	if id == "" {
+		return "", native.Captured{}, errors.New("sign in to a ChatGPT account in Settings > Accounts first")
+	}
+	m, err := accounts.Manager(id, "")
+	if err != nil {
+		return "", native.Captured{}, errors.New("choose the ChatGPT account on the Accounts page first")
+	}
+	logins, err := m.Capture(ctx, "")
+	if err != nil || len(logins) == 0 {
+		return "", native.Captured{}, errors.New("the ChatGPT account is not signed in")
+	}
+	return id, logins[0], nil
+}
+
+// activeChatGPTAccount names the ChatGPT account Pi uses, or "" when none is
+// signed in.
+func activeChatGPTAccount(accounts *runtime.Accounts) string {
+	id, err := (&store.Store{Root: accounts.Root}).Active(store.ProviderChatGPT, "pi", "")
+	if err != nil {
+		return ""
+	}
+	return id
+}

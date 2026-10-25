@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -26,7 +25,7 @@ func ownerImportFixture(t *testing.T) (*Runtime, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	clearRuntimeSelectors(t)
-	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_API_ENDPOINT", "CURSOR_API_BASE_URL", "META_API_KEY", "TBH_CREDENTIAL_BACKEND", "OPENCODE_DISABLE_CHANNEL_DB", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY"} {
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "CURSOR_API_KEY", "CURSOR_AUTH_TOKEN", "CURSOR_API_ENDPOINT", "CURSOR_API_BASE_URL", "META_API_KEY", "TBH_CREDENTIAL_BACKEND", "OPENCODE_DISABLE_CHANNEL_DB", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
 		t.Setenv(k, "")
 	}
 	return &Runtime{Accounts: &Accounts{Root: filepath.Join(t.TempDir(), "accounts")}}, home
@@ -46,10 +45,6 @@ func ownerImportSeed(t *testing.T, home, h string) []string {
 	switch h {
 	case "claude-code":
 		files = map[string]string{".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"fixture-refresh","expiresAt":4102444800000,"scopes":["user:inference"]},"mcpOAuth":{"canary":"owner-only"}}`, ".claude.json": `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},"projects":{"canary":"owner-only"},"mcpServers":{"canary":"owner-only"}}`}
-	case "codex":
-		jwt := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"owner","chatgpt_account_id":"workspace"}}`)) + ".signature"
-		raw, _ := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": jwt, "access_token": "fixture-access", "refresh_token": "fixture-refresh", "account_id": "workspace"}})
-		files = map[string]string{".codex/auth.json": string(raw)}
 	case "pi":
 		files = map[string]string{".pi/agent/auth.json": `{"anthropic":{"type":"oauth","access":"fixture-access","refresh":"fixture-refresh"}}`}
 	case "grok":
@@ -67,7 +62,7 @@ func ownerImportSeed(t *testing.T, home, h string) []string {
 	return paths
 }
 func TestOwnerLoginImportNativeFiles(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "pi", "grok", "muse"} {
+	for _, h := range []string{"claude-code", "pi", "grok", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home := ownerImportFixture(t)
 			paths := ownerImportSeed(t, home, h)
@@ -239,12 +234,12 @@ func TestOwnerLoginImportIgnoresNestedAliases(t *testing.T) {
 }
 func TestOwnerLoginImportSerializesWithTurnLease(t *testing.T) {
 	r, home := ownerImportFixture(t)
-	ownerImportSeed(t, home, "codex")
+	ownerImportSeed(t, home, "pi")
 	// The copies serialize on the import lock, one after another, and each
 	// bounds itself. A shared wall-clock deadline only raced machine load;
 	// the test's own context still stops a hang.
 	ctx := t.Context()
-	release, err := r.Accounts.TurnLease(ctx, "codex")
+	release, err := r.Accounts.TurnLease(ctx, "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +248,7 @@ func TestOwnerLoginImportSerializesWithTurnLease(t *testing.T) {
 	var copied atomic.Int32
 	for range 4 {
 		wg.Go(func() {
-			if err := r.copyPersonalLogin(ctx, "codex"); err == nil {
+			if err := r.copyPersonalLogin(ctx, "pi"); err == nil {
 				copied.Add(1)
 			} else if !errors.Is(err, errPrivateHomeUsed) {
 				t.Error(err)
@@ -400,7 +395,7 @@ func (m ownerImportCancelAfterCapture) Capture(ctx context.Context, root string)
 
 // Cancellation after activation must not turn a completed import into a failure.
 func TestOwnerLoginImportSuccessAfterCancellation(t *testing.T) {
-	for _, h := range []string{"grok", "codex"} {
+	for _, h := range []string{"grok", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			r, home := ownerImportFixture(t)
 			ownerImportSeed(t, home, h)
@@ -558,7 +553,7 @@ func (m ownerImportReadOnlyManager) CredentialExpiry(native.Captured) (time.Time
 	return time.Unix(1, 0), nil
 }
 func TestOwnerLoginImportOwnerCanariesAfterFailedRefresh(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "pi", "grok", "muse"} {
+	for _, h := range []string{"claude-code", "pi", "grok", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home := ownerImportFixture(t)
 			files := ownerImportSeed(t, home, h)

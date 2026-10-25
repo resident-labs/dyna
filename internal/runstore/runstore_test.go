@@ -34,7 +34,6 @@ func TestCreateOmitsEmptySessionAndReadsOldMeta(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_session-empty")
 	t.Setenv(SessionEnv, "")
-	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("MUSE_SESSION_ID", "")
 	run, err := Create("no session", "return null", nil)
@@ -61,7 +60,6 @@ func TestCreateOmitsEmptySessionAndReadsOldMeta(t *testing.T) {
 
 func TestOwnerFromEnv(t *testing.T) {
 	t.Setenv(SessionEnv, "")
-	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("MUSE_SESSION_ID", "")
 	if got := OwnerFromEnv(); got != "" {
@@ -74,10 +72,6 @@ func TestOwnerFromEnv(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "c1")
 	if got := OwnerFromEnv(); got != "claude:c1" {
 		t.Fatalf("claude: %q", got)
-	}
-	t.Setenv("CODEX_THREAD_ID", "t1")
-	if got := OwnerFromEnv(); got != "codex:t1" {
-		t.Fatalf("codex: %q", got)
 	}
 	t.Setenv(SessionEnv, "ses_x")
 	if got := OwnerFromEnv(); got != "ses_x" {

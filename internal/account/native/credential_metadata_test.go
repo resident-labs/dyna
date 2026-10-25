@@ -99,32 +99,6 @@ func TestClaudeActiveRefreshCheckpointsBeforeNativeWrite(t *testing.T) {
 	}
 }
 
-func TestCodexActiveRefreshCheckpointsNativeRotation(t *testing.T) {
-	m, root := codexTestManager(t)
-	raw := codexTestAuth("person", "workspace", "old", time.Now().Add(-time.Hour))
-	codexTestWrite(t, filepath.Join(root, "auth.json"), raw)
-	c, _ := codexParse(raw)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"access_token": codexTestJWT(map[string]int64{"exp": time.Now().Add(time.Hour).Unix()}), "refresh_token": "rotated"})
-	}))
-	defer server.Close()
-	m.client = server.Client()
-	m.tokenURL = server.URL
-	calls := 0
-	got, err := m.RefreshActive(context.Background(), c, func(next Captured) error {
-		calls++
-		rows, e := m.Capture(context.Background(), "")
-		if e != nil || len(rows) != 1 || NewerCredential(rows[0], c) || !NewerCredential(next, c) {
-			t.Error("wrong checkpoint order")
-		}
-		return nil
-	})
-	rows, e := m.Capture(context.Background(), "")
-	if err != nil || e != nil || calls != 1 || len(rows) != 1 || !NewerCredential(rows[0], c) || !NewerCredential(got, c) {
-		t.Fatal("active Codex rotation failed", err, e)
-	}
-}
-
 func TestCredentialMetadataRejectsForgedExpiryAndIdentity(t *testing.T) {
 	m := claudeTestManager(t, nil)
 	old := Captured{Identity: "anthropic:" + claudeTestAccountA, Credential: claudeTestPayload(t, m, claudeTestAccountA, "old", time.Hour)}
@@ -194,30 +168,6 @@ func TestCredentialRecoveryCancellation(t *testing.T) {
 	}
 }
 
-func TestCodexActiveRefreshRestoresNewerSavedCredential(t *testing.T) {
-	m, root := codexTestManager(t)
-	raw := codexTestAuth("person", "workspace", "old", time.Now().Add(-time.Hour))
-	codexTestWrite(t, filepath.Join(root, "auth.json"), raw)
-	old, _ := codexParse(raw)
-	saved, _ := codexParse(codexTestAuth("person", "workspace", "rotated", time.Now().Add(time.Hour)))
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("newer saved grant should not refresh") }))
-	defer server.Close()
-	m.client = server.Client()
-	m.tokenURL = server.URL
-	calls := 0
-	got, err := m.RefreshActive(context.Background(), saved, func(next Captured) error {
-		calls++
-		if !NewerCredential(next, old) {
-			t.Error("stale native grant was used")
-		}
-		return nil
-	})
-	rows, e := m.Capture(context.Background(), "")
-	if err != nil || e != nil || calls != 1 || len(rows) != 1 || !NewerCredential(rows[0], old) || !NewerCredential(got, old) {
-		t.Fatal("saved rotation was not restored", err, e)
-	}
-}
-
 func TestActiveRefreshRejectsChangedNativeAccount(t *testing.T) {
 	m := claudeTestManager(t, nil)
 	c := Captured{Identity: "anthropic:" + claudeTestAccountA, Credential: claudeTestPayload(t, m, claudeTestAccountA, "old", -time.Hour)}
@@ -246,7 +196,7 @@ func TestCredentialRefreshSupportIsSharedAndConservative(t *testing.T) {
 	}
 	// Existing adapters without a credential-specific gate retain their
 	// capability.
-	for _, harness := range []string{"claude-code", "codex", "muse", "opencode"} {
+	for _, harness := range []string{"claude-code", "muse", "opencode"} {
 		manager, ok := For(harness, Host{})
 		if !ok {
 			t.Fatal(harness)

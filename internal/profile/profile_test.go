@@ -22,10 +22,10 @@ func TestOutputDeclarationCompatibilityAndValidation(t *testing.T) {
 		t.Fatalf("legacy profile gained an output declaration: %s", b)
 	}
 
-	legacy.Harness = HarnessCodex
-	legacy.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}
+	legacy.Harness = HarnessPi
+	legacy.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}
 	b, err = json.Marshal(legacy)
-	if err != nil || !strings.Contains(string(b), `"dialect":"codex-jsonl"`) {
+	if err != nil || !strings.Contains(string(b), `"dialect":"pi-json"`) {
 		t.Fatalf("output declaration did not serialize: %s, %v", b, err)
 	}
 	if err := legacy.Validate(); err != nil {
@@ -304,7 +304,7 @@ func TestModelListsAreCloned(t *testing.T) {
 
 func TestStoredSystemRuntimeLoadsAsDynaManaged(t *testing.T) {
 	var p Profile
-	if err := json.Unmarshal([]byte(`{"name":"old","harness":"codex","runtime":"system","taste":5,"intelligence":5,"cost":5}`), &p); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"old","harness":"pi","runtime":"system","taste":5,"intelligence":5,"cost":5}`), &p); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Validate(); err != nil || !p.DynaManaged() {

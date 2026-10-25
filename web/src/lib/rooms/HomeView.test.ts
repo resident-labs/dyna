@@ -87,7 +87,7 @@ test('closing Settings reloads the home screen accounts and runtimes', async () 
   } }
   const c: CloseState = Object.assign(state, homeFunctions<Pick<CloseState, 'refresh'>>(refreshCode, state, ['refresh']))
 
-  // Settings is where the owner signs in to Codex, so the
+  // Settings is where the owner signs in to a provider, so the
   // header's Call Voice rereads whether voice is set up.
   let voiceRefreshed = 0
   const app = { showSettings: true, loadProfiles: () => {}, home: { refresh: () => c.refresh() }, voiceCall: { refresh: () => voiceRefreshed++ } }

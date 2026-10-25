@@ -33,7 +33,7 @@ func TestMuseSteerHookForwardsOwnerEnvironment(t *testing.T) {
 	data := []byte(strings.Join(args, "\n"))
 	var names []string
 	var hookPath string
-	for _, pair := range codexConfigArgs(args) {
+	for _, pair := range configArgs(args) {
 		if raw, ok := strings.CutPrefix(pair, "managed_hooks_env_vars="); ok {
 			if err := json.Unmarshal([]byte(raw), &names); err != nil {
 				t.Fatal(err)

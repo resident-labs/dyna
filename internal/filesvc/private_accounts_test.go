@@ -13,7 +13,7 @@ func TestPrivateAccountsStayOutOfFileBrowsing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
-	account, err := runtime.NewAccounts().Create("codex", "private")
+	account, err := runtime.NewAccounts().Create("pi", "private")
 	if err != nil {
 		t.Fatal(err)
 	}

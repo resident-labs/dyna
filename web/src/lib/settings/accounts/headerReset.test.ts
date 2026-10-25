@@ -63,7 +63,7 @@ test('a second account still drops its limit after an earlier deadline has passe
     flushSync(() => {
       app = mount(Card, { target, props: {
         group: { provider: 'chatgpt', accounts: [
-          { id: 'a', harness: 'codex', label: 'Old block', status: 'ready', active: false, quotaBlocked: true, blockingQuotaWindows: ['five_hour'], quotaBlockedUntil: new Date(now - 3600000).toISOString() },
+          { id: 'a', harness: 'pi', label: 'Old block', status: 'ready', active: false, quotaBlocked: true, blockingQuotaWindows: ['five_hour'], quotaBlockedUntil: new Date(now - 3600000).toISOString() },
           { id: 'b', harness: 'claude-code', label: 'Weekly account', status: 'ready', active: false, windows: [{ id: 'seven_day', label: 'Weekly', usedPercent: 100, resetsAt: new Date(now + 60000).toISOString() }] },
         ] },
       } })

@@ -10,14 +10,13 @@ import (
 // nativePathKeys lists the credential path keys each adapter must declare.
 var nativePathKeys = map[string][]string{
 	"claude-code": {"CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR"},
-	"codex":       {"CODEX_HOME", "CODEX_SQLITE_HOME"},
 	"opencode":    {"OPENCODE_CONFIG_DIR", "OPENCODE_DB"},
 	"muse":        {"MUSE_AUTH_PATH", "TBH_CREDENTIAL_BACKEND"},
 	"kimi-code":   {"KIMI_CODE_HOME"},
 }
 
 func TestNativeEnvironmentIsSharedByLoginAndRuntime(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "pi"} {
+	for _, h := range []string{"claude-code", "opencode", "muse", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			scope := filepath.Join(a.Root, h, ".runtime")

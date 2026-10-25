@@ -3,7 +3,6 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -23,7 +22,7 @@ import (
 	"dyna-agent/internal/shellquote"
 )
 
-// Hook-based steering. Codex and Muse run a PostToolUse hook given on
+// Hook-based steering. Muse runs a PostToolUse hook given on
 // their command line (-c) and add the hook's additionalContext to the running
 // turn before the next model call. For those harnesses dyna installs its own
 // hook for each worker run: a pending steering message goes into a per-run
@@ -108,9 +107,9 @@ type steerHook struct {
 
 // newSteerHook returns nil when the harness has no usable command hook. Muse
 // always gets one, for its memory denial; the other harnesses need steering.
-// Codex and Muse own hooks for the process lifetime, rather than one turn.
+// Muse owns its hook for the process lifetime, rather than one turn.
 func newSteerHookForTurn(p profile.Profile) (*steerHook, error) {
-	if p.Harness == profile.HarnessCodex || p.Harness == profile.HarnessMuse {
+	if p.Harness == profile.HarnessMuse {
 		return nil, nil
 	}
 	return newSteerHook(p)
@@ -157,12 +156,6 @@ func (h *steerHook) argv(argv, launchEnv []string) ([]string, error) {
 	}
 	var extra []string
 	switch h.harness {
-	case profile.HarnessCodex:
-		// The trust bypass is needed for a hook given with -c to run at all.
-		// It also lifts the review step for any other hook enabled for this
-		// invocation (user or project config); see `dyna guide steering`.
-		extra = []string{"-c", fmt.Sprintf(`hooks.PostToolUse=[{matcher="*",hooks=[{type="command",command=%s,timeout=%d}]}]`, tomlString(h.command), steerHookTimeout),
-			"--dangerously-bypass-hook-trust"}
 	case profile.HarnessMuse:
 		hooks := map[string][]hookMatcher{"PreToolUse": {museMemoryDenyHook}}
 		if h.steer {
@@ -306,9 +299,6 @@ func probeSteerHookSupport(h, path string) bool {
 	var args []string
 	var check func(string) bool
 	switch h {
-	case profile.HarnessCodex:
-		args = []string{"exec", "--help"}
-		check = func(s string) bool { return strings.Contains(s, "--dangerously-bypass-hook-trust") }
 	case profile.HarnessMuse:
 		args = []string{"--version"}
 		check = func(s string) bool { return museVersionAtLeast(s, museHookMinVersion) }
@@ -343,23 +333,4 @@ func museVersionAtLeast(s string, min [3]int) bool {
 		}
 	}
 	return true
-}
-
-// tomlString renders s as a TOML basic string.
-func tomlString(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch {
-		case r == '"' || r == '\\':
-			b.WriteByte('\\')
-			b.WriteRune(r)
-		case r < 0x20 || r == 0x7f:
-			fmt.Fprintf(&b, `\u%04X`, r)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
 }

@@ -45,7 +45,6 @@ func TestMain(m *testing.M) {
 			os.Unsetenv(key)
 		}
 	}
-	os.Unsetenv("CODEX_THREAD_ID")
 	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
 	// Each job re-executes this binary twice, as launcher and supervisor. Keep
 	// race checks without their one-second exit grace on every job. This

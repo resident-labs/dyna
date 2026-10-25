@@ -146,45 +146,6 @@ func TestPreferenceImportClaudeSafeAndImmutable(t *testing.T) {
 		t.Fatal("metadata contains values")
 	}
 }
-func TestPreferenceCodexDottedKeysAndRace(t *testing.T) {
-	r, a, home := preferenceFixture(t, "codex")
-	path := writePreferenceFixture(t, home, ".codex/config.toml", `hide_agent_reasoning = true
-show_raw_agent_reasoning = false
-model = "private-model"
-[history]
-max_bytes = 1024
-persistence = "none"
-[tui]
-animations = false
-alternate_screen = "never"
-`)
-	p, err := r.PreviewPreferenceImport(a.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if preferenceStatuses(p)["history.max_bytes"] != "allowed" {
-		t.Fatal(p)
-	}
-	before, _ := os.ReadFile(path)
-	info, _ := os.Stat(path)
-	if err := r.ImportPreferences(a.ID, p.Hash); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.ReadFile(path)
-	afterInfo, _ := os.Stat(path)
-	if string(before) != string(after) || !info.ModTime().Equal(afterInfo.ModTime()) {
-		t.Fatal("import wrote personal config")
-	}
-	values, err := r.PreferenceValues(a.ID)
-	if err != nil || len(values) != 6 || values["history.persistence"] != "none" {
-		t.Fatalf("%v %v", values, err)
-	}
-	writePreferenceFixture(t, home, ".codex/config.toml", string(before)+"\n# changed\n")
-	err = r.ImportPreferences(a.ID, p.Hash)
-	if err == nil || !strings.Contains(err.Error(), "changed") {
-		t.Fatalf("expected stale preview error: %v", err)
-	}
-}
 func TestPreferenceUnsafeValuesAndTypes(t *testing.T) {
 	cases := []string{`"~/private"`, `"/home/private"`, `"C:\\Users\\private"`, `"https://user:pass@example.com"`, `"$(echo private)"`, `"English; echo private"`, `"sk-private"`, `"eyJhbGciOiJIUzI1NiJ9"`, `["English"]`, `{"command":"private"}`, `42`, `null`}
 	for _, value := range cases {
@@ -208,15 +169,17 @@ func TestPreferenceUnsafeValuesAndTypes(t *testing.T) {
 			}
 		})
 	}
-	for _, value := range []any{[]any{true}, map[string]any{"value": true}, nil, 1.5, "true"} {
-		if preferenceValueSafe("codex", "tui.animations", value) {
-			t.Fatalf("unsupported value: %#v", value)
-		}
-	}
 }
 func TestPreferenceErrorsDoNotExposeContents(t *testing.T) {
-	r, a, home := preferenceFixture(t, "codex")
-	writePreferenceFixture(t, home, ".codex/config.toml", `secret-value = "unterminated`)
+	r, a, home := preferenceFixture(t, "muse")
+	adapters.Lock()
+	original := adapters.items["muse"]
+	modified := original
+	modified.PersonalConfigFiles = []string{"prefs/config.toml"}
+	adapters.items["muse"] = modified
+	adapters.Unlock()
+	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	writePreferenceFixture(t, home, "prefs/config.toml", `secret-value = "unterminated`)
 	p, err := r.PreviewPreferenceImport(a.ID)
 	if err == nil {
 		t.Fatal("invalid TOML accepted")
@@ -240,16 +203,16 @@ func TestPreferenceSourceSymlinkRefusal(t *testing.T) {
 	}
 }
 func TestPreferenceDenylistOverridesAdapterAndNoAllowlist(t *testing.T) {
-	r, a, home := preferenceFixture(t, "codex")
+	r, a, home := preferenceFixture(t, "muse")
 	adapters.Lock()
-	original := adapters.items["codex"]
+	original := adapters.items["muse"]
 	modified := original
 	modified.ConfigAllowlist = []string{"hooks.Stop", "env.API_KEY", "mcp_servers.example.command", "model", "provider", "permissions", "approval_policy", "sandbox_mode", "status_line.command", "notification.command", "personal_path", "safe_unknown"}
-	modified.PersonalConfigFiles = []string{".codex/config.jsonc"}
-	adapters.items["codex"] = modified
+	modified.PersonalConfigFiles = []string{"prefs/config.jsonc"}
+	adapters.items["muse"] = modified
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["codex"] = original; adapters.Unlock() }()
-	writePreferenceFixture(t, home, ".codex/config.jsonc", `{"hooks":{"Stop":true},"env":{"API_KEY":true},"mcp_servers":{"example":{"command":true}},"model":true,"provider":true,"permissions":true,"approval_policy":true,"sandbox_mode":true,"status_line":{"command":true},"notification":{"command":true},"personal_path":true,"safe_unknown":true}`)
+	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	writePreferenceFixture(t, home, "prefs/config.jsonc", `{"hooks":{"Stop":true},"env":{"API_KEY":true},"mcp_servers":{"example":{"command":true}},"model":true,"provider":true,"permissions":true,"approval_policy":true,"sandbox_mode":true,"status_line":{"command":true},"notification":{"command":true},"personal_path":true,"safe_unknown":true}`)
 	p, err := r.PreviewPreferenceImport(a.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +224,7 @@ func TestPreferenceDenylistOverridesAdapterAndNoAllowlist(t *testing.T) {
 	}
 	adapters.Lock()
 	modified.ConfigAllowlist = []string{}
-	adapters.items["codex"] = modified
+	adapters.items["muse"] = modified
 	adapters.Unlock()
 	p, err = r.PreviewPreferenceImport(a.ID)
 	if err != nil {
@@ -314,7 +277,7 @@ func TestPreferenceFlattenCollisionAndNoArrays(t *testing.T) {
 }
 
 func TestPreferenceMissingSourceAndAllowlistHash(t *testing.T) {
-	r, a, home := preferenceFixture(t, "codex")
+	r, a, home := preferenceFixture(t, "muse")
 	p, err := r.PreviewPreferenceImport(a.ID)
 	if err != nil || len(p.Keys) != 0 {
 		t.Fatalf("%v %v", p, err)
@@ -322,34 +285,34 @@ func TestPreferenceMissingSourceAndAllowlistHash(t *testing.T) {
 	if err := r.ImportPreferences(a.ID, p.Hash); err == nil {
 		t.Fatal("missing source imported")
 	}
-	writePreferenceFixture(t, home, ".codex/config.toml", "hide_agent_reasoning = true\n")
+	writePreferenceFixture(t, home, "prefs/config.toml", "hide_agent_reasoning = true\n")
 	p, err = r.PreviewPreferenceImport(a.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	adapters.Lock()
-	original := adapters.items["codex"]
+	original := adapters.items["muse"]
 	modified := original
 	modified.ConfigAllowlist = []string{"history.persistence"}
-	adapters.items["codex"] = modified
+	adapters.items["muse"] = modified
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["codex"] = original; adapters.Unlock() }()
+	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
 	if err := r.ImportPreferences(a.ID, p.Hash); err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("allowlist change was not refused: %v", err)
 	}
 }
 func TestPreferenceInvalidSourceSelection(t *testing.T) {
-	r, a, home := preferenceFixture(t, "codex")
-	writePreferenceFixture(t, home, ".codex/config.toml", "hide_agent_reasoning = true\n")
+	r, a, home := preferenceFixture(t, "muse")
+	writePreferenceFixture(t, home, "prefs/config.toml", "hide_agent_reasoning = true\n")
 	adapters.Lock()
-	original := adapters.items["codex"]
+	original := adapters.items["muse"]
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["codex"] = original; adapters.Unlock() }()
-	for _, path := range []string{"../outside.toml", "/outside.toml", ".codex/../outside.toml"} {
+	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	for _, path := range []string{"../outside.toml", "/outside.toml", "prefs/../outside.toml"} {
 		adapters.Lock()
 		modified := original
 		modified.PersonalConfigFiles = []string{path}
-		adapters.items["codex"] = modified
+		adapters.items["muse"] = modified
 		adapters.Unlock()
 		if _, err := r.PreviewPreferenceImport(a.ID); err == nil {
 			t.Fatal("unsafe source path accepted")

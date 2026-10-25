@@ -2,21 +2,16 @@ package subagent
 
 import (
 	"slices"
-
-	"dyna-agent/internal/profile"
 )
 
-// A Codex turn can finish without final text when it owes no report. An
-// explicit post can supply the result for any harness. Read the current
-// obligation, including live steering, before empty-output recovery.
+// An explicit post can supply the result for a harness that owes no final text.
+// Read the current obligation, including live steering, before empty-output
+// recovery.
 func (m *Manager) turnAcceptsEmptyOutput(id string, n int) bool {
 	store := m.store()
 	turn, err := store.ReadTurn(id, n)
 	if err != nil || turn.Schema != "" {
 		return false
-	}
-	if turn.Harness == profile.HarnessCodex && len(turn.ReportTo) == 0 {
-		return true
 	}
 	if len(turn.PostedTo) == 0 {
 		return false

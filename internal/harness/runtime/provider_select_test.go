@@ -27,7 +27,6 @@ func TestProviderForModelKeepsOtherHarnessesOnTheirProvider(t *testing.T) {
 		{"opencode", "zai/glm-5.3", store.ProviderOpenCodeGo},
 		{"opencode", "opencode-go/mimo-v2.6-pro", store.ProviderOpenCodeGo},
 		{"claude-code", "haiku", store.ProviderAnthropic},
-		{"codex", "gpt-6.1-sol", store.ProviderChatGPT},
 	} {
 		if got := providerForModel(c.harness, c.model); got != c.want {
 			t.Fatalf("%s %s: provider %q, want %q", c.harness, c.model, got, c.want)
