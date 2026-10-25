@@ -418,20 +418,28 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		return false, err
 	}
 	result, err := registry.LoadResult(ctx, repo, job.head)
+	// A machine that could not run a check proves nothing about the head, so that
+	// run moves to another machine once instead of leaving the head pending for
+	// evidence that will never come.
+	retriedFrom := ""
 	if err == nil && s.registeredJobResultComplete(ctx, job, result) {
-		// Only a hosted head has GitHub work to resume or commit statuses to
-		// publish. A local head's reader takes its evidence from the registry.
-		if job.hosted() {
-			applyLocalBudgets(&result, EffectivePolicy(st, job.record))
-			if localInfrastructureError(result) {
-				if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+		if names := machineFailureRetryFrom(result); names != "" {
+			retriedFrom = names
+		} else {
+			// Only a hosted head has GitHub work to resume or commit statuses to
+			// publish. A local head's reader takes its evidence from the registry.
+			if job.hosted() {
+				applyLocalBudgets(&result, EffectivePolicy(st, job.record))
+				if localInfrastructureError(result) {
+					if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+						return false, err
+					}
+				} else if err := s.publishLocalStatuses(ctx, job, result); err != nil {
 					return false, err
 				}
-			} else if err := s.publishLocalStatuses(ctx, job, result); err != nil {
-				return false, err
 			}
+			return false, nil
 		}
-		return false, nil
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
@@ -439,7 +447,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if runs.runs[key] != nil {
 		return false, nil
 	}
-	chosen := availableCINode(enabled, active, job.record.RoomID)
+	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
 	if chosen == nil {
 		return false, nil
 	}
@@ -469,7 +477,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		if settled {
 			return false, nil
 		}
-		chosen = availableCINode(enabled, active, job.record.RoomID)
+		chosen = availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
 		if chosen == nil {
 			return false, nil
 		}
@@ -484,8 +492,45 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	runs.runs[key] = run
 	active[chosen.Name] += slots
-	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run)
+	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom)
 	return true, nil
+}
+
+// machineFailureRetryFrom names the machine whose failure made the result, when
+// the result is a machine-level infrastructure failure that has not been retried
+// yet. An empty string means the result stands: it either tested the commit or
+// it is already the retry of another machine's failure.
+func machineFailureRetryFrom(result localci.Result) string {
+	if result.Node == "" || result.RetriedFrom != "" || !localInfrastructureError(result) {
+		return ""
+	}
+	if result.Cause != "" && !machineCause(result.Cause) {
+		return ""
+	}
+	failed := false
+	for _, check := range result.Checks {
+		if check.Status == localci.OutcomePassed {
+			continue
+		}
+		if !machineCause(check.Cause) {
+			return ""
+		}
+		failed = true
+	}
+	if !failed && !machineCause(result.Cause) {
+		return ""
+	}
+	return result.Node
+}
+
+// machineCause reports a failure the machine caused, which says nothing about
+// the commit.
+func machineCause(cause localci.FailureCause) bool {
+	switch cause {
+	case localci.CauseContainerFailure, localci.CauseSSHDrop, localci.CauseDiskFull:
+		return true
+	}
+	return false
 }
 
 // Bound each run so queued heads can share a node. Slot locks in the runner
@@ -497,11 +542,17 @@ const registeredCIRunSlots = 6
 // on disk takes no new run, so its work waits for a node that has space. A
 // machine that names rooms takes only those rooms' work.
 func availableCINode(nodes []localci.Node, active map[string]int, roomID string) *localci.Node {
+	return availableCINodeExcept(nodes, active, roomID, "")
+}
+
+// availableCINodeExcept is availableCINode without the machine the run just
+// failed on, so a retry lands somewhere else.
+func availableCINodeExcept(nodes []localci.Node, active map[string]int, roomID, skip string) *localci.Node {
 	var chosen *localci.Node
 	free := 0
 	for i := range nodes {
 		node := &nodes[i]
-		if node.LowDisk || !node.AllowsRoom(roomID) {
+		if node.LowDisk || !node.AllowsRoom(roomID) || node.Name == skip {
 			continue
 		}
 		if available := node.Slots - active[node.Name]; node.Enabled && available > free {
@@ -511,7 +562,7 @@ func availableCINode(nodes []localci.Node, active map[string]int, roomID string)
 	return chosen
 }
 
-func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun) {
+func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun, retriedFrom string) {
 	// A run that ends on any path has no work left on the node.
 	defer run.markStopped()
 	defer func() {
@@ -584,6 +635,9 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		return
 	}
 	result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
+	// The result says which machine's failure caused this attempt, so a machine
+	// failure on the retry ends the head instead of walking the fleet.
+	result.RetriedFrom = retriedFrom
 	if err != nil {
 		result.Status = "error"
 		result.Error = Sanitize(err.Error())

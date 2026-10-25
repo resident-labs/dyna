@@ -127,6 +127,10 @@ type Result struct {
 	Suites   []SuiteResult `json:"suites"`
 	Checks   []SuiteResult `json:"checks,omitempty"`
 	Error    string        `json:"error,omitempty"`
+	// RetriedFrom names the machine whose infrastructure failure moved this run
+	// to another machine. A result that carries it is that retry, so a second
+	// infrastructure failure ends the run instead of walking around the fleet.
+	RetriedFrom string `json:"retriedFrom,omitempty"`
 }
 
 // FailureCause is why a check or a run stopped without testing the commit, or

@@ -539,6 +539,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 						sr.Status = OutcomeFailed
 					}
 				}
+				// A container that never started proves nothing about the commit: report
+				// the machine, not a failing test, so the run can move to another one.
+				if sr.Status == OutcomeFailed && check.image != "" && !commandStarted(sr.LogTail) {
+					sr.Status, sr.Error, sr.Cause = OutcomeError, "the container did not start the check's command on "+node.Name, CauseContainerFailure
+				}
 				// A full disk on the machine is not a failing test: report it as an
 				// infrastructure error, so the run cleans up and retries, and hosted
 				// CI resumes when it stays broken.
@@ -693,6 +698,21 @@ func cancelled(ctx context.Context) bool {
 // checkMarker is the exit status the node writes after a check's command ran.
 // Without it the check never reached its command or never came back.
 var checkMarker = regexp.MustCompile(`(?m)^DYNA_CI_CHECK_EXIT=([0-9]+)$`)
+
+// commandStartedFile is the sentinel a check's command writes before it runs.
+// Its name matches no report filter, so it never leaves the node.
+const commandStartedFile = ".command-started"
+
+// commandMarker is what the node writes about that sentinel: 1 when the
+// container started the command, 0 when it never got that far.
+var commandMarker = regexp.MustCompile(`(?m)^DYNA_CI_COMMAND_STARTED=([01])$`)
+
+// commandStarted reports what the node's marker proves. A log without the marker
+// proves nothing either way, so it counts as started.
+func commandStarted(logTail string) bool {
+	marks := commandMarker.FindAllStringSubmatch(logTail, -1)
+	return len(marks) == 0 || marks[len(marks)-1][1] == "1"
+}
 
 // checkCause reads why a check stopped from what its own output proves: the
 // deadline, the exit status the node recorded, and the marker it printed. It
@@ -965,7 +985,12 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	q := shellquote.Quote
 	seconds := int64((timeout + time.Second - 1) / time.Second)
 	timing := `printf '{"durationNanos":%s}\n' "$(( $(date +%s%N) - started ))" > ` + q(path.Join(reportDir, "execution.json")) + "; "
-	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; fi; `
+	// A container that never started is an infrastructure failure, not a failing
+	// test, so the node records whether the command inside it began. The sentinel
+	// is a file because the check's own output can be longer than the tail a run
+	// keeps.
+	startedMarker := `if [ -e ` + q(path.Join(reportDir, commandStartedFile)) + ` ]; then printf 'DYNA_CI_COMMAND_STARTED=1\n'; else printf 'DYNA_CI_COMMAND_STARTED=0\n'; fi; `
+	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `fi; `
 	if !check.host {
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
@@ -975,7 +1000,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
 	}
 	if check.host {
-		setup += "cd " + q(work) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
+		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
 		environment := map[string]string{
 			"RUNNER_TEMP": reportDir, "GITHUB_STEP_SUMMARY": path.Join(reportDir, "step-summary.md"),
 			"JUNIT_REPORT_PATH": path.Join(reportDir, string(check.id)+"-test.xml"),
@@ -996,7 +1021,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	if node.SSH == "" {
 		setup += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
 	}
-	inner := "mkdir -p /tmp/home /tmp/data /tmp/config /tmp/cache; " + check.inner
+	inner := "mkdir -p /tmp/home /tmp/data /tmp/config /tmp/cache; : > /reports/" + commandStartedFile + "; " + check.inner
 	user := " --user $(id -u):$(id -g)"
 	if check.hostUser {
 		user = ""
