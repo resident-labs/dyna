@@ -537,7 +537,7 @@ func TestRoomGitHubAccessPolicyCommand(t *testing.T) {
 			t.Fatalf("policy %s: %s %v", access, out, err)
 		}
 		rec, err := f.s.Notify.Rooms.Resolve(f.room)
-		if err != nil || rec.GitHubAccess != access {
+		if err != nil || rec.GitHubAccess != room.GitHubAccess(access) {
 			t.Fatalf("saved policy = %q %v", rec.GitHubAccess, err)
 		}
 	}
