@@ -65,10 +65,7 @@
   {:else if !row.accounts.length}
     <div class="signin-card">
       <p>Sign in to start using {row.meta.name}.</p>
-      <!-- Antigravity signs in through its ACP server and never copies a personal login. -->
-      {#if row.id !== 'antigravity'}
-        <p class="muted small">If you already use {row.meta.name}, Dyna can copy that login once.</p>
-      {/if}
+      <p class="muted small">If you already use {row.meta.name}, Dyna can copy that login once.</p>
       <button class="btn pri" disabled={busy || signingIn} onclick={() => onsignin()}>{scanning ? 'Looking for your login…' : 'Sign in'}</button>
     </div>
   {:else}

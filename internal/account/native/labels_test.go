@@ -24,22 +24,6 @@ func TestCodexIdentityLabel(t *testing.T) {
 	}
 }
 
-func TestAntigravityIdentityLabel(t *testing.T) {
-	for _, tc := range []struct{ email, plan, want string }{
-		{"person@example.test", "pro", "person@example.test"}, {"", "pro", "pro"}, {"", "", ""},
-	} {
-		var doc map[string]any
-		_ = json.Unmarshal(agyTestWrapper(t, "user"), &doc)
-		doc["id_token"] = codexTestJWT(map[string]string{"sub": "user", "email": tc.email})
-		doc["user_tier"] = tc.plan
-		raw, _ := json.Marshal(doc)
-		c, err := agyAccount(raw)
-		if err != nil || c.Label != tc.want {
-			t.Fatal("incorrect Antigravity identity label", err)
-		}
-	}
-}
-
 func TestGrokIdentityLabel(t *testing.T) {
 	for _, tc := range []struct{ email, tier, want string }{
 		{"person@example.test", "SuperGrok", "person@example.test"},

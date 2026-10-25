@@ -270,23 +270,6 @@ func TestRuntimeControlStopErrorKeepsRemainingCount(t *testing.T) {
 	awaitControlResult(t, done)
 }
 
-func TestRuntimeControlAntigravityDoesNotNeedPersonalConsent(t *testing.T) {
-	a := testPrivateRuntime(t)
-	// Antigravity now uses private files and reaches bundle validation without consent.
-	account, err := NewAccounts().Create("antigravity", "offline consent test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = a.SwitchPrivateRuntimeAccount(account.ID, false)
-	if err == nil || !strings.Contains(err.Error(), "private bundle is not installed") {
-		t.Fatalf("expected private bundle validation: %v", err)
-	}
-	state, err := a.PrivateRuntimeSwitchState(context.Background(), "antigravity")
-	if err != nil || state.RequestID != "" || state.CanStop {
-		t.Fatalf("unconsented switch registered: %+v %v", state, err)
-	}
-}
-
 func TestRuntimeControlCanonicalHarness(t *testing.T) {
 	a, f := controlApp(t)
 	a.privateSwitch.hooks.prepare = func(string, bool) (string, string, error) { return "claude", "offline", nil }

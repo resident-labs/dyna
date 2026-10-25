@@ -147,9 +147,9 @@ func TestSteerHookArgv(t *testing.T) {
 	if got != want {
 		t.Fatalf("muse argv:\n got %s\nwant %s", got, want)
 	}
-	other := &steerHook{harness: profile.HarnessAntigravity}
-	if got := mustHookArgv(t, other, []string{"agy", "--print"}); len(got) != 2 {
-		t.Fatalf("antigravity argv changed: %v", got)
+	other := &steerHook{harness: profile.HarnessPi}
+	if got := mustHookArgv(t, other, []string{"pi", "--print"}); len(got) != 2 {
+		t.Fatalf("unhooked harness argv changed: %v", got)
 	}
 	if !museVersionAtLeast("Muse Code 1.4.7 (1.4.7-R6101.1)", museHookMinVersion) || museVersionAtLeast("Muse Code 1.4.6", museHookMinVersion) ||
 		!museVersionAtLeast("Muse Code 2.0.0", museHookMinVersion) {

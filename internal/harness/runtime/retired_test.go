@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,5 +75,42 @@ func TestGCRemovesTheRetiredQwenBundle(t *testing.T) {
 	}
 	if _, err := os.Lstat(codex); err != nil {
 		t.Fatalf("gc removed another bundle: %v", err)
+	}
+}
+
+// An Antigravity account saved by an earlier release must not break listing or
+// lookup for the accounts that survive. gc then drops the record and folders.
+func TestRetiredAntigravityAccountIsSkippedUntilGC(t *testing.T) {
+	a := testAccounts(t)
+	codex, err := a.Create("codex", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const oldID = "0123456789abcdef0123456789abcdef"
+	home := filepath.Join(a.Root, "antigravity", oldID)
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s := &store.Store{Root: a.Root}
+	old := store.Entry{Metadata: store.Metadata{ID: oldID, Harness: "antigravity", Label: "google", NativeHome: home}}
+	if err := s.Update(func(st *store.State) error { st.Entries = append(st.Entries, old); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := a.List()
+	if err != nil || len(rows) != 1 || rows[0].ID != codex.ID {
+		t.Fatalf("list = %+v, %v", rows, err)
+	}
+	if _, err := a.Find(oldID); !errors.Is(err, errAccountMissing) {
+		t.Fatalf("found a retired account: %v", err)
+	}
+	if err := RemoveRetiredHarnesses(a, &BundleManager{Root: filepath.Join(filepath.Dir(a.Root), "harnesses")}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := s.Read()
+	if err != nil || len(state.Entries) != 1 || state.Entries[0].ID != codex.ID {
+		t.Fatalf("store after gc = %+v, %v", state.Entries, err)
+	}
+	if _, err := os.Lstat(filepath.Join(a.Root, "antigravity")); !os.IsNotExist(err) {
+		t.Fatalf("retired account folder is still there: %v", err)
 	}
 }

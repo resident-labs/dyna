@@ -28,7 +28,6 @@ const harnessProbePrompt = "Run this tiny shell command once: printf 'DYNA_PROFI
 var harnessDefinitions = []HarnessDefinition{
 	{HarnessClaudeCode, "claude", []string{"--version"}, workeroutput.DialectClaudeStreamJSON, "claude-print", "--resume", harnessProbePrompt, []string{"claude-tools.jsonl"}},
 	{HarnessCodex, "codex", []string{"--version"}, workeroutput.DialectCodexJSONL, "codex-app-server", "thread/resume", harnessProbePrompt, []string{"codex-tools.jsonl"}},
-	{HarnessAntigravity, "agy", []string{"--version"}, workeroutput.DialectAcpJSON, "antigravity-acp", "session/resume", harnessProbePrompt, []string{"acp-grok.jsonl"}},
 	{HarnessOpenCode, "opencode", []string{"--version"}, workeroutput.DialectOpenCodeJSON, "opencode-run", "--session", harnessProbePrompt, []string{"opencode-stream.jsonl"}},
 	{HarnessMuse, "muse", []string{"--version"}, workeroutput.DialectMuseJSONL, "muse-exec", "--session-id", harnessProbePrompt, []string{"muse-stream.jsonl"}},
 	{HarnessGrok, "grok", []string{"--version"}, workeroutput.DialectAcpJSON, "grok-acp", "load", harnessProbePrompt, []string{"acp-grok.jsonl"}},

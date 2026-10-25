@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-func TestProfileV3MigrationPreservesUnknownFieldsAndACP(t *testing.T) {
+func TestProfileV3MigrationPreservesUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	raw := []byte(`{"version":2,"futureRoot":{"keep":42},"profiles":[
  {"name":"codex","harness":"codex","taste":5,"intelligence":5,"cost":5,"futureProfile":["keep"]},
- {"name":"agy","harness":"antigravity","taste":5,"intelligence":5,"cost":5,"output":{"dialect":"antigravity-stream-json","futureOutput":{"keep":true}},"extraArgs":["--effort","high","--keep","--effort=low"]},
+ {"name":"grok","harness":"grok","taste":5,"intelligence":5,"cost":5,"output":{"dialect":"acp-json","futureOutput":{"keep":true}},"extraArgs":["--keep"]},
  {"name":"custom","harness":"custom","command":["fixture"],"taste":5,"intelligence":5,"cost":5,"output":{"dialect":"codex-jsonl","futureOutput":"keep"}}]}`)
 	if err := os.WriteFile(path, raw, 0644); err != nil {
 		t.Fatal(err)
@@ -45,13 +45,13 @@ func TestProfileV3MigrationPreservesUnknownFieldsAndACP(t *testing.T) {
 			t.Fatalf("output %d = %v", i, out)
 		}
 	}
-	agyOutput := document.Profiles[1]["output"].(map[string]any)
+	grokOutput := document.Profiles[1]["output"].(map[string]any)
 	customOutput := document.Profiles[2]["output"].(map[string]any)
-	if !reflect.DeepEqual(agyOutput["futureOutput"], map[string]any{"keep": true}) || customOutput["futureOutput"] != "keep" {
+	if !reflect.DeepEqual(grokOutput["futureOutput"], map[string]any{"keep": true}) || customOutput["futureOutput"] != "keep" {
 		t.Fatal("unknown output fields lost")
 	}
 	if !reflect.DeepEqual(document.Profiles[1]["extraArgs"], []any{"--keep"}) {
-		t.Fatalf("obsolete arguments remain: %v", document.Profiles[1]["extraArgs"])
+		t.Fatalf("extraArgs = %v", document.Profiles[1]["extraArgs"])
 	}
 	backup, err := os.ReadFile(path + ".v2.bak")
 	if err != nil || string(backup) != string(raw) {

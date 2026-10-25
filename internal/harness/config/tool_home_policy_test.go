@@ -12,7 +12,7 @@ import (
 )
 
 func TestToolHomeEnvironmentOwnerPolicy(t *testing.T) {
-	for _, list := range [][]string{nil, {}, {"cloud-cli", "git", "helper"}, {"claude", "agy"}} {
+	for _, list := range [][]string{nil, {}, {"cloud-cli", "git", "helper"}, {"claude", "gcloud"}} {
 		t.Run(strings.Join(list, "-"), func(t *testing.T) {
 			m := &ConfigManager{Path: filepath.Join(t.TempDir(), "harness-config.json")}
 			inherited := []string{"HOME=/owner", "DYNA_HOME_TOOLS=untrusted", "PATH=/tools", "DYNA_HOME_TOOLS=another", "DYNA_HOME_TOOLS", "KEEP=last"}
@@ -48,7 +48,7 @@ func TestToolHomeEnvironmentOwnerPolicy(t *testing.T) {
 
 func TestToolHomePolicyPersistsAcrossConfigUpdates(t *testing.T) {
 	m := &ConfigManager{Path: filepath.Join(t.TempDir(), "harness-config.json")}
-	if err := os.WriteFile(m.Path, []byte(`{"toolHomeBridges":["claude","agy"],"mcp":[],"skills":[]}`), 0600); err != nil {
+	if err := os.WriteFile(m.Path, []byte(`{"toolHomeBridges":["claude","gcloud"],"mcp":[],"skills":[]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "default", Source: skillSource(t), EnabledHarnesses: []string{"claude"}}); err != nil {
@@ -58,14 +58,14 @@ func TestToolHomePolicyPersistsAcrossConfigUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(config.ToolHomeBridges, []string{"claude", "agy"}) {
+	if !reflect.DeepEqual(config.ToolHomeBridges, []string{"claude", "gcloud"}) {
 		t.Fatal("owner policy lost during update")
 	}
 	env, err := m.ToolHomeEnvironment(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(env, []string{"DYNA_HOME_TOOLS=claude,agy"}) {
+	if !reflect.DeepEqual(env, []string{"DYNA_HOME_TOOLS=claude,gcloud"}) {
 		t.Fatal(env)
 	}
 }

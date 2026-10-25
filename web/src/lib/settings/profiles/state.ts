@@ -11,7 +11,6 @@ export const harnesses: HarnessChoice[] = [
   { id: 'opencode', label: 'OpenCode', icon: 'opencode', description: 'One harness, many providers. Browse Go, free, and API models.' },
   { id: 'codex', label: 'Codex', icon: 'codex', description: 'OpenAI’s coding agent. Use your ChatGPT plan or an API key.' },
   { id: 'claude-code', label: 'Claude Code', icon: 'claude', description: 'Anthropic’s coding agent, with Claude models and familiar controls.' },
-  { id: 'antigravity', label: 'Antigravity', icon: 'antigravity', description: 'Google’s agent harness, with an account-specific model list.' },
   { id: 'muse', label: 'Muse', icon: 'muse', description: 'A dedicated harness for Muse models and agent sessions.' },
   { id: 'pi', label: 'Pi', icon: 'pi', description: 'A minimal agent harness. Sign in to Anthropic, OpenAI or Copilot inside Pi, or use API keys.' },
   { id: 'grok', label: 'Grok Build', icon: 'grok', description: 'xAI’s coding agent, with Grok models and reasoning levels.' },
@@ -134,7 +133,7 @@ export function compactHint(rule: CompactRule | null | undefined, off = '', max 
 const ACCESS: Record<string, string> = { go: 'OpenCode Go', free: 'Free', other: 'Provider access' }
 export const accessLabel = (model?: Pick<CatalogModel, 'category'> | null): string => ACCESS[model?.category ?? ''] ?? 'Manual entry'
 
-const PUBLISHER_ICONS: Record<string, string> = { openai: 'codex', anthropic: 'claude', google: 'antigravity', muse: 'muse', xai: 'grok', opencode: 'opencode', 'opencode-go': 'opencode', 'managed:kimi-code': 'kimi-code', kimi: 'kimi-code', moonshot: 'kimi-code' }
+const PUBLISHER_ICONS: Record<string, string> = { openai: 'codex', anthropic: 'claude', muse: 'muse', xai: 'grok', opencode: 'opencode', 'opencode-go': 'opencode', 'managed:kimi-code': 'kimi-code', kimi: 'kimi-code', moonshot: 'kimi-code' }
 export function publisherIcon(model?: Pick<CatalogModel, 'publisher' | 'providerId'> | null): string {
   const publisher = (model?.publisher || model?.providerId || '').toLowerCase()
   return PUBLISHER_ICONS[publisher] || ''

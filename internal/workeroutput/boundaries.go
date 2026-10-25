@@ -81,18 +81,6 @@ func codexItemGenerates(kind string) bool {
 	return false
 }
 
-func antigravityToolSignals(record *antigravityRecord) []ToolSignal {
-	if record.Event != "step_update" ||
-		record.StepUpdate.StepType != "tool" || record.StepUpdate.Index == nil {
-		return nil
-	}
-	id := "step-" + itoa(*record.StepUpdate.Index)
-	if strings.EqualFold(strings.TrimSpace(record.StepUpdate.State), "ACTIVE") {
-		return []ToolSignal{{ID: id, Start: true}}
-	}
-	return []ToolSignal{{ID: id}}
-}
-
 func claudeToolSignals(record *claudeRecord) []ToolSignal {
 	var out []ToolSignal
 	for _, block := range record.Message.Content {
@@ -187,7 +175,7 @@ func (u *Usage) Add(o Usage) {
 }
 
 // ExtractUsage reads token usage from one raw line when the dialect reports it
-// (codex turn.completed, claude/cursor/antigravity result, opencode step_finish).
+// (codex turn.completed, claude result, opencode step_finish).
 // OpenCode step usage is additive. Codex values are raw
 // thread snapshots; use UsageNormalizer for additive per-call accounting.
 func ExtractUsage(decl *Declaration, line string) (Usage, bool) {
@@ -197,14 +185,6 @@ func ExtractUsage(decl *Declaration, line string) (Usage, bool) {
 	decoded := DecodeLine(decl, line)
 	if !decoded.valid {
 		return Usage{}, false
-	}
-	if decoded.dialect == DialectAntigravityStreamJSON {
-		// The terminal contains the whole process total. Independent line
-		// extraction must not add the same usage from step updates as well.
-		if decoded.recordUsage.Type != "result" {
-			return Usage{}, false
-		}
-		return NewUsageNormalizer("", nil).ObserveRecord(decoded)
 	}
 	if decoded.dialect == DialectOpenCodeJSON {
 		return NewUsageNormalizer("", nil).ObserveRecord(decoded)

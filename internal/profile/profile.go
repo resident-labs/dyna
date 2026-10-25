@@ -20,17 +20,15 @@ import (
 
 // Harness identifies which CLI executes the worker.
 const (
-	HarnessClaudeCode  = "claude-code"
-	HarnessCodex       = "codex"
-	HarnessAntigravity = "antigravity"
-	HarnessOpenCode    = "opencode"
-	HarnessMuse        = "muse"
-	HarnessGrok        = "grok"
-	HarnessPi          = "pi"
-	HarnessKimiCode    = "kimi-code"
-	HarnessCustom      = "custom"
-	HarnessMock        = "mock"
-	AntigravityModel   = "gemini-3.8-flash-high"
+	HarnessClaudeCode = "claude-code"
+	HarnessCodex      = "codex"
+	HarnessOpenCode   = "opencode"
+	HarnessMuse       = "muse"
+	HarnessGrok       = "grok"
+	HarnessPi         = "pi"
+	HarnessKimiCode   = "kimi-code"
+	HarnessCustom     = "custom"
+	HarnessMock       = "mock"
 )
 
 var Harnesses = harnessNames()
@@ -228,13 +226,6 @@ func (p *Profile) Validate() error {
 	if err := validateCompact(*p); err != nil {
 		return err
 	}
-	if p.Harness == HarnessAntigravity {
-		for _, arg := range p.ExtraArgs {
-			if arg == "--model" || strings.HasPrefix(arg, "--model=") {
-				return errors.New("antigravity profile extraArgs may not override --model")
-			}
-		}
-	}
 	if p.Output != nil && strings.TrimSpace(p.Output.Dialect) != "" {
 		if err := workeroutput.ValidateDeclaration(p.Output); err != nil {
 			return err
@@ -291,41 +282,12 @@ func Load(path string) (*Store, error) {
 	s.Path = path
 	for i := range s.Profiles {
 		p := &s.Profiles[i]
-		migrateAntigravityACP(p)
 		if err := p.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid profile %q in %s: %w", p.Name, path, err)
 		}
 	}
 	sort.Slice(s.Profiles, func(i, j int) bool { return s.Profiles[i].Name < s.Profiles[j].Name })
 	return s, nil
-}
-
-// TODO: legacy/shim remove later — loads Antigravity profiles saved before the ACP harness (antigravity-stream-json dialect, --effort arguments); remove once stores saved by earlier releases are gone.
-// ACP emits acp-json and takes the effort from the model, so both old values
-// would make the whole store fail to load.
-func migrateAntigravityACP(p *Profile) {
-	if p.Harness != HarnessAntigravity {
-		return
-	}
-	if p.Output != nil && p.Output.Dialect == workeroutput.DialectAntigravityStreamJSON {
-		p.Output.Dialect = workeroutput.DialectAcpJSON
-	}
-	args := p.ExtraArgs[:0:0]
-	for i := 0; i < len(p.ExtraArgs); i++ {
-		arg := p.ExtraArgs[i]
-		if arg == "--effort" {
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "--effort=") {
-			continue
-		}
-		args = append(args, arg)
-	}
-	if len(args) == 0 {
-		args = nil
-	}
-	p.ExtraArgs = args
 }
 
 func cloneProfile(p Profile) Profile {

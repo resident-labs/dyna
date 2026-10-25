@@ -3,7 +3,7 @@
 ## The root seat
 
 Each room has one root seat. Take it before you watch the room: `dyna root attach --room <room> --harness <name>`.
-The harness name is one word, such as `claude`, `codex`, `opencode`, `pi`, `grok`, `muse` or `antigravity`. The web app shows its icon on the root row.
+The harness name is one word, such as `claude`, `codex`, `opencode`, `pi`, `grok` or `muse`. The web app shows its icon on the root row.
 Until you attach, the internal root answers posts to @root, and `dyna room watch` warns you.
 Attaching asks an open internal root for a handoff, waits up to 30 seconds, then stops its turn. The command prints the handoff (or transcript fallback) and saves it in the seat note. While you hold the seat, posts to @root wait in the room log for your watcher.
 When you stop orchestrating, run `dyna root detach --room <room>` to give the seat back to the internal root.

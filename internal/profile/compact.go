@@ -38,13 +38,12 @@ type CompactRule struct {
 const claudeCompactBuffer = 33000
 
 var compactRules = map[string]CompactRule{
-	HarnessClaudeCode:  {Min: 100000 - claudeCompactBuffer, Max: 1000000 - claudeCompactBuffer},
-	HarnessCodex:       {Min: 1},
-	HarnessMuse:        {Window: true, Min: 1},
-	HarnessGrok:        {Window: true, Min: 1},
-	HarnessOpenCode:    {Trigger: true, Min: 1},
-	HarnessPi:          {Trigger: true, Min: 1},
-	HarnessAntigravity: {Reason: "Manual compaction is not supported by Antigravity ACP 1.3.0; native automatic compaction stays enabled."},
+	HarnessClaudeCode: {Min: 100000 - claudeCompactBuffer, Max: 1000000 - claudeCompactBuffer},
+	HarnessCodex:      {Min: 1},
+	HarnessMuse:       {Window: true, Min: 1},
+	HarnessGrok:       {Window: true, Min: 1},
+	HarnessOpenCode:   {Trigger: true, Min: 1},
+	HarnessPi:         {Trigger: true, Min: 1},
 }
 
 // CompactRuleFor returns the rule for harness.
