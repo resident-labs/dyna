@@ -62,6 +62,31 @@ func sharedServiceAccount(h string) bool {
 
 var errAccountPath = errors.New("The private account path is unsafe.")
 var errAccountMissing = errors.New("The private account does not exist.")
+var errAccountHarness = errors.New("The account names a harness this release does not run.")
+
+// AccountProblemReason is why one saved row could not be listed.
+type AccountProblemReason string
+
+const (
+	// AccountUnknownHarness names a row of a harness this release does not run.
+	AccountUnknownHarness AccountProblemReason = "unknown-harness"
+	// AccountUnsafeHome names a row whose saved home is unsafe or gone.
+	AccountUnsafeHome AccountProblemReason = "unsafe-home"
+	// AccountMissingHome names a row that names no saved home.
+	AccountMissingHome AccountProblemReason = "missing-home"
+	// AccountUnreadable names a row that could not be read for another reason.
+	AccountUnreadable AccountProblemReason = "unreadable"
+)
+
+// AccountProblem is one saved account row that the list skipped. It is a result
+// about that row, never a reason to fail the whole list: one bad row must not
+// hide every other account.
+type AccountProblem struct {
+	ID      string               `json:"id"`
+	Harness string               `json:"harness,omitempty"`
+	Label   string               `json:"label,omitempty"`
+	Reason  AccountProblemReason `json:"reason"`
+}
 
 // safeAccountPath rejects symlinks in every existing path component.
 func safeAccountPath(path string) error {
@@ -123,7 +148,10 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 		return NativeAccount{}, errAccountMissing
 	}
 	h, err := canonicalAccountHarness(e.Harness)
-	if err != nil || h != e.Harness || len(e.ID) != 32 {
+	if err != nil || h != e.Harness {
+		return NativeAccount{}, errAccountHarness
+	}
+	if len(e.ID) != 32 {
 		return NativeAccount{}, errAccountPath
 	}
 	if _, err := hex.DecodeString(e.ID); err != nil {
@@ -245,27 +273,53 @@ func (a *Accounts) Find(id string) (result NativeAccount, err error) {
 	return
 }
 
-func (a *Accounts) List() (result []NativeAccount, err error) {
+// List returns every account this release can run. A saved row it cannot read is
+// left out; ListWithProblems names it.
+func (a *Accounts) List() ([]NativeAccount, error) {
+	result, _, err := a.ListWithProblems()
+	return result, err
+}
+
+// ListWithProblems returns the accounts and names each saved row it skipped, so
+// one bad row never fails the list or hides the other accounts.
+func (a *Accounts) ListWithProblems() (result []NativeAccount, problems []AccountProblem, err error) {
 	result = []NativeAccount{}
+	problems = []AccountProblem{}
 	rules, err := a.rules()
 	if err != nil {
-		return result, err
+		return result, problems, err
 	}
 	err = a.transaction(func(state *store.State) error {
 		for i := range state.Entries {
-			if state.Entries[i].NativeHome == "" || retiredHarness(state.Entries[i].Harness) {
+			e := &state.Entries[i]
+			if e.NativeHome == "" || retiredHarness(e.Harness) {
 				continue
 			}
-			n, err := a.native(&state.Entries[i])
-			if err != nil {
-				return err
+			n, e2 := a.native(e)
+			if e2 != nil {
+				problems = append(problems, accountProblem(*e, e2))
+				continue
 			}
 			n.Repos = rules[n.ID]
 			result = append(result, n)
 		}
 		return nil
 	}, false)
-	return
+	return result, problems, err
+}
+
+// accountProblem names why one saved row was skipped.
+func accountProblem(e store.Entry, err error) AccountProblem {
+	reason := AccountUnreadable
+	switch {
+	case errors.Is(err, errAccountHarness):
+		reason = AccountUnknownHarness
+	case errors.Is(err, errAccountMissing):
+		reason = AccountMissingHome
+	case errors.Is(err, errAccountPath):
+		reason = AccountUnsafeHome
+	}
+	return AccountProblem{ID: e.ID, Harness: e.Harness, Label: e.Label, Reason: reason}
 }
 
 // privateAccountManager disallows copying or refreshing saved grants.
