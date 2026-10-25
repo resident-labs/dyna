@@ -10,8 +10,6 @@ import (
 // conformanceFixtures lists captures per dialect. Multiple captures cover
 // each stream feature without altering real records.
 var conformanceFixtures = map[string][]string{
-	DialectGrokJSON:         {"grok-acp.jsonl"},
-	DialectAcpJSON:          {"acp-grok.jsonl"},
 	DialectPiJSON:           {"pi-stream.jsonl"},
 	DialectText:             {"plain-text.txt"},
 	DialectCodexJSONL:       {"codex-tools.jsonl"},
@@ -115,8 +113,6 @@ func TestReasoningConformance(t *testing.T) {
 		}},
 		DialectCodexJSONL:   {`{"type":"item.completed","item":{"id":"i","type":"reasoning","text":"Plan."}}`, "completed", []string{`{"type":"item.completed","item":{"id":"i","type":"reasoning","text":""}}`}},
 		DialectOpenCodeJSON: {`{"type":"reasoning","part":{"type":"reasoning","text":"Plan."}}`, "completed", []string{`{"type":"reasoning","part":{"type":"reasoning","text":""}}`}},
-		DialectGrokJSON:     {`{"type":"thought","data":"Plan."}`, "delta", []string{`{"type":"thought","data":""}`}},
-		DialectAcpJSON:      {`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Plan."}}}}`, "delta", []string{`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":""}}}}`}},
 		DialectPiJSON: {`{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Plan."}]}}`, "completed", []string{
 			`{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","thinkingSignature":"s","redacted":true}]}}`,
 		}},

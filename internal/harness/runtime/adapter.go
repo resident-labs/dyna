@@ -44,6 +44,10 @@ type RuntimeAdapter struct {
 	// unless this is set, and ExclusiveReason names the verified conflict.
 	Exclusive       bool
 	ExclusiveReason string
+	// AccountOnly marks a retired harness whose saved accounts and usage
+	// reader stay. It keeps the native home safe and refreshable, and it is
+	// never listed, installed, leased or run as a harness.
+	AccountOnly bool
 	Install         func(context.Context, *BundleManager, string, string, []string) (InstallArtifact, error)
 	// NPMExecutable, when set, picks the executable inside an npm install
 	// root. An empty result keeps bin/<Binary>.
@@ -83,7 +87,7 @@ var adapters = struct {
 func RegisterRuntimeAdapter(a RuntimeAdapter) {
 	adapters.Lock()
 	defer adapters.Unlock()
-	if a.Harness == "" || a.Binary == "" {
+	if a.Harness == "" || (a.Binary == "" && !a.AccountOnly) {
 		panic("runtime adapter needs a harness and binary")
 	}
 	if _, ok := adapters.items[a.Harness]; ok {
@@ -108,12 +112,16 @@ func Adapter(h string) (RuntimeAdapter, error) {
 	return a, nil
 }
 
-// RuntimeAdapters returns every registered harness adapter, sorted.
+// RuntimeAdapters returns every registered harness adapter, sorted. Adapters
+// for retired harnesses are excluded: their accounts stay, their turns do not.
 func RuntimeAdapters() []RuntimeAdapter {
 	adapters.RLock()
 	defer adapters.RUnlock()
 	out := []RuntimeAdapter{}
 	for _, a := range adapters.items {
+		if a.AccountOnly {
+			continue
+		}
 		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Harness < out[j].Harness })

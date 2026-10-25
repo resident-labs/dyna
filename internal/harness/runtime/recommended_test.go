@@ -54,17 +54,14 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 		if pkg == "@opencode/cli" {
 			version = "0.0.0-v2-20261017"
 		}
-		if pkg == "@moonshot-ai/kimi-code" {
-			version = "2.3.1"
-		}
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	got := r.RecommendedVersions(context.Background())
-	if len(got) != 7 {
+	if len(got) != 5 {
 		t.Fatalf("got %d adapters", len(got))
 	}
 	sort.Strings(packages)
-	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage, "@moonshot-ai/kimi-code", "@openai/codex", "@opencode/cli", "@xai-official/grok"}) {
+	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage, "@openai/codex", "@opencode/cli"}) {
 		t.Fatalf("incorrect adapter packages: %v", packages)
 	}
 	for i, v := range got {
@@ -202,7 +199,7 @@ func TestRecommendedVersionsCancellation(t *testing.T) {
 		return nil, req.Context().Err()
 	})}
 	got := r.RecommendedVersions(ctx)
-	if len(got) != 7 {
+	if len(got) != 5 {
 		t.Fatal("cancellation removed per-harness results")
 	}
 	for _, v := range got {
@@ -230,18 +227,15 @@ func TestRecommendedVersionsCache(t *testing.T) {
 		path := req.URL.Path
 		pkg := strings.TrimPrefix(path[:strings.LastIndex(path, "/")], "/")
 		version := "2.1.0"
-		if pkg == "@moonshot-ai/kimi-code" {
-			version = "2.3.1"
-		}
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	first := r.RecommendedVersions(context.Background())
-	if calls != 14 {
+	if calls != 10 {
 		t.Fatalf("first lookup made %d requests", calls)
 	}
 	offline = true
 	now = now.Add(6*time.Hour - time.Second)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 14 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 10 {
 		t.Fatalf("fresh cache missed: %d requests, %+v", calls, got)
 	}
 	now = now.Add(time.Second)
@@ -250,7 +244,7 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("expired result reused: %+v", v)
 		}
 	}
-	if calls != 21 {
+	if calls != 15 {
 		t.Fatalf("expired cache made %d requests", calls)
 	}
 	offline = false
@@ -259,11 +253,11 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("failure cache reused stale success: %+v", v)
 		}
 	}
-	if calls != 21 {
+	if calls != 15 {
 		t.Fatalf("failure cache missed: %d requests", calls)
 	}
 	now = now.Add(time.Minute)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 35 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 25 {
 		t.Fatalf("expired failure cache did not recover: %d requests, %+v", calls, got)
 	}
 }
@@ -272,7 +266,7 @@ func TestRecommendedVersionsCache(t *testing.T) {
 func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := make(chan string, 7)
+	started := make(chan string, 5)
 	r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(req.URL.Path, "/latest") || req.URL.String() == museChannelURL {
 			started <- req.URL.String()
@@ -285,7 +279,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
 	// Every source makes a request.
-	for range 7 {
+	for range 5 {
 		select {
 		case <-started:
 		case <-deadline.C:
@@ -295,7 +289,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 		}
 	}
 	cancel()
-	if len(<-done) != 7 {
+	if len(<-done) != 5 {
 		t.Fatal("lost per-harness results")
 	}
 }

@@ -17,8 +17,6 @@ func TestCompactNativeMapsTokensPerHarness(t *testing.T) {
 		{HarnessClaudeCode, Compact{Tokens: 95000}, []string{"--settings", `{"autoCompactWindow":128000}`}, nil},
 		{HarnessCodex, Compact{Tokens: 95000}, []string{"-c", "model_auto_compact_token_limit=95000"}, nil},
 		{HarnessMuse, Compact{Tokens: 95000, Windows: map[string]int64{"m": 200000}}, []string{"-c", "context_compaction.soft_threshold=0.475"}, nil},
-		// 95000 of 200000 is 47.5%; Grok gets 47 so it never compacts late.
-		{HarnessGrok, Compact{Tokens: 95000, Windows: map[string]int64{"m": 200000}}, nil, map[string]string{"GROK_AUTO_COMPACT_THRESHOLD_PERCENT": "47"}},
 		{HarnessOpenCode, Compact{Tokens: 95000}, nil, nil},
 	} {
 		c := tc.compact
@@ -41,7 +39,6 @@ func TestCompactNativeRejectsWhatTheHarnessCannotTake(t *testing.T) {
 		{HarnessClaudeCode, Compact{Tokens: 66999}, "67000 to 967000"},
 		{HarnessClaudeCode, Compact{Tokens: 967001}, "67000 to 967000"},
 		{HarnessMuse, Compact{Tokens: 95000}, "context window"},
-		{HarnessGrok, Compact{Tokens: 1000, Windows: map[string]int64{"m": 200000}}, "1%"},
 		{HarnessPi, Compact{Tokens: 0}, "at least 1"},
 	} {
 		c := tc.compact
@@ -59,14 +56,14 @@ func TestCompactNativeRejectsWhatTheHarnessCannotTake(t *testing.T) {
 // smaller window is rejected on save and gets its own window at launch.
 func TestCompactUsesEachChainModelsWindow(t *testing.T) {
 	c := Compact{Tokens: 95000, Windows: map[string]int64{"big": 1000000, "small": 200000}}
-	p := Profile{Name: "p", Harness: HarnessGrok, Model: "big", Models: []string{"big", "small"}, Taste: 5, Intelligence: 5, Cost: 5, Compact: &c}
+	p := Profile{Name: "p", Harness: HarnessMuse, Model: "big", Models: []string{"big", "small"}, Taste: 5, Intelligence: 5, Cost: 5, Compact: &c}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for model, want := range map[string]string{"big": "9", "small": "47"} {
+	for model, want := range map[string]string{"big": "0.095", "small": "0.475"} {
 		p.Model = model
-		if _, env, err := CompactNative(p); err != nil || env["GROK_AUTO_COMPACT_THRESHOLD_PERCENT"] != want {
-			t.Errorf("%s: env=%v err=%v", model, env, err)
+		if args, _, err := CompactNative(p); err != nil || len(args) != 2 || args[1] != "context_compaction.soft_threshold="+want {
+			t.Errorf("%s: args=%q err=%v", model, args, err)
 		}
 	}
 	p.Model, p.Models = "big", []string{"big", "small", "unknown"}

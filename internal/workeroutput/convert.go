@@ -10,8 +10,7 @@ import "slices"
 // event shapes; remove with the render-time repairs in transcript.
 func ConvertSessionTurn(dialect string, events []Event) []int {
 	changed := map[int]bool{}
-	streamed := dialect == DialectGrokJSON || dialect == DialectMuseJSONL
-	started := map[string]bool{}
+	streamed := dialect == DialectMuseJSONL
 	for i := range events {
 		e := &events[i]
 		switch {
@@ -24,13 +23,6 @@ func ConvertSessionTurn(dialect string, events []Event) []int {
 				e.State = "delta"
 				changed[i] = true
 			}
-		case dialect == DialectGrokJSON && e.Kind == "tool" && e.State == "started" && e.ID != "":
-			// Grok wrote progress on a running call as a nameless start.
-			if started[e.ID] && e.Name == "" {
-				e.State = "updated"
-				changed[i] = true
-			}
-			started[e.ID] = true
 		}
 	}
 	pairByName(events, changed)

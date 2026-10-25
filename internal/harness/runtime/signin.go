@@ -82,8 +82,6 @@ var signInSpecs = map[string]signInSpec{
 	"pi":          {Argv: piOAuthArgv, Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
-	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
-	"kimi-code":   {Argv: kimiSignInArgv, Parse: parseKimiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"muse":        {Argv: museDeviceArgv, Parse: parseMuseSignIn},
 	"opencode":    {Argv: openCodeDeviceArgv, Parse: parseOpenCodeSignIn},
 }

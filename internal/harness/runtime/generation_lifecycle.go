@@ -336,11 +336,6 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 			return err
 		}
 	}
-	if h == "kimi-code" {
-		if err = publishKimiGeneration(dir, home); err != nil {
-			return err
-		}
-	}
 	if a.ConfigFile != "" && h != "opencode" && h != "muse" {
 		if err = publishGenerationFile(dir, file, home, a.ConfigFile); err != nil {
 			return err

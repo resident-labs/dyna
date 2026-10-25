@@ -787,8 +787,8 @@ func SessionTurn(t subagent.Turn, events []workeroutput.Event, omitted bool) Tur
 	if !t.Started.IsZero() {
 		promptTS = t.Started
 	}
-	// TODO: legacy/shim remove later — marks deltas in old normalized Grok and Muse output; remove after affected artifacts expire or migrate
-	if t.OutputDialect == workeroutput.DialectGrokJSON || t.OutputDialect == workeroutput.DialectMuseJSONL {
+	// TODO: legacy/shim remove later — marks deltas in old normalized Muse output; remove after affected artifacts expire or migrate
+	if t.OutputDialect == workeroutput.DialectMuseJSONL {
 		events = append([]workeroutput.Event(nil), events...)
 		for i := range events {
 			if events[i].Kind == "message" && events[i].Role == "assistant" && events[i].State == "" {
@@ -797,19 +797,6 @@ func SessionTurn(t subagent.Turn, events []workeroutput.Event, omitted bool) Tur
 					events[i].State = "delta"
 				}
 			}
-		}
-	}
-	// TODO: legacy/shim remove later — old normalized Grok output marks in_progress tool updates as nameless starts; remove after affected artifacts expire or migrate
-	if t.OutputDialect == workeroutput.DialectGrokJSON {
-		started := map[string]bool{}
-		for i, e := range events {
-			if e.Kind != "tool" || e.State != "started" || e.ID == "" {
-				continue
-			}
-			if started[e.ID] && e.Name == "" {
-				events[i].State = "updated"
-			}
-			started[e.ID] = true
 		}
 	}
 	items, hidden, _ := fromEventsWithSteering(events, steeringItems(t))
