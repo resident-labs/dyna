@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"testing"
 
 	"dyna-agent/internal/localci"
@@ -148,5 +149,50 @@ suites:
 	}
 	if !found {
 		t.Fatal("the independent failure was removed from hosted evidence")
+	}
+}
+
+// A trial's hosted run is cancelled for local CI, which leaves the hosting
+// jobs failed: the frontend aggregate failed while all six of its shards were
+// cancelled, and go-test failed with it. The hosted shard names must reach the
+// same provider group as the local checks, and a job named for that group must
+// count as the cancellation it repeats, or the trial blames the PR for a
+// cancellation Dyna itself made.
+func TestHostedCancellationTreatsTheFrontendShardsAsCancelledOnly(t *testing.T) {
+	definition := watchDynaDefinition(t)
+	run := Run{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", Status: "completed", Conclusion: "cancelled"}
+	snap := Snapshot{Runs: []Run{run}}
+	add := func(name, conclusion string) {
+		check := actionsCheck(Check{Name: name, Status: "completed", Conclusion: conclusion})
+		check.CheckSuite.ID = 20
+		snap.Checks = append(snap.Checks, check)
+	}
+	for shard := 0; shard < 6; shard++ {
+		add(fmt.Sprintf("frontend test (%d)", shard), "cancelled")
+	}
+	for shard := 0; shard < 8; shard++ {
+		add(fmt.Sprintf("go-test-shard (%d)", shard), "cancelled")
+	}
+	add("frontend", "failure")
+	add("frontend-check", "cancelled")
+	add("go-static", "cancelled")
+	add("go-test", "failure")
+
+	if group, cancelled := aggregateCancelled(definition, snap.currentSuiteChecks(), 20); !cancelled || group.Name() != "go-test" {
+		t.Fatalf("cancelled aggregate = %q, %t; want go-test", group, cancelled)
+	}
+	filtered := withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{10: 1}}, definition)
+	if len(filtered.Runs) != 0 || len(filtered.Checks) != 0 {
+		t.Fatalf("a cancelled-only trial left hosted evidence: runs=%d checks=%d", len(filtered.Runs), len(filtered.Checks))
+	}
+
+	// One shard that failed is a real failure, whatever the others did.
+	snap.Checks[2].Conclusion = "failure"
+	if _, cancelled := aggregateCancelled(definition, snap.currentSuiteChecks(), 20); cancelled {
+		t.Fatal("a failed shard was hidden behind cancelled ones")
+	}
+	kept := withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{10: 1}}, definition)
+	if len(kept.Runs) != 1 || len(kept.Checks) == 0 {
+		t.Fatal("a failed frontend shard lost its hosted evidence")
 	}
 }

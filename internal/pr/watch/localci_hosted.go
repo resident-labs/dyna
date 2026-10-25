@@ -168,11 +168,18 @@ func cancelledAggregates(definition *localci.Definition, checks []Check, suite i
 	if definition == nil {
 		return nil
 	}
+	// A provider group is decided first: a hosted job named for it fails when
+	// its own checks were cancelled, and the suite aggregate counts that failure
+	// as the cancellation it is.
+	providers := cancelledProviderAggregates(definition, checks, suite)
 	aggregates := map[localci.CheckName]bool{}
+	for name := range providers {
+		aggregates[name] = true
+	}
 	for _, id := range definition.Suites() {
 		described, _ := definition.Checks(id)
 		for _, check := range described {
-			if check.Group != "" && aggregateGroupCancelled(definition, check.Group, checks, suite) {
+			if check.Group != "" && aggregateGroupCancelled(definition, check.Group, checks, suite, providers) {
 				aggregates[check.Group.Name()] = true
 			}
 		}
@@ -180,7 +187,52 @@ func cancelledAggregates(definition *localci.Definition, checks []Check, suite i
 	return aggregates
 }
 
-func aggregateGroupCancelled(definition *localci.Definition, aggregate localci.Group, checks []Check, suite int64) bool {
+// cancelledProviderAggregates names every provider group whose checks all ran
+// cancelled, under a failed job named for the group. Dyna reports one row per
+// provider group, and a repository may host that row as its own job, such as a
+// frontend job that needs one job per shard.
+func cancelledProviderAggregates(definition *localci.Definition, checks []Check, suite int64) map[localci.CheckName]bool {
+	cancelled := map[localci.CheckName]bool{}
+	for _, id := range definition.Suites() {
+		described, _ := definition.Checks(id)
+		for _, check := range described {
+			group := definition.ProviderGroup(check.Name)
+			if group == check.Name || cancelled[group] {
+				continue
+			}
+			if providerAggregateCancelled(definition, group, checks, suite) {
+				cancelled[group] = true
+			}
+		}
+	}
+	return cancelled
+}
+
+// providerAggregateCancelled reports whether a job named for the provider group
+// failed only because every check of that group was cancelled.
+func providerAggregateCancelled(definition *localci.Definition, aggregate localci.CheckName, checks []Check, suite int64) bool {
+	cancelled, failedAggregate, members := false, false, 0
+	for _, check := range checks {
+		if check.CheckSuite.ID != suite || check.App.Slug != "github-actions" {
+			continue
+		}
+		if localci.CheckName(check.Name) == aggregate {
+			failedAggregate = check.Status == "completed" && check.Conclusion == "failure"
+			continue
+		}
+		if definition.ProviderGroup(localci.CheckName(check.Name)) != aggregate {
+			continue
+		}
+		if check.Status != "completed" || (check.Conclusion != "success" && check.Conclusion != "cancelled") {
+			return false
+		}
+		members++
+		cancelled = cancelled || check.Conclusion == "cancelled"
+	}
+	return failedAggregate && cancelled && members > 0
+}
+
+func aggregateGroupCancelled(definition *localci.Definition, aggregate localci.Group, checks []Check, suite int64, providers map[localci.CheckName]bool) bool {
 	groups := map[localci.CheckName]bool{}
 	cancelled, failedAggregate := false, false
 	expected := map[localci.CheckName]bool{}
@@ -200,6 +252,12 @@ func aggregateGroupCancelled(definition *localci.Definition, aggregate localci.G
 		}
 		group := definition.ProviderGroup(localci.CheckName(check.Name))
 		if !expected[group] {
+			continue
+		}
+		if providers[localci.CheckName(check.Name)] {
+			// A job named for its provider group only repeats its members.
+			groups[group] = true
+			cancelled = true
 			continue
 		}
 		if check.Status != "completed" || (check.Conclusion != "success" && check.Conclusion != "cancelled") {

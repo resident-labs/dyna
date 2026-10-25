@@ -355,7 +355,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
 		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
 	}
-	wanted := map[CheckName]bool{"frontend (0)": true, "frontend (1)": true, "frontend (2)": true, "frontend (3)": true, "frontend (4)": true, "frontend (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
+	wanted := map[CheckName]bool{"frontend test (0)": true, "frontend test (1)": true, "frontend test (2)": true, "frontend test (3)": true, "frontend test (4)": true, "frontend test (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
 	for i := 0; i < 8; i++ {
 		wanted[CheckName(fmt.Sprintf("go-test-shard (%d)", i))] = true
 	}
@@ -372,7 +372,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		}
 		// This check's command passed; the reports proved the failure, and the
 		// log must end with that cause too.
-		if check.CheckName == "frontend (0)" {
+		if check.CheckName == "frontend test (0)" {
 			if cause := loggedExit(t, check).Cause; cause != CauseTestFailure {
 				t.Fatalf("frontend log lost the cause the reports proved: %q", cause)
 			}
