@@ -50,6 +50,124 @@ type nodeCheck struct {
 	caches   []CacheDefinition
 	reports  ReportMode
 	priority int
+	// cpus and memoryMiB are what the repository asked for, and resources is
+	// what the node granted.
+	cpus      int
+	memoryMiB int64
+	resources checkResources
+}
+
+// A check's default resources. The slot pool hands every check two CPUs and the
+// default container memory, so a repository that asks for nothing keeps exactly
+// the limits it had before a check could ask for more.
+const (
+	defaultCheckCPUs          = 2
+	defaultContainerMemoryMiB = int64(4096)
+	defaultHostMemoryMiB      = int64(5120)
+	// hostTasksMax bounds the processes one host check may start.
+	hostTasksMax = 768
+)
+
+// checkResources is the CPU count and memory one check runs with, after the node
+// bounded the repository's request.
+type checkResources struct {
+	CPUs      int
+	MemoryMiB int64
+	// Note says what Dyna clamped, and is empty when the check got what it
+	// asked for.
+	Note string
+}
+
+// clampCheckResources bounds a check's request by the machine. The slot pool
+// gives two CPUs and the default container memory per slot, and a probe of the
+// machine bounds both again. A request within the bound is granted. A default is
+// never clamped, so a small machine keeps the limits its checks already had.
+func clampCheckResources(check nodeCheck, node Node) checkResources {
+	resources := checkResources{CPUs: defaultCheckCPUs, MemoryMiB: defaultContainerMemoryMiB}
+	if check.host {
+		resources.MemoryMiB = defaultHostMemoryMiB
+	}
+	if check.cpus > 0 {
+		resources.CPUs = check.cpus
+	}
+	if check.memoryMiB > 0 {
+		resources.MemoryMiB = check.memoryMiB
+	}
+	cpuLimit := node.Slots * defaultCheckCPUs
+	memoryLimit := int64(node.Slots) * defaultContainerMemoryMiB
+	if node.CPUs > 0 {
+		cpuLimit = min(cpuLimit, node.CPUs)
+	}
+	if node.MemoryBytes > 0 {
+		// A probe total sits a little below the nominal size, so the bound is
+		// a whole GiB and reads as one number in the run report.
+		probed := int64(node.MemoryBytes / (1 << 20))
+		memoryLimit = min(memoryLimit, probed-probed%1024)
+	}
+	cpuLimit = max(cpuLimit, defaultCheckCPUs)
+	memoryLimit = max(memoryLimit, defaultContainerMemoryMiB)
+	if check.host {
+		memoryLimit = max(memoryLimit, defaultHostMemoryMiB)
+	}
+	var clamped []string
+	if resources.CPUs > cpuLimit {
+		clamped = append(clamped, fmt.Sprintf("cpus from %d to %d", resources.CPUs, cpuLimit))
+		resources.CPUs = cpuLimit
+	}
+	if resources.MemoryMiB > memoryLimit {
+		clamped = append(clamped, "memory from "+memoryLabel(resources.MemoryMiB)+" to "+memoryLabel(memoryLimit))
+		resources.MemoryMiB = memoryLimit
+	}
+	if len(clamped) > 0 {
+		resources.Note = "Dyna clamped " + strings.Join(clamped, " and ")
+	}
+	return resources
+}
+
+// memoryLabel writes a memory size in MiB or GiB, as a person reads it.
+func memoryLabel(mib int64) string {
+	if mib%1024 == 0 {
+		return strconv.FormatInt(mib/1024, 10) + " GiB"
+	}
+	return strconv.FormatInt(mib, 10) + " MiB"
+}
+
+// dockerMemory writes a memory size in the unit docker reads.
+func dockerMemory(mib int64) string {
+	if mib%1024 == 0 {
+		return strconv.FormatInt(mib/1024, 10) + "g"
+	}
+	return strconv.FormatInt(mib, 10) + "m"
+}
+
+// systemdMemory writes a memory size in the unit systemd reads.
+func systemdMemory(mib int64) string {
+	if mib%1024 == 0 {
+		return strconv.FormatInt(mib/1024, 10) + "G"
+	}
+	return strconv.FormatInt(mib, 10) + "M"
+}
+
+// scopeLimits bound one systemd scope.
+type scopeLimits struct {
+	CPUs      int
+	MemoryMiB int64
+	TasksMax  int
+}
+
+// defaultScopeLimits bound a scope that is not a check, such as node setup or
+// cleanup.
+var defaultScopeLimits = scopeLimits{CPUs: defaultCheckCPUs, MemoryMiB: defaultHostMemoryMiB, TasksMax: hostTasksMax}
+
+// scope is the systemd scope limit a granted check runs in. A container keeps
+// one GiB above its own memory limit for the docker client, as it always had. A
+// host check has no container limit, so the scope is its only memory bound.
+func (c checkResources) scope(host bool) scopeLimits {
+	memory := c.MemoryMiB
+	if !host {
+		memory += 1024
+	}
+	return scopeLimits{CPUs: c.CPUs, MemoryMiB: memory, TasksMax: hostTasksMax}
 }
 
 // ErrHostChecksDisabled means a repository asked for host execution on a
@@ -89,6 +207,7 @@ func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeC
 				host: command.Host, hostUser: command.HostUser, setup: command.Setup,
 				env: cloneStrings(command.Env), caches: append([]CacheDefinition(nil), command.Caches...),
 				reports: command.Reports, priority: command.Priority,
+				cpus: command.CPUs, memoryMiB: command.MemoryMiB,
 			})
 		}
 	}
@@ -108,6 +227,13 @@ func nodeCacheNames(checks []nodeCheck) []string {
 }
 
 func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, script string) error {
+	return r.nodeCommandScoped(ctx, out, stderr, scope, defaultScopeLimits, script)
+}
+
+// nodeCommandScoped runs a node script in a systemd scope with the given limits.
+// A check passes the limits the node granted it, so a host check cannot use more
+// of the machine than the repository asked for.
+func (r Runner) nodeCommandScoped(ctx context.Context, out, stderr io.Writer, scope string, limits scopeLimits, script string) error {
 	fn := r.Command
 	if fn == nil {
 		fn = command
@@ -115,7 +241,11 @@ func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, s
 	name, args := "bash", []string{"-o", "pipefail", "-c", script}
 	if scope != "" {
 		name = "systemd-run"
-		args = append([]string{"--user", "--scope", "--quiet", "--expand-environment=no", "--unit", scope, "-p", "CPUQuota=200%", "-p", "MemoryMax=5G", "-p", "TasksMax=768", "--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c"}, script)
+		args = append([]string{"--user", "--scope", "--quiet", "--expand-environment=no", "--unit", scope,
+			"-p", "CPUQuota=" + strconv.Itoa(limits.CPUs*100) + "%",
+			"-p", "MemoryMax=" + systemdMemory(limits.MemoryMiB),
+			"-p", "TasksMax=" + strconv.Itoa(limits.TasksMax),
+			"--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c"}, script)
 	}
 	if r.Node.SSH != "" {
 		remote := shellquote.Quote(name)
@@ -150,7 +280,15 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		if errors.Is(prepareErr, ErrHostChecksDisabled) {
 			return fmt.Errorf("CI node %q: %w", node.Name, prepareErr)
 		}
-		return prepareErr
+		if prepareErr != nil {
+			return prepareErr
+		}
+		// Every check is bounded by this node before any of them starts, so the
+		// report and the command agree on what the run granted.
+		for i := range checks {
+			checks[i].resources = clampCheckResources(checks[i], node)
+		}
+		return nil
 	}
 	if req.Definition != nil {
 		if err := prepareChecks(); err != nil {
@@ -342,7 +480,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			defer wg.Done()
 			for i := range jobs {
 				check := checks[i]
-				sr := SuiteResult{Suite: check.id, CheckName: check.name, Group: check.group, Node: node.Name, Status: "passed"}
+				sr := SuiteResult{Suite: check.id, CheckName: check.name, Group: check.group, Node: node.Name, Status: "passed", Note: check.resources.Note}
 				checkCtx, stop := context.WithTimeout(control, admissionWait+req.Timeout+time.Minute)
 				var output tailBuffer
 				writer := io.Writer(&output)
@@ -355,7 +493,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				} else {
 					writer = io.MultiWriter(&output, blob)
 				}
-				runErr := r.nodeCommand(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				if runErr != nil || len(markers) == 0 {
@@ -778,6 +916,15 @@ func nodeSlotScript(base string, slots, index int, inner string) string {
 		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then exec 9>%s; flock -w %d 9 || exit 75; fi; ", shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
 }
 
+// noteScript writes at the start of a check's log what Dyna changed about its
+// request. The evidence file then holds the clamp next to the result.
+func noteScript(note string) string {
+	if note == "" {
+		return ""
+	}
+	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
+}
+
 func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
@@ -790,7 +937,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
 	cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
-	setup := "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
 	}
@@ -828,7 +975,9 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	}
 	// A stable source path lets build tools reuse results across run IDs. Each
 	// check keeps a separate host worktree and report directory.
-	args := `"${docker[@]}" run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --name ` + q(name) + user +
+	args := `"${docker[@]}" run --rm --init --cpus=` + strconv.Itoa(check.resources.CPUs) +
+		" --memory=" + dockerMemory(check.resources.MemoryMiB) + " --memory-swap=" + dockerMemory(check.resources.MemoryMiB) +
+		` --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --name ` + q(name) + user +
 		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
 	environment := map[string]string{
 		"HOME": "/tmp/home", "XDG_DATA_HOME": "/tmp/data", "XDG_CONFIG_HOME": "/tmp/config", "XDG_CACHE_HOME": "/tmp/cache",

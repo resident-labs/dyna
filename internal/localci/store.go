@@ -40,6 +40,12 @@ type Node struct {
 	// floor on the filesystem that holds its /var/tmp, so Dyna starts no CI
 	// work there until space is freed.
 	LowDisk bool `json:"lowDisk,omitempty"`
+	// CPUs and MemoryBytes are the machine's capacity from the last probe. A
+	// check's request is clamped to them, so a repository cannot ask for more
+	// than the machine has. Zero means no probe read the machine, and the slot
+	// count bounds the request instead.
+	CPUs        int    `json:"cpus,omitempty"`
+	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
 }
 
 type Store struct{ DataDir string }
@@ -147,7 +153,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, AllowHostChecks: m.AllowHostChecks, LowDisk: m.HoldsCI()})
+		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, AllowHostChecks: m.AllowHostChecks, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal})
 	}
 	return nodes, nil
 }

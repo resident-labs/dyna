@@ -96,6 +96,10 @@ type SuiteResult struct {
 	Failures  []string      `json:"failures,omitempty"`
 	Reports   []string      `json:"reports,omitempty"`
 	Error     string        `json:"error,omitempty"`
+	// Note says what Dyna changed about the check's request, such as a CPU or
+	// memory request it clamped to the machine. It is empty when the check got
+	// what it asked for.
+	Note string `json:"note,omitempty"`
 }
 
 // Name is the name a check reports under: its own name, or its suite for a result

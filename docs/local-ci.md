@@ -96,11 +96,47 @@ Each item in `checks` supports these fields:
   defaults to the check's display name.
 - `priority` is a nonnegative integer. Higher values start first. Equal
   priorities keep definition order.
+- `cpus` is the CPU count the check asks for, and `memory` its memory, such as
+  `memory: 16g`. Both keep a default when they are absent; see
+  [Resource limits](#resource-limits).
 
 Dyna supplies isolated home and temporary directories, report paths, a safe Git
 directory setting, and `JUNIT_REPORT_PATH`. The runner always writes
 `execution.json` from the check's admitted execution time. A `junit` or `go`
 command writes its XML under the same report directory.
+
+## Resource limits
+
+A check runs with 2 CPUs and 4 GiB of memory in a container, and with 2 CPUs and
+5 GiB as a host check. A CPU-bound or memory-hungry step asks for more:
+
+```yaml
+  - id: cargo-build
+    image: rust:1
+    command: cargo nextest run --workspace --no-run
+    cpus: 8
+    memory: 16g
+```
+
+`cpus` is a whole number. `memory` needs a unit, `m` or `g`.
+
+Dyna bounds a request by the machine, so a repository cannot take more than the
+machine has. The slot pool gives two CPUs and 4 GiB per slot, and the machine's
+last probe bounds both again. A request above a bound is clamped, and the check's
+result and its log say so:
+
+```
+Dyna clamped cpus from 32 to 16 and memory from 64 GiB to 32 GiB
+```
+
+A default is never clamped, so a small machine keeps the limits its checks
+already had. A container check keeps 1 GiB above its own memory limit in the
+systemd scope, so the docker client fits in the scope. A host check's scope is
+its only memory bound, so it gets exactly the granted memory.
+
+A check holds one slot whatever it asks for. A wide check therefore shares the
+machine with the other slots' checks, so keep the machine's slot count and the
+requests in mind together.
 
 ## Caches
 
