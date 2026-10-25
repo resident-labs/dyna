@@ -61,22 +61,146 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 4, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 5, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
 				return err
 			}
 		}
+		// TODO: legacy/shim remove later — the per-harness selection table moves
+		// to the provider-scoped one in this version, and nothing reads it after.
+		legacyActive, err := movedHarnessActive(ctx, conn)
+		if err != nil {
+			return err
+		}
 		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
 			return err
 		}
-		if err := importActiveSelections(ctx, conn, root); err != nil {
+		if err := (&Store{Root: root}).importRegistry(ctx, conn); err != nil {
 			return err
 		}
-		return (&Store{Root: root}).importRegistry(ctx, conn)
+		if err := fillProviders(ctx, conn); err != nil {
+			return err
+		}
+		return fillActiveSelections(ctx, conn, legacyActive)
 	})
 	return db, err
+}
+
+// TODO: legacy/shim remove later — one migration from per-harness selections
+// to provider-scoped ones. movedHarnessActive renames the old table, if any,
+// and reports whether it exists.
+func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
+	var harness bool
+	if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pragma_table_info('account_active') WHERE name = 'harness')").Scan(&harness); err != nil {
+		return false, err
+	}
+	if !harness {
+		return false, nil
+	}
+	_, err := conn.ExecContext(ctx, "ALTER TABLE account_active RENAME TO account_active_harness")
+	return err == nil, err
+}
+
+// fillProviders writes each row's provider and kind from ProviderFor, so the
+// scoped table can key on the provider. A row that already names a provider
+// keeps it.
+func fillProviders(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT id, metadata FROM accounts")
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id   string
+		meta []byte
+	}
+	var pending []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.meta); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, r)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, r := range pending {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(r.meta, &fields); err != nil {
+			return err
+		}
+		if _, ok := fieldValue(fields, "provider"); ok {
+			continue
+		}
+		harness, _ := fieldValue(fields, "harness")
+		integration, _ := fieldValue(fields, "integration")
+		provider, kind := ProviderFor(harness, integration)
+		raw, err := json.Marshal(provider)
+		if err != nil {
+			return err
+		}
+		fields = setField(fields, "provider", raw)
+		if raw, err = json.Marshal(kind); err != nil {
+			return err
+		}
+		fields = setField(fields, "kind", raw)
+		meta, err := json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "UPDATE accounts SET metadata = ? WHERE id = ?", meta, r.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fieldValue reads one metadata string field, matching its name without case.
+func fieldValue(fields map[string]json.RawMessage, name string) (string, bool) {
+	for key, raw := range fields {
+		if !strings.EqualFold(key, name) {
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return "", false
+		}
+		return value, true
+	}
+	return "", false
+}
+
+// setField writes one metadata field under its canonical name, dropping any
+// other spelling of it.
+func setField(fields map[string]json.RawMessage, name string, raw json.RawMessage) map[string]json.RawMessage {
+	for key := range fields {
+		if strings.EqualFold(key, name) {
+			delete(fields, key)
+		}
+	}
+	fields[name] = raw
+	return fields
+}
+
+// fillActiveSelections copies each per-harness row to its active account's
+// provider at global scope, then drops the old table.
+func fillActiveSelections(ctx context.Context, conn *sql.Conn, legacy bool) error {
+	if !legacy {
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO account_active(provider, scope, account)
+		SELECT json_extract(a.metadata, '$.provider'), '', old.account
+		FROM account_active_harness old JOIN accounts a ON a.id = old.account
+		ON CONFLICT DO NOTHING`); err != nil {
+		return err
+	}
+	_, err := conn.ExecContext(ctx, "DROP TABLE account_active_harness")
+	return err
 }
 
 // Topic is the committed event of a changed account registry. The engine's

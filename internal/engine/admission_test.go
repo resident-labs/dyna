@@ -69,7 +69,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&accountstore.Store{Root: accounts.Root}).SetActive("codex", n.ID); err != nil {
+	if err := (&accountstore.Store{Root: accounts.Root}).SetActive(accountstore.ProviderChatGPT, "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	profiles := &profile.Store{Profiles: []profile.Profile{
@@ -332,7 +332,7 @@ func TestHistoricalExecutionCallerDoesNotRequireLiveState(t *testing.T) {
 	if _, err := f.db.Exec("UPDATE session_turns SET turn=? WHERE session=? AND n=1", turn, f.meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&accountstore.Store{Root: f.s.runtime.Accounts.Root}).SetActive("codex", ""); err != nil {
+	if err := (&accountstore.Store{Root: f.s.runtime.Accounts.Root}).SetActive(accountstore.ProviderChatGPT, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ctx := callspec.WithRequest(t.Context(), f.meta.ID+"/historical-observation")

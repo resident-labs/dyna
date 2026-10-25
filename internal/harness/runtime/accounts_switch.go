@@ -20,12 +20,21 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
+// accountProvider maps a harness to the provider its saved accounts belong to.
+// The active table is keyed by provider, and this release still asks for the
+// active account by harness. A later PR passes the provider from the profile
+// instead.
+func accountProvider(harness string) store.Provider {
+	provider, _ := store.ProviderFor(harness, "")
+	return provider
+}
+
 // activeID is the account that harness h uses, from the account registry.
 func (a *Accounts) activeID(h string) (string, error) {
 	if err := safeAccountPath(filepath.Join(a.Root, h, ".active.json")); err != nil {
 		return "", err
 	}
-	return (&store.Store{Root: a.Root}).Active(h)
+	return (&store.Store{Root: a.Root}).Active(accountProvider(h), "")
 }
 
 // setActive records the account that harness h uses, in the registry.
@@ -33,7 +42,7 @@ func (a *Accounts) setActive(h, id string) error {
 	if err := safeAccountPath(filepath.Join(a.Root, h, ".active.json")); err != nil {
 		return err
 	}
-	return (&store.Store{Root: a.Root}).SetActive(h, id)
+	return (&store.Store{Root: a.Root}).SetActive(accountProvider(h), "", id)
 }
 
 func (a *Accounts) Active(harness string) (NativeAccount, error) {
