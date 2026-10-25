@@ -152,6 +152,23 @@ func TestPiMetaOAuthUsageUsesTheIdentityToken(t *testing.T) {
 	}
 }
 
+func TestPiMetaOAuthIdlePlanIsKept(t *testing.T) {
+	c := piCaptured(t, "meta", map[string]any{
+		"type": "oauth", "access": "fixture-minted-key", "refresh": "fixture-identity",
+	})
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	client := directTestClient(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer fixture-identity" {
+			t.Fatal("wrong Muse OAuth usage request")
+		}
+		return directTestResponse(200, `{"user_email":"fixture@example.test","subs_tier_id":"max","subs_tier_name":"Muse Code Max Usage","is_subs_active":true}`), nil
+	})
+	o, err := probePiSaved(context.Background(), c, client, now)
+	if !errors.Is(err, ErrUsageIdle) || o.Plan == nil || o.Plan.Label != "Muse Code Max Usage" || !o.ObservedAt.IsZero() || len(o.Windows) != 0 {
+		t.Fatalf("unexpected Muse idle observation: %+v, %v", o, err)
+	}
+}
+
 func TestPiMetaKeyIsTypedNotReadableWithoutARequest(t *testing.T) {
 	c := piCaptured(t, "meta", map[string]any{"type": "api_key", "key": "fixture-key"})
 	deny := directTestClient(func(*http.Request) (*http.Response, error) {
