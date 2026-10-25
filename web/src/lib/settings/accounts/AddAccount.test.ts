@@ -92,7 +92,7 @@ test('an API key is sent once and cleared from the form', async (t) => {
     flushSync()
     submit(target)
     await settle(flushSync)
-    assert.deepEqual(calls, [['add', 'deepseek', 'Work', 'sk-test', 'pi']])
+    assert.deepEqual(calls, [['add', 'pi', 'deepseek', 'Work', 'sk-test']])
     assert.equal(element<HTMLInputElement>(target, 'input[aria-label="API key"]').value, '', 'the key is cleared after submit')
     assert.doesNotMatch(target.textContent ?? '', /sk-test/)
   } finally { await unmount(app) }
@@ -150,6 +150,6 @@ test('an OpenCode Go key creates an OpenCode account', async (t) => {
     flushSync()
     submit(target)
     await settle(flushSync)
-    assert.deepEqual(calls, [['add', 'opencode-go', 'Go work', 'sk-go', 'opencode']], 'the key creates an OpenCode account, not a Pi one')
+    assert.deepEqual(calls, [['add', 'opencode', 'opencode-go', 'Go work', 'sk-go']], 'the key creates an OpenCode account, not a Pi one')
   } finally { await unmount(app) }
 })

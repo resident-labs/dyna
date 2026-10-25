@@ -45,7 +45,7 @@ export interface Engine {
   AccountsView(scope: string): Promise<AccountsSnapshot>
   AccountsList(scope: string, refresh: boolean): Promise<AccountsSnapshot>
   AccountsUse(id: string, scope: string): Promise<AccountsSnapshot>
-  AccountsAdd(provider: string, label: string, key: string, harness: string): Promise<AccountsSnapshot>
+  AccountsAdd(harness: string, provider: string, label: string, key: string): Promise<AccountsSnapshot>
   AccountsRemove(id: string): Promise<AccountsSnapshot>
   ProfileModels(harness: string, refresh: boolean): Promise<Catalog>
   UsageRollup(roomId: string, from: string, to: string): Promise<ActivityRollup>

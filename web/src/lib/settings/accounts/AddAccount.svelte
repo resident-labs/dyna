@@ -198,12 +198,12 @@
     try {
       if (!account && how === 'key' && keyWhere === 'opencode') {
         if (!openCode) throw new Error(`${providerName(provider)} has no API key in OpenCode.`)
-        const next = await api.accountsAdd(provider, label.trim(), key, 'opencode')
+        const next = await api.accountsAdd('opencode', provider, label.trim(), key)
         key = ''
         if (!stopped) onsaved(next)
         return
       }
-      const next = await api.accountsAdd(provider, label.trim(), key, 'pi')
+      const next = await api.accountsAdd('pi', provider, label.trim(), key)
       key = ''
       if (!stopped) onsaved(next)
     } catch (e) { if (!stopped) error = errorText(e) || 'Could not save the key.' }
