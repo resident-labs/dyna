@@ -175,6 +175,19 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 			}
 			write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": session, "update": map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "starting"}}}})
 			reply(msg.ID, map[string]any{"sessionId": session, "models": map[string]any{"currentModelId": "fake-model"}, "modes": map[string]any{"currentModeId": "default", "availableModes": []any{}}})
+		case "session/close":
+			fakeMark("session/close " + session)
+			if body, err := os.ReadFile(filepath.Join(s.scriptDir, "pending-kimi-wire.jsonl")); err == nil {
+				path := filepath.Join(os.Getenv("KIMI_CODE_HOME"), "sessions", "fixture", session, "agents", "main", "wire.jsonl")
+				_ = os.MkdirAll(filepath.Dir(path), 0700)
+				f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+				if err == nil {
+					_, _ = f.Write(body)
+					_ = f.Close()
+				}
+				_ = os.Remove(filepath.Join(s.scriptDir, "pending-kimi-wire.jsonl"))
+			}
+			reply(msg.ID, struct{}{})
 		case "session/load", "session/resume":
 			var params struct {
 				SessionID string `json:"sessionId"`
@@ -312,15 +325,21 @@ func (s *fakeAgentServer) runScript(write func(any), session string, cancel <-ch
 	ignoreCancel := strings.Contains(strings.TrimSpace(string(script)), "ignoreCancel")
 	for _, action := range strings.Split(strings.TrimSpace(string(script)), "\n") {
 		var step struct {
-			Stderr        string         `json:"stderr"`
-			WaitForCancel bool           `json:"waitForCancel"`
-			Update        map[string]any `json:"update"`
-			PromptID      string         `json:"promptId"`
-			Stop          string         `json:"stopReason"`
-			Usage         map[string]any `json:"usage"`
-			IgnoreCancel  bool           `json:"ignoreCancel"`
+			Stderr        string          `json:"stderr"`
+			KimiTurnEnd   json.RawMessage `json:"kimiTurnEnd"`
+			WaitForCancel bool            `json:"waitForCancel"`
+			Update        map[string]any  `json:"update"`
+			PromptID      string          `json:"promptId"`
+			Stop          string          `json:"stopReason"`
+			Usage         map[string]any  `json:"usage"`
+			IgnoreCancel  bool            `json:"ignoreCancel"`
 		}
 		if json.Unmarshal([]byte(action), &step) != nil {
+			continue
+		}
+		if len(step.KimiTurnEnd) != 0 {
+			// Simulate Kimi returning end_turn before its journal flushes.
+			_ = os.WriteFile(filepath.Join(s.scriptDir, "pending-kimi-wire.jsonl"), append(step.KimiTurnEnd, '\n'), 0600)
 			continue
 		}
 		if step.Stderr != "" {
