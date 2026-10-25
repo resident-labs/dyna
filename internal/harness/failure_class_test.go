@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
+	"dyna-agent/internal/store/storetest"
 )
 
 // A process-guard error once carried the Claude result JSON, whose
@@ -164,6 +166,7 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 // A turn that fails before the model runs, such as a signed-out account, marks
 // its profile as not ready. A canceled turn says nothing about the profile.
 func TestRuntimePrepareFailureIsNotReady(t *testing.T) {
+	storetest.Isolate(t)
 	prepare := PrepareRuntime
 	t.Cleanup(func() { PrepareRuntime = prepare })
 	PrepareRuntime = func(context.Context, profile.Profile, *runtime.Pin) (profile.Profile, runtime.Pin, func(), error) {
@@ -174,6 +177,11 @@ func TestRuntimePrepareFailureIsNotReady(t *testing.T) {
 	_, err := RunSessionTurn(context.Background(), p, "task", root, false, JournalOptions{}, SteeringOptions{}, SessionOptions{})
 	if err == nil || !IsNotReady(err.Error()) {
 		t.Fatalf("prepare error = %v", err)
+	}
+	// Health must not keep showing an older success, or the reviewer pool would
+	// clear its hold on every pass and retry the same broken runtime.
+	if got := harnesshealth.New("").View(p, "test").Status; got != harnesshealth.Unhealthy {
+		t.Fatalf("health after a start failure = %q, want unhealthy", got)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
