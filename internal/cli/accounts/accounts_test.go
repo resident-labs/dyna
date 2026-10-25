@@ -144,6 +144,21 @@ func TestImportRendersTheTypedAnswer(t *testing.T) {
 	}
 }
 
+// A saved balance shows its amount, never the missing-allowance fallback.
+func TestListShowsABalanceAmount(t *testing.T) {
+	amount := 53.37
+	snap := service.AccountsSnapshot{Providers: []service.ProviderAccounts{{Provider: store.ProviderDeepSeek, Accounts: []service.ScopeAccount{{
+		Account:    service.Account{ID: strings.Repeat("c", 32), Provider: store.ProviderDeepSeek, Label: "pi native login", Kind: store.KindAPIKey, Status: "ready", Windows: []service.Window{{ID: "balance-usd", Label: "Balance (USD)", Balance: &amount, Unit: "USD"}}},
+		ActiveHere: true,
+	}}}}}
+	var out bytes.Buffer
+	writeAccounts(&out, snap, "")
+	text := out.String()
+	if !strings.Contains(text, "Balance (USD) $53.37") || strings.Contains(text, "Remaining allowance not reported") {
+		t.Fatalf("list = %q, want the balance amount", text)
+	}
+}
+
 // A saved reading shows its age and a stale mark, so an old percentage never
 // looks current.
 func TestListShowsTheReadingAgeAndStaleMark(t *testing.T) {
