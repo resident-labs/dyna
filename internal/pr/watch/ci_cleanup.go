@@ -13,7 +13,7 @@ import (
 // keepHead preserves runs for the current head; an empty value cancels all active runs.
 // Errors do not change the PR state or prevent later watcher work.
 func (s *Service) cleanupCIRuns(ctx context.Context, r Record, keepHead string) {
-	if changeKind(r) != "github" || r.Number < 1 || r.Branch == "" || r.Branch == "main" || r.Branch == r.BaseRef {
+	if changeKind(r) != "github" || r.Number < 1 || r.Branch == "" || r.Branch == r.DefaultBranch || r.Branch == r.BaseRef {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

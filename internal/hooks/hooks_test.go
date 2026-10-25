@@ -347,6 +347,31 @@ func TestScheduleAndMainMovementClaimOnce(t *testing.T) {
 	}
 }
 
+func TestTickFollowsTrunkDefaultBranch(t *testing.T) {
+	s, repo := setup(t)
+	ctx := context.Background()
+	remote := t.TempDir()
+	git(t, remote, "init", "--bare")
+	git(t, repo, "branch", "-m", "trunk")
+	git(t, repo, "remote", "add", "origin", remote)
+	git(t, repo, "push", "origin", "trunk")
+	git(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	add(t, s, repo, hook("install", MainUpdated))
+	now := time.Now()
+	if err := s.Tick(ctx, repo, now); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "next")
+	next := git(t, repo, "rev-parse", "HEAD")
+	git(t, repo, "push", "origin", "trunk")
+	if err := s.Tick(ctx, repo, now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if events := queuedEvents(t, s); len(events) != 1 || events[0].Event != MainUpdated || events[0].SHA != next || events[0].Branch != "trunk" {
+		t.Fatalf("trunk movement missed: %#v", events)
+	}
+}
+
 func TestIntervalEditMovesThePendingRun(t *testing.T) {
 	s, repo := setup(t)
 	ctx := context.Background()

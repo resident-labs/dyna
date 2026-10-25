@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/notices"
+	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 )
@@ -144,8 +145,10 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 			continue
 		}
 		base := "refs/heads/dyna/integration"
+		var baseErr error
 		if _, e := read(ctx, repo, "rev-parse", "--verify", base); e != nil {
-			base = "refs/heads/main"
+			resolved, err := repoid.DefaultBranch(ctx, repo, read)
+			base, baseErr = "refs/heads/"+resolved.Name, err
 		}
 		for _, name := range strings.Fields(names) {
 			old := oldRemotes[name]
@@ -164,9 +167,18 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 			}
 			branch, e := read(ctx, repo, "symbolic-ref", "refs/remotes/"+name+"/HEAD")
 			if e != nil {
-				branch = "refs/remotes/" + name + "/main"
+				resolved, resolveErr := repoid.DefaultBranch(ctx, repo, read)
+				if resolveErr != nil {
+					e = resolveErr
+				} else {
+					branch = "refs/remotes/" + name + "/" + resolved.Name
+					e = nil
+				}
 			}
-			head, e := read(ctx, repo, "rev-parse", "--verify", branch)
+			head := ""
+			if e == nil {
+				head, e = read(ctx, repo, "rev-parse", "--verify", branch)
+			}
 			if e == nil {
 				current.Branch = branch
 				current.Head = head
@@ -180,6 +192,9 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 						current.Rewrite = ""
 					}
 				}
+			}
+			if e == nil && baseErr != nil {
+				e = baseErr
 			}
 			if e == nil {
 				counts, err := read(ctx, repo, "rev-list", "--left-right", "--count", base+"..."+head)

@@ -38,11 +38,27 @@ func gcRepo(t *testing.T) string {
 
 func gcTree(t *testing.T, repo, branch, owner string) string {
 	t.Helper()
-	rec, err := NewFor(context.Background(), repo, branch, "origin/main", owner, "")
+	return gcTreeAt(t, repo, branch, "origin/main", owner)
+}
+
+func gcTreeAt(t *testing.T, repo, branch, base, owner string) string {
+	t.Helper()
+	rec, err := NewFor(context.Background(), repo, branch, base, owner, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return rec.Path
+}
+
+func useTrunk(t *testing.T, repo string) {
+	t.Helper()
+	remote := git(t, repo, "remote", "get-url", "origin")
+	git(t, repo, "branch", "-M", "trunk")
+	git(t, remote, "branch", "-m", "main", "trunk")
+	git(t, remote, "symbolic-ref", "HEAD", "refs/heads/trunk")
+	git(t, repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+	git(t, repo, "update-ref", "-d", "refs/remotes/origin/main")
+	git(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 }
 
 func ageGCTree(t *testing.T, path string) {
@@ -74,8 +90,9 @@ func TestGCWithoutLinkedWorktreesNeedsNoRemote(t *testing.T) {
 
 func TestGCContinuesAfterRemovingItsStartingWorktree(t *testing.T) {
 	repo := gcRepo(t)
-	first := gcTree(t, repo, "cleanup-start", "closed-owner")
-	second := gcTree(t, repo, "cleanup-next", "closed-owner")
+	useTrunk(t, repo)
+	first := gcTreeAt(t, repo, "cleanup-start", "origin/trunk", "closed-owner")
+	second := gcTreeAt(t, repo, "cleanup-next", "origin/trunk", "closed-owner")
 	trees, err := GC(context.Background(), first, GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatalf("cleanup must use a repository directory that survives removal: %v", err)
@@ -84,6 +101,41 @@ func TestGCContinuesAfterRemovingItsStartingWorktree(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("closed owner worktree remains: %s: %v; decisions: %#v", path, err, trees)
 		}
+	}
+}
+
+func TestGCKeepsUnpublishedWorktreeWithoutOriginHead(t *testing.T) {
+	repo := gcRepo(t)
+	useTrunk(t, repo)
+	git(t, repo, "config", "remote.origin.followRemoteHEAD", "never")
+	git(t, repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+	path := gcTreeAt(t, repo, "unpublished", "origin/trunk", "closed-owner")
+	git(t, path, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "unpublished")
+	git(t, repo, "merge", "--ff-only", "unpublished")
+	opts := GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }}
+	trees, err := GC(context.Background(), repo, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tree := range trees {
+		if tree.Path == path {
+			found = tree.Action == "kept" && !tree.Merged && tree.Ahead == 1 && tree.Reason == ReasonNotMerged
+		}
+	}
+	if !found {
+		t.Fatalf("cleanup did not preserve unpublished work: %+v", trees)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("unpublished worktree was removed: %v", err)
+	}
+
+	git(t, repo, "push", "origin", "trunk")
+	if _, err := GC(context.Background(), repo, opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("published worktree was not removed after the ancestry recheck: %v", err)
 	}
 }
 
@@ -517,6 +569,7 @@ func TestGCMarksOnlyTheMainCheckout(t *testing.T) {
 
 func TestNewLocalLaneDefaultsToIntegrationAndExplicitBaseWins(t *testing.T) {
 	repo := gcRepo(t)
+	useTrunk(t, repo)
 	v, err := settings.Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +585,7 @@ func TestNewLocalLaneDefaultsToIntegrationAndExplicitBaseWins(t *testing.T) {
 	if first.Base != "dyna/integration" {
 		t.Fatalf("default base = %s", first.Base)
 	}
-	// Move integration, then prove an explicit base still uses origin/main.
+	// Move integration, then prove an explicit base still uses origin/trunk.
 	git(t, first.Path, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "local integration")
 	head := git(t, first.Path, "rev-parse", "HEAD")
 	git(t, repo, "update-ref", "refs/heads/dyna/integration", head)
@@ -543,7 +596,7 @@ func TestNewLocalLaneDefaultsToIntegrationAndExplicitBaseWins(t *testing.T) {
 	if got := git(t, second.Path, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("local worktree head = %s", got)
 	}
-	explicit, err := NewFor(context.Background(), repo, "explicit-main", "origin/main", "", "")
+	explicit, err := NewFor(context.Background(), repo, "explicit-trunk", "origin/trunk", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
