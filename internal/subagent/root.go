@@ -44,8 +44,11 @@ func (m *Manager) StartRoot(rec room.Record, input, messageID string) (Info, boo
 		return Info{}, false, err
 	}
 	name := ""
-	if p, ok := profs.Get(m.settings().RootProfile); ok && !p.Disabled {
-		name = p.Name
+	for _, candidate := range []string{rec.RootProfile, m.settings().RootProfile} {
+		if p, ok := profs.Get(candidate); ok && p.ForSubagents() {
+			name = p.Name
+			break
+		}
 	}
 	dir := rec.Repo
 	if st, err := os.Stat(dir); dir == "" || err != nil || !st.IsDir() {

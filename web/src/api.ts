@@ -232,6 +232,7 @@ export const api = {
   archiveRoom: (ref: string) => app.ArchiveRoom(ref),
   unarchiveRoom: (ref: string) => app.UnarchiveRoom(ref),
   renameRoom: (ref: string, name: string) => app.RenameRoom(ref, name),
+  setRoomRootProfile: (ref: string, name: string) => app.SetRoomRootProfile(ref, name),
   deleteRoom: (ref: string) => app.DeleteRoom(ref),
   pinRoom: (ref: string, order = 0) => app.PinRoom(ref, order),
   unpinRoom: (ref: string) => app.UnpinRoom(ref),
