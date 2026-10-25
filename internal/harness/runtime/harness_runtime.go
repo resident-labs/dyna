@@ -124,6 +124,9 @@ func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version
 			if _, ok := PiOAuthProviderID(p); !ok {
 				return PrivateLogin{}, errors.New("This provider has no Pi OAuth sign-in.")
 			}
+			if p == accountstore.ProviderAnthropic {
+				return PrivateLogin{}, ErrPiAnthropicOAuth
+			}
 		}
 		return a.beginPiProviderSignIn(b.Executable, "", p)
 	}
