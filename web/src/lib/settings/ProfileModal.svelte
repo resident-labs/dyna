@@ -67,6 +67,7 @@
       <div class="body">
         <h2 class="hue-{m.hue}">{m.name} {#if agentExpedited($expedite, m)}<ExpediteBadge />{/if}</h2>
         <p class="addr mono">{m.address}</p>
+        {#if m.ownerDisplay}<p class="display">uses your display</p>{/if}
 
         <div class="actions">
           <button class="btn fill lg" onclick={() => onmessage(m)}>Message</button>
@@ -180,6 +181,8 @@
   .body { padding: var(--s2) var(--s5) var(--s5); }
   h2 { margin: 0; font-size: var(--t-display); font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
   .addr { margin: 2px 0 0; color: var(--muted); font-size: var(--t-sm); }
+  /* The owner-display grant is quiet plain text, not a badge. */
+  .display { margin: 2px 0 0; color: var(--faint); font-size: var(--t-sm); }
   .actions { display: flex; gap: var(--s2); margin: var(--s4) 0 var(--s1); }
   dt { font-size: var(--t-sm); font-weight: 600; color: var(--faint); margin-bottom: 2px; }
   dd { margin: 0; font-size: var(--t-body); color: var(--ink-2); }

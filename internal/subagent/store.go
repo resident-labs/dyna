@@ -162,6 +162,10 @@ type Meta struct {
 	InstructionsSeq int `json:"instructionsSeq,omitempty"`
 	// InstructionsChangedAt is the last queued change, persisted for the engine's quiet period.
 	InstructionsChangedAt time.Time `json:"instructionsChangedAt,omitzero"`
+	// OwnerDisplay lets this session's own shells use the owner's display.
+	// Only the owner or root grants it at start, and no session inherits it;
+	// root keeps the owner display without it.
+	OwnerDisplay bool `json:"ownerDisplay,omitempty"`
 	// Resumable records whether the profile's harness can resume (follow-ups
 	// and steering need it).
 	Resumable bool               `json:"resumable"`
