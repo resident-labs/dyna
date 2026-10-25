@@ -194,11 +194,6 @@ func credentialCheckAt(now time.Time, res runtime.CredentialRefreshResult, err e
 	return now.Add(credentialRetry)
 }
 
-// selfRenewing reports a harness that renews a saved grant itself, in the
-// account's own home, on its next request. Dyna never refreshes those grants and
-// never treats their access-token expiry as a sign-out.
-func selfRenewing(harness string) bool { return harness == "pi" }
-
 func setCredentialExpiry(a *Account, c native.Captured) {
 	m, _ := runtime.NativeRuntimeManager(a.Harness, native.Host{})
 	setCredentialExpiryForManager(a, c, m)
@@ -216,15 +211,6 @@ func setCredentialExpiryForManager(a *Account, c native.Captured, m native.Manag
 	}
 	if native.CredentialUsesAPIKey(c) {
 		a.RefreshMessage = "API key · no expiry"
-		return
-	}
-	if selfRenewing(a.Harness) {
-		// Pi owns the login file of its own account home and renews that entry
-		// on its next request there, so an expired access token is not a sign-out.
-		a.RefreshMessage = "Pi renews this sign-in on its next turn."
-		if !expiry.IsZero() {
-			a.RefreshMessage += " Saved access token expiry: " + expiry.UTC().Format(time.RFC3339) + "."
-		}
 		return
 	}
 	if m == nil || !native.SupportsRefresh(m, c) {

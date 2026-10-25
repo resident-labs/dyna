@@ -383,3 +383,65 @@ func piAccountEntry(c store.Credential) (string, piAuthEntry, error) {
 	return "", piAuthEntry{}, ErrSchema
 }
 
+
+// mustJSON encodes v, or an empty object when it cannot be encoded.
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+// PiGrant returns the provider ID, access token, refresh token and expiry of a
+// saved Pi credential. Callers must never log or store the token values.
+func PiGrant(c store.Credential) (id, access, refresh string, expiry time.Time, err error) {
+	id, entry, err := piAccountEntry(c)
+	if err != nil {
+		return "", "", "", time.Time{}, err
+	}
+	return id, entry.Access, entry.Refresh, piEntryExpiry(entry), nil
+}
+
+// PiEntry returns the provider ID and raw entry of a saved Pi credential.
+func PiEntry(c store.Credential) (string, json.RawMessage, error) {
+	if c.Schema != piNativeFilesSchema {
+		return "", nil, ErrSchema
+	}
+	var files, auth map[string]json.RawMessage
+	if json.Unmarshal(c.Payload, &files) != nil || json.Unmarshal(files["auth.json"], &auth) != nil || len(auth) != 1 {
+		return "", nil, ErrSchema
+	}
+	for id, entry := range auth {
+		return id, entry, nil
+	}
+	return "", nil, ErrSchema
+}
+
+// PiCapturedFromAuth builds the captured login of the one provider an account's
+// auth.json holds.
+func PiCapturedFromAuth(auth map[string]json.RawMessage) (Captured, error) {
+	if len(auth) != 1 {
+		return Captured{}, ErrSchema
+	}
+	for id, entry := range auth {
+		var parsed piAuthEntry
+		if json.Unmarshal(entry, &parsed) != nil {
+			return Captured{}, ErrSchema
+		}
+		payload, err := json.Marshal(map[string]json.RawMessage{"auth.json": json.RawMessage(mustJSON(map[string]json.RawMessage{id: entry}))})
+		if err != nil {
+			return Captured{}, ErrSchema
+		}
+		return Captured{Identity: "pi:" + id, ExpiresAt: piEntryExpiry(parsed), Credential: store.Credential{Schema: piNativeFilesSchema, Payload: payload}}, nil
+	}
+	return Captured{}, ErrSchema
+}
+
+// PiOAuthGrantUsable reports whether a saved Pi account holds an OAuth grant Pi
+// can renew. Dyna asks Pi for the renewal; it never runs a provider refresh
+// itself.
+func PiOAuthGrantUsable(c Captured) bool {
+	_, entry, err := piAccountEntry(c.Credential)
+	return err == nil && entry.Type == "oauth" && entry.Access != "" && entry.Refresh != ""
+}

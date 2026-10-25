@@ -411,12 +411,23 @@ func TestKimiRetiredAccountUsesAndRenewsWithoutBundle(t *testing.T) {
 	}
 }
 
-// Pi renews a saved grant itself, so an expired access token must not mark the
-// account as signed out.
+// A Pi account renews its OpenAI grant through the shared refresh, so an expired
+// access token must not mark the account as signed out.
 func TestExpiredPiAccessTokenIsNotASignOut(t *testing.T) {
-	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{"openai-codex": map[string]any{
-		"type": "oauth", "access": "access-token", "refresh": "refresh-token", "expires": time.Now().Add(-time.Hour).UnixMilli(), "accountId": "workspace",
-	}}})
+	type piEntry struct {
+		Type      string `json:"type"`
+		Access    string `json:"access"`
+		Refresh   string `json:"refresh"`
+		Expires   int64  `json:"expires"`
+		AccountID string `json:"accountId"`
+	}
+	entry, err := json.Marshal(map[string]piEntry{"openai-codex": {
+		Type: "oauth", Access: "access-token", Refresh: "refresh-token", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]json.RawMessage{"auth.json": entry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,9 +436,6 @@ func TestExpiredPiAccessTokenIsNotASignOut(t *testing.T) {
 	setCredentialExpiry(account, credential)
 	if account.NeedsLogin || account.Status == "needs_auth" {
 		t.Fatalf("an expired Pi access token asked for a new sign-in: %+v", account)
-	}
-	if !strings.Contains(account.RefreshMessage, "Pi renews this sign-in") {
-		t.Fatalf("refresh message = %q", account.RefreshMessage)
 	}
 	if account.ExpiresAt == nil {
 		t.Fatal("the access-token expiry was not shown")
