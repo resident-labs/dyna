@@ -7,7 +7,7 @@ import { errorText } from '../errorText.ts'
 import { clipText } from '../ui/toast.ts'
 import { router } from './router.svelte.ts'
 import type { Goal } from '../api/goal.ts'
-import type { Member } from '../api/room.ts'
+import type { CloseOutcome, Member } from '../api/room.ts'
 import type { RunSummary } from '../api/workflow.ts'
 import type { ToastInput } from '../ui/toast.ts'
 import { allowsForceClose, closeRecoveryOf, type Responsibility } from '../api/session.ts'
@@ -35,8 +35,8 @@ export interface ConfirmHost {
   members(): Member[]
   /** The goal the room expedites now, which the replace text names. */
   expedited(): string
-  /** The page shows the close summary the session returned. */
-  closed(name: string, items: string[]): void
+  /** The page shows the typed close result the session returned. */
+  closed(name: string, outcomes: CloseOutcome[]): void
   loadGoals(): void
   loadRuns(): void
   loadRun(): void

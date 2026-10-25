@@ -1,13 +1,14 @@
 import type { Member, ProfileChoice } from '../api/room.ts'
 import type { BulkSessionItem, BulkSessionResult, TransferState } from '../api/session.ts'
 import { errorText } from '../errorText.ts'
+import { closeSummaryText } from './closeOutcomes.ts'
 
 export type BulkAction = 'stop' | 'close' | 'promote' | 'adopt' | 'transfer'
 // The fields of a result that these helpers read.
 export interface ResultLike {
   ok: boolean
   error?: string
-  member?: { closeSummary?: string[] }
+  member?: Pick<Member, 'closeSummary'>
   transfer?: Pick<TransferState, 'phase'> & Partial<TransferState>
 }
 // A result row, with the note a failed progress check leaves on it.
@@ -21,7 +22,7 @@ const TRANSFER_TEXT: Record<string, string> = { completed: 'New model ready', fa
 const ACTION_TEXT: Record<string, string> = { stop: 'Stop accepted', close: 'Close accepted', promote: 'Promoted to lead', adopt: 'Moved' }
 export function bulkResultText(r: ResultLike, action: string): string {
   if (!r.ok) return r.error || 'The host refused this action.'
-  if (action === 'close' && r.member?.closeSummary?.length) return r.member.closeSummary.join('; ')
+  if (action === 'close' && r.member?.closeSummary?.length) return closeSummaryText(r.member.closeSummary)
   if (action === 'transfer') return TRANSFER_TEXT[r.transfer?.phase ?? ''] ?? 'Transfer accepted'
   return ACTION_TEXT[action] ?? 'Accepted'
 }
