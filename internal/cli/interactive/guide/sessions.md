@@ -73,9 +73,10 @@ with the input of its next turn that has posts.
 
 A parent still tells its children what a snapshot cannot. A new task, a changed
 scope, a priority, an answer or a correction is a message: post it. The snapshot
-carries standing state only, and only while the session is open. To correct a
-child's goal, use `dyna goal edit <id> --amend "<text>"`: the correction joins
-its instructions and also arrives as a post.
+carries standing state only, and only while the session is open. Only root and
+the owner may correct a brief, with `dyna goal edit <id> --amend "<text>"`: the
+correction joins the holder's instructions and also arrives as a post. Another
+parent posts the correction, or asks root to amend the brief.
 
 A compaction or a model transfer does not lose the instructions. After a
 compaction, the next turn sends the current snapshot again, so the rules, the
