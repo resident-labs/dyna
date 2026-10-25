@@ -457,13 +457,18 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 	return s.changeIssueFrom(roomID, id, by, origin, false, "ChangeIssue", change)
 }
 
-// LinkIssueGoal records goal work without closing the issue. Relinking a
+// LinkIssueGoal records goal work without closing the issue. A non-empty from
+// is the state the issue must still have: the check and the write happen in the
+// same locked step, so two callers cannot both claim one issue. Relinking a
 // legacy goal issue is allowed, so a finished goal can be replaced by new work.
-func (s *Store) LinkIssueGoal(roomID, id, goalID, by string) (Issue, error) {
+func (s *Store) LinkIssueGoal(roomID, id, goalID, by string, from IssueState) (Issue, error) {
 	if strings.TrimSpace(goalID) == "" {
 		return Issue{}, errors.New("goal link needs a goal ID")
 	}
 	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
+		if from != "" && i.State != from {
+			return fmt.Errorf("issue %s is already %s", i.Label(), i.State)
+		}
 		i.State, i.GoalID, i.Assignee = IssueStateGoal, goalID, ""
 		return nil
 	})

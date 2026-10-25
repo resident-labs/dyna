@@ -53,7 +53,7 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 		if err != nil {
 			return "", "", err
 		}
-		if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links); err != nil {
+		if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links, goals.ClaimAny); err != nil {
 			return "", "", err
 		}
 		if !g.Shared && !g.HeldBy(meta.ID) {
@@ -78,7 +78,7 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 			if err != nil {
 				return "", "", err
 			}
-			if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links); err != nil {
+			if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links, goals.ClaimAny); err != nil {
 				return "", "", err
 			}
 			itemText := text
@@ -92,7 +92,7 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 			return goal, item.ID, nil
 		}
 	}
-	g, err := store.AddWithIssues(meta.RoomID, setter, actor, goals.Input{Text: text, Detail: brief, Holders: []string{meta.ID}}, fixes)
+	g, err := store.AddWithIssues(meta.RoomID, setter, actor, goals.Input{Text: text, Detail: brief, Holders: []string{meta.ID}}, fixes, goals.ClaimAny)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot create the session's goal: %w", err)
 	}

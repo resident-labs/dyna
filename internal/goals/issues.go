@@ -8,9 +8,34 @@ import (
 	"dyna-agent/internal/room"
 )
 
+// A Claim is the room issue state a goal requires when it links the issue.
+// The link store checks it in the same locked step that writes the link, so a
+// second goal cannot take an issue another goal has just claimed.
+type Claim int
+
+const (
+	// ClaimAny links an issue in the state the caller prepared: one still open,
+	// or one that already names a goal, which is the deliberate replacement of
+	// finished work.
+	ClaimAny Claim = iota
+	// ClaimOpen links only an issue that is still open, so two requests that
+	// both read the issue as open start one goal, not two.
+	ClaimOpen
+)
+
+// state is the issue state claim requires, or empty for the prepared state.
+func (c Claim) state(prepared room.IssueState) room.IssueState {
+	if c == ClaimOpen {
+		return room.IssueStateOpen
+	}
+	return prepared
+}
+
 // AddWithIssues uses the same goal creation path as Add, then links room
 // issues to the new goal. With no text, one linked issue supplies the title.
-func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int) (Goal, error) {
+// A link the claim refuses deletes the new goal, so a losing assignment leaves
+// no goal behind.
+func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int, claim Claim) (Goal, error) {
 	links, err := s.PrepareIssueLinks(roomID, actor, fixes)
 	if err != nil {
 		return Goal{}, err
@@ -25,7 +50,7 @@ func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int) (
 	if err != nil {
 		return g, err
 	}
-	if err := s.LinkPreparedIssues(roomID, g.ID, actor, links); err != nil {
+	if err := s.LinkPreparedIssues(roomID, g.ID, actor, links, claim); err != nil {
 		return g, errors.Join(err, s.deleteGoal(roomID, g.ID))
 	}
 	return g, nil
@@ -49,7 +74,7 @@ func (s *Store) LinkIssues(roomID, goalID, actor string, fixes []int) error {
 	if err != nil {
 		return err
 	}
-	return s.LinkPreparedIssues(roomID, goalID, actor, links)
+	return s.LinkPreparedIssues(roomID, goalID, actor, links, ClaimAny)
 }
 
 // PrepareIssueLinks validates permission and every issue before any goal,
@@ -72,13 +97,13 @@ func (s *Store) PrepareIssueLinks(roomID, actor string, fixes []int) ([]room.Iss
 
 // LinkPreparedIssues applies snapshots from PrepareIssueLinks. A failure
 // restores any links already changed by this call.
-func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Issue) error {
+func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Issue, claim Claim) error {
 	actor, err := s.issueActor(roomID, actor)
 	if err != nil && len(links) > 0 {
 		return err
 	}
 	for i, issue := range links {
-		linked, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor)
+		linked, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor, claim.state(issue.State))
 		if err != nil {
 			restore := links[:i]
 			if linked.ID == issue.ID && linked.State == room.IssueStateGoal && linked.GoalID == goalID {

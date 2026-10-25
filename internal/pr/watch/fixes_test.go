@@ -66,7 +66,7 @@ func TestMergedPRClosesItsLinkedIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.rooms.LinkIssueGoal(e.room.ID, issue.ID, "g7", e.room.Name); err != nil {
+	if _, err := e.rooms.LinkIssueGoal(e.room.ID, issue.ID, "g7", e.room.Name, "open"); err != nil {
 		t.Fatal(err)
 	}
 	r := e.mergedRecord(

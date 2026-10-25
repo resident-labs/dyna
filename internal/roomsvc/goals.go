@@ -145,8 +145,17 @@ func (s *Service) refuseRootHolders(holders []string) error {
 	return nil
 }
 
+// goalStart is one request to start a goal: the dyna goal command, a room
+// issue's assign action, or the web.
+type goalStart struct {
+	In        goals.Input // the goal's text, detail and holder choice
+	Selectors []string    // CLI holder selectors, resolved for the room
+	Fixes     []int       // room issues the goal starts work on
+	Claim     goals.Claim // the state the linked issues must still have
+}
+
 func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors []string, fixes []int) (goals.Goal, error) {
-	return s.startGoal(ctx, roomRef, goals.Input{Text: text}, selectors, fixes)
+	return s.startGoal(ctx, roomRef, goalStart{In: goals.Input{Text: text}, Selectors: selectors, Fixes: fixes, Claim: goals.ClaimAny})
 }
 
 // startGoal is the one way a goal starts: the dyna goal command, a room
@@ -154,25 +163,26 @@ func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors [
 // the holder choice, refuses a root holder, then creates the goal, links the
 // issues it fixes and posts its milestone. AddWithIssues deletes the new goal
 // when a link fails, so a refused link leaves no goal behind.
-func (s *Service) startGoal(ctx context.Context, roomRef string, in goals.Input, selectors []string, fixes []int) (goals.Goal, error) {
+func (s *Service) startGoal(ctx context.Context, roomRef string, req goalStart) (goals.Goal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
 		return goals.Goal{}, err
 	}
 	service := s.goalService()
-	holders, shared, err := service.ResolveHolders(r.ID, author.ResolveAs, selectors)
+	holders, shared, err := service.ResolveHolders(r.ID, author.ResolveAs, req.Selectors)
 	if err != nil {
 		return goals.Goal{}, err
 	}
 	if err = s.refuseRootHolders(holders); err != nil {
 		return goals.Goal{}, err
 	}
+	in := req.In
 	in.Holders, in.Shared = holders, shared
 	actor := author.Address
 	if author.ID == "owner" {
 		actor = r.Name
 	}
-	g, err := service.Store.AddWithIssues(r.ID, author.ID, actor, in, fixes)
+	g, err := service.Store.AddWithIssues(r.ID, author.ID, actor, in, req.Fixes, req.Claim)
 	if err != nil {
 		return g, err
 	}
@@ -218,7 +228,7 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 	if err != nil || len(fixes) == 0 {
 		return g, err
 	}
-	return g, s.goalService().Store.LinkPreparedIssues(r.ID, g.ID, actor, links)
+	return g, s.goalService().Store.LinkPreparedIssues(r.ID, g.ID, actor, links, goals.ClaimAny)
 }
 
 func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holders *[]string, shared bool) (goals.Goal, error) {
