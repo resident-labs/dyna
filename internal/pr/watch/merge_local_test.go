@@ -268,11 +268,9 @@ func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
 		t.Fatal("integration moved before CI result")
 	}
-	deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	select {
-	case <-ci.started:
-	case <-deadline.Done():
+	// Admission registers the run before it starts, so a run in flight is
+	// visible here without waiting on a clock.
+	if runningLocalCIHead(e.s) == "" {
 		t.Fatal("local trial CI did not start")
 	}
 	localTick(t, e)
