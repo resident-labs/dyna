@@ -35,10 +35,10 @@ func TestDoctorChecksStoredSystemRuntimeAsDynaManaged(t *testing.T) {
 	}
 }
 
-func TestDoctorReportsCustomHarnessAsDirect(t *testing.T) {
-	doctor := New().Doctor(context.Background(), profile.Profile{Name: "own", Harness: profile.HarnessCustom, Command: []string{"true"}})
+func TestDoctorReportsMockHarnessAsDirect(t *testing.T) {
+	doctor := New().Doctor(context.Background(), profile.Profile{Name: "own", Harness: profile.HarnessMock})
 	if doctor.Status != "direct" || doctor.Reason == "" {
-		t.Fatalf("a custom harness runs its own command: %+v", doctor)
+		t.Fatalf("the mock harness runs no external copy: %+v", doctor)
 	}
 }
 

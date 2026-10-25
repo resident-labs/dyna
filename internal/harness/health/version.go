@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -58,7 +57,7 @@ var VersionDetector = DetectVersion
 
 // DetectVersion resolves the effective launch environment on every call. Native
 // version commands have a two-second deadline and a short, process-local cache.
-// Custom commands are only located; mock harnesses require no executable.
+// Mock harnesses require no executable.
 func DetectVersion(ctx context.Context, p profile.Profile) VersionInfo {
 	return detectVersion(ctx, p, 2*time.Second)
 }
@@ -74,17 +73,6 @@ func detectVersion(ctx context.Context, p profile.Profile, timeout time.Duration
 	env := versionEnvironment(p.Env)
 	var path string
 	var err error
-	if p.Harness == profile.HarnessCustom {
-		result := VersionInfo{Version: "custom"}
-		if len(p.Command) > 0 {
-			path = customVersionPath(p.Command[0], env)
-		}
-		result.Path, result.Installed = path, path != ""
-		if !result.Installed {
-			result.Error = "executable not found"
-		}
-		return result
-	}
 	// Dyna runs its private copy: the prepared executable, else the bundle.
 	path = p.RuntimeExecutable
 	if path == "" {
@@ -162,39 +150,6 @@ func versionEnvironment(overrides map[string]string) []string {
 	}
 	sort.Strings(env)
 	return env
-}
-
-func customVersionPath(binary string, env []string) string {
-	if binary == "" {
-		return ""
-	}
-	candidate := func(path string) string {
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return ""
-		}
-		info, err := os.Stat(absolute)
-		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
-			return absolute
-		}
-		return ""
-	}
-	if strings.ContainsRune(binary, filepath.Separator) {
-		return candidate(binary)
-	}
-	for _, item := range env {
-		if value, ok := strings.CutPrefix(item, "PATH="); ok {
-			for _, dir := range filepath.SplitList(value) {
-				if !filepath.IsAbs(dir) {
-					continue
-				}
-				if path := candidate(filepath.Join(dir, binary)); path != "" {
-					return path
-				}
-			}
-		}
-	}
-	return ""
 }
 
 func runVersion(parent context.Context, path string, args, env []string, timeout time.Duration) VersionInfo {

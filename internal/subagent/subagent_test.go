@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
@@ -789,14 +790,13 @@ func TestWorkflowWorkersCannotStartOrControlSubagents(t *testing.T) {
 }
 
 func TestSendRefusesWhenHarnessCannotResume(t *testing.T) {
-	custom := profile.Profile{
-		Name: "custom", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `cat >/dev/null; printf done`},
-	}
-	e := newTestEnv(t, custom)
+	p := fakeworker.InstallClaude(t, `printf done`)
+	p.Name, p.Default = "custom", true
+	p.ExtraArgs = []string{"--no-session-persistence"}
+	e := newTestEnv(t, p)
 	info, _ := e.start("task", func(o *StartOptions) { o.Profile = "custom" })
 	if info.Resumable {
-		t.Fatal("custom harness reported resumable")
+		t.Fatal("a turn without session persistence reported resumable")
 	}
 	_, done := e.wait(info.ID, 1)
 	if done.Status != TurnOK || done.Result != "done" {
@@ -1086,18 +1086,18 @@ func TestWakeAfterPostWasDeliveredDoesNotStartEmptyTurn(t *testing.T) {
 func TestNonResumableSchemaRetryKeepsWorkerContextLast(t *testing.T) {
 	dir := t.TempDir()
 	capture := filepath.Join(dir, "prompt")
-	e := newTestEnv(t, profile.Profile{
-		Name: "custom", Harness: profile.HarnessCustom, Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `
+	p := fakeworker.InstallClaude(t, `
 count=0
 if [ -f "$COUNT" ]; then count=$(/bin/cat "$COUNT"); fi
 count=$((count+1))
 printf '%s' "$count" > "$COUNT"
-/bin/cat > "$CAPTURE.$count"
+printf '%s' "$DYNA_FAKE_PROMPT" > "$CAPTURE.$count"
 if [ "$count" -eq 1 ]; then printf '"invalid"'; else printf '{"n":7}'; fi
-`},
-		Env: map[string]string{"COUNT": filepath.Join(dir, "count"), "CAPTURE": capture},
-	})
+`)
+	p.Name = "custom"
+	p.ExtraArgs = []string{"--no-session-persistence"}
+	p.Env = mergedEnv(p.Env, map[string]string{"COUNT": filepath.Join(dir, "count"), "CAPTURE": capture})
+	e := newTestEnv(t, p)
 	info, _ := e.start("Produce the requested number.", func(o *StartOptions) {
 		o.Profile = "custom"
 		o.Schema = `{"type":"object","required":["n"],"properties":{"n":{"type":"number"}}}`

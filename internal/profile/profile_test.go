@@ -22,8 +22,7 @@ func TestOutputDeclarationCompatibilityAndValidation(t *testing.T) {
 		t.Fatalf("legacy profile gained an output declaration: %s", b)
 	}
 
-	legacy.Harness = HarnessCustom
-	legacy.Command = []string{"test-fixture"}
+	legacy.Harness = HarnessCodex
 	legacy.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}
 	b, err = json.Marshal(legacy)
 	if err != nil || !strings.Contains(string(b), `"dialect":"codex-jsonl"`) {
@@ -145,13 +144,13 @@ func TestWorkflowDefaultSkipsSubagentsOnly(t *testing.T) {
 
 func TestLoadRejectsInvalidProfile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
-	contents := `{"version":2,"profiles":[{"name":"broken","harness":"custom","taste":5,"intelligence":5,"cost":5}]}`
+	contents := `{"version":2,"profiles":[{"name":"","harness":"pi","taste":5,"intelligence":5,"cost":5}]}`
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), `invalid profile "broken"`) || !strings.Contains(err.Error(), "custom harness requires a command") {
-		t.Fatalf("Load() error = %v, want invalid custom profile", err)
+	if err == nil || !strings.Contains(err.Error(), `invalid profile ""`) || !strings.Contains(err.Error(), "profile name is required") {
+		t.Fatalf("Load() error = %v, want an invalid profile", err)
 	}
 }
 
@@ -311,9 +310,9 @@ func TestStoredSystemRuntimeLoadsAsDynaManaged(t *testing.T) {
 	if err := p.Validate(); err != nil || !p.DynaManaged() {
 		t.Fatalf("Validate() = %v, DynaManaged() = %v; want a valid Dyna-managed profile", err, p.DynaManaged())
 	}
-	custom := Profile{Name: "own", Harness: HarnessCustom, Command: []string{"true"}, RuntimeVersion: "1.0.0", Taste: 5, Intelligence: 5, Cost: 5}
-	if custom.DynaManaged() || custom.Validate() == nil {
-		t.Fatal("a custom harness has no Dyna-managed copy to pin")
+	plain := Profile{Name: "own", Harness: HarnessMock, RuntimeVersion: "1.0.0", Taste: 5, Intelligence: 5, Cost: 5}
+	if plain.DynaManaged() || plain.Validate() == nil {
+		t.Fatal("an unmanaged harness has no Dyna-managed copy to pin")
 	}
 }
 

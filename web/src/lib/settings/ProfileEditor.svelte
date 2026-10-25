@@ -32,7 +32,6 @@
   let fallbacks = $state(normalizeModels(profile.model ?? '', draft?.models ?? profile.models ?? []).slice(1))
   let newFallback = $state('')
   let args = $state(draft?.args ?? (profile.extraArgs ?? []).join('\n'))
-  let command = $state(draft?.command ?? (profile.command ?? []).join('\n'))
   let envSet = $state<Record<string, string>>(draft?.envSet ?? {}) // key -> new value
   let envRemove = $state<string[]>(draft?.envRemove ?? [])
   let newKey = $state(draft?.newKey ?? '')
@@ -61,7 +60,7 @@
     const harness = p.harness
     const ticket = catalogGate.next()
     catalog = null
-    if (['custom', 'mock'].includes(harness)) return
+    if (['mock'].includes(harness)) return
     api.profileModels(harness, false).then((c: Catalog) => { if (catalogGate.current(ticket)) catalog = c }, () => {})
   })
   const knob = $derived(profileEffort(catalog?.models ?? [], p.model ?? '', lines(args)))
@@ -126,7 +125,7 @@
   // Keep raw text and write-only values in memory while the wizard changes steps.
   function leave(step: number | null = null) {
     if (busy) return
-    const value = $state.snapshot({ profile: { ...p, models: chain() }, models: chain(), args, command, envSet, envRemove, newKey, newVal, replacing, replacementValue, advancedOpen })
+    const value = $state.snapshot({ profile: { ...p, models: chain() }, models: chain(), args, envSet, envRemove, newKey, newVal, replacing, replacementValue, advancedOpen })
     if (step === null) oncancel(value)
     else onback?.(step, value)
   }
@@ -155,13 +154,13 @@
   let probeError = $derived(test?.phase === 'done' ? test.check?.probeError : '')
 
   async function save() {
-    if (busy || (guided && (!p.name?.trim() || (p.harness === 'custom' && !command.trim())))) return
+    if (busy || (guided && !p.name?.trim())) return
     busy = true
     error = ''
     try {
       const v = await api.saveProfile({
         original,
-        profile: { ...$state.snapshot(p), model: chain()[0] ?? '', models: chain(), extraArgs: lines(args), command: lines(command) },
+        profile: { ...$state.snapshot(p), model: chain()[0] ?? '', models: chain(), extraArgs: lines(args) },
         envSet: $state.snapshot(envSet),
         envRemove: $state.snapshot(envRemove),
       })
@@ -228,10 +227,6 @@
         <label>Calls per run<input type="number" min="0" bind:value={p.maxCallsPerRun} /></label>
       </div>
 
-      {#if p.harness === 'custom' && !guided}
-        <h3>Command <span>one argument per line; {'{{prompt}}'} and {'{{model}}'} are filled in</span></h3>
-        <textarea bind:value={command} rows="3" class="mono" spellcheck="false"></textarea>
-      {/if}
       <h3>Extra arguments <span>one per line, passed to the harness</span></h3>
       <textarea bind:value={args} rows="2" class="mono" spellcheck="false" placeholder="--flag=value"></textarea>
 
@@ -282,7 +277,6 @@
             <label>Profile name<input bind:this={first} bind:value={p.name} class="mono" placeholder="e.g. quick-research" spellcheck="false" /></label>
             <label>What will you use it for?<textarea bind:value={p.description} rows="3" placeholder="e.g. Fast research and small code changes"></textarea></label>
             {@render modelKnobs()}
-            {#if p.harness === 'custom'}<label>Command<textarea bind:value={command} rows="3" class="mono" spellcheck="false" placeholder="One argument per line"></textarea><span class="field-hint">Use {'{{prompt}}'} and {'{{model}}'}.</span></label>{/if}
           </div>
           <div class="score-section"><h3>Workflow scores</h3><p class="explain">Your ratings help workflows choose a profile. Higher is better.</p>
           <div class="scores">{#each ([['taste', 'Taste'], ['diagnostics', 'Diagnostics'], ['intelligence', 'Intelligence'], ['cost', 'Cost efficiency']] as const) as [k, label]}<label class="score"><span>{label}</span><input type="range" min="1" max="10" bind:value={p[k]} /><span class="v">{p[k]}</span></label>{/each}</div></div>
@@ -386,7 +380,7 @@
     <footer>
       {#if error}<p class="err" role="alert">{error}</p>{:else}<p class="hint"><kbd>Ctrl</kbd>+<kbd>S</kbd> saves · <kbd>Esc</kbd> {guided ? 'returns to details' : 'cancels'}</p>{/if}
       <button type="button" class="btn quiet lg" onclick={() => leave()} disabled={busy}>{guided ? '← Details' : 'Cancel'}</button>
-      <button type="submit" class="btn fill lg" disabled={busy || !p.name?.trim() || (guided && p.harness === 'custom' && !command.trim())}>{busy ? 'Saving…' : original ? 'Save changes' : 'Create profile'}</button>
+      <button type="submit" class="btn fill lg" disabled={busy || !p.name?.trim()}>{busy ? 'Saving…' : original ? 'Save changes' : 'Create profile'}</button>
     </footer>
   </form>
 </div>

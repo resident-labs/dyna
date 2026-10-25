@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
@@ -44,21 +45,29 @@ func TestWorkflowWorkerStandingRules(t *testing.T) {
 				run.Meta.RoomID = ""
 			}
 			capture := filepath.Join(t.TempDir(), "prompt")
-			store := &profile.Store{Profiles: []profile.Profile{{
-				Name: "capture", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-				Command: []string{"/bin/sh", "-c", `cat > "$CAPTURE"; printf done`},
-				Env:     map[string]string{"CAPTURE": capture},
-			}}}
+			worker := fakeworker.InstallClaude(t, `printf '%s' "$DYNA_FAKE_PROMPT" > "$CAPTURE.prompt"; printf '%s' "$DYNA_FAKE_INSTRUCTIONS" > "$CAPTURE.instructions"; printf done`)
+			worker.Name, worker.Default = "capture", true
+			worker.Env = mergedEnv(worker.Env, map[string]string{"CAPTURE": capture})
+			store := &profile.Store{Profiles: []profile.Profile{worker}}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			if _, err := Execute(ctx, Options{ScriptSrc: script, Store: store, Run: run, WorkDir: t.TempDir()}); err != nil {
 				t.Fatal(err)
 			}
-			b, err := os.ReadFile(capture)
+			prompt, err := os.ReadFile(capture + ".prompt")
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := string(b)
+			instructions, err := os.ReadFile(capture + ".instructions")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The rules travel in the harness's own instruction channel, and the
+			// prompt carries the task alone.
+			if !strings.Contains(string(prompt), "[ORIGINAL TASK]\ntask") || strings.Contains(string(prompt), "[DYNA RULES]") {
+				t.Fatalf("room=%v prompt = %q", hasRoom, prompt)
+			}
+			got := string(instructions)
 			// Global rules reach every worker, with or without a room.
 			if !strings.Contains(got, "[DYNA GLOBAL RULES]") || !strings.Contains(got, "Write in Central time. · owner") {
 				t.Fatalf("room=%v global rule missing: %q", hasRoom, got)
@@ -67,11 +76,6 @@ func TestWorkflowWorkerStandingRules(t *testing.T) {
 				if strings.Contains(got, want) != hasRoom {
 					t.Fatalf("room=%v missing/unexpected %q: %q", hasRoom, want, got)
 				}
-			}
-			// A custom harness has no native channel, so the instructions lead
-			// the prompt and the task follows them.
-			if hasRoom && strings.Index(got, "[DYNA RULES]") > strings.Index(got, "[ORIGINAL TASK]\ntask") {
-				t.Fatal("rules after the task")
 			}
 		})
 	}

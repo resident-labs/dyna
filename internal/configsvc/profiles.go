@@ -47,7 +47,6 @@ type ProfileView struct {
 	ExtraArgs      []string `json:"extraArgs"`
 	// Compact is the auto-compact threshold; null keeps the harness default.
 	Compact *profile.Compact `json:"compact"`
-	Command []string         `json:"command"`
 	EnvKeys []string         `json:"envKeys"`
 	// Support is how much of the harness's output Dyna reads. It is derived
 	// from the profile's output dialect and ignored on save.
@@ -85,7 +84,7 @@ func view(p profile.Profile) ProfileView {
 		Taste:    p.Taste, Diagnostics: p.EffectiveDiagnostics(), Intelligence: p.Intelligence, Cost: p.Cost,
 		TimeoutSec: p.TimeoutSec, MaxConcurrent: p.MaxConcurrent, MaxCallsPerRun: p.MaxCallsPerRun,
 		Default: p.Default, Disabled: p.Disabled, Uses: p.EffectiveUses(), SafeMode: p.SafeMode,
-		ExtraArgs: append([]string{}, p.ExtraArgs...), Compact: p.Compact, Command: append([]string{}, p.Command...), EnvKeys: []string{},
+		ExtraArgs: append([]string{}, p.ExtraArgs...), Compact: p.Compact, EnvKeys: []string{},
 	}
 	for k := range p.Env {
 		v.EnvKeys = append(v.EnvKeys, k)
@@ -184,10 +183,7 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	p.Diagnostics = in.Diagnostics
 	p.TimeoutSec, p.MaxConcurrent, p.MaxCallsPerRun = in.TimeoutSec, in.MaxConcurrent, in.MaxCallsPerRun
 	p.Default, p.Disabled, p.Uses, p.SafeMode = in.Default, in.Disabled, in.Uses, in.SafeMode
-	p.ExtraArgs, p.Command, p.Compact = clean(in.ExtraArgs), clean(in.Command), in.Compact
-	if p.Harness != profile.HarnessCustom {
-		p.Command = nil
-	}
+	p.ExtraArgs, p.Compact = clean(in.ExtraArgs), in.Compact
 	env := map[string]string{}
 	for k, v := range p.Env {
 		env[k] = v

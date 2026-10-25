@@ -5,24 +5,22 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
 )
 
 // GitHub refusing requests must cost the agent one line, not the turn.
 func TestTurnStartsWithOneLineWhenGitHubIsLimited(t *testing.T) {
-	installFakeCLI(t, "notice-worker", `#!/bin/sh
-/bin/cat
-`)
+
 	original := prepareRoomGitHub
 	t.Cleanup(func() { prepareRoomGitHub = original })
 	prepareRoomGitHub = func(context.Context, profile.Profile) (map[string]string, string, error) {
 		return map[string]string{"GH_TOKEN": ""}, "GitHub is rate limited until 2026-10-23T15:00:00Z, so GitHub commands may fail this turn; continue without them.", nil
 	}
-	p := profile.Profile{
-		Name: "notice", Harness: profile.HarnessCustom, Command: []string{"notice-worker"},
-		Env: map[string]string{mode.EnvRoomID: "any-room"},
-	}
+	p := fakeworker.InstallClaude(t, `printf '%s' "$DYNA_FAKE_PROMPT"`)
+	p.Name = "notice"
+	p.Env = mergedEnv(p.Env, map[string]string{mode.EnvRoomID: "any-room"})
 	result, err := RunSessionTurn(context.Background(), p, "repair the parser", t.TempDir(), true,
 		JournalOptions{}, SteeringOptions{}, SessionOptions{})
 	if err != nil {

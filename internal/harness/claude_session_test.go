@@ -170,7 +170,7 @@ func claudeHostedTestSetup(t *testing.T) *claudeFakeHost {
 func claudeHostedTurn(ctx context.Context, t *testing.T, dir, prompt string, steering *steeringSupervisor, liveLine func(string)) <-chan attempt {
 	t.Helper()
 	spec := commandSpec{prompt: prompt, streamInput: true, argv: []string{"/bin/sh", "-c", "exit 0"}}
-	p := profile.Profile{Harness: profile.HarnessCustom, Model: "haiku"}
+	p := profile.Profile{Harness: profile.HarnessMock, Model: "haiku"}
 	execution := ExecutionOptions{SkipComputer: true, SessionKey: "claude-hosted-test"}
 	done := make(chan attempt, 1)
 	// The engine's tracker learns the id dyna itself passed (--session-id); a
@@ -374,7 +374,7 @@ func TestClaudeHostedHardCancelStopsChildImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	dir := t.TempDir()
-	p := profile.Profile{Harness: profile.HarnessCustom, Model: "haiku"}
+	p := profile.Profile{Harness: profile.HarnessMock, Model: "haiku"}
 	spec := commandSpec{prompt: "hold turn", streamInput: true, argv: []string{"/bin/sh", "-c", "exit 0"}}
 	done := make(chan attempt, 1)
 	go func() {
