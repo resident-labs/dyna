@@ -60,6 +60,12 @@ test('each section shows its moved controls in one shared layout', async () => {
     assert.equal((general.match(/role="switch" aria-checked="true"/g) || []).length, 2)
     // No pause state yet: the switch waits for the host.
     assert.match(show('general'), /aria-label="Pause agents" disabled/)
+    const root = show('general', {
+      room: { ...room, rootProfile: 'chosen' },
+      profiles: [{ name: 'chosen', harness: 'mock' }, { name: 'opus', harness: 'claude-code' }],
+    })
+    assert.match(root, /aria-label="Root profile"/)
+    assert.match(text(root), /Root profile .*Global default .*chosen .*opus/)
 
     const review = text(show('review', { reviewer: { enabled: true } }))
     assert.match(review, /Review &amp; landing .*Automatic review Review new PRs .*Reviewer sessions .*Restart reviewer/)

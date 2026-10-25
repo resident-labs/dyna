@@ -736,6 +736,8 @@
     api.profiles().then((p: ProfileChoice[] | null) => (profiles = p ?? [])).catch(() => {})
   }
 
+  $effect(() => { if (showRoomSettings) untrack(loadProfiles) })
+
   const workflowData = createWorkflowData(api, {
     current: () => ({ room: roomId, visit: roomRequest, id: openRun, running: view === 'runs' && !!openRun && runDetail?.run?.status === 'running', visible: document.visibilityState === 'visible' }),
     list: (value) => { runs = value; runsError = '' },
@@ -1910,7 +1912,7 @@
 {#if showRoomSettings && room}
   {#key roomSettingsKey}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} start={roomSettingsAt.start} hookRun={roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { showRoomSettings = false; openSettings('hooks') }} onclose={() => (showRoomSettings = false)} />
+  <RoomSettings {room} {profiles} start={roomSettingsAt.start} hookRun={roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { showRoomSettings = false; openSettings('hooks') }} onclose={() => (showRoomSettings = false)} />
   {/key}
 {/if}
 {#if roomMenu}

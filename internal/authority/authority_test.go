@@ -99,6 +99,7 @@ func TestRoleLimits(t *testing.T) {
 		{"ask", []Role{Root}},
 		{"ask withdraw", []Role{Root, Session, Worker}},
 		{"room create", []Role{Owner, Root}},
+		{"room edit", []Role{Owner, Root}},
 		{"room delete", []Role{Owner, Root}},
 		{"room watch", []Role{Owner}},
 		{"root attach", []Role{Owner}},

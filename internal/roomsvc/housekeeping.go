@@ -16,6 +16,19 @@ func (s *Service) UnarchiveRoom(ref string) error      { return s.rooms().SetArc
 func (s *Service) RenameRoom(ref, name string) error   { return s.rooms().Rename(ref, name) }
 func (s *Service) PinRoom(ref string, order int) error { return s.rooms().SetPinned(ref, true, order) }
 func (s *Service) UnpinRoom(ref string) error          { return s.rooms().SetPinned(ref, false, 0) }
+func (s *Service) SetRoomRootProfile(ctx context.Context, ref, name string) error {
+	if err := authority.Check("room edit", authority.Of(ctx), nil); err != nil {
+		return err
+	}
+	rec, err := s.rooms().Resolve(ref)
+	if err != nil {
+		return err
+	}
+	if _, err := authority.ActorIn(ctx, rec.ID); err != nil {
+		return err
+	}
+	return s.rooms().SetRootProfile(ref, name)
+}
 
 // DeleteRoom refuses deletion while open sessions or live work pin the room.
 // Closed session records remain readable after the room is deleted.
