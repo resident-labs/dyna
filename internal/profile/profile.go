@@ -202,7 +202,7 @@ func (p *Profile) Validate() error {
 		}
 	}
 	if !ok {
-		return fmt.Errorf("unknown harness %q (valid: %s)", p.Harness, strings.Join(Harnesses, ", "))
+		return fmt.Errorf("unknown harness %q: set the profile's harness to one of %s, or remove the profile", p.Harness, strings.Join(Harnesses, ", "))
 	}
 	for _, v := range []struct {
 		n string
