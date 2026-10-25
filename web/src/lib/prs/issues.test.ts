@@ -174,13 +174,13 @@ test('Issues never loads PR merge status, on mount or focus', async () => {
 const localIssue: RoomIssue = { id: 'msg_local', number: 12, title: 'Local issue', state: 'open', file: 'web/Example.svelte', line: 12, filer: 'builder', filedAt: 100 }
 
 test('issue work uses local goal and PR progress plus GitHub work facts', () => {
-  const active = { ...localIssue, state: 'goal', goalId: 'g1', inProgress: true, goalHolder: 'ana', fixPr: 42 }
+  const active = { ...localIssue, state: 'goal', goalId: 'g1', inProgress: true, goalHolder: 'ana', fixPr: 42 } satisfies RoomIssue
   const activeRow = need(unifiedIssues([], [active], 'dyna', 'open', '')[0])
   assert.equal(activeRow.state, 'OPEN')
   assert.equal(issueWork(activeRow), 'in-progress')
   const finished = { ...active, inProgress: false, fixPr: undefined }
   assert.equal(issueWork(need(unifiedIssues([], [finished], 'dyna', 'open', '')[0])), 'unhandled')
-  assert.equal(issueWork(need(unifiedIssues([], [{ ...localIssue, state: 'closed' }], 'dyna', 'all', '')[0])), 'other')
+  assert.equal(issueWork(need(unifiedIssues([], [{ ...localIssue, state: 'closed' } satisfies RoomIssue], 'dyna', 'all', '')[0])), 'other')
   assert.equal(issueWork(issue(1, 'working')), 'in-progress')
   assert.equal(issueWork(issue(2, 'has-pr')), 'in-progress')
   assert.equal(issueWork(issue(3, 'needs-owner')), 'unhandled')
@@ -204,11 +204,11 @@ test('Issues default to Unhandled and In progress names the goal holder and PR',
 
 test('unified issues deduplicate exports by repository URL and preserve local rows without GitHub', () => {
   const remote = issue(20, 'needs-owner')
-  const exported = { ...localIssue, id: 'export', state: 'exported', githubUrl: remote.url + '/' }
+  const exported = { ...localIssue, id: 'export', state: 'exported', githubUrl: remote.url + '/' } satisfies RoomIssue
   const rows = unifiedIssues([remote, issue(2, '')], [localIssue, exported], 'all', 'all', '')
   assert.deepEqual(rows.map(i => i.number || i.local?.id), [20, 'msg_local', 2])
   assert.equal(rows[0]?.local?.id, 'export')
-  assert.equal(unifiedIssues([], [localIssue, { ...localIssue, state: 'closed' }], 'all', 'all', '').length, 1)
+  assert.equal(unifiedIssues([], [localIssue, { ...localIssue, state: 'closed' } satisfies RoomIssue], 'all', 'all', '').length, 1)
   assert.equal(unifiedIssues([], [localIssue, exported], 'dyna', 'all', '').length, 2)
   assert.deepEqual(unifiedIssues([], [localIssue], 'dyna', 'open', 'example.svelte').map(i => i.local?.id), ['msg_local'])
 })
@@ -285,7 +285,7 @@ test('an issue row keeps one compact action group and puts the rest in its menu'
 
 test('an unresolved export is history, not a closed GitHub issue', () => {
   const remote = issue(20, 'needs-owner')
-  const exported = { ...localIssue, state: 'exported', githubUrl: remote.url }
+  const exported = { ...localIssue, state: 'exported', githubUrl: remote.url } satisfies RoomIssue
   assert.deepEqual(unifiedIssues([], [exported], 'all', 'closed', ''), [])
   assert.deepEqual(unifiedIssues([], [exported], 'all', 'open', ''), [])
   const history = unifiedIssues([], [exported], 'all', 'all', '')

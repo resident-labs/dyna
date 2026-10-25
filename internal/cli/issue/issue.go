@@ -54,11 +54,11 @@ func Command(o Options) *cobra.Command {
 		}
 		action, link := i.State, ""
 		switch i.State {
-		case "open":
+		case room.IssueStateOpen:
 			action = "filed"
-		case "goal":
+		case room.IssueStateGoal:
 			link = i.GoalID
-		case "exported":
+		case room.IssueStateExported:
 			link = i.GitHubURL
 		}
 		suffix := ""
