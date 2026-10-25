@@ -80,7 +80,7 @@ function dismiss() {
 function forceCloseLines(responsibilities: Responsibility[], detail?: string): string[] {
   const lines = detail ? [detail] : []
   lines.push(...responsibilities.map((item) => item.text))
-  lines.push('Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.')
+  lines.push('Retry after fixing the error, or close anyway. The work above stays unresolved.')
   return lines
 }
 
@@ -122,16 +122,22 @@ let confirmText = $derived.by((): ConfirmText | null => {
       action: 'Stop turn',
     }
   }
-  const lines = ['The session closes, and its name becomes free.', 'PR authorship moves to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
-  lines.push('A held goal goes up with the work, but root cannot hold a goal. A goal with only root or the owner above it stops the close.')
-  lines.push('“Close and move goals” closes anyway and gives those goals to the owner. Other unfinished work then stays unresolved.')
-  if (m.state === 'live') lines.push('Its running turn stops first.')
-  const hasChildren = confirmHost.members().some((child) => !child.closed && child.parent === m.id)
-  if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move to its nearest open ancestor and keep running.')
-  return { title: `Close ${m.name}?`, lines, action: 'Close session', alternative: 'Close and move goals', onalternative: () => runConfirm(true) }
+  return closeConfirm(m, confirmHost.members().some((child) => !child.closed && child.parent === m.id))
 })
 
-async function runConfirm(force = false) {
+// closeConfirm is the close dialog: the one action the server takes for a
+// close, and what that close does with the session's work. It offers no goal
+// handoff to the owner: root and the owner hold no goals, so a close refuses a
+// goal that no open agent can take and names the commands that resolve it.
+function closeConfirm(m: Member, hasChildren: boolean): ConfirmText {
+  const lines = ['The session closes, and its name becomes free.', 'PR authorship moves to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
+  lines.push('A held goal moves to its nearest open agent. Root and the owner hold no goals, so a goal with no such agent stops the close: hand it to an open session, or finish or drop it first.')
+  if (m.state === 'live') lines.push('Its running turn stops first.')
+  if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move to its nearest open ancestor and keep running.')
+  return { title: `Close ${m.name}?`, lines, action: 'Close session' }
+}
+
+async function runConfirm() {
   const request = confirm
   if (!request) return
   const { kind } = request
@@ -165,7 +171,7 @@ async function runConfirm(force = false) {
     if (kind === 'stop') await api.stopSession(roomId, m.id)
     else if (kind === 'promote') await api.promoteSession(roomId, m.id)
     else {
-      const result = await api.closeSession(roomId, m.id, force || kind === 'forceclose')
+      const result = await api.closeSession(roomId, m.id, kind === 'forceclose')
       confirmHost.closed(m.name, result?.closeSummary ?? [])
     }
     confirm = null
