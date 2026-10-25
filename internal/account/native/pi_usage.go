@@ -355,6 +355,15 @@ func zaiUsageObservation(raw []byte, now time.Time) (store.Observation, error) {
 	return observation, nil
 }
 
+// piEntryExpiry reads the access-token expiry of a Pi provider entry, which Pi
+// writes in milliseconds. An entry without one keeps no expiry.
+func piEntryExpiry(entry piAuthEntry) time.Time {
+	if entry.Expires <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(entry.Expires).UTC()
+}
+
 // piAccountEntry returns the provider ID and entry of a saved Pi account.
 func piAccountEntry(c store.Credential) (string, piAuthEntry, error) {
 	if c.Schema != piNativeFilesSchema {
@@ -374,11 +383,3 @@ func piAccountEntry(c store.Credential) (string, piAuthEntry, error) {
 	return "", piAuthEntry{}, ErrSchema
 }
 
-// piEntryExpiry reads the access-token expiry of a Pi provider entry, which Pi
-// writes in milliseconds. An entry without one keeps no expiry.
-func piEntryExpiry(entry piAuthEntry) time.Time {
-	if entry.Expires <= 0 {
-		return time.Time{}
-	}
-	return time.UnixMilli(entry.Expires).UTC()
-}

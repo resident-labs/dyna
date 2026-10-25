@@ -582,6 +582,10 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 	result.ContextTokens, result.CompactError = state.compactValues()
 	if err != nil {
 		result.UsageNormalization.MarkPartial("invocation did not complete")
+		// A failed turn cannot prove what the provider billed, so the saved
+		// checkpoint must not survive it: the next turn would subtract it and
+		// report the missing spend as its own, complete.
+		result.UsageBaseline = nil
 	}
 	// Stop the progress writer before publishing the completed observation, so
 	// a late progress write cannot replace the final health result.
