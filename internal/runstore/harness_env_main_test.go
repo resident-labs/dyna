@@ -8,7 +8,7 @@ import (
 )
 
 // TestMain keeps tests hermetic when they run inside an agent harness: the
-// caller's Codex thread or Claude Code session would otherwise be recorded as
+// caller's Claude Code session would otherwise be recorded as
 // the owner of every run and session the tests create.
 func TestMain(m *testing.M) {
 	os.Setenv("DYNA_COMPUTERS_ENABLED", "0")
@@ -19,7 +19,6 @@ func TestMain(m *testing.M) {
 	for _, key := range []string{"DYNA_AGENT_JOURNAL", "DYNA_AGENT_JOURNAL_ROOT"} {
 		os.Unsetenv(key)
 	}
-	os.Unsetenv("CODEX_THREAD_ID")
 	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
 	os.Unsetenv("MUSE_SESSION_ID")
 	os.Exit(m.Run())

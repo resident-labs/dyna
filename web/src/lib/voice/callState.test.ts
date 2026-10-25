@@ -76,7 +76,7 @@ test('controls carry over to the next call', () => {
 })
 
 test('the header offers a call only when voice is set up', () => {
-  // Without a Codex account, or before the status
+  // Without a ChatGPT account, or before the status
   // arrives, the header shows nothing new.
   assert.equal(offerCall(initial, 'r1'), '')
   assert.equal(offerCall(run({ type: 'status', available: false }), 'r1'), '')

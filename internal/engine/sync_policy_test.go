@@ -32,9 +32,9 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 		args []json.RawMessage
 	}
 	cases := []syncCall{
-		{"SyncCatalogAccount", cliArgs(t, "mcp", "codex", "selected")},
-		{"SyncCatalogAccount", cliArgs(t, "skill", "codex", "selected")},
-		{"SyncPrivateRuntime", cliArgs(t, "codex")},
+		{"SyncCatalogAccount", cliArgs(t, "mcp", "pi", "selected")},
+		{"SyncCatalogAccount", cliArgs(t, "skill", "pi", "selected")},
+		{"SyncPrivateRuntime", cliArgs(t, "pi")},
 	}
 	check := func(ctx context.Context, allowed bool) {
 		t.Helper()
@@ -71,10 +71,10 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 	check(claimed, false)
 	// Browser owner calls still work remotely; the new account call stays local.
 	paired := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	if _, err := calls["SyncPrivateRuntime"](paired, cliArgs(t, "codex")); err == nil || !strings.Contains(err.Error(), "invalid character") {
+	if _, err := calls["SyncPrivateRuntime"](paired, cliArgs(t, "pi")); err == nil || !strings.Contains(err.Error(), "invalid character") {
 		t.Errorf("browser locality changed: %v", err)
 	}
-	if _, err := calls["SyncCatalogAccount"](paired, cliArgs(t, "mcp", "codex", "selected")); err == nil || !strings.Contains(err.Error(), "only through the local engine socket") {
+	if _, err := calls["SyncCatalogAccount"](paired, cliArgs(t, "mcp", "pi", "selected")); err == nil || !strings.Contains(err.Error(), "only through the local engine socket") {
 		t.Errorf("account sync accepted remote owner: %v", err)
 	}
 }

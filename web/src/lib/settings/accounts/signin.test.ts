@@ -17,7 +17,7 @@ test('a saved sign-in is recovered for the account that asked for it', () => {
 
 test('a provider names its native harness and its OpenCode key', () => {
   assert.equal(nativeHarness('anthropic'), 'claude-code')
-  assert.equal(nativeHarness('chatgpt'), 'codex')
+  assert.equal(nativeHarness('chatgpt'), '', 'Pi alone signs in to ChatGPT')
   assert.equal(nativeHarness('opencode-go'), 'opencode')
   assert.equal(nativeHarness('meta-muse'), 'muse')
   assert.equal(nativeHarness('deepseek'), '', 'Pi alone signs in to DeepSeek')
@@ -27,17 +27,17 @@ test('a provider names its native harness and its OpenCode key', () => {
 
 test('a sign-in uses the installed or recommended copy of its harness', () => {
   const snapshot: HarnessSnapshot = {
-    bundles: [{ harness: 'codex', version: '0.163.0', executable: '', directory: '' }],
+    bundles: [{ harness: 'pi', version: '0.163.0', executable: '', directory: '' }],
     accounts: [],
     profiles: [],
     installing: [],
     selectedVersions: {},
-    recommendedVersions: [{ harness: 'codex', version: '0.164.0', status: 'resolved', source: 'npm' }],
+    recommendedVersions: [{ harness: 'pi', version: '0.164.0', status: 'resolved', source: 'npm' }],
     capabilities: [{ harness: 'muse', status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: true }],
   }
-  assert.equal(harnessPin(snapshot, 'codex'), '0.163.0', 'an installed copy wins')
-  assert.equal(harnessPin({ ...snapshot, bundles: [] }, 'codex'), '0.164.0', 'the recommendation is the next choice')
-  assert.equal(harnessPin(null, 'codex'), '')
+  assert.equal(harnessPin(snapshot, 'pi'), '0.163.0', 'an installed copy wins')
+  assert.equal(harnessPin({ ...snapshot, bundles: [] }, 'pi'), '0.164.0', 'the recommendation is the next choice')
+  assert.equal(harnessPin(null, 'pi'), '')
   assert.equal(sharedLogin(snapshot, 'muse'), true)
-  assert.equal(sharedLogin(snapshot, 'codex'), false)
+  assert.equal(sharedLogin(snapshot, 'pi'), false)
 })

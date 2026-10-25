@@ -27,20 +27,20 @@ test('a block lasts until its last exhausted window resets', () => {
     { id: 'seven_day', used: 10, limit: 10, resetsAt: '2026-10-20T15:00:00Z' },
     { id: 'other', usedPercent: 100, resetsAt: '2026-10-20T18:00:00Z' },
   ]
-  const block = quotaBlock(windows, 'codex', now)
+  const block = quotaBlock(windows, 'pi', now)
   assert.deepEqual(block?.ids, ['five_hour', 'seven_day'], 'only the windows that stop the account count')
   assert.equal(block?.until, Date.parse('2026-10-20T15:00:00Z'))
-  assert.equal(quotaBlock(windows, 'codex', Date.parse('2026-10-20T15:00:00Z')), null, 'a reset exactly at the deadline frees the account')
-  assert.equal(blockUntil({ windows, harness: 'codex' }, now), Date.parse('2026-10-20T15:00:00Z'))
-  assert.equal(blockUntil({ windows, harness: 'codex' }, Date.parse('2026-10-20T16:00:00Z')), Number.NaN, 'a deadline behind the clock asks for no wake')
+  assert.equal(quotaBlock(windows, 'pi', Date.parse('2026-10-20T15:00:00Z')), null, 'a reset exactly at the deadline frees the account')
+  assert.equal(blockUntil({ windows, harness: 'pi' }, now), Date.parse('2026-10-20T15:00:00Z'))
+  assert.equal(blockUntil({ windows, harness: 'pi' }, Date.parse('2026-10-20T16:00:00Z')), Number.NaN, 'a deadline behind the clock asks for no wake')
 })
 
 test('a partly used window or an unknown reset never blocks', () => {
-  assert.equal(quotaBlock([{ id: 'five_hour', usedPercent: 40, resetsAt: '2026-10-20T15:00:00Z' }], 'codex', now), null)
-  assert.equal(quotaBlock([{ id: 'five_hour', usedPercent: 100 }], 'codex', now), null)
-  assert.equal(quotaBlock([{ id: 'five_hour', usedPercent: 100, resetsAt: 'invalid' }], 'codex', now), null)
-  assert.equal(quotaBlock([], 'codex', now), null)
-  assert.equal(quotaBlock(undefined, 'codex', now), null)
+  assert.equal(quotaBlock([{ id: 'five_hour', usedPercent: 40, resetsAt: '2026-10-20T15:00:00Z' }], 'pi', now), null)
+  assert.equal(quotaBlock([{ id: 'five_hour', usedPercent: 100 }], 'pi', now), null)
+  assert.equal(quotaBlock([{ id: 'five_hour', usedPercent: 100, resetsAt: 'invalid' }], 'pi', now), null)
+  assert.equal(quotaBlock([], 'pi', now), null)
+  assert.equal(quotaBlock(undefined, 'pi', now), null)
   assert.equal(Number.isNaN(blockUntil({ windows: [] })), true, 'no deadline means no wake')
 })
 

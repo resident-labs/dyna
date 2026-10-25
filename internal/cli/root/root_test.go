@@ -317,8 +317,8 @@ func TestSeatChangesPostOneNoticeEach(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
-		{"attach", "--room", "alpha", "--harness", "codex"},
-		{"attach", "--room", "alpha", "--harness", "codex"},
+		{"attach", "--room", "alpha", "--harness", "pi"},
+		{"attach", "--room", "alpha", "--harness", "pi"},
 		{"detach", "--room", "alpha"},
 	} {
 		if _, err := run(t, svc, "", args...); err != nil {
@@ -332,7 +332,7 @@ func TestSeatChangesPostOneNoticeEach(t *testing.T) {
 	if len(posts) != 2 {
 		t.Fatalf("got %d posts, want two seat notices: %+v", len(posts), posts)
 	}
-	for i, want := range []string{"codex (external) took the root seat", "Internal root took back the seat"} {
+	for i, want := range []string{"pi (external) took the root seat", "Internal root took back the seat"} {
 		p := posts[i]
 		payload, ok := p.Session()
 		if p.From != "dyna" || !ok || payload.Seat != want || p.Wake || !p.Addressed("alpha:root") || !p.Addressed("alpha") || !strings.HasPrefix(p.Text, want) {
@@ -422,7 +422,7 @@ func TestAttachPreservesLargeHandoffs(t *testing.T) {
 				}
 				return nil
 			}
-			out, err := run(t, svc, "", "attach", "--room", "alpha", "--harness", "codex")
+			out, err := run(t, svc, "", "attach", "--room", "alpha", "--harness", "pi")
 			if err != nil {
 				t.Fatalf("attach failed for a large handoff: %v", err)
 			}
@@ -496,13 +496,13 @@ func TestSeatCommandsCallTheEngine(t *testing.T) {
 	if err := os.WriteFile(note, []byte("PR 12 waits for CI."), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"attach", "--room", "alpha", "--harness", "codex"}, {"detach", "--room", "alpha", "--handoff", note}} {
+	for _, args := range [][]string{{"attach", "--room", "alpha", "--harness", "pi"}, {"detach", "--room", "alpha", "--handoff", note}} {
 		if out, err := run(t, svc, "", args...); err != nil {
 			t.Fatalf("%v: %v: %s", args, err, out)
 		}
 	}
-	if a, r := got["AttachSeat"], got["ReturnSeat"]; len(a) != 2 || a[0] != rec.ID || a[1] != "codex" || len(r) != 2 || r[0] != rec.ID || r[1] != "PR 12 waits for CI." {
-		t.Fatalf("calls = %q; want AttachSeat [room codex] and ReturnSeat [room note]", got)
+	if a, r := got["AttachSeat"], got["ReturnSeat"]; len(a) != 2 || a[0] != rec.ID || a[1] != "pi" || len(r) != 2 || r[0] != rec.ID || r[1] != "PR 12 waits for CI." {
+		t.Fatalf("calls = %q; want AttachSeat [room pi] and ReturnSeat [room note]", got)
 	}
 	if cur, err := svc.Rooms.Resolve(rec.ID); err != nil || cur.Seat.External || !cur.Seat.Since.IsZero() {
 		t.Fatalf("the CLI changed the seat itself: %+v, %v", cur.Seat, err)

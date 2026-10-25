@@ -44,11 +44,11 @@ func testSyncEnginePower(t *testing.T, role authority.Role) {
 	isolateCatalog(t)
 	t.Setenv("DYNA_BIN", "/fake/dyna")
 	_, called, r := serveSyncEngine(t, authority.Actor{Role: role, Session: "session", Run: "wf_test"})
-	account, err := r.Accounts.Create("codex", "metadata only")
+	account, err := r.Accounts.Create("pi", "metadata only")
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, err := r.Accounts.HarnessHome("codex")
+	home, err := r.Accounts.HarnessHome("pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func testSyncEnginePower(t *testing.T, role authority.Role) {
 			ctx = authority.WithActor(ctx, authority.Actor{Role: authority.Owner})
 		}
 		// The session case has cleared stamps and no actor in the CLI context.
-		out, err := runCatalog(ctx, kind, []string{"sync", "--harness", "codex", "--account", account.ID})
+		out, err := runCatalog(ctx, kind, []string{"sync", "--harness", "pi", "--account", account.ID})
 		if allowed {
 			var result harnessruntime.ConfigSyncResult
 			if err != nil {
@@ -116,7 +116,7 @@ func TestSyncEngineFailureHasNoLocalFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"mcp", "skill"} {
-		out, err := runCatalog(t.Context(), kind, []string{"sync", "--harness", "codex", "--account", "selected"})
+		out, err := runCatalog(t.Context(), kind, []string{"sync", "--harness", "pi", "--account", "selected"})
 		if !errors.Is(err, engineclient.ErrNotRunning) || out != "" {
 			t.Errorf("sync engine cause = %v, output = %q", err, out)
 		}

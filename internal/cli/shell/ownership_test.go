@@ -16,7 +16,7 @@ import (
 
 func TestStopChecksShellOwner(t *testing.T) {
 	storetest.Isolate(t)
-	for _, key := range []string{"CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
+	for _, key := range []string{"CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
 	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "work"})
