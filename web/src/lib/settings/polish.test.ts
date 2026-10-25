@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs'
 
 const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8')
 // The Harnesses pane and the section components that now hold its markup.
-const harnessSections = (): string => ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallControls', 'AccountsSection', 'ProvidersSection', 'SettingsImportSection', 'HarnessToolsSection', 'ToolsTab'].map((f) => read(`./harnesses/${f}.svelte`)).join('\n')
+const harnessSections = (): string => ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallControls', 'SettingsImportSection', 'HarnessToolsSection', 'ToolsTab'].map((f) => read(`./harnesses/${f}.svelte`)).join('\n')
 
 test('every settings loading line with an unknown layout is the shared muted Loading element', () => {
-  const files = ['ProfileModal', 'ProfileWizard', 'harnesses/HarnessesPane', 'usage/UsagePane', 'usage/LocalActivity']
+  const files = ['ProfileModal', 'ProfileWizard', 'harnesses/HarnessesPane', 'accounts/AccountsPane', 'accounts/LocalActivity']
   for (const f of files) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<Loading\b/, f)
@@ -20,7 +20,7 @@ test('every settings loading line with an unknown layout is the shared muted Loa
 })
 
 test('empty lists in the settings panes use EmptyState', () => {
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'usage/UsagePane', 'usage/ActivityReport']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'accounts/AccountsPane', 'accounts/ActivityReport']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<EmptyState\b/, f)
     assert.doesNotMatch(text, /class="empty"/, f)
@@ -31,7 +31,7 @@ test('empty lists in the settings panes use EmptyState', () => {
 })
 
 test('Usage tabs use the shared filter-chip look', () => {
-  const text = read('./usage/UsagePane.svelte')
+  const text = read('./accounts/AccountsPane.svelte')
   const css = text.slice(text.indexOf('<style>'))
   const tabs = css.split('\n').filter((l) => l.includes('.tabs'))
   assert.ok(tabs.some((l) => l.includes('var(--select)')))
@@ -47,7 +47,7 @@ test('the phone settings menu is two rows of four', () => {
 
 test('the settings browser fixture mocks every api call each pane makes', () => {
   const fixture = read('../../../tests/settings.ts')
-  for (const f of ['ProfilesPane', 'usage/UsagePane', 'SettingsPane', 'DevicesPane']) {
+  for (const f of ['ProfilesPane', 'accounts/AccountsPane', 'SettingsPane', 'DevicesPane']) {
     const calls = new Set([...read(`./${f}.svelte`).matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1] ?? ''))
     for (const name of calls) assert.ok(fixture.includes(`api.${name} = `), `${f}: api.${name}`)
   }
@@ -55,7 +55,7 @@ test('the settings browser fixture mocks every api call each pane makes', () => 
 })
 
 test('every settings pane uses the shared TabHeader without its own h1', () => {
-  for (const f of ['ProfilesPane', 'harnesses/HarnessesPane', 'usage/UsagePane', 'SettingsPane', 'DevicesPane', 'Settings']) {
+  for (const f of ['ProfilesPane', 'harnesses/HarnessesPane', 'accounts/AccountsPane', 'SettingsPane', 'DevicesPane', 'Settings']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<TabHeader\b[^>]*\bflush\b/, f)
     assert.doesNotMatch(text, /<h1\b/, f)
@@ -87,7 +87,7 @@ test('settings buttons use the one global .btn', () => {
   const css = read('../../app.css')
   assert.match(css, /\.btn \{[^}]*min-height: 30px/)
   for (const v of ['pri', 'quiet', 'danger', 'fill']) assert.match(css, new RegExp(`\\.btn\\.${v} \\{`), v)
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'HookForm', 'harnesses/HarnessesPane', 'harnesses/ToolEditor', 'usage/UsagePane']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'HookForm', 'harnesses/HarnessesPane', 'harnesses/ToolEditor', 'accounts/AccountsPane']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /class="btn\b/, f)
     const style = text.slice(text.indexOf('<style>'))
@@ -97,7 +97,7 @@ test('settings buttons use the one global .btn', () => {
   // A filled button keeps dark text, so pressing it must not turn the background dark.
   assert.match(css, /\.btn\.fill:active \{ background: var\(--iris-hover\)/)
   // Refresh keeps its 44 px touch height.
-  assert.match(read('./usage/UsagePane.svelte'), /pointer: coarse\) \{ \.btn, /)
+  assert.match(read('./accounts/AccountsPane.svelte'), /pointer: coarse\) \{ \.btn, /)
 })
 
 test('Harnesses uses the shared Switch, which keeps its size on phones', () => {

@@ -91,6 +91,9 @@ export interface PrivateLogin {
   accountId: string
   // Set when the sign-in has no account of its own, such as a Pi provider sign-in.
   harness?: string
+  // Set by a sign-in again of an account with no card of its own: the saved
+  // account whose provider must take the new credential.
+  target?: string
   warning?: string
   signIn?: SignInState
 }
