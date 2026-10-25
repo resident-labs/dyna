@@ -99,9 +99,9 @@ type ItemChange struct {
 }
 
 // SetItemState marks an item done, dropped or open again. Setting the state
-// an item already has changes nothing. Closing the goal's last open item is
-// found inside this call's transaction, so exactly one of two concurrent
-// closes reports it.
+// an item already has changes nothing, and changing one closed state to
+// another closes nothing. Closing the goal's last open item is found inside
+// this call's transaction, so exactly one of two concurrent closes reports it.
 func (s *Store) SetItemState(room, goal, item, by, state string) (ItemChange, error) {
 	var out ItemChange
 	if state != ItemOpen && state != ItemDone && state != ItemDropped {
@@ -126,12 +126,15 @@ func (s *Store) SetItemState(room, goal, item, by, state string) (ItemChange, er
 			return nil
 		}
 		now := s.now()
+		// Only an item that was open closes the goal's checklist. Correcting a
+		// closed item from done to dropped describes the same completion.
+		wasOpen := it.State == ItemOpen
 		it.State, it.UpdatedAt = state, now
 		if err := writeItem(w.conn, room, goal, it); err != nil {
 			return err
 		}
 		g.UpdatedAt = now
-		if state != ItemOpen {
+		if wasOpen && state != ItemOpen {
 			open, err := openItems(w.conn, room, goal)
 			if err != nil {
 				return err
