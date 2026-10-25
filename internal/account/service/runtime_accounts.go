@@ -9,22 +9,28 @@ import (
 	"time"
 
 	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/harness/runtime"
 )
 
 // nativeHomeAccounts reads the same private native homes as the launcher. It
 // never changes the owner's own sign-in. A storage error comes back with the
-// rows that could be read.
-func (s *Service) nativeHomeAccounts(ctx context.Context, explicitRefresh bool) ([]Account, error) {
+// rows that could be read, and a saved row it could not read comes back as a
+// problem about that row only.
+func (s *Service) nativeHomeAccounts(ctx context.Context, explicitRefresh bool) ([]Account, []runtime.AccountProblem, error) {
 	out := []Account{}
 	if s.o.Store == nil {
-		return out, nil
+		return out, []runtime.AccountProblem{}, nil
 	}
 	accounts := &runtime.Accounts{Root: s.o.Store.Root}
-	rows, err := accounts.List()
+	rows, problems, err := accounts.ListWithProblems()
 	if err != nil {
-		return out, err
+		return out, problems, err
+	}
+	rules := reposcope.Rules{}
+	if scopes, scopeErr := reposcope.Open(filepath.Dir(s.o.Store.Root)); scopeErr == nil {
+		rules, _ = scopes.Rules()
 	}
 	bundles := &runtime.BundleManager{Root: filepath.Join(filepath.Dir(s.o.Store.Root), "harnesses")}
 	state, _ := s.o.Store.Read()
@@ -34,7 +40,7 @@ func (s *Service) nativeHomeAccounts(ctx context.Context, explicitRefresh bool) 
 	}
 	var saveErr error
 	for _, n := range rows {
-		a := Account{Active: n.Active, ID: n.ID, Harness: n.Harness, Label: n.Label, Status: n.Status, Source: "Dyna private native account", ObservedAt: time.Now().UTC(), Profiles: []string{}, Windows: []Window{}}
+		a := Account{Active: n.Active, ID: n.ID, Harness: n.Harness, Provider: n.Provider, Kind: n.Kind, Label: n.Label, Status: n.Status, Source: "Dyna private native account", ObservedAt: time.Now().UTC(), Profiles: []string{}, Windows: []Window{}, Repos: append([]string{}, rules[n.ID]...)}
 		a.NeedsLogin = n.Status == "not signed in"
 		if entry, ok := saved[n.ID]; ok {
 			applySavedObservation(&a, entry, s.o.Now())
@@ -105,7 +111,7 @@ func (s *Service) nativeHomeAccounts(ctx context.Context, explicitRefresh bool) 
 		}
 		out = append(out, a)
 	}
-	return out, saveErr
+	return out, problems, saveErr
 }
 
 // Credential checks wake at each login's refresh time instead of every
