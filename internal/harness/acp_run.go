@@ -327,6 +327,10 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 	}
 	state.beginProcess()
 	accumulator.Reset()
+	var kimiJournal kimiPromptJournal
+	if p.Harness == profile.HarnessKimiCode {
+		kimiJournal = newKimiPromptJournal(p.Env["KIMI_CODE_HOME"], s.session)
+	}
 
 	promptDone := make(chan acpPromptState, 4)
 	inFlight := 0
@@ -552,7 +556,19 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 			if finalStderr != "" {
 				stderr.line(finalStderr)
 			}
+			// Kimi flushes its native journal on session/close. Its prompt
+			// reply can arrive before the terminal record reaches disk.
+			var kimiCloseErr error
+			if p.Harness == profile.HarnessKimiCode {
+				kimiCloseErr = s.agent.CloseSession(ctx, s.session)
+			}
 			runErr := acpStopReasonError(p.Harness, st.res.StopReason)
+			if runErr == nil && p.Harness == profile.HarnessKimiCode {
+				runErr = kimiJournal.promptError()
+				if runErr == nil && kimiCloseErr != nil {
+					runErr = fmt.Errorf("kimi-code could not close the native turn: %w", kimiCloseErr)
+				}
+			}
 			if runErr == nil && s.antigravity {
 				runErr = antigravityACPPromptError(s.session, finalStderr)
 			}
@@ -607,6 +623,9 @@ func acpStopReasonError(harness, stopReason string) error {
 	case "cancelled":
 		return fmt.Errorf("%s turn stopped: cancelled", harness)
 	case "max_tokens", "max_turn_requests":
+		if harness == profile.HarnessKimiCode && stopReason == "max_turn_requests" {
+			return &kimiTurnError{Code: "loop.max_steps_exceeded"}
+		}
 		return fmt.Errorf("%s turn stopped: %s", harness, stopReason)
 	case "refusal":
 		return fmt.Errorf("%s refused the turn", harness)
