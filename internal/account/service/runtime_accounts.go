@@ -53,6 +53,12 @@ func (s *Service) nativeHomeAccounts(ctx context.Context, explicitRefresh bool) 
 			continue
 		}
 		b, err := bundles.Resolve(n.Harness, "")
+		if err != nil && !runtime.RunsAsHarness(n.Harness) {
+			// A saved file-based login of a retired harness still refreshes
+			// and reports usage; it needs no bundle or executable.
+			b = runtime.Bundle{Harness: n.Harness}
+			err = nil
+		}
 		if err != nil {
 			a.Status = "unavailable"
 			out = append(out, a)
@@ -144,6 +150,11 @@ func (s *Service) RefreshCredentials(ctx context.Context, now time.Time) time.Ti
 			return next
 		}
 		b, err := bundles.Resolve(n.Harness, "")
+		if err != nil && !runtime.RunsAsHarness(n.Harness) {
+			// A saved login of a retired harness still renews its own token.
+			b = runtime.Bundle{Harness: n.Harness}
+			err = nil
+		}
 		if err != nil {
 			continue
 		}

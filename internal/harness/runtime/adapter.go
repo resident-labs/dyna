@@ -112,6 +112,14 @@ func Adapter(h string) (RuntimeAdapter, error) {
 	return a, nil
 }
 
+// RunsAsHarness reports whether a turn can run h. A retired harness keeps only
+// its saved accounts and usage reader, so account reads must not require its
+// bundle or executable.
+func RunsAsHarness(h string) bool {
+	a, err := Adapter(h)
+	return err == nil && !a.AccountOnly
+}
+
 // RuntimeAdapters returns every registered harness adapter, sorted. Adapters
 // for retired harnesses are excluded: their accounts stay, their turns do not.
 func RuntimeAdapters() []RuntimeAdapter {
