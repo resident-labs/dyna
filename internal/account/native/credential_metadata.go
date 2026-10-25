@@ -41,6 +41,20 @@ func SupportsRefresh(m Manager, c Captured) bool {
 
 // CredentialUsesAPIKey reports a validated key login, including a key fallback.
 func CredentialUsesAPIKey(c Captured) bool {
+	if c.Credential.Schema == piFilesSchema {
+		_, entry, err := piProviderEntry(c.Credential)
+		if err != nil {
+			return false
+		}
+		var value struct {
+			Type string `json:"type"`
+			Key  string `json:"key"`
+		}
+		if json.Unmarshal(entry, &value) != nil {
+			return false
+		}
+		return value.Key != "" || value.Type == "api_key"
+	}
 	if c.Credential.Schema == openCodeRefSchema {
 		ref, err := openCodeUnpack(c.Credential)
 		return err == nil && c.Identity == "opencode:"+ref.Integration+":"+ref.CredentialID && c.Integration == ref.Integration && ref.CredentialType == "key"
