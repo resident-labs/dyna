@@ -99,7 +99,8 @@ type Service struct {
 	// Post is where a run's events go. Tests replace it; the default posts
 	// them through room.PostEvent.
 	Post func(Event, room.HookEvent) error
-	// Fetch refreshes origin/main; tests replace it with a local fake.
+	// Fetch refreshes the remote default branch; tests replace it with a
+	// local fake.
 	Fetch func(context.Context, string) error
 }
 

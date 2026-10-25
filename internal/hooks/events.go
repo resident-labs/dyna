@@ -94,10 +94,10 @@ func (s Service) dispatch(ctx context.Context, e Event, preparationErr error) er
 	return errors.Join(errs...)
 }
 
-// Tick uses persisted state to claim schedule intervals and origin/main changes
-// once across all maintenance processes. Main hooks refresh origin/main at most
-// once every five minutes, independently of tracked pull requests.
-// The first main observation establishes a baseline without emitting an event.
+// Tick uses persisted state to claim schedule intervals and default branch
+// changes once across all maintenance processes. Main hooks refresh the remote
+// default branch at most once every five minutes, independently of tracked pull
+// requests. The first observation establishes a baseline without an event.
 func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	hooks, err := s.List(ctx, repo)
 	if err != nil || len(hooks) == 0 {
@@ -122,26 +122,45 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 			break
 		}
 	}
+	// A default branch that cannot be resolved, such as a checkout without
+	// origin/HEAD and without a branch, has no movement to report. Its
+	// schedule hooks still run.
+	branch, branchErr := repoid.DefaultBranch(ctx, r.Root, repoid.Git)
 	var fetchErr error
-	if fetchDue {
+	if fetchDue && branchErr == nil {
 		fetch := s.Fetch
 		if fetch == nil {
 			fetch = func(ctx context.Context, repo string) error {
-				_, err := repoid.Git(ctx, repo, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "origin", "+refs/heads/main:refs/remotes/origin/main")
+				refspec := "+refs/heads/" + branch.Name + ":refs/remotes/origin/" + branch.Name
+				_, err := repoid.Git(ctx, repo, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "origin", refspec)
 				return err
 			}
 		}
 		fetchErr = fetch(ctx, r.Root)
 	}
-	main, _ := repoid.Git(ctx, r.Root, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
+	head := ""
+	if branchErr == nil {
+		// Prefer the remote-tracking ref, because the fetch just refreshed it
+		// and the local branch of the same name does not move with the remote.
+		refs := []string{"origin/" + branch.Name}
+		if branch.Ref != refs[0] {
+			refs = append(refs, branch.Ref)
+		}
+		for _, ref := range refs {
+			if sha, err := repoid.Git(ctx, r.Root, "rev-parse", "--verify", ref+"^{commit}"); err == nil {
+				head = sha
+				break
+			}
+		}
+	}
 	var events []Event
 	var due []string
 	err = s.runtime(r.ID, func(st *state) error {
-		if main != "" {
-			if st.Main != "" && st.Main != main {
-				events = append(events, Event{Event: MainUpdated, Repo: r.Root, Worktree: r.Main, Branch: "main", SHA: main})
+		if head != "" {
+			if st.Main != "" && st.Main != head {
+				events = append(events, Event{Event: MainUpdated, Repo: r.Root, Worktree: r.Main, Branch: branch.Name, SHA: head})
 			}
-			st.Main = main
+			st.Main = head
 		}
 		due = claimSchedule(st, hooks, now)
 		return nil
