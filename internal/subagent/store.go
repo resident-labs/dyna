@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/instructions"
 	"dyna-agent/internal/lockrank"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/turnlock"
 	"encoding/hex"
 	"encoding/json"
@@ -324,9 +325,11 @@ func (t Turn) Done() bool {
 // Info is a session as listed: stored meta plus live status.
 type Info struct {
 	Meta
-	CloseSummary []string `json:"closeSummary,omitempty"`
-	Status       string   `json:"status"`
-	CurrentTurn  int      `json:"currentTurn,omitempty"`
+	// CloseSummary is what a finished close did with the session's work, one
+	// typed fact per step. It is empty for an open session.
+	CloseSummary []sessionclose.Outcome `json:"closeSummary,omitempty"`
+	Status       string                 `json:"status"`
+	CurrentTurn  int                    `json:"currentTurn,omitempty"`
 }
 
 // Store addresses the sessions directory. The zero value uses the data dir.

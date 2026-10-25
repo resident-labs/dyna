@@ -183,6 +183,35 @@ export interface Seat {
   since?: string
 }
 
+// CloseOutcomeKind is sessionclose.ResponsibilityKind: the kind of work one
+// close result row is about. It is undefined when the failure concerns the
+// close itself rather than one piece of work.
+export type CloseOutcomeKind = 'pr' | 'goal' | 'item' | 'question' | 'child' | 'shell' | 'workflow'
+
+// CloseOutcomeResult is sessionclose.OutcomeResult: what the close did with
+// that work.
+export type CloseOutcomeResult = 'moved' | 'closed' | 'canceled' | 'withdrawn' | 'returned' | 'stopped' | 'released' | 'deferred' | 'failed'
+
+// CloseFailure is sessionclose.Failure: why one close step did not run.
+export type CloseFailure = 'handoff' | 'goal-needs-agent' | 'child-heir' | 'child-handoff' | 'process-cleanup'
+
+// CloseOutcome is sessionclose.Outcome: one typed fact of a session close. The
+// app draws its label, link and choice from these fields, never from engine
+// wording.
+export interface CloseOutcome {
+  kind?: CloseOutcomeKind
+  result: CloseOutcomeResult
+  /** The goal, item, run, question or shell ID, or a session ID for a child. */
+  id?: string
+  /** The PR number of PR work. */
+  number?: number
+  /** The display name of the work, such as a child session's name. */
+  name?: string
+  /** The address of the session that took the work; empty for top level. */
+  to?: string
+  failure?: CloseFailure
+}
+
 // Member is roomsvc.Member: the owner entry or a session in a room.
 export interface Member {
   resumable: boolean
@@ -207,7 +236,7 @@ export interface Member {
   ended?: string
   doing?: Doing
   closed?: boolean
-  closeSummary?: string[]
+  closeSummary?: CloseOutcome[]
   emoji?: string
   seat?: Seat
   responsibilities?: Responsibilities

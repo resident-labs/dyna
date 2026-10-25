@@ -113,3 +113,15 @@ test('a feed with a call row hides the empty message and an empty feed keeps it'
   assert.doesNotMatch(calls, /No messages yet/)
   assert.match(html('emptyFeed'), /No messages yet/)
 })
+
+test('a close result words the typed facts and offers the choice of a failed step', () => {
+  const body = html('closeResult')
+  assert.match(body, /worker is closed\./)
+  assert.match(body, /PR #42/)
+  assert.match(body, /handed over/)
+  assert.match(body, /Workflow wf_one/)
+  assert.match(body, /No open agent can hold the goal\./)
+  assert.match(body, />Hand off the goal</)
+  // The engine's own sentences never reach this view.
+  assert.doesNotMatch(body, /→|author →|CloseSummary/)
+})

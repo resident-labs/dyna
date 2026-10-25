@@ -15,6 +15,7 @@ import { errorText } from '../src/lib/errorText.ts'
 import { clipText, dismissDelay, makeToast, TOAST_DETAIL_MS, TOAST_MS } from '../src/lib/ui/toast.ts'
 import { reconcileRows } from '../src/lib/ui/reloadGate.ts'
 import { questionID, visualKey } from '../src/lib/questions/questions.ts'
+import type { CloseOutcome } from '../src/lib/api/room.ts'
 
 // The visual set is a .svelte.ts module with rune state at module scope, which
 // plain Node cannot load; a test that needs it passes its own setter.
@@ -582,7 +583,7 @@ export function installConfirm(state: object): ConfirmSlice {
   write(fields, 'confirmHost', {
     members: () => (read_(fields, 'members') as unknown[] | undefined) ?? [],
     expedited: () => String(read_(fields, 'expeditedGoalId') ?? ''),
-    closed: (name: string, items: string[]) => write(fields, 'closeResult', { name, items }),
+    closed: (name: string, outcomes: CloseOutcome[]) => write(fields, 'closeResult', { name, outcomes }),
     loadGoals: () => call(fields, 'loadGoals'),
     loadRuns: () => call(fields, 'loadRuns'),
     loadRun: () => call(fields, 'loadRun'),

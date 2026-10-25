@@ -3,6 +3,7 @@ import Skeleton from '../src/lib/ui/Skeleton.svelte'
 import Session from '../src/lib/sessions/Session.svelte'
 import Feed from '../src/lib/rooms/Feed.svelte'
 import DmMessage from '../src/lib/sessions/DmMessage.svelte'
+import CloseResult from '../src/lib/sessions/CloseResult.svelte'
 import { setVisuals } from '../src/lib/files/visuals.svelte.ts'
 import type { CallRequest } from '../src/lib/voice/callRequests.ts'
 import type { Attachment, Post, Room } from '../src/lib/api/room.ts'
@@ -74,4 +75,20 @@ export function callOnlyFeed(): string {
 
 export function emptyFeed(): string {
   return feed(null)
+}
+
+// A close result draws the typed facts the engine returned, including one
+// failed step that offers the choice which resolves it.
+export function closeResult(): string {
+  return render(CloseResult, {
+    props: {
+      name: 'worker',
+      onclose: noop,
+      outcomes: [
+        { kind: 'pr', result: 'moved', number: 42, to: 'dyna:root' },
+        { kind: 'workflow', result: 'canceled', id: 'wf_one' },
+        { kind: 'goal', result: 'failed', id: 'g9', failure: 'goal-needs-agent' },
+      ],
+    },
+  }).body
 }
