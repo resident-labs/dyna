@@ -87,6 +87,44 @@ func TestGoFailureDetailsSurviveJUnitExport(t *testing.T) {
 	}
 }
 
+// A test that only ran over the room's per-test time budget did not fail. The
+// check fails all the same, but its cause names the budget: nobody then hunts a
+// bug in a test that passed.
+func TestOverBudgetTestIsNotATestFailure(t *testing.T) {
+	dir := t.TempDir()
+	reports := filepath.Join(dir, "reports", "frontend")
+	if err := os.MkdirAll(reports, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reports, "execution.json"), []byte(`{"durationNanos":1000000}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(xml string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(reports, "frontend.xml"), []byte(xml), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`<testsuite><testcase name="slow" classname="rooms" time="2.5"/><testcase name="fast" classname="rooms" time="0.1"/></testsuite>`)
+	result := SuiteResult{Suite: "frontend", Status: OutcomePassed}
+	readReports(&result, ReportJUnit, dir, 2*time.Second, nil)
+	if result.Status != OutcomeFailed || result.Cause != CauseOverBudget {
+		t.Fatalf("status=%s cause=%s, want failed with cause %s", result.Status, result.Cause, CauseOverBudget)
+	}
+	if label := result.Cause.Label(); label != "over the time budget" {
+		t.Fatalf("label=%q, want the time budget", label)
+	}
+
+	// A broken test keeps its own cause, even beside one that ran too long.
+	write(`<testsuite><testcase name="slow" classname="rooms" time="2.5"/><testcase name="broken" classname="rooms" time="0.1"><failure message="boom"/></testcase></testsuite>`)
+	failed := SuiteResult{Suite: "frontend", Status: OutcomePassed}
+	readReports(&failed, ReportJUnit, dir, 2*time.Second, nil)
+	if failed.Cause != CauseTestFailure {
+		t.Fatalf("cause=%s, want %s when a test failed", failed.Cause, CauseTestFailure)
+	}
+}
+
 // Inspect the bytes sent over the transport, before readArchive can filter
 // them. Build tools and logs share RUNNER_TEMP with the required reports.
 func TestNodeRunArchivesOnlyRequiredReportFiles(t *testing.T) {
