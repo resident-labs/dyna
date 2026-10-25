@@ -48,13 +48,6 @@ func TestCompactionEvents(t *testing.T) {
 			Event{Kind: "status", Name: "compaction", State: "failed", Trigger: "manual"}},
 		{DialectPiJSON, `{"type":"compaction_end","reason":"overflow","aborted":false,"errorMessage":"summary failed"}`,
 			Event{Kind: "status", Name: "compaction", State: "failed", Trigger: "auto", Text: "summary failed"}},
-		// Grok 1.0.62 compacts by itself at its threshold.
-		{DialectGrokJSON, `{"type":"auto_compact_started"}`,
-			Event{Kind: "status", Name: "compaction", State: "started", Trigger: "auto"}},
-		{DialectGrokJSON, `{"type":"auto_compact_completed"}`,
-			Event{Kind: "status", Name: "compaction", State: "completed", Trigger: "auto"}},
-		{DialectGrokJSON, `{"type":"auto_compact_failed","message":"summary model failed"}`,
-			Event{Kind: "status", Name: "compaction", State: "failed", Text: "summary model failed", Trigger: "auto"}},
 		// Codex names the item in snake_case on the exec stream (0.163.0).
 		{DialectCodexJSONL, `{"type":"item.started","item":{"id":"c1","type":"context_compaction"}}`,
 			Event{Kind: "status", Name: "compaction", State: "started", Trigger: "auto"}},

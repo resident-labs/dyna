@@ -15,8 +15,6 @@ type DialectCapabilities struct {
 }
 
 var dialectCapabilities = map[string]DialectCapabilities{
-	DialectGrokJSON:         {Transcript: true, ToolEvents: true, SafePoints: true, Usage: "yes", SessionResume: true},
-	DialectAcpJSON:          {Transcript: true, ToolEvents: true, SafePoints: true, Usage: "yes", SessionResume: true},
 	DialectPiJSON:           {Transcript: true, ToolEvents: true, SafePoints: true, Usage: "yes", SessionResume: true},
 	DialectText:             {Transcript: true, Usage: "no", UsageReason: "plain text output does not report usage"},
 	DialectCodexJSONL:       {Transcript: true, ToolEvents: true, SafePoints: true, Usage: "yes", SessionResume: true},

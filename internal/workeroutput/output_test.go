@@ -158,23 +158,19 @@ func TestCoalesceNormalizedEventsMergesReasoningDeltas(t *testing.T) {
 	}
 }
 
-// Grok streams a reply a few tokens per text record. The joiner must turn those
-// deltas into one whole message so a packet lists complete messages, not the
-// word fragments the provider streamed.
-func TestCoalesceNormalizedEventsJoinsGrokReplyDeltas(t *testing.T) {
-	decl := &Declaration{Dialect: DialectGrokJSON}
-	var events []Event
-	for _, line := range []string{
-		`{"type":"text","data":"and"}`,
-		`{"type":"text","data":" run"}`,
-		`{"type":"text","data":" the"}`,
-		`{"type":"text","data":" watcher."}`,
-	} {
-		events = append(events, NormalizeLine(decl, line)...)
+// A harness that streams a reply a few tokens per record leaves delta events.
+// The joiner must turn those deltas into one whole message so a packet lists
+// complete messages, not the word fragments the provider streamed.
+func TestCoalesceNormalizedEventsJoinsReplyDeltas(t *testing.T) {
+	events := []Event{
+		{V: SchemaVersion, Kind: "message", Role: "assistant", State: "delta", Text: "and"},
+		{V: SchemaVersion, Kind: "message", Role: "assistant", State: "delta", Text: " run"},
+		{V: SchemaVersion, Kind: "message", Role: "assistant", State: "delta", Text: " the"},
+		{V: SchemaVersion, Kind: "message", Role: "assistant", State: "delta", Text: " watcher."},
 	}
 	got := CoalesceNormalizedEvents(events)
 	if len(got) != 1 || got[0].Kind != "message" || got[0].Text != "and run the watcher." {
-		t.Fatalf("joined grok deltas = %#v, want one whole message", got)
+		t.Fatalf("joined deltas = %#v, want one whole message", got)
 	}
 }
 

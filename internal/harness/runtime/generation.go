@@ -183,34 +183,6 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 		root["policies"] = policies
 		root["update"] = "disable"
 	}
-	if h == "kimi-code" {
-		// ACP has no per-session denylist. Merge only the generated tool
-		// policy into the private config; its provider and model sections stay.
-		if _, ok := servers[dynaMCPName]; ok {
-			tools, _ := root["tools"].(map[string]any)
-			if tools == nil {
-				tools = map[string]any{}
-				root["tools"] = tools
-			}
-			disabled, _ := tools["disabled"].([]string)
-			tools["disabled"] = append(disabled, nativeFeaturePolicies[h].Shell...)
-		}
-	}
-	if h == "grok" {
-		root["attribution"] = false
-		// Dyna's shell server replaces the native shell; deny it in the same
-		// config.toml the generation owns. Never add the denial without the
-		// server, or the session loses its shell entirely.
-		if _, ok := servers[dynaMCPName]; ok {
-			hooks, _ := root["hooks"].(map[string]any)
-			if hooks == nil {
-				hooks = map[string]any{}
-				root["hooks"] = hooks
-			}
-			entries, _ := hooks["PreToolUse"].([]any)
-			hooks["PreToolUse"] = append(entries, GrokShellDenyHook())
-		}
-	}
 	var raw []byte
 	if a.ConfigFormat == "toml" {
 		raw, err = toml.Marshal(root)

@@ -18,9 +18,7 @@ func TestGenerationRemovesLegacyGlobalRulesFiles(t *testing.T) {
 		"claude-code": "CLAUDE.md",
 		"codex":       "AGENTS.md",
 		"opencode":    "AGENTS.md",
-		"grok":        "AGENTS.md",
 		"pi":          "AGENTS.md",
-		"kimi-code":   "AGENTS.md",
 		"muse":        "~/.config/muse/AGENTS.md",
 	}
 	for _, a := range RuntimeAdapters() {

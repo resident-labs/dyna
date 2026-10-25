@@ -11,20 +11,12 @@ All seven catalog harnesses support MCP and skills. `ConfigCapabilities()` retur
 | `claude-code` | `~/.claude.json` | `mcpServers`, JSON | `~/.claude/skills/` |
 | `codex` | `~/.codex/config.toml` | `mcp_servers`, TOML | `~/.agents/skills/` |
 | `opencode` | `~/.config/opencode/opencode.json` and `.jsonc` | `mcp`, JSONC | `~/.config/opencode/skills/` |
-| `grok` | `~/.grok/config.toml` | `mcp_servers`, TOML | `~/.grok/skills/` |
 | `pi` | `~/.pi/agent/mcp.json` | `mcpServers`, JSON | `~/.pi/agent/skills/` |
 | `muse` | `~/.config/muse/settings.json` | `mcpServers`, JSON; legacy `mcp_servers` accepted | `~/.config/muse/skills/` |
 
 OpenCode local commands use arrays. The other adapters read a command string and a separate arguments array. Remote servers use `url`. Readers expose environment variable names, never their values. They exclude authentication headers. Hashes cover the complete parsed entry so changes to secret values and unknown fields still show drift. Skill hashes cover the exact `SKILL.md` bytes.
 
 ## Extra adapter evidence
-
-Grok Build uses TOML. The adapter also reads shared `.agents` and Claude user skills after native skills.
-
-- [Grok settings, paths, and TOML example](https://docs.x.ai/build/settings)
-- [Grok MCP servers](https://docs.x.ai/build/features/mcp-servers)
-- [Grok skills and compatibility](https://docs.x.ai/build/features/skills-plugins-marketplaces)
-- Local check: `grok mcp add --help` identifies `~/.grok/config.toml` as the user file. Installed package: `@xai-official/grok` 1.0.62.
 
 Pi now has native MCP support. Do not classify it as unsupported based on older releases. The adapter also reads shared `.agents` user skills.
 
