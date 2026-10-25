@@ -75,6 +75,23 @@ func PiProviderID(p store.Provider) (string, bool) {
 	return id, ok
 }
 
+// piOAuthProviderName maps each provider to the ID Pi's OAuth login uses.
+// ChatGPT signs in through openai-codex, not the openai API-key provider.
+var piOAuthProviderName = map[store.Provider]string{
+	store.ProviderAnthropic: "anthropic",
+	store.ProviderChatGPT:   "openai-codex",
+	store.ProviderKimiCode:  "kimi-coding",
+	store.ProviderXAI:       "xai",
+	store.ProviderMetaMuse:  "meta",
+}
+
+// PiOAuthProviderID returns the Pi OAuth provider ID of p, or false when Pi
+// has no OAuth sign-in for that provider.
+func PiOAuthProviderID(p store.Provider) (string, bool) {
+	id, ok := piOAuthProviderName[p]
+	return id, ok
+}
+
 // PiProvider names the provider a Pi provider ID or a Dyna provider name means.
 // An ID this release does not know is not a provider Dyna can add a key for.
 func PiProvider(name string) (store.Provider, bool) {

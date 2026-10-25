@@ -4,8 +4,8 @@
   import { api } from '../../../api.ts'
   import { dialog } from '../../ui/dialog.ts'
   import SignInCard from './SignInCard.svelte'
-  import { PROVIDERS, accountLabel, providerName } from './state.ts'
-  import { harnessLabel, harnessPin, nativeHarness, openCodeKey, runningFlow, sharedLogin } from './signin.ts'
+  import { PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, providerName } from './state.ts'
+  import { harnessLabel, harnessPin, runningFlow, sharedLogin } from './signin.ts'
   import type { AccountsSnapshot, Provider } from '../../api/account.ts'
   import type { HarnessSnapshot, PersonalLogin, PrivateLogin, SignInState } from '../../api/harness.ts'
 
@@ -20,10 +20,11 @@
     onsaved: (snapshot: AccountsSnapshot) => void
   }
   let { scope, account = null, onclose, onsaved }: Props = $props()
-  type How = 'native' | 'pi' | 'key'
+  type HarnessChoice = 'claude-code' | 'pi'
+  type PiMethod = 'oauth' | 'key'
   let provider = $state<Provider>(untrack(() => account?.provider ?? 'anthropic'))
-  let how = $state<How>('pi')
-  let keyWhere = $state<'pi' | 'opencode'>('pi')
+  let harnessChoice = $state<HarnessChoice | ''>(untrack(() => account ? (account.harness === 'pi' ? 'pi' : 'claude-code') : ''))
+  let piMethod = $state<PiMethod>('oauth')
   let label = $state('')
   let key = $state('')
   let busy = $state(false)
@@ -37,16 +38,13 @@
   let first: HTMLElement | undefined = $state()
   let stopped = false
 
-  const native = $derived(nativeHarness(provider))
-  const openCode = $derived(openCodeKey(provider))
-  const title = $derived(account ? `Sign in again to ${account.label}` : 'Add account')
-
-  // The native path leads for a provider that has one; Pi and a key stay open.
+  const piProviders = $derived(piMethod === 'oauth' ? PI_OAUTH_PROVIDERS : PI_KEY_PROVIDERS)
   $effect(() => {
-    if (!account && how === 'native' && !native) how = 'pi'
-    if (!openCode) keyWhere = 'pi'
-    personal = null
+    const fallback = piProviders[0]
+    if (fallback && !piProviders.includes(provider)) provider = fallback
   })
+  const canSubmit = $derived(account !== null || harnessChoice === 'claude-code' || (harnessChoice === 'pi' && (piMethod === 'oauth' || key.length > 0)))
+  const title = $derived(account ? `Sign in again to ${account.label}` : 'Add account')
 
   // The pane polls the native sign-in step and collects the finished account.
   $effect(() => {
@@ -100,9 +98,8 @@
   async function submit() {
     if (busy || flow || personal) return
     if (account) return startRestart()
-    if (how === 'key') return saveKey()
-    if (how === 'native') return startNative()
-    return startPi()
+    if (harnessChoice === 'claude-code') return startNative()
+    if (harnessChoice === 'pi') return piMethod === 'key' ? saveKey() : startPi()
   }
 
   async function startRestart() {
@@ -133,8 +130,8 @@
   // startNative offers the owner's own saved login first, as the harness page
   // did, then starts the native sign-in.
   async function startNative() {
-    const harness = native
-    if (!harness || busy) return
+    if (harnessChoice !== 'claude-code' || busy) return
+    const harness = 'claude-code'
     busy = true; error = ''
     try {
       const snapshot = await snapshotOfHarness()
@@ -163,19 +160,19 @@
   async function performBegin(harness: string, pin: string, confirmed: boolean) {
     busy = true; error = ''
     try {
-      const result = await api.beginPrivateRuntimeLogin(harness, pin, label.trim(), confirmed)
+      const result = await api.beginPrivateRuntimeLogin(harness, pin, label.trim(), '', confirmed)
       if (!stopped) { flow = { ...result, harness }; signIn = result.signIn ?? { phase: 'starting' }; confirmAsk = null; personal = null }
     } catch (e) { if (!stopped) error = errorText(e) || 'Could not start the sign-in.' }
     finally { if (!stopped) busy = false }
   }
 
-  // startPi runs Pi's provider sign-in, which saves one account for each
-  // provider the person signs in to.
+  // startPi runs the exact Pi OAuth flow the owner chose, so Pi does not ask
+  // for the provider a second time.
   async function startPi() {
-    if (busy) return
+    if (busy || !provider) return
     busy = true; error = ''
     try {
-      const result = await api.beginPrivateRuntimeLogin('pi', '', '', false)
+      const result = await api.beginPrivateRuntimeLogin('pi', '', '', provider, false)
       if (!stopped) { flow = { ...result, harness: 'pi' }; signIn = result.signIn ?? { phase: 'starting' } }
     } catch (e) { if (!stopped) error = errorText(e) || 'Could not start the sign-in.' }
     finally { if (!stopped) busy = false }
@@ -196,13 +193,6 @@
     if (busy || !key) return
     busy = true; error = ''
     try {
-      if (!account && how === 'key' && keyWhere === 'opencode') {
-        if (!openCode) throw new Error(`${providerName(provider)} has no API key in OpenCode.`)
-        const next = await api.accountsAdd('opencode', provider, label.trim(), key)
-        key = ''
-        if (!stopped) onsaved(next)
-        return
-      }
       const next = await api.accountsAdd('pi', provider, label.trim(), key)
       key = ''
       if (!stopped) onsaved(next)
@@ -281,50 +271,48 @@
       </div>
     {:else}
       <label>
-        <span class="muted small">Provider</span>
-        <select class="field" bind:this={first} bind:value={provider} disabled={busy} aria-label="Provider">
-          {#each PROVIDERS as id (id)}<option value={id}>{providerName(id)}</option>{/each}
+        <span class="muted small">Step 1 · Harness</span>
+        <select class="field" bind:this={first} bind:value={harnessChoice} disabled={busy} aria-label="Harness">
+          <option value="">Choose a harness</option>
+          <option value="claude-code">Claude Code</option>
+          <option value="pi">Pi</option>
         </select>
       </label>
-      <fieldset class="how">
-        <legend class="muted small">How to sign in</legend>
-        {#if native}
-          <label class="choice"><input type="radio" name="how" value="native" bind:group={how} disabled={busy} /><span>Sign in with {harnessLabel(native)}</span></label>
-        {/if}
-        <label class="choice"><input type="radio" name="how" value="pi" bind:group={how} disabled={busy} /><span>Sign in with Pi</span></label>
-        <label class="choice"><input type="radio" name="how" value="key" bind:group={how} disabled={busy} /><span>Use an API key</span></label>
-      </fieldset>
-      {#if how === 'key'}
-        {#if openCode}
+      {#if harnessChoice === 'claude-code'}
+        <label>
+          <span class="muted small">Label (optional)</span>
+          <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
+        </label>
+        <p class="muted small">Claude Code signs in to Anthropic with its own sign-in.</p>
+      {:else if harnessChoice === 'pi'}
+        <fieldset class="how">
+          <legend class="muted small">Step 2 · Sign-in method</legend>
+          <label class="choice"><input type="radio" name="pi-method" value="oauth" bind:group={piMethod} disabled={busy} /><span>Sign in with the provider</span></label>
+          <label class="choice"><input type="radio" name="pi-method" value="key" bind:group={piMethod} disabled={busy} /><span>API key</span></label>
+        </fieldset>
+        <label>
+          <span class="muted small">Step 3 · Provider</span>
+          <select class="field" bind:value={provider} disabled={busy} aria-label="Provider">
+            {#each piProviders as id (id)}<option value={id}>{providerName(id)}</option>{/each}
+          </select>
+        </label>
+        {#if piMethod === 'key'}
           <label>
-            <span class="muted small">Save the key in</span>
-            <select class="field" bind:value={keyWhere} disabled={busy} aria-label="Save the key in">
-              <option value="pi">Pi</option>
-              <option value="opencode">OpenCode</option>
-            </select>
+            <span class="muted small">Label (optional)</span>
+            <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
           </label>
+          <label>
+            <span class="muted small">API key for {providerName(provider)}</span>
+            <input class="field mono" type="password" bind:value={key} autocomplete="off" spellcheck="false" disabled={busy} aria-label="API key" />
+          </label>
+          <p class="muted small">Dyna saves the key in the account’s own Pi home. It never shows the key again.</p>
+        {:else}
+          <p class="muted small">Dyna starts {providerName(provider)}’s Pi OAuth sign-in directly. Pi asks only for the approval it needs.</p>
         {/if}
-        <label>
-          <span class="muted small">Label (optional)</span>
-          <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
-        </label>
-        <label>
-          <span class="muted small">API key for {providerName(provider)}</span>
-          <input class="field mono" type="password" bind:value={key} autocomplete="off" spellcheck="false" disabled={busy} aria-label="API key" />
-        </label>
-        <p class="muted small">{keyWhere === 'opencode' ? 'Dyna saves the key in OpenCode’s private home.' : 'Dyna saves the key in the account’s own home.'} It never shows the key again.</p>
-      {:else if how === 'native'}
-        <label>
-          <span class="muted small">Label (optional)</span>
-          <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
-        </label>
-        <p class="muted small">Dyna uses its own copy of {harnessLabel(native)}. If it finds your saved login, it offers to copy it once.</p>
-      {:else}
-        <p class="muted small">Pi asks which provider to sign in to and saves one account for each one you choose. Use a saved API key below when the provider does not sign in interactively.</p>
       {/if}
       <div class="row">
         <button type="button" class="btn quiet" onclick={onclose} disabled={busy}>Cancel</button>
-        <button type="submit" class="btn" disabled={busy || (how === 'key' && !key)}>{busy ? 'Working…' : how === 'key' ? 'Save key' : 'Sign in'}</button>
+        <button type="submit" class="btn" disabled={busy || !canSubmit}>{busy ? 'Working…' : harnessChoice === 'pi' && piMethod === 'key' ? 'Save key' : 'Sign in'}</button>
       </div>
     {/if}
     {#if error}<p class="err" role="alert">{error}</p>{/if}

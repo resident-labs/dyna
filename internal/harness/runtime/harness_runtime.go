@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"dyna-agent/internal/account/reposcope"
+	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness/config"
 	"dyna-agent/internal/profile"
@@ -91,6 +93,9 @@ type privateRuntimeLogin struct {
 	// target is the saved account a sign-in again writes, when the flow has no
 	// account of its own.
 	target string
+	// provider is the Pi provider this flow signs in, so a second request for
+	// another provider does not join the running flow.
+	provider accountstore.Provider
 }
 
 type PrivateLogin struct {
@@ -104,7 +109,7 @@ type PrivateLogin struct {
 	SignIn  *SignInState `json:"signIn,omitempty"`
 }
 
-func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version, label string, _ bool) (PrivateLogin, error) {
+func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version, label, provider string, _ bool) (PrivateLogin, error) {
 	h, err := CanonicalHarness(harness)
 	if err != nil {
 		return PrivateLogin{}, err
@@ -114,7 +119,13 @@ func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version
 		return PrivateLogin{}, err
 	}
 	if h == "pi" {
-		return a.beginPiProviderSignIn(b.Executable, "")
+		p := accountstore.Provider(strings.TrimSpace(provider))
+		if p != "" {
+			if _, ok := PiOAuthProviderID(p); !ok {
+				return PrivateLogin{}, errors.New("This provider has no Pi OAuth sign-in.")
+			}
+		}
+		return a.beginPiProviderSignIn(b.Executable, "", p)
 	}
 	n, err := a.Accounts.Create(harness, label)
 	if err != nil {
@@ -160,6 +171,7 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 
 func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ bool) (PrivateLogin, error) {
 	harness, target := "pi", ""
+	provider := accountstore.Provider("")
 	if id != piProviderSignInID {
 		n, err := a.Accounts.Find(id)
 		if err != nil {
@@ -170,6 +182,7 @@ func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ b
 			// Pi keeps its provider entries in one login, so the card has no
 			// account of its own; target keeps this account's entry its own.
 			target = n.ID
+			provider = n.Provider
 		}
 	}
 	b, err := EnsureBundle(ctx, harness, "")
@@ -177,7 +190,7 @@ func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ b
 		return PrivateLogin{}, err
 	}
 	if harness == "pi" {
-		return a.beginPiProviderSignIn(b.Executable, target)
+		return a.beginPiProviderSignIn(b.Executable, target, provider)
 	}
 	return a.startPrivateLogin(id, b.Executable)
 }

@@ -313,7 +313,7 @@ export const api = {
  removePrivateRuntime: (harness: string, version: string, confirmed = false) => app.RemovePrivateRuntime(harness,version,confirmed),
  uninstallPrivateRuntime: (harness: string) => app.UninstallPrivateRuntime(harness,true),
  installPrivateRuntime: (harness: string, version: string) => app.InstallPrivateRuntime(harness,version),
- beginPrivateRuntimeLogin: (harness: string, version: string, label: string, confirmed = false) => app.BeginPrivateRuntimeLogin(harness,version,label,confirmed),
+ beginPrivateRuntimeLogin: (harness: string, version: string, label: string, provider = '', confirmed = false) => app.BeginPrivateRuntimeLogin(harness,version,label,provider,confirmed),
  findPersonalLogin: (harness: string, version: string) => app.FindPersonalLogin(harness,version),
  usePersonalLogin: (harness: string) => app.UsePersonalLogin(harness),
  privateRuntimeLogins: () => app.PrivateRuntimeLogins(),
