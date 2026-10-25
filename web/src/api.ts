@@ -146,7 +146,7 @@ export const api = {
   ciHealth: (roomId: string, runs = 30) => app.CIHealth(roomId, runs),
   ciHealthTest: (roomId: string, test: string) => app.CIHealthTest(roomId, test),
   closeIssue: (roomId: string, id: string, reason = '') => app.CloseIssue(roomId, id, reason),
-  issueGoal: (roomId: string, id: string, holder = '') => app.IssueGoal(roomId, id, holder),
+  issueGoal: (roomId: string, id: string) => app.IssueGoal(roomId, id),
   exportIssue: (roomId: string, id: string) => app.ExportIssue(roomId, id),
   syncRefresh: (roomId: string, repo: string) => app.SyncRefresh(roomId, repo),
   gitExport: (roomId: string, repo: string) => app.GitExport(roomId, repo),

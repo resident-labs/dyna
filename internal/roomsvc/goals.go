@@ -146,6 +146,15 @@ func (s *Service) refuseRootHolders(holders []string) error {
 }
 
 func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors []string, fixes []int) (goals.Goal, error) {
+	return s.startGoal(ctx, roomRef, goals.Input{Text: text}, selectors, fixes)
+}
+
+// startGoal is the one way a goal starts: the dyna goal command, a room
+// issue's assign action and every web entry point. It resolves the caller and
+// the holder choice, refuses a root holder, then creates the goal, links the
+// issues it fixes and posts its milestone. AddWithIssues deletes the new goal
+// when a link fails, so a refused link leaves no goal behind.
+func (s *Service) startGoal(ctx context.Context, roomRef string, in goals.Input, selectors []string, fixes []int) (goals.Goal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
 		return goals.Goal{}, err
@@ -158,11 +167,12 @@ func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors [
 	if err = s.refuseRootHolders(holders); err != nil {
 		return goals.Goal{}, err
 	}
+	in.Holders, in.Shared = holders, shared
 	actor := author.Address
 	if author.ID == "owner" {
 		actor = r.Name
 	}
-	g, err := service.Store.AddWithIssues(r.ID, author.ID, actor, goals.Input{Text: text, Holders: holders, Shared: shared}, fixes)
+	g, err := service.Store.AddWithIssues(r.ID, author.ID, actor, in, fixes)
 	if err != nil {
 		return g, err
 	}

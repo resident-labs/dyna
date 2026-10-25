@@ -128,7 +128,7 @@ export interface Engine {
   Issues(roomId: string, all: boolean): Promise<Issue[]>
   Library(roomId: string): Promise<LibraryView>
   CloseIssue(roomId: string, id: string, reason: string): Promise<Issue>
-  IssueGoal(roomId: string, id: string, holder: string): Promise<Issue>
+  IssueGoal(roomId: string, id: string): Promise<Issue>
   ExportIssue(roomId: string, id: string): Promise<Issue>
 
   // Sessions.

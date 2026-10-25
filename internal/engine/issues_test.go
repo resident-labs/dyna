@@ -136,14 +136,10 @@ func testIssueCallerPower(t *testing.T, method string) {
 				ctx = localCallerContext(t, tc.caller, tc.actor)
 			}
 			ctx = callspec.WithClaim(ctx, tc.claim)
-			value := "fixed"
-			if method == "IssueGoal" {
-				value = ""
-			}
 			raw := func(v string) json.RawMessage { b, _ := json.Marshal(v); return b }
 			args := []json.RawMessage{raw(rec.ID), raw(issue.ID)}
-			if method != "ExportIssue" {
-				args = append(args, raw(value))
+			if method == "CloseIssue" {
+				args = append(args, raw("fixed"))
 			}
 			_, err = calls[method](ctx, args)
 			repositoryCheck := method == "ExportIssue" && tc.allow
