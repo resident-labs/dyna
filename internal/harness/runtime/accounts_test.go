@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/database"
 	harnesshome "dyna-agent/internal/harness/home"
@@ -60,14 +58,15 @@ func writeAccountFixture(t *testing.T, n NativeAccount) {
 	if n.Harness == "claude-code" {
 		write(".credentials.json", `{"claudeAiOauth":{"accessToken":"native-access-canary","refreshToken":"native-refresh-canary","expiresAt":1999999999999,"scopes":["user:inference"]}}`)
 		write(".claude.json", `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","emailAddress":"fixture@example.test"}}`)
-	} else {
-		jwt := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"fixture-user","chatgpt_account_id":"fixture-workspace"}}`)) + ".signature"
-		raw, _ := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": jwt, "access_token": "native-access-canary", "refresh_token": "native-refresh-canary", "account_id": "fixture-workspace"}})
-		write("auth.json", string(raw))
+		return
 	}
+	// Pi stores one provider entry per account in auth.json.
+	entry, _ := json.Marshal(map[string]string{"type": "oauth", "access": "native-access-canary", "refresh": "native-refresh-canary", "expires": "1999999999999", "accountId": "fixture-workspace"})
+	auth, _ := json.Marshal(map[string]json.RawMessage{"openai-codex": entry})
+	write("auth.json", string(auth))
 }
 func TestAccountsPrivateLifecycle(t *testing.T) {
-	for _, h := range []string{"claude", "codex"} {
+	for _, h := range []string{"claude", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			t.Setenv("OPENAI_API_KEY", "inherited-key")
@@ -135,7 +134,7 @@ func TestAccountsPrivateLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if h == "codex" && (overrides["CODEX_HOME"] != shared || overrides["CODEX_SQLITE_HOME"] != filepath.Join(shared, "sqlite") || overrides["OPENAI_API_KEY"] != "") {
+			if h == "pi" && (overrides["PI_CODING_AGENT_DIR"] != shared || overrides["PI_CODING_AGENT_SESSION_DIR"] != filepath.Join(shared, "sessions") || overrides["OPENAI_API_KEY"] != "") {
 				t.Fatal(overrides)
 			}
 			// Claude credentials stay in the account's own home; see claude_pin.go.
@@ -154,8 +153,11 @@ func TestAccountsPrivateLifecycle(t *testing.T) {
 					if e != nil || len(got) != 1 || got[0].Identity != n.Identity {
 						t.Error("concurrent capture", e)
 					}
-					if _, e = m.Activate(context.Background(), "", store.Credential{}); e != native.ErrUnsupported {
-						t.Error("activation allowed", e)
+					if _, e = m.Activate(context.Background(), "", store.Credential{}); e == nil {
+						t.Error("activation accepted a blank credential", e)
+					}
+					if _, e = m.Capture(context.Background(), t.TempDir()); e == nil {
+						t.Error("capture read outside the private account home", e)
 					}
 				})
 			}
@@ -183,7 +185,7 @@ func TestAccountsPrivateLifecycle(t *testing.T) {
 }
 func TestAccountPaths(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("codex", "")
+	n, err := a.Create("pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +223,7 @@ func TestAccountPaths(t *testing.T) {
 }
 func TestNativeCredentialSymlinkRejected(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("codex", "")
+	n, err := a.Create("pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +241,7 @@ func TestNativeCredentialSymlinkRejected(t *testing.T) {
 }
 
 func TestAccountStorageSymlinksRejected(t *testing.T) {
-	for _, name := range []string{"accounts.lock", "codex"} {
+	for _, name := range []string{"accounts.lock", "pi"} {
 		t.Run(name, func(t *testing.T) {
 			a := testAccounts(t)
 			if err := os.MkdirAll(a.Root, 0700); err != nil {
@@ -252,7 +254,7 @@ func TestAccountStorageSymlinksRejected(t *testing.T) {
 			if err := os.Symlink(outside, filepath.Join(a.Root, name)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := a.Create("codex", ""); err == nil {
+			if _, err := a.Create("pi", ""); err == nil {
 				t.Fatal("storage symlink accepted")
 			}
 			checkMode(t, outside, 0700)
@@ -262,7 +264,7 @@ func TestAccountStorageSymlinksRejected(t *testing.T) {
 
 func TestNativeCredentialHardlinkRejected(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("codex", "")
+	n, err := a.Create("pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +342,7 @@ func accountMetadataBytes(t *testing.T, a *Accounts) []byte {
 // provider and kind too: a provider lookup would otherwise miss the account.
 func TestCreateNamesTheProvider(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("codex", "Work")
+	n, err := a.CreateProvider("pi", store.ProviderChatGPT, store.KindOAuth, "Work")
 	if err != nil {
 		t.Fatal(err)
 	}

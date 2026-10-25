@@ -57,11 +57,11 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	got := r.RecommendedVersions(context.Background())
-	if len(got) != 5 {
+	if len(got) != 4 {
 		t.Fatalf("got %d adapters", len(got))
 	}
 	sort.Strings(packages)
-	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage, "@openai/codex", "@opencode/cli"}) {
+	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage, "@opencode/cli"}) {
 		t.Fatalf("incorrect adapter packages: %v", packages)
 	}
 	for i, v := range got {
@@ -107,18 +107,18 @@ func TestRecommendedVersionsMetadataFailure(t *testing.T) {
 		{"http", `secret response`, 503},
 		{"redirect", `secret response`, 302},
 		{"malformed", `{`, 200},
-		{"trailing", `{"name":"@openai/codex","version":"1.2.3"} {}`, 200},
+		{"trailing", `{"name":"` + piNPMPackage + `","version":"1.1.0"} {}`, 200},
 		{"wrong-package", `{"name":"opencode-ai","version":"2.1.0"}`, 200},
-		{"tag", `{"name":"@openai/codex","version":"latest"}`, 200},
-		{"range", `{"name":"@openai/codex","version":"^1.2.3"}`, 200},
-		{"invalid-semver", `{"name":"@openai/codex","version":"1.2.3-01"}`, 200},
-		{"missing-integrity", `{"name":"@openai/codex","version":"1.2.3"}`, 200},
-		{"bad-integrity", `{"name":"@openai/codex","version":"1.2.3","dist":{"integrity":"sha512-secret"}}`, 200},
+		{"tag", `{"name":"` + piNPMPackage + `","version":"latest"}`, 200},
+		{"range", `{"name":"` + piNPMPackage + `","version":"^1.1.0"}`, 200},
+		{"invalid-semver", `{"name":"` + piNPMPackage + `","version":"1.1.0-01"}`, 200},
+		{"missing-integrity", `{"name":"` + piNPMPackage + `","version":"1.1.0"}`, 200},
+		{"bad-integrity", `{"name":"` + piNPMPackage + `","version":"1.1.0","dist":{"integrity":"sha512-secret"}}`, 200},
 		{"oversized", strings.Repeat(" ", (64<<10)+1), 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) { return recommendedResponse(tc.status, tc.body), nil })}
-			a, _ := Adapter("codex")
+			a, _ := Adapter("pi")
 			v, reason := r.npmVersion(context.Background(), a, "https://registry.npmjs.org/example/latest")
 			if v != "" || reason == "" || strings.Contains(reason, "secret") {
 				t.Fatalf("unverified version or exposed response: %q %q", v, reason)
@@ -133,20 +133,20 @@ func TestRecommendedVersionsExactMetadataMismatch(t *testing.T) {
 			calls := 0
 			r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
 				calls++
-				body := recommendedMetadata("@openai/codex", "1.2.3")
+				body := recommendedMetadata(piNPMPackage, "1.1.0")
 				if calls == 2 {
-					if !strings.HasSuffix(req.URL.Path, "/1.2.3") {
+					if !strings.HasSuffix(req.URL.Path, "/1.1.0") {
 						t.Fatalf("wrong exact source: %s", req.URL)
 					}
 					if change == "version" {
-						body = recommendedMetadata("@openai/codex", "1.2.4")
+						body = recommendedMetadata(piNPMPackage, "1.1.1")
 					} else {
 						body = strings.ReplaceAll(body, base64.StdEncoding.EncodeToString(make([]byte, 64)), base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 64))))
 					}
 				}
 				return recommendedResponse(200, body), nil
 			})}
-			a, _ := Adapter("codex")
+			a, _ := Adapter("pi")
 			v, reason := r.npmVersion(context.Background(), a, "https://registry.npmjs.org/example/latest")
 			if v != "" || reason == "" || calls != 2 {
 				t.Fatalf("mismatched metadata accepted: %q, %q, %d requests", v, reason, calls)
@@ -199,7 +199,7 @@ func TestRecommendedVersionsCancellation(t *testing.T) {
 		return nil, req.Context().Err()
 	})}
 	got := r.RecommendedVersions(ctx)
-	if len(got) != 5 {
+	if len(got) != 4 {
 		t.Fatal("cancellation removed per-harness results")
 	}
 	for _, v := range got {
@@ -230,21 +230,21 @@ func TestRecommendedVersionsCache(t *testing.T) {
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	first := r.RecommendedVersions(context.Background())
-	if calls != 10 {
+	if calls != 8 {
 		t.Fatalf("first lookup made %d requests", calls)
 	}
 	offline = true
 	now = now.Add(6*time.Hour - time.Second)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 10 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 8 {
 		t.Fatalf("fresh cache missed: %d requests, %+v", calls, got)
 	}
 	now = now.Add(time.Second)
 	for _, v := range r.RecommendedVersions(context.Background()) {
-		if v.Status == "resolved" || (v.Harness == "codex" && v.Reason == "") {
+		if v.Status == "resolved" || (v.Harness == "pi" && v.Reason == "") {
 			t.Fatalf("expired result reused: %+v", v)
 		}
 	}
-	if calls != 15 {
+	if calls != 12 {
 		t.Fatalf("expired cache made %d requests", calls)
 	}
 	offline = false
@@ -253,11 +253,11 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("failure cache reused stale success: %+v", v)
 		}
 	}
-	if calls != 15 {
+	if calls != 12 {
 		t.Fatalf("failure cache missed: %d requests", calls)
 	}
 	now = now.Add(time.Minute)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 25 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 20 {
 		t.Fatalf("expired failure cache did not recover: %d requests, %+v", calls, got)
 	}
 }
@@ -279,7 +279,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
 	// Every source makes a request.
-	for range 5 {
+	for range 4 {
 		select {
 		case <-started:
 		case <-deadline.C:
@@ -289,7 +289,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 		}
 	}
 	cancel()
-	if len(<-done) != 5 {
+	if len(<-done) != 4 {
 		t.Fatal("lost per-harness results")
 	}
 }

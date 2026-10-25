@@ -14,25 +14,25 @@ import (
 func TestAccountsMarksTheRoomAccountAndTheGlobalOne(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "accounts")
 	accounts := &runtime.Accounts{Root: root}
-	work, err := accounts.Create("codex", "Work")
+	work, err := accounts.Create("claude-code", "Work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, err := accounts.Create("codex", "Home")
+	home, err := accounts.Create("claude-code", "Home")
 	if err != nil {
 		t.Fatal(err)
 	}
 	selections := &store.Store{Root: root}
-	if err := selections.SetActive(store.ProviderChatGPT, "codex", "", work.ID); err != nil {
+	if err := selections.SetActive(store.ProviderAnthropic, "claude-code", "", work.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := selections.SetActive(store.ProviderChatGPT, "codex", "room-a", home.ID); err != nil {
+	if err := selections.SetActive(store.ProviderAnthropic, "claude-code", "room-a", home.ID); err != nil {
 		t.Fatal(err)
 	}
 	s := New(Options{Store: &store.Store{Root: root}})
 
 	snap := s.Accounts(t.Context(), "room-a", false)
-	if len(snap.Providers) != 1 || snap.Providers[0].Provider != store.ProviderChatGPT || len(snap.Providers[0].Accounts) != 2 {
+	if len(snap.Providers) != 1 || snap.Providers[0].Provider != store.ProviderAnthropic || len(snap.Providers[0].Accounts) != 2 {
 		t.Fatalf("Accounts = %+v, want one provider with both accounts", snap)
 	}
 	marks := map[string]ScopeAccount{}
@@ -58,7 +58,7 @@ func TestAccountsMarksTheRoomAccountAndTheGlobalOne(t *testing.T) {
 	if !inherited.Providers[0].Accounts[0].ActiveHere || inherited.Providers[0].Accounts[0].Label != "Work" {
 		t.Fatalf("unset room = %+v, want the global account inherited", inherited)
 	}
-	if err := selections.SetActive(store.ProviderChatGPT, "codex", "room-b", ""); err != nil {
+	if err := selections.SetActive(store.ProviderAnthropic, "claude-code", "room-b", ""); err != nil {
 		t.Fatal(err)
 	}
 	cleared := s.Accounts(t.Context(), "room-b", false)

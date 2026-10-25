@@ -24,7 +24,7 @@ type credentialRefreshFixture struct {
 	beforeWrite              func(native.Captured) error
 }
 
-func (*credentialRefreshFixture) Harness() string { return "codex" }
+func (*credentialRefreshFixture) Harness() string { return "pi" }
 func (m *credentialRefreshFixture) Caps() native.Caps {
 	return native.Caps{Refresh: m.supported}
 }
@@ -38,7 +38,7 @@ func (*credentialRefreshFixture) Activate(context.Context, string, accountstore.
 	return nil, errors.New("fixture forbids activation")
 }
 func (*credentialRefreshFixture) LoginCommand(string, string) ([]string, []string, error) {
-	return []string{"/fake/codex", "login"}, nil, nil
+	return []string{"/fake/pi", "login"}, nil, nil
 }
 func (m *credentialRefreshFixture) Refresh(context.Context, native.Captured) (native.Captured, error) {
 	m.savedCalls++
@@ -70,7 +70,10 @@ func (m *credentialRefreshFixture) RecoverCredential(context.Context, native.Cap
 	return m.recovered, nil
 }
 
-func refreshFixtureCredential(t *testing.T, user string, expiry time.Time, grant string) native.Captured {
+// refreshFixtureCredential builds a saved Pi credential for one provider
+// entry, so a rotated credential that names another provider is a changed
+// identity.
+func refreshFixtureCredential(t *testing.T, provider string, expiry time.Time, grant string) native.Captured {
 	t.Helper()
 	jwt := func(v any) string {
 		raw, err := json.Marshal(v)
@@ -79,22 +82,26 @@ func refreshFixtureCredential(t *testing.T, user string, expiry time.Time, grant
 		}
 		return "header." + base64.RawURLEncoding.EncodeToString(raw) + ".signature"
 	}
-	id := jwt(map[string]any{"https://api.openai.com/auth": map[string]string{"chatgpt_user_id": user, "chatgpt_account_id": "workspace"}})
 	access := jwt(map[string]int64{"exp": expiry.Unix()})
-	auth, _ := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": id, "access_token": access, "refresh_token": grant, "account_id": "workspace"}})
+	expires := expiry.UnixMilli()
+	entry, err := json.Marshal(map[string]any{"type": "oauth", "access": access, "refresh": grant, "expires": expires, "accountId": "workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, _ := json.Marshal(map[string]json.RawMessage{provider: entry})
 	payload, _ := json.Marshal(map[string]json.RawMessage{"auth.json": auth})
-	return native.Captured{Identity: "openai:" + user + ":workspace", Credential: accountstore.Credential{Schema: "codex/auth-file@1", Payload: payload}, ExpiresAt: time.Unix(expiry.Unix(), 0)}
+	return native.Captured{Identity: "pi:" + provider, Credential: accountstore.Credential{Schema: "pi/native-files@1", Payload: payload}, ExpiresAt: time.UnixMilli(expires)}
 }
 
 func setupCredentialRefresh(t *testing.T, active bool) (*Accounts, NativeAccount, *credentialRefreshFixture) {
 	t.Helper()
 	a := testAccounts(t)
-	n, err := a.Create("codex", "Fixture")
+	n, err := a.Create("pi", "Fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := refreshFixtureCredential(t, "fixture", time.Now().Add(-time.Minute), "fake-original-grant")
-	m := &credentialRefreshFixture{supported: true, next: refreshFixtureCredential(t, "fixture", time.Now().Add(time.Hour), "fake-rotated-grant")}
+	c := refreshFixtureCredential(t, "openai-codex", time.Now().Add(-time.Minute), "fake-original-grant")
+	m := &credentialRefreshFixture{supported: true, next: refreshFixtureCredential(t, "openai-codex", time.Now().Add(time.Hour), "fake-rotated-grant")}
 	a.NativeManager = func(string, native.Host) (native.Manager, bool) { return m, true }
 	if err = a.transaction(func(st *accountstore.State) error {
 		e := st.Find(n.ID)
@@ -105,7 +112,7 @@ func setupCredentialRefresh(t *testing.T, active bool) (*Accounts, NativeAccount
 	}
 	if active {
 		m.current = c
-		if err = a.setActive("codex", n.ID); err != nil {
+		if err = a.setActive("pi", n.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -126,7 +133,7 @@ func TestCredentialRefreshInactiveCoalesces(t *testing.T) {
 	errs := make(chan error, 2)
 	for _, accounts := range []*Accounts{a, other} {
 		wg.Go(func() {
-			_, err := accounts.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+			_, err := accounts.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 			errs <- err
 		})
 	}
@@ -163,7 +170,7 @@ func TestCredentialRefreshActiveCheckpointSurvivesNativeFailure(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex"); !errors.Is(err, m.nativeErr) {
+	if _, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi"); !errors.Is(err, m.nativeErr) {
 		t.Fatal("native failure was lost", err)
 	}
 	saved, err := readAccountLogin(n.Home)
@@ -171,7 +178,7 @@ func TestCredentialRefreshActiveCheckpointSurvivesNativeFailure(t *testing.T) {
 		t.Fatal("native failure lost the rotated grant", err)
 	}
 	m.nativeErr = nil
-	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 	if err != nil || !result.Active || !result.Refreshed || m.activeCalls != 2 || m.savedCalls != 0 {
 		t.Fatal("newer checkpoint was not sent for native repair", result, err)
 	}
@@ -180,7 +187,7 @@ func TestCredentialRefreshActiveCheckpointSurvivesNativeFailure(t *testing.T) {
 func TestCredentialRefreshInvalidGrantMarksLogin(t *testing.T) {
 	a, n, m := setupCredentialRefresh(t, false)
 	m.refreshErr = native.ErrInvalidGrant
-	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 	if !errors.Is(err, native.ErrInvalidGrant) || result.Reason == "" {
 		t.Fatal("invalid grant was not reported", result, err)
 	}
@@ -199,7 +206,7 @@ func TestCredentialRefreshRecoversBeforeProvider(t *testing.T) {
 	}, true); err != nil {
 		t.Fatal(err)
 	}
-	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 	if err != nil || result.Refreshed || m.savedCalls != 0 || !result.ExpiresAt.Equal(m.next.ExpiresAt) {
 		t.Fatal("newer native recovery did not avoid provider refresh", result, err)
 	}
@@ -212,7 +219,7 @@ func TestCredentialRefreshRecoversBeforeProvider(t *testing.T) {
 func TestCredentialRefreshUnsupportedReportsExpiry(t *testing.T) {
 	a, n, m := setupCredentialRefresh(t, false)
 	m.supported = false
-	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 	if !errors.Is(err, native.ErrUnsupported) || result.Supported || result.ExpiresAt.IsZero() || result.Reason == "" || m.savedCalls != 0 {
 		t.Fatal("unsupported refresh lacks status", result, err)
 	}
@@ -224,8 +231,8 @@ func TestCredentialRefreshRejectsChangedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.next = refreshFixtureCredential(t, "other", time.Now().Add(time.Hour), "fake-wrong-grant")
-	if _, err = a.RefreshCredentials(context.Background(), n.ID, "/fake/codex"); !errors.Is(err, native.ErrNoIdentity) {
+	m.next = refreshFixtureCredential(t, "zai", time.Now().Add(time.Hour), "fake-wrong-grant")
+	if _, err = a.RefreshCredentials(context.Background(), n.ID, "/fake/pi"); !errors.Is(err, native.ErrNoIdentity) {
 		t.Fatal("changed identity was accepted", err)
 	}
 	after, err := readAccountLogin(n.Home)
@@ -236,14 +243,14 @@ func TestCredentialRefreshRejectsChangedIdentity(t *testing.T) {
 
 func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
 	a, n, m := setupCredentialRefresh(t, true)
-	release, err := a.TurnLease(context.Background(), "codex")
+	release, err := a.TurnLease(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
-	if _, err = a.RefreshCredentials(ctx, n.ID, "/fake/codex"); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err = a.RefreshCredentials(ctx, n.ID, "/fake/pi"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("refresh bypassed a native turn", err)
 	}
 	if m.activeCalls != 0 || m.savedCalls != 0 {
@@ -263,7 +270,7 @@ func TestCredentialRefreshDeclinedLoginDoesNotReachProvider(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+		result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 		if !errors.Is(err, native.ErrUnsupported) || result.Supported || m.savedCalls != 0 || m.activeCalls != 0 {
 			t.Fatalf("active=%v result=%+v err=%v", active, result, err)
 		}
@@ -345,7 +352,7 @@ func TestPrivateHomeRefreshForwardsCredentialGateAndCheckpoint(t *testing.T) {
 	if err := os.MkdirAll(scope, 0700); err != nil {
 		t.Fatal(err)
 	}
-	fixture.current = refreshFixtureCredential(t, "fixture", time.Now().Add(-time.Minute), "old")
+	fixture.current = refreshFixtureCredential(t, "openai-codex", time.Now().Add(-time.Minute), "old")
 	wrapper := checkedHomeManager{Manager: fixture, harness: "muse", scope: scope}
 	if !native.SupportsRefresh(wrapper, fixture.current) {
 		t.Fatal("wrapper lost supported refresh")
@@ -392,7 +399,7 @@ func TestPrivateRefreshGateChecksChangedCredential(t *testing.T) {
 			a, n, m := setupCredentialRefresh(t, active)
 			gate := &changingCredentialGateFixture{credentialRefreshFixture: m, retry: mode == "retry-active" || mode == "retry-inactive"}
 			a.NativeManager = func(string, native.Host) (native.Manager, bool) { return gate, true }
-			declined := refreshFixtureCredential(t, "fixture", time.Now().Add(-30*time.Second), "declined")
+			declined := refreshFixtureCredential(t, "openai-codex", time.Now().Add(-30*time.Second), "declined")
 			if mode == "native" {
 				m.current = declined
 			} else {
@@ -401,7 +408,7 @@ func TestPrivateRefreshGateChecksChangedCredential(t *testing.T) {
 			if gate.retry {
 				m.refreshErr = native.ErrInvalidGrant
 			}
-			result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/codex")
+			result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/pi")
 			if !errors.Is(err, native.ErrUnsupported) || result.Supported {
 				t.Fatal("changed credential was not declined", result, err)
 			}
