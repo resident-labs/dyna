@@ -20,9 +20,6 @@ const activeSchema = `CREATE TABLE IF NOT EXISTS account_active (
  PRIMARY KEY (provider, scope)
 );`
 
-// activeKey names a previous release's per-harness selection in state_mirrors.
-func activeKey(harness string) string { return "accounts/active/" + harness }
-
 // validActiveID reports whether id is an account ID or empty (no account).
 func validActiveID(id string) bool {
 	if id == "" {
