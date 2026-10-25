@@ -233,11 +233,13 @@ func Command(o Options) *cobra.Command {
 	}
 	finish := func(drop bool) *cobra.Command {
 		use, short := "done <id> <summary>", "Mark a goal done"
+		long := "Ends a goal its holder owns. A session that holds one item of a goal finishes the item with dyna goal item done and leaves the goal open; its holder, root or the owner ends the goal."
 		args := cobra.ExactArgs(2)
 		if drop {
 			use, short, args = "drop <id> [why]", "Drop a goal", cobra.RangeArgs(1, 2)
+			long = "Cancels a goal its holder owns, with the same holders that may end it."
 		}
-		cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: func(c *cobra.Command, a []string) error {
+		cmd := &cobra.Command{Use: use, Short: short, Long: long, Args: args, RunE: func(c *cobra.Command, a []string) error {
 			summary := ""
 			if len(a) == 2 {
 				summary = a[1]

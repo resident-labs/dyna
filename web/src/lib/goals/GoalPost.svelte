@@ -39,13 +39,14 @@
   let verdict = $derived(payload ? (payload.type === 'finished' ? 'done' : '') : legacyVerdict)
   let summary = $derived(payload?.summary ?? milestone?.[3] ?? legacy?.[2] ?? '')
   let actor = $derived(payload?.actor ?? legacyActor)
-  // The words before the goal link, and the goal's own text after it.
-  let rest = $derived(payload ? ` ${payload.type} goal ` : legacyActor ? legacyPrefix.slice(legacyActor.length) : legacyPrefix)
+  // The words before the goal link, and the goal's own text after it. A
+  // closed checklist is a plain sentence, so its type never shows raw.
+  let rest = $derived(payload ? ` ${payload.type === 'items_done' ? 'finished every item of' : payload.type} goal ` : legacyActor ? legacyPrefix.slice(legacyActor.length) : legacyPrefix)
   let tail = $derived(payload ? `: ${payload.title}` : (post.text?.split(/goal g\d+:?/i).slice(1).join('') ?? ''))
   let state = $derived(payload ? payload.state : verdict === 'done' ? 'done' : /\bdropped goal\b/.test(post.text ?? '') ? 'dropped' : 'active')
   const clip = (s: string): string => ([...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s)
   let rowTitle = $derived(verdict ? id : `${actor}${rest}${id}`.replace(/\s+/g, ' ').trim())
-  let rowSummary = $derived(verdict ? [clip(title).replace(/\.$/, ''), summary].filter(Boolean).join(' · ') : payload?.type === 'amended' ? summary : tail.replace(/^:\s*/, ''))
+  let rowSummary = $derived(verdict ? [clip(title).replace(/\.$/, ''), summary].filter(Boolean).join(' · ') : payload?.type === 'amended' || payload?.type === 'items_done' ? summary : tail.replace(/^:\s*/, ''))
   let chips = $derived([
     { label: state, tone: state === 'done' ? 'sage' : state === 'dropped' ? 'coral' : 'iris' },
     ...(goalExpedited($expedite, { id }) ? [{ label: 'expedited', tone: 'iris' }] : []),
