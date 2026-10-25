@@ -142,6 +142,10 @@ dyna git ci run HEAD --suite lint --node build-machine
 dyna git ci show HEAD --json
 ```
 
+A manual run uses the only enabled CI machine in the registry and prints its
+name. When several machines are enabled, the run asks for `--node <name>`.
+The `localci.remote` setting no longer selects the machine.
+
 ## Host checks
 
 Host execution is off by default on every machine. A one-time upgrade
