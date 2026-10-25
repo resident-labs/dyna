@@ -17,6 +17,9 @@ import (
 // older builds age out once newer ones exist.
 const stableImageCopies = 4
 
+// currentImageLink is the file name a published link carries.
+const currentImageLink = "current"
+
 // StableExecutable returns a path to the binary this process runs that outlives
 // the process. Harness MCP commands, $DYNA_BIN and their published tool homes
 // keep this path across turns, engine restarts and installed updates, so a
@@ -24,7 +27,8 @@ const stableImageCopies = 4
 // instead of naming it: the copy is byte-for-byte the build this process runs,
 // which keeps a worker on its engine's version even while an installed update
 // waits for a restart. Naming /proc/<pid>/exe would break as soon as this
-// process exits.
+// process exits. Publish CurrentImage of this path instead of the path itself: a
+// wrapper that names the copy stays on this build forever.
 func StableExecutable() (string, error) { return StableImage(fmt.Sprintf("/proc/%d/exe", os.Getpid())) }
 
 // StableImage returns a stable path holding the image at source. It covers
@@ -38,11 +42,10 @@ func StableImage(source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cache, err := os.UserCacheDir()
+	dir, err := imageCacheDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(cache, "dyna", "bin")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
@@ -58,6 +61,129 @@ func StableImage(source string) (string, error) {
 	}
 	pruneStableExecutables(dir, filepath.Base(path))
 	return path, nil
+}
+
+// CurrentBuild returns the image of the build that source names, for a running
+// image such as /proc/<pid>/exe and for a copy in the image cache. It reports
+// false for a path that survives an update by itself, such as an installed
+// binary that the update replaces in place.
+func CurrentBuild(source string) (string, bool, error) {
+	if runtime.GOOS != "linux" {
+		return "", false, nil
+	}
+	if strings.HasPrefix(source, "/proc/") {
+		image, err := StableImage(source)
+		return image, err == nil, err
+	}
+	service, err := cacheRoot()
+	if err != nil {
+		return "", false, err
+	}
+	if filepath.Dir(source) != filepath.Join(service, "bin") || !imageCopyName(filepath.Base(source)) {
+		return "", false, nil
+	}
+	return source, true, nil
+}
+
+// CurrentLink returns the path one native scope publishes to name the build the
+// engine runs now. Its own directory keeps pruning from treating the link as an
+// image, and a scope that is not the engine's still gets a link of its own.
+func CurrentLink(scope string) (string, error) {
+	service, err := cacheRoot()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(scope))
+	return filepath.Join(service, "links", hex.EncodeToString(sum[:8]), currentImageLink), nil
+}
+
+// SetLink makes link name target. Each update stages the link under a name of
+// its own and renames it into place, so callers that publish at the same time
+// never share a staging path, and a command that execs the link runs either the
+// old target or the new one, never a path that does not exist.
+func SetLink(link, target string) error {
+	if current, err := os.Readlink(link); err == nil && current == target {
+		return nil
+	}
+	dir := filepath.Dir(link)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(dir, ".link-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	staged := filepath.Join(stage, currentImageLink)
+	if err := os.Symlink(target, staged); err != nil {
+		return err
+	}
+	return os.Rename(staged, link)
+}
+
+// linkRoot is the directory that holds one link directory per native scope.
+func linkRoot() (string, error) {
+	service, err := cacheRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(service, "links"), nil
+}
+
+// linkedImages names every image a published link still points at. Pruning
+// keeps them: a scope that has not run a turn since an update still names the
+// build it last published, and deleting that image would break its wrappers.
+func linkedImages() map[string]bool {
+	out := map[string]bool{}
+	root, err := linkRoot()
+	if err != nil {
+		return out
+	}
+	scopes, err := os.ReadDir(root)
+	if err != nil {
+		return out
+	}
+	for _, scope := range scopes {
+		if !scope.IsDir() {
+			continue
+		}
+		if target, err := os.Readlink(filepath.Join(root, scope.Name(), currentImageLink)); err == nil {
+			out[target] = true
+		}
+	}
+	return out
+}
+
+// cacheRoot is the directory that holds copied images and published links.
+func cacheRoot() (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "dyna"), nil
+}
+
+// imageCacheDir is where copied images live.
+func imageCacheDir() (string, error) {
+	root, err := cacheRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "bin"), nil
+}
+
+// imageCopyName reports whether name is one copied image.
+func imageCopyName(name string) bool {
+	const prefix, digits = "dyna-", 16
+	if !strings.HasPrefix(name, prefix) || len(name) != len(prefix)+digits {
+		return false
+	}
+	for _, r := range name[len(prefix):] {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // copyExecutable writes a private copy of source under dir and renames it into
@@ -87,11 +213,18 @@ func copyExecutable(source, path, dir string) error {
 	return os.Rename(temp.Name(), path)
 }
 
-// pruneStableExecutables keeps the newest copies and the one just written. It
-// never removes a copy that a running process executes: a long-lived session
-// MCP server or an idle harness child still runs the image its turn named, and
-// deleting it would break the next launch of that same path.
-func pruneStableExecutables(dir, keep string) { pruneImages(dir, keep, runningImages()) }
+// pruneStableExecutables keeps the newest copies, the one just written and
+// every copy a published link names. It never removes a copy that a running
+// process executes: a long-lived session MCP server or an idle harness child
+// still runs the image its turn named, and deleting it would break the next
+// launch of that same path.
+func pruneStableExecutables(dir, keep string) {
+	inUse := runningImages()
+	for image := range linkedImages() {
+		inUse[image] = true
+	}
+	pruneImages(dir, keep, inUse)
+}
 
 // pruneImages keeps the newest copies and the one just written, and never
 // removes a copy whose path inUse names.

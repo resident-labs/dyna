@@ -257,7 +257,7 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	var gen harnessmgr.ConfigGeneration
 	if pin.Generation != "" {
 		gen, err = loadNativeGeneration(a.Harness, pin.Generation, lookup)
-		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home) {
+		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home, privateEnv["DYNA_BIN"]) {
 			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs.
 			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 		}
@@ -323,9 +323,14 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 
 // pinnedGenerationUsable reports whether a resumed session may keep this
 // generation. A pin whose Dyna MCP command no longer runs cannot give the next
-// turn any Dyna tools, so the turn rebuilds it instead.
-func pinnedGenerationUsable(harness, dir string, gen harnessmgr.ConfigGeneration, nativeHome string) bool {
+// turn any Dyna tools, so the turn rebuilds it instead. cli is the Dyna command
+// this turn publishes: a pin that names another one would keep calling the
+// build the session first started on, so it rebuilds too.
+func pinnedGenerationUsable(harness, dir string, gen harnessmgr.ConfigGeneration, nativeHome, cli string) bool {
 	if !privateGenerationRoots(gen.Env, nativeHome) || !currentNativeFeaturePolicy(dir, harness) {
+		return false
+	}
+	if gen.CLI != "" && cli != "" && gen.CLI != cli {
 		return false
 	}
 	if nativeFeaturePolicies[harness].DynaShell {
