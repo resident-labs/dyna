@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/profile"
 )
 
@@ -21,6 +22,10 @@ const bodyEnv = "DYNA_FAKE_WORKER_BODY"
 // script sets the exit status, and its stderr reaches Dyna unchanged.
 func InstallClaude(t testing.TB, body string) profile.Profile {
 	t.Helper()
+	// A hosted worker keeps a session host and its child alive for a while
+	// after a turn. Shut them down when the test ends, so a long test binary
+	// never holds a process per worker it ever ran.
+	t.Cleanup(sessionhost.ResetForTest)
 	dir := t.TempDir()
 	if err := fsutil.WriteExecutable(filepath.Join(dir, "claude"), []byte(claudeWrapper), 0o755); err != nil {
 		t.Fatal(err)
