@@ -90,7 +90,7 @@ func (s *Service) privateInstallations() []Installation {
 			continue
 		}
 		active, err := accounts.Find(selection.Account)
-		if err != nil || active.Harness != selection.Harness || active.Provider != selection.Provider {
+		if err != nil || !installationRuns(active, selection) {
 			continue
 		}
 		native, err := accounts.Env(active.ID)
@@ -116,6 +116,13 @@ func (s *Service) privateInstallations() []Installation {
 		out = append(out, Installation{Harness: selection.Harness, Executable: b.Executable, AccountID: active.ID, Env: env})
 	}
 	return out
+}
+
+// installationRuns reports whether an active account matches a global
+// selection. A non-Pi harness keeps one selection key, so a keyed OpenCode
+// account selected under opencode-go still matches.
+func installationRuns(account runtime.NativeAccount, selection store.Selection) bool {
+	return account.Harness == selection.Harness && runtime.SelectionProvider(account.Harness, account.Provider) == selection.Provider
 }
 
 // Snapshot lists Dyna's private accounts. refresh also asks each provider for
