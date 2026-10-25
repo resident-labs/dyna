@@ -85,7 +85,9 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 		t.Fatal(err)
 	}
 	started := time.Unix(1000, 0)
-	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Notify: notify.New(rooms, subagent.NewManager()), Now: func() time.Time { return started }}
+	// Each fixture owns its run set, so no run from another test can wait on this
+	// test's engine stop.
+	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Notify: notify.New(rooms, subagent.NewManager()), Now: func() time.Time { return started }, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{}}}
 	s.GH.run = func(context.Context, *exec.Cmd) error { return nil }
 	return s, saved, started
 }
