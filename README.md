@@ -117,7 +117,7 @@ to call. See `docs/voice.md`.
 ### Harnesses and profiles
 
 A harness is an adapter for one agent CLI: `claude-code`, `codex`,
-`opencode`, `muse`, `pi`, `custom` and `mock`. Each
+`opencode`, `muse`, `pi` and `mock`. Each
 runs as a headless child process, with its own private runtime and accounts.
 
 A profile binds a harness and a model to four ratings from 1 to 10: taste,
