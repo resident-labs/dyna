@@ -75,9 +75,20 @@ func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 			t.Fatalf("account %s moved to (%q, %q)", entry.ID, entry.Provider, entry.Kind)
 		}
 	}
-	for provider, id := range map[string]string{"anthropic": "11111111111111111111111111111111", "chatgpt": "22222222222222222222222222222222"} {
-		if got, err := s.Active(Provider(provider), ""); err != nil || got != id {
-			t.Fatalf("active %s = %q, %v", provider, got, err)
+	// Each selection keeps the harness of the account it names.
+	for _, row := range []struct {
+		provider Provider
+		harness  string
+		id       string
+	}{
+		{ProviderAnthropic, "claude-code", "11111111111111111111111111111111"},
+		{ProviderChatGPT, "codex", "22222222222222222222222222222222"},
+	} {
+		if got, err := s.Active(row.provider, row.harness, ""); err != nil || got != row.id {
+			t.Fatalf("active %s for %s = %q, %v", row.provider, row.harness, got, err)
+		}
+		if got, err := s.Active(row.provider, "pi", ""); err != nil || got != "" {
+			t.Fatalf("pi took %s's selection: %q, %v", row.harness, got, err)
 		}
 	}
 	var harnessTable int
@@ -92,25 +103,25 @@ func TestActiveForPrefersTheRoomRow(t *testing.T) {
 	shared := saveAccount(t, s, "shared")
 	room := saveAccount(t, s, "room")
 	provider, _ := ProviderFor("fixture", "")
-	if err := s.SetActive(provider, "", shared.ID); err != nil {
+	if err := s.SetActive(provider, "pi", "", shared.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ActiveFor(provider, "room-1"); err != nil || got != shared.ID {
+	if got, err := s.ActiveFor(provider, "pi", "room-1"); err != nil || got != shared.ID {
 		t.Fatalf("room without a row = %q, %v", got, err)
 	}
-	if err := s.SetActive(provider, "room-1", room.ID); err != nil {
+	if err := s.SetActive(provider, "pi", "room-1", room.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ActiveFor(provider, "room-1"); err != nil || got != room.ID {
+	if got, err := s.ActiveFor(provider, "pi", "room-1"); err != nil || got != room.ID {
 		t.Fatalf("room row = %q, %v", got, err)
 	}
-	if got, err := s.ActiveFor(provider, "room-2"); err != nil || got != shared.ID {
+	if got, err := s.ActiveFor(provider, "pi", "room-2"); err != nil || got != shared.ID {
 		t.Fatalf("another room = %q, %v", got, err)
 	}
-	if err := s.SetActive(provider, "room-1", ""); err != nil {
+	if err := s.SetActive(provider, "pi", "room-1", ""); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ActiveFor(provider, "room-1"); err != nil || got != "" {
+	if got, err := s.ActiveFor(provider, "pi", "room-1"); err != nil || got != "" {
 		t.Fatalf("cleared room row = %q, %v", got, err)
 	}
 }
@@ -142,7 +153,7 @@ func TestRemovingAnAccountDeletesItsLinkedRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider, _ := ProviderFor("fixture", "")
-	if err := s.SetActive(provider, "", meta.ID); err != nil {
+	if err := s.SetActive(provider, "pi", "", meta.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Update(func(st *State) error {

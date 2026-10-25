@@ -103,7 +103,7 @@ func TestFailoverRanksByTheUsageScore(t *testing.T) {
 		"aaa-later-access": usageBody(10, 10, time.Now().Add(6*24*time.Hour)),
 		"zzz-soon-access":  usageBody(30, 40, time.Now().Add(14*time.Hour)),
 	})
-	from, to, err := a.Failover(context.Background(), "claude-code", failed.ID, "", "/fake/native", time.Now().Add(time.Hour))
+	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, failed.ID, "", "/fake/native", time.Now().Add(time.Hour))
 	if err != nil || from.ID != failed.ID || to.ID != soon.ID {
 		t.Fatalf("from=%v to=%v err=%v; want the account that resets soon", from.ID, to.ID, err)
 	}
@@ -121,7 +121,7 @@ func TestFailoverNeverPicksAnAccountNearItsCap(t *testing.T) {
 	fixtureUsageEndpoint(t, map[string]string{
 		"zzz-healthy-access": usageBody(15, 20, time.Now().Add(24*time.Hour)),
 	})
-	from, to, err := a.Failover(context.Background(), "claude-code", failed.ID, "", "/fake/native", time.Now().Add(time.Hour))
+	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, failed.ID, "", "/fake/native", time.Now().Add(time.Hour))
 	if err != nil || from.ID != failed.ID || to.ID != healthy.ID {
 		t.Fatalf("from=%v to=%v err=%v; want the healthy account", from.ID, to.ID, err)
 	}
@@ -146,7 +146,7 @@ func TestFailoverSkipsAQuotaBlockedAccount(t *testing.T) {
 	fixtureUsageEndpoint(t, nil)
 	// The failed account's own limit ends after the blocked account's five-hour
 	// reset, so the error names the sooner recovery.
-	_, _, err := a.Failover(context.Background(), "claude-code", failed.ID, "", "/fake/native", time.Now().Add(6*time.Hour))
+	_, _, err := a.Failover(context.Background(), store.ProviderAnthropic, failed.ID, "", "/fake/native", time.Now().Add(6*time.Hour))
 	if err == nil {
 		t.Fatal("a quota-blocked account took the turn")
 	}
@@ -174,7 +174,7 @@ func TestFailoverRefreshesTheChosenReadingFirst(t *testing.T) {
 		"aaa-stale-access": usageBody(97, 98, time.Now().Add(24*time.Hour)),
 		// The runner-up's endpoint is down; its saved reading stands.
 	})
-	from, to, err := a.Failover(context.Background(), "claude-code", failed.ID, "", "/fake/native", time.Now().Add(time.Hour))
+	from, to, err := a.Failover(context.Background(), store.ProviderAnthropic, failed.ID, "", "/fake/native", time.Now().Add(time.Hour))
 	if err != nil || from.ID != failed.ID || to.ID != steady.ID {
 		t.Fatalf("from=%v to=%v err=%v; want the steady account after the refresh", from.ID, to.ID, err)
 	}

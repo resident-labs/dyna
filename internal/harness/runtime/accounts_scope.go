@@ -13,6 +13,7 @@ import (
 	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/gitexec"
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/repoid"
 )
@@ -61,12 +62,12 @@ func repoName(repo string) string {
 	return repo
 }
 
-// SelectForRepo makes the active account one that may run in repo. It keeps
-// the active account when allowed. Otherwise it switches to an allowed
-// account with quota left, ranked by its usage score, and never picks one
-// whose reading says it is at a cap. It never picks an account the repo
-// rules refuse. With no scopes saved it does nothing.
-func (a *Accounts) SelectForRepo(ctx context.Context, harness, repo, executable string) error {
+// SelectForRepo makes the active account of provider one that harness h may run
+// and that may run in repo. It keeps the active account when allowed. Otherwise
+// it switches to an allowed account with quota left, ranked by its usage score,
+// and never picks one whose reading says it is at a cap. It never picks an
+// account the repo rules refuse. With no scopes saved it does nothing.
+func (a *Accounts) SelectForRepo(ctx context.Context, harness string, provider store.Provider, roomID, repo, executable string) error {
 	rules, err := a.rules()
 	if err != nil || len(rules) == 0 {
 		return err
@@ -75,21 +76,27 @@ func (a *Accounts) SelectForRepo(ctx context.Context, harness, repo, executable 
 	if err != nil {
 		return err
 	}
+	if provider == "" {
+		return nil
+	}
 	all, err := a.List()
 	if err != nil {
 		return err
 	}
+	// The account this turn would run on now keeps its place when the repo
+	// allows it, so a room or provider selection is not replaced needlessly.
+	current, _ := a.activeAccount(harness, provider, roomID)
 	var allowed []NativeAccount
 	for _, n := range all {
-		if n.Harness == h && n.Status == "ready" && rules.Allows(n.ID, repo) {
-			if n.Active {
+		if accountRuns(h, n, provider) && n.Status == "ready" && rules.Allows(n.ID, repo) {
+			if n.ID == current.ID {
 				return nil
 			}
 			allowed = append(allowed, n)
 		}
 	}
 	if len(allowed) == 0 {
-		return fmt.Errorf("No signed-in %s account may run in %s. Allow one in Settings, Accounts.", h, repoName(repo))
+		return fmt.Errorf("No signed-in %s account may run in %s. Allow one in Settings, Accounts.", provider, repoName(repo))
 	}
 	now := time.Now()
 	earliest, earliestLabel := time.Time{}, ""
@@ -111,18 +118,19 @@ func (a *Accounts) SelectForRepo(ctx context.Context, harness, repo, executable 
 	chosen, earliest, earliestLabel := a.chooseUsage(ctx, open, earliest, earliestLabel, now)
 	if chosen == nil {
 		if earliest.IsZero() {
-			return fmt.Errorf("Every %s account that may run in %s is at its usage limit.", h, repoName(repo))
+			return fmt.Errorf("Every %s account that may run in %s is at its usage limit.", provider, repoName(repo))
 		}
-		return fmt.Errorf("No %s account with quota left may run in %s. %s resets %s.", h, repoName(repo), earliestLabel, earliest.Local().Format("Mon 15:04"))
+		return fmt.Errorf("No %s account with quota left may run in %s. %s resets %s.", provider, repoName(repo), earliestLabel, earliest.Local().Format("Mon 15:04"))
 	}
 	return a.Switch(ctx, chosen.ID, executable)
 }
 
-// activeFor returns the active account when the repo rules allow it. A turn
-// calls it after it holds its lease, so a switch by another turn cannot move
-// this one onto an account that the repo refuses.
-func (a *Accounts) activeFor(harness, repo string) (NativeAccount, error) {
-	active, err := a.Active(harness)
+// activeFor returns the account provider uses in roomID when the repo rules
+// allow it. A turn calls it after it holds its lease, so a switch by another
+// turn cannot move this one onto an account that the repo refuses. The room's
+// own selection wins over the global one.
+func (a *Accounts) activeFor(harness string, provider store.Provider, roomID, repo string) (NativeAccount, error) {
+	active, err := a.activeAccount(harness, provider, roomID)
 	if err != nil {
 		return active, err
 	}
@@ -131,7 +139,7 @@ func (a *Accounts) activeFor(harness, repo string) (NativeAccount, error) {
 		return active, err
 	}
 	if !rules.Allows(active.ID, repo) {
-		return active, fmt.Errorf("%w: the active %s account %s may not run in %s. Try the turn again.", errScopeRefused, active.Harness, active.Label, repoName(repo))
+		return active, fmt.Errorf("%w: the active %s account %s may not run in %s. Try the turn again.", errScopeRefused, active.Provider, active.Label, repoName(repo))
 	}
 	return active, nil
 }
@@ -150,19 +158,19 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	if err != nil {
 		return p, err
 	}
-	return p, r.Accounts.SelectForRepo(ctx, p.Harness, p.RuntimeRepo, b.Executable)
+	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
 // Failover runs after a turn on the account failedID hit a usage limit that
 // lasts until the given time. It remembers that limit, then picks another
-// account of the harness that the repo allows, is signed in and has quota
+// account of the same provider that the repo allows, is signed in and has quota
 // left: usage readings rank the candidates, the chosen reading is refreshed
 // first, and an account whose reading says it has no quota left is never
 // picked. The turn's own account fails, not whatever is active now: another
 // turn may have switched since. The active account is kept when it qualifies.
 // It never picks an account the repo rules refuse. With none left, it names
 // the earliest reset.
-func (a *Accounts) Failover(ctx context.Context, harness, failedID, repo, executable string, until time.Time) (from, to NativeAccount, err error) {
+func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failedID, repo, executable string, until time.Time) (from, to NativeAccount, err error) {
 	if from, err = a.Find(failedID); err != nil {
 		return from, to, err
 	}
@@ -192,7 +200,7 @@ func (a *Accounts) Failover(ctx context.Context, harness, failedID, repo, execut
 	}
 	var open []NativeAccount
 	for _, n := range all {
-		if n.Harness != from.Harness || n.ID == from.ID || n.Status != "ready" || !rules.Allows(n.ID, repo) {
+		if !accountRuns(from.Harness, n, provider) || n.ID == from.ID || n.Status != "ready" || !rules.Allows(n.ID, repo) {
 			continue
 		}
 		if end, hit := limits[n.ID]; hit {
@@ -205,7 +213,7 @@ func (a *Accounts) Failover(ctx context.Context, harness, failedID, repo, execut
 	}
 	chosen, earliest, earliestLabel := a.chooseUsage(ctx, open, earliest, earliestLabel, time.Now())
 	if chosen == nil {
-		return from, to, fmt.Errorf("No other %s account may run in %s with quota left. %s resets %s.", from.Harness, repoName(repo), earliestLabel, earliest.Local().Format("Mon 15:04"))
+		return from, to, fmt.Errorf("No other %s account may run in %s with quota left. %s resets %s.", provider, repoName(repo), earliestLabel, earliest.Local().Format("Mon 15:04"))
 	}
 	if chosen.Active {
 		return from, *chosen, nil

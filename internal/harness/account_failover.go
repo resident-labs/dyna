@@ -31,7 +31,7 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 		return nil, err
 	}
 	until := UnavailableUntil(failure.Error(), time.Now())
-	from, to, err := rt.Accounts.Failover(ctx, p.Harness, accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, until)
+	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, until)
 	if err != nil {
 		return nil, err
 	}

@@ -10,14 +10,18 @@ import (
 	statewrite "dyna-agent/internal/state"
 )
 
-// The account each provider uses lives in dyna.db, beside the registry, so a
-// removal clears it with the account. Scope is "" for the global row, or a room
-// ID. A room row overrides the global row.
+// The account each harness uses for each provider lives in dyna.db, beside the
+// registry, so a removal clears it with the account. Harness is part of the key:
+// two harnesses can run one provider (Claude Code and Pi both run anthropic) and
+// their credential formats cannot be exchanged yet, so each keeps its own
+// choice. Scope is "" for the global row, or a room ID. A room row overrides the
+// global row of the same harness and provider.
 const activeSchema = `CREATE TABLE IF NOT EXISTS account_active (
  provider TEXT NOT NULL,
+ harness TEXT NOT NULL DEFAULT '',
  scope TEXT NOT NULL DEFAULT '',
  account TEXT NOT NULL,
- PRIMARY KEY (provider, scope)
+ PRIMARY KEY (provider, harness, scope)
 );`
 
 // validActiveID reports whether id is an account ID or empty (no account).
@@ -35,8 +39,9 @@ func forgetActive(ctx context.Context, conn *sql.Conn, id string) error {
 	return err
 }
 
-// Active returns the ID of the account provider uses in scope, or empty.
-func (s *Store) Active(provider Provider, scope string) (string, error) {
+// Active returns the ID of the account harness h uses for provider in scope, or
+// empty.
+func (s *Store) Active(provider Provider, harness, scope string) (string, error) {
 	db, err := s.db()
 	if err != nil {
 		return "", err
@@ -45,15 +50,15 @@ func (s *Store) Active(provider Provider, scope string) (string, error) {
 	var id string
 	err = statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
 		var err error
-		id, err = ReadActive(ctx, q, provider, scope)
+		id, err = ReadActive(ctx, q, provider, harness, scope)
 		return err
 	})
 	return id, err
 }
 
-// ActiveFor returns the ID of the account provider uses in roomID: its room
-// row when it has one, else the global row.
-func (s *Store) ActiveFor(provider Provider, roomID string) (string, error) {
+// ActiveFor returns the ID of the account harness h uses for provider in
+// roomID: its room row when it has one, else the global row.
+func (s *Store) ActiveFor(provider Provider, harness, roomID string) (string, error) {
 	db, err := s.db()
 	if err != nil {
 		return "", err
@@ -61,15 +66,8 @@ func (s *Store) ActiveFor(provider Provider, roomID string) (string, error) {
 	ctx := context.Background()
 	var id string
 	err = statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
-		if roomID != "" {
-			room, found, err := readActiveRow(ctx, q, provider, roomID)
-			if err != nil || found {
-				id = room
-				return err
-			}
-		}
 		var err error
-		id, err = ReadActive(ctx, q, provider, "")
+		id, _, err = ReadActiveFor(ctx, q, provider, harness, roomID)
 		return err
 	})
 	return id, err
@@ -77,16 +75,29 @@ func (s *Store) ActiveFor(provider Provider, roomID string) (string, error) {
 
 // ReadActive reads the saved selection through the caller's database snapshot.
 // It does not open another connection.
-func ReadActive(ctx context.Context, q statewrite.Reader, provider Provider, scope string) (string, error) {
-	id, _, err := readActiveRow(ctx, q, provider, scope)
+func ReadActive(ctx context.Context, q statewrite.Reader, provider Provider, harness, scope string) (string, error) {
+	id, _, err := readActiveRow(ctx, q, provider, harness, scope)
 	return id, err
+}
+
+// ReadActiveFor reads the selection harness h uses in roomID through the
+// caller's snapshot: the room row when it exists, else the global row. found
+// reports whether either row exists, so a row that names no account is not
+// mistaken for no row.
+func ReadActiveFor(ctx context.Context, q statewrite.Reader, provider Provider, harness, roomID string) (id string, found bool, err error) {
+	if roomID != "" {
+		if id, found, err = readActiveRow(ctx, q, provider, harness, roomID); err != nil || found {
+			return id, found, err
+		}
+	}
+	return readActiveRow(ctx, q, provider, harness, "")
 }
 
 // readActiveRow reads one row and reports whether the row exists, so a room row
 // that names no account still overrides the global row.
-func readActiveRow(ctx context.Context, q statewrite.Reader, provider Provider, scope string) (string, bool, error) {
+func readActiveRow(ctx context.Context, q statewrite.Reader, provider Provider, harness, scope string) (string, bool, error) {
 	var id string
-	err := q.QueryRowContext(ctx, "SELECT account FROM account_active WHERE provider = ? AND scope = ?", provider, scope).Scan(&id)
+	err := q.QueryRowContext(ctx, "SELECT account FROM account_active WHERE provider = ? AND harness = ? AND scope = ?", provider, harness, scope).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -96,9 +107,9 @@ func readActiveRow(ctx context.Context, q statewrite.Reader, provider Provider, 
 	return id, true, nil
 }
 
-// SetActive records that provider uses account id in scope, or none when id is
-// empty.
-func (s *Store) SetActive(provider Provider, scope, id string) error {
+// SetActive records that harness h uses account id for provider in scope, or
+// none when id is empty.
+func (s *Store) SetActive(provider Provider, harness, scope, id string) error {
 	if !validActiveID(id) {
 		return errors.New("An account selection needs a saved account ID.")
 	}
@@ -108,12 +119,12 @@ func (s *Store) SetActive(provider Provider, scope, id string) error {
 	}
 	ctx := context.Background()
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		return setActiveRow(ctx, conn, provider, scope, id)
+		return setActiveRow(ctx, conn, provider, harness, scope, id)
 	})
 }
 
-func setActiveRow(ctx context.Context, conn *sql.Conn, provider Provider, scope, id string) error {
-	_, err := conn.ExecContext(ctx, `INSERT INTO account_active(provider, scope, account) VALUES (?, ?, ?)
-ON CONFLICT(provider, scope) DO UPDATE SET account = excluded.account`, provider, scope, id)
+func setActiveRow(ctx context.Context, conn *sql.Conn, provider Provider, harness, scope, id string) error {
+	_, err := conn.ExecContext(ctx, `INSERT INTO account_active(provider, harness, scope, account) VALUES (?, ?, ?, ?)
+ON CONFLICT(provider, harness, scope) DO UPDATE SET account = excluded.account`, provider, harness, scope, id)
 	return err
 }

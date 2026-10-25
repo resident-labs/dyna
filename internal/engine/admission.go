@@ -164,7 +164,7 @@ func (s services) admitNativeAttempt(ctx context.Context, in callspec.AccountAdm
 	// Workflows may use any actual cwd, including one without an origin.
 	// Existing account scope rules decide which account may run there.
 	repo := harnessruntime.RepoIdentity(ctx, dir)
-	account, err := s.runtime.Accounts.CheckPreparedAccount(harness, in.AccountID, repo)
+	account, err := s.runtime.Accounts.CheckPreparedAccount(harness, in.AccountID, owner.room, repo)
 	if err != nil {
 		return callspec.ExecutionRef{}, err
 	}

@@ -91,6 +91,20 @@ func checkPrivateAccountHome(h, scope string, setModes bool) error {
 	}
 	return nil
 }
+
+// checkedCredentialHome accepts the shared harness home itself, or one account
+// home next to it, and rejects every other path. A harness that pins credentials
+// per account must never read a credential from anywhere else.
+func checkedCredentialHome(scope, home string) error {
+	if home == scope {
+		return nil
+	}
+	if !pinnedSecretOf(scope, home) {
+		return errAccountPath
+	}
+	return safeAccountPath(home)
+}
+
 func prepareAccountLogin(h, scope string, env map[string]string) error {
 	if err := checkPrivateAccountHome(h, scope, false); err != nil {
 		return err
@@ -174,8 +188,22 @@ func (m checkedHomeManager) Refresh(ctx context.Context, c native.Captured) (nat
 // Validate the final manager environment after adapter values have been merged.
 // Active native scopes stay at scope; Muse and Cursor use exact checked HOME paths.
 func validateAccountManagerEnv(h, scope string, env map[string]string) error {
+	return validateAccountManagerEnvAt(h, scope, scope, env)
+}
+
+// validateAccountManagerEnvAt is validateAccountManagerEnv for a harness that
+// keeps each account's credentials in that account's own home. credentialHome
+// is that home, or scope when the caller works on the scope itself. Pi reads its
+// whole agent directory from the account home, but its session history stays in
+// scope, which is the shared harness home.
+func validateAccountManagerEnvAt(h, scope, credentialHome string, env map[string]string) error {
 	if err := safeAccountPath(scope); err != nil {
 		return err
+	}
+	if h == "claude-code" || h == "pi" {
+		if err := checkedCredentialHome(scope, credentialHome); err != nil {
+			return err
+		}
 	}
 	for key, value := range harnesshome.Roots(scope) {
 		if env[key] != value {
@@ -186,7 +214,7 @@ func validateAccountManagerEnv(h, scope string, env map[string]string) error {
 	switch h {
 	case "claude-code":
 		expected["CLAUDE_CONFIG_DIR"] = scope
-		expected["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = scope
+		expected["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = credentialHome
 		expected["ANTHROPIC_CONFIG_DIR"] = filepath.Join(scope, "anthropic")
 	case "codex":
 		expected["CODEX_HOME"] = scope
@@ -194,8 +222,8 @@ func validateAccountManagerEnv(h, scope string, env map[string]string) error {
 	case "grok":
 		expected["GROK_HOME"] = scope
 	case "pi":
-		expected["PI_CODING_AGENT_DIR"] = scope
-		expected["PI_CODING_AGENT_SESSION_DIR"] = filepath.Join(scope, "sessions")
+		expected[piAgentDirKey] = credentialHome
+		expected[piSessionDirKey] = filepath.Join(scope, "sessions")
 	case "kimi-code":
 		expected["KIMI_CODE_HOME"] = scope
 	case "opencode":

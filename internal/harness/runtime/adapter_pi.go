@@ -43,8 +43,8 @@ func init() {
 		ConfigArgs: piConfigArgs,
 		LoginArgs:  piLoginArgs,
 		// Pi has no account of its own. /login inside Pi stores provider OAuth
-		// grants and API keys in auth.json. Pi runs with its own defaults:
-		// Dyna imports no personal preferences.
+		// grants and API keys in auth.json. Dyna runs each account from its own
+		// home, so a provider sign-in becomes an account of that provider.
 		AuthFiles: []string{"auth.json"},
 		// Account sign-in is not blocked: /login stores credentials in the
 		// private auth.json, so no shared credential backend is touched.
@@ -57,14 +57,15 @@ func init() {
 	})
 }
 
-// piNativeEnv scopes Pi to one private account home. The agent directory covers
-// settings, mcp.json, auth.json, skills, and user instructions. Shared launch
-// code supplies private HOME/XDG roots; PI_OFFLINE stops automatic network activity.
+// piNativeEnv scopes Pi to one private home. The agent directory covers
+// settings, mcp.json, auth.json, skills, and user instructions; a turn overrides
+// the agent directory with the account's own home. Shared launch code supplies
+// private HOME/XDG roots; PI_OFFLINE stops automatic network activity.
 func piNativeEnv(home string) map[string]string {
 	env := map[string]string{
-		"PI_CODING_AGENT_DIR":         home,
-		"PI_CODING_AGENT_SESSION_DIR": filepath.Join(home, "sessions"),
-		"PI_OFFLINE":                  "1",
+		piAgentDirKey:   home,
+		piSessionDirKey: filepath.Join(home, "sessions"),
+		"PI_OFFLINE":    "1",
 		// PI_SKIP_VERSION_CHECK stops the pi.dev latest-version request.
 		"PI_SKIP_VERSION_CHECK": "1",
 	}

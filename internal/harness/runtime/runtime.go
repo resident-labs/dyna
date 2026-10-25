@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
@@ -165,9 +166,12 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	if _, _, err := (&FirstUse{Bundles: r.Bundles}).EnsureBundle(ctx, a.Harness, version); err != nil {
 		return p, Pin{}, err
 	}
+	// A profile model names its provider, and the account selection is kept per
+	// provider and per room. The room row wins over the global row.
+	provider := providerForModel(a.Harness, p.Model)
 	// Dyna never copies a personal login on its own. The user signs in, or
 	// chooses the personal login, on the Harnesses page or with dyna harness login.
-	active, err := r.Accounts.activeFor(a.Harness, p.RuntimeRepo)
+	active, err := r.Accounts.activeFor(a.Harness, provider, p.Env[mode.EnvRoomID], p.RuntimeRepo)
 	if err != nil {
 		if errors.Is(err, errScopeRefused) {
 			return p, Pin{}, err
@@ -196,6 +200,13 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	if err != nil {
 		return p, pin, err
 	}
+	if a.Harness == "pi" {
+		// Pi's history and shared files stay here while the account home holds
+		// the credential of the turn.
+		if err = ensurePiSharedHome(home); err != nil {
+			return p, pin, err
+		}
+	}
 	if pinsCredentials(a.Harness) {
 		if err := r.Accounts.prepareTurnPin(ctx, active, b.Executable); err != nil {
 			return p, pin, fmt.Errorf("Sign in to %s in Dyna: %w", a.Harness, err)
@@ -215,7 +226,7 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	for k, v := range harnesshome.Discovery(home) {
 		env[k] = v
 	}
-	native, err := r.Accounts.Env(active.ID)
+	native, err := r.Accounts.launchEnv(active.ID)
 	if err != nil {
 		return p, pin, err
 	}
@@ -283,11 +294,21 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		env[k] = v
 	}
 	applyNativeFeatureEnvironment(a.Harness, env)
-	if err := validateAccountManagerEnv(a.Harness, home, env); err != nil {
-		return p, pin, err
+	// A harness that keeps credentials per account reads them from that
+	// account's own home. Pi reads its whole agent directory there, so Dyna
+	// publishes the generation's settings, MCP servers and skills first. Session
+	// history stays in the shared harness home.
+	if a.Harness == "pi" {
+		if err := publishPiAccountHome(gen.Directory, home, active.Home); err != nil {
+			return p, pin, err
+		}
+		env[piAgentDirKey] = active.Home
 	}
 	if pinsCredentials(a.Harness) {
 		env[pinnedSecretKey] = active.Home
+	}
+	if err := validateAccountManagerEnvAt(a.Harness, home, active.Home, env); err != nil {
+		return p, pin, err
 	}
 	env["PATH"] = filepath.Dir(b.Executable) + string(os.PathListSeparator) + privateEnv["PATH"]
 	paths := []string{}
@@ -360,7 +381,7 @@ func (r *Runtime) observeAccount(ctx context.Context, id, exe string) (NativeAcc
 	if err != nil {
 		return n, err
 	}
-	m, err := r.Accounts.Manager(id, exe)
+	m, err := r.Accounts.launchManager(id, exe)
 	if err != nil {
 		return n, err
 	}

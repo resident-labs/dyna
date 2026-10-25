@@ -173,6 +173,13 @@ func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onAc
 	if onActivate != nil {
 		onActivate()
 	}
+	n, err := a.Find(id)
+	if err != nil {
+		return err
+	}
+	if n.Harness == "pi" {
+		return a.selectPinned(n)
+	}
 	return a.transaction(func(state *store.State) error {
 		entry := state.Find(id)
 		n, err := a.native(entry)
@@ -214,6 +221,6 @@ func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onAc
 		if err = os.Remove(filepath.Join(n.Home, ".login-pending.json")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		return a.setActive(n.Harness, id)
+		return a.setActiveAccount(n)
 	}, true)
 }

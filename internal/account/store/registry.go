@@ -61,7 +61,7 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 6, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 7, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
@@ -88,7 +88,16 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 				return err
 			}
 		}
-		return fillActiveSelections(ctx, conn, legacyActive)
+		if err := fillActiveSelections(ctx, conn, legacyActive); err != nil {
+			return err
+		}
+		if old < 7 {
+			if err := fillActiveHarness(ctx, conn); err != nil {
+				return err
+			}
+		}
+		_, err = conn.ExecContext(ctx, piSplitSchema)
+		return err
 	})
 	return db, err
 }
@@ -230,8 +239,10 @@ func fillActiveSelections(ctx context.Context, conn *sql.Conn, legacy bool) erro
 	if !legacy {
 		return nil
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO account_active(provider, scope, account)
-		SELECT json_extract(a.metadata, '$.provider'), '', old.account
+	// The legacy table kept one row per harness, so its key names the harness of
+	// the selection and each harness keeps its own choice.
+	if _, err := conn.ExecContext(ctx, `INSERT INTO account_active(provider, harness, scope, account)
+		SELECT json_extract(a.metadata, '$.provider'), old.harness, '', old.account
 		FROM account_active_harness old JOIN accounts a ON a.id = old.account
 		ON CONFLICT DO NOTHING`); err != nil {
 		return err
@@ -239,6 +250,64 @@ func fillActiveSelections(ctx context.Context, conn *sql.Conn, legacy bool) erro
 	_, err := conn.ExecContext(ctx, "DROP TABLE account_active_harness")
 	return err
 }
+
+// fillActiveHarness rebuilds the selection table with the harness in its key,
+// so that two harnesses running one provider keep their own choice. Each row's
+// harness is the harness of the account it names. A row whose account is gone
+// keeps no harness and so selects nothing.
+func fillActiveHarness(ctx context.Context, conn *sql.Conn) error {
+	var hasHarness bool
+	if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pragma_table_info('account_active') WHERE name = 'harness')").Scan(&hasHarness); err != nil {
+		return err
+	}
+	if hasHarness {
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE account_active_harness_v7 (
+ provider TEXT NOT NULL,
+ harness TEXT NOT NULL DEFAULT '',
+ scope TEXT NOT NULL DEFAULT '',
+ account TEXT NOT NULL,
+ PRIMARY KEY (provider, harness, scope))`); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO account_active_harness_v7(provider, harness, scope, account)
+		SELECT old.provider, COALESCE(json_extract(a.metadata, '$.harness'), ''), old.scope, old.account
+		FROM account_active old LEFT JOIN accounts a ON a.id = old.account`); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "DROP TABLE account_active"); err != nil {
+		return err
+	}
+	_, err := conn.ExecContext(ctx, "ALTER TABLE account_active_harness_v7 RENAME TO account_active")
+	return err
+}
+
+// piSplitSchema keeps the one-time Pi split in dyna.db: the accounts it moves
+// providers out of, their entries and repository rules, and the account each
+// provider was moved into. It is deleted with the split step.
+const piSplitSchema = `CREATE TABLE IF NOT EXISTS pi_split_sources (
+ account TEXT PRIMARY KEY,
+ home TEXT NOT NULL,
+ label TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pi_split_source_entries (
+ source TEXT NOT NULL,
+ provider TEXT NOT NULL,
+ PRIMARY KEY (source, provider)
+);
+CREATE TABLE IF NOT EXISTS pi_split_source_repos (
+ source TEXT NOT NULL,
+ repo TEXT NOT NULL,
+ PRIMARY KEY (source, repo)
+);
+CREATE TABLE IF NOT EXISTS pi_split_done (
+ source TEXT NOT NULL,
+ provider TEXT NOT NULL,
+ account TEXT NOT NULL,
+ completed INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY (source, provider)
+);`
 
 // Topic is the committed event of a changed account registry. The engine's
 // account timer wakes on it.

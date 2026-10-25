@@ -217,7 +217,7 @@ func TestRetiredHarnessAccountRefreshesAndReportsUsageWithoutBundle(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&store.Store{Root: root}).SetActive(store.ProviderXAI, "", n.ID); err != nil {
+	if err := (&store.Store{Root: root}).SetActive(store.ProviderXAI, "grok", "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	s := New(Options{Store: &store.Store{Root: root}, Now: func() time.Time { return now }})
@@ -342,7 +342,7 @@ func TestKimiRetiredAccountUsesAndRenewsWithoutBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeKimiLogin(t, accounts, now.Add(time.Hour))
-	if err := (&store.Store{Root: root}).SetActive(store.ProviderKimiCode, "", n.ID); err != nil {
+	if err := (&store.Store{Root: root}).SetActive(store.ProviderKimiCode, "kimi-code", "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	// Save the login the account reports, so renewal has a credential to rotate.

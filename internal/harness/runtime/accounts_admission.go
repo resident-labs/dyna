@@ -18,8 +18,10 @@ import (
 type preparedAccount struct {
 	root     string
 	repo     string
+	room     string
 	metadata store.Metadata
 	repos    []string
+	provider store.Provider
 }
 
 var errPreparedAccountChanged = errors.New("The prepared account changed. Prepare the turn again.")
@@ -27,13 +29,25 @@ var errPreparedAccountChanged = errors.New("The prepared account changed. Prepar
 // CheckPreparedAccount validates the already selected account before admission.
 // The caller must hold its existing PrepareRuntime lease. This check never
 // selects an account. File and credential checks happen only here.
-func (a *Accounts) CheckPreparedAccount(harness, accountID, repo string) (NativeAccount, error) {
-	n, err := a.activeFor(harness, repo)
+func (a *Accounts) CheckPreparedAccount(harness, accountID, room, repo string) (NativeAccount, error) {
+	n, err := a.Find(accountID)
+	if err != nil {
+		return NativeAccount{}, errPreparedAccountChanged
+	}
+	canonical, err := canonicalAccountHarness(harness)
+	if err != nil || n.Harness != canonical {
+		return NativeAccount{}, errPreparedAccountChanged
+	}
+	active, err := a.activeAccount(harness, selectionProvider(canonical, n.Provider), room)
+	if err != nil || active.ID != n.ID {
+		return NativeAccount{}, errPreparedAccountChanged
+	}
+	rules, err := a.rules()
 	if err != nil {
 		return NativeAccount{}, err
 	}
-	if n.ID != accountID || !n.Active {
-		return NativeAccount{}, errPreparedAccountChanged
+	if !rules.Allows(n.ID, repo) {
+		return NativeAccount{}, errScopeRefused
 	}
 	if n.Status != "ready" {
 		return NativeAccount{}, native.ErrNotSignedIn
@@ -61,15 +75,8 @@ func (a *Accounts) CheckPreparedAccount(harness, accountID, repo string) (Native
 	if login.Identity != metadata.Identity || login.Integration != metadata.Integration {
 		return NativeAccount{}, errPreparedAccountChanged
 	}
-	rules, err := a.rules()
-	if err != nil {
-		return NativeAccount{}, err
-	}
-	if !rules.Allows(n.ID, repo) {
-		return NativeAccount{}, errScopeRefused
-	}
 	n.Repos = slices.Clone(rules[n.ID])
-	n.prepared = &preparedAccount{root: a.Root, repo: repo, metadata: metadata, repos: slices.Clone(n.Repos)}
+	n.prepared = &preparedAccount{root: a.Root, repo: repo, room: room, metadata: metadata, repos: slices.Clone(n.Repos), provider: selectionProvider(canonical, n.Provider)}
 	return n, nil
 }
 
@@ -84,7 +91,10 @@ func (a *Accounts) RecheckPreparedAccount(ctx context.Context, conn *sql.Conn, e
 	old := snapshot.metadata
 	if expected.ID != old.ID || expected.Harness != old.Harness || expected.Identity != old.Identity ||
 		expected.Home != filepath.Join(a.Root, old.Harness, old.ID) || expected.Status != "ready" ||
-		!expected.Active || !slices.Equal(expected.Repos, snapshot.repos) {
+		// The account keeps its own provider; the selection is keyed by the
+		// provider its harness serves, and an OpenCode key account names another.
+		expected.Provider != old.Provider || snapshot.provider != selectionProvider(old.Harness, old.Provider) ||
+		!slices.Equal(expected.Repos, snapshot.repos) {
 		return errPreparedAccountChanged
 	}
 	current, err := store.ReadMetadata(ctx, conn, old.ID)
@@ -98,11 +108,14 @@ func (a *Accounts) RecheckPreparedAccount(ctx context.Context, conn *sql.Conn, e
 		current.NativeHome != old.NativeHome || current.Integration != old.Integration || current.NeedsLogin {
 		return errPreparedAccountChanged
 	}
-	active, err := store.ReadActive(ctx, conn, accountProvider(old.Harness), "")
+	// The selection of this harness and provider must still name the account the
+	// turn prepared with: a switch, a room selection or a cleared choice since
+	// then changes it.
+	active, found, err := store.ReadActiveFor(ctx, conn, snapshot.provider, old.Harness, snapshot.room)
 	if err != nil {
 		return err
 	}
-	if active != old.ID {
+	if !found || active != old.ID {
 		return errPreparedAccountChanged
 	}
 	rules, err := reposcope.ReadRules(ctx, conn)

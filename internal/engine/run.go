@@ -492,7 +492,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	runtime := newRuntime(ctx)
 	if !readOnly {
-		startService(func() { runtime.MigratePiAccounts(ctx) })
+		startService(func() { runtime.SplitPiAccounts(ctx) })
 	}
 	cleanup = append(cleanup, runtime.CancelPrivateLogins, runtime.CancelPrivateRuntimeSwitches)
 	config := &configsvc.Service{CLI: cli, NoUpdate: noUpdate, ReadOnly: readOnly, Sessions: rooms.Notify.Sessions}
