@@ -755,6 +755,21 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if m.store().lockHeld(id) {
 				return false, nil
 			}
+			if t.Source == sourceNative && turn.Status == TurnError && !m.transferHasOutput(id, turn) {
+				// Pi keeps the session file but cannot always resume it on the
+				// target model: a failed first launch can leave no file, and a
+				// history that no longer fits the new window can fail both its
+				// compaction and the continuation. The fresh conversation is
+				// the bounded fallback, and it runs once: its own failure fails
+				// the move as before.
+				err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
+					t.Phase, t.Turn, t.StartupDeadline = "stopping", 0, time.Time{}
+					t.Source = "transcript"
+					t.Reason = "Pi could not resume the session; using a fresh conversation: " + clipped(turn.Error, 300)
+					return nil
+				})
+				return false, err
+			}
 			return true, m.failTransfer(id, token, fmt.Errorf("replacement startup failed: %s", turn.Error))
 		}
 		if turn.Status == TurnOK || m.transferHasOutput(id, turn) {
