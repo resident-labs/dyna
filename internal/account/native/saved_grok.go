@@ -98,16 +98,27 @@ func grokBillingObservation(raw []byte, now time.Time) (store.Observation, error
 		validPeriod = startErr == nil && endErr == nil && end.After(start)
 	}
 	percent := result.Config.CreditUsagePercent
-	if percent == nil && validPeriod && (kind == "weekly" || kind == "monthly") {
-		// Grok omits a zero percentage while retaining the complete period.
-		zero := 0.0
-		percent = &zero
+	legacy := store.Observation{Plan: &store.Plan{ID: "grok-legacy", Label: "Legacy (monthly)"}, ObservedAt: now}
+	if kind == "weekly" || kind == "monthly" {
+		// A weekly or monthly window needs its complete period: the reset is
+		// part of the window, and a synthesized reset would clear old quota.
+		if !validPeriod {
+			if percent == nil && result.Config.Unified != nil && !*result.Config.Unified {
+				return legacy, nil
+			}
+			return store.Observation{}, ErrSchema
+		}
+		if percent == nil {
+			// Grok omits a zero percentage while retaining the complete period.
+			zero := 0.0
+			percent = &zero
+		}
 	}
 	if percent == nil {
 		if result.Config.Unified != nil && !*result.Config.Unified {
 			// An older monthly plan with no period data is named, but no usage
 			// can be read. T3 returns no window for this shape too.
-			return store.Observation{Plan: &store.Plan{ID: "grok-legacy", Label: "Legacy (monthly)"}, ObservedAt: now}, nil
+			return legacy, nil
 		}
 		return store.Observation{}, ErrSchema
 	}
