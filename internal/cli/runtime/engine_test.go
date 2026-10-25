@@ -31,7 +31,7 @@ func TestAccountRemoveIsAnEngineCall(t *testing.T) {
 	type request struct{ args []json.RawMessage }
 	requests := make(chan request, 1)
 	enginetest.Serve(t, store.DataDir(), map[string]websvc.Call{
-		"RemovePrivateRuntimeAccount": func(_ context.Context, args []json.RawMessage) (any, error) {
+		"AccountsRemove": func(_ context.Context, args []json.RawMessage) (any, error) {
 			requests <- request{args}
 			return nil, nil
 		},
@@ -40,7 +40,7 @@ func TestAccountRemoveIsAnEngineCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := <-requests
-	if len(got.args) != 2 || string(got.args[0]) != `"account-1"` || string(got.args[1]) != "true" {
+	if len(got.args) != 1 || string(got.args[0]) != `"account-1"` {
 		t.Fatalf("engine got %s", got.args)
 	}
 }
@@ -79,7 +79,7 @@ func TestRuntimeWritesAreEngineCalls(t *testing.T) {
 	}
 	requests := make(chan request, 1)
 	calls := map[string]websvc.Call{}
-	for _, method := range []string{"ActivatePrivateRuntimeAccount", "ImportPrivateConfig", "GCPrivateRuntime"} {
+	for _, method := range []string{"AccountsUse", "ImportPrivateConfig", "GCPrivateRuntime"} {
 		calls[method] = func(_ context.Context, args []json.RawMessage) (any, error) {
 			raw, err := json.Marshal(args)
 			if err != nil {
@@ -95,7 +95,7 @@ func TestRuntimeWritesAreEngineCalls(t *testing.T) {
 		method string
 		want   string
 	}{
-		{[]string{"accounts", "activate", "account-1"}, "ActivatePrivateRuntimeAccount", `["account-1"]`},
+		{[]string{"accounts", "activate", "account-1"}, "AccountsUse", `["account-1",""]`},
 		{[]string{"config-import", "--account", "account-1", "--preview-hash", "abc"}, "ImportPrivateConfig", `["account-1","abc"]`},
 		{[]string{"gc"}, "GCPrivateRuntime", `[]`},
 	} {

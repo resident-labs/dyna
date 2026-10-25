@@ -404,9 +404,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "CreateRoom", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.createRoom},
 		{Name: "CreateRoomRecord", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.createRoomRecord},
 		{Name: "RestartPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.RestartPrivateRuntimeLogin},
-		{Name: "PrivateRuntimeSwitchState", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.PrivateRuntimeSwitchState},
-		{Name: "CancelPrivateRuntimeAccountSwitch", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.CancelPrivateRuntimeAccountSwitch},
-		{Name: "ConfirmPrivateRuntimeAccountSwitch", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.ConfirmPrivateRuntimeAccountSwitch},
 		{Name: "PreviewPrivateConfig", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.PreviewPrivateConfig},
 		{Name: "ImportPrivateConfig", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.ImportPrivateConfig},
 		{Name: "PrivateRuntimes", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.PrivateRuntimes},
@@ -422,13 +419,10 @@ func bindings(s services) []websvc.Binding {
 		{Name: "RespondPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.RespondPrivateRuntimeLogin},
 		{Name: "CancelPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.CancelPrivateRuntimeLogin},
 		{Name: "FinishPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.FinishPrivateRuntimeLogin},
-		{Name: "HarnessProviderKeys", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.HarnessProviderKeys},
 		{Name: "SetAccountRepos", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.SetAccountRepos},
-		{Name: "RemovePrivateRuntimeAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.RemovePrivateRuntimeAccount},
 		{Name: "SetHarnessConfigEnabled", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.SetHarnessConfigEnabled},
 		{Name: "SyncCatalogAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.SyncCatalogAccount},
 		{Name: "SyncPrivateRuntime", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.SyncPrivateRuntime},
-		{Name: "ActivatePrivateRuntimeAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.ActivatePrivateRuntimeAccount},
 		{Name: "GCPrivateRuntime", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.GCPrivateRuntime},
 		{Name: "AddCatalogMCP", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.AddCatalogMCP},
 		{Name: "AddCatalogSkill", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.AddCatalogSkill},
@@ -447,8 +441,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "AccountsView", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.accountsView},
 		{Name: "AccountsUse", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsUse},
 		{Name: "AccountsRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsRemove},
-		// AccountsAdd saves an API key from the Accounts add form and the CLI,
-		// like HarnessProviderKeys does for the harness form.
 		{Name: "AccountsAdd", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsAdd},
 		// AccountsImport moves a saved native sign-in into its Pi provider
 		// account, so no two copies renew one refresh token.
@@ -599,7 +591,7 @@ func (s services) accountsUse(ctx context.Context, id, scope string) (service.Ac
 // accountsRemove deletes an account and its homes. The caller asked for the
 // removal, so the engine needs no separate confirmation argument.
 func (s services) accountsRemove(ctx context.Context, id string) (service.AccountsSnapshot, error) {
-	if _, err := s.runtime.RemovePrivateRuntimeAccount(ctx, id, true); err != nil {
+	if err := s.runtime.RemoveAccount(id); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
 	return s.accounts.Accounts(ctx, "", false), nil

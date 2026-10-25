@@ -31,17 +31,11 @@ func accountProvider(harness string) store.Provider {
 
 // activeID is the account that harness h uses, from the account registry.
 func (a *Accounts) activeID(h string) (string, error) {
-	if err := safeAccountPath(filepath.Join(a.Root, h, ".active.json")); err != nil {
-		return "", err
-	}
 	return (&store.Store{Root: a.Root}).Active(accountProvider(h), h, "")
 }
 
 // setActive records the account that harness h uses, in the registry.
 func (a *Accounts) setActive(h, id string) error {
-	if err := safeAccountPath(filepath.Join(a.Root, h, ".active.json")); err != nil {
-		return err
-	}
 	return (&store.Store{Root: a.Root}).SetActive(accountProvider(h), h, "", id)
 }
 
@@ -343,7 +337,8 @@ func (a *Accounts) switchGate(ctx context.Context, harness string) (func(), erro
 	return func() { releaseAccountLock(turns); releaseAccountLock(gate); releaseAccountLock(pending) }, nil
 }
 
-// saveOutgoing keeps the native refresh owner in its saved slot. It never writes grants to accounts.json.
+// saveOutgoing keeps the native refresh owner in its saved slot. It never writes
+// a grant outside the registry.
 func (a *Accounts) saveOutgoing(state *store.State, h string, c native.Captured, ownerIDs ...string) error {
 	if c.Identity == "" {
 		return native.ErrNoIdentity
@@ -394,9 +389,6 @@ func (a *Accounts) saveOutgoing(state *store.State, h string, c native.Captured,
 				return err
 			}
 		}
-	}
-	if requirePrivateAccount(h) {
-		entry.PrivateProof = &store.PrivateProof{Version: 1, Identity: c.Identity}
 	}
 	entry.NeedsLogin = false
 	entry.UpdatedAt = time.Now().UTC()
@@ -489,9 +481,6 @@ func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string
 		return err
 	}
 	defer release()
-	if err = requirePrivateSnapshot(target); err != nil {
-		return err
-	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}
@@ -517,10 +506,8 @@ func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"accounts.json", "accounts.lock"} {
-		if err = safeAccountPath(filepath.Join(a.Root, name)); err != nil {
-			return err
-		}
+	if err = safeAccountPath(filepath.Join(a.Root, "accounts.lock")); err != nil {
+		return err
 	}
 	return (&store.Store{Root: a.Root}).Transaction(func(state *store.State, checkpoint func() error) (operationErr error) {
 		// A failed switch writes no accounts. The outgoing login saved below stays
@@ -782,7 +769,6 @@ func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*Nati
 	if err = prepareAccountLogin(n.Harness, home, overrides); err != nil {
 		return nil, err
 	}
-	freshRequired := requirePrivateAccount(n.Harness) && !privateProofHolds(n.Identity, n.proof)
 	outgoing, err := manager.Capture(ctx, "")
 	if err != nil && !errors.Is(err, native.ErrNotSignedIn) {
 		return nil, err
@@ -884,12 +870,6 @@ func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*Nati
 			if selected == nil || selected.Identity == "" {
 				return native.ErrNoIdentity
 			}
-			if freshRequired {
-				previous := capturedFor(outgoing, selected.Integration)
-				if previous != nil && previous.Identity == selected.Identity && bytes.Equal(previous.Credential.Payload, selected.Credential.Payload) {
-					return errPrivateSignIn
-				}
-			}
 			if e = checkPrivateAccountHome(n.Harness, home, true); e != nil {
 				return e
 			}
@@ -898,9 +878,6 @@ func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*Nati
 			}
 			if e = writeAccountLogin(n.Home, *selected); e != nil {
 				return e
-			}
-			if requirePrivateAccount(n.Harness) {
-				entry.PrivateProof = &store.PrivateProof{Version: 1, Identity: selected.Identity}
 			}
 			entry.Identity = selected.Identity
 			entry.Integration = selected.Integration

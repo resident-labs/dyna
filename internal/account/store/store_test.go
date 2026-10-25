@@ -71,7 +71,7 @@ func TestReadDoesNotCreateAndFailedUpdateDoesNotReplace(t *testing.T) {
 }
 
 func TestSameIdentityInDifferentIntegrationsStaysSeparate(t *testing.T) {
-	st := State{Version: 1}
+	st := State{}
 	a, err := st.Save("fixture", "one", "identity", "One", grant("one"))
 	if err != nil {
 		t.Fatal(err)
@@ -138,61 +138,6 @@ func TestObservationRoundTripRetainsCheckpointedUsage(t *testing.T) {
 	o := st.Find(id).Observation
 	if o == nil || o.Plan.ID != "pro" || len(o.Windows) != 1 || *o.Windows[0].UsedPercent != 72 || !o.ObservedAt.Equal(observed) || !o.RateLimitedUntil.Equal(until) || o.Failures != 2 || !o.Unavailable {
 		t.Fatal("observation lost during credential checkpoint")
-	}
-}
-
-func TestLegacyOpenCodeProviderCleanupPreservesNativeCredentials(t *testing.T) {
-	root := t.TempDir()
-	store := &Store{Root: filepath.Join(root, "dyna")}
-	native := filepath.Join(root, "opencode-v2.db")
-	original := []byte("native Go, Zen, OpenAI and xAI credentials")
-	if err := os.WriteFile(native, original, 0600); err != nil {
-		t.Fatal(err)
-	}
-	st := State{Version: 1}
-	for _, integration := range []string{"opencode-go", "opencode", "openai", "xai", "anthropic"} {
-		if _, err := st.Save("opencode", integration, integration, "OpenCode account", grant("reference")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	st.Entries = append(st.Entries, Entry{Metadata: Metadata{ID: "private", Harness: "opencode", NativeHome: filepath.Join(root, "private")}, Credential: grant("private")})
-	if err := os.MkdirAll(store.Root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	// The registry as the previous release wrote it.
-	raw, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store.Root, "accounts.json"), raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := os.ReadFile(filepath.Join(store.Root, "accounts.json"))
-	visible, err := store.Read()
-	if err != nil || len(visible.Entries) != 3 {
-		t.Fatalf("read filter: %+v, %v", visible, err)
-	}
-	unchanged, _ := os.ReadFile(filepath.Join(store.Root, "accounts.json"))
-	if string(unchanged) != string(before) {
-		t.Fatal("read persisted cleanup")
-	}
-	for range 2 {
-		if err := store.Transaction(func(st *State, _ func() error) error {
-			if !st.OpenCodeProvidersCleaned || len(st.Entries) != 3 {
-				t.Fatal("cleanup did not run")
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	persisted, err := store.Read()
-	if err != nil || !persisted.OpenCodeProvidersCleaned || len(persisted.Entries) != 3 {
-		t.Fatal("cleanup not persisted")
-	}
-	after, _ := os.ReadFile(native)
-	if string(after) != string(original) {
-		t.Fatal("cleanup changed native credentials")
 	}
 }
 

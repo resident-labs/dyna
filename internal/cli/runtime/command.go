@@ -209,14 +209,6 @@ func NewCommand() *cobra.Command {
 	login.Flags().StringVar(&accountID, "account", "", "existing private account ID")
 	login.MarkFlagsMutuallyExclusive("use-personal", "sign-in")
 	login.MarkFlagsMutuallyExclusive("use-personal", "account")
-	var confirmed bool
-	remove := &cobra.Command{Use: "rm <account-id>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
-		return engineClient().Call(c.Context(), "RemovePrivateRuntimeAccount", []any{a[0], confirmed}, nil)
-	}}
-	remove.Flags().BoolVar(&confirmed, "confirm", false, "confirm deletion of this private native account home")
-	activate := &cobra.Command{Use: "activate <account-id>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
-		return engineClient().Call(c.Context(), "ActivatePrivateRuntimeAccount", []any{args[0]}, nil)
-	}}
 	var importAccount, previewHash string
 	preview := &cobra.Command{Use: "config-preview", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		p, err := harnessruntime.New().PreviewPreferenceImport(importAccount)
@@ -234,6 +226,21 @@ func NewCommand() *cobra.Command {
 	apply.Flags().StringVar(&previewHash, "preview-hash", "", "hash from config-preview")
 	_ = apply.MarkFlagRequired("account")
 	_ = apply.MarkFlagRequired("preview-hash")
+	// The engine removes the account and its homes in one accounts call, so the
+	// registry commit publishes the change from the engine process. The flag
+	// guards the native home this deletes; the Accounts page asks in its card.
+	var confirmed bool
+	remove := &cobra.Command{Use: "rm <account-id>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		if !confirmed {
+			return errors.New("confirm deletion of this account and its native home with --confirm")
+		}
+		return engineClient().Call(c.Context(), "AccountsRemove", []any{a[0]}, nil)
+	}}
+	remove.Flags().BoolVar(&confirmed, "confirm", false, "confirm deletion of this account and its native home")
+	// An empty scope asks for the global selection of the account's provider.
+	activate := &cobra.Command{Use: "activate <account-id>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		return engineClient().Call(c.Context(), "AccountsUse", []any{args[0], ""}, nil)
+	}}
 	accounts.AddCommand(remove, activate)
 	root.AddCommand(preview, apply)
 	var removeVersion string

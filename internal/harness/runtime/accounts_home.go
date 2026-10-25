@@ -15,22 +15,6 @@ import (
 	harnesshome "dyna-agent/internal/harness/home"
 )
 
-// TODO: legacy/shim remove later — old Muse snapshots predate private
-// initialization. A private login or the owner-authorized one-time import records origin.
-func requirePrivateAccount(h string) bool { return h == "muse" }
-
-var errPrivateSignIn = errors.New("Sign in again in Dyna's private account scope before using this account.")
-
-func privateProofHolds(identity string, proof *store.PrivateProof) bool {
-	return identity != "" && proof != nil && proof.Version == 1 && proof.Identity == identity
-}
-func requirePrivateSnapshot(n NativeAccount) error {
-	if requirePrivateAccount(n.Harness) && !privateProofHolds(n.Identity, n.proof) {
-		return errPrivateSignIn
-	}
-	return nil
-}
-
 // Check only credential/config/lock paths. Tool sockets and bridges in the
 // paired HOME are valid and must never enter the native credential tree walk.
 func privateAccountFiles(h, scope string) []string {

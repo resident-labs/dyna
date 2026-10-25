@@ -32,15 +32,7 @@ const registrySchema = `CREATE TABLE accounts (
  ord INTEGER NOT NULL,
  metadata BLOB NOT NULL CHECK(json_valid(metadata)),
  credential_schema TEXT NOT NULL DEFAULT ''
-);
-CREATE TABLE accounts_registry (
- id INTEGER PRIMARY KEY CHECK(id = 1),
- version INTEGER NOT NULL,
- opencode_cleaned INTEGER NOT NULL
 );`
-
-// registryKey names accounts.json in state_mirrors.
-const registryKey = "accounts/registry"
 
 // Migrate creates the account registry tables. Only the engine runs it, at
 // start.
@@ -50,10 +42,10 @@ func Migrate(dataDir string) error {
 }
 
 func openRegistry(dataDir string) (*sql.DB, error) {
-	return openRegistryAt(dataDir, filepath.Join(dataDir, "accounts"))
+	return openRegistryAt(dataDir)
 }
 
-func openRegistryAt(dataDir, root string) (*sql.DB, error) {
+func openRegistryAt(dataDir string) (*sql.DB, error) {
 	db, err := database.Open(dataDir)
 	if err != nil {
 		return nil, err
@@ -61,7 +53,7 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 7, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 8, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
@@ -77,24 +69,25 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
 			return err
 		}
-		if err := (&Store{Root: root}).importRegistry(ctx, conn); err != nil {
-			return err
-		}
 		if err := fillProviders(ctx, conn); err != nil {
 			return err
-		}
-		if old < 6 {
-			if err := dropRetiredHarnessRows(ctx, conn); err != nil {
-				return err
-			}
 		}
 		if err := fillActiveSelections(ctx, conn, legacyActive); err != nil {
 			return err
 		}
-		if old < 7 {
-			if err := fillActiveHarness(ctx, conn); err != nil {
-				return err
-			}
+		if err := fillActiveHarness(ctx, conn); err != nil {
+			return err
+		}
+		// Version 8 drops the leftover tables of the retired JSON registry: its
+		// version row and the mirrored accounts.json.
+		if _, err := conn.ExecContext(ctx, "DROP TABLE IF EXISTS accounts_registry"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM state_mirrors WHERE key = 'accounts/registry'"); err != nil {
+			return err
+		}
+		if err := dropRemovedHarnessRows(ctx, conn); err != nil {
+			return err
 		}
 		_, err = conn.ExecContext(ctx, piSplitSchema)
 		return err
@@ -117,24 +110,30 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 	return err == nil, err
 }
 
-// TODO: legacy/shim remove later — Antigravity was removed on 2026-10-25. Its
-// saved rows predate that and nothing can sign in or refresh them, so version 6
-// drops them instead of leaving a provider no code names. Each store's
-// dependent rows go in the same write, so a repository rule cannot outlive the
-// account it names.
-func dropRetiredHarnessRows(ctx context.Context, conn *sql.Conn) error {
-	rows, err := conn.QueryContext(ctx, "SELECT id FROM accounts WHERE json_extract(CAST(metadata AS TEXT), '$.harness') = 'antigravity'")
+// dropRemovedHarnessRows applies the owner's decision of 2026-10-25: the saved
+// harness-bound accounts of Codex, Muse and OpenCode are dead weight, because
+// those sign-ins now live in Pi provider accounts, and antigravity was removed
+// before the provider model existed. A row of a harness this release does not
+// run goes for the same reason. Each dropped account loses its active marks,
+// repository scope, limit and, through the orphan cleanup, its credential file,
+// so nothing keeps a secret for an account no turn can use. The engine backs up
+// dyna.db before this migration, so the rows stay in that backup.
+func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness') FROM accounts")
 	if err != nil {
 		return err
 	}
-	var ids []string
+	var ids, harnesses []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, harness string
+		if err := rows.Scan(&id, &harness); err != nil {
 			rows.Close()
 			return err
 		}
-		ids = append(ids, id)
+		if !KnownHarness(harness) || AccountsRetired(harness) {
+			ids = append(ids, id)
+			harnesses = append(harnesses, harness)
+		}
 	}
 	err = rows.Err()
 	rows.Close()
@@ -146,7 +145,18 @@ func dropRetiredHarnessRows(ctx context.Context, conn *sql.Conn) error {
 			return err
 		}
 	}
-	return forgetAccounts(ctx, conn, ids)
+	if err := forgetAccounts(ctx, conn, ids); err != nil {
+		return err
+	}
+	// forgetters clear a selection but keep its row, so a room can override the
+	// global choice with none. A selection of an unknown harness has no such
+	// meaning and goes.
+	for _, harness := range append(harnesses, "") {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM account_active WHERE harness = ?", harness); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the
@@ -314,9 +324,7 @@ CREATE TABLE IF NOT EXISTS pi_split_done (
 const Topic = "accounts"
 
 // db is the registry's database: dyna.db in the folder above the accounts.
-func (s *Store) db() (*sql.DB, error) { return openRegistryAt(filepath.Dir(s.Root), s.Root) }
-
-func (s *Store) registryPath() string { return filepath.Join(s.Root, "accounts.json") }
+func (s *Store) db() (*sql.DB, error) { return openRegistryAt(filepath.Dir(s.Root)) }
 
 // credentialDir holds one private file per account's credential.
 func (s *Store) credentialDir() string { return filepath.Join(s.Root, "credentials") }
@@ -339,14 +347,8 @@ func (st State) clone() State {
 // load reads the registry rows and each account's credential file. A row
 // whose credential file is missing or damaged reads as signed out.
 func (s *Store) load(ctx context.Context, db *sql.DB) (State, error) {
-	st := State{Version: 1, Entries: []Entry{}}
+	st := State{Entries: []Entry{}}
 	err := statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
-		var cleaned int
-		err := q.QueryRowContext(ctx, "SELECT version, opencode_cleaned FROM accounts_registry WHERE id = 1").Scan(&st.Version, &cleaned)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		st.OpenCodeProvidersCleaned = cleaned != 0
 		rows, err := q.QueryContext(ctx, "SELECT metadata, credential_schema FROM accounts ORDER BY ord")
 		if err != nil {
 			return err
@@ -627,18 +629,7 @@ func writeRows(ctx context.Context, conn *sql.Conn, st State) error {
 			return err
 		}
 	}
-	cleaned := 0
-	if st.OpenCodeProvidersCleaned {
-		cleaned = 1
-	}
-	version := st.Version
-	if version == 0 {
-		version = 1
-	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES (1, ?, ?)
-ON CONFLICT(id) DO UPDATE SET version = excluded.version, opencode_cleaned = excluded.opencode_cleaned
-WHERE accounts_registry.version != excluded.version OR accounts_registry.opencode_cleaned != excluded.opencode_cleaned`, version, cleaned)
-	return err
+	return nil
 }
 
 func sameCredential(a, b Credential) bool {
@@ -693,79 +684,6 @@ func mergeMetadata(meta Metadata, prior []byte) ([]byte, error) {
 		}
 	}
 	return json.Marshal(fields)
-}
-
-// TODO: legacy/shim remove later — import accounts.json once, before SQL owns the registry.
-// Credential files are durable before the transaction commits metadata. Retrying
-// an interrupted migration preserves any credential file already written.
-func (s *Store) importRegistry(ctx context.Context, conn *sql.Conn) error {
-	var canonical bool
-	if err := conn.QueryRowContext(ctx, `SELECT
-		EXISTS(SELECT 1 FROM accounts) OR EXISTS(SELECT 1 FROM accounts_registry)
-		OR EXISTS(SELECT 1 FROM state_mirrors WHERE key = ?)`, registryKey).Scan(&canonical); err != nil {
-		return err
-	}
-	if canonical {
-		return nil
-	}
-	_, err := statewrite.ImportMigration(ctx, conn, registryKey, s.registryPath(), func(conn *sql.Conn, raw []byte) error {
-		st, err := parseRegistry(raw)
-		if err != nil {
-			return err
-		}
-		var source struct{ Entries []map[string]json.RawMessage }
-		if err := json.Unmarshal(raw, &source); err != nil {
-			return err
-		}
-		for i, e := range st.Entries {
-			if e.ID == "" || filepath.Base(e.ID) != e.ID || e.ID == "." || e.ID == ".." {
-				return errors.New("Saved accounts have an unsupported or invalid format.")
-			}
-			if _, err := os.Lstat(s.credentialPath(e.ID)); errors.Is(err, os.ErrNotExist) {
-				if err := s.writeCredential(e.ID, e.Credential); err != nil {
-					return err
-				}
-			} else if err != nil {
-				return err
-			}
-			// JSON field matching is case-insensitive; no credential spelling may
-			// enter the metadata row.
-			for name := range source.Entries[i] {
-				if strings.EqualFold(name, "credential") {
-					delete(source.Entries[i], name)
-				}
-			}
-			schema := e.Credential.Schema
-			if c, ok := s.readCredential(e.ID); ok {
-				schema = c.Schema
-			}
-			metadata, err := json.Marshal(source.Entries[i])
-			if err != nil {
-				return err
-			}
-			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id,ord,metadata,credential_schema) VALUES(?,?,?,?)", e.ID, i, metadata, schema); err != nil {
-				return err
-			}
-		}
-		cleaned := 0
-		if st.OpenCodeProvidersCleaned {
-			cleaned = 1
-		}
-		_, err = conn.ExecContext(ctx, "INSERT INTO accounts_registry(id,version,opencode_cleaned) VALUES(1,?,?)", st.Version, cleaned)
-		return err
-	})
-	return err
-}
-
-func parseRegistry(raw []byte) (State, error) {
-	if len(raw) > maxStoreBytes {
-		return State{}, errors.New("Saved accounts could not be read.")
-	}
-	var st State
-	if json.Unmarshal(raw, &st) != nil || st.Version != 1 {
-		return State{}, errors.New("Saved accounts have an unsupported or invalid format.")
-	}
-	return st, nil
 }
 
 // dropOrphanCredentials deletes the credential file of every account that
