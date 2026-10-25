@@ -363,10 +363,11 @@ The suite IDs come from the `trial` list in
 `computer-smoke`. An empty list is the default and lets the machine take every
 suite. Merge trial scheduling sends a run only to a machine that allows every
 suite of that run, and an integration sync follows the same rule. When no
-enabled machine allows a suite of the run, the trial fails at once with an
-error that names the suite, so a trial never waits for a machine that cannot
-take it. `dyna machine show <name>` prints the list, and taking the ci role away
-clears it.
+enabled machine of the run's room allows a suite of it, the trial fails at once
+with an error that names the suite, so a trial never waits for a machine that
+cannot take it. A machine that is only busy or low on disk still counts, so its
+room's work waits for a slot rather than failing. `dyna machine show <name>`
+prints the list, and taking the ci role away clears it.
 
 ## Probing machines
 

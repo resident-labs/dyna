@@ -486,12 +486,13 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 			return false, nil
 		}
 	}
-	// Only a machine that allows every suite of the run takes it. A suite that
-	// no machine allows would wait for ever, so the caller gets a typed error
-	// that names it instead.
+	// Only a machine that allows the run's room and every suite of it takes the
+	// run. A suite that no machine of that room allows never arrives, so the
+	// caller gets a typed error that names it; a fleet that is only busy or low
+	// on disk keeps waiting.
 	chosen = availableCINodeExcept(localci.NodesForSuites(enabled, plan.suites), active, job.record.RoomID, retriedFrom)
 	if chosen == nil {
-		return false, localci.BlockedSuite(enabled, plan.suites)
+		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])

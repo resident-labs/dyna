@@ -92,6 +92,18 @@ func (e SuiteBlockedError) Error() string {
 		strings.Join(SuiteNames(e.Suites), ", "), strings.Join(SuiteNames(e.Suites), ","))
 }
 
+// NodesForRoom keeps the machines that take CI work for the room. A machine
+// that names no room takes work from every room, so it stays.
+func NodesForRoom(nodes []Node, roomID string) []Node {
+	kept := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.AllowsRoom(roomID) {
+			kept = append(kept, node)
+		}
+	}
+	return kept
+}
+
 // NodesForSuites keeps the machines that allow every suite of a run. A machine
 // that names no suite allows every suite, so it stays.
 func NodesForSuites(nodes []Node, suites []Suite) []Node {
@@ -104,9 +116,12 @@ func NodesForSuites(nodes []Node, suites []Suite) []Node {
 	return kept
 }
 
-// BlockedSuite reports why no machine can take a run with these suites. It
-// returns nil when at least one machine allows every suite, or when the run
-// names no suite.
+// BlockedSuite reports why no machine can take a run with these suites. Pass
+// only the machines that may take the run at all, such as those of its room: a
+// machine another room owns cannot take the suite either. It returns nil when
+// at least one machine allows every suite, or when the run names no suite. A
+// machine that is busy or low on disk still allows a suite, so a caller must
+// keep those in the list.
 func BlockedSuite(nodes []Node, suites []Suite) error {
 	if len(NodesForSuites(nodes, suites)) > 0 {
 		return nil
