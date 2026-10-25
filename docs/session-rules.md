@@ -25,7 +25,7 @@ tool output, and unknown event names do not trigger one.
 | Codex | No verified signal in `codex exec --json`. The upstream [exec event types](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs) and [JSONL processor](https://github.com/openai/codex/blob/main/codex-rs/exec/src/event_processor_with_jsonl_output.rs) do not expose a compaction event. Dyna does not treat internal app-server events as exec stdout. |
 | OpenCode | Native v2 events are converted to OpenCode JSONL records without a verified compaction record. Dyna-controlled compaction waits for the server to become idle, requests compaction, and waits again before the resumed turn. Automatic compaction has no verified receipt. |
 | Muse | No verified signal in captured `internal/workeroutput/testdata/muse-stream.jsonl` and `muse-tools.jsonl` records or its adapter. |
-| Custom, Pi, mock | No verified structured compaction signal in the configured output stream. |
+| Pi, mock | No verified structured compaction signal in the configured output stream. |
 
 Sources and captures were checked on 2026-10-17. For streams without a verified
 signal, automatic refresh after compaction is unavailable. Rule changes still
