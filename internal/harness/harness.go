@@ -24,6 +24,7 @@ import (
 	harnesshealth "dyna-agent/internal/harness/health"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
 )
@@ -708,7 +709,7 @@ func runJournaledState(ctx context.Context, p profile.Profile, prompt, cwd strin
 // runMockTurn runs the mock harness, which has no process to supervise.
 func (r *journaledRun) runMockTurn() (Result, error) {
 	if text, ok := mockUsageLimit(r.prompt); ok && !r.exec.AfterAccountSwitch {
-		return Result{}, errors.New(text)
+		return Result{}, providerfailure.Tag(providerfailure.Quota, errors.New(text))
 	}
 	if r.session.ResumeID != "" || r.session.OnSession != nil || r.steeringOpts.Source != nil {
 		return runMockSession(r.ctx, r.prompt, r.journal, r.steeringOpts, r.session, r.state)
@@ -1042,15 +1043,27 @@ func (r *journaledRun) failAttempt(a attempt, attemptErr error) (stepAct, Result
 	return r.recoverSameSession(a, attemptErr)
 }
 
-// fallbackModel switches to the next candidate model after a provider failure.
+// fallbackModel recovers from a provider failure by its named reason: a busy
+// provider gets the same model again after a backoff, a spent account gets the
+// next model, and a rejected sign-in gets neither another model nor a retry. A
+// no-progress stop keeps its own named fallback. No recovery is chosen from the
+// text a model wrote.
 func (r *journaledRun) fallbackModel(a attempt, attemptErr error) (stepAct, Result, error) {
-	if r.ctx.Err() != nil || !(a.noProgress || IsProviderFailure(attemptErr.Error()) || IsProviderFailure(a.stderr)) {
+	if r.ctx.Err() != nil {
 		return actNext, Result{}, nil
+	}
+	reason, typed := attemptFailureReason(a, attemptErr)
+	action := reason.Action()
+	if !a.noProgress && !typed {
+		return actNext, Result{}, nil
+	}
+	if !a.noProgress && action == providerfailure.ActionReauthenticate {
+		// A signed-out account does not improve by another model or another try.
+		return actReturn, Result{Output: r.lastOutput, Duration: time.Since(r.start)}, attemptErr
 	}
 	// A busy provider gets the same model again after a pause, before the
 	// model chain counts it as failed.
-	retrySame := !a.noProgress && r.state.capacityTries < len(capacityBackoff) &&
-		(IsCapacityFailure(attemptErr.Error()) || IsCapacityFailure(a.stderr))
+	retrySame := !a.noProgress && action == providerfailure.ActionRetryLater && r.state.capacityTries < len(capacityBackoff)
 	if retrySame {
 		if err := capacityWait(r.ctx, capacityBackoff[r.state.capacityTries]); err != nil {
 			return actReturn, Result{Output: r.lastOutput, Duration: time.Since(r.start)},
@@ -1060,21 +1073,19 @@ func (r *journaledRun) fallbackModel(a attempt, attemptErr error) (stepAct, Resu
 	} else {
 		RecordModelFailure(r.p.Name, r.p.Model, cooldownNow())
 	}
-	if !retrySame {
-		if a.noProgress && r.candidateIdx+1 >= len(r.candidates) {
-			return actReturn, Result{Output: r.lastOutput, Duration: time.Since(r.start)}, attemptErr
-		}
-		if r.candidateIdx+1 >= len(r.candidates) {
-			return actNext, Result{}, nil
-		}
+	if !retrySame && r.candidateIdx+1 >= len(r.candidates) {
+		// The reason's own recovery chain is used up. Finish the turn instead of
+		// sending the generic same-session nudge: that would retry a spent account
+		// or a busy provider, and its error would lose the reason.
+		return actReturn, Result{Output: r.lastOutput, Duration: time.Since(r.start)}, attemptErr
 	}
 	// Continue any work already done in the exact session. Never
 	// restart a turn that may have changed files or called tools.
 	// Empty steps changed nothing, so they do not count as work.
 	active := r.state.hasActivity()
-	reason := "the provider rejected the model (quota or rate limit)"
+	reasonText := fallbackReasonText(reason)
 	if a.noProgress {
-		active, reason = r.state.hasRealProgress(), attemptErr.Error()
+		active, reasonText = r.state.hasRealProgress(), attemptErr.Error()
 	}
 	sid := r.tracker.idValue()
 	if active && (sid == "" || r.inv.resume == nil) {
@@ -1082,7 +1093,7 @@ func (r *journaledRun) fallbackModel(a attempt, attemptErr error) (stepAct, Resu
 	}
 	if !retrySame {
 		if r.session.OnFallback != nil {
-			r.session.OnFallback(ModelFallback{From: r.p.Model, To: r.candidates[r.candidateIdx+1], Reason: reason})
+			r.session.OnFallback(ModelFallback{From: r.p.Model, To: r.candidates[r.candidateIdx+1], Reason: reasonText})
 		}
 		r.candidateIdx++
 		r.p.Model = r.candidates[r.candidateIdx]
@@ -1444,6 +1455,29 @@ func (s *sessionTracker) idValue() string {
 	return s.id
 }
 
+// attemptFailureReason returns the reason a trusted boundary named for this
+// attempt: a protocol parser, an ACP stop reason, or the process's stderr. The
+// text a model wrote never names one, so a turn that merely talks about a
+// limit cannot move an account or a model.
+func attemptFailureReason(a attempt, attemptErr error) (providerfailure.Reason, bool) {
+	if reason, ok := providerfailure.ReasonOf(attemptErr); ok {
+		return reason, true
+	}
+	return providerfailure.ClassifyStderr(a.stderr)
+}
+
+// fallbackReasonText says why a model was replaced. It is text for the owner;
+// the routing already happened by reason.
+func fallbackReasonText(reason providerfailure.Reason) string {
+	switch reason {
+	case providerfailure.Quota:
+		return "the provider rejected the model (quota or rate limit)"
+	case providerfailure.Unavailable:
+		return "the provider failed on its own side (server error)"
+	}
+	return "the provider rejected the model"
+}
+
 func attemptError(ctx context.Context, p profile.Profile, argv []string, a attempt) error {
 	// A stopped turn also cancels the steering read; report the stop.
 	stopped := a.contextDone && (errors.Is(a.steeringErr, context.Canceled) || errors.Is(a.steeringErr, context.DeadlineExceeded))
@@ -1462,10 +1496,13 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 	}
 	if a.startupStalled {
 		errTail := tail(strings.TrimSpace(a.stderr), 2000)
+		var err error
 		if errTail == "" {
-			return fmt.Errorf("worker %s (model %s) failed to start: %w", p.Name, p.Model, a.runErr)
+			err = fmt.Errorf("worker %s (model %s) failed to start: %w", p.Name, p.Model, a.runErr)
+		} else {
+			err = fmt.Errorf("worker %s (model %s) failed to start: %w: %s", p.Name, p.Model, a.runErr, errTail)
 		}
-		return fmt.Errorf("worker %s (model %s) failed to start: %w: %s", p.Name, p.Model, a.runErr, errTail)
+		return providerfailure.TagStderr(err, a.stderr)
 	}
 	var protocolErr error
 	switch p.Harness {
@@ -1481,7 +1518,14 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		protocolErr = workeroutput.OpenCodeError(a.stdout)
 	}
 	if protocolErr != nil {
-		return fmt.Errorf("worker %s: %w", p.Name, protocolErr)
+		err := fmt.Errorf("worker %s: %w", p.Name, protocolErr)
+		// The parser can report an opaque protocol record while the harness
+		// already reported why the turn failed. Keep that reason.
+		if reason, ok := providerfailure.ReasonOf(a.runErr); ok {
+			return providerfailure.Tag(reason, err)
+		}
+		// Otherwise the process's own stderr is the remaining narrow evidence.
+		return providerfailure.TagStderr(err, a.stderr)
 	}
 	if a.runErr != nil {
 		var cwdErr *workingDirectoryError
@@ -1491,14 +1535,20 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		errTail := tail(strings.TrimSpace(a.stderr), 2000)
 		// Structured stdout is protocol data, and the parsers above already
 		// report its errors. Its tail holds model text and usage fields, such
-		// as "fallback_credit", that look like provider failures.
+		// as "fallback_credit", that look like provider failures. A plain text
+		// harness has no parser, so its tail stays in the message for the
+		// owner; the reason still comes only from a parser or from stderr.
 		if errTail == "" && p.EffectiveDialect() == workeroutput.DialectText {
 			errTail = tail(strings.TrimSpace(a.stdout), 2000)
 		}
+		var err error
 		if errTail == "" {
-			return fmt.Errorf("worker %s (%s) failed: %w", p.Name, commandName(argv), a.runErr)
+			err = fmt.Errorf("worker %s (%s) failed: %w", p.Name, commandName(argv), a.runErr)
+		} else {
+			err = fmt.Errorf("worker %s (%s) failed: %w: %s", p.Name, commandName(argv), a.runErr, errTail)
 		}
-		return fmt.Errorf("worker %s (%s) failed: %w: %s", p.Name, commandName(argv), a.runErr, errTail)
+		// A process's own stderr is the only text a turn may name a reason from.
+		return providerfailure.TagStderr(err, a.stderr)
 	}
 	if a.output == "" && p.Harness == profile.HarnessCodex && !workeroutput.CodexTurnCompleted(a.stdout) {
 		return fmt.Errorf("worker %s returned no final response without turn.completed", p.Name)

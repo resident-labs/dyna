@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/scratch"
@@ -118,6 +119,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		if runErr != nil {
 			msg = runErr.Error()
 		}
+		// The reason comes from a trusted boundary deeper in the error chain, so
+		// the engine routes recovery by it rather than by this display text.
+		failureReason, _ := providerfailure.ReasonOf(runErr)
 		ended := time.Now()
 		// Settle the live gate first: its final read cursor is this turn's input
 		// boundary, including steering it claimed even when delivery failed. A
@@ -143,6 +147,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			log.Printf("session %s turn %d: %v; the terminal write uses the read position", id, n, cutoffErr)
 		}
 		end := TurnEnd{Turn: n, Status: status, Error: msg, Ended: ended, Model: model, Usage: turnUsage,
+			FailureReason:      failureReason,
 			UsageNormalization: turnNormalization, HarnessSession: sid, RawEnd: fileSize(rawPath), NormEnd: fileSize(normPath),
 			InputCutoff: cutoff, CutoffPending: cutoff == nil, FallbackCutoff: &fallback}
 		if result != nil {

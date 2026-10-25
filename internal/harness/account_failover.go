@@ -7,6 +7,7 @@ import (
 
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 )
 
 // AccountSwitch names the accounts of a turn that moved after a usage limit.
@@ -41,14 +42,16 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 // that hit its limit.
 const accountFailoverPrompt = "Your account hit its usage limit, so Dyna moved this session to another account. Continue the task from where you stopped. Do not repeat work or actions you already did."
 
-// withAccountFailover runs a turn. When it ends on a usage limit, it moves the
-// harness to the next allowed account and runs the turn once more there.
+// withAccountFailover runs a turn. When it ends on a quota failure, it moves the
+// harness to the next allowed account and runs the turn once more there. A
+// rejected sign-in never moves the account, and a busy provider never does
+// either: it gets a backoff and then another model instead.
 // A turn that already did work resumes its exact session; if the harness gave
 // no session to resume, the turn is not replayed. When no account is left, the
 // error says when the first one resets.
 func withAccountFailover(ctx context.Context, p profile.Profile, cwd string, exec ExecutionOptions, once func(opts ExecutionOptions, resumeID string) (Result, error)) (Result, error) {
 	res, err := once(exec, "")
-	if err == nil || isNativeAdmissionError(err) || ctx.Err() != nil || exec.ProcessRunner != nil || !IsUsageLimit(err.Error()) || IsCapacityFailure(err.Error()) {
+	if err == nil || isNativeAdmissionError(err) || ctx.Err() != nil || exec.ProcessRunner != nil || !providerfailure.Is(err, providerfailure.Quota) {
 		return res, err
 	}
 	worked := res.SessionID != "" || res.Output != "" || res.Usage.Total() > 0

@@ -3,8 +3,11 @@ package workeroutput
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // DialectClaudeStreamJSON is `claude -p --input-format stream-json
@@ -23,6 +26,11 @@ type claudeRecord struct {
 	SessionID string   `json:"session_id"`
 	Result    string   `json:"result"`
 	IsError   bool     `json:"is_error"`
+	// APIErrorStatus and APIErrorCode are the provider's own failure fields on a
+	// result. A refusal result also sets is_error, but keeps assistant text in
+	// Result, so only these fields and Errors may name a provider reason.
+	APIErrorStatus json.RawMessage `json:"api_error_status"`
+	APIErrorCode   string          `json:"api_error_code"`
 	// Status is raw because other records may use the key for non-strings.
 	Status        json.RawMessage `json:"status"`
 	CompactResult string          `json:"compact_result"`
@@ -292,7 +300,33 @@ func ClaudeResultError(line string) error {
 	}
 
 	detail := strings.TrimSpace(strings.Join(append([]string{r.Result}, r.Errors...), " "))
-	return fmt.Errorf("Claude protocol result %s: %s", r.Subtype, detail)
+	err := fmt.Errorf("Claude protocol result %s: %s", r.Subtype, detail)
+	// The provider's own status and code name the reason. A refusal result puts
+	// assistant text in Result, so Result is display text only.
+	if reason, ok := r.Reason(); ok {
+		err = providerfailure.Tag(reason, err)
+	}
+	return err
+}
+
+// Reason returns the provider reason of a failed result. Only the provider's
+// structured fields name it: its API error status, its API error code, or its
+// error list. Assistant prose never does.
+func (r claudeRecord) Reason() (providerfailure.Reason, bool) {
+	if status, err := strconv.Atoi(strings.TrimSpace(scalarText(r.APIErrorStatus))); err == nil {
+		if reason, ok := providerfailure.StatusReason(status); ok {
+			return reason, true
+		}
+	}
+	if reason, ok := providerfailure.ClassifyField(r.APIErrorCode); ok {
+		return reason, true
+	}
+	for _, message := range r.Errors {
+		if reason, ok := providerfailure.Classify(message); ok {
+			return reason, true
+		}
+	}
+	return "", false
 }
 
 // ClaudeGenerationStarted recognizes affirmative generation activity. This is

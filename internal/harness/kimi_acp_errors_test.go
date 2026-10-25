@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 )
 
 func TestKimiACPReportsHiddenFailure(t *testing.T) {
@@ -24,6 +25,15 @@ func TestKimiACPReportsHiddenFailure(t *testing.T) {
 			var failure *kimiTurnError
 			if !errors.As(err, &failure) || failure.Code != code {
 				t.Fatalf("hidden failure = %v; want typed %s", err, code)
+			}
+			// A provider connection error names a provider failure; Kimi's own
+			// step limit does not.
+			want := providerfailure.Reason("")
+			if code == "provider.connection_error" {
+				want = providerfailure.Unavailable
+			}
+			if reason, ok := providerfailure.ReasonOf(err); ok != (want != "") || reason != want {
+				t.Fatalf("reason = %q, %v; want %q (error %v)", reason, ok, want, err)
 			}
 			if result.Output != "Work in progress." {
 				t.Fatalf("partial work was lost: %q", result.Output)

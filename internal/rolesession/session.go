@@ -50,7 +50,7 @@ func Lookup(id, roomID, role string, inspect InspectFunc, named func() (subagent
 
 // NeedsRecreation excludes provider failures, which require profile failover.
 func NeedsRecreation(info subagent.Info, turn subagent.Turn) bool {
-	if turn.Status == subagent.TurnError && ProviderFailure(turn.Error) {
+	if turn.Status == subagent.TurnError && ProviderFailure(turn) {
 		return false
 	}
 	return turn.Status == subagent.TurnError ||

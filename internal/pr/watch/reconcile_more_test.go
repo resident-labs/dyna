@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/subagent"
 	"strings"
 	"testing"
@@ -48,8 +49,14 @@ func TestReconcileKeepsBusyTurnsAndFillsOldestNeed(t *testing.T) {
 }
 
 func TestReconcileCapacityFailureUsesFreshReviewer(t *testing.T) {
-	for _, message := range []string{"quota exceeded", "Selected model is at capacity"} {
-		t.Run(message, func(t *testing.T) {
+	for _, tc := range []struct {
+		message string
+		reason  providerfailure.Reason
+	}{
+		{"quota exceeded", providerfailure.Quota},
+		{"Selected model is at capacity", providerfailure.Capacity},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
 			e, keys := readyReviewPool(t, 1)
 			e.s.ReviewerProfiles = func() ([]profile.Profile, error) {
 				return []profile.Profile{{Name: "judge", Taste: 9, Cost: 9, MaxConcurrent: 1}, {Name: "mock", Taste: 1, Cost: 1, MaxConcurrent: 1}}, nil
@@ -63,7 +70,8 @@ func TestReconcileCapacityFailureUsesFreshReviewer(t *testing.T) {
 					info.Status = subagent.StatusIdle
 					info.CurrentTurn = 0
 					turn.Status = subagent.TurnError
-					turn.Error = message
+					turn.Error = tc.message
+					turn.FailureReason = tc.reason
 					turn.Ended = e.clock
 				}
 				return info, turn, err

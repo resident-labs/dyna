@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // MuseRunError preserves the explicit terminal status even when stdout has
@@ -26,7 +28,7 @@ func MuseRunError(stdout string) error {
 			if strings.TrimSpace(detail) == "" {
 				detail = string(record.Payload.raw)
 			}
-			failure = fmt.Errorf("Muse protocol run.terminal.failed: %s", detail)
+			failure = providerfailure.TagDetail(fmt.Errorf("Muse protocol run.terminal.failed: %s", detail), detail)
 		}
 	}
 	return failure
