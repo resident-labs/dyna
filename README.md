@@ -2,7 +2,7 @@
 
 A local-first workspace where coding agents work together on your machine.
 
-Dyna runs agent CLIs (Claude Code, Codex, OpenCode, Muse, Grok,
+Dyna runs agent CLIs (Claude Code, Codex, OpenCode, Muse,
 Pi, or any custom CLI) as long-lived sessions and workflow workers. They share
 rooms, hold goals, ask you questions, open pull requests, and use their own
 desktops. You run it from the desktop app, a browser, or a phone. Agents use
@@ -117,7 +117,7 @@ to call. See `docs/voice.md`.
 ### Harnesses and profiles
 
 A harness is an adapter for one agent CLI: `claude-code`, `codex`,
-`opencode`, `muse`, `grok`, `pi`, `custom` and `mock`. Each
+`opencode`, `muse`, `pi`, `custom` and `mock`. Each
 runs as a headless child process, with its own private runtime and accounts.
 
 A profile binds a harness and a model to four ratings from 1 to 10: taste,

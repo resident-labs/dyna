@@ -13,7 +13,7 @@ func TestHarnessDefaultDialects(t *testing.T) {
 	for harness, want := range map[string]string{
 		HarnessClaudeCode: "claude-stream-json", HarnessCodex: "codex-jsonl",
 		HarnessOpenCode: "opencode-json", HarnessMuse: "muse-jsonl",
-		HarnessGrok: "acp-json", HarnessPi: "pi-json", HarnessKimiCode: "acp-json",
+		HarnessPi: "pi-json",
 		HarnessCustom: "text", HarnessMock: "text",
 	} {
 		t.Run(harness, func(t *testing.T) {

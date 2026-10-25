@@ -30,7 +30,7 @@
     <p class="muted small" style="margin:0">Sign in to preview and import personal preferences.</p>
   {:else}
     {#if preview}
-      {#if ['grok', 'pi'].includes(row.id)}<p class="muted small">Preview only. This harness cannot copy preferences yet.</p>{/if}
+      {#if ['pi'].includes(row.id)}<p class="muted small">Preview only. This harness cannot copy preferences yet.</p>{/if}
       <div class="preview-box">
         {#each preview.keys ?? [] as item (item.key)}
           <div class="kv">
@@ -44,7 +44,7 @@
       <div class="btn-group" style="margin-top:10px">
         <button
           class="btn"
-          disabled={busy || allowedCount === 0 || ['grok', 'pi'].includes(row.id)}
+          disabled={busy || allowedCount === 0 || ['pi'].includes(row.id)}
           onclick={onimport}
         >
           Confirm import ({allowedCount})

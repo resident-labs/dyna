@@ -24,9 +24,7 @@ const (
 	HarnessCodex      = "codex"
 	HarnessOpenCode   = "opencode"
 	HarnessMuse       = "muse"
-	HarnessGrok       = "grok"
 	HarnessPi         = "pi"
-	HarnessKimiCode   = "kimi-code"
 	HarnessCustom     = "custom"
 	HarnessMock       = "mock"
 )

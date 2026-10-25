@@ -1,7 +1,7 @@
 # The X Subscription usage
 
 The X Subscription gives each paid seat one weekly included pool. Team seats
-do not share weekly usage. Dyna runs Grok Build against that pool.
+do not share weekly usage. Dyna keeps the saved Grok account to read that pool.
 
 Usage shows one dashboard card for the pool. The card links to
 <https://grok.com/dashboard>. It does not claim that a Dyna account has an X
