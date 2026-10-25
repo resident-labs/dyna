@@ -67,7 +67,7 @@ func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	closed, err := s.ChangeIssueFrom(rec.ID, issue.ID, "alpha:root", CloseOrigin{PR: 542, Commit: "24c91eb"}, func(i *Issue) error {
-		i.State = string(IssueStateClosed)
+		i.State = IssueStateClosed
 		i.Reason = "Fixed by #542"
 		return nil
 	})
@@ -94,7 +94,7 @@ func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 	if want := "The engine closed issue D-" + strconv.Itoa(issue.Number) + ": Fixed by #542"; msg.Text != want {
 		t.Fatalf("close text = %q, want %q", msg.Text, want)
 	}
-	if closed.State != string(IssueStateClosed) {
+	if closed.State != IssueStateClosed {
 		t.Fatalf("issue state = %q", closed.State)
 	}
 }
@@ -132,7 +132,7 @@ func TestIssueGoalAssignmentNamesTheAssignee(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.ChangeIssue(rec.ID, issue.ID, "alpha:root", func(i *Issue) error {
-		i.State = string(IssueStateGoal)
+		i.State = IssueStateGoal
 		i.GoalID = "g7"
 		i.Assignee = "alpha:librarian"
 		return nil

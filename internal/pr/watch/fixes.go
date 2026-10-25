@@ -52,7 +52,7 @@ func (s *Service) closeRoomIssue(rec room.Record, fix state.IssueRef, reason str
 	}
 	id := ""
 	for _, issue := range open {
-		if issue.Number == fix.Number && (issue.State == "open" || issue.State == "goal") {
+		if issue.Number == fix.Number && (issue.State == room.IssueStateOpen || issue.State == room.IssueStateGoal) {
 			id = issue.Label()
 			break
 		}
