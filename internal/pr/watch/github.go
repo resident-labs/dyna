@@ -129,7 +129,7 @@ type Status struct {
 type Snapshot struct {
 	OwnerLogin    string
 	localCI       *registeredCIObservation
-	localCIConfig localCIConfigState
+	localCIConfig state.LocalCIConfigState
 	localCIDef    *localci.Definition
 	ciReused      bool // A discussion refresh does not advance the full CI safety clock.
 	headConfirmed bool

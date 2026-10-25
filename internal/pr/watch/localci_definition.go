@@ -9,15 +9,6 @@ import (
 	"dyna-agent/internal/localci"
 )
 
-// localCIConfigState describes repository configuration to PR views. It is
-// typed so a client can word the state without displaying a Git or YAML error.
-type localCIConfigState string
-
-const (
-	localCIConfigNotConfigured localCIConfigState = "not-configured"
-	localCIConfigHeadMissing   localCIConfigState = "head-missing"
-)
-
 // localCIPlan separates the two revisions involved in a local run. Execution
 // comes from the head so a PR can repair commands. The required graph and file
 // selection come from the base so the same PR cannot remove its own gate.

@@ -310,6 +310,12 @@ func normalizeState(st *State) {
 		if r == nil {
 			delete(st.Records, key)
 			delete(st.Responses, key)
+			continue
+		}
+		// A client renders only a known local CI state, so a value written by an
+		// older or a broken writer never reaches a view as prose.
+		if !r.LocalCIConfig.known() {
+			r.LocalCIConfig = LocalCIConfigNone
 		}
 	}
 	st.RefreshQuotaDisplay()
