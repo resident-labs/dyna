@@ -187,7 +187,7 @@ func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if pin.AccountID != activeID {
+					if pin.AccountID != active.ID {
 						t.Error("wrong account")
 					}
 				})
@@ -204,10 +204,6 @@ func TestMissingPrivateLoginAndProtectedEnvironment(t *testing.T) {
 	}
 	p.Env = nil
 	n, err := r.Accounts.Active(ProviderForModel(p.Harness, p.Model), p.Harness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n, err := r.Accounts.Find(activeID)
 	if err != nil {
 		t.Fatal(err)
 	}
