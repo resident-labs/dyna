@@ -304,7 +304,8 @@ are separate from GitHub runners and come from the shared machine registry
 (`dyna machine list`). Local machines run merge trials only: GitHub's hosted CI
 checks a pull request head, so a PR head push starts no local run. The engine
 cancels work for superseded trial heads and never runs fork PRs on these
-machines. `dyna git ci run <sha>` still checks one commit by hand.
+machines. `dyna git ci run <sha>` still checks one commit by hand, and the
+change it belongs to reads that result at its next tick.
 
 Slots limit concurrent checks across all runs on a machine. Each scheduled run
 reserves up to six slots, so other heads can start while capacity is free.

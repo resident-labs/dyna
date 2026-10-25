@@ -439,11 +439,6 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 					}
 				}
 			}
-			// A result the PR has not read yet, such as one a manual rerun wrote,
-			// must refresh it even when GitHub did not change.
-			if err := s.refreshSavedLocalResult(job, result); err != nil {
-				return false, err
-			}
 			return false, nil
 		}
 	}
@@ -563,23 +558,39 @@ func savedLocalResultKey(result localci.Result) string {
 	return digest(string(body))
 }
 
-// refreshSavedLocalResult forces the next full poll of a PR whose saved local
-// result it has not read yet. A manual `dyna git ci run` writes only Dyna's
-// records, and a quiet settled PR would otherwise keep its old verdict until the
-// safety poll. Nothing here changes GitHub state.
-func (s *Service) refreshSavedLocalResult(job registeredCIJob, result localci.Result) error {
+// RefreshSavedLocalResult marks every tracked change whose stored local result
+// the watcher has not read yet, so its next tick takes a full poll and the new
+// evidence decides. `dyna git ci run` is the one writer of a pull request
+// head's local result, because no local CI runs for that head any more, and a
+// quiet pull request would otherwise keep its old verdict.
+func (s *Service) RefreshSavedLocalResult(result localci.Result) error {
 	key := savedLocalResultKey(result)
-	if key == "" || s.Store == nil {
+	if key == "" || result.SHA == "" || s.Store == nil {
 		return nil
 	}
-	return s.Store.updateRecords([]string{job.record.Key}, func(st *State) error {
-		r := st.Records[job.record.Key]
-		if r == nil || r.Head != job.head || r.Polling.LocalCI == key {
-			return nil
+	st, err := s.Store.Read()
+	if err != nil {
+		return err
+	}
+	var keys []string
+	for recordKey, r := range st.Records {
+		if r.Head == result.SHA && r.Polling.LocalCI != key {
+			keys = append(keys, recordKey)
 		}
-		r.Polling.LocalCI = key
-		r.Polling.Next = time.Time{}
-		r.Polling.FullChecked = time.Time{}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return s.Store.updateRecords(keys, func(st *State) error {
+		for _, recordKey := range keys {
+			r := st.Records[recordKey]
+			if r == nil || r.Head != result.SHA || r.Polling.LocalCI == key {
+				continue
+			}
+			r.Polling.LocalCI = key
+			r.Polling.Next = time.Time{}
+			r.Polling.FullChecked = time.Time{}
+		}
 		return nil
 	})
 }
@@ -708,10 +719,22 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			}
 		}
 	}
-	// A local completion must force a full snapshot even if GitHub did not change.
-	if err := s.refreshSavedLocalResult(job, result); err != nil {
+	// A completed trial or sync must force a full snapshot even if GitHub did
+	// not change, so its reader sees the new evidence.
+	if err := s.forceFullPoll(job.record.Key, job.head); err != nil {
 		log.Printf("refresh local CI: %v", err)
 	}
+}
+
+// forceFullPoll makes the next tick take a full poll of the change at this head.
+func (s *Service) forceFullPoll(recordKey, head string) error {
+	return s.Store.updateRecords([]string{recordKey}, func(st *State) error {
+		if r := st.Records[recordKey]; r != nil && r.Head == head {
+			r.Polling.Next = time.Time{}
+			r.Polling.FullChecked = time.Time{}
+		}
+		return nil
+	})
 }
 
 func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) (localCIPlan, error) {
