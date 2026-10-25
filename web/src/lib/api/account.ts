@@ -15,6 +15,10 @@ export interface Plan {
   label: string
 }
 
+// UsageReason is store.UsageReason, why an account has no current reading.
+// The app chooses a designed message for each reason.
+export type UsageReason = 'not-readable' | 'expired' | 'secret' | 'provider-error' | 'rate-limited' | 'no-windows'
+
 // UsageWindow is store.Window, one quota window of an account.
 export interface UsageWindow {
   unavailableReason?: string
@@ -25,6 +29,9 @@ export interface UsageWindow {
   usedPercent?: number
   used?: number
   limit?: number
+  // balance is a remaining money amount when the provider reports a balance
+  // instead of a quota window. unit names its currency.
+  balance?: number
   unit?: string
   resetsAt?: string
   // Added by the client from the window's own fields.
@@ -35,6 +42,7 @@ export interface UsageWindow {
 // Account is service.Account, one saved provider sign-in. Times are ISO strings.
 export interface Account {
   usageError?: string
+  usageReason?: UsageReason
   expiresAt?: string
   refreshMessage?: string
   quotaBlocked: boolean

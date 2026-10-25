@@ -25,6 +25,7 @@ func applySavedObservation(a *Account, e accountstore.Entry, now time.Time) {
 	a.ObservedAt = time.Time{}
 	if o := e.Observation; o != nil {
 		a.UsageError = o.UsageError
+		a.UsageReason = o.Reason
 		if o.Plan != nil {
 			a.Plan = o.Plan
 		}

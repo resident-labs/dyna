@@ -36,6 +36,7 @@ func TestInactiveUsageProbeDeadlines(t *testing.T) {
 		{"fresh after reset", &store.Observation{ObservedAt: reset, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset.Add(30 * time.Minute)},
 		{"provider backoff", &store.Observation{ObservedAt: now, RateLimitedUntil: &backoff, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, backoff},
 		{"invalid reset", &store.Observation{ObservedAt: now, Windows: []Window{{ResetsAt: "invalid"}}}, now.Add(30 * time.Minute)},
+		{"reading saved before typed reasons", &store.Observation{ObservedAt: now, LastAttemptAt: now, UsageError: "old generic result"}, time.Time{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := usageProbeAt(tc.o, false); !got.Equal(tc.want) {
@@ -136,6 +137,50 @@ func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
 	s.RefreshInactiveUsage(ctx, now.Add(time.Hour))
 	if calls != 2 {
 		t.Fatal("cancelled pass probed an account")
+	}
+}
+
+func TestActivePiAccountProbesItsProviderUsageWhileIdle(t *testing.T) {
+	accounts := &runtime.Accounts{Root: t.TempDir()}
+	account, err := accounts.CreateProvider("pi", store.ProviderDeepSeek, store.KindAPIKey, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(account.Home, "auth.json"), []byte(`{"deepseek":{"type":"api_key","key":"fixture-key"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accounts.Capture(t.Context(), account.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	st := &store.Store{Root: accounts.Root}
+	if err := st.SetActive(store.ProviderDeepSeek, "pi", "", account.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	calls := 0
+	old := http.DefaultTransport
+	http.DefaultTransport = usageRefreshTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.String() != "https://api.deepseek.com/user/balance" || r.Header.Get("Authorization") != "Bearer fixture-key" {
+			t.Fatal("wrong Pi usage request")
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"is_available":true,"balance_infos":[{"currency":"USD","total_balance":"12.34"}]}`))}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = old })
+	s := New(Options{Store: st, Now: func() time.Time { return now }})
+	if next := s.RefreshInactiveUsage(t.Context(), now); next.Before(now.Add(30 * time.Minute)) {
+		t.Fatalf("next probe = %v", next)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want one idle probe", calls)
+	}
+	state, err := st.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := state.Find(account.ID)
+	if entry == nil || entry.Observation == nil || len(entry.Observation.Windows) != 1 || entry.Observation.Windows[0].Balance == nil || *entry.Observation.Windows[0].Balance != 12.34 {
+		t.Fatalf("observation = %+v", entry)
 	}
 }
 

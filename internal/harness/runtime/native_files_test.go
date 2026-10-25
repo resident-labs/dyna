@@ -38,6 +38,10 @@ func TestNativeFilesGrokUsageIsAvailableThroughSavedProber(t *testing.T) {
 		t.Fatal("Grok reader was not reached", err)
 	}
 	manager.adapter, _ = Adapter("pi")
+	if _, err = prober.ProbeSaved(context.Background(), native.Captured{}); !errors.Is(err, native.ErrSchema) {
+		t.Fatal("Pi reader was not reached", err)
+	}
+	manager.adapter, _ = Adapter("claude-code")
 	if _, err = prober.ProbeSaved(context.Background(), native.Captured{}); !errors.Is(err, native.ErrUnsupported) {
 		t.Fatal("other native files gained unsupported usage", err)
 	}
