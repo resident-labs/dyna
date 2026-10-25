@@ -89,9 +89,6 @@ func resolveForOS(binary string, env []string, platform string) (string, error) 
 	}
 	if home != "" && filepath.IsAbs(home) {
 		dirs := []string{filepath.Join(home, ".local", "bin")}
-		if binary == "opencode" {
-			dirs = append([]string{filepath.Join(home, ".opencode", "bin")}, dirs...)
-		}
 		for _, dir := range dirs {
 			if path, ok := candidate(dir); ok {
 				return path, nil

@@ -609,9 +609,6 @@ func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string
 			return err
 		}
 		if activationErr != nil {
-			if n.Harness == "opencode" && (errors.Is(activationErr, native.ErrSchema) || errors.Is(activationErr, native.ErrNotSignedIn)) {
-				return errors.Join(errors.New("Sign in again: this OpenCode account could not be proven in Dyna's private database."), activationErr)
-			}
 			return activationErr
 		}
 		actual, err := shared.Capture(ctx, "")
@@ -714,7 +711,7 @@ type NativeLogin struct {
 }
 
 // BeginLogin keeps shared native login state under the harness switch gate
-// for the full interactive sign-in, including private Muse and Cursor auth.
+// for the full interactive sign-in.
 func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*NativeLogin, error) {
 	n, err := a.Find(id)
 	if err != nil {

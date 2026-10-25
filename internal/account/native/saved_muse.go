@@ -15,64 +15,6 @@ import (
 // ErrUsageIdle means Muse omitted quota while the five-hour window is idle.
 var ErrUsageIdle = errors.New("Muse’s five-hour usage window is idle.")
 
-// Muse 1.4.10 mints a key at startup with this request. The response can
-// include subs_usage; MSP usage/read only reads the host’s cached observation.
-// This probe discards the minted key and never changes the saved login.
-func (*museManager) ProbeSaved(ctx context.Context, c Captured) (store.Observation, error) {
-	var o store.Observation
-	if err := ctx.Err(); err != nil {
-		return o, err
-	}
-	if c.Credential.Schema != museAuthSchema {
-		return o, ErrSchema
-	}
-	var payload struct {
-		Meta json.RawMessage `json:"metaCredential"`
-	}
-	if json.Unmarshal(c.Credential.Payload, &payload) != nil {
-		return o, ErrSchema
-	}
-	identity, _, expiry, err := museMetaIdentity(payload.Meta)
-	if err != nil {
-		return o, err
-	}
-	if identity != c.Identity || c.Integration != "" {
-		return o, ErrNoIdentity
-	}
-	var credential struct {
-		AccessToken string `json:"access_token"`
-		APIKey      string `json:"api_key"`
-	}
-	if json.Unmarshal(payload.Meta, &credential) != nil {
-		return o, ErrSchema
-	}
-	if credential.AccessToken == "" {
-		return o, ErrUnsupported
-	}
-	now := time.Now().UTC()
-	usageAuthError := func() error {
-		if credential.APIKey != "" {
-			return errors.New("Muse quota access expired. The saved API key can still run Muse.")
-		}
-		return ErrInvalidGrant
-	}
-	if !expiry.IsZero() && !expiry.After(now) {
-		return o, usageAuthError()
-	}
-	body, err := museUsageRequest(ctx, nil, now, credential.AccessToken)
-	if err != nil {
-		if errors.Is(err, ErrInvalidGrant) {
-			return o, usageAuthError()
-		}
-		return o, err
-	}
-	observation, err := museUsageObservation(body, now, c.Identity)
-	return observation, err
-}
-
-// museUsageRequest mints a key with a Muse identity token. The same response
-// carries subs_usage, so the caller reads the plan without keeping the key. It
-// never writes the saved login or renews the identity token.
 func museUsageRequest(ctx context.Context, client claudeHTTPClient, now time.Time, identityToken string) ([]byte, error) {
 	return directRequest(ctx, client, http.MethodPost, "https://api.meta.ai/muse-code/key", `{"onboard":false}`, map[string]string{
 		"Authorization": "Bearer " + identityToken, "x-api-version": "1.0.0",

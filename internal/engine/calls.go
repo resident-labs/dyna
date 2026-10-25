@@ -108,7 +108,6 @@ func bindings(s services) []websvc.Binding {
 	machine := s.machineAPI()
 	return append(lead, []websvc.Binding{
 		s.admissionBinding(),
-		s.museQuotaBinding(),
 		s.claudeUsageBinding(),
 		{Name: "EnableLibrarian", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.enableLibrarian},
 		{Name: "DisableLibrarian", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.disableLibrarian},
@@ -612,9 +611,8 @@ func (s services) accountScope(scope string) (string, error) {
 }
 
 // accountsAdd adds an API key as a new account of one provider for harness:
-// empty or "pi" keeps it in a Pi account, and "opencode" creates an OpenCode
-// account. The CLI reads the key from standard input and sends it once; it is
-// never a CLI argument.
+// empty or "pi" keeps it in a Pi account. The CLI reads the key from standard
+// input and sends it once; it is never a CLI argument.
 func (s services) accountsAdd(ctx context.Context, harness, provider, label, key string) (service.AccountsSnapshot, error) {
 	p, ok := harnessruntime.PiProvider(provider)
 	if !ok {

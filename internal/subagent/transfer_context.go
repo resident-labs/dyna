@@ -209,8 +209,8 @@ func (m *Manager) transferHasOutput(id string, t Turn) bool {
 	found := false
 	scanTail(path, t.NormStart, func(line []byte) {
 		var e workeroutput.Event
-		// A started step means the model is running. OpenCode prints no
-		// reasoning, so a long first thought shows only its step_start.
+		// A started step means the model is running, so a long first thought
+		// shows as progress even when the harness prints no reasoning.
 		if json.Unmarshal(line, &e) == nil && ((e.Kind == "message" && e.Role == "assistant" && strings.TrimSpace(e.Text) != "") || e.Kind == "tool" || e.Kind == "reasoning" ||
 			(e.Kind == "status" && e.Name == "step" && e.State == "started")) {
 			found = true

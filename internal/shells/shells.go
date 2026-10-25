@@ -611,9 +611,8 @@ func (s *Store) Stop(id, by string) (Info, error) {
 
 // Spawn launches the detached supervisor through `exe shell _spawn <id>`,
 // which starts it and exits at once, so the supervisor is reparented to init.
-// Some harnesses (Muse) kill an MCP server's whole live process tree when a
-// run ends, whatever its sessions; an orphan is outside that tree. A launch
-// error comes back as _spawn's error.
+// A harness that kills an MCP server's whole live process tree when a run
+// ends cannot reach an orphan. A launch error comes back as _spawn's error.
 func Spawn(exe, id string) error {
 	cmd := exec.Command(exe, "shell", "_spawn", id)
 	cmd.Env = home.LaunchEnv()

@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	_ "embed"
-	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -13,11 +11,6 @@ import (
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 )
-
-// Bundled capabilities supplement exact discovered routes; they never establish account access.
-//
-//go:embed catalog/opencode.json
-var openCodeMetadata []byte
 
 // installationKey names the accounts and executables a catalog belongs to, so
 // a provider switch on a harness such as Pi gets a fresh catalog.
@@ -68,11 +61,6 @@ func (s *Service) ProfileModels(ctx context.Context, harness string, refresh boo
 		out.Message = "The harness model catalog could not be refreshed: " + reason + ". Enter a model ID or retry."
 		return out, nil
 	}
-	var metadata struct {
-		Source string                                            `json:"source"`
-		Models map[string]struct{ Context, Input, Output int64 } `json:"models"`
-	}
-	_ = json.Unmarshal(openCodeMetadata, &metadata)
 	seen := map[string]bool{}
 	for _, m := range models {
 		if m.ID == "" || seen[m.ID] {
@@ -87,38 +75,9 @@ func (s *Service) ProfileModels(ctx context.Context, harness string, refresh boo
 		if v.Source == "" {
 			v.Source = out.Source
 		}
-		if harness == "opencode" {
-			if caps, ok := metadata.Models[m.ID]; ok {
-				if v.Context == 0 {
-					v.Context = caps.Context
-				}
-				if v.Input == 0 {
-					v.Input = caps.Input
-				}
-				if v.Output == 0 {
-					v.Output = caps.Output
-				}
-				v.Source += "; capabilities: " + metadata.Source
-			}
-			if strings.HasPrefix(m.ID, "opencode-go/") {
-				v.Category = "go"
-				v.Limits = goLimits(m.ID)
-			}
-			if strings.HasPrefix(m.ID, "opencode/") && (strings.HasSuffix(m.ID, "-free") || m.ID == "opencode/big-pickle") {
-				v.Category = "free"
-				v.Limits = []Limit{{Label: "Free offering", Value: "200 requests per day. The current shared or per-model scope is not published.", Source: "https://opencode.ai/"}}
-			}
-			switch m.ID {
-			case "opencode/glm-5.3-flash-free", "opencode/deepseek-v4.1-flash-free":
-				v.Description = "Zero data retention. Prompts and responses are not used for training."
-			case "opencode/big-pickle":
-				v.Description = "Collected data may be used to improve the model."
-			case "opencode/beam-free":
-				v.Description = "Data retained for 30 days; not used for training. Regional restrictions apply."
-			}
-			if v.Description != "" {
-				v.Source += "; data policy: https://opencode.ai/v2/docs/console/models"
-			}
+		if strings.HasPrefix(m.ID, "opencode-go/") {
+			v.Category = "go"
+			v.Limits = goLimits(m.ID)
 		}
 		out.Models = append(out.Models, v)
 	}

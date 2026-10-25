@@ -144,27 +144,14 @@ func (r RecommendedVersionResolver) RecommendedVersions(ctx context.Context) []R
 		go func() {
 			defer pending.Done()
 			v := RecommendedVersion{Harness: a.Harness, Status: "unavailable"}
-			switch harnessDistributions[a.Harness].Kind {
-			case "muse-stable":
-				v.Source = museChannelURL
-				if musePlatform(r.GOOS, r.GOARCH) == "" {
-					v.Status, v.Reason = "unsupported", "No verified Muse artifact supports this platform."
-					break
-				}
-				v.Version, v.Reason = r.cached(ctx, a.Harness+":"+v.Source, func() (string, string) { return r.museVersion(ctx) })
+			if a.NPMPackage == "" {
+				v.Reason = "The adapter has no verified version metadata source."
+			} else {
+				v.Source = "https://registry.npmjs.org/" + url.PathEscape(a.NPMPackage) + "/latest"
+				v.Version, v.Reason = r.cached(ctx, a.Harness+":"+v.Source, func() (string, string) { return r.npmVersion(ctx, a, v.Source) })
 				if v.Version != "" {
-					v.Status, v.Source = "resolved", museReleaseManifestURL(v.Version)
-				}
-			default:
-				if a.NPMPackage == "" {
-					v.Reason = "The adapter has no verified version metadata source."
-				} else {
-					v.Source = "https://registry.npmjs.org/" + url.PathEscape(a.NPMPackage) + "/latest"
-					v.Version, v.Reason = r.cached(ctx, a.Harness+":"+v.Source, func() (string, string) { return r.npmVersion(ctx, a, v.Source) })
-					if v.Version != "" {
-						v.Status = "resolved"
-						v.Source = strings.TrimSuffix(v.Source, "/latest") + "/" + url.PathEscape(v.Version)
-					}
+					v.Status = "resolved"
+					v.Source = strings.TrimSuffix(v.Source, "/latest") + "/" + url.PathEscape(v.Version)
 				}
 			}
 			out[i] = v
@@ -213,37 +200,6 @@ func (r RecommendedVersionResolver) fetch(ctx context.Context, source, accept st
 		return nil, "Version metadata is unreadable or exceeds the response limit."
 	}
 	return body, ""
-}
-
-// museVersion reads the stable Muse channel, the source the official launcher
-// uses.
-func (r RecommendedVersionResolver) museVersion(ctx context.Context) (string, string) {
-	body, reason := r.fetch(ctx, museChannelURL, "application/json")
-	if reason != "" {
-		return "", reason
-	}
-	var channel struct {
-		Version string `json:"version"`
-	}
-	if json.Unmarshal(body, &channel) != nil || !museVersionPattern.MatchString(channel.Version) {
-		return "", "The Muse channel does not name an exact version."
-	}
-	body, reason = r.fetch(ctx, museReleaseManifestURL(channel.Version), "application/json")
-	if reason != "" {
-		return "", reason
-	}
-	var manifest museManifest
-	goos, goarch := r.GOOS, r.GOARCH
-	if goos == "" {
-		goos = runtime.GOOS
-	}
-	if goarch == "" {
-		goarch = runtime.GOARCH
-	}
-	if json.Unmarshal(body, &manifest) != nil || !manifest.supports(channel.Version, musePlatform(goos, goarch)) {
-		return "", "The Muse release manifest has no verified artifact for this version and platform."
-	}
-	return channel.Version, ""
 }
 
 func (r RecommendedVersionResolver) npmVersion(ctx context.Context, a RuntimeAdapter, source string) (string, string) {

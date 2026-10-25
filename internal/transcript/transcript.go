@@ -442,8 +442,6 @@ func mcpResultText(output string) string {
 
 // Summarize condenses one tool event.
 func Summarize(e workeroutput.Event) Tool {
-	// TODO: legacy/shim remove later — renders old normalized Muse envelopes; remove after affected artifacts expire or migrate
-	e = workeroutput.UpgradeLegacyEvent(e)
 	t := Tool{Name: e.Name, Detail: e.Input, Output: e.Output, Exit: e.Exit}
 	t.Done = e.State == "completed" || e.State == "failed"
 	t.Failed = e.State == "failed" || (e.Exit != nil && *e.Exit != 0)
@@ -786,18 +784,6 @@ func SessionTurn(t subagent.Turn, events []workeroutput.Event, omitted bool) Tur
 	promptTS := t.Created
 	if !t.Started.IsZero() {
 		promptTS = t.Started
-	}
-	// TODO: legacy/shim remove later — marks deltas in old normalized Muse output; remove after affected artifacts expire or migrate
-	if t.OutputDialect == workeroutput.DialectMuseJSONL {
-		events = append([]workeroutput.Event(nil), events...)
-		for i := range events {
-			if events[i].Kind == "message" && events[i].Role == "assistant" && events[i].State == "" {
-				// A result response is a full message, not a streamed delta.
-				if i == 0 || events[i-1].Kind != "status" || events[i-1].Name != "result" {
-					events[i].State = "delta"
-				}
-			}
-		}
 	}
 	items, hidden, _ := fromEventsWithSteering(events, steeringItems(t))
 	out.Hidden = hidden

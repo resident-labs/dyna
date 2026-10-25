@@ -86,7 +86,7 @@ func MetadataEnv() []string {
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		switch key {
-		case "CLAUDE_CODE_SESSION_ID", "MUSE_SESSION_ID":
+		case "CLAUDE_CODE_SESSION_ID":
 			continue
 		}
 		if strings.HasPrefix(key, "DYNA_") || strings.HasPrefix(key, "GIT_") {

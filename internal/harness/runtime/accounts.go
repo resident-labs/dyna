@@ -55,7 +55,7 @@ func canonicalAccountHarness(h string) (string, error) {
 
 // These native backends need a drained harness gate for interactive login.
 func sharedServiceAccount(h string) bool {
-	return h == "opencode" || h == "muse" || h == "kimi-code"
+	return h == "kimi-code"
 }
 
 var errAccountPath = errors.New("The private account path is unsafe.")
@@ -383,12 +383,7 @@ func (a *Accounts) scopedManagerWith(h, home, executable string, pin map[string]
 	if factory == nil {
 		factory = NativeRuntimeManager
 	}
-	if h == "opencode" {
-		if err := ensureOpenCodeServicePort(home); err != nil {
-			return nil, nil, err
-		}
-	}
-	host := native.Host{OpenCodeService: h == "opencode", Home: harnesshome.Home(home), Executable: executable, Env: func(k string) string {
+	host := native.Host{Home: harnesshome.Home(home), Executable: executable, Env: func(k string) string {
 		if v, ok := pin[k]; ok {
 			return v
 		}
@@ -449,7 +444,7 @@ func (a *Accounts) scopedManagerWith(h, home, executable string, pin map[string]
 	if !ok {
 		return nil, nil, native.ErrUnsupported
 	}
-	if h == "muse" || h == "opencode" || h == "kimi-code" {
+	if h == "kimi-code" {
 		manager = checkedHomeManager{Manager: manager, harness: h, scope: home}
 	}
 	return manager, overrides, nil

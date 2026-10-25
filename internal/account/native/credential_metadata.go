@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -48,23 +47,7 @@ func CredentialUsesAPIKey(c Captured) bool {
 		}
 		return entry.Key != "" || entry.Type == "api_key"
 	}
-	if c.Credential.Schema == openCodeRefSchema {
-		ref, err := openCodeUnpack(c.Credential)
-		return err == nil && c.Identity == "opencode:"+ref.Integration+":"+ref.CredentialID && c.Integration == ref.Integration && ref.CredentialType == "key"
-	}
-	if c.Credential.Schema != museAuthSchema {
-		return false
-	}
-	parsed, err := credentialMetadata(c.Credential)
-	if err != nil || parsed.Identity != c.Identity {
-		return false
-	}
-	var p struct {
-		Meta struct {
-			APIKey string `json:"api_key"`
-		} `json:"metaCredential"`
-	}
-	return json.Unmarshal(c.Credential.Payload, &p) == nil && p.Meta.APIKey != ""
+	return false
 }
 
 // ActiveRefresher holds the adapter's activation lock while it captures, refreshes,
@@ -122,26 +105,6 @@ func credentialMetadata(c store.Credential) (Captured, error) {
 			return Captured{}, err
 		}
 		return Captured{Identity: "pi:" + id, Credential: c, ExpiresAt: piEntryExpiry(entry)}, nil
-	case museAuthSchema:
-		var p map[string]json.RawMessage
-		if len(c.Payload) > museAuthMaxBytes || json.Unmarshal(c.Payload, &p) != nil || len(p) != 1 {
-			return Captured{}, ErrSchema
-		}
-		rows, err := museCaptureMeta(p["metaCredential"])
-		if err != nil {
-			return Captured{}, err
-		}
-		return rows[0], nil
-	case openCodeRefSchema:
-		ref, err := openCodeUnpack(c)
-		if err != nil {
-			return Captured{}, err
-		}
-		parsed := Captured{Identity: "opencode:" + ref.Integration + ":" + ref.CredentialID, Integration: ref.Integration, Credential: c}
-		if ref.Expires > 0 {
-			parsed.ExpiresAt = time.UnixMilli(ref.Expires).UTC()
-		}
-		return parsed, nil
 	case kimiCodeSchema:
 		login, err := unpackKimiCodeLogin(c)
 		if err != nil {
@@ -163,21 +126,14 @@ func CredentialExpiry(c store.Credential) time.Time {
 	return parsed.ExpiresAt
 }
 
-// CredentialExpired reports an expired access credential only when no native
-// API-key fallback remains. Expiry metadata alone does not invalidate that key.
+// CredentialExpired reports an expired access credential. A credential with no
+// expiry, such as an API key, never counts as expired.
 func CredentialExpired(c Captured, now time.Time) bool {
-	// OpenCode owns the live grant. A saved reference can predate native renewal.
-	if c.Credential.Schema == openCodeRefSchema {
-		return false
-	}
 	expiry := CredentialExpiry(c.Credential)
 	if expiry.IsZero() {
 		expiry = c.ExpiresAt
 	}
-	if expiry.IsZero() || expiry.After(now) {
-		return false
-	}
-	return !CredentialUsesAPIKey(c)
+	return !expiry.IsZero() && !expiry.After(now)
 }
 
 func credentialExpiry(c Captured) (time.Time, error) {
@@ -193,9 +149,7 @@ func credentialExpiry(c Captured) (time.Time, error) {
 	}
 	return parsed.ExpiresAt, nil
 }
-func (*claudeManager) CredentialExpiry(c Captured) (time.Time, error)   { return credentialExpiry(c) }
-func (*museManager) CredentialExpiry(c Captured) (time.Time, error)     { return credentialExpiry(c) }
-func (*openCodeManager) CredentialExpiry(c Captured) (time.Time, error) { return credentialExpiry(c) }
+func (*claudeManager) CredentialExpiry(c Captured) (time.Time, error) { return credentialExpiry(c) }
 
 // NewerCredential compares validated same-identity payloads by access-token expiry.
 // A known expiry takes precedence over an unknown expiry so a saved rotation
@@ -240,9 +194,6 @@ func (m *claudeManager) RecoverCredential(ctx context.Context, c Captured) (Capt
 	// TODO: legacy/shim remove later — recovers rotated claude-accounts snapshots until the legacy helper is retired
 	rows, _ := ImportLegacyClaude(ctx, m.host)
 	return recoverNative(ctx, m, c, directNow(m.now), rows)
-}
-func (m *museManager) RecoverCredential(ctx context.Context, c Captured) (Captured, error) {
-	return recoverNative(ctx, m, c, time.Now(), nil)
 }
 
 // CredentialLabel derives the default label from a validated saved credential.

@@ -29,8 +29,8 @@ export interface Block {
 
 // Mirrors service.ApplyBlockingQuota: only these windows stop an account, and
 // only while the reading is at its limit and the reset is still ahead.
-function blockingIDs(harness?: string): readonly string[] {
-  return harness === 'muse' ? ['five_hour', 'seven_day', 'subscription'] : ['five_hour', 'seven_day']
+function blockingIDs(): readonly string[] {
+  return ['five_hour', 'seven_day']
 }
 
 function exhausted(window: QuotaWindow): boolean {
@@ -40,11 +40,11 @@ function exhausted(window: QuotaWindow): boolean {
 
 // quotaBlock is the host's blocking decision computed against the clock, so a
 // page that stays open stops showing a limit that has already reset.
-export function quotaBlock(windows: readonly QuotaWindow[] | null | undefined, harness: string | undefined, now = Date.now()): Block | null {
+export function quotaBlock(windows: readonly QuotaWindow[] | null | undefined, now = Date.now()): Block | null {
   const ids: string[] = []
   let until = 0
   for (const window of windows ?? []) {
-    if (!blockingIDs(harness).includes(window.id ?? '')) continue
+    if (!blockingIDs().includes(window.id ?? '')) continue
     const reset = Date.parse(window.resetsAt ?? '')
     if (!Number.isFinite(reset) || reset <= now || !exhausted(window)) continue
     ids.push(window.id ?? '')
@@ -58,7 +58,7 @@ export function quotaBlock(windows: readonly QuotaWindow[] | null | undefined, h
 // stays open wakes at this deadline, so an expired one must ask for no wake and
 // let a later account deadline win.
 export function blockUntil(account: BlockedAccount | null | undefined, now = Date.now()): number {
-  const block = quotaBlock(account?.windows, account?.harness, now)
+  const block = quotaBlock(account?.windows, now)
   if (block) return block.until
   // A reading with windows is decided by the windows above, as in the status line.
   if (account?.windows?.length) return Number.NaN

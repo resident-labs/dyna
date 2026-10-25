@@ -81,8 +81,6 @@ type signInSpec struct {
 var signInSpecs = map[string]signInSpec{
 	"pi":          {Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
-	"muse":        {Argv: museDeviceArgv, Parse: parseMuseSignIn},
-	"opencode":    {Argv: openCodeDeviceArgv, Parse: parseOpenCodeSignIn},
 }
 
 var (
