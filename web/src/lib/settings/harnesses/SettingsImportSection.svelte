@@ -27,7 +27,7 @@
     Copy safe preferences from your own {row.meta.name} setup. Nothing is copied until you confirm.
   </p>
   {#if !row.activeAccount}
-    <p class="muted small" style="margin:0">Sign in to preview and import personal preferences.</p>
+    <p class="muted small" style="margin:0">Use an account to preview and import personal preferences.</p>
   {:else}
     {#if preview}
       {#if ['pi'].includes(row.id)}<p class="muted small">Preview only. This harness cannot copy preferences yet.</p>{/if}

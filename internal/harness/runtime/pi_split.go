@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -76,7 +77,26 @@ func (a *Runtime) piAccountForProvider(ctx context.Context, provider store.Provi
 // provider, creates the account when the provider has none, records its login,
 // and makes it the active account of the provider. It returns the accounts it
 // saved, in provider order.
-func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]json.RawMessage) ([]NativeAccount, error) {
+//
+// target names an account that must take the entry of its own provider, as a
+// sign-in again does: that account may not be the provider's active one, and
+// the selection must not change, because the owner asked to refresh one saved
+// credential, not to switch providers.
+func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]json.RawMessage, target string) ([]NativeAccount, error) {
+	if target != "" {
+		// A sign-in again names the one account it may write. A target that is
+		// gone, or that cannot take a Pi credential, must never fall through to
+		// the generic path: that would write whichever account of a provider is
+		// active, which is the account the owner did not ask to change.
+		n, err := a.Accounts.Find(target)
+		if err != nil {
+			return nil, errors.New("The account this sign-in was started for is gone. Start the sign-in again from the account list.")
+		}
+		if n.Harness != "pi" || n.Provider == "" {
+			return nil, errors.New("The account this sign-in was started for cannot take a Pi credential.")
+		}
+		return a.saveTargetedPiEntry(ctx, entries, n)
+	}
 	var saved []NativeAccount
 	var firstErr error
 	for _, id := range slices.Sorted(maps.Keys(entries)) {
@@ -109,6 +129,33 @@ func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]
 		saved = append(saved, captured)
 	}
 	return saved, firstErr
+}
+
+// saveTargetedPiEntry writes only the target account's provider entry. A
+// sign-in again must change that account and nothing else, and the provider
+// card offers every provider: a credential for another provider is refused,
+// because writing it would replace that provider's active account, which the
+// owner did not ask for.
+func (a *Runtime) saveTargetedPiEntry(ctx context.Context, entries map[string]json.RawMessage, target NativeAccount) ([]NativeAccount, error) {
+	var entryID string
+	var entry json.RawMessage
+	for _, id := range slices.Sorted(maps.Keys(entries)) {
+		if piProvider(id) == target.Provider {
+			entryID, entry = id, entries[id]
+			break
+		}
+	}
+	if entry == nil {
+		return nil, fmt.Errorf("This sign-in saved no %s credential. Sign in again and choose %s.", target.Provider, target.Provider)
+	}
+	if err := writePiAccountAuth(ctx, target, map[string]json.RawMessage{entryID: entry}); err != nil {
+		return nil, err
+	}
+	captured, err := a.Accounts.Capture(ctx, target.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	return []NativeAccount{captured}, nil
 }
 
 // adoptProviderAccount gives a Pi row that held several providers the provider

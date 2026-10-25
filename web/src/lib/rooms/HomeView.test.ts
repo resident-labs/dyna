@@ -69,20 +69,20 @@ assert.ok(onclose, 'App wires the Settings onclose handler')
 interface Usage {
   id?: string
   n?: number
-  accounts?: { id: string; needsLogin: boolean }[]
+  providers?: { provider: string; accounts: { id: string; needsLogin: boolean }[] }[]
 }
 
 interface CloseState {
   usage: Usage | null
   runtimes: { v: string } | null
-  api: { accountUsageCached: () => Promise<Usage>; privateRuntimes: () => Promise<{ v: string }> }
+  api: { accountsView: () => Promise<Usage>; privateRuntimes: () => Promise<{ v: string }> }
   refresh: () => Promise<void>
 }
 
 test('closing Settings reloads the home screen accounts and runtimes', async () => {
   let n = 0
-  const state = { usage: { accounts: [{ id: 'g', needsLogin: true }] } as Usage, runtimes: { v: 'old' }, api: {
-    accountUsageCached: () => Promise.resolve({ accounts: [{ id: 'g', needsLogin: false }], n: ++n }),
+  const state = { usage: { providers: [{ provider: 'zai', accounts: [{ id: 'g', needsLogin: true }] }] } as Usage, runtimes: { v: 'old' }, api: {
+    accountsView: () => Promise.resolve({ providers: [{ provider: 'zai', accounts: [{ id: 'g', needsLogin: false }] }], n: ++n }),
     privateRuntimes: () => Promise.resolve({ v: 'new' }),
   } }
   const c: CloseState = Object.assign(state, homeFunctions<Pick<CloseState, 'refresh'>>(refreshCode, state, ['refresh']))
@@ -96,7 +96,7 @@ test('closing Settings reloads the home screen accounts and runtimes', async () 
   await setImmediate()
   assert.equal(app.showSettings, false)
   assert.equal(voiceRefreshed, 1)
-  assert.equal(c.usage?.accounts?.[0]?.needsLogin, false)
+  assert.equal(c.usage?.providers?.[0]?.accounts?.[0]?.needsLogin, false)
   assert.equal(c.runtimes?.v, 'new')
 })
 
@@ -105,7 +105,7 @@ test('a late account answer cannot replace a newer one', async () => {
   const old = new Promise<Usage>((r) => { resolveOld = r })
   let calls = 0
   const state = { usage: null as Usage | null, runtimes: null as { v: string } | null, api: {
-    accountUsageCached: () => (++calls === 1 ? old : Promise.resolve({ id: 'new' })),
+    accountsView: () => (++calls === 1 ? old : Promise.resolve({ id: 'new' })),
     privateRuntimes: () => new Promise<{ v: string }>(() => {}),
   } }
   const c: CloseState = Object.assign(state, homeFunctions<Pick<CloseState, 'refresh'>>(refreshCode, state, ['refresh']))

@@ -14,7 +14,7 @@ export interface ServiceApi {
   voiceStatus(): Promise<unknown>
   notices(): Promise<unknown>
   roomCIBudget(room: string): Promise<unknown>
-  accountUsageCached(): Promise<unknown>
+  accountsView(scope: string): Promise<unknown>
   ciHealth(room: string, runs: number): Promise<unknown>
   syncStatus(): Promise<unknown>
 }
@@ -116,7 +116,7 @@ export async function loadServiceData(
     load('voice', () => api.voiceStatus(), readVoice, (d, v) => ({ ...d, voice: v })),
     load('notices', () => api.notices(), readNotices, (d, v) => ({ ...d, notices: v })),
     load('budget', () => api.roomCIBudget(room), readBudget, (d, v) => ({ ...d, budget: v })),
-    load('accounts', () => api.accountUsageCached(), readAccounts, (d, v) => ({ ...d, accounts: v })),
+    load('accounts', () => api.accountsView(''), readAccounts, (d, v) => ({ ...d, accounts: v })),
     load('tests', () => api.ciHealth(room, 30), readTestHealth, (d, v) => ({ ...d, testHealth: v })),
     load('sync', () => api.syncStatus(), readSync, (d, v) => ({ ...d, laneSync: v })),
     runs,

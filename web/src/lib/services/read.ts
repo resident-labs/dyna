@@ -84,11 +84,11 @@ export function readBudget(v: unknown): BudgetInfo | null {
   return { warnAfter: str(v.ciWarnAfter), failAfter: str(v.ciFailAfter), testMax: str(v.ciTestMax) }
 }
 
-// AccountUsageCached: the stored account readings, of which the page shows the
-// newest time and whether any reading is stale.
+// AccountsList: the saved account readings grouped by provider, of which the
+// page shows the newest time and whether any reading is stale.
 export function readAccounts(v: unknown): AccountsInfo | null {
-  if (!isRecord(v) || !Array.isArray(v.accounts)) return null
-  const accounts = rows(v.accounts)
+  if (!isRecord(v) || !Array.isArray(v.providers)) return null
+  const accounts = rows(v.providers).flatMap((group) => rows(group.accounts))
   const times = accounts.map((a) => str(a.observedAt)).filter(Boolean).sort()
   return { count: accounts.length, at: times.at(-1) ?? '', stale: accounts.some((a) => a.stale === true) }
 }

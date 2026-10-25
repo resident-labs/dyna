@@ -1850,7 +1850,7 @@
         {#if !roomId && machineId}
           <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
         {:else if !roomId}
-          <Home bind:this={home} {rooms} {roomsLoaded} {update} onnewroom={() => openNewRoom()} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} onsettings={(pane: string) => openSettings(pane)} />
+          <Home bind:this={home} {rooms} {roomsLoaded} {update} onnewroom={() => openNewRoom()} onroom={selectRoom} onaccount={(id: string) => openSettings('accounts', false, '', id)} onsettings={(pane: string) => openSettings(pane)} />
         {:else if !room}
           <Skeleton label="Loading room" />
         {:else if drill}

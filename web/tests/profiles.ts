@@ -17,7 +17,7 @@ import type { ProfileSave } from '../src/lib/api/engine.ts'
 
 // savedView is the saved profile as the pane reads it: the name it reports.
 const savedView = (data: ProfileSave): ProfileView => ({ runtimeVersion: '', fallback: '', support: noSupport, ...data.profile })
-import { usageAccount } from '../test/account-fixtures.ts'
+import { account } from '../test/account-fixtures.ts'
 import { element, need } from '../test/need.ts'
 
 const query = new URLSearchParams(location.search)
@@ -31,7 +31,7 @@ api.profileModels = async () => {
  if (scenario === 'error') throw new Error('Fixture discovery error')
  return { models: scenario === 'empty' ? [] : models, compact: { window: true }, source: 'Isolated UI fixture', observedAt: '2026-10-17T17:30:00Z' }
 }
-api.accountUsage = async () => ({ checkedAt: '2026-10-17T17:30:00Z', accounts: [usageAccount({ id: 'fixture-account', harness: 'opencode', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] })] })
+api.accountsList = async () => ({ checkedAt: '2026-10-17T17:30:00Z', problems: [], providers: [{ provider: 'opencode-go', accounts: [{ ...account({ id: 'fixture-account', harness: 'opencode', provider: 'opencode-go', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] }), activeHere: true }] }] })
 // What the last save asked for.
 const sent: { saved?: ProfileSave } = {}
 api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }

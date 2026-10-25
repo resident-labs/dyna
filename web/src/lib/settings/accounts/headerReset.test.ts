@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 // Bundle outside the test clock; the regression measures only a mounted view.
 const { bundle, domNames, importBundle, installDom } = await import('../../prs/prDetailHarness.ts')
-const cardCode = await bundle({ component: '../settings/usage/SubscriptionCard' })
+const cardCode = await bundle({ component: '../settings/accounts/SubscriptionCard' })
 type Harness = {
   dir: string
   default: unknown
@@ -24,8 +24,8 @@ test('an open usage card stops saying limit reached when its blocking window res
   try {
     flushSync(() => {
       app = mount(Card, { target, props: {
-        group: { plan: 'Max', accounts: [{
-          id: 'a', harness: 'codex', label: 'Work account', status: 'ready', active: true, observedAt: new Date(now).toISOString(),
+        group: { provider: 'chatgpt', accounts: [{
+          id: 'a', harness: 'pi', provider: 'chatgpt', label: 'Work account', plan: { id: 'max', label: 'Max' }, status: 'ready', activeHere: true, active: true, observedAt: new Date(now).toISOString(),
           windows: [{ id: 'five_hour', label: 'Session', usedPercent: 100, resetsAt: new Date(now + 60000).toISOString() }],
         }] },
       } })
@@ -62,7 +62,7 @@ test('a second account still drops its limit after an earlier deadline has passe
   try {
     flushSync(() => {
       app = mount(Card, { target, props: {
-        group: { plan: 'Max', accounts: [
+        group: { provider: 'chatgpt', accounts: [
           { id: 'a', harness: 'codex', label: 'Old block', status: 'ready', active: false, quotaBlocked: true, blockingQuotaWindows: ['five_hour'], quotaBlockedUntil: new Date(now - 3600000).toISOString() },
           { id: 'b', harness: 'claude-code', label: 'Weekly account', status: 'ready', active: false, windows: [{ id: 'seven_day', label: 'Weekly', usedPercent: 100, resetsAt: new Date(now + 60000).toISOString() }] },
         ] },

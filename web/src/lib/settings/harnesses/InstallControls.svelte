@@ -9,7 +9,6 @@
   let {
     row,
     busy = false,
-    signingIn = false,
     chooseVersion = $bindable(false),
     versionInput = $bindable(''),
     removing = $bindable(''),
@@ -18,7 +17,6 @@
   }: {
     row: HarnessRow
     busy?: boolean
-    signingIn?: boolean
     chooseVersion?: boolean
     versionInput?: string
     removing?: string
@@ -41,7 +39,7 @@
       </label>
     {/if}
     <span class="btn-group">
-      <button class="btn pri" disabled={busy || signingIn || !row.capability?.installSupported} onclick={() => oninstall()}>Install</button>
+      <button class="btn pri" disabled={busy || !row.capability?.installSupported} onclick={() => oninstall()}>Install</button>
       {#if recommendedVersion(row) && !chooseVersion}<button class="link" disabled={busy} onclick={() => (chooseVersion = true)}>Choose version</button>{/if}
     </span>
   </div>
@@ -50,8 +48,8 @@
     {#if removing === 'copy'}
       <InlineConfirm ask="Uninstall Dyna’s copy?" action="Uninstall" {busy} onconfirm={onuninstall} oncancel={() => (removing = '')} />
     {:else}
-      {#if row.update}<button class="btn" disabled={busy || signingIn} onclick={() => oninstall(row.update)}><span class="up" aria-hidden="true">↑</span>Update to {row.update}</button>{/if}
-      {#if row.version}<button class="btn quiet" disabled={busy || signingIn} onclick={() => (removing = 'copy')}>Uninstall</button>{/if}
+      {#if row.update}<button class="btn" disabled={busy} onclick={() => oninstall(row.update)}><span class="up" aria-hidden="true">↑</span>Update to {row.update}</button>{/if}
+      {#if row.version}<button class="btn quiet" disabled={busy} onclick={() => (removing = 'copy')}>Uninstall</button>{/if}
     {/if}
   </div>
 {/if}
