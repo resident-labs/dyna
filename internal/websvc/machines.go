@@ -2,12 +2,15 @@ package websvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/machines"
 )
 
@@ -115,6 +118,9 @@ type MachineDetail struct {
 	MachineSummary
 	SSH         string `json:"ssh"`
 	DynaVersion string `json:"dynaVersion,omitempty"`
+	// HostChecksAllowedBy words who allows host checks, when someone does:
+	// "the owner", or "root of room <name>".
+	HostChecksAllowedBy []string `json:"hostChecksAllowedBy,omitempty"`
 
 	Harnesses []MachineHarness `json:"harnesses,omitempty"`
 	Running   []MachineAgent   `json:"running,omitempty"`
@@ -209,6 +215,9 @@ type MachineAPI struct {
 	// DiskFloor is the free space a CI machine must keep on its /var/tmp. A
 	// nil DiskFloor reads no floor, so every CI machine counts as online.
 	DiskFloor func() int64
+	// RoomName names a room from its ID, so the page says which room allows
+	// host checks and not only its ID. A nil RoomName shows the ID.
+	RoomName func(roomID string) string
 	// Alerter posts the low-disk alert of a machine that starts holding CI. A
 	// nil Alerter posts nothing.
 	Alerter machines.Alerter
@@ -253,20 +262,58 @@ func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePat
 	if patch.CISlots != nil {
 		m.CISlots = *patch.CISlots
 	}
-	if patch.AllowHostChecks != nil {
-		m.AllowHostChecks = *patch.AllowHostChecks
-	}
 	if patch.Rooms != nil {
 		m.Rooms = *patch.Rooms
 	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
 	}
-	saved, err := a.Store.Save(ctx, m)
+	if _, err := a.Store.Save(ctx, m); err != nil {
+		return MachineDetail{}, err
+	}
+	if patch.AllowHostChecks != nil {
+		// The grant changes inside the store's writer transaction, so this
+		// answer cannot restore a grant that another caller refused meanwhile.
+		if _, err := a.Store.UpdateHostChecksGrants(ctx, id, func(stored machines.Machine) ([]machines.HostChecksGrant, error) {
+			return hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
+		}); err != nil {
+			return MachineDetail{}, err
+		}
+	}
+	saved, err := a.find(ctx, id)
 	if err != nil {
 		return MachineDetail{}, err
 	}
 	return a.machine(ctx, saved, a.ciRuns()), nil
+}
+
+// hostChecksGrants answers one allow or refuse of host checks with the machine's
+// grants after it. The owner answers for every room, so allowing replaces the
+// grants and refusing clears them. A room root answers for its own room:
+// allowing adds its grant and refusing removes only that, so neither touches the
+// owner's grant or another room's. The engine refuses every other caller before
+// this runs.
+func hostChecksGrants(current []machines.HostChecksGrant, actor authority.Actor, allow bool) ([]machines.HostChecksGrant, error) {
+	switch actor.Role {
+	case authority.Owner:
+		if !allow {
+			return nil, nil
+		}
+		return []machines.HostChecksGrant{{By: machines.GrantorOwner}}, nil
+	case authority.Root:
+		if actor.Room == "" {
+			return nil, errors.New("host checks need a room: a room root allows them for its own room")
+		}
+		mine := machines.HostChecksGrant{By: machines.GrantorRoot, Room: actor.Room}
+		if allow {
+			return append(slices.Clone(current), mine), nil
+		}
+		if slices.Contains(current, machines.HostChecksGrant{By: machines.GrantorOwner}) {
+			return nil, errors.New("the owner allows host checks on this machine for every room: ask the owner to refuse them")
+		}
+		return slices.DeleteFunc(slices.Clone(current), func(grant machines.HostChecksGrant) bool { return grant == mine }), nil
+	}
+	return nil, errors.New("SaveMachine is owner only: the owner, or a room root for its own room, allows host checks")
 }
 
 // ProbeMachine reads one machine now and answers with its page after the
@@ -317,7 +364,7 @@ func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, erro
 // machine, so only the local row reads them. The CI runs belong to whichever
 // machine holds their slots, so a CI machine reports them wherever it runs.
 func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[string][]MachineCIRun) MachineDetail {
-	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH}
+	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH, HostChecksAllowedBy: a.hostChecksAllowedBy(m)}
 	// The probe fills these for every machine, this one included.
 	if !m.LastProbe.IsZero() {
 		probed := m.LastProbe
@@ -378,6 +425,30 @@ func ciUsedSlots(runs []MachineCIRun) int {
 	return used
 }
 
+// hostChecksAllowedBy words who allows host checks on m, so the page names the
+// room roots whose decision it was.
+func (a MachineAPI) hostChecksAllowedBy(m machines.Machine) []string {
+	if len(m.HostChecksGrants) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m.HostChecksGrants))
+	for _, grant := range m.HostChecksGrants {
+		if grant.By == machines.GrantorOwner {
+			out = append(out, "the owner")
+			continue
+		}
+		room := grant.Room
+		if a.RoomName != nil {
+			room = a.RoomName(room)
+		}
+		if room == "" {
+			room = "a room"
+		}
+		out = append(out, "root of room "+room)
+	}
+	return out
+}
+
 // machineSummary is the row a machine's stored state alone gives. A remote
 // machine gets its CPU figure from its last probe, so its list row shows the
 // same one bar as this engine's own row.
@@ -390,7 +461,7 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Enabled:         m.Enabled,
 		Status:          machineStatus(m),
 		CISlots:         m.CISlots,
-		AllowHostChecks: m.AllowHostChecks,
+		AllowHostChecks: m.HasHostChecksGrants(),
 		Rooms:           m.Rooms,
 	}
 	if !m.Local && m.Load.CPUPercent != nil {

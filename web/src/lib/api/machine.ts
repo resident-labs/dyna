@@ -57,7 +57,8 @@ export interface MachineSummary {
   // ciSlots is the machine's setting; ci is its use now, which the CI work
   // reports in a later version.
   ciSlots: number
-  // allowHostChecks is an explicit owner opt-in to repository commands outside containers.
+  // allowHostChecks is an explicit opt-in by the owner, or by the root of a
+  // room for that room, to repository commands outside containers.
   allowHostChecks: boolean
   // cpu is the machine's share of its cores in percent: live for this engine's
   // machine, and the last probe reading for a remote one.
@@ -88,6 +89,9 @@ export interface MachineHarness {
 export interface MachineDetail extends MachineSummary {
   ssh: string
   dynaVersion?: string
+  // hostChecksAllowedBy names who allows host checks, when someone does: the
+  // owner, or the root of a room. The engine words it.
+  hostChecksAllowedBy?: string[]
   harnesses?: MachineHarness[]
   running?: MachineAgent[]
   // ciRuns lists the CI runs in flight on this machine, so the page shows what
