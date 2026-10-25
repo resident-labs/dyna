@@ -650,6 +650,31 @@ func TestGrokAcpModelFallbackSwitchesModel(t *testing.T) {
 	}
 }
 
+// A typed provider failure that used up its own recovery chain finishes the
+// turn. The generic same-session nudge would retry the spent account, and for a
+// busy provider it would retry outside the capacity backoff.
+func TestExhaustedQuotaFinishesWithoutSessionNudge(t *testing.T) {
+	oldFailover := FailoverAccount
+	FailoverAccount = func(context.Context, profile.Profile, string, string, error) (*AccountSwitch, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { FailoverAccount = oldFailover })
+	dir := acpScript(t, map[string]string{
+		"task":             `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"partial work"}},"promptId":"p1"}|{"stopReason":"rate_limit"}`,
+		sessionNudgePrompt: `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"nudged"}},"promptId":"p2"}|{"stopReason":"end_turn"}`,
+	})
+	env, _ := acpTestEnv(t, dir)
+	acpPrepare(t)
+	zero := time.Duration(0)
+	result, err := RunWithOptions(t.Context(), acpProfile(env), "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true, startupLimit: 30 * time.Second})
+	if !providerfailure.Is(err, providerfailure.Quota) {
+		t.Fatalf("exhausted quota = %v (result %+v), want a quota reason", err, result)
+	}
+	if result.Output != "partial work" {
+		t.Fatalf("output = %q; the nudge must not run", result.Output)
+	}
+}
+
 func TestGrokAcpJournalReminderInterrupts(t *testing.T) {
 	dir := acpScript(t, map[string]string{
 		"quiet task":            `{"waitForCancel":true}`,

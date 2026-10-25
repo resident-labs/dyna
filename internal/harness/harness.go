@@ -1073,13 +1073,11 @@ func (r *journaledRun) fallbackModel(a attempt, attemptErr error) (stepAct, Resu
 	} else {
 		RecordModelFailure(r.p.Name, r.p.Model, cooldownNow())
 	}
-	if !retrySame {
-		if a.noProgress && r.candidateIdx+1 >= len(r.candidates) {
-			return actReturn, Result{Output: r.lastOutput, Duration: time.Since(r.start)}, attemptErr
-		}
-		if r.candidateIdx+1 >= len(r.candidates) {
-			return actNext, Result{}, nil
-		}
+	if !retrySame && r.candidateIdx+1 >= len(r.candidates) {
+		// The reason's own recovery chain is used up. Finish the turn instead of
+		// sending the generic same-session nudge: that would retry a spent account
+		// or a busy provider, and its error would lose the reason.
+		return actReturn, Result{Output: r.lastOutput, Duration: time.Since(r.start)}, attemptErr
 	}
 	// Continue any work already done in the exact session. Never
 	// restart a turn that may have changed files or called tools.
@@ -1520,7 +1518,9 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		protocolErr = workeroutput.OpenCodeError(a.stdout)
 	}
 	if protocolErr != nil {
-		return fmt.Errorf("worker %s: %w", p.Name, protocolErr)
+		// A parser can report an opaque protocol failure. The process's own stderr
+		// is still narrow evidence of its reason, so the error keeps one.
+		return providerfailure.TagStderr(fmt.Errorf("worker %s: %w", p.Name, protocolErr), a.stderr)
 	}
 	if a.runErr != nil {
 		var cwdErr *workingDirectoryError
