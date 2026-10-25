@@ -21,6 +21,9 @@ func TestRepositoryDefinitionDrivesNonGoRun(t *testing.T) {
 	}
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
