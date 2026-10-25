@@ -91,6 +91,11 @@ func TestGrokBillingRejectsUnusablePeriods(t *testing.T) {
 		`{"config":{}}`,
 		strings.Replace(grokWeeklyFixture, "2026-10-18", "2026-10-26", 1),
 		strings.Replace(grokWeeklyFixture, "2026-10-25", "invalid", 1),
+		// An explicit percentage must not excuse an unusable weekly or monthly period.
+		`{"config":{"isUnifiedBillingUser":true,"creditUsagePercent":42,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-18T05:11:47.565+00:00","end":"invalid"}}}`,
+		`{"config":{"isUnifiedBillingUser":true,"creditUsagePercent":42,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-26T05:11:47.565+00:00","end":"2026-10-25T05:11:47.565+00:00"}}}`,
+		`{"config":{"isUnifiedBillingUser":true,"creditUsagePercent":42,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY"}}}`,
+		`{"config":{"isUnifiedBillingUser":false,"creditUsagePercent":42,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY"}}}`,
 	} {
 		if _, err := grokBillingObservation([]byte(raw), time.Now()); err == nil {
 			t.Fatal("accepted an unusable period")
