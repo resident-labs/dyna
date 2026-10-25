@@ -27,10 +27,10 @@ var emojiPool = []string{
 type avatarBook struct {
 	byID   map[string]string
 	byAddr map[string][]addrAvatar // address -> sessions that held it, oldest first
-	// addrByID and heldBy name sessions of every room, not only this one, so a
-	// reply finds the session that wrote a post after a rename or a move.
-	addrByID map[string]string   // session -> the address it answers at now
-	heldBy   map[string][]string // address -> sessions that hold it, oldest first
+	// addrByID and openByAddr name sessions of every room, not only this one, so
+	// a reply finds the session that wrote a post after a rename or a move.
+	addrByID   map[string]string // session -> the address it answers at now
+	openByAddr map[string]string // address -> the session that answers to it now
 }
 
 type addrAvatar struct {
@@ -47,10 +47,15 @@ func newAvatarBook(sessions []subagent.Info, roomID string) avatarBook {
 		}
 		return ordered[i].ID < ordered[j].ID
 	})
-	b := avatarBook{byID: map[string]string{}, byAddr: map[string][]addrAvatar{}, addrByID: map[string]string{}, heldBy: map[string][]string{}}
+	b := avatarBook{byID: map[string]string{}, byAddr: map[string][]addrAvatar{}, addrByID: map[string]string{}, openByAddr: map[string]string{}}
 	for _, s := range ordered {
 		b.addrByID[s.ID] = s.Address()
-		b.heldBy[s.Address()] = append(b.heldBy[s.Address()], s.ID)
+		// An open session answers to its address, as a mention resolves. In
+		// creation order the newest holder wins, and a closed session holds
+		// nothing: a live session can take a closed one's name.
+		if s.Status != subagent.StatusClosed {
+			b.openByAddr[s.Address()] = s.ID
+		}
 	}
 	var in []subagent.Info
 	for _, s := range ordered {
@@ -100,16 +105,12 @@ func (b avatarBook) sessionsFor(addr string) []string {
 }
 
 // address is the address session id answers at now, wherever the session's
-// room is. ok is false when the snapshot does not hold the session, or when a
-// newer session holds its address: a name reused after a close now belongs to
-// that newer session, so a reply must not name it.
+// room is. ok is false when the snapshot does not hold the session, or when
+// another open session answers to that address now: a reply names the session
+// a mention reaches, never a stranger that took the name.
 func (b avatarBook) address(id string) (string, bool) {
 	cur, ok := b.addrByID[id]
-	if !ok {
-		return "", false
-	}
-	held := b.heldBy[cur]
-	if len(held) == 0 || held[len(held)-1] != id {
+	if !ok || b.openByAddr[cur] != id {
 		return "", false
 	}
 	return cur, true

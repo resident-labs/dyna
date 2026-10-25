@@ -82,6 +82,13 @@ func TestReplyTargetFollowsTheSessionNotItsStoredAddress(t *testing.T) {
 			want: &ReplyTarget{Kind: ReplySession, ID: "ses_closed_lead"},
 		},
 		{
+			// The older live session renamed to the name a newer session closed
+			// with, so a mention of that name reaches the older session.
+			name: "live session took a closed session's name",
+			msg:  room.Message{From: "beta:builder", SessionIDs: map[string]string{"beta:builder": "ses_new_closed"}},
+			want: &ReplyTarget{Kind: ReplySession, ID: "ses_new_closed"},
+		},
+		{
 			name: "session gone from the store",
 			msg:  room.Message{From: "alpha:worker", SessionIDs: map[string]string{"alpha:worker": "ses_retired"}},
 			want: &ReplyTarget{Kind: ReplySession, ID: "ses_retired"},
@@ -97,17 +104,25 @@ func TestReplyTargetFollowsTheSessionNotItsStoredAddress(t *testing.T) {
 	}
 }
 
-// memberSessions is one room with a session, one session of another room that
-// changed its name, and a closed session whose name a newer one took.
+// memberSessions is one room with a live session, a session of another room
+// that changed its name, a closed session whose name a newer session took, and
+// an older live session that took the name of a newer closed one.
 func memberSessions() []subagent.Info {
 	at := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
-	session := func(id, roomName, name string, created time.Time) subagent.Info {
-		return subagent.Info{Meta: subagent.Meta{ID: id, RoomID: "room_" + roomName, Room: roomName, Name: name, Created: created}}
+	session := func(id, roomName, name string, created time.Time, closed bool) subagent.Info {
+		status := subagent.StatusIdle
+		if closed {
+			status = subagent.StatusClosed
+		}
+		return subagent.Info{Meta: subagent.Meta{ID: id, RoomID: "room_" + roomName, Room: roomName, Name: name, Created: created}, Status: status}
 	}
 	return []subagent.Info{
-		session("ses_1", "alpha", "worker", at),
-		session("ses_beta", "beta", "other", at.Add(time.Minute)),
-		session("ses_closed_lead", "alpha", "lead", at.Add(2*time.Minute)),
-		session("ses_lead", "alpha", "lead", at.Add(3*time.Minute)),
+		session("ses_1", "alpha", "worker", at, false),
+		session("ses_beta", "beta", "other", at.Add(time.Minute), false),
+		session("ses_closed_lead", "alpha", "lead", at.Add(2*time.Minute), true),
+		session("ses_lead", "alpha", "lead", at.Add(3*time.Minute), false),
+		// The newer session closed with this name; the older one holds it now.
+		session("ses_new_closed", "beta", "builder", at.Add(4*time.Minute), true),
+		session("ses_old", "beta", "builder", at, false),
 	}
 }
