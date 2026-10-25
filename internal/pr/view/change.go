@@ -48,7 +48,6 @@ type ChangeView struct {
 	Watching            bool                 `json:"watching,omitempty"`
 	Status              string               `json:"status,omitempty"`
 	CI                  string               `json:"ci,omitempty"`
-	LocalCIConfig       string               `json:"localCIConfig,omitempty"`
 	CITestReportNote    string               `json:"ciTestReportNote,omitempty"`
 	CIReason            string               `json:"ciReason,omitempty"`
 	BotReviews          []state.BotReview    `json:"botReviews"`
@@ -72,6 +71,10 @@ type ChangeView struct {
 	// Fixes lists the issues that this change closes when it merges.
 	Fixes       []state.IssueRef `json:"fixes,omitempty"`
 	MergeCommit string           `json:"mergeCommit,omitempty"`
+
+	// LocalCIConfig is one of the known local CI configuration states, so a
+	// client words it itself.
+	LocalCIConfig state.LocalCIConfigState `json:"localCIConfig,omitempty"`
 }
 
 type ChangeDetail struct {

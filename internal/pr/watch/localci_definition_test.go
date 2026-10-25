@@ -94,7 +94,7 @@ suites:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.localCIConfig != localCIConfigNotConfigured || got.localCI != nil {
+	if got.localCIConfig != state.LocalCIConfigNotConfigured || got.localCI != nil {
 		t.Fatalf("unconfigured repository acquired local CI: %+v", got.localCI)
 	}
 	if state, _, _, _ := got.CIStatus(); state != "passed" {
