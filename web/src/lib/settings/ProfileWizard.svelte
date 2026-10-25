@@ -321,7 +321,6 @@
   .h-top { display: flex; align-items: center; gap: 10px; font-size: var(--t-body); }
   .harness p { margin: var(--s4) 0 0; font-size: var(--t-sm); }
   .arrow { color: var(--faint); margin-left: auto; font-size: var(--t-page); }
-  .command-icon { font-family: var(--mono); font-size: var(--t-page); color: var(--muted); }
   .developer { margin-top: 20px; font-size: var(--t-sm); color: var(--muted); }
   .developer button { margin-top: var(--s3); }
   .context, .account-summary { display: flex; align-items: center; gap: 14px; padding-bottom: 18px; margin-bottom: 23px; border-bottom: 1px solid var(--line); font-size: var(--t-ui); }
