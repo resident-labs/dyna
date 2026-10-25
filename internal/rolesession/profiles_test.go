@@ -104,9 +104,11 @@ func TestRecordFailure(t *testing.T) {
 			t.Fatalf("reason %q did not block the profile", reason)
 		}
 	}
+	// A busy provider also blocks after the turn ended: its backoff and model
+	// chain are spent, so the role must move to a healthy profile.
 	busy := subagent.Turn{Status: subagent.TurnError, Error: "service overloaded", FailureReason: providerfailure.Capacity}
-	if !ProviderFailure(busy) || len(RecordFailure(nil, info, busy, now)) != 0 {
-		t.Fatal("a busy provider blocked the profile")
+	if !ProviderFailure(busy) || len(RecordFailure(nil, info, busy, now)) != 1 {
+		t.Fatal("an exhausted capacity failure did not block the profile")
 	}
 	// A runtime that failed before the model ran keeps its own key.
 	notReady := subagent.Turn{Status: subagent.TurnError, Error: "worker sol runtime is not ready: the active private account is not signed in"}

@@ -5,6 +5,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 	"encoding/json"
@@ -132,7 +133,7 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 	write := func(id, status string, at time.Time) {
 		meta := subagent.Meta{ID: id, RoomID: e.author.RoomID, Room: e.author.Room, Profile: "judge", Turns: 1, LastActivity: at}
 		recordtest.Write(t, mgr.Store.Root, id, meta)
-		turn := subagent.Turn{N: 1, Profile: "judge", Status: status, Created: at, Ended: at, Error: "429 quota exhausted"}
+		turn := subagent.Turn{N: 1, Profile: "judge", Status: status, Created: at, Ended: at, Error: "429 quota exhausted", FailureReason: providerfailure.Quota}
 		b, _ := json.Marshal(turn)
 		if err := subagent.Migrate(filepath.Dir(mgr.Store.Root)); err != nil {
 			t.Fatal(err)
