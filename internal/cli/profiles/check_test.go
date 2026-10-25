@@ -75,30 +75,25 @@ func TestCheckReportsAccountReadiness(t *testing.T) {
 	}
 }
 
-func TestCheckMissingBinaryFailsWithoutStartingCommand(t *testing.T) {
+func TestCheckBinaryLocatesWithoutStartingCommand(t *testing.T) {
 	isolateProfiles(t)
 	marker := filepath.Join(t.TempDir(), "started")
-	fake := filepath.Join(t.TempDir(), "fake")
+	bin := t.TempDir()
+	fake := filepath.Join(bin, "pi")
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	runProfilesCommand(t, "add", "--name", "fake", "--harness", "custom", "--command", fake)
-	runProfilesCommand(t, "add", "--name", "missing", "--harness", "custom", "--command", filepath.Join(t.TempDir(), "absent"))
-	cmd := NewCommand()
-	cmd.SetArgs([]string{"check"})
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SilenceUsage = true
-	cmd.SilenceErrors = true
-	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "1 profile check(s) failed") {
-		t.Fatalf("error = %v", err)
-	}
-	if !strings.Contains(out.String(), "binary: missing") || !strings.Contains(out.String(), "fake\n") {
-		t.Fatal(out.String())
+	p := profile.Profile{Name: "fake", Harness: profile.HarnessPi, Env: map[string]string{"PATH": bin}}
+	got, err := checkBinary(p)
+	if err != nil || got != fake {
+		t.Fatalf("checkBinary() = %q, %v; want the fake pi path", got, err)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("static check started fake binary: %v", err)
+		t.Fatalf("static check started the binary: %v", err)
+	}
+	missing := profile.Profile{Name: "missing", Harness: profile.HarnessPi, Env: map[string]string{"PATH": t.TempDir()}}
+	if _, err := checkBinary(missing); err == nil {
+		t.Fatal("checkBinary() resolved a binary that is not on PATH")
 	}
 }
 

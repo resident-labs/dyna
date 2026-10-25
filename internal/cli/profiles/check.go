@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -120,7 +118,7 @@ func selectCheckProfiles(store *profile.Store, names []string) ([]profile.Profil
 }
 
 // accountDoctors reports the private sign-in state each managed profile needs
-// before its first turn. A direct harness runs its own command, so Dyna checks
+// before its first turn. The mock harness runs no executable, so Dyna checks
 // no account for it.
 func accountDoctors(ctx context.Context, selected []profile.Profile) map[string]harnessruntime.Doctor {
 	managed := []profile.Profile{}
@@ -158,13 +156,6 @@ func printAccount(w io.Writer, doc harnessruntime.Doctor) bool {
 func checkBinary(p profile.Profile) (string, error) {
 	if p.Harness == profile.HarnessMock {
 		return "built-in mock", nil
-	}
-	if p.Harness == profile.HarnessCustom {
-		if len(p.Command) == 0 {
-			return "", fmt.Errorf("custom command is empty")
-		}
-		binary := strings.ReplaceAll(p.Command[0], "{{model}}", p.Model)
-		return exec.LookPath(binary)
 	}
 	definition, ok := profile.HarnessDefinitionFor(p.Harness)
 	if !ok {

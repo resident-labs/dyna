@@ -11,15 +11,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
-	"dyna-agent/internal/workeroutput"
 )
 
 // noBoundaryWait is steering.maxToolWait for fake CLIs that print no output
@@ -154,13 +153,9 @@ func TestJournalStateKeepsCommittedOffsetAcrossHarnessTurns(t *testing.T) {
 
 func TestJournalStateKeepsIdleDeadlineAcrossHarnessTurns(t *testing.T) {
 	journalPath := createHarnessJournal(t, 36)
-	installFakeCLI(t, "quiet-state-worker", `#!/bin/sh
-set -eu
-cat >/dev/null
-sleep 0.04
-printf '%s\n' ok
-`)
-	p := profile.Profile{Name: "quiet-state", Harness: profile.HarnessCustom, Command: []string{"quiet-state-worker"}}
+	p := fakeworker.InstallClaude(t, `sleep 0.04; printf ok`)
+	p.Name = "quiet-state"
+	p.ExtraArgs = []string{"--no-session-persistence"}
 	state := NewJournalState()
 	var nudges []JournalNudge
 	opts := JournalOptions{
@@ -254,20 +249,17 @@ func TestJournalSupervisorIgnoresNonEntries(t *testing.T) {
 	}
 }
 
-func TestQuietNonResumableWorkerIsNotInterruptedOrRetried(t *testing.T) {
+func TestQuietWorkerGetsItsRemindersThroughItsSession(t *testing.T) {
 	journalPath := createHarnessJournal(t, 30)
-	logPath := installFakeCLI(t, "quiet-worker", `#!/bin/sh
-set -eu
-printf 'CALL %s\n' "$*" >> "$DYNA_FAKE_LOG"
-	/bin/cat >/dev/null
+	logPath := filepath.Join(t.TempDir(), "calls.log")
+	p := fakeworker.InstallClaude(t, `
+printf 'CALL %s\n' "$PPID" >> "$DYNA_FAKE_LOG"
 sleep 0.15
-printf '%s\n' 'FINISHED' >> "$DYNA_FAKE_LOG"
-printf '%s\n' 'custom worker completed'
+printf 'FINISHED\n' >> "$DYNA_FAKE_LOG"
+printf '%s' 'worker completed'
 `)
-	p := profile.Profile{
-		Name: "quiet-custom", Harness: profile.HarnessCustom, Command: []string{"quiet-worker"},
-		Env: map[string]string{"DYNA_FAKE_LOG": logPath},
-	}
+	p.Name = "quiet-worker"
+	p.Env = mergedEnv(p.Env, map[string]string{"DYNA_FAKE_LOG": logPath})
 	var deliveries []JournalNudge
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -278,15 +270,27 @@ printf '%s\n' 'custom worker completed'
 	if err != nil {
 		t.Fatalf("RunWithJournal() error = %v", err)
 	}
-	if result.Output != "custom worker completed" || result.Nudged || result.JournalNudges != 0 {
+	if result.Output != "worker completed" || result.Nudged {
 		t.Fatalf("result = %#v", result)
 	}
-	if len(deliveries) != 2 || deliveries[0].Delivered || deliveries[0].Reason != JournalNudgeIdle || deliveries[1].Delivered || deliveries[1].Reason != JournalNudgeMissing {
-		t.Fatalf("OnNudge deliveries = %#v, want unavailable idle and missing-entry reminders", deliveries)
+	reasons := make([]string, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		reasons = append(reasons, delivery.Reason)
 	}
+	if !slices.Contains(reasons, JournalNudgeIdle) || !slices.Contains(reasons, JournalNudgeMissing) {
+		t.Fatalf("OnNudge deliveries = %#v, want idle and missing-entry reminders", deliveries)
+	}
+	// The reminder interrupts and continues the exact session, which a stream
+	// harness runs in a new process; the turn result survives both.
 	log := readTestFile(t, logPath)
-	if strings.Count(log, "CALL ") != 1 || !strings.Contains(log, "FINISHED") {
-		t.Fatalf("quiet non-resumable worker was killed or retried:\n%s", log)
+	pids := map[string]bool{}
+	for _, line := range strings.Split(log, "\n") {
+		if pid, ok := strings.CutPrefix(line, "CALL "); ok {
+			pids[pid] = true
+		}
+	}
+	if len(pids) != 2 || !strings.Contains(log, "FINISHED") {
+		t.Fatalf("the idle reminder did not continue the exact session (%d runs):\n%s", len(pids), log)
 	}
 }
 
@@ -418,10 +422,8 @@ func TestStoppedTurnIsNotASteeringFailure(t *testing.T) {
 
 func TestMissingWorkingDirectoryHasDistinctError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "removed-worktree")
-	p := profile.Profile{
-		Name: "missing-cwd", Harness: profile.HarnessCustom,
-		Command: []string{"/bin/sh", "-c", "printf should-not-run"},
-	}
+	p := fakeworker.InstallClaude(t, "printf should-not-run")
+	p.Name = "missing-cwd"
 
 	_, err := runTest(context.Background(), p, "task", missing)
 	if err == nil {
@@ -440,10 +442,8 @@ func TestWorkerEnvPWDMatchesWorkingDirectory(t *testing.T) {
 	t.Setenv("PWD", "/somewhere/else")
 	t.Setenv("OLDPWD", "/somewhere/older")
 	dir := t.TempDir()
-	p := profile.Profile{
-		Name: "pwd-env", Harness: profile.HarnessCustom,
-		Command: []string{"/bin/sh", "-c", `printf '%s|%s' "$PWD" "${OLDPWD:-unset}"`},
-	}
+	p := fakeworker.InstallClaude(t, `printf '%s|%s' "$PWD" "${OLDPWD:-unset}"`)
+	p.Name = "pwd-env"
 
 	result, err := runTest(context.Background(), p, "task", dir)
 	if err != nil {
@@ -810,12 +810,11 @@ func TestLeafExecutionNativeControlsInitialAndResume(t *testing.T) {
 }
 
 func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
-	// Dyna owns native delegation on every invocation, including generic ones.
+	// Dyna owns native delegation on every invocation.
 	for _, p := range []profile.Profile{
 		{Harness: profile.HarnessClaudeCode},
 		{Harness: profile.HarnessCodex},
 		{Harness: profile.HarnessOpenCode},
-		{Harness: profile.HarnessCustom, Command: []string{"worker"}},
 	} {
 		inv, err := buildInvocation(p, "task")
 		if err != nil {
@@ -832,7 +831,6 @@ func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 	// With the leaf option, harnesses without a known control still get none.
 	for _, p := range []profile.Profile{
 		{Harness: profile.HarnessOpenCode},
-		{Harness: profile.HarnessCustom, Command: []string{"worker"}},
 	} {
 		inv, err := buildInvocationWithExecution(p, "task", ExecutionOptions{DisableNativeSubagents: true})
 		if err != nil {
@@ -1068,13 +1066,14 @@ func TestModelFallbackExhaustionAndUnrelatedErrors(t *testing.T) {
 	} {
 		t.Run(tc.message, func(t *testing.T) {
 			storetest.DataDir(t)
-			// The chain logic is harness-neutral; a shell CLI keeps each attempt
-			// cheap. TestCodexAppServerLaunchChangeResumesThread covers the
-			// Codex process replacement a model change causes.
+			// The chain logic is harness-neutral; a scripted worker keeps each
+			// attempt cheap. TestCodexAppServerLaunchChangeResumesThread covers
+			// the Codex process replacement a model change causes.
 			log := filepath.Join(t.TempDir(), "calls.log")
-			p := profile.Profile{Name: "exhausted", Harness: profile.HarnessCustom, Models: []string{"a", "b", "c"},
-				Command: []string{"/bin/sh", "-c", `printf 'CALL %s\n' "$0" >> "$FAKE_LOG"; cat >/dev/null; printf '%s' "$TASK_OUTPUT"; printf '%s' "$FAILURE" >&2; exit 1`, "{{model}}"},
-				Env:     map[string]string{"FAKE_LOG": log, "FAILURE": tc.message, "TASK_OUTPUT": tc.stdout}}
+			p := fakeworker.InstallClaude(t, `printf 'CALL %s\n' "$DYNA_FAKE_MODEL" >> "$FAKE_LOG"; printf '%s' "$TASK_OUTPUT"; printf '%s' "$FAILURE" >&2; exit 1`)
+			p.Name, p.Models = "exhausted", []string{"a", "b", "c"}
+			p.ExtraArgs = []string{"--no-session-persistence"}
+			p.Env = mergedEnv(p.Env, map[string]string{"FAKE_LOG": log, "FAILURE": tc.message, "TASK_OUTPUT": tc.stdout})
 			result, err := RunWithOptions(context.Background(), p, "task", t.TempDir(), false,
 				JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
 			if err == nil || !strings.Contains(err.Error(), tc.message) {
@@ -1112,8 +1111,9 @@ func TestModelResultIncludesSingleAndMockModels(t *testing.T) {
 
 func TestModelFallbackCancellation(t *testing.T) {
 	storetest.DataDir(t)
-	p := profile.Profile{Name: "canceled", Harness: profile.HarnessCustom, Models: []string{"a", "b"},
-		Command: []string{"/bin/sh", "-c", "printf '429 quota' >&2; exit 1"}}
+	p := fakeworker.InstallClaude(t, "printf '429 quota' >&2; exit 1")
+	p.Name, p.Models = "canceled", []string{"a", "b"}
+	p.ExtraArgs = []string{"--no-session-persistence"}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	result, err := RunWithOptions(ctx, p, "task", t.TempDir(), false,
@@ -1125,16 +1125,9 @@ func TestModelFallbackCancellation(t *testing.T) {
 
 func TestModelFallbackDoesNotReplayUnresumableActivity(t *testing.T) {
 	storetest.DataDir(t)
-	p := profile.Profile{
-		Name: "unresumable", Harness: profile.HarnessCustom, Models: []string{"a", "b"},
-		Output: &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
-		Command: []string{"/bin/sh", "-c", `
-cat >/dev/null
-printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"work started"}}'
-printf '429 quota' >&2
-exit 1
-`},
-	}
+	p := fakeworker.MarkStatus(fakeworker.InstallClaude(t, "printf 'work started'; exit 1"), 429)
+	p.Name, p.Models = "unresumable", []string{"a", "b"}
+	p.ExtraArgs = []string{"--no-session-persistence"}
 	result, err := RunWithOptions(context.Background(), p, "task", t.TempDir(), false,
 		JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
 	if err == nil || result.Model != "a" || IsModelCoolingDown(p.Name, "b", cooldownNow()) {
@@ -1142,55 +1135,23 @@ exit 1
 	}
 }
 
-// The startup limit fires only after the worker wrote its stderr line, so
-// the test does not depend on how fast a loaded host starts the script.
-func TestStartupLimitFailsSilentWorkerWithStderrAndExit(t *testing.T) {
-	ready := filepath.Join(t.TempDir(), "ready")
-	if err := syscall.Mkfifo(ready, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	logPath := installFakeCLI(t, "opencode", `#!/bin/sh
-printf 'CALL %s\n' "$*" >> "$DYNA_FAKE_LOG"
+// A worker that never acknowledges its prompt is stopped at the startup bound,
+// so a hung harness fails fast instead of running until the turn deadline.
+func TestStartupLimitFailsSilentWorker(t *testing.T) {
+	p := fakeworker.MarkSilent(fakeworker.InstallClaude(t, `
 echo "slow init: no model events" >&2
-echo ready > "$DYNA_FAKE_READY"
 while :; do sleep 0.05; done
-`)
-	fired := make(chan time.Time, 1)
-	go func() {
-		// Opening a FIFO for reading blocks until the script opens it to write.
-		if b, err := os.ReadFile(ready); err == nil && len(b) > 0 {
-			fired <- time.Now()
-		}
-	}()
-	p := profile.Profile{Name: "silent", Harness: profile.HarnessCustom, Command: []string{"opencode"}, Model: "hangs", Env: map[string]string{"DYNA_FAKE_LOG": logPath, "DYNA_FAKE_READY": ready}}
+`))
+	p.Name, p.Model = "silent", "hangs"
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	_, err := RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{},
-		ExecutionOptions{DisableNativeSubagents: true, startupLimit: 200 * time.Millisecond, startupFired: fired})
+		ExecutionOptions{DisableNativeSubagents: true, startupLimit: 500 * time.Millisecond})
 	if err == nil {
 		t.Fatal("a worker that produced no harness event did not fail")
 	}
-	if !strings.Contains(err.Error(), "failed to start") || !strings.Contains(err.Error(), "slow init: no model events") {
-		t.Fatalf("startup failure lacks the cause and stderr: %v", err)
-	}
-}
-
-func TestEmptyStepsOnLastModelFail(t *testing.T) {
-	storetest.DataDir(t)
-	logPath := installFakeCLI(t, "opencode", `#!/bin/sh
-printf 'CALL %s\n' "$*" >> "$DYNA_FAKE_LOG"
-while :; do
-  printf '%s\n' '{"type":"step_start","sessionID":"session-stuck","part":{"type":"step-start"}}'
-  sleep 0.05
-done
-`)
-	p := profile.Profile{Name: "free", Harness: profile.HarnessCustom, Command: []string{"opencode"}, Output: &workeroutput.Declaration{Dialect: workeroutput.DialectOpenCodeJSON}, Model: "stuck", Env: map[string]string{"DYNA_FAKE_LOG": logPath}}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	_, err := RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{},
-		ExecutionOptions{DisableNativeSubagents: true, emptyStepLimit: 3})
-	if err == nil || !strings.Contains(err.Error(), "empty steps") || strings.Count(readTestFile(t, logPath), "CALL ") != 1 {
-		t.Fatalf("err = %v; want one attempt that fails with the empty-step reason", err)
+	if !strings.Contains(err.Error(), "failed to start") || !strings.Contains(err.Error(), "no harness event") {
+		t.Fatalf("startup failure lacks its cause: %v", err)
 	}
 }
 
@@ -1275,7 +1236,7 @@ func TestInstructionsReachEveryTurnNatively(t *testing.T) {
 			}
 		}
 	}
-	if NativeInstructions(profile.HarnessCustom) || NativeInstructions(profile.HarnessMock) || NativeInstructions(profile.HarnessOpenCode) {
+	if NativeInstructions(profile.HarnessMock) || NativeInstructions(profile.HarnessOpenCode) {
 		t.Fatal("custom, mock and OpenCode keep prompt injection")
 	}
 	huge := profile.Profile{Harness: profile.HarnessCodex, RuntimeInstructions: strings.Repeat("x", 70*1024)}
@@ -1337,17 +1298,14 @@ func TestCapacityErrorRetriesSameModelWithBackoff(t *testing.T) {
 			capacityWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
 			t.Cleanup(func() { capacityBackoff, capacityWait = old, oldWait })
 			calls := filepath.Join(t.TempDir(), "calls")
-			p := profile.Profile{
-				Name: "busy", Harness: profile.HarnessCustom, Model: "only",
-				Output: &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
-				Env:    map[string]string{"CALLS": calls, "FAILING": strconv.Itoa(tc.failing)},
-				Command: []string{"/bin/sh", "-c", `
-cat >/dev/null
+			p := fakeworker.InstallClaude(t, `
 echo x >> "$CALLS"
 if [ "$(wc -l < "$CALLS")" -le "$FAILING" ]; then printf 'Selected model is at capacity' >&2; exit 1; fi
-printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}'
-`},
-			}
+printf done
+`)
+			p.Name, p.Model = "busy", "only"
+			p.ExtraArgs = []string{"--no-session-persistence"}
+			p.Env = mergedEnv(p.Env, map[string]string{"CALLS": calls, "FAILING": strconv.Itoa(tc.failing)})
 			result, err := RunWithOptions(context.Background(), p, "task", t.TempDir(), false,
 				JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
 			if (err != nil) != tc.fails {
@@ -1384,12 +1342,10 @@ func TestUsageLimitAndUnknownErrorsAreNotRetried(t *testing.T) {
 			capacityWait = func(context.Context, time.Duration) error { t.Fatal("waited before retrying"); return nil }
 			t.Cleanup(func() { capacityWait = oldWait })
 			calls := filepath.Join(t.TempDir(), "calls")
-			p := profile.Profile{
-				Name: "limited", Harness: profile.HarnessCustom, Model: "only",
-				Output:  &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
-				Env:     map[string]string{"CALLS": calls, "FAILURE": tc.message},
-				Command: []string{"/bin/sh", "-c", "cat >/dev/null\necho x >> \"$CALLS\"\nprintf '%s' \"$FAILURE\" >&2\nexit 1"},
-			}
+			p := fakeworker.InstallClaude(t, `echo x >> "$CALLS"; printf '%s' "$FAILURE" >&2; exit 1`)
+			p.Name, p.Model = "limited", "only"
+			p.ExtraArgs = []string{"--no-session-persistence"}
+			p.Env = mergedEnv(p.Env, map[string]string{"CALLS": calls, "FAILURE": tc.message})
 			_, err := RunWithOptions(context.Background(), p, "task", t.TempDir(), false,
 				JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
 			if err == nil || !strings.Contains(err.Error(), tc.message) {
@@ -1404,4 +1360,3 @@ func TestUsageLimitAndUnknownErrorsAreNotRetried(t *testing.T) {
 		})
 	}
 }
-

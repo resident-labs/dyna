@@ -27,7 +27,7 @@ func TestClaudeCancelSendsInterruptControl(t *testing.T) {
 	seenPrompt := make(chan struct{})
 	var prompted bool
 	spec := commandSpec{prompt: "work", streamInput: true, argv: []string{"/bin/sh", "-c", claudeInterruptScript}}
-	p := profile.Profile{Harness: profile.HarnessCustom, Env: map[string]string{"CONTROL_CAPTURE": capture}}
+	p := profile.Profile{Harness: profile.HarnessMock, Env: map[string]string{"CONTROL_CAPTURE": capture}}
 	done := make(chan attempt, 1)
 	go func() {
 		done <- runOnce(ctx, p, dir, spec, newSessionTracker(nil), nil, nil, true, "", "",
@@ -70,7 +70,7 @@ func TestClaudeStreamSendsSetModelBeforePrompt(t *testing.T) {
 	defer cancel()
 	spec := commandSpec{prompt: "work", streamInput: true, argv: []string{"/bin/sh", "-c", claudeSetModelScript}}
 	p := profile.Profile{
-		Harness: profile.HarnessCustom,
+		Harness: profile.HarnessMock,
 		Model:   "fixture-model",
 		Env:     map[string]string{"CONTROL_CAPTURE": capture},
 	}

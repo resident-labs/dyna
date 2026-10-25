@@ -25,7 +25,6 @@ export interface ProfileView {
   safeMode: boolean
   extraArgs: string[] | null
   compact: Compact | null
-  command: string[] | null
   envKeys: string[] | null
   support: HarnessSupport
 }

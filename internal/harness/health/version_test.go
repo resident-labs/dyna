@@ -157,30 +157,16 @@ func TestDetectVersionMissingPrivateCopy(t *testing.T) {
 	}
 }
 
-func TestDetectVersionCustomAndMockNeverExecute(t *testing.T) {
+func TestDetectVersionMockNeverExecutes(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "executed")
-	path, p := versionFake(t, "my-command", `printf 'executed' > "$MARKER"`)
-	p.Harness, p.Command, p.Env["MARKER"] = profile.HarnessCustom, []string{"my-command", "--secret"}, marker
-	p.RuntimeExecutable, p.Env["PATH"] = "", filepath.Dir(path) // custom commands still use PATH
+	_, p := versionFake(t, "codex", `printf 'executed' > "$MARKER"`)
+	p.Harness, p.Env["MARKER"] = profile.HarnessMock, marker
 	got := detectVersion(context.Background(), p, time.Minute)
-	if got.Version != "custom" || !got.Installed || got.Path != path || got.Error != "" {
-		t.Fatalf("custom result: %+v", got)
-	}
-	p.Command[0] = path
-	if got := detectVersion(context.Background(), p, time.Minute); !got.Installed {
-		t.Fatalf("absolute custom: %+v", got)
-	}
-	p.Harness = profile.HarnessMock
-	got = detectVersion(context.Background(), p, time.Minute)
 	if got.Version != "built-in" || !got.Installed || got.Path != "" || got.Error != "" {
 		t.Fatalf("mock result: %+v", got)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("command executed: %v", err)
-	}
-	p.Harness, p.Command = profile.HarnessCustom, []string{"absent"}
-	if got := detectVersion(context.Background(), p, time.Minute); got.Installed || got.Version != "custom" {
-		t.Fatalf("missing custom: %+v", got)
 	}
 }
 

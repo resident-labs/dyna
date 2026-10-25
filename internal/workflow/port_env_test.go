@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"testing"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/worktrees"
@@ -36,11 +37,10 @@ func TestWorkflowWorkerGetsWorktreePortEnv(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := filepath.Join(t.TempDir(), "port")
-			store := &profile.Store{Profiles: []profile.Profile{{
-				Name: "leafy", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-				Command: []string{"/bin/sh", "-c", `printf '%s|%s' "$DYNA_PORT" "$PORT" > "$CAPTURE"; printf done`},
-				Env:     map[string]string{"CAPTURE": capture},
-			}}}
+			worker := fakeworker.InstallClaude(t, `printf '%s|%s' "$DYNA_PORT" "$PORT" > "$CAPTURE"; printf done`)
+			worker.Name, worker.Default = "leafy", true
+			worker.Env = mergedEnv(worker.Env, map[string]string{"CAPTURE": capture})
+			store := &profile.Store{Profiles: []profile.Profile{worker}}
 			run, err := runstore.Create("port env", `return await agent("task")`, nil)
 			if err != nil {
 				t.Fatal(err)

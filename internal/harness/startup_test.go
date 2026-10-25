@@ -52,7 +52,7 @@ func TestCodexStartupLimit(t *testing.T) {
 			defer cancel()
 			fired := make(chan time.Time)
 			done := make(chan attempt, 1)
-			p := profile.Profile{Harness: profile.HarnessCustom, Env: map[string]string{
+			p := profile.Profile{Harness: profile.HarnessMock, Env: map[string]string{
 				"STARTUP_MODE": mode, "STARTUP_CONTROL": control.Name(),
 			}}
 			spec := commandSpec{argv: []string{"/bin/sh", "-c", `
