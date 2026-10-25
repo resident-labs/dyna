@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 func editManager(t *testing.T) (*ConfigManager, string, string) {
@@ -43,22 +41,22 @@ func fileBytes(t *testing.T, p string) []byte {
 func TestCatalogEditsPreservePersonalFiles(t *testing.T) {
 	m, _, _ := editManager(t)
 	canaries := map[string][]byte{}
-	for _, p := range []string{".claude.json", ".codex/config.toml", ".agents/skills/canary/SKILL.md"} {
+	for _, p := range []string{".claude.json", ".agents/skills/canary/SKILL.md"} {
 		full := filepath.Join(m.Home, p)
 		mustEdit(t, os.MkdirAll(filepath.Dir(full), 0700))
 		b := []byte("personal canary " + p)
 		mustEdit(t, os.WriteFile(full, b, 0600))
 		canaries[full] = b
 	}
-	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"claude-code"}}))
+	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"pi"}}))
 	if err := m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "other"}}); err == nil {
 		t.Fatal("duplicate accepted")
 	}
-	mustEdit(t, m.SetEnabled(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", "codex", true))
-	mustEdit(t, m.Remove(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", "claude"))
+	mustEdit(t, m.SetEnabled(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", "claude", true))
+	mustEdit(t, m.Remove(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", "pi"))
 	c, e := m.Read()
 	mustEdit(t, e)
-	if len(c.MCP) != 1 || strings.Join(c.MCP[0].EnabledHarnesses, ",") != "codex" || c.MCP[0].Command != "node" {
+	if len(c.MCP) != 1 || strings.Join(c.MCP[0].EnabledHarnesses, ",") != "claude-code" || c.MCP[0].Command != "node" {
 		t.Fatalf("definition or enablement lost: %+v", c)
 	}
 	mustEdit(t, m.Remove(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", ""))
@@ -110,21 +108,14 @@ func TestGeneratePrivateImmutableConfigAndEnvironment(t *testing.T) {
 	m, account, root := editManager(t)
 	personal := filepath.Join(m.Home, ".claude.json")
 	mustEdit(t, os.WriteFile(personal, []byte("canary"), 0600))
-	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node", Args: []string{"quotes\"slash\\\n雪"}, EnvKeys: []string{"TEST_GENERATION_SECRET"}}, EnabledHarnesses: []string{"claude", "codex"}}))
+	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node", Args: []string{"quotes\"slash\\\n雪"}, EnvKeys: []string{"TEST_GENERATION_SECRET"}}, EnabledHarnesses: []string{"claude"}}))
 	lookup := func(key string) (string, bool) { return "secret-value-canary", key == "TEST_GENERATION_SECRET" }
 	claude, e := m.GenerateWithEnv("claude-code", account, root, lookup)
 	mustEdit(t, e)
-	codex, e := m.GenerateWithEnv("codex", account, root, lookup)
-	mustEdit(t, e)
-	if claude.ID == codex.ID || len(codex.PartialReasons) == 0 {
-		t.Fatal("generation identity or partial reason missing")
-	}
-	if reasons := strings.Join(codex.PartialReasons, " "); strings.Contains(reasons, "~/.agents") {
-		t.Fatalf("Codex runs with a private HOME; stale personal skill reason: %s", reasons)
-	}
 	var native struct {
 		Servers map[string]struct {
 			Command string
+			Args    []string
 			Env     map[string]string
 		} `json:"mcpServers"`
 	}
@@ -133,32 +124,11 @@ func TestGeneratePrivateImmutableConfigAndEnvironment(t *testing.T) {
 	if native.Servers["tool"].Env["TEST_GENERATION_SECRET"] != "${TEST_GENERATION_SECRET}" || claude.Env["TEST_GENERATION_SECRET"] != "secret-value-canary" {
 		t.Fatal("Claude missing env value")
 	}
-	var parsed struct {
-		MCP map[string]struct {
-			Command string
-			Args    []string
-			EnvVars []string `toml:"env_vars"`
-		} `toml:"mcp_servers"`
+	if native.Servers["tool"].Command != "node" || len(native.Servers["tool"].Args) != 1 || native.Servers["tool"].Args[0] != "quotes\"slash\\\n雪" {
+		t.Fatalf("invalid native config: %+v", native)
 	}
-	mustEdit(t, toml.Unmarshal([]byte(codex.Args[1]), &parsed))
-	for i := 0; i < len(codex.Args); i += 2 {
-		if codex.Args[i] != "-c" || i+1 >= len(codex.Args) {
-			t.Fatal("invalid Codex override argument pair")
-		}
-		var assignment map[string]any
-		mustEdit(t, toml.Unmarshal([]byte(codex.Args[i+1]), &assignment))
-		if value, ok := assignment["cli_auth_credentials_store"]; ok && value != "file" {
-			t.Fatalf("invalid auth storage value: %v", value)
-		}
-		if value, ok := assignment["check_for_update_on_startup"]; ok && value != false {
-			t.Fatalf("invalid updater value: %v", value)
-		}
-	}
-	if parsed.MCP["tool"].Command != "node" || parsed.MCP["tool"].Args[0] != "quotes\"slash\\\n雪" {
-		t.Fatalf("invalid native TOML: %+v", parsed)
-	}
-	if strings.Contains(strings.Join(codex.Args, " "), "secret-value-canary") || codex.Env["TEST_GENERATION_SECRET"] != "secret-value-canary" {
-		t.Fatal("Codex secret transport unsafe")
+	if strings.Contains(strings.Join(claude.Args, " "), "secret-value-canary") || strings.Contains(string(b), "secret-value-canary") {
+		t.Fatal("Claude secret transport unsafe")
 	}
 	mustEdit(t, m.Remove(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", ""))
 	newer, e := m.Generate("claude", account, root)
@@ -174,11 +144,6 @@ func TestGeneratePrivateImmutableConfigAndEnvironment(t *testing.T) {
 	}
 	if string(fileBytes(t, personal)) != "canary" {
 		t.Fatal("personal file changed")
-	}
-	files, e := os.ReadDir(account)
-	mustEdit(t, e)
-	if len(files) != 1 || files[0].Name() != "skills" || !files[0].IsDir() {
-		t.Fatal("account writes must contain only the shared Codex skill view")
 	}
 	mustEdit(t, filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -209,33 +174,29 @@ func TestGenerationSafeErrorsAndPaths(t *testing.T) {
 			t.Fatalf("unsafe paths accepted: %v", paths)
 		}
 	}
-	personal := filepath.Join(m.Home, ".codex")
+	personal := filepath.Join(m.Home, ".claude")
 	mustEdit(t, os.Mkdir(personal, 0700))
-	if _, e := m.Generate("codex", account, personal); e == nil {
+	if _, e := m.Generate("claude-code", account, personal); e == nil {
 		t.Fatal("personal config path accepted")
 	}
 	link := filepath.Join(t.TempDir(), "link")
 	mustEdit(t, os.Symlink(root, link))
-	if _, e := m.Generate("codex", account, link); e == nil {
+	if _, e := m.Generate("claude-code", account, link); e == nil {
 		t.Fatal("symlink accepted")
 	}
 	mustEdit(t, os.Chmod(root, 0755))
-	if _, e := m.Generate("codex", account, root); e == nil {
+	if _, e := m.Generate("claude-code", account, root); e == nil {
 		t.Fatal("public directory accepted")
 	}
 }
 func TestConcurrentGenerations(t *testing.T) {
 	m, account, root := editManager(t)
-	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"claude", "codex"}}))
+	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"claude"}}))
 	var wg sync.WaitGroup
 	directories := make(chan string, 16)
-	for i := range 16 {
+	for range 16 {
 		wg.Go(func() {
-			h := "claude"
-			if i%2 == 1 {
-				h = "codex"
-			}
-			g, e := m.Generate(h, account, root)
+			g, e := m.Generate("claude-code", account, root)
 			if e != nil {
 				t.Error(e)
 				return
@@ -263,7 +224,7 @@ func TestSkillGenerationCopiesAndRejectsLinks(t *testing.T) {
 	m, account, root := editManager(t)
 	source := t.TempDir()
 	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("original skill"), 0600))
-	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"claude", "codex"}}))
+	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"claude"}}))
 	g, e := m.Generate("claude", account, root)
 	mustEdit(t, e)
 	copied := filepath.Join(g.Directory, "plugin", "skills", "review", "SKILL.md")
@@ -288,40 +249,35 @@ func TestSkillGenerationCopiesAndRejectsLinks(t *testing.T) {
 
 func TestLoadGenerationRetainsFilesAndResolvesCurrentKeys(t *testing.T) {
 	m, account, root := editManager(t)
-	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node", EnvKeys: []string{"RESUME_SECRET"}}, EnabledHarnesses: []string{"claude", "codex"}}))
-	for _, h := range []string{"claude", "codex"} {
-		g, e := m.GenerateWithEnv(h, account, root, func(string) (string, bool) { return "first-secret-canary", true })
-		mustEdit(t, e)
+	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node", EnvKeys: []string{"RESUME_SECRET"}}, EnabledHarnesses: []string{"claude"}}))
+	g, e := m.GenerateWithEnv("claude", account, root, func(string) (string, bool) { return "first-secret-canary", true })
+	mustEdit(t, e)
 
-		serialized, e := json.Marshal(g)
-		mustEdit(t, e)
-		if bytes.Contains(serialized, []byte("first-secret-canary")) {
-			t.Fatal("generation serialization leaked Env")
-		}
-		manifest := fileBytes(t, filepath.Join(g.Directory, "generation.json"))
-		if bytes.Contains(manifest, []byte("first-secret-canary")) {
-			t.Fatal("secret in generation metadata")
-		}
-		b := fileBytes(t, filepath.Join(g.Directory, "mcp.json"))
-		if bytes.Contains(b, []byte("first-secret-canary")) {
-			t.Fatal("secret value persisted in native config")
-		}
-		resumed, e := LoadGenerationWithEnv(g.Directory, func(string) (string, bool) { return "current-secret-canary", true })
-		mustEdit(t, e)
-		if resumed.ID != g.ID || strings.Join(resumed.Args, "\x00") != strings.Join(g.Args, "\x00") || resumed.Env["RESUME_SECRET"] != "current-secret-canary" {
-			t.Fatal("resume changed pinned generation")
-		}
-		if !bytes.Equal(fileBytes(t, filepath.Join(g.Directory, "mcp.json")), b) {
-			t.Fatal("resume rewrote generation")
-		}
-		if _, e := LoadGenerationWithEnv(g.Directory, nil); e == nil || e.Error() != "missing environment key RESUME_SECRET" {
-			t.Fatalf("unsafe missing reference error: %v", e)
-		}
+	serialized, e := json.Marshal(g)
+	mustEdit(t, e)
+	if bytes.Contains(serialized, []byte("first-secret-canary")) {
+		t.Fatal("generation serialization leaked Env")
+	}
+	manifest := fileBytes(t, filepath.Join(g.Directory, "generation.json"))
+	if bytes.Contains(manifest, []byte("first-secret-canary")) {
+		t.Fatal("secret in generation metadata")
+	}
+	b := fileBytes(t, filepath.Join(g.Directory, "mcp.json"))
+	if bytes.Contains(b, []byte("first-secret-canary")) {
+		t.Fatal("secret value persisted in native config")
+	}
+	resumed, e := LoadGenerationWithEnv(g.Directory, func(string) (string, bool) { return "current-secret-canary", true })
+	mustEdit(t, e)
+	if resumed.ID != g.ID || strings.Join(resumed.Args, "\x00") != strings.Join(g.Args, "\x00") || resumed.Env["RESUME_SECRET"] != "current-secret-canary" {
+		t.Fatal("resume changed pinned generation")
+	}
+	if !bytes.Equal(fileBytes(t, filepath.Join(g.Directory, "mcp.json")), b) {
+		t.Fatal("resume rewrote generation")
+	}
+	if _, e := LoadGenerationWithEnv(g.Directory, nil); e == nil || e.Error() != "missing environment key RESUME_SECRET" {
+		t.Fatalf("unsafe missing reference error: %v", e)
 	}
 	mustEdit(t, m.Remove(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", ""))
-	if ok, reason := NativeSkillCapability("codex"); !ok || !strings.Contains(reason, "not pinned per generation") {
-		t.Fatal("unsupported native skill capability missing")
-	}
 	if ok, reason := NativeSkillCapability("claude"); !ok || reason != "" {
 		t.Fatal("Claude plugin skills unsupported")
 	}
@@ -346,192 +302,12 @@ func TestConcurrentCatalogEdits(t *testing.T) {
 	}
 }
 
-func TestCodexSharedSkillViewUpdatesWithoutResumeRollback(t *testing.T) {
-	m, account, root := editManager(t)
-	source := t.TempDir()
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("first skill"), 0600))
-	personalSkill := filepath.Join(m.Home, ".agents", "skills", "personal", "SKILL.md")
-	mustEdit(t, os.MkdirAll(filepath.Dir(personalSkill), 0700))
-	mustEdit(t, os.WriteFile(personalSkill, []byte("personal canary"), 0600))
-	auth := filepath.Join(account, "auth.json")
-	mustEdit(t, os.WriteFile(auth, []byte("credential canary"), 0600))
-	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"codex"}}))
-	first, e := m.Generate("codex", account, root)
-	mustEdit(t, e)
-	view := filepath.Join(account, "skills")
-	target, e := os.Readlink(filepath.Join(view, "review"))
-	mustEdit(t, e)
-	if target != filepath.Join(first.Directory, "skills", "review") {
-		t.Fatal("native skill view does not reference generation copy")
-	}
-	copied := filepath.Join(first.Directory, "skills", "review", "SKILL.md")
-	if string(fileBytes(t, filepath.Join(view, "review", "SKILL.md"))) != "first skill" {
-		t.Fatal("native skill is missing")
-	}
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("second skill"), 0600))
-	second, e := m.Generate("codex", account, root)
-	mustEdit(t, e)
-	target, e = os.Readlink(filepath.Join(view, "review"))
-	mustEdit(t, e)
-	if target != filepath.Join(second.Directory, "skills", "review") {
-		t.Fatal("native skill view did not advance")
-	}
-	if string(fileBytes(t, copied)) != "first skill" {
-		t.Fatal("previous skill copy changed")
-	}
-	if string(fileBytes(t, filepath.Join(view, "review", "SKILL.md"))) != "second skill" {
-		t.Fatal("native view did not load new copy")
-	}
-	resumed, e := LoadGeneration(first.Directory)
-	mustEdit(t, e)
-	target, e = os.Readlink(filepath.Join(view, "review"))
-	mustEdit(t, e)
-	if target != filepath.Join(second.Directory, "skills", "review") {
-		t.Fatal("resume rolled back the shared skill view")
-	}
-	if !strings.Contains(strings.Join(resumed.PartialReasons, " "), "not pinned per generation") {
-		t.Fatal("resume omitted the shared skill limitation")
-	}
-	mustEdit(t, m.SetEnabled(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "skill", "review", "codex", false))
-	_, e = m.Generate("codex", account, root)
-	mustEdit(t, e)
-	entries, e := os.ReadDir(view)
-	mustEdit(t, e)
-	if len(entries) != 0 {
-		t.Fatal("disabled skills remain active")
-	}
-	if string(fileBytes(t, personalSkill)) != "personal canary" || string(fileBytes(t, auth)) != "credential canary" {
-		t.Fatal("generation changed personal skills or account credentials")
-	}
-	entries, e = os.ReadDir(account)
-	mustEdit(t, e)
-	if len(entries) != 2 {
-		t.Fatal("temporary skill view staging was retained")
-	}
-}
-
-func TestCodexFailedSkillGenerationPreservesSharedView(t *testing.T) {
-	m, account, root := editManager(t)
-	source := t.TempDir()
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("stable skill"), 0600))
-	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"codex"}}))
-	g, e := m.Generate("codex", account, root)
-	mustEdit(t, e)
-	mustEdit(t, os.Symlink(filepath.Join(source, "SKILL.md"), filepath.Join(source, "mutable-link")))
-	if _, e := m.Generate("codex", account, root); e == nil {
-		t.Fatal("mutable skill resource link accepted")
-	}
-	target, e := os.Readlink(filepath.Join(account, "skills", "review"))
-	mustEdit(t, e)
-	if target != filepath.Join(g.Directory, "skills", "review") {
-		t.Fatal("failed generation changed native skill view")
-	}
-	entries, e := os.ReadDir(root)
-	mustEdit(t, e)
-	if len(entries) != 1 {
-		t.Fatal("failed generation was retained")
-	}
-}
-
-func TestCodexSkillViewRefusesExistingFile(t *testing.T) {
-	m, account, root := editManager(t)
-	view := filepath.Join(account, "skills")
-	mustEdit(t, os.WriteFile(view, []byte("existing canary"), 0600))
-	if _, e := m.Generate("codex", account, root); e == nil {
-		t.Fatal("generation replaced an unmanaged skill path")
-	}
-	if string(fileBytes(t, view)) != "existing canary" {
-		t.Fatal("generation changed unmanaged skill data")
-	}
-	entries, e := os.ReadDir(root)
-	mustEdit(t, e)
-	if len(entries) != 0 {
-		t.Fatal("failed generation was retained")
-	}
-}
-
-// Codex writes its own system skills into the view. They stay in the account
-// home, and a Dyna skill never replaces an entry that the harness owns.
-func TestCodexSkillViewKeepsHarnessEntries(t *testing.T) {
-	m, account, root := editManager(t)
-	source := t.TempDir()
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("dyna skill"), 0600))
-	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"codex"}}))
-	view := filepath.Join(account, "skills")
-	owned := filepath.Join(view, "owned", "SKILL.md")
-	mustEdit(t, os.MkdirAll(filepath.Dir(owned), 0700))
-	mustEdit(t, os.WriteFile(owned, []byte("user skill"), 0600))
-	g, e := m.Generate("codex", account, root)
-	mustEdit(t, e)
-	system := filepath.Join(view, ".system", "SKILL.md")
-	mustEdit(t, os.MkdirAll(filepath.Dir(system), 0700))
-	mustEdit(t, os.WriteFile(system, []byte("codex system skill"), 0600))
-	if _, e := os.Lstat(filepath.Join(g.Directory, "skills", ".system")); !os.IsNotExist(e) {
-		t.Fatal("harness write reached the generation", e)
-	}
-	_, e = m.Generate("codex", account, root)
-	mustEdit(t, e)
-	if string(fileBytes(t, system)) != "codex system skill" || string(fileBytes(t, owned)) != "user skill" {
-		t.Fatal("publication changed harness-owned skills")
-	}
-}
-
-func TestConcurrentCodexSkillViewsPublishCompleteGenerations(t *testing.T) {
-	m, account, root := editManager(t)
-	source := t.TempDir()
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("complete skill"), 0600))
-	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"codex"}}))
-	_, e := m.Generate("codex", account, root)
-	mustEdit(t, e)
-	stop := make(chan struct{})
-	var reader sync.WaitGroup
-	reader.Go(func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			target, e := os.Readlink(filepath.Join(account, "skills", "review"))
-			if e != nil {
-				t.Error("atomic view disappeared:", e)
-				return
-			}
-			b, e := os.ReadFile(filepath.Join(target, "SKILL.md"))
-			if e != nil || string(b) != "complete skill" {
-				t.Error("published incomplete skill generation:", e)
-				return
-			}
-			if _, e := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(target)), "generation.json")); e != nil {
-				t.Error("published generation before its manifest:", e)
-				return
-			}
-		}
-	})
-	var writers sync.WaitGroup
-	for range 12 {
-		writers.Go(func() {
-			if _, e := m.Generate("codex", account, root); e != nil {
-				t.Error(e)
-			}
-		})
-	}
-	writers.Wait()
-	close(stop)
-	reader.Wait()
-	entries, e := os.ReadDir(account)
-	mustEdit(t, e)
-	if len(entries) != 1 || entries[0].Name() != "skills" {
-		t.Fatal("concurrent generation left staging paths")
-	}
-}
-
 func TestMCPEnvironmentCannotSelectHarnessAccount(t *testing.T) {
 	m, account, root := editManager(t)
-	if err := m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "provider-tools", MCPDefinition: MCPDefinition{Command: "node", Args: []string{"tools.js"}, EnvKeys: []string{"OPENAI_API_KEY"}}, EnabledHarnesses: []string{"codex"}}); err != nil {
+	if err := m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "provider-tools", MCPDefinition: MCPDefinition{Command: "node", Args: []string{"tools.js"}, EnvKeys: []string{"OPENAI_API_KEY"}}, EnabledHarnesses: []string{"claude"}}); err != nil {
 		t.Fatal(err)
 	}
-	generation, err := m.GenerateWithEnv("codex", account, root, func(key string) (string, bool) {
+	generation, err := m.GenerateWithEnv("claude-code", account, root, func(key string) (string, bool) {
 		if key == "OPENAI_API_KEY" {
 			return "mcp-secret-canary", true
 		}
@@ -550,12 +326,15 @@ func TestMCPEnvironmentCannotSelectHarnessAccount(t *testing.T) {
 	if strings.Contains(strings.Join(generation.Args, " "), "mcp-secret-canary") {
 		t.Fatal("secret entered argv")
 	}
-	raw, err := os.ReadFile(filepath.Join(generation.Directory, "mcp-exec.json"))
+	raw, err := os.ReadFile(filepath.Join(generation.Directory, "mcp.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), "mcp-secret-canary") {
-		t.Fatal("secret entered execution metadata")
+		t.Fatal("secret entered native config")
+	}
+	if !strings.Contains(string(raw), "${"+alias+"}") {
+		t.Fatal("native config lost the scoped reference")
 	}
 	resumed, err := LoadGenerationWithEnv(generation.Directory, func(key string) (string, bool) { return "rotated-mcp-canary", key == "OPENAI_API_KEY" })
 	if err != nil {
@@ -570,7 +349,7 @@ func TestSkillSourceCannotExportCentralNativeAccounts(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
-	source := filepath.Join(store.DataDir(), "accounts", "codex", "fixture")
+	source := filepath.Join(store.DataDir(), "accounts", "claude", "fixture")
 	if err := os.MkdirAll(source, 0700); err != nil {
 		t.Fatal(err)
 	}
