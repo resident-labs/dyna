@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/cli/jsonout"
@@ -58,23 +60,30 @@ func localCommands() []*cobra.Command {
 			return err
 		}
 		runner := localci.Runner{}
+		nodes, err := (localci.Store{}).Nodes(c.Context())
+		if err != nil {
+			return err
+		}
+		var node localci.Node
 		if nodeName == "" {
-			node, err := (localci.Store{}).LegacyRemoteNode(c.Context())
+			node, err = defaultNode(nodes)
 			if err != nil {
 				return err
 			}
-			runner.Node = &node
 		} else {
-			nodes, err := (localci.Store{}).Nodes(c.Context())
-			if err != nil {
-				return err
-			}
-			node, ok := findNode(nodes, nodeName)
+			found, ok := findNode(nodes, nodeName)
 			if !ok {
 				return fmt.Errorf("enabled CI node %q was not found", nodeName)
 			}
-			runner.Node = &node
+			node = found
 		}
+		runner.Node = &node
+		// A JSON result stays machine readable, so the choice goes to stderr.
+		message := c.OutOrStdout()
+		if asJSON {
+			message = c.ErrOrStderr()
+		}
+		fmt.Fprintf(message, "CI machine: %s\n", node.Name)
 		runner.OnCacheRepair = svc.CacheRepairReporter(rec.ID)
 		result, runErr := runner.Run(c.Context(), localci.Request{Definition: definition, Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed})
 		if result.SHA != "" {
@@ -92,7 +101,7 @@ func localCommands() []*cobra.Command {
 	}}
 	run.Flags().StringSliceVar(&suites, "suite", nil, "suite from .dyna/local-ci.yaml (repeatable; default: full workflow)")
 	run.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "timeout for each check")
-	run.Flags().StringVar(&nodeName, "node", "", "registered node to use (default: map localci.remote)")
+	run.Flags().StringVar(&nodeName, "node", "", "registered CI machine to use (default: the only enabled machine)")
 	run.Flags().BoolVar(&asJSON, "json", false, "print the saved result as JSON")
 	var showJSON bool
 	show := &cobra.Command{Use: "show <sha>", Short: "Show saved local CI results for a commit", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
@@ -131,6 +140,29 @@ func findNode(nodes []localci.Node, name string) (localci.Node, bool) {
 		}
 	}
 	return localci.Node{}, false
+}
+
+// defaultNode picks the machine a manual run uses when --node is absent. One
+// enabled machine needs no choice; with several, the owner names one.
+func defaultNode(nodes []localci.Node) (localci.Node, error) {
+	enabled := []localci.Node{}
+	for _, node := range nodes {
+		if node.Enabled {
+			enabled = append(enabled, node)
+		}
+	}
+	switch len(enabled) {
+	case 0:
+		return localci.Node{}, fmt.Errorf("no enabled CI machine is registered; add one with dyna machine add")
+	case 1:
+		return enabled[0], nil
+	}
+	names := make([]string, len(enabled))
+	for i, node := range enabled {
+		names[i] = node.Name
+	}
+	sort.Strings(names)
+	return localci.Node{}, fmt.Errorf("several enabled CI machines are registered; choose one with --node (%s)", strings.Join(names, ", "))
 }
 func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 	if asJSON {
