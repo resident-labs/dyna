@@ -12,9 +12,8 @@ import (
 func TestHarnessDefaultDialects(t *testing.T) {
 	for harness, want := range map[string]string{
 		HarnessClaudeCode: "claude-stream-json",
-		HarnessOpenCode: "opencode-json", HarnessMuse: "muse-jsonl",
-		HarnessPi:   "pi-json",
-		HarnessMock: "text",
+		HarnessPi:         "pi-json",
+		HarnessMock:       "text",
 	} {
 		t.Run(harness, func(t *testing.T) {
 			p := Profile{Harness: harness}
@@ -56,9 +55,9 @@ func TestDialectMustMatchHarness(t *testing.T) {
 		if err := p.Validate(); err != nil {
 			t.Fatalf("%s native: %v", harness, err)
 		}
-		p.Output.Dialect = workeroutput.DialectMuseJSONL
+		p.Output.Dialect = workeroutput.DialectPiJSON
 		if p.Output.Dialect == definition.Dialect {
-			p.Output.Dialect = workeroutput.DialectOpenCodeJSON
+			p.Output.Dialect = workeroutput.DialectClaudeStreamJSON
 		}
 		err := p.Validate()
 		if err == nil || !strings.Contains(err.Error(), "emits") {

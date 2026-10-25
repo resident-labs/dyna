@@ -17,7 +17,7 @@ import (
 )
 
 func TestShowUnavailableTokenUsage(t *testing.T) {
-	unknown := workeroutput.UsageNormalization{Version: 1, Source: "harness-reported", Input: "unknown", CachedInput: "unknown", Output: "unknown", Reason: "Muse JSON output does not report provider usage"}
+	unknown := workeroutput.UsageNormalization{Version: 1, Source: "harness-reported", Input: "unknown", CachedInput: "unknown", Output: "unknown", Reason: "JSON output does not report provider usage"}
 	measured := workeroutput.UsageNormalization{Version: 1, Source: "harness-reported", Input: "complete", CachedInput: "complete", Output: "complete"}
 	for _, tc := range []struct {
 		name           string
@@ -72,7 +72,7 @@ func TestShowUnavailableTokenUsage(t *testing.T) {
 				}
 			}
 			for i, normalization := range tc.normalizations {
-				turn := subagent.Turn{N: i + 1, Status: subagent.TurnOK, OutputDialect: workeroutput.DialectMuseJSONL, UsageNormalization: normalization}
+				turn := subagent.Turn{N: i + 1, Status: subagent.TurnOK, OutputDialect: workeroutput.DialectPiJSON, UsageNormalization: normalization}
 				if i == len(tc.normalizations)-1 && tc.unfinished != "" {
 					turn.Status = tc.unfinished
 				}

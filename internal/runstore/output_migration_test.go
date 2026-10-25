@@ -2,27 +2,21 @@ package runstore
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/store/storetest"
-	"dyna-agent/internal/workeroutput"
 )
 
 func TestRunOutputCheckpointDoesNotRecaptureGrowth(t *testing.T) {
-	for _, shape := range []string{"converted", "unchanged", "empty"} {
+	for _, shape := range []string{"unchanged", "empty"} {
 		t.Run(shape, func(t *testing.T) {
 			dir := storetest.DataDir(t)
 			t.Setenv(ArchiveDirEnv, "")
 			source := []byte("{\"v\":1,\"kind\":\"message\",\"text\":\"whole\"}\n")
-			if shape == "converted" {
-				envelope := `{"command":"printf fixture","terminal_status":"completed","exit_code":0,"output":"fixture\n"}`
-				source, _ = json.Marshal(workeroutput.Event{Kind: "tool", Name: "bash", State: "completed", Output: envelope})
-				source = append(source, '\n')
-			} else if shape == "empty" {
+			if shape == "empty" {
 				source = nil
 			}
 			path := filepath.Join(dir, "runs", "wf_a", "agents", "1", "output.jsonl")
@@ -57,14 +51,8 @@ func TestRunOutputCheckpointDoesNotRecaptureGrowth(t *testing.T) {
 			if err := db.QueryRow("SELECT count(*) FROM output_projection WHERE artifact_key='runs/wf_a/agents/1'").Scan(&count); err != nil {
 				t.Fatal(err)
 			}
-			if (count == 1) != (shape == "converted") {
-				t.Fatalf("converted rows = %d", count)
-			}
-			if shape == "converted" {
-				events, _, err := ReadAgentNormalizedOutputFrom("wf_a", 1, 0)
-				if err != nil || len(events) != 1 || events[0].Output != "fixture\n" || events[0].Input == "" || events[0].Exit == nil || *events[0].Exit != 0 {
-					t.Fatalf("converted events: %+v, %v", events, err)
-				}
+			if count != 0 {
+				t.Fatalf("projected rows = %d", count)
 			}
 			grown := append(bytes.Clone(source), []byte("{\"v\":1,\"kind\":\"message\",\"text\":\"later\"}\n")...)
 			if err := os.WriteFile(path, grown, 0600); err != nil {

@@ -281,71 +281,6 @@ func TestCredentialRefreshDeclinedLoginDoesNotReachProvider(t *testing.T) {
 	}
 }
 
-func TestUnsupportedExpiredPrivateLoginNeedsSignIn(t *testing.T) {
-	for _, h := range []string{"muse"} {
-		t.Run(h, func(t *testing.T) {
-			a := &Accounts{Root: filepath.Join(t.TempDir(), "accounts")}
-			n, err := a.Create(h, "Fixture")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, expired := range []bool{true, false} {
-				expiry := time.Now().Add(time.Hour)
-				if expired {
-					expiry = time.Now().Add(-time.Hour)
-				}
-				var payload []byte
-				identity, schema := "meta:email:fixture@example.test", "muse/auth-file@1"
-				payload, _ = json.Marshal(map[string]any{"metaCredential": map[string]any{"mechanism": "oauth", "access_token": "fixture", "user_email": "fixture@example.test", "expires_at": expiry.Unix()}})
-				c := native.Captured{Identity: identity, Credential: accountstore.Credential{Schema: schema, Payload: payload}}
-				if err := writeAccountLogin(n.Home, c); err != nil {
-					t.Fatal(err)
-				}
-				store := &accountstore.Store{Root: a.Root}
-				if err := store.Update(func(st *accountstore.State) error {
-					e := st.Find(n.ID)
-					e.Identity = identity
-					e.NeedsLogin = false
-					return nil
-				}); err != nil {
-					t.Fatal(err)
-				}
-				before, _ := os.ReadFile(filepath.Join(n.Home, ".login.json"))
-				rows, err := a.List()
-				want := "ready"
-				if expired {
-					want = "not signed in"
-				}
-				if err != nil || len(rows) != 1 || rows[0].Status != want || rows[0].ExpiresAt == nil || rows[0].ExpiresAt.Unix() != expiry.Unix() {
-					t.Fatalf("expired=%v: rows=%+v, err=%v", expired, rows, err)
-				}
-				after, _ := os.ReadFile(filepath.Join(n.Home, ".login.json"))
-				if !bytes.Equal(before, after) {
-					t.Fatal("status read changed native credentials")
-				}
-
-				var payloadWithKey map[string]map[string]any
-				if err := json.Unmarshal(c.Credential.Payload, &payloadWithKey); err != nil {
-					t.Fatal(err)
-				}
-				role, key := "auth.json", "apiKey"
-				if h == "muse" {
-					role, key = "metaCredential", "api_key"
-				}
-				payloadWithKey[role][key] = "fixture-key"
-				c.Credential.Payload, _ = json.Marshal(payloadWithKey)
-				if err := writeAccountLogin(n.Home, c); err != nil {
-					t.Fatal(err)
-				}
-				rows, err = a.List()
-				if err != nil || rows[0].Status != "ready" {
-					t.Fatalf("API-key fallback lost: %+v %v", rows, err)
-				}
-			}
-		})
-	}
-}
-
 func TestPrivateHomeRefreshForwardsCredentialGateAndCheckpoint(t *testing.T) {
 	_, n, fixture := setupCredentialRefresh(t, false)
 	scope := filepath.Join(n.Home, "private-runtime")
@@ -353,7 +288,7 @@ func TestPrivateHomeRefreshForwardsCredentialGateAndCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.current = refreshFixtureCredential(t, "openai-codex", time.Now().Add(-time.Minute), "old")
-	wrapper := checkedHomeManager{Manager: fixture, harness: "muse", scope: scope}
+	wrapper := checkedHomeManager{Manager: fixture, harness: "claude-code", scope: scope}
 	if !native.SupportsRefresh(wrapper, fixture.current) {
 		t.Fatal("wrapper lost supported refresh")
 	}
@@ -424,31 +359,5 @@ func TestPrivateRefreshGateChecksChangedCredential(t *testing.T) {
 				t.Fatal("changed credential was not checkpointed", err)
 			}
 		})
-	}
-}
-
-func TestOpenCodeSavedExpiryDoesNotInvalidateNativeRenewal(t *testing.T) {
-	a := testAccounts(t)
-	n, err := a.Create("opencode", "fixture")
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity := "opencode:opencode-go:fixture"
-	c := native.Captured{Identity: identity, Integration: "opencode-go", Credential: accountstore.Credential{Schema: "opencode/v2-ref@1", Payload: json.RawMessage(`{"ref":{"integration":"opencode-go","credentialID":"fixture","scope":{},"credentialType":"oauth","expires":1}}`)}}
-	if err := writeAccountLogin(n.Home, c); err != nil {
-		t.Fatal(err)
-	}
-	if err := (&accountstore.Store{Root: a.Root}).Update(func(s *accountstore.State) error {
-		e := s.Find(n.ID)
-		e.Identity = identity
-		e.NeedsLogin = false
-		e.Integration = c.Integration
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := a.Find(n.ID)
-	if err != nil || got.Status != "ready" {
-		t.Fatalf("native renewal invalidated by reference expiry: %+v %v", got, err)
 	}
 }

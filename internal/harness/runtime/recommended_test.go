@@ -33,9 +33,6 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 	packages := []string{}
 	var mu sync.Mutex
 	r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-		if body, ok := vendorMetadata[req.URL.String()]; ok {
-			return recommendedResponse(200, body), nil
-		}
 		if req.Method != "GET" || req.URL.Scheme != "https" || req.URL.Host != "registry.npmjs.org" || req.Header.Get("Authorization") != "" {
 			t.Fatalf("unexpected request: %s %s", req.Method, req.URL)
 		}
@@ -51,50 +48,22 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 			mu.Unlock()
 		}
 		version := "1.2.3"
-		if pkg == "@opencode/cli" {
-			version = "0.0.0-v2-20261017"
-		}
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	got := r.RecommendedVersions(context.Background())
-	if len(got) != 4 {
+	if len(got) != 2 {
 		t.Fatalf("got %d adapters", len(got))
 	}
 	sort.Strings(packages)
-	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage, "@opencode/cli"}) {
+	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage}) {
 		t.Fatalf("incorrect adapter packages: %v", packages)
 	}
 	for i, v := range got {
 		if i > 0 && got[i-1].Harness >= v.Harness {
 			t.Fatal("results are not sorted")
 		}
-		switch v.Harness {
-		case "muse":
-			if v.Version != "1.4.10-R6427.1" || v.Status != "resolved" || v.Source != museReleaseManifestURL(v.Version) {
-				t.Fatalf("bad Muse result: %+v", v)
-			}
-		default:
-			if v.Status != "resolved" || v.Version == "" || v.Reason != "" {
-				t.Fatalf("bad npm result: %+v", v)
-			}
-		}
-	}
-}
-
-// vendorMetadata holds the non-npm latest-version documents.
-var vendorMetadata = func() map[string]string {
-	data := map[string]string{
-		museReleaseManifestURL("1.4.10-R6427.1"): `{"version":"1.4.10-R6427.1","checksum_algorithm":"sha256","artifacts":{"x86_linux":{"url":"` + museArtifactPrefix + `channel=muse&file=muse-bin","checksum":"` + strings.Repeat("0", 64) + `","size":123}}}`,
-		museChannelURL:                           `{"channel":"muse-stable","version":"1.4.10-R6427.1"}`,
-	}
-	return data
-}()
-
-func TestRecommendedVersionsVendorMetadataFailure(t *testing.T) {
-	for _, body := range []string{`{`, `{"version":"latest"}`, `{"version":"1.4.10"}`} {
-		r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) { return recommendedResponse(200, body), nil })}
-		if v, reason := r.museVersion(context.Background()); v != "" || reason == "" {
-			t.Fatalf("Muse channel %s gave %q, %q", body, v, reason)
+		if v.Status != "resolved" || v.Version == "" || v.Reason != "" {
+			t.Fatalf("bad npm result: %+v", v)
 		}
 	}
 }
@@ -108,7 +77,7 @@ func TestRecommendedVersionsMetadataFailure(t *testing.T) {
 		{"redirect", `secret response`, 302},
 		{"malformed", `{`, 200},
 		{"trailing", `{"name":"` + piNPMPackage + `","version":"1.1.0"} {}`, 200},
-		{"wrong-package", `{"name":"opencode-ai","version":"2.1.0"}`, 200},
+		{"wrong-package", `{"name":"not-the-pi-package","version":"2.1.0"}`, 200},
 		{"tag", `{"name":"` + piNPMPackage + `","version":"latest"}`, 200},
 		{"range", `{"name":"` + piNPMPackage + `","version":"^1.1.0"}`, 200},
 		{"invalid-semver", `{"name":"` + piNPMPackage + `","version":"1.1.0-01"}`, 200},
@@ -155,22 +124,6 @@ func TestRecommendedVersionsExactMetadataMismatch(t *testing.T) {
 	}
 }
 
-func TestRecommendedVersionsOpenCodeV2(t *testing.T) {
-	for _, version := range []string{"1.9.0", "3.0.0", "0.0.0-v1-build", "2.1.0", "0.0.0-v2-build"} {
-		t.Run(version, func(t *testing.T) {
-			r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) {
-				return recommendedResponse(200, recommendedMetadata("@opencode/cli", version)), nil
-			})}
-			a, _ := Adapter("opencode")
-			got, reason := r.npmVersion(context.Background(), a, "https://registry.npmjs.org/example/latest")
-			valid := strings.HasPrefix(version, "2.") || strings.HasPrefix(version, "0.0.0-v2-")
-			if (got != "") != valid || (reason == "") != valid {
-				t.Fatalf("version %q produced %q, %q", version, got, reason)
-			}
-		})
-	}
-}
-
 func TestRecommendedVersionsOfflineAndUnsupported(t *testing.T) {
 	r := RecommendedVersionResolver{GOOS: "windows", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("secret transport details")
@@ -179,11 +132,7 @@ func TestRecommendedVersionsOfflineAndUnsupported(t *testing.T) {
 		if v.Version != "" || v.Reason == "" || strings.Contains(v.Reason, "secret") {
 			t.Fatalf("bad offline result: %+v", v)
 		}
-		want := "unavailable"
-		if v.Harness == "muse" {
-			want = "unsupported"
-		}
-		if v.Status != want {
+		if v.Status != "unavailable" {
 			t.Fatalf("bad platform status: %+v", v)
 		}
 	}
@@ -199,7 +148,7 @@ func TestRecommendedVersionsCancellation(t *testing.T) {
 		return nil, req.Context().Err()
 	})}
 	got := r.RecommendedVersions(ctx)
-	if len(got) != 4 {
+	if len(got) != 2 {
 		t.Fatal("cancellation removed per-harness results")
 	}
 	for _, v := range got {
@@ -221,21 +170,18 @@ func TestRecommendedVersionsCache(t *testing.T) {
 		if offline {
 			return nil, errors.New("offline")
 		}
-		if body, ok := vendorMetadata[req.URL.String()]; ok {
-			return recommendedResponse(200, body), nil
-		}
 		path := req.URL.Path
 		pkg := strings.TrimPrefix(path[:strings.LastIndex(path, "/")], "/")
 		version := "2.1.0"
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	first := r.RecommendedVersions(context.Background())
-	if calls != 8 {
+	if calls != 4 {
 		t.Fatalf("first lookup made %d requests", calls)
 	}
 	offline = true
 	now = now.Add(6*time.Hour - time.Second)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 8 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 4 {
 		t.Fatalf("fresh cache missed: %d requests, %+v", calls, got)
 	}
 	now = now.Add(time.Second)
@@ -244,7 +190,7 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("expired result reused: %+v", v)
 		}
 	}
-	if calls != 12 {
+	if calls != 6 {
 		t.Fatalf("expired cache made %d requests", calls)
 	}
 	offline = false
@@ -253,11 +199,11 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("failure cache reused stale success: %+v", v)
 		}
 	}
-	if calls != 12 {
+	if calls != 6 {
 		t.Fatalf("failure cache missed: %d requests", calls)
 	}
 	now = now.Add(time.Minute)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 20 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 10 {
 		t.Fatalf("expired failure cache did not recover: %d requests, %+v", calls, got)
 	}
 }
@@ -268,7 +214,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	defer cancel()
 	started := make(chan string, 5)
 	r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-		if strings.HasSuffix(req.URL.Path, "/latest") || req.URL.String() == museChannelURL {
+		if strings.HasSuffix(req.URL.Path, "/latest") {
 			started <- req.URL.String()
 		}
 		<-req.Context().Done()
@@ -279,7 +225,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
 	// Every source makes a request.
-	for range 4 {
+	for range 2 {
 		select {
 		case <-started:
 		case <-deadline.C:
@@ -289,7 +235,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 		}
 	}
 	cancel()
-	if len(<-done) != 4 {
+	if len(<-done) != 2 {
 		t.Fatal("lost per-harness results")
 	}
 }
@@ -318,20 +264,4 @@ func TestRecommendedRefreshBypassesSixHourCache(t *testing.T) {
 	if calls != 2 {
 		t.Fatal("Refresh did not replace cached metadata")
 	}
-}
-
-func TestRecommendedVendorRejectsUninstallableRelease(t *testing.T) {
-	t.Run("muse", func(t *testing.T) {
-		r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.String() == museChannelURL {
-				return recommendedResponse(200, vendorMetadata[museChannelURL]), nil
-			}
-			// A channel can name a version before its artifact is published.
-			return recommendedResponse(200, `{"version":"1.4.2"}`), nil
-		})}
-		version, reason := r.museVersion(context.Background())
-		if version != "" || reason == "" {
-			t.Fatal("recommended a release without a verified artifact", version, reason)
-		}
-	})
 }

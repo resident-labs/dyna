@@ -7,7 +7,7 @@ import { call, runFunctions } from '../../../../test/svelte-source.ts'
 const component = (file: string): string => readFileSync(new URL(file, import.meta.url), 'utf8')
 
 test('profile handoffs are one-shot and normal navigation cannot replay them', () => {
-  const context: Record<string, unknown> = { pane: 'profiles', profileSelection: { harness: 'opencode' }, profileToOpen: 'old', accountToOpen: '' }
+  const context: Record<string, unknown> = { pane: 'profiles', profileSelection: { harness: 'pi' }, profileToOpen: 'old', accountToOpen: '' }
   runFunctions(component('../Settings.svelte'), ['selectPane', 'viewAccount', 'viewProfile'], context)
   call(context, 'viewAccount', 'account-a')
   assert.equal(context.profileSelection, null); assert.equal(context.profileToOpen, ''); assert.equal(context.pane, 'accounts')

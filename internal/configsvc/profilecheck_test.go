@@ -64,7 +64,7 @@ func TestCheckProfileRejectsUnknownAndDisabled(t *testing.T) {
 func TestChangingHarnessUsesNewNativeDialect(t *testing.T) {
 	isolate(t)
 	p := mock("switch")
-	p.Harness = profile.HarnessMuse
+	p.Harness = profile.HarnessPi
 	p.Output = p.EffectiveOutput()
 	seed(t, p)
 	v := view(p)

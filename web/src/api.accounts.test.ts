@@ -27,6 +27,6 @@ test('AccountsAdd sends the harness first, as the engine reads it', async () => 
     seen.push({ path: String(input), body: JSON.parse(String(init?.body)) })
     return Response.json({ providers: [] })
   }
-  await api.accountsAdd('opencode', 'opencode-go', 'Go work', 'sk-go')
-  assert.deepEqual(seen, [{ path: '/api/AccountsAdd', body: ['opencode', 'opencode-go', 'Go work', 'sk-go'] }])
+  await api.accountsAdd('pi', 'opencode-go', 'Go work', 'sk-go')
+  assert.deepEqual(seen, [{ path: '/api/AccountsAdd', body: ['pi', 'opencode-go', 'Go work', 'sk-go'] }])
 })

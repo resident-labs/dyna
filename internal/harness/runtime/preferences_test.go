@@ -171,14 +171,14 @@ func TestPreferenceUnsafeValuesAndTypes(t *testing.T) {
 	}
 }
 func TestPreferenceErrorsDoNotExposeContents(t *testing.T) {
-	r, a, home := preferenceFixture(t, "muse")
+	r, a, home := preferenceFixture(t, "claude-code")
 	adapters.Lock()
-	original := adapters.items["muse"]
+	original := adapters.items["claude-code"]
 	modified := original
 	modified.PersonalConfigFiles = []string{"prefs/config.toml"}
-	adapters.items["muse"] = modified
+	adapters.items["claude-code"] = modified
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	defer func() { adapters.Lock(); adapters.items["claude-code"] = original; adapters.Unlock() }()
 	writePreferenceFixture(t, home, "prefs/config.toml", `secret-value = "unterminated`)
 	p, err := r.PreviewPreferenceImport(a.ID)
 	if err == nil {
@@ -203,15 +203,15 @@ func TestPreferenceSourceSymlinkRefusal(t *testing.T) {
 	}
 }
 func TestPreferenceDenylistOverridesAdapterAndNoAllowlist(t *testing.T) {
-	r, a, home := preferenceFixture(t, "muse")
+	r, a, home := preferenceFixture(t, "claude-code")
 	adapters.Lock()
-	original := adapters.items["muse"]
+	original := adapters.items["claude-code"]
 	modified := original
 	modified.ConfigAllowlist = []string{"hooks.Stop", "env.API_KEY", "mcp_servers.example.command", "model", "provider", "permissions", "approval_policy", "sandbox_mode", "status_line.command", "notification.command", "personal_path", "safe_unknown"}
 	modified.PersonalConfigFiles = []string{"prefs/config.jsonc"}
-	adapters.items["muse"] = modified
+	adapters.items["claude-code"] = modified
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	defer func() { adapters.Lock(); adapters.items["claude-code"] = original; adapters.Unlock() }()
 	writePreferenceFixture(t, home, "prefs/config.jsonc", `{"hooks":{"Stop":true},"env":{"API_KEY":true},"mcp_servers":{"example":{"command":true}},"model":true,"provider":true,"permissions":true,"approval_policy":true,"sandbox_mode":true,"status_line":{"command":true},"notification":{"command":true},"personal_path":true,"safe_unknown":true}`)
 	p, err := r.PreviewPreferenceImport(a.ID)
 	if err != nil {
@@ -224,7 +224,7 @@ func TestPreferenceDenylistOverridesAdapterAndNoAllowlist(t *testing.T) {
 	}
 	adapters.Lock()
 	modified.ConfigAllowlist = []string{}
-	adapters.items["muse"] = modified
+	adapters.items["claude-code"] = modified
 	adapters.Unlock()
 	p, err = r.PreviewPreferenceImport(a.ID)
 	if err != nil {
@@ -277,7 +277,7 @@ func TestPreferenceFlattenCollisionAndNoArrays(t *testing.T) {
 }
 
 func TestPreferenceMissingSourceAndAllowlistHash(t *testing.T) {
-	r, a, home := preferenceFixture(t, "muse")
+	r, a, home := preferenceFixture(t, "claude-code")
 	p, err := r.PreviewPreferenceImport(a.ID)
 	if err != nil || len(p.Keys) != 0 {
 		t.Fatalf("%v %v", p, err)
@@ -291,28 +291,28 @@ func TestPreferenceMissingSourceAndAllowlistHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapters.Lock()
-	original := adapters.items["muse"]
+	original := adapters.items["claude-code"]
 	modified := original
 	modified.ConfigAllowlist = []string{"history.persistence"}
-	adapters.items["muse"] = modified
+	adapters.items["claude-code"] = modified
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	defer func() { adapters.Lock(); adapters.items["claude-code"] = original; adapters.Unlock() }()
 	if err := r.ImportPreferences(a.ID, p.Hash); err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("allowlist change was not refused: %v", err)
 	}
 }
 func TestPreferenceInvalidSourceSelection(t *testing.T) {
-	r, a, home := preferenceFixture(t, "muse")
+	r, a, home := preferenceFixture(t, "claude-code")
 	writePreferenceFixture(t, home, "prefs/config.toml", "hide_agent_reasoning = true\n")
 	adapters.Lock()
-	original := adapters.items["muse"]
+	original := adapters.items["claude-code"]
 	adapters.Unlock()
-	defer func() { adapters.Lock(); adapters.items["muse"] = original; adapters.Unlock() }()
+	defer func() { adapters.Lock(); adapters.items["claude-code"] = original; adapters.Unlock() }()
 	for _, path := range []string{"../outside.toml", "/outside.toml", "prefs/../outside.toml"} {
 		adapters.Lock()
 		modified := original
 		modified.PersonalConfigFiles = []string{path}
-		adapters.items["muse"] = modified
+		adapters.items["claude-code"] = modified
 		adapters.Unlock()
 		if _, err := r.PreviewPreferenceImport(a.ID); err == nil {
 			t.Fatal("unsafe source path accepted")

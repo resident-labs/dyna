@@ -79,13 +79,6 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 		{name: "stderr mentions quota settings", harness: profile.HarnessMock, stderr: "checking quota configuration for the room"},
 		{name: "stderr names no provider", harness: profile.HarnessMock, stderr: "the model wondered about its credit balance"},
 		{name: "stderr names a bare invalid key", harness: profile.HarnessMock, stderr: "invalid key in configuration"},
-		{
-			name:    "opencode opaque record keeps the harness reason",
-			harness: profile.HarnessOpenCode,
-			stdout:  `{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"the provider said no"}}}`,
-			runErr:  providerfailure.Tag(providerfailure.Auth, errors.New("OpenCode turn failed: the provider said no")),
-			want:    providerfailure.Auth,
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := attempt{stdout: tc.stdout, stderr: tc.stderr, runErr: tc.runErr}
@@ -125,7 +118,7 @@ func TestRuntimePrepareFailureIsNotReady(t *testing.T) {
 		return profile.Profile{}, runtime.Pin{}, nil, errors.New("the active private account is not signed in")
 	}
 	root := t.TempDir()
-	p := profile.Profile{Name: "sol", Harness: profile.HarnessMuse}
+	p := profile.Profile{Name: "sol", Harness: profile.HarnessPi}
 	_, err := RunSessionTurn(context.Background(), p, "task", root, false, JournalOptions{}, SteeringOptions{}, SessionOptions{})
 	if err == nil || !IsNotReady(err.Error()) {
 		t.Fatalf("prepare error = %v", err)

@@ -10,13 +10,11 @@ import (
 	"testing"
 
 	"dyna-agent/internal/account/native"
-	"dyna-agent/internal/account/store"
-	"dyna-agent/internal/fsutil"
 	harnesshome "dyna-agent/internal/harness/home"
 )
 
 func TestAccountPrivateManagerAndLoginRoots(t *testing.T) {
-	for _, h := range []string{"claude-code", "pi", "muse", "opencode"} {
+	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			for key := range harnesshome.Discovery(filepath.Join(a.Root, h, ".runtime")) {
@@ -63,7 +61,7 @@ func TestAccountPrivateManagerAndLoginRoots(t *testing.T) {
 					t.Fatalf("inherited %s escaped private scope", key)
 				}
 			}
-			nativeKeys := map[string]string{"claude-code": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_CONFIG_DIR"}
+			nativeKeys := map[string]string{"claude-code": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}
 			if key := nativeKeys[h]; key != "" && env[key] != scope {
 				t.Fatalf("native scope changed: %s = %q", key, env[key])
 			}
@@ -75,7 +73,7 @@ func TestAccountPrivateManagerAndLoginRoots(t *testing.T) {
 }
 
 func TestPrivateHomeKnownPathsAndNativeTreeBoundary(t *testing.T) {
-	for _, h := range []string{"muse", "opencode"} {
+	for _, h := range []string{"kimi-code"} {
 		for _, kind := range []string{"parent", "leaf", "hardlink", "lock"} {
 			t.Run(h+"/"+kind, func(t *testing.T) {
 				a := testAccounts(t)
@@ -170,38 +168,6 @@ func TestRemoveDeletesSavedPairedHomeOnly(t *testing.T) {
 	}
 }
 
-func personalAccountCanaries(t *testing.T) func() {
-	t.Helper()
-	config := os.Getenv("XDG_CONFIG_HOME")
-	if config == "" {
-		config = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	paths := []string{
-		filepath.Join(config, "muse", "auth.json"),
-		filepath.Join(config, "cursor", "auth.json"),
-		filepath.Join(os.Getenv("HOME"), ".agents", "skills", "personal", "SKILL.md"),
-		filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"),
-		filepath.Join(os.Getenv("HOME"), ".claude.json"),
-	}
-	for _, path := range paths {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("personal canary"), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return func() {
-		t.Helper()
-		for _, path := range paths {
-			raw, err := os.ReadFile(path)
-			if err != nil || string(raw) != "personal canary" {
-				t.Fatalf("personal file changed: %s: %v", path, err)
-			}
-		}
-	}
-}
-
 func TestNativeFilesManagerUsesHarnessSpecificRoot(t *testing.T) {
 	for _, h := range []string{"pi"} {
 		t.Run(h, func(t *testing.T) {
@@ -223,96 +189,6 @@ func TestNativeFilesManagerUsesHarnessSpecificRoot(t *testing.T) {
 				t.Fatal(root, err)
 			}
 		})
-	}
-}
-
-func TestOpenCodeRebindsOnlyCapturedPrivateDatabaseRows(t *testing.T) {
-	a := testAccounts(t)
-	scope, _ := a.HarnessHome("opencode")
-	if err := os.MkdirAll(scope, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := harnesshome.Ensure(scope); err != nil {
-		t.Fatal(err)
-	}
-	database := filepath.Join(scope, "opencode.db")
-	if err := os.WriteFile(database, []byte("private database canary"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	exe := filepath.Join(t.TempDir(), "opencode")
-	script := `#!/bin/sh
-if [ "$1 $2" = "auth list" ]; then
- printf '%s\n' '[{"id":"opencode","connections":[{"type":"credential","id":"proven"}]}]'
-elif [ "$1 $2 $3 $4" = "auth switch opencode proven" ]; then
- exit 0
-else
- exit 1
-fi
-`
-	if err := fsutil.WriteExecutable(exe, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	old, _ := native.For("opencode", native.Host{Home: os.Getenv("HOME"), Executable: exe, Env: func(k string) string {
-		if k == "OPENCODE_DB" {
-			return database
-		}
-		return os.Getenv(k)
-	}})
-	rows, err := old.Capture(context.Background(), "")
-	if err != nil || len(rows) != 1 {
-		t.Fatal(rows, err)
-	}
-	n, err := a.Create("opencode", "old reference")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = writeAccountLogin(n.Home, rows[0]); err != nil {
-		t.Fatal(err)
-	}
-	if err = a.transaction(func(s *store.State) error {
-		e := s.Find(n.ID)
-		e.Identity = rows[0].Identity
-		e.Integration = rows[0].Integration
-		e.NeedsLogin = false
-		return nil
-	}, true); err != nil {
-		t.Fatal(err)
-	}
-	if err = a.Switch(context.Background(), n.ID, exe); err != nil {
-		t.Fatal(err)
-	}
-	updated, err := readAccountLogin(n.Home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(updated.Credential.Payload), harnesshome.Home(scope)) {
-		t.Fatal("private reference was not rebound")
-	}
-	raw, err := os.ReadFile(database)
-	if err != nil || string(raw) != "private database canary" {
-		t.Fatal("database changed", err)
-	}
-	// An absent row cannot use its old scope reference.
-	rows[0].Identity = "opencode:opencode:absent"
-	rows[0].Credential.Payload = []byte(strings.ReplaceAll(string(rows[0].Credential.Payload), "proven", "absent"))
-	missing, err := a.Create("opencode", "absent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = writeAccountLogin(missing.Home, rows[0]); err != nil {
-		t.Fatal(err)
-	}
-	if err = a.transaction(func(s *store.State) error {
-		e := s.Find(missing.ID)
-		e.Identity = rows[0].Identity
-		e.Integration = rows[0].Integration
-		e.NeedsLogin = false
-		return nil
-	}, true); err != nil {
-		t.Fatal(err)
-	}
-	if err = a.Switch(context.Background(), missing.ID, exe); err == nil || !strings.Contains(err.Error(), "Sign in again") {
-		t.Fatal(err)
 	}
 }
 
@@ -372,7 +248,7 @@ func TestTrustedDataRootDoesNotTrustOwnedSymlinks(t *testing.T) {
 }
 
 func TestFinalAccountManagerCredentialRootGuard(t *testing.T) {
-	keys := map[string]string{"claude-code": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_DB", "muse": "MUSE_AUTH_PATH"}
+	keys := map[string]string{"claude-code": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}
 	for h, key := range keys {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)

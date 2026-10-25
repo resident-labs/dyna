@@ -108,14 +108,6 @@ func TestPrivateInstallationsResolveEachPiProvider(t *testing.T) {
 	}
 }
 
-func TestInstallationRunsAcceptsAKeyedOpenCodeAccount(t *testing.T) {
-	account := runtime.NativeAccount{Harness: "opencode", Provider: accountstore.ProviderZAI}
-	selection := accountstore.Selection{Harness: "opencode", Provider: accountstore.ProviderOpenCodeGo}
-	if !installationRuns(account, selection) {
-		t.Fatal("a keyed OpenCode account selected under opencode-go was dropped")
-	}
-}
-
 func TestProfileModelsMergesEachPiProviderCatalog(t *testing.T) {
 	calls := []string{}
 	s := New(Options{Models: func(_ context.Context, _, executable string, _ []string) ([]adapters.Model, error) {

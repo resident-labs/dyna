@@ -86,15 +86,15 @@ func TestInstallAndSelectRejectsNewVersionWithoutVersionAnswer(t *testing.T) {
 // The handshake answer must stay inside the harness's supported range: a
 // binary that reports an incompatible build is rejected too.
 func TestInstallAndSelectRejectsUnsupportedReportedVersion(t *testing.T) {
-	m := scriptedManager(t, "#!/bin/sh\necho 1.9.0\n")
-	old := install(t, m, "opencode", "2.0.0")
-	if err := m.Select("opencode", old.Version); err != nil {
+	m := scriptedManager(t, "#!/bin/sh\necho 1.0.9\n")
+	old := install(t, m, "pi", "1.1.0")
+	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "opencode", "2.1.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.2.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("mismatched update accepted: %v", err)
 	}
-	if got, err := m.Resolve("opencode", ""); err != nil || got.Version != old.Version {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != old.Version {
 		t.Fatalf("selection changed: %+v %v", got, err)
 	}
 }

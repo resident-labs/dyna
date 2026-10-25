@@ -11,7 +11,7 @@ import (
 )
 
 func TestNativeSubprocessTimeoutKillsProcessGroup(t *testing.T) {
-	exe := fakeOpenCode(t, "sleep 30\n")
+	exe := claudeFixtureCommand(t, "sleep 30\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
@@ -23,20 +23,20 @@ func TestNativeSubprocessTimeoutKillsProcessGroup(t *testing.T) {
 	}
 }
 func TestNativeSubprocessOutputBound(t *testing.T) {
-	exe := fakeOpenCode(t, "head -c 4194305 /dev/zero\n")
+	exe := claudeFixtureCommand(t, "head -c 4194305 /dev/zero\n")
 	if output, err := run(context.Background(), exe, nil); !errors.Is(err, ErrProbe) || len(output) != 0 {
 		t.Fatalf("unbounded output: bytes=%d err=%v", len(output), err)
 	}
 }
 func TestSensitiveNativeErrorHasNoArguments(t *testing.T) {
-	exe := fakeOpenCode(t, "echo PRIVATE_BODY;echo PRIVATE_ERROR >&2;exit 2\n")
+	exe := claudeFixtureCommand(t, "echo PRIVATE_BODY;echo PRIVATE_ERROR >&2;exit 2\n")
 	_, err := run(context.Background(), exe, nil, "PRIVATE_ARGUMENT")
 	if err == nil || strings.Contains(err.Error(), "PRIVATE") {
 		t.Fatal("native output leaked", err)
 	}
 }
 func TestNativeSubprocessUsesGivenEnvironment(t *testing.T) {
-	exe := fakeOpenCode(t, "printf '%s' \"$DYNA_FIXTURE_HOME\"\n")
+	exe := claudeFixtureCommand(t, "printf '%s' \"$DYNA_FIXTURE_HOME\"\n")
 	output, err := run(context.Background(), exe, []string{"DYNA_FIXTURE_HOME=/private/home"})
 	if err != nil || string(output) != "/private/home" {
 		t.Fatalf("run() = %q, %v; want the given environment", output, err)
@@ -46,13 +46,13 @@ func TestNativeSubprocessUsesGivenEnvironment(t *testing.T) {
 // A failed probe must name the process outcome, never its output, arguments,
 // or executable path, so the reason can reach the owner.
 func TestNativeProbeFailureNamesTheOutcome(t *testing.T) {
-	_, err := run(context.Background(), fakeOpenCode(t, "exit 3\n"), nil)
+	_, err := run(context.Background(), claudeFixtureCommand(t, "exit 3\n"), nil)
 	if !errors.Is(err, ErrProbe) || !strings.Contains(err.Error(), "status 3") {
 		t.Fatalf("run() = %v; want the exit status named", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
-	_, err = run(ctx, fakeOpenCode(t, "sleep 30\n"), nil)
+	_, err = run(ctx, claudeFixtureCommand(t, "sleep 30\n"), nil)
 	if !errors.Is(err, ErrProbe) || !strings.Contains(err.Error(), "did not finish") {
 		t.Fatalf("run() = %v; want the timeout named", err)
 	}

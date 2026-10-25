@@ -14,7 +14,7 @@ import (
 )
 
 func testProfile() profile.Profile {
-	return profile.Profile{Name: "worker", Harness: profile.HarnessMuse, Model: "test-model"}
+	return profile.Profile{Name: "worker", Harness: profile.HarnessPi, Model: "test-model"}
 }
 
 func observation(at int) Observation {

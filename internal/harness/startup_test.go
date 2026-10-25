@@ -13,8 +13,7 @@ func TestTurnStartPreservesNoProgressLimit(t *testing.T) {
 	if state.hasRealProgress() || state.hasActivity() {
 		t.Fatal("turn start counted as output")
 	}
-	step := workeroutput.DecodeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectOpenCodeJSON},
-		`{"type":"step_start","part":{"type":"step-start"}}`)
+	step := workeroutput.Record{Events: []workeroutput.Event{{Kind: "status", Name: "step", State: "started"}}}
 	state.observeRecord(step)
 	state.observeRecord(turn)
 	state.observeRecord(step)

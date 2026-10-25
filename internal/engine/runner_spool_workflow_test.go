@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,11 +15,9 @@ import (
 	"time"
 
 	"dyna-agent/internal/account/attempts"
-	accountservice "dyna-agent/internal/account/service"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/engineclient"
-	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/subagent"
@@ -147,83 +144,6 @@ func TestWorkflowSpoolAdmissionReplaysTerminalReceipt(t *testing.T) {
 	}
 }
 
-func TestWorkflowSpoolQuotaReplaysTerminalReceipt(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, logs := quotaSpool(t, f)
-	in := f.input
-	in.ExecutionRef = f.runRef
-	owner := in.Run
-	f.pose(websvc.Caller{Kind: websvc.Worker, Run: owner})
-	id := owner + "/quota/committed"
-	if err := f.send(id, in); err != nil {
-		t.Fatal(err)
-	}
-	before, err := f.store.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	secrets := quotaSecretSnapshot(t, f.store.Root)
-	receipt, done, err := state.For(f.db).RequestDone(t.Context(), runnerRequestKey(id))
-	if err != nil || !done {
-		t.Fatalf("live quota did not commit its receipt: %v %v", done, err)
-	}
-	line := engineclient.SpoolLine{ID: id, Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, in)}, At: time.Now()}
-	for range 2 {
-		writeSpoolFor(t, s, owner, line)
-		if err := s.drain(t.Context(), owner); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(*logs) != 0 {
-		t.Errorf("own committed quota was rejected: %v", *logs)
-	}
-	if _, err := os.Stat(filepath.Join(s.dir, owner+".rejected.jsonl")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("own committed quota has a rejection file: %v", err)
-	}
-	for _, kind := range []string{"changed-observation", "foreign-execution", "foreign-request-prefix"} {
-		t.Run(kind, func(t *testing.T) {
-			changed := in
-			conflict := line
-			switch kind {
-			case "changed-observation":
-				changed.ResetsAt = changed.ResetsAt.Add(time.Hour)
-			case "foreign-execution":
-				changed.ExecutionRef = f.input.ExecutionRef
-			case "foreign-request-prefix":
-				// The other execution's real receipt must not replay under this owner.
-				f.pose(websvc.Caller{Kind: websvc.Session, Session: f.input.Session})
-				conflict.ID = f.input.Session + "/quota/committed"
-				if err := f.send(conflict.ID, f.input); err != nil {
-					t.Fatal(err)
-				}
-				changed = f.input
-			}
-			conflict.Args = []json.RawMessage{arg(t, changed)}
-			writeSpoolFor(t, s, owner, conflict)
-			original := workflowSpoolRaw(t, s, owner)
-			*logs = nil
-			if err := s.drain(t.Context(), owner); err != nil {
-				t.Fatal(err)
-			}
-			if len(*logs) != 1 || !strings.HasPrefix((*logs)[0], "bug:") {
-				t.Errorf("foreign or changed receipt lost its defect log: %v", *logs)
-			}
-			workflowSpoolRejected(t, s, owner, original)
-			if err := os.Remove(filepath.Join(s.dir, owner+".rejected.jsonl")); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-	after, err := f.store.Read()
-	if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(secrets, quotaSecretSnapshot(t, f.store.Root)) {
-		t.Errorf("recovery changed account observations or credentials: %v", err)
-	}
-	afterReceipt, done, err := state.For(f.db).RequestDone(t.Context(), runnerRequestKey(id))
-	if err != nil || !done || !bytes.Equal(receipt, afterReceipt) {
-		t.Errorf("recovery changed the original quota receipt: %q %v %v", afterReceipt, done, err)
-	}
-}
-
 func TestWorkflowSpoolUncommittedReceiptsRetainOriginals(t *testing.T) {
 	t.Run("admission", func(t *testing.T) {
 		f := newAdmissionFixture(t)
@@ -250,51 +170,20 @@ func TestWorkflowSpoolUncommittedReceiptsRetainOriginals(t *testing.T) {
 			t.Errorf("offline admission created %d facts: %v", count, err)
 		}
 	})
-	t.Run("quota", func(t *testing.T) {
-		f := newMuseQuotaFixture(t)
-		s, _, logs := quotaSpool(t, f)
-		in := f.input
-		in.ExecutionRef = f.runRef
-		refuse := s.receiptCalls["ObserveMuseQuota"]
-		s.receiptCalls["ObserveMuseQuota"] = func(ctx context.Context, args []json.RawMessage) (any, error) {
-			actor := authority.Of(ctx)
-			if actor.Role != authority.Worker || actor.Run != in.Run || actor.Agent != 0 || actor.Session != "" {
-				t.Errorf("workflow recovery actor = %+v", actor)
-			}
-			return refuse(ctx, args)
-		}
-		before, err := f.store.Read()
-		if err != nil {
-			t.Fatal(err)
-		}
-		id := in.Run + "/quota/uncommitted"
-		writeSpoolFor(t, s, in.Run, engineclient.SpoolLine{ID: id, Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, in)}, At: time.Now()})
-		original := workflowSpoolRaw(t, s, in.Run)
-		if err := s.drain(t.Context(), in.Run); err != nil {
-			t.Fatal(err)
-		}
-		workflowSpoolRejected(t, s, in.Run, original)
-		if len(*logs) != 1 || !strings.HasPrefix((*logs)[0], "runner spool of ") || !strings.Contains((*logs)[0], "without a committed receipt") {
-			t.Errorf("uncommitted quota did not get a plain refusal: %v", *logs)
-		}
-		workflowSpoolNoReceipt(t, f.db, id)
-		after, err := f.store.Read()
-		if err != nil || !reflect.DeepEqual(before, after) {
-			t.Errorf("offline quota created an observation: %v", err)
-		}
-	})
 }
 
 func TestWorkflowSpoolNeverExecutesSessionMethods(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, m, _ := quotaSpool(t, f)
-	owner := f.runRef.Run
-	before, err := m.Store.ReadMeta(f.input.Session)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
+	m := f.s.rooms.Notify.Sessions
+	const owner = "wf_spool_methods"
+	workflowSpoolRun(t, f.db, owner, "running")
+	before, err := m.Store.ReadMeta(f.meta.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The run table must refuse these calls before any session method runs.
-	s, err = newRunnerSpool(filepath.Dir(f.store.Root), func() *subagent.Manager {
+	s, err = newRunnerSpool(f.dir, func() *subagent.Manager {
 		t.Error("run recovery entered a session method")
 		return m
 	}, state.For(f.db), t.Logf)
@@ -311,7 +200,7 @@ func TestWorkflowSpoolNeverExecutesSessionMethods(t *testing.T) {
 	if err := s.drain(t.Context(), owner); err != nil {
 		t.Fatal(err)
 	}
-	after, err := m.Store.ReadMeta(f.input.Session)
+	after, err := m.Store.ReadMeta(f.meta.ID)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Errorf("run spool changed session metadata: %+v %v", after, err)
 	}
@@ -322,17 +211,17 @@ func TestWorkflowSpoolNeverExecutesSessionMethods(t *testing.T) {
 }
 
 func TestWorkflowSpoolRefusesUnsafeOrUnstoredOwnersBeforeMovingFiles(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
 	for _, owner := range []string{"", ".", "..", "../wf_escape", "wf_nested/child", "wf_back\\slash", "wf_bad\x00", "wf_foreign", "wf_file_only"} {
 		t.Run(fmt.Sprintf("%q", owner), func(t *testing.T) {
 			if owner == "wf_foreign" {
-				if _, err := f.db.Exec("INSERT INTO runs(id,session,started,body) VALUES(?,?,0,?)", owner, "", string(arg(t, runstore.Meta{ID: f.runRef.Run, Status: "ok"}))); err != nil {
+				if _, err := f.db.Exec("INSERT INTO runs(id,session,started,body) VALUES(?,?,0,?)", owner, "", string(arg(t, runstore.Meta{ID: "wf_other", Status: "ok"}))); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if owner == "wf_file_only" {
-				path := filepath.Join(filepath.Dir(f.store.Root), "runs", owner, "meta.json")
+				path := filepath.Join(f.dir, "runs", owner, "meta.json")
 				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -389,13 +278,16 @@ func rejectedArtifacts(t *testing.T, s *runnerSpool, owner string) []string {
 }
 
 func TestWorkflowSpoolDeletedRunIsRejected(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, logs := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
+	var logLines []string
+	s.logf = func(format string, args ...any) { logLines = append(logLines, fmt.Sprintf(format, args...)) }
+	logs := &logLines
 	// The run registered a row, spooled a line, and its row was then deleted,
 	// so no drain can ever name its owner again.
 	const owner = "wf_spool_deleted"
 	workflowSpoolRun(t, f.db, owner, "running")
-	line := engineclient.SpoolLine{ID: owner + "/quota/gone", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/admission/gone", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	original := workflowSpoolRaw(t, s, owner)
 	if _, err := f.db.Exec("DELETE FROM runs WHERE id=?", owner); err != nil {
@@ -430,11 +322,14 @@ func TestWorkflowSpoolDeletedRunIsRejected(t *testing.T) {
 
 // A retirement keeps the frozen file exactly: no trimming, no added framing.
 func TestWorkflowSpoolDeletedRunRetiresExactBytes(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, logs := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
+	var logLines []string
+	s.logf = func(format string, args ...any) { logLines = append(logLines, fmt.Sprintf(format, args...)) }
+	logs := &logLines
 	const owner = "wf_spool_deleted_bytes"
 	workflowSpoolRun(t, f.db, owner, "running")
-	line := engineclient.SpoolLine{ID: owner + "/quota/gone", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/admission/gone", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	raw, err := json.Marshal(line)
 	if err != nil {
 		t.Fatal(err)
@@ -477,10 +372,10 @@ func TestWorkflowSpoolDeletedRunRetiresExactBytes(t *testing.T) {
 // A run whose row is gone but whose retained files remain is not a deleted
 // run: its spool stays refused, byte for byte.
 func TestWorkflowSpoolFileOnlyOwnerKeepsItsRefusal(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
 	const owner = "wf_spool_file_only"
-	line := engineclient.SpoolLine{ID: owner + "/quota/file", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/admission/file", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	original := workflowSpoolRaw(t, s, owner)
 	dir := filepath.Join(s.runs, owner)
@@ -504,10 +399,10 @@ func TestWorkflowSpoolFileOnlyOwnerKeepsItsRefusal(t *testing.T) {
 // A retained-entry lookup that fails for a reason other than absence does not
 // prove the run was deleted, so the spool keeps its retry path.
 func TestWorkflowSpoolLookupErrorKeepsItsRetryPath(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
 	const owner = "wf_spool_lookup"
-	line := engineclient.SpoolLine{ID: owner + "/quota/lookup", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/admission/lookup", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	source := workflowSpoolRaw(t, s, owner)
 	// The lookup fails with ENOTDIR, which is not proof of absence.
@@ -548,14 +443,14 @@ func TestWorkflowSpoolLookupErrorKeepsItsRetryPath(t *testing.T) {
 // A frozen name that an earlier retirement already used must never lose its
 // bytes: the new retirement takes another name.
 func TestWorkflowSpoolRetirementNeverReplacesAnArtifact(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
 	const owner = "wf_spool_collision"
 	// A fixed clock makes the taken file name, and so the first artifact name,
 	// repeatable.
 	fixed := time.Unix(1_700_000_000, 123)
 	s.now = func() time.Time { return fixed }
-	line := engineclient.SpoolLine{ID: owner + "/quota/collision", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/admission/collision", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	source := workflowSpoolRaw(t, s, owner)
 	earlier := filepath.Join(s.dir, fmt.Sprintf("%s.%d.draining.rejected.jsonl", owner, fixed.UnixNano()))
@@ -586,8 +481,8 @@ func TestWorkflowSpoolRetirementNeverReplacesAnArtifact(t *testing.T) {
 // A frozen file that a stopped drain left keeps its bytes: a new take
 // reserves another name instead of replacing it.
 func TestWorkflowSpoolTakeNeverReplacesAFrozenFile(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
 	const owner = "wf_spool_take"
 	// A fixed clock makes the name a take would choose repeatable.
 	fixed := time.Unix(1_700_000_000, 456)
@@ -600,7 +495,7 @@ func TestWorkflowSpoolTakeNeverReplacesAFrozenFile(t *testing.T) {
 	if err := os.WriteFile(frozen, frozenBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	line := engineclient.SpoolLine{ID: owner + "/quota/take", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/quota/take", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	active := workflowSpoolRaw(t, s, owner)
 	if err := s.drain(t.Context(), owner); err != nil {
@@ -633,10 +528,11 @@ func TestWorkflowSpoolTakeNeverReplacesAFrozenFile(t *testing.T) {
 // must follow the rename, and a failed sync must keep the recoverable file so
 // a retry can finish the work.
 func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, m, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
+	m := f.s.rooms.Notify.Sessions
 	const owner = "wf_spool_durable"
-	line := engineclient.SpoolLine{ID: owner + "/quota/durable", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	line := engineclient.SpoolLine{ID: owner + "/quota/durable", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	source := workflowSpoolRaw(t, s, owner)
 
@@ -676,7 +572,7 @@ func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
 	// A failed sync keeps the recoverable file, and a new spool over the same
 	// directory finishes the retirement exactly once.
 	const retryOwner = "wf_spool_durable_retry"
-	retryLine := engineclient.SpoolLine{ID: retryOwner + "/quota/retry", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	retryLine := engineclient.SpoolLine{ID: retryOwner + "/quota/retry", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, retryOwner, retryLine)
 	retrySource := workflowSpoolRaw(t, s, retryOwner)
 	fails := 1
@@ -694,7 +590,7 @@ func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
 	if err != nil || len(frozen) != 1 {
 		t.Fatalf("frozen file after the failed sync = %v %v", frozen, err)
 	}
-	again, err := newRunnerSpool(filepath.Dir(f.store.Root), func() *subagent.Manager { return m }, state.For(f.db), t.Logf)
+	again, err := newRunnerSpool(f.dir, func() *subagent.Manager { return m }, state.For(f.db), t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -714,7 +610,7 @@ func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
 	// source left. The retry must sync the directory again before it reports
 	// success, or the artifact stays unconfirmed.
 	const lateOwner = "wf_spool_durable_late"
-	lateLine := engineclient.SpoolLine{ID: lateOwner + "/quota/late", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	lateLine := engineclient.SpoolLine{ID: lateOwner + "/quota/late", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, lateOwner, lateLine)
 	lateSource := workflowSpoolRaw(t, s, lateOwner)
 	calls := 0
@@ -746,7 +642,7 @@ func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
 	// syntax. The retry must still confirm the directory, so it must not depend
 	// on an owner-derived lookup.
 	const metaOwner = "wf_["
-	mtLine := engineclient.SpoolLine{ID: metaOwner + "/quota/meta", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	mtLine := engineclient.SpoolLine{ID: metaOwner + "/quota/meta", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, metaOwner, mtLine)
 	mtSource := workflowSpoolRaw(t, s, metaOwner)
 	metaCalls := 0
@@ -776,71 +672,17 @@ func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
 	workflowSpoolNoReceipt(t, f.db, mtLine.ID)
 }
 
-func TestWorkflowSpoolLiveGuardRequiresVerifiedCoordinator(t *testing.T) {
-	workflowSpoolLiveGuard(t, "coordinator")
-}
-func TestWorkflowSpoolNonzeroWorkerCannotDrain(t *testing.T) { workflowSpoolLiveGuard(t, "worker") }
-func TestWorkflowSpoolUnverifiedCallerCannotDrain(t *testing.T) {
-	workflowSpoolLiveGuard(t, "unverified")
-}
-
-func workflowSpoolLiveGuard(t *testing.T, kind string) {
-	t.Helper()
-	f := newMuseQuotaFixture(t)
-	s, m, _ := quotaSpool(t, f)
-	in := f.input
-	in.ExecutionRef = f.runRef
-	caller := websvc.Caller{Kind: websvc.Worker, Run: in.Run}
-	if kind == "worker" {
-		caller.Agent = in.Agent
-	} else if kind == "unverified" {
-		caller.Kind = websvc.Unverified
-	}
-	service := services{accounts: accountservice.New(accountservice.Options{Store: f.store})}
-	calls, err := websvc.Bind([]websvc.Binding{service.museQuotaBinding()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.guard(calls)
-	callers := &socketCallers{sessions: m.Store}
-	callers.actForCallers(calls)
-	applyOnce(calls, state.For(f.db), t.Logf)
-	enginetest.ServeCallers(t, filepath.Dir(f.store.Root), func(net.Conn) (websvc.Caller, error) { return caller, nil }, calls)
-	client := engineclient.New("", engineclient.RestartWait(0), engineclient.Notices(nil))
-	offlineID := in.Run + "/quota/offline"
-	writeSpoolFor(t, s, in.Run, engineclient.SpoolLine{ID: offlineID, Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, in)}, At: time.Now()})
-	original := workflowSpoolRaw(t, s, in.Run)
-	err = client.Call(callspec.WithRequest(t.Context(), in.Run+"/quota/live"), "ObserveMuseQuota", []any{in}, nil)
-	if kind == "coordinator" {
-		if err != nil {
-			t.Fatalf("verified coordinator call failed: %v", err)
-		}
-		workflowSpoolRejected(t, s, in.Run, original)
-	} else {
-		if err == nil {
-			t.Error("noncoordinator executed live quota")
-		}
-		if got := workflowSpoolRaw(t, s, in.Run); !bytes.Equal(got, original) {
-			t.Errorf("noncoordinator moved spool: %q", got)
-		}
-		if _, err := os.Stat(filepath.Join(s.dir, in.Run+".rejected.jsonl")); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("noncoordinator drained the spool: %v", err)
-		}
-	}
-	workflowSpoolNoReceipt(t, f.db, offlineID)
-}
-
 func TestWorkflowSpoolClaimedSessionActorCannotDrainRun(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
-	owner := f.runRef.Run
-	line := engineclient.SpoolLine{ID: owner + "/claimed", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
+	const owner = "wf_claimed"
+	line := engineclient.SpoolLine{ID: owner + "/claimed", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}
 	writeSpoolFor(t, s, owner, line)
 	before := workflowSpoolRaw(t, s, owner)
-	calls := map[string]websvc.Call{"ObserveMuseQuota": func(context.Context, []json.RawMessage) (any, error) { return nil, nil }}
+	calls := map[string]websvc.Call{"AdmitNativeAttempt": func(context.Context, []json.RawMessage) (any, error) { return nil, nil }}
 	s.guard(calls)
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: owner})
-	if _, err := calls["ObserveMuseQuota"](ctx, nil); err != nil {
+	if _, err := calls["AdmitNativeAttempt"](ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	if raw, err := os.ReadFile(filepath.Join(s.dir, owner+".jsonl")); err != nil || !bytes.Equal(raw, before) {
@@ -849,8 +691,8 @@ func TestWorkflowSpoolClaimedSessionActorCannotDrainRun(t *testing.T) {
 }
 
 func TestWorkflowSpoolTreatsOwnerAsLiteralPathElement(t *testing.T) {
-	f := newMuseQuotaFixture(t)
-	s, _, _ := quotaSpool(t, f)
+	f := newAdmissionFixture(t)
+	s := admissionSpool(t, f)
 	const owner = "wf_literal[1].part"
 	const foreign = "wf_literal1.part"
 	workflowSpoolRun(t, f.db, owner, "ok")
@@ -858,7 +700,7 @@ func TestWorkflowSpoolTreatsOwnerAsLiteralPathElement(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := func(id string) []byte {
-		return append(arg(t, engineclient.SpoolLine{ID: id + "/uncommitted", Method: "ObserveMuseQuota", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}), '\n')
+		return append(arg(t, engineclient.SpoolLine{ID: id + "/uncommitted", Method: "AdmitNativeAttempt", Args: []json.RawMessage{arg(t, f.input)}, At: time.Now()}), '\n')
 	}
 	ownPath := filepath.Join(s.dir, owner+".100.draining")
 	foreignPath := filepath.Join(s.dir, foreign+".200.draining")

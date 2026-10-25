@@ -78,10 +78,6 @@ func TestSessionProjectionUsesSharedOverlapContext(t *testing.T) {
 			"{\"kind\":\"status\",\"name\":\"result\"}\n",
 			"{\"kind\":\"message\",\"role\":\"assistant\",\"text\":\"done\"}\n",
 		}, "", ""},
-		{"pair", []string{
-			"{\"kind\":\"tool\",\"state\":\"started\",\"id\":\"a\",\"name\":\"shell\"}\n",
-			"{\"kind\":\"tool\",\"state\":\"completed\",\"id\":\"b\",\"name\":\"shell\"}\n",
-		}, "completed", "a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, id := turnStore(t)
@@ -102,7 +98,7 @@ func TestSessionProjectionUsesSharedOverlapContext(t *testing.T) {
 			}
 			offset := int64(len(tc.lines[0]))
 			for n, start := range []int64{0, offset} {
-				raw, err := json.Marshal(Turn{N: n + 1, Status: "ok", NormStart: start, NormEnd: int64(len(source)), OutputDialect: workeroutput.DialectMuseJSONL})
+				raw, err := json.Marshal(Turn{N: n + 1, Status: "ok", NormStart: start, NormEnd: int64(len(source)), OutputDialect: workeroutput.DialectClaudeStreamJSON})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -20,7 +20,7 @@ import (
 
 func TestConfigSyncUsesRuntimeGeneration(t *testing.T) {
 	for _, kind := range []string{"skill", "mcp"} {
-		for _, harness := range []string{"pi", "opencode"} {
+		for _, harness := range []string{"pi"} {
 			t.Run(kind+"/"+harness, func(t *testing.T) {
 				storetest.Isolate(t)
 				home := t.TempDir()

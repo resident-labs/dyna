@@ -5,7 +5,7 @@ import { bestProfile, gaps, stateLabel, supportBrief, supportChip, supportDraft,
 
 const item = (key: string, label: string, state: string, reason = '', chip = '') => ({ key, label, state, reason, chip })
 const full = { dialect: 'claude-stream-json', partial: false, items: [item('transcript', 'Transcript', 'yes'), item('usage', 'Token counts', 'yes')] }
-const muse = { dialect: 'muse-jsonl', partial: true, items: [item('transcript', 'Transcript', 'yes'), item('usage', 'Token counts', 'unavailable', 'Muse JSON output does not report provider usage', 'No token counts')] }
+const partial = { dialect: 'pi-json', partial: true, items: [item('transcript', 'Transcript', 'yes'), item('usage', 'Token counts', 'unavailable', 'Pi JSON output does not report provider usage', 'No token counts')] }
 const text = { dialect: 'text', partial: true, items: [item('toolEvents', 'Tool calls', 'no', 'The plain text output does not show tool calls', 'No tool calls'), item('usage', 'Token counts', 'no', 'Plain text output does not report usage', 'No token counts')] }
 
 test('full support shows no chip', () => {
@@ -15,9 +15,9 @@ test('full support shows no chip', () => {
 })
 
 test('partial support shows one short chip', () => {
-  assert.equal(supportChip({ support: muse }), 'No token counts')
+  assert.equal(supportChip({ support: partial }), 'No token counts')
   assert.equal(supportChip({ support: text }), 'No tool calls +1')
-  assert.match(supportTitle({ support: muse }), /Token counts: Muse JSON output does not report provider usage/)
+  assert.match(supportTitle({ support: partial }), /Token counts: Pi JSON output does not report provider usage/)
 })
 
 test('states read as plain words', () => {
@@ -33,9 +33,9 @@ test('the support profile follows the reviewer rule', () => {
 })
 
 test('the brief names the harness, the gaps and every step', () => {
-  const brief = supportBrief({ name: 'wonder', harness: 'muse', support: muse })
-  assert.match(brief, /muse harness\. Profile: wonder\. Output dialect: muse-jsonl/)
-  assert.match(brief, /Token counts: unavailable\. Muse JSON output does not report provider usage\./)
+  const brief = supportBrief({ name: 'wonder', harness: 'pi', support: partial })
+  assert.match(brief, /pi harness\. Profile: wonder\. Output dialect: pi-json/)
+  assert.match(brief, /Token counts: unavailable\. Pi JSON output does not report provider usage\./)
   assert.match(brief, /real output sample/)
   assert.match(brief, /internal\/workeroutput/)
   assert.match(brief, /conformance test/)

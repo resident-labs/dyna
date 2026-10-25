@@ -45,8 +45,6 @@ func TestProviderForModelKeepsOtherHarnessesOnTheirProvider(t *testing.T) {
 		{"pi", "kimi-coding/k3.1-pro", store.ProviderKimiCode},
 		{"pi", "xai/grok-4.7", store.ProviderXAI},
 		{"pi", "deepseek/deepseek-flash", store.ProviderDeepSeek},
-		{"opencode", "zai/glm-5.3", store.ProviderOpenCodeGo},
-		{"opencode", "opencode-go/mimo-v2.6-pro", store.ProviderOpenCodeGo},
 		{"claude-code", "haiku", store.ProviderAnthropic},
 	} {
 		if got := providerForModel(c.harness, c.model); got != c.want {
@@ -55,34 +53,6 @@ func TestProviderForModelKeepsOtherHarnessesOnTheirProvider(t *testing.T) {
 	}
 }
 
-// An OpenCode account whose credential names another provider stays the one a
-// zai model uses, because OpenCode serves one selection and takes the key from
-// its own store.
-func TestOpenCodeSelectionServesAnyKeyedAccount(t *testing.T) {
-	a := testAccounts(t)
-	keyed, err := a.Create("opencode", "zai-key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// An OpenCode integration key names its own provider on the account row.
-	if err = a.transaction(func(s *store.State) error {
-		s.Find(keyed.ID).Provider = store.ProviderZAI
-		return nil
-	}, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.setActive("opencode", keyed.ID); err != nil {
-		t.Fatal(err)
-	}
-	got, err := a.activeAccount("opencode", providerForModel("opencode", "zai/glm-5.3"), "")
-	if err != nil || got.ID != keyed.ID {
-		t.Fatalf("opencode selection = %+v %v", got, err)
-	}
-}
-
-// Two harnesses that both run anthropic keep their own account: choosing one
-// never takes the other's account away, because their credential formats cannot
-// be exchanged yet.
 func TestProviderSelectionDoesNotTakeAnotherHarnessesAccount(t *testing.T) {
 	a := testAccounts(t)
 	work := signedClaude(t, a, "work", "aaaaaaaa-bbbb-cccc-dddd-000000000009")
@@ -126,16 +96,16 @@ func TestProviderSelectionDoesNotTakeAnotherHarnessesAccount(t *testing.T) {
 	}
 }
 
-// An OpenCode account whose credential names another provider admits with the
+// A keyed Pi account whose credential names another provider admits with the
 // provider the harness selects, because the selection row and the account row
 // keep their own values.
-func TestOpenCodeKeyedAccountAdmits(t *testing.T) {
+func TestPiKeyedAccountAdmits(t *testing.T) {
 	a := testAccounts(t)
-	n, err := a.Create("opencode", "zai-key")
+	n, err := a.Create("pi", "zai-key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	captured := fixtureLogin("opencode-keyed")
+	captured := fixtureLogin("pi-keyed")
 	if err = writeAccountLogin(n.Home, captured); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +122,7 @@ func TestOpenCodeKeyedAccountAdmits(t *testing.T) {
 	if err = a.setActiveAccount(n); err != nil {
 		t.Fatal(err)
 	}
-	expected, err := a.CheckPreparedAccount("opencode", n.ID, "", "")
+	expected, err := a.CheckPreparedAccount("pi", n.ID, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

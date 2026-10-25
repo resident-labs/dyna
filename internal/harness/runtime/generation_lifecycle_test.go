@@ -13,7 +13,6 @@ import (
 
 	"dyna-agent/internal/authority"
 	harnessmgr "dyna-agent/internal/harness/config"
-	"dyna-agent/internal/harness/preferences"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store"
 )
@@ -96,7 +95,7 @@ func writeGenerationSession(t *testing.T, name string, pin Pin, closed bool) {
 }
 
 func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
-	for _, h := range []string{"claude-code", "opencode", "pi", "muse"} {
+	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
 			t.Setenv("MCP_TOKEN", "first-secret-canary")
@@ -251,54 +250,6 @@ func TestGenerationCapturedSkillsSurviveSourceEdits(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(stage, "plugin", "skills", "custom", "SKILL.md"))
 	if err != nil || string(raw) != "before" {
 		t.Fatal("materialization reread mutable source")
-	}
-}
-
-func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
-	r, home, id := generationFixture(t, "muse")
-	addGenerationMCP(t, r, "muse", "zulu")
-	addGenerationMCP(t, r, "muse", "alpha")
-	a := buildGeneration(t, r, "muse", home, id)
-	c, err := r.Config.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.MCP[0], c.MCP[1] = c.MCP[1], c.MCP[0]
-	if err = writeGenerationJSON(r.Config.Path, c, 0600); err != nil {
-		t.Fatal(err)
-	}
-	b := buildGeneration(t, r, "muse", home, id)
-	if a.Directory != b.Directory {
-		t.Fatal("catalog order invalidated effective content")
-	}
-	root, err := r.preferenceRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings := filepath.Join(root, "layer-test", "settings.json")
-	if err = writeGenerationJSON(settings, map[string]any{"tui.verbose_output": false, "tui.foreign_context_notice_shown": true}, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = preferences.Save(id, preferences.Ref{Settings: settings, Harness: "muse"}); err != nil {
-		t.Fatal(err)
-	}
-	withPrefs := buildGeneration(t, r, "muse", home, id)
-	if withPrefs.Directory == a.Directory {
-		t.Fatal("effective preferences did not invalidate content")
-	}
-	if !strings.Contains(strings.Join(withPrefs.Args, " "), "verbose_output") {
-		t.Fatal("preference missing from generated args")
-	}
-	again := buildGeneration(t, r, "muse", home, id)
-	if withPrefs.Directory != again.Directory {
-		t.Fatal("preferences did not reuse")
-	}
-	loaded, err := loadNativeGeneration("muse", a.Directory, os.LookupEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(strings.Join(loaded.Args, " "), "verbose_output") {
-		t.Fatal("resume loaded current preferences")
 	}
 }
 
@@ -637,14 +588,14 @@ func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
 	}
 }
 
-// An older build published Muse args as one whole-map pair under the previous
-// inputs version. The current build must not reuse that generation.
+// An older build published different args under the previous inputs version.
+// The current build must not reuse that generation.
 func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
-	r, home, id := generationFixture(t, "muse")
-	addGenerationMCP(t, r, "muse", "tools")
-	fresh := buildGeneration(t, r, "muse", home, id)
+	r, home, id := generationFixture(t, "pi")
+	addGenerationMCP(t, r, "pi", "tools")
+	fresh := buildGeneration(t, r, "pi", home, id)
 	inputDir := t.TempDir()
-	_, inputs, err := r.captureGeneration("muse", home, id, inputDir, os.LookupEnv)
+	_, inputs, err := r.captureGeneration("pi", home, id, inputDir, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +616,7 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	if err = readGenerationJSON(manifest, &m); err != nil {
 		t.Fatal(err)
 	}
-	m.Args = []string{"-c", `mcpServers={"tools":{"command":"tools","args":null}}`}
+	m.Args = []string{"--stale-generation-args"}
 	if err = writeGenerationJSON(manifest, m, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -673,13 +624,13 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = writeGenerationJSON(filepath.Join(stale, generationMetadata), generationOwnership{1, digest, payload, "muse", home}, 0600); err != nil {
+	if err = writeGenerationJSON(filepath.Join(stale, generationMetadata), generationOwnership{1, digest, payload, "pi", home}, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = validateOwnedGeneration(stale); err != nil {
 		t.Fatal("stale fixture is not a valid generation:", err)
 	}
-	got := buildGeneration(t, r, "muse", home, id)
+	got := buildGeneration(t, r, "pi", home, id)
 	if got.Directory == stale || strings.Join(got.Args, " ") != strings.Join(fresh.Args, " ") {
 		t.Fatalf("reused the older generation: %s %q", got.Directory, got.Args)
 	}

@@ -16,7 +16,6 @@ const maxUncheckedWrites = 0
 // These handlers apply the caller policy themselves. Each reason names the
 // check, so adding a name requires reviewing that implementation.
 var handlerCallerChecks = map[string]string{
-	"ObserveMuseQuota":            "checkMuseQuotaCaller uses the verified execution caller and request prefix, then the service loads the complete immutable admission reference.",
 	"ObserveClaudeUsage":          "checkClaudeUsageCaller uses the verified execution caller and request prefix, then the service loads the complete immutable admission reference.",
 	"AdmitNativeAttempt":          "checkAdmissionCaller requires the verified session runner or the run coordinator and its own execution and request prefix.",
 	"AttachSeat":                  "Checks root attach with authority.Of(ctx).",

@@ -23,7 +23,7 @@ const built = await bundle({ component: '../settings/accounts/AddAccount', api }
 const runtimes: HarnessSnapshot = {
   bundles: [
     { harness: 'claude-code', version: '2.1.302', executable: '/dyna/claude', directory: '/dyna/claude' },
-    { harness: 'opencode', version: '2.0.32', executable: '/dyna/opencode', directory: '/dyna/opencode' },
+
   ],
   accounts: [],
   profiles: [],
@@ -99,25 +99,12 @@ test('the native path offers a saved login and starts Claude Code', async (t) =>
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
   try {
     const options = [...element<HTMLSelectElement>(target, 'select[aria-label="Harness"]').options].map((option) => option.value)
-    assert.deepEqual(options, ['', 'claude-code', 'muse', 'opencode', 'pi'], 'the other native harnesses keep their sign-in path')
+    assert.deepEqual(options, ['', 'claude-code', 'pi'], 'only the harnesses this release runs keep a sign-in path')
     selectHarness(target, 'claude-code')
     flushSync()
     submit(target)
     await settle(flushSync)
     assert.deepEqual(calls, [['find', 'claude-code', '2.1.302'], ['begin', 'claude-code', '2.1.302', '', '', false]])
-  } finally { await unmount(app) }
-})
-
-test('an OpenCode native choice starts the OpenCode sign-in', async (t) => {
-  const calls: unknown[][] = []
-  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
-  const { target, unmount, flushSync, app } = await mountForm(t, dom)
-  try {
-    selectHarness(target, 'opencode')
-    flushSync()
-    submit(target)
-    await settle(flushSync)
-    assert.deepEqual(calls, [['find', 'opencode', '2.0.32'], ['begin', 'opencode', '2.0.32', '', '', false]], 'every native harness starts its own sign-in')
   } finally { await unmount(app) }
 })
 
@@ -175,29 +162,6 @@ test('a reopened dialog shows the native sign-in saved for its account', async (
     await settle(flushSync)
     assert.match(textOf(target), /Paste the code from the browser/, 'the saved step and its paste control are back')
     assert.ok(elements(target, 'button').some((b) => textOf(b) === 'Cancel sign-in'), 'the saved sign-in can still be cancelled')
-  } finally { await unmount(app) }
-})
-
-test('an OpenCode Go key creates an OpenCode account', async (t) => {
-  const calls: unknown[][] = []
-  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
-  const { target, unmount, flushSync, app } = await mountForm(t, dom)
-  try {
-    selectHarness(target, 'pi')
-    flushSync()
-    chooseMethod(target, 'key')
-    flushSync()
-    selectProvider(target, 'opencode-go')
-    flushSync()
-    const where = element<HTMLSelectElement>(target, 'select[aria-label="Save the key in"]')
-    where.value = 'opencode'
-    where.dispatchEvent(new Event('change', { bubbles: true }))
-    type(target, 'input[aria-label="Account label"]', 'Go work')
-    type(target, 'input[aria-label="API key"]', 'sk-go')
-    flushSync()
-    submit(target)
-    await settle(flushSync)
-    assert.deepEqual(calls, [['add', 'opencode', 'opencode-go', 'Go work', 'sk-go']], 'the key creates an OpenCode account, not a Pi one')
   } finally { await unmount(app) }
 })
 

@@ -45,8 +45,6 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 	h := "pi"
 	if strings.HasPrefix(spec, "@anthropic-ai/") {
 		h = "claude-code"
-	} else if strings.HasPrefix(spec, "@opencode/") {
-		h = "opencode"
 	}
 	pkg, name := bundlePackage(h)
 	version := strings.TrimPrefix(spec, pkg+"@")

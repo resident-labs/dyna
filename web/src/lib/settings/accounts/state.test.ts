@@ -68,13 +68,10 @@ test('allowance arithmetic preserves reported values without guessing from reset
   assert.equal(remainingPercent({ usedPercent: 100, resetsAt: 'invalid' }), 0)
 })
 
-test('OpenCode default labels identify the provider and preserve custom account names', () => {
-  for (const [integration, label] of [['opencode-go', 'OpenCode Go'], ['opencode', 'OpenCode Zen']]) {
-    assert.equal(accountLabel({ harness: 'opencode', integration, label: 'OpenCode account' }), label)
-    assert.equal(accountLabel({ harness: 'opencode', integration, label: '' }), label)
-    assert.equal(accountLabel({ harness: 'opencode', integration, label: 'Work account' }), 'Work account')
-  }
-  assert.equal(accountLabel({ harness: 'pi', label: 'OpenCode account' }), 'OpenCode account')
+test('account labels use the saved label or the provider name', () => {
+  assert.equal(accountLabel({ harness: 'pi', provider: 'opencode-go', label: 'OpenCode account' }), 'OpenCode account')
+  assert.equal(accountLabel({ harness: 'pi', provider: 'opencode-go', label: '' }), 'OpenCode Go')
+  assert.equal(accountLabel({ harness: 'claude-code', provider: 'anthropic' }), 'Anthropic')
 })
 
 test('an account without a label is named by its provider, and a provider has a name', () => {
@@ -110,13 +107,13 @@ test('idle window explains a passed reset without a new model call', () => {
   assert.match(windowReset({ ...window, label: 'Weekly' }), /^Reset /)
 })
 
-test('OpenCode omits an unreported plan while preserving real plans and account warnings', () => {
-  const row = { harness: 'opencode', status: 'ready' }
-  assert.equal(accountStatus(row), '')
-  assert.equal(accountStatus({ ...row, plan: { id: 'unknown', label: '' } }), '')
+test('account status names a plan only when one is reported', () => {
+  const row = { harness: 'pi', status: 'ready' }
+  assert.equal(accountStatus(row), 'Plan not reported')
+  assert.equal(accountStatus({ ...row, plan: { id: 'unknown', label: '' } }), 'Plan not reported')
   assert.equal(accountStatus({ ...row, plan: { id: '', label: 'Reported plan' } }), 'Reported plan')
   assert.equal(accountStatus({ ...row, needsLogin: true }), 'Needs sign-in')
-  assert.equal(accountStatus({ ...row, quotaBlocked: true }), 'Session limit reached')
+  assert.match(accountStatus({ ...row, quotaBlocked: true, quotaBlockedUntil: '2999-01-01T00:00:00Z' }), /^Session limit reached/)
 })
 
 test('an account without readable usage says why in words, never raw engine text', () => {

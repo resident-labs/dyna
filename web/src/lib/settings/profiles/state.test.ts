@@ -8,8 +8,9 @@ const go = model('opencode-go/model', { label: 'Shared name', providerId: 'openc
 const free = model('opencode/model-free', { label: 'Shared name', providerId: 'opencode', category: 'free' })
 const vendor = model('vendor/model', { label: 'Other', providerId: 'vendor', publisher: 'Publisher', category: 'other' })
 const models = [go, free, vendor]
-test('OpenCode starts with Go and free while All models includes provider routes', () => {
-  assert.deepEqual(filterModels(models, { category: 'opencode' }), [go, free])
+test('model filters use categories and provider routes', () => {
+  assert.deepEqual(filterModels(models, { category: 'go' }), [go])
+  assert.deepEqual(filterModels(models, { category: 'free' }), [free])
   assert.deepEqual(filterModels(models, { category: 'all', search: ' PUBLISHER ' }), [vendor])
   assert.deepEqual(filterModels(models, { category: 'go', provider: 'opencode' }), [])
 })
@@ -19,18 +20,18 @@ test('route preselection preserves exact identity and never substitutes by label
   assert.equal(routeModel(models, ''), null)
 })
 test('account selection requires matching harness, route, and unambiguous active connection', () => {
-  const account = accountFixture({ id: 'a', harness: 'opencode', providerId: 'opencode-go', active: true })
-  assert.equal(selectedAccount([account], 'opencode', go), account)
-  assert.equal(selectedAccount([account], 'pi', go), null)
-  assert.equal(selectedAccount([account], 'opencode', free, 'a'), null)
-  assert.equal(selectedAccount([account], 'opencode', go, 'ctx'), null)
-  assert.equal(selectedAccount([{ ...account, active: false }], 'opencode', go, 'a'), null)
-  assert.equal(selectedAccount([account, { ...account, id: 'b' }], 'opencode', go), null)
-  assert.equal(selectedAccount([{ ...account, routeId: 'opencode-go/other' }], 'opencode', go), null)
+  const account = accountFixture({ id: 'a', harness: 'pi', providerId: 'opencode-go', active: true })
+  assert.equal(selectedAccount([account], 'pi', go), account)
+  assert.equal(selectedAccount([account], 'claude-code', go), null)
+  assert.equal(selectedAccount([account], 'pi', free, 'a'), null)
+  assert.equal(selectedAccount([account], 'pi', go, 'ctx'), null)
+  assert.equal(selectedAccount([{ ...account, active: false }], 'pi', go, 'a'), null)
+  assert.equal(selectedAccount([account, { ...account, id: 'b' }], 'pi', go), null)
+  assert.equal(selectedAccount([{ ...account, routeId: 'opencode-go/other' }], 'pi', go), null)
 })
-test('new profiles use OpenCode defaults and preserve the selected exact model', () => {
-  assert.equal(blankProfile().harness, 'opencode')
-  assert.equal(blankProfile('opencode', go.id).model, go.id)
+test('new profiles use live harness defaults and preserve the selected exact model', () => {
+  assert.equal(blankProfile().harness, 'claude-code')
+  assert.equal(blankProfile('pi', go.id).model, go.id)
   assert.equal(blankProfile().name, '')
   assert.deepEqual(blankProfile().envKeys, [])
 })
@@ -39,13 +40,13 @@ test('new profiles start every rating at neutral 5, including diagnostics', () =
   assert.deepEqual({ taste, diagnostics, intelligence, cost }, { taste: 5, diagnostics: 5, intelligence: 5, cost: 5 })
 })
 
-test('single-route harnesses join by harness while OpenCode follows credential integration', () => {
+test('single-route harnesses join by harness while Pi follows credential integration', () => {
   const claude = accountFixture({ id: 'claude-account', harness: 'claude-code', providerId: 'anthropic', active: true })
   assert.equal(selectedAccount([claude], 'claude-code', { id: 'sonnet', providerId: 'anthropic' }), claude)
-  const consoleAccount = accountFixture({ id: 'console-account', harness: 'opencode', providerId: 'opencode', active: true })
+  const consoleAccount = accountFixture({ id: 'console-account', harness: 'pi', providerId: 'opencode', active: true })
   const route = { id: 'opencode-go/model', providerId: 'opencode-go', integrationId: 'opencode' }
-  assert.equal(selectedAccount([consoleAccount], 'opencode', route), consoleAccount)
-  assert.equal(selectedAccount([consoleAccount], 'opencode', { ...route, integrationId: 'different' }), null)
+  assert.equal(selectedAccount([consoleAccount], 'pi', route), consoleAccount)
+  assert.equal(selectedAccount([consoleAccount], 'pi', { ...route, integrationId: 'different' }), null)
 })
 
 test('publisher filters preserve exact harness routes', () => {

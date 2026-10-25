@@ -122,7 +122,7 @@ func dynaCommandStub(t *testing.T, build string) string {
 // Exercise the final Prepare merge rather than only individual adapter maps.
 // A pinned fake binary avoids provider installs and account network requests.
 func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
-	for _, h := range []string{"claude-code", "opencode", "muse", "pi"} {
+	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			accounts := testAccounts(t)
 			scope, err := accounts.HarnessHome(h)

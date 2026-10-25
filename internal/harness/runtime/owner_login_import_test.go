@@ -2,10 +2,8 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,7 +14,6 @@ import (
 
 	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/store"
-	"dyna-agent/internal/fsutil"
 	harnesshome "dyna-agent/internal/harness/home"
 )
 
@@ -49,8 +46,6 @@ func ownerImportSeed(t *testing.T, home, h string) []string {
 		files = map[string]string{".pi/agent/auth.json": `{"anthropic":{"type":"oauth","access":"fixture-access","refresh":"fixture-refresh"}}`}
 	case "grok":
 		files = map[string]string{".grok/auth.json": `{"access_token":"fixture-access","refresh_token":"fixture-refresh"}`}
-	case "muse":
-		files = map[string]string{".config/muse/auth.json": `{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","access_token":"fixture-access","user_email":"owner@example.test"},"other":{"api_key":"owner-only"}},"mcp_oauth":{"canary":"owner-only"}}`}
 	}
 	files["settings-canary.json"] = `{"skills":"owner-only","hooks":"owner-only","plugins":"owner-only","mcpServers":"owner-only"}`
 	var paths []string
@@ -62,7 +57,7 @@ func ownerImportSeed(t *testing.T, home, h string) []string {
 	return paths
 }
 func TestOwnerLoginImportNativeFiles(t *testing.T) {
-	for _, h := range []string{"claude-code", "pi", "grok", "muse"} {
+	for _, h := range []string{"claude-code", "pi", "grok"} {
 		t.Run(h, func(t *testing.T) {
 			r, home := ownerImportFixture(t)
 			paths := ownerImportSeed(t, home, h)
@@ -136,8 +131,6 @@ func TestOwnerLoginImportNativeFiles(t *testing.T) {
 			switch h {
 			case "claude-code":
 				login = filepath.Join(scope, ".credentials.json")
-			case "muse":
-				login = privateAccountFiles(h, scope)[0]
 			default:
 				login = filepath.Join(scope, "auth.json")
 			}
@@ -178,7 +171,7 @@ func TestCopyPersonalLoginMissingOrBroken(t *testing.T) {
 	}
 }
 func TestCopyPersonalLoginNeverReplacesSavedLogin(t *testing.T) {
-	for _, h := range []string{"grok", "muse"} {
+	for _, h := range []string{"claude-code", "grok"} {
 		t.Run(h, func(t *testing.T) {
 			r, home := ownerImportFixture(t)
 			ownerImportSeed(t, home, h)
@@ -262,49 +255,6 @@ func TestOwnerLoginImportSerializesWithTurnLease(t *testing.T) {
 	}
 }
 
-const ownerImportCredentialDDL = `CREATE TABLE credential (id text PRIMARY KEY,integration_id text,label text NOT NULL,value text NOT NULL,connector_id text,method_id text,active integer,time_created integer NOT NULL,time_updated integer NOT NULL);`
-
-func ownerImportSQL(t *testing.T, path, sql string) string {
-	t.Helper()
-	cmd := exec.Command("sqlite3", "-batch", path)
-	cmd.Stdin = strings.NewReader(sql)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatal("fixture SQLite command failed")
-	}
-	return string(out)
-}
-func TestOwnerLoginImportOpenCodeCredentialRowsOnly(t *testing.T) {
-	if _, err := exec.LookPath("sqlite3"); err != nil {
-		t.Skip("sqlite3 is unavailable")
-	}
-	r, home := ownerImportFixture(t)
-	owner := filepath.Join(home, ".local/share/opencode/opencode-v2.db")
-	if err := os.MkdirAll(filepath.Dir(owner), 0700); err != nil {
-		t.Fatal(err)
-	}
-	ownerImportSQL(t, owner, ownerImportCredentialDDL+`INSERT INTO credential VALUES ('cred1','opencode','Owner','{"token":"fixture-grant"}',NULL,NULL,1,1,1); CREATE TABLE session (data text); INSERT INTO session VALUES ('owner-only'); CREATE TABLE settings (data text); INSERT INTO settings VALUES ('owner-only');`)
-	destination := filepath.Join(t.TempDir(), "private.db")
-	ownerImportSQL(t, destination, ownerImportCredentialDDL+`CREATE TABLE settings (data text); INSERT INTO settings VALUES ('private-canary');`)
-	host, err := ownerLoginHost(r.Accounts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := importOwnerOpenCodeRows(context.Background(), host, destination); err != nil {
-		t.Fatal(err)
-	}
-	if got := ownerImportSQL(t, destination, `SELECT count(*) FROM credential; SELECT data FROM settings; SELECT count(*) FROM sqlite_master WHERE name='session';`); got != "1\nprivate-canary\n0\n" {
-		t.Fatal("copied unrelated owner database state")
-	}
-	if err := importOwnerOpenCodeRows(context.Background(), host, destination); err == nil {
-		t.Fatal("existing credential destination was overwritten")
-	}
-	if got := ownerImportSQL(t, owner, `SELECT count(*) FROM credential; SELECT data FROM session; SELECT data FROM settings;`); got != "1\nowner-only\nowner-only\n" {
-		t.Fatal("owner database changed")
-	}
-	checkMode(t, destination, 0600)
-}
-
 type ownerImportPartialManager struct {
 	native.Manager
 	calls *int
@@ -318,6 +268,7 @@ func (m ownerImportPartialManager) Activate(ctx context.Context, integration str
 	}
 	return rows, native.ErrPartialActivation
 }
+
 func TestOwnerLoginImportPartialFailureNeverRecopies(t *testing.T) {
 	r, home := ownerImportFixture(t)
 	ownerImportSeed(t, home, "grok")
@@ -426,78 +377,6 @@ func TestOwnerLoginImportSuccessAfterCancellation(t *testing.T) {
 	}
 }
 
-// ownerImportOpenCodeFixture seeds an owner OpenCode database and puts an
-// offline native CLI fixture on PATH. While the file named by
-// FAKE_OPENCODE_FAIL_ONCE exists, the fixture removes it, writes a native log
-// and fails, like a failed native command.
-func ownerImportOpenCodeFixture(t *testing.T) *Runtime {
-	t.Helper()
-	if _, err := exec.LookPath("sqlite3"); err != nil {
-		t.Skip("sqlite3 is unavailable")
-	}
-	r, home := ownerImportFixture(t)
-	owner := filepath.Join(home, ".local/share/opencode/opencode-v2.db")
-	if err := os.MkdirAll(filepath.Dir(owner), 0700); err != nil {
-		t.Fatal(err)
-	}
-	ownerImportSQL(t, owner, ownerImportCredentialDDL+`INSERT INTO credential VALUES ('cred1','opencode','Owner','{"token":"fixture-grant"}',NULL,NULL,1,1,1); CREATE TABLE session (data text); INSERT INTO session VALUES ('owner-only');`)
-	// Use the real account/native manager with an offline native CLI fixture.
-	// Its only output is the same reference list as native auth list --format json.
-	bin := t.TempDir()
-	// Keep the fixture on the native SQLite path. Starting Python and importing
-	// sqlite3 for every auth capture adds unrelated interpreter startup work.
-	script := `#!/bin/sh
-set -eu
-once=${FAKE_OPENCODE_FAIL_ONCE:-}
-if [ -n "$once" ] && [ -e "$once" ]; then
-    rm "$once"
-    log="$XDG_DATA_HOME/opencode/log"
-    mkdir -p "$log"
-    printf '%s' 'cli process failed' > "$log/opencode.log"
-    exit 1
-fi
-exec sqlite3 "$OPENCODE_DB" <<'SQL'
-` + strings.Replace(ownerImportCredentialDDL, "CREATE TABLE credential", "CREATE TABLE IF NOT EXISTS credential", 1) + `
-SELECT json_group_array(json_object('id',integration_id,'connections',json_array(json_object('type','credential','id',id,'status',NULL)))) FROM credential WHERE active=1;
-SQL
-`
-	if err := fsutil.WriteExecutable(filepath.Join(bin, "opencode"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return r
-}
-
-func TestOwnerLoginImportOpenCodePrivateCapture(t *testing.T) {
-	r := ownerImportOpenCodeFixture(t)
-	if err := r.copyPersonalLogin(context.Background(), "opencode"); err != nil {
-		t.Fatal(err)
-	}
-	n, err := r.Accounts.Active(accountProvider("opencode"), "opencode")
-	if err != nil || n.Status != "ready" {
-		t.Fatal("private OpenCode account unavailable", err)
-	}
-	c, err := readAccountLogin(n.Home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var payload struct {
-		Ref struct {
-			Scope struct{ Home, Data, Config, Database string }
-		}
-	}
-	if err := json.Unmarshal(c.Credential.Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	scope, _ := r.Accounts.HarnessHome("opencode")
-	if payload.Ref.Scope.Database != filepath.Join(scope, "opencode.db") || payload.Ref.Scope.Home != harnesshome.Home(scope) {
-		t.Fatal("OpenCode retained an owner reference")
-	}
-	if got := ownerImportSQL(t, payload.Ref.Scope.Database, `SELECT count(*) FROM credential; SELECT count(*) FROM sqlite_master WHERE name='session';`); got != "1\n0\n" {
-		t.Fatal("OpenCode copied owner session state")
-	}
-}
-
 func TestOwnerLoginImportBrokenPrivateLoginDoesNotRecopy(t *testing.T) {
 	r, home := ownerImportFixture(t)
 	ownerImportSeed(t, home, "grok")
@@ -553,7 +432,7 @@ func (m ownerImportReadOnlyManager) CredentialExpiry(native.Captured) (time.Time
 	return time.Unix(1, 0), nil
 }
 func TestOwnerLoginImportOwnerCanariesAfterFailedRefresh(t *testing.T) {
-	for _, h := range []string{"claude-code", "pi", "grok", "muse"} {
+	for _, h := range []string{"claude-code", "pi", "grok"} {
 		t.Run(h, func(t *testing.T) {
 			r, home := ownerImportFixture(t)
 			files := ownerImportSeed(t, home, h)
@@ -707,66 +586,6 @@ func TestOwnerLoginImportDeadlineLeavesAttemptAvailable(t *testing.T) {
 	}
 }
 
-func TestOwnerLoginImportOpenCodeBusyOwnerDatabase(t *testing.T) {
-	if _, err := exec.LookPath("sqlite3"); err != nil {
-		t.Skip("sqlite3 is unavailable")
-	}
-	r, home := ownerImportFixture(t)
-	owner := filepath.Join(home, ".local/share/opencode/opencode-v2.db")
-	if err := os.MkdirAll(filepath.Dir(owner), 0700); err != nil {
-		t.Fatal(err)
-	}
-	ownerImportSQL(t, owner, ownerImportCredentialDDL+`INSERT INTO credential VALUES ('cred1','opencode','Owner','{"token":"fixture-grant"}',NULL,NULL,1,1,1);`)
-	destination := filepath.Join(t.TempDir(), "private.db")
-	ownerImportSQL(t, destination, ownerImportCredentialDDL)
-	// Hold SQLite's exclusive lock bytes, as a running owner OpenCode writer would.
-	f, err := os.OpenFile(owner, os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	lock := syscall.Flock_t{Type: syscall.F_WRLCK, Whence: 0, Start: 0x40000000, Len: 512}
-	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lock); err != nil {
-		t.Fatal(err)
-	}
-	host, err := ownerLoginHost(r.Accounts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := importOwnerOpenCodeRows(context.Background(), host, destination); !errors.Is(err, errOwnerLoginBusy) {
-		t.Fatal("busy owner database was not reported as busy", err)
-	}
-	if got := ownerImportSQL(t, destination, `SELECT count(*) FROM credential;`); got != "0\n" {
-		t.Fatal("busy import changed the private database")
-	}
-}
-
-func TestCopyPersonalLoginReportsMissingSQLite(t *testing.T) {
-	// PATH holds only the fixture, so a version-manager shim cannot run.
-	out, err := exec.Command("python3", "-c", "import sys; print(sys.executable)").Output()
-	if err != nil {
-		t.Skip("python3 is unavailable")
-	}
-	python := strings.TrimSpace(string(out))
-	r, home := ownerImportFixture(t)
-	owner := filepath.Join(home, ".local/share/opencode/opencode-v2.db")
-	ownerImportWrite(t, owner, "")
-	// The offline native CLI fixture initializes the private schema without sqlite3.
-	bin := t.TempDir()
-	if err := fsutil.WriteExecutable(filepath.Join(bin, "opencode"), []byte("#!"+python+"\n"+`import os,sqlite3
-c=sqlite3.connect(os.environ['OPENCODE_DB'])
-c.execute('`+ownerImportCredentialDDL+`'.replace('CREATE TABLE credential','CREATE TABLE IF NOT EXISTS credential'))
-c.close()
-print('[]')
-`), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	if err := r.copyPersonalLogin(context.Background(), "opencode"); !errors.Is(err, errSQLiteMissing) {
-		t.Fatal("missing sqlite3 was not reported", err)
-	}
-}
-
 func TestOwnerLoginImportRetryIndexesInterruptedCopy(t *testing.T) {
 	r, home := ownerImportFixture(t)
 	ownerImportSeed(t, home, "grok")
@@ -862,23 +681,5 @@ func TestOwnerLoginImportRetriesAfterFailedCommand(t *testing.T) {
 	}
 	if n, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil || n.Status != "ready" {
 		t.Fatal("retry did not import the login", err)
-	}
-}
-
-// A failed private OpenCode command leaves native files in the private home.
-// The retry must resume the import instead of treating them as native state.
-func TestOwnerLoginImportOpenCodeRetriesAfterFailedCommand(t *testing.T) {
-	r := ownerImportOpenCodeFixture(t)
-	once := filepath.Join(t.TempDir(), "fail-once")
-	ownerImportWrite(t, once, "")
-	t.Setenv("FAKE_OPENCODE_FAIL_ONCE", once)
-	if err := r.copyPersonalLogin(context.Background(), "opencode"); !errors.Is(err, errOwnerLoginRetry) {
-		t.Fatalf("failed command was not reported for retry: %v", err)
-	}
-	if err := r.copyPersonalLogin(context.Background(), "opencode"); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := r.Accounts.Active(accountProvider("opencode"), "opencode"); err != nil || n.Status != "ready" {
-		t.Fatal("retry did not import the OpenCode login", err)
 	}
 }

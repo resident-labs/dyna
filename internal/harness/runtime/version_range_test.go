@@ -13,9 +13,6 @@ import (
 func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 	m := manager(t)
 	for _, tc := range []struct{ harness, version, reason string }{
-		{"opencode", "1.9.0", "v2 builds only"},
-		{"opencode", "0.0.0-v1-build", "v2 builds only"},
-		{"opencode", "3.0.0", "v2 builds only"},
 		{"pi", "1.0.9", "1.1.0"},
 	} {
 		_, err := m.Install(context.Background(), tc.harness, tc.version)
@@ -24,8 +21,6 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ harness, version string }{
-		{"opencode", "2.0.0"},
-		{"opencode", "0.0.0-v2-build"},
 		{"pi", "1.1.0"},
 		{"claude-code", "0.1.0"},
 	} {

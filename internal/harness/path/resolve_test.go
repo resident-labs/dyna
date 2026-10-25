@@ -24,10 +24,10 @@ func TestPATHPrecedesNativeFallbacks(t *testing.T) {
 	home := t.TempDir()
 	first := t.TempDir()
 	second := t.TempDir()
-	want := executable(t, first, "opencode")
-	executable(t, second, "opencode")
-	executable(t, filepath.Join(home, ".opencode", "bin"), "opencode")
-	got, err := Resolve("opencode", []string{"HOME=" + home, "PATH=" + first + string(os.PathListSeparator) + second})
+	want := executable(t, first, "pi")
+	executable(t, second, "pi")
+	executable(t, filepath.Join(home, ".local", "bin"), "pi")
+	got, err := Resolve("pi", []string{"HOME=" + home, "PATH=" + first + string(os.PathListSeparator) + second})
 	if err != nil || got != want || !filepath.IsAbs(got) {
 		t.Fatalf("got %q, %v; want %q", got, err, want)
 	}
@@ -44,16 +44,8 @@ func TestWindowsNativeResolutionUsesPATHEXTAndCaseInsensitiveEnvironment(t *test
 		t.Fatalf("Windows executable lookup: %q %v", got, err)
 	}
 }
-func TestOpenCodeNativeFallback(t *testing.T) {
-	home := t.TempDir()
-	want := executable(t, filepath.Join(home, ".opencode", "bin"), "opencode")
-	got, err := Resolve("opencode", []string{"HOME=" + home, "PATH=" + t.TempDir()})
-	if err != nil || got != want {
-		t.Fatalf("got %q, %v; want %q", got, err, want)
-	}
-}
 func TestLocalBinFallbackForEveryNativeHarness(t *testing.T) {
-	for _, binary := range []string{"claude", "opencode", "muse", "pi"} {
+	for _, binary := range []string{"claude", "pi"} {
 		t.Run(binary, func(t *testing.T) {
 			home := t.TempDir()
 			want := executable(t, filepath.Join(home, ".local", "bin"), binary)
@@ -85,11 +77,13 @@ func TestRejectsNonExecutableDirectoryBrokenLinkAndCustomNames(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "claude"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(dir, "absent"), filepath.Join(dir, "muse")); err != nil {
+	links := t.TempDir()
+	if err := os.Symlink(filepath.Join(links, "absent"), filepath.Join(links, "pi")); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"pi", "claude", "muse"} {
-		if path, err := Resolve(name, []string{"HOME=" + home, "PATH=" + dir}); path != "" || !errors.Is(err, exec.ErrNotFound) {
+	path := dir + string(os.PathListSeparator) + links
+	for _, name := range []string{"pi", "claude"} {
+		if path, err := Resolve(name, []string{"HOME=" + home, "PATH=" + path}); path != "" || !errors.Is(err, exec.ErrNotFound) {
 			t.Fatalf("%s accepted: %q, %v", name, path, err)
 		}
 	}

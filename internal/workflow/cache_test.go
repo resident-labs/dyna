@@ -337,7 +337,7 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 		{"runtime executable", func(p *profile.Profile) { p.RuntimeExecutable = "/other/executable" }},
 		{"runtime skills", func(p *profile.Profile) { p.RuntimeSkillPaths = []string{"/other/skill"} }},
 		{"effective dialect", func(p *profile.Profile) {
-			p.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectMuseJSONL}
+			p.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}
 		}},
 		{"chain order", func(p *profile.Profile) { p.Models = []string{"fallback", "first"} }},
 		{"fallback model", func(p *profile.Profile) { p.Models = []string{"first", "other"} }},

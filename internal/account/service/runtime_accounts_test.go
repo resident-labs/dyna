@@ -17,7 +17,7 @@ import (
 )
 
 func TestUnsupportedCredentialExpiryOffersSignIn(t *testing.T) {
-	for _, harness := range []string{"muse", "opencode"} {
+	for _, harness := range []string{"pi", "kimi-code"} {
 		t.Run(harness, func(t *testing.T) {
 			for _, expiry := range []time.Time{time.Now().Add(-time.Hour), time.Now().Add(time.Hour), {}} {
 				a := Account{Harness: harness, Status: "ready"}
@@ -48,22 +48,6 @@ func TestUnsupportedCredentialExpiryOffersSignIn(t *testing.T) {
 	setCredentialExpiry(&a, native.Captured{Identity: "grok:native", ExpiresAt: expired, Credential: store.Credential{Schema: "grok/native-files@1", Payload: payload}})
 	if a.NeedsLogin {
 		t.Fatal("refreshable token incorrectly required sign-in")
-	}
-}
-
-func TestExpiredAccessTokenKeepsAPIKeyFallbackSignedIn(t *testing.T) {
-	expiry := time.Now().Add(-time.Hour)
-	for _, h := range []string{"muse"} {
-		payload, _ := json.Marshal(map[string]any{"metaCredential": map[string]any{"access_token": "fixture-token", "api_key": "fixture-key", "user_email": "fixture@example.test", "expires_at": expiry.Unix()}})
-		schema, identity := "muse/auth-file@1", "meta:email:fixture@example.test"
-		a := Account{Harness: h, Status: "ready"}
-		setCredentialExpiry(&a, native.Captured{Identity: identity, Credential: store.Credential{Schema: schema, Payload: payload}})
-		if strings.Contains(a.RefreshMessage, "Sign in again before") || a.RefreshMessage != "API key · no expiry" {
-			t.Fatalf("misleading fallback guidance for %s: %s", h, a.RefreshMessage)
-		}
-		if a.NeedsLogin || a.Status != "ready" || a.ExpiresAt == nil {
-			t.Fatalf("fallback lost for %s: %+v", h, a)
-		}
 	}
 }
 
@@ -138,40 +122,6 @@ func TestCurrentCredentialClearsSavedRefreshWarning(t *testing.T) {
 	}
 }
 
-func TestMuseAPIKeyHasNoExpiryWarning(t *testing.T) {
-	payload := json.RawMessage(`{"metaCredential":{"api_key":"fixture-key","access_token":"fixture-access","user_email":"fixture@example.test"}}`)
-	a := Account{Harness: "muse", Status: "ready"}
-	setCredentialExpiry(&a, native.Captured{Identity: "meta:email:fixture@example.test", Credential: store.Credential{Schema: "muse/auth-file@1", Payload: payload}})
-	if a.RefreshMessage != "API key · no expiry" || a.NeedsLogin {
-		t.Fatalf("static key status: %+v", a)
-	}
-}
-
-func TestSavedUsagePreservesPrivateCredentialStatus(t *testing.T) {
-	expiry := time.Now().Add(time.Hour)
-	a := Account{Harness: "muse", RefreshMessage: "API key · no expiry", ExpiresAt: &expiry}
-	applySavedObservation(&a, store.Entry{Metadata: store.Metadata{Harness: "muse", NativeHome: t.TempDir()}}, time.Now())
-	if a.RefreshMessage != "API key · no expiry" || a.ExpiresAt == nil {
-		t.Fatal("index without credentials overwrote native login status", a)
-	}
-}
-
-func TestOpenCodeSavedReferenceExpiryIsInformational(t *testing.T) {
-	c := native.Captured{Identity: "opencode:opencode-go:fixture", Integration: "opencode-go", Credential: store.Credential{Schema: "opencode/v2-ref@1", Payload: json.RawMessage(`{"ref":{"integration":"opencode-go","credentialID":"fixture","scope":{},"credentialType":"oauth","expires":1}}`)}}
-	a := Account{Harness: "opencode", Status: "ready"}
-	setCredentialExpiry(&a, c)
-	if a.NeedsLogin || a.Status != "ready" {
-		t.Fatal("reference expiry rejected native login", a)
-	}
-	c.Credential.Payload = json.RawMessage(`{"ref":{"integration":"opencode-go","credentialID":"fixture","scope":{},"credentialType":"oauth","expires":1999999999999}}`)
-	setCredentialExpiry(&a, c)
-	if a.NeedsLogin || a.Status != "ready" || a.ExpiresAt.UnixMilli() != 1999999999999 {
-		t.Fatal("current native expiry lost", a)
-	}
-}
-
-// A saved login of a retired harness keeps reporting usage and renewing: the
-// bundle and executable a turn would need are no longer required.
 // grokAuthFile is one login in Grok's auth.json.
 type grokAuthFile struct {
 	AuthMode     string `json:"auth_mode"`

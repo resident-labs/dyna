@@ -124,7 +124,7 @@ func TestFirstUseLatestVersion(t *testing.T) {
 	f.Latest = func(context.Context, string) (string, error) {
 		return "", errors.New("Version metadata is unavailable.")
 	}
-	if _, err := f.LatestVersion(context.Background(), "muse"); err == nil || !strings.Contains(err.Error(), "cannot install muse") || !strings.Contains(err.Error(), "Connect to the internet") {
+	if _, err := f.LatestVersion(context.Background(), "pi"); err == nil || !strings.Contains(err.Error(), "cannot install pi") || !strings.Contains(err.Error(), "Connect to the internet") {
 		t.Fatalf("err = %v", err)
 	}
 }

@@ -33,19 +33,19 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
   const snapshot = loose({
     capabilities: [
       { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
-      { harness: 'muse', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
-      { harness: 'grok', status: 'partial', reason: 'Home compatibility skills remain.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
+      { harness: 'pi', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
+      { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
     ],
     bundles: [
       { harness: 'claude-code', version: '2.1.299', executable: '/dyna/claude' },
-      { harness: 'muse', version: '0.61.0', executable: '/dyna/muse' },
+      { harness: 'pi', version: '0.61.0', executable: '/dyna/pi' },
     ],
     accounts: [
       { id: 'acc-1', harness: 'claude-code', label: 'work@acme.dev', status: 'ready', active: true },
-      { id: 'acc-2', harness: 'muse', label: 'me@personal', status: 'ready', active: true },
+      { id: 'acc-2', harness: 'pi', label: 'me@personal', status: 'ready', active: true },
     ],
     profiles: [
-      { profile: 'muse-prof', harness: 'muse', status: 'switch pending', reason: 'switch pending: 2 turns running', switchPending: true, runningTurns: 2 },
+      { profile: 'pi-prof', harness: 'pi', status: 'switch pending', reason: 'switch pending: 2 turns running', switchPending: true, runningTurns: 2 },
     ],
   })
 
@@ -54,18 +54,18 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
   assert.equal(claude.needsSignIn, false)
   assert.equal(claude.version, '2.1.299')
 
-  const muse = harnessRowState('muse', snapshot)
-  assert.equal(muse.status, 'switch pending')
-  assert.equal(muse.switchPending, true)
-  assert.equal(muse.runningTurns, 2)
-  assert.match(muse.reason, /switch pending: 2 turns running/)
-
   const pi = harnessRowState('pi', snapshot)
-  assert.equal(pi.status, 'not installed')
-  assert.equal(pi.needsSignIn, false)
-  assert.equal(pi.needsInstall, true)
+  assert.equal(pi.status, 'switch pending')
+  assert.equal(pi.switchPending, true)
+  assert.equal(pi.runningTurns, 2)
+  assert.match(pi.reason, /switch pending: 2 turns running/)
 
-  const installing = harnessRowState('pi', { ...snapshot, installing: ['pi'] })
+  const missing = harnessRowState('claude-code', { ...snapshot, bundles: [], accounts: [], profiles: [], capabilities: [] })
+  assert.equal(missing.status, 'not installed')
+  assert.equal(missing.needsSignIn, false)
+  assert.equal(missing.needsInstall, true)
+
+  const installing = harnessRowState('claude-code', { ...snapshot, installing: ['claude-code'] })
   assert.equal(installing.status, 'installing')
   assert.match(installing.reason, /installing its copy/)
 })
@@ -75,11 +75,11 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(harnessMeta('claude').id, 'claude')
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude-code'] }, 'claude-code'), true)
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude', 'grok'] }, 'claude-code'), false)
-  assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude', 'grok'] }, 'muse'), false)
+  assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude'] }, 'pi'), false)
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
   assert.equal(toolSummary('mcp', { command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
-  assert.equal(HARNESS_ORDER.length, 4)
+  assert.equal(HARNESS_ORDER.length, 2)
 })
 
 test('tool selection sends the runtime harness ID to the catalog', async () => {
@@ -182,7 +182,7 @@ test('only verified recommendation statuses permit automatic installation', () =
 })
 
 test('not-signed-in rows keep their harness state without a sign-in action', () => {
-  for (const harness of ['muse', 'opencode']) {
+  for (const harness of ['claude-code', 'pi']) {
     const snapshot = loose({ bundles: [{ harness, version: '2.0.0' }], accounts: [{ id: 'saved', harness, active: true, status: 'not signed in' }] })
     const row = harnessRowState(harness, snapshot)
     assert.equal(row.needsSignIn, true)
