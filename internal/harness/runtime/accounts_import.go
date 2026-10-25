@@ -32,44 +32,68 @@ func (h PiImportHost) CreatePiAccount(ctx context.Context, provider store.Provid
 	if label == "" {
 		label = string(provider) + " login"
 	}
+	created, err := h.createLocked(ctx, provider, kind, label, login)
+	if err == nil {
+		return importer.PiAccount{ID: created.ID, Provider: created.Provider, Kind: created.Kind}, nil
+	}
+	if created.ID == "" {
+		return importer.PiAccount{}, err
+	}
+	// The Pi account gate is free again, so the removal can take the harness
+	// locks it needs. Removing the account this attempt made keeps the source
+	// the only copy of the refresh token.
+	if removeErr := h.RemovePiAccount(ctx, created.ID); removeErr != nil {
+		return importer.PiAccount{}, errors.Join(err, fmt.Errorf("The new Pi account could not be removed: %w", removeErr))
+	}
+	return importer.PiAccount{}, err
+}
+
+// createLocked makes the account and writes its login under the Pi account
+// gate. It reports the account it made even when a later step fails, so the
+// caller removes it after the gate is released.
+func (h PiImportHost) createLocked(ctx context.Context, provider store.Provider, kind store.Kind, label string, login importer.PiLogin) (NativeAccount, error) {
 	piKeysMu.Lock()
 	defer piKeysMu.Unlock()
 	release, err := h.Runtime.lockPiAccounts(ctx)
 	if err != nil {
-		return importer.PiAccount{}, err
+		return NativeAccount{}, err
 	}
 	defer release()
 	account, err := h.Runtime.Accounts.CreateProvider("pi", provider, kind, label)
 	if err != nil {
-		return importer.PiAccount{}, err
-	}
-	fail := func(cause error) (importer.PiAccount, error) {
-		if removeErr := h.Runtime.Accounts.Remove(account.ID, true); removeErr != nil {
-			return importer.PiAccount{}, errors.Join(cause, removeErr)
-		}
-		return importer.PiAccount{}, cause
+		return NativeAccount{}, err
 	}
 	edit := func(entries map[string]json.RawMessage) {
 		clear(entries)
 		entries[login.EntryID] = login.Entry
 	}
 	if _, err := piEditAuth(ctx, account.Home, edit); err != nil {
-		return fail(err)
+		return account, err
 	}
 	if _, err := h.Runtime.Accounts.Capture(ctx, account.ID, ""); err != nil {
-		return fail(fmt.Errorf("Pi did not save the moved sign-in: %w", err))
-	}
-	if err := verifyPiLogin(account.Home, login); err != nil {
-		return fail(err)
+		return account, fmt.Errorf("Pi did not save the moved sign-in: %w", err)
 	}
 	saved, err := h.Runtime.Accounts.Find(account.ID)
 	if err != nil {
-		return fail(err)
+		return account, err
+	}
+	if err := piImportConfirm(account.Home, saved, login); err != nil {
+		return account, err
+	}
+	return saved, nil
+}
+
+// piImportConfirm checks the account after Pi saved the entry: exactly the
+// wanted entry, and the account reads as ready. Tests replace it to reach the
+// rollback that runs when the read-back fails.
+var piImportConfirm = func(home string, saved NativeAccount, login importer.PiLogin) error {
+	if err := verifyPiLogin(home, login); err != nil {
+		return err
 	}
 	if saved.Status != "ready" {
-		return fail(errors.New("Pi read the moved sign-in as not signed in."))
+		return errors.New("Pi read the moved sign-in as not signed in.")
 	}
-	return importer.PiAccount{ID: saved.ID, Provider: saved.Provider, Kind: saved.Kind}, nil
+	return nil
 }
 
 // piLoginEntry holds the fields of a Pi login entry this Dyna release writes.
