@@ -153,7 +153,7 @@ func TestFailoverSkipsAQuotaBlockedAccount(t *testing.T) {
 	if want := reset.Local().Format("Mon 15:04"); !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %v, want the blocked account's reset %s", err, want)
 	}
-	if active, _ := a.Active("claude-code"); active.ID == blocked.ID {
+	if active, _ := a.Active(accountProvider("claude-code"), "claude-code"); active.ID == blocked.ID {
 		t.Fatal("the switch moved onto the blocked account")
 	}
 }

@@ -73,7 +73,7 @@ func TestClaudeSwitchDoesNotWaitForRunningTurns(t *testing.T) {
 	if err = a.Switch(ctx, work.ID, "/fake/native"); err != nil {
 		t.Fatal("switch waited for the running turn:", err)
 	}
-	if active, err := a.Active("claude-code"); err != nil || active.ID != work.ID {
+	if active, err := a.Active(accountProvider("claude-code"), "claude-code"); err != nil || active.ID != work.ID {
 		t.Fatal("switch did not select the new account", active, err)
 	}
 	next, err := a.Env(work.ID)

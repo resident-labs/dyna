@@ -90,7 +90,7 @@ func (r *Runtime) UsePersonalLogin(ctx context.Context, harness string) (NativeA
 	if err = r.copyPersonalLogin(ctx, found.Harness); err != nil {
 		return NativeAccount{}, err
 	}
-	n, err := r.Accounts.Active(found.Harness)
+	n, err := r.Accounts.Active(accountProvider(found.Harness), found.Harness)
 	if err != nil || n.Identity != found.identity {
 		return NativeAccount{}, errCopyFailed
 	}

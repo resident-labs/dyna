@@ -192,7 +192,7 @@ func TestSwitchRestoresPreviousLoginAfterPartialActivation(t *testing.T) {
 	if err := a.Switch(context.Background(), second.ID, "/fake/codex"); !errors.Is(err, accountnative.ErrPartialActivation) {
 		t.Fatal(err)
 	}
-	active, err := a.Active("codex")
+	active, err := a.Active(accountProvider("codex"), "codex")
 	if err != nil || active.ID != first.ID {
 		t.Fatal(active, err)
 	}
@@ -376,7 +376,7 @@ func TestSharedServiceNativeLoginCompleteAndCancel(t *testing.T) {
 			if err = flow.Cancel(); err != nil {
 				t.Fatal("cancel is not idempotent", err)
 			}
-			active, err := a.Active(h)
+			active, err := a.Active(accountProvider(h), h)
 			if err != nil || active.ID != first.ID {
 				t.Fatal(active, err)
 			}
@@ -599,7 +599,7 @@ func TestAccountDiscoveryDoesNotCreateStorage(t *testing.T) {
 	if rows, err := a.List(); err != nil || len(rows) != 0 {
 		t.Fatal(rows, err)
 	}
-	if _, err := a.Active("codex"); err == nil {
+	if _, err := a.Active(accountProvider("codex"), "codex"); err == nil {
 		t.Fatal("missing active selection accepted")
 	}
 	if _, err := a.HarnessHome("codex"); err != nil {
@@ -640,7 +640,7 @@ func TestSavedManagerReadsInactiveSnapshotWithoutNativeChanges(t *testing.T) {
 	if _, err = m.Activate(context.Background(), "", captured[0].Credential); !errors.Is(err, accountnative.ErrUnsupported) {
 		t.Fatal("saved activation allowed", err)
 	}
-	active, err := a.Active("codex")
+	active, err := a.Active(accountProvider("codex"), "codex")
 	if err != nil || active.ID != second.ID {
 		t.Fatal("saved capture changed runtime selection", err)
 	}
