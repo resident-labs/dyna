@@ -86,7 +86,7 @@ Stored hierarchy controls parent selectors and depth, even when `DYNA_DEPTH` pre
 
 Only root uses `dyna ask` to ask the human owner. Other sessions use `dyna post @parent` for questions.
 A worker blocked on something only the owner can do, such as a sign-in, a live check on a
-device, a secret, or an outside decision, posts to root with `--needs-root`. The post states
+device, a secret, or an outside decision, posts to @root or to its parent root. The post states
 what is needed and why the work stops without it. Root turns that post into one `dyna ask`
 question. Workers never ask the owner directly.
 Root can use these question commands:

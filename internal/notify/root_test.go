@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -461,66 +460,38 @@ func rootDetachBoundary(t *testing.T, overflow bool) {
 	}
 }
 
-// Unmarked worker copies stay out of root's live input and appear once in
-// the next human-triggered turn instead.
-func TestUnmarkedRootPostIsQuietAndReachesNextDigest(t *testing.T) {
+// A depth-1 session's message to its parent root wakes root: an agent's
+// question must not wait in the quiet digest, with no flag to remember.
+func TestDepthOneSessionPostToParentRootWakesRoot(t *testing.T) {
 	e := newTestEnv(t, withImmediateTurns)
 	rec := e.room()
-	agent := e.start(rec, "agent", nil)
 	e.human(rec, "RESPOND: ready", "@root")
 	root := e.wait(e.rootSession(rec).ID, 1)
-	out, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: agent}, Mentions: []string{"@parent"}, Text: "The draft stays frozen."})
+	top := e.start(rec, "lead", &root)
+	snd := Sender{Kind: SenderSession, Room: rec.Name, Session: top}
+
+	out, err := e.svc.Post(e.ctx, PostInput{Sender: snd, Mentions: []string{"@parent"}, Text: "Which format should the export use?"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := rootDelivery(out, rec); got != "" {
-		t.Fatalf("unmarked copy woke root: %q", got)
+	if got := rootDelivery(out, rec); got != "session-queued" {
+		t.Fatalf("a depth-1 @parent post did not wake root: %q %+v", got, out.Deliveries)
 	}
-	if _, err := e.mgr.TickSessions(e.ctx); err != nil {
-		t.Fatal(err)
+	seat, ok, err := e.svc.Rooms.SeatDelivery(rec.ID, out.Message.ID)
+	if err != nil || !ok || seat.Mode != room.DeliveryWake {
+		t.Fatalf("seat row = %+v, %v, %v", seat, ok, err)
 	}
-	if got := e.rootSession(rec); got.Turns != root.Turns {
-		t.Fatalf("quiet copy started turn %d", got.Turns)
-	}
-	e.human(rec, "RESPOND: next", "@root")
 	e.wait(root.ID, 2)
-	turn, err := e.mgr.Store.ReadTurn(root.ID, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if input := e.turnInput(root.ID, 2) + fmt.Sprint(turn.Result); !strings.Contains(input, "[QUIET ROOT POSTS]") || !strings.Contains(input, out.Message.ID) || !strings.Contains(input, out.Message.Text) {
-		t.Fatalf("quiet copy missing from digest: %s", input)
-	}
-	e.human(rec, "RESPOND: later", "@root")
-	e.wait(root.ID, 3)
-	later, err := e.mgr.Store.ReadTurn(root.ID, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if input := e.turnInput(root.ID, 3) + fmt.Sprint(later.Result); strings.Contains(input, out.Message.ID) {
-		t.Fatalf("quiet copy repeated: %s", input)
+	if input := e.turnInput(root.ID, 2); !strings.Contains(input, out.Message.ID) || !strings.Contains(input, out.Message.Text) {
+		t.Fatalf("the post is not root's turn input: %s", input)
 	}
 }
 
-func TestMarkedRootPostWakesAndUnmarkedChildPostKeepsParentDelivery(t *testing.T) {
+func TestChildPostKeepsParentDelivery(t *testing.T) {
 	e := newTestEnv(t, withImmediateTurns)
 	rec := e.room()
 	parent := e.start(rec, "lead", nil)
 	child := e.start(rec, "child", &parent)
-	e.human(rec, "RESPOND: ready", "@root")
-	root := e.wait(e.rootSession(rec).ID, 1)
-	request := PostRequest{NeedsRoot: true, Mentions: []string{"@parent"}, Text: "Root must choose the merge order."}
-	marked, err := e.svc.Post(e.ctx, request.Input(Sender{Kind: SenderSession, Room: rec.Name, Session: parent}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !marked.Message.NeedsRoot || rootDelivery(marked, rec) != "session-queued" {
-		t.Fatalf("marked post did not wake root: %+v", marked)
-	}
-	e.wait(root.ID, 2)
-	if p := e.turnInput(root.ID, 2); !strings.Contains(p, marked.Message.ID) {
-		t.Fatalf("missing marked input: %s", p)
-	}
 	ordinary, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: child}, Mentions: []string{"@parent"}, Text: "Parent must resolve the interface."})
 	if err != nil {
 		t.Fatal(err)
@@ -532,8 +503,7 @@ func TestMarkedRootPostWakesAndUnmarkedChildPostKeepsParentDelivery(t *testing.T
 
 // A session whose parent is the root session addresses the seat itself: @parent
 // stores the room's own address, the same one @root uses, so one seat has one
-// address. The post stays quiet for root unless it needs root, and the seat's
-// delivery row carries that decision.
+// address, and a message to it wakes root.
 func TestParentOfRootSessionAddressesTheSeat(t *testing.T) {
 	e := newTestEnv(t, withImmediateTurns)
 	rec := e.room()
@@ -542,34 +512,26 @@ func TestParentOfRootSessionAddressesTheSeat(t *testing.T) {
 	top := e.start(rec, "lead", &root)
 	snd := Sender{Kind: SenderSession, Room: rec.Name, Session: top}
 
-	quiet, err := e.svc.Post(e.ctx, PostInput{Sender: snd, Mentions: []string{"@parent"}, Text: "The draft is ready."})
+	woken, err := e.svc.Post(e.ctx, PostInput{Sender: snd, Mentions: []string{"@parent"}, Text: "The draft is ready."})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := quiet.Message.To; !reflect.DeepEqual(got, []string{rec.Name}) {
+	if got := woken.Message.To; !reflect.DeepEqual(got, []string{rec.Name}) {
 		t.Fatalf("@parent stored to %v, want the seat address %q", got, rec.Name)
 	}
-	if _, bound := quiet.Message.SessionIDs[root.Address()]; bound {
-		t.Fatalf("the seat post still binds the root session: %v", quiet.Message.SessionIDs)
+	if _, bound := woken.Message.SessionIDs[root.Address()]; bound {
+		t.Fatalf("the seat post still binds the root session: %v", woken.Message.SessionIDs)
 	}
-	if got := rootDelivery(quiet, rec); got != "" {
-		t.Fatalf("a quiet post to the seat woke root: %q", got)
+	if got := rootDelivery(woken, rec); got != "session-queued" {
+		t.Fatalf("a post to the seat did not wake root: %q %+v", got, woken.Deliveries)
 	}
-	seat, ok, err := e.svc.Rooms.SeatDelivery(rec.ID, quiet.Message.ID)
-	if err != nil || !ok || seat.Mode != room.DeliveryQuiet || seat.Category != room.RootQuietPost {
-		t.Fatalf("quiet seat row = %+v, %v, %v", seat, ok, err)
-	}
-
-	marked, err := e.svc.Post(e.ctx, PostRequest{NeedsRoot: true, Mentions: []string{"@parent"}, Text: "Root must choose the merge order."}.Input(snd))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := rootDelivery(marked, rec); got != "session-queued" {
-		t.Fatalf("a post that needs root did not wake it: %+v", marked.Deliveries)
+	seat, ok, err := e.svc.Rooms.SeatDelivery(rec.ID, woken.Message.ID)
+	if err != nil || !ok || seat.Mode != room.DeliveryWake {
+		t.Fatalf("seat row = %+v, %v, %v", seat, ok, err)
 	}
 	e.wait(root.ID, 2)
-	if input := e.turnInput(root.ID, 2); !strings.Contains(input, marked.Message.ID) {
-		t.Fatalf("marked seat post is not root's input: %s", input)
+	if input := e.turnInput(root.ID, 2); !strings.Contains(input, woken.Message.ID) {
+		t.Fatalf("seat post is not root's input: %s", input)
 	}
 }
 

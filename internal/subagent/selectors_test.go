@@ -62,7 +62,7 @@ func TestSelectorContextResolvesSelectorsNow(t *testing.T) {
 		t.Fatal(err)
 	}
 	top := e.m.Store.SelectorContext(leadMeta)
-	for _, want := range []string{"@parent = @root (quiet unless --needs-root)", "@siblings = work:other (idle)", "work:child-a (idle)", "work:child-b (idle)"} {
+	for _, want := range []string{"@parent = @root", "@siblings = work:other (idle)", "work:child-a (idle)", "work:child-b (idle)"} {
 		if !strings.Contains(top, want) {
 			t.Fatalf("top-level selector context missing %q:\n%s", want, top)
 		}

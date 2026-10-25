@@ -68,8 +68,7 @@ Read `dyna guide posting` for mention rules.
 ## Reports and turn boundaries
 
 The final message is the turn's full result report.
-Post only when a session must act before your final result: a blocker or a decision.
-Use --needs-root only for decisions, blockers, or work root must act on. Never copy status to @root.
+Post only when a session must act before your final result: a blocker or a decision. A post to @root, or to your parent root, wakes root. Never copy status to @root.
 If a successful turn already posted to its report recipient, Dyna sends no duplicate completion. Failures still report.
 
 A session turn reports once on its first turn, with a schema, or after a parent or owner post that names the session.
@@ -81,7 +80,7 @@ Actionable failures alert the current stored parent and owner, including provide
 Missing or unavailable parents fall back to the owner.
 Ordinary cancellation stays quiet; concrete stop errors alert.
 Failed and stopped turns always report. Successful turns started only by child or sibling posts, or only by group mentions such as `@team`, end silently.
-Worker posts wake root only with `--needs-root` or `--alert`; quiet copies appear in its next-turn digest. Other recipients still wake. Run and shell completions reach their parent and owner; foreground workflow joins return to the caller.
+Worker posts to `@root`, including depth-1 `@parent`, wake root. Other recipients still wake. Run and shell completions reach their parent and owner; foreground workflow joins return to the caller.
 Use `@parent` during a turn when a blocker or handoff needs action.
 
 Session progress shows in the session transcript and in room posts.
