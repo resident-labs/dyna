@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -55,55 +56,94 @@ func probeGrokCredits(ctx context.Context, client claudeHTTPClient, now time.Tim
 	}
 	return grokBillingObservation(raw, now)
 }
+
+type grokBillingPeriod struct {
+	Type  string `json:"type"`
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+// grokBillingObservation follows T3 Code's provider-grok reader: the period
+// type names the window, creditUsagePercent is the used share, and the period
+// end is the reset. Grok omits a zero percentage while keeping the complete
+// period, so a missing percentage for a valid weekly or monthly period is 0.
 func grokBillingObservation(raw []byte, now time.Time) (store.Observation, error) {
 	var result struct {
-		Config struct {
-			Unified            *bool    `json:"isUnifiedBillingUser"`
-			CreditUsagePercent *float64 `json:"creditUsagePercent"`
-			Period             struct {
-				Type  string `json:"type"`
-				Start string `json:"start"`
-				End   string `json:"end"`
-			} `json:"currentPeriod"`
+		Config *struct {
+			Unified            *bool              `json:"isUnifiedBillingUser"`
+			CreditUsagePercent *float64           `json:"creditUsagePercent"`
+			CurrentPeriod      *grokBillingPeriod `json:"currentPeriod"`
 		} `json:"config"`
 	}
-	if json.Unmarshal(raw, &result) != nil {
+	if json.Unmarshal(raw, &result) != nil || result.Config == nil {
 		return store.Observation{}, ErrSchema
 	}
-	if result.Config.Unified == nil {
-		return store.Observation{}, ErrSchema
+	kind := "other"
+	periodType := ""
+	if result.Config.CurrentPeriod != nil {
+		periodType = strings.TrimPrefix(result.Config.CurrentPeriod.Type, "USAGE_PERIOD_TYPE_")
 	}
-	// isUnifiedBillingUser is the only reliable plan signal: the tier name
-	// says "SuperGrok Plus" on both plans. An older plan bills monthly
-	// credits; that schema is unverified, so Dyna names the plan and reads
-	// no usage.
-	if !*result.Config.Unified {
-		return store.Observation{Plan: &store.Plan{ID: "grok-legacy", Label: "Legacy (monthly)"}, ObservedAt: now}, nil
+	switch periodType {
+	case "WEEKLY":
+		kind = "weekly"
+	case "MONTHLY":
+		kind = "monthly"
 	}
-	p := result.Config.Period
-	if p.Type != "USAGE_PERIOD_TYPE_WEEKLY" {
-		return store.Observation{}, ErrUnsupported
+	start, end := time.Time{}, time.Time{}
+	validPeriod := false
+	if period := result.Config.CurrentPeriod; period != nil && period.Start != "" && period.End != "" {
+		var startErr, endErr error
+		start, startErr = time.Parse(time.RFC3339Nano, period.Start)
+		end, endErr = time.Parse(time.RFC3339Nano, period.End)
+		validPeriod = startErr == nil && endErr == nil && end.After(start)
 	}
-	start, err := time.Parse(time.RFC3339Nano, p.Start)
-	if err != nil {
-		return store.Observation{}, ErrSchema
-	}
-	end, err := time.Parse(time.RFC3339Nano, p.End)
-	if err != nil || end.Sub(start) != 7*24*time.Hour {
-		return store.Observation{}, ErrSchema
-	}
-	window := store.Window{ID: "grok-weekly", Label: "Weekly usage", Period: "week", PeriodStart: start.UTC().Format(time.RFC3339Nano), ResetsAt: end.UTC().Format(time.RFC3339Nano)}
-	if percent := result.Config.CreditUsagePercent; percent != nil {
-		if *percent < 0 || *percent > 100 {
+	percent := result.Config.CreditUsagePercent
+	legacy := store.Observation{Plan: &store.Plan{ID: "grok-legacy", Label: "Legacy (monthly)"}, ObservedAt: now}
+	if kind == "weekly" || kind == "monthly" {
+		// A weekly or monthly window needs its complete period: the reset is
+		// part of the window, and a synthesized reset would clear old quota.
+		if !validPeriod {
+			if percent == nil && result.Config.Unified != nil && !*result.Config.Unified {
+				return legacy, nil
+			}
 			return store.Observation{}, ErrSchema
 		}
-		// Grok /usage show displays this value directly as percent used.
-		window.UsedPercent, window.Unit = percent, "percent"
-	} else {
-		window.UnavailableReason = "Grok did not return a usage percentage."
+		if percent == nil {
+			// Grok omits a zero percentage while retaining the complete period.
+			zero := 0.0
+			percent = &zero
+		}
 	}
-	return store.Observation{Plan: &store.Plan{ID: "x-subscription", Label: "X Subscription (weekly)"}, ObservedAt: now, Windows: []store.Window{window}}, nil
-
+	if percent == nil {
+		if result.Config.Unified != nil && !*result.Config.Unified {
+			// An older monthly plan with no period data is named, but no usage
+			// can be read. T3 returns no window for this shape too.
+			return legacy, nil
+		}
+		return store.Observation{}, ErrSchema
+	}
+	if *percent < 0 || *percent > 100 || math.IsNaN(*percent) || math.IsInf(*percent, 0) {
+		return store.Observation{}, ErrSchema
+	}
+	window := store.Window{ID: "grok-subscription", Label: "Subscription", UsedPercent: percent, Unit: "percent"}
+	switch kind {
+	case "weekly":
+		window.ID, window.Label, window.Period = "grok-weekly", "Weekly", "week"
+	case "monthly":
+		window.ID, window.Label, window.Period = "grok-monthly", "Monthly", "month"
+	}
+	if validPeriod {
+		window.PeriodStart = start.UTC().Format(time.RFC3339Nano)
+		window.ResetsAt = end.UTC().Format(time.RFC3339Nano)
+	}
+	observation := store.Observation{ObservedAt: now, Windows: []store.Window{window}}
+	if result.Config.Unified != nil && *result.Config.Unified {
+		// isUnifiedBillingUser is the X Subscription, Grok's shared weekly pool.
+		observation.Plan = &store.Plan{ID: "x-subscription", Label: "X Subscription (weekly)"}
+	} else if kind == "monthly" {
+		observation.Plan = &store.Plan{ID: "grok-legacy", Label: "Legacy (monthly)"}
+	}
+	return observation, nil
 }
 
 type grokSession struct {
