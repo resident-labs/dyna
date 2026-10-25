@@ -12,7 +12,6 @@ import (
 
 // GitHub refusing requests must cost the agent one line, not the turn.
 func TestTurnStartsWithOneLineWhenGitHubIsLimited(t *testing.T) {
-
 	original := prepareRoomGitHub
 	t.Cleanup(func() { prepareRoomGitHub = original })
 	prepareRoomGitHub = func(context.Context, profile.Profile) (map[string]string, string, error) {

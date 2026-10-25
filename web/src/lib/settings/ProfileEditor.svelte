@@ -60,7 +60,7 @@
     const harness = p.harness
     const ticket = catalogGate.next()
     catalog = null
-    if (['mock'].includes(harness)) return
+    if (harness === 'mock') return
     api.profileModels(harness, false).then((c: Catalog) => { if (catalogGate.current(ticket)) catalog = c }, () => {})
   })
   const knob = $derived(profileEffort(catalog?.models ?? [], p.model ?? '', lines(args)))

@@ -12,24 +12,13 @@ import (
 	"dyna-agent/internal/profile"
 )
 
-// PromptEnv holds the text of the user message Dyna sent.
-const PromptEnv = "DYNA_FAKE_PROMPT"
-
-// ModelEnv holds the model Dyna passed with --model.
-const ModelEnv = "DYNA_FAKE_MODEL"
-
-// ArgsEnv holds every harness argument, one per line.
-const ArgsEnv = "DYNA_FAKE_ARGS"
-
-// InstructionsEnv holds the system instructions Dyna passed this turn.
-const InstructionsEnv = "DYNA_FAKE_INSTRUCTIONS"
-
+// bodyEnv carries the shell body of the turn to the fake CLI.
 const bodyEnv = "DYNA_FAKE_WORKER_BODY"
 
 // InstallClaude puts a `claude` on PATH that speaks claude-stream-json: it
-// replays the user message, runs body as a shell script with PromptEnv set to
-// that message, and reports the script's stdout as the turn result. The script
-// sets the exit status, and its stderr reaches Dyna unchanged.
+// replays the user message, runs body as a shell script with DYNA_FAKE_PROMPT
+// set to that message, and reports the script's stdout as the turn result. The
+// script sets the exit status, and its stderr reaches Dyna unchanged.
 func InstallClaude(t testing.TB, body string) profile.Profile {
 	t.Helper()
 	dir := t.TempDir()
@@ -52,13 +41,6 @@ func MarkSilent(p profile.Profile) profile.Profile {
 	return p
 }
 
-// MarkEmptySteps makes each turn emit n assistant records with no text before
-// its result, like a worker that produces empty steps.
-func MarkEmptySteps(p profile.Profile, n int) profile.Profile {
-	p.Env[emptyStepsEnv] = strconv.Itoa(n)
-	return p
-}
-
 // MarkStatus makes every failed turn of p report the provider's own failure
 // status, such as 429 for a usage limit or 503 for a busy provider.
 func MarkStatus(p profile.Profile, status int) profile.Profile {
@@ -75,10 +57,9 @@ func InstallClaudeLimit(t testing.TB, message string) profile.Profile {
 }
 
 const (
-	silentEnv     = "DYNA_FAKE_SILENT"
-	emptyStepsEnv = "DYNA_FAKE_EMPTY_STEPS"
-	statusEnv     = "DYNA_FAKE_STATUS"
-	messageEnv    = "DYNA_FAKE_LIMIT"
+	silentEnv  = "DYNA_FAKE_SILENT"
+	statusEnv  = "DYNA_FAKE_STATUS"
+	messageEnv = "DYNA_FAKE_LIMIT"
 )
 
 // claudeWrapper wraps a shell worker in Claude's persistent-input protocol.
@@ -147,8 +128,6 @@ for line in sys.stdin:
             log.write(json.dumps({"ts": int(__import__("time").time() * 1000), "kind": "verification",
                                   "message": "Fixture worker finished.", "source": "agent"}) + "\n")
     code = worker.returncode
-    for _ in range(int(os.environ.get("DYNA_FAKE_EMPTY_STEPS", "0"))):
-        emit({"type": "assistant", "message": {"role": "assistant", "content": []}})
     if worker.stdout:
         # A real worker says what it did before the turn ends.
         emit({"type": "assistant", "message": {"role": "assistant",
