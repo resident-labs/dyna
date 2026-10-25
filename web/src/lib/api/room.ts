@@ -1,4 +1,4 @@
-import type { EventPayload } from '../rooms/events.gen.ts'
+import type { EventPayload, IssueState } from '../rooms/events.gen.ts'
 
 import type { RunList } from './workflow.ts'
 import type { Reference } from '../rooms/references.ts'
@@ -338,7 +338,7 @@ export interface Issue {
   line: number
   filer: string
   filedAt: number
-  state: string
+  state: IssueState
   reason: string
   goalId: string
   githubUrl: string

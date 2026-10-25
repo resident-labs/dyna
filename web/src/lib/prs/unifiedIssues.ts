@@ -1,4 +1,5 @@
 import type { GitHubItem } from '../api/github.ts'
+import type { IssueState } from '../rooms/events.gen.ts'
 
 export interface RoomIssue {
   id: string
@@ -8,7 +9,7 @@ export interface RoomIssue {
   line?: number
   filer?: string
   filedAt: number
-  state: string
+  state: IssueState
   reason?: string
   goalId?: string
   githubUrl?: string

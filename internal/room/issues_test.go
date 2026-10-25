@@ -251,3 +251,27 @@ func TestRoomDeletionKeepsTheRoomWhenIssueCleanupFails(t *testing.T) {
 		t.Fatal("room still resolves after the retried deletion")
 	}
 }
+
+// TestIssuesRejectUnknownStoredState guards the storage boundary: a state the
+// protocol does not define never reaches a caller as if it were finite.
+func TestIssuesRejectUnknownStoredState(t *testing.T) {
+	s, rec, _ := pinFixture(t)
+	issue, err := s.FileIssue(rec.ID, IssueInput{Title: "Typo", Filer: rec.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.issuesDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := json.Marshal(Issue{ID: issue.ID, Number: issue.Number, Title: issue.Title, Filer: issue.Filer, State: IssueState("opne")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE room_issues SET state='opne', body=? WHERE room_id=? AND id=?`, string(stored), rec.ID, issue.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Issues(rec.ID, true); err == nil || !strings.Contains(err.Error(), `unknown state "opne"`) {
+		t.Fatalf("stored typo reached a caller: %v", err)
+	}
+}

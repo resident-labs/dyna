@@ -81,7 +81,7 @@ func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Is
 		linked, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor)
 		if err != nil {
 			restore := links[:i]
-			if linked.ID == issue.ID && linked.State == "goal" && linked.GoalID == goalID {
+			if linked.ID == issue.ID && linked.State == room.IssueStateGoal && linked.GoalID == goalID {
 				restore = links[:i+1]
 			}
 			return errors.Join(fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err), s.RestoreIssueLinks(roomID, actor, restore))
@@ -142,7 +142,7 @@ func (s *Store) issueLinks(roomID string, fixes []int) ([]room.Issue, error) {
 		if !ok {
 			return nil, fmt.Errorf("issue D-%d not found", number)
 		}
-		if issue.State != "open" && issue.State != "goal" {
+		if issue.State != room.IssueStateOpen && issue.State != room.IssueStateGoal {
 			return nil, fmt.Errorf("issue D-%d is already %s", number, issue.State)
 		}
 		links = append(links, issue)

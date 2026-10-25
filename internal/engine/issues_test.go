@@ -177,9 +177,9 @@ func testIssueCallerPower(t *testing.T, method string) {
 				}
 				return
 			}
-			wantState := "closed"
+			wantState := room.IssueStateClosed
 			if method == "IssueGoal" {
-				wantState = "goal"
+				wantState = room.IssueStateGoal
 			}
 			if saved.State != wantState || saved.ChangedBy != tc.by {
 				t.Fatalf("saved issue: %+v", saved)
