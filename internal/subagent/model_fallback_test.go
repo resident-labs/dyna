@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/harness"
 	"dyna-agent/internal/profile"
 )
 
@@ -17,8 +16,6 @@ func TestRunTurnModelFallbackAndMetadataOverride(t *testing.T) {
 		{"explicit override", "custom", "custom", "custom", "custom"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			harness.ResetModelCooldownsForTest()
-			t.Cleanup(harness.ResetModelCooldownsForTest)
 			log := filepath.Join(t.TempDir(), "models")
 			e := newTestEnv(t, profile.Profile{
 				Name: "chain", Harness: profile.HarnessCustom, Model: "a", Models: []string{"a", "b"},
