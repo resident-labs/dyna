@@ -133,3 +133,58 @@ func TestRegistryImportPreservesRawMetadataAndCanonicalEmpty(t *testing.T) {
 		})
 	}
 }
+
+// Antigravity rows predate its removal and can no longer sign in or refresh.
+// Version 6 drops them and leaves the rows that still work alone.
+func TestRegistryMigrationDropsRetiredHarnessRows(t *testing.T) {
+	s := registryStore(t)
+	dataDir := filepath.Dir(s.Root)
+	ctx := context.Background()
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(db, "account.registry", 5, func(conn *sql.Conn, old int) error {
+		if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
+			return err
+		}
+		for _, row := range []struct{ id, harness, provider string }{
+			{"kept", "codex", "chatgpt"},
+			{"retired", "antigravity", "google"},
+		} {
+			metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth"})
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES(?, 0, ?)", row.id, metadata); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(ctx, "INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES(1, 1, 1)")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.QueryContext(ctx, "SELECT id FROM accounts ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var kept []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		kept = append(kept, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0] != "kept" {
+		t.Fatalf("rows after migration = %v, want only the codex row", kept)
+	}
+}
