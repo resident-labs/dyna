@@ -561,3 +561,96 @@ func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 		}
 	}
 }
+
+type preparationCIRegistry struct {
+	occupiedCIRegistry
+	onSave func(localci.Result)
+}
+
+func (r *preparationCIRegistry) SaveResult(_ context.Context, result localci.Result) error {
+	r.results = append(r.results, result)
+	if r.onSave != nil {
+		r.onSave(result)
+	}
+	return nil
+}
+
+func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
+	repo, base := changeRepo(t)
+	writeTrialDefinition(t, repo, "version: 1\nunknown: true\n")
+	changeGit(t, repo, "add", ".")
+	changeGit(t, repo, "commit", "-m", "invalid local CI")
+	invalid := changeGit(t, repo, "rev-parse", "HEAD")
+	writeWatchDefinition(t, repo)
+	if err := os.WriteFile(filepath.Join(repo, "change.go"), []byte("package fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changeGit(t, repo, "add", ".")
+	changeGit(t, repo, "commit", "-m", "valid local CI")
+	valid := changeGit(t, repo, "rev-parse", "HEAD")
+	invalidRecord := &Record{Kind: "github", Key: "invalid", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: invalid, Base: base, Branch: "invalid", RepoPath: repo, Watching: true, State: "open", CI: "pending", Created: time.Unix(1, 0)}
+	validRecord := &Record{Kind: "github", Key: "valid", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: valid, Base: base, Branch: "valid", RepoPath: repo, Watching: true, State: "open", CI: "pending", Created: time.Unix(2, 0)}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	validSaved := make(chan struct{})
+	changed := make(chan struct{}, 4)
+	registry := &preparationCIRegistry{}
+	registry.onSave = func(result localci.Result) {
+		if result.SHA == valid {
+			close(validSaved)
+		}
+	}
+	s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{}}, RunningCIChanged: func() { changed <- struct{}{} }}
+	if err := s.Store.update(func(st *State) error {
+		st.Records[invalidRecord.Key] = invalidRecord
+		st.Records[validRecord.Key] = validRecord
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		if filepath.Base(cmd.Path) == "git" {
+			return nil
+		}
+		return fmt.Errorf("unexpected GitHub call: %v", cmd.Args)
+	}
+	s.RunNodeCI = func(_ context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
+		if req.SHA != valid {
+			t.Errorf("ran unexpected head %s", req.SHA)
+		}
+		close(started)
+		<-release
+		return localci.Result{}, fmt.Errorf("stop after proving the valid job started")
+	}
+	st, err := s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scheduleRegisteredCI(t.Context(), st); err != nil {
+		t.Fatal(err)
+	}
+	validKey := registeredJobKey(registeredCIJob{record: *validRecord, head: valid})
+	runs := s.nodeRuns()
+	runs.Lock()
+	_, running := runs.runs[validKey]
+	runs.Unlock()
+	if !running {
+		t.Fatal("the valid job was not admitted after the invalid job")
+	}
+	close(release)
+	<-started
+	<-validSaved
+	for {
+		<-changed
+		runs := s.nodeRuns()
+		runs.Lock()
+		_, running := runs.runs[validKey]
+		runs.Unlock()
+		if !running {
+			break
+		}
+	}
+	if len(registry.results) == 0 || registry.results[0].SHA != invalid || registry.results[0].Status != localci.OutcomeError {
+		t.Fatalf("invalid job did not save its own infrastructure result: %+v", registry.results)
+	}
+}

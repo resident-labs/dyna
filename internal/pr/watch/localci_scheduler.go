@@ -327,12 +327,20 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if runs.runs[key] != nil {
 			continue
 		}
-		if availableCINode(enabled, active) == nil {
+		chosen := availableCINode(enabled, active)
+		if chosen == nil {
 			continue
 		}
 		plan, err := s.prepareRegisteredCI(ctx, job)
 		if err != nil {
-			return err
+			result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Error: Sanitize(err.Error())}
+			if saveErr := registry.SaveResult(ctx, result); saveErr != nil {
+				log.Printf("save local CI preparation failure: %v", saveErr)
+			}
+			if resumeErr := s.resumeHostedCI(ctx, job, repo); resumeErr != nil {
+				log.Printf("resume hosted CI after preparation failure: %v", resumeErr)
+			}
+			continue
 		}
 		if !plan.runnable() {
 			continue
@@ -344,7 +352,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if settled {
 			continue
 		}
-		chosen := availableCINode(enabled, active)
+		chosen = availableCINode(enabled, active)
 		if chosen == nil {
 			continue
 		}

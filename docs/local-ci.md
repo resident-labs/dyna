@@ -112,10 +112,12 @@ Each item in the top-level `caches` list has:
 
 A container check needs `target` on each referenced cache. A host check needs
 `env`: the runner sets it to the managed host path. Dyna creates only the caches
-a check declares and mounts no others.
+a check declares and mounts no others. The names `runs`, `slots`, `diagnostics`,
+and `caches` are reserved for runner state.
 
-Cache directories remain owned and locked by Dyna. The runner refuses unsafe
-symbolic links before mounting them.
+Cache directories remain owned and locked by Dyna under its separate `caches/`
+directory. The runner refuses unsafe symbolic links before mounting them. Every
+cache has age cleanup and a size cap.
 
 ## Suites
 
@@ -143,10 +145,11 @@ dyna git ci show HEAD --json
 ## Host checks
 
 Host execution is off by default on every machine. A one-time upgrade
-migration preserves permission only on registered machines with saved
-`computer-smoke` evidence from the old runner. Every other existing machine
-and every machine added later starts off. The repository cannot turn it on.
-The machine owner must explicitly allow it:
+migration preserves permission only when saved `computer-smoke` evidence proves
+that the old command started. A passed result or a test failure provides that
+proof. A setup failure does not. Every other existing machine and every machine
+added later starts off. The repository cannot turn it on. Only the machine owner
+can explicitly allow it:
 
 ```sh
 dyna machine edit build-machine --allow-host-checks

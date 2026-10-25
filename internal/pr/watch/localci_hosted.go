@@ -145,25 +145,42 @@ func (s *Service) resumeHostedCI(ctx context.Context, job registeredCIJob, repo 
 	return registry.SaveHostedRuns(ctx, repo, job.head, saved)
 }
 
-// aggregateCancelled recognizes a dependency-only aggregate from the
+// aggregateCancelled recognizes dependency-only aggregates from the
 // repository definition. Every dependency must have passed or been cancelled;
 // an independent failure or missing provider group keeps hosted CI red.
 func aggregateCancelled(definition *localci.Definition, checks []Check, suite int64) (localci.Group, bool) {
 	if definition == nil {
 		return "", false
 	}
+	class := classifyHostedSuite(definition, checks, suite, true)
+	if class.realFailure {
+		return "", false
+	}
 	for _, id := range definition.Suites() {
 		described, _ := definition.Checks(id)
 		for _, check := range described {
-			if check.Group == "" {
-				continue
-			}
-			if aggregateGroupCancelled(definition, check.Group, checks, suite) {
+			if class.cancelledOnlyAggregates[check.Group.Name()] {
 				return check.Group, true
 			}
 		}
 	}
 	return "", false
+}
+
+func cancelledAggregates(definition *localci.Definition, checks []Check, suite int64) map[localci.CheckName]bool {
+	if definition == nil {
+		return nil
+	}
+	aggregates := map[localci.CheckName]bool{}
+	for _, id := range definition.Suites() {
+		described, _ := definition.Checks(id)
+		for _, check := range described {
+			if check.Group != "" && aggregateGroupCancelled(definition, check.Group, checks, suite) {
+				aggregates[check.Group.Name()] = true
+			}
+		}
+	}
+	return aggregates
 }
 
 func aggregateGroupCancelled(definition *localci.Definition, aggregate localci.Group, checks []Check, suite int64) bool {
@@ -185,44 +202,43 @@ func aggregateGroupCancelled(definition *localci.Definition, aggregate localci.G
 			continue
 		}
 		group := definition.ProviderGroup(localci.CheckName(check.Name))
-		if expected[group] {
-			if check.Status != "completed" || (check.Conclusion != "success" && check.Conclusion != "cancelled") {
-				return false
-			}
-			groups[group] = true
-			cancelled = cancelled || check.Conclusion == "cancelled"
+		if !expected[group] {
 			continue
 		}
-		if check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" {
+		if check.Status != "completed" || (check.Conclusion != "success" && check.Conclusion != "cancelled") {
 			return false
 		}
+		groups[group] = true
+		cancelled = cancelled || check.Conclusion == "cancelled"
 	}
 	return failedAggregate && cancelled && len(groups) == len(expected)
 }
 
-// hostedSuiteClass separates a real failure from an aggregate that only
+// hostedSuiteClass separates real failures from every aggregate that only
 // repeats cancellations. Both cancellation filters use the same classification.
 type hostedSuiteClass struct {
-	realFailure            bool
-	cancelledOnlyAggregate localci.Group
+	realFailure             bool
+	cancelledOnlyAggregates map[localci.CheckName]bool
 }
 
 // classifyHostedSuite classifies one hosted suite. The caller disables
 // aggregate trust for a run without a suite ID or a replaceable workflow.
 func classifyHostedSuite(definition *localci.Definition, checks []Check, suite int64, trustAggregate bool) hostedSuiteClass {
-	var aggregate localci.Group
+	class := hostedSuiteClass{}
 	if trustAggregate {
-		aggregate, _ = aggregateCancelled(definition, checks, suite)
+		class.cancelledOnlyAggregates = cancelledAggregates(definition, checks, suite)
 	}
-	class := hostedSuiteClass{cancelledOnlyAggregate: aggregate}
 	for _, check := range checks {
 		if check.CheckSuite.ID != suite || check.Status != "completed" || success(check.Conclusion) || check.Conclusion == "cancelled" {
 			continue
 		}
-		if aggregate != "" && check.Name == string(aggregate.Name()) {
+		if class.cancelledOnlyAggregates[localci.CheckName(check.Name)] {
 			continue
 		}
 		class.realFailure = true
+	}
+	if class.realFailure {
+		class.cancelledOnlyAggregates = nil
 	}
 	return class
 }
@@ -231,7 +247,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, de
 	snap.localCIDef = definition
 	current := snap.currentSuiteChecks()
 	cancelledSuites, ignoredSuites := map[int64]bool{}, map[int64]bool{}
-	aggregates := map[int64]localci.Group{}
+	aggregates := map[int64]map[localci.CheckName]bool{}
 	var runs []Run
 	for _, run := range snap.Runs {
 		attempt, ours := saved.Attempts[run.ID]
@@ -248,7 +264,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, de
 		suite := run.CheckSuiteID
 		cancelledSuites[suite] = true
 		class := classifyHostedSuite(definition, current, suite, replaceableHostedWorkflow(run))
-		aggregates[suite] = class.cancelledOnlyAggregate
+		aggregates[suite] = class.cancelledOnlyAggregates
 		// The saved record proves the cancellation is ours, so here a run that is
 		// still active, or one whose aggregate failed, counts too. This is the one
 		// rule the general filter below does not share: with no saved record it
@@ -256,7 +272,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, de
 		// cancellation rather than a test ended it. Cancellation can leave the
 		// run active, cancelled, or failed after its aggregate runs; none is a test
 		// failure when only cancelled work caused it.
-		if !class.realFailure && (run.Conclusion == "cancelled" || class.cancelledOnlyAggregate != "") {
+		if !class.realFailure && (run.Conclusion == "cancelled" || len(class.cancelledOnlyAggregates) > 0) {
 			ignoredSuites[suite] = true
 			continue
 		}
@@ -266,7 +282,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, de
 	var checks []Check
 	for _, check := range snap.Checks {
 		suite := check.CheckSuite.ID
-		if check.App.Slug == "github-actions" && (ignoredSuites[suite] || cancelledSuites[suite] && (check.Conclusion == "cancelled" || (aggregates[suite] != "" && check.Name == string(aggregates[suite].Name())))) {
+		if check.App.Slug == "github-actions" && (ignoredSuites[suite] || cancelledSuites[suite] && (check.Conclusion == "cancelled" || aggregates[suite][localci.CheckName(check.Name)])) {
 			continue
 		}
 		checks = append(checks, check)

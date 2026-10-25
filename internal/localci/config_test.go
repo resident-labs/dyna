@@ -2,6 +2,7 @@ package localci
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -124,6 +125,30 @@ suites:
 `)
 	if _, err := ParseDefinition(body); err == nil || !strings.Contains(err.Error(), "one YAML document") {
 		t.Fatalf("additional document error = %v", err)
+	}
+}
+
+func TestDefinitionRejectsRunnerDirectoryCacheNames(t *testing.T) {
+	for _, name := range []string{"runs", "slots"} {
+		t.Run(name, func(t *testing.T) {
+			body := fmt.Sprintf(`version: 1
+trial: [test]
+caches:
+  - name: %s
+    target: /cache/data
+checks:
+  - id: pytest
+    image: python:3.13-slim
+    command: python -m pytest
+    caches: [%s]
+suites:
+  - id: test
+    checks: [pytest]
+`, name, name)
+			if _, err := ParseDefinition([]byte(body)); err == nil || !strings.Contains(err.Error(), "reserved") {
+				t.Fatalf("reserved cache name %q was accepted: %v", name, err)
+			}
+		})
 	}
 }
 

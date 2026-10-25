@@ -29,7 +29,7 @@ func TestRepositoryDefinitionDrivesNonGoRun(t *testing.T) {
 		case strings.Contains(script, "tar -C"):
 			return fakeNodeReports(out, checks, false)
 		case name == "systemd-run":
-			for _, want := range []string{"python:3.13-slim", "python -m pytest", "/pip:/cache/pip", "PIP_CACHE_DIR=/cache/pip"} {
+			for _, want := range []string{"python:3.13-slim", "python -m pytest", "/caches/pip:/cache/pip", "PIP_CACHE_DIR=/cache/pip"} {
 				if !strings.Contains(script, want) {
 					t.Errorf("configured check script lacks %q", want)
 				}
@@ -64,7 +64,7 @@ func TestHostCheckNeedsMachineConsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := nodeCheckScript(*node, "/var/tmp/dyna-ci/local", "/var/tmp/dyna-ci/repo.git", "/var/tmp/dyna-ci/run", "run", strings.Repeat("a", 40), checks[0], time.Minute, 0)
-	for _, want := range []string{"env -i", "PIP_CACHE_DIR=/var/tmp/dyna-ci/local/pip", "python -m pytest"} {
+	for _, want := range []string{"env -i", "PIP_CACHE_DIR=/var/tmp/dyna-ci/local/caches/pip", "python -m pytest"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("allowed host script lacks %q", want)
 		}
