@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,6 +47,15 @@ type Node struct {
 	// count bounds the request instead.
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
+	// Rooms limits the machine to those rooms' CI work. An empty list takes
+	// work from every room.
+	Rooms []string `json:"rooms,omitempty"`
+}
+
+// AllowsRoom reports whether the machine takes CI work for the room. A machine
+// that names no room takes work from every room.
+func (n Node) AllowsRoom(roomID string) bool {
+	return len(n.Rooms) == 0 || slices.Contains(n.Rooms, roomID)
 }
 
 type Store struct{ DataDir string }
@@ -153,7 +163,8 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, AllowHostChecks: m.AllowHostChecks, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal})
+		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, AllowHostChecks: m.AllowHostChecks, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms}
+		nodes = append(nodes, node)
 	}
 	return nodes, nil
 }
