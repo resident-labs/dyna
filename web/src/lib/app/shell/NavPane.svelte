@@ -24,7 +24,7 @@
 </script>
 
 <div class="nav" class:open>
-  <RoomRail {rooms} {selected} {onselect} {onmenu} />
+  <RoomRail {narrow} {rooms} {selected} {onselect} {onmenu} />
   {#if showSide || narrow}
     <Sidebar {...sidebar} />
   {/if}
@@ -33,16 +33,19 @@
 <style>
   .nav { display: contents; }
 
-  /* A phone: the rail and the sidebar are one drawer from the left. */
+  /* A phone: full room rows and the selected room's views share one drawer. */
   @media (max-width: 760px) {
     .nav {
       display: flex;
+      flex-direction: column;
       position: fixed;
       z-index: 50;
       top: 0;
       bottom: 0;
       left: 0;
+      width: min(320px, calc(100vw - 48px));
       max-width: calc(100vw - 48px);
+      overflow: hidden;
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
       background: var(--side);
@@ -51,6 +54,6 @@
       box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
     }
     .nav.open { transform: none; }
-    .nav > :global(.side) { width: min(240px, calc(100vw - 120px)); }
+    .nav > :global(.side) { width: 100%; flex: 1 1 55%; border-top: 1px solid var(--line-soft); }
   }
 </style>
