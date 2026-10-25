@@ -130,6 +130,42 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	}
 }
 
+// The provider card offers every provider, so a sign-in again of one account
+// can come back with another provider. Writing that entry would replace the
+// other provider's active credential, so the completion is refused and nothing
+// is written.
+func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0")
+	ctx := context.Background()
+	anthropic := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep-a"}`)
+	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
+	if info, err := r.beginPiProviderSignIn(bundle.Executable, anthropic.ID); err != nil || info.Target != anthropic.ID {
+		t.Fatalf("begin = %+v, %v", info, err)
+	}
+	login := r.findPrivateLogin(piProviderSignInID)
+	if login == nil || login.flow == nil {
+		t.Fatal("the sign-in flow is not running")
+	}
+	body := `{"openai":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
+	if err := os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.FinishPrivateRuntimeLogin(ctx, piProviderSignInID); err == nil {
+		t.Fatal("a sign-in for another provider was written")
+	}
+	if types := piAuthTypes(t, other.Home); types["openai"] != "api_key" {
+		t.Fatalf("the other provider's account was overwritten: %v", types)
+	}
+	if types := piAuthTypes(t, anthropic.Home); types["anthropic"] != "api_key" {
+		t.Fatalf("the target account changed without its own provider: %v", types)
+	}
+	got, err := r.Accounts.Find(other.ID)
+	if err != nil || !got.Active {
+		t.Fatalf("the other provider's selection moved: %+v %v", got, err)
+	}
+}
+
 // The split gives every provider of the shared login its own account and home,
 // and writes only that provider's entry into the home. The shared login keeps
 // serving turns that started before the split.
