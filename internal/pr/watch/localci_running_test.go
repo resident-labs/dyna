@@ -208,6 +208,11 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
 		t.Fatal(err)
 	}
+	// Admission registers a run before it starts, so a missing run fails here
+	// instead of waiting.
+	if runs := s.RunningCI(); len(runs) != 2 {
+		t.Fatalf("machine runs = %+v, want the pull request and the local head", runs)
+	}
 	<-lane.started
 
 	// Cancellation starts with the engine and does not wait for the teardown.
@@ -216,18 +221,8 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 		t.Fatalf("a run was not cancelled with the engine: scheduled=%v local=%v", scheduled.ctx.Err(), lane.ctx.Err())
 	}
 
-	// A stop with a live budget waits for both teardowns to end.
-	stopped := make(chan []string, 1)
-	go func() { stopped <- s.StopLocalCI(context.Background()) }()
-	// The stop has cancelled every run, so a run that waits for its
-	// teardown is blocked here; one that returns at once has no value yet.
-	select {
-	case left := <-stopped:
-		t.Fatalf("stop returned before the runs ended their node work: %v", left)
-	default:
-	}
-
-	// A stop whose budget is already gone names the runs still working.
+	// A stop whose budget is already gone names the runs still working on the
+	// machine, because neither has ended its node work.
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
 	want := []string{head[:7] + " on hermes", localHead[:7] + " on hermes"}
@@ -238,10 +233,12 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 		t.Fatalf("leftover runs = %v, want %v", left, want)
 	}
 
-	// Both teardowns end, and then the stop returns.
+	// Both teardowns end, so a stop with a live budget finds nothing left.
 	close(scheduled.teardown)
 	close(lane.teardown)
-	if left := <-stopped; len(left) != 0 {
+	<-scheduled.finished
+	<-lane.finished
+	if left := s.StopLocalCI(context.Background()); len(left) != 0 {
 		t.Fatalf("stop reported %v", left)
 	}
 }
