@@ -15,7 +15,7 @@ import (
 // be unavailable. Managed fetches must use the room account, like gh does.
 func TestManagedFetchUsesRoomAccountWithoutKeyring(t *testing.T) {
 	repo := gcRepo(t)
-	git(t, repo, "remote", "set-url", "origin", "https://github.com/work/managed.git")
+	git(t, repo, "remote", "set-url", "origin", "https://github.com/Work/Managed.git")
 	git(t, repo, "config", "credential.helper", "")
 	git(t, repo, "config", "remote.origin.vcs", "managed-test")
 	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "managed-fetch", Repo: repo})
@@ -30,7 +30,7 @@ case "$1 $2" in
 "auth token") exit 1;;
 "api --hostname") case "$4" in
 user) echo '{"login":"worker"}';;
-repos/work/managed) echo '{"permissions":{"push":true}}';;
+repos/work/managed|repos/Work/Managed) echo '{"permissions":{"push":true}}';;
 *) exit 1;;
 esac;;
 "auth git-credential") cat >/dev/null; printf 'username=worker\npassword=%s\n' "$GH_TOKEN";;
@@ -42,7 +42,7 @@ esac
 	// advertises a commit already present in the fixture. No network runs.
 	helper := filepath.Join(bin, "git-remote-managed-test")
 	if err := os.WriteFile(helper, []byte(`#!/bin/sh
-credentials=$(printf 'protocol=https\nhost=github.com\npath=work/managed.git\n\n' | /usr/bin/git credential fill) || exit 1
+credentials=$(printf 'protocol=https\nhost=github.com\npath=Work/Managed.git\n\n' | /usr/bin/git credential fill) || exit 1
 printf '%s\n' "$credentials" | /usr/bin/grep -q '^password=session-secret$' || exit 1
 while read -r command; do
 case "$command" in
