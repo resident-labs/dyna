@@ -18,7 +18,7 @@ func fieldSet(t *testing.T, peer *pipeAgent, method string) <-chan map[string]js
 			decoded = nil
 		}
 		fields <- decoded
-		peer.reply(msg["id"], map[string]any{})
+		peer.reply(msg["id"], struct{}{})
 	}()
 	return fields
 }
@@ -65,7 +65,7 @@ func TestSessionRequestsCarryTypedParams(t *testing.T) {
 			var fields map[string]json.RawMessage
 			_ = json.Unmarshal(raw, &fields)
 			requests <- requested{method: method, fields: fields}
-			peer.reply(msg["id"], map[string]any{"sessionId": "s-1"})
+			peer.reply(msg["id"], SessionSetup{SessionID: "s-1"})
 		}
 	}()
 	ctx := t.Context()
