@@ -181,19 +181,32 @@ func registeredCIJobs(st State) []registeredCIJob {
 			continue
 		}
 		r := st.Records[b.Changes[0].Key]
-		if r == nil || changeKind(*r) != "github" {
+		if r == nil {
+			continue
+		}
+		local := changeKind(*r) == "local"
+		if !local && changeKind(*r) != "github" {
 			continue
 		}
 		valid := true
 		for _, c := range b.Changes {
-			if member := st.Records[c.Key]; !currentTrialMember(member, c) || member == nil || !strings.EqualFold(member.HeadRepo, member.Repo) {
+			if member := st.Records[c.Key]; !currentTrialMember(member, c) || member == nil || !local && !strings.EqualFold(member.HeadRepo, member.Repo) {
 				valid = false
 			}
 		}
 		if !valid {
 			continue
 		}
-		if b.Head != "" && (b.Phase == state.MergeTrialPhaseRunning || b.Phase == state.MergeTrialPhaseBuilding || b.Phase == state.MergeTrialPhasePassed) {
+		// A local trial enters the queue once its branch is built, because the
+		// trial asks for CI then. A hosted trial also takes its turn while the
+		// branch builds: its push run starts before the branch exists.
+		switch {
+		case local && b.Phase == state.MergeTrialPhaseRunning:
+		case !local && (b.Phase == state.MergeTrialPhaseRunning || b.Phase == state.MergeTrialPhaseBuilding || b.Phase == state.MergeTrialPhasePassed):
+		default:
+			continue
+		}
+		if b.Head != "" {
 			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, base: b.Base, trial: true, created: b.Created})
 		}
 		for _, stack := range b.Stacks {
@@ -246,22 +259,30 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	var jobs []registeredCIJob
 	modes := map[string]string{}
 	for _, job := range registeredCIJobs(st) {
-		mode, ok := modes[job.record.RoomID]
-		if !ok {
-			mode, err = registry.Mode(ctx, job.record.RoomID)
+		// A local head's run does not depend on the room's hosted CI mode: the
+		// local lane and its trial hold decide it. Without this, a room in GitHub
+		// mode would starve the local merges that share the same machines.
+		if job.hosted() {
+			mode, ok := modes[job.record.RoomID]
+			if !ok {
+				mode, err = registry.Mode(ctx, job.record.RoomID)
+				if err != nil {
+					return err
+				}
+				modes[job.record.RoomID] = mode
+			}
+			if mode != localci.ModeLocal && mode != localci.ModeBoth {
+				continue
+			}
+			paused, err := s.RoomPaused(job.record.RoomID)
 			if err != nil {
 				return err
 			}
-			modes[job.record.RoomID] = mode
+			if paused {
+				continue
+			}
 		}
-		if mode != localci.ModeLocal && mode != localci.ModeBoth || len(enabled) == 0 {
-			continue
-		}
-		paused, err := s.RoomPaused(job.record.RoomID)
-		if err != nil {
-			return err
-		}
-		if paused {
+		if len(enabled) == 0 {
 			continue
 		}
 		if job.record.RepoPath == "" {

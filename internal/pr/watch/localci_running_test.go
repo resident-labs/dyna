@@ -223,6 +223,49 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	}
 }
 
+// oneSlotRegistry offers one machine with a single slot, so the queue order
+// decides which head runs.
+type oneSlotRegistry struct{ runningCIRegistry }
+
+func (r *oneSlotRegistry) Nodes(context.Context) ([]localci.Node, error) {
+	return []localci.Node{{Name: "hermes", Slots: 1, Enabled: true}}, nil
+}
+
+// A local trial enters the one admission queue before ordinary pull request
+// heads, so a backlog of hosted work cannot starve a local merge.
+func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
+	s, saved, _ := scheduledCIRunFixture(t)
+	s.LocalCIRegistry = &oneSlotRegistry{}
+	record := saved.Records["pr"]
+	localHead := addCommit(t, record.RepoPath, "local.txt")
+	local := *record
+	local.Key, local.Kind, local.Head, local.Number = "local", "local", localHead, 0
+	batch := &state.MergeTrial{Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/7", Base: record.Base, Head: localHead,
+		Changes: []state.MergeTrialChange{{Key: local.Key, Head: localHead}}, Created: record.Created.Add(time.Hour)}
+	st := State{Version: 1, Records: map[string]*Record{record.Key: record, local.Key: &local}, MergeTrials: map[string]*state.MergeTrial{defaultRepo(local): batch}}
+	if err := state.Write(s.Store.Root, st); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan string, 2)
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
+		started <- req.SHA
+		<-ctx.Done()
+		return localci.Result{}, ctx.Err()
+	}
+	if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case head := <-started:
+		if head != localHead {
+			t.Fatalf("machine started %s, want the local trial head %s", head, localHead)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no run started")
+	}
+	s.CancelLocalCI()
+}
+
 // A poll tick never cancels a local head's run. No hosted poll decides that
 // head, so only the engine's stop ends its run.
 func TestPollTickKeepsALocalRunInFlight(t *testing.T) {
