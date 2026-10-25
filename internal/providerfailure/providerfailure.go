@@ -6,6 +6,7 @@ package providerfailure
 import (
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -133,7 +134,7 @@ var stderrPatterns = []struct {
 	pattern *regexp.Regexp
 }{
 	{Capacity, regexp.MustCompile(`(?i)\bprovider (?:is )?overloaded\b|\boverloaded_error\b|\bat capacity\b|\bservice unavailable\b|\bserver is busy\b`)},
-	{Auth, regexp.MustCompile(`(?i)\bauthentication[_ ]error\b|\binvalid (?:api )?(?:key|x-api-key)\b|\bnot logged in\b|\bnot signed in\b|\bsigned out\b|\bunauthorized\b|\breauthenticate\b`)},
+	{Auth, regexp.MustCompile(`(?i)\bauthentication[_ ]error\b|\binvalid api[_ ]key\b|\binvalid[_ ]api[_ ]key\b|\binvalid x-api-key\b|\bnot logged in\b|\bnot signed in\b|\bsigned out\b|\bunauthorized\b|\breauthenticate\b`)},
 	{Quota, regexp.MustCompile(`(?i)\b(?:http|status|code|error)[ /:=]*429\b|\b429 (?:too many requests|rate[ _-]?limit|quota)|\bquotas? (?:exhausted|exceeded|reached|too low)\b|\busage[ _-]?limit\b|\bsession limit\b|\bweekly limit\b|\bcredit balance (?:is )?too low\b|\binsufficient credits?\b|\bout of credits?\b|\bno credits? left\b|\brate[ _-]?limit (?:exceeded|reached|hit)\b|\btoo many requests\b`)},
 	{Unavailable, regexp.MustCompile(`(?i)\binternal server error\b|\bbad gateway\b|\bgateway timeout\b`)},
 }
@@ -159,13 +160,37 @@ func Classify(detail string) (Reason, bool) { return match(protocolPatterns, det
 
 // ClassifyField returns the reason a structured protocol type, code or status
 // names. Such a field joins its words with underscores or dashes, as in
-// "insufficient_quota", so it is also read with those joins as spaces. The
-// value must come from a structured error field, never from model output.
+// "insufficient_quota", so it is also read with those joins as spaces, and a
+// bare number is an HTTP status. The value must come from a structured error
+// field, never from model output.
 func ClassifyField(field string) (Reason, bool) {
+	field = strings.TrimSpace(field)
+	if status, err := strconv.Atoi(field); err == nil {
+		if reason, ok := StatusReason(status); ok {
+			return reason, true
+		}
+	}
 	if reason, ok := Classify(field); ok {
 		return reason, true
 	}
 	return Classify(strings.NewReplacer("_", " ", "-", " ").Replace(field))
+}
+
+// StatusReason returns the reason a provider HTTP status names. A status a
+// provider reports is structured evidence, so it needs no matching text. A 402
+// asks for payment and names no provider failure.
+func StatusReason(status int) (Reason, bool) {
+	switch status {
+	case 401:
+		return Auth, true
+	case 429:
+		return Quota, true
+	case 503:
+		return Capacity, true
+	case 500, 502, 504:
+		return Unavailable, true
+	}
+	return "", false
 }
 
 // Action is what recovery does for a reason. Each reason has exactly one action

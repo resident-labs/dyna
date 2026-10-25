@@ -3,7 +3,6 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"dyna-agent/internal/providerfailure"
@@ -114,14 +113,19 @@ func (n *openCodeTurnNotifications) observe(event openCodeEvent) []string {
 	case "session.execution.failed":
 		n.done = true
 		detail := d.Error.Message
-		// The provider's own status fields, not its text, decide that the account
-		// ran out. The kind keeps that decision without a later text match.
-		kind := providerfailure.Reason("")
-		if d.Error.Status == 429 || strings.Contains(d.Error.Type, "rate-limit") || d.Error.Type == "provider.quota" && d.Error.Status != 402 {
-			detail = "429 " + detail
-			kind = providerfailure.Quota
+		// The provider's own status and type name the reason; its text is only the
+		// fallback. A 402 asks for payment, so it names no provider failure.
+		reason, _ := providerfailure.StatusReason(d.Error.Status)
+		if reason == "" {
+			reason, _ = providerfailure.ClassifyField(d.Error.Type)
 		}
-		n.err = providerfailure.Tag(kind, fmt.Errorf("OpenCode turn failed: %s", detail))
+		if d.Error.Status == 402 {
+			reason = ""
+		}
+		if reason == providerfailure.Quota {
+			detail = "429 " + detail
+		}
+		n.err = providerfailure.Tag(reason, fmt.Errorf("OpenCode turn failed: %s", detail))
 		raw, _ := json.Marshal(map[string]any{"type": "error", "sessionID": n.session, "error": map[string]any{"name": d.Error.Type, "data": map[string]any{"message": detail}}})
 		return []string{string(raw)}
 	}

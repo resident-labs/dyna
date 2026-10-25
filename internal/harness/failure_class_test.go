@@ -86,6 +86,7 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 		{name: "stderr reads a line number", harness: profile.HarnessCustom, stderr: "reading line 429 of the session log"},
 		{name: "stderr mentions quota settings", harness: profile.HarnessCustom, stderr: "checking quota configuration for the room"},
 		{name: "stderr names no provider", harness: profile.HarnessCustom, stderr: "the model wondered about its credit balance"},
+		{name: "stderr names a bare invalid key", harness: profile.HarnessCustom, stderr: "invalid key in configuration"},
 		{
 			name:    "codex protocol failure names the quota",
 			harness: profile.HarnessCodex,
@@ -105,6 +106,27 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 			harness: profile.HarnessCodex,
 			stdout:  `{"type":"turn.failed","error":{"code":429,"message":"slow down"}}`,
 			want:    providerfailure.Quota,
+		},
+		{
+			name:    "codex numeric code names the sign-in",
+			harness: profile.HarnessCodex,
+			stdout:  `{"type":"turn.failed","error":{"code":401,"message":"bad token"}}`,
+			want:    providerfailure.Auth,
+		},
+		{
+			name:    "codex numeric status names the busy provider",
+			harness: profile.HarnessCodex,
+			stdout:  `{"type":"turn.failed","error":{"status":503,"message":"try later"}}`,
+			want:    providerfailure.Capacity,
+		},
+		{
+			// An opaque protocol failure still takes its reason from the process's
+			// own stderr, so the profile can be blocked and no retry is spent.
+			name:    "codex opaque failure reads stderr",
+			harness: profile.HarnessCodex,
+			stdout:  `{"type":"turn.failed","error":{"message":"closed"}}`,
+			stderr:  "authentication_error: invalid api key",
+			want:    providerfailure.Auth,
 		},
 		{
 			name:    "codex protocol failure is unclear",
