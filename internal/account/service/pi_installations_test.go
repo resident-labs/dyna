@@ -42,10 +42,19 @@ func piBundleInstall(_ context.Context, args, _ []string) error {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), metadata, 0600); err != nil {
 		return err
 	}
-	lock, _ := json.Marshal(map[string]any{"packages": map[string]any{
-		"node_modules/" + pkg: map[string]string{"version": version, "integrity": "sha512-Zml4dHVyZQ=="},
+	lock, _ := json.Marshal(piLockFile{Packages: map[string]piLockPackage{
+		"node_modules/" + pkg: {Version: version, Integrity: "sha512-Zml4dHVyZQ=="},
 	}})
 	return os.WriteFile(filepath.Join(root, "package-lock.json"), lock, 0600)
+}
+
+type piLockPackage struct {
+	Version   string `json:"version"`
+	Integrity string `json:"integrity"`
+}
+
+type piLockFile struct {
+	Packages map[string]piLockPackage `json:"packages"`
 }
 
 func TestPrivateInstallationsResolveEachPiProvider(t *testing.T) {
@@ -96,6 +105,14 @@ func TestPrivateInstallationsResolveEachPiProvider(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("Pi installations = %v, want %v", got, want)
+	}
+}
+
+func TestInstallationRunsAcceptsAKeyedOpenCodeAccount(t *testing.T) {
+	account := runtime.NativeAccount{Harness: "opencode", Provider: accountstore.ProviderZAI}
+	selection := accountstore.Selection{Harness: "opencode", Provider: accountstore.ProviderOpenCodeGo}
+	if !installationRuns(account, selection) {
+		t.Fatal("a keyed OpenCode account selected under opencode-go was dropped")
 	}
 }
 

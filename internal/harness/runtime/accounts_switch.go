@@ -89,9 +89,12 @@ func (a *Accounts) activeAccount(h string, p store.Provider, roomID string) (Nat
 	return n, nil
 }
 
-// Active returns the account its provider uses for harness h. A harness that
-// keeps one selection per provider, such as Pi, needs the provider: an empty
-// provider would find no account.
+// Active returns the account its selection provider uses for harness h. A
+// harness that keeps one selection per provider, such as Pi, needs the
+// provider: an empty provider would find no account. A caller that has an
+// account's credential provider must pass SelectionProvider(h, provider): a
+// non-Pi harness keeps one selection key, so a keyed OpenCode account can be
+// selected under opencode-go while its credential names another provider.
 func (a *Accounts) Active(provider store.Provider, harness string) (NativeAccount, error) {
 	h, err := canonicalAccountHarness(harness)
 	if err != nil {

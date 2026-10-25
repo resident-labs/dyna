@@ -10,6 +10,30 @@ import (
 	accountstore "dyna-agent/internal/account/store"
 )
 
+func TestCachedUsageMarksAKeyedOpenCodeAccountActive(t *testing.T) {
+	st := &accountstore.Store{Root: filepath.Join(t.TempDir(), "accounts")}
+	id := strings.Repeat("c", 32)
+	if err := os.MkdirAll(filepath.Join(st.Root, "opencode", id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(state *accountstore.State) error {
+		state.Entries = append(state.Entries, accountstore.Entry{Metadata: accountstore.Metadata{
+			ID: id, Harness: "opencode", Provider: accountstore.ProviderZAI, Kind: accountstore.KindAPIKey,
+			Identity: "opencode:zai:fixture", NativeHome: filepath.Join(st.Root, "opencode", id), Label: "zai key",
+		}})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetActive(accountstore.ProviderOpenCodeGo, "opencode", "", id); err != nil {
+		t.Fatal(err)
+	}
+	rows := CachedUsage(st, time.Now().UTC()).Accounts
+	if len(rows) != 1 || !rows[0].Active || rows[0].Provider != accountstore.ProviderZAI {
+		t.Fatalf("keyed OpenCode account = %+v, want active with its zai provider", rows)
+	}
+}
+
 func TestCachedUsageMarksAPiAccountActiveByItsProvider(t *testing.T) {
 	st := &accountstore.Store{Root: filepath.Join(t.TempDir(), "accounts")}
 	zai, deepseek := strings.Repeat("a", 32), strings.Repeat("b", 32)
