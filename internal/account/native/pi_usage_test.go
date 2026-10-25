@@ -78,7 +78,7 @@ func TestPiXAIUsageReadsTheGrokCredits(t *testing.T) {
 		return directTestResponse(200, grokWeeklyFixture), nil
 	})
 	o, err := probePiSaved(context.Background(), c, client, now)
-	if err != nil || len(o.Windows) != 1 || o.Windows[0].ID != "grok-weekly" || o.Plan == nil || o.Plan.ID != "x-subscription" {
+	if err != nil || len(o.Windows) != 1 || o.Windows[0].ID != "grok-weekly" || o.Windows[0].Label != "Weekly" || o.Windows[0].UsedPercent == nil || *o.Windows[0].UsedPercent != 0 || o.Plan == nil || o.Plan.ID != "x-subscription" {
 		t.Fatalf("unexpected xAI observation: %+v, %v", o, err)
 	}
 }
