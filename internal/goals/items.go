@@ -88,17 +88,30 @@ func (s *Store) AddItem(room, goal, by, text, assignee string) (Item, error) {
 	return out, err
 }
 
+// ItemChange is what one SetItemState call changed. Closed marks the call that
+// closed the goal's last open item, and Sequence numbers those closes on the
+// goal: each of them notifies the holders once, and a reopen and a later close
+// notify again.
+type ItemChange struct {
+	Item     Item
+	Closed   bool
+	Sequence int
+}
+
 // SetItemState marks an item done, dropped or open again. Setting the state
-// an item already has changes nothing.
-func (s *Store) SetItemState(room, goal, item, by, state string) (Item, error) {
-	var out Item
+// an item already has changes nothing, and changing one closed state to
+// another closes nothing. Closing the goal's last open item is found inside
+// this call's transaction, so exactly one of two concurrent closes reports it.
+func (s *Store) SetItemState(room, goal, item, by, state string) (ItemChange, error) {
+	var out ItemChange
 	if state != ItemOpen && state != ItemDone && state != ItemDropped {
 		return out, fmt.Errorf("item state must be open, done or dropped")
 	}
 	var ev Event
 	where, args := named(room, goal)
 	err := s.updateTx(func(w *wake, st *State) error {
-		if st.Room(room).Goals[goal] == nil {
+		g := st.Room(room).Goals[goal]
+		if g == nil {
 			return fmt.Errorf("goal %s does not exist in this room", goal)
 		}
 		it, found, err := readItem(w.conn, room, goal, item)
@@ -109,33 +122,52 @@ func (s *Store) SetItemState(room, goal, item, by, state string) (Item, error) {
 			return fmt.Errorf("item %s does not exist on goal %s", item, goal)
 		}
 		if it.State == state {
-			out = it
+			out.Item = it
 			return nil
 		}
 		now := s.now()
+		// Only an item that was open closes the goal's checklist. Correcting a
+		// closed item from done to dropped describes the same completion.
+		wasOpen := it.State == ItemOpen
 		it.State, it.UpdatedAt = state, now
 		if err := writeItem(w.conn, room, goal, it); err != nil {
 			return err
 		}
-		if g := st.Room(room).Goals[goal]; g != nil {
-			g.UpdatedAt = now
+		g.UpdatedAt = now
+		if wasOpen && state != ItemOpen {
+			open, err := openItems(w.conn, room, goal)
+			if err != nil {
+				return err
+			}
+			if open == 0 {
+				g.ItemsClosed++
+				out.Closed, out.Sequence = true, g.ItemsClosed
+			}
 		}
 		verb := "reopened"
 		if state != ItemOpen {
 			verb = state
 		}
 		ev = Event{Goal: goal, Item: item, By: by, Kind: "event", Event: verb, At: now}
-		out = it
+		out.Item = it
 		return nil
 	}, where, args...)
 	if err != nil {
-		return Item{}, err
+		return ItemChange{}, err
 	}
 	if ev.Goal == "" {
 		return out, nil
 	}
 	_, err = s.AddEvent(room, ev)
 	return out, err
+}
+
+// openItems counts a goal's open items inside a writer transaction, so the
+// call that closes the last one is the only one that sees none left.
+func openItems(conn *sql.Conn, room, goal string) (int, error) {
+	var n int
+	err := conn.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM goal_items WHERE room=? AND goal=? AND state=?", room, goal, ItemOpen).Scan(&n)
+	return n, err
 }
 
 // EditItem changes an item's text and, when assignee is non-nil, its
