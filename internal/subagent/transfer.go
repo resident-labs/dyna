@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 )
 
@@ -47,7 +48,7 @@ type TransferState struct {
 	Handoff           string        `json:"handoff,omitempty"`
 	Dir               string        `json:"dir,omitempty"`
 	Branch            string        `json:"branch,omitempty"`
-	Source            string        `json:"source,omitempty"` // cooperative or transcript
+	Source            string        `json:"source,omitempty"` // cooperative, transcript or native (same Pi session)
 	Reason            string        `json:"reason,omitempty"`
 	Error             string        `json:"error,omitempty"`
 	// Notice is the one session DM that explains an automatic fallback after
@@ -177,6 +178,12 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		// stays a record that only --retry repeats.
 		fresh := opts.Fresh || !opts.rootSeat && !opts.Retry && meta.Profile == opts.Profile &&
 			currentModel == candidate.Model && (meta.Transfer == nil || meta.Transfer.Phase == "completed")
+		// A move between two Pi profiles keeps the session file: a resumed Pi
+		// session takes the target model, its thinking level and its account,
+		// and the whole conversation stays. That needs no written handoff, so
+		// the transfer stops the old turn and resumes at once. Every other
+		// pair still starts a fresh native conversation.
+		native := nativePiMove(ps, meta, candidate, fresh, opts)
 		// A fallback chain continues from the profile the session is on. When the
 		// turn that this transfer moved it to hits its own limit, that move is
 		// over: the next move supersedes it here, in the same transaction. Its
@@ -199,11 +206,15 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		meta.Model = currentModel
 		now := m.transferNow()
 		token := NewID()
-		out = TransferState{RootSeat: opts.rootSeat, ID: token, Session: meta.ID, Phase: "waiting", Profile: opts.Profile, Model: candidate.Model,
+		phase, source, reason := "waiting", "", ""
+		if native {
+			phase, source, reason = "stopping", sourceNative, "the same Pi session keeps the conversation"
+		}
+		out = TransferState{RootSeat: opts.rootSeat, ID: token, Session: meta.ID, Phase: phase, Profile: opts.Profile, Model: candidate.Model,
 			PreviousProfile: meta.Profile, PreviousModel: meta.Model, PreviousHarness: meta.HarnessSession, PreviousDir: meta.Dir,
 			PreviousResumable: meta.Resumable, OldTurns: meta.Turns, Requested: now, WaitFor: time.Duration(opts.WaitSeconds) * time.Second,
-			Deadline: now.Add(time.Duration(opts.WaitSeconds) * time.Second),
-			PostID:   transferPostID(token)}
+			Deadline: now.Add(time.Duration(opts.WaitSeconds) * time.Second), Source: source, Reason: reason,
+			PostID: transferPostID(token)}
 		if opts.Fallback {
 			// Record the profiles this session has left and entered, so a later
 			// limit continues the chain and never returns to one that just ran
@@ -219,7 +230,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 			// optional chain over.
 			meta.FallbackPath = nil
 		}
-		if previous := meta.Transfer; !opts.rootSeat && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
+		if previous := meta.Transfer; !native && !opts.rootSeat && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
 			out.WrittenHandoff, out.Handoff, out.Dir, out.Branch, out.Source = previous.WrittenHandoff, previous.WrittenHandoff, previous.Dir, previous.Branch, "cooperative"
 		}
 		// Freeze labels for records written before per-turn profile snapshots.
@@ -260,6 +271,26 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		}
 	}
 	return out, nil
+}
+
+// sourceNative marks a transfer that keeps the session's own native
+// conversation instead of building a handoff packet.
+const sourceNative = "native"
+
+// nativePiMove reports whether a transfer keeps the session's Pi session
+// file. Pi stores one session file per conversation and a session resumed with
+// another --model continues the same history, under the new model's provider
+// and account home. The move therefore needs a resumable Pi session with an ID
+// and a Pi target; a fresh request, a root seat and a missing prior profile
+// keep the written-handoff path. Pi compacts the session before it sends a
+// request that no longer fits the new model's window, and Dyna's own compact
+// command runs first when the target profile's threshold is due.
+func nativePiMove(ps *profile.Store, meta Meta, target profile.Profile, fresh bool, opts TransferOptions) bool {
+	if opts.rootSeat || fresh || !meta.Resumable || meta.HarnessSession == "" || target.Harness != profile.HarnessPi {
+		return false
+	}
+	current, ok := ps.Get(meta.Profile)
+	return ok && current.Harness == profile.HarnessPi
 }
 
 func transferPostID(token string) string { // deterministic, no second room post on recovery
@@ -638,21 +669,30 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			}
 		}
 		// Resolve hints after the old turn stops, so its last messages are included.
-		packet, dir, err := m.handoffPacket(meta, *t)
-		if err != nil {
-			return true, m.failTransfer(id, token, err)
+		native := t.Source == sourceNative
+		var packet, dir, prompt string
+		if native {
+			// The session file already holds the conversation, the files and the
+			// tool state, so no packet is built and the worktree stays as it is.
+			dir = meta.Dir
+			prompt = fmt.Sprintf("[DYNA MODEL TRANSFER] Continue this session. It now runs on %s / %s in the same Pi conversation, so the full history is intact. Resume the open work.\n", t.Profile, orNone(t.Model))
+		} else {
+			packet, dir, err = m.handoffPacket(meta, *t)
+			if err != nil {
+				return true, m.failTransfer(id, token, err)
+			}
+			if t.RootSeat {
+				return true, m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
+					t.Phase, t.Ended = "completed", now
+					t.Handoff = packet
+					if t.Source == "" {
+						t.Source = "transcript"
+					}
+					return nil
+				})
+			}
+			prompt = "[DYNA MODEL TRANSFER] Continue this stable session in a fresh native conversation.\n" + packet
 		}
-		if t.RootSeat {
-			return true, m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
-				t.Phase, t.Ended = "completed", now
-				t.Handoff = packet
-				if t.Source == "" {
-					t.Source = "transcript"
-				}
-				return nil
-			})
-		}
-		prompt := "[DYNA MODEL TRANSFER] Continue this stable session in a fresh native conversation.\n" + packet
 		ps, err := m.profiles()
 		if err != nil {
 			return true, m.failTransfer(id, token, err)
@@ -679,7 +719,13 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if t.Source == "" {
 				t.Source = "transcript"
 			}
-			meta.Profile, meta.Model, meta.HarnessSession, meta.Resumable, meta.Dir = t.Profile, t.Model, "", harness.Resumable(chosen), dir
+			meta.Profile, meta.Model, meta.Dir = t.Profile, t.Model, dir
+			// A native Pi move keeps HarnessSession and Resumable: the new model
+			// resumes the same session, and the turn's own account selection
+			// gives the target provider's active account home.
+			if !native {
+				meta.HarnessSession, meta.Resumable = "", harness.Resumable(chosen)
+			}
 			t.Handoff = prompt // durable, so a dead worker can restart before turn creation
 			return nil
 		})
