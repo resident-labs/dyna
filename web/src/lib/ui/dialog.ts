@@ -3,6 +3,7 @@ import type { Action } from 'svelte/action'
 
 interface DialogOptions {
   close: () => unknown
+  active?: boolean
   busy?: boolean
   initial?: () => HTMLElement | null | undefined
   preventScroll?: boolean
@@ -19,13 +20,13 @@ const activeDialog = () => dialogs.filter((entry) => !dialogs.some((other) => ot
 // Apply to the dialog card. Its parent is the backdrop. Only the top
 // dialog handles keys, so Escape cannot also close the page behind it.
 export const dialog = ((node, options: DialogOptions) => {
-  const previous = document.activeElement
   const backdrop = node.parentElement
   if (!backdrop) throw new TypeError('A dialog needs a parent backdrop.')
   const entry = { node }
-  dialogs.push(entry)
   let alive = true
-  const top = () => activeDialog() === entry
+  let active = false
+  let previous: Element | null = null
+  const top = () => active && activeDialog() === entry
   const otherModal = () => {
     const modal = document.activeElement?.closest?.('[aria-modal="true"]')
     return modal && modal !== node && !modal.contains(node)
@@ -47,8 +48,8 @@ export const dialog = ((node, options: DialogOptions) => {
     } else if (event.key === 'Tab') {
       const available = [...node.querySelectorAll<HTMLElement>(controls)].filter((el) => (!('disabled' in el) || !el.disabled) && el.tabIndex >= 0 && el.getClientRects().length)
       const first = available[0], last = available.at(-1)
-      const active = document.activeElement
-      if (!first || !node.contains(active) || active === node || (event.shiftKey ? active === first : active === last)) {
+      const focused = document.activeElement
+      if (!first || !node.contains(focused) || focused === node || (event.shiftKey ? focused === first : focused === last)) {
         event.preventDefault()
         event.stopImmediatePropagation()
         ;(event.shiftKey ? last : first)?.focus()
@@ -56,27 +57,46 @@ export const dialog = ((node, options: DialogOptions) => {
       }
     }
   }
-  tick().then(() => {
-    if (!alive || !top()) return
-    const initial = options.initial?.() || node
-    initial.focus({ preventScroll: !!options.preventScroll })
-    if (options.select && 'select' in initial && typeof initial.select === 'function') initial.select()
-  })
+  const deactivate = () => {
+    if (!active) return
+    const restore = top() && !otherModal()
+    const index = dialogs.indexOf(entry)
+    if (index >= 0) dialogs.splice(index, 1)
+    active = false
+    if (restore) {
+      const lower = activeDialog()?.node
+      const target = lower && !lower.contains(previous) ? lower : previous
+      if (target?.isConnected && 'focus' in target && typeof target.focus === 'function') target.focus()
+    }
+  }
+  const activate = () => {
+    if (!alive || active) return
+    previous = document.activeElement
+    active = true
+    dialogs.push(entry)
+    tick().then(() => {
+      if (!alive || !top()) return
+      const initial = options.initial?.() || node
+      initial.focus({ preventScroll: !!options.preventScroll })
+      if (options.select && 'select' in initial && typeof initial.select === 'function') initial.select()
+    })
+  }
   window.addEventListener('keydown', keydown, true)
   backdrop.addEventListener('click', click)
+  if (options.active ?? true) activate()
   return {
-    update(value: DialogOptions) { options = value },
+    update(value: DialogOptions) {
+      const next = value.active ?? true
+      options = value
+      if (next === active) return
+      if (next) activate()
+      else deactivate()
+    },
     destroy() {
       alive = false
-      const restore = top() && !otherModal()
-      dialogs.splice(dialogs.indexOf(entry), 1)
+      deactivate()
       window.removeEventListener('keydown', keydown, true)
       backdrop.removeEventListener('click', click)
-      if (restore) {
-        const lower = activeDialog()?.node
-        const target = lower && !lower.contains(previous) ? lower : previous
-        if (target?.isConnected && 'focus' in target && typeof target.focus === 'function') target.focus()
-      }
     },
   }
 }) satisfies Action<HTMLElement, DialogOptions>
