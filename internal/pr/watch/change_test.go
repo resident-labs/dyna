@@ -26,10 +26,26 @@ func changeGit(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(data))
 }
+func writeWatchDefinition(t *testing.T, dir string) {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".dyna", "local-ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".dyna", "local-ci.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func changeRepo(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	changeGit(t, dir, "init", "-b", "main")
+	writeWatchDefinition(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "code.txt"), []byte("base\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

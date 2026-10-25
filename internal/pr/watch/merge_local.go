@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -187,12 +188,12 @@ type localCIRun struct {
 	err    error
 }
 
-// completeLocalCI excludes cached manual runs of only part of the trial suite.
-func completeLocalCI(result localci.Result) bool {
-	return localci.CoversSuites(result, localci.WorkflowSuites())
+// completeLocalCI excludes cached manual runs of only part of the base-defined trial suite.
+func completeLocalCI(result localci.Result, definition *localci.Definition, suites []localci.Suite) bool {
+	return definition.CoversSuites(result, suites)
 }
 
-func localCIStatus(result localci.Result, repo, head string) (CIVerdict, string, string, error) {
+func localCIStatus(result localci.Result, repo, head string, definition *localci.Definition, suites []localci.Suite) (CIVerdict, string, string, error) {
 	if result.SHA != head || result.Repo != repo {
 		return "", "", "", errors.New("local CI result does not match repository and trial head")
 	}
@@ -211,7 +212,7 @@ func localCIStatus(result localci.Result, repo, head string) (CIVerdict, string,
 				return VerdictFailed, logs, "local CI failed", nil
 			}
 		}
-		if !completeLocalCI(result) {
+		if !completeLocalCI(result, definition, suites) {
 			return VerdictPending, "", "waiting for complete local CI", nil
 		}
 		return VerdictPassed, "", "", nil
@@ -228,12 +229,23 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 	if runner == nil {
 		runner = localci.Runner{DataDir: dataDir}
 	}
+	result, err := runner.Show(r.RepoPath, head)
+	if err == nil && result.Node != "" && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError) {
+		status, logs, reason, statusErr := localCIStatus(result, r.RepoPath, head, nil, nil)
+		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
+	}
+	plan, err := s.planLocalLaneCI(ctx, r, head)
+	if err != nil {
+		return trialCI{}, err
+	}
+	if !plan.runnable() {
+		return trialCI{Status: VerdictPending, Reason: "local CI is not configured at the trial head and its base"}, nil
+	}
 	show := func(result localci.Result) (trialCI, error) {
-		status, logs, reason, err := localCIStatus(result, r.RepoPath, head)
+		status, logs, reason, err := localCIStatus(result, r.RepoPath, head, plan.required, plan.suites)
 		return trialCI{Status: status, Logs: logs, Reason: reason}, err
 	}
-	result, err := runner.Show(r.RepoPath, head)
-	if err == nil && completeLocalCI(result) {
+	if err == nil && completeLocalCI(result, plan.required, plan.suites) {
 		s.localRuns().forget(r.RepoPath + "\x00" + head)
 		return show(result)
 	}
@@ -275,9 +287,37 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 			nodeRunner.OnCacheRepair = s.CacheRepairReporter(r.RoomID)
 			runRunner = nodeRunner
 		}
-		run.result, run.err = runRunner.Run(runCtx, localci.Request{Repo: r.RepoPath, SHA: head, Suites: localci.WorkflowSuites()})
+		run.result, run.err = runRunner.Run(runCtx, localci.Request{Definition: plan.execution, Repo: r.RepoPath, SHA: head, Suites: plan.suites})
 	}()
 	return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
+}
+
+func (s *Service) planLocalLaneCI(ctx context.Context, r Record, head string) (localCIPlan, error) {
+	var plan localCIPlan
+	execution, err := localci.LoadDefinition(ctx, r.RepoPath, head)
+	if errors.Is(err, localci.ErrDefinitionNotFound) {
+		plan.headMissing = true
+		return plan, nil
+	}
+	if err != nil {
+		return plan, err
+	}
+	plan.execution = execution
+	base, err := gitRead(ctx, r.RepoPath, "rev-parse", "--verify", "--end-of-options", head+"^1^{commit}")
+	if err != nil {
+		return plan, fmt.Errorf("resolve local trial base: %w", err)
+	}
+	required, err := localci.LoadDefinition(ctx, r.RepoPath, base)
+	if errors.Is(err, localci.ErrDefinitionNotFound) {
+		plan.baseMissing = true
+		return plan, nil
+	}
+	if err != nil {
+		return plan, err
+	}
+	plan.required = required
+	plan.suites = required.WorkflowSuites()
+	return plan, nil
 }
 
 func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, trialID string) error {
@@ -303,23 +343,13 @@ func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, tr
 	return nil
 }
 
+var localFailureLine = regexp.MustCompile(`(?m)^([^\n]+) \((?:failed|error)\):`)
+
 func returnedLocalFailure(logs string) (string, string) {
-	suite := ""
-	excerpt := logs
-	failedAt := -1
-	names := localci.RequiredChecks(localci.WorkflowSuites())
-	// Results from the old runner used the go suite name without an aggregate.
-	names = append(names, localci.CheckName(localci.SuiteGo))
-	for _, name := range names {
-		for _, status := range []string{"failed", "error"} {
-			if at := strings.Index(logs, string(name)+" ("+status+"):"); at >= 0 && (failedAt < 0 || at < failedAt) {
-				suite = string(name)
-				failedAt = at
-			}
-		}
-	}
-	if failedAt >= 0 {
-		excerpt = logs[failedAt:]
+	suite, excerpt := "", logs
+	if match := localFailureLine.FindStringSubmatchIndex(logs); match != nil {
+		suite = strings.TrimSpace(logs[match[2]:match[3]])
+		excerpt = logs[match[0]:]
 	}
 	if len(excerpt) > 2000 {
 		excerpt = excerpt[:2000]

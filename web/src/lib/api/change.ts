@@ -83,6 +83,7 @@ export interface ChangeView {
   watching?: boolean
   status?: string
   ci?: string
+  localCIConfig?: 'not-configured' | 'head-missing'
   ciTestReportNote?: string
   ciReason?: string
   consecutiveFailures?: number

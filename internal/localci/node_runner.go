@@ -13,6 +13,8 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,81 +38,73 @@ const (
 )
 
 type nodeCheck struct {
-	id    Suite
-	name  CheckName
-	inner string
-	image string
+	id       Suite
+	name     CheckName
+	group    Group
+	inner    string
+	image    string
+	host     bool
+	hostUser bool
+	setup    string
+	env      map[string]string
+	caches   []CacheDefinition
+	reports  ReportMode
+	priority int
 }
 
-// checkCommand is how a node runs one check: its container image and the command
-// inside it. The suite description says which checks exist; this says what each
-// one runs.
-type checkCommand struct {
-	image string
-	inner string
-}
+// ErrHostChecksDisabled means a repository asked for host execution on a
+// machine whose owner has not allowed it. The repository cannot enable it.
+var ErrHostChecksDisabled = errors.New("host CI checks are disabled")
 
-var nodeCommands = func() map[Suite]checkCommand {
-	commands := map[Suite]checkCommand{
-		SuiteRelay:         {image: "node:22", inner: "bash scripts/ci.sh relay"},
-		SuiteFrontend:      {image: "node:22", inner: "bash scripts/ci.sh frontend test"},
-		SuiteFrontendCheck: {image: "node:22", inner: "bash scripts/ci.sh frontend check"},
-		SuiteGoStatic:      {image: "golang:1.26.3", inner: "bash scripts/ci.sh go modules && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer"},
-		SuiteCrossBuild:    {image: "golang:1.26.3", inner: "bash scripts/ci.sh cross-build"},
-		// The computer smoke test needs the node itself, not a container.
-		SuiteComputerSmoke: {},
-	}
-	for i := 0; i < ShardCount; i++ {
-		commands[shardID(i)] = checkCommand{image: "golang:1.26.3", inner: shardCommand(i)}
-	}
-	return commands
-}()
-
-// nodeChecks expands suites into the checks this node runs, in the order the
-// suite description gives and with the go suite's expansion already applied.
-func nodeChecks(suites []Suite) ([]nodeCheck, bool, error) {
+// nodeChecks expands repository-defined suites into checks. A check shared by
+// suites runs once and keeps the aggregate membership from its grouped suite.
+func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeCheck, bool, error) {
 	if len(suites) == 0 {
-		suites = WorkflowSuites()
+		suites = definition.WorkflowSuites()
 	}
 	var checks []nodeCheck
-	seen := map[Suite]bool{}
+	seen := map[Suite]int{}
 	aggregate := false
 	for _, suite := range suites {
-		expanded, ok := Checks(suite)
+		expanded, ok := definition.ExecutableChecks(suite)
 		if !ok {
 			return nil, false, fmt.Errorf("unknown CI suite %q", suite)
 		}
-		for _, check := range expanded {
-			if seen[check.ID] {
+		for _, command := range expanded {
+			check := command.Check
+			aggregate = aggregate || check.Group != ""
+			if index, exists := seen[check.ID]; exists {
+				if checks[index].group == "" {
+					checks[index].group = check.Group
+				}
 				continue
 			}
-			seen[check.ID] = true
-			command, ok := nodeCommands[check.ID]
-			if !ok {
-				return nil, false, fmt.Errorf("no command for CI check %q", check.ID)
+			if command.Host && !allowHost {
+				return nil, false, fmt.Errorf("%w: check %q", ErrHostChecksDisabled, check.ID)
 			}
-			aggregate = aggregate || check.Group != ""
-			checks = append(checks, nodeCheck{id: check.ID, name: check.Name, inner: command.inner, image: command.image})
+			seen[check.ID] = len(checks)
+			checks = append(checks, nodeCheck{
+				id: check.ID, name: check.Name, group: check.Group,
+				inner: command.Command, image: command.Image,
+				host: command.Host, hostUser: command.HostUser, setup: command.Setup,
+				env: cloneStrings(command.Env), caches: append([]CacheDefinition(nil), command.Caches...),
+				reports: command.Reports, priority: command.Priority,
+			})
 		}
 	}
 	return checks, aggregate, nil
 }
 
-// shardCommand runs one go-test shard: its slice of the shared test set, and the
-// middle shard also builds the desktop app.
-func shardCommand(index int) string {
-	inner := fmt.Sprintf("export CI_SHARD=%d/%d CI_SLICE=''; ", index, ShardCount)
-	switch index {
-	case 0:
-		inner += "export CI_SLICE=0/2; "
-	case ShardCount - 1:
-		inner += "export CI_SLICE=1/2; "
+func nodeCacheNames(checks []nodeCheck) []string {
+	var names []string
+	for _, check := range checks {
+		for _, cache := range check.caches {
+			if !slices.Contains(names, cache.Name) {
+				names = append(names, cache.Name)
+			}
+		}
 	}
-	inner += "bash scripts/ci.sh go build && bash scripts/ci.sh go test"
-	if index == ShardCount/2 {
-		inner += " && touch web/dist/index.html && bash scripts/ci.sh go desktop"
-	}
-	return inner
+	return names
 }
 
 func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, script string) error {
@@ -135,10 +129,6 @@ func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, s
 }
 
 func (r Runner) runNode(ctx context.Context, req Request) (result Result, err error) {
-	checks, aggregate, err := nodeChecks(req.Suites)
-	if err != nil {
-		return result, err
-	}
 	node := *r.Node
 	if err := node.Validate(); err != nil {
 		return result, err
@@ -151,6 +141,21 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	if req.MaxTest <= 0 {
 		req.MaxTest = 10 * time.Second
+	}
+	var checks []nodeCheck
+	var aggregate bool
+	prepareChecks := func() error {
+		var prepareErr error
+		checks, aggregate, prepareErr = nodeChecks(req.Definition, req.Suites, node.AllowHostChecks)
+		if errors.Is(prepareErr, ErrHostChecksDisabled) {
+			return fmt.Errorf("CI node %q: %w", node.Name, prepareErr)
+		}
+		return prepareErr
+	}
+	if req.Definition != nil {
+		if err := prepareChecks(); err != nil {
+			return result, err
+		}
 	}
 	repo, err := filepath.Abs(req.Repo)
 	if err != nil {
@@ -171,6 +176,20 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	sha := strings.TrimSpace(output.String())
 	if !regexp.MustCompile(`^[0-9a-f]{40,64}$`).MatchString(sha) {
 		return result, fmt.Errorf("git returned invalid commit SHA")
+	}
+	if req.Definition == nil {
+		req.Definition, err = LoadDefinition(ctx, repo, sha)
+		if err != nil {
+			return result, err
+		}
+	}
+	if req.Definition.revision != "" && req.Definition.revision != sha {
+		return result, fmt.Errorf("local CI definition revision does not match commit %s", sha)
+	}
+	if checks == nil {
+		if err := prepareChecks(); err != nil {
+			return result, err
+		}
 	}
 	result = Result{Repo: common, RoomID: req.RoomID, Node: node.Name, SHA: sha, Started: time.Now().UTC(), Status: "error"}
 	defer func() {
@@ -223,7 +242,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if e := r.cleanBeforeRun(control, node); e != nil {
 		log.Printf("local CI %s: free space check: %v", node.Name, e)
 	}
-	setup := nodeSetupScript(base, cache, reports, active)
+	setup := nodeSetupScript(base, cache, reports, active, nodeCacheNames(checks))
 	setupErr := r.nodeCommand(control, &output, &output, "", setup)
 	// A repair is a fact whether or not the run then succeeded, so report it
 	// before the setup error returns.
@@ -282,27 +301,34 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	logs := make([]*checkLog, len(checks))
 	defer func() {
 		result.Checks = append([]SuiteResult(nil), result.Suites...)
-		if aggregate {
+		if !aggregate {
+			return
+		}
+		var groups []Group
+		for _, check := range checks {
+			if check.group != "" && !slices.Contains(groups, check.group) {
+				groups = append(groups, check.group)
+			}
+		}
+		for _, group := range groups {
 			status := OutcomePassed
 			for _, check := range result.Suites {
-				if GroupOf(check.Name()) == GroupGoTest {
+				if check.Group == group {
 					status = combinedStatus(status, check.Status)
 				}
 			}
-			result.Checks = append(result.Checks, SuiteResult{Suite: SuiteGoTest, CheckName: GroupGoTest.Name(), Node: node.Name, Status: status})
+			result.Checks = append(result.Checks, SuiteResult{Suite: Suite(group), CheckName: group.Name(), Node: node.Name, Status: status, Aggregate: true})
 		}
 	}()
 	jobs := make(chan int, len(checks))
-	// Cross-build is the longest cold check. Start it beside the other suites.
-	for i, check := range checks {
-		if check.id == SuiteCrossBuild {
-			jobs <- i
-		}
+	order := make([]int, len(checks))
+	for i := range checks {
+		order[i] = i
 	}
-	for i, check := range checks {
-		if check.id != SuiteCrossBuild {
-			jobs <- i
-		}
+	// Higher-priority checks start first; equal priorities keep definition order.
+	sort.SliceStable(order, func(i, j int) bool { return checks[order[i]].priority > checks[order[j]].priority })
+	for _, index := range order {
+		jobs <- index
 	}
 	close(jobs)
 	var wg sync.WaitGroup
@@ -316,7 +342,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			defer wg.Done()
 			for i := range jobs {
 				check := checks[i]
-				sr := SuiteResult{Suite: check.id, CheckName: check.name, Node: node.Name, Status: "passed"}
+				sr := SuiteResult{Suite: check.id, CheckName: check.name, Group: check.group, Node: node.Name, Status: "passed"}
 				checkCtx, stop := context.WithTimeout(control, admissionWait+req.Timeout+time.Minute)
 				var output tailBuffer
 				writer := io.Writer(&output)
@@ -394,7 +420,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			// the structured failures, the slow tests and the diagnostics links.
 			// Read them for every check, including one whose command failed; the
 			// command's own outcome and cause stay the check's.
-			readReports(sr, reportRoot, req.MaxTest, req.Allowed)
+			readReports(sr, checks[i].reports, reportRoot, req.MaxTest, req.Allowed)
 		}
 		result.Status = combinedStatus(result.Status, sr.Status)
 	}
@@ -451,7 +477,7 @@ func (r Runner) fetchReports(ctx context.Context, reportRoot, reports string) er
 // readReports fills one check's duration, reports and test failures from the
 // copied report files, whatever the command already proved. A check that cannot
 // show a result of its own is an infrastructure error and never a passing one.
-func readReports(sr *SuiteResult, reportRoot string, max time.Duration, allowed map[string]bool) {
+func readReports(sr *SuiteResult, mode ReportMode, reportRoot string, max time.Duration, allowed map[string]bool) {
 	var timing struct {
 		DurationNanos time.Duration `json:"durationNanos"`
 	}
@@ -465,7 +491,7 @@ func readReports(sr *SuiteResult, reportRoot string, max time.Duration, allowed 
 	} else if sr.Status == OutcomePassed {
 		sr.Status, sr.Error, sr.Cause = OutcomeError, "check produced no valid execution timing", CauseReports
 	}
-	if e := checkReports(sr, reportRoot, max, allowed); e != nil {
+	if e := checkReports(sr, mode, reportRoot, max, allowed); e != nil {
 		// A check that already proved how it failed keeps its status, its cause
 		// and its error: a report problem is not better evidence than the
 		// command, and it is added to what the command said instead.
@@ -736,11 +762,11 @@ func combinedStatus(a, b Outcome) Outcome {
 // linked go-build or go-mod path under the exclusive cache lock, before the run
 // takes its ordinary shared lock, and refuses any remaining unsafe link. A run
 // therefore never mounts or trims a cache that Dyna does not own.
-func nodeSetupScript(base, cache, reports, active string) string {
+func nodeSetupScript(base, cache, reports, active string, cacheNames []string) string {
 	q := shellquote.Quote
 	return "set -e; umask 077; " + baseLinkGuard(base) +
 		"mkdir -p " + q(base) + " " + q(reports) + "; " +
-		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base) + runLocks(base, active) +
+		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) +
 		"flock " + q(path.Join(base, "init.lock")) + " bash -c " + q("if [ ! -d "+q(cache)+" ]; then git init --bare "+q(cache)+"; fi")
 }
 
@@ -758,42 +784,97 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	name := "dyna-ci-" + runID + "-" + string(check.id)
 	q := shellquote.Quote
 	seconds := int64((timeout + time.Second - 1) / time.Second)
-	docker := "docker=(docker); "
-	if node.SSH == "" {
-		docker += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
-	}
 	timing := `printf '{"durationNanos":%s}\n' "$(( $(date +%s%N) - started ))" > ` + q(path.Join(reportDir, "execution.json")) + "; "
-	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; fi; "${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
-	setup := "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; " + docker + "trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
-	if check.id == SuiteComputerSmoke {
-		setup += "for tool in go labwc Xwayland sqlite3 agent-browser; do command -v \"$tool\" >/dev/null || { echo \"Missing computer-smoke prerequisite: $tool\" >&2; exit 69; }; done; "
-		setup += "cd " + q(work) + "; mkdir -p " + q(path.Join(base, "go-build")) + " " + q(path.Join(base, "go-mod")) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
-		setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\" GOCACHE=%s GOMODCACHE=%s GOMAXPROCS=2 GOFLAGS=-p=2 DYNA_COMPUTERS_ENABLED=0 DYNA_COMPUTERS_REQUIRE_LIVE=1 go test -count=1 -timeout 5m ./internal/computers", seconds, q(path.Join(base, "go-build")), q(path.Join(base, "go-mod")))
+	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; fi; `
+	if !check.host {
+		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
+	}
+	cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
+	setup := "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+	for _, cache := range check.caches {
+		setup += "mkdir -p " + q(path.Join(base, cache.Name)) + "; "
+	}
+	if check.host {
+		setup += "cd " + q(work) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
+		environment := map[string]string{
+			"RUNNER_TEMP": reportDir, "GITHUB_STEP_SUMMARY": path.Join(reportDir, "step-summary.md"),
+			"JUNIT_REPORT_PATH": path.Join(reportDir, string(check.id)+"-test.xml"),
+			"GIT_CONFIG_COUNT":  "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": work,
+		}
+		for _, cache := range check.caches {
+			if cache.Env != "" {
+				environment[cache.Env] = path.Join(base, cache.Name)
+			}
+		}
+		for key, value := range check.env {
+			environment[key] = value
+		}
+		setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
+		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner)
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
-	for _, cacheDir := range []string{"go-build", "go-mod", "npm"} {
-		setup += "mkdir -p " + q(path.Join(base, cacheDir)) + "; "
+	if node.SSH == "" {
+		setup += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
 	}
 	inner := "mkdir -p /tmp/home /tmp/data /tmp/config /tmp/cache; " + check.inner
 	user := " --user $(id -u):$(id -g)"
-	if strings.HasPrefix(check.image, "golang:") {
+	if check.hostUser {
 		user = ""
 		prepare := ""
-		if check.id == SuiteGoStatic {
-			prepare = "timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69; "
+		if check.setup != "" {
+			prepare = "(" + check.setup + ") || exit 69; "
 		}
 		inner = prepare + "(getent group $CI_GID >/dev/null || groupadd --gid $CI_GID dyna-ci) && (getent passwd $CI_UID >/dev/null || useradd --no-log-init --uid $CI_UID --gid $CI_GID --no-create-home --home-dir /tmp/home dyna-ci) && exec setpriv --reuid=$CI_UID --regid=$CI_GID --clear-groups bash -c " + q(inner)
 	}
-	// A stable source path lets Go reuse build and test results across run IDs.
-	// The host worktree and reports stay separate for each check.
-	// Temporary SQLite fixtures need no disk flushes and share the memory cap.
+	// A stable source path lets build tools reuse results across run IDs. Each
+	// check keeps a separate host worktree and report directory.
 	args := `"${docker[@]}" run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --name ` + q(name) + user +
 		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
-	for _, mount := range [][2]string{{"go-build", "build"}, {"go-mod", "mod"}, {"npm", "npm"}} {
-		args += " -v " + q(path.Join(base, mount[0])+":/cache/"+mount[1])
+	environment := map[string]string{
+		"HOME": "/tmp/home", "XDG_DATA_HOME": "/tmp/data", "XDG_CONFIG_HOME": "/tmp/config", "XDG_CACHE_HOME": "/tmp/cache",
+		"RUNNER_TEMP": "/reports", "GITHUB_STEP_SUMMARY": "/reports/step-summary.md",
+		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": "/workspace", "GITHUB_WORKSPACE": "/workspace",
+		"JUNIT_REPORT_PATH": "/reports/" + string(check.id) + "-test.xml",
 	}
-	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/workspace -e GITHUB_WORKSPACE=/workspace -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + string(check.id) + "-test.xml " + check.image
+	for _, cache := range check.caches {
+		args += " -v " + q(path.Join(base, cache.Name)+":"+cache.Target)
+		if cache.Env != "" {
+			environment[cache.Env] = cache.Target
+		}
+	}
+	for key, value := range check.env {
+		environment[key] = value
+	}
+	args += dockerEnvironment(environment) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) " + q(check.image)
 	// Both host and container deadlines survive a disconnected SSH client.
 	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
 	return nodeSlotScript(base, node.Slots, index, setup)
+}
+
+func dockerEnvironment(environment map[string]string) string {
+	keys := make([]string, 0, len(environment))
+	for key := range environment {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var out strings.Builder
+	for _, key := range keys {
+		out.WriteString(" -e ")
+		out.WriteString(shellquote.Quote(key + "=" + environment[key]))
+	}
+	return out.String()
+}
+
+func hostEnvironment(environment map[string]string) string {
+	keys := make([]string, 0, len(environment))
+	for key := range environment {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var out strings.Builder
+	for _, key := range keys {
+		out.WriteByte(' ')
+		out.WriteString(shellquote.Quote(key + "=" + environment[key]))
+	}
+	return out.String()
 }

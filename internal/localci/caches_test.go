@@ -213,7 +213,7 @@ func TestCacheRepairPreservesLinkedCaches(t *testing.T) {
 	}
 
 	// The generated setup command carries the repair before the shared run lock.
-	script := nodeSetupScript(base, filepath.Join(base, "repo.git"), filepath.Join(base, "runs", "run", "reports"), filepath.Join(base, "runs", "run", ".active"))
+	script := nodeSetupScript(base, filepath.Join(base, "repo.git"), filepath.Join(base, "runs", "run", "reports"), filepath.Join(base, "runs", "run", ".active"), []string{"go-build", "go-mod", "npm"})
 	if parsed, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("setup command does not parse: %v: %s", err, parsed)
 	}
@@ -237,7 +237,7 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(base, "npm")); err != nil {
 			t.Fatal(err)
 		}
-		out, err := exec.Command("bash", "-c", cacheLinkGuard(base)).CombinedOutput()
+		out, err := exec.Command("bash", "-c", cacheLinkGuard(base, []string{"go-build", "go-mod", "npm"})).CombinedOutput()
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 69 {
 			t.Fatalf("guard accepted a linked npm cache: %v: %s", err, out)
@@ -256,7 +256,7 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if out, err := exec.Command("bash", "-c", cacheLinkGuard(base)).CombinedOutput(); err != nil {
+		if out, err := exec.Command("bash", "-c", cacheLinkGuard(base, []string{"go-build", "go-mod", "npm"})).CombinedOutput(); err != nil {
 			t.Fatalf("guard refused real managed cache directories: %v: %s", err, out)
 		}
 	})
@@ -268,7 +268,7 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 		base := filepath.Join(parent, "node")
-		out, err := exec.Command("bash", "-c", cacheLinkGuard(base)).CombinedOutput()
+		out, err := exec.Command("bash", "-c", cacheLinkGuard(base, []string{"go-build", "go-mod", "npm"})).CombinedOutput()
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 69 || !strings.Contains(string(out), parent) {
 			t.Fatalf("guard accepted a linked base parent: %v: %s", err, out)

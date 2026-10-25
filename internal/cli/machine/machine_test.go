@@ -79,6 +79,12 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	if _, err := run(t, "edit", "build", "--role", "ci", "--ssh", "ari@build"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := run(t, "edit", "hermes", "--allow-host-checks"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Host checks: true") {
+		t.Fatalf("host-check setting = %q, %v", out, err)
+	}
 	if _, err := run(t, "edit", "hermes", "--rename", "hermeslab", "--disable"); err != nil {
 		t.Fatal(err)
 	}

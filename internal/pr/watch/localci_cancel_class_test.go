@@ -56,7 +56,7 @@ func TestHostedCancellationClassification(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			run := Run{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", Status: tc.status, Conclusion: tc.conclusion}
-			snap := Snapshot{Runs: []Run{run}}
+			snap := Snapshot{Runs: []Run{run}, localCIDef: watchDynaDefinition(t)}
 			for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
 				check := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "success"})
 				check.CheckSuite.ID = 20
@@ -68,11 +68,11 @@ func TestHostedCancellationClassification(t *testing.T) {
 				}
 				snap.Checks = append(snap.Checks, check)
 			}
-			class := classifyHostedSuite(snap.currentSuiteChecks(), run.CheckSuiteID, replaceableHostedWorkflow(run))
-			if class.realFailure != tc.wantRealFailure || class.cancelledOnlyAggregate != tc.wantAggregate {
+			class := classifyHostedSuite(watchDynaDefinition(t), snap.currentSuiteChecks(), run.CheckSuiteID, replaceableHostedWorkflow(run))
+			if class.realFailure != tc.wantRealFailure || (class.cancelledOnlyAggregate != "") != tc.wantAggregate {
 				t.Fatalf("classification = %+v, want real failure %t and aggregate %t", class, tc.wantRealFailure, tc.wantAggregate)
 			}
-			saved := withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{10: 1}})
+			saved := withoutLocalHostedCancellations(snap, localci.HostedRuns{Attempts: map[int64]int{10: 1}}, watchDynaDefinition(t))
 			if kept := len(saved.Runs) == 1; kept != tc.wantSaved {
 				t.Fatalf("saved cancellation filter kept the run = %t, want %t", kept, tc.wantSaved)
 			}
