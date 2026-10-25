@@ -450,6 +450,9 @@ func bindings(s services) []websvc.Binding {
 		// AccountsAdd saves an API key from the Accounts add form and the CLI,
 		// like HarnessProviderKeys does for the harness form.
 		{Name: "AccountsAdd", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsAdd},
+		// AccountsImport moves a saved native sign-in into its Pi provider
+		// account, so no two copies renew one refresh token.
+		{Name: "AccountsImport", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsImport},
 		{Name: "ProfileModels", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accounts.ProfileModels},
 		{Name: "UsageRollup", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.UsageRollup},
 		{Name: "ProfileUsage", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ProfileUsage},

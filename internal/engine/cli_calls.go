@@ -49,6 +49,7 @@ var cliCalls = []string{
 	"AccountsList",
 	"AccountsUse",
 	"AccountsRemove",
+	"AccountsImport",
 	"ArchiveRun",
 	"UnarchiveRun",
 	"CancelRun",
