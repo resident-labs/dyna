@@ -9,7 +9,7 @@ import type { HarnessSnapshot } from '../../api/harness.ts'
 // an account that does not exist, and it must save a key once and clear it.
 const api = `export const api = {
   privateRuntimes: () => Promise.resolve(globalThis.addRuntimes),
-  privateRuntimeLogins: () => Promise.resolve([]),
+  privateRuntimeLogins: () => Promise.resolve(globalThis.addFlows ?? []),
   privateRuntimeLoginState: () => new Promise(() => {}),
   findPersonalLogin: (...args) => { globalThis.addCalls.push(['find', ...args]); return Promise.resolve(null) },
   beginPrivateRuntimeLogin: (...args) => { globalThis.addCalls.push(['begin', ...args]); return Promise.resolve({ accountId: 'new-account', signIn: { phase: 'waiting' } }) },
@@ -37,7 +37,7 @@ async function mountForm(t: { after: (fn: () => Promise<void>) => void }, dom: R
   const { dir, default: AddAccount, mount, flushSync, unmount } = await importBundle(built, 'AddAccount')
   t.after(async () => {
     dom.window.close()
-    for (const name of [...domNames, 'addCalls', 'addRuntimes', 'addSnapshot']) Reflect.deleteProperty(globalThis, name)
+    for (const name of [...domNames, 'addCalls', 'addRuntimes', 'addSnapshot', 'addFlows']) Reflect.deleteProperty(globalThis, name)
     await rm(dir, { recursive: true, force: true })
   })
   const target = need(document.getElementById('app'), 'app')
@@ -108,5 +108,26 @@ test('an existing account signs in again', async (t) => {
     submit(target)
     await settle(flushSync)
     assert.deepEqual(calls, [['restart', 'saved-account', false]], 'a saved account restarts, not starts')
+  } finally { await unmount(app) }
+})
+
+test('a reopened dialog shows the native sign-in saved for its account', async (t) => {
+  const flows = [{ accountId: 'saved-account', harness: 'claude-code', signIn: { phase: 'waiting', acceptsPaste: true, message: 'Paste the code from the browser.' } }]
+  const dom = installDom({ addCalls: [], addRuntimes: runtimes, addSnapshot: snapshot, addFlows: flows })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom, { id: 'saved-account', label: 'Work', provider: 'anthropic', harness: 'claude-code' })
+  try {
+    await settle(flushSync)
+    assert.match(textOf(target), /Paste the code from the browser/, 'the saved step and its paste control are back')
+    assert.ok(elements(target, 'button').some((b) => textOf(b) === 'Cancel sign-in'), 'the saved sign-in can still be cancelled')
+  } finally { await unmount(app) }
+})
+
+test('a reopened Pi sign-in finds the account it was started for', async (t) => {
+  const flows = [{ accountId: 'pi:provider', harness: 'pi', target: 'pi-account', signIn: { phase: 'waiting', message: 'Approve the sign-in in your browser.' } }]
+  const dom = installDom({ addCalls: [], addRuntimes: runtimes, addSnapshot: snapshot, addFlows: flows })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom, { id: 'pi-account', label: 'Work', provider: 'anthropic', harness: 'pi' })
+  try {
+    await settle(flushSync)
+    assert.match(textOf(target), /Approve the sign-in in your browser/, 'the Pi card is recovered by target')
   } finally { await unmount(app) }
 })
