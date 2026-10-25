@@ -102,6 +102,9 @@ func TestOpenCodeRecordKeepsStructuredReason(t *testing.T) {
 		{"status names the sign-in", `{"type":"error","error":{"name":"APIError","status":401,"data":{"message":"the provider said no"}}}`, providerfailure.Auth},
 		{"status names the busy provider", `{"type":"error","error":{"name":"APIError","status":503,"data":{"message":"the provider said no"}}}`, providerfailure.Capacity},
 		{"quota type names the quota", `{"type":"error","error":{"name":"provider.quota","data":{"message":"the provider said no"}}}`, providerfailure.Quota},
+		// A payment request names no provider failure, even when the record also
+		// carries a quota type.
+		{"payment required names nothing", `{"type":"error","error":{"name":"provider.quota","status":402,"data":{"message":"the provider said no"}}}`, ""},
 		{"opaque record names nothing", `{"type":"error","error":{"name":"APIError","data":{"message":"the provider said no"}}}`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

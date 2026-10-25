@@ -63,10 +63,17 @@ func openCodeFailureReason(raw json.RawMessage) (providerfailure.Reason, bool) {
 	}
 	if json.Unmarshal(raw, &event) == nil {
 		for _, status := range []json.RawMessage{event.Status, event.Data.Status} {
-			if code, err := strconv.Atoi(strings.TrimSpace(scalarText(status))); err == nil {
-				if reason, ok := providerfailure.StatusReason(code); ok {
-					return reason, true
-				}
+			code, err := strconv.Atoi(strings.TrimSpace(scalarText(status)))
+			if err != nil {
+				continue
+			}
+			// A 402 asks for payment, so it names no provider failure whatever
+			// the type of the record says.
+			if code == 402 {
+				return "", false
+			}
+			if reason, ok := providerfailure.StatusReason(code); ok {
+				return reason, true
 			}
 		}
 		for _, field := range []string{event.Name, event.Data.Type} {
