@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
@@ -180,6 +181,11 @@ func TestExecuteWaitsForDanglingWorkerTerminalJournal(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-dangling-journal")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
+	// The fake claude reads its input only after a turn's body returns, and this
+	// body blocks until the test ends, so a canceled turn waits the whole grace.
+	// The wait is not what this test proves, so shorten it.
+	grace := harness.SetClaudeInterruptGraceForTest(50 * time.Millisecond)
+	t.Cleanup(func() { harness.SetClaudeInterruptGraceForTest(grace) })
 	script := `
 agent("keep working until the orchestrator finishes", {profile: "slow", label: "dangling worker"});
 agent("wait behind the first worker", {profile: "slow", label: "queued worker"});
