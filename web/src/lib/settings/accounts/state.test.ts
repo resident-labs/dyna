@@ -128,7 +128,7 @@ test('an account without readable usage says why in words, never raw engine text
   assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'provider-error' }), 'Usage is temporarily unavailable')
   assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'rate-limited' }), 'Usage is rate limited. Try again later')
   assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'no-windows' }), 'The provider reported no usage windows')
-  assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'meta-muse', usageReason: 'not-readable' }), 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse to read it.')
+  assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'meta-muse', usageReason: 'not-readable' }), 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse with Pi\'s OAuth sign-in to read it.')
   assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'zai', usageReason: 'not-readable' }), 'This provider does not publish usage that Dyna can read.')
   assert.equal(observation({ usageError: 'provider said 403', rateLimitedUntil: '2000-01-01T00:00:00Z' }), '')
 })
