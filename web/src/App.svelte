@@ -76,6 +76,8 @@
   import Confirm from './lib/ui/Confirm.svelte'
   import BulkSessionAction from './lib/sessions/BulkSessionAction.svelte'
   import SessionConsolidation from './lib/sessions/SessionConsolidation.svelte'
+  import CloseResult from './lib/sessions/CloseResult.svelte'
+  import { type CloseRow, type CloseChoice } from './lib/sessions/closeOutcomes.ts'
   import { selectableSession } from './lib/sessions/consolidation.ts'
   import ModelTransfer from './lib/sessions/ModelTransfer.svelte'
   import Runs from './lib/workflows/Runs.svelte'
@@ -123,7 +125,7 @@
   import MachinePage from './lib/machines/MachinePage.svelte'
   import { machinesSub } from './lib/machines/machines.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
-  import type { Room, Member, Post, Opened, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
+  import type { Room, Member, Post, Opened, Question, Visual, ProfileChoice, Attachment, CloseOutcome } from './lib/api/room.ts'
   import type { AttachmentRef } from './lib/api/engine.ts'
   import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
   import type { Goal } from './lib/api/goal.ts'
@@ -431,7 +433,7 @@
   const toast = $derived(toasts.line)
   const toastDetail = $derived(toasts.detail)
   const toastDetailOpen = $derived(toasts.detailOpen)
-  let closeResult = $state<{ name: string; items: string[] } | null>(null)
+  let closeResult = $state<{ name: string; outcomes: CloseOutcome[] } | null>(null)
   let runs = $state<RunList | null>(null) // roomsvc.RunList for the room
   let runsError = $state('')
   let runDetail = $state<RunDetail | null>(null)
@@ -628,7 +630,7 @@
   bindConfirm({
     members: () => members,
     expedited: () => expeditedGoalId,
-    closed: (name, items) => (closeResult = { name, items }),
+    closed: (name, outcomes) => (closeResult = { name, outcomes }),
     loadGoals,
     loadRuns,
     loadRun,
@@ -958,6 +960,21 @@
       if (!await selecting || request !== detailRequest) return
     }
     openSession(m)
+  }
+
+  // chooseCloseRow opens the work a failed close step left behind, where the
+  // owner can resolve it: hand a goal to an agent, move a child, or read a PR.
+  function chooseCloseRow(choice: CloseChoice, row: CloseRow) {
+    closeResult = null
+    const target = row.target
+    if (!target) return
+    if (choice === 'move-goal' && target.kind === 'goal') openGoal(target.id)
+    else if (choice === 'open-pr' && target.kind === 'pr') openPR(target.number)
+    else if (choice === 'move-child' && target.kind === 'session') {
+      const name = target.name
+      const member = hierarchy.find((m) => m.name === name)
+      if (member) openSession(member)
+    }
   }
 
   // openSession drills into a member's full session view.
@@ -1956,11 +1973,7 @@
   <Prompt {...ask} onsubmit={ask.submit} oncancel={() => (ask = null)} />
 {/if}
 {#if closeResult}
-  <section class="close-result" role="status" aria-label="Session close result">
-    <strong>{closeResult.name} is closed.</strong>
-    {#if closeResult.items.length}<ul>{#each closeResult.items as item}<li>{item}</li>{/each}</ul>{/if}
-    <button onclick={() => (closeResult = null)}>Dismiss</button>
-  </section>
+  <CloseResult name={closeResult.name} outcomes={closeResult.outcomes} onclose={() => (closeResult = null)} onchoose={chooseCloseRow} />
 {:else if toast}
   <Toast {toast} detail={toastDetail} detailOpen={toastDetailOpen} ondismiss={hideToast} onaction={runToastAction} ontoggle={toggleToastDetail} />
 {/if}
@@ -1983,29 +1996,6 @@
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--main); }
   .content { flex: 1; display: flex; min-height: 0; }
   .center { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-  /* A close result is its own floating panel. The toast component's styles are
-     scoped to it, so this panel carries the position and surface it needs. */
-  .close-result {
-    position: fixed;
-    left: 50%;
-    bottom: 84px;
-    transform: translateX(-50%);
-    z-index: 70;
-    width: max-content;
-    max-width: min(640px, calc(100vw - 32px));
-    max-height: 50vh;
-    overflow: auto;
-    overflow-wrap: anywhere;
-    padding: 10px 14px;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--r-sm);
-    background: #121113;
-    color: var(--ink-2);
-    font-size: var(--t-ui);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  }
-  .close-result ul { margin: 8px 0; padding-left: 20px; }
-  .close-result button { margin-top: 8px; }
   .toast-details {
     position: fixed;
     left: 50%;
@@ -2053,6 +2043,5 @@
     .scrim { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.5); }
     .center { padding-bottom: env(safe-area-inset-bottom); }
     .toast-details { bottom: calc(146px + env(safe-area-inset-bottom)); max-height: 54vh; }
-    .close-result { bottom: calc(96px + env(safe-area-inset-bottom)); }
   }
 </style>

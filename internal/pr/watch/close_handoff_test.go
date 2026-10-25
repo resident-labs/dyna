@@ -8,6 +8,7 @@ import (
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 )
@@ -156,7 +157,7 @@ func TestCloseSkipsPRTransferredToAnotherAuthor(t *testing.T) {
 		<-release
 	}
 	type result struct {
-		summary []string
+		summary []sessionclose.Outcome
 		err     error
 	}
 	done := make(chan result, 1)

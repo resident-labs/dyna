@@ -6,7 +6,10 @@ import { call } from '../../../test/svelte-source.ts'
 import { installConfirm } from '../../../test/appModules.ts'
 
 test('closing shows the returned handoff until the user dismisses it', async () => {
-  const moved = ['PR #7 author → root', 'Workflow wf_one canceled']
+  const moved = [
+    { kind: 'pr', result: 'moved', number: 7, to: 'dyna:root' },
+    { kind: 'workflow', result: 'canceled', id: 'wf_one' },
+  ]
   const app = {
     confirm: { kind: 'close', m: { id: 'one', name: 'worker' } },
     closeResult: null, errorText,
@@ -17,7 +20,7 @@ test('closing shows the returned handoff until the user dismisses it', async () 
   // The confirm dialog moved to lib/app/confirm.svelte.ts.
   installConfirm(app)
   await call(app, 'runConfirm')
-  assert.deepEqual(JSON.parse(JSON.stringify(app.closeResult)), { name: 'worker', items: moved })
+  assert.deepEqual(JSON.parse(JSON.stringify(app.closeResult)), { name: 'worker', outcomes: moved })
   assert.equal(app.confirm, null)
 })
 
