@@ -81,7 +81,7 @@ func TestRegisteredCIRequiresCompleteWorkflowChecks(t *testing.T) {
 	if definition.CoversSuites(result, []localci.Suite{localci.SuiteRelay}) {
 		t.Fatal("manual subset passed the registered gate")
 	}
-	if got := definition.SuitesForFiles([]string{"internal/computerweb/handler.go"}); !reflect.DeepEqual(got, []localci.Suite{localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
+	if got := definition.SuitesForFiles([]string{"internal/computerweb/handler.go"}); !reflect.DeepEqual(got, []localci.Suite{localci.SuiteGo, localci.SuiteCross, localci.SuiteComputerSmoke}) {
 		t.Fatalf("computer suites: %v", got)
 	}
 	if got := definition.SuitesForFiles([]string{"docs/readme.md"}); len(got) != 0 {
