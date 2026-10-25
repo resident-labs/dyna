@@ -456,6 +456,12 @@ func TestLocalTrialUsesTheRoomTestBudgetAndMachine(t *testing.T) {
 	ci.started = make(chan struct{}, 1)
 	ci.release = make(chan struct{})
 	ci.saved = make(chan struct{}, 1)
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+	})
 	policy := RoomPolicy(State{}, e.author.RoomID)
 	policy.CITimeBudget = "enforce"
 	policy.CITestMax = "1s"
@@ -468,29 +474,24 @@ func TestLocalTrialUsesTheRoomTestBudgetAndMachine(t *testing.T) {
 	if err != nil || trial.Status != "pending" {
 		t.Fatalf("start = %s %v", trial.Status, err)
 	}
-	deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	select {
-	case <-ci.started:
-	case <-deadline.Done():
-		t.Fatal("local trial CI did not start")
-	}
-	runs := e.s.RunningCI()
-	if len(runs) != 1 || runs[0].Machine != "hermes" || runs[0].Head != r.Head[:7] {
+	// Admission registers the run before it starts, and the fake records the
+	// request before it signals, so no clock decides what this test sees.
+	if runs := e.s.RunningCI(); len(runs) != 1 || runs[0].Machine != "hermes" || runs[0].Head != r.Head[:7] {
 		t.Fatalf("machine view does not name the local run: %+v", runs)
 	}
-	close(ci.release)
-	select {
-	case <-ci.saved:
-	case <-deadline.Done():
-		t.Fatal("local trial CI did not save its result")
-	}
+	<-ci.started
 	req := ci.requestFor(t, r.Head)
 	if req.MaxTest != time.Second || !req.Allowed["pkg/slow"] {
 		t.Fatalf("run used max test %s and allowlist %v, want the room budget", req.MaxTest, req.Allowed)
 	}
 	if req.Parallelism != registeredCIRunSlots || !req.DeferSave {
 		t.Fatalf("run asked for %d parallel slots and defer=%t", req.Parallelism, req.DeferSave)
+	}
+	close(ci.release)
+	released = true
+	<-ci.saved
+	if trial, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head); err != nil || trial.Status != "passed" {
+		t.Fatalf("finished = %s %v", trial.Status, err)
 	}
 }
 

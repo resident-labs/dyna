@@ -78,6 +78,9 @@ type registeredCIJob struct {
 	head, branch string
 	base         string
 	trial        bool
+	// wholeSuite runs every workflow suite of the base definition instead of
+	// only the suites that the changed files select.
+	wholeSuite bool
 	// sync marks the CI of an integration sync, which has no change of its own.
 	sync    bool
 	created time.Time
@@ -225,11 +228,11 @@ func registeredCIJobs(st State) []registeredCIJob {
 			continue
 		}
 		if b.Head != "" {
-			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, base: b.Base, trial: true, created: b.Created})
+			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, base: b.Base, trial: true, wholeSuite: true, created: b.Created})
 		}
 		for _, stack := range b.Stacks {
 			if stack.Head != "" && stack.Phase == state.MergeTrialPhaseRunning {
-				jobs = append(jobs, registeredCIJob{record: *r, head: stack.Head, branch: stack.Branch, base: b.Base, trial: true, created: b.Created})
+				jobs = append(jobs, registeredCIJob{record: *r, head: stack.Head, branch: stack.Branch, base: b.Base, trial: true, wholeSuite: true, created: b.Created})
 			}
 		}
 	}
