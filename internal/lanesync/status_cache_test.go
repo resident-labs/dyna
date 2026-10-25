@@ -15,11 +15,13 @@ import (
 func statusFixture(t *testing.T) (svc *Service, repo, base, head string) {
 	t.Helper()
 	repo = t.TempDir()
-	git(t, repo, "init", "-b", "main")
+	git(t, repo, "init", "-b", "trunk")
 	git(t, repo, "commit", "--allow-empty", "-m", "base")
 	base = strings.TrimSpace(git(t, repo, "rev-parse", "HEAD"))
 	head = commitOn(t, repo, base, "first")
 	git(t, repo, "update-ref", "refs/heads/dyna/integration", head)
+	git(t, repo, "update-ref", "refs/remotes/origin/trunk", base)
+	git(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 	common := strings.TrimSpace(git(t, repo, "rev-parse", "--absolute-git-dir"))
 	svc = &Service{Dir: t.TempDir()}
 	raw := map[string]any{
@@ -98,7 +100,7 @@ func TestSyncStatusKeepsItsGitViewUntilRefsMove(t *testing.T) {
 func TestSyncStatusRefreshesSymbolicRefTargets(t *testing.T) {
 	for _, integration := range []bool{true, false} {
 		svc, repo, base, head := statusFixture(t)
-		ref, target := "refs/remotes/origin/main", "refs/heads/base-target"
+		ref, target := "refs/remotes/origin/trunk", "refs/heads/base-target"
 		initial, moved := base, head
 		if integration {
 			ref, target = "refs/heads/dyna/integration", "refs/heads/integration-target"
@@ -121,7 +123,7 @@ func TestSyncStatusRefreshesSymbolicRefTargets(t *testing.T) {
 				t.Fatalf("symbolic integration target stayed stale: %+v", got[repo].Integration)
 			}
 		} else if len(got[repo].Integration.Commits) != 0 {
-			t.Fatalf("symbolic main target left stale commits: %+v", got[repo].Integration)
+			t.Fatalf("symbolic default-branch target left stale commits: %+v", got[repo].Integration)
 		}
 	}
 }

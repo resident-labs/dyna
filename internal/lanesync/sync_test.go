@@ -128,7 +128,6 @@ func TestTickReturnsTheNextFetchAndUsesTheDefaultBranch(t *testing.T) {
 	git(t, dir, "clone", remote, clone)
 	git(t, clone, "commit", "--allow-empty", "-m", "base")
 	git(t, clone, "push", "origin", "trunk")
-	git(t, clone, "branch", "main")
 	git(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 	v, e := settings.Load("")
 	if e != nil {
@@ -153,11 +152,12 @@ func TestTickReturnsTheNextFetchAndUsesTheDefaultBranch(t *testing.T) {
 	}
 	first, _ := s.Status()
 	r := first[clone].Remotes["origin"]
-	if r.Branch != "refs/remotes/origin/trunk" || r.Ahead != 0 || r.Behind != 0 {
+	if r.Branch != "refs/remotes/origin/trunk" || r.Ahead != 0 || r.Behind != 0 || r.LastError != "" {
 		t.Fatalf("%+v", r)
 	}
 	git(t, clone, "commit", "--allow-empty", "-m", "next")
 	git(t, clone, "push", "origin", "trunk")
+	git(t, clone, "update-ref", "refs/heads/trunk", "HEAD^")
 	if _, e := s.Tick(context.Background(), now.Add(time.Minute)); e != nil {
 		t.Fatal(e)
 	}

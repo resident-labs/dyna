@@ -31,6 +31,34 @@ func GitRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
+// GitReadFunc reads Git output for repository metadata resolution.
+type GitReadFunc func(context.Context, string, ...string) (string, error)
+
+// Branch identifies the default branch and the local revision that selects it.
+type Branch struct {
+	Name string
+	Ref  string
+}
+
+// DefaultBranch resolves origin/HEAD, then the current branch.
+func DefaultBranch(ctx context.Context, dir string, read GitReadFunc) (Branch, error) {
+	remote, remoteErr := read(ctx, dir, "symbolic-ref", "--quiet", "--no-recurse", "refs/remotes/origin/HEAD")
+	if remoteErr == nil {
+		if name, ok := strings.CutPrefix(remote, "refs/remotes/origin/"); ok && name != "" && !strings.ContainsAny(name, "\r\n") {
+			return Branch{Name: name, Ref: "origin/" + name}, nil
+		}
+		remoteErr = fmt.Errorf("invalid origin/HEAD %q", remote)
+	}
+	current, currentErr := read(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if currentErr == nil && current != "" && !strings.ContainsAny(current, "\r\n") {
+		return Branch{Name: current, Ref: current}, nil
+	}
+	if currentErr == nil {
+		currentErr = fmt.Errorf("invalid current branch %q", current)
+	}
+	return Branch{}, fmt.Errorf("cannot resolve default branch from origin/HEAD (%v) or current branch (%v)", remoteErr, currentErr)
+}
+
 type Repo struct{ ID, Root, Main string }
 
 // Resolve uses the effective origin URL, or another remote if origin is absent.

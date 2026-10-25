@@ -3,7 +3,7 @@ package worktrees
 import "context"
 
 // Orphaned lists trees kept by GC whose known session owners are all closed.
-// It uses the cached origin/main reference and never fetches or removes trees.
+// It uses the cached default-branch reference and never fetches or removes trees.
 func Orphaned(ctx context.Context, repo string) ([]Tree, error) {
 	trees, err := Scan(ctx, repo)
 	if err != nil {

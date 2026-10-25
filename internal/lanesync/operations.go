@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/repoid"
 )
 
 type Progress struct {
@@ -193,10 +195,18 @@ func (s *Service) repoView(common, repo, export string) *repoView {
 		rangeRef := view.head
 		if export != "" {
 			rangeRef = export + ".." + view.head
-		} else if main, err := s.gitRead(context.Background(), repo, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"); err == nil {
-			rangeRef = main + ".." + view.head
-		} else if !noSuchRef(err) {
-			keep = false
+		} else {
+			branch, err := repoid.DefaultBranch(context.Background(), repo, s.gitRead)
+			if err == nil {
+				var base string
+				base, err = s.gitRead(context.Background(), repo, "rev-parse", "--verify", "--quiet", branch.Ref)
+				if err == nil {
+					rangeRef = base + ".." + view.head
+				}
+			}
+			if err != nil {
+				keep = false
+			}
 		}
 		if out, err := s.gitRead(context.Background(), repo, "log", "-50", "--format=%H%x00%s%x00%an%x00%aI", rangeRef, "--"); err == nil {
 			for _, line := range strings.Split(out, "\n") {
@@ -222,24 +232,36 @@ func noSuchRef(err error) bool {
 	return errors.As(err, &exit) && exit.ExitCode() == 1
 }
 
-// refsFingerprint names the refs a repository's view depends on. The two refs
-// it reads are compared by their value, so a rewrite of the same length is
-// seen; packed-refs and a reftable list are compared by size and change time,
-// which a pack or a table write always moves. Reading it costs file metadata
-// and two short files, not a Git process.
+// refsFingerprint follows the integration and default-branch refs, including
+// symbolic targets. Packed refs and reftables use their size and change time.
+// Without origin/HEAD, the current branch can belong to a linked worktree;
+// leave that view uncached instead of using the common directory's HEAD.
 func refsFingerprint(common string) (string, bool) {
+	if _, err := os.Stat(filepath.Join(common, "refs/remotes/origin/HEAD")); err != nil {
+		return "", false
+	}
 	var b strings.Builder
-	for _, name := range []string{"refs/heads/dyna/integration", "refs/remotes/origin/main"} {
-		value, err := os.ReadFile(filepath.Join(common, name))
-		if err != nil {
-			b.WriteString(name + "-;")
-			continue
+	for _, root := range []string{"refs/heads/dyna/integration", "refs/remotes/origin/HEAD"} {
+		name := root
+		for depth := 0; ; depth++ {
+			if depth >= 8 || !strings.HasPrefix(name, "refs/") || filepath.Clean(name) != name {
+				return "", false
+			}
+			value, err := os.ReadFile(filepath.Join(common, name))
+			if err != nil {
+				if !os.IsNotExist(err) {
+					return "", false
+				}
+				b.WriteString(name + "-;")
+				break
+			}
+			fmt.Fprintf(&b, "%s=%s;", name, value)
+			target, symbolic := strings.CutPrefix(strings.TrimSpace(string(value)), "ref: ")
+			if !symbolic {
+				break
+			}
+			name = target
 		}
-		// Git must resolve symbolic targets on every read.
-		if strings.HasPrefix(string(value), "ref:") {
-			return "", false
-		}
-		fmt.Fprintf(&b, "%s=%s;", name, value)
 	}
 	for _, name := range []string{"packed-refs", "reftable/tables.list"} {
 		st, err := os.Stat(filepath.Join(common, name))

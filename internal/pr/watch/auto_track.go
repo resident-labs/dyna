@@ -193,9 +193,9 @@ func (s *Service) loadWorktreeOwners(ctx context.Context, st State) worktreeOwne
 		}
 		branch, known := defaults[main]
 		if !known {
-			// Use local origin/HEAD when this repo has no saved default-branch fact.
-			head, _ := gitRead(ctx, main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-			branch = strings.TrimPrefix(head, "origin/")
+			// Resolve the local default when this repo has no saved branch fact.
+			resolved, _ := repoid.DefaultBranch(ctx, main, gitRead)
+			branch = resolved.Name
 			defaults[main] = branch
 		}
 		if tree.Branch == branch {

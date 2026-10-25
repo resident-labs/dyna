@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"dyna-agent/internal/gitexec"
+	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/settings"
 )
 
@@ -84,12 +85,16 @@ func Ensure(ctx context.Context, repo string) (string, error) {
 	if head, err := git(ctx, repo, "rev-parse", "--verify", ref+"^{commit}"); err == nil {
 		return head, nil
 	}
-	base, err := git(ctx, repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
+	defaultBranch, err := repoid.DefaultBranch(ctx, repo, git)
+	if err != nil {
+		return "", err
+	}
+	base, err := git(ctx, repo, "rev-parse", "--verify", defaultBranch.Ref+"^{commit}")
 	if err != nil {
 		return "", err
 	}
 	if _, err := git(ctx, repo, "update-ref", ref, base, ""); err != nil {
-		// Another caller may have created integration while this caller read main.
+		// Another caller may have created integration while this caller read the default branch.
 		if head, readErr := git(ctx, repo, "rev-parse", "--verify", ref+"^{commit}"); readErr == nil {
 			return head, nil
 		}

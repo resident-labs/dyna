@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"dyna-agent/internal/locallane"
+	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
@@ -201,13 +202,19 @@ func slug(branch string) string {
 	}, branch)
 }
 
+func defaultBranch(ctx context.Context, repo string) (repoid.Branch, error) {
+	return repoid.DefaultBranch(ctx, repo, func(ctx context.Context, dir string, args ...string) (string, error) {
+		out, err := gitOutput(ctx, dir, args...)
+		return strings.TrimSpace(string(out)), err
+	})
+}
+
 // NewFor creates a worktree with the caller identity supplied by the engine.
 func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Record, error) {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return Record{}, errors.New("branch is required and must not start with '-'")
 	}
 	if base == "" {
-		base = "origin/main"
 		enabled, err := locallane.Enabled(ctx, repo)
 		if err != nil {
 			return Record{}, err
@@ -217,6 +224,12 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 				return Record{}, err
 			}
 			base = locallane.Integration
+		} else {
+			resolved, err := defaultBranch(ctx, repo)
+			if err != nil {
+				return Record{}, err
+			}
+			base = resolved.Ref
 		}
 	}
 	if strings.HasPrefix(base, "-") {
@@ -352,6 +365,10 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 	if inferenceErr != nil {
 		return nil, fmt.Errorf("cannot infer worktree owners safely: %w", inferenceErr)
 	}
+	defaultRef := ""
+	if resolved, err := defaultBranch(ctx, repo); err == nil {
+		defaultRef = resolved.Ref
+	}
 	var trees []Tree
 	for index, block := range blocks {
 		t := Tree{Ahead: -1}
@@ -432,15 +449,19 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 				t.DirtyFiles = strings.Split(status, "\n")
 			}
 			t.Ahead = -1
-			if count, err := gitOutput(ctx, repo, "rev-list", "--count", t.head, "--not", "refs/remotes/origin/main"); err == nil {
-				t.Ahead, _ = strconv.Atoi(strings.TrimSpace(string(count)))
+			if defaultRef != "" {
+				if count, err := gitOutput(ctx, repo, "rev-list", "--count", t.head, "--not", defaultRef); err == nil {
+					t.Ahead, _ = strconv.Atoi(strings.TrimSpace(string(count)))
+				}
 			}
 			if e != nil {
 				t.protected = "cannot inspect git status: " + e.Error()
 				t.Dirty = true
 			}
-			_, e = gitOutput(ctx, repo, "merge-base", "--is-ancestor", t.head, "refs/remotes/origin/main")
-			t.Merged = e == nil
+			if defaultRef != "" {
+				_, e = gitOutput(ctx, repo, "merge-base", "--is-ancestor", t.head, defaultRef)
+				t.Merged = e == nil
+			}
 			if usageNeeded(t, opts) {
 				size, touched, walkErr := treeUsage(ctx, t.Path)
 				t.Size, t.touched = size, touched
@@ -560,6 +581,27 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second
 
+func refreshDefaultBranch(ctx context.Context, repo string) (string, error) {
+	resolved, err := defaultBranch(ctx, repo)
+	if err != nil {
+		return "cannot resolve repository default branch", err
+	}
+	remoteRef := "refs/heads/" + resolved.Name
+	out, err := gitOutput(ctx, repo, "fetch", "--no-tags", "origin", "+"+remoteRef+":refs/remotes/origin/"+resolved.Name)
+	if err == nil {
+		return "", nil
+	}
+	reason := "cannot verify remote " + resolved.Name + ": " + strings.TrimSpace(string(out))
+	fetchErr := fmt.Errorf("fetch origin before cleanup: %w: %s", err, out)
+	// An outside clone can lack the selected branch. Keep its trees without
+	// reporting a cleanup failure; an unreachable remote remains an error.
+	var missing *exec.ExitError
+	if _, lsErr := gitOutput(ctx, repo, "ls-remote", "--exit-code", "origin", remoteRef); errors.As(lsErr, &missing) && missing.ExitCode() == 2 {
+		return "remote has no " + resolved.Name + " branch", nil
+	}
+	return reason, fetchErr
+}
+
 // GC applies the same conservative rule to every repository worktree.
 // It never removes a branch and never forces Git to remove a directory.
 func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
@@ -577,16 +619,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	// The first entry is always protected. With no linked worktrees, no
 	// removal depends on remote ancestry, including in local-only repositories.
 	if len(blocks) > 1 {
-		if out, err := gitOutput(ctx, repo, "fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"); err != nil {
-			reason := "cannot verify remote main: " + strings.TrimSpace(string(out))
-			fetchErr := fmt.Errorf("fetch origin before cleanup: %w: %s", err, out)
-			// A remote with no main branch is not a Dyna repository (for
-			// example an outside clone in a scratch folder). Its trees are
-			// kept, and that is not a cleanup failure.
-			var missing *exec.ExitError
-			if _, lsErr := gitOutput(ctx, repo, "ls-remote", "--exit-code", "origin", "refs/heads/main"); errors.As(lsErr, &missing) && missing.ExitCode() == 2 {
-				reason, fetchErr = "remote has no main branch", nil
-			}
+		if reason, fetchErr := refreshDefaultBranch(ctx, repo); reason != "" || fetchErr != nil {
 			trees, scanErr := scanBlocks(ctx, repo, &opts, blocks)
 			for i := range trees {
 				trees[i].Action = "kept"
@@ -672,7 +705,7 @@ func processUse(ctx context.Context, path string) (string, error) {
 // reword stays in step with the event.
 const (
 	ReasonDirty     = "uncommitted changes or untracked files"
-	ReasonNotMerged = "HEAD is not merged into origin/main"
+	ReasonNotMerged = "HEAD is not merged into the repository default branch"
 )
 
 func decide(t Tree, closed func(string) (bool, error)) Tree {
