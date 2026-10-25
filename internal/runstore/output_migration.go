@@ -123,9 +123,9 @@ func migrateOutputArtifact(db *sql.DB, key, path string) error {
 			if len(line.Raw) == 0 {
 				return nil
 			}
-			// Retained workflow output needs no field repair: every current
-			// dialect writes complete tool events.
-			return pack.Add([]projection.Line{line}, func([]workeroutput.Event) []int { return nil })
+			// TODO: legacy/shim remove later — restores tool fields in retained
+			// workflow output written before the current event shapes.
+			return pack.Add([]projection.Line{line}, workeroutput.ConvertRunAgent)
 		})
 		if err != nil {
 			return err
