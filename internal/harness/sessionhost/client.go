@@ -202,7 +202,11 @@ func spawnHost(ctx context.Context, socket string) error {
 }
 
 // shutdownUsed asks the host of every key this process attached to stop its
-// child and exit. It never spawns a host.
+// child and exit. It never spawns a host. A detach this process sent finishes
+// first: its host kills the abandoned child, so the shutdown never waits the
+// orderly stop for a child that is already dead. Without that order a shutdown
+// that arrives first closes stdin and waits the whole stop grace for a child
+// that ignores it, which is five seconds of test time under load.
 func (h *socketHost) shutdownUsed() {
 	h.mu.Lock()
 	dir := h.dir
@@ -210,8 +214,17 @@ func (h *socketHost) shutdownUsed() {
 	for key := range h.used {
 		keys = append(keys, key)
 	}
+	pending := make([]<-chan struct{}, 0, len(h.pending))
+	for _, done := range h.pending {
+		pending = append(pending, done)
+	}
 	h.used = map[string]bool{}
 	h.mu.Unlock()
+	// A pending detach is bounded by its own acknowledgement, so this wait can
+	// never outlast one detach call.
+	for _, done := range pending {
+		<-done
+	}
 	for _, key := range keys {
 		socket, _ := hostPaths(dir, key)
 		conn, err := net.DialTimeout("unix", socket, detachWait)
