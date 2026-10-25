@@ -32,18 +32,46 @@ type Window struct {
 	UsedPercent       *float64 `json:"usedPercent,omitempty"`
 	Used              *float64 `json:"used,omitempty"`
 	Limit             *float64 `json:"limit,omitempty"`
-	Unit              string   `json:"unit,omitempty"`
-	ResetsAt          string   `json:"resetsAt,omitempty"`
+	// Balance is the remaining money when a provider reports a balance
+	// instead of a quota window. Unit names its currency.
+	Balance  *float64 `json:"balance,omitempty"`
+	Unit     string   `json:"unit,omitempty"`
+	ResetsAt string   `json:"resetsAt,omitempty"`
 }
+
+// UsageReason is the classified reason an account has no current usage reading.
+// It is typed so the CLI and the web app can show a designed message instead of
+// raw reader text.
+type UsageReason string
+
+const (
+	// UsageReasonNotReadable means the provider does not publish usage this
+	// credential can read, so a retry will not help.
+	UsageReasonNotReadable UsageReason = "not-readable"
+	// UsageReasonExpired means the saved sign-in can no longer read usage. The
+	// owner signs in again.
+	UsageReasonExpired UsageReason = "expired"
+	// UsageReasonSecret means a reader copied the account's credential, or a
+	// value that looks like one, into its result. Dyna rejects that result.
+	UsageReasonSecret UsageReason = "secret"
+	// UsageReasonProviderError means a temporary provider or network failure.
+	UsageReasonProviderError UsageReason = "provider-error"
+	// UsageReasonRateLimited means the provider asked Dyna to wait.
+	UsageReasonRateLimited UsageReason = "rate-limited"
+	// UsageReasonNoWindows means the provider answered but reported no windows.
+	UsageReasonNoWindows UsageReason = "no-windows"
+)
+
 type Observation struct {
-	UsageError       string     `json:"usageError,omitempty"`
-	Plan             *Plan      `json:"plan,omitempty"`
-	Windows          []Window   `json:"windows"`
-	ObservedAt       time.Time  `json:"observedAt"`
-	RateLimitedUntil *time.Time `json:"rateLimitedUntil,omitempty"`
-	LastAttemptAt    time.Time  `json:"lastAttemptAt,omitempty"`
-	Failures         int        `json:"failures,omitempty"`
-	Unavailable      bool       `json:"unavailable,omitempty"`
+	UsageError       string      `json:"usageError,omitempty"`
+	Reason           UsageReason `json:"reason,omitempty"`
+	Plan             *Plan       `json:"plan,omitempty"`
+	Windows          []Window    `json:"windows"`
+	ObservedAt       time.Time   `json:"observedAt"`
+	RateLimitedUntil *time.Time  `json:"rateLimitedUntil,omitempty"`
+	LastAttemptAt    time.Time   `json:"lastAttemptAt,omitempty"`
+	Failures         int         `json:"failures,omitempty"`
+	Unavailable      bool        `json:"unavailable,omitempty"`
 }
 
 type Metadata struct {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { remainingPercent, percent, allowanceLabel, shortLabel, windowReset } from './state.ts'
+  import { remainingPercent, percent, allowanceLabel, shortLabel, windowReset, money } from './state.ts'
   import { resetNotice, type WindowTiming } from './reset.ts'
   import { deadlineClock } from './clock.svelte.ts'
   interface UsageWindow extends WindowTiming {
@@ -8,6 +8,7 @@
     remainingPercent?: number
     used?: number
     limit?: number
+    balance?: number
     unit?: string
     amountLabel?: string
   }
@@ -17,11 +18,14 @@
   const notice = $derived(resetNotice(window, observedAt, now()))
   const remaining = $derived(remainingPercent(window))
   const amount = $derived(allowanceLabel(window))
+  const balance = $derived(window.balance === undefined ? '' : money(window.balance, window.unit))
   const reset = $derived(windowReset(window))
 </script>
 
 <div class="window" class:compact>
-  {#if notice}
+  {#if balance}
+    <div class="top"><span title={window.label}>{shortLabel(window.label)}</span><strong>{balance}</strong></div>
+  {:else if notice}
     <div class="top reset"><span title={window.label}>{shortLabel(window.label)}: {notice}</span></div>
   {:else}
     <div class="top"><span title={window.label}>{shortLabel(window.label)}</span><strong>{remaining === null ? 'Not reported' : `${percent(remaining)} left`}</strong></div>
