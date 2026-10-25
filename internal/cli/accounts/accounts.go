@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/account/importer"
 	"dyna-agent/internal/account/service"
 	"dyna-agent/internal/account/store"
 	"dyna-agent/internal/engineclient"
@@ -135,16 +136,33 @@ func (o Options) useCommand() *cobra.Command {
 }
 
 func (o Options) addCommand() *cobra.Command {
-	var label string
-	var apiKeyStdin bool
+	var label, importHarness, account string
+	var apiKeyStdin, dryRun bool
 	cmd := &cobra.Command{
-		Use:   "add <provider>",
-		Short: "Add an account of a provider",
+		Use:   "add [provider]",
+		Short: "Add an account of a provider, or import a saved sign-in",
 		Long: "Add an account of one provider. With --api-key-stdin Dyna reads one API key from standard input and saves it as an account of that provider. " +
 			"A key is never read from an argument, so it does not stay in the shell history. " +
-			"Without it Dyna prints the sign-in step to run, because a provider sign-in is interactive and the owner completes it.",
-		Args: cobra.ExactArgs(1),
+			"Without it Dyna prints the sign-in step to run, because a provider sign-in is interactive and the owner completes it. " +
+			"With --import Dyna moves every saved sign-in of one harness into the Pi account of its provider and retires the source, so two copies never renew one refresh token. " +
+			"--dry-run lists what would move and writes nothing. Dyna refuses a harness that an enabled profile or an open session still runs.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			if importHarness != "" {
+				if len(args) != 0 {
+					return errors.New("Name the harness with --import, not as an argument.")
+				}
+				if label != "" || apiKeyStdin {
+					return errors.New("--label and --api-key-stdin do not apply to --import.")
+				}
+				return o.importAccounts(c, importHarness, account, dryRun)
+			}
+			if account != "" || dryRun {
+				return errors.New("--account and --dry-run need --import.")
+			}
+			if len(args) != 1 {
+				return errors.New("Name the provider to add, or give a harness with --import.")
+			}
 			if _, ok := runtime.PiProvider(args[0]); !ok {
 				return fmt.Errorf("Unknown provider %q. Choose a provider Dyna knows, such as anthropic, deepseek or zai.", args[0])
 			}
@@ -170,7 +188,43 @@ func (o Options) addCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&label, "label", "", "the name this account shows as")
 	cmd.Flags().BoolVar(&apiKeyStdin, "api-key-stdin", false, "read one API key from standard input")
+	cmd.Flags().StringVar(&importHarness, "import", "", "move the saved sign-ins of this harness into Pi")
+	cmd.Flags().StringVar(&account, "account", "", "only this saved account, by ID, ID prefix or label")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list what would move and write nothing")
 	return cmd
+}
+
+// importAccounts asks the engine to move one harness's saved sign-ins and
+// renders its typed answer. A refusal names the enabled profiles and open
+// sessions that still run the harness.
+func (o Options) importAccounts(c *cobra.Command, harness, account string, dryRun bool) error {
+	var result importer.Result
+	if err := o.Client.Call(c.Context(), "AccountsImport", []any{harness, account, dryRun}, &result); err != nil {
+		return err
+	}
+	return writeImport(c.OutOrStdout(), c.ErrOrStderr(), result)
+}
+
+// writeImport prints the moved accounts and the refused ones.
+func writeImport(out, errOut io.Writer, result importer.Result) error {
+	for _, moved := range result.Moved {
+		name := moved.Label
+		if name == "" {
+			name = moved.Source
+		}
+		if result.DryRun {
+			fmt.Fprintf(out, "Would move %s to a Pi %s account (%s).\n", name, moved.Provider, moved.Kind)
+			continue
+		}
+		fmt.Fprintf(out, "Moved %s to Pi account %s (%s, %s).\n", name, moved.Account, moved.Provider, moved.Kind)
+	}
+	for _, refused := range result.Refused {
+		fmt.Fprintln(errOut, refused.Describe(result.Harness))
+	}
+	if len(result.Moved) == 0 {
+		return errors.New("Nothing was moved. The saved sign-ins stay where they are.")
+	}
+	return nil
 }
 
 func (o Options) removeCommand() *cobra.Command {
