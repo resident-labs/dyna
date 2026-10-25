@@ -232,7 +232,7 @@ func (s Snapshot) CheckSummaries(ref Ref) []CheckSummary {
 		if v.State == "pending" || v.State == "" {
 			status = "in_progress"
 		}
-		out = append(out, CheckSummary{Node: localStatusNode(v), Name: Sanitize(v.Context), State: checkState(status, v.State), Status: status, Conclusion: v.State, URL: v.URL, CommentURL: s.checkCommentURL(v.URL, v.Context)})
+		out = append(out, CheckSummary{Name: Sanitize(v.Context), State: checkState(status, v.State), Status: status, Conclusion: v.State, URL: v.URL, CommentURL: s.checkCommentURL(v.URL, v.Context)})
 	}
 	if s.localCI != nil {
 		out = append(out, s.localCI.Checks...)

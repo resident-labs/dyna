@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -426,17 +427,20 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		if names := machineFailureRetryFrom(result); names != "" {
 			retriedFrom = names
 		} else {
-			// Only a hosted head has GitHub work to resume or commit statuses to
-			// publish. A local head's reader takes its evidence from the registry.
+			// Only a hosted head has GitHub work to resume. A local result needs
+			// no GitHub call: its evidence stays in the local CI records.
 			if job.hosted() {
 				applyLocalBudgets(&result, EffectivePolicy(st, job.record))
 				if localInfrastructureError(result) {
 					if err := s.resumeHostedCI(ctx, job, repo); err != nil {
 						return false, err
 					}
-				} else if err := s.publishLocalStatuses(ctx, job, result); err != nil {
-					return false, err
 				}
+			}
+			// A result the PR has not read yet, such as one a manual rerun wrote,
+			// must refresh it even when GitHub did not change.
+			if err := s.refreshSavedLocalResult(job, result); err != nil {
+				return false, err
 			}
 			return false, nil
 		}
@@ -539,6 +543,37 @@ func machineCause(cause localci.FailureCause) bool {
 		return true
 	}
 	return false
+}
+
+// savedLocalResultKey identifies one saved local result, so the watcher can tell
+// a result the PR has already read from one a manual rerun just wrote.
+func savedLocalResultKey(result localci.Result) string {
+	body, err := json.Marshal(result)
+	if err != nil {
+		return ""
+	}
+	return digest(string(body))
+}
+
+// refreshSavedLocalResult forces the next full poll of a PR whose saved local
+// result it has not read yet. A manual `dyna git ci run` writes only Dyna's
+// records, and a quiet settled PR would otherwise keep its old verdict until the
+// safety poll. Nothing here changes GitHub state.
+func (s *Service) refreshSavedLocalResult(job registeredCIJob, result localci.Result) error {
+	key := savedLocalResultKey(result)
+	if key == "" || s.Store == nil {
+		return nil
+	}
+	return s.Store.updateRecords([]string{job.record.Key}, func(st *State) error {
+		r := st.Records[job.record.Key]
+		if r == nil || r.Head != job.head || r.Polling.LocalCI == key {
+			return nil
+		}
+		r.Polling.LocalCI = key
+		r.Polling.Next = time.Time{}
+		r.Polling.FullChecked = time.Time{}
+		return nil
+	})
 }
 
 // Bound each run so queued heads can share a node. Slot locks in the runner
@@ -662,19 +697,9 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 				log.Printf("resume hosted CI: %v", err)
 			}
 		}
-	} else if job.hosted() {
-		if err := s.publishLocalStatuses(ctx, job, result); err != nil {
-			log.Printf("publish local CI: %v", err)
-		}
 	}
 	// A local completion must force a full snapshot even if GitHub did not change.
-	if err := s.Store.updateRecords([]string{job.record.Key}, func(st *State) error {
-		if r := st.Records[job.record.Key]; r != nil && r.Head == job.record.Head {
-			r.Polling.Next = time.Time{}
-			r.Polling.FullChecked = time.Time{}
-		}
-		return nil
-	}); err != nil {
+	if err := s.refreshSavedLocalResult(job, result); err != nil {
 		log.Printf("refresh local CI: %v", err)
 	}
 }
