@@ -89,12 +89,15 @@ func (a *Accounts) activeAccount(h string, p store.Provider, roomID string) (Nat
 	return n, nil
 }
 
-func (a *Accounts) Active(harness string) (NativeAccount, error) {
+// Active returns the account its provider uses for harness h. A harness that
+// keeps one selection per provider, such as Pi, needs the provider: an empty
+// provider would find no account.
+func (a *Accounts) Active(provider store.Provider, harness string) (NativeAccount, error) {
 	h, err := canonicalAccountHarness(harness)
 	if err != nil {
 		return NativeAccount{}, err
 	}
-	id, err := a.activeID(h)
+	id, err := (&store.Store{Root: a.Root}).Active(provider, h, "")
 	if err != nil {
 		return NativeAccount{}, err
 	}

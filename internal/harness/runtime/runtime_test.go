@@ -149,7 +149,7 @@ func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
 	for _, h := range []string{"claude-code", "codex"} {
 		t.Run(h, func(t *testing.T) {
 			r, p := runtimeFixture(t, h)
-			active, err := r.Accounts.Active(p.Harness)
+			active, err := r.Accounts.Active(ProviderForModel(p.Harness, p.Model), p.Harness)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -177,7 +177,7 @@ func TestMissingPrivateLoginAndProtectedEnvironment(t *testing.T) {
 		t.Fatal("accepted HOME override")
 	}
 	p.Env = nil
-	n, err := r.Accounts.Active(p.Harness)
+	n, err := r.Accounts.Active(ProviderForModel(p.Harness, p.Model), p.Harness)
 	if err != nil {
 		t.Fatal(err)
 	}
