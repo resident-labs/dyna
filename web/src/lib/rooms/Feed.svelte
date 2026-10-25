@@ -1,6 +1,6 @@
 <script lang="ts">
   import { speaker } from '../ui/posts.ts'
-  import { ROOM_CHAT } from './feedViews.ts'
+  import { GENERAL, ROOM_CHAT } from './feedViews.ts'
   import { tick, onMount } from 'svelte'
   import HeldCommentNotice from '../prs/HeldCommentNotice.svelte'
   import { refreshHeldComments } from '../prs/heldComments.ts'
@@ -12,6 +12,7 @@
   import { createSelection } from '../ui/selection.svelte.ts'
   import ForwardQuote from '../ui/ForwardQuote.svelte'
   import HistoryList from './HistoryList.svelte'
+  import EmptyState from '../ui/EmptyState.svelte'
   import FeedMessage from './FeedMessage.svelte'
   import { focusWhen } from '../ui/focusWhen.ts'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
@@ -32,7 +33,7 @@
   import { prEvent } from './eventPayloads.ts'
   import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
-  import type { Attachment, Post, Question, Room } from '../api/room.ts'
+  import type { Attachment, Post, ProfileChoice, Question, Room } from '../api/room.ts'
   import type { Goal } from '../api/goal.ts'
   import type { CallRequest } from '../voice/callRequests.ts'
 
@@ -41,6 +42,8 @@
     label?: string
     intro?: boolean
     posts?: Post[]
+    profiles?: ProfileChoice[]
+    onnewprofile?: (() => void) | null
     questions?: Question[]
     calls?: CallRequest[]
     goals?: Goal[]
@@ -68,7 +71,7 @@
     ongoal?: (id: string) => unknown
     stuck?: boolean
   }
-  let { room, label = ROOM_CHAT, intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
+  let { room, label = ROOM_CHAT, intro = true, posts = [], profiles = [], onnewprofile = null, questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
 
   let scroller = $state<HTMLDivElement>()
   // The list's jump and scroll calls, which only it knows how to make.
@@ -224,7 +227,20 @@
 <div class="pane">
 <div class="feed" bind:this={scroller} >
   {#if rows.length === 0}
-    <p class="empty">No messages yet.</p>
+    {#if view === GENERAL}
+      {@const profile = profiles.find((p) => p.default) ?? profiles[0]}
+      <EmptyState title="Start your first session">
+        {#if profile}
+          Type this example in the composer. You can change the task.<br />
+          <code>/{profile.name} Review this project and suggest a first task.</code>
+        {:else}
+          Add a profile to choose a model for your first agent.<br />
+          {#if onnewprofile}<button class="new-profile" onclick={onnewprofile}>New profile</button>{/if}
+        {/if}
+      </EmptyState>
+    {:else}
+      <p class="empty">No messages yet.</p>
+    {/if}
   {/if}
   <!-- Only rows near the viewport render; jump() finds the others by index. -->
   {#key room.id + ':' + view}
@@ -312,6 +328,7 @@
     position: relative;
   }
   .empty { padding: var(--s1) var(--s4); color: var(--muted); }
+  .new-profile { padding: var(--s2) 0; color: var(--ink); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
 
   .divider {
     display: flex;
