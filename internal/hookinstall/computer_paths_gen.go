@@ -44,6 +44,7 @@ var computerCodePaths = []string{
 	"internal/textutil",
 	"internal/turnlock",
 	"internal/userservices",
+	"internal/websearch",
 	"internal/websvc/devicestore",
 	"internal/workeroutput",
 	"internal/workeroutput/projection",
