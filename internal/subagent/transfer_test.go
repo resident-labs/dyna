@@ -246,6 +246,51 @@ func TestTransferNoResponseUsesInjectedDeadlineAndCancel(t *testing.T) {
 	}
 }
 
+// A transfer of a running turn holds the handoff ask only until its request
+// deadline. A turn that keeps running is stopped then, and the transcript
+// fallback goes ahead; the deadline never moves forward to wait for it.
+func TestTransferOfARunningTurnStopsAtTheDeadline(t *testing.T) {
+	e, now := transferEnv(t)
+	info, _ := e.start("SLEEP:1 RESPOND: old task")
+	info, _ = e.wait(info.ID, 1)
+	// Start a turn that stays running, as a long model turn would.
+	runner := e.m.Spawner
+	held := &heldTurnSpawner{}
+	e.m.Spawner = held
+	if _, err := e.m.beginTurn(info.ID, "RESPOND: long task", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	e.m.Spawner = runner
+	defer held.lock.Close()
+	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "next", WaitSeconds: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advance(t, e, state, 1)
+	before, _ := e.m.TransferStatus(info.ID)
+	if before.Phase != "waiting" || before.Posted {
+		t.Fatalf("running turn was not held: %+v", before)
+	}
+	deadline := before.Deadline
+	*now = now.Add(31 * time.Second)
+	advance(t, e, state, 1)
+	after, _ := e.m.TransferStatus(info.ID)
+	if after.Phase != "stopping" {
+		t.Fatalf("transfer still waits past the deadline: %+v", after)
+	}
+	if !after.Deadline.Equal(deadline) {
+		t.Fatalf("deadline moved from %s to %s", deadline, after.Deadline)
+	}
+	held.lock.Close()
+	advance(t, e, state, 2)
+	e.wait(info.ID, 0)
+	advance(t, e, state, 1)
+	got, _ := e.m.TransferStatus(info.ID)
+	if got.Phase != "completed" || got.Source != "transcript" || got.Reason != "handoff wait ended" {
+		t.Fatalf("deadline fallback: %+v", got)
+	}
+}
+
 type failedTransferSpawner struct{}
 
 func (failedTransferSpawner) Spawn(_ *Manager, _ string, _ int, _ *os.File) error {
@@ -408,8 +453,10 @@ func TestTransferFinalHandoffHintsAndDurableCoordinatorRecovery(t *testing.T) {
 }
 
 // A transfer requested mid-turn must wait for that turn to end before it asks
-// for a handoff, then give the handoff its full window. Otherwise a long turn
-// burns the wait and the session falls back to a transcript handoff.
+// for a handoff, then give the handoff its full window. Otherwise an ask sent
+// into a running turn burns the wait and the session falls back to a transcript
+// handoff. The hold itself ends at the request deadline; see
+// TestTransferOfARunningTurnStopsAtTheDeadline.
 func TestTransferHoldsHandoffAskUntilRunningTurnEnds(t *testing.T) {
 	e, now := transferEnv(t)
 	info, _ := e.start("SLEEP:1 RESPOND: initial")
@@ -426,9 +473,9 @@ func TestTransferHoldsHandoffAskUntilRunningTurnEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The in-flight turn runs well past the original handoff window. The ask
+	// The in-flight turn still runs near the end of the handoff window. The ask
 	// must not go out, and the transfer must not fall back, while it runs.
-	*now = now.Add(2 * time.Minute)
+	*now = now.Add(29 * time.Second)
 	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -455,11 +502,10 @@ func TestTransferHoldsHandoffAskUntilRunningTurnEnds(t *testing.T) {
 	}
 }
 
-// Regression: if a running turn ends past the original deadline and the
-// coordinator never polled while it ran (so the deadline was never pushed out),
-// the transfer must still ask for the handoff and give it a full window rather
-// than fall back to a transcript handoff.
-func TestTransferAsksAfterTurnEndsPastDeadline(t *testing.T) {
+// Regression: when a running turn ends past the request deadline with no poll
+// in between, the transfer falls back to the transcript at once. It must not
+// reopen the handoff window for a turn that outlived the bound.
+func TestTransferFallsBackWhenTheTurnEndsPastTheDeadline(t *testing.T) {
 	e, now := transferEnv(t)
 	info, _ := e.start("SLEEP:1 RESPOND: initial")
 	info, _ = e.wait(info.ID, 1)
@@ -474,8 +520,7 @@ func TestTransferAsksAfterTurnEndsPastDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The turn ends past the deadline, with no poll in between, so the deadline
-	// was never pushed out while it ran.
+	// The turn ends past the deadline, with no poll in between.
 	*now = now.Add(time.Minute)
 	if _, err := e.m.Store.UpdateTurn(info.ID, second.N, func(turn *Turn) {
 		turn.Status, turn.Ended = TurnOK, *now
@@ -487,11 +532,8 @@ func TestTransferAsksAfterTurnEndsPastDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, _ := e.m.TransferStatus(info.ID)
-	if !current.Posted || current.Phase != "waiting" || current.Reason != "" {
-		t.Fatalf("transfer fell back instead of asking after a late turn: %+v", current)
-	}
-	if !current.Deadline.After(now.Add(29 * time.Second)) {
-		t.Fatalf("handoff window did not start after the late turn ended: %+v", current)
+	if current.Posted || current.Phase != "stopping" || current.Reason != "handoff wait ended" {
+		t.Fatalf("late turn reopened the handoff window: %+v", current)
 	}
 }
 
@@ -514,8 +556,8 @@ func TestTransferAskIsATypedSessionEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The turn ends past the deadline, so the ask goes out on this poll.
-	*now = now.Add(time.Minute)
+	// The turn ends inside the window, so the ask goes out on this poll.
+	*now = now.Add(10 * time.Second)
 	if _, err := e.m.Store.UpdateTurn(info.ID, second.N, func(turn *Turn) {
 		turn.Status, turn.Ended = TurnOK, *now
 	}); err != nil {
