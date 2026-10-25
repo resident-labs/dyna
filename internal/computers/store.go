@@ -107,6 +107,38 @@ func Ensure(ctx context.Context, id, room string) (Meta, error) {
 		}
 	}
 }
+
+// runningCheckTimeout bounds the status read that decides whether a computer
+// is running. It is short because a shell start must not wait on a daemon.
+const runningCheckTimeout = 300 * time.Millisecond
+
+// RunningEnvironment returns the display environment of a computer that is
+// already running, and false when none runs. It never registers, creates or
+// starts a computer: a shell that starts on its own must not start a desktop.
+func RunningEnvironment(ctx context.Context, id string, base []string) ([]string, bool) {
+	if ok, _ := Enabled(); !ok {
+		return nil, false
+	}
+	call, cancel := context.WithTimeout(ctx, runningCheckTimeout)
+	defer cancel()
+	st, err := GetStatus(call, id)
+	if err != nil || st.State != StateRunning {
+		return nil, false
+	}
+	m, err := ReadMeta(id)
+	if err != nil {
+		return nil, false
+	}
+	env, err := Environment(m, base)
+	if err != nil {
+		return nil, false
+	}
+	return env, true
+}
+
+// ShimDir is the directory of a computer's browser shims.
+func ShimDir(id string) string { return filepath.Join(Dir(id), "bin") }
+
 func Environment(m Meta, base []string) ([]string, error) {
 	shim, err := browserShims(m.SessionID, base)
 	if err != nil {
@@ -167,7 +199,7 @@ func mergeEnvironment(base []string, values map[string]string) []string {
 	return out
 }
 func browserShims(id string, env []string) (string, error) {
-	dir := filepath.Join(Dir(id), "bin")
+	dir := ShimDir(id)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
