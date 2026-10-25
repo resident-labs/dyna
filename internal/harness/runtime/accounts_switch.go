@@ -84,6 +84,9 @@ func (a *Accounts) activeAccount(h string, p store.Provider, roomID string) (Nat
 		return n, err
 	}
 	if !accountRuns(canonical, n, p) {
+		if canonical == "pi" && p == store.ProviderAnthropic && n.Provider == p && n.Kind != store.KindAPIKey {
+			return NativeAccount{}, ErrPiAnthropicOAuth
+		}
 		return NativeAccount{}, errAccountMissing
 	}
 	return n, nil
