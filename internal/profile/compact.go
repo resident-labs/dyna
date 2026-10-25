@@ -41,7 +41,6 @@ var compactRules = map[string]CompactRule{
 	HarnessClaudeCode: {Min: 100000 - claudeCompactBuffer, Max: 1000000 - claudeCompactBuffer},
 	HarnessCodex:      {Min: 1},
 	HarnessMuse:       {Window: true, Min: 1},
-	HarnessGrok:       {Window: true, Min: 1},
 	HarnessOpenCode:   {Trigger: true, Min: 1},
 	HarnessPi:         {Trigger: true, Min: 1},
 }
@@ -115,14 +114,6 @@ func CompactNative(p Profile) ([]string, map[string]string, error) {
 	case HarnessMuse:
 		// Muse takes the soft threshold as a fraction of the window, in (0, 1].
 		return []string{"-c", "context_compaction.soft_threshold=" + strconv.FormatFloat(float64(c.Tokens)/float64(window), 'g', 6, 64)}, nil, nil
-	case HarnessGrok:
-		// Grok 1.0.62 reads a whole percent from 0 to 100. Round down, so it
-		// never compacts later than asked.
-		percent := c.Tokens * 100 / window
-		if percent < 1 {
-			return nil, nil, fmt.Errorf("compact: grok needs at least 1%% of the %d token window", window)
-		}
-		return nil, map[string]string{"GROK_AUTO_COMPACT_THRESHOLD_PERCENT": strconv.FormatInt(percent, 10)}, nil
 	}
 	return nil, nil, fmt.Errorf("compact: %s has no mapping", p.Harness)
 }

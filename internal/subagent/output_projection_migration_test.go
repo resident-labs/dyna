@@ -74,10 +74,6 @@ func TestSessionProjectionUsesSharedOverlapContext(t *testing.T) {
 		wantState string
 		wantID    string
 	}{
-		{"progress", []string{
-			"{\"kind\":\"tool\",\"state\":\"started\",\"id\":\"a\",\"name\":\"shell\"}\n",
-			"{\"kind\":\"tool\",\"state\":\"started\",\"id\":\"a\"}\n",
-		}, "updated", "a"},
 		{"result", []string{
 			"{\"kind\":\"status\",\"name\":\"result\"}\n",
 			"{\"kind\":\"message\",\"role\":\"assistant\",\"text\":\"done\"}\n",
@@ -106,7 +102,7 @@ func TestSessionProjectionUsesSharedOverlapContext(t *testing.T) {
 			}
 			offset := int64(len(tc.lines[0]))
 			for n, start := range []int64{0, offset} {
-				raw, err := json.Marshal(Turn{N: n + 1, Status: "ok", NormStart: start, NormEnd: int64(len(source)), OutputDialect: workeroutput.DialectGrokJSON})
+				raw, err := json.Marshal(Turn{N: n + 1, Status: "ok", NormStart: start, NormEnd: int64(len(source)), OutputDialect: workeroutput.DialectMuseJSONL})
 				if err != nil {
 					t.Fatal(err)
 				}

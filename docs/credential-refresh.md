@@ -1,7 +1,7 @@
 # Saved login refresh
 
 Dyna desktop and the desktop web server check saved logins every minute.
-Claude, Codex, and Grok refresh when access tokens have five minutes
+Claude and Codex refresh when access tokens have five minutes
 or less left. Active and inactive accounts use the same account lock. The
 registry lock also serializes account changes across Dyna processes.
 

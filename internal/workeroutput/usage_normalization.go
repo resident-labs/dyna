@@ -174,9 +174,6 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 	}
 	dialect := decoded.dialect
 	record := decoded.recordUsage
-	if dialect == DialectGrokJSON || dialect == DialectAcpJSON {
-		return n.observeGrok(record)
-	}
 	if dialect == DialectPiJSON {
 		return n.observePi(record)
 	}
