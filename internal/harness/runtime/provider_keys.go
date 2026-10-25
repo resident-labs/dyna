@@ -315,17 +315,11 @@ func (a *Runtime) piProviderKeysEdit(ctx context.Context, action, provider, key 
 func (a *Runtime) editPiProviderAccount(ctx context.Context, provider store.Provider, edit piAuthEdit, create bool) error {
 	piKeysMu.Lock()
 	defer piKeysMu.Unlock()
-	// The first lock of an account switch or native login. Holding it keeps the
-	// active account fixed through the edit without waiting for running turns.
-	dir, err := a.Accounts.harnessDirectory("pi")
+	release, err := a.lockPiAccounts(ctx)
 	if err != nil {
 		return err
 	}
-	gate, err := acquireAccountLock(ctx, filepath.Join(dir, ".switch.lock"), syscall.LOCK_EX)
-	if err != nil {
-		return errors.New("Pi's account is changing. Try again in a moment.")
-	}
-	defer releaseAccountLock(gate)
+	defer release()
 	account, found, err := a.piAccountForProvider(ctx, provider)
 	if err != nil {
 		return err
@@ -338,6 +332,28 @@ func (a *Runtime) editPiProviderAccount(ctx context.Context, provider store.Prov
 			return err
 		}
 	}
+	return a.writePiAccountLogin(ctx, account, edit)
+}
+
+// lockPiAccounts holds the first lock of an account switch or native login, so
+// the active account stays fixed through a login edit without waiting for
+// running turns. The caller releases it when the edit and its record are done.
+func (a *Runtime) lockPiAccounts(ctx context.Context) (func(), error) {
+	dir, err := a.Accounts.harnessDirectory("pi")
+	if err != nil {
+		return nil, err
+	}
+	gate, err := acquireAccountLock(ctx, filepath.Join(dir, ".switch.lock"), syscall.LOCK_EX)
+	if err != nil {
+		return nil, errors.New("Pi's account is changing. Try again in a moment.")
+	}
+	return func() { releaseAccountLock(gate) }, nil
+}
+
+// writePiAccountLogin applies edit to one Pi account's login, records it, and
+// makes the account active for its provider. The caller holds the Pi account
+// locks, so no switch moves the account during the write.
+func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount, edit piAuthEdit) error {
 	file := filepath.Join(account.Home, "auth.json")
 	before, readErr := os.ReadFile(file)
 	// restore puts the account file back and reports a failure to do so.
@@ -351,7 +367,7 @@ func (a *Runtime) editPiProviderAccount(ctx context.Context, provider store.Prov
 		}
 		return cause
 	}
-	if _, err = piEditAuth(ctx, account.Home, edit); err != nil {
+	if _, err := piEditAuth(ctx, account.Home, edit); err != nil {
 		return err
 	}
 	captured, err := a.Accounts.Capture(ctx, account.ID, "")

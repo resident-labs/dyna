@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/callspec"
+	cliaccounts "dyna-agent/internal/cli/accounts"
 	"dyna-agent/internal/cli/ask"
 	"dyna-agent/internal/cli/call"
 	"dyna-agent/internal/cli/computer"
@@ -42,7 +43,6 @@ import (
 	"dyna-agent/internal/cli/shell"
 	clisubagent "dyna-agent/internal/cli/subagent"
 	cliupdate "dyna-agent/internal/cli/update"
-	"dyna-agent/internal/cli/usage"
 	versioncmd "dyna-agent/internal/cli/version"
 	"dyna-agent/internal/cli/workflows"
 	"dyna-agent/internal/computerrestart"
@@ -149,7 +149,7 @@ func newRootCommand() *cobra.Command {
 		goal.NewCommand(),
 		rules.NewCommand(),
 		cliroot.NewCommand(),
-		usage.NewCommand(),
+		cliaccounts.NewCommand(),
 		clidoctor.NewCommand(),
 		cliroom.RoomCmd(),
 		cliroom.PostCmd(),
