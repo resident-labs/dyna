@@ -195,7 +195,9 @@ func shortHead(head string) string {
 	return head
 }
 
-// Trials use the same node slots as PR heads and enter the queue first.
+// A merge trial uses the same node slots as an integration sync, and it is the
+// only work these machines schedule: a pull request head is checked by GitHub's
+// hosted CI, so nothing here queues one.
 func registeredCIJobs(st State) []registeredCIJob {
 	var jobs []registeredCIJob
 	for _, b := range st.MergeTrials {
@@ -237,15 +239,7 @@ func registeredCIJobs(st State) []registeredCIJob {
 			}
 		}
 	}
-	for _, r := range st.Records {
-		if changeKind(*r) == "github" && r.Watching && r.State == "open" && !r.IsDraft && headVerified(*r) && r.Head != "" && strings.EqualFold(r.HeadRepo, r.Repo) {
-			jobs = append(jobs, registeredCIJob{record: *r, head: r.Head, branch: r.Branch, created: r.Created})
-		}
-	}
 	sort.Slice(jobs, func(i, j int) bool {
-		if jobs[i].trial != jobs[j].trial {
-			return jobs[i].trial
-		}
 		if !jobs[i].created.Equal(jobs[j].created) {
 			return jobs[i].created.Before(jobs[j].created)
 		}
@@ -341,6 +335,14 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 		another, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, active, runs)
 		if err != nil {
+			// A suite that no machine allows fails the trial that asked for it,
+			// and that trial reports the failure on its own read. The tick keeps
+			// taking the work the fleet can hold.
+			var blocked localci.SuiteBlockedError
+			if errors.As(err, &blocked) {
+				log.Printf("local CI: %v", blocked)
+				continue
+			}
 			return err
 		}
 		started = started || another
@@ -451,6 +453,8 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if runs.runs[key] != nil {
 		return false, nil
 	}
+	// A machine with a free slot must exist before the plan does any work, so a
+	// fleet that is only busy keeps the job waiting without a fetch.
 	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
 	if chosen == nil {
 		return false, nil
@@ -481,10 +485,13 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		if settled {
 			return false, nil
 		}
-		chosen = availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
-		if chosen == nil {
-			return false, nil
-		}
+	}
+	// Only a machine that allows every suite of the run takes it. A suite that
+	// no machine allows would wait for ever, so the caller gets a typed error
+	// that names it instead.
+	chosen = availableCINodeExcept(localci.NodesForSuites(enabled, plan.suites), active, job.record.RoomID, retriedFrom)
+	if chosen == nil {
+		return false, localci.BlockedSuite(enabled, plan.suites)
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
@@ -583,7 +590,9 @@ const registeredCIRunSlots = 6
 
 // Prefer the node with the most unreserved check slots. A machine that is low
 // on disk takes no new run, so its work waits for a node that has space. A
-// machine that names rooms takes only those rooms' work.
+// machine that names rooms takes only those rooms' work, and one that names
+// suites takes only runs whose every suite it allows, so callers pass the
+// machines that allow the run's suites.
 func availableCINode(nodes []localci.Node, active map[string]int, roomID string) *localci.Node {
 	return availableCINodeExcept(nodes, active, roomID, "")
 }

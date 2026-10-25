@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -193,5 +194,50 @@ func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
 	}
 	if saved.HasHostChecksGrants() {
 		t.Fatal("denied host-check edit changed the registry")
+	}
+}
+
+// A machine can be limited to chosen suites, and the limit is shown and can be
+// cleared again. An empty list keeps the default of every suite.
+func TestMachineEditLimitsSuites(t *testing.T) {
+	storetest.DataDir(t)
+	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab", "--ci-slots", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "hermes", "--suites", "go,frontend"); err != nil {
+		t.Fatal(err)
+	}
+	hermes, ok := find(listed(t), "hermes")
+	if !ok || !reflect.DeepEqual(hermes.Suites, []string{"frontend", "go"}) {
+		t.Fatalf("suite limit = %v", hermes.Suites)
+	}
+	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Suites:   frontend, go") {
+		t.Fatalf("shown suite limit = %q, %v", out, err)
+	}
+	if _, err := run(t, "edit", "hermes", "--suites", ""); err != nil {
+		t.Fatal(err)
+	}
+	hermes, _ = find(listed(t), "hermes")
+	if len(hermes.Suites) != 0 || !hermes.AllowsSuite("relay") {
+		t.Fatalf("cleared suite limit = %v", hermes.Suites)
+	}
+	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Suites:   every suite") {
+		t.Fatalf("shown cleared limit = %q, %v", out, err)
+	}
+	// A suite limit belongs to the CI role, and taking that role away clears it.
+	if _, err := run(t, "add", "build", "--ssh", "ari@build", "--role", "agents"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "build", "--suites", "go"); err == nil {
+		t.Fatal("gave a machine without the ci role a suite limit")
+	}
+	if _, err := run(t, "edit", "hermes", "--suites", "go"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "hermes", "--role", "agents"); err != nil {
+		t.Fatal(err)
+	}
+	if hermes, _ := find(listed(t), "hermes"); len(hermes.Suites) != 0 {
+		t.Fatalf("suite limit survived the ci role: %v", hermes.Suites)
 	}
 }
