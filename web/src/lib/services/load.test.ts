@@ -13,7 +13,7 @@ const api: ServiceApi = {
   voiceStatus: ok({ available: true, live: false }),
   notices: ok([]),
   roomCIBudget: ok({ ciWarnAfter: '2m', ciFailAfter: '3m', ciTestMax: '1s' }),
-  accountUsageCached: ok({ accounts: [] }),
+  accountsList: ok({ providers: [] }),
   ciHealth: ok({ limitMs: 1000, tests: [] }),
   syncStatus: ok({}),
 }

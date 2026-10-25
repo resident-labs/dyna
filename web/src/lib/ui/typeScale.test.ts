@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 
 // The visuals team owns these; they move onto the scale in their own change.
 const skip = new Set(['Rich.svelte', 'Files.svelte', 'CardFrame.svelte', 'Viewer.svelte', 'Visuals.svelte'])
-const dirs = ['../sessions', '../rooms', '../ui', '../settings', '../settings/usage', '../settings/harnesses']
+const dirs = ['../sessions', '../rooms', '../ui', '../settings', '../settings/accounts', '../settings/harnesses']
 
 interface Source {
   name: string

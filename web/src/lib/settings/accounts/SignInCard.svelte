@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import type { SignInState } from '../../api/harness.ts'
-  import { signInStatus } from './state.ts'
+  import { signInStatus } from './login.ts'
 
   // SignInCard shows one in-app native sign-in: the link, the one-time code,
   // the current step and, when the login reads a code, a paste box. It fits a

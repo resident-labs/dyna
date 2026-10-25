@@ -1,12 +1,5 @@
-<script module lang="ts">
-  import type { LoginFlow } from './state.ts'
-  // Keep a running sign-in reachable when Settings closes or changes panes.
-  let pendingLogin: LoginFlow | null = null
-</script>
-
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { errorText } from '../../errorText.ts'
   import { fly } from 'svelte/transition'
   import { BASE, motion } from '../../ui/motion.ts'
   import Loading from '../Loading.svelte'
@@ -15,29 +8,18 @@
   import HarnessList from './HarnessList.svelte'
   import HarnessTabs from './HarnessTabs.svelte'
   import InstallControls from './InstallControls.svelte'
-  import AccountsSection from './AccountsSection.svelte'
-  import ProvidersSection from './ProvidersSection.svelte'
   import SettingsImportSection from './SettingsImportSection.svelte'
   import HarnessToolsSection from './HarnessToolsSection.svelte'
   import ToolsTab from './ToolsTab.svelte'
   import Confirm from '../../ui/Confirm.svelte'
   import TabHeader from '../../rooms/TabHeader.svelte'
-  import ProviderKeyDialog from './ProviderKeyDialog.svelte'
-  import {
-    HARNESS_ORDER,
-    exactVersion,
-    failText,
-    harnessRowState,
-    hasSubscriptionLogin,
-    parseScopeList,
-    personalLoginChoice,
-    recommendedVersion,
-    recoveredLogins,
-    takesProviderKeys,
-  } from './state.ts'
+  import { HARNESS_ORDER, exactVersion, failText, harnessRowState, recommendedVersion } from './state.ts'
   import type { Confirmation, HarnessRow } from './state.ts'
-  import type { HarnessAccount, HarnessConfig, HarnessSnapshot, PersonalLogin, PreferencePreview, ProviderKey, SignInState } from '../../api/harness.ts'
+  import type { HarnessAccount, HarnessConfig, HarnessSnapshot, PreferencePreview } from '../../api/harness.ts'
 
+  // Dyna's own copies of the coding agents: install, update, uninstall, the
+  // tools they may use and the safe preferences Dyna can import. Sign-ins and
+  // usage belong to the Accounts pane.
   let { onmodal = () => {} }: { onmodal?: (open: boolean) => void } = $props()
 
   let snapshot = $state<HarnessSnapshot | null>(null)
@@ -47,27 +29,15 @@
   let error = $state('')
   let notice = $state('')
   let tab = $state('harnesses')
-  let selectedId = $state(pendingLogin?.harness || 'claude-code')
+  let selectedId = $state('claude-code')
 
   let versionInput = $state('')
-  let labelInput = $state('')
-  let showSignInForm = $state(false)
-  let scanning = $state('')
   let installing = $state('') // the harness this screen is installing now
   let chooseVersion = $state(false) // the exact-version field is open
   let removingTool = $state<{ kind: string; name: string } | null>(null) // {kind, name} waiting for an inline confirm
-  let scoping = $state('') // the account ID whose repo list is open for editing
-  let scopeText = $state('') // one repo per line
-  let removing = $state('') // the account ID, or 'copy', waiting for an inline confirm
-  let login = $state<LoginFlow | null>(pendingLogin)
-  let loginFlows = $state<LoginFlow[]>(pendingLogin ? [pendingLogin] : [])
-  // signInState is the live step of a sign-in running in the engine.
-  let signInState = $state<SignInState | null>(pendingLogin?.signIn ?? null)
+  let removing = $state('') // 'copy' while uninstall waits for an inline confirm
   let preview = $state<PreferencePreview | null>(null)
   let confirm = $state<Confirmation | null>(null)
-  let providers = $state<Record<string, ProviderKey[]>>({}) // harness ID -> providers that hold an API key (names only)
-  let addingProvider = $state(false)
-  let removingProvider = $state('')
   let addToolHint = $state('')
   let detailPanel: HTMLElement | undefined
 
@@ -85,7 +55,7 @@
   const allowedPreviewCount = $derived((preview?.keys ?? []).filter((k) => k.status === 'allowed').length)
 
   $effect(() => {
-    onmodal(!!confirm || addingProvider)
+    onmodal(!!confirm)
   })
 
   $effect(() => {
@@ -94,63 +64,6 @@
       pollTimer = setTimeout(pollPending, 1500)
     }
   })
-
-  $effect(() => {
-    const r = selectedRow
-    if (r && takesProviderKeys(r.id) && !r.needsInstall && !r.installing && !providers[r.id]) loadProviders(r.id)
-  })
-
-  // The pane polls the native sign-in step and collects the completed account.
-  $effect(() => {
-    const flow = login
-    if (!flow) {
-      signInState = null
-      return
-    }
-    signInState = flow.signIn ?? { phase: 'starting' }
-    const accountId = flow.accountId
-    let live = true
-    let finishing = false
-    const tick = async () => {
-      try {
-        const next = await api.privateRuntimeLoginState(accountId)
-        if (!live) return
-        signInState = next
-        if (next.phase === 'succeeded' && !finishing) {
-          finishing = true
-          await finishLogin()
-          finishing = false
-        }
-      } catch {}
-    }
-    void tick()
-    const timer = setInterval(tick, 2000)
-    return () => {
-      live = false
-      clearInterval(timer)
-    }
-  })
-
-  async function loadProviders(id: string) {
-    try {
-      providers[id] = (await api.harnessProviderKeys(id, 'list')).providers ?? []
-    } catch (e) {
-      if (!stopped) error = failText(e, 'Could not read the providers.')
-    }
-  }
-
-  async function removeProvider(id: string, provider: string) {
-    busy = true
-    error = ''
-    try {
-      providers[id] = (await api.harnessProviderKeys(id, 'remove', provider)).providers ?? []
-      removingProvider = ''
-    } catch (e) {
-      error = failText(e, 'Could not remove the provider.')
-    } finally {
-      busy = false
-    }
-  }
 
   async function pollPending() {
     if (stopped) return
@@ -172,14 +85,6 @@
       if (stopped) return
       snapshot = runtimes
       catalog = cfg
-      // Selected versions and login recovery APIs ship in the same backend update.
-      if (runtimes.selectedVersions) {
-        const flows = await api.privateRuntimeLogins()
-        if (stopped) return
-        loginFlows = recoveredLogins(flows, runtimes.accounts)
-        login = loginFlows.find((flow) => flow.accountId === pendingLogin?.accountId) ?? loginFlows[0] ?? null
-        pendingLogin = login
-      }
     } catch (e) {
       if (!stopped) error = failText(e, 'Could not load harnesses.')
     } finally {
@@ -194,7 +99,7 @@
     onmodal(false)
   })
 
-  async function selectHarness(id: string, openSignIn = false) {
+  async function selectHarness(id: string) {
     if (id !== selectedId) {
       selectedId = id
       preview = null
@@ -202,7 +107,6 @@
       versionInput = ''
       chooseVersion = false
     }
-    showSignInForm = openSignIn
     await tick()
     // Narrow screens open the panel under the row: keep that row in view.
     const split = detailPanel?.parentElement
@@ -233,305 +137,6 @@
       if (!stopped) error = 'Could not install that version. Check the version string and try again.'
     } finally {
       if (!stopped) { busy = false; installing = '' }
-    }
-  }
-
-  // Every Sign in button starts here. A saved account signs in again; a new
-  // account first offers the user's personal login when Dyna finds one.
-  function signIn(row: HarnessRow, add = false) {
-    // Pi keeps every provider in one login, so its sign-in never picks an account.
-    if (row?.id === 'pi') return requestBeginLogin(row)
-    return !add && row?.activeAccount ? requestRestartLogin(row, row.activeAccount) : findPersonalLogin(row)
-  }
-
-  function signInVersion(row: HarnessRow): string {
-    // A missing private copy is installed on first use before sign-in starts.
-    const pin = (row?.version || recommendedVersion(row) || versionInput || '').trim()
-    if (exactVersion(pin)) return pin
-    showSignInForm = true
-    error = 'Enter an exact version (for example 1.0.0) before signing in.'
-    return ''
-  }
-
-  async function findPersonalLogin(row: HarnessRow) {
-    if (busy || stopped || login || row?.capability?.accountBlocked) return
-    const pin = signInVersion(row)
-    if (!pin) return
-    busy = true
-    scanning = row.id
-    error = ''
-    notice = `Looking for your ${row.meta.name} login…`
-    let found: PersonalLogin | null
-    try {
-      found = await api.findPersonalLogin(row.id, pin)
-    } catch (e) {
-      const message = e == null ? '' : errorText(e)
-      if (!stopped) error = message.startsWith('cannot install') ? message : 'Could not start sign-in. Check the runtime version and try again.'
-      return
-    } finally {
-      if (!stopped) { busy = false; scanning = ''; notice = '' }
-    }
-    if (stopped) return
-    if (!found) return requestBeginLogin(row)
-    confirm = {
-      kind: 'personal-login',
-      ...personalLoginChoice(row.meta.name, found),
-      danger: false,
-      run: found.saved ? () => requestBeginLogin(row) : () => usePersonalLogin(row.id),
-      runAlternative: () => requestBeginLogin(row),
-    }
-  }
-
-  async function usePersonalLogin(harness: string) {
-    if (busy || stopped) return
-    busy = true
-    error = ''
-    notice = ''
-    try {
-      const next = await api.usePersonalLogin(harness)
-      if (!stopped) {
-        snapshot = next
-        confirm = null
-        notice = 'Dyna copied your personal login. You are signed in.'
-      }
-    } catch (e) {
-      if (!stopped) error = failText(e, 'Could not copy your personal login.')
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  function requestBeginLogin(row: HarnessRow, confirmed = false) {
-    if (busy || stopped || login || row?.capability?.accountBlocked) return
-    const pin = signInVersion(row)
-    if (!pin) return
-    if (row.sharedPersonalLogin && !confirmed) {
-      confirm = {
-        kind: 'begin-login',
-        title: `Sign in to ${row.meta.name}?`,
-        lines: [`Signing in to Dyna’s ${row.meta.name} account also changes the login of your own ${row.meta.name} CLI.`],
-        action: 'Continue sign-in',
-        danger: false,
-        run: () => performBeginLogin(row.id, pin, labelInput.trim(), true),
-      }
-      return
-    }
-    return performBeginLogin(row.id, pin, labelInput.trim(), confirmed)
-  }
-
-  async function performBeginLogin(harness: string, pin: string, label: string, confirmed: boolean) {
-    if (busy || stopped || login) return
-    busy = true
-    error = ''
-    notice = ''
-    try {
-      const result = await api.beginPrivateRuntimeLogin(harness, pin, label, confirmed)
-      const flow: LoginFlow = { ...result, harness }
-      pendingLogin = flow
-      if (!stopped) {
-        login = flow
-        loginFlows = [...loginFlows.filter((other) => other.accountId !== flow.accountId), flow]
-        confirm = null
-        showSignInForm = false
-        notice = 'Follow the sign-in steps below.'
-      }
-    } catch (e) {
-      const message = e == null ? '' : errorText(e)
-      if (!stopped) error = message.startsWith('cannot install') ? message : 'Could not start sign-in. Check the runtime version and try again.'
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  function requestRestartLogin(row: HarnessRow, account: HarnessAccount | null, confirmed = false) {
-    if (busy || stopped || login || !account?.id || row?.capability?.accountBlocked) return
-    if (row.sharedPersonalLogin && !confirmed) {
-      confirm = {
-        kind: 'restart-login',
-        title: `Sign in to ${account.label || row.meta.name} again?`,
-        lines: [`Signing in also changes the login of your own ${row.meta.name} CLI.`],
-        action: 'Continue sign-in',
-        danger: false,
-        run: () => performRestartLogin(row.id, account.id, true),
-      }
-      return
-    }
-    return performRestartLogin(row.id, account.id, confirmed)
-  }
-
-  async function performRestartLogin(harness: string, accountId: string, confirmed: boolean) {
-    if (busy || stopped || login) return
-    busy = true
-    error = ''
-    notice = ''
-    try {
-      const result = await api.restartPrivateRuntimeLogin(accountId, confirmed)
-      const flow: LoginFlow = { ...result, harness }
-      pendingLogin = flow
-      if (!stopped) {
-        login = flow
-        loginFlows = [...loginFlows.filter((other) => other.accountId !== flow.accountId), flow]
-        confirm = null
-        notice = 'Follow the sign-in steps below.'
-      }
-    } catch {
-      if (!stopped) error = 'Could not restart sign-in. Try again.'
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  async function finishLogin() {
-    if (busy || stopped || !login?.accountId) return
-    busy = true
-    error = ''
-    notice = ''
-    const accountId = login.accountId
-    try {
-      const next = await api.finishPrivateRuntimeLogin(accountId)
-      pendingLogin = null
-      if (!stopped) {
-        snapshot = next
-        loginFlows = loginFlows.filter((flow) => flow.accountId !== accountId)
-        login = loginFlows[0] ?? null
-        pendingLogin = login
-        labelInput = ''
-        notice = 'Sign-in finished.'
-      }
-    } catch (e) {
-      // The engine names the missing step, so keep its words.
-      if (!stopped) error = failText(e, 'Sign-in is not complete yet.')
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  function openLogin(flow: LoginFlow) {
-    pendingLogin = flow
-    login = flow
-    tab = 'harnesses'
-    selectHarness(flow.harness)
-  }
-
-  async function respondPaste(code: string) {
-    if (busy || stopped || !login?.accountId) return false
-    busy = true
-    error = ''
-    try {
-      await api.respondPrivateRuntimeLogin(login.accountId, code)
-      return true
-    } catch (e) {
-      if (!stopped) error = failText(e, 'Could not send the code.')
-      return false
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  async function cancelLogin() {
-    if (busy || stopped || !login?.accountId) return
-    const accountId = login.accountId
-    busy = true; error = ''
-    try {
-      await api.cancelPrivateRuntimeLogin(accountId)
-      pendingLogin = null
-      if (!stopped) {
-        loginFlows = loginFlows.filter((flow) => flow.accountId !== accountId)
-        login = loginFlows[0] ?? null
-        pendingLogin = login
-        notice = 'Sign-in cancelled. The saved account remains.'
-        await load()
-      }
-    } catch (e) {
-      if (!stopped) error = failText(e, 'Could not cancel sign-in.')
-    } finally { if (!stopped) busy = false }
-  }
-
-  function requestSwitchAccount(row: HarnessRow, account: HarnessAccount, confirmed = false) {
-    if (busy || stopped || login || !account?.id || account.active) return
-    if (row.sharedPersonalLogin && !confirmed) {
-      confirm = {
-        kind: 'switch-account',
-        title: `Switch ${row.meta.name} to ${account.label || account.id}?`,
-        lines: [`Switching Dyna’s ${row.meta.name} account also changes the login of your own ${row.meta.name} CLI.`],
-        action: 'Switch account',
-        danger: false,
-        run: () => performSwitchAccount(account.id, true),
-      }
-      return
-    }
-    performSwitchAccount(account.id, confirmed)
-  }
-
-  async function performSwitchAccount(accountId: string, confirmed: boolean) {
-    if (busy || stopped || login) return
-    busy = true
-    error = ''
-    notice = ''
-    const poll = setInterval(async () => {
-      try {
-        const next = await api.privateRuntimes()
-        if (!stopped && busy) snapshot = next
-      } catch {}
-    }, 1000)
-    try {
-      const next = await api.switchPrivateRuntimeAccount(accountId, confirmed)
-      if (!stopped) {
-        snapshot = next
-        confirm = null
-        preview = null
-        notice = 'Active account switched.'
-      }
-    } catch {
-      if (!stopped) error = 'Could not switch account. Try again.'
-    } finally {
-      clearInterval(poll)
-      if (!stopped) busy = false
-    }
-  }
-
-  function openScope(acct: HarnessAccount) {
-    scoping = acct.id
-    scopeText = (acct.repos ?? []).join('\n')
-  }
-
-  async function saveScope(accountId: string) {
-    if (busy || stopped) return
-    busy = true
-    error = ''
-    notice = ''
-    try {
-      const repos = parseScopeList(scopeText)
-      const next = await api.setAccountRepos(accountId, repos)
-      if (!stopped) {
-        snapshot = next
-        scoping = ''
-        notice = repos.length ? 'Account limited to the listed repos.' : 'Account may use any repo that no other account names.'
-      }
-    } catch (e) {
-      if (!stopped) error = String(Reflect.get(Object(e), 'message') || 'Could not save the repo list. Use a remote URL or host/org/name.')
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  async function removeAccount(accountId: string) {
-    if (busy || stopped) return
-    busy = true
-    error = ''
-    notice = ''
-    try {
-      const next = await api.removePrivateRuntimeAccount(accountId, true)
-      if (!stopped) {
-        snapshot = next
-        removing = ''
-        if (preview?.accountId === accountId) preview = null
-        notice = 'Account removed.'
-      }
-    } catch {
-      if (!stopped) error = 'Could not remove account. Close any active session using it first.'
-    } finally {
-      if (!stopped) busy = false
     }
   }
 
@@ -629,13 +234,6 @@
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if notice}<p class="notice" role="status">{notice}</p>{/if}
   {/if}
-  {#if loginFlows.length}
-    <div class="btn-group" style="margin-top:var(--s3)" aria-label="Pending sign-ins">
-      {#each loginFlows as flow (flow.accountId)}
-        <button class="btn" disabled={busy} onclick={() => openLogin(flow)}>Continue {HARNESS_ORDER.find((h) => h.id === flow.harness)?.name || flow.harness} sign-in</button>
-      {/each}
-    </div>
-  {/if}
 
   {#if loading && !snapshot}
     <Loading>Loading harnesses…</Loading>
@@ -645,10 +243,8 @@
         {rows}
         selected={selectedRow?.id ?? ''}
         {busy}
-        signingIn={!!login}
         onselect={selectHarness}
         oninstall={install}
-        onsignin={(r) => { selectHarness(r.id); signIn(r) }}
       />
 
       {#if selectedRow}
@@ -667,7 +263,6 @@
           <InstallControls
             row={r}
             {busy}
-            signingIn={!!login}
             bind:chooseVersion
             bind:versionInput
             bind:removing
@@ -676,47 +271,6 @@
           />
           {#if error}<p class="error" role="alert">{error}</p>{/if}
           {#if notice}<p class="notice" role="status">{notice}</p>{/if}
-
-          {#if r.id !== 'pi' && (hasSubscriptionLogin(r.id) || (login && login.harness === r.id))}
-            <AccountsSection
-              row={r}
-              {busy}
-              signingIn={!!login}
-              login={login && login.harness === r.id ? login : null}
-              {signInState}
-              scanning={scanning === r.id}
-              bind:removing
-              bind:scoping
-              bind:scopeText
-              bind:showSignInForm
-              bind:labelInput
-              onsignin={(add) => signIn(r, add)}
-              oncancel={cancelLogin}
-              onpaste={respondPaste}
-              onrestart={(acct) => requestRestartLogin(r, acct)}
-              onswitch={(acct) => requestSwitchAccount(r, acct)}
-              onscope={openScope}
-              onsavescope={saveScope}
-              onremove={removeAccount}
-            />
-          {/if}
-
-          {#if takesProviderKeys(r.id) && !r.needsInstall && !r.installing}
-            <ProvidersSection
-              row={r}
-              providers={providers[r.id] ?? []}
-              {busy}
-              signingIn={!!login}
-              login={login && login.harness === r.id ? login : null}
-              {signInState}
-              onsignin={() => signIn(r, true)}
-              oncancel={cancelLogin}
-              onpaste={respondPaste}
-              bind:removingProvider
-              onremove={(provider) => removeProvider(r.id, provider)}
-              onadd={() => (addingProvider = true)}
-            />
-          {/if}
 
           {#if !r.needsInstall && !r.installing}
           <SettingsImportSection
@@ -756,10 +310,6 @@
   {/if}
 </section>
 
-{#if addingProvider && selectedRow}
-  <ProviderKeyDialog harness={selectedRow.id} name={selectedRow.meta.name} onclose={() => (addingProvider = false)} onsaved={(list) => { providers[selectedRow.id] = list; addingProvider = false; load() }} />
-{/if}
-
 {#if confirm}
   {@const asked = confirm}
   <Confirm
@@ -778,7 +328,6 @@
 
 <style>
   .harnesses { container-type: inline-size; }
-  .btn-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
   .ver { font-family: var(--mono); font-size: var(--t-cap); color: var(--muted); }
   .name { font-size: var(--t-body); font-weight: 500; }
   .panel-title { font-size: var(--t-head); }

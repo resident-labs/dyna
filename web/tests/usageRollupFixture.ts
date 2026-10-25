@@ -1,6 +1,6 @@
 // Browser fixture only: a usage rollup shaped like a room with about 10,000
 // turns, in the same form as api.usageRollup. Not imported by the app.
-import type { Cost, DayModelRow, Metric, RoleModelRow, UsageRow } from '../src/lib/settings/usage/activity.ts'
+import type { Cost, DayModelRow, Metric, RoleModelRow, UsageRow } from '../src/lib/settings/accounts/activity.ts'
 import type { UsageWindow } from '../src/lib/api/account.ts'
 export const fixtureWindow = (id: string, label: string, used: number, resetsAt: string): UsageWindow => ({ id, label, usedPercent: used, resetsAt })
 

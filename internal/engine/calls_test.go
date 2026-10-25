@@ -207,7 +207,7 @@ func TestHookActionsUseRequestPrincipal(t *testing.T) {
 
 }
 
-func TestRuntimeConstructionAndUsageDoNotWriteAccounts(t *testing.T) {
+func TestRuntimeConstructionDoesNotWriteAccounts(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	store := accountstore.DefaultStore()
 	// Write the historical fixture directly. Store.Update would add an
@@ -251,8 +251,6 @@ func TestRuntimeConstructionAndUsageDoNotWriteAccounts(t *testing.T) {
 			t.Fatalf("%s rewrote account store: %v", name, err)
 		}
 	}
-	accounts := service.New(service.Options{Store: store})
-	checkReadOnly("old usage", func() { accounts.AccountUsage(t.Context(), false) })
 	checkReadOnly("runtime construction", func() { newRuntime(t.Context()) })
 }
 
@@ -418,13 +416,13 @@ func TestEveryCallHasOneScope(t *testing.T) {
 		scope websvc.Scope
 		names string
 	}{
-		{websvc.ScopeRead, `RunnerWaitInput Health SystemLoad Machines Machine Rooms FeedTail FeedAfter FeedAround SearchFeed OpenRoom Members MentionChoices Preview Transcript TranscriptMore RootSession HeldPRComments TranscriptPage TranscriptAfter TranscriptTurn Profile Profiles RoomSessionControls SessionTransfer SessionConsolidations RoomCIBudget CIHealth CIHealthRun CIHealthTest RoomChangePolicy Changes ChangeDetail MergeStatus MergeControlStatus RoomMergeStatus RoomMergeHistory ReviewerStatus ListServices GitHubList GitHubView GitHubDiff Runs RunDetail RunResult AttachmentText Pins Issues Library CallRequests Questions Visuals Rules Goals Goal GoalJournal GoalItems GoalItemCounts GoalStatus GoalEvents ListTemplates SessionQueue Notices AccountUsageCached UsageRollup ProfileUsage VoiceStatus PRSettings PRNoiseRules SyncStatus`},
+		{websvc.ScopeRead, `RunnerWaitInput Health SystemLoad Machines Machine Rooms FeedTail FeedAfter FeedAround SearchFeed OpenRoom Members MentionChoices Preview Transcript TranscriptMore RootSession HeldPRComments TranscriptPage TranscriptAfter TranscriptTurn Profile Profiles RoomSessionControls SessionTransfer SessionConsolidations RoomCIBudget CIHealth CIHealthRun CIHealthTest RoomChangePolicy Changes ChangeDetail MergeStatus MergeControlStatus RoomMergeStatus RoomMergeHistory ReviewerStatus ListServices GitHubList GitHubView GitHubDiff Runs RunDetail RunResult AttachmentText Pins Issues Library CallRequests Questions Visuals Rules Goals Goal GoalJournal GoalItems GoalItemCounts GoalStatus GoalEvents ListTemplates SessionQueue Notices UsageRollup ProfileUsage VoiceStatus PRSettings PRNoiseRules SyncStatus`},
 		{websvc.ScopeOperate, "StampPlanAncestry AdmitNativeAttempt AddRunDirectories FinishRun ObserveMuseQuota ObserveClaudeUsage"},
 		{websvc.ScopeOperate, `WakeLibrarian FileLibrarySmell AddLibraryEntry UpdateLibraryEntry LinkLibraryEntry RetireLibraryEntry NewWorktree GCWorktrees RemoveWorktrees PruneWorktrees ApplyRunWorktreeDisposition MarkRead MarkReadMany SendToSession SendWithReferences SendToSessionWithReferences Send Post StopSession BulkSessionAction PauseRoomSessions ResumeRoomSessions ClearDormantSessions DismissSession ReturnSeat CloseSession CloseSessionOptions ReopenSession ForceCloseSession PromoteSession TransferSession CancelSessionTransfer SubmitTransferHandoff ConsolidateSessions ResumeSessionConsolidation CancelSessionConsolidation ReplyToFinding SendDiffComments SendWorktreeComments RestartReviewer StartIssueWork DismissPRComment AdmitPRComment CommentPR PostPRReview LearnPRNoise UntrackPR ResumePR TrackPR TrackPRRef TransferPR SetPRDraft RequirePRReviewers CloseChange OpenChange RecordReviewResult RecordPRVerdict Attach Pin Unpin CloseIssue IssueGoal RequestCall WithdrawCall CallRequestShown DeclineCallRequest AskQuestion WithdrawQuestion AnswerQuestion AddGoal AddGoalItem MoveGoalItem EditGoalSelectors EditGoalItem EditGoal AmendGoalBrief FinishGoal ExpediteGoal SetPRGoal SetGoalItemState NoteGoal RunnerSetPid RunnerSetRuntimePin RunnerSetInstructionsStale RunnerSetHarnessSession RunnerSetDMCursor RunnerFinish RunnerTurnStart RunnerTurnNote RunnerTurnEnd RunnerCompleteTurn RunnerReturnDormant RunnerInstructions RunnerClaimInput CancelRun PauseRun RemoveRun ClearRuns ArchiveRun UnarchiveRun SteerRun DeletePendingSteer DismissPendingPost DismissNotice VoiceStart VoiceResume VoiceStop AttachSeat AdoptSession RenameSession StartSubagent`},
 		{websvc.ScopeFiles, `ListEntries ReadFile SyncFetch SyncRefresh GitExport GitStatus GitLastCommits GitReadFile GitHistory GitBlame GitDiff BrowseInfo BrowseDirs InspectPath`},
 		{websvc.ScopeTerminal, `TermOpen Terms TermAttach TermWrite TermResize TermClose ShellJobs ShellLog ShellLogRange StopShell`},
 		{websvc.ScopeComputers, `Computers Computer ComputerControl`},
-		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian SaveMachine ProbeMachine TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog ListGlobalHooks GlobalHookSummary GlobalHookRuns RunGlobalHook AddGlobalHook EditGlobalHook RemoveGlobalHook ResetHook GlobalHookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom SetRoomRootProfile DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin SwitchPrivateRuntimeAccount PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountUsage AccountsList AccountsUse AccountsRemove AccountsAdd ProfileModels`},
+		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian SaveMachine ProbeMachine TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog ListGlobalHooks GlobalHookSummary GlobalHookRuns RunGlobalHook AddGlobalHook EditGlobalHook RemoveGlobalHook ResetHook GlobalHookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom SetRoomRootProfile DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountsList AccountsView AccountsUse AccountsRemove AccountsAdd ProfileModels`},
 	}
 	want := map[string]websvc.Scope{}
 	for _, group := range scopes {
@@ -460,10 +458,7 @@ func TestConditionalWritesAreRejectedInReadOnlyMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scopes["AccountUsageCached"] != websvc.ScopeRead {
-		t.Fatal("cached usage must be available with read scope")
-	}
-	for _, name := range []string{"ConfigCheckProfile", "UpdateNotice", "AccountUsage", "AccountsList", "ProfileModels"} {
+	for _, name := range []string{"ConfigCheckProfile", "UpdateNotice", "AccountsList", "ProfileModels"} {
 		if scopes[name] != websvc.ScopeAdmin {
 			t.Fatalf("%s must retain admin scope", name)
 		}
@@ -475,9 +470,6 @@ func TestConditionalWritesAreRejectedInReadOnlyMode(t *testing.T) {
 		if entry.Access == websvc.Write && entry.Scope == websvc.ScopeRead {
 			t.Errorf("%s is Write in read scope", entry.Name)
 		}
-	}
-	if _, err := calls["AccountUsageCached"](t.Context(), nil); err != nil {
-		t.Fatalf("cached usage unavailable: %v", err)
 	}
 }
 
@@ -524,8 +516,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 		}
 	}
 	// VoiceResume can dial a provider, like VoiceStart.
-	if n := len(callspec.LongCalls); n != 97 {
-		t.Fatalf("LongCalls has %d calls, want 93; a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 95 {
+		t.Fatalf("LongCalls has %d calls, want 95; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 
