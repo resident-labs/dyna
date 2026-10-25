@@ -322,7 +322,7 @@ func uniqueIDs(ids ...string) []string {
 // returns the children that own nothing, to close next. Their own children get
 // the same choice when they close, so grandchildren do not count here. The rest
 // move to the heir, or become top-level leads when there is no open ancestor.
-func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) (closeNext, summary []string, err error) {
+func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) (closeNext []string, summary []sessionclose.Outcome, err error) {
 	children, err := m.OpenChildren(closed.ID)
 	if err != nil {
 		return nil, nil, err
@@ -339,15 +339,14 @@ func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) 
 		items = slices.DeleteFunc(items, func(r Responsibility) bool { return r.Kind == "child" })
 		if len(items) == 0 {
 			closeNext = append(closeNext, child.ID)
-			summary = append(summary, "Child "+child.Name+" closed")
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultClosed, ID: child.ID, Name: child.Name})
 		} else if err = m.reparentLockedContext(ctx, child.ID, parent, depth); err != nil {
+			// The child names the failure itself: the client can then offer to
+			// move it, which needs its name.
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, ID: child.ID, Name: child.Name, Failure: sessionclose.FailureChildHandoff})
 			return closeNext, summary, err
 		} else {
-			target := heir.Name
-			if target == "" {
-				target = "top level"
-			}
-			summary = append(summary, "Child "+child.Name+" → "+target)
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultMoved, ID: child.ID, Name: child.Name, To: heirAddress(heir)})
 		}
 	}
 	return closeNext, summary, nil

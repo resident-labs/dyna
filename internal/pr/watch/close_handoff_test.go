@@ -8,6 +8,7 @@ import (
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 )
@@ -145,6 +146,27 @@ func TestCloseHandsQueuedUnreadNoticeToHeir(t *testing.T) {
 	}
 }
 
+// A close that cannot move a PR still names that PR, so the app shows which
+// work stayed behind and can open it.
+func TestCloseNamesThePRItCouldNotMove(t *testing.T) {
+	e := newEnv(t)
+	r := e.track()
+	got, err := e.s.CloseSession(t.Context(), e.author, subagent.Info{})
+	if err == nil {
+		t.Fatal("close moved a PR with no open heir")
+	}
+	for _, o := range got {
+		if o.Kind != sessionclose.ResponsibilityPR || o.Result != sessionclose.ResultFailed {
+			continue
+		}
+		if o.Number != r.Number || o.Failure != sessionclose.FailureHandoff {
+			t.Fatalf("failed row = %+v, want PR #%d with a handoff failure", o, r.Number)
+		}
+		return
+	}
+	t.Fatalf("close outcomes = %+v, want a failed row for PR #%d", got, r.Number)
+}
+
 func TestCloseSkipsPRTransferredToAnotherAuthor(t *testing.T) {
 	e := newEnv(t)
 	r := e.track()
@@ -156,7 +178,7 @@ func TestCloseSkipsPRTransferredToAnotherAuthor(t *testing.T) {
 		<-release
 	}
 	type result struct {
-		summary []string
+		summary []sessionclose.Outcome
 		err     error
 	}
 	done := make(chan result, 1)
