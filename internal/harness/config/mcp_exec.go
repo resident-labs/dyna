@@ -23,7 +23,7 @@ type MCPExecSpec struct {
 // MCPEnvironmentName keeps MCP credentials from changing the harness account or
 // its native paths. The server receives its original names after translation.
 func MCPEnvironmentName(key string) string {
-	if home.PrivateEnvironmentKey(key) || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "CLAUDE_") || strings.HasPrefix(key, "CODEX_") || strings.HasPrefix(key, "OPENCODE_") || strings.HasPrefix(key, "CURSOR_") || strings.HasPrefix(key, "ANTHROPIC_") || strings.HasPrefix(key, "GEMINI_") || strings.HasPrefix(key, "GROK_") || strings.HasPrefix(key, "MUSE_") || key == "OPENAI_API_KEY" || key == "META_API_KEY" || key == "DBUS_SESSION_BUS_ADDRESS" || strings.HasPrefix(key, "AWS_") || strings.HasPrefix(key, "GOOGLE_") || strings.HasPrefix(key, "XAI_") || strings.HasPrefix(key, "TBH_") || strings.HasPrefix(key, "PI_") {
+	if home.PrivateEnvironmentKey(key) || strings.HasPrefix(key, "XDG_") || strings.HasPrefix(key, "CLAUDE_") || strings.HasPrefix(key, "OPENCODE_") || strings.HasPrefix(key, "CURSOR_") || strings.HasPrefix(key, "ANTHROPIC_") || strings.HasPrefix(key, "GEMINI_") || strings.HasPrefix(key, "GROK_") || strings.HasPrefix(key, "MUSE_") || key == "OPENAI_API_KEY" || key == "META_API_KEY" || key == "DBUS_SESSION_BUS_ADDRESS" || strings.HasPrefix(key, "AWS_") || strings.HasPrefix(key, "GOOGLE_") || strings.HasPrefix(key, "XAI_") || strings.HasPrefix(key, "TBH_") || strings.HasPrefix(key, "PI_") {
 		sum := sha256.Sum256([]byte(key))
 		return "DYNA_MCP_" + strings.ToUpper(hex.EncodeToString(sum[:8]))
 	}

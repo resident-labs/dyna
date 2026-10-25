@@ -28,7 +28,7 @@ import (
 )
 
 // Bundle identifies an exact installed executable. Launchers must set
-// DISABLE_UPDATES=1 for Claude Code and check_for_update_on_startup=false for Codex.
+// DISABLE_UPDATES=1 for Claude Code.
 type Bundle struct {
 	Harness    string `json:"harness"`
 	Version    string `json:"version"`

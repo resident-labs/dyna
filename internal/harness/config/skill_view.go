@@ -11,7 +11,7 @@ const skillLinkPrefix = ".dyna-link-"
 
 // PublishSkillView links each skill in a generation's skills directory into
 // view. The view is a real directory, so a harness that writes its own skills
-// there (Codex adds .system) never changes the read-only generation. Dyna owns
+// there never changes the read-only generation. Dyna owns
 // only the symlinks in view. Each link is replaced with an atomic rename, and
 // links to skills that the generation no longer has are removed.
 func PublishSkillView(view, skills string) error {
