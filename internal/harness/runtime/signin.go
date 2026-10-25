@@ -80,7 +80,6 @@ type signInSpec struct {
 // signInSpecs lists the harnesses with an in-app sign-in adapter.
 var signInSpecs = map[string]signInSpec{
 	"pi":          {Argv: piOAuthArgv, Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
-	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, GracefulStop: true, Timeout: 5 * time.Minute},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},

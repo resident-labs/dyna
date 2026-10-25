@@ -76,7 +76,7 @@ func sessionResolver(store *subagent.Store) func(string) (shellmcp.Caller, bool)
 }
 
 // sessionCwd is the session's working directory. A harness may start its MCP
-// servers elsewhere (Antigravity uses the plugin folder), so a session's own
+// servers elsewhere (one may use a plugin folder), so a session's own
 // directory wins over the server's.
 func sessionCwd(store *subagent.Store, owner, fallback string) string {
 	if meta, err := store.ReadMeta(owner); err == nil && meta.Dir != "" {

@@ -14,7 +14,6 @@ var harnessDistributions = map[string]struct {
 	"pi":          {"npm", piNPMPackage},
 	"kimi-code":   {"npm", "@moonshot-ai/kimi-code"},
 	"muse":        {"muse-stable", ""},
-	"antigravity": {"antigravity-manifest", ""},
 }
 
 // npmDistributionMetadata is the registry receipt used for lookup and install.

@@ -17,7 +17,7 @@ var nativePathKeys = map[string][]string{
 }
 
 func TestNativeEnvironmentIsSharedByLoginAndRuntime(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "grok", "pi", "antigravity", "kimi-code"} {
+	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "grok", "pi", "kimi-code"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			scope := filepath.Join(a.Root, h, ".runtime")

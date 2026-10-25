@@ -7,13 +7,11 @@ test('working accounts with a usage reading are cards; login and quota problems 
     { id: 'c', harness: 'claude-code', label: 'claude-code', active: true, windows: [{ id: 'five_hour', label: '5h', remainingPercent: 40 }] },
     { id: 'q', harness: 'codex', label: 'quiet', active: true, windows: [] },
     { id: 'n', harness: 'grok', label: 'grok', active: true, windows: [{ id: 'weekly', label: 'Weekly' }] },
-    { id: 'g', harness: 'antigravity', label: 'antigravity', active: true, needsLogin: true },
     { id: 'o', harness: 'opencode', label: 'argon', active: true, quotaBlocked: true, blockingQuotaWindows: ['seven_day'] },
     { id: 'x', harness: 'codex', label: 'spare', active: false, needsLogin: true },
   ] })
   assert.deepEqual(cards.map((a) => a.id), ['c'])
   assert.deepEqual(alerts.map((a) => [a.id, a.text, a.action]), [
-    ['g', 'antigravity: Needs sign-in', 'Log in'],
     ['o', 'argon: Weekly limit reached', 'Details'],
   ])
 })
@@ -30,7 +28,6 @@ test('updates list dyna and installed harnesses with a newer recommended version
       { harness: 'claude-code', version: '2.10.0', status: 'resolved', source: 'npm' },
       { harness: 'codex', version: '0.63.2', status: 'resolved', source: 'npm' },
       { harness: 'opencode', version: '1.9.0', status: 'resolved', source: 'npm' },
-      { harness: 'antigravity', version: '1.0.0', status: 'pinned', source: 'npm' },
     ],
   }
   const updates = updateRows({ current: '0.42.0', latest: '0.43.1' }, runtimes)

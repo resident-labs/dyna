@@ -16,7 +16,6 @@ The wizard does not create a per-profile account binding or silently switch one.
 | OpenCode | Native model/provider API, then native model listing |
 | Codex | App-server `model/list` |
 | Claude Code | Installed help's model aliases |
-| Antigravity | Native model listing |
 | Muse | Version-negotiated MSP `model/list` |
 
 Discovery runs Dyna's private copy of the harness with the active private

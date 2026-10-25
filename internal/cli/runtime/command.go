@@ -109,7 +109,6 @@ func NewCommand() *cobra.Command {
 	accounts := &cobra.Command{Use: "accounts", Short: "Manage private native login homes"}
 	accounts.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		accounts := harnessruntime.NewAccounts()
-		accounts.RepairAntigravityACPAccount()
 		a, err := accounts.List()
 		if err != nil {
 			return err
@@ -187,21 +186,14 @@ func NewCommand() *cobra.Command {
 		if flow.Warning != "" {
 			fmt.Fprintln(c.ErrOrStderr(), flow.Warning)
 		}
-		if account.Harness == "antigravity" {
-			// Antigravity signs in through its ACP server only.
-			if err := antigravityACPLogin(c, b.Executable, account.Identity, flow); err != nil {
-				return err
-			}
-		} else {
-			cmd := exec.CommandContext(c.Context(), flow.Argv[0], flow.Argv[1:]...)
-			cmd.Env = append(os.Environ(), flow.Env...)
-			cmd.Dir = flow.Cwd
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = c.OutOrStdout()
-			cmd.Stderr = c.ErrOrStderr()
-			if err := cmd.Run(); err != nil {
-				return errors.New("native sign-in did not complete")
-			}
+		cmd := exec.CommandContext(c.Context(), flow.Argv[0], flow.Argv[1:]...)
+		cmd.Env = append(os.Environ(), flow.Env...)
+		cmd.Dir = flow.Cwd
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = c.OutOrStdout()
+		cmd.Stderr = c.ErrOrStderr()
+		if err := cmd.Run(); err != nil {
+			return errors.New("native sign-in did not complete")
 		}
 		result, err := flow.Complete(c.Context())
 		if err != nil {

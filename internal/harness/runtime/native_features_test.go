@@ -194,7 +194,7 @@ func TestNativeFeatureEnvironmentOverridesProfileOnResume(t *testing.T) {
 
 func TestNativeFeatureGapsAreReported(t *testing.T) {
 	for _, c := range Capabilities() {
-		if c.Harness == "grok" || c.Harness == "antigravity" || c.Harness == "muse" {
+		if c.Harness == "grok" || c.Harness == "muse" {
 			if c.Status != "partial" || !strings.Contains(c.Reason, "No switch verified") {
 				t.Errorf("unreported feature gap: %+v", c)
 			}
@@ -220,7 +220,7 @@ func TestMuseKeepsMemoryGaps(t *testing.T) {
 }
 
 func TestNativeFeaturesInFreshAndRestoredGenerations(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "grok", "pi", "opencode", "muse", "antigravity"} {
+	for _, h := range []string{"claude-code", "codex", "grok", "pi", "opencode", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
 			fresh := buildGeneration(t, r, h, home, id)
@@ -269,13 +269,6 @@ func TestNativeFeaturesInFreshAndRestoredGenerations(t *testing.T) {
 				case "pi":
 					if strings.Contains(joined, "--no-extensions") {
 						t.Error("policy added an unrelated extension restriction")
-					}
-				case "antigravity":
-					if strings.Contains(joined, "--disable-slash-commands") {
-						t.Errorf("%s carries CLI-only slash-command flag", g.name)
-					}
-					if got := NativeFeatureDenyTools(h, false); !slices.Equal(got, []string{"start_subagent", "schedule"}) {
-						t.Errorf("ACP native controls: %v", got)
 					}
 				case "muse":
 					for _, flag := range []string{"--disable-request-user-input", "--no-foreign-personal-context"} {
@@ -606,14 +599,4 @@ func generationMCPServer(t *testing.T, file string, raw []byte, name string) (st
 		return command, args, true
 	}
 	return "", nil, false
-}
-
-func TestAntigravityACPToolPolicyUsesVerifiedBuiltins(t *testing.T) {
-	if got := NativeFeatureDenyTools("antigravity", true); !slices.Equal(got, []string{"start_subagent", "schedule", "run_command"}) {
-		t.Fatalf("ACP session controls: %v", got)
-	}
-	// ACP's tool list is a protocol field, not a CLI denylist flag.
-	if got := NativeFeatureArgs("antigravity", []string{"--add-dir", "/generation"}, true); !slices.Equal(got, []string{"--add-dir", "/generation"}) {
-		t.Fatalf("invented ACP launch flags: %v", got)
-	}
 }

@@ -165,7 +165,6 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	if _, _, err := (&FirstUse{Bundles: r.Bundles}).EnsureBundle(ctx, a.Harness, version); err != nil {
 		return p, Pin{}, err
 	}
-	r.Accounts.RepairAntigravityACPAccount()
 	// Dyna never copies a personal login on its own. The user signs in, or
 	// chooses the personal login, on the Harnesses page or with dyna harness login.
 	active, err := r.Accounts.activeFor(a.Harness, p.RuntimeRepo)

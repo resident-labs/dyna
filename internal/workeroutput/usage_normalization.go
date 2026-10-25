@@ -105,8 +105,6 @@ type UsageNormalizer struct {
 	costBase                    *float64 // Claude's cumulative total_cost_usd already billed
 	costSeen                    bool
 	lastSnapshot                bool
-	antigravityTotal            Usage
-	antigravitySteps            map[string]Usage
 }
 
 func NewUsageNormalizer(resumeID string, baseline *UsageBaseline) *UsageNormalizer {
@@ -138,8 +136,6 @@ func NewUsageNormalizer(resumeID string, baseline *UsageBaseline) *UsageNormaliz
 }
 func (n *UsageNormalizer) BeginProcess() {
 	n.lastSnapshot = false
-	n.antigravityTotal = Usage{}
-	n.antigravitySteps = nil
 }
 func (n *UsageNormalizer) markReason(reason string) {
 	if !strings.Contains(n.reason, reason) {
@@ -183,9 +179,6 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 	}
 	if dialect == DialectPiJSON {
 		return n.observePi(record)
-	}
-	if dialect == DialectAntigravityStreamJSON {
-		return n.observeAntigravity(record)
 	}
 	if dialect == DialectMuseJSONL && (record.Type == "run.terminal.completed" || record.Type == "run.terminal.failed") {
 		// muse exec --json omits provider usage, even though Muse stores it

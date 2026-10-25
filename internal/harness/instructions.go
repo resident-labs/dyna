@@ -25,7 +25,7 @@ const maxInstructionsArg = 64 * 1024
 // nativeInstructions lists the harnesses whose CLI takes per-run instructions
 // as a system-prompt addition. OpenCode uses the shared prompt path: its
 // service loads ambient config at startup, not from each client environment.
-// Grok and Antigravity over ACP have no per-launch flag, so they use the prompt path on
+// Grok over ACP has no per-launch flag, so it uses the prompt path on
 // a session's first turn.
 var nativeInstructions = map[string]bool{
 	profile.HarnessClaudeCode: true, profile.HarnessCodex: true, profile.HarnessPi: true,
@@ -93,7 +93,7 @@ func writeFileOnce(path string, data []byte) error {
 //   - Codex: -c developer_instructions (a TOML string).
 //   - Pi: --append-system-prompt, which reads a file's contents.
 //   - Muse: -c run.developer_prompt (a JSON string).
-//   - Grok and Antigravity over ACP: the first prompt of a session
+//   - Grok over ACP: the first prompt of a session
 //     carries them (WithPromptInstructions).
 func instructionsNative(p profile.Profile) ([]string, error) {
 	text := p.RuntimeInstructions

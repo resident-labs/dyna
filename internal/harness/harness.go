@@ -1,5 +1,5 @@
 // Package harness executes a single worker turn on a concrete agent CLI
-// (claude-code, codex, antigravity, opencode, muse, grok, pi, a custom argv, or
+// (claude-code, codex, opencode, muse, grok, pi, a custom argv, or
 // the built-in mock).
 package harness
 
@@ -463,7 +463,7 @@ func prepareRuntime(ctx context.Context, p profile.Profile, previous *harnessrun
 			cleanup()
 		}
 	}()
-	lease, err := prepareAccountTurnLease(ctx, p)
+	lease, err := harnessruntime.NewAccounts().TurnLeaseManaged(ctx, p.Harness)
 	if err != nil {
 		return p, harnessruntime.Pin{}, nil, err
 	}
@@ -1512,8 +1512,6 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		protocolErr = workeroutput.PiResultError(a.stdout)
 	case profile.HarnessMuse:
 		protocolErr = workeroutput.MuseRunError(a.stdout)
-	case profile.HarnessAntigravity:
-		protocolErr = workeroutput.AntigravityResultError(a.stdout)
 	case profile.HarnessOpenCode:
 		protocolErr = workeroutput.OpenCodeError(a.stdout)
 	}

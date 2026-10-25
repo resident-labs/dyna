@@ -16,10 +16,9 @@ import (
 const SchemaVersion = 1
 
 const (
-	DialectText                  = "text"
-	DialectCodexJSONL            = "codex-jsonl"
-	DialectAntigravityStreamJSON = "antigravity-stream-json"
-	DialectOpenCodeJSON          = "opencode-json"
+	DialectText         = "text"
+	DialectCodexJSONL   = "codex-jsonl"
+	DialectOpenCodeJSON = "opencode-json"
 )
 
 // Declaration is the optional, profile-specific description of a model's
@@ -84,15 +83,14 @@ type SelectedSnapshot struct {
 type adapter func([]byte) Record
 
 var adapters = map[string]adapter{
-	DialectGrokJSON:              decodeGrok,
-	DialectAcpJSON:               decodeAcp,
-	DialectPiJSON:                decodePi,
-	DialectText:                  decodeText,
-	DialectCodexJSONL:            decodeCodex,
-	DialectAntigravityStreamJSON: decodeAntigravity,
-	DialectOpenCodeJSON:          decodeOpenCode,
-	DialectClaudeStreamJSON:      decodeClaude,
-	DialectMuseJSONL:             decodeMuse,
+	DialectGrokJSON:         decodeGrok,
+	DialectAcpJSON:          decodeAcp,
+	DialectPiJSON:           decodePi,
+	DialectText:             decodeText,
+	DialectCodexJSONL:       decodeCodex,
+	DialectOpenCodeJSON:     decodeOpenCode,
+	DialectClaudeStreamJSON: decodeClaude,
+	DialectMuseJSONL:        decodeMuse,
 }
 
 // Dialects returns the stable allowlist accepted by profile declarations.
@@ -133,12 +131,11 @@ func NormalizeLine(decl *Declaration, line string) []Event {
 // success/failure. Callers deliberately ignore errors so observability can
 // never change the worker's final result.
 type Normalizer struct {
-	mu          sync.Mutex
-	boundary    int64
-	known       bool
-	decl        *Declaration
-	w           io.Writer
-	antigravity *antigravityStreamState
+	mu       sync.Mutex
+	boundary int64
+	known    bool
+	decl     *Declaration
+	w        io.Writer
 	// Now stamps events (tests); nil uses time.Now.
 	Now func() time.Time
 }
@@ -148,9 +145,6 @@ type Normalizer struct {
 // end in a verified newline before its boundary can be reported.
 func NewNormalizer(decl *Declaration, w io.Writer) *Normalizer {
 	n := &Normalizer{decl: CloneDeclaration(decl), w: w}
-	if decl != nil && strings.TrimSpace(decl.Dialect) == DialectAntigravityStreamJSON {
-		n.antigravity = &antigravityStreamState{}
-	}
 	if seeker, ok := w.(io.Seeker); ok {
 		if end, err := seeker.Seek(0, io.SeekEnd); err == nil && end >= 0 {
 			n.boundary = end
@@ -214,9 +208,6 @@ func (n *Normalizer) WriteRecord(record Record) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	events := record.Events
-	if n.antigravity != nil {
-		events = n.antigravity.deduplicate(events)
-	}
 	now := time.Now().UnixMilli()
 	if n.Now != nil {
 		now = n.Now().UnixMilli()

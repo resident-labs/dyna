@@ -78,7 +78,7 @@ func Command(o Options) *cobra.Command {
 		return nil
 	}
 	attachCmd := &cobra.Command{Use: "attach", Short: "Take the root seat as the external orchestrator", Long: "Take the root seat as the external orchestrator. Posts to @root then wait in the room log for your `dyna room watch`. An open internal root gets up to 30 seconds to write a handoff before its turn stops. The handoff, or a transcript fallback, prints here and appears in the seat note. --harness names your harness, so the web app shows its icon.", Args: cobra.NoArgs, RunE: attach}
-	attachCmd.Flags().StringVar(&harness, "harness", "", "your harness, one word: claude, codex, opencode, pi, grok, muse or antigravity")
+	attachCmd.Flags().StringVar(&harness, "harness", "", "your harness, one word: claude, codex, opencode, pi, grok or muse")
 	cmd.AddCommand(attachCmd)
 	detachCmd := &cobra.Command{Use: "detach", Short: "Give the root seat back to the internal root", Long: "Give the root seat back to the internal root. Posts you handled while attached never reach it. With --handoff, your note becomes the internal root's next turn input and wakes it; without it, the internal root resumes on the next post.", Args: cobra.NoArgs, RunE: detach}
 	detachCmd.Flags().StringVar(&handoff, "handoff", "", "file with a handoff note for the internal root, or - for stdin")
