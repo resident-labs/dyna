@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/shelldisplay"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 )
@@ -203,6 +204,10 @@ func runCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 			defer stop()
 			st := shells.DefaultStore()
+			// A shell must not reach the owner display or start a computer on
+			// its own; the policy needs the computer package, which imports
+			// shells, so the shell CLI applies it here.
+			st.CommandEnv = shelldisplay.CommandEnv
 			if err := st.Supervise(ctx, args[0]); err != nil {
 				return err
 			}
