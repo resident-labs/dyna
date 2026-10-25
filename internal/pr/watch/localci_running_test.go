@@ -452,21 +452,14 @@ func TestStopLocalCIRefusesRunsScheduledAfterTheStop(t *testing.T) {
 }
 
 // addCommit writes one file and commits it, and returns the new head.
+// addCommit writes one file and commits it through the shared git helper, which
+// sets the identity a CI container has none of.
 func addCommit(t *testing.T, repo, name string) string {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("git", "-C", repo, "add", name).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git add: %v: %s", err, out)
-	}
-	if out, err = exec.Command("git", "-C", repo, "commit", "--quiet", "-m", name).CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v: %s", err, out)
-	}
-	out, err = exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimSpace(string(out))
+	changeGit(t, repo, "add", name)
+	changeGit(t, repo, "commit", "--quiet", "-m", name)
+	return changeGit(t, repo, "rev-parse", "HEAD")
 }
