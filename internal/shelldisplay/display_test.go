@@ -2,6 +2,7 @@ package shelldisplay
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -212,6 +213,46 @@ func TestCommandEnv(t *testing.T) {
 		env, noDisplay := CommandEnv(ctx, dir, shells.Meta{ID: meta.ID}, base)
 		if noDisplay || !slices.Equal(env, base) {
 			t.Fatalf("owner shell noDisplay = %v, env = %v; want it unchanged", noDisplay, env)
+		}
+	})
+
+	// The real shell boundary: one job runs with the policy, so a child that
+	// reads stderr sees the hint once, and the command keeps its exit code.
+	t.Run("supervised shell gets the blocked environment and one stderr hint", func(t *testing.T) {
+		use(t, noComputer)
+		writeSession(t, testSessionRecord{ID: owner})
+		store := &shells.Store{Root: filepath.Join(filepath.Dir(runstore.SessionsDir()), "shells"), CommandEnv: CommandEnv}
+		m, err := store.Create(shells.StartOptions{
+			Name:  "display probe",
+			Owner: owner,
+			Cwd:   t.TempDir(),
+			Cmd:   []string{"/bin/sh", "-c", `printf 'display=%s bus=%s\n' "${DISPLAY-absent}" "$DBUS_SESSION_BUS_ADDRESS"; exit 3`},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Supervise(ctx, m.ID); err != nil {
+			t.Fatal(err)
+		}
+		path, err := store.OutputPath(m.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := string(raw)
+		if got := strings.Count(out, shells.NoDisplayHint); got != 1 {
+			t.Errorf("hint count = %d, want 1; output:\n%s", got, out)
+		}
+		jobDir := filepath.Dir(path)
+		if !strings.Contains(out, "display=absent") || !strings.Contains(out, "bus="+noSessionBus(jobDir)) {
+			t.Errorf("output = %q, want the blocked display and bus", out)
+		}
+		exit, err := store.ReadExit(m.ID)
+		if err != nil || exit == nil || exit.Code != 3 {
+			t.Fatalf("exit = %#v, %v; want the command's own code 3", exit, err)
 		}
 	})
 }
