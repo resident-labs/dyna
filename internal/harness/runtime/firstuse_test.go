@@ -23,14 +23,14 @@ func firstUse(t *testing.T, latest string) (*FirstUse, *atomic.Int32) {
 
 func TestFirstUseInstallsMissingCLIOnce(t *testing.T) {
 	f, installs := firstUse(t, "1.2.3")
-	b, installed, err := f.EnsureBundle(context.Background(), "codex", "")
+	b, installed, err := f.EnsureBundle(context.Background(), "pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !installed || b.Version != "1.2.3" || b.Executable == "" {
 		t.Fatalf("bundle = %#v, installed = %v", b, installed)
 	}
-	again, installed, err := f.EnsureBundle(context.Background(), "codex", "")
+	again, installed, err := f.EnsureBundle(context.Background(), "pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], _, errs[i] = f.EnsureBundle(context.Background(), "codex", "")
+			results[i], _, errs[i] = f.EnsureBundle(context.Background(), "pi", "")
 		}(i)
 	}
 	// Two more callers model separate processes: they skip the in-process
@@ -67,7 +67,7 @@ func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			a, _ := Adapter("codex")
+			a, _ := Adapter("pi")
 			if _, _, err := f.install(context.Background(), a, ""); err != nil {
 				t.Error(err)
 			}
@@ -79,8 +79,8 @@ func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
 	case <-deadline:
 		t.Fatal("no install reached the download")
 	}
-	if !f.Installing("codex") || f.Installing("claude-code") {
-		t.Fatal("Installing does not report the running codex install")
+	if !f.Installing("pi") || f.Installing("claude-code") {
+		t.Fatal("Installing does not report the running pi install")
 	}
 	close(release)
 	wg.Wait()
@@ -89,8 +89,8 @@ func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
 			t.Fatalf("caller %d: %#v %v", i, results[i], err)
 		}
 	}
-	if installs.Load() != 1 || f.Installing("codex") {
-		t.Fatalf("installs = %d, installing = %v", installs.Load(), f.Installing("codex"))
+	if installs.Load() != 1 || f.Installing("pi") {
+		t.Fatalf("installs = %d, installing = %v", installs.Load(), f.Installing("pi"))
 	}
 }
 
@@ -105,13 +105,13 @@ func TestFirstUseOfflineGivesClearError(t *testing.T) {
 	}
 	f, _ = firstUse(t, "1.2.3")
 	f.Bundles.Run = func(context.Context, []string, []string) error { return errors.New("ENOTFOUND registry.npmjs.org") }
-	_, _, err = f.EnsureBundle(context.Background(), "codex", "")
-	if err == nil || !strings.Contains(err.Error(), "cannot install codex 1.2.3") || !strings.Contains(err.Error(), "Check the internet connection") || strings.Contains(err.Error(), "ENOTFOUND") {
+	_, _, err = f.EnsureBundle(context.Background(), "pi", "")
+	if err == nil || !strings.Contains(err.Error(), "cannot install pi 1.2.3") || !strings.Contains(err.Error(), "Check the internet connection") || strings.Contains(err.Error(), "ENOTFOUND") {
 		t.Fatalf("err = %v", err)
 	}
 	// The failure is not cached: the next call tries again.
 	f.Bundles.Run = fixtureInstall
-	if _, _, err := f.EnsureBundle(context.Background(), "codex", ""); err != nil {
+	if _, _, err := f.EnsureBundle(context.Background(), "pi", ""); err != nil {
 		t.Fatal(err)
 	}
 }

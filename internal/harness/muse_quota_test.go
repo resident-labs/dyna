@@ -190,7 +190,7 @@ func TestMuseQuotaCaptureRejectsIdentitySwitchAndUnadmittedCalls(t *testing.T) {
 	invalid.Run, invalid.Agent = "wf_other", 1
 	captureMuseQuota(t.Context(), f.profiles[0], invalid, f.out)("", message)
 	nonMuse := f.profiles[0]
-	nonMuse.Harness = profile.HarnessCodex
+	nonMuse.Harness = profile.HarnessClaudeCode
 	captureMuseQuota(t.Context(), nonMuse, f.refs[0], f.out)("", message)
 	captureMuseQuota(t.Context(), f.profiles[0], f.refs[0], f.out)("", "not a quota error")
 	captureMuseQuota(t.Context(), f.profiles[0], f.refs[0], f.out)("", "429 Subscription quota exhausted. Your usage window resets at 2000-01-01T00:00:00Z")

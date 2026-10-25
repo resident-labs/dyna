@@ -430,11 +430,6 @@ func (a *Accounts) scopedManagerWith(h, home, executable string, pin map[string]
 			}
 		}
 	}
-	switch h {
-	case "codex":
-		overrides["OPENAI_API_KEY"] = ""
-		overrides["CODEX_API_KEY"] = ""
-	}
 	for k, v := range roots {
 		overrides[k] = v
 	}
@@ -699,9 +694,6 @@ func (a *Accounts) Login(id, executable string) (argv, env []string, cwd string,
 		}
 		if adapter, e := Adapter(n.Harness); e == nil && adapter.LoginArgs != nil {
 			argv = adapter.LoginArgs(executable, n.Home)
-		}
-		if n.Harness == "codex" && len(argv) > 0 {
-			argv = append([]string{argv[0], "-c", "check_for_update_on_startup=false", "-c", `cli_auth_credentials_store="file"`}, argv[1:]...)
 		}
 		for k, v := range overrides {
 			env = append(env, k+"="+v)

@@ -10,7 +10,7 @@ chmod 0755 /
 chmod 0440 /etc/sudoers.d/dyna
 install -Dm755 /output/dyna /usr/local/bin/dyna
 install -Dm755 /output/dyna-desktop /usr/local/bin/dyna-desktop
-# Codex and Claude Code are not baked in. Dyna installs a harness CLI as a
+# Claude Code is not baked in. Dyna installs a harness CLI as a
 # private bundle the first time an account or session needs it. The bundle
 # installer runs npm, so nodejs and npm stay in packages.txt.
 systemctl set-default multi-user.target

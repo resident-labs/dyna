@@ -182,7 +182,7 @@ type Importer struct {
 func (im *Importer) Run(ctx context.Context, req Request) (Result, error) {
 	result := Result{Harness: req.Harness, DryRun: req.DryRun, Moved: []Moved{}, Refused: []Refused{}}
 	if !Importable(req.Harness) {
-		return result, fmt.Errorf("Dyna has no import for harness %q. Choose claude-code, codex, kimi-code, grok, muse or opencode.", req.Harness)
+		return result, fmt.Errorf("Dyna has no import for harness %q. Choose claude-code, kimi-code, grok, muse or opencode.", req.Harness)
 	}
 	if refusal := req.Use.Refusal(req.Harness); refusal != nil {
 		result.Refused = append(result.Refused, *refusal)

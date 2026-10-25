@@ -80,64 +80,16 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 		{name: "stderr names no provider", harness: profile.HarnessMock, stderr: "the model wondered about its credit balance"},
 		{name: "stderr names a bare invalid key", harness: profile.HarnessMock, stderr: "invalid key in configuration"},
 		{
-			name:    "codex protocol failure names the quota",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"message":"You've hit your session limit, resets in 3h"}}`,
-			want:    providerfailure.Quota,
-		},
-		{
-			// The message uses none of the provider vocabulary; its structured type
-			// names the failure instead.
-			name:    "codex structured type names the sign-in",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"type":"authentication_error","message":"bad token"}}`,
-			want:    providerfailure.Auth,
-		},
-		{
-			name:    "codex structured status names the quota",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"code":429,"message":"slow down"}}`,
-			want:    providerfailure.Quota,
-		},
-		{
-			name:    "codex numeric code names the sign-in",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"code":401,"message":"bad token"}}`,
-			want:    providerfailure.Auth,
-		},
-		{
-			name:    "codex numeric status names the busy provider",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"status":503,"message":"try later"}}`,
-			want:    providerfailure.Capacity,
-		},
-		{
-			// An opaque protocol failure still takes its reason from the process's
-			// own stderr, so the profile can be blocked and no retry is spent.
-			name:    "codex opaque failure reads stderr",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"message":"closed"}}`,
-			stderr:  "authentication_error: invalid api key",
-			want:    providerfailure.Auth,
-		},
-		{
-			// The protocol record is opaque, but the harness already named the reason
-			// of that same failure.
 			name:    "opencode opaque record keeps the harness reason",
 			harness: profile.HarnessOpenCode,
 			stdout:  `{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"the provider said no"}}}`,
 			runErr:  providerfailure.Tag(providerfailure.Auth, errors.New("OpenCode turn failed: the provider said no")),
 			want:    providerfailure.Auth,
 		},
-		{
-			name:    "codex protocol failure is unclear",
-			harness: profile.HarnessCodex,
-			stdout:  `{"type":"turn.failed","error":{"message":"stream closed unexpectedly"}}`,
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := attempt{stdout: tc.stdout, stderr: tc.stderr, runErr: tc.runErr}
-			if a.runErr == nil && tc.harness != profile.HarnessCodex {
+			if a.runErr == nil {
 				a.runErr = errors.New("exit status 1")
 			}
 			err := attemptError(context.Background(), profile.Profile{Name: "worker", Harness: tc.harness}, []string{"tool"}, a)
@@ -173,7 +125,7 @@ func TestRuntimePrepareFailureIsNotReady(t *testing.T) {
 		return profile.Profile{}, runtime.Pin{}, nil, errors.New("the active private account is not signed in")
 	}
 	root := t.TempDir()
-	p := profile.Profile{Name: "sol", Harness: profile.HarnessCodex}
+	p := profile.Profile{Name: "sol", Harness: profile.HarnessMuse}
 	_, err := RunSessionTurn(context.Background(), p, "task", root, false, JournalOptions{}, SteeringOptions{}, SessionOptions{})
 	if err == nil || !IsNotReady(err.Error()) {
 		t.Fatalf("prepare error = %v", err)

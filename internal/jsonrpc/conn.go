@@ -1,5 +1,5 @@
 // Package jsonrpc is a small JSON-RPC 2.0 client connection shared by the
-// agent protocols Dyna speaks (ACP, Codex app-server). It owns framing,
+// agent protocols Dyna speaks (ACP, Pi RPC). It owns framing,
 // request/response routing, notifications, server-initiated requests and
 // close handling. Protocol packages supply the methods and the handlers.
 package jsonrpc

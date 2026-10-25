@@ -2,7 +2,6 @@ package harness
 
 import (
 	"fmt"
-	"strings"
 
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
@@ -58,9 +57,6 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 	p.ExtraArgs = append([]string{}, p.ExtraArgs...)
 	p.ExtraArgs = append(p.ExtraArgs, compactArgs...)
 	p.ExtraArgs = append(p.ExtraArgs, instructionArgs...)
-	if exec.DisableNativeSubagents && p.Harness == profile.HarnessCodex && codexExplicitlyEnablesMultiAgent(p.ExtraArgs) {
-		return invocation{}, fmt.Errorf("codex profile cannot enable multi_agent for this invocation: native subagents are disabled for this invocation")
-	}
 	p.ExtraArgs = harnessruntime.NativeFeatureArgs(p.Harness, p.ExtraArgs, exec.DynaShell)
 	switch definition.Invocation {
 	case "claude-print":
@@ -125,9 +121,6 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 		}
 		return inv, nil
 
-	case "codex-app-server":
-		return codexInvocation(p, prompt, exec)
-
 	case "opencode-run":
 		return openCodeInvocation(p, prompt, exec)
 
@@ -138,40 +131,4 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 		return piInvocation(p, prompt, exec)
 	}
 	return invocation{}, fmt.Errorf("unknown harness %q", p.Harness)
-}
-
-// CodexCodeModeOverride is the per-invocation config dyna passes to every
-// Codex it launches (codex-cli 0.160): code mode off, and a 10-minute exec
-// yield. Models whose catalog entry sets tool_mode=code_mode_only (all of
-// gpt-5.6/gpt-6 today) keep code mode regardless of the flag; for them the
-// long yield is what matters: a tool call inside an exec cell is not handed
-// back to the model as "still running" every 30 s (the CLI default), which
-// otherwise costs one model call per yield while the tool runs.
-const CodexCodeModeOverride = "features.code_mode={enabled=false,default_exec_yield_time_ms=600000}"
-
-// codexCodeModeArgs returns the code-mode override unless the profile already
-// configures code mode itself.
-func codexCodeModeArgs(extra []string) []string {
-	if CodexMentionsCodeMode(extra) {
-		return nil
-	}
-	return []string{"-c", CodexCodeModeOverride}
-}
-
-// CodexMentionsCodeMode reports whether args already enable/disable code mode.
-func CodexMentionsCodeMode(args []string) bool {
-	for i, a := range args {
-		if strings.Contains(a, "code_mode") && i > 0 {
-			switch args[i-1] {
-			case "--enable", "--disable", "-c", "--config":
-				return true
-			}
-		}
-		if strings.HasPrefix(a, "--enable=") || strings.HasPrefix(a, "--disable=") || strings.HasPrefix(a, "--config=") {
-			if strings.Contains(a, "code_mode") {
-				return true
-			}
-		}
-	}
-	return false
 }

@@ -57,7 +57,7 @@ func TestAccountWritesHaveNoLocalFallback(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"accounts", "rm", "account-1", "--confirm"},
-		{"login", "codex", "--use-personal"},
+		{"login", "pi", "--use-personal"},
 		{"accounts", "activate", "account-1"},
 		{"config-import", "--account", "account-1", "--preview-hash", "abc"},
 		{"gc"},
@@ -121,8 +121,8 @@ func TestUsePersonalPreparesBeforeCopying(t *testing.T) {
 		"UsePersonalLogin": func(_ context.Context, args []json.RawMessage) (any, error) {
 			order <- "use " + string(args[0])
 			return map[string]any{"accounts": []map[string]any{
-				{"id": "other", "harness": "codex", "active": false},
-				{"id": "copied", "harness": "codex", "active": true},
+				{"id": "other", "harness": "pi", "active": false},
+				{"id": "copied", "harness": "pi", "active": true},
 			}}, nil
 		},
 	}
@@ -131,11 +131,11 @@ func TestUsePersonalPreparesBeforeCopying(t *testing.T) {
 	c := NewCommand()
 	c.SetOut(&out)
 	c.SetErr(&bytes.Buffer{})
-	c.SetArgs([]string{"login", "codex", "--use-personal"})
+	c.SetArgs([]string{"login", "pi", "--use-personal"})
 	if err := c.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if first, second := <-order, <-order; first != `find "codex"` || second != `use "codex"` {
+	if first, second := <-order, <-order; first != `find "pi"` || second != `use "pi"` {
 		t.Fatalf("calls were %s then %s", first, second)
 	}
 	if !strings.Contains(out.String(), `"id": "copied"`) {

@@ -21,7 +21,7 @@ test('route preselection preserves exact identity and never substitutes by label
 test('account selection requires matching harness, route, and unambiguous active connection', () => {
   const account = accountFixture({ id: 'a', harness: 'opencode', providerId: 'opencode-go', active: true })
   assert.equal(selectedAccount([account], 'opencode', go), account)
-  assert.equal(selectedAccount([account], 'codex', go), null)
+  assert.equal(selectedAccount([account], 'pi', go), null)
   assert.equal(selectedAccount([account], 'opencode', free, 'a'), null)
   assert.equal(selectedAccount([account], 'opencode', go, 'ctx'), null)
   assert.equal(selectedAccount([{ ...account, active: false }], 'opencode', go, 'a'), null)
@@ -40,8 +40,8 @@ test('new profiles start every rating at neutral 5, including diagnostics', () =
 })
 
 test('single-route harnesses join by harness while OpenCode follows credential integration', () => {
-  const codex = accountFixture({ id: 'codex-account', harness: 'codex', providerId: 'codex', active: true })
-  assert.equal(selectedAccount([codex], 'codex', { id: 'gpt-test', providerId: 'openai' }), codex)
+  const claude = accountFixture({ id: 'claude-account', harness: 'claude-code', providerId: 'anthropic', active: true })
+  assert.equal(selectedAccount([claude], 'claude-code', { id: 'sonnet', providerId: 'anthropic' }), claude)
   const consoleAccount = accountFixture({ id: 'console-account', harness: 'opencode', providerId: 'opencode', active: true })
   const route = { id: 'opencode-go/model', providerId: 'opencode-go', integrationId: 'opencode' }
   assert.equal(selectedAccount([consoleAccount], 'opencode', route), consoleAccount)
@@ -107,19 +107,19 @@ test('choosing an effort changes args, or the model ID for model-ID efforts', ()
 })
 
 test('compact needs a harness threshold and, for relative ones, every chain model window', () => {
-  const codex = { min: 1 }, muse = { window: true, min: 1 }
+  const absolute = { min: 1 }, muse = { window: true, min: 1 }
   const sized = [model('big', { context: 1000000 }), model('small', { context: 200000 })]
   const windows = compactWindows(sized, ['big', 'small'])
   assert.deepEqual(windows, { big: 1000000, small: 200000 })
   assert.equal(compactBlock({ reason: 'Cursor Agent has no compaction threshold setting.' }, {}), 'Cursor Agent has no compaction threshold setting.')
-  assert.equal(compactBlock(codex, { '': 0 }), '')
+  assert.equal(compactBlock(absolute, { '': 0 }), '')
   assert.match(compactBlock(muse, compactWindows(sized, ['big', 'manual'])), /none for manual/)
   assert.match(compactBlock(muse, compactWindows(sized, [])), /harness default model/)
-  assert.deepEqual(compactFor(codex, { '': 0 }, 95000), { tokens: 95000 })
+  assert.deepEqual(compactFor(absolute, { '': 0 }, 95000), { tokens: 95000 })
   assert.deepEqual(compactFor(muse, windows, 95000), { tokens: 95000, windows })
   // A saved window stays when the catalog does not list the model.
   assert.deepEqual(compactWindows(sized, ['big', 'manual'], { tokens: 1, windows: { manual: 150000 } }), { big: 1000000, manual: 150000 })
-  assert.equal(compactFor(codex, {}, 0), null)
+  assert.equal(compactFor(absolute, {}, 0), null)
   assert.equal(compactFor({ reason: 'none' }, {}, 95000), null)
 })
 

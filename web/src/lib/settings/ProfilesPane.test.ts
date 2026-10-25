@@ -12,7 +12,7 @@ const built = await bundle({ component: '../settings/ProfilesPane', api: `export
 test('profile filtering searches every field and preserves the complete uses grid and action context', async () => {
   const profile = (name: string, fields: object) => ({ name, uses: ['agents'], taste: 5, intelligence: 5, cost: 5, ...fields })
   const dom = installDom({ matchMedia: () => ({ matches: true }), listed: { default: 'alpha', profiles: [
-    profile('alpha', { harness: 'codex', model: 'prime-a', models: ['prime-a', 'fallback-z'], description: 'Quick repair', default: true }),
+    profile('alpha', { harness: 'pi', model: 'prime-a', models: ['prime-a', 'fallback-z'], description: 'Quick repair', default: true }),
     profile('beta', { harness: 'claude-code', model: 'sonnet', description: 'Design drafts' }),
     profile('gamma', { harness: 'opencode', model: 'archive-mini', description: 'Archive scans', disabled: true }),
   ] } })

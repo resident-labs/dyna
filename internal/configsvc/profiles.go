@@ -76,6 +76,13 @@ type ProfileEdit struct {
 
 func loadProfiles() (*profile.Store, error) { return profile.Load(profile.DefaultPath()) }
 
+// loadProfilesForRepair reads the registry without validating its profiles, so
+// an owner can remove or replace one that names a harness Dyna has retired.
+// Load still refuses such a file, so nothing from it runs.
+func loadProfilesForRepair() (*profile.Store, error) {
+	return profile.LoadForRepair(profile.DefaultPath())
+}
+
 func view(p profile.Profile) ProfileView {
 	v := ProfileView{
 		RuntimeVersion: p.RuntimeVersion,
@@ -224,7 +231,7 @@ func (s *Service) RemoveProfile(ctx context.Context, name string) error {
 	if err := authority.Check("profiles remove", authority.Of(ctx), nil); err != nil {
 		return err
 	}
-	reg, err := loadProfiles()
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return err
 	}
@@ -310,7 +317,9 @@ func (s *Service) UpsertProfile(ctx context.Context, p profile.Profile) error {
 	if err := authority.Check("profiles add", authority.Of(ctx), nil); err != nil {
 		return err
 	}
-	reg, err := loadProfiles()
+	// Repair path: replacing a profile that names a retired harness must work,
+	// and the replacement itself is validated by Upsert below.
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return err
 	}

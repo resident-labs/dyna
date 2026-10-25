@@ -9,7 +9,6 @@ import type { Provider } from '../../api/account.ts'
 // serves every provider, so it is the fallback and never listed here.
 const NATIVE_HARNESS: Partial<Record<Provider, string>> = {
   anthropic: 'claude-code',
-  chatgpt: 'codex',
   'opencode-go': 'opencode',
   'meta-muse': 'muse',
 }

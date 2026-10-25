@@ -15,10 +15,7 @@ func entryCaptured(e accountstore.Entry) native.Captured {
 
 const activeUsageTTL = 2 * time.Minute
 
-func savedTTL(h string) time.Duration {
-	if h == "codex" {
-		return 15 * time.Minute
-	}
+func savedTTL(string) time.Duration {
 	return 10 * time.Minute
 }
 func applySavedObservation(a *Account, e accountstore.Entry, now time.Time) {

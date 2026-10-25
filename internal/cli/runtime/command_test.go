@@ -9,7 +9,7 @@ import (
 )
 
 func TestChoosePersonal(t *testing.T) {
-	found := &runtime.PersonalLogin{Harness: "codex", Label: "owner@example.test"}
+	found := &runtime.PersonalLogin{Harness: "pi", Label: "owner@example.test"}
 	for answer, want := range map[string]bool{"\n": true, "u\n": true, "Use\n": true, "s\n": false, "sign in\n": false, "": true} {
 		var out bytes.Buffer
 		if got := choosePersonal(strings.NewReader(answer), &out, found); got != want {
@@ -29,7 +29,7 @@ func TestChoosePersonal(t *testing.T) {
 
 func TestLoginRejectsConflictingChoices(t *testing.T) {
 	c := NewCommand()
-	c.SetArgs([]string{"login", "codex", "--use-personal", "--sign-in"})
+	c.SetArgs([]string{"login", "pi", "--use-personal", "--sign-in"})
 	c.SetOut(&bytes.Buffer{})
 	c.SetErr(&bytes.Buffer{})
 	if err := c.Execute(); err == nil || !strings.Contains(err.Error(), "use-personal") {
@@ -53,7 +53,7 @@ func TestRollbackWithoutTargetFails(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	c := NewCommand()
-	c.SetArgs([]string{"rollback", "codex"})
+	c.SetArgs([]string{"rollback", "pi"})
 	c.SetOut(&bytes.Buffer{})
 	c.SetErr(&bytes.Buffer{})
 	if err := c.Execute(); err == nil || !strings.Contains(err.Error(), "No earlier good version") {

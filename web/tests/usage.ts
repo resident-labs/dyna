@@ -18,7 +18,7 @@ const savedAccounts: ScopeAccount[] = [
   row({ id: 'claude-personal', harness: 'pi', provider: 'anthropic', label: 'Claude · Personal', active: true, plan: { id: 'max', label: 'Max 5x' }, source: 'Claude account report', profiles: ['reviewer'], windows: [windowFor('short', '5-hour window', 32), windowFor('weekly', 'Weekly window', 59)] }),
   row({ id: 'claude-work', harness: 'pi', provider: 'anthropic', label: 'Claude · Work', plan: { id: 'max', label: 'Max 20x' }, source: 'Claude account report', windows: [windowFor('short', '5-hour window', 26), windowFor('weekly', 'Weekly window', 37)] }),
   row({ id: 'go', harness: 'pi', provider: 'opencode-go', label: 'OpenCode Go · Personal', active: true, source: 'OpenCode Console usage', profiles: ['builder'], windows: [{ ...windowFor('short', '5-hour window', 20), used: 2.4, limit: 12, unit: 'USD' }, { ...windowFor('weekly', 'Weekly window', 30), used: 9, limit: 30, unit: 'USD' }, { id: 'month', label: 'Monthly window', usedPercent: 35, used: 21, limit: 60, unit: 'USD' }] }),
-  row({ id: 'codex', harness: 'pi', provider: 'chatgpt', label: 'Codex · Personal', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'Codex account report', stale: true }),
+  row({ id: 'chatgpt', harness: 'pi', provider: 'chatgpt', label: 'ChatGPT · Personal', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'ChatGPT account report', stale: true }),
 ]
 const fixture: { selection?: ModelSelection } = {}
 Reflect.set(window, 'usageFixture', fixture)

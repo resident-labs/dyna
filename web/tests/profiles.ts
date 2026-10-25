@@ -38,7 +38,7 @@ api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedMode
 const manualScenarios = ['save-error', 'draft-details', 'draft-navigation', 'advanced-details', 'advanced-navigation']
 const initialSelection: ModelSelection | null = scenario === 'harness' ? null : { harness: manualScenarios.includes(scenario) ? 'mock' : 'opencode', ...(['details', 'settings'].includes(scenario) ? { connectionId: 'fixture-account', routeId: need(models[0]).id } : {}) }
 const app = need(document.getElementById('app'), 'app')
-const wizard = mount(Wizard, { target: app, props: { harnesses: ['opencode', 'codex', 'mock'], initialSelection, onsaved: () => {}, oncancel: () => {}, onusage: (id: string) => { document.body.dataset.usage = id } } })
+const wizard = mount(Wizard, { target: app, props: { harnesses: ['opencode', 'pi', 'mock'], initialSelection, onsaved: () => {}, oncancel: () => {}, onusage: (id: string) => { document.body.dataset.usage = id } } })
 
 const results: { name: string; pass: boolean }[] = []
 const pause = () => new Promise<void>((r) => setTimeout(r, 80))

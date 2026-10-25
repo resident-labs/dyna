@@ -27,7 +27,7 @@ const pane = query.get('pane') || 'harnesses'
 // ?empty=1 shows every list with no rows. ?delay=<ms> slows every api call, to see loading states.
 const empty = query.has('empty')
 const delay = Number(query.get('delay') || 120)
-const caps: Capability[] = ['claude-code', 'codex', 'opencode', 'grok', 'pi', 'muse'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
+const caps: Capability[] = ['claude-code', 'opencode', 'grok', 'pi', 'muse'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
 const bundle = (harness: string, version: string): Bundle => ({ harness, version, executable: '', directory: '' })
 const harnessAccount = (id: string, harness: string, label: string, active: boolean): HarnessAccount => ({ id, harness, label, home: '', identity: '', status: 'ready', active, repos: null })
 // The runtime snapshot the fixture changes in place: its lists are never null.
@@ -35,13 +35,12 @@ interface Snapshot extends HarnessSnapshot {
   bundles: Bundle[]
   accounts: HarnessAccount[]
 }
-const selectedVersions: Record<string, string> = { 'claude-code': '2.1.302', codex: '0.163.0', opencode: '2.0.32', grok: '1.0.62', pi: '1.3.0', muse: '1.4.10-R6427.1' }
+const selectedVersions: Record<string, string> = { 'claude-code': '2.1.302', opencode: '2.0.32', grok: '1.0.62', pi: '1.3.0', muse: '1.4.10-R6427.1' }
 const snapshot: Snapshot = {
-  bundles: [bundle('claude-code', '2.1.302'), bundle('codex', '0.163.0'), bundle('opencode', '2.0.32'), bundle('grok', '1.0.62'), bundle('pi', '1.3.0'), bundle('muse', '1.4.10-R6427.1')],
+  bundles: [bundle('claude-code', '2.1.302'), bundle('opencode', '2.0.32'), bundle('grok', '1.0.62'), bundle('pi', '1.3.0'), bundle('muse', '1.4.10-R6427.1')],
   accounts: [
     harnessAccount('claude-3', 'claude-code', 'Work', true),
     harnessAccount('claude-p', 'claude-code', 'Personal', false),
-    harnessAccount('codex-1', 'codex', 'ChatGPT account', true),
     harnessAccount('oc-1', 'opencode', 'OpenCode Go', true),
     harnessAccount('grok-1', 'grok', 'Current Grok account', true),
     harnessAccount('muse-1', 'muse', 'user@example.com', true),
@@ -49,10 +48,10 @@ const snapshot: Snapshot = {
   profiles: [],
   capabilities: caps.map((c) => ['grok', 'muse'].includes(c.harness) ? { ...c, status: 'partial', reason: 'No switch verified for native memory.' } : c),
   selectedVersions,
-  recommendedVersions: [{ harness: 'claude-code', version: '2.1.310', status: 'resolved', source: 'npm' }, { harness: 'codex', version: '0.163.0', status: 'resolved', source: 'npm' }],
+  recommendedVersions: [{ harness: 'claude-code', version: '2.1.310', status: 'resolved', source: 'npm' }],
   installing: [],
 }
-const catalog: HarnessConfig = { mcp: [{ name: 'github', command: 'gh-mcp', enabledHarnesses: ['claude-code', 'codex'] }], skills: [{ name: 'release-notes', source: '~/.dyna/skills/release-notes', enabledHarnesses: ['claude-code'] }] }
+const catalog: HarnessConfig = { mcp: [{ name: 'github', command: 'gh-mcp', enabledHarnesses: ['claude-code', 'pi'] }], skills: [{ name: 'release-notes', source: '~/.dyna/skills/release-notes', enabledHarnesses: ['claude-code'] }] }
 const later = <T>(value: T, ms = delay): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms))
 api.privateRuntimes = () => later(snapshot)
 api.harnessConfig = () => later(catalog)
@@ -80,10 +79,10 @@ interface Listed extends ProfileList {
 }
 const profileList: Listed = {
   default: 'sol',
-  harnesses: ['claude-code', 'codex', 'opencode', 'muse', 'custom'],
+  harnesses: ['claude-code', 'pi', 'opencode', 'muse', 'custom'],
   unready: {},
   profiles: [
-    profile('sol', 'codex', 'gpt-6.1-sol', { taste: 7, intelligence: 9, cost: 8, description: 'A work-horse and thorough debugger for tasks that need intelligence.' }),
+    profile('sol', 'pi', 'openai-codex/gpt-6.1-sol', { taste: 7, intelligence: 9, cost: 8, description: 'A work-horse and thorough debugger for tasks that need intelligence.' }),
     profile('opus', 'claude-code', 'opus', { taste: 10, intelligence: 10, cost: 4, description: 'Highest taste. Use for design and review.', envKeys: ['ANTHROPIC_BASE_URL'] }),
     profile('mimo', 'opencode', 'opencode-go/mimo-v2.6-pro', { taste: 7, intelligence: 8, cost: 10, models: ['opencode-go/mimo-v2.6-pro', 'opencode-go/glm-5'], description: 'A cheap work-horse for routine implementation.' }),
     profile('haiku', 'claude-code', 'haiku', { taste: 6, intelligence: 7, cost: 9, uses: ['agents'], description: 'Fast mechanical edits from a rigid specification.' }),
@@ -107,7 +106,7 @@ const window5 = (id: string, label: string, used: number) => fixtureWindow(id, l
 const savedAccounts: ScopeAccount[] = [
   { ...account({ id: 'claude-work', harness: 'pi', provider: 'anthropic', kind: 'oauth', label: 'Claude · Work', active: true, plan: { id: 'max', label: 'Max 20x' }, source: 'Claude account report', observedAt: minutes(2), profiles: ['opus', 'haiku'], windows: [window5('short', '5-hour window', 32), window5('weekly', 'Weekly window', 59)] }), activeHere: true },
   { ...account({ id: 'claude-home', harness: 'pi', provider: 'anthropic', kind: 'oauth', label: 'Claude · Personal', source: 'Claude account report', observedAt: minutes(4), windows: [window5('short', '5-hour window', 11), window5('weekly', 'Weekly window', 22)] }), activeHere: false },
-  { ...account({ id: 'codex-1', harness: 'pi', provider: 'chatgpt', kind: 'oauth', label: 'Codex · ChatGPT account', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'Codex account report', observedAt: minutes(5), profiles: ['sol'], windows: [window5('short', '5-hour window', 18), window5('weekly', 'Weekly window', 41)] }), activeHere: true },
+  { ...account({ id: 'chatgpt-1', harness: 'pi', provider: 'chatgpt', kind: 'oauth', label: 'ChatGPT account', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'ChatGPT account report', observedAt: minutes(5), profiles: ['sol'], windows: [window5('short', '5-hour window', 18), window5('weekly', 'Weekly window', 41)] }), activeHere: true },
   { ...account({ id: 'go', harness: 'pi', provider: 'opencode-go', kind: 'api_key', label: 'OpenCode Go · Personal', active: true, source: 'OpenCode Console usage', observedAt: minutes(9), profiles: ['mimo'], windows: [{ ...window5('short', '5-hour window', 20), used: 2.4, limit: 12, unit: 'USD' }, { ...window5('weekly', 'Weekly window', 30), used: 9, limit: 30, unit: 'USD' }] }), activeHere: true },
 ]
 const accountsSnapshot = (scope = '') => {

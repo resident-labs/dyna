@@ -11,11 +11,11 @@ import (
 func TestAccountUsageCachedMarksActiveAccount(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	store := &accountstore.Store{Root: filepath.Join(t.TempDir(), "accounts")}
-	n, err := (&runtime.Accounts{Root: store.Root}).Create("codex", "Work")
+	n, err := (&runtime.Accounts{Root: store.Root}).Create("claude-code", "Work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetActive(accountstore.ProviderChatGPT, "codex", "", n.ID); err != nil {
+	if err := store.SetActive(accountstore.ProviderAnthropic, "claude-code", "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	rows := New(Options{Store: store}).AccountUsageCached().Accounts

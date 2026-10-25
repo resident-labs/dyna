@@ -33,7 +33,7 @@ type nativeFilesManager struct {
 
 func (m *nativeFilesManager) Harness() string { return m.adapter.Harness }
 func (m *nativeFilesManager) Caps() native.Caps {
-	return native.Caps{Refresh: m.adapter.Harness == "grok", Activate: true, IsolatedLogin: true, Scope: "Dyna's shared native harness home", RunningEffect: "New turns use the active native login after the harness gate drains."}
+	return native.Caps{Refresh: m.adapter.Harness == "grok" || m.adapter.Harness == "pi", Activate: true, IsolatedLogin: true, Scope: "Dyna's shared native harness home", RunningEffect: "New turns use the active native login after the harness gate drains."}
 }
 func (m *nativeFilesManager) root(root string) (string, error) {
 	if root != "" {
@@ -152,16 +152,19 @@ func (m *nativeFilesManager) Activate(ctx context.Context, _ string, c store.Cre
 	return old, nil
 }
 func (m *nativeFilesManager) Refresh(ctx context.Context, c native.Captured) (native.Captured, error) {
-	if m.adapter.Harness != "grok" {
-		return c, native.ErrUnsupported
+	switch m.adapter.Harness {
+	case "grok":
+		return native.RefreshGrokSaved(ctx, c)
+	case "pi":
+		return m.renewPi(ctx, c)
 	}
-	return native.RefreshGrokSaved(ctx, c)
+	return c, native.ErrUnsupported
 }
 
 // RefreshActive runs inside Accounts.RefreshCredentials, which holds the switch
 // gate and account lock. Checkpoint the rotated grant before the native write.
 func (m *nativeFilesManager) RefreshActive(ctx context.Context, c native.Captured, checkpoint func(native.Captured) error) (native.Captured, error) {
-	if checkpoint == nil || m.adapter.Harness != "grok" {
+	if checkpoint == nil || (m.adapter.Harness != "grok" && m.adapter.Harness != "pi") {
 		return c, native.ErrUnsupported
 	}
 	next, err := m.Refresh(ctx, c)
@@ -173,6 +176,11 @@ func (m *nativeFilesManager) RefreshActive(ctx context.Context, c native.Capture
 	}
 	if err = checkpoint(next); err != nil {
 		return next, err
+	}
+	if m.adapter.Harness == "pi" {
+		// refreshPi wrote the rotated entry under Pi's own lock, so a second
+		// native write here would race its next writer.
+		return next, nil
 	}
 	_, err = m.Activate(ctx, next.Integration, next.Credential)
 	return next, err
@@ -243,5 +251,11 @@ func (m *nativeFilesManager) ProbeSaved(ctx context.Context, c native.Captured) 
 }
 
 func (m *nativeFilesManager) SupportsCredentialRefresh(c native.Captured) bool {
-	return m.adapter.Harness == "grok" && native.GrokRefreshSupported(c)
+	switch m.adapter.Harness {
+	case "grok":
+		return native.GrokRefreshSupported(c)
+	case "pi":
+		return native.PiOAuthGrantUsable(c)
+	}
+	return false
 }

@@ -3,7 +3,9 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/store/storetest"
+	"dyna-agent/internal/workeroutput"
 )
 
 type claudeUsageCaptureFixture struct {
@@ -210,10 +213,55 @@ func TestClaudeUsageCaptureRejectsUnsafeSources(t *testing.T) {
 	captureClaudeUsage(t.Context(), f.p, callspec.ExecutionRef{}, f.out).Finish()
 	captureClaudeUsage(t.Context(), f.p, f.ref, nil).Finish()
 	otherHarness := f.p
-	otherHarness.Harness = profile.HarnessCodex
+	otherHarness.Harness = profile.HarnessMuse
 	captureClaudeUsage(t.Context(), otherHarness, f.ref, f.out).Finish()
 	f.flush(t)
 	if len(f.observations()) != 0 {
 		t.Fatal("unsafe or unadmitted capture queued an observation")
+	}
+}
+
+// A failed turn cannot prove what the provider billed, so it must not leave a
+// checkpoint behind: the next turn would subtract it and claim the missing
+// spend as its own.
+func TestFailedTurnDropsTheClaudeCostCheckpoint(t *testing.T) {
+	const result = `{"type":"result","subtype":"success","result":"done","total_cost_usd":4.5,"usage":{"input_tokens":10,"output_tokens":2}}`
+	for _, tc := range []struct {
+		name string
+		fail bool
+	}{
+		{"failed", true},
+		{"completed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cost := 3.5
+			p := profile.Profile{Name: "claude", Harness: profile.HarnessClaudeCode, Model: "m"}
+			session := SessionOptions{ResumeID: "s1", UsageBaseline: &workeroutput.UsageBaseline{Version: 1, ThreadID: "s1", Cost: &cost}}
+			exec := ExecutionOptions{ProcessRunner: func(_ context.Context, _ []string, stdout, _ io.Writer) error {
+				if _, err := fmt.Fprintln(stdout, result); err != nil {
+					return err
+				}
+				if tc.fail {
+					return errors.New("provider stream cut")
+				}
+				return nil
+			}}
+			got, err := runJournaled(t.Context(), p, "task", t.TempDir(), false, 0, JournalOptions{}, SteeringOptions{}, session, exec)
+			if tc.fail {
+				if err == nil {
+					t.Fatal("the turn did not fail")
+				}
+				if got.UsageBaseline != nil {
+					t.Fatalf("a failed turn kept the checkpoint: %+v", got.UsageBaseline)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.UsageBaseline == nil || got.UsageBaseline.Cost == nil || *got.UsageBaseline.Cost != 4.5 {
+				t.Fatalf("a completed turn lost its checkpoint: %+v", got.UsageBaseline)
+			}
+		})
 	}
 }

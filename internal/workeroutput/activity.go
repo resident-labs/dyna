@@ -48,7 +48,7 @@ func LastActivity(path string) Activity {
 	ended := map[string]bool{}
 	compactionEnded := false
 	// running is the newest tool call that has only progress records so far
-	// (Codex item.updated, OpenCode running); its start time is further back.
+	// (OpenCode running); its start time is further back.
 	var running *Activity
 	runningID := ""
 	for i := len(lines) - 1; i >= 0; i-- {

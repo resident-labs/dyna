@@ -53,7 +53,7 @@
   let heading = $state<HTMLElement>()
   const catalogGate = requestGate()
   const accountGate = requestGate()
-  const iconIds = ['opencode', 'codex', 'claude', 'muse', 'pi']
+  const iconIds = ['opencode', 'claude', 'muse', 'pi']
   const choices = $derived([...knownHarnesses, ...harnesses.filter(id => !knownHarnesses.some(h => h.id === id) && id !== 'mock').map(id => ({ id, label: id, description: 'Use an exact model ID or the harness default.', icon: '' }))])
   const selectedHarness = $derived(choices.find(h => h.id === harness) || { id: harness, label: harness === 'mock' ? 'Mock harness' : harness, icon: '', description: '' })
   const models = $derived(catalog?.models ?? [])

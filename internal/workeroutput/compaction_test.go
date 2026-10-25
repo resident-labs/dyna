@@ -12,7 +12,6 @@ func TestIsCompaction(t *testing.T) {
 		{DialectClaudeStreamJSON, `{"type":"assistant","subtype":"compact_boundary"}`, false},
 		{DialectClaudeStreamJSON, `{"type":"assistant","message":{"content":[{"type":"text","text":"compact_boundary"}]}}`, false},
 		{DialectClaudeStreamJSON, `{`, false},
-		{DialectCodexJSONL, `{"type":"system","subtype":"compact_boundary"}`, false},
 	} {
 		if got := IsCompaction(&Declaration{Dialect: tc.dialect}, tc.line); got != tc.want {
 			t.Errorf("%s: %v", tc.line, got)
@@ -48,14 +47,6 @@ func TestCompactionEvents(t *testing.T) {
 			Event{Kind: "status", Name: "compaction", State: "failed", Trigger: "manual"}},
 		{DialectPiJSON, `{"type":"compaction_end","reason":"overflow","aborted":false,"errorMessage":"summary failed"}`,
 			Event{Kind: "status", Name: "compaction", State: "failed", Trigger: "auto", Text: "summary failed"}},
-		// Codex names the item in snake_case on the exec stream (0.163.0).
-		{DialectCodexJSONL, `{"type":"item.started","item":{"id":"c1","type":"context_compaction"}}`,
-			Event{Kind: "status", Name: "compaction", State: "started", Trigger: "auto"}},
-		{DialectCodexJSONL, `{"type":"item.completed","item":{"id":"c1","type":"context_compaction"}}`,
-			Event{Kind: "status", Name: "compaction", State: "completed", Trigger: "auto"}},
-		// The app-server protocol names the same item in camelCase.
-		{DialectCodexJSONL, `{"type":"item.completed","item":{"id":"c2","type":"contextCompaction"}}`,
-			Event{Kind: "status", Name: "compaction", State: "completed", Trigger: "auto"}},
 	} {
 		t.Run(tc.line, func(t *testing.T) {
 			r := DecodeLine(&Declaration{Dialect: tc.dialect}, tc.line)
