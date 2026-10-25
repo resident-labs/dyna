@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +85,50 @@ func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 	var harnessTable int
 	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'account_active_harness'").Scan(&harnessTable); err != nil || harnessTable != 0 {
 		t.Fatalf("the per-harness table stayed: %d, %v", harnessTable, err)
+	}
+}
+
+// An owner who skips the SQL release still keeps the account each harness uses:
+// the JSON import takes the folder over, and each selection lands under its own
+// account's provider. An explicit clear stays cleared.
+func TestMigrationImportsJSONEraSelections(t *testing.T) {
+	s := registryStore(t)
+	dataDir := filepath.Dir(s.Root)
+	if err := os.MkdirAll(s.Root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	active, cleared := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	// The previous release's registry names no provider and no kind.
+	raw, err := json.Marshal(map[string]any{
+		"version": 1,
+		"entries": []map[string]any{
+			{"id": active, "harness": "codex", "identity": "codex:one", "label": "One", "credential": map[string]any{"schema": "fixture-v1", "payload": map[string]string{"token": "token"}}},
+			{"id": cleared, "harness": "grok", "identity": "grok:one", "label": "One", "credential": map[string]any{"schema": "fixture-v1", "payload": map[string]string{"token": "token"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.registryPath(), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for harness, id := range map[string]string{"codex": active, "grok": ""} {
+		dir := filepath.Join(s.Root, harness)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".active.json"), []byte(`{"id":"`+id+`"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Active(ProviderChatGPT, ""); err != nil || got != active {
+		t.Fatalf("imported selection = %q, %v", got, err)
+	}
+	if got, err := s.Active(ProviderXAI, ""); err != nil || got != "" {
+		t.Fatalf("cleared selection = %q, %v", got, err)
 	}
 }
 
