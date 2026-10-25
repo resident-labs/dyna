@@ -234,6 +234,8 @@ export interface ReviewerStatus {
   enabled: boolean
   profile: string
   profileSource: string
+  // Why the pool could not use the pinned profile; absent when it did.
+  profileCause?: string
   profileReason: string
   queue: ReviewQueued[] | null
   lastError: string
