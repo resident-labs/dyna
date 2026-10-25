@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allowanceLabel, accountLabel, accountsOf, accountStatus, needsSignIn, observation, percent, problemText, providerName, remainingPercent, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
+import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, problemText, providerName, remainingPercent, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
 import { account } from '../../../../test/account-fixtures.ts'
 import type { UsageWindow } from '../../api/account.ts'
 
@@ -123,7 +123,22 @@ test('an account without readable usage says why in words, never raw engine text
   assert.equal(usageUnavailableText({ kind: 'api_key', usageError: 'provider said 403' }), 'Usage unavailable for an API key')
   assert.equal(usageUnavailableText({ kind: 'oauth' }), 'Usage unavailable')
   assert.equal(usageUnavailableText({ kind: 'oauth', needsLogin: true }), 'Sign in to read usage')
+  assert.equal(usageUnavailableText({ kind: 'oauth', usageReason: 'expired' }), 'Sign in again to read usage')
+  assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'secret' }), 'Reader output rejected: contained a secret')
+  assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'provider-error' }), 'Usage is temporarily unavailable')
+  assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'rate-limited' }), 'Usage is rate limited. Try again later')
+  assert.equal(usageUnavailableText({ kind: 'api_key', usageReason: 'no-windows' }), 'The provider reported no usage windows')
+  assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'meta-muse', usageReason: 'not-readable' }), 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse to read it.')
+  assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'zai', usageReason: 'not-readable' }), 'This provider does not publish usage that Dyna can read.')
   assert.equal(observation({ usageError: 'provider said 403', rateLimitedUntil: '2000-01-01T00:00:00Z' }), '')
+})
+
+test('a balance is money, not a percent', () => {
+  assert.equal(money(53.78, 'USD'), '$53.78')
+  assert.equal(money(0, 'USD'), '$0.00')
+  assert.equal(money(12, 'CNY'), '12 CNY')
+  assert.equal(money(null, 'USD'), 'Not reported')
+  assert.equal(allowanceLabel({ balance: 53.78, unit: 'USD' }), '')
 })
 
 test('the cards word the repo limit, the selection and a skipped saved row', () => {

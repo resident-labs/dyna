@@ -78,12 +78,18 @@ func (m *kimiCodeManager) ProbeSaved(ctx context.Context, c Captured) (store.Obs
 	if endpoint == "" {
 		endpoint = baseURL + "/usages"
 	}
-	raw, err := directRequest(ctx, m.client, http.MethodGet, endpoint, "", map[string]string{
-		"Authorization": "Bearer " + login.tokenInfo.AccessToken,
+	return probeKimiCodeUsage(ctx, m.client, now, endpoint, login.tokenInfo.AccessToken)
+}
+
+// probeKimiCodeUsage reads a Kimi Code plan with an access token. It takes no
+// harness credential, so any account of the provider can use it.
+func probeKimiCodeUsage(ctx context.Context, client claudeHTTPClient, now time.Time, endpoint, access string) (store.Observation, error) {
+	raw, err := directRequest(ctx, client, http.MethodGet, endpoint, "", map[string]string{
+		"Authorization": "Bearer " + access,
 		"Accept":        "application/json",
 	}, now)
 	if err != nil {
-		return empty, err
+		return store.Observation{}, err
 	}
 	return kimiCodeUsageObservation(raw, now)
 }

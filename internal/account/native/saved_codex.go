@@ -26,11 +26,16 @@ func (m *codexManager) ProbeSaved(ctx context.Context, c Captured) (store.Observ
 	if err != nil {
 		return store.Observation{}, err
 	}
-	now := time.Now().UTC()
 	var client claudeHTTPClient
 	if m.client != nil {
 		client = m.client
 	}
+	return probeChatGPTUsage(ctx, client, time.Now().UTC(), access, account)
+}
+
+// probeChatGPTUsage reads the ChatGPT plan with an access token and account
+// ID. It takes no harness credential, so any account of the provider can use it.
+func probeChatGPTUsage(ctx context.Context, client claudeHTTPClient, now time.Time, access, account string) (store.Observation, error) {
 	body, err := directRequest(ctx, client, http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", "", map[string]string{"Authorization": "Bearer " + access, "ChatGPT-Account-Id": account, "Accept": "application/json"}, now, http.StatusForbidden)
 	if err != nil {
 		return store.Observation{}, err

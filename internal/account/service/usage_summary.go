@@ -40,6 +40,10 @@ func windowsSummary(a Account, now time.Time) string {
 			parts = append(parts, w.Label+": "+probablyResetReason+" · last checked "+checked)
 			continue
 		}
+		if w.Balance != nil {
+			parts = append(parts, w.Label+" "+money(*w.Balance, w.Unit))
+			continue
+		}
 		p, ok := WindowPercent(w)
 		if ok {
 			parts = append(parts, fmt.Sprintf("%s %.0f%%", w.Label, p))
@@ -79,6 +83,17 @@ func windowsSummary(a Account, now time.Time) string {
 		out += ". " + strings.Join(reasons, " ")
 	}
 	return out
+}
+
+// money formats a balance in its unit. USD gets a dollar sign.
+func money(amount float64, unit string) string {
+	if strings.EqualFold(unit, "USD") {
+		return fmt.Sprintf("$%.2f", amount)
+	}
+	if unit == "" {
+		return fmt.Sprintf("%.2f", amount)
+	}
+	return fmt.Sprintf("%.2f %s", amount, unit)
 }
 
 // UsageNote is the one-line turn header for an account. It is empty unless a

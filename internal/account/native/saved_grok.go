@@ -30,17 +30,28 @@ func probeGrokSaved(ctx context.Context, c Captured, client claudeHTTPClient, no
 	if err != nil {
 		return empty, err
 	}
-	raw, err := directRequest(ctx, client, http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", "", map[string]string{
-		"Authorization": "Bearer " + login.Key, "x-xai-token-auth": "xai-grok-cli", "x-userid": login.UserID,
+	return probeGrokCredits(ctx, client, now, login.Key, login.UserID)
+}
+
+// probeGrokCredits follows the Grok CLI billing request with an access token
+// and an optional user ID. It takes no harness credential, so any account of
+// the provider can use it. It never rotates the token.
+func probeGrokCredits(ctx context.Context, client claudeHTTPClient, now time.Time, key, userID string) (store.Observation, error) {
+	headers := map[string]string{
+		"Authorization": "Bearer " + key, "x-xai-token-auth": "xai-grok-cli",
 		"x-grok-client-version": "1.0.62", "x-grok-client-mode": "interactive",
-	}, now)
+	}
+	if userID != "" {
+		headers["x-userid"] = userID
+	}
+	raw, err := directRequest(ctx, client, http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", "", headers, now)
 	if err != nil {
 		// A billing rejection does not establish that the refresh grant expired.
 		// Only the credential refresh operation can return that sign-in decision.
 		if errors.Is(err, ErrInvalidGrant) {
-			return empty, &UsageHTTPError{Status: http.StatusUnauthorized}
+			return store.Observation{}, &UsageHTTPError{Status: http.StatusUnauthorized}
 		}
-		return empty, err
+		return store.Observation{}, err
 	}
 	return grokBillingObservation(raw, now)
 }
