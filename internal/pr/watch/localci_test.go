@@ -49,7 +49,7 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 	if status, _, _, _ := snap.CIStatus("go-test"); status != "pending" {
 		t.Fatalf("local status fed hosted gate: %s", status)
 	}
-	infra := localci.Result{Node: "node-a", Status: "error", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "error"}, {CheckName: "go-test", Status: "failed"}}}
+	infra := localci.Result{Node: "node-a", Status: "error", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "error"}, {CheckName: "go-test", Status: "failed", Aggregate: true}}}
 	if status, _, _ := registeredResultStatus(infra); status != "pending" {
 		t.Fatalf("infrastructure error blocks fallback: %s", status)
 	}
@@ -63,27 +63,28 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 }
 
 func TestRegisteredCIRequiresCompleteWorkflowChecks(t *testing.T) {
-	suites := []localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}
-	required := localci.RequiredChecks(suites)
+	definition := watchDynaDefinition(t)
+	suites := definition.WorkflowSuites()
+	required := definition.RequiredChecks(suites)
 	result := localci.Result{Node: "node-a", Status: "passed"}
 	for _, name := range required {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
-	if !localci.CoversSuites(result, suites) {
+	if !definition.CoversSuites(result, suites) {
 		t.Fatal("complete run rejected")
 	}
 	result.Checks = result.Checks[:len(result.Checks)-1]
-	if localci.CoversSuites(result, suites) {
+	if definition.CoversSuites(result, suites) {
 		t.Fatal("missing check passed the trial gate")
 	}
 	result.Node = ""
-	if localci.CoversSuites(result, []localci.Suite{localci.SuiteRelay}) {
+	if definition.CoversSuites(result, []localci.Suite{localci.SuiteRelay}) {
 		t.Fatal("manual subset passed the registered gate")
 	}
-	if got := localci.SuitesForFiles([]string{"internal/computerweb/handler.go"}); !reflect.DeepEqual(got, []localci.Suite{localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
+	if got := definition.SuitesForFiles([]string{"internal/computerweb/handler.go"}); !reflect.DeepEqual(got, []localci.Suite{localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
 		t.Fatalf("computer suites: %v", got)
 	}
-	if got := localci.SuitesForFiles([]string{"docs/readme.md"}); len(got) != 0 {
+	if got := definition.SuitesForFiles([]string{"docs/readme.md"}); len(got) != 0 {
 		t.Fatalf("docs suites: %v", got)
 	}
 }
@@ -201,7 +202,7 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	cancelledRun.Status, cancelledRun.Conclusion, cancelledRun.CheckSuiteID = "completed", "cancelled", 9
 	check := actionsCheck(Check{Status: "completed", Conclusion: "cancelled"})
 	check.CheckSuite.ID = 9
-	snap := withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}, Checks: []Check{check}}, registry.hosted)
+	snap := withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}, Checks: []Check{check}}, registry.hosted, watchDynaDefinition(t))
 	if ci, _, _, _ := snap.CIStatus(); ci != "pending" {
 		t.Fatalf("our cancellation became a failure: %s", ci)
 	}
@@ -258,7 +259,7 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	}
 	cancelledRun.Attempt = 2
 	cancelledRun.Conclusion = "failure"
-	snap = withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}}, registry.hosted)
+	snap = withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}}, registry.hosted, watchDynaDefinition(t))
 	if ci, _, _, _ := snap.CIStatus(); ci != "failed" {
 		t.Fatalf("new hosted attempt failure hidden: %s", ci)
 	}
@@ -352,7 +353,7 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 		stale, want bool
 	}{{"passed", head, false, true}, {"failed", head, false, true}, {"pending", head, false, false}, {"passed", "old", false, false}, {"passed", head, true, false}} {
 		r.CI, r.Polling.PullHead, r.HeadStale = tc.ci, tc.polled, tc.stale
-		got, err := s.scheduledCIConclusive(context.Background(), registeredCIJob{record: r, head: head}, "repo")
+		got, err := s.scheduledCIConclusive(context.Background(), registeredCIJob{record: r, head: head}, "repo", watchDynaDefinition(t))
 		if err != nil || got != tc.want {
 			t.Fatalf("ci=%s polled=%s stale=%t: settled=%t err=%v", tc.ci, tc.polled, tc.stale, got, err)
 		}
@@ -372,11 +373,11 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 		}
 		return writeFakeJSON(cmd.Stdout, emptyResponse{})
 	}
-	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo"); err != nil || !done {
+	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t)); err != nil || !done {
 		t.Fatalf("passing exact trial: %t %v", done, err)
 	}
 	run.HeadBranch = "main"
-	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo"); err != nil || done {
+	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t)); err != nil || done {
 		t.Fatalf("unrelated main push settled trial: %t %v", done, err)
 	}
 	// A settled record does not remove an already active run from the queue.
@@ -413,18 +414,15 @@ func (r *requiredCIRegistry) LoadResult(context.Context, string, string) (localc
 }
 
 func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
-	repo := t.TempDir()
-	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
-		t.Fatalf("init repository: %v: %s", err, raw)
-	}
+	repo, base := changeRepo(t)
+	head := changeCommit(t, repo, "trial\n")
 	common, err := localci.CanonicalRepo(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	head := strings.Repeat("a", 40)
-	r := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo}
+	r := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Head: head, Base: base, Branch: "dyna/merge-trial/1", RepoPath: repo}
 	var checks []localci.SuiteResult
-	for _, name := range localci.RequiredChecks([]localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
+	for _, name := range watchDynaRequiredChecks(t) {
 		checks = append(checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	for _, tc := range []struct {
@@ -463,7 +461,13 @@ func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
 			if tc.check != nil {
 				snap.Checks = []Check{*tc.check}
 			}
-			s := &Service{LocalCIRegistry: &requiredCIRegistry{result: result}}
+			s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: &requiredCIRegistry{result: result}}
+			if err := s.Store.update(func(st *State) error {
+				st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Base: base, Head: head, Branch: r.Branch}}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
 			got, err := s.withRegisteredCI(context.Background(), r, snap, ChangePolicy{RequiredChecks: []string{"security"}})
 			if err != nil {
 				t.Fatal(err)

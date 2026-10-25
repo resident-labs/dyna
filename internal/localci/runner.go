@@ -40,6 +40,9 @@ type Runner struct {
 	Node *Node
 }
 type Request struct {
+	// Definition is the validated graph at SHA. A nil definition loads
+	// DefinitionPath from SHA before any node work starts.
+	Definition *Definition
 	// Parallelism limits this run without changing the shared node slot limit.
 	// Zero uses all node slots.
 	Parallelism int
@@ -83,6 +86,8 @@ type SuiteResult struct {
 	Suite     Suite         `json:"suite"`
 	Node      string        `json:"node,omitempty"`
 	CheckName CheckName     `json:"checkName,omitempty"`
+	Group     Group         `json:"group,omitempty"`
+	Aggregate bool          `json:"aggregate,omitempty"`
 	Duration  time.Duration `json:"duration"`
 	SlowTests []TestTiming  `json:"slowTests,omitempty"`
 	Status    Outcome       `json:"status"`
@@ -322,9 +327,8 @@ func readArchive(input io.Reader, dir string) error {
 		}
 	}
 }
-func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[string]bool) error {
-	switch sr.Suite {
-	case SuiteCrossBuild, SuiteFrontendCheck, SuiteGoStatic, SuiteComputerSmoke:
+func checkReports(sr *SuiteResult, mode ReportMode, dir string, max time.Duration, allowed map[string]bool) error {
+	if mode == ReportNone {
 		return nil
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "reports", string(sr.Suite), "*.xml"))
@@ -351,7 +355,7 @@ func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[st
 		sr.Reports = append(sr.Reports, file)
 	}
 	// Go's JUnit exporter records timing; its JSON stream retains failure details.
-	if sr.Suite == SuiteGo || IsShard(sr.Suite) {
+	if mode == ReportGo {
 		streams, e := filepath.Glob(filepath.Join(dir, "reports", string(sr.Suite), "*.json"))
 		if e != nil {
 			return e

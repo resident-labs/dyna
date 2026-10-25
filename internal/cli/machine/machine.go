@@ -119,6 +119,9 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "Roles:    %s\n", m.RoleNames())
 			fmt.Fprintf(out, "SSH:      %s\n", ssh)
 			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
+			if m.HasRole(machines.RoleCI) {
+				fmt.Fprintf(out, "Host checks: %t\n", m.AllowHostChecks)
+			}
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
 			fmt.Fprintf(out, "Status:   %s\n", m.Status())
@@ -299,6 +302,7 @@ func editCommand() *cobra.Command {
 	var roleNames []string
 	var slots int
 	var enable, disable bool
+	var allowHostChecks, disallowHostChecks bool
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
 		Short: "Change a machine",
@@ -340,8 +344,17 @@ func editCommand() *cobra.Command {
 			if disable {
 				m.Enabled, changed = false, true
 			}
+			if allowHostChecks {
+				m.AllowHostChecks, changed = true, true
+			}
+			if disallowHostChecks {
+				m.AllowHostChecks, changed = false, true
+			}
 			if !changed {
-				return fmt.Errorf("edit %s: give at least one of --rename, --ssh, --role, --ci-slots, --enable or --disable", args[0])
+				return fmt.Errorf("edit %s: give a machine or host-check setting to change", args[0])
+			}
+			if allowHostChecks && !m.HasRole(machines.RoleCI) {
+				return fmt.Errorf("host checks require the ci role")
 			}
 			if m.HasRole(machines.RoleCI) && m.CISlots < 1 {
 				m.CISlots = 1
@@ -360,7 +373,10 @@ func editCommand() *cobra.Command {
 	cmd.Flags().IntVar(&slots, "ci-slots", 0, "maximum concurrent CI checks; a positive value adds the ci role")
 	cmd.Flags().BoolVar(&enable, "enable", false, "allow work on the machine")
 	cmd.Flags().BoolVar(&disable, "disable", false, "stop new work on the machine")
+	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
+	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
+	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
 }
 

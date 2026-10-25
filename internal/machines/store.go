@@ -59,6 +59,9 @@ type Machine struct {
 	Roles   []Role `json:"roles"`
 	SSH     string `json:"ssh"`
 	CISlots int    `json:"ciSlots"`
+	// AllowHostChecks lets repository-defined CI commands run on this machine
+	// outside a container. It is false unless the owner explicitly enables it.
+	AllowHostChecks bool `json:"allowHostChecks"`
 	// Enabled turns the machine's work off. A disabled machine takes no new CI
 	// runs. On the local row it stops that work, not the engine, which keeps
 	// running.
@@ -152,7 +155,7 @@ func (m Machine) Validate() error {
 	return nil
 }
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -170,7 +173,8 @@ const schema = `CREATE TABLE machines (
 	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
 	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
 	probe_error    TEXT    NOT NULL DEFAULT '',
-	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load))
+	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
+	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))
 );
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
 
@@ -196,7 +200,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,allow_host_checks`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -231,8 +235,8 @@ func (s Store) db() (*sql.DB, error) {
 }
 
 // prepare runs inside the migration. Version 1 created the registry and
-// imported the old local CI nodes; version 2 added the probe columns, and
-// version 3 added the reason of a degraded health.
+// imported the old local CI nodes. Later versions added probe data, degradation
+// reasons, and the explicit host-check permission.
 func prepare(conn *sql.Conn, old int) error {
 	ctx := context.Background()
 	if old >= schemaVersion {
@@ -252,7 +256,13 @@ func prepare(conn *sql.Conn, old int) error {
 			return err
 		}
 	}
-	return addDegradedColumn(ctx, conn)
+	if old < 3 {
+		if err := addDegradedColumn(ctx, conn); err != nil {
+			return err
+		}
+	}
+	_, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))`)
+	return err
 }
 
 // addDegradedColumn adds the reason of a degraded health to a version 2 table.
@@ -481,7 +491,7 @@ func scan(row scanner) (Machine, error) {
 	var roles, capabilities, health, reason, load, probeError string
 	var created, updated, probed, seen int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &m.AllowHostChecks); err != nil {
 		return Machine{}, err
 	}
 	if err := json.Unmarshal([]byte(roles), &m.Roles); err != nil {
@@ -639,6 +649,7 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	m.Roles = uniqueRoles(m.Roles)
 	if !m.HasRole(RoleCI) {
 		m.CISlots = 0
+		m.AllowHostChecks = false
 	}
 	m.Updated = now
 	if err := m.Validate(); err != nil {
@@ -646,8 +657,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+` WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, allow_host_checks=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), flag(m.AllowHostChecks), m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -657,9 +668,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,allow_host_checks) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)))
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), flag(m.AllowHostChecks))
 		return err
 	})
 	if err != nil {
@@ -726,13 +737,14 @@ func (s Store) RemoveRole(ctx context.Context, name string, role Role) error {
 		}
 		if !m.HasRole(RoleCI) {
 			m.CISlots = 0
+			m.AllowHostChecks = false
 		}
 		if err := m.Validate(); err != nil {
 			return err
 		}
 		m.Updated = time.Now()
-		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, updated_ms=? WHERE id=?`,
-			marshalRoles(m.Roles), m.CISlots, m.Updated.UnixMilli(), m.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, allow_host_checks=?, updated_ms=? WHERE id=?`,
+			marshalRoles(m.Roles), m.CISlots, flag(m.AllowHostChecks), m.Updated.UnixMilli(), m.ID)
 		return err
 	})
 }

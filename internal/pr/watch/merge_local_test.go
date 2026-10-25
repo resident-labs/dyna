@@ -80,7 +80,7 @@ func (f *fakeLocalCI) Run(ctx context.Context, req localci.Request) (localci.Res
 		}
 	}
 	var checks []localci.SuiteResult
-	for _, name := range localci.RequiredChecks(localci.WorkflowSuites()) {
+	for _, name := range req.Definition.RequiredChecks(req.Suites) {
 		checks = append(checks, localci.SuiteResult{Suite: localci.Suite(name), CheckName: name, Node: "local", Status: status})
 	}
 	errText := ""
@@ -496,15 +496,17 @@ func TestLocalLaneGitHubFactsAndPublicationAreHeld(t *testing.T) {
 }
 
 func TestLocalCIReadsNodeChecks(t *testing.T) {
+	definition := watchDynaDefinition(t)
+	suites := definition.WorkflowSuites()
 	result := localci.Result{Repo: "repo", SHA: "head", Node: "hermeslab", Status: localci.OutcomePassed}
-	for _, name := range localci.RequiredChecks(localci.WorkflowSuites()) {
+	for _, name := range definition.RequiredChecks(suites) {
 		result.Checks = append(result.Checks, localci.SuiteResult{Suite: localci.Suite(name), CheckName: name, Node: "hermeslab", Status: localci.OutcomePassed})
 	}
-	if status, _, _, err := localCIStatus(result, "repo", "head"); err != nil || status != VerdictPassed {
+	if status, _, _, err := localCIStatus(result, "repo", "head", definition, suites); err != nil || status != VerdictPassed {
 		t.Fatalf("complete node checks did not pass: %s %v", status, err)
 	}
 	result.Checks = result.Checks[:len(result.Checks)-1]
-	if status, _, _, err := localCIStatus(result, "repo", "head"); err != nil || status != VerdictPending {
+	if status, _, _, err := localCIStatus(result, "repo", "head", definition, suites); err != nil || status != VerdictPending {
 		t.Fatalf("partial node checks did not stay pending: %s %v", status, err)
 	}
 }
@@ -518,12 +520,14 @@ func TestReturnedLocalFailureKeepsFailedShardEvidence(t *testing.T) {
 }
 
 func TestLocalCIRequiresEachWorkflowSuiteToPass(t *testing.T) {
+	definition := watchDynaDefinition(t)
+	suites := definition.WorkflowSuites()
 	result := localci.Result{Repo: "repo", SHA: "head", Status: "passed"}
-	for _, suite := range localci.WorkflowSuites() {
+	for _, suite := range suites {
 		result.Suites = append(result.Suites, localci.SuiteResult{Suite: suite, Status: "passed"})
 	}
 	result.Suites[0].Status = "failed"
-	if status, _, _, err := localCIStatus(result, "repo", "head"); err != nil || status != "failed" {
+	if status, _, _, err := localCIStatus(result, "repo", "head", definition, suites); err != nil || status != "failed" {
 		t.Fatalf("failed suite accepted: %s %v", status, err)
 	}
 }

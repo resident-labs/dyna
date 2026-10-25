@@ -151,7 +151,7 @@ esac
 			t.Fatal(err)
 		}
 	}
-	check := nodeCheck{id: SuiteGoStatic, name: "go-static", inner: "bash scripts/ci.sh go vet", image: "golang:1.26.3"}
+	check := nodeCheck{id: SuiteGoStatic, name: "go-static", inner: "bash scripts/ci.sh go vet", image: "golang:1.26.3", hostUser: true}
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "repo.git"), filepath.Join(dir, "run"), "run", strings.Repeat("a", 40), check, time.Minute, 0)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()

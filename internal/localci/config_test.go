@@ -67,7 +67,8 @@ suites:
 	}
 }
 
-func TestDynaDefinitionMirrorsBuiltInGraph(t *testing.T) {
+func testDynaDefinition(t *testing.T) *Definition {
+	t.Helper()
 	body, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(DefinitionPath)))
 	if err != nil {
 		t.Fatal(err)
@@ -76,37 +77,7 @@ func TestDynaDefinitionMirrorsBuiltInGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := definition.Suites(), Suites(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("defined suites %v, want %v", got, want)
-	}
-	if got, want := definition.WorkflowSuites(), WorkflowSuites(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("defined trial %v, want %v", got, want)
-	}
-	for _, suite := range Suites() {
-		got, gotOK := definition.Checks(suite)
-		want, wantOK := Checks(suite)
-		if gotOK != wantOK || !reflect.DeepEqual(got, want) {
-			t.Errorf("suite %q checks %v, %t; want %v, %t", suite, got, gotOK, want, wantOK)
-		}
-	}
-	for _, files := range [][]string{{"relay/server.ts"}, {"internal/pr/watch/service.go"}, {"web/src/main.ts"}, {"internal/computers/service.go"}, {"docs/README.md"}} {
-		if got, want := definition.SuitesForFiles(files), SuitesForFiles(files); !reflect.DeepEqual(got, want) {
-			t.Errorf("files %v selected %v, want %v", files, got, want)
-		}
-	}
-	for id, command := range nodeCommands {
-		if IsShard(id) || id == SuiteComputerSmoke {
-			continue
-		}
-		checks, ok := definition.ExecutableChecks(id)
-		if !ok || len(checks) != 1 {
-			t.Errorf("defined command for %q is missing", id)
-			continue
-		}
-		if checks[0].Image != command.image || checks[0].Command != command.inner {
-			t.Errorf("check %q = image %q, command %q; want image %q, command %q", id, checks[0].Image, checks[0].Command, command.image, command.inner)
-		}
-	}
+	return definition
 }
 
 func TestLoadDefinitionAbsentAndStrict(t *testing.T) {

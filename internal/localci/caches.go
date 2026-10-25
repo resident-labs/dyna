@@ -78,10 +78,10 @@ func baseLinkGuard(base string) string {
 // after the prepare stage. Docker and the node resolve a bind source link on
 // the host, so such a link would make a run read, write and prune a cache
 // outside Dyna's own tree. It also refuses a linked base or parent.
-func cacheLinkGuard(base string) string {
+func cacheLinkGuard(base string, names []string) string {
 	q := shellquote.Quote
 	guard := baseLinkGuard(base)
-	for _, name := range []string{"go-build", "go-mod", "npm"} {
+	for _, name := range names {
 		unsafe := path.Join(base, name)
 		guard += "if [ -L " + q(unsafe) + " ]; then echo " +
 			q("unsafe CI cache path "+unsafe+" is a symlink to") + " \"$(readlink -- " + q(unsafe) + ")\" >&2; exit 69; fi; "

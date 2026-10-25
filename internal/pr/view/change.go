@@ -48,6 +48,7 @@ type ChangeView struct {
 	Watching            bool                 `json:"watching,omitempty"`
 	Status              string               `json:"status,omitempty"`
 	CI                  string               `json:"ci,omitempty"`
+	LocalCIConfig       string               `json:"localCIConfig,omitempty"`
 	CITestReportNote    string               `json:"ciTestReportNote,omitempty"`
 	CIReason            string               `json:"ciReason,omitempty"`
 	BotReviews          []state.BotReview    `json:"botReviews"`

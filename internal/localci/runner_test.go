@@ -24,7 +24,7 @@ func TestRunNeedsARegisteredNode(t *testing.T) {
 		t.Fatal("ran a command without a registered node")
 		return nil
 	}}
-	if _, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{SuiteRelay}}); err == nil || !strings.Contains(err.Error(), "registered node") {
+	if _, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteRelay}}); err == nil || !strings.Contains(err.Error(), "registered node") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -35,7 +35,7 @@ func TestRunRejectsUnknownSuiteBeforeAnyCommand(t *testing.T) {
 		t.Fatal("ran a command for an unknown suite")
 		return nil
 	}}
-	if _, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{"go-test-typo"}}); err == nil {
+	if _, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-test-typo"}}); err == nil {
 		t.Fatal("accepted an unknown suite")
 	}
 }
@@ -79,7 +79,7 @@ func TestGoFailureDetailsSurviveJUnitExport(t *testing.T) {
 	}
 
 	result := SuiteResult{Suite: "go", Status: "failed"}
-	if err := checkReports(&result, dir, 10*time.Second, nil); err != nil {
+	if err := checkReports(&result, ReportGo, dir, 10*time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Failures) == 0 || !strings.Contains(result.Failures[0], "TestBroken") {
@@ -163,7 +163,7 @@ func TestNodeRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 			archived[strings.TrimPrefix(header.Name, "./")] = string(content)
 		}
 	}
-	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{SuiteRelay}, Timeout: 30 * time.Second, MaxTest: time.Second})
+	result, err := runner.Run(ctx, Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteRelay}, Timeout: 30 * time.Second, MaxTest: time.Second})
 	if err != nil || result.Status != OutcomePassed {
 		t.Fatalf("report retrieval: %+v %v", result, err)
 	}

@@ -68,6 +68,7 @@ type registeredCIRun struct {
 type registeredCIJob struct {
 	record       Record
 	head, branch string
+	base         string
 	trial        bool
 	created      time.Time
 }
@@ -192,11 +193,11 @@ func registeredCIJobs(st State) []registeredCIJob {
 			continue
 		}
 		if b.Head != "" && (b.Phase == state.MergeTrialPhaseRunning || b.Phase == state.MergeTrialPhaseBuilding || b.Phase == state.MergeTrialPhasePassed) {
-			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, trial: true, created: b.Created})
+			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, base: b.Base, trial: true, created: b.Created})
 		}
 		for _, stack := range b.Stacks {
 			if stack.Head != "" && stack.Phase == state.MergeTrialPhaseRunning {
-				jobs = append(jobs, registeredCIJob{record: *r, head: stack.Head, branch: stack.Branch, trial: true, created: b.Created})
+				jobs = append(jobs, registeredCIJob{record: *r, head: stack.Head, branch: stack.Branch, base: b.Base, trial: true, created: b.Created})
 			}
 		}
 	}
@@ -326,15 +327,25 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if runs.runs[key] != nil {
 			continue
 		}
-		chosen := availableCINode(enabled, active)
-		if chosen == nil {
+		if availableCINode(enabled, active) == nil {
 			continue
 		}
-		settled, err := s.scheduledCIConclusive(ctx, job, repo)
+		plan, err := s.prepareRegisteredCI(ctx, job)
+		if err != nil {
+			return err
+		}
+		if !plan.runnable() {
+			continue
+		}
+		settled, err := s.scheduledCIConclusive(ctx, job, repo, plan.execution)
 		if err != nil {
 			return err
 		}
 		if settled {
+			continue
+		}
+		chosen := availableCINode(enabled, active)
+		if chosen == nil {
 			continue
 		}
 		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -347,7 +358,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		runs.runs[key] = run
 		started = true
 		active[chosen.Name] += slots
-		go s.executeRegisteredCI(runCtx, job, repo, *chosen, key, run)
+		go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run)
 	}
 	return nil
 }
@@ -374,7 +385,7 @@ func availableCINode(nodes []localci.Node, active map[string]int) *localci.Node 
 	return chosen
 }
 
-func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, repo string, node localci.Node, key string, run *registeredCIRun) {
+func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun) {
 	// A run that ends on any path has no work left on the node.
 	defer run.markStopped()
 	defer func() {
@@ -406,13 +417,13 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	if !policy.EnforceCITimeBudget() {
 		maxTest = time.Duration(1<<63 - 1)
 	}
-	suites, err := s.prepareRegisteredCI(ctx, job)
+	suites := plan.suites
 	if len(suites) > 0 {
 		s.setRunningCISuites(key, run, suites)
 	}
 	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
 	if err == nil && len(suites) > 0 {
-		req := localci.Request{Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}
+		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}
 		req.OnStart = func(startCtx context.Context) error {
 			if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
 				log.Printf("cancel queued hosted CI: %v", err)
@@ -474,11 +485,15 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	}
 }
 
-func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) ([]localci.Suite, error) {
+func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) (localCIPlan, error) {
 	r := job.record
 	args := []string{"fetch", "--quiet", "--no-tags", "--", "https://" + r.Host + "/" + r.Repo + ".git", job.head}
-	if !job.trial && headSHAPattern.MatchString(r.Base) {
-		args = append(args, r.Base)
+	base := job.base
+	if base == "" {
+		base = r.Base
+	}
+	if headSHAPattern.MatchString(base) {
+		args = append(args, base)
 	}
 	cmd := gitexec.Command(ctx, r.RepoPath, args...)
 	g := s.github(r.RoomID)
@@ -490,19 +505,9 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 		err = ghclient.RunGit(ctx, g.Executable, cmd)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("fetch local CI head: %w", err)
+		return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w", err)
 	}
-	if job.trial {
-		return localci.WorkflowSuites(), nil
-	}
-	if !headSHAPattern.MatchString(r.Base) {
-		return nil, fmt.Errorf("local CI requires a verified base SHA")
-	}
-	files, err := gitRead(ctx, r.RepoPath, "diff", "--name-only", r.Base+"..."+job.head)
-	if err != nil {
-		return nil, err
-	}
-	return localci.SuitesForFiles(strings.Split(files, "\n")), nil
+	return s.planRegisteredCI(ctx, job)
 }
 
 // Cancellation of a still-current head restores the hosted work we removed.
@@ -536,7 +541,7 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 
 // Saved CI belongs to a PR head only after that head received a full poll.
 // Trial heads have separate push runs and must use their own exact-head facts.
-func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string) (bool, error) {
+func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string, definition *localci.Definition) (bool, error) {
 	r := job.record
 	if !job.trial {
 		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(r.CI).Conclusive(), nil
@@ -559,7 +564,7 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	snap = withoutLocalHostedCancellations(snap, saved)
+	snap = withoutLocalHostedCancellations(snap, saved, definition)
 	snap.Pull.Head.SHA = job.head
 	// A workflow that only cancellations ended proves nothing about the head, so
 	// the scheduler must still run local CI instead of treating the head as

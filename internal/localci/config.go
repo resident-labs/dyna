@@ -67,6 +67,7 @@ type ExecutableCheck struct {
 // Definition is the validated local CI graph at one repository revision.
 // Its methods replace repository-specific suite tables with repository data.
 type Definition struct {
+	revision   string
 	trial      []Suite
 	suites     []definitionSuite
 	bySuite    map[Suite]definitionSuite
@@ -159,6 +160,7 @@ func LoadDefinition(ctx context.Context, repo, ref string) (*Definition, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s at %.12s: %w", DefinitionPath, sha, err)
 	}
+	definition.revision = sha
 	return definition, nil
 }
 
