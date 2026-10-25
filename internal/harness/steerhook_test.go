@@ -26,6 +26,10 @@ const envTestSteerHookDir = "DYNA_TEST_STEER_HOOK_DIR"
 // know nothing about hooks).
 func TestMain(m *testing.M) {
 	PrepareRuntime = fakeruntime.Prepare
+	// No test account has a second sign-in, so a usage limit never moves one.
+	FailoverAccount = func(context.Context, profile.Profile, string, string, error) (*AccountSwitch, error) {
+		return nil, nil
+	}
 	harnesshealth.VersionDetector = func(context.Context, profile.Profile) harnesshealth.VersionInfo {
 		return harnesshealth.VersionInfo{Version: "test", Installed: true}
 	}

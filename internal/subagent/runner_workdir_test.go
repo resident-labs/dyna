@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/profile"
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/room"
 )
 
@@ -15,18 +15,18 @@ import (
 func TestSchemaRetryKeepsDirectoryNote(t *testing.T) {
 	dir := t.TempDir()
 	capture := filepath.Join(dir, "prompt")
-	e := newTestEnv(t, profile.Profile{
-		Name: "custom", Harness: profile.HarnessCustom, Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `
+	p := fakeworker.InstallClaude(t, `
 count=0
 if [ -f "$COUNT" ]; then count=$(/bin/cat "$COUNT"); fi
 count=$((count+1))
 printf '%s' "$count" > "$COUNT"
-/bin/cat > "$CAPTURE.$count"
+printf '%s' "$DYNA_FAKE_PROMPT" > "$CAPTURE.$count"
 if [ "$count" -eq 1 ]; then printf '"invalid"'; else printf '{"n":7}'; fi
-`},
-		Env: map[string]string{"COUNT": filepath.Join(dir, "count"), "CAPTURE": capture},
-	})
+`)
+	p.Name = "custom"
+	p.ExtraArgs = []string{"--no-session-persistence"}
+	p.Env = mergedEnv(p.Env, map[string]string{"COUNT": filepath.Join(dir, "count"), "CAPTURE": capture})
+	e := newTestEnv(t, p)
 	repo := t.TempDir()
 	if err := e.m.RoomStore().UpdatePreferences(e.room.ID, func(r *room.Record) error {
 		r.Repo = repo

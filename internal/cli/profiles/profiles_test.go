@@ -143,7 +143,7 @@ func TestProfilesShowNeutralDiagnosticsForOldProfiles(t *testing.T) {
 
 func TestProfilesAddOutputDialectFlag(t *testing.T) {
 	isolateProfiles(t)
-	runProfilesCommand(t, "add", "--name", "direct-codex", "--harness", "custom", "--command", "fixture", "--output-dialect", workeroutput.DialectCodexJSONL)
+	runProfilesCommand(t, "add", "--name", "direct-codex", "--harness", "codex", "--output-dialect", workeroutput.DialectCodexJSONL)
 	store, err := profile.Load(profile.DefaultPath())
 	if err != nil {
 		t.Fatal(err)

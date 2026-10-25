@@ -184,7 +184,7 @@ func TestSpawnRecordFailureIsNotFatal(t *testing.T) {
 func TestProfilesPayloadHasNoSecrets(t *testing.T) {
 	e := newEnv(t)
 	store := &profile.Store{Profiles: []profile.Profile{
-		{Name: "mock", Harness: profile.HarnessMock, Default: true, Env: map[string]string{"API_KEY": "secret"}, Command: []string{"x"}, ExtraArgs: []string{"--key=secret"}},
+		{Name: "mock", Harness: profile.HarnessMock, Default: true, Env: map[string]string{"API_KEY": "secret"}, ExtraArgs: []string{"--key=secret"}},
 		{Name: "off", Harness: profile.HarnessMock, Disabled: true},
 		{Name: "solo", Harness: profile.HarnessMock, Uses: []string{profile.UseAgents}},
 		{Name: "svc", Harness: profile.HarnessMock, Uses: []string{profile.UseServices}},

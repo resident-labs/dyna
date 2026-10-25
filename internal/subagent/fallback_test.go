@@ -9,18 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 )
 
 // limitProfile fails every turn on a usage limit, like a harness whose account
 // has no quota left and no same-harness account to move to.
-func limitProfile(name, fallback string) profile.Profile {
-	return profile.Profile{
-		Name: name, Harness: profile.HarnessCustom, Model: "only", Fallback: fallback,
-		Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `/bin/cat >/dev/null; printf 'quota exhausted; resets in 2h' >&2; exit 1`},
-	}
+func limitProfile(t *testing.T, name, fallback string) profile.Profile {
+	p := fakeworker.InstallClaudeLimit(t, "quota exhausted; resets in 2h")
+	p.Name, p.Fallback = name, fallback
+	return p
 }
 
 // A usage limit with no account left moves the session to its fallback profile
@@ -106,7 +105,7 @@ func TestUsageLimitFallbackMovesSessionAndContinues(t *testing.T) {
 // A cyclic chain does not loop: the second limit finds no profile the session
 // has not already left, so nothing moves.
 func TestFallbackChainDoesNotLoop(t *testing.T) {
-	e := newTestEnv(t, limitProfile("one", "two"), limitProfile("two", "one"))
+	e := newTestEnv(t, limitProfile(t, "one", "two"), limitProfile(t, "two", "one"))
 	e.m.TransferLaunch = func(*Manager, string, string) error { return nil }
 	held := &heldTurnSpawner{}
 	e.m.Spawner = held
@@ -141,7 +140,7 @@ func TestFallbackChainDoesNotLoop(t *testing.T) {
 // coordinator must neither block the third target nor restore the first
 // profile.
 func TestFallbackChainContinuesAfterASecondLimit(t *testing.T) {
-	e := newTestEnv(t, limitProfile("one", "two"), limitProfile("two", "three"), mockProfile("three"))
+	e := newTestEnv(t, limitProfile(t, "one", "two"), limitProfile(t, "two", "three"), mockProfile("three"))
 	e.m.TransferLaunch = func(*Manager, string, string) error { return nil }
 	held := &heldTurnSpawner{}
 	e.m.Spawner = held
@@ -223,7 +222,7 @@ func (s *turnLocks) Spawn(_ *Manager, _ string, turn int, lock *os.File) error {
 // the second move is saved, so a worker key that names only the session would
 // drop the new launch and leave the move waiting forever.
 func TestFallbackChainSupersedingTransferGetsItsCoordinator(t *testing.T) {
-	e := newTestEnv(t, limitProfile("one", "two"), limitProfile("two", "three"), mockProfile("three"))
+	e := newTestEnv(t, limitProfile(t, "one", "two"), limitProfile(t, "two", "three"), mockProfile("three"))
 	coordinatorWorkers(t, e)
 	locks := &turnLocks{ch: make(chan spawnedTurn, 4)}
 	e.m.Spawner = locks
@@ -373,7 +372,7 @@ func TestFallbackNoticeNamesResetOnlyWhenGiven(t *testing.T) {
 // The fallback path stores no secrets and leaves the worktree and PR record
 // untouched; the replacement continues in the same directory.
 func TestFallbackKeepsDirectoryAndTrackedPR(t *testing.T) {
-	e := newTestEnv(t, limitProfile("one", "two"), limitProfile("two", ""))
+	e := newTestEnv(t, limitProfile(t, "one", "two"), limitProfile(t, "two", ""))
 	e.m.TransferLaunch = func(*Manager, string, string) error { return nil }
 	held := &heldTurnSpawner{}
 	e.m.Spawner = held

@@ -84,7 +84,7 @@ func TestProbeCannotBlessUnrecognizedOrUnsuccessfulOutput(t *testing.T) {
 }
 
 func TestFingerprintInvalidation(t *testing.T) {
-	for _, field := range []string{"harness", "model", "command", "extraArgs", "output"} {
+	for _, field := range []string{"harness", "model", "extraArgs", "output"} {
 		t.Run(field, func(t *testing.T) {
 			s, p := New(t.TempDir()), testProfile()
 			recordTurn(t, s, p, "v1", observation(1))
@@ -93,8 +93,6 @@ func TestFingerprintInvalidation(t *testing.T) {
 				p.Harness = profile.HarnessClaudeCode
 			case "model":
 				p.Model = "different-model"
-			case "command":
-				p.Command = []string{"other-cli"}
 			case "extraArgs":
 				p.ExtraArgs = []string{"--different"}
 			case "output":
@@ -116,7 +114,6 @@ func TestReloadAndPrivateStorage(t *testing.T) {
 	dir, p := t.TempDir(), testProfile()
 	p.Name = "../../worker/with/slashes"
 	p.Env = map[string]string{"SECRET": "do-not-store-env"}
-	p.Command = []string{"do-not-store-command"}
 	p.ExtraArgs = []string{"do-not-store-args"}
 	s := New(dir)
 	o := observation(1)

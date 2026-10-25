@@ -5,15 +5,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"dyna-agent/internal/profile"
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/scratch"
 )
 
 func TestSessionTurnScratchEnv(t *testing.T) {
 	capture := filepath.Join(t.TempDir(), "scratch")
-	p := profile.Profile{Name: "mock", Harness: profile.HarnessCustom, Default: true,
-		Command: []string{"/bin/sh", "-c", `cat >/dev/null; printf '%s|%s' "$DYNA_SCRATCH" "$(stat -c %a "$DYNA_SCRATCH")" > "$CAPTURE"; printf done`},
-		Env:     map[string]string{"CAPTURE": capture}, Taste: 5, Intelligence: 5, Cost: 5}
+	p := fakeworker.InstallClaude(t, `printf '%s|%s' "$DYNA_SCRATCH" "$(stat -c %a "$DYNA_SCRATCH")" > "$CAPTURE"; printf done`)
+	p.Name, p.Default = "mock", true
+	p.Env = mergedEnv(p.Env, map[string]string{"CAPTURE": capture})
 	e := newTestEnv(t, p)
 	e.joinRunners()
 	info, turn := e.start("check scratch")
@@ -34,9 +34,9 @@ func TestSessionTurnScratchEnv(t *testing.T) {
 func TestSessionTurnStartsWithScratchUnavailable(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DYNA_SCRATCH", "/stale/parent")
-	p := profile.Profile{Name: "mock", Harness: profile.HarnessCustom, Default: true,
-		Command: []string{"/bin/sh", "-c", `cat >/dev/null; if [ "${DYNA_SCRATCH+x}" = x ]; then printf stale; else printf done; fi`},
-		Env:     map[string]string{"DYNA_SCRATCH": "/stale/profile"}, Taste: 5, Intelligence: 5, Cost: 5}
+	p := fakeworker.InstallClaude(t, `if [ "${DYNA_SCRATCH+x}" = x ]; then printf stale; else printf done; fi`)
+	p.Name, p.Default = "mock", true
+	p.Env = mergedEnv(p.Env, map[string]string{"DYNA_SCRATCH": "/stale/profile"})
 	e := newTestEnv(t, p)
 	t.Setenv("TMPDIR", tmp)
 	root := scratch.Root()

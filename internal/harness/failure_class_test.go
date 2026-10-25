@@ -26,7 +26,7 @@ func TestProcessErrorDoesNotLeakStructuredStdout(t *testing.T) {
 	}
 	// Plain text output has no parser, so its tail stays in the message for the
 	// owner. Model text never names a provider reason.
-	err = attemptError(context.Background(), profile.Profile{Name: "custom", Harness: profile.HarnessCustom}, []string{"tool"}, attempt{
+	err = attemptError(context.Background(), profile.Profile{Name: "plain", Harness: profile.HarnessMock}, []string{"tool"}, attempt{
 		runErr: errors.New("exit status 1"), stdout: "rate limit exceeded",
 	})
 	if err == nil || !strings.Contains(err.Error(), "rate limit exceeded") {
@@ -36,7 +36,7 @@ func TestProcessErrorDoesNotLeakStructuredStdout(t *testing.T) {
 		t.Fatalf("model stdout named provider reason %q", reason)
 	}
 	// The process's own stderr is a trusted boundary.
-	err = attemptError(context.Background(), profile.Profile{Name: "custom", Harness: profile.HarnessCustom}, []string{"tool"}, attempt{
+	err = attemptError(context.Background(), profile.Profile{Name: "plain", Harness: profile.HarnessMock}, []string{"tool"}, attempt{
 		runErr: errors.New("exit status 1"), stderr: "Error: 429 rate limit exceeded",
 	})
 	if !providerfailure.Is(err, providerfailure.Quota) {
@@ -58,7 +58,7 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 	}{
 		{
 			name:    "model talks about a limit and credit",
-			harness: profile.HarnessCustom,
+			harness: profile.HarnessMock,
 			stdout:  "The provider returned HTTP 429 and my credit balance is low; retry the usage limit later.",
 		},
 		{
@@ -67,16 +67,16 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 			stdout:  `{"type":"result","subtype":"success","is_error":false,"result":"HTTP 429 rate limit"}` + "\n",
 			stderr:  "exit status 1",
 		},
-		{name: "stderr names a rate limit", harness: profile.HarnessCustom, stderr: "HTTP 429: rate limit exceeded", want: providerfailure.Quota},
-		{name: "stderr names a busy provider", harness: profile.HarnessCustom, stderr: "provider overloaded, retry in a minute", want: providerfailure.Capacity},
-		{name: "stderr names a rejected sign-in", harness: profile.HarnessCustom, stderr: "authentication_error: invalid api key", want: providerfailure.Auth},
-		{name: "stderr names a server failure", harness: profile.HarnessCustom, stderr: "internal server error", want: providerfailure.Unavailable},
+		{name: "stderr names a rate limit", harness: profile.HarnessMock, stderr: "HTTP 429: rate limit exceeded", want: providerfailure.Quota},
+		{name: "stderr names a busy provider", harness: profile.HarnessMock, stderr: "provider overloaded, retry in a minute", want: providerfailure.Capacity},
+		{name: "stderr names a rejected sign-in", harness: profile.HarnessMock, stderr: "authentication_error: invalid api key", want: providerfailure.Auth},
+		{name: "stderr names a server failure", harness: profile.HarnessMock, stderr: "internal server error", want: providerfailure.Unavailable},
 		// Stderr holds log lines as well as provider diagnostics, so a bare number
 		// or a provider word alone is not evidence of a failure.
-		{name: "stderr reads a line number", harness: profile.HarnessCustom, stderr: "reading line 429 of the session log"},
-		{name: "stderr mentions quota settings", harness: profile.HarnessCustom, stderr: "checking quota configuration for the room"},
-		{name: "stderr names no provider", harness: profile.HarnessCustom, stderr: "the model wondered about its credit balance"},
-		{name: "stderr names a bare invalid key", harness: profile.HarnessCustom, stderr: "invalid key in configuration"},
+		{name: "stderr reads a line number", harness: profile.HarnessMock, stderr: "reading line 429 of the session log"},
+		{name: "stderr mentions quota settings", harness: profile.HarnessMock, stderr: "checking quota configuration for the room"},
+		{name: "stderr names no provider", harness: profile.HarnessMock, stderr: "the model wondered about its credit balance"},
+		{name: "stderr names a bare invalid key", harness: profile.HarnessMock, stderr: "invalid key in configuration"},
 		{
 			name:    "codex protocol failure names the quota",
 			harness: profile.HarnessCodex,

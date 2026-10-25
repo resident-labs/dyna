@@ -8,7 +8,7 @@ import (
 func TestWorkflowProfileUsesRegisteredPolicy(t *testing.T) {
 	s := &Store{Profiles: []Profile{
 		{Name: "session", Default: true, Uses: []string{UseAgents}},
-		{Name: "worker", Harness: HarnessCustom, Command: []string{"custom-worker"}, ExtraArgs: []string{"--registered"}},
+		{Name: "worker", Harness: HarnessPi, ExtraArgs: []string{"--registered"}},
 		{Name: "disabled", Disabled: true},
 	}}
 	for _, name := range []string{"", "worker"} {
@@ -16,8 +16,8 @@ func TestWorkflowProfileUsesRegisteredPolicy(t *testing.T) {
 		if err != nil || p != &s.Profiles[1] {
 			t.Fatalf("WorkflowProfile(%q) = %#v, %v; want registered worker", name, p, err)
 		}
-		if p.Command[0] != "custom-worker" || p.ExtraArgs[0] != "--registered" {
-			t.Fatal("selection replaced registered custom options")
+		if p.ExtraArgs[0] != "--registered" {
+			t.Fatal("selection replaced registered options")
 		}
 	}
 	for _, tc := range []struct{ name, want string }{

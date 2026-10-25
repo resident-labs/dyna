@@ -167,13 +167,11 @@ func NewCommand() *cobra.Command {
 	}
 
 	var p profile.Profile
-	var command []string
 	var outputDialect string
 	add := &cobra.Command{
 		Use:   "add",
 		Short: "Register or update a worker profile",
 		RunE: func(c *cobra.Command, _ []string) error {
-			p.Command = command
 			if c.Flags().Changed("models") {
 				p.Model, p.Models = profile.NormalizeModels("", p.Models)
 			}
@@ -201,7 +199,6 @@ func NewCommand() *cobra.Command {
 	f.IntVar(&p.Cost, "cost", 5, "cost efficiency 1..10, higher better (10 = very cheap)")
 	f.IntVar(&p.Diagnostics, "diagnostics", 5, "finding what is wrong in a given solution 1..10, higher better")
 	f.StringArrayVar(&p.ExtraArgs, "extra-arg", nil, "extra CLI arg for the harness (repeatable)")
-	f.StringArrayVar(&command, "command", nil, "custom harness argv (repeatable; {{prompt}}/{{model}} placeholders)")
 	f.IntVar(&p.TimeoutSec, "timeout", 0, "per-call timeout in seconds (default: 5 hours; explicit values have a 30-minute minimum)")
 	f.BoolVar(&p.Default, "default", false, "make this the default profile")
 	f.BoolVar(&p.SafeMode, "safe-mode", false, "keep the harness's own permission prompts/sandbox (default: bypassed)")
