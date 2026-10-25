@@ -49,13 +49,13 @@ func (a *Accounts) setActive(h, id string) error {
 // harness keeps its own selection, so two harnesses that run one provider never
 // take each other's account.
 func (a *Accounts) setActiveAccount(n NativeAccount) error {
-	return (&store.Store{Root: a.Root}).SetActive(selectionProvider(n.Harness, n.Provider), n.Harness, "", n.ID)
+	return (&store.Store{Root: a.Root}).SetActive(SelectionProvider(n.Harness, n.Provider), n.Harness, "", n.ID)
 }
 
 // clearActive records that the account's harness has no selection for its
 // provider.
 func (a *Accounts) clearActive(n NativeAccount) error {
-	return (&store.Store{Root: a.Root}).SetActive(selectionProvider(n.Harness, n.Provider), n.Harness, "", "")
+	return (&store.Store{Root: a.Root}).SetActive(SelectionProvider(n.Harness, n.Provider), n.Harness, "", "")
 }
 
 // selectPinned makes an account the active one of its provider without copying
@@ -77,7 +77,7 @@ func (a *Accounts) activeAccount(h string, p store.Provider, roomID string) (Nat
 	if err != nil {
 		return NativeAccount{}, err
 	}
-	p = selectionProvider(canonical, p)
+	p = SelectionProvider(canonical, p)
 	id, err := (&store.Store{Root: a.Root}).ActiveFor(p, canonical, roomID)
 	if err != nil {
 		return NativeAccount{}, err
