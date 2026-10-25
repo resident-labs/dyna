@@ -74,8 +74,9 @@ by accident. Starting a shell never starts a computer.
   reach the control socket. `CHROME_USER_DATA_DIR` and `CHROME_CONFIG_HOME` name
   private directories: Chromium finds a running browser through its profile
   before it needs a display, so an absolute launch from a desktop entry must not
-  join one that runs on the owner display. The job output gets one hint that
-  names these commands.
+  join one that runs on the owner display. The job's stderr gets one hint that
+  names these commands, printed before the command runs, so its own PID and exit
+  status are kept.
 
 The browser shims keep each computer on its own profile: Chromium gets
 `--user-data-dir`, Firefox gets `--profile` without a shared remote, and the

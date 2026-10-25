@@ -47,10 +47,17 @@ const (
 
 var idPattern = regexp.MustCompile(`^sh_[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$`)
 
-// noDisplayHint tells an agent where its GUI programs can run. Supervise writes
-// it once to the job's output when the display policy reports no display.
-const noDisplayHint = "no computer is running, so this shell has no display; " +
+// NoDisplayHint is the one stderr line a shell without a display prints.
+const NoDisplayHint = "no computer is running, so this shell has no display; " +
 	"run dyna computer run, or dyna computer open -- <app>, to start a GUI app on your own computer"
+
+// hintShell and hintScript put the hint on stderr before the command. The hint
+// is one argument, and exec hands the remaining arguments to the command
+// unchanged, so its PID and exit status are the command's own.
+const (
+	hintShell  = "/bin/sh"
+	hintScript = `printf '%s\n' "$1" >&2; shift; exec "$@"`
+)
 
 // ValidID reports whether id has the shell id shape.
 func ValidID(id string) bool { return idPattern.MatchString(id) }
@@ -250,8 +257,8 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 		env, noDisplay = s.CommandEnv(ctx, dir, m, env)
 	}
 	if noDisplay {
-		// One hint per shell, where the agent reads the job's output.
-		_, _ = fmt.Fprintf(out, "\n[dyna: %s]\n", noDisplayHint)
+		cmd = exec.Command(hintShell, append([]string{"-c", hintScript, hintShell, NoDisplayHint}, m.Cmd...)...)
+		cmd.Dir = m.Cwd
 	}
 	// Without a terminal, a pager or color codes only get in the way.
 	cmd.Env = append(env, "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
