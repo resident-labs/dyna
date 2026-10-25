@@ -30,6 +30,7 @@ var piProviderIDs = map[string]store.Provider{
 	"opencode-go":  store.ProviderOpenCodeGo,
 	"deepseek":     store.ProviderDeepSeek,
 	"zai":          store.ProviderZAI,
+	"brave":        store.ProviderBrave,
 }
 
 // providerForModel returns the provider an account is selected for.
@@ -72,6 +73,7 @@ var piProviderName = map[store.Provider]string{
 	store.ProviderOpenCodeGo: "opencode",
 	store.ProviderDeepSeek:   "deepseek",
 	store.ProviderZAI:        "zai",
+	store.ProviderBrave:      "brave",
 }
 
 // PiProviderID returns the Pi provider ID of p, so a key goes to that

@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/shells"
+	"dyna-agent/internal/websearch"
 )
 
 // ForegroundLimit is how long a command runs before it moves to the background.
@@ -56,6 +58,9 @@ type Tools struct {
 	// A server shared by many sessions has no single owner. A call it cannot
 	// map keeps this server's own owner, or foreground mode.
 	Resolve func(clientSession string) (Caller, bool)
+	// Search runs one web search in the engine, which holds every provider
+	// credential. A session's own process never sees a token or a key.
+	Search func(ctx context.Context, in callspec.WebSearchRequest) (callspec.WebSearchResponse, error)
 
 	mu      sync.Mutex
 	started []string
@@ -76,7 +81,7 @@ func (t *Tools) forCaller(clientSession string) *Tools {
 	if !ok {
 		return t
 	}
-	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env}
+	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search}
 }
 
 // capped is d, limited to the longest call may block.
@@ -180,6 +185,19 @@ var toolList = []map[string]any{
 		"description": "List your running jobs and the jobs that ended in the last hour.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
+	{
+		"name": "web_search",
+		"description": "Search the web. Returns titled results with a URL, a snippet and the provider that found them, " +
+			"as compact JSON. The provider order is fixed: ChatGPT first when the owner signed in to it, then Brave.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "What to search for."},
+				"limit": map[string]any{"type": "integer", "description": "How many results to return, 1 to 10. Default 5."},
+			},
+			"required": []string{"query"},
+		},
+	},
 }
 
 // Result is one tool call's answer and what the session learns from it.
@@ -229,6 +247,8 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 		JobID       string `json:"job_id"`
 		Wait        string `json:"wait"`
 		Timeout     int    `json:"timeout_seconds"`
+		Query       string `json:"query"`
+		Limit       int    `json:"limit"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
@@ -246,6 +266,8 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 		err = t.stop(&r, args.JobID)
 	case "shell_jobs":
 		r.Text, err = t.jobs()
+	case "web_search":
+		r.Text, err = t.webSearch(ctx, args.Query, args.Limit)
 	default:
 		err = fmt.Errorf("unknown tool %q", name)
 	}
@@ -441,6 +463,34 @@ func (t *Tools) jobs() (string, error) {
 		return "No jobs.", nil
 	}
 	return b.String(), nil
+}
+
+// webSearch runs one search in the engine and answers with the results as
+// compact JSON. A provider failure becomes the tool's one-line error.
+func (t *Tools) webSearch(ctx context.Context, query string, limit int) (string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", errors.New("query is required")
+	}
+	if limit < 0 || limit > websearch.MaxLimit {
+		return "", fmt.Errorf("limit must be from 1 to %d", websearch.MaxLimit)
+	}
+	if t.Search == nil {
+		return "", errors.New("web search is not available in this session")
+	}
+	answer, err := t.Search(ctx, callspec.WebSearchRequest{Query: query, Limit: limit})
+	if err != nil {
+		return "", err
+	}
+	results := answer.Results
+	if results == nil {
+		results = []websearch.Result{}
+	}
+	encoded, err := json.Marshal(results)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 // own returns a job that belongs to this session.
