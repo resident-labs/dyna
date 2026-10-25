@@ -30,6 +30,12 @@ func usageProbeAt(o *store.Observation, active bool) time.Time {
 	if o == nil {
 		return time.Time{}
 	}
+	if o.Reason == "" && o.UsageError != "" {
+		// TODO: legacy/shim remove later — a reading saved before typed reasons
+		// retries at once, so a repaired reader replaces its generic result
+		// without waiting one interval.
+		return time.Time{}
+	}
 	attempted := o.LastAttemptAt
 	if attempted.IsZero() {
 		attempted = o.ObservedAt
@@ -81,8 +87,22 @@ func (s *Service) RefreshInactiveUsage(ctx context.Context, now time.Time) time.
 		}
 		if n.Active {
 			// The reading only matters while turns run; an idle harness keeps
-			// whatever reading it had.
+			// whatever reading it had. A Pi provider account holds no harness
+			// turn of its own, so its reading stays current while idle.
 			if _, running := accounts.SwitchStatus(n.Harness); running == 0 {
+				if n.Harness != "pi" {
+					continue
+				}
+				at := usageProbeAt(entry.Observation, false)
+				if !at.After(now) {
+					at = s.probeInactiveUsage(ctx, accounts, n, now)
+				}
+				if !at.After(now) {
+					at = now.Add(credentialRetry)
+				}
+				if at.Before(next) {
+					next = at
+				}
 				continue
 			}
 			at := activeUsageDue(entry.Observation, now)
