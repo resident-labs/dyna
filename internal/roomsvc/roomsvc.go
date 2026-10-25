@@ -487,17 +487,19 @@ type ReplyTarget struct {
 	Kind string `json:"kind"` // ReplySession or ReplyRoom
 	// ID is the session bound to the sender address, and empty for the room.
 	ID string `json:"id,omitempty"`
-	// Address is the address a reply names: the sender's own, or the room's.
+	// Address is the address a reply names: the sender's own address today, or
+	// the room's. It is empty when the stored session is gone or its address
+	// now belongs to another session, so the reply names nobody.
 	Address string `json:"address,omitempty"`
 }
 
 // replyTarget reads who a reply to m answers from the stored sender identity.
-// A session's own post names the session the sender address is bound to, which
-// survives a rename and works across rooms. The room's owner and its root seat
-// name the room, which a composer writes as @root, so the seat's holder can
-// change. A post the owner typed has no target: a reply to it keeps the
-// draft's recipients.
-func replyTarget(m room.Message, roomName string) *ReplyTarget {
+// A session's own post names the session the sender address is bound to, at the
+// address that session answers at now, which survives a rename and works
+// across rooms. The room's owner and its root seat name the room, which a
+// composer writes as @root, so the seat's holder can change. A post the owner
+// typed has no target: a reply to it keeps the draft's recipients.
+func replyTarget(m room.Message, roomName string, book avatarBook) *ReplyTarget {
 	if m.From == roomName || m.From == roomName+":"+room.RootAgent {
 		if m.Human {
 			return nil
@@ -505,7 +507,13 @@ func replyTarget(m room.Message, roomName string) *ReplyTarget {
 		return &ReplyTarget{Kind: ReplyRoom, Address: roomName}
 	}
 	if id := m.AuthorSessionID(); id != "" {
-		return &ReplyTarget{Kind: ReplySession, ID: id, Address: m.From}
+		// The stored address may be out of date, or now belong to another
+		// session, so the target names the session only when it still holds it.
+		cur, ok := book.address(id)
+		if !ok {
+			return &ReplyTarget{Kind: ReplySession, ID: id}
+		}
+		return &ReplyTarget{Kind: ReplySession, ID: id, Address: cur}
 	}
 	// An engine, script or worker post has no session to answer, so a reply
 	// goes to the room's root, as it does for the owner's own posts.
@@ -704,7 +712,7 @@ func decorate(m room.Message, roomName string, reads map[string]bool, book avata
 		// the row and finds the sender's avatar.
 		name = ev.Session
 	}
-	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName), Reply: replyTarget(m, roomName)}
+	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName), Reply: replyTarget(m, roomName, book)}
 	if !p.Owner {
 		p.FromEmoji = book.forPost(name, m.TS)
 	}

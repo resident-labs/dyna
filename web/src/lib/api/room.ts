@@ -121,7 +121,9 @@ export interface PostDetail {
 export interface ReplyTarget {
   kind: 'session' | 'room'
   id?: string
-  address: string
+  // address is the address a reply names, resolved by the server: a session's
+  // address today, or the room's. It is empty when the reply must name nobody.
+  address?: string
 }
 
 // Post is roomsvc.Post. Go embeds room.Message, so its fields sit at the top

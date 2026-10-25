@@ -1010,19 +1010,20 @@
   }
 
   // startReply targets the post's sender, which the server names from the
-  // stored identity of the post (Post.reply). The stored session answers at
-  // its current address, so a renamed session still takes the reply. It
-  // replaces the draft's leading recipients (a kept '@viewer ' included) and
-  // keeps any text already written after them. A post with no reply target,
-  // such as one the owner typed, leaves the draft alone.
+  // stored identity of the post (Post.reply). The target carries the address
+  // that session answers at now, across rooms and after a rename, so this only
+  // writes it. A target with no address names nobody, such as a session whose
+  // name another session took, and a post with no target, such as one the
+  // owner typed, leaves the draft's recipients alone. The reply replaces the
+  // draft's leading recipients (a kept '@viewer ' included) and keeps any text
+  // already written after them.
   function startReply(p: Post) {
     reply = p
     if (!room) return
     const target = p.reply
-    if (target) {
-      const address = (target.id ? members.find((m) => m.id === target.id)?.address : '') || target.address
+    if (target?.address) {
       const body = draft.value.replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
-      draft.value = `@${short(address, room.name)} ${body}`
+      draft.value = `@${short(target.address, room.name)} ${body}`
     }
     composer?.focus()
   }

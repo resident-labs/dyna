@@ -13,23 +13,19 @@ assert.ok(fn, 'App has a startReply function')
 const { start, end } = sourceRange(fn)
 const startReplySource = stripTypes(source.slice(start, end))
 
-// startReply reads the reply target the server stores for the post, and the
-// member list that gives a renamed session its current address.
+// startReply reads only the reply target the server stores for the post.
 type ReplyPost = Partial<Post> & { from: string; reply?: ReplyTarget }
-
-type ReplyMember = { id: string; address: string }
 
 interface ReplyContext {
   room: { name: string }
   draft: { value: string }
   reply: ReplyPost | null
   composer: { focus(): void }
-  members: ReplyMember[]
   short: typeof short
 }
 
-function replyTo(post: ReplyPost, members: ReplyMember[] = []): string {
-  const context: ReplyContext = { room: { name: 'alpha' }, draft: { value: '@old Keep this draft' }, reply: null, composer: { focus() {} }, members, short }
+function replyTo(post: ReplyPost): string {
+  const context: ReplyContext = { room: { name: 'alpha' }, draft: { value: '@old Keep this draft' }, reply: null, composer: { focus() {} }, short }
   vm.createContext(context)
   vm.runInContext(startReplySource, context)
   const startReply = vm.runInContext('startReply', context) as (post: ReplyPost) => void
@@ -45,9 +41,15 @@ test('replies target a room sender and preserve the draft body', () => {
 test('a reply to a session in another room names that session, not root', () => {
   assert.equal(replyTo({ from: 'beta:other', reply: { kind: 'session', id: 'ses_2', address: 'beta:other' } }), '@beta:other Keep this draft')
 })
-test('a renamed session takes the reply at its current address', () => {
-  const members = [{ id: 'ses_1', address: 'alpha:builder' }]
-  assert.equal(replyTo({ from: 'alpha:worker', reply: { kind: 'session', id: 'ses_1', address: 'alpha:worker' } }, members), '@builder Keep this draft')
+test('a renamed cross-room sender answers at the address the server resolved', () => {
+  // The server follows the stored session ID across rooms, so the composer
+  // writes the current address and never the address the post was stored with.
+  assert.equal(replyTo({ from: 'beta:other', reply: { kind: 'session', id: 'ses_2', address: 'beta:builder' } }), '@beta:builder Keep this draft')
+})
+test('a target with no address names nobody and keeps the draft', () => {
+  // The stored session is gone, or another session took its address, so the
+  // server sends no address and the reply must not name a stranger.
+  assert.equal(replyTo({ from: 'beta:other', reply: { kind: 'session', id: 'ses_2' } }), '@old Keep this draft')
 })
 test('system posts reply to root instead of slicing an unrelated sender address', () => {
   for (const from of ['goal-keeper', 'shell:sh_1', 'run:wf_1', 'github:review', 'future-system']) {
