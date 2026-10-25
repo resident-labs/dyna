@@ -122,6 +122,29 @@ const (
 	StopTooLarge   StopReason = "too-large"
 )
 
+// LocalCIConfigState is the local CI configuration a repository has at a head.
+// A view reports one of these known states, so a client words it itself and
+// never shows a Git or YAML message.
+type LocalCIConfigState string
+
+// Local CI configuration states.
+const (
+	// LocalCIConfigNone means the head and its base both define local CI, or
+	// that the question does not apply to this change.
+	LocalCIConfigNone LocalCIConfigState = ""
+	// LocalCIConfigNotConfigured means the base defines no local CI, so the
+	// repository uses hosted CI only.
+	LocalCIConfigNotConfigured LocalCIConfigState = "not-configured"
+	// LocalCIConfigHeadMissing means the head removed a definition that its
+	// base still requires.
+	LocalCIConfigHeadMissing LocalCIConfigState = "head-missing"
+)
+
+// known reports whether a stored value is a state that a client renders.
+func (c LocalCIConfigState) known() bool {
+	return c == LocalCIConfigNone || c == LocalCIConfigNotConfigured || c == LocalCIConfigHeadMissing
+}
+
 // FastLand records whether an approve-fast result uses direct publication.
 // The stored Boolean also preserves the meaning of older review events.
 type FastLand struct {
@@ -262,7 +285,7 @@ type Record struct {
 	Checked          time.Time                    `json:"checked,omitempty"`
 	CI               string                       `json:"ci,omitempty"`
 	CIReason         string                       `json:"ciReason,omitempty"`
-	LocalCIConfig    string                       `json:"localCIConfig,omitempty"`
+	LocalCIConfig    LocalCIConfigState           `json:"localCIConfig,omitempty"`
 	BotReviews       []BotReview                  `json:"botReviews,omitempty"`
 	Checks           []CheckSummary               `json:"checks"`
 	CIKey            string                       `json:"ciKey,omitempty"`
