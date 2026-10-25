@@ -92,12 +92,59 @@ func writeDiff(ctx context.Context, repo, path string, args ...string) (bool, er
 	return limit.truncated, file.Close()
 }
 
+// reviewBase is the PR's base commit as GitHub reports it now: the same
+// verified base SHA the watcher uses for heads. A stored base can lag a rebase,
+// and a diff from it includes the base commits that landed since.
+func (s *Service) reviewBase(ctx context.Context, r Record) (string, error) {
+	heads, _, err := s.github(r.RoomID).readHeads(ctx, []*Record{&r})
+	probe := heads[r.Key]
+	if probe.Err != nil {
+		return "", probe.Err
+	}
+	if err != nil {
+		return "", err
+	}
+	if probe.Pull.Base.SHA == "" {
+		return "", fmt.Errorf("GitHub returned no base commit")
+	}
+	return probe.Pull.Base.SHA, nil
+}
+
+// reviewChecks is the CI evidence for the assigned head. A stored summary
+// belongs to the head of the last full poll, so a review of another head reads
+// the head's own checks instead of showing an earlier head's result.
+func (s *Service) reviewChecks(ctx context.Context, r Record) ([]CheckSummary, error) {
+	if r.Polling.PullHead == r.Head && len(r.Checks) > 0 {
+		return r.Checks, nil
+	}
+	var snap Snapshot
+	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), r.Head, &snap); err != nil {
+		return nil, err
+	}
+	return snap.CheckSummaries(refRecord(r)), nil
+}
+
 // prepareReviewTask writes the assignment context. seen is the head this
 // reviewer last saw without a verdict; the delta starts there, otherwise at
 // the previous reviewed head.
 func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) (string, error) {
 	var err error
-	input := ReviewContext{GitHubChecks: r.Checks, Assignment: assignment(r), Findings: cloneFindings(r.Findings), Rules: map[string]string{}}
+	// A rebase moves the base under a record whose stored base is older, so the
+	// input takes the base and the CI evidence as GitHub has them for this head.
+	base, checks := r.Base, r.Checks
+	if r.Kind == "github" {
+		if current, e := s.reviewBase(ctx, r); e == nil {
+			base = current
+		}
+		if fresh, e := s.reviewChecks(ctx, r); e == nil {
+			checks = fresh
+		} else if r.Polling.PullHead != r.Head {
+			checks = nil
+		}
+	}
+	assigned := assignment(r)
+	assigned.Base = base
+	input := ReviewContext{GitHubChecks: checks, Assignment: assigned, Findings: cloneFindings(r.Findings), Rules: map[string]string{}}
 	if len(r.ReviewRounds) > 0 {
 		prior := r.ReviewRounds[len(r.ReviewRounds)-1]
 		input.Previous = &prior
@@ -107,11 +154,11 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		return "", err
 	}
 	name := fmt.Sprintf("%s-%d", digest(r.Head)[:16], r.Round)
-	if r.RepoPath != "" && r.Base != "" {
+	if r.RepoPath != "" && base != "" {
 		input.DiffPath = filepath.Join(dir, name+".patch")
-		diffBase, e := gitRead(ctx, r.RepoPath, "merge-base", r.Base, r.Head)
+		diffBase, e := gitRead(ctx, r.RepoPath, "merge-base", base, r.Head)
 		if e != nil {
-			diffBase = r.Base
+			diffBase = base
 		}
 		input.DiffTruncated, err = writeTreeDiff(ctx, r.RepoPath, diffBase, r.Head, input.DiffPath)
 		if err != nil {
@@ -121,7 +168,7 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		input.DiffStat, _ = gitRead(ctx, r.RepoPath, "diff", "--no-ext-diff", "--no-textconv", "--stat", diffBase+".."+r.Head, "--")
 		if from := deltaBase(input.Previous, seen); from != "" && from != r.Head {
 			input.DeltaPath = filepath.Join(dir, name+"-delta.patch")
-			truncated, e := writeReviewDelta(ctx, r.RepoPath, r.Base, from, r.Head, input.DeltaPath)
+			truncated, e := writeReviewDelta(ctx, r.RepoPath, base, from, r.Head, input.DeltaPath)
 			input.DiffTruncated = input.DiffTruncated || truncated
 			if e != nil {
 				input.DeltaPath = ""
