@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,15 +10,13 @@ import (
 	"dyna-agent/internal/localci"
 )
 
+// localStatusPrefix marks the commit statuses Dyna posted for a local CI run
+// before it stopped posting them. GitHub keeps them on old commits, so the
+// prefix still tells a leftover local status apart from a hosted one: a
+// leftover status must never become hosted evidence for a merge.
 const localStatusPrefix = "Dyna local CI on "
 
 func localCommitStatus(s Status) bool { return strings.HasPrefix(s.Description, localStatusPrefix) }
-func localStatusNode(s Status) string {
-	if !localCommitStatus(s) {
-		return ""
-	}
-	return strings.TrimPrefix(s.Description, localStatusPrefix)
-}
 func replaceableHostedWorkflow(run Run) bool {
 	path, _, _ := strings.Cut(run.Path, "@")
 	return path == ".github/workflows/ci.yml"
@@ -326,52 +323,6 @@ func (s *Service) hostedWithoutLocalCancellations(ctx context.Context, r Record,
 		return snap, err
 	}
 	return withoutLocalHostedCancellations(snap, saved, definition), nil
-}
-
-// commitStatusState is the one conversion from a local CI outcome to the GitHub
-// commit status state Dyna posts. An infrastructure error posts no status: the
-// run is retried and hosted CI decides instead.
-func commitStatusState(outcome localci.Outcome) (state string, publish bool) {
-	switch outcome {
-	case localci.OutcomePassed:
-		return "success", true
-	case localci.OutcomeFailed:
-		return "failure", true
-	}
-	return "", false
-}
-
-func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob, result localci.Result) error {
-	registry := s.ciRegistry()
-	saved, err := registry.LoadHostedRuns(ctx, result.Repo, job.head)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	payload, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
-	publicationKey := digest(string(payload))
-	if saved.PublishedKey == publicationKey {
-		return nil
-	}
-	gh := s.github(job.record.RoomID)
-	for _, check := range result.Checks {
-		if localInfrastructureError(result) && !registeredTestFailure(result, check) {
-			continue
-		}
-		name := string(check.Name())
-		state, publish := commitStatusState(check.Status)
-		if !publish {
-			continue
-		}
-		if _, _, err := gh.requestMethod(ctx, refRecord(job.record), fmt.Sprintf("repos/%s/statuses/%s", job.record.Repo, job.head), "POST", "-f", "context="+name, "-f", "state="+state, "-f", "description="+clip(localStatusPrefix+result.Node, 140), "-f", "target_url=https://"+job.record.Host+"/"+job.record.Repo+"/commit/"+job.head); err != nil {
-			return err
-		}
-	}
-	saved.Published = true
-	saved.PublishedKey = publicationKey
-	return registry.SaveHostedRuns(ctx, result.Repo, job.head, saved)
 }
 
 // hostedCancelledOnly reports a hosted failure that only cancellations caused:
