@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/profile"
+	"dyna-agent/internal/harness/fakeworker"
 )
 
 func TestRunTurnModelFallbackAndMetadataOverride(t *testing.T) {
@@ -17,17 +17,16 @@ func TestRunTurnModelFallbackAndMetadataOverride(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := filepath.Join(t.TempDir(), "models")
-			e := newTestEnv(t, profile.Profile{
-				Name: "chain", Harness: profile.HarnessCustom, Model: "a", Models: []string{"a", "b"},
-				Taste: 5, Intelligence: 5, Cost: 5,
-				Command: []string{"/bin/sh", "-c", `
-/bin/cat >/dev/null
-printf '%s\n' "$1" >> "$MODEL_LOG"
-if [ "$1" = "a" ]; then printf 'quota exhausted' >&2; exit 1; fi
-printf 'served by %s' "$1"
-`, "worker", "{{model}}"},
-				Env: map[string]string{"MODEL_LOG": log},
-			})
+			p := fakeworker.InstallClaude(t, `
+printf '%s\n' "$DYNA_FAKE_MODEL" >> "$MODEL_LOG"
+if [ "$DYNA_FAKE_MODEL" = "a" ]; then printf 'quota exhausted' >&2; exit 1; fi
+printf 'served by %s' "$DYNA_FAKE_MODEL"
+`)
+			p.Name, p.Model, p.Models = "chain", "a", []string{"a", "b"}
+			p.ExtraArgs = []string{"--no-session-persistence"}
+			p = fakeworker.MarkStatus(p, 429)
+			p.Env = mergedEnv(p.Env, map[string]string{"MODEL_LOG": log})
+			e := newTestEnv(t, p)
 			held := &heldTurnSpawner{}
 			e.m.Spawner = held
 			info, _ := e.start("task", func(o *StartOptions) { o.Profile = "chain" })

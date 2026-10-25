@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 )
 
@@ -26,10 +27,10 @@ func TestWorkflowWorkerGoFlags(t *testing.T) {
 			capture := filepath.Join(t.TempDir(), "flags")
 			tc.env["CAPTURE"] = capture
 			original := tc.env["GOFLAGS"]
-			store := &profile.Store{Profiles: []profile.Profile{{
-				Name: "custom", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-				Command: []string{"/bin/sh", "-c", `printf '%s' "$GOFLAGS" > "$CAPTURE"; printf done`}, Env: tc.env,
-			}}}
+			worker := fakeworker.InstallClaude(t, `printf '%s' "$GOFLAGS" > "$CAPTURE"; printf done`)
+			worker.Name, worker.Default = "custom", true
+			worker.Env = mergedEnv(worker.Env, tc.env)
+			store := &profile.Store{Profiles: []profile.Profile{worker}}
 			if _, err := Execute(context.Background(), Options{
 				ScriptSrc: `return await agent("task")`, Store: store, WorkDir: t.TempDir(),
 			}); err != nil {

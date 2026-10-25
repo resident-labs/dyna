@@ -18,6 +18,9 @@ import (
 // Codex and Muse CLIs from being probed for steering-hook support.
 func TestMain(m *testing.M) {
 	harness.PrepareRuntime = fakeruntime.Prepare
+	harness.FailoverAccount = func(context.Context, profile.Profile, string, string, error) (*harness.AccountSwitch, error) {
+		return nil, nil // every test account is spent or absent unless it says otherwise
+	}
 	// A test that needs a turn held open says so with SLEEP:<ms>. Every other mock
 	// turn would otherwise wait 400 ms, which was most of this package's run time.
 	harness.MockDefaultDelay = 0

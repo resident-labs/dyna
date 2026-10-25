@@ -61,7 +61,7 @@ trap 'wait; printf "parent-stopped\n"; exit 0' TERM
 ' &
 wait
 `
-	p := profile.Profile{Harness: profile.HarnessCustom}
+	p := profile.Profile{Harness: profile.HarnessMock}
 	cmd, err := harnessCommand(ctx, p, dir, []string{"/bin/sh", "-c", script}, ExecutionOptions{SkipComputer: true})
 	if err != nil {
 		t.Fatal(err)

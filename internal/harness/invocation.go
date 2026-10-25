@@ -136,20 +136,6 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 
 	case "pi-print":
 		return piInvocation(p, prompt, exec)
-
-	case "command":
-		var argv []string
-		hasPrompt := false
-		for _, a := range p.Command {
-			out := strings.ReplaceAll(a, "{{model}}", p.Model)
-			if strings.Contains(out, "{{prompt}}") {
-				out = strings.ReplaceAll(out, "{{prompt}}", prompt)
-				hasPrompt = true
-			}
-			argv = append(argv, out)
-		}
-		inv.initial = commandSpec{argv: argv, stdinPrompt: !hasPrompt, prompt: prompt}
-		return inv, nil
 	}
 	return invocation{}, fmt.Errorf("unknown harness %q", p.Harness)
 }

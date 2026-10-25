@@ -35,10 +35,10 @@ api.accountsList = async () => ({ checkedAt: '2026-10-17T17:30:00Z', problems: [
 // What the last save asked for.
 const sent: { saved?: ProfileSave } = {}
 api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }
-const customScenarios = ['custom-error', 'draft-details', 'draft-navigation', 'advanced-details', 'advanced-navigation']
-const initialSelection: ModelSelection | null = scenario === 'harness' ? null : { harness: customScenarios.includes(scenario) ? 'custom' : 'opencode', ...(['details', 'settings'].includes(scenario) ? { connectionId: 'fixture-account', routeId: need(models[0]).id } : {}) }
+const manualScenarios = ['save-error', 'draft-details', 'draft-navigation', 'advanced-details', 'advanced-navigation']
+const initialSelection: ModelSelection | null = scenario === 'harness' ? null : { harness: manualScenarios.includes(scenario) ? 'mock' : 'opencode', ...(['details', 'settings'].includes(scenario) ? { connectionId: 'fixture-account', routeId: need(models[0]).id } : {}) }
 const app = need(document.getElementById('app'), 'app')
-const wizard = mount(Wizard, { target: app, props: { harnesses: ['opencode', 'codex', 'custom'], initialSelection, onsaved: () => {}, oncancel: () => {}, onusage: (id: string) => { document.body.dataset.usage = id } } })
+const wizard = mount(Wizard, { target: app, props: { harnesses: ['opencode', 'codex', 'mock'], initialSelection, onsaved: () => {}, oncancel: () => {}, onusage: (id: string) => { document.body.dataset.usage = id } } })
 
 const results: { name: string; pass: boolean }[] = []
 const pause = () => new Promise<void>((r) => setTimeout(r, 80))
@@ -82,31 +82,29 @@ if (scenario === 'test') {
  report()
 }
 
-if (scenario === 'custom-error') {
+if (scenario === 'save-error') {
  await pause(); button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
- const name = one<HTMLInputElement>('input[placeholder="e.g. quick-research"]'), command = one<HTMLTextAreaElement>('textarea[placeholder="One argument per line"]')
- check('Custom command is visible without opening Advanced', command.getClientRects().length && !one<HTMLDetailsElement>('details.advanced').open)
- await setValue(name, 'custom-fixture'); await setValue(command, 'fixture-agent\n{{prompt}}')
+ const name = one<HTMLInputElement>('input[placeholder="e.g. quick-research"]')
+ await setValue(name, 'fixture-profile')
  api.saveProfile = async () => { throw new Error('Fixture save failure: please retry. '.repeat(5)) }; button('Create profile').click(); await pause()
  const error = document.querySelector('[role=alert]')
  check('Save error is visible', !!error && error.getBoundingClientRect().top >= 0 && error.getBoundingClientRect().bottom <= innerHeight)
- check('Save error preserves name and command', name.value === 'custom-fixture' && command.value === 'fixture-agent\n{{prompt}}')
+ check('Save error preserves the name', name.value === 'fixture-profile')
  check('Save action remains Create profile', findButton('Create profile') && !button('Create profile').disabled)
  api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }; button('Create profile').click(); await pause()
- check('Custom harness default remains empty on retry', document.body.dataset.savedModel === '')
+ check('A harness default remains an empty model ID on retry', document.body.dataset.savedModel === '')
  report()
 }
 
 if (['draft-details', 'draft-navigation', 'draft-environment'].includes(scenario)) {
- const command = 'fixture-agent\n{{prompt}}', args = '--fixture=true\n--second=value'
+ const args = '--fixture=true\n--second=value'
  const row = (key: string) => [...document.querySelectorAll('.envrow')].find((el) => el.textContent?.includes(key))
  const add = async (key: string, value: string) => { await input('input[placeholder="KEY"]', key); await input('input[placeholder="value"]', value); button('Add').click(); await tick() }
  api.saveProfile = async (data: ProfileSave) => { sent.saved = data; return savedView(data) }
  await pause()
  if (scenario !== 'draft-environment') {
   button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
-  await input('input[placeholder="e.g. quick-research"]', 'custom-fixture')
-  await input('textarea[placeholder="One argument per line"]', command)
+  await input('input[placeholder="e.g. quick-research"]', 'fixture-profile')
   one('details.advanced summary').click(); await pause()
   await input('textarea[placeholder="--flag=value"]', args)
   await add('FIXTURE_KEEP', 'fixture-value'); await add('FIXTURE_DROP', 'discard')
@@ -117,22 +115,21 @@ if (['draft-details', 'draft-navigation', 'draft-environment'].includes(scenario
   await tick()
   if (scenario === 'draft-navigation') { button('Model details').click(); await tick() }
   button('Use harness default').click(); await tick()
-  check('Profile name survives navigation', one<HTMLInputElement>('input[placeholder="e.g. quick-research"]').value === 'custom-fixture')
-  check('Raw custom command survives navigation', one<HTMLTextAreaElement>('textarea[placeholder="One argument per line"]').value === command)
+  check('Profile name survives navigation', one<HTMLInputElement>('input[placeholder="e.g. quick-research"]').value === 'fixture-profile')
   check('Raw extra arguments survive navigation', one<HTMLTextAreaElement>('textarea[placeholder="--flag=value"]').value === args)
   check('Advanced section stays open', one<HTMLDetailsElement>('details.advanced').open)
   check('Staged environment addition survives', row('FIXTURE_KEEP')?.textContent?.includes('new value set'))
   check('Removed staged key stays absent', !row('FIXTURE_DROP'))
   check('Pending environment input survives', one<HTMLInputElement>('input[placeholder="KEY"]').value === 'FIXTURE_PENDING' && one<HTMLInputElement>('input[placeholder="value"]').value === 'pending-value')
   button('Add').click(); await tick(); button('Create profile').click(); await pause()
-  check('Save receives command and arguments', JSON.stringify(sent.saved?.profile.command) === JSON.stringify(command.split('\n')) && JSON.stringify(sent.saved?.profile.extraArgs) === JSON.stringify(args.split('\n')))
+  check('Save receives the raw arguments', JSON.stringify(sent.saved?.profile.extraArgs) === JSON.stringify(args.split('\n')))
   check('Save receives complete staged environment', sent.saved?.envSet?.FIXTURE_KEEP === 'fixture-value' && sent.saved.envSet.FIXTURE_PENDING === 'pending-value' && !('FIXTURE_DROP' in sent.saved.envSet))
  } else {
   // Existing removals need an editor with existing keys. All values are fixtures.
   await unmount(wizard)
   for (const path of ['details', 'navigation']) {
    const kept: { draft?: EditorDraft } = {}
-   const props = { guided: true, profile: { ...blankProfile('custom'), name: 'fixture', command: ['fixture-agent'], envKeys: ['FIXTURE_REMOVE', 'FIXTURE_REPLACE'] }, harnesses: ['custom'], onsaved: () => {}, oncancel: (value: EditorDraft) => { kept.draft = value }, onback: (_step: number, value: EditorDraft) => { kept.draft = value } }
+   const props = { guided: true, profile: { ...blankProfile('mock'), name: 'fixture', envKeys: ['FIXTURE_REMOVE', 'FIXTURE_REPLACE'] }, harnesses: ['mock'], onsaved: () => {}, oncancel: (value: EditorDraft) => { kept.draft = value }, onback: (_step: number, value: EditorDraft) => { kept.draft = value } }
    let instance = mount(Editor, { target: app, props }); await tick()
    one('details.advanced summary').click(); await pause()
    need(row('FIXTURE_REMOVE')?.querySelector<HTMLElement>('.bad'), 'remove button').click(); await tick()
@@ -176,9 +173,9 @@ if (['advanced-details', 'advanced-navigation'].includes(scenario)) {
  nav('Model').click(); await tick(); button('Fixture free model').click(); await tick(); button('Use this model').click(); await tick()
  button('Create profile').click(); await pause()
  check('Explicit picker model replaces Advanced selection', sent.saved?.profile.model === 'opencode/test-free')
- nav('Harness').click(); await tick(); button('Bring your own harness').click(); await tick(); button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
- await input('textarea[placeholder="One argument per line"]', 'fixture-agent')
+ nav('Harness').click(); await tick(); one('details.developer summary').click(); await pause(); button('Use the mock harness for testing').click(); await tick()
+ button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
  button('Create profile').click(); await pause()
- check('Explicit picker harness replaces Advanced selection', sent.saved?.profile.harness === 'custom' && sent.saved.profile.model === '')
+ check('Explicit picker harness replaces Advanced selection', sent.saved?.profile.harness === 'mock' && sent.saved.profile.model === '')
  report()
 }

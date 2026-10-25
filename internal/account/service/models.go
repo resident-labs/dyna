@@ -25,7 +25,7 @@ func (s *Service) ProfileModels(ctx context.Context, harness string, refresh boo
 	defer cancel()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := runtime.Adapter(harness); err != nil && harness != "custom" && harness != "mock" {
+	if _, err := runtime.Adapter(harness); err != nil && harness != "mock" {
 		return Catalog{}, errors.New("Unknown harness.")
 	}
 	installation := s.installations()[harness]

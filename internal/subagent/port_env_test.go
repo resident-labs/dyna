@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"dyna-agent/internal/profile"
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/worktrees"
 	"dyna-agent/internal/worktrees/worktreetest"
 )
@@ -26,9 +26,9 @@ func TestSessionTurnGetsWorktreePortEnv(t *testing.T) {
 			t.Setenv("DYNA_PORTS", "39999-40008")
 			t.Setenv("PORT", "39999")
 			capture := filepath.Join(t.TempDir(), "port")
-			p := profile.Profile{Name: "mock", Harness: profile.HarnessCustom, Default: true,
-				Command: []string{"/bin/sh", "-c", `cat >/dev/null; printf '%s|%s' "$DYNA_PORT" "$PORT" > "$CAPTURE"; printf done`},
-				Env:     map[string]string{"CAPTURE": capture}, Taste: 5, Intelligence: 5, Cost: 5}
+			p := fakeworker.InstallClaude(t, `printf '%s|%s' "$DYNA_PORT" "$PORT" > "$CAPTURE"; printf done`)
+			p.Name, p.Default = "mock", true
+			p.Env = mergedEnv(p.Env, map[string]string{"CAPTURE": capture})
 			e := newTestEnv(t, p)
 			dir, want := t.TempDir(), "|"
 			if tc.tracked {

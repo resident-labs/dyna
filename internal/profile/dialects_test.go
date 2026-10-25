@@ -13,8 +13,8 @@ func TestHarnessDefaultDialects(t *testing.T) {
 	for harness, want := range map[string]string{
 		HarnessClaudeCode: "claude-stream-json", HarnessCodex: "codex-jsonl",
 		HarnessOpenCode: "opencode-json", HarnessMuse: "muse-jsonl",
-		HarnessPi: "pi-json",
-		HarnessCustom: "text", HarnessMock: "text",
+		HarnessPi:   "pi-json",
+		HarnessMock: "text",
 	} {
 		t.Run(harness, func(t *testing.T) {
 			p := Profile{Harness: harness}
@@ -48,7 +48,7 @@ func TestEveryHarnessHasDefaultDialect(t *testing.T) {
 func TestDialectMustMatchHarness(t *testing.T) {
 	for _, harness := range Harnesses {
 		definition, _ := HarnessDefinitionFor(harness)
-		p := Profile{Name: "test", Harness: harness, Command: []string{"fixture"}, Taste: 5, Intelligence: 5, Cost: 5}
+		p := Profile{Name: "test", Harness: harness, Taste: 5, Intelligence: 5, Cost: 5}
 		if err := p.Validate(); err != nil {
 			t.Fatalf("%s default: %v", harness, err)
 		}
@@ -61,11 +61,7 @@ func TestDialectMustMatchHarness(t *testing.T) {
 			p.Output.Dialect = workeroutput.DialectCodexJSONL
 		}
 		err := p.Validate()
-		if harness == HarnessCustom {
-			if err != nil {
-				t.Fatal(err)
-			}
-		} else if err == nil || !strings.Contains(err.Error(), "emits") {
+		if err == nil || !strings.Contains(err.Error(), "emits") {
 			t.Fatalf("%s mismatch error = %v", harness, err)
 		}
 	}
@@ -109,7 +105,7 @@ func TestHarnessDefinitionsAreCopies(t *testing.T) {
 func TestBlankProfileDeclarationUsesHarnessDefault(t *testing.T) {
 	for _, harness := range Harnesses {
 		definition, _ := HarnessDefinitionFor(harness)
-		p := Profile{Name: "legacy-empty", Harness: harness, Command: []string{"fixture"}, Taste: 5, Intelligence: 5, Cost: 5,
+		p := Profile{Name: "legacy-empty", Harness: harness, Taste: 5, Intelligence: 5, Cost: 5,
 			Output: &workeroutput.Declaration{Dialect: "  "}}
 		if err := p.Validate(); err != nil {
 			t.Fatalf("%s empty optional dialect: %v", harness, err)

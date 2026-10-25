@@ -67,8 +67,8 @@
   let asking = $state<EditableProfile | null>(null) // the profile whose harness needs support
 
   // One color per harness, from the name palette, so a list reads at a glance.
-  const harnessHue: Record<string, number> = { 'claude-code': 7, codex: 3, opencode: 6, muse: 2, custom: 5, mock: 0 }
-  const short: Record<string, string> = { 'claude-code': 'CC', codex: 'CX', opencode: 'OC', muse: 'MU', custom: 'SH', mock: 'MK' }
+  const harnessHue: Record<string, number> = { 'claude-code': 7, codex: 3, opencode: 6, muse: 2, mock: 0 }
+  const short: Record<string, string> = { 'claude-code': 'CC', codex: 'CX', opencode: 'OC', muse: 'MU', mock: 'MK' }
 
   $effect(() => {
     if (initialProfile && initialProfile !== lastProfile && list) {

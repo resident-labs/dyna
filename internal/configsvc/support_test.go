@@ -8,9 +8,8 @@ import (
 	"dyna-agent/internal/workeroutput"
 )
 
-func withDialect(p profile.Profile, dialect string) profile.Profile {
-	p.Harness = profile.HarnessCustom
-	p.Command = []string{"test-fixture"}
+func withDialect(p profile.Profile, harness, dialect string) profile.Profile {
+	p.Harness = harness
 	p.Output = &workeroutput.Declaration{Dialect: dialect}
 	return p
 }
@@ -29,8 +28,8 @@ func supportItem(t *testing.T, s HarnessSupport, key string) SupportItem {
 func TestProfilesReportHarnessSupport(t *testing.T) {
 	isolate(t)
 	seed(t,
-		withDialect(mock("opus"), workeroutput.DialectClaudeStreamJSON),
-		withDialect(mock("wonder"), workeroutput.DialectMuseJSONL),
+		withDialect(mock("opus"), profile.HarnessClaudeCode, workeroutput.DialectClaudeStreamJSON),
+		withDialect(mock("wonder"), profile.HarnessMuse, workeroutput.DialectMuseJSONL),
 		mock("plain"),
 	)
 	list, err := Profiles()
@@ -76,7 +75,7 @@ func TestProfilesReportHarnessSupport(t *testing.T) {
 func TestSupportMatchesCapabilitiesForEveryDialect(t *testing.T) {
 	for _, d := range workeroutput.Dialects() {
 		c := workeroutput.Capabilities(d)
-		s := supportFor(withDialect(mock("x"), d))
+		s := supportFor(withDialect(mock("x"), profile.HarnessMock, d))
 		if got := supportItem(t, s, "usage").State; got != c.Usage {
 			t.Errorf("%s usage = %q, table says %q", d, got, c.Usage)
 		}
