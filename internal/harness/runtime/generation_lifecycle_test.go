@@ -96,7 +96,7 @@ func writeGenerationSession(t *testing.T, name string, pin Pin, closed bool) {
 }
 
 func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "pi", "muse"} {
+	for _, h := range []string{"claude-code", "opencode", "pi", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
 			t.Setenv("MCP_TOKEN", "first-secret-canary")
@@ -147,7 +147,7 @@ func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
 }
 
 func TestGenerationSkillSnapshotAndEffectiveInputs(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
+	r, home, id := generationFixture(t, "pi")
 	source := t.TempDir()
 	skill := filepath.Join(source, "SKILL.md")
 	resource := filepath.Join(source, "helper.sh")
@@ -156,26 +156,26 @@ func TestGenerationSkillSnapshotAndEffectiveInputs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "custom", Source: source, EnabledHarnesses: []string{"codex"}}); err != nil {
+	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "custom", Source: source, EnabledHarnesses: []string{"pi"}}); err != nil {
 		t.Fatal(err)
 	}
-	a := buildGeneration(t, r, "codex", home, id)
+	a := buildGeneration(t, r, "pi", home, id)
 	if err := os.Chtimes(resource, time.Unix(1, 0), time.Unix(1, 0)); err != nil {
 		t.Fatal(err)
 	}
-	b := buildGeneration(t, r, "codex", home, id)
+	b := buildGeneration(t, r, "pi", home, id)
 	if a.Directory != b.Directory {
 		t.Fatal("mtime invalidated generation")
 	}
 	addGenerationMCP(t, r, "claude-code", "unrelated")
-	b = buildGeneration(t, r, "codex", home, id)
+	b = buildGeneration(t, r, "pi", home, id)
 	if a.Directory != b.Directory {
 		t.Fatal("another harness invalidated generation")
 	}
 	if err := os.WriteFile(resource, []byte("echo v2"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	c := buildGeneration(t, r, "codex", home, id)
+	c := buildGeneration(t, r, "pi", home, id)
 	if c.Directory == a.Directory {
 		t.Fatal("resource change did not invalidate generation")
 	}
@@ -186,7 +186,7 @@ func TestGenerationSkillSnapshotAndEffectiveInputs(t *testing.T) {
 	if err = os.Chmod(resource, 0700); err != nil {
 		t.Fatal(err)
 	}
-	d := buildGeneration(t, r, "codex", home, id)
+	d := buildGeneration(t, r, "pi", home, id)
 	if d.Directory == c.Directory {
 		t.Fatal("executable mode did not invalidate generation")
 	}
@@ -198,11 +198,11 @@ func TestGenerationSkillSnapshotAndEffectiveInputs(t *testing.T) {
 	if err = os.WriteFile(resource, []byte("echo v1"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	reused := buildGeneration(t, r, "codex", home, id)
+	reused := buildGeneration(t, r, "pi", home, id)
 	if reused.Directory != a.Directory {
 		t.Fatal("restored content did not reuse original")
 	}
-	if _, err = loadNativeGeneration("codex", c.Directory, os.LookupEnv); err != nil {
+	if _, err = loadNativeGeneration("pi", c.Directory, os.LookupEnv); err != nil {
 		t.Fatal(err)
 	}
 	target, err := os.Readlink(filepath.Join(home, "skills", "custom"))
@@ -255,10 +255,10 @@ func TestGenerationCapturedSkillsSurviveSourceEdits(t *testing.T) {
 }
 
 func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
-	addGenerationMCP(t, r, "codex", "zulu")
-	addGenerationMCP(t, r, "codex", "alpha")
-	a := buildGeneration(t, r, "codex", home, id)
+	r, home, id := generationFixture(t, "muse")
+	addGenerationMCP(t, r, "muse", "zulu")
+	addGenerationMCP(t, r, "muse", "alpha")
+	a := buildGeneration(t, r, "muse", home, id)
 	c, err := r.Config.Read()
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
 	if err = writeGenerationJSON(r.Config.Path, c, 0600); err != nil {
 		t.Fatal(err)
 	}
-	b := buildGeneration(t, r, "codex", home, id)
+	b := buildGeneration(t, r, "muse", home, id)
 	if a.Directory != b.Directory {
 		t.Fatal("catalog order invalidated effective content")
 	}
@@ -276,39 +276,39 @@ func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := filepath.Join(root, "layer-test", "settings.json")
-	if err = writeGenerationJSON(settings, map[string]any{"tui.animations": false, "history.persistence": "none"}, 0600); err != nil {
+	if err = writeGenerationJSON(settings, map[string]any{"tui.verbose_output": false, "tui.foreign_context_notice_shown": true}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = preferences.Save(id, preferences.Ref{Settings: settings, Harness: "codex"}); err != nil {
+	if err = preferences.Save(id, preferences.Ref{Settings: settings, Harness: "muse"}); err != nil {
 		t.Fatal(err)
 	}
-	withPrefs := buildGeneration(t, r, "codex", home, id)
+	withPrefs := buildGeneration(t, r, "muse", home, id)
 	if withPrefs.Directory == a.Directory {
 		t.Fatal("effective preferences did not invalidate content")
 	}
-	if !strings.Contains(strings.Join(withPrefs.Args, " "), "tui.animations=false") {
+	if !strings.Contains(strings.Join(withPrefs.Args, " "), "verbose_output") {
 		t.Fatal("preference missing from generated args")
 	}
-	again := buildGeneration(t, r, "codex", home, id)
+	again := buildGeneration(t, r, "muse", home, id)
 	if withPrefs.Directory != again.Directory {
 		t.Fatal("preferences did not reuse")
 	}
-	loaded, err := loadNativeGeneration("codex", a.Directory, os.LookupEnv)
+	loaded, err := loadNativeGeneration("muse", a.Directory, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.Join(loaded.Args, " "), "tui.animations") {
+	if strings.Contains(strings.Join(loaded.Args, " "), "verbose_output") {
 		t.Fatal("resume loaded current preferences")
 	}
 }
 
 func TestGenerationGCKeepsAllReferencesAndPreferences(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
+	r, home, id := generationFixture(t, "pi")
 	var gens []harnessmgr.ConfigGeneration
-	addGenerationSkill(t, r, "codex")
+	addGenerationSkill(t, r, "pi")
 	for _, name := range []string{"open", "closed", "active", "released", "current"} {
-		addGenerationMCP(t, r, "codex", name)
-		gens = append(gens, buildGeneration(t, r, "codex", home, id))
+		addGenerationMCP(t, r, "pi", name)
+		gens = append(gens, buildGeneration(t, r, "pi", home, id))
 	}
 	writeGenerationSession(t, "open", Pin{Generation: gens[0].Directory}, false)
 	writeGenerationSession(t, "closed", Pin{Generation: gens[1].Directory}, true)
@@ -458,33 +458,33 @@ func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 }
 
 func TestGenerationReuseRebuildsTamperingAndRejectsSkillLinks(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
-	addGenerationSkill(t, r, "codex")
-	g := buildGeneration(t, r, "codex", home, id)
-	original, err := os.ReadFile(filepath.Join(g.Directory, "mcp.json"))
+	r, home, id := generationFixture(t, "pi")
+	addGenerationSkill(t, r, "pi")
+	g := buildGeneration(t, r, "pi", home, id)
+	original, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(g.Directory, "mcp.json"), []byte("tampered"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(g.Directory, "settings.json"), []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if rebuilt := buildGeneration(t, r, "codex", home, id); rebuilt.Directory != g.Directory {
+	if rebuilt := buildGeneration(t, r, "pi", home, id); rebuilt.Directory != g.Directory {
 		t.Fatal("rebuild moved the generation")
 	}
-	if raw, err := os.ReadFile(filepath.Join(g.Directory, "mcp.json")); err != nil || string(raw) != string(original) {
+	if raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json")); err != nil || string(raw) != string(original) {
 		t.Fatal("reused corrupt generation", string(raw), err)
 	}
 	source := t.TempDir()
 	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(g.Directory, "mcp.json"), filepath.Join(source, "resource")); err != nil {
+	if err := os.Symlink(filepath.Join(g.Directory, "settings.json"), filepath.Join(source, "resource")); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "unsafe", Source: source, EnabledHarnesses: []string{"codex"}}); err != nil {
+	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "unsafe", Source: source, EnabledHarnesses: []string{"pi"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.generate("codex", home, id, os.LookupEnv); err == nil {
+	if _, err := r.generate("pi", home, id, os.LookupEnv); err == nil {
 		t.Fatal("accepted interior skill symlink")
 	}
 	entries, err := os.ReadDir(filepath.Join(home, "skills"))
@@ -554,12 +554,12 @@ func TestPrepareLeasedKeepsGenerationThroughRunnerLifetime(t *testing.T) {
 }
 
 func TestConcurrentGenerationReusePublishesOneCompleteDirectory(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
+	r, home, id := generationFixture(t, "pi")
 	var wg sync.WaitGroup
 	paths := make(chan string, 8)
 	for range 8 {
 		wg.Go(func() {
-			g, err := r.generate("codex", home, id, os.LookupEnv)
+			g, err := r.generate("pi", home, id, os.LookupEnv)
 			if err != nil {
 				t.Error(err)
 				return
@@ -685,11 +685,11 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	}
 }
 
-// Codex writes its system skills into CODEX_HOME/skills. That write must land
-// in the account home, so the next prepare reuses the sealed generation.
+// A harness that writes its own skills into the private home must not
+// invalidate the sealed generation.
 func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
-	g := buildGeneration(t, r, "codex", home, id)
+	r, home, id := generationFixture(t, "pi")
+	g := buildGeneration(t, r, "pi", home, id)
 	view := filepath.Join(home, "skills")
 	// Older builds linked the whole view to one generation; publication migrates it.
 	if err := os.RemoveAll(view); err != nil {
@@ -698,15 +698,15 @@ func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
 	if err := os.Symlink(filepath.Join(g.Directory, "skills"), view); err != nil {
 		t.Fatal(err)
 	}
-	g = buildGeneration(t, r, "codex", home, id)
+	g = buildGeneration(t, r, "pi", home, id)
 	system := filepath.Join(view, ".system", "imagegen", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(system), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(system, []byte("codex system skill"), 0644); err != nil {
+	if err := os.WriteFile(system, []byte("harness system skill"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if again := buildGeneration(t, r, "codex", home, id); again.Directory != g.Directory {
+	if again := buildGeneration(t, r, "pi", home, id); again.Directory != g.Directory {
 		t.Fatal("harness skill write invalidated the generation")
 	}
 	if _, err := validateOwnedGeneration(g.Directory); err != nil {
@@ -715,14 +715,14 @@ func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(g.Directory, "skills", ".system")); !os.IsNotExist(err) {
 		t.Fatal("harness skill write reached the generation", err)
 	}
-	if raw, err := os.ReadFile(system); err != nil || string(raw) != "codex system skill" {
+	if raw, err := os.ReadFile(system); err != nil || string(raw) != "harness system skill" {
 		t.Fatal("publication removed the harness's own skills", err)
 	}
 }
 
 func TestGenerationLifecycleErrorNamesCheckAndPath(t *testing.T) {
-	r, home, id := generationFixture(t, "codex")
-	g := buildGeneration(t, r, "codex", home, id)
+	r, home, id := generationFixture(t, "pi")
+	g := buildGeneration(t, r, "pi", home, id)
 	manifest := filepath.Join(g.Directory, "mcp.json")
 	if err := os.WriteFile(manifest, []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)

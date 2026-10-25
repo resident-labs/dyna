@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -46,21 +44,16 @@ func TestInactiveUsageProbeDeadlines(t *testing.T) {
 	}
 }
 
-func privateCodexAccounts(t *testing.T) (*runtime.Accounts, runtime.NativeAccount, runtime.NativeAccount, *store.Store) {
+// privateClaudeAccounts makes one active and one inactive Claude Code account,
+// both signed in with a saved grant.
+func privateClaudeAccounts(t *testing.T) (*runtime.Accounts, runtime.NativeAccount, runtime.NativeAccount, *store.Store) {
 	t.Helper()
-	accounts, bundle, active, st := privateCodexAccount(t)
-	inactive, err := accounts.Create("codex", "Inactive")
+	accounts, bundle, active, st := privateClaudeAccount(t)
+	inactive, err := accounts.Create("claude-code", "Inactive")
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"inactive-user","chatgpt_account_id":"inactive-workspace"}}`))
-	auth, err := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": "header." + claims + ".signature", "access_token": "inactive-access", "refresh_token": "inactive-refresh", "account_id": "inactive-workspace"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(inactive.Home, "auth.json"), auth, 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeClaudeFixtureWithAccount(t, inactive.Home, "inactive-access", "aaaaaaaa-bbbb-cccc-dddd-000000000002", "inactive@example.test")
 	if _, err = accounts.Capture(t.Context(), inactive.ID, bundle.Executable); err != nil {
 		t.Fatal(err)
 	}
@@ -68,12 +61,8 @@ func privateCodexAccounts(t *testing.T) (*runtime.Accounts, runtime.NativeAccoun
 }
 
 func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
-	accounts, active, inactive, st := privateCodexAccounts(t)
-	home, err := accounts.HarnessHome("codex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	nativePath := filepath.Join(home, "auth.json")
+	accounts, active, inactive, st := privateClaudeAccounts(t)
+	nativePath := filepath.Join(active.Home, ".credentials.json")
 	before, err := os.ReadFile(nativePath)
 	if err != nil {
 		t.Fatal(err)
@@ -91,10 +80,10 @@ func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
 	old := http.DefaultTransport
 	http.DefaultTransport = usageRefreshTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
-		if r.URL.Host != "chatgpt.com" || r.Header.Get("Authorization") != "Bearer inactive-access" {
+		if r.URL.Host != "api.anthropic.com" || r.Header.Get("Authorization") != "Bearer inactive-access" {
 			t.Fatal("probe did not use the inactive saved grant")
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800,"reset_at":1900000000}}}`)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"five_hour":{"utilization":12,"resets_at":"2030-03-17T17:46:40Z"}}`)), Header: make(http.Header)}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
 	s := New(Options{Store: st, Now: func() time.Time { return now }})
@@ -128,7 +117,7 @@ func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
 	if err != nil || string(before) != string(after) {
 		t.Fatal("inactive probe changed active native credentials", err)
 	}
-	selected, err := accounts.Active(store.ProviderChatGPT, "codex")
+	selected, err := accounts.Active(store.ProviderAnthropic, "claude-code")
 	if err != nil || selected.ID != active.ID {
 		t.Fatal("inactive probe changed the active account", err)
 	}
@@ -202,7 +191,7 @@ func TestFailedInactiveResetProbeWaitsBeforeRetry(t *testing.T) {
 		return store.Observation{}, errors.New("provider unavailable")
 	})
 	s := New(Options{Store: st, Now: func() time.Time { return now }})
-	row := Account{ID: id, Harness: "codex"}
+	row := Account{ID: id, Harness: "claude-code"}
 	captured := native.Captured{Identity: "fixture"}
 	if err := s.refreshNativeUsage(t.Context(), &row, probe, captured); err != nil {
 		t.Fatal(err)
@@ -220,7 +209,7 @@ func TestFailedInactiveResetProbeWaitsBeforeRetry(t *testing.T) {
 }
 
 func TestInactiveProbeDoesNotBlockProfileModels(t *testing.T) {
-	_, _, _, st := privateCodexAccounts(t)
+	_, _, _, st := privateClaudeAccounts(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	old := http.DefaultTransport
@@ -243,7 +232,7 @@ func TestInactiveProbeDoesNotBlockProfileModels(t *testing.T) {
 	<-started
 	read := make(chan Catalog, 1)
 	go func() {
-		catalog, err := s.ProfileModels(ctx, "codex", false)
+		catalog, err := s.ProfileModels(ctx, "claude-code", false)
 		if err != nil {
 			catalog.Message = err.Error()
 		}
@@ -262,7 +251,7 @@ func TestInactiveProbeDoesNotBlockProfileModels(t *testing.T) {
 // The active account's reading is re-polled every five minutes while turns
 // run on its harness, and not while the harness is idle.
 func TestRefreshInactiveUsageRepollsTheActiveAccountDuringTurns(t *testing.T) {
-	accounts, active, inactive, st := privateCodexAccounts(t)
+	accounts, active, inactive, st := privateClaudeAccounts(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	used := 95.0
 	if err := st.Update(func(state *store.State) error {
@@ -278,10 +267,10 @@ func TestRefreshInactiveUsageRepollsTheActiveAccountDuringTurns(t *testing.T) {
 	old := http.DefaultTransport
 	http.DefaultTransport = usageRefreshTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
-		if r.URL.Host != "chatgpt.com" || r.Header.Get("Authorization") != "Bearer fixture-access" {
+		if r.URL.Host != "api.anthropic.com" || r.Header.Get("Authorization") != "Bearer fixture-access" {
 			t.Errorf("probe did not use the active live grant: %v %v", r.URL.Host, r.Header.Get("Authorization"))
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800,"reset_at":1900000000}}}`)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"five_hour":{"utilization":12,"resets_at":"2030-03-17T17:46:40Z"}}`)), Header: make(http.Header)}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
 	s := New(Options{Store: st, Now: func() time.Time { return now }})
@@ -289,7 +278,7 @@ func TestRefreshInactiveUsageRepollsTheActiveAccountDuringTurns(t *testing.T) {
 	if next := s.RefreshInactiveUsage(t.Context(), now); !next.Equal(now.Add(inactiveUsageTTL)) || calls != 0 {
 		t.Fatalf("idle: next=%v calls=%d, want no active probe", next, calls)
 	}
-	release, err := accounts.TurnLease(t.Context(), "codex")
+	release, err := accounts.TurnLease(t.Context(), "claude-code")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,13 +3,10 @@ package service
 import (
 	"context"
 	"dyna-agent/internal/account/service/adapters"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,40 +19,29 @@ func (f usageRefreshTransport) RoundTrip(r *http.Request) (*http.Response, error
 func TestExplicitUsageRefreshRenewsCredentialsBeforeProbe(t *testing.T) {
 	for _, network := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "network error"}[network], func(t *testing.T) {
-			accounts, bundle, account, st := privateCodexAccount(t)
-			home, _ := accounts.HarnessHome("codex")
-			jwt := func(expiry time.Time) string {
-				b, _ := json.Marshal(map[string]int64{"exp": expiry.Unix()})
-				return "header." + base64.RawURLEncoding.EncodeToString(b) + ".signature"
-			}
-			path := filepath.Join(home, "auth.json")
-			b, _ := os.ReadFile(path)
-			b = []byte(strings.Replace(string(b), "fixture-access", jwt(time.Now().Add(-time.Hour)), 1))
-			if err := os.WriteFile(path, b, 0600); err != nil {
-				t.Fatal(err)
-			}
+			accounts, bundle, account, st := privateClaudeAccount(t)
+			writeClaudeFixtureTokens(t, account.Home, "expired-access", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "fixture@example.test", time.Now().Add(-time.Hour))
 			if _, err := accounts.Capture(context.Background(), account.ID, bundle.Executable); err != nil {
 				t.Fatal(err)
 			}
 			old := http.DefaultTransport
 			refreshes, probes := 0, 0
-			access := jwt(time.Now().Add(time.Hour))
 			http.DefaultTransport = usageRefreshTransport(func(r *http.Request) (*http.Response, error) {
 				body := ""
 				switch r.URL.Host {
-				case "auth.openai.com":
+				case "platform.claude.com":
 					refreshes++
 					if network {
 						return nil, errors.New("private-network-error")
 					}
-					raw, _ := json.Marshal(map[string]string{"access_token": access, "refresh_token": "renewed-grant"})
+					raw, _ := json.Marshal(map[string]any{"access_token": "renewed-access", "refresh_token": "renewed-grant", "expires_in": 3600})
 					body = string(raw)
-				case "chatgpt.com":
+				case "api.anthropic.com":
 					probes++
-					if r.Header.Get("Authorization") != "Bearer "+access {
+					if r.Header.Get("Authorization") != "Bearer renewed-access" {
 						t.Fatal("usage used expired token")
 					}
-					body = `{"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800,"reset_at":1900000000}}}`
+					body = `{"five_hour":{"utilization":12,"resets_at":"2030-03-17T17:46:40Z"}}`
 				default:
 					t.Fatal("unexpected provider host")
 				}
@@ -86,25 +72,9 @@ func TestExplicitUsageRefreshRenewsCredentialsBeforeProbe(t *testing.T) {
 }
 
 func TestCredentialRenewalAllowsModelReads(t *testing.T) {
-	accounts, bundle, account, st := privateCodexAccount(t)
-	home, err := accounts.HarnessHome("codex")
-	if err != nil {
-		t.Fatal(err)
-	}
+	accounts, bundle, account, st := privateClaudeAccount(t)
 	now := time.Now()
-	jwt := func(expiry time.Time) string {
-		raw, _ := json.Marshal(map[string]int64{"exp": expiry.Unix()})
-		return "header." + base64.RawURLEncoding.EncodeToString(raw) + ".signature"
-	}
-	path := filepath.Join(home, "auth.json")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body = []byte(strings.Replace(string(body), "fixture-access", jwt(now.Add(-time.Hour)), 1))
-	if err := os.WriteFile(path, body, 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeClaudeFixtureTokens(t, account.Home, "expired-access", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "fixture@example.test", now.Add(-time.Hour))
 	if _, err := accounts.Capture(t.Context(), account.ID, bundle.Executable); err != nil {
 		t.Fatal(err)
 	}
@@ -122,9 +92,9 @@ func TestCredentialRenewalAllowsModelReads(t *testing.T) {
 			return nil, errors.New("credential renewal holds the model lock")
 		}
 		s.mu.Unlock()
-		catalog, err := s.ProfileModels(r.Context(), "codex", true)
+		catalog, err := s.ProfileModels(r.Context(), "claude-code", true)
 		readable = err == nil && len(catalog.Models) == 1 && catalog.Models[0].ID == "fixture-model"
-		raw, _ := json.Marshal(map[string]string{"access_token": jwt(now.Add(time.Hour)), "refresh_token": "renewed-grant"})
+		raw, _ := json.Marshal(map[string]any{"access_token": "renewed-access", "refresh_token": "renewed-grant", "expires_in": 3600})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
 	})
 	s.RefreshCredentials(t.Context(), now)

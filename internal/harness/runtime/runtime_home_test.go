@@ -24,9 +24,11 @@ func (m launchEnvironmentManager) Capture(ctx context.Context, _ string) ([]nati
 }
 
 func TestDoctorChecksStoredSystemRuntimeAsDynaManaged(t *testing.T) {
-	r, _ := runtimeFixture(t, "codex")
+	// Doctor reads the active account of the harness, which resolves for
+	// Claude Code; a Pi account is selected per provider (see the known gap).
+	r, _ := runtimeFixture(t, "claude-code")
 	var stored profile.Profile
-	if err := json.Unmarshal([]byte(`{"name":"old","harness":"codex","runtime":"system"}`), &stored); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"old","harness":"claude-code","runtime":"system"}`), &stored); err != nil {
 		t.Fatal(err)
 	}
 	doctor := r.Doctor(context.Background(), stored)
@@ -43,7 +45,7 @@ func TestDoctorReportsMockHarnessAsDirect(t *testing.T) {
 }
 
 func TestComputerSessionBinsReusePreparedToolHome(t *testing.T) {
-	r, p := runtimeFixture(t, "codex")
+	r, p := runtimeFixture(t, "pi")
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	var bridge, firstPath string
 	for _, id := range []string{"first-computer", "second-computer"} {
@@ -120,7 +122,7 @@ func dynaCommandStub(t *testing.T, build string) string {
 // Exercise the final Prepare merge rather than only individual adapter maps.
 // A pinned fake binary avoids provider installs and account network requests.
 func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "pi"} {
+	for _, h := range []string{"claude-code", "opencode", "muse", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			accounts := testAccounts(t)
 			scope, err := accounts.HarnessHome(h)
@@ -202,7 +204,7 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			}
 			keys := map[string][]string{
 				"claude-code": {"CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR"},
-				"codex":       {"CODEX_HOME", "CODEX_SQLITE_HOME"}, "opencode": {"OPENCODE_CONFIG_DIR", "OPENCODE_DB"},
+				"opencode": {"OPENCODE_CONFIG_DIR", "OPENCODE_DB"},
 				"muse": {"MUSE_AUTH_PATH"},
 				"grok": {"GROK_HOME"}, "pi": {"PI_CODING_AGENT_DIR"},
 			}

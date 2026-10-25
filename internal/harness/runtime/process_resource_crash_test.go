@@ -30,7 +30,7 @@ func TestResourceRunnerCrashHelper(t *testing.T) {
 	if err := json.Unmarshal([]byte(os.Getenv("RESOURCE_BUNDLE")), &bundle); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := account.TurnLeaseManaged(context.Background(), "codex")
+	turn, err := account.TurnLeaseManaged(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,9 +65,9 @@ func TestResourceRunnerCrashHelper(t *testing.T) {
 func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	accounts := testAccounts(t)
 	bundles := manager(t)
-	old := install(t, bundles, "codex", "1.0.0")
-	_ = install(t, bundles, "codex", "2.0.0")
-	_ = install(t, bundles, "codex", "3.0.0")
+	old := install(t, bundles, "pi", "1.1.0")
+	_ = install(t, bundles, "pi", "2.0.0")
+	_ = install(t, bundles, "pi", "3.0.0")
 	raw, _ := json.Marshal(old)
 	ready := filepath.Join(t.TempDir(), "grandchild.pid")
 	// The helper writes its grandchild's PID into this pipe, which blocks
@@ -117,7 +117,7 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paths, err := resourceLeasePaths(filepath.Join(accounts.Root, "codex", ".turns"), "")
+	paths, err := resourceLeasePaths(filepath.Join(accounts.Root, "pi", ".turns"), "")
 	if err != nil || len(paths) != 1 {
 		t.Fatal(paths, err)
 	}
@@ -138,7 +138,7 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	}
 	defer unix.Close(guardian)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	if release, e := accounts.switchGate(ctx, "codex"); e == nil {
+	if release, e := accounts.switchGate(ctx, "pi"); e == nil {
 		release()
 		cancel()
 		t.Fatal("live native turn did not block account switch")
@@ -147,7 +147,7 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	if err = bundles.GC(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = bundles.Resolve("codex", old.Version); err != nil {
+	if _, err = bundles.Resolve("pi", old.Version); err != nil {
 		t.Fatal("GC removed a live native bundle", err)
 	}
 	if err = cmd.Process.Kill(); err != nil {
@@ -163,18 +163,18 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	if syscall.Kill(pid, 0) == nil {
 		t.Fatal("backgrounded grandchild survived cleanup")
 	}
-	release, err := accounts.switchGate(context.Background(), "codex")
+	release, err := accounts.switchGate(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
 	release()
-	if _, running := accounts.SwitchStatus("codex"); running != 0 {
+	if _, running := accounts.SwitchStatus("pi"); running != 0 {
 		t.Fatal("stale native turn retained the account lease", running)
 	}
 	if err = bundles.GC(nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = bundles.Resolve("codex", old.Version); err == nil {
+	if _, err = bundles.Resolve("pi", old.Version); err == nil {
 		t.Fatal("dead native process retained old bundle")
 	}
 }

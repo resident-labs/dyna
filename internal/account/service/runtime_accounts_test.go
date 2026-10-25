@@ -35,8 +35,17 @@ func TestUnsupportedCredentialExpiryOffersSignIn(t *testing.T) {
 			}
 		})
 	}
-	a := Account{Harness: "codex", Status: "ready"}
-	setCredentialExpiry(&a, native.Captured{ExpiresAt: time.Now().Add(-time.Hour)})
+	// A grok sign-in that can refresh needs no sign-in for a past expiry.
+	expired := time.Now().Add(-time.Hour)
+	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{"https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828": map[string]any{
+		"auth_mode": "oidc", "oidc_issuer": "https://auth.x.ai", "oidc_client_id": "b1a00492-073a-47ea-816f-4c329264a828",
+		"user_id": "fixture-user", "key": "fixture-access", "refresh_token": "fixture-refresh", "expires_at": expired,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := Account{Harness: "grok", Status: "ready"}
+	setCredentialExpiry(&a, native.Captured{Identity: "grok:native", ExpiresAt: expired, Credential: store.Credential{Schema: "grok/native-files@1", Payload: payload}})
 	if a.NeedsLogin {
 		t.Fatal("refreshable token incorrectly required sign-in")
 	}
