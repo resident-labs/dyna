@@ -99,8 +99,10 @@ func (s *Service) IssueGoal(ctx context.Context, roomRef, id string) (room.Issue
 	in := goals.Input{Text: issue.Title, Detail: issueDetail(issue, issueText(post))}
 	// The whole room holds a goal that starts from an issue: the issue names
 	// no holder. The goal is the one dyna goal creates, and the issue is its
-	// first link.
-	if _, err = s.startGoal(ctx, r.ID, in, []string{"@room"}, []int{issue.Number}); err != nil {
+	// first link. The claim takes only an issue still open, so two assignments
+	// of one issue start one goal: the loser's goal is deleted.
+	req := goalStart{In: in, Selectors: []string{"@room"}, Fixes: []int{issue.Number}, Claim: goals.ClaimOpen}
+	if _, err = s.startGoal(ctx, r.ID, req); err != nil {
 		return room.Issue{}, err
 	}
 	return s.rooms().Issue(r.ID, id)
