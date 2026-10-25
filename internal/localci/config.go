@@ -1,9 +1,11 @@
 package localci
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"regexp"
 	"strconv"
@@ -165,8 +167,16 @@ func LoadDefinition(ctx context.Context, repo, ref string) (*Definition, error) 
 // remove a command or a required check.
 func ParseDefinition(body []byte) (*Definition, error) {
 	var file definitionFile
-	if err := yaml.UnmarshalWithOptions(body, &file, yaml.Strict()); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(body), yaml.Strict())
+	if err := decoder.Decode(&file); err != nil {
 		return nil, err
+	}
+	var extra definitionFile
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("decode additional YAML document: %w", err)
+		}
+		return nil, fmt.Errorf("local CI definition must contain exactly one YAML document")
 	}
 	if file.Version != 1 {
 		return nil, fmt.Errorf("version must be 1")
