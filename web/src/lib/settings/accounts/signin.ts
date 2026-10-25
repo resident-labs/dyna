@@ -27,6 +27,7 @@ export function harnessLabel(harness: string): string {
 // OPENCODE_KEY maps a provider to the provider ID OpenCode keeps its API key
 // for, or '' when OpenCode takes no key for it. Source: store.ProviderFor.
 const OPENCODE_KEY: Partial<Record<Provider, string>> = {
+  'opencode-go': 'opencode-go',
   anthropic: 'anthropic',
   chatgpt: 'openai',
   xai: 'xai',

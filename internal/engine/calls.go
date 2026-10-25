@@ -615,9 +615,11 @@ func (s services) accountScope(scope string) (string, error) {
 	return rec.ID, nil
 }
 
-// accountsAdd adds an API key as a new account of one provider. The CLI reads
-// the key from standard input and sends it once; it is never a CLI argument.
-func (s services) accountsAdd(ctx context.Context, provider, label, key string) (service.AccountsSnapshot, error) {
+// accountsAdd adds an API key as a new account of one provider for harness:
+// empty or "pi" keeps it in a Pi account, and "opencode" creates an OpenCode
+// account. The CLI reads the key from standard input and sends it once; it is
+// never a CLI argument.
+func (s services) accountsAdd(ctx context.Context, harness, provider, label, key string) (service.AccountsSnapshot, error) {
 	p, ok := harnessruntime.PiProvider(provider)
 	if !ok {
 		return service.AccountsSnapshot{}, errors.New("Unknown provider. Choose a provider Dyna knows, such as anthropic, deepseek or zai.")
@@ -625,7 +627,7 @@ func (s services) accountsAdd(ctx context.Context, provider, label, key string) 
 	if key == "" {
 		return service.AccountsSnapshot{}, errors.New("An API key is required on standard input.")
 	}
-	if _, err := s.runtime.AddProviderKey(ctx, p, label, key); err != nil {
+	if _, err := s.runtime.AddProviderKey(ctx, harness, p, label, key); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
 	return s.accounts.Accounts(ctx, "", false), nil

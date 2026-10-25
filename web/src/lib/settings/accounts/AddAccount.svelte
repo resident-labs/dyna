@@ -197,14 +197,13 @@
     busy = true; error = ''
     try {
       if (!account && how === 'key' && keyWhere === 'opencode') {
-        const id = openCode
-        if (!id) throw new Error(`${providerName(provider)} has no API key in OpenCode.`)
-        await api.harnessProviderKeys('opencode', 'add', id, key)
+        if (!openCode) throw new Error(`${providerName(provider)} has no API key in OpenCode.`)
+        const next = await api.accountsAdd(provider, label.trim(), key, 'opencode')
         key = ''
-        if (!stopped) await reload()
+        if (!stopped) onsaved(next)
         return
       }
-      const next = await api.accountsAdd(provider, label.trim(), key)
+      const next = await api.accountsAdd(provider, label.trim(), key, 'pi')
       key = ''
       if (!stopped) onsaved(next)
     } catch (e) { if (!stopped) error = errorText(e) || 'Could not save the key.' }
@@ -305,12 +304,10 @@
             </select>
           </label>
         {/if}
-        {#if keyWhere === 'pi'}
-          <label>
-            <span class="muted small">Label (optional)</span>
-            <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
-          </label>
-        {/if}
+        <label>
+          <span class="muted small">Label (optional)</span>
+          <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
+        </label>
         <label>
           <span class="muted small">API key for {providerName(provider)}</span>
           <input class="field mono" type="password" bind:value={key} autocomplete="off" spellcheck="false" disabled={busy} aria-label="API key" />
