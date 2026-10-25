@@ -97,28 +97,3 @@ func TestMockSessionResumesAndIsSteered(t *testing.T) {
 		t.Fatalf("resumed mock turn = %#v, %v", again, err)
 	}
 }
-
-func TestAntigravityDiscoveredModelUsesACP(t *testing.T) {
-	p := profile.Profile{Harness: profile.HarnessAntigravity, Model: "gemini-discovered-alternate"}
-	inv, err := buildInvocation(p, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, spec := range []commandSpec{inv.initial, inv.resume("conversation", "continue")} {
-		if len(spec.argv) != 0 || spec.acpPrompt == "" {
-			t.Fatalf("Antigravity model must use ACP session/set_model, got %+v", spec)
-		}
-	}
-}
-
-func TestAntigravityNativeDefaultDoesNotPassEmptyModel(t *testing.T) {
-	inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessAntigravity}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, spec := range []commandSpec{inv.initial, inv.resume("conversation", "continue")} {
-		if hasArg(spec.argv, "--model") {
-			t.Fatalf("default model was overridden: %v", spec.argv)
-		}
-	}
-}

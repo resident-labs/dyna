@@ -16,7 +16,7 @@ func TestStderrTailDrainsPendingDiagnostics(t *testing.T) {
 	}
 	defer c.stderrPipe.reader.Close()
 	defer c.stderrPipe.writer.Close()
-	const diagnostic = "Antigravity SDK error processing prompt for session last-turn\n"
+	const diagnostic = "harness error processing prompt for session last-turn\n"
 	if _, err := c.stderrPipe.writer.Write([]byte(diagnostic)); err != nil {
 		t.Fatal(err)
 	}

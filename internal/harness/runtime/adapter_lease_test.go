@@ -5,7 +5,7 @@ import "testing"
 // TestAdaptersShareLeaseUnlessExclusive keeps sharing the default. Only the
 // harnesses listed here may serialize turns, and each one must name its reason.
 func TestAdaptersShareLeaseUnlessExclusive(t *testing.T) {
-	exclusive := map[string]bool{"antigravity": true}
+	exclusive := map[string]bool{}
 	for _, a := range RuntimeAdapters() {
 		if a.Exclusive != exclusive[a.Harness] {
 			t.Errorf("%s Exclusive = %v; only the listed harnesses serialize turns", a.Harness, a.Exclusive)

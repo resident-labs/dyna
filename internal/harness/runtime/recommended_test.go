@@ -60,7 +60,7 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	got := r.RecommendedVersions(context.Background())
-	if len(got) != 8 {
+	if len(got) != 7 {
 		t.Fatalf("got %d adapters", len(got))
 	}
 	sort.Strings(packages)
@@ -72,10 +72,6 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 			t.Fatal("results are not sorted")
 		}
 		switch v.Harness {
-		case "antigravity":
-			if v.Version != "1.4.2" || v.Status != "resolved" || v.Source != antigravityTestManifestURL("linux", "amd64") {
-				t.Fatalf("bad Antigravity result: %+v", v)
-			}
 		case "muse":
 			if v.Version != "1.4.10-R6427.1" || v.Status != "resolved" || v.Source != museReleaseManifestURL(v.Version) {
 				t.Fatalf("bad Muse result: %+v", v)
@@ -91,35 +87,17 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 // vendorMetadata holds the non-npm latest-version documents.
 var vendorMetadata = func() map[string]string {
 	data := map[string]string{
-		museReleaseManifestURL("1.4.10-R6427.1"):     `{"version":"1.4.10-R6427.1","checksum_algorithm":"sha256","artifacts":{"x86_linux":{"url":"` + museArtifactPrefix + `channel=muse&file=muse-bin","checksum":"` + strings.Repeat("0", 64) + `","size":123}}}`,
-		museChannelURL:                               `{"channel":"muse-stable","version":"1.4.10-R6427.1"}`,
-		antigravityTestManifestURL("linux", "amd64"): `{"version":"1.4.2","url":"` + antigravityArtifactPrefix + `x.tar.gz","sha512":"` + strings.Repeat("0", 128) + `"}`,
-	}
-	for _, platform := range [][2]string{{"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}} {
-		data[antigravityTestManifestURL(platform[0], platform[1])] = data[antigravityTestManifestURL("linux", "amd64")]
+		museReleaseManifestURL("1.4.10-R6427.1"): `{"version":"1.4.10-R6427.1","checksum_algorithm":"sha256","artifacts":{"x86_linux":{"url":"` + museArtifactPrefix + `channel=muse&file=muse-bin","checksum":"` + strings.Repeat("0", 64) + `","size":123}}}`,
+		museChannelURL:                           `{"channel":"muse-stable","version":"1.4.10-R6427.1"}`,
 	}
 	return data
 }()
-
-func antigravityTestManifestURL(goos, goarch string) string {
-	source, err := antigravityManifestURL(goos, goarch, muslLoader())
-	if err != nil {
-		panic(err)
-	}
-	return source
-}
 
 func TestRecommendedVersionsVendorMetadataFailure(t *testing.T) {
 	for _, body := range []string{`{`, `{"version":"latest"}`, `{"version":"1.4.10"}`} {
 		r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) { return recommendedResponse(200, body), nil })}
 		if v, reason := r.museVersion(context.Background()); v != "" || reason == "" {
 			t.Fatalf("Muse channel %s gave %q, %q", body, v, reason)
-		}
-		if body == `{"version":"1.4.10"}` {
-			continue
-		}
-		if v, reason := r.antigravityVersion(context.Background(), antigravityTestManifestURL("linux", "amd64")); v != "" || reason == "" {
-			t.Fatalf("Antigravity manifest %s gave %q, %q", body, v, reason)
 		}
 	}
 }
@@ -205,7 +183,7 @@ func TestRecommendedVersionsOfflineAndUnsupported(t *testing.T) {
 			t.Fatalf("bad offline result: %+v", v)
 		}
 		want := "unavailable"
-		if v.Harness == "muse" || v.Harness == "antigravity" {
+		if v.Harness == "muse" {
 			want = "unsupported"
 		}
 		if v.Status != want {
@@ -224,7 +202,7 @@ func TestRecommendedVersionsCancellation(t *testing.T) {
 		return nil, req.Context().Err()
 	})}
 	got := r.RecommendedVersions(ctx)
-	if len(got) != 8 {
+	if len(got) != 7 {
 		t.Fatal("cancellation removed per-harness results")
 	}
 	for _, v := range got {
@@ -258,12 +236,12 @@ func TestRecommendedVersionsCache(t *testing.T) {
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	first := r.RecommendedVersions(context.Background())
-	if calls != 15 {
+	if calls != 14 {
 		t.Fatalf("first lookup made %d requests", calls)
 	}
 	offline = true
 	now = now.Add(6*time.Hour - time.Second)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 15 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 14 {
 		t.Fatalf("fresh cache missed: %d requests, %+v", calls, got)
 	}
 	now = now.Add(time.Second)
@@ -272,7 +250,7 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("expired result reused: %+v", v)
 		}
 	}
-	if calls != 23 {
+	if calls != 21 {
 		t.Fatalf("expired cache made %d requests", calls)
 	}
 	offline = false
@@ -281,56 +259,12 @@ func TestRecommendedVersionsCache(t *testing.T) {
 			t.Fatalf("failure cache reused stale success: %+v", v)
 		}
 	}
-	if calls != 23 {
+	if calls != 21 {
 		t.Fatalf("failure cache missed: %d requests", calls)
 	}
 	now = now.Add(time.Minute)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 38 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 35 {
 		t.Fatalf("expired failure cache did not recover: %d requests, %+v", calls, got)
-	}
-}
-
-func TestRecommendedAntigravityUsesPlatformManifest(t *testing.T) {
-	for _, tc := range []struct{ goos, goarch, platform string }{
-		{"linux", "amd64", "linux_amd64"}, {"linux", "arm64", "linux_arm64"},
-		{"darwin", "amd64", "darwin_amd64"}, {"darwin", "arm64", "darwin_arm64"},
-		{"windows", "amd64", ""}, {"linux", "386", ""},
-	} {
-		t.Run(tc.goos+"_"+tc.goarch, func(t *testing.T) {
-			source := ""
-			if tc.platform != "" {
-				platform := tc.platform
-				if tc.goos == "linux" && muslLoader() {
-					platform += "_musl"
-				}
-				source = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/" + platform + ".json"
-			}
-			calls := 0
-			r := RecommendedVersionResolver{GOOS: tc.goos, GOARCH: tc.goarch, HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-				if strings.HasPrefix(req.URL.String(), antigravityManifestBaseURL) {
-					calls++
-					if req.URL.String() != source {
-						t.Fatal("wrong platform source", req.URL)
-					}
-					return recommendedResponse(200, vendorMetadata[antigravityTestManifestURL("linux", "amd64")]), nil
-				}
-				return recommendedResponse(404, ""), nil
-			})}
-			for _, v := range r.RecommendedVersions(context.Background()) {
-				if v.Harness != "antigravity" {
-					continue
-				}
-				if source == "" {
-					if v.Status != "unsupported" || calls != 0 {
-						t.Fatal("queried unsupported platform", v)
-					}
-				} else if v.Source != source || v.Version != "1.4.2" || v.Status != "resolved" || calls != 1 {
-					t.Fatal("platform recommendation failed", v, calls)
-				}
-				return
-			}
-			t.Fatal("missing Antigravity recommendation")
-		})
 	}
 }
 
@@ -338,9 +272,9 @@ func TestRecommendedAntigravityUsesPlatformManifest(t *testing.T) {
 func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := make(chan string, 8)
+	started := make(chan string, 7)
 	r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-		if strings.HasSuffix(req.URL.Path, "/latest") || req.URL.String() == museChannelURL || strings.HasPrefix(req.URL.String(), antigravityManifestBaseURL) {
+		if strings.HasSuffix(req.URL.Path, "/latest") || req.URL.String() == museChannelURL {
 			started <- req.URL.String()
 		}
 		<-req.Context().Done()
@@ -351,7 +285,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
 	// Every source makes a request.
-	for range 8 {
+	for range 7 {
 		select {
 		case <-started:
 		case <-deadline.C:
@@ -361,7 +295,7 @@ func TestRecommendedSourcesRunIndependently(t *testing.T) {
 		}
 	}
 	cancel()
-	if len(<-done) != 8 {
+	if len(<-done) != 7 {
 		t.Fatal("lost per-harness results")
 	}
 }
@@ -393,24 +327,17 @@ func TestRecommendedRefreshBypassesSixHourCache(t *testing.T) {
 }
 
 func TestRecommendedVendorRejectsUninstallableRelease(t *testing.T) {
-	for _, vendor := range []string{"muse", "antigravity"} {
-		t.Run(vendor, func(t *testing.T) {
-			r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-				if req.URL.String() == museChannelURL {
-					return recommendedResponse(200, vendorMetadata[museChannelURL]), nil
-				}
-				// A channel can name a version before its artifact is published.
-				return recommendedResponse(200, `{"version":"1.4.2"}`), nil
-			})}
-			var version, reason string
-			if vendor == "muse" {
-				version, reason = r.museVersion(context.Background())
-			} else {
-				version, reason = r.antigravityVersion(context.Background(), antigravityTestManifestURL("linux", "amd64"))
+	t.Run("muse", func(t *testing.T) {
+		r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.String() == museChannelURL {
+				return recommendedResponse(200, vendorMetadata[museChannelURL]), nil
 			}
-			if version != "" || reason == "" {
-				t.Fatal("recommended a release without a verified artifact", version, reason)
-			}
-		})
-	}
+			// A channel can name a version before its artifact is published.
+			return recommendedResponse(200, `{"version":"1.4.2"}`), nil
+		})}
+		version, reason := r.museVersion(context.Background())
+		if version != "" || reason == "" {
+			t.Fatal("recommended a release without a verified artifact", version, reason)
+		}
+	})
 }

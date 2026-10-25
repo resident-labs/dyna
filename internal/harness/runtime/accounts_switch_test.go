@@ -94,7 +94,7 @@ func TestAccountLeaseProcess(t *testing.T) {
 }
 
 func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "antigravity", "muse", "grok", "pi"} {
+	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "grok", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			release, err := a.TurnLease(context.Background(), h)
@@ -325,15 +325,12 @@ func setSharedLogin(state *sharedLoginFixture, c accountnative.Captured) {
 }
 
 func TestSharedServiceNativeLoginCompleteAndCancel(t *testing.T) {
-	for _, h := range []string{"opencode", "antigravity", "muse"} {
+	for _, h := range []string{"opencode", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			a, state, first := setupSharedLogin(t, h)
 			flow, err := a.BeginLogin(context.Background(), first.ID, "/fake/native")
 			if err != nil {
 				t.Fatal(err)
-			}
-			if h == "antigravity" && flow.Warning != "" {
-				t.Fatal("stale global keyring warning")
 			}
 			if h == "muse" && flow.Warning != "" {
 				t.Fatal(flow.Warning)

@@ -143,7 +143,7 @@ func TestAcpIgnoresReplayAndUnrelatedMethods(t *testing.T) {
 	}
 }
 
-func TestAntigravityACPContextUsageDoesNotInventBilling(t *testing.T) {
+func TestACPContextUsageDoesNotInventBilling(t *testing.T) {
 	decl := &Declaration{Dialect: DialectAcpJSON}
 	record := DecodeLine(decl, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"exact","update":{"sessionUpdate":"usage_update","used":1234,"size":1048576}}}`)
 	if !record.Recognized() || record.ContextTokens != 1234 {

@@ -16,7 +16,7 @@ import (
 )
 
 func TestAccountPrivateManagerAndLoginRoots(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "grok", "pi", "muse", "opencode", "antigravity"} {
+	for _, h := range []string{"claude-code", "codex", "grok", "pi", "muse", "opencode"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			for key := range harnesshome.Discovery(filepath.Join(a.Root, h, ".runtime")) {
@@ -173,7 +173,7 @@ func TestPrivateOriginFailsClosed(t *testing.T) {
 	}
 }
 func TestPrivateHomeKnownPathsAndNativeTreeBoundary(t *testing.T) {
-	for _, h := range []string{"muse", "opencode", "antigravity"} {
+	for _, h := range []string{"muse", "opencode"} {
 		for _, kind := range []string{"parent", "leaf", "hardlink", "lock"} {
 			t.Run(h+"/"+kind, func(t *testing.T) {
 				a := testAccounts(t)
@@ -470,7 +470,7 @@ func TestTrustedDataRootDoesNotTrustOwnedSymlinks(t *testing.T) {
 }
 
 func TestFinalAccountManagerCredentialRootGuard(t *testing.T) {
-	keys := map[string]string{"claude-code": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "codex": "CODEX_HOME", "grok": "GROK_HOME", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_DB", "muse": "MUSE_AUTH_PATH", "antigravity": "JETSKI_APP_DATA_DIR"}
+	keys := map[string]string{"claude-code": "CLAUDE_SECURESTORAGE_CONFIG_DIR", "codex": "CODEX_HOME", "grok": "GROK_HOME", "pi": "PI_CODING_AGENT_DIR", "opencode": "OPENCODE_DB", "muse": "MUSE_AUTH_PATH"}
 	for h, key := range keys {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)

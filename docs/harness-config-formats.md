@@ -11,7 +11,6 @@ All seven catalog harnesses support MCP and skills. `ConfigCapabilities()` retur
 | `claude-code` | `~/.claude.json` | `mcpServers`, JSON | `~/.claude/skills/` |
 | `codex` | `~/.codex/config.toml` | `mcp_servers`, TOML | `~/.agents/skills/` |
 | `opencode` | `~/.config/opencode/opencode.json` and `.jsonc` | `mcp`, JSONC | `~/.config/opencode/skills/` |
-| `antigravity` | `~/.gemini/config/mcp_config.json` | `mcpServers`, JSONC | `~/.gemini/antigravity-cli/skills/` |
 | `grok` | `~/.grok/config.toml` | `mcp_servers`, TOML | `~/.grok/skills/` |
 | `pi` | `~/.pi/agent/mcp.json` | `mcpServers`, JSON | `~/.pi/agent/skills/` |
 | `muse` | `~/.config/muse/settings.json` | `mcpServers`, JSON; legacy `mcp_servers` accepted | `~/.config/muse/skills/` |
@@ -19,13 +18,6 @@ All seven catalog harnesses support MCP and skills. `ConfigCapabilities()` retur
 OpenCode local commands use arrays. The other adapters read a command string and a separate arguments array. Remote servers use `url`. Readers expose environment variable names, never their values. They exclude authentication headers. Hashes cover the complete parsed entry so changes to secret values and unknown fields still show drift. Skill hashes cover the exact `SKILL.md` bytes.
 
 ## Extra adapter evidence
-
-Antigravity CLI has a dedicated global MCP file. Its global skills directory differs from the Antigravity App skills directory. Account import reads the `agy` CLI files, not the IDE or App. Worker turns use ACP 1.3.0 and receive catalog MCP servers through the session protocol.
-
-- [Antigravity MCP locations and schema](https://antigravity.google/docs/mcp)
-- [Antigravity skills by surface](https://antigravity.google/docs/skills/)
-- [Antigravity plugins](https://antigravity.google/docs/plugins?tab=cli)
-- Local checks: `agy --help`, `agy mcp --help`, and `agy mcp add --help`. The installed binary contains the documented `.gemini/config` path and `mcp_config.json` filename.
 
 Grok Build uses TOML. The adapter also reads shared `.agents` and Claude user skills after native skills.
 

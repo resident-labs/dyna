@@ -95,7 +95,7 @@ func DecodeLine(decl *Declaration, line string) Record {
 	}
 	normalized := r.Events[:0]
 	for _, e := range r.Events {
-		if e.Kind == "tool" && (e.State == "completed" || e.State == "failed") && e.ID == "" && r.dialect != DialectAntigravityStreamJSON {
+		if e.Kind == "tool" && (e.State == "completed" || e.State == "failed") && e.ID == "" {
 			continue
 		}
 		e.V = SchemaVersion
@@ -129,33 +129,6 @@ func decodeCodex(line []byte) Record {
 	// Session creation alone does not show that the model started working.
 	if p.Type == "turn.started" || (strings.HasPrefix(p.Type, "item.") && codexItemGenerates(p.Item.Type)) {
 		r.Generation = true
-	}
-	return r
-}
-
-func decodeAntigravity(line []byte) Record {
-	p, ok := parseRecord[antigravityRecord](line)
-	if !ok {
-		return Record{}
-	}
-	events, known := adaptAntigravityStreamJSON(p)
-	usage := recordUsage{Type: p.Event}
-	if p.Event == "result" {
-		usage.Usage = p.Result.Usage
-	} else if p.Event == "step_update" && strings.EqualFold(p.StepUpdate.State, "DONE") && p.StepUpdate.Index != nil {
-		usage.Usage = p.StepUpdate.Usage
-		usage.StepID = itoa(*p.StepUpdate.Index)
-	}
-	r := Record{Events: events, Signals: antigravityToolSignals(p), valid: true, recognized: known, recordUsage: usage}
-	if p.Event == "step_update" {
-		// Step usage is per call; result usage is the process total.
-		r.ContextTokens = usageSum(usage.Usage, "input_tokens", "cache_read_tokens")
-	}
-	if p.Event == "init" {
-		r.SessionID = p.ConversationID
-	}
-	if p.Event == "result" {
-		r.SessionID = p.Result.ConversationID
 	}
 	return r
 }
@@ -258,40 +231,6 @@ type openCodeRecord struct {
 			Error  string          `json:"error"`
 		} `json:"state"`
 	} `json:"part"`
-}
-
-type antigravityRecord struct {
-	Event          string `json:"event"`
-	ConversationID string `json:"conversation_id"`
-	StepUpdate     struct {
-		State     string                     `json:"state"`
-		Usage     map[string]json.RawMessage `json:"usage"`
-		Index     *int                       `json:"step_index"`
-		StepType  string                     `json:"step_type"`
-		ToolName  string                     `json:"tool_name"`
-		TextDelta string                     `json:"text_delta"`
-		ToolInfo  struct {
-			Name       string            `json:"name"`
-			Parameters json.RawMessage   `json:"parameters"`
-			Output     json.RawMessage   `json:"output"`
-			Error      *antigravityError `json:"error"`
-		} `json:"tool_info"`
-	} `json:"step_update"`
-	Command struct {
-		Name string          `json:"name"`
-		Data json.RawMessage `json:"data"`
-	} `json:"command"`
-	Result struct {
-		Usage          map[string]json.RawMessage `json:"usage"`
-		Status         string                     `json:"status"`
-		ConversationID string                     `json:"conversation_id"`
-		Response       string                     `json:"response"`
-		Error          string                     `json:"error"`
-		Command        struct {
-			Name string          `json:"name"`
-			Data json.RawMessage `json:"data"`
-		} `json:"command"`
-	} `json:"result"`
 }
 
 // recordError accepts both protocol error shapes without rejecting the envelope.

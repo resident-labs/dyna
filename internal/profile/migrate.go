@@ -62,7 +62,6 @@ func Migrate(path string) error {
 			return err
 		}
 		oldArgs := slices.Clone(p.ExtraArgs)
-		migrateAntigravityACP(&p)
 		p.DeclareOutput()
 		if err := p.Validate(); err != nil {
 			return fmt.Errorf("invalid profile %q: %w", p.Name, err)

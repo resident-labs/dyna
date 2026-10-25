@@ -13,7 +13,6 @@ import (
 )
 
 func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
-	// Antigravity ACP receives the catalog in session/new, not a plugin file.
 	for _, h := range []string{"opencode", "pi", "grok", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			accounts := testAccounts(t)

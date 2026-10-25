@@ -289,8 +289,8 @@ func cachedTurn(in, cached int64, input, cachedState string) Turn {
 	return t
 }
 
-// A cached count above input breaks the subset rule (older Antigravity turns
-// counted cache reads beside input), so that turn's cache reads as unknown.
+// A cached count above input breaks the subset rule (older turns counted
+// cache reads beside input), so that turn's cache reads as unknown.
 func TestCachedAboveInputIsUnknown(t *testing.T) {
 	s := rollupStore(t)
 	meta := Meta{ID: "ses_20261019-120000-aaaaaaaa", RoomID: "r1"}

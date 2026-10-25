@@ -2,15 +2,15 @@
 
 Every profile with a catalog harness runs on Dyna's private copy of that harness. An optional exact `runtimeVersion` in the profile pins a version. Older releases also stored a `runtime` field (`system` or `dyna`). Dyna ignores it, so those profiles run on the private copy too. Custom and mock harnesses run their own command, and the doctor reports them as `direct`. The CLI, the Harnesses page and the desktop API manage private bundles, saved logins, the active login, MCP servers, and skills. The doctor reports the selected binary, native home, account, and remaining personal reads.
 
-Install the latest verified version with `dyna harness install <harness>`, or an exact version with `--version <version>`. `dyna harness list` shows installed bundles. `dyna harness doctor` shows runtime status. Supported management adapters are Claude Code, Codex, OpenCode v2, Antigravity, Grok, Pi, and Muse. Grok and Pi use their native structured output formats for worker turns.
+Install the latest verified version with `dyna harness install <harness>`, or an exact version with `--version <version>`. `dyna harness list` shows installed bundles. `dyna harness doctor` shows runtime status. Supported management adapters are Claude Code, Codex, OpenCode v2, Grok, Pi, and Muse. Grok and Pi use their native structured output formats for worker turns.
 
 An update never selects a version it has not run: Dyna starts the new version once in a throwaway private scope and requires it to answer its version command, with no provider calls. A version that cannot start, stays silent, or reports a version outside the harness's supported range is not selected. When an update does switch the selection, Dyna records the replaced version as the last good version and keeps it on disk. `dyna harness rollback <harness>` re-selects that last good version in one command.
 
 Each harness has one active login and one shared native home. Saved account slots contain login files. Native history stays in the shared home. `dyna harness login <harness>` starts native sign-in. `dyna harness accounts activate <account-id>` switches accounts. A switch blocks new turns and waits for running turns to finish. Claude Code, Codex, Grok, Muse and OpenCode allow concurrent turns. Other adapters serialize turns until native concurrency is verified.
 
-All eight private runtimes, including Claude Code, use their own HOME and XDG roots. The native scope stays at `accounts/<harness>/.runtime` under the Dyna data directory. HOME is the paired directory `.runtime.home`. Its `.config`, `.local/share`, `.cache`, and `.local/state` directories supply the four XDG roots. Saved-slot login uses a paired `<account-id>.home`. These directories have mode `0700`. Credential checks inspect native files and known auth paths; they do not walk tool caches. Tools can create sockets and symlinks in their private HOME.
+All seven private runtimes, including Claude Code, use their own HOME and XDG roots. The native scope stays at `accounts/<harness>/.runtime` under the Dyna data directory. HOME is the paired directory `.runtime.home`. Its `.config`, `.local/share`, `.cache`, and `.local/state` directories supply the four XDG roots. Saved-slot login uses a paired `<account-id>.home`. These directories have mode `0700`. Credential checks inspect native files and known auth paths; they do not walk tool caches. Tools can create sockets and symlinks in their private HOME.
 
-Dyna never copies a personal login on its own. A turn with no private account fails with "Sign in to <harness> in Dyna." When the user clicks Sign in on the Harnesses page, or runs `dyna harness login <harness>`, Dyna looks for the personal login of that harness. If it finds one, the user chooses: use it (Dyna copies the login once) or sign in instead. `--use-personal` and `--sign-in` answer that question for scripts. Dyna offers the copy only for a harness with no saved account, and never for a login that is already saved. The copy takes login data only. Personal settings, skills, hooks, plugins, and MCP definitions stay outside the private roots. It never replaces files in the private home. For Claude Code, Codex, and Muse, the copy shares a refresh-token family with the personal login. A refresh on either side can require a new sign-in on the other side. The copy only reads login data and does not validate or refresh tokens. If a native refresh later fails, the user signs in again. A deadline, a failed native command or a busy owner database (for example, while the owner's OpenCode runs) fails the copy with "Copying your personal login did not finish. Try again." OpenCode copies need `sqlite3`. Antigravity stores the CLI token and ACP token in its private account HOME. ACP uses a separate OAuth client and needs its own one-time Google sign-in. Capture and refresh keep both file stores; no shared keyring is used.
+Dyna never copies a personal login on its own. A turn with no private account fails with "Sign in to <harness> in Dyna." When the user clicks Sign in on the Harnesses page, or runs `dyna harness login <harness>`, Dyna looks for the personal login of that harness. If it finds one, the user chooses: use it (Dyna copies the login once) or sign in instead. `--use-personal` and `--sign-in` answer that question for scripts. Dyna offers the copy only for a harness with no saved account, and never for a login that is already saved. The copy takes login data only. Personal settings, skills, hooks, plugins, and MCP definitions stay outside the private roots. It never replaces files in the private home. For Claude Code, Codex, and Muse, the copy shares a refresh-token family with the personal login. A refresh on either side can require a new sign-in on the other side. The copy only reads login data and does not validate or refresh tokens. If a native refresh later fails, the user signs in again. A deadline, a failed native command or a busy owner database (for example, while the owner's OpenCode runs) fails the copy with "Copying your personal login did not finish. Try again." OpenCode copies need `sqlite3`.
 
 Private HOME hides automatic personal skill, MCP, hook, plugin, and settings discovery. Project settings and ancestor instructions still apply. HOME isolation is not a filesystem sandbox. Personal preference import stays explicit.
 
@@ -36,7 +36,7 @@ Old repair backups remain unchanged under the harness data directory. `dyna harn
 
 ## Native session processes
 
-Pi RPC, Codex app-server, Grok ACP, Antigravity ACP and Claude stream-json use one child per
+Pi RPC, Codex app-server, Grok ACP and Claude stream-json use one child per
 Dyna session. A detached host keeps that child across turns and engine
 restarts. Each turn attaches over a private Unix socket and binds its
 runtime leases again. A second active attachment to the same key is refused.
@@ -44,17 +44,6 @@ runtime leases again. A second active attachment to the same key is refused.
 Grok uses `grok agent stdio` for each session. It no longer starts a shared
 account-wide serve process. A model, account or launch change replaces the
 child, and the adapter resumes the native conversation.
-
-Antigravity uses the pinned ACP 1.3.0 server beside the account-management
-CLI. Its account lease is exclusive while a turn runs and is released when
-the child becomes idle. The next turn reuses the child with a fresh account lease.
-Its session metadata blocks Dyna-owned native tools before execution.
-Manual compaction is not supported; native automatic compaction stays enabled.
-
-An older CLI-only Antigravity bundle must be unused before replacement.
-`dyna harness rm antigravity --version <version> --confirm` refuses a pinned
-or active bundle. Install its replacement with `dyna harness install antigravity`;
-the new bundle contains both checked ACP companions.
 
 ## First-use install
 
@@ -72,10 +61,6 @@ official latest-version source:
 |---|---|---|
 | Claude Code, Codex, OpenCode, Grok, Pi | npm registry `/<package>/latest` | npm `dist.integrity` |
 | Muse | the `muse-stable` channel, then that version's release manifest | manifest SHA-256 and size |
-| Antigravity (Linux and macOS, amd64 and arm64) | the official `linux_amd64.json` manifest | manifest SHA-512 |
-
-Antigravity's manifest names only its latest version, so older versions cannot
-be installed.
 
 It writes a bundle under the harness data directory. A per-harness lock lets two
 sessions share one install. An install of one harness does not block another.
@@ -91,8 +76,8 @@ Code or Codex, so the first use of each one needs internet access.
 The distribution table in `internal/harness/runtime/distribution.go` owns the
 source for each harness. npm sources use the official package `latest` tag and
 verify the exact version metadata. Muse uses its stable channel and release
-manifest. Antigravity uses its platform manifest. Vendor manifest checks require
-an official artifact URL and a complete checksum for the current platform.
+manifest. Vendor manifest checks require an official artifact URL and a
+complete checksum for the current platform.
 
 The engine checks versions every six hours, including while the UI is closed.
 Version checks run independently, so one slow vendor cannot block another.

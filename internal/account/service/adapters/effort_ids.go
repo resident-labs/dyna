@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// effortLevels is the order the picker shows. Cursor and Antigravity encode
-// one of these as a model ID segment, for example claude-fable-5-thinking-high
-// or gemini-4-argon-low.
+// effortLevels is the order the picker shows. Cursor encodes one of these as
+// a model ID segment, for example claude-fable-5-thinking-high.
 var effortLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 var effortSegment = regexp.MustCompile(`-(none|minimal|low|medium|high|xhigh|max)(-|$)`)

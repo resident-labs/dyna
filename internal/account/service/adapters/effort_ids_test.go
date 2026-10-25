@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// IDs and names are copied from the real Cursor and Antigravity catalogs.
+// IDs and names are copied from the real Cursor catalog.
 func TestGroupEffortIDs(t *testing.T) {
 	in := []Model{
 		{ID: "auto", Name: "Auto (default)"},

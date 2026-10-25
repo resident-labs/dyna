@@ -155,17 +155,6 @@ func (r RecommendedVersionResolver) RecommendedVersions(ctx context.Context) []R
 				if v.Version != "" {
 					v.Status, v.Source = "resolved", museReleaseManifestURL(v.Version)
 				}
-			case "antigravity-manifest":
-				source, err := antigravityManifestURL(r.GOOS, r.GOARCH, muslLoader())
-				v.Source = source
-				if err != nil {
-					v.Status, v.Reason = "unsupported", "No verified Antigravity artifact supports this platform."
-					break
-				}
-				v.Version, v.Reason = r.cached(ctx, a.Harness+":"+v.Source, func() (string, string) { return r.antigravityVersion(ctx, v.Source) })
-				if v.Version != "" {
-					v.Status = "resolved"
-				}
 			default:
 				if a.NPMPackage == "" {
 					v.Reason = "The adapter has no verified version metadata source."
@@ -255,19 +244,6 @@ func (r RecommendedVersionResolver) museVersion(ctx context.Context) (string, st
 		return "", "The Muse release manifest has no verified artifact for this version and platform."
 	}
 	return channel.Version, ""
-}
-
-// antigravityVersion reads the official manifest the Antigravity installer uses.
-func (r RecommendedVersionResolver) antigravityVersion(ctx context.Context, source string) (string, string) {
-	body, reason := r.fetch(ctx, source, "application/json")
-	if reason != "" {
-		return "", reason
-	}
-	var manifest antigravityManifest
-	if json.Unmarshal(body, &manifest) != nil || !manifest.valid() {
-		return "", "The Antigravity manifest does not name an exact version."
-	}
-	return manifest.Version, ""
 }
 
 func (r RecommendedVersionResolver) npmVersion(ctx context.Context, a RuntimeAdapter, source string) (string, string) {

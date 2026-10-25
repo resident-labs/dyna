@@ -492,7 +492,6 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	runtime := newRuntime(ctx)
 	if !readOnly {
-		runtime.Accounts.RepairAntigravityACPAccount()
 		startService(func() { runtime.MigratePiAccounts(ctx) })
 	}
 	cleanup = append(cleanup, runtime.CancelPrivateLogins, runtime.CancelPrivateRuntimeSwitches)

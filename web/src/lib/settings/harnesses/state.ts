@@ -30,7 +30,6 @@ export const HARNESS_ORDER: HarnessMeta[] = [
   { id: 'claude-code', iconId: 'claude', name: 'Claude Code', short: 'Claude' },
   { id: 'codex', iconId: 'codex', name: 'Codex', short: 'Codex' },
   { id: 'opencode', iconId: 'opencode', name: 'OpenCode', short: 'OpenCode' },
-  { id: 'antigravity', iconId: 'antigravity', name: 'Antigravity', short: 'Antigrav.' },
   { id: 'grok', iconId: 'grok', name: 'Grok', short: 'Grok' },
   { id: 'kimi-code', iconId: 'kimi-code', name: 'Kimi Code', short: 'Kimi' },
   { id: 'pi', iconId: 'pi', name: 'Pi', short: 'Pi' },
@@ -192,7 +191,7 @@ export function harnessRowState(harnessId: string, snapshot: Partial<HarnessSnap
     version: bundles.find((bundle) => bundle.version === snapshot?.selectedVersions?.[id])?.version || bundles[0]?.version || dynaDoc?.version || '',
     // Explicit backend capabilities take precedence, including false. The list
     // preserves warnings for older snapshots that omit this capability.
-    sharedPersonalLogin: !!(cap?.sharedPersonalLogin ?? ['antigravity', 'muse'].includes(id)),
+    sharedPersonalLogin: !!(cap?.sharedPersonalLogin ?? id === 'muse'),
     switchPending: !!pendingDoc, runningTurns: pendingDoc?.runningTurns ?? 0,
     needsSignIn: hasSubscriptionLogin(id) && (!activeAccount || accountNeedsSignIn(activeAccount) || doctors.some((d) => d.status === 'not signed in')),
     update: '',

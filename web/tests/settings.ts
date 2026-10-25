@@ -27,7 +27,7 @@ const pane = query.get('pane') || 'harnesses'
 // ?empty=1 shows every list with no rows. ?delay=<ms> slows every api call, to see loading states.
 const empty = query.has('empty')
 const delay = Number(query.get('delay') || 120)
-const caps: Capability[] = ['claude-code', 'codex', 'opencode', 'antigravity', 'grok', 'pi', 'muse'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
+const caps: Capability[] = ['claude-code', 'codex', 'opencode', 'grok', 'pi', 'muse'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
 const bundle = (harness: string, version: string): Bundle => ({ harness, version, executable: '', directory: '' })
 const harnessAccount = (id: string, harness: string, label: string, active: boolean): HarnessAccount => ({ id, harness, label, home: '', identity: '', status: 'ready', active, repos: null })
 // The runtime snapshot the fixture changes in place: its lists are never null.
@@ -35,20 +35,19 @@ interface Snapshot extends HarnessSnapshot {
   bundles: Bundle[]
   accounts: HarnessAccount[]
 }
-const selectedVersions: Record<string, string> = { 'claude-code': '2.1.302', codex: '0.163.0', opencode: '2.0.32', antigravity: '1.4.2', grok: '1.0.62', pi: '1.3.0', muse: '1.4.10-R6427.1' }
+const selectedVersions: Record<string, string> = { 'claude-code': '2.1.302', codex: '0.163.0', opencode: '2.0.32', grok: '1.0.62', pi: '1.3.0', muse: '1.4.10-R6427.1' }
 const snapshot: Snapshot = {
-  bundles: [bundle('claude-code', '2.1.302'), bundle('codex', '0.163.0'), bundle('opencode', '2.0.32'), bundle('antigravity', '1.4.2'), bundle('grok', '1.0.62'), bundle('pi', '1.3.0'), bundle('muse', '1.4.10-R6427.1')],
+  bundles: [bundle('claude-code', '2.1.302'), bundle('codex', '0.163.0'), bundle('opencode', '2.0.32'), bundle('grok', '1.0.62'), bundle('pi', '1.3.0'), bundle('muse', '1.4.10-R6427.1')],
   accounts: [
     harnessAccount('claude-3', 'claude-code', 'Work', true),
     harnessAccount('claude-p', 'claude-code', 'Personal', false),
     harnessAccount('codex-1', 'codex', 'ChatGPT account', true),
     harnessAccount('oc-1', 'opencode', 'OpenCode Go', true),
-    harnessAccount('agy-1', 'antigravity', 'Antigravity account', true),
     harnessAccount('grok-1', 'grok', 'Current Grok account', true),
     harnessAccount('muse-1', 'muse', 'user@example.com', true),
   ],
   profiles: [],
-  capabilities: caps.map((c) => ['antigravity', 'grok', 'muse'].includes(c.harness) ? { ...c, status: 'partial', reason: 'No switch verified for native memory.' } : c),
+  capabilities: caps.map((c) => ['grok', 'muse'].includes(c.harness) ? { ...c, status: 'partial', reason: 'No switch verified for native memory.' } : c),
   selectedVersions,
   recommendedVersions: [{ harness: 'claude-code', version: '2.1.310', status: 'resolved', source: 'npm' }, { harness: 'codex', version: '0.163.0', status: 'resolved', source: 'npm' }],
   installing: [],
@@ -91,7 +90,7 @@ interface Listed extends ProfileList {
 }
 const profileList: Listed = {
   default: 'sol',
-  harnesses: ['claude-code', 'codex', 'opencode', 'antigravity', 'muse', 'custom'],
+  harnesses: ['claude-code', 'codex', 'opencode', 'muse', 'custom'],
   unready: {},
   profiles: [
     profile('sol', 'codex', 'gpt-6.1-sol', { taste: 7, intelligence: 9, cost: 8, description: 'A work-horse and thorough debugger for tasks that need intelligence.' }),

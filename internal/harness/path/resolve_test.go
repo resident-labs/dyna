@@ -53,7 +53,7 @@ func TestOpenCodeNativeFallback(t *testing.T) {
 	}
 }
 func TestLocalBinFallbackForEveryNativeHarness(t *testing.T) {
-	for _, binary := range []string{"claude", "codex", "agy", "opencode", "muse"} {
+	for _, binary := range []string{"claude", "codex", "kimi", "opencode", "muse"} {
 		t.Run(binary, func(t *testing.T) {
 			home := t.TempDir()
 			want := executable(t, filepath.Join(home, ".local", "bin"), binary)
