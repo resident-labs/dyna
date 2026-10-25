@@ -15,7 +15,7 @@ const NATIVE_HARNESS: Partial<Record<Provider, string>> = {
 
 // NATIVE_HARNESSES are the harnesses with their own sign-in, in the order the
 // add form offers them. Their credentials are not shared with Pi.
-export const NATIVE_HARNESSES = ['claude-code', 'codex', 'muse', 'opencode'] as const
+export const NATIVE_HARNESSES = ['claude-code', 'muse', 'opencode'] as const
 
 // nativeHarness names the harness that signs a provider in itself, or '' when
 // only Pi does. Source: store.ProviderFor and the adapters in internal/harness.
