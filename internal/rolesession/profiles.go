@@ -32,23 +32,29 @@ func unavailable(turn subagent.Turn) bool {
 }
 
 // failureKey names the failure entry for a turn. A runtime that is not ready
-// fails before any model runs, and a rejected sign-in rejects the whole account,
-// so neither can be fixed by picking another model: both block every model of
-// the profile under its own key. A model failure stays under the profile name,
-// which multi-model profiles replace with their model cooldowns.
+// fails before any model runs, a rejected sign-in rejects the whole account,
+// and a capacity failure that ended a turn has already spent every model of the
+// chain. None can be fixed by picking another model of the same profile, so all
+// three block the whole profile under the whole-profile key. A quota failure
+// stays under the profile name, because another model of the profile may still
+// work and its model cooldowns handle that.
 func failureKey(profileName string, turn subagent.Turn) string {
-	if harness.IsNotReady(turn.Error) || turn.FailureReason == providerfailure.Auth {
+	switch {
+	case harness.IsNotReady(turn.Error), turn.FailureReason == providerfailure.Auth, turn.FailureReason == providerfailure.Capacity:
 		return notReadyKey(profileName)
 	}
 	return profileName
 }
 
+// notReadyKey is the whole-profile key: RankProfiles excludes the profile while
+// this key is in the future, whatever models it has. It names a failure of the
+// profile itself, not of one model.
 func notReadyKey(profileName string) string { return profileName + " (not ready)" }
 
-// RankProfiles excludes disabled profiles, profiles whose runtime is not ready,
-// and profiles that are unavailable until a later time. Multi-model profiles
-// remain available while any model is healthy. role orders the result; see
-// rankBefore.
+// RankProfiles excludes disabled profiles, profiles that carry a failure of the
+// whole profile, and profiles that are unavailable until a later time.
+// Multi-model profiles remain available while any model is healthy, unless the
+// whole-profile key excludes them. role orders the result; see rankBefore.
 func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now time.Time, role string) []profile.Profile {
 	out := []profile.Profile{}
 	accounts := runtime.NewAccounts()
