@@ -93,6 +93,13 @@ actual task directory and branch; the launch directory can be stale. A final
 handoff may start with `[DYNA HANDOFF]`, then separate `Worktree: /absolute/path`
 and `Branch: feature/name` lines.
 
+A move between two Pi profiles needs no handoff. Pi keeps one session file per
+conversation, so the transfer resumes that exact session with the new profile's
+model, thinking level and provider account. The conversation and worktree stay,
+and no handoff wait runs. Pi compacts the session before a request that no
+longer fits the new model's window, and Dyna runs the target profile's compact
+command first when its threshold is due.
+
 Repeating a request recovers its saved attempt. Use `--retry` after failure or
 cancellation. Cancel only while waiting for handoff. Late handoffs cannot finish
 another attempt. Dyna stops the old turn before replacement startup. Stored
