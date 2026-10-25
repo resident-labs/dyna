@@ -17,11 +17,14 @@ The wizard does not create a per-profile account binding or silently switch one.
 | Codex | App-server `model/list` |
 | Claude Code | Installed help's model aliases |
 | Muse | Version-negotiated MSP `model/list` |
+| Pi | Native `--list-models`, one probe per active provider |
 
 Discovery runs Dyna's private copy of the harness with the active private
-account's home. It never runs a CLI on PATH. Without a private copy and an
-active account, or when the installed schema does not support discovery, the
-catalog is empty and shows a message. Enter an exact model ID or use the harness default then.
+account's home. A harness with one provider runs one probe; Pi runs one probe
+for each active provider and merges the catalogs. It never runs a CLI on PATH.
+Without a private copy and an active account, or when the installed schema does
+not support discovery, the catalog is empty and shows a message. Enter an exact
+model ID or use the harness default then.
 
 Context and maximum input/output limits come from the native model catalog.
 Pinned OpenCode metadata supplements only exact discovered routes. Bundled
