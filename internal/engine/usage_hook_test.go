@@ -38,6 +38,22 @@ func TestDisabledAccountUsageHookStopsUsageButNotRenewal(t *testing.T) {
 	}
 	name := string(automations.BuiltinAccountUsage)
 	off := true
+	// The other global hooks are not this test's subject, and two of them reach
+	// the network or the disk: the version hook reads vendor metadata, and the
+	// maintenance hook walks the data folder. Seeded and left on, they make this
+	// test wait for work it never asks about.
+	global, err := service.ListGlobal(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range global {
+		if hook.Name == name {
+			continue
+		}
+		if err := service.Edit(ctx, "", hook.Name, "owner", hooks.Patch{Disabled: &off}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := service.Edit(ctx, "", name, "owner", hooks.Patch{Disabled: &off}); err != nil {
 		t.Fatal(err)
 	}
