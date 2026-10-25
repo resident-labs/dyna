@@ -171,12 +171,13 @@ func TestCICleanupSkipsCancelWhenOpenPRCheckFails(t *testing.T) {
 }
 
 func TestHeadChangeCleansUpOldRunsOnce(t *testing.T) {
-	for _, mode := range []string{"normal", "shared", "cancel failure", "main"} {
+	for _, mode := range []string{"normal", "shared", "cancel failure", "default branch"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newEnv(t)
 			branch := "feature"
-			if mode == "main" {
-				branch = "main"
+			e.f.Pull.Base.Repo.DefaultBranch = "trunk"
+			if mode == "default branch" {
+				branch = "trunk"
 			}
 			e.f.Pull.Head.Ref = branch
 			e.write()
@@ -209,7 +210,7 @@ func TestHeadChangeCleansUpOldRunsOnce(t *testing.T) {
 			}
 			calls, _ := os.ReadFile(e.calls)
 			want := 5
-			if mode == "shared" || mode == "main" {
+			if mode == "shared" || mode == "default branch" {
 				want = 0
 			}
 			if strings.Count(string(calls), "/cancel") != want {

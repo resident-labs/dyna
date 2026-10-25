@@ -25,6 +25,7 @@ func TestManagedNewAndRepositoryList(t *testing.T) {
 	commandGit(t, remote, "init", "--bare")
 	commandGit(t, repo, "remote", "add", "origin", remote)
 	commandGit(t, repo, "push", "origin", "HEAD:refs/heads/main")
+	commandGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	root := filepath.Join(t.TempDir(), "managed trees")
 	v, err := settings.Load("")
 	if err != nil {

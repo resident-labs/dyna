@@ -56,7 +56,7 @@ func Command(o Options) *cobra.Command {
 	openRoom := open.Flags().String("room", "", "room name or ID; a stamped session may name only its own room")
 	pr := open.Flags().String("pr", "", "link a GitHub PR number or URL instead of a local change")
 	var opts watch.OpenChangeOptions
-	open.Flags().StringVar(&opts.Base, "base", "", "base branch or commit (default: origin/main, then main)")
+	open.Flags().StringVar(&opts.Base, "base", "", "base branch or commit (default: origin/HEAD, then current branch)")
 	open.Flags().StringVar(&opts.Title, "title", "", "change title (default: branch name)")
 	open.Flags().StringVar(&opts.Notes.Intent, "intent", "", "what this change does and why")
 	open.Flags().StringVar(&opts.Notes.Testing, "testing", "", "checks run and their results")

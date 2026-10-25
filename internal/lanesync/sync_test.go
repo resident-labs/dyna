@@ -27,8 +27,10 @@ func TestFetchCountsAndDivergence(t *testing.T) {
 	clone := filepath.Join(dir, "clone")
 	git(t, dir, "init", "--bare", "--initial-branch=main", remote)
 	git(t, dir, "clone", remote, clone)
+	git(t, clone, "config", "remote.origin.followRemoteHEAD", "never")
 	git(t, clone, "commit", "--allow-empty", "-m", "base")
 	git(t, clone, "push", "origin", "main")
+	git(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	s := Service{Dir: filepath.Join(dir, "state")}
 	tick := func() {
 		t.Helper()
@@ -89,8 +91,10 @@ func TestTwoRemoteDisagreement(t *testing.T) {
 	git(t, dir, "init", "--bare", "--initial-branch=main", a)
 	git(t, dir, "init", "--bare", "--initial-branch=main", b)
 	git(t, dir, "clone", a, clone)
+	git(t, clone, "config", "remote.origin.followRemoteHEAD", "never")
 	git(t, clone, "commit", "--allow-empty", "-m", "base")
 	git(t, clone, "push", "origin", "main")
+	git(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	git(t, clone, "remote", "add", "other", b)
 	git(t, clone, "push", "other", "main")
 	git(t, clone, "branch", "base")
@@ -128,7 +132,6 @@ func TestTickReturnsTheNextFetchAndUsesTheDefaultBranch(t *testing.T) {
 	git(t, dir, "clone", remote, clone)
 	git(t, clone, "commit", "--allow-empty", "-m", "base")
 	git(t, clone, "push", "origin", "trunk")
-	git(t, clone, "branch", "main")
 	git(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 	v, e := settings.Load("")
 	if e != nil {
@@ -153,11 +156,12 @@ func TestTickReturnsTheNextFetchAndUsesTheDefaultBranch(t *testing.T) {
 	}
 	first, _ := s.Status()
 	r := first[clone].Remotes["origin"]
-	if r.Branch != "refs/remotes/origin/trunk" || r.Ahead != 0 || r.Behind != 0 {
+	if r.Branch != "refs/remotes/origin/trunk" || r.Ahead != 0 || r.Behind != 0 || r.LastError != "" {
 		t.Fatalf("%+v", r)
 	}
 	git(t, clone, "commit", "--allow-empty", "-m", "next")
 	git(t, clone, "push", "origin", "trunk")
+	git(t, clone, "update-ref", "refs/heads/trunk", "HEAD^")
 	if _, e := s.Tick(context.Background(), now.Add(time.Minute)); e != nil {
 		t.Fatal(e)
 	}
@@ -175,8 +179,10 @@ func TestFetchErrorKeepsDisagreement(t *testing.T) {
 	git(t, dir, "init", "--bare", "--initial-branch=main", a)
 	git(t, dir, "init", "--bare", "--initial-branch=main", b)
 	git(t, dir, "clone", a, clone)
+	git(t, clone, "config", "remote.origin.followRemoteHEAD", "never")
 	git(t, clone, "commit", "--allow-empty", "-m", "base")
 	git(t, clone, "push", "origin", "main")
+	git(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	git(t, clone, "remote", "add", "other", b)
 	git(t, clone, "branch", "base")
 	git(t, clone, "commit", "--allow-empty", "-m", "one")
