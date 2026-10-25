@@ -266,7 +266,7 @@ checks:
     caches: [cargo]
   - id: clippy
     image: rust:slim
-    command: cargo clippy --locked -- -D warnings
+    command: rustup component add clippy && cargo clippy --locked -- -D warnings
     caches: [cargo]
 
 suites:
