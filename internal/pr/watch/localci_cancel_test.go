@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/pr/state"
 )
 
 func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
 	// GitHub may omit a suite ID; the saved cancelled run itself is still ours.
 	withoutSuite := withoutLocalHostedCancellations(
 		Snapshot{Runs: []Run{{ID: 10, Attempt: 1, Status: "completed", Conclusion: "cancelled"}}},
-		localci.HostedRuns{Attempts: map[int64]int{10: 1}},
+		localci.HostedRuns{Attempts: map[int64]int{10: 1}}, watchDynaDefinition(t),
 	)
 	if len(withoutSuite.Runs) != 0 {
 		t.Fatal("saved cancelled run without a suite was retained")
@@ -50,7 +51,7 @@ func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
 			if tc.savedAttempt != 0 {
 				saved.Attempts[10] = tc.savedAttempt
 			}
-			filtered := withoutLocalHostedCancellations(snap, saved)
+			filtered := withoutLocalHostedCancellations(snap, saved, watchDynaDefinition(t))
 			state, key, jobs, runs := (&Service{}).registeredHostedStatus(filtered, Record{}, ChangePolicy{})
 			if tc.want == "passed" && state != "pending" {
 				t.Fatalf("cancelled suite supplied a conclusive result: %s", state)
@@ -69,7 +70,7 @@ func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
 func TestLocalCancellationAggregateResumesAfterInfrastructureError(t *testing.T) {
 	for _, dependency := range []string{"cancelled", "failure"} {
 		t.Run(dependency, func(t *testing.T) {
-			head := strings.Repeat("a", 40)
+			repo, head := changeRepo(t)
 			run := Run{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: "feature", Event: "pull_request", Status: "completed", Conclusion: "failure"}
 			registry := &hostedCIRegistry{hosted: localci.HostedRuns{IDs: []int64{10}, Attempts: map[int64]int{10: 1}}}
 			s := &Service{LocalCIRegistry: registry}
@@ -104,7 +105,7 @@ func TestLocalCancellationAggregateResumesAfterInfrastructureError(t *testing.T)
 					return fmt.Errorf("unexpected endpoint %s", endpoint)
 				}
 			}
-			job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo"}, head: head, branch: "feature"}
+			job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", RepoPath: repo}, head: head, branch: "feature"}
 			if err := s.resumeHostedCI(context.Background(), job, "repo"); err != nil {
 				t.Fatal(err)
 			}
@@ -130,16 +131,14 @@ func (r *cancellationCIRegistry) Mode(context.Context, string) (string, error) {
 // hosted evidence, including while the cancelled workflow remains active.
 func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 	ctx := context.Background()
-	repo := t.TempDir()
-	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, raw)
-	}
+	repo, base := changeRepo(t)
+	head := changeCommit(t, repo, "trial\n")
 	common, err := localci.CanonicalRepo(ctx, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, branch := strings.Repeat("a", 40), "dyna/merge-trial/1"
-	r := Record{Kind: "github", Head: head, Host: "github.com", Repo: "owner/repo", RepoPath: repo, Branch: branch}
+	branch := "dyna/merge-trial/1"
+	r := Record{Kind: "github", Key: "pr", Head: head, Base: base, Host: "github.com", Repo: "owner/repo", RepoPath: repo, Branch: branch}
 	snap := Snapshot{Runs: []Run{{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "in_progress"}}}
 	snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, r.Repo
 	for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
@@ -165,11 +164,17 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 		} {
 			t.Run(mode+"/"+string(tc.want), func(t *testing.T) {
 				result := localci.Result{Repo: common, SHA: head, Node: "node", Status: tc.state}
-				for _, name := range localci.RequiredChecks([]localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
+				for _, name := range watchDynaRequiredChecks(t) {
 					result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: tc.state})
 				}
 				registry := &cancellationCIRegistry{mode: mode, requiredCIRegistry: requiredCIRegistry{result: result, hostedCIRegistry: hostedCIRegistry{hosted: localci.HostedRuns{IDs: []int64{10}, Attempts: map[int64]int{10: 1}}}}}
 				s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry}
+				if err := s.Store.update(func(st *State) error {
+					st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Base: base, Head: head, Branch: branch}}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
 				s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
 					endpoint := ""
 					for _, arg := range cmd.Args {

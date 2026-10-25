@@ -49,6 +49,8 @@ export interface MachineSummary {
   // ciSlots is the machine's setting; ci is its use now, which the CI work
   // reports in a later version.
   ciSlots: number
+  // allowHostChecks is an explicit owner opt-in to repository commands outside containers.
+  allowHostChecks: boolean
   // cpu is the machine's share of its cores in percent: live for this engine's
   // machine, and the last probe reading for a remote one.
   cpu?: number
@@ -131,5 +133,6 @@ export interface MachinePatch {
   enabled?: boolean
   roles?: MachineRole[]
   ciSlots?: number
+  allowHostChecks?: boolean
   ssh?: string
 }

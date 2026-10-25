@@ -196,6 +196,35 @@ func TestStoppingRunKeeperWaitsOnTheSameLock(t *testing.T) {
 	}
 }
 
+func TestCacheCleanTrimsRepositoryCacheNamespace(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-pip", os.Getpid()))
+	t.Cleanup(func() { os.RemoveAll(base) })
+	oldEntry := filepath.Join(base, "caches", "pip", "old")
+	newEntry := filepath.Join(base, "caches", "pip", "new")
+	for _, entry := range []string{oldEntry, newEntry} {
+		if err := os.MkdirAll(entry, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-73 * time.Hour)
+	if err := os.Chtimes(oldEntry, old, old); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCacheClean(t, base, false)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v: %s", err, out)
+	}
+	if _, err := os.Stat(oldEntry); !os.IsNotExist(err) {
+		t.Fatalf("old repository cache entry remains: %v", err)
+	}
+	if _, err := os.Stat(newEntry); err != nil {
+		t.Fatalf("recent repository cache entry was removed: %v", err)
+	}
+}
+
 // TestCacheCleanCapsRecentCacheSize bounds a cache by its own size, not only by
 // the age of its hot parent directory. A recent cache that is over its cap
 // loses its oldest entry and keeps the newest, a live run's shared cache lock

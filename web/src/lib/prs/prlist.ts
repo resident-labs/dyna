@@ -258,8 +258,10 @@ function ciStep(c: Row): Step {
   const local = isLocal(c)
   const name = local ? 'Checks' : 'CI'
   if (c.state === 'merged' || c.ci === 'passed') return { name, state: 'ok', note: 'passed' }
-  if (c.ci === 'absent') return { name, state: 'wait', note: c.ciReason || 'no GitHub CI' }
   if (c.ci === 'failed' || c.status === 'ci-failed') return { name, state: 'bad', note: `failed ${Math.min(c.consecutiveFailures || 1, 3)}/3` }
+  if (c.localCIConfig === 'not-configured') return { name, state: 'wait', note: 'local CI not configured; hosted CI only' }
+  if (c.localCIConfig === 'head-missing') return { name, state: 'wait', note: 'head removed local CI; base checks still required' }
+  if (c.ci === 'absent') return { name, state: 'wait', note: c.ciReason || 'no GitHub CI' }
   if (local) return { name, state: 'wait', note: 'not run yet' }
   return { name, state: 'run', note: 'running' }
 }

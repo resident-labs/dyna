@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -44,7 +45,15 @@ func localCommands() []*cobra.Command {
 		if len(args) > 0 {
 			sha = args[0]
 		}
-		requested, err := localci.ParseSuites(suites)
+		definition, err := localci.LoadDefinition(c.Context(), checkout.Root, sha)
+		if errors.Is(err, localci.ErrDefinitionNotFound) {
+			fmt.Fprintf(c.OutOrStdout(), "Local CI is not configured at %s; hosted CI remains unchanged.\n", sha)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		requested, err := definition.ParseSuites(suites)
 		if err != nil {
 			return err
 		}
@@ -67,7 +76,7 @@ func localCommands() []*cobra.Command {
 			runner.Node = &node
 		}
 		runner.OnCacheRepair = svc.CacheRepairReporter(rec.ID)
-		result, runErr := runner.Run(c.Context(), localci.Request{Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed})
+		result, runErr := runner.Run(c.Context(), localci.Request{Definition: definition, Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed})
 		if result.SHA != "" {
 			if err := printResult(c, result, asJSON); err != nil {
 				return err
@@ -81,7 +90,7 @@ func localCommands() []*cobra.Command {
 		}
 		return nil
 	}}
-	run.Flags().StringSliceVar(&suites, "suite", nil, "suite to run: relay, frontend, frontend-check, go, go-static, cross-build, computer-smoke (repeatable; default: full workflow)")
+	run.Flags().StringSliceVar(&suites, "suite", nil, "suite from .dyna/local-ci.yaml (repeatable; default: full workflow)")
 	run.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "timeout for each check")
 	run.Flags().StringVar(&nodeName, "node", "", "registered node to use (default: map localci.remote)")
 	run.Flags().BoolVar(&asJSON, "json", false, "print the saved result as JSON")

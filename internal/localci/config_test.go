@@ -2,6 +2,7 @@ package localci
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -67,7 +68,8 @@ suites:
 	}
 }
 
-func TestDynaDefinitionMirrorsBuiltInGraph(t *testing.T) {
+func testDynaDefinition(t *testing.T) *Definition {
+	t.Helper()
 	body, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(DefinitionPath)))
 	if err != nil {
 		t.Fatal(err)
@@ -76,37 +78,7 @@ func TestDynaDefinitionMirrorsBuiltInGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := definition.Suites(), Suites(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("defined suites %v, want %v", got, want)
-	}
-	if got, want := definition.WorkflowSuites(), WorkflowSuites(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("defined trial %v, want %v", got, want)
-	}
-	for _, suite := range Suites() {
-		got, gotOK := definition.Checks(suite)
-		want, wantOK := Checks(suite)
-		if gotOK != wantOK || !reflect.DeepEqual(got, want) {
-			t.Errorf("suite %q checks %v, %t; want %v, %t", suite, got, gotOK, want, wantOK)
-		}
-	}
-	for _, files := range [][]string{{"relay/server.ts"}, {"internal/pr/watch/service.go"}, {"web/src/main.ts"}, {"internal/computers/service.go"}, {"docs/README.md"}} {
-		if got, want := definition.SuitesForFiles(files), SuitesForFiles(files); !reflect.DeepEqual(got, want) {
-			t.Errorf("files %v selected %v, want %v", files, got, want)
-		}
-	}
-	for id, command := range nodeCommands {
-		if IsShard(id) || id == SuiteComputerSmoke {
-			continue
-		}
-		checks, ok := definition.ExecutableChecks(id)
-		if !ok || len(checks) != 1 {
-			t.Errorf("defined command for %q is missing", id)
-			continue
-		}
-		if checks[0].Image != command.image || checks[0].Command != command.inner {
-			t.Errorf("check %q = image %q, command %q; want image %q, command %q", id, checks[0].Image, checks[0].Command, command.image, command.inner)
-		}
-	}
+	return definition
 }
 
 func TestLoadDefinitionAbsentAndStrict(t *testing.T) {
@@ -153,6 +125,30 @@ suites:
 `)
 	if _, err := ParseDefinition(body); err == nil || !strings.Contains(err.Error(), "one YAML document") {
 		t.Fatalf("additional document error = %v", err)
+	}
+}
+
+func TestDefinitionRejectsRunnerDirectoryCacheNames(t *testing.T) {
+	for _, name := range []string{"runs", "slots"} {
+		t.Run(name, func(t *testing.T) {
+			body := fmt.Sprintf(`version: 1
+trial: [test]
+caches:
+  - name: %s
+    target: /cache/data
+checks:
+  - id: pytest
+    image: python:3.13-slim
+    command: python -m pytest
+    caches: [%s]
+suites:
+  - id: test
+    checks: [pytest]
+`, name, name)
+			if _, err := ParseDefinition([]byte(body)); err == nil || !strings.Contains(err.Error(), "reserved") {
+				t.Fatalf("reserved cache name %q was accepted: %v", name, err)
+			}
+		})
 	}
 }
 

@@ -71,17 +71,18 @@ type MachineAgent struct {
 // MachineSummary is one row of the Machines list. A figure the engine does not
 // measure stays nil, so the client shows no count instead of a zero.
 type MachineSummary struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Roles     []machines.Role `json:"roles"`
-	Local     bool            `json:"local"`
-	Enabled   bool            `json:"enabled"`
-	Status    MachineStatus   `json:"status"`
-	CISlots   int             `json:"ciSlots"`
-	CPU       *int            `json:"cpu,omitempty"`
-	Agents    *int            `json:"agents,omitempty"`
-	Computers *int            `json:"computers,omitempty"`
-	CI        *MachineCISlots `json:"ci,omitempty"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Roles           []machines.Role `json:"roles"`
+	Local           bool            `json:"local"`
+	Enabled         bool            `json:"enabled"`
+	Status          MachineStatus   `json:"status"`
+	CISlots         int             `json:"ciSlots"`
+	AllowHostChecks bool            `json:"allowHostChecks"`
+	CPU             *int            `json:"cpu,omitempty"`
+	Agents          *int            `json:"agents,omitempty"`
+	Computers       *int            `json:"computers,omitempty"`
+	CI              *MachineCISlots `json:"ci,omitempty"`
 }
 
 // MachineHarness is one agent harness installed on a machine and its version.
@@ -152,10 +153,11 @@ type MachineLoad struct {
 // MachinePatch is one change to a machine. A nil field keeps its value; the
 // store checks the result before it writes.
 type MachinePatch struct {
-	Enabled *bool            `json:"enabled"`
-	Roles   *[]machines.Role `json:"roles"`
-	CISlots *int             `json:"ciSlots"`
-	SSH     *string          `json:"ssh"`
+	Enabled         *bool            `json:"enabled"`
+	Roles           *[]machines.Role `json:"roles"`
+	CISlots         *int             `json:"ciSlots"`
+	AllowHostChecks *bool            `json:"allowHostChecks"`
+	SSH             *string          `json:"ssh"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -232,6 +234,9 @@ func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePat
 	}
 	if patch.CISlots != nil {
 		m.CISlots = *patch.CISlots
+	}
+	if patch.AllowHostChecks != nil {
+		m.AllowHostChecks = *patch.AllowHostChecks
 	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
@@ -357,13 +362,14 @@ func ciUsedSlots(runs []MachineCIRun) int {
 // same one bar as this engine's own row.
 func machineSummary(m machines.Machine) MachineSummary {
 	out := MachineSummary{
-		ID:      m.ID,
-		Name:    m.Name,
-		Roles:   m.Roles,
-		Local:   m.Local,
-		Enabled: m.Enabled,
-		Status:  machineStatus(m),
-		CISlots: m.CISlots,
+		ID:              m.ID,
+		Name:            m.Name,
+		Roles:           m.Roles,
+		Local:           m.Local,
+		Enabled:         m.Enabled,
+		Status:          machineStatus(m),
+		CISlots:         m.CISlots,
+		AllowHostChecks: m.AllowHostChecks,
 	}
 	if !m.Local && m.Load.CPUPercent != nil {
 		cpu := int(math.Round(*m.Load.CPUPercent))

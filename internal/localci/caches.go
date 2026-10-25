@@ -55,6 +55,12 @@ func cacheBase(node string) string {
 	return fmt.Sprintf("/var/tmp/dyna-local-ci-%d/%s", os.Getuid(), node)
 }
 
+func repositoryCacheRoot(base string) string { return path.Join(base, "caches") }
+
+func repositoryCachePath(base, name string) string {
+	return path.Join(repositoryCacheRoot(base), name)
+}
+
 //go:embed cache_clean.sh
 var ciCacheCleanBody string
 
@@ -78,11 +84,14 @@ func baseLinkGuard(base string) string {
 // after the prepare stage. Docker and the node resolve a bind source link on
 // the host, so such a link would make a run read, write and prune a cache
 // outside Dyna's own tree. It also refuses a linked base or parent.
-func cacheLinkGuard(base string) string {
+func cacheLinkGuard(base string, names []string) string {
 	q := shellquote.Quote
 	guard := baseLinkGuard(base)
-	for _, name := range []string{"go-build", "go-mod", "npm"} {
-		unsafe := path.Join(base, name)
+	root := repositoryCacheRoot(base)
+	guard += "if [ -L " + q(root) + " ]; then echo " +
+		q("unsafe CI cache root "+root+" is a symlink to") + " \"$(readlink -- " + q(root) + ")\" >&2; exit 69; fi; "
+	for _, name := range names {
+		unsafe := repositoryCachePath(base, name)
 		guard += "if [ -L " + q(unsafe) + " ]; then echo " +
 			q("unsafe CI cache path "+unsafe+" is a symlink to") + " \"$(readlink -- " + q(unsafe) + ")\" >&2; exit 69; fi; "
 	}
@@ -98,7 +107,7 @@ func cacheLinkGuard(base string) string {
 // exclusive lock and prints nothing.
 func cacheRepairScript(base string, wait time.Duration) string {
 	q := shellquote.Quote
-	build, mod := path.Join(base, "go-build"), path.Join(base, "go-mod")
+	build, mod := repositoryCachePath(base, "go-build"), repositoryCachePath(base, "go-mod")
 	repair := "b=" + q(base) + "; "
 	for _, cachePath := range []string{build, mod} {
 		backup := cachePath + ".before-d48"
@@ -120,7 +129,7 @@ func cacheRepairScript(base string, wait time.Duration) string {
 }
 
 // CacheKind names one managed cache path that a run can repair. The values are
-// the path names under the managed base.
+// the path names under the repository cache root.
 type CacheKind string
 
 const (

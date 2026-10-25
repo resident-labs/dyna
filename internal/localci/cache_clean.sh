@@ -14,12 +14,12 @@
 #   DYNA_CI_CACHE_CAP_KB=...   size cap in KiB for every cache, for a caller
 #                              that runs this script directly; 0 turns the size
 #                              bound off. Defaults: 20 GiB go-build, 10 GiB
-#                              go-mod, 5 GiB npm. A cache over its cap loses
-#                              its oldest entries until it fits, even when they
-#                              are recent.
+#                              go-mod, and 5 GiB for every other cache. A cache
+#                              over its cap loses its oldest entries until it fits,
+#                              even when they are recent.
 #
 # A root is the directory a run keeps its caches in, holding runs/,
-# diagnostics/ and go-build/. The caller passes the one it writes to, which
+# diagnostics/ and caches/. The caller passes the one it writes to, which
 # names the controller's user ID, so the ID here never has to match it.
 #
 # It prints one DYNA_CI_CACHE_CLEAN_ITEM <kb> <path> line per path it removes,
@@ -169,7 +169,7 @@ cap_kb() {
   go-build) echo $((20 * 1024 * 1024)) ;;
   go-mod) echo $((10 * 1024 * 1024)) ;;
   npm) echo $((5 * 1024 * 1024)) ;;
-  *) echo 0 ;;
+  *) echo $((5 * 1024 * 1024)) ;;
   esac
 }
 
@@ -267,9 +267,20 @@ trim_caches() {
     exec 8>&-
     return 0
   fi
+  if [ -L "$base/caches" ]; then
+    echo "dyna-ci-clean: refusing linked repository cache root $base/caches" >&2
+    exec 8>&-
+    return 1
+  fi
+  for path in "$base"/caches/*; do
+    name=${path##*/}
+    # A cache path that is a link names another cache; never trim through it.
+    [ -d "$path" ] && [ ! -L "$path" ] || continue
+    trim_cache "$name" "$path" "$(cap_kb "$name")" || failed=1
+  done
+  # Also clean caches written before the repository cache namespace existed.
   for name in go-build go-mod npm; do
     path=$base/$name
-    # A cache path that is a link names another cache; never trim through it.
     [ -d "$path" ] && [ ! -L "$path" ] || continue
     trim_cache "$name" "$path" "$(cap_kb "$name")" || failed=1
   done
