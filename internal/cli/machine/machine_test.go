@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/store/storetest"
+	"dyna-agent/internal/websvc"
 )
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -46,6 +48,7 @@ func find(list []machines.Machine, name string) (machines.Machine, bool) {
 
 func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	storetest.DataDir(t)
+	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) error { return nil })
 	ctx := context.Background()
 	localName := localMachineName(t)
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab", "--ci-slots", "2"); err != nil {
@@ -121,4 +124,36 @@ func localMachineName(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return local.Name
+}
+
+func stubSaveMachine(t *testing.T, save func(context.Context, string, websvc.MachinePatch) error) {
+	t.Helper()
+	previous := saveMachine
+	saveMachine = save
+	t.Cleanup(func() { saveMachine = previous })
+}
+
+func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
+	storetest.DataDir(t)
+	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) error {
+		called = true
+		return errors.New("SaveMachine is owner only")
+	})
+	if _, err := run(t, "edit", "hermes", "--allow-host-checks"); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("session host-check edit = %v, want owner denial", err)
+	}
+	if !called {
+		t.Fatal("host-check edit bypassed the engine")
+	}
+	saved, err := (machines.Store{}).Get(context.Background(), "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.AllowHostChecks {
+		t.Fatal("denied host-check edit changed the registry")
+	}
 }

@@ -268,9 +268,9 @@ func prepare(conn *sql.Conn, old int) error {
 	return inheritHostChecks(ctx, conn)
 }
 
-// inheritHostChecks is a one-time migration for machines that already ran the
-// old host-based computer-smoke check. New machines and machines without that
-// evidence stay opted out. A repository file cannot grant this permission.
+// inheritHostChecks is a one-time migration for machines with proof that the
+// old host-based computer-smoke command started. New machines and machines with
+// only setup evidence stay opted out. A repository file cannot grant permission.
 // TODO: legacy/shim remove when pre-repository-definition local_ci_results are
 // no longer retained; after that, every machine uses only its explicit setting.
 func inheritHostChecks(ctx context.Context, conn *sql.Conn) error {
@@ -283,10 +283,14 @@ WHERE EXISTS (
  SELECT 1 FROM local_ci_results AS results, json_each(results.payload,'$.suites') AS item
  WHERE json_extract(item.value,'$.suite')='computer-smoke'
  AND json_extract(item.value,'$.node')=machines.name
+ AND (json_extract(item.value,'$.status')='passed'
+  OR (json_extract(item.value,'$.status')='failed' AND json_extract(item.value,'$.cause')='test-failure'))
 ) OR EXISTS (
  SELECT 1 FROM local_ci_results AS results, json_each(results.payload,'$.checks') AS item
  WHERE json_extract(item.value,'$.suite')='computer-smoke'
  AND json_extract(item.value,'$.node')=machines.name
+ AND (json_extract(item.value,'$.status')='passed'
+  OR (json_extract(item.value,'$.status')='failed' AND json_extract(item.value,'$.cause')='test-failure'))
 )`)
 	return err
 }

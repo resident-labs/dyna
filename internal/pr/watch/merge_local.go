@@ -303,9 +303,31 @@ func (s *Service) planLocalLaneCI(ctx context.Context, r Record, head string) (l
 		return plan, err
 	}
 	plan.execution = execution
-	base, err := gitRead(ctx, r.RepoPath, "rev-parse", "--verify", "--end-of-options", head+"^1^{commit}")
-	if err != nil {
-		return plan, fmt.Errorf("resolve local trial base: %w", err)
+	base := ""
+	if s.Store != nil {
+		st, err := s.Store.Read()
+		if err != nil {
+			return plan, err
+		}
+		if batch := st.MergeTrials[defaultRepo(r)]; batch != nil {
+			if batch.Head == head {
+				base = batch.Base
+			}
+			if base == "" {
+				for _, stack := range batch.Stacks {
+					if stack.Head == head {
+						base = batch.Base
+						break
+					}
+				}
+			}
+		}
+	}
+	if base == "" {
+		base, err = gitRead(ctx, r.RepoPath, "rev-parse", "--verify", "--end-of-options", head+"^1^{commit}")
+		if err != nil {
+			return plan, fmt.Errorf("resolve local trial base: %w", err)
+		}
 	}
 	required, err := localci.LoadDefinition(ctx, r.RepoPath, base)
 	if errors.Is(err, localci.ErrDefinitionNotFound) {

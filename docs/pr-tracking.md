@@ -373,8 +373,8 @@ The GitHub workflow stays unchanged and always checks landed code on main.
 Each machine limits concurrent checks with its slot count. Local work runs with
 systemd CPU and memory limits and a lower process priority. Containers also
 limit CPU, memory, and process counts. Machines reuse repository-declared
-caches in directories Dyna owns. Supported cache kinds have size caps and age
-cleanup. A run that finds a linked
+caches under the runner's separate `caches/` directory. Every cache has a size
+cap and age cleanup. A run that finds a linked
 go-build or go-mod path keeps the link beside the cache as `.before-d48`,
 creates a real directory under the exclusive cache lock, and posts a typed
 machine notice. Any other unsafe cache link stops the run, so it never mounts

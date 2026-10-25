@@ -302,9 +302,15 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			}
 		}
 	}
+	cancellationDefinition := plan.execution
+	if conclusiveLocal {
+		// Saved failures stay readable without their old commits. Cancellation
+		// classification gets the head graph separately when that graph is available.
+		cancellationDefinition, _ = localci.LoadDefinition(ctx, r.RepoPath, r.Head)
+	}
 	// A run Dyna cancelled for local CI never tested the head. Drop it here,
 	// so no later step spends an artifact read or a log excerpt on it.
-	snap = withoutLocalHostedCancellations(snap, saved, plan.execution)
+	snap = withoutLocalHostedCancellations(snap, saved, cancellationDefinition)
 	if !enabled {
 		// In local mode a saved local result can decide the head without a ready
 		// node. A host that is briefly unavailable must not restart the hosted

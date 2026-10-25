@@ -191,6 +191,10 @@ func ParseDefinition(body []byte) (*Definition, error) {
 		if !definitionID.MatchString(cache.Name) {
 			return nil, fmt.Errorf("invalid cache name %q", cache.Name)
 		}
+		switch cache.Name {
+		case "runs", "slots", "diagnostics", "caches":
+			return nil, fmt.Errorf("cache name %q is reserved for runner state", cache.Name)
+		}
 		if _, exists := caches[cache.Name]; exists {
 			return nil, fmt.Errorf("duplicate cache %q", cache.Name)
 		}

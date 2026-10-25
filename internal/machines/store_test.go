@@ -259,9 +259,11 @@ func TestMigrateInheritsHostCheckPermissionFromComputerSmoke(t *testing.T) {
 	t.Cleanup(func() { database.Close(dir) })
 	_, err = db.Exec(machinesVersionOneSchema + `
 INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms) VALUES
- ('m_other','other','["ci"]','ari@other',1,1,0,1000,1000);
+ ('m_other','other','["ci"]','ari@other',1,1,0,1000,1000),
+ ('m_setup','setup','["ci"]','ari@setup',1,1,0,1000,1000);
 CREATE TABLE local_ci_results(repo TEXT, sha TEXT, payload BLOB NOT NULL);
-INSERT INTO local_ci_results VALUES('repo','abc','{"node":"hermes","sha":"abc","status":"passed","suites":[{"suite":"computer-smoke","node":"hermes","status":"passed"}]}');`)
+INSERT INTO local_ci_results VALUES('repo','abc','{"node":"hermes","sha":"abc","status":"passed","suites":[{"suite":"computer-smoke","node":"hermes","status":"passed"}]}');
+INSERT INTO local_ci_results VALUES('repo','def','{"node":"setup","sha":"def","status":"error","suites":[{"suite":"computer-smoke","node":"setup","status":"error","cause":"container-failure"}]}');`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +279,10 @@ INSERT INTO local_ci_results VALUES('repo','abc','{"node":"hermes","sha":"abc","
 	other, err := s.Get(context.Background(), "other")
 	if err != nil || other.AllowHostChecks {
 		t.Fatalf("unrelated machine gained host permission: %#v, %v", other, err)
+	}
+	setup, err := s.Get(context.Background(), "setup")
+	if err != nil || setup.AllowHostChecks {
+		t.Fatalf("failed setup granted host permission: %#v, %v", setup, err)
 	}
 	added, err := s.Save(context.Background(), Machine{Name: "added", Roles: []Role{RoleCI}, SSH: "ari@added", CISlots: 1, Enabled: true})
 	if err != nil || added.AllowHostChecks {
