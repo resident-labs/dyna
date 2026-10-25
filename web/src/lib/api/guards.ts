@@ -8,6 +8,7 @@ import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Me
 import type { VoicePageEvent } from './voice.ts'
 import type { SessionReference } from './session.ts'
 import { eventSpecs, isEventPayload } from '../rooms/events.gen.ts'
+import type { IssueState } from '../rooms/events.gen.ts'
 
 export type Guard<T> = (v: unknown) => v is T
 
@@ -34,6 +35,16 @@ const maybe = <T>(guard: Guard<T>): Guard<T | undefined> => (v): v is T | undefi
 export const nullable = (v: unknown, guard: Guard<unknown>): boolean => v === null || guard(v)
 
 const isStringMap = (v: unknown): v is Record<string, string> => isRecord(v) && Object.values(v).every(isString)
+
+// issueStates names every state the issue protocol defines, keyed by the
+// generated union, so a new state fails to compile here until it is listed.
+const issueStates: Record<IssueState, true> = { open: true, goal: true, exported: true, closed: true }
+
+// isIssueState accepts only a state the engine defines. Source: IssueState in
+// internal/room/events.go.
+export function isIssueState(v: unknown): v is IssueState {
+  return isString(v) && Object.hasOwn(issueStates, v)
+}
 
 function isShot(v: unknown): v is Shot {
   return isRecord(v) && isNumber(v.width) && isString(v.id)

@@ -61,7 +61,7 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 		}
 		// The default is unhandled work. Closed goals leave their historical
 		// goal ID, but do not keep the issue in progress.
-		if !all && (issue.InProgress || issue.State != "open" && issue.State != "goal") {
+		if !all && (issue.InProgress || issue.State != room.IssueStateOpen && issue.State != room.IssueStateGoal) {
 			continue
 		}
 		out = append(out, issue)
@@ -120,7 +120,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 	return s.rooms().ChangeIssue(r.ID, id, by, func(i *room.Issue) error {
 		switch action {
 		case "close":
-			i.State = "closed"
+			i.State = room.IssueStateClosed
 			i.Reason = strings.TrimSpace(value)
 		case "goal":
 			in := goals.Input{Text: i.Title, Shared: true}
@@ -169,7 +169,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 			if err != nil {
 				return err
 			}
-			i.State, i.GoalID = "goal", g.ID
+			i.State, i.GoalID = room.IssueStateGoal, g.ID
 		case "export":
 			if ghclient.Access(ctx, r) != ghclient.ReadWrite {
 				return fmt.Errorf("room %s has read-only GitHub access", r.Name)
@@ -202,7 +202,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 			if err != nil || u.Scheme != "https" || u.Host == "" || !strings.Contains(u.Path, "/issues/") {
 				return fmt.Errorf("gh issue create returned an invalid issue URL")
 			}
-			i.State, i.GitHubURL = "exported", raw
+			i.State, i.GitHubURL = room.IssueStateExported, raw
 		default:
 			return fmt.Errorf("unknown issue action %q", action)
 		}

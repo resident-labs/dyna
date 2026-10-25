@@ -181,6 +181,16 @@ const (
 // issueStates lists every issue state the web needs as a union type.
 var issueStates = []IssueState{IssueStateOpen, IssueStateGoal, IssueStateExported, IssueStateClosed}
 
+// Valid reports whether the state is one the protocol defines.
+func (s IssueState) Valid() bool {
+	for _, known := range issueStates {
+		if s == known {
+			return true
+		}
+	}
+	return false
+}
+
 // IssueActor is who caused an issue change: the engine itself, or the address
 // of the session that did. The engine is not a session, so a change the engine
 // makes names itself here instead of borrowing a session's name.
