@@ -454,14 +454,16 @@ func inheritedToken(env []string, host string) string {
 	return environmentValue(env, fallback)
 }
 
-// environmentValue reads the first value for key, as the shell does.
+// environmentValue reads the value for key the way os/exec prepares a command
+// environment: the last duplicate wins, so a later override is the one gh gets.
 func environmentValue(env []string, key string) string {
+	value := ""
 	for _, entry := range env {
-		if value, ok := strings.CutPrefix(entry, key+"="); ok {
-			return value
+		if found, ok := strings.CutPrefix(entry, key+"="); ok {
+			value = found
 		}
 	}
-	return ""
+	return value
 }
 
 // tokenLogin reports the login a token belongs to. It reads no saved credential,
