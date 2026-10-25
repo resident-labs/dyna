@@ -11,13 +11,13 @@ func TestCatalogEnrichesOnlyExactDiscoveredRoutes(t *testing.T) {
 	s := New(Options{Models: func(context.Context, string, string, []string) ([]adapters.Model, error) {
 		return []adapters.Model{{ID: "opencode/goose-free"}, {ID: "opencode-go/kimi-k3"}}, nil
 	}})
-	s.installed = func() []Installation { return []Installation{{Harness: "opencode", Executable: "/oc"}} }
-	c, err := s.ProfileModels(context.Background(), "opencode", false)
+	s.installed = func() []Installation { return []Installation{{Harness: "pi", Executable: "/pi"}} }
+	c, err := s.ProfileModels(context.Background(), "pi", false)
 	if err != nil || len(c.Models) != 2 {
 		t.Fatalf("%+v %v", c, err)
 	}
 	for _, m := range c.Models {
-		if m.ID == "opencode-go/kimi-k3" && (m.Context != 1048576 || m.Output != 131072 || m.Category != "go") {
+		if m.ID == "opencode-go/kimi-k3" && (m.Category != "go" || len(m.Limits) == 0) {
 			t.Fatalf("exact catalog metadata missing: %+v", m)
 		}
 		if m.ID == "opencode/goose-free" && m.Context != 0 {
@@ -33,10 +33,10 @@ func TestCatalogCacheFollowsExecutable(t *testing.T) {
 		calls++
 		return []adapters.Model{{ID: path}}, nil
 	}})
-	s.installed = func() []Installation { return []Installation{{Harness: "opencode", Executable: executable}} }
-	first, _ := s.ProfileModels(context.Background(), "opencode", false)
+	s.installed = func() []Installation { return []Installation{{Harness: "pi", Executable: executable}} }
+	first, _ := s.ProfileModels(context.Background(), "pi", false)
 	executable = "/second/oc"
-	second, _ := s.ProfileModels(context.Background(), "opencode", false)
+	second, _ := s.ProfileModels(context.Background(), "pi", false)
 	if calls != 2 || first.Models[0].ID == second.Models[0].ID {
 		t.Fatalf("old executable catalog reused: calls=%d", calls)
 	}
@@ -59,11 +59,11 @@ func TestCatalogCacheFollowsActiveAccount(t *testing.T) {
 		return []adapters.Model{{ID: account + "-model"}}, nil
 	}})
 	s.installed = func() []Installation {
-		return []Installation{{Harness: "opencode", Executable: "/oc", AccountID: account}}
+		return []Installation{{Harness: "pi", Executable: "/pi", AccountID: account}}
 	}
-	first, _ := s.ProfileModels(context.Background(), "opencode", false)
+	first, _ := s.ProfileModels(context.Background(), "pi", false)
 	account = "second"
-	second, _ := s.ProfileModels(context.Background(), "opencode", false)
+	second, _ := s.ProfileModels(context.Background(), "pi", false)
 	if calls != 2 || first.Models[0].ID == second.Models[0].ID {
 		t.Fatalf("an account switch reused the old catalog: calls=%d", calls)
 	}
@@ -73,8 +73,8 @@ func TestCatalogCarriesTheCompactRule(t *testing.T) {
 	s := New(Options{Models: func(context.Context, string, string, []string) ([]adapters.Model, error) { return nil, nil }})
 	s.installed = func() []Installation { return nil }
 	// The rule shows even when the harness is not installed.
-	if c, _ := s.ProfileModels(context.Background(), "muse", false); !c.Compact.Window || c.Compact.Reason != "" {
-		t.Fatalf("muse rule = %+v", c.Compact)
+	if c, _ := s.ProfileModels(context.Background(), "pi", false); !c.Compact.Trigger || c.Compact.Reason != "" {
+		t.Fatalf("pi rule = %+v", c.Compact)
 	}
 	if c, _ := s.ProfileModels(context.Background(), "mock", false); c.Compact.Reason == "" {
 		t.Fatalf("mock rule = %+v", c.Compact)

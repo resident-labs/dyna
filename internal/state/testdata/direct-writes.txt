@@ -11,9 +11,6 @@ not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's
 not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeLock 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeManager.activate 2 # a harness CLI's own credential and config files
-not-state internal/account/native/muse.go museLock 1 # a harness CLI's own credential and config files
-not-state internal/account/native/muse.go museManager.Activate 2 # a harness CLI's own credential and config files
-not-state internal/account/native/opencode.go lockOpenCode 1 # a harness CLI's own credential and config files
 violation internal/agentslice/agentslice.go WriteSlice 1
 not-state internal/cli/ci/ci.go NewCommand 1 # exports a JUnit report to a caller-selected artifact path
 not-state internal/cli/computer/browser_deps.go playwrightModule 2 # browser launcher files of one computer
@@ -93,20 +90,16 @@ not-state internal/harness/home/publication.go publish 2 # a harness CLI's priva
 not-state internal/harness/inprocess.go runInProcess 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/instructions.go writeFileOnce 2 # instruction input file for a harness CLI, written once by content hash
 not-state internal/harness/mock.go runMockSession 2 # mock harness for tests
-not-state internal/harness/opencodefixture/fixture.go New 1 # test fixture runtime
 not-state internal/harness/process.go runOnce 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
-not-state internal/harness/muse_run.go runMuseTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/pi_rpc.go runPiTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/sessionhost/client.go socketHost.connect 1 # removes a dead session host's socket before it starts a new host
 not-state internal/harness/sessionhost/wire.go lockFile 1 # flock lock file for one session host, not state
-not-state internal/harness/steerhook.go steerHook.argv 1 # per-turn Muse hook launch configuration, removed after the turn; no queried state
 not-state internal/harness/runtime/accounts_switch.go Accounts.Remove 2 # removes a harness CLI's private homes; the account record goes through the accounts store
 not-state internal/harness/runtime/accounts_switch.go Accounts.SwitchWithProgress 1 # creates the harness's private home folder; the account registry and selection live in dyna.db
 not-state internal/harness/runtime/accounts_switch.go Accounts.dropNewEntries 1 # removes the private homes a failed switch created
 not-state internal/harness/runtime/accounts_switch.go openAccountLock 1 # flock lock file, not state
 not-state internal/harness/runtime/pi_renew.go runPiRenewScript 2 # the embedded renewal script in a private temp dir, not state
 not-state internal/harness/runtime/accounts_switch.go writePrivateAccountJSONChecked 2 # the one writer of a harness CLI's private home files (login markers, leases, service config, provider keys); the account selection lives in dyna.db
-not-state internal/harness/runtime/adapter_muse.go installMuseArtifact 2 # a harness CLI's own runtime files
 not-state internal/harness/runtime/bundle.go BundleManager.InstallAndSelect 1 # publishes the staged candidate under the manager lock
 not-state internal/harness/runtime/bundle.go BundleManager.Rollback 1 # installed harness bundles: clears the rollback marker it consumed
 not-state internal/harness/runtime/bundle.go BundleManager.Uninstall 2 # installed harness bundles
@@ -141,8 +134,6 @@ not-state internal/harness/runtime/resource_lease.go ResourceLease.Close 1 # flo
 not-state internal/harness/runtime/resource_lease.go newResourceLease 3 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go removeResourceLease 2 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/runtime.go Runtime.EnsureCatalog 1 # removes a stale skill folder from a harness CLI's own config
-not-state internal/harness/steerhook.go newSteerHook 1 # per-run steer-hook handoff folder between the runner and the hook process
-not-state internal/harness/steerhook.go steerHook.cleanup 1 # per-run steer-hook handoff folder between the runner and the hook process
 not-state internal/hookinstall/install.go Service.Locked 2 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go copyFile 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go driver.run 1 # self-update install jobs and unit files (an inbox the engine does not own)
@@ -243,7 +234,6 @@ not-state internal/harness/claude_session.go runClaudeTurn 2 # append-only turn 
 not-state internal/fsutil/tree.go RemoveTree 1 # removes a read-only folder tree the caller names, such as a test folder or a frozen harness bundle
 not-state internal/userservices/engine_restart_legacy.go retireEngineRestart 1 # removes the retired dyna-engine-restart.service unit file; its SQLite row is deleted through internal/state
 
-not-state internal/harness/opencode_run.go runOpenCodeTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/websvc/devicestore/store.go Store.Key 2 # the immutable web signing key and its creation lock stay files
 not-state internal/harness/runtime/signin_pi_provider.go Runtime.piProviderFlow 2 # makes and removes the scratch home of a Pi sign-in, a harness CLI private home
 not-state internal/harness/fakeworker/fakeworker.go InstallClaude 1 # writes the fake CLI executable into a test temp dir; nothing shared is stored

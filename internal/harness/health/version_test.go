@@ -23,17 +23,17 @@ func versionFake(t *testing.T, name, body string) (string, profile.Profile) {
 	if err := fsutil.WriteExecutable(path, []byte("#!/bin/sh\n"+body+"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return path, profile.Profile{Harness: profile.HarnessMuse, RuntimeExecutable: path, Env: map[string]string{"HOME": t.TempDir()}}
+	return path, profile.Profile{Harness: profile.HarnessPi, RuntimeExecutable: path, Env: map[string]string{"HOME": t.TempDir()}}
 }
 
 // The default two-second deadline is not under test in these tests. Starting
 // a shell script can exceed it on a loaded host, so they use a long deadline.
-// The private copy is checked; a muse on PATH is never run.
+// The private copy is checked; a pi on PATH is never run.
 func TestDetectVersionUsesPrivateExecutable(t *testing.T) {
-	host, _ := versionFake(t, "muse", "exit 99")
+	host, _ := versionFake(t, "pi", "exit 99")
 	t.Setenv("PATH", filepath.Dir(host))
-	path, p := versionFake(t, "muse", `[ "$#" = 1 ] && [ "$1" = --version ] || exit 98
-printf 'muse-cli 1.2.3\n'`)
+	path, p := versionFake(t, "pi", `[ "$#" = 1 ] && [ "$1" = --version ] || exit 98
+printf 'pi-cli 1.2.3\n'`)
 	got := detectVersion(context.Background(), p, time.Minute)
 	if got.Path != path || !got.Installed || got.Version != "1.2.3" || got.Error != "" {
 		t.Fatalf("unexpected discovery: %+v", got)
@@ -41,7 +41,7 @@ printf 'muse-cli 1.2.3\n'`)
 }
 
 func TestDetectVersionRefreshAfterBinaryChange(t *testing.T) {
-	path, p := versionFake(t, "muse", "printf '1.2.3\\n'")
+	path, p := versionFake(t, "pi", "printf '1.2.3\\n'")
 	first := detectVersion(context.Background(), p, time.Minute)
 	if first.Version != "1.2.3" {
 		t.Fatalf("initial version: %+v", first)
@@ -57,7 +57,7 @@ func TestDetectVersionRefreshAfterBinaryChange(t *testing.T) {
 }
 
 func TestDetectVersionRefreshAfterMtimeChange(t *testing.T) {
-	path, p := versionFake(t, "muse", "printf '1.2.3\\n'")
+	path, p := versionFake(t, "pi", "printf '1.2.3\\n'")
 	if got := detectVersion(context.Background(), p, time.Minute); got.Version != "1.2.3" {
 		t.Fatalf("initial version: %+v", got)
 	}
@@ -83,7 +83,7 @@ func TestDetectVersionRefreshAfterMtimeChange(t *testing.T) {
 // came back as "version command failed"; a late copy goroutine on a loaded
 // CI host gave the same failure (TestDetectVersionCacheAndEnvironmentChange).
 func TestDetectVersionIgnoresDescendantHoldingOutput(t *testing.T) {
-	_, p := versionFake(t, "muse", `printf 'muse-cli 1.2.3\n'
+	_, p := versionFake(t, "pi", `printf 'pi-cli 1.2.3\n'
 /bin/sleep 5 &`)
 	start := time.Now()
 	got := detectVersion(context.Background(), p, time.Minute)
@@ -96,7 +96,7 @@ func TestDetectVersionIgnoresDescendantHoldingOutput(t *testing.T) {
 }
 
 func TestDetectVersionCacheAndEnvironmentChange(t *testing.T) {
-	path, p := versionFake(t, "muse", `printf x >> "$COUNT_FILE"
+	path, p := versionFake(t, "pi", `printf x >> "$COUNT_FILE"
 printf '%s\n' "$FAKE_VERSION"`)
 	count := filepath.Join(t.TempDir(), "calls")
 	p.Env["COUNT_FILE"], p.Env["FAKE_VERSION"] = count, "1.2.3"
@@ -144,14 +144,14 @@ func TestDetectVersionMissingPrivateCopy(t *testing.T) {
 			if installable {
 				return false, nil
 			}
-			return false, errors.New("Install muse on the Harnesses page first.")
+			return false, errors.New("Install pi on the Harnesses page first.")
 		}
-		p := profile.Profile{Harness: profile.HarnessMuse, Env: map[string]string{"HOME": t.TempDir()}}
+		p := profile.Profile{Harness: profile.HarnessPi, Env: map[string]string{"HOME": t.TempDir()}}
 		got := detectVersion(context.Background(), p, time.Minute)
 		if got.Installed || got.Path != "" || got.Installable != installable || got.Error == "" {
 			t.Fatalf("installable=%v: %+v", installable, got)
 		}
-		if !installable && got.Error != "Install muse on the Harnesses page first." {
+		if !installable && got.Error != "Install pi on the Harnesses page first." {
 			t.Fatalf("missing fix in error: %q", got.Error)
 		}
 	}
@@ -181,7 +181,7 @@ func TestDetectVersionCancelKillsProcessGroup(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, p := versionFake(t, "muse", `(
+	_, p := versionFake(t, "pi", `(
 exec 3>"$FIFO"
 /bin/sleep 60
 printf escaped > "$MARKER"
@@ -246,13 +246,13 @@ wait`)
 
 func TestDetectVersionBoundsOutputAndHidesErrors(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
-		{"stderr", "printf 'muse 3.4.5-beta.2\\n' >&2", "3.4.5-beta.2"},
+		{"stderr", "printf 'pi 3.4.5-beta.2\\n' >&2", "3.4.5-beta.2"},
 		{"failure", "printf '%s' \"$SECRET\" >&2; exit 1", ""},
 		{"large", "i=0; while [ $i -lt 10000 ]; do printf x; i=$((i+1)); done", ""},
 		{"large-version", "printf 1.2.3-; i=0; while [ $i -lt 500 ]; do printf x; i=$((i+1)); done", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, p := versionFake(t, "muse", tc.body)
+			_, p := versionFake(t, "pi", tc.body)
 			p.Env["SECRET"] = "PRIVATE_TOKEN_ABC"
 			got := detectVersion(context.Background(), p, time.Minute)
 			if got.Version != tc.want || len(got.Version) > 128 {
@@ -269,7 +269,7 @@ func TestDetectVersionBoundsOutputAndHidesErrors(t *testing.T) {
 }
 
 func TestDetectVersionCallerCancellationDoesNotPoisonCache(t *testing.T) {
-	_, p := versionFake(t, "muse", "printf '1.2.3\\n'")
+	_, p := versionFake(t, "pi", "printf '1.2.3\\n'")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if got := DetectVersion(ctx, p); got.Error == "" {
@@ -289,13 +289,13 @@ func TestDetectVersionParsesCompleteTokens(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{"v-prefix", "printf 'v2.1.2 (build)\\n'", "2.1.2"},
 		{"v-only", "printf 'v1.1.0'", "1.1.0"},
-		{"prerelease", "printf 'muse 1.4.10-R6427.1\\n'", "1.4.10-R6427.1"},
+		{"prerelease", "printf 'pi 1.4.10-R6427.1\\n'", "1.4.10-R6427.1"},
 		{"build", "printf 'x 2.1.2+build.4\\n'", "2.1.2+build.4"},
 		{"glued", "printf 'xyz1.2.3\\n'", ""},
 		{"four-part", "printf '1.2.3.4\\n'", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, p := versionFake(t, "muse", tc.body)
+			_, p := versionFake(t, "pi", tc.body)
 			got := detectVersion(context.Background(), p, time.Minute)
 			if got.Version != tc.want {
 				t.Fatalf("version = %q, want %q (%+v)", got.Version, tc.want, got)

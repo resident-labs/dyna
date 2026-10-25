@@ -112,7 +112,6 @@ func TestValidateProbeEvidence(t *testing.T) {
 		{"no text", workeroutput.DialectPiJSON, positive, tool, "text events"},
 		{"no tools", workeroutput.DialectPiJSON, positive, message, "tool events"},
 		{"no usage", workeroutput.DialectPiJSON, harness.Result{}, events, "token usage"},
-		{"muse usage unavailable", workeroutput.DialectMuseJSONL, harness.Result{}, events, ""},
 		{"plain text", workeroutput.DialectText, harness.Result{}, message, ""},
 		{"raw is not text", workeroutput.DialectPiJSON, positive, []byte(`{"kind":"raw","raw":"DYNA_PROFILE_CHECK_OK"}`), "text events"},
 	} {
@@ -158,7 +157,6 @@ func TestCheckNativeBinaryUsesProfileEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	for harnessName, binary := range map[string]string{
 		profile.HarnessClaudeCode: "claude", profile.HarnessPi: "pi",
-		profile.HarnessOpenCode: "opencode", profile.HarnessMuse: "muse",
 	} {
 		path := filepath.Join(dir, binary)
 		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {

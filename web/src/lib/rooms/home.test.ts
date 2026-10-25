@@ -34,13 +34,11 @@ test('updates list dyna and installed harnesses with a newer recommended version
     bundles: [
       { harness: 'claude-code', version: '2.4.1', executable: 'claude', directory: '/home/claude' },
       { harness: 'pi', version: '0.63.2', executable: 'pi', directory: '/home/pi' },
-      { harness: 'opencode', version: '1.10.0', executable: 'opencode', directory: '/home/opencode' },
     ],
-    selectedVersions: { 'claude-code': '2.4.1', pi: '0.63.2', opencode: '1.10.0' },
+    selectedVersions: { 'claude-code': '2.4.1', pi: '0.63.2' },
     recommendedVersions: [
       { harness: 'claude-code', version: '2.10.0', status: 'resolved', source: 'npm' },
       { harness: 'pi', version: '0.63.2', status: 'resolved', source: 'npm' },
-      { harness: 'opencode', version: '1.9.0', status: 'resolved', source: 'npm' },
     ],
   }
   const updates = updateRows({ current: '0.42.0', latest: '0.43.1' }, runtimes)

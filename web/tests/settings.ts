@@ -27,7 +27,7 @@ const pane = query.get('pane') || 'harnesses'
 // ?empty=1 shows every list with no rows. ?delay=<ms> slows every api call, to see loading states.
 const empty = query.has('empty')
 const delay = Number(query.get('delay') || 120)
-const caps: Capability[] = ['claude-code', 'opencode', 'grok', 'pi', 'muse'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
+const caps: Capability[] = ['claude-code', 'pi', 'mock'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
 const bundle = (harness: string, version: string): Bundle => ({ harness, version, executable: '', directory: '' })
 const harnessAccount = (id: string, harness: string, label: string, active: boolean): HarnessAccount => ({ id, harness, label, home: '', identity: '', status: 'ready', active, repos: null })
 // The runtime snapshot the fixture changes in place: its lists are never null.
@@ -35,18 +35,17 @@ interface Snapshot extends HarnessSnapshot {
   bundles: Bundle[]
   accounts: HarnessAccount[]
 }
-const selectedVersions: Record<string, string> = { 'claude-code': '2.1.302', opencode: '2.0.32', grok: '1.0.62', pi: '1.3.0', muse: '1.4.10-R6427.1' }
+const selectedVersions: Record<string, string> = { 'claude-code': '2.1.302', pi: '1.3.0' }
 const snapshot: Snapshot = {
-  bundles: [bundle('claude-code', '2.1.302'), bundle('opencode', '2.0.32'), bundle('grok', '1.0.62'), bundle('pi', '1.3.0'), bundle('muse', '1.4.10-R6427.1')],
+  bundles: [bundle('claude-code', '2.1.302'), bundle('pi', '1.3.0')],
   accounts: [
     harnessAccount('claude-3', 'claude-code', 'Work', true),
     harnessAccount('claude-p', 'claude-code', 'Personal', false),
-    harnessAccount('oc-1', 'opencode', 'OpenCode Go', true),
-    harnessAccount('grok-1', 'grok', 'Current Grok account', true),
-    harnessAccount('muse-1', 'muse', 'user@example.com', true),
+    harnessAccount('pi-1', 'pi', 'OpenCode Go', true),
+    harnessAccount('pi-2', 'pi', 'user@example.com', false),
   ],
   profiles: [],
-  capabilities: caps.map((c) => ['grok', 'muse'].includes(c.harness) ? { ...c, status: 'partial', reason: 'No switch verified for native memory.' } : c),
+  capabilities: caps.map((c) => c.harness === 'pi' ? { ...c, status: 'partial', reason: 'No switch verified for native memory.' } : c),
   selectedVersions,
   recommendedVersions: [{ harness: 'claude-code', version: '2.1.310', status: 'resolved', source: 'npm' }],
   installing: [],
@@ -79,14 +78,14 @@ interface Listed extends ProfileList {
 }
 const profileList: Listed = {
   default: 'sol',
-  harnesses: ['claude-code', 'pi', 'opencode', 'muse', 'custom'],
+  harnesses: ['claude-code', 'pi', 'mock', 'custom'],
   unready: {},
   profiles: [
     profile('sol', 'pi', 'openai-codex/gpt-6.1-sol', { taste: 7, intelligence: 9, cost: 8, description: 'A work-horse and thorough debugger for tasks that need intelligence.' }),
     profile('opus', 'claude-code', 'opus', { taste: 10, intelligence: 10, cost: 4, description: 'Highest taste. Use for design and review.', envKeys: ['ANTHROPIC_BASE_URL'] }),
-    profile('mimo', 'opencode', 'opencode-go/mimo-v2.6-pro', { taste: 7, intelligence: 8, cost: 10, models: ['opencode-go/mimo-v2.6-pro', 'opencode-go/glm-5'], description: 'A cheap work-horse for routine implementation.' }),
+    profile('mimo', 'pi', 'opencode-go/mimo-v2.6-pro', { taste: 7, intelligence: 8, cost: 10, models: ['opencode-go/mimo-v2.6-pro', 'opencode-go/glm-5'], description: 'A cheap work-horse for routine implementation.' }),
     profile('haiku', 'claude-code', 'haiku', { taste: 6, intelligence: 7, cost: 9, uses: ['agents'], description: 'Fast mechanical edits from a rigid specification.' }),
-    profile('wonder-full', 'muse', 'muse-wonder-full-1.0', { taste: 10, intelligence: 8, cost: 4, support: support({ status: 'unverified_since_update', version: '1.4.10', items: [supportItem('Token usage', 'no', 'no usage', 'Muse does not print token counts.')] }) }),
+    profile('wonder-full', 'pi', 'muse-wonder-full-1.0', { taste: 10, intelligence: 8, cost: 4, support: support({ status: 'unverified_since_update', version: '1.4.10', items: [supportItem('Token usage', 'no', 'no usage', 'The harness does not print token counts.')] }) }),
     profile('scratch', 'custom', '', { taste: 5, intelligence: 5, cost: 5, disabled: true }),
   ],
 }

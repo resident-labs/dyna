@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
-	for _, h := range []string{"opencode", "pi", "muse"} {
+	for _, h := range []string{"pi"} {
 		t.Run(h, func(t *testing.T) {
 			accounts := testAccounts(t)
 			t.Setenv("DYNA_BIN", "/fake/dyna")
@@ -41,10 +40,6 @@ func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
 			switch h {
 			case "pi":
 				target = filepath.Join(home, "mcp.json")
-			case "muse":
-				target = filepath.Join(gen.Directory, "settings.json")
-			case "opencode":
-				target = filepath.Join(gen.Directory, "settings.json")
 			}
 			raw, err := os.ReadFile(target)
 			if err != nil {
@@ -66,16 +61,6 @@ func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
 			}
 			if restored.Env["MCP_TOKEN"] != "current-canary" || strings.Join(restored.Args, "\x00") != strings.Join(gen.Args, "\x00") {
 				t.Fatal("generation did not restore")
-			}
-			if h == "opencode" {
-				var doc map[string]any
-				if json.Unmarshal(raw, &doc) != nil {
-					t.Fatal("invalid v2 JSON")
-				}
-				mcp := doc["mcp"].(map[string]any)
-				if mcp["servers"] == nil || doc["update"] != "disable" {
-					t.Fatal("incorrect OpenCode v2 schema")
-				}
 			}
 		})
 	}

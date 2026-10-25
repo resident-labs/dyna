@@ -68,7 +68,7 @@ func awaitAccountCondition(t *testing.T, fn func() bool) {
 }
 
 func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
-	for _, h := range []string{"claude-code", "opencode", "muse", "pi"} {
+	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			release, err := a.TurnLease(context.Background(), h)
@@ -261,7 +261,7 @@ func (m sharedLoginManager) Refresh(context.Context, accountnative.Captured) (ac
 	return accountnative.Captured{}, errors.New("test forbids saved refresh")
 }
 func (m sharedLoginManager) LoginCommand(root, integration string) ([]string, []string, error) {
-	if root != "" && m.h != "muse" {
+	if root != "" && m.h != "kimi-code" {
 		return nil, nil, accountnative.ErrUnsupported
 	}
 	return []string{"/fake/native", "login"}, nil, nil
@@ -299,15 +299,12 @@ func setSharedLogin(state *sharedLoginFixture, c accountnative.Captured) {
 }
 
 func TestSharedServiceNativeLoginCompleteAndCancel(t *testing.T) {
-	for _, h := range []string{"opencode", "muse"} {
+	for _, h := range []string{"kimi-code"} {
 		t.Run(h, func(t *testing.T) {
 			a, state, first := setupSharedLogin(t, h)
 			flow, err := a.BeginLogin(context.Background(), first.ID, "/fake/native")
 			if err != nil {
 				t.Fatal(err)
-			}
-			if h == "muse" && flow.Warning != "" {
-				t.Fatal(flow.Warning)
 			}
 
 			shared, _ := a.HarnessHome(h)
@@ -701,191 +698,6 @@ func TestNativeCaptureDuringSkillPublicationAndAuthReplacement(t *testing.T) {
 	}
 }
 
-func TestMusePrivateLoginUsesNativeAdapter(t *testing.T) {
-	for _, useXDG := range []bool{true, false} {
-		name := "xdg-config"
-		if !useXDG {
-			name = "home-fallback"
-		}
-		t.Run(name, func(t *testing.T) {
-			a := testAccounts(t)
-			if !useXDG {
-				t.Setenv("XDG_CONFIG_HOME", "")
-			}
-			defer personalAccountCanaries(t)()
-			realHome, xdgBefore := os.Getenv("HOME"), os.Getenv("XDG_CONFIG_HOME")
-			shared, _ := a.HarnessHome("muse")
-			auth := filepath.Join(shared+".home", ".config", "muse", "auth.json")
-			launcherOnly := filepath.Join(t.TempDir(), "auth.json")
-			launcherBytes := []byte(`{"launcherOnly":"unchanged-fixture"}`)
-			if err := os.WriteFile(launcherOnly, launcherBytes, 0600); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("MUSE_AUTH_PATH", launcherOnly)
-			t.Setenv("META_API_KEY", "inherited-fixture-key")
-			t.Setenv("TBH_CREDENTIAL_BACKEND", "keychain")
-			writeLogin := func(user, canary string) {
-				t.Helper()
-				if err := os.MkdirAll(filepath.Dir(auth), 0700); err != nil {
-					t.Fatal(err)
-				}
-				doc := map[string]any{"schema_version": 1, "future": map[string]bool{"keep": true},
-					"providers": map[string]any{
-						"meta":  map[string]string{"mechanism": "oauth", "access_token": canary, "user_email": user + "@example.test"},
-						"other": map[string]string{"fixture": "preserve-other-provider"},
-					}}
-				raw, _ := json.Marshal(doc)
-				if err := os.WriteFile(auth, raw, 0644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			writeLogin("original", "muse-original-canary")
-			target, err := a.Create("muse", "target")
-			if err != nil {
-				t.Fatal(err)
-			}
-			flow, err := a.BeginLogin(context.Background(), target.ID, "/fake/muse")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if flow.Warning != "" {
-				t.Fatal(flow.Warning)
-			}
-			env := map[string]string{}
-			for _, v := range flow.Env {
-				key, value, _ := strings.Cut(v, "=")
-				env[key] = value
-				if key == "HOME" && value != shared+".home" {
-					t.Fatal(key)
-				}
-			}
-			if env["MUSE_AUTH_PATH"] != auth || env["META_API_KEY"] != "" || env["TBH_CREDENTIAL_BACKEND"] != "file" {
-				t.Fatal("launcher/native login scope or auth clearing differs")
-			}
-			if _, _, _, err = a.Login(target.ID, "/fake/muse"); err == nil {
-				t.Fatal("ungated shared Muse login allowed")
-			}
-			if _, err = a.Capture(context.Background(), target.ID, "/fake/muse"); err == nil {
-				t.Fatal("ungated shared Muse capture allowed")
-			}
-			writeLogin("target", "muse-target-canary")
-			signed, err := flow.Complete(context.Background())
-			if err != nil || !signed.Active || signed.Identity != "meta:email:target@example.test" {
-				t.Fatal("native Muse login completion failed", err)
-			}
-			nestedSkills := filepath.Join(shared+".home", ".config", "muse", "skills")
-			generated := filepath.Join(store.DataDir(), "harnesses", "generations", "muse-fixture", "skills")
-			for _, dir := range []string{filepath.Dir(nestedSkills), generated} {
-				if err = os.MkdirAll(dir, 0700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			source := filepath.Join(generated, "SKILL.md")
-			if err = os.WriteFile(source, []byte("fixture skill"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			if err = os.Symlink(generated, nestedSkills); err != nil {
-				t.Fatal(err)
-			}
-			rows, err := a.List()
-			if err != nil {
-				t.Fatal(err)
-			}
-			var original NativeAccount
-			for _, row := range rows {
-				if row.Identity == "meta:email:original@example.test" {
-					original = row
-				}
-			}
-			if original.ID == "" {
-				t.Fatal("outgoing private Muse login was not saved")
-			}
-			if err = a.Switch(context.Background(), original.ID, "/fake/muse"); err != nil {
-				t.Fatal(err)
-			}
-			manager, err := a.Manager(original.ID, "/fake/muse")
-			if err != nil {
-				t.Fatal(err)
-			}
-			captured, err := manager.Capture(context.Background(), "")
-			if err != nil || len(captured) != 1 || captured[0].Identity != original.Identity {
-				t.Fatal("runtime manager did not read private XDG login", err)
-			}
-			raw, err := os.ReadFile(auth)
-			if err != nil || !strings.Contains(string(raw), "muse-original-canary") || !strings.Contains(string(raw), "preserve-other-provider") {
-				t.Fatal("Muse switch lost private login or unrelated native records", err)
-			}
-			var preserved struct {
-				Future struct {
-					Keep bool `json:"keep"`
-				} `json:"future"`
-			}
-			if json.Unmarshal(raw, &preserved) != nil || !preserved.Future.Keep {
-				t.Fatal("Muse switch lost unrelated native root records")
-			}
-
-			// Cancelling another interactive sign-in restores this private login.
-			cancelled, err := a.Create("muse", "cancelled")
-			if err != nil {
-				t.Fatal(err)
-			}
-			flow, err = a.BeginLogin(context.Background(), cancelled.ID, "/fake/muse")
-			if err != nil {
-				t.Fatal(err)
-			}
-			writeLogin("cancelled", "muse-cancelled-canary")
-			if err = flow.Cancel(); err != nil {
-				t.Fatal(err)
-			}
-			captured, err = manager.Capture(context.Background(), "")
-			if err != nil || len(captured) != 1 || captured[0].Identity != original.Identity {
-				t.Fatal("Muse cancellation did not restore private login", err)
-			}
-			release, err := a.TurnLease(context.Background(), "muse")
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-			blocked, err := a.BeginLogin(ctx, target.ID, "/fake/muse")
-			cancel()
-			release()
-			if err == nil {
-				blocked.Cancel()
-				t.Fatal("Muse private login bypassed a live turn")
-			}
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatal(err)
-			}
-			if os.Getenv("HOME") != realHome || os.Getenv("XDG_CONFIG_HOME") != xdgBefore {
-				t.Fatal("personal roots changed")
-			}
-			untouched, err := os.ReadFile(launcherOnly)
-			if err != nil || string(untouched) != string(launcherBytes) {
-				t.Fatal("unrelated launcher-only file changed", err)
-			}
-			raw = accountMetadataBytes(t, a)
-			for _, canary := range []string{"muse-original-canary", "muse-target-canary", "muse-cancelled-canary"} {
-				if strings.Contains(string(raw), canary) {
-					t.Fatal("Muse grant leaked into metadata")
-				}
-			}
-			checkMode(t, auth, 0600)
-			checkMode(t, source, 0644)
-			// The same target is not permitted under a credential filename.
-			if err = os.Remove(auth); err != nil {
-				t.Fatal(err)
-			}
-			if err = os.Symlink(generated, filepath.Join(filepath.Dir(nestedSkills), "auth.json")); err != nil {
-				t.Fatal(err)
-			}
-			if err = checkPrivateAccountHome("muse", shared, false); err == nil {
-				t.Fatal("nested credential-name symlink was allowed")
-			}
-
-		})
-	}
-}
-
 func TestSharedLoginFixtureDoesNotProbeHostGo(t *testing.T) {
 	// A shared-login test must not discover the developer's Go toolchain.
 	for _, key := range []string{"GOPATH", "GOMODCACHE", "GOCACHE"} {
@@ -894,7 +706,7 @@ func TestSharedLoginFixtureDoesNotProbeHostGo(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a, _, first := setupSharedLogin(t, "opencode")
+	a, _, first := setupSharedLogin(t, "kimi-code")
 	bin := t.TempDir()
 	marker := filepath.Join(bin, "go-probed")
 	t.Setenv("GO_PROBE_MARKER", marker)

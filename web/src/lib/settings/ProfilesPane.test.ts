@@ -14,7 +14,7 @@ test('profile filtering searches every field and preserves the complete uses gri
   const dom = installDom({ matchMedia: () => ({ matches: true }), listed: { default: 'alpha', profiles: [
     profile('alpha', { harness: 'pi', model: 'prime-a', models: ['prime-a', 'fallback-z'], description: 'Quick repair', default: true }),
     profile('beta', { harness: 'claude-code', model: 'sonnet', description: 'Design drafts' }),
-    profile('gamma', { harness: 'opencode', model: 'archive-mini', description: 'Archive scans', disabled: true }),
+    profile('gamma', { harness: 'mock', model: 'archive-mini', description: 'Archive scans', disabled: true }),
   ] } })
   Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement })
   const { dir, default: ProfilesPane, mount, flushSync, unmount } = await importBundle(built, 'ProfilesPane')

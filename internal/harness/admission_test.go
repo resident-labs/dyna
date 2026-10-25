@@ -144,89 +144,78 @@ func TestNativeAdmissionRejects(t *testing.T) {
 }
 
 func TestNativeAdmissionLostAck(t *testing.T) {
-	for _, compact := range []bool{false, true} {
-		t.Run(fmt.Sprintf("compact_%t", compact), func(t *testing.T) {
-			p, log := admissionProfile(t)
-			steering := SteeringOptions{}
-			session := SessionOptions{}
-			if compact {
-				log, steering = installOpenCodeCompactCLI(t)
-				p.Harness = profile.HarnessOpenCode
-				p.Env["DYNA_FAKE_LOG"] = log
-				p.Compact = &profile.Compact{Tokens: 120}
-				session.ResumeID = "ses_fixture"
-			}
-			invoke := func(ctx context.Context, out *engineclient.Outbox) (Result, error) {
-				return runJournaled(ctx, p, "task", t.TempDir(), true, 0, JournalOptions{}, steering, session, ExecutionOptions{
-					Execution: callspec.ExecutionRef{Session: "session", Turn: 7}, Outbox: out,
-				})
-			}
-			accounts := &harnessruntime.Accounts{Root: filepath.Join(t.TempDir(), "accounts")}
-			prepare := PrepareRuntime
-			PrepareRuntime = func(ctx context.Context, p profile.Profile, previous *harnessruntime.Pin) (profile.Profile, harnessruntime.Pin, func(), error) {
-				selected, pin, release, err := prepare(ctx, p, previous)
-				if err != nil {
-					return selected, pin, release, err
-				}
-				lease, err := accounts.TurnLeaseManaged(ctx, p.Harness)
-				if err != nil {
-					release()
-					return selected, pin, nil, err
-				}
-				pin.AccountID = "prepared-account"
-				return selected, pin, func() { _ = lease.Close(); release() }, nil
-			}
-			t.Cleanup(func() { PrepareRuntime = prepare })
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			var mu sync.Mutex
-			facts := map[string]callspec.AccountAdmission{}
-			out := admissionOutbox(t, "session/7/123/456", func(w http.ResponseWriter, r *http.Request, call admissionCall) {
-				mu.Lock()
-				facts[call.ID] = call.Input
-				mu.Unlock()
-				cancel() // The fact committed, but its acknowledgement never arrives.
-				<-r.Context().Done()
-			})
-			var spooled []engineclient.Queued
-			out.Spool = func(queued []engineclient.Queued) error { spooled = append(spooled, queued...); return nil }
-			_, err := invoke(ctx, out)
-			var uncertain *engineclient.UnacknowledgedError
-			if !errors.As(err, &uncertain) || uncertain.RequestID != "session/7/123/456/1" || !strings.Contains(err.Error(), uncertain.RequestID) {
-				t.Fatalf("lost acknowledgement: %v", err)
-			}
-			assertNoAdmissionProcess(t, log)
-			if _, running := accounts.SwitchStatus(p.Harness); running != 0 {
-				t.Fatalf("preparation lease leaked: %d", running)
-			}
-			out.Close(ctx)
-			if len(spooled) != 1 || spooled[0].ID != uncertain.RequestID {
-				t.Fatalf("lost original outbox entry: %+v", spooled)
-			}
-			next := admissionOutbox(t, "session/7/124/789", func(w http.ResponseWriter, r *http.Request, call admissionCall) {
-				if call.ID == uncertain.RequestID || call.Input.AccountID != "prepared-account" {
-					t.Errorf("next invocation reused uncertain request or lost its prepared account: %+v", call)
-				}
-				if _, running := accounts.SwitchStatus(p.Harness); running != 1 {
-					t.Errorf("next invocation lacks preparation lease: %d", running)
-				}
-				ref := call.Input.ExecutionRef
-				ref.AdmissionID = call.ID
-				_ = json.NewEncoder(w).Encode(ref)
-			})
-			result, err := invoke(t.Context(), next)
-			if err != nil || !strings.HasPrefix(result.Output, "done") {
-				t.Fatalf("next invocation: %+v, %v", result, err)
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if len(facts) != 1 || facts[uncertain.RequestID].AccountID != "prepared-account" || facts[uncertain.RequestID].ExecutionRef != (callspec.ExecutionRef{Session: "session", Turn: 7}) {
-				t.Fatalf("uncertain fact changed: %+v", facts)
-			}
-			if _, running := accounts.SwitchStatus(p.Harness); running != 0 {
-				t.Fatalf("next preparation lease leaked: %d", running)
-			}
+	p, log := admissionProfile(t)
+	steering := SteeringOptions{}
+	session := SessionOptions{}
+	invoke := func(ctx context.Context, out *engineclient.Outbox) (Result, error) {
+		return runJournaled(ctx, p, "task", t.TempDir(), true, 0, JournalOptions{}, steering, session, ExecutionOptions{
+			Execution: callspec.ExecutionRef{Session: "session", Turn: 7}, Outbox: out,
 		})
+	}
+	accounts := &harnessruntime.Accounts{Root: filepath.Join(t.TempDir(), "accounts")}
+	prepare := PrepareRuntime
+	PrepareRuntime = func(ctx context.Context, p profile.Profile, previous *harnessruntime.Pin) (profile.Profile, harnessruntime.Pin, func(), error) {
+		selected, pin, release, err := prepare(ctx, p, previous)
+		if err != nil {
+			return selected, pin, release, err
+		}
+		lease, err := accounts.TurnLeaseManaged(ctx, p.Harness)
+		if err != nil {
+			release()
+			return selected, pin, nil, err
+		}
+		pin.AccountID = "prepared-account"
+		return selected, pin, func() { _ = lease.Close(); release() }, nil
+	}
+	t.Cleanup(func() { PrepareRuntime = prepare })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var mu sync.Mutex
+	facts := map[string]callspec.AccountAdmission{}
+	out := admissionOutbox(t, "session/7/123/456", func(w http.ResponseWriter, r *http.Request, call admissionCall) {
+		mu.Lock()
+		facts[call.ID] = call.Input
+		mu.Unlock()
+		cancel() // The fact committed, but its acknowledgement never arrives.
+		<-r.Context().Done()
+	})
+	var spooled []engineclient.Queued
+	out.Spool = func(queued []engineclient.Queued) error { spooled = append(spooled, queued...); return nil }
+	_, err := invoke(ctx, out)
+	var uncertain *engineclient.UnacknowledgedError
+	if !errors.As(err, &uncertain) || uncertain.RequestID != "session/7/123/456/1" || !strings.Contains(err.Error(), uncertain.RequestID) {
+		t.Fatalf("lost acknowledgement: %v", err)
+	}
+	assertNoAdmissionProcess(t, log)
+	if _, running := accounts.SwitchStatus(p.Harness); running != 0 {
+		t.Fatalf("preparation lease leaked: %d", running)
+	}
+	out.Close(ctx)
+	if len(spooled) != 1 || spooled[0].ID != uncertain.RequestID {
+		t.Fatalf("lost original outbox entry: %+v", spooled)
+	}
+	next := admissionOutbox(t, "session/7/124/789", func(w http.ResponseWriter, r *http.Request, call admissionCall) {
+		if call.ID == uncertain.RequestID || call.Input.AccountID != "prepared-account" {
+			t.Errorf("next invocation reused uncertain request or lost its prepared account: %+v", call)
+		}
+		if _, running := accounts.SwitchStatus(p.Harness); running != 1 {
+			t.Errorf("next invocation lacks preparation lease: %d", running)
+		}
+		ref := call.Input.ExecutionRef
+		ref.AdmissionID = call.ID
+		_ = json.NewEncoder(w).Encode(ref)
+	})
+	result, err := invoke(t.Context(), next)
+	if err != nil || !strings.HasPrefix(result.Output, "done") {
+		t.Fatalf("next invocation: %+v, %v", result, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(facts) != 1 || facts[uncertain.RequestID].AccountID != "prepared-account" || facts[uncertain.RequestID].ExecutionRef != (callspec.ExecutionRef{Session: "session", Turn: 7}) {
+		t.Fatalf("uncertain fact changed: %+v", facts)
+	}
+	if _, running := accounts.SwitchStatus(p.Harness); running != 0 {
+		t.Fatalf("next preparation lease leaked: %d", running)
 	}
 }
 
@@ -283,83 +272,6 @@ func TestNativeAdmissionNeedsParent(t *testing.T) {
 	}
 }
 
-func TestNativeAdmissionCompactionRefuses(t *testing.T) {
-	for _, denyAt := range []int{1, 2, 3, 4} {
-		t.Run(fmt.Sprintf("deny_%d", denyAt), func(t *testing.T) {
-			testNativeAdmissionCompaction(t, denyAt)
-		})
-	}
-}
-
-func TestNativeAdmissionCompactionAdmits(t *testing.T) {
-	testNativeAdmissionCompaction(t, 0)
-}
-
-func testNativeAdmissionCompaction(t *testing.T, denyAt int) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", home)
-	t.Setenv("DYNA_DATA_DIR", home)
-	log, steering := installOpenCodeCompactCLI(t)
-	p := profile.Profile{Name: "oc-fake", Harness: profile.HarnessOpenCode, Compact: &profile.Compact{Tokens: 120}, Env: map[string]string{"DYNA_FAKE_LOG": log}}
-	calls := make(chan admissionCall, 8)
-	out := admissionOutbox(t, "session/7/123/456", func(w http.ResponseWriter, r *http.Request, call admissionCall) {
-		calls <- call
-		n := len(calls)
-		raw, err := os.ReadFile(log)
-		if n == 1 {
-			if !os.IsNotExist(err) {
-				t.Errorf("process before first admission: %q, %v", raw, err)
-			}
-		} else if err != nil || strings.Count(string(raw), "\n") != n-1 {
-			t.Errorf("processes before admission %d: %q, %v", n, raw, err)
-		}
-		if n == denyAt {
-			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "compaction admission refused"})
-			return
-		}
-		ref := call.Input.ExecutionRef
-		ref.AdmissionID = call.ID
-		_ = json.NewEncoder(w).Encode(ref)
-	})
-	result, err := runJournaled(t.Context(), p, "task", t.TempDir(), true, 0, JournalOptions{}, steering, SessionOptions{ResumeID: "ses_fixture"}, ExecutionOptions{
-		Execution: callspec.ExecutionRef{Session: "session", Turn: 7}, Outbox: out,
-	})
-	want := denyAt
-	if denyAt == 0 {
-		want = 5
-		if err != nil || result.Output != "done" {
-			t.Fatalf("successful compact turn: %+v, %v", result, err)
-		}
-	} else if err == nil || !isNativeAdmissionError(err) || result.CompactError != "" {
-		t.Fatalf("compaction swallowed admission failure: %+v, %v", result, err)
-	}
-	if len(calls) != want {
-		t.Fatalf("admission count = %d, want %d", len(calls), want)
-	}
-	lastAdmitted := want
-	if denyAt != 0 {
-		lastAdmitted--
-	}
-	var expected callspec.ExecutionRef
-	if lastAdmitted > 0 {
-		expected = callspec.ExecutionRef{Session: "session", Turn: 7, AdmissionID: fmt.Sprintf("session/7/123/456/%d", lastAdmitted)}
-	}
-	if result.Execution != expected {
-		t.Fatalf("last admitted reference = %+v, want %+v", result.Execution, expected)
-	}
-	for i := 1; i <= want; i++ {
-		call := <-calls
-		if call.ID != fmt.Sprintf("session/7/123/456/%d", i) {
-			t.Fatalf("nonordinary ID: %+v", call)
-		}
-	}
-	if denyAt == 1 {
-		assertNoAdmissionProcess(t, log)
-	}
-}
-
 func TestNativeAdmissionSkipsOtherExecution(t *testing.T) {
 	for _, injected := range []bool{false, true} {
 		t.Run(fmt.Sprintf("injected_%t", injected), func(t *testing.T) {
@@ -375,14 +287,11 @@ func TestNativeAdmissionSkipsOtherExecution(t *testing.T) {
 			ran := false
 			if injected {
 				// A native profile with an injected runner never admits an attempt.
-				p.Harness = profile.HarnessMuse
+				p.Harness = profile.HarnessClaudeCode
 				p.RuntimeExecutable = "/bin/false"
 				exec.ProcessRunner = func(_ context.Context, _ []string, stdout, _ io.Writer) error {
 					ran = true
-					if _, err := fmt.Fprintln(stdout, `{"payload_type":"run.output.delta","payload":{"text":"done"}}`); err != nil {
-						return err
-					}
-					_, err := fmt.Fprintln(stdout, `{"payload_type":"run.terminal.completed","payload":{"text":"done"}}`)
+					_, err := fmt.Fprintln(stdout, `{"type":"result","subtype":"success","result":"done"}`)
 					return err
 				}
 			} else {

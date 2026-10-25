@@ -69,29 +69,6 @@ func seedPiAccount(t *testing.T, r *Runtime, id, entry string) NativeAccount {
 	return account
 }
 
-func TestOpenCodeKeyCreatesAnOpenCodeAccount(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "opencode", "2.0.32")
-	ctx := context.Background()
-	account, err := r.AddProviderKey(ctx, "opencode", store.ProviderOpenCodeGo, "Go work", testProviderKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if account.Harness != "opencode" || account.Provider != store.ProviderOpenCodeGo || account.Status != "ready" || !account.Active || account.Label != "Go work" {
-		t.Fatalf("account = %+v", account)
-	}
-	// The key went into OpenCode's own store, and the account owns the captured
-	// identity of that key.
-	shared, _ := r.Accounts.HarnessHome("opencode")
-	stdin, _ := os.ReadFile(filepath.Join(shared, "opencode.db") + ".stdin")
-	if !strings.Contains(string(stdin), `"integrationID":"opencode-go"`) || !strings.Contains(string(stdin), `"key":"`+testProviderKey+`"`) {
-		t.Fatalf("the key was not imported: %s", stdin)
-	}
-	if !strings.HasPrefix(account.Identity, "opencode:opencode-go:") {
-		t.Fatalf("the account identity = %q", account.Identity)
-	}
-}
-
 func TestPiAuthLockRenewsItsMtimeAndLosesToATakeover(t *testing.T) {
 	beat := make(chan struct{})
 	piBeat, piBeatDone = time.Millisecond, func() { beat <- struct{}{} }

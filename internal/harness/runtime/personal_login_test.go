@@ -7,21 +7,6 @@ import (
 	"testing"
 )
 
-func TestFindPersonalLoginReadsWithoutCopying(t *testing.T) {
-	r, home := ownerImportFixture(t)
-	if found, err := r.FindPersonalLogin(context.Background(), "muse"); err != nil || found != nil {
-		t.Fatalf("no owner login: got %+v, %v", found, err)
-	}
-	ownerImportSeed(t, home, "muse")
-	found, err := r.FindPersonalLogin(context.Background(), "muse")
-	if err != nil || found == nil || found.Harness != "muse" || found.Label != "owner@example.test" || found.Saved {
-		t.Fatalf("got %+v, %v", found, err)
-	}
-	if _, err := r.Accounts.Active(accountProvider("muse"), "muse"); err == nil {
-		t.Fatal("the scan copied the login")
-	}
-}
-
 func TestUsePersonalLoginCopiesOnce(t *testing.T) {
 	r, home := ownerImportFixture(t)
 	ownerImportSeed(t, home, "claude-code")

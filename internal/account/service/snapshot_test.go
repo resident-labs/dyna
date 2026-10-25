@@ -38,11 +38,11 @@ func TestAccountUsageCachedShowsPrivateObservationsAndResets(t *testing.T) {
 	privateID, grantID := "11111111111111111111111111111111", "22222222222222222222222222222222"
 	if err := store.Update(func(state *accountstore.State) error {
 		state.Entries = append(state.Entries,
-			accountstore.Entry{Metadata: accountstore.Metadata{ID: privateID, Harness: "muse", Label: "Muse", NativeHome: filepath.Join(store.Root, "muse", privateID), Observation: &accountstore.Observation{
-				Windows:    []Window{{ID: "subscription", UsedPercent: &used, Unit: "percent", ResetsAt: reset.Format(time.RFC3339Nano)}},
+			accountstore.Entry{Metadata: accountstore.Metadata{ID: privateID, Harness: "pi", Label: "Muse", NativeHome: filepath.Join(store.Root, "pi", privateID), Observation: &accountstore.Observation{
+				Windows:    []Window{{ID: "five_hour", UsedPercent: &used, Unit: "percent", ResetsAt: reset.Format(time.RFC3339Nano)}},
 				ObservedAt: now, RateLimitedUntil: &reset,
 			}}},
-			accountstore.Entry{Metadata: accountstore.Metadata{ID: grantID, Harness: "muse", Identity: "meta:grant"}, Credential: accountstore.Credential{Schema: "muse/auth-file@1"}})
+			accountstore.Entry{Metadata: accountstore.Metadata{ID: grantID, Harness: "pi", Identity: "meta:grant"}, Credential: accountstore.Credential{Schema: "muse/auth-file@1"}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)

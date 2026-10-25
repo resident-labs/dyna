@@ -1,7 +1,6 @@
 package configsvc
 
 import (
-	"strings"
 	"testing"
 
 	"dyna-agent/internal/profile"
@@ -29,7 +28,7 @@ func TestProfilesReportHarnessSupport(t *testing.T) {
 	isolate(t)
 	seed(t,
 		withDialect(mock("opus"), profile.HarnessClaudeCode, workeroutput.DialectClaudeStreamJSON),
-		withDialect(mock("wonder"), profile.HarnessMuse, workeroutput.DialectMuseJSONL),
+		withDialect(mock("pi"), profile.HarnessPi, workeroutput.DialectPiJSON),
 		mock("plain"),
 	)
 	list, err := Profiles()
@@ -44,16 +43,15 @@ func TestProfilesReportHarnessSupport(t *testing.T) {
 	if s := by["opus"]; s.Partial || s.Dialect != workeroutput.DialectClaudeStreamJSON {
 		t.Fatalf("claude support = %+v", s)
 	}
-	muse := by["wonder"]
-	if !muse.Partial {
-		t.Fatalf("muse should be partial: %+v", muse)
+	pi := by["pi"]
+	if pi.Partial {
+		t.Fatalf("pi should be full: %+v", pi)
 	}
-	usage := supportItem(t, muse, "usage")
-	if usage.State != SupportUnavailable || usage.Chip != "No token counts" || !strings.Contains(usage.Reason, "does not report provider usage") {
-		t.Fatalf("muse usage = %+v", usage)
+	if usage := supportItem(t, pi, "usage"); usage.State != SupportYes {
+		t.Fatalf("pi usage = %+v", usage)
 	}
-	if supportItem(t, muse, "toolEvents").State != SupportYes {
-		t.Fatalf("muse tool events = %+v", muse)
+	if supportItem(t, pi, "toolEvents").State != SupportYes {
+		t.Fatalf("pi tool events = %+v", pi)
 	}
 
 	plain := by["plain"]
