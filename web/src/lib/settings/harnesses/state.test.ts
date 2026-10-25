@@ -27,25 +27,25 @@ const paneMarkup = ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallContr
   .join('\n')
 // The helpers the pane's functions call from their own script.
 const helpers = { errorText, failText: (e: unknown, fallback: string) => (e ? errorText(e) : fallback) }
-const recommendation = (status: string, version?: string): RecommendedVersion => ({ harness: 'codex', source: 'npm', status, version })
+const recommendation = (status: string, version?: string): RecommendedVersion => ({ harness: 'pi', source: 'npm', status, version })
 
 test('harnessRowState derives ready, partial, not signed in, and switch pending states', () => {
   const snapshot = loose({
     capabilities: [
       { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
-      { harness: 'codex', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
+      { harness: 'muse', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
       { harness: 'grok', status: 'partial', reason: 'Home compatibility skills remain.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
     ],
     bundles: [
       { harness: 'claude-code', version: '2.1.299', executable: '/dyna/claude' },
-      { harness: 'codex', version: '0.61.0', executable: '/dyna/codex' },
+      { harness: 'muse', version: '0.61.0', executable: '/dyna/muse' },
     ],
     accounts: [
       { id: 'acc-1', harness: 'claude-code', label: 'work@acme.dev', status: 'ready', active: true },
-      { id: 'acc-2', harness: 'codex', label: 'me@personal', status: 'ready', active: true },
+      { id: 'acc-2', harness: 'muse', label: 'me@personal', status: 'ready', active: true },
     ],
     profiles: [
-      { profile: 'codex-prof', harness: 'codex', status: 'switch pending', reason: 'switch pending: 2 turns running', switchPending: true, runningTurns: 2 },
+      { profile: 'muse-prof', harness: 'muse', status: 'switch pending', reason: 'switch pending: 2 turns running', switchPending: true, runningTurns: 2 },
     ],
   })
 
@@ -54,11 +54,11 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
   assert.equal(claude.needsSignIn, false)
   assert.equal(claude.version, '2.1.299')
 
-  const codex = harnessRowState('codex', snapshot)
-  assert.equal(codex.status, 'switch pending')
-  assert.equal(codex.switchPending, true)
-  assert.equal(codex.runningTurns, 2)
-  assert.match(codex.reason, /switch pending: 2 turns running/)
+  const muse = harnessRowState('muse', snapshot)
+  assert.equal(muse.status, 'switch pending')
+  assert.equal(muse.switchPending, true)
+  assert.equal(muse.runningTurns, 2)
+  assert.match(muse.reason, /switch pending: 2 turns running/)
 
   const pi = harnessRowState('pi', snapshot)
   assert.equal(pi.status, 'not installed')
@@ -75,11 +75,11 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(harnessMeta('claude').id, 'claude')
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude-code'] }, 'claude-code'), true)
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude', 'grok'] }, 'claude-code'), false)
-  assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude', 'grok'] }, 'codex'), false)
+  assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude', 'grok'] }, 'muse'), false)
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
   assert.equal(toolSummary('mcp', { command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
-  assert.equal(HARNESS_ORDER.length, 5)
+  assert.equal(HARNESS_ORDER.length, 4)
 })
 
 test('tool selection sends the runtime harness ID to the catalog', async () => {
@@ -102,30 +102,30 @@ test('settings import requires matching preview hash and account', async () => {
     error: '',
     notice: '',
     snapshot: null,
-    preview: { accountId: 'acc-1', harness: 'codex', hash: 'hash-123', keys: [{ key: 'theme', status: 'allowed' }] },
+    preview: { accountId: 'acc-1', harness: 'pi', hash: 'hash-123', keys: [{ key: 'theme', status: 'allowed' }] },
     api: {
       importPrivateConfig: async (...args: unknown[]) => { calls.push(args); return { accounts: [] } },
     },
   }
   runFunctions(paneSource, ['confirmImport'], context)
 
-  await call(context, 'confirmImport', { id: 'other', harness: 'codex' })
+  await call(context, 'confirmImport', { id: 'other', harness: 'pi' })
   assert.equal(calls.length, 0)
-  await call(context, 'confirmImport', { id: 'acc-1', harness: 'codex' })
+  await call(context, 'confirmImport', { id: 'acc-1', harness: 'pi' })
   assert.deepEqual(calls, [['acc-1', 'hash-123']])
   assert.equal(context.preview, null)
 })
 
 test('saved native accounts report not signed in and missing copies cannot be ready', () => {
   const snapshot = (status: string, bundles: object[]) => loose({
-    capabilities: [{ harness: 'codex', status: 'partial', reason: 'Personal skills remain.' }],
+    capabilities: [{ harness: 'pi', status: 'partial', reason: 'Personal skills remain.' }],
     bundles,
-    accounts: [{ id: 'saved', harness: 'codex', status, active: true }],
+    accounts: [{ id: 'saved', harness: 'pi', status, active: true }],
   })
-  const bundles = [{ harness: 'codex', version: '0.61.0' }]
-  assert.equal(harnessRowState('codex', snapshot('not signed in', bundles)).needsSignIn, true)
-  assert.equal(harnessRowState('codex', snapshot('ready', bundles)).status, 'partial')
-  assert.equal(harnessRowState('codex', snapshot('ready', [])).status, 'not installed')
+  const bundles = [{ harness: 'pi', version: '0.61.0' }]
+  assert.equal(harnessRowState('pi', snapshot('not signed in', bundles)).needsSignIn, true)
+  assert.equal(harnessRowState('pi', snapshot('ready', bundles)).status, 'partial')
+  assert.equal(harnessRowState('pi', snapshot('ready', [])).status, 'not installed')
 })
 
 test('private copy versions accept pinned releases and reject ranges or shell text', () => {
@@ -159,20 +159,20 @@ test('installing a private copy clears the install action', async () => {
     busy: false, stopped: false, error: '', notice: '', installing: '', chooseVersion: false, snapshot: { bundles: [], accounts: [] }, exactVersion,
     api: { installPrivateRuntime: async (harness: string, version: string) => ({ bundles: [{ harness, version }], accounts: [] }) },
   }
-  assert.equal(harnessRowState('codex', context.snapshot).needsInstall, true)
-  assert.equal(harnessRowState('codex', context.snapshot).needsSignIn, false)
+  assert.equal(harnessRowState('pi', context.snapshot).needsInstall, true)
+  assert.equal(harnessRowState('pi', context.snapshot).needsSignIn, false)
   runFunctions(paneSource, ['installVersion'], context)
-  await call(context, 'installVersion', { id: 'codex', meta: { name: 'Codex' } }, '0.61.0')
-  const installed = harnessRowState('codex', context.snapshot)
+  await call(context, 'installVersion', { id: 'pi', meta: { name: 'Pi' } }, '0.61.0')
+  const installed = harnessRowState('pi', context.snapshot)
   assert.equal(installed.needsInstall, false)
   assert.equal(installed.status, 'not signed in')
   assert.equal(installed.needsSignIn, true)
 })
 
 test('selected private version takes precedence over the newest retained bundle', () => {
-  const snapshot = (selected: string) => loose({ bundles: [{ harness: 'codex', version: '3.0.0' }, { harness: 'codex', version: '2.0.0' }], selectedVersions: { codex: selected } })
-  assert.equal(harnessRowState('codex', snapshot('2.0.0')).version, '2.0.0')
-  assert.equal(harnessRowState('codex', snapshot('1.0.0')).version, '3.0.0')
+  const snapshot = (selected: string) => loose({ bundles: [{ harness: 'pi', version: '3.0.0' }, { harness: 'pi', version: '2.0.0' }], selectedVersions: { pi: selected } })
+  assert.equal(harnessRowState('pi', snapshot('2.0.0')).version, '2.0.0')
+  assert.equal(harnessRowState('pi', snapshot('1.0.0')).version, '3.0.0')
 })
 
 test('only verified recommendation statuses permit automatic installation', () => {
@@ -203,11 +203,11 @@ test('a status check that timed out shows as unavailable, not ready', () => {
 })
 
 test('a row offers an update only when the recommended version is newer than Dyna’s copy', () => {
-  const snap = (recommended: string) => loose({ bundles: [{ harness: 'codex', version: '0.9.0' }], selectedVersions: { codex: '0.9.0' }, recommendedVersions: [{ harness: 'codex', version: recommended, status: 'resolved' }] })
-  assert.equal(harnessRowState('codex', snap('0.10.0')).update, '0.10.0')
-  assert.equal(harnessRowState('codex', snap('0.9.0')).update, '')
-  assert.equal(harnessRowState('codex', snap('0.8.5')).update, '')
-  assert.equal(harnessRowState('codex', loose({ recommendedVersions: [{ harness: 'codex', version: '1.0.0', status: 'resolved' }] })).update, '')
+  const snap = (recommended: string) => loose({ bundles: [{ harness: 'pi', version: '0.9.0' }], selectedVersions: { pi: '0.9.0' }, recommendedVersions: [{ harness: 'pi', version: recommended, status: 'resolved' }] })
+  assert.equal(harnessRowState('pi', snap('0.10.0')).update, '0.10.0')
+  assert.equal(harnessRowState('pi', snap('0.9.0')).update, '')
+  assert.equal(harnessRowState('pi', snap('0.8.5')).update, '')
+  assert.equal(harnessRowState('pi', loose({ recommendedVersions: [{ harness: 'pi', version: '1.0.0', status: 'resolved' }] })).update, '')
 })
 
 test('the Harnesses pane shows install actions only, with no account or sign-in section', () => {
@@ -219,10 +219,10 @@ test('the Harnesses pane shows install actions only, with no account or sign-in 
 })
 
 test('a row’s second line names the account and Dyna’s version', () => {
-  const bundles = [{ harness: 'codex', version: '0.9.0' }]
-  assert.equal(harnessStateLine('codex', loose({ bundles, accounts: [{ id: 'a', harness: 'codex', label: 'Work', active: true, status: 'ready' }] })), 'Work · 0.9.0')
-  assert.equal(harnessStateLine('codex', loose({ bundles, accounts: [] })), 'Not signed in · 0.9.0')
-  assert.equal(harnessStateLine('codex', {}), 'Not installed')
+  const bundles = [{ harness: 'pi', version: '0.9.0' }]
+  assert.equal(harnessStateLine('pi', loose({ bundles, accounts: [{ id: 'a', harness: 'pi', label: 'Work', active: true, status: 'ready' }] })), 'Work · 0.9.0')
+  assert.equal(harnessStateLine('pi', loose({ bundles, accounts: [] })), 'Not signed in · 0.9.0')
+  assert.equal(harnessStateLine('pi', {}), 'Not installed')
 })
 function harnessStateLine(id: string, snapshot: Partial<HarnessSnapshot>) { return rowLine(harnessRowState(id, snapshot)) }
 
@@ -265,22 +265,22 @@ test('a version typed for one harness never installs another', async () => {
     api: { installPrivateRuntime: async (...args: unknown[]) => { calls.push(args); return { bundles: [] } } },
   }
   runFunctions(paneSource, ['selectHarness', 'install', 'installVersion'], context)
-  const codex = { id: 'codex', meta: { name: 'Codex' }, needsInstall: true, capability: {}, recommendation: { status: 'resolved', version: '0.163.0' } }
+  const pi = { id: 'pi', meta: { name: 'Pi' }, needsInstall: true, capability: {}, recommendation: { status: 'resolved', version: '0.163.0' } }
   context.chooseVersion = true
   context.versionInput = '2.1.299'
-  await call(context, 'install', codex)
-  assert.deepEqual(calls, [['codex', '0.163.0']])
-  assert.equal(context.selectedId, 'codex')
+  await call(context, 'install', pi)
+  assert.deepEqual(calls, [['pi', '0.163.0']])
+  assert.equal(context.selectedId, 'pi')
   context.chooseVersion = true
   context.versionInput = '0.160.0'
-  await call(context, 'install', codex)
-  assert.deepEqual(calls[1], ['codex', '0.160.0'])
+  await call(context, 'install', pi)
+  assert.deepEqual(calls[1], ['pi', '0.160.0'])
 })
 
 test('updates follow semantic precedence and keep vendor version ordering', () => {
-  const update = (installed: string, latest: string) => harnessRowState('codex', loose({
-    bundles: [{ harness: 'codex', version: installed }],
-    recommendedVersions: [{ harness: 'codex', version: latest, status: 'resolved' }],
+  const update = (installed: string, latest: string) => harnessRowState('pi', loose({
+    bundles: [{ harness: 'pi', version: installed }],
+    recommendedVersions: [{ harness: 'pi', version: latest, status: 'resolved' }],
   })).update
   assert.equal(update('1.0.0-beta.1', '1.0.0'), '1.0.0')
   assert.equal(update('1.0.0', '1.0.0-beta.1'), '')

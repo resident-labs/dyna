@@ -33,19 +33,19 @@ test('needsSignIn and quotaBlocked status reporting', () => {
 test('a limit whose blocking windows have all reset stops being reported on an open page', () => {
   const at = Date.parse('2026-10-18T14:00:00Z')
   // The host marked the account blocked for a session window that has reset since.
-  assert.equal(accountStatus({ harness: 'codex', status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['five_hour'], quotaBlockedUntil: '2026-10-18T13:00:00Z' }, '', at), 'Plan not reported')
+  assert.equal(accountStatus({ harness: 'pi', status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['five_hour'], quotaBlockedUntil: '2026-10-18T13:00:00Z' }, '', at), 'Plan not reported')
   // A second window is still exhausted, and its reset is ahead: keep its name.
-  assert.match(accountStatus({ harness: 'codex', status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['five_hour', 'seven_day'], quotaBlockedUntil: '2026-10-18T13:00:00Z', windows: [
+  assert.match(accountStatus({ harness: 'pi', status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['five_hour', 'seven_day'], quotaBlockedUntil: '2026-10-18T13:00:00Z', windows: [
     win({ id: 'five_hour', usedPercent: 100, resetsAt: '2026-10-18T13:00:00Z' }),
     win({ id: 'seven_day', usedPercent: 100, resetsAt: '2026-10-20T13:00:00Z' }),
   ] }, '', at), /Weekly limit reached/)
   // The same reading with both resets passed reports no limit at all.
-  assert.doesNotMatch(accountStatus({ harness: 'codex', status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['five_hour', 'seven_day'], quotaBlockedUntil: '2026-10-20T13:00:00Z', windows: [
+  assert.doesNotMatch(accountStatus({ harness: 'pi', status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['five_hour', 'seven_day'], quotaBlockedUntil: '2026-10-20T13:00:00Z', windows: [
     win({ id: 'five_hour', usedPercent: 100, resetsAt: '2026-10-18T13:00:00Z' }),
     win({ id: 'seven_day', usedPercent: 100, resetsAt: '2026-10-20T13:00:00Z' }),
   ] }, '', Date.parse('2026-10-21T09:00:00Z')), /limit reached/)
   // A window that is only partly used never blocks, whatever the host said.
-  assert.equal(accountStatus({ harness: 'codex', status: 'ready', quotaBlocked: true, windows: [win({ id: 'seven_day', usedPercent: 40, resetsAt: '2026-10-20T13:00:00Z' })] }, '', at), 'Plan not reported')
+  assert.equal(accountStatus({ harness: 'pi', status: 'ready', quotaBlocked: true, windows: [win({ id: 'seven_day', usedPercent: 40, resetsAt: '2026-10-20T13:00:00Z' })] }, '', at), 'Plan not reported')
 })
 
 test('a delayed response cannot replace a newer request, even for the same identity', async () => {
@@ -74,7 +74,7 @@ test('OpenCode default labels identify the provider and preserve custom account 
     assert.equal(accountLabel({ harness: 'opencode', integration, label: '' }), label)
     assert.equal(accountLabel({ harness: 'opencode', integration, label: 'Work account' }), 'Work account')
   }
-  assert.equal(accountLabel({ harness: 'codex', label: 'OpenCode account' }), 'OpenCode account')
+  assert.equal(accountLabel({ harness: 'pi', label: 'OpenCode account' }), 'OpenCode account')
 })
 
 test('an account without a label is named by its provider, and a provider has a name', () => {

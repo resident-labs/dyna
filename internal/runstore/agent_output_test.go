@@ -77,7 +77,7 @@ func TestOutputSnapshotsAndNormalizedIncrementalRead(t *testing.T) {
 	}
 	defer run.Finish("ok", "null", nil)
 
-	decl := &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}
+	decl := &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}
 	selected := workeroutput.ProfileSnapshot{Name: "sol", Model: "gpt-test", Output: decl}
 	if err := run.SnapshotOutputProfiles([]workeroutput.ProfileSnapshot{selected}); err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestOutputSnapshotsAndNormalizedIncrementalRead(t *testing.T) {
 	if err := json.Unmarshal(b, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Version != 1 || snapshot.Profile.Name != "sol" || snapshot.Profile.Output == nil || snapshot.Profile.Output.Dialect != workeroutput.DialectCodexJSONL {
+	if snapshot.Version != 1 || snapshot.Profile.Name != "sol" || snapshot.Profile.Output == nil || snapshot.Profile.Output.Dialect != workeroutput.DialectPiJSON {
 		t.Fatalf("selected snapshot = %#v", snapshot)
 	}
 
@@ -194,7 +194,7 @@ func TestSnapshotOutputProfilesIsCreateOnce(t *testing.T) {
 	}
 	defer run.Finish("ok", "null", nil)
 
-	first := workeroutput.ProfileSnapshot{Name: "sol", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}}
+	first := workeroutput.ProfileSnapshot{Name: "sol", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}}
 	if err := run.SnapshotOutputProfiles([]workeroutput.ProfileSnapshot{first}); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestSnapshotOutputProfilesIsCreateOnce(t *testing.T) {
 	if err := json.Unmarshal(b, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Profiles) != 1 || snapshot.Profiles[0].Output == nil || snapshot.Profiles[0].Output.Dialect != workeroutput.DialectCodexJSONL {
+	if len(snapshot.Profiles) != 1 || snapshot.Profiles[0].Output == nil || snapshot.Profiles[0].Output.Dialect != workeroutput.DialectPiJSON {
 		t.Fatalf("create-once snapshot was overwritten: %#v", snapshot)
 	}
 }

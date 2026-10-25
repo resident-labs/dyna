@@ -33,17 +33,17 @@ func TestCatalogWritesUseCallerPower(t *testing.T) {
 		{"AddHarnessSkill", "skill add", []any{config.ManagedSkill{Name: "new", Source: source, EnabledHarnesses: []string{}}}},
 		{"RemoveHarnessConfig", "mcp rm", []any{"mcp", "existing", ""}},
 		{"RemoveHarnessConfig", "skill rm", []any{"skill", "existing", ""}},
-		{"RemoveHarnessConfig", "mcp rm scoped", []any{"mcp", "existing", "codex"}},
-		{"RemoveHarnessConfig", "skill rm scoped", []any{"skill", "existing", "codex"}},
-		{"SetHarnessConfigEnabled", "mcp enable", []any{"mcp", "existing", "codex", true}},
-		{"SetHarnessConfigEnabled", "skill enable", []any{"skill", "existing", "codex", true}},
-		{"SetHarnessConfigEnabled", "mcp disable", []any{"mcp", "existing", "codex", false}},
-		{"SetHarnessConfigEnabled", "skill disable", []any{"skill", "existing", "codex", false}},
+		{"RemoveHarnessConfig", "mcp rm scoped", []any{"mcp", "existing", "pi"}},
+		{"RemoveHarnessConfig", "skill rm scoped", []any{"skill", "existing", "pi"}},
+		{"SetHarnessConfigEnabled", "mcp enable", []any{"mcp", "existing", "pi", true}},
+		{"SetHarnessConfigEnabled", "skill enable", []any{"skill", "existing", "pi", true}},
+		{"SetHarnessConfigEnabled", "mcp disable", []any{"mcp", "existing", "pi", false}},
+		{"SetHarnessConfigEnabled", "skill disable", []any{"skill", "existing", "pi", false}},
 	} {
 		t.Run(op.action, func(t *testing.T) {
 			for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 				t.Run(string(role), func(t *testing.T) {
-					enabled := []string{"codex"}
+					enabled := []string{"pi"}
 					if strings.HasSuffix(op.action, " enable") {
 						enabled = []string{}
 					}

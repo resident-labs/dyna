@@ -38,7 +38,7 @@ type fixture struct {
 func setup(t *testing.T) *fixture {
 	t.Helper()
 	storetest.Isolate(t)
-	for _, key := range []string{"DYNA_AGENT_JOURNAL", "DYNA_AGENT_JOURNAL_ROOT", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "MUSE_SESSION_ID"} {
+	for _, key := range []string{"DYNA_AGENT_JOURNAL", "DYNA_AGENT_JOURNAL_ROOT", "CLAUDE_CODE_SESSION_ID", "MUSE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
 	f := &fixture{t: t, dir: t.TempDir()}

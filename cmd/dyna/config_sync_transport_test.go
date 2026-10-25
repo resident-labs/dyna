@@ -23,7 +23,7 @@ func TestConfigSyncRefusalComesFromEngine(t *testing.T) {
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "SyncCatalogAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true,
 		Method: func(_ context.Context, kind, harness, account string) error {
 			called.Add(1)
-			if (kind != "mcp" && kind != "skill") || harness != "codex" || account != "engine-selected" {
+			if (kind != "mcp" && kind != "skill") || harness != "pi" || account != "engine-selected" {
 				t.Errorf("sync arguments = %q, %q, %q", kind, harness, account)
 			}
 			return errors.New("verified engine caller refused sync")
@@ -48,7 +48,7 @@ func TestConfigSyncRefusalComesFromEngine(t *testing.T) {
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)
-		cmd.SetArgs([]string{"sync", "--harness", "codex", "--account", "engine-selected"})
+		cmd.SetArgs([]string{"sync", "--harness", "pi", "--account", "engine-selected"})
 		err := cmd.ExecuteContext(t.Context()) // Cleared stamps, no CLI actor.
 		if err == nil || !strings.Contains(err.Error(), "verified engine caller refused sync") {
 			t.Errorf("%s sync = %v", kind, err)

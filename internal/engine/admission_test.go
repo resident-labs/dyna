@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net"
@@ -56,26 +55,25 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 		t.Fatal(err)
 	}
 	accounts := &harnessruntime.Accounts{Root: filepath.Join(dir, "accounts")}
-	n, err := accounts.Create("codex", "admission")
+	n, err := accounts.CreateProvider("pi", accountstore.ProviderChatGPT, accountstore.KindOAuth, "admission")
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_user_id":"admission","chatgpt_account_id":"workspace"}}`))
-	raw, _ := json.Marshal(map[string]any{"auth_mode": "chatgpt", "tokens": map[string]string{"id_token": "header." + claims + ".signature", "access_token": "test-access", "refresh_token": "test-refresh", "account_id": "workspace"}})
+	raw, _ := json.Marshal(map[string]any{"openai": map[string]any{"type": "oauth", "access": "test-access", "refresh": "test-refresh"}})
 	if err := os.WriteFile(filepath.Join(n.Home, "auth.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	n, err = accounts.Capture(t.Context(), n.ID, "/fake/codex")
+	n, err = accounts.Capture(t.Context(), n.ID, "/fake/pi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&accountstore.Store{Root: accounts.Root}).SetActive(accountstore.ProviderChatGPT, "codex", "", n.ID); err != nil {
+	if err := (&accountstore.Store{Root: accounts.Root}).SetActive(accountstore.ProviderChatGPT, "pi", "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	profiles := &profile.Store{Profiles: []profile.Profile{
-		{Name: "worker", Harness: profile.HarnessCodex},
-		{Name: "disabled", Harness: profile.HarnessCodex, Disabled: true},
-		{Name: "session-only", Harness: profile.HarnessCodex, Uses: []string{profile.UseAgents}},
+		{Name: "worker", Harness: profile.HarnessPi},
+		{Name: "disabled", Harness: profile.HarnessPi, Disabled: true},
+		{Name: "session-only", Harness: profile.HarnessPi, Uses: []string{profile.UseAgents}},
 	}}
 	m := &subagent.Manager{Store: &subagent.Store{Root: filepath.Join(dir, "sessions")}, Profiles: func() (*profile.Store, error) { return profiles, nil }}
 	meta := subagent.Meta{ID: "ses_admission", Profile: "worker", Dir: t.TempDir(), Turns: 1, Status: subagent.StatusIdle}
@@ -89,7 +87,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	rooms := roomsvc.New(nil)
 	rooms.Notify.Sessions = m
 	f := &admissionFixture{t: t, dir: dir, db: db, meta: meta, s: services{rooms: rooms, runtime: &harnessruntime.Runtime{Accounts: accounts}},
-		input:  callspec.AccountAdmission{ExecutionRef: callspec.ExecutionRef{Session: meta.ID, Turn: 1}, Profile: "worker", Harness: "codex", AccountID: n.ID, WorkDir: meta.Dir},
+		input:  callspec.AccountAdmission{ExecutionRef: callspec.ExecutionRef{Session: meta.ID, Turn: 1}, Profile: "worker", Harness: "pi", AccountID: n.ID, WorkDir: meta.Dir},
 		caller: websvc.Caller{Kind: websvc.Session, Session: meta.ID},
 	}
 	calls, err := websvc.Bind([]websvc.Binding{f.s.admissionBinding(), {
@@ -275,7 +273,7 @@ func TestNativeAdmissionWorkflowCoordinatorAndProfilePolicy(t *testing.T) {
 
 func TestNativeAdmissionRechecksExecutionBeforeCommitting(t *testing.T) {
 	f := newAdmissionFixture(t)
-	account, err := f.s.runtime.Accounts.CheckPreparedAccount("codex", f.input.AccountID, "", "")
+	account, err := f.s.runtime.Accounts.CheckPreparedAccount("pi", f.input.AccountID, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +305,7 @@ func TestNativeAdmissionRechecksExecutionBeforeCommitting(t *testing.T) {
 			}
 			ref := f.input.ExecutionRef
 			ref.AdmissionID = f.meta.ID + "/changed/" + change
-			fact := attempts.Fact{ExecutionRef: ref, AccountID: account.ID, Identity: account.Identity, Profile: "worker", Harness: "codex", WorkDir: f.meta.Dir, AdmittedAt: time.Now()}
+			fact := attempts.Fact{ExecutionRef: ref, AccountID: account.ID, Identity: account.Identity, Profile: "worker", Harness: "pi", WorkDir: f.meta.Dir, AdmittedAt: time.Now()}
 			ctx := state.ForRequest(t.Context(), runnerRequestKey(ref.AdmissionID))
 			if err := f.s.writeNativeAdmission(ctx, w, owner, account, fact); err == nil {
 				t.Fatal("stale execution committed an admission")
@@ -332,7 +330,7 @@ func TestHistoricalExecutionCallerDoesNotRequireLiveState(t *testing.T) {
 	if _, err := f.db.Exec("UPDATE session_turns SET turn=? WHERE session=? AND n=1", turn, f.meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&accountstore.Store{Root: f.s.runtime.Accounts.Root}).SetActive(accountstore.ProviderChatGPT, "codex", "", ""); err != nil {
+	if err := (&accountstore.Store{Root: f.s.runtime.Accounts.Root}).SetActive(accountstore.ProviderChatGPT, "pi", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	ctx := callspec.WithRequest(t.Context(), f.meta.ID+"/historical-observation")

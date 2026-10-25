@@ -15,7 +15,6 @@ func TestCompactNativeMapsTokensPerHarness(t *testing.T) {
 	}{
 		// Claude Code compacts 33K below autoCompactWindow, so N = 95000 needs W = 128000.
 		{HarnessClaudeCode, Compact{Tokens: 95000}, []string{"--settings", `{"autoCompactWindow":128000}`}, nil},
-		{HarnessCodex, Compact{Tokens: 95000}, []string{"-c", "model_auto_compact_token_limit=95000"}, nil},
 		{HarnessMuse, Compact{Tokens: 95000, Windows: map[string]int64{"m": 200000}}, []string{"-c", "context_compaction.soft_threshold=0.475"}, nil},
 		{HarnessOpenCode, Compact{Tokens: 95000}, nil, nil},
 	} {
@@ -25,7 +24,7 @@ func TestCompactNativeMapsTokensPerHarness(t *testing.T) {
 			t.Errorf("%s: args=%q env=%v err=%v", tc.harness, args, env, err)
 		}
 	}
-	if args, env, err := CompactNative(Profile{Harness: HarnessCodex}); args != nil || env != nil || err != nil {
+	if args, env, err := CompactNative(Profile{Harness: HarnessClaudeCode}); args != nil || env != nil || err != nil {
 		t.Fatalf("nil compact changed the run: %q %v %v", args, env, err)
 	}
 }
@@ -84,7 +83,7 @@ func TestCompactDueOnlyForTriggerHarnesses(t *testing.T) {
 			t.Fatalf("%s due at the wrong size", h)
 		}
 	}
-	if CompactDue(Profile{Harness: HarnessCodex, Compact: &Compact{Tokens: 1}}, 100) || CompactDue(Profile{Harness: HarnessPi}, 100) {
+	if CompactDue(Profile{Harness: HarnessClaudeCode, Compact: &Compact{Tokens: 100000}}, 200000) || CompactDue(Profile{Harness: HarnessPi}, 100) {
 		t.Fatal("due without a trigger harness or a threshold")
 	}
 }

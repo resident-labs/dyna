@@ -53,7 +53,7 @@ func TestCheckSelection(t *testing.T) {
 func TestCheckReportsAccountReadiness(t *testing.T) {
 	storetest.Isolate(t)
 	// A managed profile needs Dyna's private copy and an active sign-in.
-	reg := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "native", Harness: profile.HarnessCodex, Taste: 5, Intelligence: 5, Cost: 5}}}
+	reg := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{Name: "native", Harness: profile.HarnessPi, Taste: 5, Intelligence: 5, Cost: 5}}}
 	if err := reg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestCheckReportsAccountReadiness(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 profile check(s) failed") {
 		t.Fatalf("error = %v, want a failed check for a profile that cannot start", err)
 	}
-	for _, want := range []string{"account: ", "next: dyna harness login codex"} {
+	for _, want := range []string{"account: ", "next: dyna harness login pi"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("check output missing %q: %s", want, out.String())
 		}
@@ -108,13 +108,13 @@ func TestValidateProbeEvidence(t *testing.T) {
 		events        []byte
 		want          string
 	}{
-		{"complete", workeroutput.DialectCodexJSONL, positive, events, ""},
-		{"no text", workeroutput.DialectCodexJSONL, positive, tool, "text events"},
-		{"no tools", workeroutput.DialectCodexJSONL, positive, message, "tool events"},
-		{"no usage", workeroutput.DialectCodexJSONL, harness.Result{}, events, "token usage"},
+		{"complete", workeroutput.DialectPiJSON, positive, events, ""},
+		{"no text", workeroutput.DialectPiJSON, positive, tool, "text events"},
+		{"no tools", workeroutput.DialectPiJSON, positive, message, "tool events"},
+		{"no usage", workeroutput.DialectPiJSON, harness.Result{}, events, "token usage"},
 		{"muse usage unavailable", workeroutput.DialectMuseJSONL, harness.Result{}, events, ""},
 		{"plain text", workeroutput.DialectText, harness.Result{}, message, ""},
-		{"raw is not text", workeroutput.DialectCodexJSONL, positive, []byte(`{"kind":"raw","raw":"DYNA_PROFILE_CHECK_OK"}`), "text events"},
+		{"raw is not text", workeroutput.DialectPiJSON, positive, []byte(`{"kind":"raw","raw":"DYNA_PROFILE_CHECK_OK"}`), "text events"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateProbe(tc.dialect, tc.result, tc.events)
@@ -133,7 +133,7 @@ func TestValidateProbeEvidence(t *testing.T) {
 
 func TestListAndAddUseEffectiveDialect(t *testing.T) {
 	isolateProfiles(t)
-	runProfilesCommand(t, "add", "--name", "native", "--harness", "codex")
+	runProfilesCommand(t, "add", "--name", "native", "--harness", "pi")
 	store, err := profile.Load(profile.DefaultPath())
 	if err != nil {
 		t.Fatal(err)
@@ -142,14 +142,14 @@ func TestListAndAddUseEffectiveDialect(t *testing.T) {
 	if p.Output != nil {
 		t.Fatalf("add persisted default override: %#v", p.Output)
 	}
-	if !strings.Contains(runProfilesCommand(t, "list"), "effective dialect: codex-jsonl") {
+	if !strings.Contains(runProfilesCommand(t, "list"), "effective dialect: pi-json") {
 		t.Fatal("human list omitted effective dialect")
 	}
 	var rows []profileListRow
 	if err := json.Unmarshal([]byte(runProfilesCommand(t, "list", "--json")), &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].EffectiveDialect != workeroutput.DialectCodexJSONL || rows[0].Output != nil {
+	if len(rows) != 1 || rows[0].EffectiveDialect != workeroutput.DialectPiJSON || rows[0].Output != nil {
 		t.Fatalf("rows = %#v", rows)
 	}
 }
@@ -157,7 +157,7 @@ func TestListAndAddUseEffectiveDialect(t *testing.T) {
 func TestCheckNativeBinaryUsesProfileEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	for harnessName, binary := range map[string]string{
-		profile.HarnessClaudeCode: "claude", profile.HarnessCodex: "codex",
+		profile.HarnessClaudeCode: "claude", profile.HarnessPi: "pi",
 		profile.HarnessOpenCode: "opencode", profile.HarnessMuse: "muse",
 	} {
 		path := filepath.Join(dir, binary)
@@ -175,7 +175,7 @@ func TestProbeCannotPassFromUserEcho(t *testing.T) {
 	user, _ := json.Marshal(workeroutput.Event{Kind: "message", Role: "user", Text: probeReply})
 	tool, _ := json.Marshal(workeroutput.Event{Kind: "tool", Name: "shell", State: "completed"})
 	events := append(append(user, '\n'), tool...)
-	if err := validateProbe(workeroutput.DialectCodexJSONL, harness.Result{Usage: workeroutput.Usage{InputTokens: 1}}, events); err == nil {
+	if err := validateProbe(workeroutput.DialectPiJSON, harness.Result{Usage: workeroutput.Usage{InputTokens: 1}}, events); err == nil {
 		t.Fatal("user prompt echo passed as assistant reply")
 	}
 }

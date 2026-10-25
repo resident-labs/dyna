@@ -308,7 +308,7 @@ func TestSaveProfileModelLists(t *testing.T) {
 func TestPrivateRuntimeSelectionRoundTrips(t *testing.T) {
 	isolate(t)
 	p := mock("private")
-	p.Harness = profile.HarnessCodex
+	p.Harness = profile.HarnessPi
 	p.RuntimeVersion = "1.2.3"
 	seed(t, p)
 	v := view(p)
@@ -382,7 +382,7 @@ func TestProfilesListsUnreadyHarnesses(t *testing.T) {
 func TestSaveProfileKeepsCompact(t *testing.T) {
 	isolate(t)
 	p := mock("cheap")
-	p.Harness = profile.HarnessCodex
+	p.Harness = profile.HarnessClaudeCode
 	seed(t, p)
 	ed := ProfileEdit{Original: p.Name, Profile: view(p)}
 	ed.Profile.Compact = &profile.Compact{Tokens: 95000}

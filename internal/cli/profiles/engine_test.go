@@ -107,10 +107,10 @@ func TestProfileAddSendsFullFieldsToEngine(t *testing.T) {
 	storetest.Isolate(t)
 	before := seedProfileRegistry(t)
 	want := profile.Profile{
-		Name: "complete", Harness: profile.HarnessCodex, RuntimeVersion: "2.3.4",
+		Name: "complete", Harness: profile.HarnessPi, RuntimeVersion: "2.3.4",
 		Description: "keep spacing ", Model: "first", Models: []string{"first", "second"},
 		Taste: 8, Diagnostics: 9, Intelligence: 7, Cost: 6, ExtraArgs: []string{"--flag", " spaced "},
-		Output:     &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
+		Output:     &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON},
 		TimeoutSec: 2100, Default: true, SafeMode: true,
 		Uses: []string{profile.UseAgents}, MaxConcurrent: 3, MaxCallsPerRun: 4,
 	}
@@ -133,10 +133,10 @@ func TestProfileAddSendsFullFieldsToEngine(t *testing.T) {
 		"--model", "ignored", "--models", " first ,second,first",
 		"--taste", "8", "--intelligence", "7", "--cost", "6", "--diagnostics", "9",
 		"--extra-arg=--flag", "--extra-arg", " spaced ",
-		"--output-dialect", workeroutput.DialectCodexJSONL, "--timeout", "2100",
+		"--output-dialect", workeroutput.DialectPiJSON, "--timeout", "2100",
 		"--default", "--safe-mode", "--use", "agents",
 		"--limit-concurrent", "3", "--limit-calls", "4")
-	if called.Load() != 1 || out != "saved profile \"complete\" (codex)\n" {
+	if called.Load() != 1 || out != "saved profile \"complete\" (pi)\n" {
 		t.Errorf("engine calls = %d, output = %q", called.Load(), out)
 	}
 	after, err := os.ReadFile(profile.DefaultPath())

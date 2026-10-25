@@ -20,12 +20,12 @@ import (
 
 func TestConfigSyncUsesRuntimeGeneration(t *testing.T) {
 	for _, kind := range []string{"skill", "mcp"} {
-		for _, harness := range []string{"codex", "opencode"} {
+		for _, harness := range []string{"pi", "opencode"} {
 			t.Run(kind+"/"+harness, func(t *testing.T) {
 				storetest.Isolate(t)
 				home := t.TempDir()
 				t.Setenv("HOME", home)
-				t.Setenv("DYNA_BIN", "/fake/dyna") // Codex generations carry Dyna's shell server
+				t.Setenv("DYNA_BIN", "/fake/dyna") // Pi generations carry Dyna's shell server
 				t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 				t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 				runtime := harnessruntime.New()
