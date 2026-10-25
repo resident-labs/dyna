@@ -21,7 +21,10 @@ const api = `export const api = {
 const built = await bundle({ component: '../settings/accounts/AddAccount', api })
 
 const runtimes: HarnessSnapshot = {
-  bundles: [{ harness: 'claude-code', version: '2.1.302', executable: '/dyna/claude', directory: '/dyna/claude' }],
+  bundles: [
+    { harness: 'claude-code', version: '2.1.302', executable: '/dyna/claude', directory: '/dyna/claude' },
+    { harness: 'codex', version: '1.2.3', executable: '/dyna/codex', directory: '/dyna/codex' },
+  ],
   accounts: [],
   profiles: [],
   capabilities: [],
@@ -46,7 +49,7 @@ async function mountForm(t: { after: (fn: () => Promise<void>) => void }, dom: R
 }
 const settle = async (flushSync: () => void) => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); flushSync() }
 const submit = (target: HTMLElement) => element(target, 'form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-const selectHarness = (target: HTMLElement, value: 'claude-code' | 'pi') => {
+const selectHarness = (target: HTMLElement, value: string) => {
   const select = element<HTMLSelectElement>(target, 'select[aria-label="Harness"]')
   select.value = value
   select.dispatchEvent(new Event('change', { bubbles: true }))
@@ -105,6 +108,19 @@ test('the native path offers a saved login and starts Claude Code', async (t) =>
   } finally { await unmount(app) }
 })
 
+test('a Codex native choice starts the Codex sign-in', async (t) => {
+  const calls: unknown[][] = []
+  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom)
+  try {
+    selectHarness(target, 'codex')
+    flushSync()
+    submit(target)
+    await settle(flushSync)
+    assert.deepEqual(calls, [['find', 'codex', '1.2.3'], ['begin', 'codex', '1.2.3', '', '', false]], 'every native harness starts its own sign-in')
+  } finally { await unmount(app) }
+})
+
 test('Pi offers an API key for every supported provider', async (t) => {
   const dom = installDom({ addCalls: [], addRuntimes: runtimes, addSnapshot: snapshot })
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
@@ -159,6 +175,29 @@ test('a reopened dialog shows the native sign-in saved for its account', async (
     await settle(flushSync)
     assert.match(textOf(target), /Paste the code from the browser/, 'the saved step and its paste control are back')
     assert.ok(elements(target, 'button').some((b) => textOf(b) === 'Cancel sign-in'), 'the saved sign-in can still be cancelled')
+  } finally { await unmount(app) }
+})
+
+test('an OpenCode Go key creates an OpenCode account', async (t) => {
+  const calls: unknown[][] = []
+  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom)
+  try {
+    selectHarness(target, 'pi')
+    flushSync()
+    chooseMethod(target, 'key')
+    flushSync()
+    selectProvider(target, 'opencode-go')
+    flushSync()
+    const where = element<HTMLSelectElement>(target, 'select[aria-label="Save the key in"]')
+    where.value = 'opencode'
+    where.dispatchEvent(new Event('change', { bubbles: true }))
+    type(target, 'input[aria-label="Account label"]', 'Go work')
+    type(target, 'input[aria-label="API key"]', 'sk-go')
+    flushSync()
+    submit(target)
+    await settle(flushSync)
+    assert.deepEqual(calls, [['add', 'opencode', 'opencode-go', 'Go work', 'sk-go']], 'the key creates an OpenCode account, not a Pi one')
   } finally { await unmount(app) }
 })
 

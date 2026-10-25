@@ -98,8 +98,8 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	t.Cleanup(func() { _ = removeBundle(defaultBundles.Root) })
 	install(t, &BundleManager{Root: defaultBundles.Root, Run: fixtureInstall}, "pi", "1.3.0")
 	ctx := context.Background()
-	expired := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"old"}`)
-	active := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep"}`)
+	expired := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"old"}`)
+	active := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep"}`)
 	info, err := r.RestartPrivateRuntimeLogin(ctx, expired.ID, false)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	if login == nil || login.flow == nil {
 		t.Fatal("the sign-in flow is not running")
 	}
-	body := `{"anthropic":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
+	body := `{"kimi-code":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
 	if err = os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -122,14 +122,14 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if piAuthTypes(t, gotExpired.Home)["anthropic"] != "oauth" {
+	if piAuthTypes(t, gotExpired.Home)["kimi-code"] != "oauth" {
 		t.Fatalf("the named account kept %v", piAuthTypes(t, gotExpired.Home))
 	}
 	gotActive, err := r.Accounts.Find(active.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if piAuthTypes(t, gotActive.Home)["anthropic"] != "api_key" {
+	if piAuthTypes(t, gotActive.Home)["kimi-code"] != "api_key" {
 		t.Fatalf("the active account was overwritten: %v", piAuthTypes(t, gotActive.Home))
 	}
 	if !gotActive.Active || gotExpired.Active {
@@ -145,9 +145,9 @@ func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 	r := providerKeysRuntime(t)
 	bundle := install(t, r.Bundles, "pi", "1.3.0")
 	ctx := context.Background()
-	anthropic := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep-a"}`)
+	target := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
 	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
-	if info, err := r.beginPiProviderSignIn(bundle.Executable, anthropic.ID, store.ProviderAnthropic); err != nil || info.Target != anthropic.ID {
+	if info, err := r.beginPiProviderSignIn(bundle.Executable, target.ID, store.ProviderKimiCode); err != nil || info.Target != target.ID {
 		t.Fatalf("begin = %+v, %v", info, err)
 	}
 	login := r.findPrivateLogin(piProviderSignInID)
@@ -164,7 +164,7 @@ func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 	if types := piAuthTypes(t, other.Home); types["openai"] != "api_key" {
 		t.Fatalf("the other provider's account was overwritten: %v", types)
 	}
-	if types := piAuthTypes(t, anthropic.Home); types["anthropic"] != "api_key" {
+	if types := piAuthTypes(t, target.Home); types["kimi-code"] != "api_key" {
 		t.Fatalf("the target account changed without its own provider: %v", types)
 	}
 	got, err := r.Accounts.Find(other.ID)
@@ -180,9 +180,9 @@ func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
 	r := providerKeysRuntime(t)
 	bundle := install(t, r.Bundles, "pi", "1.3.0")
 	ctx := context.Background()
-	gone := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep-a"}`)
+	gone := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
 	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
-	if _, err := r.beginPiProviderSignIn(bundle.Executable, gone.ID, store.ProviderAnthropic); err != nil {
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, gone.ID, store.ProviderKimiCode); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Accounts.Remove(gone.ID, true); err != nil {
