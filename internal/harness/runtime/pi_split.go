@@ -84,9 +84,18 @@ func (a *Runtime) piAccountForProvider(ctx context.Context, provider store.Provi
 // credential, not to switch providers.
 func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]json.RawMessage, target string) ([]NativeAccount, error) {
 	if target != "" {
-		if n, err := a.Accounts.Find(target); err == nil && n.Harness == "pi" && n.Provider != "" {
-			return a.saveTargetedPiEntry(ctx, entries, n)
+		// A sign-in again names the one account it may write. A target that is
+		// gone, or that cannot take a Pi credential, must never fall through to
+		// the generic path: that would write whichever account of a provider is
+		// active, which is the account the owner did not ask to change.
+		n, err := a.Accounts.Find(target)
+		if err != nil {
+			return nil, errors.New("The account this sign-in was started for is gone. Start the sign-in again from the account list.")
 		}
+		if n.Harness != "pi" || n.Provider == "" {
+			return nil, errors.New("The account this sign-in was started for cannot take a Pi credential.")
+		}
+		return a.saveTargetedPiEntry(ctx, entries, n)
 	}
 	var saved []NativeAccount
 	var firstErr error

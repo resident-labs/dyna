@@ -166,6 +166,41 @@ func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 	}
 }
 
+// A sign-in again whose target the owner removed from another client must not
+// fall back to the generic path either: that would write the provider's active
+// account, which the sign-in never named.
+func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0")
+	ctx := context.Background()
+	gone := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep-a"}`)
+	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Accounts.Remove(gone.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	login := r.findPrivateLogin(piProviderSignInID)
+	if login == nil || login.flow == nil {
+		t.Fatal("the sign-in flow is not running")
+	}
+	body := `{"openai":{"type":"oauth","access":"new","refresh":"new","expires":4102444800}}`
+	if err := os.WriteFile(filepath.Join(login.flow.Cwd, "auth.json"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.FinishPrivateRuntimeLogin(ctx, piProviderSignInID); err == nil {
+		t.Fatal("a sign-in with a removed target was written")
+	}
+	if types := piAuthTypes(t, other.Home); types["openai"] != "api_key" {
+		t.Fatalf("the other provider's account was overwritten: %v", types)
+	}
+	got, err := r.Accounts.Find(other.ID)
+	if err != nil || !got.Active {
+		t.Fatalf("the other provider's selection moved: %+v %v", got, err)
+	}
+}
+
 // The split gives every provider of the shared login its own account and home,
 // and writes only that provider's entry into the home. The shared login keeps
 // serving turns that started before the split.
