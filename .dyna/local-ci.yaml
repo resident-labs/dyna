@@ -89,9 +89,12 @@ checks:
       FRONTEND_SHARD: 6/6
 
   - id: frontend-build
-    # The hosted frontend job builds and tests, so both provider names stay the
-    # same for the aggregate that classifies a cancelled hosted run.
-    providerGroup: frontend
+    # A pull request's base still requires a check named frontend, and a local
+    # result can only satisfy that name. The build speaks for the frontend check
+    # that used to hold the build and the tests: the shards keep reporting their
+    # own names, and all of them feed go-test. The hosted frontend job builds and
+    # tests, so the provider name stays frontend too.
+    name: frontend
     image: node:22
     command: bash scripts/ci.sh frontend build
     caches: [npm]

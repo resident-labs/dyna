@@ -3,6 +3,7 @@ package watch
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"dyna-agent/internal/localci"
@@ -38,13 +39,13 @@ func watchDynaRequiredChecks(t *testing.T) []localci.CheckName {
 // description loses fails here instead of agreeing with itself.
 var expectedChecks = map[localci.Suite][]localci.CheckName{
 	localci.SuiteRelay:         {"relay"},
-	localci.SuiteFrontend:      {"frontend (0)", "frontend (1)", "frontend (2)", "frontend (3)", "frontend (4)", "frontend (5)", "frontend-build"},
+	localci.SuiteFrontend:      {"frontend (0)", "frontend (1)", "frontend (2)", "frontend (3)", "frontend (4)", "frontend (5)", "frontend"},
 	localci.SuiteFrontendCheck: {"frontend-check"},
 	localci.SuiteGoStatic:      {"go-static"},
 	localci.SuiteCrossBuild:    {"cross-build"},
 	localci.SuiteComputerSmoke: {"computer-smoke"},
 	localci.SuiteGo: {
-		"frontend (0)", "frontend (1)", "frontend (2)", "frontend (3)", "frontend (4)", "frontend (5)", "frontend-build",
+		"frontend (0)", "frontend (1)", "frontend (2)", "frontend (3)", "frontend (4)", "frontend (5)", "frontend",
 		"frontend-check", "go-static", "go-test",
 		"go-test-shard (0)", "go-test-shard (1)", "go-test-shard (2)", "go-test-shard (3)",
 		"go-test-shard (4)", "go-test-shard (5)", "go-test-shard (6)", "go-test-shard (7)",
@@ -174,6 +175,32 @@ func TestOneSuiteDescriptionDrivesExecutionGateAndTrial(t *testing.T) {
 	for _, name := range trial {
 		if complete(passedResult(withoutNames(trial, name))) {
 			t.Fatalf("a trial result without %q passed the gate", name)
+		}
+	}
+}
+
+// baseRequiredChecks are the check names local CI requires of a pull request
+// whose base is this repository before the frontend tests were split. A head
+// cannot satisfy a base requirement by renaming a check, and the local gate
+// reads the required names from the base, so the graph must keep reporting every
+// one of them.
+var baseRequiredChecks = []localci.CheckName{
+	"frontend", "frontend-check", "go-static", "go-test",
+	"go-test-shard (0)", "go-test-shard (1)", "go-test-shard (2)", "go-test-shard (3)",
+	"go-test-shard (4)", "go-test-shard (5)", "go-test-shard (6)", "go-test-shard (7)",
+}
+
+// TestHeadSuiteGraphStillReportsBaseRequiredChecks is the regression test for a
+// split check. The base requires "frontend"; a head that only reported six
+// shards and a build check left that name unanswered, so a passing local result
+// was rejected as incomplete and the pull request waited for a check that no
+// head reports.
+func TestHeadSuiteGraphStillReportsBaseRequiredChecks(t *testing.T) {
+	definition := watchDynaDefinition(t)
+	reported := reportedChecks(t, definition, localci.SuiteGo)
+	for _, name := range baseRequiredChecks {
+		if !slices.Contains(reported, name) {
+			t.Fatalf("the go suite reports %v, but a base requires %q", reported, name)
 		}
 	}
 }

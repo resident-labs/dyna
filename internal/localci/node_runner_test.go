@@ -294,7 +294,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
 		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
 	}
-	wanted := map[CheckName]bool{"frontend (0)": true, "frontend (1)": true, "frontend (2)": true, "frontend (3)": true, "frontend (4)": true, "frontend (5)": true, "frontend-build": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
+	wanted := map[CheckName]bool{"frontend (0)": true, "frontend (1)": true, "frontend (2)": true, "frontend (3)": true, "frontend (4)": true, "frontend (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
 	for i := 0; i < 8; i++ {
 		wanted[CheckName(fmt.Sprintf("go-test-shard (%d)", i))] = true
 	}
