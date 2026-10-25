@@ -16,6 +16,16 @@ var defaultChromiumFlags string
 
 func computerBrowserProfile(id string) string { return filepath.Join(Dir(id), "profiles", "chromium") }
 
+// BrowserProfileDir is the Chromium profile of a computer's browser. A shell
+// whose computer runs uses it as the default profile, so an absolute Chromium
+// launch joins that browser instead of one of the shared account config.
+func BrowserProfileDir(id string) string { return computerBrowserProfile(id) }
+
+// BrowserConfigDir is the private Chromium config directory of a computer. It
+// holds the flags file, and it keeps Chromium from reading the shared account
+// config.
+func BrowserConfigDir(id string) string { return filepath.Join(Dir(id), "config") }
+
 func chromiumFlagsFile(id string) string { return filepath.Join(Dir(id), "config", "chromium.flags") }
 func chromiumWrapper(id string) string   { return filepath.Join(Dir(id), "bin", "dyna-chromium") }
 

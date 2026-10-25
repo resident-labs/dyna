@@ -105,6 +105,7 @@ func TestRoleLimits(t *testing.T) {
 		{"root attach", []Role{Owner}},
 		{"root detach", []Role{Owner}},
 		{"subagent start", []Role{Owner, Root, Session}},
+		{"owner display grant", []Role{Owner, Root}},
 		{"doctor examine", []Role{Owner, Root, Session}},
 		{"doctor report", []Role{Owner, Root, Session}},
 	} {
