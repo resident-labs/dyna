@@ -246,6 +246,14 @@ func TestCommandEnv(t *testing.T) {
 		if got := strings.Count(out, shells.NoDisplayHint); got != 1 {
 			t.Errorf("hint count = %d, want 1; output:\n%s", got, out)
 		}
+		// The hint must end in a real newline: printf escapes need one literal
+		// backslash in the Go raw string, or the child writes a literal \n.
+		if !strings.HasPrefix(out, shells.NoDisplayHint+"\n") {
+			t.Errorf("output = %q, want the hint first, followed by a newline", out)
+		}
+		if strings.Contains(out, `\n`) {
+			t.Errorf("output = %q, want a real newline after the hint, not a literal \\n", out)
+		}
 		jobDir := filepath.Dir(path)
 		if !strings.Contains(out, "display=absent") || !strings.Contains(out, "bus="+noSessionBus(jobDir)) {
 			t.Errorf("output = %q, want the blocked display and bus", out)
