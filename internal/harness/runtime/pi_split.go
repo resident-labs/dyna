@@ -76,15 +76,34 @@ func (a *Runtime) piAccountForProvider(ctx context.Context, provider store.Provi
 // provider, creates the account when the provider has none, records its login,
 // and makes it the active account of the provider. It returns the accounts it
 // saved, in provider order.
-func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]json.RawMessage) ([]NativeAccount, error) {
+//
+// target names an account that must take the entry of its own provider, as a
+// sign-in again does: that account may not be the provider's active one, and
+// the selection must not change, because the owner asked to refresh one saved
+// credential, not to switch providers.
+func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]json.RawMessage, target string) ([]NativeAccount, error) {
 	var saved []NativeAccount
 	var firstErr error
+	var targetAccount *NativeAccount
+	if target != "" {
+		if n, err := a.Accounts.Find(target); err == nil && n.Harness == "pi" && n.Provider != "" {
+			targetAccount = &n
+		}
+	}
 	for _, id := range slices.Sorted(maps.Keys(entries)) {
 		provider := piProvider(id)
-		account, found, err := a.piAccountForProvider(ctx, provider)
-		if err != nil {
-			firstErr = errors.Join(firstErr, err)
-			continue
+		keepSelection := false
+		var account NativeAccount
+		var found bool
+		var err error
+		if targetAccount != nil && targetAccount.Provider == provider {
+			account, found, keepSelection = *targetAccount, true, true
+		} else {
+			account, found, err = a.piAccountForProvider(ctx, provider)
+			if err != nil {
+				firstErr = errors.Join(firstErr, err)
+				continue
+			}
 		}
 		if !found {
 			account, err = a.Accounts.CreateProvider("pi", provider, piEntryKind(entries[id]), id+" login")
@@ -102,9 +121,11 @@ func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]
 			firstErr = errors.Join(firstErr, err)
 			continue
 		}
-		if err := a.Accounts.setActiveAccount(captured); err != nil {
-			firstErr = errors.Join(firstErr, err)
-			continue
+		if !keepSelection {
+			if err := a.Accounts.setActiveAccount(captured); err != nil {
+				firstErr = errors.Join(firstErr, err)
+				continue
+			}
 		}
 		saved = append(saved, captured)
 	}

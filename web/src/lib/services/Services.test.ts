@@ -56,7 +56,7 @@ export const api = {
   hookRunLog: (repo, name, id) => Promise.resolve(id === 'run1' ? { exitCode: 1, tail: 'exit status 1' } : { exitCode: -1, tail: 'context deadline exceeded' }),
   notices: () => Promise.resolve([{ key: 'provider:sol', severity: 'warn', text: 'sol: provider limit reached, resets in 60m' }]),
   roomCIBudget: () => Promise.resolve({ ciWarnAfter: '3m0s', ciFailAfter: '4m0s', ciTestMax: '1s' }),
-  accountsList: () => Promise.resolve({ providers: [{ provider: 'zai', accounts: [{ observedAt: iso(12), stale: true }] }], problems: [] }),
+  accountsView: () => Promise.resolve({ providers: [{ provider: 'zai', accounts: [{ observedAt: iso(12), stale: true }] }], problems: [] }),
   syncStatus: () => Promise.resolve({ '/repo': { remotes: { origin: { ahead: 0, behind: 0, checkedAt: iso(3), lastError: '' } }, operation: null } }),
   ciHealth: () => Promise.resolve({ limitMs: 1000, warnMs: 60000, failMs: 120000, runs: [
     { token: '2/1', pr: 2, busyMs: 190000, queueMs: 40000, warnMs: 60000, failMs: 120000, conclusion: 'success', jobs: [{ id: 1, name: 'go-test', busyMs: 150000 }, { id: 2, name: 'frontend', busyMs: 30000 }] },

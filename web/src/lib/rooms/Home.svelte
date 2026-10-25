@@ -73,7 +73,7 @@
   let accountsRequest = 0
   export function refresh() {
     const request = ++accountsRequest
-    api.accountsList('', false).then((s) => { if (request === accountsRequest) usage = s }).catch(() => {})
+    api.accountsView('').then((s) => { if (request === accountsRequest) usage = s }).catch(() => {})
     api.privateRuntimes().then((s) => { if (request === accountsRequest) runtimes = s }).catch(() => {})
   }
 

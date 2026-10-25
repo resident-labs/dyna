@@ -48,7 +48,7 @@ type RuntimeAdapter struct {
 	// reader stay. It keeps the native home safe and refreshable, and it is
 	// never listed, installed, leased or run as a harness.
 	AccountOnly bool
-	Install         func(context.Context, *BundleManager, string, string, []string) (InstallArtifact, error)
+	Install     func(context.Context, *BundleManager, string, string, []string) (InstallArtifact, error)
 	// NPMExecutable, when set, picks the executable inside an npm install
 	// root. An empty result keeps bin/<Binary>.
 	NPMExecutable func(root string) string
