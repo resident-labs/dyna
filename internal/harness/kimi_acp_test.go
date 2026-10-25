@@ -2,6 +2,7 @@ package harness
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,50 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 )
+
+func TestKimiACPStartupTimeoutReplacesChildOnResume(t *testing.T) {
+	dir := acpScript(t, map[string]string{
+		"stalled": `{"waitForCancel":true}`,
+		"resume":  `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"current answer"}}}|{"stopReason":"end_turn"}`,
+	})
+	history := `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old answer"}}}` + "\n" +
+		`{"update":{"sessionUpdate":"tool_call_update","toolCallId":"old-tool","status":"completed"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "load.jsonl"), []byte(history), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env, mark := acpTestEnv(t, dir)
+	p := kimiACPProfile(env)
+	cwd := t.TempDir()
+	const sessionID = "fake-session-1"
+	fired := make(chan time.Time)
+	go func() {
+		waitForMark(t, mark, "prompt stalled")
+		close(fired)
+	}()
+	_, err := RunWithOptions(t.Context(), p, "stalled", cwd, false, JournalOptions{}, SteeringOptions{},
+		SessionOptions{ResumeID: sessionID}, ExecutionOptions{HealthProbe: true, startupFired: fired})
+	if err == nil || !strings.Contains(err.Error(), "failed to start") {
+		t.Fatalf("startup timeout = %v", err)
+	}
+	result, err := RunWithOptions(t.Context(), p, "resume", cwd, false, JournalOptions{}, SteeringOptions{},
+		SessionOptions{ResumeID: sessionID}, ExecutionOptions{HealthProbe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SessionID != sessionID || result.Output != "current answer" {
+		t.Fatalf("resumed session = %q, output = %q", result.SessionID, result.Output)
+	}
+	body, err := os.ReadFile(mark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boots := strings.Count(string(body), "boot "); boots != 2 {
+		t.Fatalf("startup timeout retained the stalled child: %d boots; want 2\n%s", boots, body)
+	}
+	if loads := strings.Count(string(body), "session/load "+sessionID); loads != 2 {
+		t.Fatalf("session was not loaded in both children: %d loads\n%s", loads, body)
+	}
+}
 
 func kimiACPProfile(env map[string]string) profile.Profile {
 	p := acpProfile(env)
