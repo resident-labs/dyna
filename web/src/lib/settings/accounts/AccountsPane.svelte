@@ -154,8 +154,10 @@
 <section class="accounts">
   <TabHeader flush title="Accounts" blurb="Provider sign-ins, their usage, and the account each provider uses.">
     {#snippet action()}
-      <button class="btn quiet" onclick={refresh} disabled={tab === 'accounts' && loading}>{tab === 'accounts' && loading ? 'Refreshing…' : 'Refresh'}</button>
-      <button class="btn pri" onclick={() => (adding = true)}>Add account</button>
+      <span class="head-actions">
+        <button class="btn quiet" onclick={refresh} disabled={tab === 'accounts' && loading}>{tab === 'accounts' && loading ? 'Refreshing…' : 'Refresh'}</button>
+        <button class="btn pri" onclick={() => (adding = true)}>Add account</button>
+      </span>
     {/snippet}
   </TabHeader>
 
@@ -215,6 +217,7 @@
 
 <style>
   .accounts { container-type: inline-size; }
+  .head-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
   .tabs { display: flex; gap: var(--s1); margin-bottom: var(--s4); }
   .tabs button { border-radius: 14px; padding: var(--s1) 10px; font-size: var(--t-sm); color: var(--muted); min-height: 28px; transition: background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
