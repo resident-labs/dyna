@@ -112,9 +112,14 @@ func piProviderUsage(ctx context.Context, id string, entry piAuthEntry, client c
 		o, err := probeZAIUsage(ctx, client, now, entry.Key)
 		return piClassify("z.ai", o, err)
 	case "meta", "meta-muse", "muse":
-		// Pi stores a Meta OAuth identity token in refresh and the minted
-		// inference key in access. The Muse key-mint endpoint reads the plan
-		// from the identity token, so an OAuth sign-in can show usage.
+		// Pi 1.4.0's pi-ai auth/oauth/meta.js stores the Meta identity token
+		// as refresh and the minted inference key as access: Meta splits
+		// identity from inference access, and the standard OAuth scheduler
+		// re-mints the key when it expires. The Muse key-mint endpoint reads
+		// the plan from the identity token, so an OAuth sign-in can show usage.
+		// The entry's expires field is the minted key's expiry, not the identity
+		// token's, so a local expiry check would be wrong; a 401 from the
+		// endpoint is the reliable signal.
 		if entry.Type == "oauth" && entry.Refresh != "" {
 			body, err := museUsageRequest(ctx, client, now, entry.Refresh)
 			if err != nil {
@@ -125,7 +130,7 @@ func piProviderUsage(ctx context.Context, id string, entry piAuthEntry, client c
 		}
 		return store.Observation{}, &UsageUnavailableError{
 			Reason: store.UsageReasonNotReadable,
-			Detail: "Dyna cannot read Muse plan usage from the Pi API key. Sign in to Muse with Pi's OAuth sign-in to read it.",
+			Detail: "Dyna cannot read Muse plan usage from the Pi API key. Sign in to Muse through Pi to read it.",
 		}
 	case "anthropic":
 		return store.Observation{}, &UsageUnavailableError{
