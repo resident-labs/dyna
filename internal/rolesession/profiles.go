@@ -61,7 +61,7 @@ func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now
 	accounts := runtime.NewAccounts()
 	busy := map[string]bool{}
 	for _, p := range profiles {
-		if p.Disabled || now.Before(failures[notReadyKey(p.Name)]) {
+		if cause, _ := blockReason(p, failures, now); cause != "" {
 			continue
 		}
 		if adapter, err := runtime.Adapter(p.Harness); err == nil && adapter.Exclusive {
@@ -75,30 +75,62 @@ func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now
 				continue
 			}
 		}
-		models := p.EffectiveModels()
-		if len(models) > 1 {
-			// A multi-model profile stays available while any model is healthy.
-			for _, model := range models {
-				if !harness.IsModelCoolingDown(p.Name, model, now) {
-					out = append(out, p)
-					break
-				}
-			}
-		} else if !now.Before(failures[p.Name]) {
-			// A single-model profile has no other model to fall back on, so both
-			// its failure entry and its model's cooldown keep it out. The model key
-			// is the one effective models give, else Model for a harness default.
-			model := p.Model
-			if len(models) == 1 {
-				model = models[0]
-			}
-			if !harness.IsModelCoolingDown(p.Name, model, now) {
-				out = append(out, p)
-			}
-		}
+		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return rankBefore(role, out[i], out[j]) })
 	return out
+}
+
+// Cause names why a role cannot use a profile, independently of its display
+// text. The zero value means the profile is available.
+type Cause string
+
+const (
+	CauseMissing        Cause = "missing"
+	CauseDisabled       Cause = "disabled"
+	CauseNotForServices Cause = "not-for-services"
+	CauseNotReady       Cause = "not-ready"
+	CauseProviderFailed Cause = "provider-failed"
+	CauseModelCooling   Cause = "model-cooling-down"
+	CauseHarnessBusy    Cause = "harness-busy"
+)
+
+// blockReason names why the profile cannot run now, or returns no cause when it
+// can. The detail is the exact cause, so a caller can report it to the owner.
+func blockReason(p profile.Profile, failures map[string]time.Time, now time.Time) (Cause, string) {
+	if p.Disabled {
+		return CauseDisabled, "it is disabled"
+	}
+	if at := failures[notReadyKey(p.Name)]; now.Before(at) {
+		// This key holds every failure that no other model of the profile can
+		// fix: a runtime that did not start, a rejected sign-in, and exhausted
+		// capacity. Health names the runtime cause when it has one.
+		return CauseNotReady, fmt.Sprintf("its last turn failed in a way that another model of the profile cannot fix, so it is held out until %s", at.Format(time.RFC3339))
+	}
+	models := p.EffectiveModels()
+	if len(models) > 1 {
+		// A multi-model profile stays available while any model is healthy.
+		for _, model := range models {
+			if !harness.IsModelCoolingDown(p.Name, model, now) {
+				return "", ""
+			}
+		}
+		return CauseModelCooling, "every model is cooling down after a provider failure"
+	}
+	// A single-model profile has no other model to fall back on, so both its
+	// failure entry and its model's cooldown keep it out. The model key is the
+	// one effective models give, else Model for a harness default.
+	if at := failures[p.Name]; now.Before(at) {
+		return CauseProviderFailed, fmt.Sprintf("its last turn failed at the provider, so it is held out until %s", at.Format(time.RFC3339))
+	}
+	model := p.Model
+	if len(models) == 1 {
+		model = models[0]
+	}
+	if harness.IsModelCoolingDown(p.Name, model, now) {
+		return CauseModelCooling, fmt.Sprintf("model %s is cooling down after a provider failure", model)
+	}
+	return "", ""
 }
 
 // rankBefore reports whether a outranks b for role. A reviewer checks finished
@@ -118,30 +150,82 @@ func rankBefore(role string, a, b profile.Profile) bool {
 	return a.Name < b.Name
 }
 
+// Choice is the profile a role runs, the reason for it, and the typed cause
+// when the room pinned another profile that the role cannot use now.
+type Choice struct {
+	Name   string
+	Reason string
+	Cause  Cause
+}
+
 // ChooseProfile honors an available pin, then uses the shared ranking for role.
 // role orders the result and names the profile kind in the error message.
-func ChooseProfile(profiles []profile.Profile, pinned string, failures map[string]time.Time, now time.Time, role string) (string, string, error) {
-	// Services never run subagents-only profiles.
-	profiles = slices.DeleteFunc(slices.Clone(profiles), func(p profile.Profile) bool { return !p.ForServices() })
-	ranked := RankProfiles(profiles, failures, now, role)
+func ChooseProfile(profiles []profile.Profile, pinned string, failures map[string]time.Time, now time.Time, role string) (Choice, error) {
+	// Services never run subagents-only profiles. Keep the full list to explain
+	// a pinned profile that this filter removed.
+	usable := slices.DeleteFunc(slices.Clone(profiles), func(p profile.Profile) bool { return !p.ForServices() })
+	ranked := RankProfiles(usable, failures, now, role)
 	if pinned != "" {
 		for _, p := range ranked {
 			if p.Name == pinned {
-				return p.Name, "pinned by the room", nil
+				return Choice{Name: p.Name, Reason: "pinned by the room"}, nil
 			}
 		}
 	}
 	if len(ranked) == 0 {
-		return "", "", fmt.Errorf("no enabled %s profile is available; all profiles are disabled or recently failed", role)
-	}
-	reason := "auto: best taste + cost"
-	if role == subagent.RoleReviewer {
-		reason = "auto: best diagnostics + cost"
+		return Choice{}, fmt.Errorf("no enabled %s profile is available; all profiles are disabled or recently failed", role)
 	}
 	if pinned != "" {
-		reason = "pinned profile unavailable; using best available profile"
+		cause, detail := pinnedBlock(profiles, pinned, failures, now)
+		return Choice{Name: ranked[0].Name, Cause: cause, Reason: fmt.Sprintf("pinned %s profile %s is unavailable: %s", role, pinned, detail)}, nil
 	}
-	return ranked[0].Name, reason, nil
+	if role == subagent.RoleReviewer {
+		return Choice{Name: ranked[0].Name, Reason: "auto: best diagnostics + cost"}, nil
+	}
+	return Choice{Name: ranked[0].Name, Reason: "auto: best taste + cost"}, nil
+}
+
+// pinnedBlock says exactly why the role cannot use the profile the room pinned.
+// It reads the same failure map and profile list as RankProfiles, so the owner
+// sees the cause and can fix it instead of guessing.
+func pinnedBlock(profiles []profile.Profile, profileName string, failures map[string]time.Time, now time.Time) (Cause, string) {
+	for i := range profiles {
+		p := profiles[i]
+		if p.Name != profileName {
+			continue
+		}
+		if p.Disabled {
+			return CauseDisabled, "it is disabled"
+		}
+		if !p.ForServices() {
+			return CauseNotForServices, "it does not allow the services use"
+		}
+		if cause, detail := blockReason(p, failures, now); cause != "" {
+			return cause, detail
+		}
+		if adapter, err := runtime.Adapter(p.Harness); err == nil && adapter.Exclusive {
+			pending, running := runtime.NewAccounts().SwitchStatus(adapter.Harness)
+			if pending || running > 0 {
+				return CauseHarnessBusy, fmt.Sprintf("its harness %s is switching accounts or running a turn", adapter.Harness)
+			}
+		}
+		return "", "its profile record is incomplete"
+	}
+	return CauseMissing, "no profile has that name"
+}
+
+// NotReadyHeld reports whether a failure that stopped the runtime before the
+// model ran still holds the profile out.
+func NotReadyHeld(failures map[string]time.Time, profileName string, now time.Time) bool {
+	return now.Before(failures[notReadyKey(profileName)])
+}
+
+// ClearNotReady drops the runtime-not-ready hold for profileName, because
+// newer evidence shows the runtime starts. It returns an independent map.
+func ClearNotReady(failures map[string]time.Time, profileName string) map[string]time.Time {
+	out := MergeFailures(failures)
+	delete(out, notReadyKey(profileName))
+	return out
 }
 
 // MergeFailures returns an independent map containing the latest unavailable

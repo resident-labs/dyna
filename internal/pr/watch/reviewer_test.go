@@ -3,9 +3,11 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/database"
+	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
+	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 	"encoding/json"
@@ -147,19 +149,37 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 		}
 	}
 	write("ses_20261017-000001-aaaaaaaa", subagent.TurnError, e.clock.Add(-time.Minute))
-	name, _, err := e.s.chooseProfile(Reviewer{})
-	if err != nil || name == "judge" {
-		t.Fatalf("recent failing profile: %s %v", name, err)
+	choice, err := e.s.chooseProfile(Reviewer{})
+	if err != nil || choice.Name == "judge" {
+		t.Fatalf("recent failing profile: %s %v", choice.Name, err)
 	}
 	write("ses_20261017-000002-bbbbbbbb", subagent.TurnOK, e.clock)
-	cached, _, e2 := e.s.chooseProfile(Reviewer{})
-	if e2 != nil || cached == "judge" {
+	cached, e2 := e.s.chooseProfile(Reviewer{})
+	if e2 != nil || cached.Name == "judge" {
 		t.Fatal("profile scan did not reuse its minute cache")
 	}
 	e.clock = e.clock.Add(time.Minute)
-	name, _, err = e.s.chooseProfile(Reviewer{})
-	if err != nil || name != "judge" {
-		t.Fatalf("newer healthy turn: %s %v", name, err)
+	choice, err = e.s.chooseProfile(Reviewer{})
+	if err != nil || choice.Name != "judge" {
+		t.Fatalf("newer healthy turn: %s %v", choice.Name, err)
+	}
+}
+
+// D-68: a signed-out runtime held a review profile out for an hour, and a
+// passing live check did not clear the hold. The pool must name the exact
+// cause while the hold lasts, and clear it on newer successful evidence.
+func TestPinnedProfileUsesNewerHealthyCheck(t *testing.T) {
+	e := newEnv(t)
+	sol := profile.Profile{Name: "sol", Harness: profile.HarnessMock, Diagnostics: 10, Cost: 8}
+	haiku := profile.Profile{Name: "haiku", Harness: profile.HarnessMock, Diagnostics: 7, Cost: 10}
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{sol, haiku}, nil }
+	cfg := Reviewer{Profile: "sol", FailedProfiles: map[string]time.Time{"sol (not ready)": e.clock.Add(time.Hour)}}
+	if choice, err := e.s.chooseProfile(cfg); err != nil || choice.Name != "haiku" || choice.Cause != rolesession.CauseNotReady || !strings.Contains(choice.Reason, "pinned reviewer profile sol is unavailable") {
+		t.Fatalf("held profile: %+v %v", choice, err)
+	}
+	harnesshealth.New("").RecordProbe(sol, "built-in", harnesshealth.Observation{At: e.clock, Successful: true, StdoutSeen: true, RecognizedRecords: 2}, true)
+	if choice, err := e.s.chooseProfile(cfg); err != nil || choice.Name != "sol" || choice.Reason != "pinned by the room" || choice.Cause != "" {
+		t.Fatalf("healthy check did not clear the hold: %+v %v", choice, err)
 	}
 }
 

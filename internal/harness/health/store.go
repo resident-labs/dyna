@@ -191,6 +191,13 @@ func (s *Service) RecordTurn(p profile.Profile, version string, o Observation) V
 	return recordObservation(p, version, o, false, false, s.save)
 }
 
+// RecordStartFailure records that a turn could not start the runtime. It is an
+// unsuccessful observation at the turn's end time, so health stops showing an
+// older success, and it carries no CLI version because none was observed.
+func (s *Service) RecordStartFailure(p profile.Profile, at time.Time) View {
+	return recordObservation(p, "", Observation{At: at, StartFailed: true}, false, false, s.save)
+}
+
 // RecordProgress makes current stdout evidence available to a running-session
 // banner. It cannot bless a CLI version or advance the last completed turn.
 func (s *Service) RecordProgress(p profile.Profile, version string, o Observation) View {

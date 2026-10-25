@@ -37,6 +37,10 @@ type Observation struct {
 	TextSeen          bool      `json:"textSeen"`
 	ToolSeen          bool      `json:"toolSeen"`
 	PositiveUsageSeen bool      `json:"positiveUsageSeen"`
+	// StartFailed marks a turn that could not start the runtime, before any
+	// model or output. It reports that cause instead of a missing output or a
+	// version mismatch, because no CLI version was observed.
+	StartFailed bool `json:"startFailed,omitempty"`
 }
 
 // Observed contains the latest check and the last ordinary turn time.
@@ -98,6 +102,8 @@ func makeView(p profile.Profile, version string, r record) View {
 	v.LastCheckedAt = r.Observed.At
 	v.LastHealthyVersion = r.LastHealthyVersion
 	switch {
+	case r.Observed.StartFailed:
+		v.Status, v.Reason = Unhealthy, "the runtime did not start"
 	case r.Observed.StdoutSeen && !r.Observed.RecognizedOutput:
 		v.Status, v.Reason = OutputNotUnderstood, "stdout exists but no output records were recognized"
 	case !r.LastHealthyAt.IsZero() && version != r.LastHealthyVersion:
