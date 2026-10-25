@@ -233,7 +233,7 @@ a merge trial runs and the suites a pull request can select.
 - `checks` declares commands. Every check needs `id` and `command`, and `image`
   unless it sets `host: true`. Other keys are `name` (defaults to `id`), `env`,
   `caches`, `reports` (`none`, `junit` or `go`), `providerGroup`, `priority`,
-  `hostUser` and `setup`.
+  `hostUser`, `setup`, `cpus` and `memory`.
 - `caches` declares `name`, `target` (a clean absolute container path) and
   `env` (the variable that receives the host path). A container check needs the
   cache `target`; a host check needs the cache `env`.
@@ -246,6 +246,13 @@ A `host: true` check runs on the machine without a container. It cannot set
 `image`, `hostUser` or `setup`. Host checks stay off even when the file asks
 for them: only the machine owner can allow them, with
 `dyna machine edit <name> --allow-host-checks`.
+
+A check gets 2 CPUs and 4 GiB of memory in a container, and 5 GiB as a host
+check. `cpus` and `memory` raise that: `cpus: 8` and `memory: 16g`. A memory
+value needs `m` or `g`. Dyna bounds a request by the machine's last probe and by
+the slot pool, which gives two CPUs and 4 GiB per slot. A check that Dyna
+clamped says so in its result and in its log. See `docs/local-ci.md` in the
+dyna repository for the full rules.
 
 A Rust repository with cargo test and clippy:
 
