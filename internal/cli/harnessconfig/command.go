@@ -1,9 +1,11 @@
 package harnessconfig
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/room"
@@ -44,7 +46,7 @@ func shellCommand() *cobra.Command {
 				}
 			}
 		}
-		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore())}
+		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch}
 		// Only a session hears when a background job ends. Elsewhere, for
 		// example in a workflow worker, each command runs to its end.
 		if !runstore.IsSessionDirID(tools.Owner) {
@@ -54,6 +56,16 @@ func shellCommand() *cobra.Command {
 		}
 		return shellmcp.Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), tools)
 	}}
+}
+
+// engineSearch runs one web search in the engine, which holds every provider
+// credential. The MCP process itself never gets a token or a key.
+func engineSearch(ctx context.Context, in callspec.WebSearchRequest) (callspec.WebSearchResponse, error) {
+	var answer callspec.WebSearchResponse
+	if err := engineClient().Call(ctx, "WebSearch", []any{in}, &answer); err != nil {
+		return callspec.WebSearchResponse{}, err
+	}
+	return answer, nil
 }
 
 // sessionResolver finds the open session whose harness session has the given

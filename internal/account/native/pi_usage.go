@@ -70,6 +70,26 @@ func probePiSaved(ctx context.Context, c Captured, client claudeHTTPClient, now 
 	return empty, ErrSchema
 }
 
+// PiOAuthTokens returns the access token and account ID of a Pi OAuth login
+// entry, such as the openai-codex one. A caller must never log them.
+func PiOAuthTokens(entry json.RawMessage) (access, account string, err error) {
+	var e piAuthEntry
+	if json.Unmarshal(entry, &e) != nil || e.Type != "oauth" || e.Access == "" || e.AccountID == "" {
+		return "", "", ErrSchema
+	}
+	return e.Access, e.AccountID, nil
+}
+
+// PiAPIKey returns the API key of a Pi API-key login entry. A caller must never
+// log it.
+func PiAPIKey(entry json.RawMessage) (string, error) {
+	var e piAuthEntry
+	if json.Unmarshal(entry, &e) != nil || e.Type != "api_key" || e.Key == "" {
+		return "", ErrSchema
+	}
+	return e.Key, nil
+}
+
 // piProviderUsage sends the entry to the reader of its provider. A reader takes
 // only the credential fields it needs, so another harness can use the same
 // reader for an account of that provider.
