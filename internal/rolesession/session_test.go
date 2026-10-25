@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/subagent"
 )
 
@@ -73,15 +74,17 @@ func TestLookupRejectsInvalidSessions(t *testing.T) {
 func TestRecreation(t *testing.T) {
 	for _, tc := range []struct {
 		name, status, message   string
+		reason                  providerfailure.Reason
 		resumable, native, want bool
 	}{
-		{"healthy", subagent.TurnOK, "", true, true, false},
-		{"local error", subagent.TurnError, "bad input", true, true, true},
-		{"quota", subagent.TurnError, "quota", true, true, false},
-		{"quota without native session", subagent.TurnError, "quota", false, false, false},
-		{"cannot resume", subagent.TurnOK, "", false, true, true},
-		{"no native session", subagent.TurnStopped, "", true, false, true},
-		{"still running", subagent.TurnRunning, "", false, false, false},
+		{"healthy", subagent.TurnOK, "", "", true, true, false},
+		{"local error", subagent.TurnError, "bad input", "", true, true, true},
+		{"quota", subagent.TurnError, "quota", providerfailure.Quota, true, true, false},
+		{"quota without native session", subagent.TurnError, "quota", providerfailure.Quota, false, false, false},
+		{"busy provider", subagent.TurnError, "overloaded", providerfailure.Capacity, true, true, false},
+		{"cannot resume", subagent.TurnOK, "", "", false, true, true},
+		{"no native session", subagent.TurnStopped, "", "", true, false, true},
+		{"still running", subagent.TurnRunning, "", "", false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			info := roleInfo()
@@ -89,7 +92,7 @@ func TestRecreation(t *testing.T) {
 			if !tc.native {
 				info.HarnessSession = ""
 			}
-			if got := NeedsRecreation(info, subagent.Turn{Status: tc.status, Error: tc.message}); got != tc.want {
+			if got := NeedsRecreation(info, subagent.Turn{Status: tc.status, Error: tc.message, FailureReason: tc.reason}); got != tc.want {
 				t.Fatalf("got %v", got)
 			}
 		})

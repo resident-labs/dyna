@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/jsonrpc"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
 )
@@ -621,7 +622,7 @@ func TestGrokAcpStopReasonBecomesUsageLimit(t *testing.T) {
 	acpPrepare(t)
 	zero := time.Duration(0)
 	_, err := RunWithOptions(t.Context(), acpProfile(env), "task", t.TempDir(), false, JournalOptions{}, SteeringOptions{}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true, startupLimit: 30 * time.Second})
-	if err == nil || !IsUsageLimit(err.Error()) {
+	if err == nil || !providerfailure.Is(err, providerfailure.Quota) {
 		t.Fatalf("rate_limit classified as %v", err)
 	}
 }
@@ -646,6 +647,31 @@ func TestGrokAcpModelFallbackSwitchesModel(t *testing.T) {
 	body, _ := os.ReadFile(mark)
 	if !strings.Contains(string(body), "model fallback-model") {
 		t.Fatalf("session/set_model missing:\n%s", body)
+	}
+}
+
+// A typed provider failure that used up its own recovery chain finishes the
+// turn. The generic same-session nudge would retry the spent account, and for a
+// busy provider it would retry outside the capacity backoff.
+func TestExhaustedQuotaFinishesWithoutSessionNudge(t *testing.T) {
+	oldFailover := FailoverAccount
+	FailoverAccount = func(context.Context, profile.Profile, string, string, error) (*AccountSwitch, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { FailoverAccount = oldFailover })
+	dir := acpScript(t, map[string]string{
+		"task":             `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"partial work"}},"promptId":"p1"}|{"stopReason":"rate_limit"}`,
+		sessionNudgePrompt: `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"nudged"}},"promptId":"p2"}|{"stopReason":"end_turn"}`,
+	})
+	env, _ := acpTestEnv(t, dir)
+	acpPrepare(t)
+	zero := time.Duration(0)
+	result, err := RunWithOptions(t.Context(), acpProfile(env), "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true, startupLimit: 30 * time.Second})
+	if !providerfailure.Is(err, providerfailure.Quota) {
+		t.Fatalf("exhausted quota = %v (result %+v), want a quota reason", err, result)
+	}
+	if result.Output != "partial work" {
+		t.Fatalf("output = %q; the nudge must not run", result.Output)
 	}
 }
 
@@ -1002,7 +1028,7 @@ func TestAntigravityACPReadsBackendErrorMarkersBeforeSuccess(t *testing.T) {
 			if (result.runErr != nil) != tc.wantError {
 				t.Fatalf("backend error=%v, want error=%v", result.runErr, tc.wantError)
 			}
-			if tc.wantError && !IsUsageLimit(result.runErr.Error()) {
+			if tc.wantError && !providerfailure.Is(result.runErr, providerfailure.Quota) {
 				t.Fatalf("quota classification lost: %v", result.runErr)
 			}
 		})

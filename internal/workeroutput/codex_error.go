@@ -3,6 +3,8 @@ package workeroutput
 import (
 	"fmt"
 	"strings"
+
+	"dyna-agent/internal/providerfailure"
 )
 
 // CodexTurnError reads protocol status, never assistant prose. A successful
@@ -39,7 +41,15 @@ func codexTurnStatus(stdout string) (bool, error) {
 			if record.Error.Message != "" {
 				detail = record.Error.Message
 			}
+			if record.Error.Type != "" && !strings.Contains(detail, record.Error.Type) {
+				detail = record.Error.Type + ": " + detail
+			}
 			failure = fmt.Errorf("Codex protocol %s: %s", record.Type, detail)
+			// The structured type, code or status names the reason; the message
+			// text is only its fallback.
+			if reason, ok := record.Error.Reason(); ok {
+				failure = providerfailure.Tag(reason, failure)
+			}
 		}
 	}
 	return completed, failure

@@ -114,7 +114,7 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 		if st, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
 			if ok {
 				st.Head = st.Pending
-			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn.Error) {
+			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn) {
 				info, _, _ := s.Sessions.Inspect(st.Session)
 				st.FailedProfiles = rolesession.RecordFailure(st.FailedProfiles, info, turn, s.now())
 			}
@@ -231,7 +231,7 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 		if st, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
 			if ok {
 				st.SmellHead = st.SmellPending
-			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn.Error) {
+			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn) {
 				info, _, _ := s.Sessions.Inspect(st.SmellSession)
 				st.SmellFailedProfiles = rolesession.RecordFailure(st.SmellFailedProfiles, info, turn, s.now())
 			}

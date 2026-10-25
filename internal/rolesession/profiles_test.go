@@ -10,6 +10,7 @@ import (
 	"dyna-agent/internal/harness"
 	runtime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/subagent"
 )
@@ -76,7 +77,7 @@ func TestRecordFailure(t *testing.T) {
 	now := time.Now()
 	info := subagent.Info{Meta: subagent.Meta{Profile: "a"}}
 	original := map[string]time.Time{"a": now.Add(-time.Minute)}
-	turn := subagent.Turn{Status: subagent.TurnError, Error: "HTTP 429 quota exhausted"}
+	turn := subagent.Turn{Status: subagent.TurnError, Error: "HTTP 429 quota exhausted", FailureReason: providerfailure.Quota}
 	got := RecordFailure(original, info, turn, now)
 	if !got["a"].Equal(now.Add(time.Hour)) || !original["a"].Equal(now.Add(-time.Minute)) {
 		t.Fatal("failure time or ownership changed")
@@ -85,17 +86,34 @@ func TestRecordFailure(t *testing.T) {
 	if !RecordFailure(got, info, turn, now)["a"].Equal(now.Add(time.Hour)) {
 		t.Fatal("older failure replaced newer failure")
 	}
-	for _, message := range []string{"provider.go could not parse input", "authentication helper test failed", "unauthorized local file", `failed: {"fallback_credit":null}`} {
-		turn.Error = message
+	// Display text alone never blocks a profile, whatever it happens to say.
+	for _, message := range []string{"HTTP 429 quota exhausted", "provider.go could not parse input", "authentication helper test failed", "unauthorized local file", `failed: {"fallback_credit":null}`} {
+		turn := subagent.Turn{Status: subagent.TurnError, Error: message}
 		if len(RecordFailure(nil, info, turn, now)) != 0 {
-			t.Fatalf("unrelated failure: %s", message)
+			t.Fatalf("untyped failure blocked the profile: %s", message)
+		}
+		if ProviderFailure(turn) {
+			t.Fatalf("untyped failure counted as a provider failure: %s", message)
 		}
 	}
-	for _, message := range []string{"HTTP 429", "quota exhausted", "insufficient credits", "usage limit reached", "service overloaded", "RATE_LIMIT",
-		"authentication_error: invalid x-api-key", "503 Service Unavailable", "worker sol runtime is not ready: the active private account is not signed in"} {
-		if !ProviderFailure(message) {
-			t.Fatalf("missed %s", message)
+	// Each named reason a turn records is a provider failure the profile must
+	// not retry on its own, except capacity, which is only a busy provider.
+	for _, reason := range []providerfailure.Reason{providerfailure.Quota, providerfailure.Auth, providerfailure.Unavailable} {
+		turn := subagent.Turn{Status: subagent.TurnError, Error: "provider failure", FailureReason: reason}
+		if !ProviderFailure(turn) || len(RecordFailure(nil, info, turn, now)) != 1 {
+			t.Fatalf("reason %q did not block the profile", reason)
 		}
+	}
+	// A busy provider also blocks after the turn ended: its backoff and model
+	// chain are spent, so the role must move to a healthy profile.
+	busy := subagent.Turn{Status: subagent.TurnError, Error: "service overloaded", FailureReason: providerfailure.Capacity}
+	if !ProviderFailure(busy) || len(RecordFailure(nil, info, busy, now)) != 1 {
+		t.Fatal("an exhausted capacity failure did not block the profile")
+	}
+	// A runtime that failed before the model ran keeps its own key.
+	notReady := subagent.Turn{Status: subagent.TurnError, Error: "worker sol runtime is not ready: the active private account is not signed in"}
+	if !ProviderFailure(notReady) || RecordFailure(nil, info, notReady, now)[notReadyKey("a")].IsZero() {
+		t.Fatal("a runtime that is not ready did not block its profile")
 	}
 }
 
@@ -104,7 +122,7 @@ func TestFailureCacheRecovery(t *testing.T) {
 	var cache FailureCache
 	scans := 0
 	infos := []subagent.Info{{Meta: subagent.Meta{ID: "failed", Profile: "a", Turns: 1}}}
-	turns := map[string]subagent.Turn{"failed": {Profile: "a", Created: now.Add(-time.Minute), Ended: now.Add(-time.Minute), Status: subagent.TurnError, Error: "quota"}}
+	turns := map[string]subagent.Turn{"failed": {Profile: "a", Created: now.Add(-time.Minute), Ended: now.Add(-time.Minute), Status: subagent.TurnError, Error: "quota", FailureReason: providerfailure.Quota}}
 	snapshot := func() ([]subagent.Info, error) { scans++; return infos, nil }
 	read := func(id string, n int) (subagent.Turn, error) {
 		if n != 1 {
@@ -147,7 +165,7 @@ func TestFailureCacheErrorsAndExpiry(t *testing.T) {
 		if id == "unreadable" {
 			return subagent.Turn{}, errors.New("missing turn")
 		}
-		return subagent.Turn{Created: now.Add(-time.Hour), Ended: now.Add(-time.Hour), Status: subagent.TurnError, Error: "429"}, nil
+		return subagent.Turn{Created: now.Add(-time.Hour), Ended: now.Add(-time.Hour), Status: subagent.TurnError, Error: "429", FailureReason: providerfailure.Quota}, nil
 	})
 	if err != nil || len(got) != 0 {
 		t.Fatalf("expired or unreadable failure: %v %v", got, err)
@@ -180,7 +198,8 @@ func TestMultiModelProfileUsesModelCooldowns(t *testing.T) {
 }
 
 // A signed-out runtime fails before any model runs, so no model cooldown is
-// recorded. The whole profile must still step aside for a healthy one.
+// recorded. The whole profile must still step aside for a healthy one. The same
+// holds for a completed capacity failure and a rejected sign-in.
 func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	storetest.Isolate(t)
 	harness.ResetModelCooldownsForTest()
@@ -191,9 +210,25 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 		{Name: "spare", Taste: 1},
 	}
 	info := subagent.Info{Meta: subagent.Meta{Profile: "chain"}}
-	quota := subagent.Turn{Status: subagent.TurnError, Ended: now, Error: "worker chain: 429 quota exhausted"}
+	quota := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Quota, Error: "worker chain: 429 quota exhausted"}
 	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, quota, now), now, "reviewer"); err != nil || got != "chain" {
 		t.Fatalf("a quota error hid a profile with healthy models: %q %v", got, err)
+	}
+	// A rejected sign-in blocks the whole account, so no model of the profile may
+	// be chosen, even though the turn recorded no model cooldown.
+	rejected := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Auth, Error: "worker chain: authentication_error: invalid api key"}
+	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, rejected, now), now, "reviewer"); err != nil || got != "spare" {
+		t.Fatalf("a rejected sign-in kept the profile selectable: %q %v", got, err)
+	}
+	// A capacity failure that ended the turn already spent the whole model chain,
+	// so the profile steps aside for the spare even though this engine process
+	// holds no model cooldown for it.
+	busy := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Capacity, Error: "worker chain: Selected model is at capacity"}
+	if got := RankProfiles(profiles, RecordFailure(nil, info, busy, now), now, "reviewer"); len(got) != 1 || got[0].Name != "spare" {
+		t.Fatalf("a completed capacity failure kept the multi-model profile: %+v", got)
+	}
+	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, busy, now), now, "reviewer"); err != nil || got != "spare" {
+		t.Fatalf("a completed capacity failure kept the profile selectable: %q %v", got, err)
 	}
 	signedOut := subagent.Turn{Status: subagent.TurnError, Ended: now, Error: "worker chain runtime is not ready: the active private account is not signed in"}
 	failures := RecordFailure(nil, info, signedOut, now)
@@ -219,7 +254,7 @@ func TestQuotaResetKeepsProfileOut(t *testing.T) {
 	storetest.Isolate(t)
 	now := time.Date(2026, 10, 18, 10, 0, 0, 0, time.UTC)
 	info := subagent.Info{Meta: subagent.Meta{Profile: "argon"}}
-	turn := subagent.Turn{Status: subagent.TurnError, Ended: now, Error: "worker argon: Antigravity protocol result ERROR: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 152h54m19s."}
+	turn := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Quota, Error: "worker argon: Antigravity protocol result ERROR: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 152h54m19s."}
 	failures := RecordFailure(nil, info, turn, now)
 	if want := now.Add(152*time.Hour + 54*time.Minute + 19*time.Second); !failures["argon"].Equal(want) {
 		t.Fatalf("until = %v, want %v", failures["argon"], want)
@@ -234,7 +269,7 @@ func TestQuotaResetKeepsProfileOut(t *testing.T) {
 
 	var cache FailureCache
 	turns := map[string]subagent.Turn{
-		"quota": {Profile: "argon", Created: now, Ended: now, Status: subagent.TurnError, Error: turn.Error},
+		"quota": {Profile: "argon", Created: now, Ended: now, Status: subagent.TurnError, FailureReason: providerfailure.Quota, Error: turn.Error},
 		// A later canceled turn proves nothing about the quota.
 		"stopped": {Profile: "argon", Created: now.Add(time.Minute), Ended: now.Add(2 * time.Minute), Status: subagent.TurnStopped, Error: "worker argon canceled/timed out: context canceled"},
 	}

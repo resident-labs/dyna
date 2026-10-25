@@ -8,9 +8,16 @@ import (
 	"time"
 
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 )
 
 const limitText = "You've hit your session limit · resets in 3h"
+
+// quotaFailure is the same limit as a trusted boundary reports it: a typed
+// quota reason, so recovery can route on it.
+func quotaFailure() error {
+	return providerfailure.Tag(providerfailure.Quota, errors.New(limitText))
+}
 
 func failoverWith(t *testing.T, fake func(context.Context, profile.Profile, string, string, error) (*AccountSwitch, error)) {
 	t.Helper()
@@ -29,7 +36,7 @@ func TestUsageLimitMovesTheTurnToAnotherAccountOnce(t *testing.T) {
 	res, err := withAccountFailover(context.Background(), profile.Profile{Harness: profile.HarnessMock}, t.TempDir(), ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) {
 		calls++
 		if calls == 1 {
-			return Result{}, errors.New(limitText)
+			return Result{}, quotaFailure()
 		}
 		out, err := runMock(context.Background(), "RESPOND: done")
 		return Result{Output: out}, err
@@ -49,7 +56,7 @@ func TestUsageLimitRetriesOnlyOnce(t *testing.T) {
 	})
 	_, err := withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) {
 		calls++
-		return Result{}, errors.New(limitText)
+		return Result{}, quotaFailure()
 	})
 	if err == nil || calls != 2 {
 		t.Fatalf("err=%v calls=%d, want one retry", err, calls)
@@ -63,7 +70,7 @@ func TestNoAllowedAccountKeepsTheLimitAndSaysWhy(t *testing.T) {
 	calls := 0
 	_, err := withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) {
 		calls++
-		return Result{}, errors.New(limitText)
+		return Result{}, quotaFailure()
 	})
 	if err == nil || calls != 1 || !strings.Contains(err.Error(), "session limit") || !strings.Contains(err.Error(), "resets Tue 12:00") {
 		t.Fatalf("err=%v calls=%d", err, calls)
@@ -75,8 +82,14 @@ func TestOtherFailuresDoNotSwitchAccounts(t *testing.T) {
 		t.Fatal("switched on a failure that is not a usage limit")
 		return nil, nil
 	})
-	for _, text := range []string{"parse error", "service unavailable, at capacity"} {
-		if _, err := withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) { return Result{}, errors.New(text) }); err == nil {
+	for _, failure := range []error{
+		errors.New("parse error"),
+		errors.New("quota mentioned by the model in its own answer"),
+		providerfailure.Tag(providerfailure.Auth, errors.New("the account is not signed in")),
+		providerfailure.Tag(providerfailure.Capacity, errors.New("service unavailable, at capacity")),
+		providerfailure.Tag(providerfailure.Unavailable, errors.New("bad gateway")),
+	} {
+		if _, err := withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) { return Result{}, failure }); err == nil {
 			t.Fatal("error lost")
 		}
 	}
@@ -119,7 +132,7 @@ func TestFailoverResumesTheExactSessionAfterWork(t *testing.T) {
 	_, err := withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(_ ExecutionOptions, resume string) (Result, error) {
 		resumed = append(resumed, resume)
 		if len(resumed) == 1 {
-			return Result{SessionID: "sess-1", Output: "ran a tool"}, errors.New(limitText)
+			return Result{SessionID: "sess-1", Output: "ran a tool"}, quotaFailure()
 		}
 		return Result{SessionID: resume}, nil
 	})
@@ -136,7 +149,7 @@ func TestFailoverDoesNotReplayWorkThatHasNoSessionToResume(t *testing.T) {
 	calls := 0
 	_, err := withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) {
 		calls++
-		return Result{Output: "did work"}, errors.New(limitText)
+		return Result{Output: "did work"}, quotaFailure()
 	})
 	if calls != 1 || err == nil || !strings.Contains(err.Error(), "not replayed") {
 		t.Fatalf("calls=%d err=%v", calls, err)
@@ -154,7 +167,7 @@ func TestFailoverBlamesTheTurnsAccount(t *testing.T) {
 	_, _ = withAccountFailover(context.Background(), profile.Profile{}, "", ExecutionOptions{}, func(ExecutionOptions, string) (Result, error) {
 		calls++
 		if calls == 1 {
-			return Result{AccountID: "account-a"}, errors.New(limitText)
+			return Result{AccountID: "account-a"}, quotaFailure()
 		}
 		return Result{}, nil
 	})

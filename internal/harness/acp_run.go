@@ -3,6 +3,7 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/jsonrpc"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
 )
@@ -550,7 +552,7 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 					// Replace this session's dead child on the next attach.
 					_ = s.host.Close()
 				}
-				return finishAttempt(spec, rawLines.String(), stderr.String(), st.err, true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
+				return finishAttempt(spec, rawLines.String(), stderr.String(), acpPromptError(st.err), true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
 			}
 			finalStderr := s.finishStderr()
 			if finalStderr != "" {
@@ -622,6 +624,36 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 	}
 }
 
+// acpPromptError tags a JSON-RPC error reply with the provider reason its
+// structured message or data names. The reply is the provider's own answer. A
+// transport error or a local failure is not, so it stays untyped.
+func acpPromptError(err error) error {
+	var rpc *jsonrpc.Error
+	if !errors.As(err, &rpc) {
+		return err
+	}
+	if reason, ok := providerfailure.Classify(rpc.Message); ok {
+		return providerfailure.Tag(reason, err)
+	}
+	var data struct {
+		Status json.RawMessage `json:"status"`
+		Code   json.RawMessage `json:"code"`
+		Type   json.RawMessage `json:"type"`
+	}
+	if len(rpc.Data) > 0 && json.Unmarshal(rpc.Data, &data) == nil {
+		for _, field := range []json.RawMessage{data.Status, data.Code, data.Type} {
+			if len(field) == 0 {
+				continue
+			}
+			if reason, ok := providerfailure.ClassifyJSONField(field); ok {
+				return providerfailure.Tag(reason, err)
+			}
+		}
+		return providerfailure.TagDetail(err, string(rpc.Data))
+	}
+	return err
+}
+
 // acpStopReasonError turns a prompt stopReason into a turn error.
 func acpStopReasonError(harness, stopReason string) error {
 	switch stopReason {
@@ -637,7 +669,7 @@ func acpStopReasonError(harness, stopReason string) error {
 	case "refusal":
 		return fmt.Errorf("%s refused the turn", harness)
 	case "rate_limit":
-		return fmt.Errorf("%s usage limit reached (rate_limit); try again later", harness)
+		return providerfailure.Tag(providerfailure.Quota, fmt.Errorf("%s usage limit reached (rate_limit); try again later", harness))
 	case "error":
 		return fmt.Errorf("%s ended the turn with an error", harness)
 	default:
