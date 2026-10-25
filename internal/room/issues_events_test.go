@@ -1,8 +1,11 @@
 package room
 
 import (
+	"context"
 	"strconv"
 	"testing"
+
+	"dyna-agent/internal/authority"
 )
 
 // filingInput is the librarian's shape: the typed note fields a smell carries.
@@ -66,7 +69,7 @@ func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := s.ChangeIssueFrom(rec.ID, issue.ID, "alpha:root", CloseOrigin{PR: 542, Commit: "24c91eb"}, func(i *Issue) error {
+	closed, err := s.ChangeIssueFrom(authority.WithActor(context.Background(), authority.EngineRoomActor(rec.ID)), rec.ID, issue.ID, "alpha:root", CloseOrigin{PR: 542, Commit: "24c91eb"}, func(i *Issue) error {
 		i.State = IssueStateClosed
 		i.Reason = "Fixed by #542"
 		return nil
@@ -107,7 +110,7 @@ func TestManualCloseNamesTheClosingSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CloseIssue(rec.ID, issue.ID, "alpha:root", "Obsolete: the panel is gone", CloseOrigin{}); err != nil {
+	if _, err := s.CloseIssue(ownerCtx(), rec.ID, issue.ID, "alpha:root", "Obsolete: the panel is gone", CloseOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	msgs, err := s.Messages(rec.ID)
@@ -131,7 +134,7 @@ func TestIssueGoalAssignmentNamesTheAssignee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ChangeIssue(rec.ID, issue.ID, "alpha:root", func(i *Issue) error {
+	if _, err := s.ChangeIssue(ownerCtx(), rec.ID, issue.ID, "alpha:root", func(i *Issue) error {
 		i.State = IssueStateGoal
 		i.GoalID = "g7"
 		i.Assignee = "alpha:librarian"

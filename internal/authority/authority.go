@@ -76,6 +76,14 @@ func WithActor(ctx context.Context, a Actor) context.Context {
 	return context.WithValue(ctx, actorKey{}, a)
 }
 
+// EngineRoomActor is the actor of the engine's own action in a room, such as
+// closing an issue that a merged PR fixed. The engine decides such an action
+// from stored state, not from a caller's request, so it acts as the room's
+// root seat. The address that the action shows stays attribution only.
+func EngineRoomActor(roomID string) Actor {
+	return Actor{Role: Root, Room: roomID}
+}
+
 // ActorIn returns the caller's actor when it can act in roomID. The owner
 // acts in any room; every other caller is confined to its authenticated room.
 func ActorIn(ctx context.Context, roomID string) (Actor, error) {
