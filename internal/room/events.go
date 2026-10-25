@@ -266,15 +266,18 @@ type GoalChange string
 
 // Goal changes.
 const (
-	GoalAdded    GoalChange = "added"
-	GoalEdited   GoalChange = "edited"
-	GoalAmended  GoalChange = "amended"
-	GoalFinished GoalChange = "finished"
-	GoalDropped  GoalChange = "dropped"
+	GoalAdded   GoalChange = "added"
+	GoalEdited  GoalChange = "edited"
+	GoalAmended GoalChange = "amended"
+	// GoalItemsDone tells a goal's holder that a session closed the goal's last
+	// open item. Only the holder ends the goal itself.
+	GoalItemsDone GoalChange = "items_done"
+	GoalFinished  GoalChange = "finished"
+	GoalDropped   GoalChange = "dropped"
 )
 
 // goalChanges lists every goal change the web needs as a union type.
-var goalChanges = []GoalChange{GoalAdded, GoalEdited, GoalAmended, GoalFinished, GoalDropped}
+var goalChanges = []GoalChange{GoalAdded, GoalEdited, GoalAmended, GoalItemsDone, GoalFinished, GoalDropped}
 
 // GoalState is where the goal stands after the event.
 type GoalState string
@@ -298,6 +301,10 @@ type GoalEvent struct {
 	Title string    `json:"title"`
 	Actor string    `json:"actor"`
 	State GoalState `json:"state"`
+	// GoalItemsDone records how many times the goal's last open item closed.
+	// It is part of the post identity, so a reopen and a second close notify
+	// the holders again while a retried post keeps the post it made.
+	ItemsClosed int `json:"itemsClosed,omitempty"`
 	// Summary is the finishing note of a finished goal, or the text of a brief
 	// amendment.
 	Summary string `json:"summary,omitempty"`
@@ -314,9 +321,10 @@ func (g GoalEvent) eventSubject() string { return g.GoalID }
 
 // eventDedupe keys one post per goal and change and text, so a retried edit
 // posts once and a second edit posts again. An amendment adds its stored
-// position: two amendments with the same words are two different posts.
+// position and a closed checklist adds its close number: two posts with the
+// same words are two different posts.
 func (g GoalEvent) eventDedupe() string {
-	return string(g.Type) + "\x00" + g.Title + "\x00" + g.Summary + "\x00" + strconv.Itoa(g.Amendment)
+	return strings.Join([]string{string(g.Type), g.Title, g.Summary, strconv.Itoa(g.Amendment), strconv.Itoa(g.ItemsClosed)}, "\x00")
 }
 
 // CheckinState is a child's activity when the check-in was written.
@@ -1644,6 +1652,15 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeTarget,
 		Once:     true,
 		Text:     "{actor} amended the brief of goal {goalId}: {summary}",
+	},
+	{
+		Family:   FamilyGoal,
+		Type:     EventType(GoalItemsDone),
+		Renderer: "GoalPost",
+		Payload:  reflect.TypeOf(GoalEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "{actor} closed the last item of goal {goalId}: {title}. The goal stays open until its holder finishes it.",
 	},
 	{
 		Family:   FamilyGoal,
