@@ -2,11 +2,13 @@ package roomsvc
 
 import (
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/subagent"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,8 +107,8 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 				t.Fatalf("goal handoff = %+v, %v", got, err)
 			}
 			// The result must tell the app where the work went.
-			if !strings.Contains(strings.Join(closed.CloseSummary, "\n"), "PR #17 author → "+parent.Name) {
-				t.Fatalf("missing close summary: %+v", closed.CloseSummary)
+			if !movedPR(closed.CloseSummary, 17, parent.Address()) {
+				t.Fatalf("missing the PR handoff in the close result: %+v", closed.CloseSummary)
 			}
 
 		})
@@ -149,7 +151,21 @@ func TestCloseCancelsWorkflowFromSQLite(t *testing.T) {
 	if err != nil || got.Status != "canceled" {
 		t.Fatalf("run = %+v, %v", got, err)
 	}
-	if !strings.Contains(strings.Join(closed.CloseSummary, "\n"), "Workflow "+runID+" canceled") {
-		t.Fatalf("missing run result: %+v", closed.CloseSummary)
+	if !canceledWorkflow(closed.CloseSummary, runID) {
+		t.Fatalf("missing the canceled run in the close result: %+v", closed.CloseSummary)
 	}
+}
+
+// movedPR reports whether a close gave PR number to the session at to.
+func movedPR(outcomes []sessionclose.Outcome, number int, to string) bool {
+	return slices.ContainsFunc(outcomes, func(o sessionclose.Outcome) bool {
+		return o.Kind == sessionclose.ResponsibilityPR && o.Result == sessionclose.ResultMoved && o.Number == number && o.To == to
+	})
+}
+
+// canceledWorkflow reports whether a close canceled the run id.
+func canceledWorkflow(outcomes []sessionclose.Outcome, id string) bool {
+	return slices.ContainsFunc(outcomes, func(o sessionclose.Outcome) bool {
+		return o.Kind == sessionclose.ResponsibilityWorkflow && o.Result == sessionclose.ResultCanceled && o.ID == id
+	})
 }

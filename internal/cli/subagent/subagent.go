@@ -652,8 +652,8 @@ func closeCommand(newManager func() *subagent.Manager) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(c.OutOrStdout(), "closed %s (%s)\n", info.Address(), info.ID)
-			for _, item := range result.CloseSummary {
-				fmt.Fprintln(c.OutOrStdout(), item)
+			for _, outcome := range result.CloseSummary {
+				fmt.Fprintln(c.OutOrStdout(), outcome.Text())
 			}
 			return nil
 		},
