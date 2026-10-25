@@ -298,7 +298,6 @@ func TestUnsupportedExpiredPrivateLoginNeedsSignIn(t *testing.T) {
 				if err := store.Update(func(st *accountstore.State) error {
 					e := st.Find(n.ID)
 					e.Identity = identity
-					e.PrivateProof = &accountstore.PrivateProof{Version: 1, Identity: identity}
 					e.NeedsLogin = false
 					return nil
 				}); err != nil {
@@ -435,7 +434,6 @@ func TestOpenCodeSavedExpiryDoesNotInvalidateNativeRenewal(t *testing.T) {
 	if err := (&accountstore.Store{Root: a.Root}).Update(func(s *accountstore.State) error {
 		e := s.Find(n.ID)
 		e.Identity = identity
-		e.PrivateProof = &accountstore.PrivateProof{Version: 1, Identity: identity}
 		e.NeedsLogin = false
 		e.Integration = c.Integration
 		return nil

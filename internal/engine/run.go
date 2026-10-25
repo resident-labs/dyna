@@ -494,7 +494,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if !readOnly {
 		startService(func() { runtime.SplitPiAccounts(ctx) })
 	}
-	cleanup = append(cleanup, runtime.CancelPrivateLogins, runtime.CancelPrivateRuntimeSwitches)
+	cleanup = append(cleanup, runtime.CancelPrivateLogins)
 	config := &configsvc.Service{CLI: cli, NoUpdate: noUpdate, ReadOnly: readOnly, Sessions: rooms.Notify.Sessions}
 	accounts := service.New(service.Options{Store: accountstore.DefaultStore()})
 	computers := newComputerHost(rooms)

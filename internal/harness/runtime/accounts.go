@@ -20,7 +20,6 @@ import (
 )
 
 type NativeAccount struct {
-	proof     *store.PrivateProof
 	prepared  *preparedAccount
 	ID        string         `json:"id"`
 	Harness   string         `json:"harness"`
@@ -48,8 +47,7 @@ func NewAccounts() *Accounts { return &Accounts{Root: filepath.Join(runtimeDataD
 
 func canonicalAccountHarness(h string) (string, error) {
 	h = canonicalRuntimeID(h)
-	switch h {
-	case "claude-code", "codex", "opencode", "muse", "grok", "pi", "kimi-code":
+	if store.KnownHarness(h) {
 		return h, nil
 	}
 	return "", native.ErrUnsupported
@@ -169,7 +167,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 		return NativeAccount{}, errAccountPath
 	}
 	status := "ready"
-	if e.NeedsLogin || e.Identity == "" || requirePrivateAccount(h) && !privateProofHolds(e.Identity, e.PrivateProof) {
+	if e.NeedsLogin || e.Identity == "" {
 		status = "not signed in"
 	}
 	var expiresAt *time.Time
@@ -188,21 +186,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 	if err != nil {
 		return NativeAccount{}, err
 	}
-	if requirePrivateAccount(h) && status == "ready" {
-		if _, err := readAccountLogin(home); err != nil {
-			status = "not signed in"
-		}
-		if active == e.ID {
-			scope := filepath.Join(a.Root, h, ".runtime")
-			paths := privateAccountFiles(h, scope)
-			if len(paths) == 0 {
-				status = "not signed in"
-			} else if _, err := os.Lstat(paths[0]); err != nil || checkPrivateAccountHome(h, scope, false) != nil {
-				status = "not signed in"
-			}
-		}
-	}
-	return NativeAccount{ID: e.ID, Harness: h, Provider: e.Provider, Kind: e.Kind, Label: e.Label, Home: home, Identity: e.Identity, Status: status, Active: active == e.ID, ExpiresAt: expiresAt, proof: e.PrivateProof}, nil
+	return NativeAccount{ID: e.ID, Harness: h, Provider: e.Provider, Kind: e.Kind, Label: e.Label, Home: home, Identity: e.Identity, Status: status, Active: active == e.ID, ExpiresAt: expiresAt}, nil
 }
 
 // activeForEntry returns the account the registry marks active for the entry.
@@ -481,9 +465,6 @@ func (a *Accounts) activeScope(id, executable string) (NativeAccount, native.Man
 	if err != nil {
 		return n, nil, nil, err
 	}
-	if err := requirePrivateSnapshot(n); err != nil {
-		return n, nil, nil, err
-	}
 	if !n.Active {
 		return n, nil, nil, errors.New("Select this account before starting a harness turn.")
 	}
@@ -509,9 +490,6 @@ func (a *Accounts) Env(id string) (map[string]string, error) {
 func (a *Accounts) launchScope(id, executable string) (NativeAccount, native.Manager, map[string]string, error) {
 	n, err := a.Find(id)
 	if err != nil {
-		return n, nil, nil, err
-	}
-	if err := requirePrivateSnapshot(n); err != nil {
 		return n, nil, nil, err
 	}
 	home, err := a.HarnessHome(n.Harness)
@@ -540,9 +518,6 @@ func (a *Accounts) launchManager(id, executable string) (native.Manager, error) 
 	}
 	if n.Harness == "pi" {
 		// Pi reads its whole agent directory from the account's own home.
-		if err := requirePrivateSnapshot(n); err != nil {
-			return nil, err
-		}
 		m, _, err := a.scopedManager(n.Harness, n.Home, executable)
 		return m, err
 	}
@@ -550,9 +525,6 @@ func (a *Accounts) launchManager(id, executable string) (native.Manager, error) 
 		// Readiness reads the account's own credentials folder. The shared
 		// config belongs to the globally active account, which a room choice can
 		// differ from, and it would answer with that account's identity.
-		if err := requirePrivateSnapshot(n); err != nil {
-			return nil, err
-		}
 		return a.pinManager(n, executable)
 	}
 	_, m, _, err := a.launchScope(id, executable)
@@ -570,9 +542,6 @@ func (a *Accounts) Manager(id, executable string) (native.Manager, error) {
 	// A Pi account reads its whole agent directory from its own home, so its
 	// manager works there instead of the shared harness home.
 	if n.Harness == "pi" {
-		if err := requirePrivateSnapshot(n); err != nil {
-			return nil, err
-		}
 		if !n.Active {
 			return nil, errors.New("Select this account before starting a harness turn.")
 		}
@@ -620,9 +589,6 @@ func (m savedAccountManager) Capture(ctx context.Context, root string) ([]native
 	if err := checkAccountFiles(m.account.Harness, m.account.Home, false); err != nil {
 		return nil, err
 	}
-	if err := requirePrivateSnapshot(m.account); err != nil {
-		return nil, err
-	}
 	c, err := readAccountLogin(m.account.Home)
 	if err != nil {
 		return nil, err
@@ -642,9 +608,6 @@ func (m savedAccountManager) LoginCommand(string, string) ([]string, []string, e
 	return nil, nil, native.ErrUnsupported
 }
 func (m savedAccountManager) ProbeSaved(ctx context.Context, c native.Captured) (store.Observation, error) {
-	if err := requirePrivateSnapshot(m.account); err != nil {
-		return store.Observation{}, err
-	}
 	if c.Identity != m.account.Identity {
 		return store.Observation{}, native.ErrNoIdentity
 	}

@@ -44,10 +44,7 @@ func (r *Runtime) addPiProviderKey(ctx context.Context, provider store.Provider,
 	if !ok {
 		return NativeAccount{}, errors.New("Dyna has no API-key sign-in for this provider.")
 	}
-	edit, err := piActionEdit("add", piID, key)
-	if err != nil {
-		return NativeAccount{}, err
-	}
+	edit := piAPIKeyEdit(piID, key)
 	if label == "" {
 		label = string(provider) + " key"
 	}

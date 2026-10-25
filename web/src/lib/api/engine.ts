@@ -16,7 +16,7 @@ import type { DiffComment } from '../files/diffComments.ts'
 import type { Browse, BrowseInfo, CreatedRoom, CreateRoomInput, DirectoryEntries, GitBlameResult, GitDiffResult, GitHistoryResult, GitLastCommitsResult, GitStatusResult, PathCheck, WorkspaceFile } from './file.ts'
 import type { GitHubDetail, GitHubListResult } from './github.ts'
 import type { Goal, GoalEvent, GoalItem, GoalJournalEntry, GoalRule, GoalStatus, RulesView } from './goal.ts'
-import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, PrivateRuntimeSwitchControl, SignInState } from './harness.ts'
+import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, SignInState } from './harness.ts'
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
 import type { MachineDetail, MachinePatch, MachineSummary } from './machine.ts'
 import type { LibraryView } from './library.ts'
@@ -272,9 +272,6 @@ export interface Engine {
   SetDefaultProfile(name: string): Promise<null>
   SetProfileDisabled(name: string, disabled: boolean): Promise<null>
   RestartPrivateRuntimeLogin(id: string, confirmed: boolean): Promise<PrivateLogin>
-  PrivateRuntimeSwitchState(harness: string): Promise<PrivateRuntimeSwitchControl>
-  CancelPrivateRuntimeAccountSwitch(harness: string, requestId: string): Promise<PrivateRuntimeSwitchControl>
-  ConfirmPrivateRuntimeAccountSwitch(harness: string, requestId: string, stopConfirmed: boolean): Promise<PrivateRuntimeSwitchControl>
   PreviewPrivateConfig(id: string): Promise<PreferencePreview>
   ImportPrivateConfig(id: string, hash: string): Promise<HarnessSnapshot>
   PrivateRuntimes(): Promise<HarnessSnapshot>
@@ -290,7 +287,6 @@ export interface Engine {
   RespondPrivateRuntimeLogin(id: string, text: string): Promise<null>
   CancelPrivateRuntimeLogin(id: string): Promise<null>
   FinishPrivateRuntimeLogin(id: string): Promise<HarnessSnapshot>
-  RemovePrivateRuntimeAccount(id: string, confirmed: boolean): Promise<HarnessSnapshot>
   SetAccountRepos(id: string, repos: string[]): Promise<HarnessSnapshot>
   SetHarnessConfigEnabled(kind: string, name: string, harness: string, enabled: boolean): Promise<HarnessConfig>
   SyncPrivateRuntime(harness: string): Promise<HarnessSnapshot>

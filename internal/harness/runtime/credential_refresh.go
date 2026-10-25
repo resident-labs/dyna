@@ -36,11 +36,6 @@ func (a *Accounts) CredentialStatus(ctx context.Context, id, executable string) 
 		if err = checkAccountFiles(n.Harness, n.Home, false); err != nil {
 			return err
 		}
-		if err = requirePrivateSnapshot(n); err != nil {
-			result.Due = true
-			result.Reason = errPrivateSignIn.Error()
-			return nil
-		}
 		c, err := readAccountLogin(n.Home)
 		if err != nil {
 			return err
@@ -111,7 +106,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 		defer release()
 	}
 	// Use the same path checks as Accounts.transaction before opening the store.
-	for _, path := range []string{a.Root, filepath.Join(a.Root, "accounts.json"), filepath.Join(a.Root, "accounts.lock"), filepath.Join(a.Root, ".refresh-locks")} {
+	for _, path := range []string{a.Root, filepath.Join(a.Root, "accounts.lock"), filepath.Join(a.Root, ".refresh-locks")} {
 		if err = safeAccountPath(path); err != nil {
 			return result, err
 		}
@@ -128,9 +123,6 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 		}
 		if current.Harness != n.Harness {
 			return errAccountPath
-		}
-		if err = requirePrivateSnapshot(current); err != nil {
-			return err
 		}
 		result.Active = current.Active
 		if err = checkAccountFiles(current.Harness, current.Home, false); err != nil {

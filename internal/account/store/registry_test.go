@@ -237,7 +237,6 @@ func TestRegistryWritesOnlyChangedRows(t *testing.T) {
 		"CREATE TRIGGER track_insert AFTER INSERT ON accounts BEGIN INSERT INTO writes VALUES ('insert', new.id); END",
 		"CREATE TRIGGER track_update AFTER UPDATE ON accounts BEGIN INSERT INTO writes VALUES ('update', new.id); END",
 		"CREATE TRIGGER track_delete AFTER DELETE ON accounts BEGIN INSERT INTO writes VALUES ('delete', old.id); END",
-		"CREATE TRIGGER track_registry AFTER UPDATE ON accounts_registry BEGIN INSERT INTO writes VALUES ('registry', '1'); END",
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)

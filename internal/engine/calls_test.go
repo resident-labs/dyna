@@ -207,53 +207,6 @@ func TestHookActionsUseRequestPrincipal(t *testing.T) {
 
 }
 
-func TestRuntimeConstructionDoesNotWriteAccounts(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	store := accountstore.DefaultStore()
-	// Write the historical fixture directly. Store.Update would add an
-	// unrelated file and directory fsync to this startup test.
-	fixture := accountstore.State{Version: 1, OpenCodeProvidersCleaned: true, Entries: []accountstore.Entry{
-		{Metadata: accountstore.Metadata{ID: strings.Repeat("c", 32), Harness: "opencode", Integration: "opencode-go", Identity: "opencode:ref"}, Credential: accountstore.Credential{Schema: "opencode/v2-ref@1", Payload: json.RawMessage("{}")}},
-	}}
-	raw, err := json.Marshal(fixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(store.Root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(store.Root, "accounts.json")
-	if err := os.WriteFile(path, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	checkReadOnly := func(name string, read func()) {
-		t.Helper()
-		// A fixed old timestamp detects rewrites even on coarse filesystems.
-		stamp := time.Unix(946684800, 0)
-		if err := os.Chtimes(path, stamp, stamp); err != nil {
-			t.Fatal(err)
-		}
-		before, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		read()
-		after, err := os.ReadFile(path)
-		if err != nil || string(before) != string(after) {
-			t.Fatalf("%s changed account contents: %v", name, err)
-		}
-		again, err := os.Stat(path)
-		if err != nil || !os.SameFile(info, again) || !again.ModTime().Equal(info.ModTime()) {
-			t.Fatalf("%s rewrote account store: %v", name, err)
-		}
-	}
-	checkReadOnly("runtime construction", func() { newRuntime(t.Context()) })
-}
-
 func TestNotBuiltPageIsUsableShell(t *testing.T) {
 	shell, err := fs.Sub(notBuilt, "notbuilt")
 	if err != nil {
@@ -422,7 +375,7 @@ func TestEveryCallHasOneScope(t *testing.T) {
 		{websvc.ScopeFiles, `ListEntries ReadFile SyncFetch SyncRefresh GitExport GitStatus GitLastCommits GitReadFile GitHistory GitBlame GitDiff BrowseInfo BrowseDirs InspectPath`},
 		{websvc.ScopeTerminal, `TermOpen Terms TermAttach TermWrite TermResize TermClose ShellJobs ShellLog ShellLogRange StopShell`},
 		{websvc.ScopeComputers, `Computers Computer ComputerControl`},
-		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian SaveMachine ProbeMachine TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog ListGlobalHooks GlobalHookSummary GlobalHookRuns RunGlobalHook AddGlobalHook EditGlobalHook RemoveGlobalHook ResetHook GlobalHookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom SetRoomRootProfile DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountsList AccountsUse AccountsRemove AccountsAdd AccountsImport ProfileModels`},
+		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian SaveMachine ProbeMachine TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog ListGlobalHooks GlobalHookSummary GlobalHookRuns RunGlobalHook AddGlobalHook EditGlobalHook RemoveGlobalHook ResetHook GlobalHookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom SetRoomRootProfile DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountsList AccountsUse AccountsRemove AccountsAdd AccountsImport ProfileModels`},
 	}
 	want := map[string]websvc.Scope{}
 	for _, group := range scopes {
@@ -531,8 +484,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 		}
 	}
 	// VoiceResume can dial a provider, like VoiceStart.
-	if n := len(callspec.LongCalls); n != 96 {
-		t.Fatalf("LongCalls has %d calls, want 96; a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 94 {
+		t.Fatalf("LongCalls has %d calls, want 94; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 

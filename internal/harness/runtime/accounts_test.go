@@ -239,7 +239,7 @@ func TestNativeCredentialSymlinkRejected(t *testing.T) {
 }
 
 func TestAccountStorageSymlinksRejected(t *testing.T) {
-	for _, name := range []string{"accounts.json", "accounts.lock", "codex"} {
+	for _, name := range []string{"accounts.lock", "codex"} {
 		t.Run(name, func(t *testing.T) {
 			a := testAccounts(t)
 			if err := os.MkdirAll(a.Root, 0700); err != nil {

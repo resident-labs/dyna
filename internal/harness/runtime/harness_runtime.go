@@ -243,22 +243,13 @@ func (a *Runtime) ImportPrivateConfig(ctx context.Context, id, hash string) (Pri
 	return a.PrivateRuntimes(ctx)
 }
 
-// ActivatePrivateRuntimeAccount makes an account active when no turn of its
-// harness runs, then regenerates that harness's config. A running turn is an
-// error: the web app's switch waits for turns instead.
-func (a *Runtime) ActivatePrivateRuntimeAccount(ctx context.Context, id string) error {
-	n, err := a.Accounts.Find(id)
-	if err != nil {
-		return err
+// RemoveAccount deletes an account and its homes. The caller asked for the
+// removal, so the engine needs no separate confirmation.
+func (a *Runtime) RemoveAccount(id string) error {
+	if AccountInUse(id) {
+		return errors.New("an open session uses this private account; close it before removal")
 	}
-	bundle, err := a.Bundles.Resolve(n.Harness, "")
-	if err != nil {
-		return err
-	}
-	if err := a.Accounts.SwitchIfIdle(ctx, n.ID, bundle.Executable); err != nil {
-		return err
-	}
-	return a.Regenerate(n.Harness)
+	return a.Accounts.Remove(id, true)
 }
 
 // GCPrivateRuntime removes unused bundles, records of retired harnesses and
@@ -276,16 +267,6 @@ func (a *Runtime) GCPrivateRuntime(ctx context.Context) error {
 		return err
 	}
 	return a.GCGenerations(ctx)
-}
-
-func (a *Runtime) RemovePrivateRuntimeAccount(ctx context.Context, id string, confirmed bool) (PrivateRuntimeSnapshot, error) {
-	if AccountInUse(id) {
-		return PrivateRuntimeSnapshot{}, errors.New("an open session uses this private account; close it before removal")
-	}
-	if err := a.Accounts.Remove(id, confirmed); err != nil {
-		return PrivateRuntimeSnapshot{}, err
-	}
-	return a.PrivateRuntimes(ctx)
 }
 
 // SetAccountRepos limits an account to repositories. It is an admin-scope engine

@@ -43,7 +43,6 @@ type Doctor struct {
 }
 type Runtime struct {
 	privateRecommendations func(context.Context) []RecommendedVersion
-	privateSwitch          privateRuntimeControls
 	privateLoginMu         sync.Mutex
 	privateLogins          map[string]*privateRuntimeLogin
 	lifetime               context.Context
@@ -557,7 +556,7 @@ func (r *Runtime) lifetimeContext() context.Context {
 // NativeLoginNeedsSignIn distinguishes rejected or missing credentials from a
 // failed probe. Runtime readiness and account status must use the same rule.
 func NativeLoginNeedsSignIn(err error) bool {
-	return errors.Is(err, native.ErrNotSignedIn) || errors.Is(err, native.ErrInvalidGrant) || errors.Is(err, errPrivateSignIn)
+	return errors.Is(err, native.ErrNotSignedIn) || errors.Is(err, native.ErrInvalidGrant)
 }
 
 func (r *Runtime) requireAccount(ctx context.Context, id, executable string) error {

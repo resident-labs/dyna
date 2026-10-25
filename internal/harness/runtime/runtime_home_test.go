@@ -151,22 +151,9 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			if err = writeAccountLogin(n.Home, captured); err != nil {
 				t.Fatal(err)
 			}
-			if requirePrivateAccount(h) {
-				for _, path := range privateAccountFiles(h, scope)[:1] {
-					if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-						t.Fatal(err)
-					}
-					if err = os.WriteFile(path, []byte("{}"), 0600); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
 			if err = accounts.transaction(func(s *accountstore.State) error {
 				e := s.Find(n.ID)
 				e.Identity, e.NeedsLogin = captured.Identity, false
-				if requirePrivateAccount(h) {
-					e.PrivateProof = &accountstore.PrivateProof{Version: 1, Identity: captured.Identity}
-				}
 				return nil
 			}, true); err != nil {
 				t.Fatal(err)

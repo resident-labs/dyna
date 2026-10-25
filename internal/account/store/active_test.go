@@ -37,7 +37,7 @@ func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 		}
 		rows := []struct{ id, harness string }{
 			{"11111111111111111111111111111111", "claude-code"},
-			{"22222222222222222222222222222222", "codex"},
+			{"22222222222222222222222222222222", "grok"},
 		}
 		for i, row := range rows {
 			meta := `{"id":"` + row.id + `","harness":"` + row.harness + `","identity":"` + row.harness + `:one","label":"One","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}`
@@ -48,8 +48,7 @@ func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 				return err
 			}
 		}
-		_, err := conn.ExecContext(ctx, "INSERT INTO accounts_registry VALUES(1,1,1)")
-		return err
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +64,7 @@ func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 		kind     Kind
 	}{
 		"11111111111111111111111111111111": {ProviderAnthropic, KindOAuth},
-		"22222222222222222222222222222222": {ProviderChatGPT, KindOAuth},
+		"22222222222222222222222222222222": {ProviderXAI, KindOAuth},
 	}
 	if len(st.Entries) != len(want) {
 		t.Fatalf("migrated %d accounts, want %d", len(st.Entries), len(want))
@@ -82,7 +81,7 @@ func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 		id       string
 	}{
 		{ProviderAnthropic, "claude-code", "11111111111111111111111111111111"},
-		{ProviderChatGPT, "codex", "22222222222222222222222222222222"},
+		{ProviderXAI, "grok", "22222222222222222222222222222222"},
 	} {
 		if got, err := s.Active(row.provider, row.harness, ""); err != nil || got != row.id {
 			t.Fatalf("active %s for %s = %q, %v", row.provider, row.harness, got, err)

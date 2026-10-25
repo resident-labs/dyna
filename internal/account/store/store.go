@@ -46,27 +46,20 @@ type Observation struct {
 	Unavailable      bool       `json:"unavailable,omitempty"`
 }
 
-// PrivateProof binds a private sign-in to its account identity.
-type PrivateProof struct {
-	Version  int    `json:"version"`
-	Identity string `json:"identity"`
-}
-
 type Metadata struct {
-	PrivateProof   *PrivateProof `json:"privateProof,omitempty"`
-	NativeHome     string        `json:"nativeHome,omitempty"`
-	Observation    *Observation  `json:"observation,omitempty"`
-	ID             string        `json:"id"`
-	Provider       Provider      `json:"provider"`
-	Kind           Kind          `json:"kind"`
-	Harness        string        `json:"harness"`
-	Integration    string        `json:"integration,omitempty"`
-	Identity       string        `json:"identity"`
-	Label          string        `json:"label"`
-	NeedsLogin     bool          `json:"needsLogin,omitempty"`
-	RefreshPending bool          `json:"refreshPending,omitempty"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	UpdatedAt      time.Time     `json:"updatedAt"`
+	NativeHome     string       `json:"nativeHome,omitempty"`
+	Observation    *Observation `json:"observation,omitempty"`
+	ID             string       `json:"id"`
+	Provider       Provider     `json:"provider"`
+	Kind           Kind         `json:"kind"`
+	Harness        string       `json:"harness"`
+	Integration    string       `json:"integration,omitempty"`
+	Identity       string       `json:"identity"`
+	Label          string       `json:"label"`
+	NeedsLogin     bool         `json:"needsLogin,omitempty"`
+	RefreshPending bool         `json:"refreshPending,omitempty"`
+	CreatedAt      time.Time    `json:"createdAt"`
+	UpdatedAt      time.Time    `json:"updatedAt"`
 }
 
 // Provider is the sign-in service an account belongs to. A harness consumes an
@@ -143,9 +136,7 @@ type Entry struct {
 }
 
 type State struct {
-	Version                  int     `json:"version"`
-	Entries                  []Entry `json:"entries"`
-	OpenCodeProvidersCleaned bool    `json:"openCodeProvidersCleaned,omitempty"`
+	Entries []Entry `json:"entries"`
 }
 
 type Store struct {
@@ -164,29 +155,40 @@ func IsOpenCodeIntegration(integration string) bool {
 	return integration == "opencode-go" || integration == "opencode"
 }
 
-func (st *State) dropOpenCodeProviders() {
-	entries := make([]Entry, 0, len(st.Entries))
-	for _, e := range st.Entries {
-		if e.Harness == "opencode" && e.NativeHome == "" && !IsOpenCodeIntegration(e.Integration) {
-			continue
-		}
-		entries = append(entries, e)
+// KnownHarness reports whether this release runs h. Every account write path
+// validates its harness here, so a row can never name a harness that no code
+// runs.
+func KnownHarness(h string) bool {
+	switch h {
+	case "claude-code", "codex", "grok", "kimi-code", "muse", "opencode", "pi":
+		return true
 	}
-	st.Entries = entries
+	return false
 }
 
-// Read returns SQL metadata and protected credentials after the one-time migration.
+// AccountsRetired reports whether the owner retired the saved accounts of
+// harness h on 2026-10-25, when Pi took over its provider: those sign-ins were
+// moved into Pi accounts by hand, so the harness-bound rows are dead weight and
+// the migration drops them. h still runs in this release; the change that
+// removes its adapter drops it from KnownHarness too, and from then on the
+// write paths accept no new row for it. Pi's own accounts for chatgpt,
+// meta-muse and opencode-go are not harness-bound and stay.
+func AccountsRetired(h string) bool {
+	switch h {
+	case "codex", "muse", "opencode":
+		return true
+	}
+	return false
+}
+
+// Read returns SQL metadata and protected credentials.
 func (s *Store) Read() (State, error) {
 	db, err := s.db()
 	if err != nil {
 		return State{}, errors.New("Saved accounts could not be read.")
 	}
 	ctx := context.Background()
-	st, err := s.load(ctx, db)
-	if err == nil {
-		st.dropOpenCodeProviders()
-	}
-	return st, err
+	return s.load(ctx, db)
 }
 
 // Update holds the same lock through native activation and persistence when
@@ -251,19 +253,6 @@ func (s *Store) transaction(ctx context.Context, fn func(*State, func() error) e
 		return err
 	}
 	state := committed.clone()
-	// TODO: legacy/shim remove later — remove imported third-party OpenCode references once.
-	// This only rewrites Dyna's registry. Native credentials and private homes stay intact.
-	if !state.OpenCodeProvidersCleaned {
-		hadEntries := len(state.Entries) > 0
-		state.dropOpenCodeProviders()
-		state.OpenCodeProvidersCleaned = true
-		if hadEntries {
-			if err := s.save(maintenanceCtx, db, committed, state); err != nil {
-				return err
-			}
-			committed = state.clone()
-		}
-	}
 	return fn(&state, func() error {
 		if err := s.save(ctx, db, committed, state); err != nil {
 			return err

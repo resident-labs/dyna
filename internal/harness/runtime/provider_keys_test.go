@@ -2,14 +2,10 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -42,16 +38,6 @@ func providerKeysRuntime(t *testing.T) *Runtime {
 			return err
 		}
 		root := args[4]
-		// A fake Pi catalog and a fake OpenCode executable, in npm's layout.
-		catalog := filepath.Join(root, piCatalog)
-		if err := os.MkdirAll(catalog, 0700); err != nil {
-			return err
-		}
-		for _, name := range []string{"zai.json", "openrouter.json", ".manifest.json"} {
-			if err := os.WriteFile(filepath.Join(catalog, name), []byte("{}"), 0600); err != nil {
-				return err
-			}
-		}
 		pkg, _ := bundlePackage("opencode")
 		if cli := filepath.Join(root, "lib/node_modules", pkg, "cli.js"); fileExists(cli) {
 			return fsutil.WriteExecutable(cli, []byte(fakeOpenCode), 0700)
@@ -83,100 +69,6 @@ func seedPiAccount(t *testing.T, r *Runtime, id, entry string) NativeAccount {
 	return account
 }
 
-// A key belongs to the account of its provider. Pi reads one provider per
-// account, so adding one key never touches another provider's login.
-func TestPiProviderKeys(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
-	ctx := context.Background()
-	got, err := r.HarnessProviderKeys(ctx, "pi", "choices", "", "")
-	if err != nil || len(got.Choices) != 2 || got.Choices[0].ID != "openrouter" {
-		t.Fatalf("choices: %+v %v", got, err)
-	}
-	xai := seedPiAccount(t, r, "xai", `{"type":"oauth","access":"keep"}`)
-	got, err = r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey)
-	if err != nil || len(got.Providers) != 2 || got.Providers[0].ID != "xai" || got.Providers[0].Auth != "oauth" || got.Providers[1].Auth != "api_key" {
-		t.Fatalf("add: %+v %v", got, err)
-	}
-	zai, found, err := r.piAccountForProvider(ctx, store.ProviderZAI)
-	if err != nil || !found || zai.ID == xai.ID {
-		t.Fatalf("zai account: %+v %v", zai, err)
-	}
-	path := filepath.Join(zai.Home, "auth.json")
-	raw, _ := os.ReadFile(path)
-	var file map[string]map[string]string
-	if json.Unmarshal(raw, &file) != nil || file["zai"]["type"] != "api_key" || file["zai"]["key"] != testProviderKey {
-		t.Fatalf("zai auth.json: %s", raw)
-	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0600 {
-		t.Fatalf("mode %v", info.Mode())
-	}
-	if raw, _ := os.ReadFile(filepath.Join(xai.Home, "auth.json")); !strings.Contains(string(raw), "keep") {
-		t.Fatalf("the xai login changed: %s", raw)
-	}
-	if out, _ := json.Marshal(got); strings.Contains(string(out), testProviderKey) {
-		t.Fatal("key in result")
-	}
-	got, err = r.HarnessProviderKeys(ctx, "pi", "remove", "zai", "")
-	if err != nil || len(got.Providers) != 1 || got.Providers[0].ID != "xai" {
-		t.Fatalf("remove: %+v %v", got, err)
-	}
-	if raw, _ := os.ReadFile(path); strings.Contains(string(raw), "zai") {
-		t.Fatalf("zai auth.json after remove: %s", raw)
-	}
-}
-
-func TestProviderKeysRejectBadInput(t *testing.T) {
-	r := providerKeysRuntime(t)
-	ctx := context.Background()
-	for _, c := range []struct{ harness, action, provider, key string }{
-		{"codex", "list", "", ""},
-		{"pi", "add", "../x", testProviderKey},
-		{"pi", "add", "zai", ""},
-		{"pi", "add", "zai", "a\nb"},
-		{"pi", "wipe", "zai", ""},
-	} {
-		_, err := r.HarnessProviderKeys(ctx, c.harness, c.action, c.provider, c.key)
-		if err == nil || strings.Contains(err.Error(), testProviderKey) {
-			t.Fatalf("%+v: %v", c, err)
-		}
-	}
-}
-
-func TestOpenCodeProviderKeys(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "opencode", "2.0.32")
-	ctx := context.Background()
-	got, err := r.HarnessProviderKeys(ctx, "opencode", "choices", "", "")
-	if err != nil || len(got.Choices) != 1 || got.Choices[0].Name != "Z.AI" {
-		t.Fatalf("choices: %+v %v", got, err)
-	}
-	got, err = r.HarnessProviderKeys(ctx, "opencode", "add", "zai", testProviderKey)
-	if err != nil || len(got.Providers) != 1 || got.Providers[0].ID != "zai" {
-		t.Fatalf("add: %+v %v", got, err)
-	}
-	home, _ := r.Accounts.HarnessHome("opencode")
-	db := filepath.Join(home, "opencode.db")
-	stdin, _ := os.ReadFile(db + ".stdin")
-	argv, _ := os.ReadFile(db + ".argv")
-	if !strings.Contains(string(stdin), `"key":"`+testProviderKey+`"`) || !strings.Contains(string(stdin), `"type":"key"`) {
-		t.Fatalf("import stdin: %s", stdin)
-	}
-	if strings.Contains(string(argv), testProviderKey) {
-		t.Fatalf("key in arguments: %s", argv)
-	}
-	if out, _ := json.Marshal(got); strings.Contains(string(out), testProviderKey) {
-		t.Fatal("key in result")
-	}
-	got, err = r.HarnessProviderKeys(ctx, "opencode", "remove", "zai", "")
-	if err != nil || len(got.Providers) != 0 {
-		t.Fatalf("remove: %+v %v", got, err)
-	}
-}
-
-// An OpenCode Go API key creates an OpenCode account, which is what an
-// OpenCode profile runs. The key goes into that account's own home, not the
-// shared OpenCode home.
 func TestOpenCodeKeyCreatesAnOpenCodeAccount(t *testing.T) {
 	r := providerKeysRuntime(t)
 	install(t, r.Bundles, "opencode", "2.0.32")
@@ -197,53 +89,6 @@ func TestOpenCodeKeyCreatesAnOpenCodeAccount(t *testing.T) {
 	}
 	if !strings.HasPrefix(account.Identity, "opencode:opencode-go:") {
 		t.Fatalf("the account identity = %q", account.Identity)
-	}
-}
-
-func TestPiProviderKeysWaitForPiLock(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
-	account := seedPiAccount(t, r, "zai", `{"type":"api_key","key":"old"}`)
-	path := filepath.Join(account.Home, "auth.json")
-	lock := path + ".lock"
-	// Pi holds its lock: Dyna waits and then gives up without writing.
-	if err := os.Mkdir(lock, 0700); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
-	defer cancel()
-	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err == nil {
-		t.Fatal("wrote while Pi held the lock")
-	}
-	if raw, _ := os.ReadFile(path); strings.Contains(string(raw), testProviderKey) || !fileExists(lock) {
-		t.Fatal("edited the file or broke a live lock")
-	}
-	// A lock older than Pi's stale limit is broken, and Dyna's own lock is released.
-	old := time.Now().Add(-2 * piAuthStale)
-	if err := os.Chtimes(lock, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.HarnessProviderKeys(context.Background(), "pi", "add", "zai", testProviderKey); err != nil {
-		t.Fatal(err)
-	}
-	if fileExists(lock) || !fileExists(path) {
-		t.Fatal("lock left behind or key not written")
-	}
-}
-
-func TestPiProviderKeysRejectNullAuthFile(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
-	account := seedPiAccount(t, r, "zai", `{"type":"api_key","key":"old"}`)
-	path := filepath.Join(account.Home, "auth.json")
-	if err := os.WriteFile(path, []byte("null"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.HarnessProviderKeys(context.Background(), "pi", "add", "zai", testProviderKey); err == nil {
-		t.Fatal("added a key to a null login file")
-	}
-	if raw, _ := os.ReadFile(path); string(raw) != "null" {
-		t.Fatalf("file changed: %s", raw)
 	}
 }
 
@@ -322,7 +167,7 @@ func TestPiProviderKeyCreatesAndActivatesAnAccount(t *testing.T) {
 	if _, found, err := r.piAccountForProvider(ctx, store.ProviderZAI); err != nil || found {
 		t.Fatalf("fresh install already has a zai account: %+v %v", found, err)
 	}
-	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err != nil {
+	if _, err := r.AddProviderKey(ctx, "pi", store.ProviderZAI, "", testProviderKey); err != nil {
 		t.Fatal(err)
 	}
 	account, found, err := r.piAccountForProvider(ctx, store.ProviderZAI)
@@ -332,12 +177,6 @@ func TestPiProviderKeyCreatesAndActivatesAnAccount(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.Join(account.Home, "auth.json"))
 	if !strings.Contains(string(raw), `"api_key"`) {
 		t.Fatalf("account login file: %s", raw)
-	}
-	if _, err := r.HarnessProviderKeys(context.Background(), "pi", "remove", "zai", ""); err != nil {
-		t.Fatal(err)
-	}
-	if raw, _ = os.ReadFile(filepath.Join(account.Home, "auth.json")); strings.Contains(string(raw), "zai") {
-		t.Fatalf("key left in the account file: %s", raw)
 	}
 }
 
@@ -370,91 +209,6 @@ func TestPiAuthWriteKeepsPisFileWhenTheLockIsLostBeforeCommit(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != `{"pi":"update"}` {
 		t.Fatalf("Pi's update was overwritten: %s", raw)
-	}
-}
-
-func TestPiProviderKeyEditsOfOneProviderKeepOneAccount(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			if _, err := r.HarnessProviderKeys(context.Background(), "pi", "add", "zai", fmt.Sprintf("test-key-%d", i)); err != nil {
-				t.Error(err)
-			}
-		}(i)
-	}
-	wg.Wait()
-	account, found, err := r.piAccountForProvider(context.Background(), store.ProviderZAI)
-	if err != nil || !found {
-		t.Fatalf("zai account: %+v %v", account, err)
-	}
-	saved, _ := os.ReadFile(filepath.Join(account.Home, "auth.json"))
-	if !strings.Contains(string(saved), "test-key-") {
-		t.Fatalf("account login: %s", saved)
-	}
-	accounts, _ := r.Accounts.List()
-	if len(accounts) != 1 {
-		t.Fatalf("concurrent adds made %d accounts", len(accounts))
-	}
-}
-
-// A login file can lose an entry the account still lists. Removing that key
-// must report success and keep the other provider's entry.
-func TestPiProviderKeyRemoveWhenTheAccountLacksTheKey(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
-	ctx := context.Background()
-	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err != nil {
-		t.Fatal(err)
-	}
-	account, found, err := r.piAccountForProvider(ctx, store.ProviderZAI)
-	if err != nil || !found {
-		t.Fatalf("zai account: %+v %v", account, err)
-	}
-	if err := os.WriteFile(filepath.Join(account.Home, "auth.json"), []byte(`{"deepseek":{"type":"api_key","key":"kept"}}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := r.HarnessProviderKeys(ctx, "pi", "remove", "zai", "")
-	if err != nil {
-		t.Fatalf("remove a key the account lacks: %v", err)
-	}
-	for _, p := range got.Providers {
-		if p.ID == "zai" {
-			t.Fatalf("still listed: %+v", got.Providers)
-		}
-	}
-	saved, _ := os.ReadFile(filepath.Join(account.Home, "auth.json"))
-	if !strings.Contains(string(saved), "deepseek") {
-		t.Fatalf("account login lost its key: %s", saved)
-	}
-}
-
-func TestPiProviderKeyEditWaitsForAnAccountSwitch(t *testing.T) {
-	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
-	dir, err := r.Accounts.harnessDirectory("pi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A switch or native login holds this lock first.
-	gate, err := acquireAccountLock(context.Background(), filepath.Join(dir, ".switch.lock"), syscall.LOCK_EX)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
-	defer cancel()
-	if _, err = r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err == nil {
-		t.Fatal("edited keys during an account switch")
-	}
-	if _, found, err := r.piAccountForProvider(context.Background(), store.ProviderZAI); err != nil || found {
-		t.Fatal("created an account during an account switch")
-	}
-	releaseAccountLock(gate)
-	if _, err = r.HarnessProviderKeys(context.Background(), "pi", "add", "zai", testProviderKey); err != nil {
-		t.Fatal(err)
 	}
 }
 
