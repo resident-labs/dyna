@@ -40,13 +40,14 @@ func RoomCmd() *cobra.Command {
 			"Every member and the owner can read every post. Mentions decide who wakes, not who can read. " +
 			"Work started without --room goes to the current repo's room; outside a repo, pass --room.",
 	}
-	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
+	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), editCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
 	return cmd
 }
 
 func createCmd() *cobra.Command {
 	var jsonOut bool
 	var repo string
+	var rootProfile string
 	cmd := &cobra.Command{
 		Use:   "create [<name>] [--repo <path>]",
 		Short: "Create or reuse a room and print its name",
@@ -66,6 +67,7 @@ func createCmd() *cobra.Command {
 			// The engine keeps this only for the owner; it names a session or
 			// worker from the caller.
 			in.CreatedBy = runstore.OwnerFromEnv()
+			in.RootProfile = rootProfile
 			var rec room.Record
 			if err := engineClient().Call(cmd.Context(), "CreateRoomRecord", []any{in}, &rec); err != nil {
 				return fmt.Errorf("the room was not created: %w", err)
@@ -78,7 +80,28 @@ func createCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&repo, "repo", "", "derive the room from the git repo at this path")
+	cmd.Flags().StringVar(&rootProfile, "root-profile", "", "profile for a new room's internal root (empty uses the global default)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the full room record as JSON")
+	return cmd
+}
+
+func editCmd() *cobra.Command {
+	var rootProfile string
+	cmd := &cobra.Command{
+		Use:   "edit <room> --root-profile <name>",
+		Short: "Choose the profile for the room's next internal root",
+		Long:  "Choose the profile for the room's next internal root. Pass an empty name to inherit root.profile. Existing root sessions keep their current profile.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// The engine client requires a heterogeneous positional argument slice.
+			if err := engineClient().Call(cmd.Context(), "SetRoomRootProfile", []any{args[0], rootProfile}, nil); err != nil {
+				return fmt.Errorf("the room was not updated: %w", err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&rootProfile, "root-profile", "", "root profile name (empty uses the global default)")
+	_ = cmd.MarkFlagRequired("root-profile")
 	return cmd
 }
 

@@ -29,7 +29,11 @@ func gitInit(t *testing.T, dir string) {
 // engine's creator rules are tested in internal/engine.
 func serveRoomCreate(t *testing.T) {
 	t.Helper()
-	calls, err := websvc.Bind([]websvc.Binding{{Name: "CreateRoomRecord", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: roomsvc.New(nil).CreateRoomRecord}})
+	svc := roomsvc.New(nil)
+	calls, err := websvc.Bind([]websvc.Binding{
+		{Name: "CreateRoomRecord", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.CreateRoomRecord},
+		{Name: "SetRoomRootProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.SetRoomRootProfile},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,4 +121,36 @@ func TestRoomCreateReusesReservedRepoName(t *testing.T) {
 			t.Fatalf("%v = %q, %v; want %q", args, got, err, first)
 		}
 	}
+}
+
+func TestRoomRootProfileCreateEditAndClear(t *testing.T) {
+	clearStamp(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	serveRoomCreate(t)
+	t.Chdir(t.TempDir())
+
+	if _, err := execCmd(t, RoomCmd(), "create", "notes", "--root-profile", " chosen "); err != nil {
+		t.Fatal(err)
+	}
+	assertRootProfile := func(want string) {
+		t.Helper()
+		rec, err := store().Resolve("notes")
+		if err != nil || rec.RootProfile != want {
+			t.Fatalf("room root profile = %q, %v; want %q", rec.RootProfile, err, want)
+		}
+	}
+	assertRootProfile("chosen")
+	if _, err := execCmd(t, RoomCmd(), "edit", "notes", "--root-profile", "other"); err != nil {
+		t.Fatal(err)
+	}
+	assertRootProfile("other")
+	// Reusing a room must keep its saved choice.
+	if _, err := execCmd(t, RoomCmd(), "create", "notes"); err != nil {
+		t.Fatal(err)
+	}
+	assertRootProfile("other")
+	if _, err := execCmd(t, RoomCmd(), "edit", "notes", "--root-profile", ""); err != nil {
+		t.Fatal(err)
+	}
+	assertRootProfile("")
 }
