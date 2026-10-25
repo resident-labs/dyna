@@ -16,6 +16,11 @@ export interface CheckSummary {
   commentUrl?: string
 }
 
+// LocalCIConfigState is state.LocalCIConfigState: the local CI configuration a
+// repository has at a head. The engine sends one of these known states, so the
+// client words it itself and never shows a Git or YAML message.
+export type LocalCIConfigState = 'not-configured' | 'head-missing'
+
 export interface BotReview {
   bot: string
   state: string
@@ -83,7 +88,7 @@ export interface ChangeView {
   watching?: boolean
   status?: string
   ci?: string
-  localCIConfig?: 'not-configured' | 'head-missing'
+  localCIConfig?: LocalCIConfigState
   ciTestReportNote?: string
   ciReason?: string
   consecutiveFailures?: number
