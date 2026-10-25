@@ -210,6 +210,9 @@ Do not wait or poll for children. Use a foreground workflow for a join.
 Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
 When an assigned item is done, run `dyna goal item done <goal> <item>`.
+The goal stays open after its last item, and its holder gets a post that the
+items are all closed. Only a holder ends the goal, and root, the owner and any
+member of a shared goal may end it too.
 When a held goal is done, run `dyna goal done <id> "Summary"`.
 Merged and closed PR notices wake the author. Mark the goal done when its last PR
 ends, clean up its worktree, and end your turn.
