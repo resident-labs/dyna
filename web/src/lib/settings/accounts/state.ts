@@ -10,13 +10,15 @@ export type AccountLike = Partial<Omit<Account, 'plan'>> & { plan?: Account['pla
 // ranks them. Source: the Provider constants in internal/account/store/store.go.
 export const PROVIDERS: Provider[] = ['anthropic', 'chatgpt', 'kimi-code', 'xai', 'meta-muse', 'opencode-go', 'deepseek', 'zai']
 
-// PI_OAUTH_PROVIDERS are the providers Pi signs in with OAuth. Source: the
-// OAuth providers in @earendil-works/pi-ai; chatgpt is openai-codex.
-export const PI_OAUTH_PROVIDERS: Provider[] = ['anthropic', 'chatgpt', 'kimi-code', 'xai', 'meta-muse']
+// PI_OAUTH_PROVIDERS are the providers Pi signs in with OAuth. Anthropic is
+// not one: a Claude Pro/Max sign-in used by a third-party harness is billed as
+// extra per-token usage, so Dyna only offers an Anthropic API key in Pi.
+// Source: the OAuth providers in @earendil-works/pi-ai; chatgpt is openai-codex.
+export const PI_OAUTH_PROVIDERS: Provider[] = ['chatgpt', 'kimi-code', 'xai', 'meta-muse']
 
-// PI_KEY_PROVIDERS are the providers Pi accepts an API key for. Source: the
-// API-key providers in @earendil-works/pi-ai and the saved Pi key accounts.
-export const PI_KEY_PROVIDERS: Provider[] = ['anthropic', 'meta-muse', 'opencode-go', 'deepseek', 'zai']
+// PI_KEY_PROVIDERS are the providers Pi accepts an API key for. Pi supports a
+// key for every provider in PROVIDERS, including ChatGPT, Kimi Code and xAI.
+export const PI_KEY_PROVIDERS: Provider[] = PROVIDERS
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: 'Anthropic',

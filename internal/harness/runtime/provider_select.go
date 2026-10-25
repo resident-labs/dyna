@@ -1,10 +1,16 @@
 package runtime
 
 import (
+	"errors"
 	"strings"
 
 	"dyna-agent/internal/account/store"
 )
+
+// ErrPiAnthropicOAuth refuses an Anthropic OAuth sign-in through Pi. Anthropic
+// bills a Claude Pro/Max sign-in used by a third-party harness as extra
+// per-token usage, so only Claude Code or an Anthropic API key may run it.
+var ErrPiAnthropicOAuth = errors.New("Anthropic Claude Pro/Max sign-ins cannot run through Pi. Use the Claude Code harness, or add an Anthropic API key in Pi.")
 
 // piProviderIDs maps the provider IDs Pi stores in its login file, and the
 // model prefixes it uses, to the provider an account belongs to. Pi names a
@@ -126,7 +132,14 @@ func accountRuns(h string, n NativeAccount, p store.Provider) bool {
 		return false
 	}
 	if h == "pi" {
-		return n.Provider == p && p != ""
+		if n.Provider != p || p == "" {
+			return false
+		}
+		// A Claude Pro/Max OAuth entry in a Pi home is never used for a turn.
+		if p == store.ProviderAnthropic && n.Kind != store.KindAPIKey {
+			return false
+		}
+		return true
 	}
 	return true
 }
