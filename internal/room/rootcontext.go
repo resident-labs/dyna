@@ -85,9 +85,10 @@ func rootInput(msg Message, roomName string) bool {
 	return rootWakes(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == "dyna" || msg.Kind == string(FamilyCheckin))
 }
 
-// rootWakes reports whether a post requires the root seat to act. Worker
-// copies remain quiet unless marked. Human requests, Voice, alerts, failed
-// reports and root-owned shell/workflow results keep their wake behavior.
+// rootWakes reports whether a post requires the root seat to act. A session's
+// message to the seat wakes it: an agent's question to its root parent must
+// not wait in the quiet digest. Human requests, Voice, alerts, failed reports
+// and root-owned shell/workflow results keep their wake behavior.
 func rootWakes(msg Message, roomName string) bool {
 	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) || msg.From == roomName+":"+RootAgent {
 		return false
@@ -119,6 +120,13 @@ func rootWakes(msg Message, roomName string) bool {
 	}
 	switch msg.Kind {
 	case "", "message":
+		// A session's message to the seat asks root to act: an agent's question
+		// to its parent root must not wait in the quiet digest. notify binds a
+		// session's own address to its session, so the engine, shells and
+		// workflow runs keep the rules below.
+		if msg.AuthorSessionID() != "" && msg.Wake {
+			return true
+		}
 		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice
 	// TODO: legacy/shim remove later — a post stored before its family was
 	// typed still reads by its old kind. Remove when retained history ages out.

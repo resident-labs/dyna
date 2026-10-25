@@ -389,7 +389,6 @@ func callEnginePost(ctx context.Context, req notify.PostRequest) (notify.Result,
 func PostCmd() *cobra.Command {
 	var replyTo string
 	var alert bool
-	var needsRoot bool
 	var jsonOut bool
 	var attach []string
 	var richPath string
@@ -398,14 +397,14 @@ func PostCmd() *cobra.Command {
 	var forward string
 	cmd := &cobra.Command{
 		Use:   "post <@mention>... [--] <text...>",
-		Short: "Post to a room; use --needs-root for root action",
+		Short: "Post to a room",
 		Long: "Store one post in a room and deliver it to every mentioned recipient.\n\n" +
 			"Mentions: @<name> (a member of your room), @<room>:<name>, @root (the room owner),\n" +
 			"@<room> (that room's owner), @team (the owner's top-level sessions), @parent, @siblings,\n" +
 			"@children, and @run:<run-id>/agent:<n>.\n" +
 			"Bare mentions resolve in your stamped room. Outside Dyna, qualify them: @<room>:<name>,\n" +
 			"@<room>:children. All recipients must be in one room. Every member can read every post.\n\n" +
-			"Worker posts to @root or a top-level @parent stay quiet unless --needs-root is set.\n\n" +
+			"A session's message to @root, or to its parent root, wakes root at once.\n\n" +
 			"Leading arguments that start with @ are mentions; use -- before text that starts with @.\n\n" +
 			"--attach saves a file with the room and lists it in the post; repeat it for more files.\n" +
 			"With --attach the text may be empty. Mentions are read from the text only, never from files.\n" +
@@ -479,7 +478,7 @@ func PostCmd() *cobra.Command {
 			if alert {
 				kind = notify.ServiceAlertKind
 			}
-			result, err := sendPost(cmd.Context(), notify.PostRequest{NeedsRoot: needsRoot, Kind: kind, Mentions: mentions, Text: text, ReplyTo: replyTo, ForwardOf: forward, Files: files, Claim: notify.ClaimOf(snd)})
+			result, err := sendPost(cmd.Context(), notify.PostRequest{Kind: kind, Mentions: mentions, Text: text, ReplyTo: replyTo, ForwardOf: forward, Files: files, Claim: notify.ClaimOf(snd)})
 			if result.Message.ID == "" {
 				return err
 			}
@@ -526,7 +525,6 @@ func PostCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "post id this replies to")
-	cmd.Flags().BoolVar(&needsRoot, "needs-root", false, "Wake root. Use only when root must decide, unblock, or act now.")
 	cmd.Flags().BoolVar(&alert, "alert", false, "report an actionable service problem to the owner or actual parent")
 	cmd.Flags().StringVar(&forward, "forward", "", "id of a post in the room to forward; the text becomes your note")
 	cmd.Flags().StringArrayVar(&attach, "attach", nil, "attach a file (repeatable)")
@@ -607,7 +605,7 @@ func watchCmd() *cobra.Command {
 			"owner posts are not echoed back, and the owner's posts to agents stay quiet " +
 			"context, like every other root-addressed post that does not ask root to act. " +
 			"--lines prints the same deliveries as short text lines, one per post, and ends " +
-			"each delivery with `-- since <post-id>`: ! marks a needs-root post, > another " +
+			"each delivery with `-- since <post-id>`: ! marks a post that asks root to act, > another " +
 			"waking post and · quiet context. --all streams every raw post without batching. " +
 			"--since <post-id> replays posts after that post, including held context.",
 		Args: cobra.ExactArgs(1),

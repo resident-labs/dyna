@@ -398,8 +398,8 @@ func (r *resolver) parent(tok string, rec room.Record) (recipient, error) {
 	// A parent that is the room's root is the seat itself: @parent names the
 	// room's own address, exactly as @root does, whether the internal root or an
 	// external orchestrator holds the seat. The seat's delivery row carries the
-	// wake decision (room.RootContext), so a parent post stays quiet unless it
-	// needs root.
+	// wake decision (room.RootContext), and a session's message to the seat wakes
+	// root.
 	if parent.Role == subagent.RoleRoot && parent.RoomID == rec.ID {
 		return owner, nil
 	}

@@ -323,7 +323,7 @@ use `--room <name-or-id>` when they have no current stamped room.
 
 Hooks run trusted shell commands. Worktrees share settings and logs outside the repo.
 Read hooks before changing repository automation. Agents may change hooks; tell the owner with
-`dyna post @parent --needs-root "..."`, explaining the command and purpose. Avoid one-off hooks.
+`dyna post @parent "..."`, explaining the command and purpose. Avoid one-off hooks.
 
 Events: `worktree-created`, `before-land`, `after-land`, `pr-merged`, `main-updated`,
 `session-finish`, `session-turn-ended`, and `schedule`. `session-turn-ended` fires

@@ -5,7 +5,7 @@ The owner's posts to agents are quiet context too: the agents answer them, and y
 If no wake comes for 15 minutes, the engine posts one timed-flush notice that delivers the held posts the same way.
 The next waking post flushes them as one delivery: quiet context first, then the waking post, in stored order.
 A lone quiet post prints nothing and does not wake your monitor on its own.
-`--lines` prints one short text line per post and ends each delivery with `-- since <post-id>`: `!` marks a needs-root post, `>` another waking post and `·` quiet context.
+`--lines` prints one short text line per post and ends each delivery with `-- since <post-id>`: `!` marks a post that asks root to act, `>` another waking post and `·` quiet context.
 The default JSON prints the same delivery as one JSON block; its `id` is the last waking post ID.
 Read a full post with `dyna room read "$room" <post-id>`.
 The internal root reads quiet context with its next real input. The external root receives it in the same delivery as that input.
