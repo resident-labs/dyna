@@ -410,3 +410,26 @@ func TestKimiRetiredAccountUsesAndRenewsWithoutBundle(t *testing.T) {
 		t.Fatalf("saved credential = %+v", renewedToken)
 	}
 }
+
+// Pi renews a saved grant itself, so an expired access token must not mark the
+// account as signed out.
+func TestExpiredPiAccessTokenIsNotASignOut(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{"openai-codex": map[string]any{
+		"type": "oauth", "access": "access-token", "refresh": "refresh-token", "expires": time.Now().Add(-time.Hour).UnixMilli(), "accountId": "workspace",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := &Account{Harness: "pi"}
+	credential := native.Captured{Identity: "pi:openai-codex", Credential: store.Credential{Schema: "pi/native-files@1", Payload: payload}}
+	setCredentialExpiry(account, credential)
+	if account.NeedsLogin || account.Status == "needs_auth" {
+		t.Fatalf("an expired Pi access token asked for a new sign-in: %+v", account)
+	}
+	if !strings.Contains(account.RefreshMessage, "Pi renews this sign-in") {
+		t.Fatalf("refresh message = %q", account.RefreshMessage)
+	}
+	if account.ExpiresAt == nil {
+		t.Fatal("the access-token expiry was not shown")
+	}
+}

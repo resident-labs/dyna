@@ -260,6 +260,24 @@ func DefaultPath() string {
 }
 
 func Load(path string) (*Store, error) {
+	s, err := LoadForRepair(path)
+	if err != nil {
+		return nil, err
+	}
+	for i := range s.Profiles {
+		p := &s.Profiles[i]
+		if err := p.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid profile %q in %s: %w", p.Name, path, err)
+		}
+	}
+	return s, nil
+}
+
+// LoadForRepair reads a registry without validating its profiles, so an owner
+// can remove or replace a profile this release cannot run: a harness Dyna has
+// retired leaves such a profile behind, and Load refuses the whole file. Running
+// anything still needs Load, so a retired profile never reaches execution.
+func LoadForRepair(path string) (*Store, error) {
 	s := &Store{Path: path}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -272,12 +290,6 @@ func Load(path string) (*Store, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	s.Path = path
-	for i := range s.Profiles {
-		p := &s.Profiles[i]
-		if err := p.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid profile %q in %s: %w", p.Name, path, err)
-		}
-	}
 	sort.Slice(s.Profiles, func(i, j int) bool { return s.Profiles[i].Name < s.Profiles[j].Name })
 	return s, nil
 }

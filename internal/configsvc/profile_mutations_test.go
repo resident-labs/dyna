@@ -2,6 +2,7 @@ package configsvc
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,5 +91,44 @@ func TestProfileOperationsRefuseBeforeReadingConfig(t *testing.T) {
 	after, err := os.ReadFile(profile.DefaultPath())
 	if err != nil || !bytes.Equal(after, invalid) {
 		t.Fatalf("refusal changed config: %s %v", after, err)
+	}
+}
+
+// A profile of a harness Dyna has retired must be removable and replaceable,
+// or the owner can never repair the registry that refusing to load it protects.
+func TestProfileRepairOfARetiredHarness(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(ctx context.Context, svc *Service) error
+	}{
+		{"remove", func(ctx context.Context, svc *Service) error { return svc.RemoveProfile(ctx, "old-codex") }},
+		{"replace", func(ctx context.Context, svc *Service) error {
+			return svc.UpsertProfile(ctx, profile.Profile{Name: "old-codex", Harness: profile.HarnessPi, Model: "zai/glm-5.3", Taste: 6, Intelligence: 8, Cost: 8})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolate(t)
+			path := profile.DefaultPath()
+			contents := `{"version":3,"profiles":[
+				{"name":"old-codex","harness":"codex","taste":7,"intelligence":9,"cost":8},
+				{"name":"kept","harness":"pi","taste":6,"intelligence":8,"cost":8}]}`
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root})
+			if err := tc.run(ctx, &Service{}); err != nil {
+				t.Fatalf("repair failed: %v", err)
+			}
+			store, err := profile.Load(profile.DefaultPath())
+			if err != nil {
+				t.Fatalf("the repaired registry still does not load: %v", err)
+			}
+			if _, ok := store.Get("kept"); !ok {
+				t.Fatal("repair dropped the runnable profile")
+			}
+		})
 	}
 }

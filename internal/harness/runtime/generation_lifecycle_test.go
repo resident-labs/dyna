@@ -755,3 +755,51 @@ func TestGenerationGCDeletesChangedUnpinnedGeneration(t *testing.T) {
 	assertGenerationExists(t, a.Directory, true)
 	assertGenerationExists(t, b.Directory, false)
 }
+
+// A generation, and a skills view, of a harness this release no longer runs
+// must not stop cleanup: both are still Dyna's, and either would otherwise
+// block every other harness's collection forever.
+func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
+	r, home, id := generationFixture(t, "pi")
+	addGenerationSkill(t, r, "pi")
+	addGenerationMCP(t, r, "pi", "retired-tool")
+	retired := buildGeneration(t, r, "pi", home, id)
+
+	// Rename the retired copy, and a view of it, the way an old Codex install
+	// names them. Its directory name and payload hash stay valid, so only the
+	// harness checks can reject them.
+	path := filepath.Join(retired.Directory, generationMetadata)
+	var meta generationOwnership
+	if err := readGenerationJSON(path, &meta); err != nil {
+		t.Fatal(err)
+	}
+	meta.Harness = "codex"
+	if err := writeGenerationJSON(path, meta, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateOwnedGeneration(retired.Directory); !errors.Is(err, errGenerationUnsupported) {
+		t.Fatalf("a replaced harness was not reported as unsupported: %v", err)
+	}
+	viewPath := filepath.Join(r.Generations, ".views", "replaced-harness.json")
+	if err := writeGenerationJSON(viewPath, generationView{Harness: "codex", Home: home, Generations: []string{retired.Directory}}, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later Pi generation republishes the Pi skills view, so nothing points at
+	// the retired copy any more.
+	addGenerationMCP(t, r, "pi", "live-tool")
+	live := buildGeneration(t, r, "pi", home, id)
+	writeGenerationSession(t, "open", Pin{Generation: live.Directory}, false)
+	if live.Directory == retired.Directory {
+		t.Fatal("the fixture built one directory twice")
+	}
+
+	if err := r.GCGenerations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(viewPath); !os.IsNotExist(err) {
+		t.Fatalf("a view of a replaced harness survived: %v", err)
+	}
+	assertGenerationExists(t, retired.Directory, false)
+	assertGenerationExists(t, live.Directory, true)
+}
