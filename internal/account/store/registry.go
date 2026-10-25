@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -75,12 +74,6 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 		if err != nil {
 			return err
 		}
-		// A folder whose rows the JSON import takes over is the only one whose
-		// .active.json files still name its selections.
-		jsonEra, err := registryIsEmpty(ctx, conn)
-		if err != nil {
-			return err
-		}
 		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
 			return err
 		}
@@ -90,85 +83,9 @@ func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 		if err := fillProviders(ctx, conn); err != nil {
 			return err
 		}
-		if err := fillActiveSelections(ctx, conn, legacyActive); err != nil {
-			return err
-		}
-		if !jsonEra {
-			return nil
-		}
-		return importActiveSelections(ctx, conn, root)
+		return fillActiveSelections(ctx, conn, legacyActive)
 	})
 	return db, err
-}
-
-// registryIsEmpty reports whether neither a row nor a migration record exists,
-// so the JSON import owns this folder.
-func registryIsEmpty(ctx context.Context, conn *sql.Conn) (bool, error) {
-	var empty bool
-	err := conn.QueryRowContext(ctx, `SELECT NOT (EXISTS(SELECT 1 FROM accounts) OR EXISTS(SELECT 1 FROM accounts_registry)
-		OR EXISTS(SELECT 1 FROM state_mirrors WHERE key = ?))`, registryKey).Scan(&empty)
-	return empty, err
-}
-
-// TODO: legacy/shim remove later — import retained selections only during migration.
-// importActiveSelections gives each previous release's per-harness selection a
-// row under its account's own provider. It reads a folder only when the JSON
-// import takes it over, so a stale file never restores a selection that an
-// owner already cleared in SQL.
-func importActiveSelections(ctx context.Context, conn *sql.Conn, root string) error {
-	entries, err := os.ReadDir(root)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		harness := entry.Name()
-		path := filepath.Join(root, harness, ".active.json")
-		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		_, err := statewrite.ImportMigration(ctx, conn, activeKey(harness), path, func(conn *sql.Conn, raw []byte) error {
-			var selection struct {
-				ID string `json:"id"`
-			}
-			if len(raw) > 256 || json.Unmarshal(raw, &selection) != nil || !validActiveID(selection.ID) {
-				return fmt.Errorf("invalid account selection for %s", harness)
-			}
-			// An empty ID records an explicit clear, which needs no row.
-			if selection.ID == "" {
-				return nil
-			}
-			provider, found, err := accountProviderOf(ctx, conn, selection.ID)
-			if err != nil || !found {
-				return err
-			}
-			return setActiveRow(ctx, conn, provider, "", selection.ID)
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// accountProviderOf reports the provider a saved account names.
-func accountProviderOf(ctx context.Context, conn *sql.Conn, id string) (Provider, bool, error) {
-	var provider sql.NullString
-	err := conn.QueryRowContext(ctx, "SELECT json_extract(metadata, '$.provider') FROM accounts WHERE id = ?", id).Scan(&provider)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return Provider(provider.String), true, nil
 }
 
 // TODO: legacy/shim remove later — one migration from per-harness selections
