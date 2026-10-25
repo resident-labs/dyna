@@ -3,7 +3,7 @@ version: 1
 # Pull requests select only the trial suites whose file patterns match. Merge
 # trials run every suite in this list. The other suites remain available to
 # `dyna git ci run --suite` for focused manual runs.
-trial: [relay, go, cross-build, computer-smoke]
+trial: [relay, go, cross, computer-smoke]
 
 caches:
   - name: go-build
@@ -118,15 +118,51 @@ checks:
       GOFLAGS: -p=2
     reports: none
 
-  - id: cross-build
+  # One check per release target. The targets cannot share build objects (the
+  # build id includes GOOS and GOARCH), so one check for four targets built them
+  # one after another and took over two minutes. Split, each is a single
+  # cross-compile in its own slot, and the group keeps the cross-build name that
+  # the base graph requires.
+  - id: cross-build-linux-amd64
+    name: cross-build (linux/amd64)
     image: golang:1.26.3
     hostUser: true
-    command: bash scripts/ci.sh cross-build
+    command: bash scripts/ci.sh cross-build linux/amd64
     caches: [go-build, go-mod]
-    env:
+    env: &cross-build-env
       GOMAXPROCS: "2"
       GOMEMLIMIT: 3GiB
       GOFLAGS: -p=2
+    reports: none
+    priority: 1
+
+  - id: cross-build-linux-arm64
+    name: cross-build (linux/arm64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build linux/arm64
+    caches: [go-build, go-mod]
+    env: *cross-build-env
+    reports: none
+    priority: 1
+
+  - id: cross-build-darwin-amd64
+    name: cross-build (darwin/amd64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build darwin/amd64
+    caches: [go-build, go-mod]
+    env: *cross-build-env
+    reports: none
+    priority: 1
+
+  - id: cross-build-darwin-arm64
+    name: cross-build (darwin/arm64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build darwin/arm64
+    caches: [go-build, go-mod]
+    env: *cross-build-env
     reports: none
     priority: 1
 
@@ -262,9 +298,10 @@ suites:
   - id: go-static
     checks: [go-static]
 
-  - id: cross-build
+  - id: cross
+    group: cross-build
     files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
-    checks: [cross-build]
+    checks: [cross-build-linux-amd64, cross-build-linux-arm64, cross-build-darwin-amd64, cross-build-darwin-arm64]
 
   - id: computer-smoke
     files: ['^\.github/', '^internal/(computers|computerweb)/']

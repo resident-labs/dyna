@@ -122,7 +122,7 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 	if got.Title != record.Title || got.URL != record.URL {
 		t.Fatalf("running CI names %q at %q, want the PR", got.Title, got.URL)
 	}
-	if suites := strings.Join(got.Suites, ","); suites != "go,cross-build" {
+	if suites := strings.Join(got.Suites, ","); suites != "go,cross" {
 		t.Fatalf("running CI suites = %q", suites)
 	}
 

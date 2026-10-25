@@ -250,7 +250,7 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 
 func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T) {
 	const slots = 4
-	checks, _, err := nodeChecks(testDynaDefinition(t), []Suite{SuiteGo, SuiteCrossBuild}, true)
+	checks, _, err := nodeChecks(testDynaDefinition(t), []Suite{SuiteGo, SuiteCross}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,8 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
 		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
 	}
-	wanted := map[CheckName]bool{"frontend test (0)": true, "frontend test (1)": true, "frontend test (2)": true, "frontend test (3)": true, "frontend test (4)": true, "frontend test (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
+	wanted := map[CheckName]bool{"frontend test (0)": true, "frontend test (1)": true, "frontend test (2)": true, "frontend test (3)": true, "frontend test (4)": true, "frontend test (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true,
+		"cross-build (linux/amd64)": true, "cross-build (linux/arm64)": true, "cross-build (darwin/amd64)": true, "cross-build (darwin/arm64)": true, "cross-build": true}
 	for i := 0; i < 8; i++ {
 		wanted[CheckName(fmt.Sprintf("go-test-shard (%d)", i))] = true
 	}
@@ -367,7 +368,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if check.CheckName == "go-test" && check.Status != "failed" {
 			t.Fatal("aggregate lost frontend failure")
 		}
-		if check.CheckName != "go-test" && check.Duration != time.Second {
+		if check.CheckName != "go-test" && !check.Aggregate && check.Duration != time.Second {
 			t.Fatalf("check uses wall time instead of admitted execution time: %+v", check)
 		}
 		// This check's command passed; the reports proved the failure, and the
