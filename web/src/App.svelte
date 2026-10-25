@@ -201,6 +201,7 @@
     turn?: number
   }
   let rooms = $state<Room[]>([])
+  let roomsLoaded = $state(false)
   // started turns on once the first room is chosen. Before that, the
   // empty room is not the owner's choice and must not overwrite the saved one.
   let started = $state(false)
@@ -556,7 +557,7 @@
     atBottom: () => feedAtBottom,
     leaveBottom: () => (feedAtBottom = false),
     error: (message) => (loadError = message),
-    rooms: (value) => { rooms = value; loadError = '' },
+    rooms: (value) => { rooms = value; roomsLoaded = true; loadError = '' },
     opened: applyRoomOpened,
     picked: (rows) => selectionView.applyRows(rows),
     loadComputers,
@@ -1528,6 +1529,10 @@
     if (!templates) api.listTemplates().then((t: { name: string; description?: string }[] | null) => (templates = t ?? []), () => (templates = []))
     return templates ?? []
   }
+  function openNewRoom(arg = '') {
+    palettePath = arg
+    showPalette = true
+  }
   function actionRegistry(r = current ?? room) {
     return actions({
       room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id ?? ''],
@@ -1547,7 +1552,7 @@
         if (!hit) return `No room matches "${arg}".`
         selectRoom(hit.id)
       },
-      newRoom: (arg) => { palettePath = arg || ''; showPalette = true },
+      newRoom: openNewRoom,
       templateOptions: () => loadTemplates().map((t) => ({ value: t.name, hint: t.description || '' })),
       startWorkflow: async (arg) => {
         if (!arg) return void (openView('runs'), (starting = true))
@@ -1810,7 +1815,7 @@
         {#if !roomId && machineId}
           <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
         {:else if !roomId}
-          <Home bind:this={home} {rooms} {update} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} onsettings={(pane: string) => openSettings(pane)} />
+          <Home bind:this={home} {rooms} {roomsLoaded} {update} onnewroom={() => openNewRoom()} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} onsettings={(pane: string) => openSettings(pane)} />
         {:else if !room}
           <Skeleton label="Loading room" />
         {:else if drill}
