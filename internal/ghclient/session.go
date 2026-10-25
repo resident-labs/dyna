@@ -71,10 +71,7 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 			}
 		}
 	}
-	tokenKey, fallbackKey := "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"
-	if r.host == "github.com" || strings.HasSuffix(r.host, ".ghe.com") {
-		tokenKey, fallbackKey = "GH_TOKEN", "GITHUB_TOKEN"
-	}
+	tokenKey, fallbackKey := tokenEnvNames(r.host)
 	if token == "" && !unavailable {
 		// Token-only owner environments remain usable when gh has no saved accounts.
 		source := map[string]string{}
@@ -137,6 +134,15 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		return SessionEnv{}, err
 	}
 	return SessionEnv{Env: out, Notice: notice}, nil
+}
+
+// tokenEnvNames returns the environment token names the GitHub CLI reads for a
+// host, in the order it prefers them.
+func tokenEnvNames(host string) (string, string) {
+	if host == "github.com" || strings.HasSuffix(host, ".ghe.com") {
+		return "GH_TOKEN", "GITHUB_TOKEN"
+	}
+	return "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"
 }
 
 // missingCLINotice is the one line a turn needs when the GitHub CLI is absent.

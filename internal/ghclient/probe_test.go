@@ -171,7 +171,10 @@ func (e probeEnv) choice() choice {
 }
 
 func (e probeEnv) selectAccount(ctx context.Context) (string, error) {
-	login, _, err := selectAccount(ctx, Command(ctx, e.exe, ""), e.r)
+	cmd := Command(ctx, e.exe, "")
+	// These probes test saved-account selection, so no session token stands in.
+	cmd.Env = withoutTokens(cmd.Env)
+	login, _, err := selectAccount(ctx, cmd, e.r)
 	return login, err
 }
 

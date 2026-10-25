@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -324,6 +325,15 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 			if ctx.Err() != nil {
 				return "", "", ctx.Err()
 			}
+			// A managed shell cannot open the desktop keyring, so a saved login
+			// gives no token there. The command already carries that account's
+			// token, so check it before a new probe replaces the stale choice.
+			if token, err := sessionTokenFor(ctx, cmd, r, key, cached.login, write); err != nil {
+				// The check could not finish, so the saved proof stays valid.
+				return "", "", rememberLimit(key, err)
+			} else if token != "" {
+				return cached.login, token, nil
+			}
 			accounts.Lock()
 			if accounts.choices[key] == cached {
 				delete(accounts.choices, key)
@@ -371,12 +381,167 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 			return "", "", ctx.Err()
 		case <-flight.done:
 			if flight.err != nil || flight.login == "" {
+				if flight.err == nil || errors.Is(flight.err, ErrNoSignedInAccount) {
+					login, token, err := adoptSessionToken(ctx, cmd, r, key, write)
+					switch {
+					case err != nil:
+						return "", "", rememberLimit(key, err)
+					case token != "":
+						return login, token, nil
+					}
+				}
 				return "", "", flight.err
 			}
 			token, err := accountToken(ctx, cmd, r.host, flight.login)
+			if (err != nil || token == "") && ctx.Err() == nil {
+				reused, reuseErr := sessionTokenFor(ctx, cmd, r, key, flight.login, write)
+				if reuseErr != nil {
+					return "", "", rememberLimit(key, reuseErr)
+				}
+				if reused != "" {
+					return flight.login, reused, nil
+				}
+			}
 			return flight.login, token, err
 		}
 	}
+}
+
+// sessionTokenFor returns the token the command already carries when GitHub
+// confirms it belongs to want and can reach this repository. An error means the
+// check could not finish; it never means the token is wrong.
+func sessionTokenFor(ctx context.Context, cmd *exec.Cmd, r repository, key, want string, write bool) (string, error) {
+	token := inheritedToken(cmd.Env, r.host)
+	if token == "" {
+		return "", nil
+	}
+	if err := limitWindow(key); err != nil {
+		return "", err
+	}
+	login, denied, err := probeAccount(ctx, cmd, r.host, token)
+	if err != nil || denied || !strings.EqualFold(login, want) {
+		// Another account's token must never borrow this account's identity.
+		return "", err
+	}
+	// The saved proof belongs to the saved token. Another token for the same
+	// login can have a narrower repository scope, so check this one too.
+	denied, err = probeRepository(ctx, cmd, token, r, write)
+	if err != nil || denied {
+		return "", err
+	}
+	return token, nil
+}
+
+// adoptSessionToken returns the account a command's own token belongs to when
+// no saved login can give a token. The token must belong to a login the GitHub
+// CLI saved for this host and reach this repository. Nothing is cached: a saved
+// proof must only ever describe the saved credential.
+func adoptSessionToken(ctx context.Context, cmd *exec.Cmd, r repository, key string, write bool) (login, token string, err error) {
+	token = inheritedToken(cmd.Env, r.host)
+	if token == "" {
+		return "", "", nil
+	}
+	if err := limitWindow(key); err != nil {
+		return "", "", err
+	}
+	// The token can only stand in for a saved login, so a host with none needs
+	// no request at all.
+	saved, err := savedLogins(ctx, cmd, r.host)
+	if err != nil || len(saved) == 0 {
+		return "", "", err
+	}
+	login, denied, err := probeAccount(ctx, cmd, r.host, token)
+	if err != nil || denied {
+		return "", "", err
+	}
+	if !slices.ContainsFunc(saved, func(entry string) bool { return strings.EqualFold(entry, login) }) {
+		return "", "", nil
+	}
+	denied, err = probeRepository(ctx, cmd, token, r, write)
+	if err != nil || denied {
+		return "", "", err
+	}
+	return login, token, nil
+}
+
+// inheritedToken returns the account token the command's own environment holds
+// for the host, in the order the GitHub CLI prefers those variables.
+func inheritedToken(env []string, host string) string {
+	primary, fallback := tokenEnvNames(host)
+	if token := environmentValue(env, primary); token != "" {
+		return token
+	}
+	return environmentValue(env, fallback)
+}
+
+// environmentValue reads the value for key the way os/exec prepares a command
+// environment: the last duplicate wins, so a later override is the one gh gets.
+func environmentValue(env []string, key string) string {
+	value := ""
+	for _, entry := range env {
+		if found, ok := strings.CutPrefix(entry, key+"="); ok {
+			value = found
+		}
+	}
+	return value
+}
+
+// limitWindow returns the transient error an earlier answer set for key, when
+// GitHub's quota has not returned yet, so no probe is spent in that window.
+func limitWindow(key string) error {
+	accounts.Lock()
+	defer accounts.Unlock()
+	until, limited := accounts.limited[key]
+	if !limited || !time.Now().Before(until) {
+		return nil
+	}
+	return &accountProbeError{cause: "GitHub API rate limited; retrying", transient: true, until: until}
+}
+
+// rememberLimit records a transient answer so later callers make no request
+// before the reset time, and returns the same error.
+func rememberLimit(key string, err error) error {
+	var cause *accountProbeError
+	if !errors.As(err, &cause) || !cause.transient {
+		return err
+	}
+	if cause.until.IsZero() {
+		return err
+	}
+	accounts.Lock()
+	accounts.limited[key] = cause.until
+	now := time.Now()
+	for older, until := range accounts.limited {
+		if !now.Before(until) {
+			delete(accounts.limited, older)
+		}
+	}
+	accounts.Unlock()
+	return err
+}
+
+// savedLogins lists the accounts the GitHub CLI saved for a host. Reading the
+// list needs no desktop keyring, so a managed shell can still name its logins.
+func savedLogins(ctx context.Context, cmd *exec.Cmd, host string) ([]string, error) {
+	raw, _ := authOutput(ctx, cmd, "", "auth", "status", "--hostname", host, "--json", "hosts")
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
+	var status struct {
+		Hosts map[string][]struct {
+			Login string `json:"login"`
+		} `json:"hosts"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &status) != nil {
+		return nil, nil
+	}
+	logins := make([]string, 0, len(status.Hosts[host]))
+	for _, account := range status.Hosts[host] {
+		if account.Login != "" {
+			logins = append(logins, account.Login)
+		}
+	}
+	return logins, nil
 }
 
 func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string, cached choice, write bool) (login string, err error) {
@@ -390,58 +555,41 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = &accountProbeError{cause: "GitHub API account probe timed out; retrying", transient: true}
 		}
+		_ = rememberLimit(key, err)
 		var cause *accountProbeError
 		if !errors.As(err, &cause) || !cause.transient {
 			return
-		}
-		// GitHub said when its quota returns: no request before then.
-		if !cause.until.IsZero() {
-			accounts.Lock()
-			accounts.limited[key] = cause.until
-			now := time.Now()
-			for older, until := range accounts.limited {
-				if !now.Before(until) {
-					delete(accounts.limited, older)
-				}
-			}
-			accounts.Unlock()
 		}
 		if cached.login != "" && knownToken != "" {
 			cacheAccount(key, cached.login, config)
 			login, err = cached.login, nil
 		}
 	}()
-	raw, _ := authOutput(ctx, cmd, "", "auth", "status", "--hostname", r.host, "--json", "hosts")
-	if ctx.Err() != nil {
-		return "", context.Cause(ctx)
-	}
-	var status struct {
-		Hosts map[string][]struct {
-			Login string `json:"login"`
-		} `json:"hosts"`
-	}
 	// gh can report a nonzero status when one of several saved accounts expired.
 	// Ask auth token for each saved account that remains available.
-	if len(raw) == 0 || json.Unmarshal(raw, &status) != nil || len(status.Hosts[r.host]) == 0 {
+	list, err := savedLogins(ctx, cmd, r.host)
+	if err != nil {
+		return "", err
+	}
+	if len(list) == 0 {
 		return "", nil
 	}
 	// Recheck the last good account first, before considering another account.
-	list := status.Hosts[r.host]
 	for i := range list {
-		if list[i].Login == cached.login {
+		if list[i] == cached.login {
 			list[0], list[i] = list[i], list[0]
 			break
 		}
 	}
 	for _, account := range list {
 		token := knownToken
-		if account.Login != cached.login || token == "" {
-			token, err = accountToken(ctx, cmd, r.host, account.Login)
+		if account != cached.login || token == "" {
+			token, err = accountToken(ctx, cmd, r.host, account)
 		}
 		if err != nil || token == "" {
 			continue
 		}
-		if account.Login == cached.login {
+		if account == cached.login {
 			knownToken = token
 		}
 		denied, err := probeRepository(ctx, cmd, token, r, write)
@@ -449,7 +597,7 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 			return "", err
 		}
 		if denied {
-			if account.Login == cached.login {
+			if account == cached.login {
 				cached = choice{}
 				// GitHub denied this account, so remember nothing that could
 				// bring it back during a later outage.
@@ -458,8 +606,8 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 			}
 			continue
 		}
-		proveAccount(key, account.Login, config)
-		return account.Login, nil
+		proveAccount(key, account, config)
+		return account, nil
 	}
 	if ctx.Err() != nil {
 		return "", context.Cause(ctx)
