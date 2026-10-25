@@ -68,6 +68,32 @@ func stepSync(t *testing.T, e *testEnv) {
 		t.Fatal(err)
 	}
 }
+
+// waitLocalCISaved waits for the saved result of a head, which is the evidence a
+// local trial reads after its run.
+func waitLocalCISaved(t *testing.T, s *Service, head string) {
+	t.Helper()
+	registry, ok := s.LocalCIRegistry.(*fakeLocalCI)
+	if !ok {
+		t.Fatal("local CI registry is not the fake")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	for {
+		registry.mu.Lock()
+		_, saved := registry.results[head]
+		registry.mu.Unlock()
+		if saved {
+			return
+		}
+		select {
+		case <-registry.saved:
+		case <-ctx.Done():
+			t.Fatal("CI did not finish")
+		}
+	}
+}
+
 func finishSync(t *testing.T, e *testEnv, repo string) lanesync.Operation {
 	t.Helper()
 	common := changeGit(t, repo, "rev-parse", "--absolute-git-dir")
@@ -77,17 +103,8 @@ func finishSync(t *testing.T, e *testEnv, repo string) lanesync.Operation {
 		if !lanesync.Active(op.State) {
 			return op
 		}
-		if op.State == "testing" {
-			if value, ok := e.s.localRuns().load(common + "\x00" + op.Head); ok {
-				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-				select {
-				case <-value.done:
-					cancel()
-				case <-ctx.Done():
-					cancel()
-					t.Fatal("CI did not finish")
-				}
-			}
+		if op.State == "testing" && runningLocalCIHead(e.s) != "" {
+			waitLocalCISaved(t, e.s, op.Head)
 		}
 	}
 	t.Fatal("operation did not finish")
@@ -110,16 +127,8 @@ func TestRefreshPublishesTestedMergeAndSurvivesRestart(t *testing.T) {
 	}
 	// Start CI, then resume with a new service after the complete result was saved.
 	stepSync(t, e)
-	value, _ := e.s.localRuns().load(changeGit(t, repo, "rev-parse", "--absolute-git-dir") + "\x00" + op.Head)
-	waitCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	select {
-	case <-value.done:
-	case <-waitCtx.Done():
-		t.Fatal("CI did not finish")
-	}
+	waitLocalCISaved(t, e.s, op.Head)
 	resumed := *e.s
-	resumed.localCIRuns = nil
 	e.s = &resumed
 	op = finishSync(t, e, repo)
 	if op.State != "done" {
@@ -341,14 +350,8 @@ func readyExport(t *testing.T, e *testEnv, repo string) lanesync.Operation {
 	stepSync(t, e)
 	stepSync(t, e)
 	op := savedOperation(t, repo)
-	if value, ok := e.s.localRuns().load(changeGit(t, repo, "rev-parse", "--absolute-git-dir") + "\x00" + op.Head); ok {
-		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-		defer cancel()
-		select {
-		case <-value.done:
-		case <-ctx.Done():
-			t.Fatal("CI did not finish")
-		}
+	if runningLocalCIHead(e.s) != "" {
+		waitLocalCISaved(t, e.s, op.Head)
 	}
 	if op.State == "testing" {
 		stepSync(t, e)
@@ -449,7 +452,6 @@ func exportPublicationErrorSurvivesWorkerRestart(t *testing.T, created bool) {
 		t.Fatal("publication retried before its saved delay")
 	}
 	resumed := *e.s
-	resumed.localCIRuns = nil
 	e.s = &resumed
 	e.clock = e.clock.Add(time.Minute)
 	op := finishSync(t, e, repo)
@@ -532,7 +534,6 @@ func exportPublicationStopsAfterFiveFailures(t *testing.T, beforePush bool) {
 		}
 		if attempt == 2 {
 			resumed := *e.s
-			resumed.localCIRuns = nil
 			e.s = &resumed
 		}
 		e.clock = e.clock.Add(time.Minute)
@@ -567,7 +568,6 @@ func exportPublicationStopsAfterFiveFailures(t *testing.T, beforePush bool) {
 		t.Fatalf("manual retry abandoned publication: %+v", resumed)
 	}
 	restarted := *e.s
-	restarted.localCIRuns = nil
 	e.s = &restarted
 	done := finishSync(t, e, repo)
 	wantPushes := 1

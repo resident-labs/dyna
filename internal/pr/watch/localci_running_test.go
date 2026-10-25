@@ -159,36 +159,30 @@ func (f *fakeNodeWork) work(ctx context.Context) (localci.Result, error) {
 	return localci.Result{}, ctx.Err()
 }
 
-// localLaneNodes starts the local lane's CI run and holds it in the same way.
-type localLaneNodes struct{ work *fakeNodeWork }
-
-func (l localLaneNodes) Show(string, string) (localci.Result, error) {
-	return localci.Result{}, os.ErrNotExist
-}
-func (l localLaneNodes) Run(ctx context.Context, _ localci.Request) (localci.Result, error) {
-	return l.work.work(ctx)
-}
-
 // A local CI run must end with its engine. A run that outlives the engine leaves
 // a keeper on the machine, and that keeper holds the cache lock for hours, so an
-// engine that stops cancels the runs it started, in both lanes, and waits for
-// their work on the machine to end.
+// engine that stops cancels every run it admitted, a pull request head and a
+// local head alike, and waits for their work on the machine to end.
 func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	s, saved, _ := scheduledCIRunFixture(t)
 	record := saved.Records["pr"]
 	head := record.Head
-	scheduled := newFakeNodeWork()
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		return scheduled.work(ctx)
+	localHead := addCommit(t, record.RepoPath, "local.txt")
+	local := *record
+	local.Key, local.Kind, local.Head = "local", "local", localHead
+	scheduled, lane := newFakeNodeWork(), newFakeNodeWork()
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
+		if req.SHA == head {
+			return scheduled.work(ctx)
+		}
+		return lane.work(ctx)
 	}
-	lane := newFakeNodeWork()
-	s.LocalCI = localLaneNodes{work: lane}
 
 	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
 		t.Fatal(err)
 	}
 	<-scheduled.started
-	if _, err := s.localTrialCI(context.Background(), *record, head); err != nil {
+	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
 		t.Fatal(err)
 	}
 	<-lane.started
@@ -196,7 +190,7 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	// Cancellation starts with the engine and does not wait for the teardown.
 	s.CancelLocalCI()
 	if scheduled.ctx.Err() == nil || lane.ctx.Err() == nil {
-		t.Fatalf("a run was not cancelled with the engine: scheduled=%v lane=%v", scheduled.ctx.Err(), lane.ctx.Err())
+		t.Fatalf("a run was not cancelled with the engine: scheduled=%v local=%v", scheduled.ctx.Err(), lane.ctx.Err())
 	}
 
 	// A stop with a live budget waits for both teardowns to end.
@@ -213,8 +207,11 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	// A stop whose budget is already gone names the runs still working.
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
-	want := []string{head[:7] + " on the local lane", head[:7] + " on hermes"}
-	if left := s.StopLocalCI(expired); !slices.Equal(left, want) {
+	want := []string{head[:7] + " on hermes", localHead[:7] + " on hermes"}
+	slices.Sort(want)
+	left := s.StopLocalCI(expired)
+	slices.Sort(left)
+	if !slices.Equal(left, want) {
 		t.Fatalf("leftover runs = %v, want %v", left, want)
 	}
 
@@ -226,32 +223,67 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	}
 }
 
-// A stop closes admission in both lanes. A tick that is still finishing cannot
-// start a run after the engine has cancelled the runs it knew: that run's keeper
-// would outlive the process.
+// A poll tick never cancels a local head's run. No hosted poll decides that
+// head, so only the engine's stop ends its run.
+func TestPollTickKeepsALocalRunInFlight(t *testing.T) {
+	s, saved, _ := scheduledCIRunFixture(t)
+	record := saved.Records["pr"]
+	localHead := addCommit(t, record.RepoPath, "local.txt")
+	local := *record
+	local.Key, local.Kind, local.Head = "local", "local", localHead
+	lane := newFakeNodeWork()
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		return lane.work(ctx)
+	}
+	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
+		t.Fatal(err)
+	}
+	<-lane.started
+	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := lane.ctx.Err(); err != nil {
+		t.Fatalf("a poll tick cancelled the local run: %v", err)
+	}
+	s.CancelLocalCI()
+	close(lane.teardown)
+	<-lane.finished
+}
+
+// A stop closes admission once. A tick and a local trial that are still
+// finishing cannot start a run after the engine has cancelled the runs it knew:
+// that run's keeper would outlive the process.
 func TestStopLocalCIRefusesRunsScheduledAfterTheStop(t *testing.T) {
 	s, saved, _ := scheduledCIRunFixture(t)
 	record := saved.Records["pr"]
 	head := record.Head
-	scheduled := newFakeNodeWork()
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		return scheduled.work(ctx)
+	localHead := addCommit(t, record.RepoPath, "local.txt")
+	local := *record
+	local.Key, local.Kind, local.Head = "local", "local", localHead
+	scheduled, lane := newFakeNodeWork(), newFakeNodeWork()
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
+		if req.SHA == head {
+			return scheduled.work(ctx)
+		}
+		return lane.work(ctx)
 	}
-	lane := newFakeNodeWork()
-	s.LocalCI = localLaneNodes{work: lane}
 	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
 		t.Fatal(err)
 	}
 	<-scheduled.started
-	if _, err := s.localTrialCI(context.Background(), *record, head); err != nil {
+	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
 		t.Fatal(err)
 	}
 	<-lane.started
 
 	s.CancelLocalCI()
+	known := len(s.RunningCI())
+	if known != 2 {
+		t.Fatalf("the engine knows %d runs, want both heads it started", known)
+	}
 
-	// Both lanes refuse the new head, and the engine's own runs stay the only
-	// ones it knows.
+	// The run set refuses both kinds of work, so only the runs the engine already
+	// had stay in it.
 	lateHead := addCommit(t, record.RepoPath, "late.txt")
 	late := *record
 	late.Key, late.Number, late.Head = "late", 18, lateHead
@@ -259,14 +291,20 @@ func TestStopLocalCIRefusesRunsScheduledAfterTheStop(t *testing.T) {
 	if err := s.scheduleRegisteredCI(context.Background(), lateState); err != nil {
 		t.Fatal(err)
 	}
-	if runs := s.RunningCI(); len(runs) != 1 {
+	if runs := s.RunningCI(); len(runs) != known {
 		t.Fatalf("a scheduled run was admitted after the stop: %+v", runs)
 	}
-	if _, err := s.localTrialCI(context.Background(), late, lateHead); err != nil {
+	lateLocal := late
+	lateLocal.Kind = "local"
+	if _, err := s.localTrialCI(context.Background(), lateLocal, lateHead); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := s.localRuns().load(record.RepoPath + "\x00" + lateHead); ok {
-		t.Fatal("a local lane run was admitted after the stop")
+	job, err := s.localTrialJob(lateLocal, lateHead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admittedRun(s, job) {
+		t.Fatal("a local head's run was admitted after the stop")
 	}
 
 	// Release the two runs the engine already had.
