@@ -88,6 +88,25 @@ test('dialog starts at the chosen control, wraps Tab, and restores focus', async
   assert.equal(s.listeners.size, 0)
 })
 
+test('an inactive dialog leaves the page alone until it opens and restores focus when it closes', async () => {
+  const s = setup(), first = s.element(), card = s.card([first])
+  const action = dialog(asCard(card.node), { close() {}, active: false })
+  await tick()
+  assert.equal(document.activeElement, s.outside)
+  assert.equal(s.key('Tab').prevented, false)
+  action.update({ close() {}, active: true })
+  await tick()
+  assert.equal(document.activeElement, card.node)
+  s.outside.focus()
+  s.key('Tab')
+  assert.equal(document.activeElement, first)
+  action.update({ close() {}, active: false })
+  assert.equal(document.activeElement, s.outside)
+  assert.equal(s.key('Escape').stopped, false)
+  action.destroy()
+  assert.equal(s.listeners.size, 0)
+})
+
 test('dialog handles busy changes and only backdrop clicks dismiss', () => {
   const s = setup(), card = s.card()
   let closed = 0
@@ -177,6 +196,37 @@ test('a newer dialog that does not use the action keeps its keyboard and focus',
   assert.equal(closed, 0)
   action.destroy()
   assert.equal(document.activeElement, other)
+})
+
+test('a menu opened above a dialog keeps Escape and Tab, so the dialog stays open', async () => {
+  const s = setup(), card = s.card()
+  let closed = 0
+  const action = dialog(asCard(card.node), { close: () => closed++ })
+  await tick()
+  // App renders the room and session menus outside the drawer and the sheet.
+  const menu = s.element({ contains: () => false })
+  const item = s.element({ closest: (selector) => (selector.includes('[role="menu"]') ? menu : null) })
+  item.focus()
+  assert.equal(s.key('Escape').stopped, false)
+  assert.equal(s.key('Tab').prevented, false)
+  assert.equal(closed, 0)
+  action.destroy()
+})
+
+test('a sheet lets an inner control take Escape first, then closes on the next one', async () => {
+  const s = setup(), card = s.card()
+  let closed = 0, cancelled = 0
+  const action = dialog(asCard(card.node), { close: () => closed++, escape: () => { cancelled++; return true } })
+  await tick()
+  const first = s.key('Escape')
+  assert.equal(cancelled, 1)
+  assert.equal(closed, 0)
+  // The key is handled, so no lower handler cancels the same work again.
+  assert.equal(first.prevented, true)
+  action.update({ close: () => closed++, escape: () => false })
+  s.key('Escape')
+  assert.equal(closed, 1)
+  action.destroy()
 })
 
 test('a nested dialog owns keys even when its parent action mounts later', async () => {

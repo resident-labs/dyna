@@ -6,6 +6,7 @@
   import { untrack } from 'svelte'
   import { fade } from 'svelte/transition'
   import { FAST, motion } from './lib/ui/motion.ts'
+  import { dialog } from './lib/ui/dialog.ts'
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
   import { createReadMarker } from './lib/rooms/readMarker.ts'
   import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
@@ -403,6 +404,20 @@
     return () => clearTimeout(timer)
   })
   let selectedGoal = $derived(goalView.goalById(goalId))
+  let phonePanelOpen = $derived(narrow && !!roomId && !!room && (showPins || (showMembers && !drill) || (view === 'goals' && !!selectedGoal)))
+  let phonePanelLabel = $derived(view === 'goals' && selectedGoal ? `Goal ${selectedGoal.id}` : showPins ? 'Pinned posts' : 'Members')
+  function closePhonePanel() {
+    showPins = false
+    showMembers = false
+    goalId = ''
+  }
+  // A member selection in the phone sheet takes Escape first: it cancels the
+  // selection and keeps the sheet open. The next Escape closes the sheet.
+  function escapePhonePanel(): boolean {
+    if (!selectingSessions) return false
+    toggleSessionSelection()
+    return true
+  }
   // rules is the list in the Room settings Rules section.
   const rules = $derived(goalView.rules)
   // An inline rules edit keeps the list it started from until the edit closes.
@@ -1769,14 +1784,15 @@
 <ComputerPopout room={pop.room} session={pop.session} />
 {:else}
 <div class="app" class:narrow>
-  <NavPane open={navOpen} {narrow} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, questions: questions.filter((q) => q.state === 'open' && q.to === 'owner').length, live, runs, dataDir, ownerHue, route, update: !!update, onsettings: () => openSettings(), onlogout: signOut, onview: openView, onmember: openAgent }} />
-  {#if narrow && navOpen}
+  <NavPane open={navOpen} {narrow} suspended={phonePanelOpen} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onclose={() => (navOpen = false)} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, questions: questions.filter((q) => q.state === 'open' && q.to === 'owner').length, live, runs, dataDir, ownerHue, route, update: !!update, onsettings: () => openSettings(), onlogout: signOut, onview: openView, onmember: openAgent }} />
+  {#if narrow && navOpen && !phonePanelOpen}
     <button class="scrim" aria-label="Close the room list" onclick={() => (navOpen = false)}></button>
   {/if}
   <main class="main">
     <PageHeader
       {narrow}
       {navOpen}
+      backgroundInert={navOpen || phonePanelOpen}
       {showSide}
       {roomId}
       {room}
@@ -1826,7 +1842,7 @@
       ontogglemembers={() => { showMembers = !showMembers; if (showMembers) showPins = false }}
     />
     <div class="content">
-      <div class="conversation-workspace">
+      <div class="conversation-workspace" inert={narrow && (navOpen || phonePanelOpen)}>
       {#key viewIdentity({ roomId, view, drill })}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="center" inert={narrow && reviewOpen} in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
@@ -1901,11 +1917,12 @@
         {/key}
       {/if}
       </div>
-      {#if narrow && roomId && room && (showPins || (showMembers && !drill) || (view === 'goals' && selectedGoal))}
-        <button class="scrim" aria-label="Close the panel" onclick={() => { showPins = false; showMembers = false; goalId = '' }}></button>
+      {#if phonePanelOpen}
+        <button class="scrim" aria-label="Close the panel" onclick={closePhonePanel}></button>
       {/if}
-      <!-- On a wide screen this wrapper adds no box; on a narrow one it is a sheet. -->
-      <div class="panel">
+      <!-- On a wide screen this wrapper adds no box; on a narrow one it is a dialog sheet. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div class="panel" use:dialog={{ active: phonePanelOpen, close: closePhonePanel, escape: escapePhonePanel }} role={phonePanelOpen ? 'dialog' : undefined} aria-modal={phonePanelOpen ? 'true' : undefined} aria-label={phonePanelOpen ? phonePanelLabel : undefined} tabindex={phonePanelOpen ? -1 : undefined}>
       {#if roomId && room && view === 'goals' && selectedGoal}
         {#key selectedGoal.id}<GoalDetail roomId={room.id} goal={selectedGoal} members={hierarchy} onchanged={loadGoals} onclose={() => (goalId = '')} onexpedite={expediteGoal} />{/key}
       {:else if roomId && room && showPins}
