@@ -299,10 +299,11 @@ jobs:
           retention-days: 1
 
   # FRONTEND_SHARD splits the test files, as the local lane does, so each shard
-  # reports its own JUnit file and stays well inside the time budget. The job
-  # names match the local lane's check names, so Dyna reads both the same way.
+  # reports its own JUnit file and stays well inside the time budget. The name
+  # does not start with the aggregate's name, so a shard and the aggregate can
+  # never be mistaken for one another.
   frontend-shard:
-    name: frontend (${{ matrix.shard }})
+    name: frontend test (${{ matrix.shard }})
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
