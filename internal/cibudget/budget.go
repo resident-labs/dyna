@@ -282,6 +282,30 @@ func (r Report) AllowWarnings(allowed map[string]bool) []string {
 	return warnings
 }
 
+// WriteTimings prints the failures and the slowest tests without judging the
+// budget. The CI runner owns the room's test limit and compares every duration
+// itself, so this report must not name a verdict of its own.
+func (r Report) WriteTimings(output io.Writer) {
+	tests := r.BudgetTests()
+	sort.SliceStable(tests, func(i, j int) bool {
+		if tests[i].Duration == tests[j].Duration {
+			return tests[i].ID() < tests[j].ID()
+		}
+		return tests[i].Duration > tests[j].Duration
+	})
+	for _, failure := range r.Failures {
+		fmt.Fprintln(output, failure)
+	}
+	fmt.Fprintln(output, "Slowest tests:")
+	for i, test := range tests {
+		if i == 10 {
+			break
+		}
+		fmt.Fprintf(output, "  %s  %s\n", test.Duration, test.ID())
+	}
+	fmt.Fprintf(output, "%d tests; %d failed packages or cases\n", len(tests), len(r.Failures))
+}
+
 // Write prints failures and the slowest tests, and returns whether the check passes.
 func (r Report) Write(output io.Writer, max time.Duration, allowed map[string]bool) bool {
 	tests := r.BudgetTests()

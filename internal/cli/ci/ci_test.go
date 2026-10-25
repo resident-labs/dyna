@@ -32,6 +32,12 @@ func TestSlowTestOnlyReported(t *testing.T) {
 	if err != nil || strings.Contains(output, "OVER BUDGET") || !strings.Contains(output, "p/TestSlow") {
 		t.Fatalf("%v: %s", err, output)
 	}
+	// The command reports durations only: the room's limit is the PR watcher's
+	// verdict on the uploaded JUnit report. A summary that names a budget verdict
+	// of its own reads as a pass next to a check the watcher then fails.
+	if strings.Contains(strings.ToLower(output), "over budget") {
+		t.Fatalf("the report claimed a budget verdict it does not make: %s", output)
+	}
 }
 
 func TestFailedTestStillFails(t *testing.T) {
