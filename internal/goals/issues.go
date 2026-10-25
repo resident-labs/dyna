@@ -1,6 +1,7 @@
 package goals
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,9 +35,10 @@ func (c Claim) state(prepared room.IssueState) room.IssueState {
 // AddWithIssues uses the same goal creation path as Add, then links room
 // issues to the new goal. With no text, one linked issue supplies the title.
 // A link the claim refuses deletes the new goal, so a losing assignment leaves
-// no goal behind.
-func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int, claim Claim) (Goal, error) {
-	links, err := s.PrepareIssueLinks(roomID, actor, fixes)
+// no goal behind. The caller on ctx decides what it may link; the actor address
+// only credits the links.
+func (s *Store) AddWithIssues(ctx context.Context, roomID, by, actor string, in Input, fixes []int, claim Claim) (Goal, error) {
+	links, err := s.PrepareIssueLinks(ctx, roomID, fixes)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -50,46 +52,21 @@ func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int, c
 	if err != nil {
 		return g, err
 	}
-	if err := s.LinkPreparedIssues(roomID, g.ID, actor, links, claim); err != nil {
+	if err := s.LinkPreparedIssues(ctx, roomID, g.ID, actor, links, claim); err != nil {
 		return g, errors.Join(err, s.deleteGoal(roomID, g.ID))
 	}
 	return g, nil
 }
 
-// LinkIssues links existing open goals and room issues without closing them.
-// A finished goal remains stored on the issue, but only an open goal makes the
-// issue in progress at read time.
-func (s *Store) LinkIssues(roomID, goalID, actor string, fixes []int) error {
-	if len(fixes) == 0 {
-		return nil
-	}
-	g, err := s.Get(roomID, goalID)
-	if err != nil {
-		return err
-	}
-	if !g.Open() {
-		return fmt.Errorf("goal %s is not open", goalID)
-	}
-	links, err := s.PrepareIssueLinks(roomID, actor, fixes)
-	if err != nil {
-		return err
-	}
-	return s.LinkPreparedIssues(roomID, goalID, actor, links, ClaimAny)
-}
-
 // PrepareIssueLinks validates permission and every issue before any goal,
 // holder or item changes. The returned snapshots also restore partial work if
 // a later step fails.
-func (s *Store) PrepareIssueLinks(roomID, actor string, fixes []int) ([]room.Issue, error) {
+func (s *Store) PrepareIssueLinks(ctx context.Context, roomID string, fixes []int) ([]room.Issue, error) {
 	links, err := s.issueLinks(roomID, fixes)
 	if err != nil || len(links) == 0 {
 		return links, err
 	}
-	actor, err = s.issueActor(roomID, actor)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Issues.CheckIssueGoalLink(roomID, actor); err != nil {
+	if err := s.Issues.CheckIssueGoalLink(ctx, roomID); err != nil {
 		return nil, err
 	}
 	return links, nil
@@ -97,19 +74,15 @@ func (s *Store) PrepareIssueLinks(roomID, actor string, fixes []int) ([]room.Iss
 
 // LinkPreparedIssues applies snapshots from PrepareIssueLinks. A failure
 // restores any links already changed by this call.
-func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Issue, claim Claim) error {
-	actor, err := s.issueActor(roomID, actor)
-	if err != nil && len(links) > 0 {
-		return err
-	}
+func (s *Store) LinkPreparedIssues(ctx context.Context, roomID, goalID, by string, links []room.Issue, claim Claim) error {
 	for i, issue := range links {
-		linked, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor, claim.state(issue.State))
+		linked, err := s.Issues.LinkIssueGoal(ctx, roomID, issue.Label(), goalID, by, claim.state(issue.State))
 		if err != nil {
 			restore := links[:i]
 			if linked.ID == issue.ID && linked.State == room.IssueStateGoal && linked.GoalID == goalID {
 				restore = links[:i+1]
 			}
-			return errors.Join(fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err), s.RestoreIssueLinks(roomID, actor, restore))
+			return errors.Join(fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err), s.RestoreIssueLinks(ctx, roomID, by, restore))
 		}
 	}
 	return nil
@@ -117,25 +90,14 @@ func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Is
 
 // RestoreIssueLinks puts prepared issue snapshots back after a later goal or
 // session step fails.
-func (s *Store) RestoreIssueLinks(roomID, actor string, links []room.Issue) error {
+func (s *Store) RestoreIssueLinks(ctx context.Context, roomID, by string, links []room.Issue) error {
 	var errs []error
 	for _, issue := range links {
-		if _, err := s.Issues.RestoreIssueGoal(roomID, issue.Label(), issue, actor); err != nil {
+		if _, err := s.Issues.RestoreIssueGoal(ctx, roomID, issue.Label(), issue, by); err != nil {
 			errs = append(errs, fmt.Errorf("restore %s: %w", issue.Label(), err))
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (s *Store) issueActor(roomID, actor string) (string, error) {
-	if actor != "" {
-		return actor, nil
-	}
-	rec, err := s.Issues.Resolve(roomID)
-	if err != nil {
-		return "", err
-	}
-	return rec.Name, nil
 }
 
 func (s *Store) issueLinks(roomID string, fixes []int) ([]room.Issue, error) {

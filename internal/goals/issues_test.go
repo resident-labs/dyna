@@ -1,14 +1,22 @@
 package goals
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 )
+
+// ownerCtx acts for the owner, which issue links need now that they check the
+// caller on ctx instead of a credited address.
+func ownerCtx() context.Context {
+	return authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner})
+}
 
 func TestAddWithIssuesRollsBackCommittedLinkWhenEventFails(t *testing.T) {
 	root := t.TempDir()
@@ -44,7 +52,7 @@ func TestAddWithIssuesRollsBackCommittedLinkWhenEventFails(t *testing.T) {
 	}
 
 	store := &Store{Root: filepath.Join(root, "goals"), Issues: rooms}
-	_, err = store.AddWithIssues(rec.ID, "owner", rec.Name, Input{Text: "Work", Shared: true}, []int{issue.Number}, ClaimAny)
+	_, err = store.AddWithIssues(ownerCtx(), rec.ID, "owner", rec.Name, Input{Text: "Work", Shared: true}, []int{issue.Number}, ClaimAny)
 	if err == nil || !strings.Contains(err.Error(), "event needs the field \"title\"") {
 		t.Fatalf("error = %v, want event posting failure", err)
 	}
@@ -80,11 +88,11 @@ func TestClaimOpenRefusesClaimedIssue(t *testing.T) {
 	}
 	t.Cleanup(func() { database.Close(root) })
 	store := &Store{Root: filepath.Join(root, "goals"), Issues: rooms}
-	first, err := store.AddWithIssues(rec.ID, "owner", rec.Name, Input{Text: "First", Shared: true}, []int{issue.Number}, ClaimOpen)
+	first, err := store.AddWithIssues(ownerCtx(), rec.ID, "owner", rec.Name, Input{Text: "First", Shared: true}, []int{issue.Number}, ClaimOpen)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.AddWithIssues(rec.ID, "owner", rec.Name, Input{Text: "Second", Shared: true}, []int{issue.Number}, ClaimOpen); err == nil {
+	if _, err = store.AddWithIssues(ownerCtx(), rec.ID, "owner", rec.Name, Input{Text: "Second", Shared: true}, []int{issue.Number}, ClaimOpen); err == nil {
 		t.Fatal("a second goal claimed a claimed issue")
 	}
 	rows, err := rooms.Issues(rec.ID, true)
@@ -95,7 +103,7 @@ func TestClaimOpenRefusesClaimedIssue(t *testing.T) {
 	if err != nil || len(all) != 1 || all[0].ID != first.ID {
 		t.Fatalf("goals = %+v, %v, want only %s", all, err, first.ID)
 	}
-	replaced, err := store.AddWithIssues(rec.ID, "owner", rec.Name, Input{Text: "Third", Shared: true}, []int{issue.Number}, ClaimAny)
+	replaced, err := store.AddWithIssues(ownerCtx(), rec.ID, "owner", rec.Name, Input{Text: "Third", Shared: true}, []int{issue.Number}, ClaimAny)
 	if err != nil {
 		t.Fatalf("deliberate replacement was refused: %v", err)
 	}
