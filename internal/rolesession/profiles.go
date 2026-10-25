@@ -24,8 +24,9 @@ func ProviderFailure(turn subagent.Turn) bool {
 }
 
 // unavailable reports whether a failed turn keeps its profile out until it
-// recovers. A capacity failure does not: that provider was busy for a moment,
-// and the turn already retried it with backoff.
+// recovers. A typed provider failure does, including capacity: that turn already
+// spent its capacity backoff and model chain, so the profile must step aside
+// rather than start the same busy provider again.
 func unavailable(turn subagent.Turn) bool {
 	return harness.IsNotReady(turn.Error) || turn.FailureReason.BlocksProfile()
 }

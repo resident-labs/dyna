@@ -24,17 +24,20 @@ const (
 	// Quota means the account ran out of quota, credit or rate limit. Another
 	// account, and after that another model, can continue the work.
 	Quota Reason = "quota"
-	// Capacity means the provider is busy for a moment. The same request can
-	// succeed a few minutes later, so it never blocks the account.
+	// Capacity means the provider is busy for a moment. Inside a turn it keeps
+	// the same model after a backoff, then moves model. A turn that still ends at
+	// capacity has spent that chain, so the profile steps aside; the account is
+	// never recorded as out of quota.
 	Capacity Reason = "capacity"
 	// Unavailable means the provider failed on its own side, such as a 502.
 	Unavailable Reason = "unavailable"
 )
 
 // BlocksProfile reports whether the reason keeps a profile out until someone
-// fixes it or the provider recovers. A capacity failure does not: the provider
-// was busy for a moment, and another attempt can succeed.
-func (r Reason) BlocksProfile() bool { return r != "" && r != Capacity }
+// fixes it or the provider recovers. Every named reason does: a capacity
+// failure that ends a turn has already spent its backoff and model chain, so
+// starting the same provider again would only loop.
+func (r Reason) BlocksProfile() bool { return r != "" }
 
 // Failure is an error with the trusted reason a boundary observed.
 type Failure struct {
