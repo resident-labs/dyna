@@ -30,8 +30,9 @@ type SessionEnv struct {
 // SessionEnvironment gives plain gh the room account without storing a token.
 // The token has the same trust level as credentials in the owner's shell.
 // The private scratch symlink selects the executable; it stores no runtime state.
-// A rate limit or an unreachable GitHub never fails the call: the turn starts
-// without GitHub access and Notice says for how long.
+// GitHub tooling never fails the call: a rate limit, an unreachable API, a
+// missing CLI, or no usable sign-in starts the turn without GitHub commands,
+// and Notice says why in one line. Storage and authority errors stay fatal.
 func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary string, inherited []string) (SessionEnv, error) {
 	rec, err := room.DefaultStore().Resolve(roomRef)
 	if err != nil {
@@ -44,18 +45,31 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		return SessionEnv{Env: out}, nil
 	}
 	ctx = WithRoom(ctx, rec.ID)
-	notice := ""
+	readOnly := Access(ctx, rec) != ReadWrite
+	// installed is false when gh is absent, so no account probe can succeed.
+	installed := filepath.IsAbs(cmd.Path) && isExecutable(cmd.Path)
+	notice, token := "", ""
 	// unavailable means this turn could not prove which account it may use.
 	unavailable := false
-	_, token, err := selectAccount(ctx, cmd, r)
-	if err != nil {
-		// A turn must run even while GitHub refuses requests, so a limit or an
-		// unreachable API becomes one line for the agent, not an error.
-		var probe *accountProbeError
-		if !errors.As(err, &probe) || !probe.transient {
-			return SessionEnv{}, err
+	switch {
+	case !installed:
+		// The turn runs without GitHub commands, and one line says so.
+		notice, unavailable = missingCLINotice, true
+	default:
+		_, token, err = selectAccount(ctx, cmd, r)
+		if err != nil {
+			// A turn must run even while GitHub refuses requests, so a limit, an
+			// unreachable API, or no usable sign-in becomes one line for the agent.
+			var probe *accountProbeError
+			switch {
+			case errors.As(err, &probe) && probe.transient:
+				notice, token, unavailable = probeNotice(probe), "", true
+			case errors.Is(err, ErrNoSignedInAccount):
+				notice, token, unavailable = noSignedInAccountNotice, "", true
+			default:
+				return SessionEnv{}, err
+			}
 		}
-		notice, token, unavailable = probeNotice(probe), "", true
 	}
 	tokenKey, fallbackKey := "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"
 	if r.host == "github.com" || strings.HasSuffix(r.host, ".ghe.com") {
@@ -83,29 +97,31 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		values[key] = value
 	}
 	bin := filepath.Join(scratchDir, "github-bin")
-	if err := os.MkdirAll(bin, 0700); err != nil {
-		return SessionEnv{}, err
-	}
-	readOnly := Access(ctx, rec) != ReadWrite
-	target := cmd.Path
-	if !filepath.IsAbs(target) || !isExecutable(target) {
-		return SessionEnv{}, fmt.Errorf("the GitHub CLI (gh) is not installed")
-	}
 	out[ReadOnlyEnv] = ""
+	target := cmd.Path
+	if !installed {
+		// There is no gh to point PATH at, and read-only rooms still need their guard.
+		target = ""
+	}
 	if readOnly {
-		target = dynaBinary
-		out[ReadOnlyEnv] = "1"
+		// The guard stands in for gh, so a read-only room stays read-only.
+		target, out[ReadOnlyEnv] = dynaBinary, "1"
 	}
-	next := filepath.Join(bin, "gh.next")
-	_ = os.Remove(next)
-	if err := os.Symlink(target, next); err != nil {
-		return SessionEnv{}, err
+	if target != "" {
+		if err := os.MkdirAll(bin, 0700); err != nil {
+			return SessionEnv{}, err
+		}
+		next := filepath.Join(bin, "gh.next")
+		_ = os.Remove(next)
+		if err := os.Symlink(target, next); err != nil {
+			return SessionEnv{}, err
+		}
+		if err := os.Rename(next, filepath.Join(bin, "gh")); err != nil {
+			return SessionEnv{}, err
+		}
+		out[BinaryEnv] = cmd.Path
+		out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
 	}
-	if err := os.Rename(next, filepath.Join(bin, "gh")); err != nil {
-		return SessionEnv{}, err
-	}
-	out[BinaryEnv] = cmd.Path
-	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
 	if unavailable {
 		// The turn could not prove its account, so no other account may stand in:
 		// point the GitHub CLI at an empty configuration and give git no helper.
@@ -122,6 +138,13 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	}
 	return SessionEnv{Env: out, Notice: notice}, nil
 }
+
+// missingCLINotice is the one line a turn needs when the GitHub CLI is absent.
+const missingCLINotice = "The GitHub CLI (gh) is not installed, so GitHub commands may fail this turn; continue without them."
+
+// noSignedInAccountNotice is the one line a turn needs when no saved login can
+// reach the room's repository.
+const noSignedInAccountNotice = "No signed-in GitHub account can reach this repository, so GitHub commands may fail this turn; continue without them."
 
 // probeNotice is the one line a turn needs when GitHub refused the access
 // check. It names the reset time when GitHub gave one.
