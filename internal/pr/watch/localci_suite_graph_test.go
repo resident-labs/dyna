@@ -42,7 +42,10 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 	localci.SuiteFrontend:      {"frontend test (0)", "frontend test (1)", "frontend test (2)", "frontend test (3)", "frontend test (4)", "frontend test (5)", "frontend"},
 	localci.SuiteFrontendCheck: {"frontend-check"},
 	localci.SuiteGoStatic:      {"go-static"},
-	localci.SuiteCrossBuild:    {"cross-build"},
+	localci.SuiteCrossBuild: {
+		"cross-build (linux/amd64)", "cross-build (linux/arm64)",
+		"cross-build (darwin/amd64)", "cross-build (darwin/arm64)", "cross-build",
+	},
 	localci.SuiteComputerSmoke: {"computer-smoke"},
 	localci.SuiteGo: {
 		"frontend test (0)", "frontend test (1)", "frontend test (2)", "frontend test (3)", "frontend test (4)", "frontend test (5)", "frontend",
