@@ -83,16 +83,6 @@ func main() {
 		}
 		return
 	}
-	if harnessruntime.IsKimiSignInCommand(os.Args[1:]) {
-		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		err := harnessruntime.KimiSignInCommand(ctx, os.Args[1:])
-		cancel()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error:", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if err := home.RestoreOwner(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "dyna:", err)
 		os.Exit(2)

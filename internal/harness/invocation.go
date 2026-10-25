@@ -134,20 +134,6 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 	case "muse-exec":
 		return museInvocation(p, prompt, exec)
 
-	case "grok-acp", "kimi-acp":
-		if p.Harness == profile.HarnessGrok {
-			if err := validateGrokAcpArgs(p); err != nil {
-				return invocation{}, err
-			}
-		} else if len(permissionArgs) != 0 {
-			return invocation{}, fmt.Errorf("%s ACP does not support CLI extraArgs; use the profile model, SafeMode, Dyna session controls, and the managed catalog", p.Harness)
-		}
-
-		inv.initial = commandSpec{acpPrompt: prompt}
-		inv.resume = func(id, nudge string) commandSpec {
-			return commandSpec{acpPrompt: nudge}
-		}
-		return inv, nil
 	case "pi-print":
 		return piInvocation(p, prompt, exec)
 

@@ -75,23 +75,6 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 		DynaShell: true,
 		Shell:     []string{"shell_tool", "unified_exec"},
 	},
-	"grok": {
-		// docs.x.ai/build/settings/reference, installed help and embedded docs.
-		// Grok runs over ACP (`grok agent stdio`): the print-mode flags
-		// (--no-memory, --disallowed-tools) do not exist there, so every control
-		// is an environment variable or a config.toml key in the private home.
-		Env: map[string]string{"GROK_MEMORY": "0", "GROK_SUBAGENTS": "0", "GROK_WORKFLOWS": "0", "GROK_GOAL": "0", "GROK_ASK_USER_QUESTION": "0"},
-		// Tools without a feature switch are denied by a config.toml
-		// PreToolUse hook (the hooks-in-config format grok 1.0.62 documents).
-		// send_subagent_message is Grok's messaging tool (#1863).
-		Config:    map[string]any{"hooks.PreToolUse": []any{grokDenyHook("scheduler_create|scheduler_list|scheduler_delete|monitor|enter_plan_mode|exit_plan_mode|todo_write|send_subagent_message")}},
-		DynaShell: true,
-		// run_terminal_command is the native shell; the other three name its
-		// background tasks. The generation adds them to the deny hook when
-		// Dyna's MCP shell server is configured.
-		Shell:    grokShellTools,
-		NoSwitch: []string{"No switch verified for Grok restoring existing scheduled tasks; the deny hook prevents new schedules."},
-	},
 	// Pi's base package has no native memory, messaging, delegation, or cron
 	// tools. Do not disable its extension system to address absent features.
 	"pi": {
@@ -182,29 +165,6 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 		DynaShell: true,
 		Shell:     []string{"Bash", "TaskList", "TaskOutput", "TaskStop", "WaitFor"},
 	},
-}
-
-// grokShellTools are Grok's native shell tool and its background-task tools.
-var grokShellTools = []string{"run_terminal_command", "get_command_or_subagent_output", "wait_commands_or_subagents", "kill_command_or_subagent"}
-
-// grokDenyHook builds one config.toml [[hooks.PreToolUse]] entry that denies
-// the tools matching the regex with a fixed command. A deny stands under
-// --always-approve; only an ask would be
-// auto-approved away (grok 1.0.62 hooks guide).
-func grokDenyHook(matcher string) map[string]any {
-	return map[string]any{
-		"matcher": matcher,
-		"hooks": []any{map[string]any{
-			"type":    "command",
-			"command": `printf '%s' '{"decision":"deny","reason":"Dyna owns this capability. Use your goal, the room, Dyna shell or files you own instead."}'`,
-		}},
-	}
-}
-
-// GrokShellDenyHook is the entry that removes Grok's native shell tools from
-// a generation that configures Dyna's MCP shell server.
-func GrokShellDenyHook() map[string]any {
-	return grokDenyHook(strings.Join(grokShellTools, "|"))
 }
 
 func nativeFeaturePreferences(h string, preferences map[string]any) map[string]any {

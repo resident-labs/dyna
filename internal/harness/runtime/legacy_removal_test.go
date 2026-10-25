@@ -11,7 +11,7 @@ import (
 
 func TestGenerationRequiresPrivateHomeMarker(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := restoreGenerationHome("grok", dir, harnessmgr.ConfigGeneration{}); !errors.Is(err, os.ErrNotExist) {
+	if _, err := restoreGenerationHome("muse", dir, harnessmgr.ConfigGeneration{}); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("generation without private HOME marker: %v; want missing-file error", err)
 	}
 }
@@ -19,13 +19,13 @@ func TestGenerationRequiresPrivateHomeMarker(t *testing.T) {
 func TestNativeGenerationRejectsVersionOne(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
-	if err := writeNativeGeneration(filepath.Join(dir, "native-generation.json"), nativeGeneration{Version: 1, Harness: "grok", Home: home}); err != nil {
+	if err := writeNativeGeneration(filepath.Join(dir, "native-generation.json"), nativeGeneration{Version: 1, Harness: "muse", Home: home}); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeNativeGeneration(filepath.Join(dir, "private-home.json"), privateGenerationHome{Version: 1, Home: home}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readNativeGeneration("grok", dir, nil); err == nil {
+	if _, err := readNativeGeneration("muse", dir, nil); err == nil {
 		t.Fatal("version 1 native manifest was accepted")
 	}
 }

@@ -25,9 +25,6 @@ import (
 )
 
 func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, tracker *sessionTracker, journal *journalSupervisor, steering *steeringSupervisor, resumable bool, outputPath, normalizedOutputPath string, output *workeroutput.Declaration, liveLine func(string), gate *deliveryGate, state *runState, execution ExecutionOptions) (out attempt) {
-	if spec.acpPrompt != "" {
-		return runAcpAttempt(ctx, p, cwd, spec, tracker, journal, steering, resumable, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
-	}
 	if err := validateWorkingDirectory(cwd); err != nil {
 		return finishAttempt(spec, "", "", err, false, ctx.Err() != nil, false, false, nil, nil)
 	}

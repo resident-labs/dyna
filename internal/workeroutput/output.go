@@ -83,8 +83,6 @@ type SelectedSnapshot struct {
 type adapter func([]byte) Record
 
 var adapters = map[string]adapter{
-	DialectGrokJSON:         decodeGrok,
-	DialectAcpJSON:          decodeAcp,
 	DialectPiJSON:           decodePi,
 	DialectText:             decodeText,
 	DialectCodexJSONL:       decodeCodex,

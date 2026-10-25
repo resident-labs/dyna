@@ -94,7 +94,7 @@ func TestAccountLeaseProcess(t *testing.T) {
 }
 
 func TestTurnLeaseModesAndSwitchCancellation(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "grok", "pi"} {
+	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			release, err := a.TurnLease(context.Background(), h)

@@ -17,7 +17,6 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 		{"opencode", "0.0.0-v1-build", "v2 builds only"},
 		{"opencode", "3.0.0", "v2 builds only"},
 		{"pi", "1.0.9", "1.1.0"},
-		{"kimi-code", "2.3.0", "2.3.1"},
 	} {
 		_, err := m.Install(context.Background(), tc.harness, tc.version)
 		if err == nil || !strings.Contains(err.Error(), tc.reason) {
@@ -28,7 +27,6 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 		{"opencode", "2.0.0"},
 		{"opencode", "0.0.0-v2-build"},
 		{"pi", "1.1.0"},
-		{"kimi-code", "2.3.1"},
 		{"claude-code", "0.1.0"},
 	} {
 		if _, err := m.Install(context.Background(), tc.harness, tc.version); err != nil {
@@ -42,7 +40,6 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 func TestRecommendedVersionsRespectSupportedRange(t *testing.T) {
 	for _, tc := range []struct{ harness, pkg, version, reason string }{
 		{"pi", piNPMPackage, "1.0.9", "1.1.0"},
-		{"kimi-code", "@moonshot-ai/kimi-code", "2.3.0", "2.3.1"},
 	} {
 		r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) {
 			return recommendedResponse(200, recommendedMetadata(tc.pkg, tc.version)), nil
