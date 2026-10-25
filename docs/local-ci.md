@@ -142,8 +142,11 @@ dyna git ci show HEAD --json
 
 ## Host checks
 
-Host execution is off by default on every machine. The repository cannot turn
-it on. The machine owner must explicitly allow it:
+Host execution is off by default on every machine. A one-time upgrade
+migration preserves permission only on registered machines with saved
+`computer-smoke` evidence from the old runner. Every other existing machine
+and every machine added later starts off. The repository cannot turn it on.
+The machine owner must explicitly allow it:
 
 ```sh
 dyna machine edit build-machine --allow-host-checks
