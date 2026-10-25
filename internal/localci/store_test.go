@@ -194,7 +194,6 @@ func TestStoreHostedAttemptsPersist(t *testing.T) {
 		t.Fatalf("hosted event = %#v", event)
 	}
 	runs.Resumed = true
-	runs.Published = true
 	if err := s.SaveHostedRuns(ctx, repo, sha, runs); err != nil {
 		t.Fatal(err)
 	}

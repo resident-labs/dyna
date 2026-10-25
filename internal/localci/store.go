@@ -62,11 +62,9 @@ type Store struct{ DataDir string }
 
 // HostedRuns records the hosted attempts cancelled for a local run.
 type HostedRuns struct {
-	IDs          []int64       `json:"ids"`
-	Attempts     map[int64]int `json:"attempts,omitempty"`
-	Resumed      bool          `json:"resumed"`
-	Published    bool          `json:"published"`
-	PublishedKey string        `json:"publishedKey,omitempty"`
+	IDs      []int64       `json:"ids"`
+	Attempts map[int64]int `json:"attempts,omitempty"`
+	Resumed  bool          `json:"resumed"`
 }
 
 const storeSchema = `CREATE TABLE local_ci_modes (

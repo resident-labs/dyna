@@ -398,9 +398,12 @@ creates a real directory under the exclusive cache lock, and posts a typed
 machine notice. Any other unsafe cache link stops the run, so it never mounts
 or trims another account's cache.
 Results and machine settings live in SQLite; report files remain on disk.
-Dyna publishes named commit statuses, including `go-test`, using the room's
-GitHub credentials. The PR Checks tab and `dyna git merge status` show machines.
-Use `dyna git ci show <sha> --json` for saved results and durations.
+Dyna keeps a local run's result to itself: it posts no commit status to GitHub,
+so no machine name leaves the engine. The merge gate, the PR Checks tab and
+`dyna git merge status` read the saved result, which names the machine that ran
+each check. Use `dyna git ci show <sha> --json` for saved results and durations.
+A status Dyna posted for an older run stays on that commit; the watcher ignores
+it, so it never counts as hosted evidence for a merge.
 
 ## Host watcher and stored state
 

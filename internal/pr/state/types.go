@@ -506,6 +506,10 @@ type Polling struct {
 	// Error describes incomplete ancillary work, not a failed head confirmation.
 	Error     string `json:"error,omitempty"`
 	CIVersion string `json:"ciVersion,omitempty"`
+	// LocalCI identifies the saved local CI result this PR has already read. A
+	// manual rerun writes only Dyna's records, so a new result needs a full poll
+	// that a quiet pull would otherwise skip.
+	LocalCI string `json:"localCI,omitempty"`
 	// PullVersion identifies metadata and policy from the last complete poll.
 	PullVersion     string    `json:"pullVersion,omitempty"`
 	PullHead        string    `json:"pullHead,omitempty"`
