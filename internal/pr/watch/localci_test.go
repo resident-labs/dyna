@@ -551,7 +551,7 @@ func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 		{map[string]int{"hermeslab": 8}, "local"},
 		{map[string]int{"hermeslab": 8, "local": 1}, ""},
 	} {
-		node := availableCINode(nodes, tc.active)
+		node := availableCINode(nodes, tc.active, "")
 		got := ""
 		if node != nil {
 			got = node.Name
@@ -559,6 +559,43 @@ func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("active=%v: chose %q, want %q", tc.active, got, tc.want)
 		}
+	}
+}
+
+// A machine that names rooms takes only those rooms' work, so the scheduler and
+// the merge trials that share it leave it to the room that owns it.
+func TestRegisteredCISkipsMachinesLimitedToOtherRooms(t *testing.T) {
+	nodes := []localci.Node{
+		{Name: "hermeslab", Slots: 8, Enabled: true, Rooms: []string{"room_dyna"}},
+		{Name: "pve", Slots: 4, Enabled: true, Rooms: []string{"room_fl-rea"}},
+		{Name: "arch", Slots: 2, Enabled: true},
+	}
+	for _, tc := range []struct {
+		room   string
+		active map[string]int
+		want   string
+	}{
+		{"room_dyna", nil, "hermeslab"},
+		{"room_fl-rea", nil, "pve"},
+		// A full machine of the room hands work to a machine with no limit
+		// before another room's machine.
+		{"room_dyna", map[string]int{"hermeslab": 8}, "arch"},
+		// A machine with no room list takes every room's work.
+		{"room_other", nil, "arch"},
+	} {
+		node := availableCINode(nodes, tc.active, tc.room)
+		got := ""
+		if node != nil {
+			got = node.Name
+		}
+		if got != tc.want {
+			t.Fatalf("room=%s active=%v: chose %q, want %q", tc.room, tc.active, got, tc.want)
+		}
+	}
+	// A room that no machine allows waits for one, and takes no other room's
+	// machine.
+	if node := availableCINode(nodes[:2], nil, "room_other"); node != nil {
+		t.Fatalf("room with no machine chose %q", node.Name)
 	}
 }
 

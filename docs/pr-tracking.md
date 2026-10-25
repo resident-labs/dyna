@@ -328,6 +328,24 @@ flag belongs to the whole machine, so on the local row it covers that machine's
 work, not the engine, which keeps running. `dyna machine add` needs a new name;
 use `dyna machine edit` to change a stored machine.
 
+### Rooms of a machine
+
+The registry is shared by every room, so a machine can name the rooms that may
+use it, and each room's CI then stays on the machines it owns:
+
+```sh
+dyna machine edit hermeslab --rooms dyna
+dyna machine edit arch --rooms fl-rea,pve
+dyna machine edit hermeslab --rooms ""
+```
+
+Dyna stores the room IDs, so a renamed room keeps its machine. An empty list is
+the default and lets every room use the machine. Local CI scheduling and merge
+trials skip a machine that does not allow their room, so that room's work waits
+for a machine that does instead of running next to another room's work.
+`dyna machine show <name>` prints the list, and taking the ci role away clears
+it.
+
 ## Probing machines
 
 Dyna reads what a machine has, and whether it is reachable, with one bounded

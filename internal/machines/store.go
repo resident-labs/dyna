@@ -62,6 +62,10 @@ type Machine struct {
 	// AllowHostChecks lets repository-defined CI commands run on this machine
 	// outside a container. It is false unless the owner explicitly enables it.
 	AllowHostChecks bool `json:"allowHostChecks"`
+	// Rooms limits the CI work this machine takes to those room IDs. An empty
+	// list allows every room, which is what every machine allowed before it
+	// could name rooms.
+	Rooms []string `json:"rooms,omitempty"`
 	// Enabled turns the machine's work off. A disabled machine takes no new CI
 	// runs. On the local row it stops that work, not the engine, which keeps
 	// running.
@@ -85,6 +89,12 @@ type Machine struct {
 
 // HasRole reports whether the machine has the role.
 func (m Machine) HasRole(role Role) bool { return slices.Contains(m.Roles, role) }
+
+// AllowsRoom reports whether the machine takes CI work for the room. A machine
+// that names no room takes work from every room.
+func (m Machine) AllowsRoom(roomID string) bool {
+	return len(m.Rooms) == 0 || slices.Contains(m.Rooms, roomID)
+}
 
 // RoleNames joins the roles for a table cell.
 func (m Machine) RoleNames() string {
@@ -152,10 +162,20 @@ func (m Machine) Validate() error {
 	if m.HasRole(RoleCI) && m.CISlots < 1 {
 		return errors.New("a machine with the ci role needs at least one CI slot")
 	}
+	seen := make(map[string]bool, len(m.Rooms))
+	for _, room := range m.Rooms {
+		if strings.TrimSpace(room) != room || room == "" || len(room) > 64 || strings.ContainsAny(room, " ,\t\r\n") {
+			return fmt.Errorf("room %q must be a room ID of at most 64 bytes", room)
+		}
+		if seen[room] {
+			return fmt.Errorf("room %q is named twice", room)
+		}
+		seen[room] = true
+	}
 	return nil
 }
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -174,7 +194,8 @@ const schema = `CREATE TABLE machines (
 	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
 	probe_error    TEXT    NOT NULL DEFAULT '',
 	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
-	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))
+	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1)),
+	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))
 );
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
 
@@ -200,7 +221,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,allow_host_checks`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,allow_host_checks,rooms`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -264,6 +285,13 @@ func prepare(conn *sql.Conn, old int) error {
 	_, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))`)
 	if err != nil {
 		return err
+	}
+	if old < 5 {
+		// A machine with no room list takes work from every room, which is
+		// what every machine allowed before it could name rooms.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN rooms TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))`); err != nil {
+			return err
+		}
 	}
 	return inheritHostChecks(ctx, conn)
 }
@@ -518,14 +546,22 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, reason, load, probeError string
+	var roles, capabilities, health, reason, load, probeError, rooms string
 	var created, updated, probed, seen int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &m.AllowHostChecks); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &m.AllowHostChecks, &rooms); err != nil {
 		return Machine{}, err
 	}
 	if err := json.Unmarshal([]byte(roles), &m.Roles); err != nil {
 		return Machine{}, fmt.Errorf("machine %s roles: %w", m.Name, err)
+	}
+	if err := json.Unmarshal([]byte(rooms), &m.Rooms); err != nil {
+		return Machine{}, fmt.Errorf("machine %s rooms: %w", m.Name, err)
+	}
+	// A machine that names no room reads back with no list, so every stored row
+	// has one meaning of "every room".
+	if len(m.Rooms) == 0 {
+		m.Rooms = nil
 	}
 	if err := json.Unmarshal([]byte(capabilities), &m.Capabilities); err != nil {
 		return Machine{}, fmt.Errorf("machine %s capabilities: %w", m.Name, err)
@@ -680,15 +716,17 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	if !m.HasRole(RoleCI) {
 		m.CISlots = 0
 		m.AllowHostChecks = false
+		m.Rooms = nil
 	}
 	m.Updated = now
 	if err := m.Validate(); err != nil {
 		return Machine{}, err
 	}
+	rooms := marshalRooms(m.Rooms)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, allow_host_checks=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), flag(m.AllowHostChecks), m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, allow_host_checks=?, rooms=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), flag(m.AllowHostChecks), rooms, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -698,9 +736,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,allow_host_checks) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,allow_host_checks,rooms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), flag(m.AllowHostChecks))
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), flag(m.AllowHostChecks), rooms)
 		return err
 	})
 	if err != nil {
@@ -812,6 +850,23 @@ func uniqueRoles(roles []Role) []Role {
 
 func marshalRoles(roles []Role) string {
 	raw, err := json.Marshal(uniqueRoles(roles))
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+// marshalRooms stores a machine's room list in one stable order, so a row that
+// names the same rooms twice reads back the same way.
+func marshalRooms(rooms []string) string {
+	out := make([]string, 0, len(rooms))
+	for _, room := range rooms {
+		if !slices.Contains(out, room) {
+			out = append(out, room)
+		}
+	}
+	slices.Sort(out)
+	raw, err := json.Marshal(out)
 	if err != nil {
 		return "[]"
 	}
