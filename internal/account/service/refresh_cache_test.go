@@ -51,7 +51,7 @@ func TestRefreshPersistsObservationForPlainUsageRead(t *testing.T) {
 			if err := service.refreshNativeUsage(t.Context(), &row, prober, native.Captured{Identity: "fixture"}); err != nil {
 				t.Fatal(err)
 			}
-			// This reader is also used by plain dyna usage; it has no service cache.
+			// This reader is also used by plain dyna accounts list; it has no service cache.
 			plain := CachedUsage(store, now)
 			if plain.Message != "" || len(plain.Accounts) != 1 || calls != 1 {
 				t.Fatalf("plain usage = %+v, calls=%d", plain, calls)

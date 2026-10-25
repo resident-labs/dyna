@@ -90,16 +90,16 @@ func UsageNote(a Account, now time.Time) string {
 		if p, ok := WindowPercent(w); ok && p >= noteThreshold {
 			high = true
 			if p > 80 {
-				advice = " Use a cheaper profile and check `dyna usage` before large fan-outs."
+				advice = " Use a cheaper profile and check `dyna accounts list` before large fan-outs."
 			}
 		}
 	}
 	age := ""
 	switch {
 	case a.ObservedAt.IsZero():
-		age = " (no reading yet; run `dyna usage --refresh`)"
+		age = " (no reading yet; run `dyna accounts list --refresh`)"
 	case now.Sub(a.ObservedAt) > noteStaleAge:
-		age = fmt.Sprintf(" (reading %d h old; run `dyna usage --refresh`)", int(now.Sub(a.ObservedAt)/time.Hour))
+		age = fmt.Sprintf(" (reading %d h old; run `dyna accounts list --refresh`)", int(now.Sub(a.ObservedAt)/time.Hour))
 	case !high && a.UsageError == "":
 		return ""
 	}

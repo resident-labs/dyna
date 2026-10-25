@@ -18,6 +18,7 @@ var ownerCalls = []string{
 	"RevokeDevice",
 	"ComputerControl",
 	"HarnessProviderKeys",
+	"AccountsAdd",
 	"SetAccountRepos",
 	"UninstallPrivateRuntime",
 	"CancelPrivateRuntimeLogin",

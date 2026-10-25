@@ -424,7 +424,7 @@ func TestEveryCallHasOneScope(t *testing.T) {
 		{websvc.ScopeFiles, `ListEntries ReadFile SyncFetch SyncRefresh GitExport GitStatus GitLastCommits GitReadFile GitHistory GitBlame GitDiff BrowseInfo BrowseDirs InspectPath`},
 		{websvc.ScopeTerminal, `TermOpen Terms TermAttach TermWrite TermResize TermClose ShellJobs ShellLog ShellLogRange StopShell`},
 		{websvc.ScopeComputers, `Computers Computer ComputerControl`},
-		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian SaveMachine ProbeMachine TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog ListGlobalHooks GlobalHookSummary GlobalHookRuns RunGlobalHook AddGlobalHook EditGlobalHook RemoveGlobalHook ResetHook GlobalHookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom SetRoomRootProfile DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin SwitchPrivateRuntimeAccount PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountUsage ProfileModels`},
+		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian SaveMachine ProbeMachine TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog ListGlobalHooks GlobalHookSummary GlobalHookRuns RunGlobalHook AddGlobalHook EditGlobalHook RemoveGlobalHook ResetHook GlobalHookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom SetRoomRootProfile DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin SwitchPrivateRuntimeAccount PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountUsage AccountsList AccountsUse AccountsRemove AccountsAdd ProfileModels`},
 	}
 	want := map[string]websvc.Scope{}
 	for _, group := range scopes {
@@ -463,7 +463,7 @@ func TestConditionalWritesAreRejectedInReadOnlyMode(t *testing.T) {
 	if scopes["AccountUsageCached"] != websvc.ScopeRead {
 		t.Fatal("cached usage must be available with read scope")
 	}
-	for _, name := range []string{"ConfigCheckProfile", "UpdateNotice", "AccountUsage", "ProfileModels"} {
+	for _, name := range []string{"ConfigCheckProfile", "UpdateNotice", "AccountUsage", "AccountsList", "ProfileModels"} {
 		if scopes[name] != websvc.ScopeAdmin {
 			t.Fatalf("%s must retain admin scope", name)
 		}
@@ -524,7 +524,7 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 		}
 	}
 	// VoiceResume can dial a provider, like VoiceStart.
-	if n := len(callspec.LongCalls); n != 93 {
+	if n := len(callspec.LongCalls); n != 97 {
 		t.Fatalf("LongCalls has %d calls, want 93; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }

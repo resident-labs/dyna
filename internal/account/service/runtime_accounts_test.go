@@ -221,7 +221,7 @@ func TestRetiredHarnessAccountRefreshesAndReportsUsageWithoutBundle(t *testing.T
 		t.Fatal(err)
 	}
 	s := New(Options{Store: &store.Store{Root: root}, Now: func() time.Time { return now }})
-	rows, err := s.nativeHomeAccounts(t.Context(), false)
+	rows, _, err := s.nativeHomeAccounts(t.Context(), false)
 	if err != nil || len(rows) != 1 || rows[0].Status != "ready" {
 		t.Fatalf("retired harness account = %+v, %v", rows, err)
 	}
@@ -366,7 +366,7 @@ func TestKimiRetiredAccountUsesAndRenewsWithoutBundle(t *testing.T) {
 		t.Fatal("the fixture has a runnable Kimi bundle")
 	}
 	s := New(Options{Store: &store.Store{Root: root}, Now: func() time.Time { return now }})
-	rows, err := s.nativeHomeAccounts(t.Context(), true)
+	rows, _, err := s.nativeHomeAccounts(t.Context(), true)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("accounts = %+v, %v", rows, err)
 	}

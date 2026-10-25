@@ -118,8 +118,8 @@ func (s *Service) Snapshot(ctx context.Context, refresh bool) Snapshot {
 	if ctx.Err() != nil {
 		return s.last
 	}
-	accounts, err := s.nativeHomeAccounts(ctx, refresh)
-	out := Snapshot{Accounts: accounts, CheckedAt: s.o.Now().UTC()}
+	accounts, problems, err := s.nativeHomeAccounts(ctx, refresh)
+	out := Snapshot{Accounts: accounts, Problems: problems, CheckedAt: s.o.Now().UTC()}
 	if err != nil {
 		out.Message = err.Error()
 	}

@@ -62,6 +62,31 @@ func sharedServiceAccount(h string) bool {
 
 var errAccountPath = errors.New("The private account path is unsafe.")
 var errAccountMissing = errors.New("The private account does not exist.")
+var errAccountHarness = errors.New("The account names a harness this release does not run.")
+
+// AccountProblemReason is why one saved row could not be listed.
+type AccountProblemReason string
+
+const (
+	// AccountUnknownHarness names a row of a harness this release does not run.
+	AccountUnknownHarness AccountProblemReason = "unknown-harness"
+	// AccountUnsafeHome names a row whose saved home is unsafe or gone.
+	AccountUnsafeHome AccountProblemReason = "unsafe-home"
+	// AccountMissingHome names a row that names no saved home.
+	AccountMissingHome AccountProblemReason = "missing-home"
+	// AccountUnreadable names a row that could not be read for another reason.
+	AccountUnreadable AccountProblemReason = "unreadable"
+)
+
+// AccountProblem is one saved account row that the list skipped. It is a result
+// about that row, never a reason to fail the whole list: one bad row must not
+// hide every other account.
+type AccountProblem struct {
+	ID      string               `json:"id"`
+	Harness string               `json:"harness,omitempty"`
+	Label   string               `json:"label,omitempty"`
+	Reason  AccountProblemReason `json:"reason"`
+}
 
 // safeAccountPath rejects symlinks in every existing path component.
 func safeAccountPath(path string) error {
@@ -123,7 +148,10 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 		return NativeAccount{}, errAccountMissing
 	}
 	h, err := canonicalAccountHarness(e.Harness)
-	if err != nil || h != e.Harness || len(e.ID) != 32 {
+	if err != nil || h != e.Harness {
+		return NativeAccount{}, errAccountHarness
+	}
+	if len(e.ID) != 32 {
 		return NativeAccount{}, errAccountPath
 	}
 	if _, err := hex.DecodeString(e.ID); err != nil {
@@ -182,7 +210,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 // different providers are active together and a Pi account never marks the
 // account Claude Code uses for the same provider.
 func (a *Accounts) activeForEntry(e *store.Entry) (string, error) {
-	return (&store.Store{Root: a.Root}).Active(selectionProvider(e.Harness, e.Provider), e.Harness, "")
+	return (&store.Store{Root: a.Root}).Active(SelectionProvider(e.Harness, e.Provider), e.Harness, "")
 }
 
 func (a *Accounts) Create(harness, label string) (result NativeAccount, err error) {
@@ -245,27 +273,53 @@ func (a *Accounts) Find(id string) (result NativeAccount, err error) {
 	return
 }
 
-func (a *Accounts) List() (result []NativeAccount, err error) {
+// List returns every account this release can run. A saved row it cannot read is
+// left out; ListWithProblems names it.
+func (a *Accounts) List() ([]NativeAccount, error) {
+	result, _, err := a.ListWithProblems()
+	return result, err
+}
+
+// ListWithProblems returns the accounts and names each saved row it skipped, so
+// one bad row never fails the list or hides the other accounts.
+func (a *Accounts) ListWithProblems() (result []NativeAccount, problems []AccountProblem, err error) {
 	result = []NativeAccount{}
+	problems = []AccountProblem{}
 	rules, err := a.rules()
 	if err != nil {
-		return result, err
+		return result, problems, err
 	}
 	err = a.transaction(func(state *store.State) error {
 		for i := range state.Entries {
-			if state.Entries[i].NativeHome == "" || retiredHarness(state.Entries[i].Harness) {
+			e := &state.Entries[i]
+			if e.NativeHome == "" || retiredHarness(e.Harness) {
 				continue
 			}
-			n, err := a.native(&state.Entries[i])
-			if err != nil {
-				return err
+			n, e2 := a.native(e)
+			if e2 != nil {
+				problems = append(problems, accountProblem(*e, e2))
+				continue
 			}
 			n.Repos = rules[n.ID]
 			result = append(result, n)
 		}
 		return nil
 	}, false)
-	return
+	return result, problems, err
+}
+
+// accountProblem names why one saved row was skipped.
+func accountProblem(e store.Entry, err error) AccountProblem {
+	reason := AccountUnreadable
+	switch {
+	case errors.Is(err, errAccountHarness):
+		reason = AccountUnknownHarness
+	case errors.Is(err, errAccountMissing):
+		reason = AccountMissingHome
+	case errors.Is(err, errAccountPath):
+		reason = AccountUnsafeHome
+	}
+	return AccountProblem{ID: e.ID, Harness: e.Harness, Label: e.Label, Reason: reason}
 }
 
 // privateAccountManager disallows copying or refreshing saved grants.
@@ -449,7 +503,9 @@ func (a *Accounts) Env(id string) (map[string]string, error) {
 // launchScope returns the account a turn resolved and its native home. A turn
 // may resolve to an account that another harness's provider selection pushed
 // aside, so this scope checks no active mark: the turn's own selection already
-// chose the account.
+// chose the account. A harness that keeps credentials per account reads the
+// folder of the account this turn resolved, because a room choice can differ
+// from the globally active account.
 func (a *Accounts) launchScope(id, executable string) (NativeAccount, native.Manager, map[string]string, error) {
 	n, err := a.Find(id)
 	if err != nil {
@@ -462,7 +518,11 @@ func (a *Accounts) launchScope(id, executable string) (NativeAccount, native.Man
 	if err != nil {
 		return n, nil, nil, err
 	}
-	m, env, err := a.scopedManager(n.Harness, home, executable)
+	var pin map[string]string
+	if pinsCredentials(n.Harness) {
+		pin = map[string]string{pinnedSecretKey: n.Home}
+	}
+	m, env, err := a.scopedManagerWith(n.Harness, home, executable, pin)
 	return n, m, env, err
 }
 
@@ -486,12 +546,21 @@ func (a *Accounts) launchManager(id, executable string) (native.Manager, error) 
 		m, _, err := a.scopedManager(n.Harness, n.Home, executable)
 		return m, err
 	}
+	if pinsCredentials(n.Harness) {
+		// Readiness reads the account's own credentials folder. The shared
+		// config belongs to the globally active account, which a room choice can
+		// differ from, and it would answer with that account's identity.
+		if err := requirePrivateSnapshot(n); err != nil {
+			return nil, err
+		}
+		return a.pinManager(n, executable)
+	}
 	_, m, _, err := a.launchScope(id, executable)
 	if err != nil {
 		return nil, err
 	}
 	home, _ := a.HarnessHome(n.Harness)
-	return privateAccountManager{Manager: m, home: home, nativeRoot: sharedServiceAccount(n.Harness) || pinsCredentials(n.Harness)}, nil
+	return privateAccountManager{Manager: m, home: home, nativeRoot: sharedServiceAccount(n.Harness)}, nil
 }
 func (a *Accounts) Manager(id, executable string) (native.Manager, error) {
 	n, err := a.Find(id)

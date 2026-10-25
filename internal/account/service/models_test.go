@@ -100,7 +100,7 @@ func TestNativeAccountProbeFailureDoesNotRequestSignIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(Options{Store: store})
-	rows, err := s.nativeHomeAccounts(context.Background(), false)
+	rows, _, err := s.nativeHomeAccounts(context.Background(), false)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("probe result: %+v, %v", rows, err)
 	}
