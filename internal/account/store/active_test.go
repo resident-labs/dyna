@@ -6,83 +6,112 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/harness/preferences"
-	statewrite "dyna-agent/internal/state"
 )
 
-func TestActiveSelectionImportsOnceAndDoesNotResurrect(t *testing.T) {
+// legacyActiveSchema is the per-harness selection table of the previous
+// release, which the migration replaces.
+const legacyActiveSchema = `CREATE TABLE account_active (
+ harness TEXT PRIMARY KEY,
+ account TEXT NOT NULL
+);`
+
+// A registry from the previous release moves once: each row names its provider
+// and kind, and one global row per provider replaces the per-harness rows.
+func TestMigrationMovesHarnessSelectionsToProviders(t *testing.T) {
 	s := registryStore(t)
 	dataDir := filepath.Dir(s.Root)
 	db, err := database.Open(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Migrate(db, "account.registry", 2, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), registrySchema+activeSchema)
+	if err := database.Migrate(db, "account.registry", 4, func(conn *sql.Conn, _ int) error {
+		ctx := context.Background()
+		if _, err := conn.ExecContext(ctx, registrySchema+legacyActiveSchema); err != nil {
+			return err
+		}
+		rows := []struct{ id, harness string }{
+			{"11111111111111111111111111111111", "claude-code"},
+			{"22222222222222222222222222222222", "codex"},
+		}
+		for i, row := range rows {
+			meta := `{"id":"` + row.id + `","harness":"` + row.harness + `","identity":"` + row.harness + `:one","label":"One","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}`
+			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES (?, ?, ?, '')", row.id, i, meta); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO account_active(harness, account) VALUES (?, ?)", row.harness, row.id); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(ctx, "INSERT INTO accounts_registry VALUES(1,1,1)")
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := statewrite.MigrateMirrors(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	id := strings.Repeat("a", 32)
-	raw := []byte(`{"id":"` + id + `"}`)
-	for _, h := range []string{"fixture", "cleared-final", "cleared-pending"} {
-		if err := os.MkdirAll(filepath.Dir(s.activePath(h)), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(s.activePath(h), raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, h := range []string{"cleared-final", "cleared-pending"} {
-		version, pending := "prior-copy", ""
-		if h == "cleared-pending" {
-			version, pending = "", "prior-copy"
-		}
-		if _, err := db.Exec("INSERT INTO state_mirrors(key,version,pending) VALUES(?,?,?)", activeKey(h), version, pending); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := Migrate(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	var got string
-	if err := db.QueryRow("SELECT account FROM account_active WHERE harness = ?", "fixture").Scan(&got); err != nil || got != id {
-		t.Fatalf("eager selection = %q, %v", got, err)
+	st, err := s.Read()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, h := range []string{"cleared-final", "cleared-pending"} {
-		if got, err := s.Active(h); err != nil || got != "" {
-			t.Fatalf("%s restored selection %q: %v", h, got, err)
+	want := map[string]struct {
+		provider Provider
+		kind     Kind
+	}{
+		"11111111111111111111111111111111": {ProviderAnthropic, KindOAuth},
+		"22222222222222222222222222222222": {ProviderChatGPT, KindOAuth},
+	}
+	if len(st.Entries) != len(want) {
+		t.Fatalf("migrated %d accounts, want %d", len(st.Entries), len(want))
+	}
+	for _, entry := range st.Entries {
+		if entry.Provider != want[entry.ID].provider || entry.Kind != want[entry.ID].kind {
+			t.Fatalf("account %s moved to (%q, %q)", entry.ID, entry.Provider, entry.Kind)
 		}
 	}
-	if err := s.SetActive("fixture", ""); err != nil {
+	for provider, id := range map[string]string{"anthropic": "11111111111111111111111111111111", "chatgpt": "22222222222222222222222222222222"} {
+		if got, err := s.Active(Provider(provider), ""); err != nil || got != id {
+			t.Fatalf("active %s = %q, %v", provider, got, err)
+		}
+	}
+	var harnessTable int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'account_active_harness'").Scan(&harnessTable); err != nil || harnessTable != 0 {
+		t.Fatalf("the per-harness table stayed: %d, %v", harnessTable, err)
+	}
+}
+
+// A room row overrides the global row for its provider.
+func TestActiveForPrefersTheRoomRow(t *testing.T) {
+	s := registryStore(t)
+	shared := saveAccount(t, s, "shared")
+	room := saveAccount(t, s, "room")
+	provider, _ := ProviderFor("fixture", "")
+	if err := s.SetActive(provider, "", shared.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := os.ReadFile(s.activePath("fixture")); err != nil || string(got) != string(raw) {
-		t.Fatalf("SetActive changed retained bytes: %q, %v", got, err)
+	if got, err := s.ActiveFor(provider, "room-1"); err != nil || got != shared.ID {
+		t.Fatalf("room without a row = %q, %v", got, err)
 	}
-	if err := os.Remove(s.activePath("fixture")); err != nil {
+	if err := s.SetActive(provider, "room-1", room.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(s.activePath("fixture"), raw, 0600); err != nil {
+	if got, err := s.ActiveFor(provider, "room-1"); err != nil || got != room.ID {
+		t.Fatalf("room row = %q, %v", got, err)
+	}
+	if got, err := s.ActiveFor(provider, "room-2"); err != nil || got != shared.ID {
+		t.Fatalf("another room = %q, %v", got, err)
+	}
+	if err := s.SetActive(provider, "room-1", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := Migrate(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Active("fixture"); err != nil || got != "" {
-		t.Fatalf("cleared selection = %q, %v", got, err)
-	}
-	if err := db.QueryRow("SELECT account FROM account_active WHERE harness = ?", "fixture").Scan(&got); err != nil || got != "" {
-		t.Fatalf("empty selection row = %q, %v", got, err)
+	if got, err := s.ActiveFor(provider, "room-1"); err != nil || got != "" {
+		t.Fatalf("cleared room row = %q, %v", got, err)
 	}
 }
 
@@ -112,7 +141,8 @@ func TestRemovingAnAccountDeletesItsLinkedRows(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO harness_preferences(account, ref) VALUES (?, '{}')", meta.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetActive("fixture", meta.ID); err != nil {
+	provider, _ := ProviderFor("fixture", "")
+	if err := s.SetActive(provider, "", meta.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Update(func(st *State) error {

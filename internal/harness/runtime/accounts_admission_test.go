@@ -86,7 +86,9 @@ func TestRecheckPreparedAccount(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "current account"},
-		{name: "active changed", query: "UPDATE account_active SET account = ? WHERE harness = ?", args: func(n NativeAccount) []any { return []any{"00000000000000000000000000000000", n.Harness} }, wantErr: true},
+		{name: "active changed", query: "UPDATE account_active SET account = ? WHERE provider = ?", args: func(n NativeAccount) []any {
+			return []any{"00000000000000000000000000000000", accountProvider(n.Harness)}
+		}, wantErr: true},
 		{name: "active cleared", query: "DELETE FROM account_active", wantErr: true},
 		{name: "identity changed", query: "UPDATE accounts SET metadata = json_set(metadata, '$.identity', 'other')", wantErr: true},
 		{name: "signed out", query: "UPDATE accounts SET metadata = json_set(metadata, '$.needsLogin', json('true'))", wantErr: true},

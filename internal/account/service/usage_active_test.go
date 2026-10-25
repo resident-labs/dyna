@@ -15,7 +15,7 @@ func TestAccountUsageCachedMarksActiveAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetActive("codex", n.ID); err != nil {
+	if err := store.SetActive(accountstore.ProviderChatGPT, "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	rows := New(Options{Store: store}).AccountUsageCached().Accounts

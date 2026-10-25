@@ -22,7 +22,7 @@ func TestUsageFrameShowsBusyActiveAccount(t *testing.T) {
 	if got := usageFrame("codex"); got != "" {
 		t.Fatalf("usageFrame without an active account = %q", got)
 	}
-	if err := (&accountstore.Store{Root: root}).SetActive("codex", n.ID); err != nil {
+	if err := (&accountstore.Store{Root: root}).SetActive(accountstore.ProviderChatGPT, "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	busy := 80.0

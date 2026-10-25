@@ -98,7 +98,7 @@ func (a *Accounts) RecheckPreparedAccount(ctx context.Context, conn *sql.Conn, e
 		current.NativeHome != old.NativeHome || current.Integration != old.Integration || current.NeedsLogin {
 		return errPreparedAccountChanged
 	}
-	active, err := store.ReadActive(ctx, conn, old.Harness)
+	active, err := store.ReadActive(ctx, conn, accountProvider(old.Harness), "")
 	if err != nil {
 		return err
 	}

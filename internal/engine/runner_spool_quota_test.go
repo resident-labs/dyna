@@ -57,7 +57,7 @@ func TestSpooledQuotaReplaysTerminalAccountAAfterAccountB(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.SetActive("muse", b.ID); err != nil {
+	if err := f.store.SetActive(accountstore.ProviderMetaMuse, "", b.ID); err != nil {
 		t.Fatal(err)
 	}
 	second := f.input.ExecutionRef
