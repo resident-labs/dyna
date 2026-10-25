@@ -67,3 +67,20 @@ func TestSessionCannotGrantHostChecks(t *testing.T) {
 		t.Fatalf("saved patches = %+v, want none", *patches)
 	}
 }
+
+// A room root cannot slip a room-routing change through beside a host-check
+// change: the room list decides which rooms' CI work the machine takes, so it
+// is the owner's.
+func TestRoomRootCannotChangeRoomsWithHostChecks(t *testing.T) {
+	calls, patches := guardedSaveMachine()
+	ctx := localCallerContext(t,
+		websvc.Caller{Kind: websvc.Session, Session: "root"},
+		authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+
+	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"allowHostChecks":true,"rooms":[]}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root clearing the room list = %v, want an owner-only refusal", err)
+	}
+	if len(*patches) != 0 {
+		t.Fatalf("saved patches = %+v, want none", *patches)
+	}
+}

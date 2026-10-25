@@ -71,7 +71,8 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 }
 
 // onlyHostChecks reports whether the patch changes the host-check permission
-// and no other machine field.
+// and no other machine field. The room list is one of the others: it decides
+// which rooms' CI work the machine takes, which is the owner's to set.
 func onlyHostChecks(patch websvc.MachinePatch) bool {
-	return patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil
+	return patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil
 }
