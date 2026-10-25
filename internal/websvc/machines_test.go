@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/machines"
 )
@@ -107,6 +109,55 @@ func TestMachinesListAndPatch(t *testing.T) {
 	}
 	if _, err := api.Machine(t.Context(), "m_missing"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unknown machine = %v, want os.ErrNotExist", err)
+	}
+}
+
+// A room root allows host checks for its own room, so the page names that room
+// and another room's root cannot take the owner's grant away.
+func TestHostChecksGrantsNameTheirRoom(t *testing.T) {
+	api := machineAPI(t)
+	api.RoomName = func(roomID string) string {
+		if roomID == "room_dyna" {
+			return "dyna"
+		}
+		return roomID
+	}
+	node, err := api.Store.Save(t.Context(), machines.Machine{Name: "pve", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dyna := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	allow, refuse := true, false
+	page, err := api.SaveMachine(dyna, node.ID, MachinePatch{AllowHostChecks: &allow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.AllowHostChecks || !slices.Equal(page.HostChecksAllowedBy, []string{"root of room dyna"}) {
+		t.Fatalf("allowed by = %v, want the room whose root allowed host checks", page.HostChecksAllowedBy)
+	}
+	stored, err := api.Store.GetByID(t.Context(), node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.HostChecksAllowed("room_dyna") || stored.HostChecksAllowed("room_other") {
+		t.Fatalf("host-check grants = %#v, want the granting room alone", stored.HostChecksGrants)
+	}
+	// The owner's answer covers every room, and a room root cannot refuse it.
+	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
+	if page, err = api.SaveMachine(owner, node.ID, MachinePatch{AllowHostChecks: &allow}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(page.HostChecksAllowedBy, []string{"the owner"}) {
+		t.Fatalf("allowed by = %v, want the owner alone", page.HostChecksAllowedBy)
+	}
+	if _, err := api.SaveMachine(dyna, node.ID, MachinePatch{AllowHostChecks: &refuse}); err == nil || !strings.Contains(err.Error(), "ask the owner") {
+		t.Fatalf("a room root refusing the owner's grant = %v, want a refusal naming the owner", err)
+	}
+	if page, err = api.SaveMachine(owner, node.ID, MachinePatch{AllowHostChecks: &refuse}); err != nil {
+		t.Fatal(err)
+	}
+	if page.AllowHostChecks || len(page.HostChecksAllowedBy) != 0 {
+		t.Fatalf("allowed by after the owner refused = %v, want none", page.HostChecksAllowedBy)
 	}
 }
 

@@ -91,7 +91,7 @@ func TestWriteCallsHaveCallerPolicy(t *testing.T) {
 		}
 		policies[name] = reason
 	}
-	for _, names := range [][]string{goalCalls, sessionCalls, prCalls, issueCalls, ownerCalls, cliCalls} {
+	for _, names := range [][]string{goalCalls, sessionCalls, prCalls, issueCalls, machineCalls, ownerCalls, cliCalls} {
 		for _, name := range names {
 			add(name, "protectCalls")
 		}
