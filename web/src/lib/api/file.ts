@@ -140,6 +140,7 @@ export interface PathCheck {
 
 // CreateRoomInput is roomsvc.CreateRoomInput. An empty name uses the repo name.
 export interface CreateRoomInput {
+  githubAccess?: 'read-only' | 'read-write'
   path: string
   name: string
   gitInit: boolean

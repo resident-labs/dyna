@@ -55,7 +55,7 @@ var (
 // Record is one room's metadata.
 type Record struct {
 	MergeMaxParallel int          `json:"mergeMaxParallel,omitempty"`
-	GitHubAccess     string       `json:"githubAccess,omitempty"`
+	GitHubAccess     GitHubAccess `json:"githubAccess,omitempty"`
 	RootProfile      string       `json:"rootProfile,omitempty"`
 	SessionPause     SessionPause `json:"sessionPause,omitempty"`
 	// Seat is the row's seat column, which only writeSeat writes.
@@ -602,9 +602,10 @@ func newID(now time.Time) string {
 // main worktree path when the room belongs to a git repo, else empty.
 // An empty Name derives a name from Repo only when no room exists for it.
 type CreateInput struct {
-	Name      string
-	Repo      string
-	CreatedBy string
+	GitHubAccess GitHubAccess
+	Name         string
+	Repo         string
+	CreatedBy    string
 	// RootProfile applies only to new rooms. Empty inherits root.profile.
 	RootProfile string
 }
@@ -614,6 +615,12 @@ type CreateInput struct {
 // is touched, which revives an archived room. Without a matching repo, a
 // name held by a different repo or an explicit room is an error.
 func (s *Store) Create(in CreateInput) (Record, error) {
+	if in.GitHubAccess == "" {
+		in.GitHubAccess = GitHubReadOnly
+	}
+	if err := ValidateGitHubAccess(in.GitHubAccess); err != nil {
+		return Record{}, err
+	}
 	if in.Repo != "" {
 		if root, err := RepoRoot(in.Repo); err == nil {
 			in.Repo = root
@@ -673,7 +680,8 @@ func (s *Store) Create(in CreateInput) (Record, error) {
 		now := s.now()
 		out = Record{
 			ID: newID(now), Name: name, Repo: in.Repo, CreatedBy: strings.TrimSpace(in.CreatedBy),
-			CreatedAt: now, LastActivity: now,
+			GitHubAccess: in.GitHubAccess,
+			CreatedAt:    now, LastActivity: now,
 			RootProfile: strings.TrimSpace(in.RootProfile),
 		}
 		return s.createRecordLocked(out)

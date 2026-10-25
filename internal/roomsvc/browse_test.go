@@ -57,7 +57,7 @@ func TestCreateRoomFromRepo(t *testing.T) {
 	os.Mkdir(filepath.Join(repo, "sub"), 0o755)
 	real, _ := filepath.EvalSymlinks(repo)
 
-	got, err := e.svc.CreateRoom(context.Background(), CreateRoomInput{Path: repo + "/sub"})
+	got, err := e.svc.CreateRoom(context.Background(), CreateRoomInput{Path: repo + "/sub", GitHubAccess: "read-write"})
 	if err != nil || got.Existed || got.Name != "proj" || got.Repo != real {
 		t.Fatalf("create = %+v, %v", got, err)
 	}
@@ -70,7 +70,7 @@ func TestCreateRoomFromRepo(t *testing.T) {
 		t.Fatalf("second create = %+v, %v", again, err)
 	}
 	rec, err := e.svc.rooms().Resolve(got.ID)
-	if err != nil || rec.ManualArchive {
+	if err != nil || rec.ManualArchive || rec.GitHubAccess != "read-write" {
 		t.Fatalf("reused room = %+v, %v; want revived room", rec, err)
 	}
 

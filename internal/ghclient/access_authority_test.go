@@ -39,7 +39,7 @@ func TestSetAccessServiceAuthority(t *testing.T) {
 			if process == "subagent" || process == "workflow" {
 				want = ReadOnly
 			}
-			if got.GitHubAccess != want {
+			if got.GitHubAccess != room.GitHubAccess(want) {
 				t.Fatalf("access=%s, want=%s", got.GitHubAccess, want)
 			}
 		})

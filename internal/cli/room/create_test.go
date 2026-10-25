@@ -71,9 +71,13 @@ func TestRoomCreateNamesRoomsByRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := execCmd(t, RoomCmd(), "create", "--repo", repo)
+	first, err := execCmd(t, RoomCmd(), "create", "--repo", repo, "--github", "read-write")
 	if err != nil || strings.TrimSpace(first) != "web-app" {
 		t.Fatalf("create --repo = %q, %v", first, err)
+	}
+	created, err := store().Resolve("web-app")
+	if err != nil || created.GitHubAccess != "read-write" {
+		t.Fatalf("stored access = %s, %v", created.GitHubAccess, err)
 	}
 	t.Chdir(sub)
 	again, err := execCmd(t, RoomCmd(), "create")
@@ -88,6 +92,10 @@ func TestRoomCreateNamesRoomsByRepo(t *testing.T) {
 	explicit, err := execCmd(t, RoomCmd(), "create", "other", "--repo", repo)
 	if err != nil || explicit != first {
 		t.Fatalf("named --repo = %q, %v; want %q", explicit, err, first)
+	}
+	reused, err := store().Resolve("web-app")
+	if err != nil || reused.GitHubAccess != "read-write" {
+		t.Fatalf("reuse changed access = %s, %v", reused.GitHubAccess, err)
 	}
 	t.Chdir(t.TempDir())
 	notes, err := execCmd(t, RoomCmd(), "create", "notes")

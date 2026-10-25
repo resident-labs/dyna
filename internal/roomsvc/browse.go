@@ -70,7 +70,8 @@ func (s *Service) InspectPath(path string) (PathCheck, error) {
 
 // CreateRoomInput is one New room request.
 type CreateRoomInput struct {
-	Path string `json:"path"`
+	GitHubAccess room.GitHubAccess `json:"githubAccess"`
+	Path         string            `json:"path"`
 	// Name is the room name. Empty uses the repo name.
 	Name string `json:"name"`
 	// GitInit runs git init when the folder is not a repository. A missing
@@ -96,6 +97,11 @@ type CreatedRoom struct {
 func (s *Service) CreateRoom(ctx context.Context, in CreateRoomInput) (CreatedRoom, error) {
 	if err := authority.Check("room create", authority.Of(ctx), nil); err != nil {
 		return CreatedRoom{}, err
+	}
+	if in.GitHubAccess != "" {
+		if err := room.ValidateGitHubAccess(in.GitHubAccess); err != nil {
+			return CreatedRoom{}, err
+		}
 	}
 	dir, err := filesvc.CleanTyped(in.Path)
 	if err != nil {
@@ -133,7 +139,7 @@ func (s *Service) CreateRoom(ctx context.Context, in CreateRoomInput) (CreatedRo
 	if err != nil {
 		return CreatedRoom{}, err
 	}
-	rec, err := s.CreateRoomRecord(ctx, room.CreateInput{Name: in.Name, Repo: repo, CreatedBy: in.CreatedBy})
+	rec, err := s.CreateRoomRecord(ctx, room.CreateInput{Name: in.Name, Repo: repo, CreatedBy: in.CreatedBy, GitHubAccess: in.GitHubAccess})
 	if err != nil {
 		return CreatedRoom{}, err
 	}
