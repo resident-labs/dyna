@@ -130,6 +130,32 @@ func TestLoadDefinitionAbsentAndStrict(t *testing.T) {
 	}
 }
 
+func TestDefinitionRejectsAdditionalYAMLDocuments(t *testing.T) {
+	body := []byte(`version: 1
+trial: [test]
+checks:
+  - id: pytest
+    image: python:3.13-slim
+    command: python -m pytest
+suites:
+  - id: test
+    checks: [pytest]
+---
+version: 1
+trial: [other]
+checks:
+  - id: ignored
+    image: python:3.13-slim
+    command: python -m unittest
+suites:
+  - id: other
+    checks: [ignored]
+`)
+	if _, err := ParseDefinition(body); err == nil || !strings.Contains(err.Error(), "one YAML document") {
+		t.Fatalf("additional document error = %v", err)
+	}
+}
+
 func writeRepositoryDefinition(t *testing.T, repo, body string) {
 	t.Helper()
 	path := filepath.Join(repo, filepath.FromSlash(DefinitionPath))
