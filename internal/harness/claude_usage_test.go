@@ -210,7 +210,7 @@ func TestClaudeUsageCaptureRejectsUnsafeSources(t *testing.T) {
 	captureClaudeUsage(t.Context(), f.p, callspec.ExecutionRef{}, f.out).Finish()
 	captureClaudeUsage(t.Context(), f.p, f.ref, nil).Finish()
 	otherHarness := f.p
-	otherHarness.Harness = profile.HarnessCodex
+	otherHarness.Harness = profile.HarnessMuse
 	captureClaudeUsage(t.Context(), otherHarness, f.ref, f.out).Finish()
 	f.flush(t)
 	if len(f.observations()) != 0 {

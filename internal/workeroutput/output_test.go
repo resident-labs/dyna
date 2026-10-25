@@ -17,7 +17,7 @@ func TestAllowlistedAdaptersNormalizeRepresentedDialects(t *testing.T) {
 		want                Event
 	}{
 		{name: "text", dialect: DialectText, line: "plain answer", want: Event{V: 1, Kind: "message", Role: "assistant", Text: "plain answer"}},
-		{name: "codex message", dialect: DialectCodexJSONL, line: `{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"done"}}`, want: Event{V: 1, Kind: "message", Role: "assistant", Text: "done"}},
+		{name: "pi message", dialect: DialectPiJSON, line: `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`, want: Event{V: 1, Kind: "message", Role: "assistant", Text: "done"}},
 		{name: "opencode text", dialect: DialectOpenCodeJSON, line: `{"type":"text","part":{"messageID":"m","text":"answer"}}`, want: Event{V: 1, Kind: "message", Role: "assistant", Text: "answer"}},
 	}
 	for _, test := range tests {
@@ -36,8 +36,8 @@ func TestMalformedUnsupportedAndUnknownRecordsFallBackRaw(t *testing.T) {
 		decl *Declaration
 		line string
 	}{
-		{name: "malformed", decl: &Declaration{Dialect: DialectCodexJSONL}, line: `{bad`},
-		{name: "unsupported", decl: &Declaration{Dialect: DialectCodexJSONL}, line: `{"type":"future.event"}`},
+		{name: "malformed", decl: &Declaration{Dialect: DialectPiJSON}, line: `{bad`},
+		{name: "unsupported", decl: &Declaration{Dialect: DialectPiJSON}, line: `{"type":"future.event"}`},
 		{name: "unknown future dialect", decl: &Declaration{Dialect: "future-v2"}, line: `{"anything":true}`},
 		{name: "undeclared", line: "plain"},
 	} {
@@ -66,50 +66,14 @@ func TestNormalizerWritesVersionedJSONL(t *testing.T) {
 	}
 }
 
-func TestCodexAdapterNormalizesReasoningToolsAndFailures(t *testing.T) {
-	tests := []struct {
-		name, line string
-		want       Event
-	}{
-		{
-			name: "reasoning",
-			line: `{"type":"item.completed","item":{"id":"r","type":"reasoning","text":"checking files"}}`,
-			want: Event{V: 1, Kind: "reasoning", State: "completed", Text: "checking files"},
-		},
-		{
-			name: "mcp tool",
-			line: `{"type":"item.started","item":{"id":"m","type":"mcp_tool_call","server":"docs","tool":"search","arguments":{"q":"api"}}}`,
-			want: Event{V: 1, Kind: "tool", Name: "docs/search", State: "started", ID: "m", Input: `{"q":"api"}`},
-		},
-		{
-			name: "web search",
-			line: `{"type":"item.started","item":{"id":"w","type":"web_search","query":"dyna output"}}`,
-			want: Event{V: 1, Kind: "tool", Name: "web_search", State: "started", ID: "w", Input: "dyna output"},
-		},
-		{
-			name: "turn failed",
-			line: `{"type":"turn.failed","error":{"message":"rate limited"}}`,
-			want: Event{V: 1, Kind: "status", Name: "turn", State: "failed", Text: "rate limited"},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := NormalizeLine(&Declaration{Dialect: DialectCodexJSONL}, test.line)
-			if !reflect.DeepEqual(got, []Event{test.want}) {
-				t.Fatalf("NormalizeLine() = %#v, want %#v", got, []Event{test.want})
-			}
-		})
-	}
-}
-
 func TestToolCompletionsKeptOnlyWhenPairable(t *testing.T) {
-	// Codex completions carry the item id (and exit code) and are kept so a
-	// reader can fold them into the start; Cursor completions have no id and
-	// are still dropped.
-	got := NormalizeLine(&Declaration{Dialect: DialectCodexJSONL},
-		`{"type":"item.completed","item":{"id":"c","type":"command_execution","command":"go test ./...","aggregated_output":"FAIL","exit_code":1,"status":"failed"}}`)
+	// A completion that carries the call id (and exit code) is kept so a reader
+	// can fold it into the start; dialect completions with no id are still
+	// dropped.
+	got := NormalizeLine(&Declaration{Dialect: DialectMuseJSONL},
+		`{"payload_type":"tool.result","payload":{"call_id":"c","correlation_facts":{"tool_name":"bash","outcome":"failure"},"text":"{\"command\":\"go test ./...\",\"terminal_status\":\"failed\",\"output\":\"FAIL\",\"exit_code\":1}"}}`)
 	if len(got) != 1 || got[0].ID != "c" || got[0].State != "failed" || got[0].Exit == nil || *got[0].Exit != 1 {
-		t.Fatalf("codex completion = %#v", got)
+		t.Fatalf("tool completion = %#v", got)
 	}
 }
 
@@ -134,7 +98,7 @@ func TestValidateDeclarationUsesRegistry(t *testing.T) {
 	if err := ValidateDeclaration(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidateDeclaration(&Declaration{Dialect: DialectCodexJSONL}); err != nil {
+	if err := ValidateDeclaration(&Declaration{Dialect: DialectPiJSON}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ValidateDeclaration(&Declaration{Dialect: "shell:/tmp/adapter"}); err == nil {
@@ -198,8 +162,7 @@ func TestToolTrackerFollowsEachDialect(t *testing.T) {
 		dialect, fixture string
 		peak, completed  int
 	}{
-		// codex file_change arrives only as item.completed: it never opens a call.
-		{DialectCodexJSONL, "codex-tools.jsonl", 2, 2},
+		// A completion arrives only with its result record: it never opens a call.
 		{DialectClaudeStreamJSON, "claude-tools.jsonl", 2, 2},
 		{DialectMuseJSONL, "muse-stream.jsonl", 1, 1},
 	}
@@ -219,7 +182,7 @@ func TestToolBoundariesUnsupportedDialectsReportNothingInFlight(t *testing.T) {
 		if tracker.Supported() {
 			t.Fatalf("%#v must not claim tool boundaries", decl)
 		}
-		if tracker.Observe(`{"type":"item.started","item":{"id":"x","type":"command_execution"}}`) || tracker.InFlight() != 0 {
+		if tracker.Observe(`{"type":"future.event"}`) || tracker.InFlight() != 0 {
 			t.Fatalf("%#v tracked a tool", decl)
 		}
 	}
@@ -385,7 +348,6 @@ func TestExtractUsage(t *testing.T) {
 		dialect, fixture string
 		want             Usage
 	}{
-		{DialectCodexJSONL, "codex-tools.jsonl", Usage{InputTokens: 120, CachedTokens: 20, OutputTokens: 30}},
 		{DialectClaudeStreamJSON, "claude-tools.jsonl", Usage{InputTokens: 100, CachedTokens: 90, OutputTokens: 5, CostUSD: 0.01}},
 	}
 	for _, tt := range tests {

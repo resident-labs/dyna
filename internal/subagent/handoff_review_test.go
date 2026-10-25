@@ -19,9 +19,9 @@ import (
 // actual 64 KiB argument limit before calling it.
 func assertNativeArgumentsFit(t *testing.T, text, prompt string) {
 	t.Helper()
-	// Grok runs over ACP: its instructions ride the session's first prompt,
-	// not argv, so the 64 KiB argument limit no longer applies to it.
-	for _, native := range []string{profile.HarnessCodex} {
+	// Muse carries the instructions in argv as a JSON config value, so the
+	// 64 KiB argument limit applies to it.
+	for _, native := range []string{profile.HarnessMuse} {
 		called := false
 		p := profile.Profile{Harness: native, RuntimeInstructions: text}
 		_, err := harness.RunWithOptions(context.Background(), p, prompt, t.TempDir(), false,
@@ -33,9 +33,9 @@ func assertNativeArgumentsFit(t *testing.T, text, prompt string) {
 						if len(arg) > 64*1024 {
 							return fmt.Errorf("native argument needs %d bytes, above 64 KiB", len(arg))
 						}
-						if strings.HasPrefix(arg, "developer_instructions=") {
+						if raw, ok := strings.CutPrefix(arg, "run.developer_prompt="); ok {
 							var decoded string
-							if err := json.Unmarshal([]byte(strings.TrimPrefix(arg, "developer_instructions=")), &decoded); err != nil {
+							if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 								return err
 							}
 							found = decoded == text
@@ -49,9 +49,9 @@ func assertNativeArgumentsFit(t *testing.T, text, prompt string) {
 					if !found {
 						return fmt.Errorf("native instructions were not passed intact")
 					}
-					fmt.Fprintln(stdout, `{"type":"thread.started","thread_id":"source-review"}`)
-					fmt.Fprintln(stdout, `{"type":"item.completed","item":{"type":"agent_message","text":"Sources reviewed","phase":"final_answer"}}`)
-					fmt.Fprintln(stdout, `{"type":"turn.completed"}`)
+					fmt.Fprintln(stdout, `{"payload_type":"session.run.linked","stream":{"kind":"session","id":"source-review"}}`)
+					fmt.Fprintln(stdout, `{"payload_type":"run.output.delta","payload":{"text":"Sources reviewed"}}`)
+					fmt.Fprintln(stdout, `{"payload_type":"run.terminal.completed","payload":{"text":"Sources reviewed"}}`)
 					return nil
 				},
 			})

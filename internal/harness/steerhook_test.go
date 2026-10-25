@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -45,13 +44,6 @@ func TestMain(m *testing.M) {
 	}
 	// The fake pi runs before any DYNA_* reset: its mode variables arrive in
 	// its own environment, set through the profile.
-	if os.Getenv(envFakeCodex) != "" {
-		fakeCodexMain()
-		// A race-enabled os.Exit(0) runs the race finalizer, about 1 s, and the
-		// processguard helper repeats it when it replays status 0. The fake
-		// exits only after its stdin closes, so its status is never read.
-		syscall.Exit(7)
-	}
 	if os.Getenv(envFakePi) != "" {
 		fakePiMain()
 		os.Exit(0)
@@ -64,7 +56,6 @@ func TestMain(m *testing.M) {
 			os.Unsetenv(key)
 		}
 	}
-	os.Unsetenv("CODEX_THREAD_ID")
 	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
 	os.Unsetenv("MUSE_SESSION_ID")
 	steerHookSupport = func(string, string) bool { return false }
@@ -75,7 +66,7 @@ func TestMain(m *testing.M) {
 
 func TestRunSteerHook(t *testing.T) {
 	dir := t.TempDir()
-	h := &steerHook{harness: profile.HarnessCodex, dir: dir}
+	h := &steerHook{harness: profile.HarnessMuse, dir: dir}
 	defer h.cleanup()
 	run := func(session string) string {
 		var out bytes.Buffer
@@ -138,16 +129,10 @@ func mustHookArgv(t *testing.T, hook *steerHook, args []string) []string {
 }
 
 func TestSteerHookArgv(t *testing.T) {
-	codex := &steerHook{harness: profile.HarnessCodex, command: `'/bin/dyna' harness-hook steer --dir '/tmp/x'`}
-	got := strings.Join(mustHookArgv(t, codex, []string{"codex", "-c", "features.memories=false", "app-server"}), " ")
-	want := `codex -c hooks.PostToolUse=[{matcher="*",hooks=[{type="command",command="'/bin/dyna' harness-hook steer --dir '/tmp/x'",timeout=10}]}] --dangerously-bypass-hook-trust -c features.memories=false app-server`
-	if got != want {
-		t.Fatalf("codex argv:\n got %s\nwant %s", got, want)
-	}
 	muse := &steerHook{harness: profile.HarnessMuse, dir: t.TempDir(), command: "dyna harness-hook steer"}
-	got = strings.Join(mustHookArgv(t, muse, []string{"muse", "exec", "--json", "--session-id", "s", "do it"}), " ")
+	got := strings.Join(mustHookArgv(t, muse, []string{"muse", "exec", "--json", "--session-id", "s", "do it"}), " ")
 	path, _ := json.Marshal(filepath.Join(muse.dir, "hooks.json"))
-	want = "muse exec -c hooks={} -c managed_hooks_path=" + string(path) + " -c managed_hooks_env_vars=[] --json --session-id s do it"
+	want := "muse exec -c hooks={} -c managed_hooks_path=" + string(path) + " -c managed_hooks_env_vars=[] --json --session-id s do it"
 	if got != want {
 		t.Fatalf("muse argv:\n got %s\nwant %s", got, want)
 	}
@@ -158,9 +143,6 @@ func TestSteerHookArgv(t *testing.T) {
 	if !museVersionAtLeast("Muse Code 1.4.7 (1.4.7-R6101.1)", museHookMinVersion) || museVersionAtLeast("Muse Code 1.4.6", museHookMinVersion) ||
 		!museVersionAtLeast("Muse Code 2.0.0", museHookMinVersion) {
 		t.Fatal("museVersionAtLeast")
-	}
-	if got := tomlString(`a"b\c`); got != `"a\"b\\c"` {
-		t.Fatalf("tomlString = %s", got)
 	}
 }
 
@@ -234,10 +216,6 @@ func TestSteerHooksOffKeepsMuseMemoryDenial(t *testing.T) {
 	if _, ok := events["PostToolUse"]; ok {
 		t.Fatal("steering off still installs the PostToolUse hook")
 	}
-	codex, err := newSteerHook(profile.Profile{Harness: profile.HarnessCodex})
-	if err != nil || codex != nil {
-		t.Fatalf("newSteerHook(codex) with steering off = %v, %v; want nil", codex, err)
-	}
 }
 
 // museHookEvents returns the events in the managed hooks file that dir holds.
@@ -264,11 +242,11 @@ func TestSteerHookProbesDynaManagedCopy(t *testing.T) {
 	t.Cleanup(func() { steerHookSupport = previous })
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv(EnvSteerHooks, "")
-	exe := filepath.Join(t.TempDir(), "codex")
-	if err := fsutil.WriteExecutable(exe, []byte("#!/bin/sh\necho '--dangerously-bypass-hook-trust'\n"), 0o755); err != nil {
+	exe := filepath.Join(t.TempDir(), "muse")
+	if err := fsutil.WriteExecutable(exe, []byte("#!/bin/sh\necho 'Muse Code 1.4.7 (1.4.7-R6101.1)'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	hook, err := newSteerHook(profile.Profile{Harness: profile.HarnessCodex, RuntimeExecutable: exe})
+	hook, err := newSteerHook(profile.Profile{Harness: profile.HarnessMuse, RuntimeExecutable: exe})
 	if err != nil || hook == nil {
 		t.Fatalf("newSteerHook() = %v, %v; want a hook for the Dyna-managed copy", hook, err)
 	}

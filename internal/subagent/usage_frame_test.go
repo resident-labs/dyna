@@ -15,14 +15,14 @@ func TestUsageFrameShowsBusyActiveAccount(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	root := filepath.Join(store.DataDir(), "accounts")
-	n, err := (&runtime.Accounts{Root: root}).Create("codex", "Work")
+	n, err := (&runtime.Accounts{Root: root}).Create("muse", "Work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := usageFrame("codex"); got != "" {
+	if got := usageFrame("muse"); got != "" {
 		t.Fatalf("usageFrame without an active account = %q", got)
 	}
-	if err := (&accountstore.Store{Root: root}).SetActive(accountstore.ProviderChatGPT, "codex", "", n.ID); err != nil {
+	if err := (&accountstore.Store{Root: root}).SetActive(accountstore.ProviderMetaMuse, "muse", "", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	busy := 80.0
@@ -32,7 +32,7 @@ func TestUsageFrameShowsBusyActiveAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := usageFrame("codex"); !strings.HasPrefix(got, "[DYNA USAGE] codex (Work): weekly 80%") {
+	if got := usageFrame("muse"); !strings.HasPrefix(got, "[DYNA USAGE] muse (Work): weekly 80%") {
 		t.Fatalf("usageFrame = %q", got)
 	}
 	if got := usageFrame("claude-code"); got != "" {

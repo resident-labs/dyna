@@ -1,17 +1,8 @@
 package harness
 
 import (
-	"bufio"
-	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
-	"syscall"
 	"testing"
-	"time"
 
-	"dyna-agent/internal/profile"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -109,7 +100,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"d
 
 func TestCodexTurnStartPreservesNoProgressLimit(t *testing.T) {
 	state := &runState{}
-	turn := workeroutput.DecodeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}, `{"type":"turn.started"}`)
+	turn := workeroutput.DecodeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}, `{"type":"agent_start"}`)
 	state.observeRecord(turn)
 	if state.hasRealProgress() || state.hasActivity() {
 		t.Fatal("turn start counted as output")

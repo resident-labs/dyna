@@ -56,22 +56,23 @@ func admissionOutbox(t *testing.T, prefix string, handle func(http.ResponseWrite
 	return out
 }
 
-// admissionProfile returns a Codex profile whose fake app-server logs each
-// spawn and request. The log file exists only after a process starts.
+// admissionProfile returns a Pi profile whose fake runtime logs each spawn and
+// prompt. The log file exists only after a process starts.
 func admissionProfile(t *testing.T) (profile.Profile, string) {
 	t.Helper()
-	p, log := installFakeCodex(t, "normal")
+	logPath := installFakePi(t, false)
+	p := fakePiProfile(logPath, false)
 	home := t.TempDir()
 	t.Setenv("DYNA_DATA_DIR", home)
 	t.Setenv("XDG_DATA_HOME", home)
-	return p, log
+	return p, logPath
 }
 
-// codexTurnStarts counts turn/start requests in the fake log. Each admitted
+// piPrompts counts accepted prompts in the fake runtime log. Each admitted
 // attempt starts one turn, so the count matches the admitted attempts.
-func codexTurnStarts(t *testing.T, log string) int {
+func piPrompts(t *testing.T, log string) int {
 	t.Helper()
-	return strings.Count(readTestFile(t, log), `"method":"turn/start"`)
+	return strings.Count(readTestFile(t, log), "PROMPT ")
 }
 
 func runAdmission(ctx context.Context, p profile.Profile, cwd string, out *engineclient.Outbox) (Result, error) {
@@ -139,49 +140,6 @@ func TestNativeAdmissionRejects(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestNativeAdmissionRecoveryIDs(t *testing.T) {
-	p, log := admissionProfile(t)
-	// The first turn fails with a transport error, so the attempt is retried.
-	p.Env[envFakeCodexFailTurns] = "1"
-	var mu sync.Mutex
-	var calls []admissionCall
-	out := admissionOutbox(t, "session/7/123/456", func(w http.ResponseWriter, r *http.Request, call admissionCall) {
-		mu.Lock()
-		calls = append(calls, call)
-		count := len(calls)
-		mu.Unlock()
-		if count == 1 {
-			assertNoAdmissionProcess(t, log)
-		} else if got := codexTurnStarts(t, log); got != count-1 {
-			t.Errorf("turns before admission %d: %d", count, got)
-		}
-		ref := call.Input.ExecutionRef
-		ref.AdmissionID = call.ID
-		_ = json.NewEncoder(w).Encode(ref)
-	})
-	out.Send("Before")
-	cwd := t.TempDir()
-	result, err := runAdmission(t.Context(), p, cwd, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(calls) != 2 || calls[0].ID != "session/7/123/456/2" || calls[1].ID != "session/7/123/456/3" {
-		t.Fatalf("ordinary request IDs: %+v", calls)
-	}
-	for _, call := range calls {
-		if call.Input.Profile != p.Name || call.Input.Harness != p.Harness || call.Input.WorkDir != cwd || call.Input.ExecutionRef != (callspec.ExecutionRef{Session: "session", Turn: 7}) {
-			t.Fatalf("prepared admission: %+v", call)
-		}
-	}
-	want := calls[1].Input.ExecutionRef
-	want.AdmissionID = calls[1].ID
-	if result.Execution != want || !result.Nudged || codexTurnStarts(t, log) != 2 {
-		t.Fatalf("native attempts: %+v", result)
 	}
 }
 
@@ -416,12 +374,15 @@ func TestNativeAdmissionSkipsOtherExecution(t *testing.T) {
 			prompt := "task"
 			ran := false
 			if injected {
+				// A native profile with an injected runner never admits an attempt.
+				p.Harness = profile.HarnessMuse
+				p.RuntimeExecutable = "/bin/false"
 				exec.ProcessRunner = func(_ context.Context, _ []string, stdout, _ io.Writer) error {
 					ran = true
-					if _, err := fmt.Fprintln(stdout, `{"type":"item.completed","item":{"type":"agent_message","text":"done"}}`); err != nil {
+					if _, err := fmt.Fprintln(stdout, `{"payload_type":"run.output.delta","payload":{"text":"done"}}`); err != nil {
 						return err
 					}
-					_, err := fmt.Fprintln(stdout, `{"type":"turn.completed"}`)
+					_, err := fmt.Fprintln(stdout, `{"payload_type":"run.terminal.completed","payload":{"text":"done"}}`)
 					return err
 				}
 			} else {
