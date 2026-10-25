@@ -63,7 +63,7 @@ test('the tab reads usageRollup for its room and period, and no other usage call
 test('the pane header Refresh reloads the tab that is showing, and the tab has no Refresh of its own', () => {
   const reloads: string[] = []
   const context = { tab: 'activity', activity: { reload: () => reloads.push('activity') }, load: (hard: boolean) => reloads.push('accounts:' + hard) }
-  runFunctions(readFileSync(new URL('./UsagePane.svelte', import.meta.url), 'utf8'), ['refresh'], context)
+  runFunctions(readFileSync(new URL('./AccountsPane.svelte', import.meta.url), 'utf8'), ['refresh'], context)
   call(context, 'refresh')
   context.tab = 'accounts'; call(context, 'refresh')
   assert.deepEqual(reloads, ['activity', 'accounts:true'])
@@ -127,7 +127,7 @@ test('combined tokens keep the coverage of both input and output', () => {
 
 test('turns saved before the harness and model were recorded say so', async () => {
   const { render } = await vite.ssrLoadModule('svelte/server')
-  const { default: Report } = await vite.ssrLoadModule('/src/lib/settings/usage/ActivityReport.svelte')
+  const { default: Report } = await vite.ssrLoadModule('/src/lib/settings/accounts/ActivityReport.svelte')
   const legacy = roleRow('subagent', '', noUsage)
   const html = render(Report, { props: { snapshot: { ...snapshot, byRoleModel: [...snapshot.byRoleModel, legacy] } } }).body
   assert.match(html, /Not recorded/)

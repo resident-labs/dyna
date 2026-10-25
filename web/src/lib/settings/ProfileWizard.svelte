@@ -6,10 +6,10 @@
   import { api } from '../../api.ts'
   import ProfileEditor from './ProfileEditor.svelte'
   import HarnessIcon from './harnesses/HarnessIcon.svelte'
-  import UsageMeter from './usage/UsageMeter.svelte'
-  import { accountStatus, observation, dateTime, requestGate } from './usage/state.ts'
+  import UsageMeter from './accounts/UsageMeter.svelte'
+  import { accountStatus, accountsOf, observation, dateTime, requestGate } from './accounts/state.ts'
   import { harnesses as knownHarnesses, filterModels, inCategory, routeModel, selectedAccount, blankProfile, normalizeModels, accessLabel, publisherIcon, withEffort, routeEffort, type EditableProfile, type EditorDraft, type ModelSelection } from './profiles/state.ts'
-  import type { Catalog, CatalogModel, UsageAccount } from '../api/account.ts'
+  import type { Catalog, CatalogModel, Account } from '../api/account.ts'
   import type { ProfileView } from '../api/profile.ts'
 
   interface Props {
@@ -32,7 +32,7 @@
   let catalog = $state<Catalog | null>(null)
   let catalogBusy = $state(false)
   let catalogError = $state('')
-  let accounts = $state<UsageAccount[]>([])
+  let accounts = $state<Account[]>([])
   let accountBusy = $state(false)
   let accountError = $state('')
   let preselectionMessage = $state('')
@@ -73,8 +73,8 @@
     accountBusy = true
     accountError = ''
     try {
-      const result = await api.accountUsage(refresh)
-      if (accountGate.current(ticket)) accounts = result.accounts ?? []
+      const result = await api.accountsList('', refresh)
+      if (accountGate.current(ticket)) accounts = accountsOf(result)
     } catch (e) {
       if (accountGate.current(ticket)) accountError = errorText(e)
     } finally {
@@ -257,7 +257,7 @@
           {#if accountBusy}<Loading>Loading account status…</Loading>
           {:else if accountError}<div class="account-summary" role="alert"><div><strong class="error">Account status unavailable</strong><p>{accountError}</p></div><button class="text push" onclick={() => loadAccounts(true)}>Retry</button></div>
           {:else if account}
-            <div class="account-summary"><div><strong>{account.label}</strong><p>{accountStatus(account)}</p><small>{observation(account)}</small></div>{#if onusage}<button class="text push" onclick={() => onusage?.(account.id)}>View usage →</button>{/if}<button class="text" onclick={() => loadAccounts(true)}>Refresh</button></div>
+            <div class="account-summary"><div><strong>{account.label}</strong><p>{accountStatus(account)}</p><small>{observation(account)}</small></div>{#if onusage}<button class="text push" onclick={() => onusage?.(account.id)}>View account →</button>{/if}<button class="text" onclick={() => loadAccounts(true)}>Refresh</button></div>
           {:else}<p class="message">{connectionId ? 'The selected account is not active for this model route.' : 'Account and plan not reported for this model route.'} <button class="text" onclick={() => loadAccounts(true)}>Refresh accounts</button></p>{/if}
           {#if connectionId}<p class="callout">This profile will use the harness’s active account.</p>{/if}
           <div class="detail-grid"><div>

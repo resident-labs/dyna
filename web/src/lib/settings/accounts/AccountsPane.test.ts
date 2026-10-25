@@ -1,0 +1,87 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { rm } from 'node:fs/promises'
+import { bundle, domNames, importBundle, installDom } from '../../prs/prDetailHarness.ts'
+import { account } from '../../../../test/account-fixtures.ts'
+import { element, elements, need, textOf } from '../../../../test/need.ts'
+import type { AccountsSnapshot, ScopeAccount } from '../../api/account.ts'
+
+// The page lists the saved accounts by provider, and its Use button chooses an
+// account for the scope the owner shows: global, or this room.
+const api = `export const api = {
+  accountsView: (scope) => Promise.resolve(globalThis.accountsPage(scope)),
+  accountsList: (scope) => Promise.resolve(globalThis.accountsPage(scope)),
+  accountsUse: (id, scope) => { globalThis.accountsCalls.push([id, scope]); return Promise.resolve(globalThis.accountsPage(scope)) },
+  setAccountRepos: () => Promise.resolve({}),
+  accountsRemove: () => Promise.resolve(globalThis.accountsPage('')),
+  accountsAdd: () => Promise.resolve(globalThis.accountsPage('')),
+}`
+
+const built = await bundle({ component: '../settings/accounts/AccountsPane', api })
+
+const row = (fields: Partial<ScopeAccount> & Pick<ScopeAccount, 'id' | 'provider'>): ScopeAccount => ({
+  ...account({ id: fields.id, harness: 'pi' }),
+  label: fields.id,
+  activeHere: false,
+  ...fields,
+})
+
+// settle waits for the pane's load promise and the render it causes.
+async function settle(flushSync: () => void) {
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+  flushSync()
+}
+
+test('accounts are grouped by provider and Use calls the API with the selected scope', async () => {
+  const work = row({ id: 'claude-work', provider: 'anthropic', label: 'Claude · Work', active: true, activeHere: true })
+  const home = row({ id: 'claude-home', provider: 'anthropic', label: 'Claude · Personal' })
+  const zai = row({ id: 'zai-key', provider: 'zai', kind: 'api_key', label: 'Z.ai key' })
+  const calls: [string, string][] = []
+  // The saved accounts in order, and the account the last Use chose in a scope.
+  const saved: AccountsSnapshot = { providers: [{ provider: 'anthropic', accounts: [work, home] }, { provider: 'zai', accounts: [zai] }], problems: [], checkedAt: '2026-10-25T12:00:00Z' }
+  const groups = saved.providers ?? []
+  let inRoom: Record<string, string> = {}
+  const dom = installDom({
+    accountsCalls: calls,
+    accountsPage: (scope: string) => ({
+      ...saved,
+      scope,
+      providers: groups.map((group) => ({ ...group, accounts: group.accounts.map((a) => ({ ...a, activeHere: scope ? inRoom[scope] === a.id : a.active })) })),
+    }),
+  })
+  const { dir, default: AccountsPane, mount, flushSync, unmount } = await importBundle(built, 'AccountsPane')
+  let mounted: ReturnType<typeof mount> | undefined
+  const rows = (target: HTMLElement) => [...target.querySelectorAll('.account')]
+  const useButtons = (target: HTMLElement) => elements<HTMLButtonElement>(target, '.account button').filter((b) => textOf(b) === 'Use')
+  const useFor = (target: HTMLElement, label: string) => need(useButtons(target).find((b) => textOf(b.closest('.account')).includes(label)), `Use button for ${label}`)
+  try {
+    const target = need(document.getElementById('app'), 'app')
+    mounted = mount(AccountsPane, { target, props: { roomId: 'room-a', onmodal: () => {} } })
+    await settle(flushSync)
+
+    assert.deepEqual([...target.querySelectorAll('h4')].map(textOf), ['Anthropic', 'Z.ai'], 'one group per provider, in engine order')
+    assert.deepEqual(rows(target).map((r) => textOf(need(r.querySelector('b'), 'account label'))), ['Claude · Work', 'Claude · Personal', 'Z.ai key'])
+    assert.match(textOf(need(rows(target)[2], 'zai row')), /Usage unavailable for an API key/, 'a key account names why it has no meters')
+
+    // The account its provider uses in this scope shows a filled marker instead.
+    assert.match(textOf(need(rows(target)[0], 'work row')), /In use/)
+    assert.equal(useButtons(target).length, 2, 'only an account that is not in use offers Use')
+
+    useFor(target, 'Claude · Personal').click()
+    await settle(flushSync)
+    assert.deepEqual(calls, [['claude-home', '']], 'the global scope is the engine default')
+
+    element(target, '[role="group"][aria-label="Account scope"] button:nth-of-type(2)').click()
+    await settle(flushSync)
+    inRoom = { 'room-a': 'claude-home' }
+    useFor(target, 'Z.ai key').click()
+    await settle(flushSync)
+    assert.deepEqual(calls.at(-1), ['zai-key', 'room-a'], 'the room scope names the room')
+    assert.match(textOf(need(rows(target)[0], 'work row')), /Global choice/, 'the global account is shown as inherited')
+  } finally {
+    if (mounted) await unmount(mounted)
+    dom.window.close()
+    for (const name of [...domNames, 'accountsCalls', 'accountsPage']) Reflect.deleteProperty(globalThis, name)
+    await rm(dir, { recursive: true, force: true })
+  }
+})

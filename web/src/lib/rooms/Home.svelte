@@ -7,13 +7,13 @@
   import { api } from '../../api.ts'
   import type { Room, Question } from '../api/room.ts'
   import type { StreamEvent, ListEvent } from '../api/event.ts'
-  import type { UsageSnapshot } from '../api/account.ts'
+  import type { AccountsSnapshot } from '../api/account.ts'
   import type { HarnessSnapshot } from '../api/harness.ts'
   import type { Notice, UpdateNotice } from '../api/settings.ts'
   import type { RowChange } from '../ui/listChanges.ts'
   import type { UpdateRow } from './home.ts'
   import { ago, roomLabel } from '../ui/format.ts'
-  import SubscriptionCard from '../settings/usage/SubscriptionCard.svelte'
+  import SubscriptionCard from '../settings/accounts/SubscriptionCard.svelte'
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
@@ -34,7 +34,7 @@
   }
   let { rooms = [], roomsLoaded = false, update = null, onroom, onaccount, onnewroom, onsettings }: Props = $props()
 
-  let usage = $state<UsageSnapshot | null>(null)
+  let usage = $state<AccountsSnapshot | null>(null)
   let runtimes = $state<HarnessSnapshot | null>(null)
   let notices = $state<Notice[]>([])
   let questionAlive = true
@@ -73,7 +73,7 @@
   let accountsRequest = 0
   export function refresh() {
     const request = ++accountsRequest
-    api.accountUsageCached().then((s) => { if (request === accountsRequest) usage = s }).catch(() => {})
+    api.accountsList('', false).then((s) => { if (request === accountsRequest) usage = s }).catch(() => {})
     api.privateRuntimes().then((s) => { if (request === accountsRequest) runtimes = s }).catch(() => {})
   }
 
@@ -155,7 +155,7 @@
   // whose repository it names. A kind with no place gets no action button.
   function noticeAction(n: Notice) {
     if (n.kind === 'disk') return { label: 'Open settings', run: () => onsettings('settings') }
-    if (n.kind === 'provider') return { label: 'Open usage', run: () => onsettings('usage') }
+    if (n.kind === 'provider') return { label: 'Open accounts', run: () => onsettings('accounts') }
     if (n.kind === 'sync') {
       const repo = n.sync?.repo ?? ''
       const room = rooms.find((r) => !r.archived && r.repo === repo)
@@ -173,7 +173,7 @@
 
   {#if accounts.cards.length}
     <div class="cards">
-      {#each accounts.cards as group (group.id)}
+      {#each accounts.cards as group (group.provider)}
         <SubscriptionCard {group} compact onopen={(account) => onaccount(account.id)} />
       {/each}
     </div>

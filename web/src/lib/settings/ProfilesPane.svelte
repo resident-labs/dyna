@@ -16,7 +16,7 @@
   import Menu from '../ui/Menu.svelte'
   import SupportBrief from './SupportBrief.svelte'
   import { healthChip } from './support.ts'
-  import { costText, rangeBounds, type Period } from './usage/activity.ts'
+  import { costText, rangeBounds, type Period } from './accounts/activity.ts'
   import type { ProfileCheck, ProfileList, ProfileUsageSnapshot, ProfileUsageStats, ProfileView } from '../api/profile.ts'
   import type { EditableProfile, ModelSelection } from './profiles/state.ts'
 

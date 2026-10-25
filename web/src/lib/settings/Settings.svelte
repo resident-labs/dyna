@@ -7,7 +7,7 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import ProfilesPane from './ProfilesPane.svelte'
   import HarnessesPane from './harnesses/HarnessesPane.svelte'
-  import UsagePane from './usage/UsagePane.svelte'
+  import AccountsPane from './accounts/AccountsPane.svelte'
   import SettingsPane from './SettingsPane.svelte'
   import HooksPane from './HooksPane.svelte'
   import DevicesPane from './DevicesPane.svelte'
@@ -29,7 +29,7 @@
   let { update = null, dataDir = '', start = 'profiles', pairNow = false, roomId = '', accountId = '', profile = '', initialSelection = null, oncreateprofile = () => {}, onclose }: Props = $props()
 
   let pane = $state(untrack(() => start)) // the pane to open first
-  let usageAccountId = $state(untrack(() => accountId))
+  let accountToOpen = $state(untrack(() => accountId))
   let profileToOpen = $state(untrack(() => profile))
   let profileSelection = $state<ModelSelection | null>(untrack(() => initialSelection))
   let busy = $state(false) // a modal inside a pane owns Esc while open
@@ -37,7 +37,7 @@
   const nav = [
     { id: 'profiles', label: 'Profiles', hint: 'Who does the work' },
     { id: 'harnesses', label: 'Harnesses', hint: 'Install and maintain coding agents' },
-    { id: 'usage', label: 'Usage', hint: 'Accounts and activity' },
+    { id: 'accounts', label: 'Accounts', hint: 'Sign-ins, usage and active account' },
     { id: 'hooks', label: 'Hooks', hint: 'Automatic passes and shell hooks' },
     { id: 'settings', label: 'Settings', hint: 'How Dyna behaves' },
     { id: 'devices', label: 'Devices', hint: 'Phones and browsers' },
@@ -48,19 +48,19 @@
     if (next !== pane) { profileSelection = null; profileToOpen = '' }
     pane = next
   }
-  function viewUsage(id: string) { profileSelection = null; profileToOpen = ''; usageAccountId = id; pane = 'usage' }
+  function viewAccount(id: string) { profileSelection = null; profileToOpen = ''; accountToOpen = id; pane = 'accounts' }
   function viewProfile(name: string) { profileSelection = null; profileToOpen = name; pane = 'profiles' }
 </script>
 
 {#snippet foot()}{#if pane === 'settings'}Display preferences apply at once in this browser. Other changes save{:else}Changes save{/if} at once and apply to new sessions and runs. The <span class="mono">dyna</span> CLI sees the same values.{/snippet}
 
-<SettingsShell label="Settings" title="Configuration" nav={nav.map((n) => (n.id === 'about' && update?.text ? { ...n, dot: 'Update available' } : n))} {pane} onselect={selectPane} {busy} wide={pane === 'harnesses'} {onclose} foot={['harnesses', 'usage'].includes(pane) ? null : foot}>
+<SettingsShell label="Settings" title="Configuration" nav={nav.map((n) => (n.id === 'about' && update?.text ? { ...n, dot: 'Update available' } : n))} {pane} onselect={selectPane} {busy} wide={pane === 'harnesses'} {onclose} foot={['harnesses', 'accounts'].includes(pane) ? null : foot}>
   {#if pane === 'profiles'}
-    <ProfilesPane initialSelection={profileSelection} initialProfile={profileToOpen} {roomId} onusage={viewUsage} onmodal={(open) => (busy = open)} />
+    <ProfilesPane initialSelection={profileSelection} initialProfile={profileToOpen} {roomId} onusage={viewAccount} onmodal={(open) => (busy = open)} />
   {:else if pane === 'harnesses'}
     <HarnessesPane onmodal={(open) => (busy = open)} />
-  {:else if pane === 'usage'}
-    <UsagePane accountId={usageAccountId} {roomId} {oncreateprofile} onprofile={viewProfile} onharnesses={() => selectPane('harnesses')} onmodal={(open) => (busy = open)} />
+  {:else if pane === 'accounts'}
+    <AccountsPane accountId={accountToOpen} {roomId} {oncreateprofile} onprofile={viewProfile} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}
     <SettingsPane />
   {:else if pane === 'hooks'}

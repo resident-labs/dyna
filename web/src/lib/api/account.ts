@@ -1,6 +1,14 @@
 // Account usage and the model catalog. Sources: internal/account/service/types.go,
 // internal/account/store/store.go and internal/profile/compact.go.
 
+// Provider is store.Provider, the sign-in service an account belongs to. A
+// harness consumes an account; it does not own it. Empty means the saved row
+// names no provider this release knows.
+export type Provider = 'anthropic' | 'chatgpt' | 'kimi-code' | 'xai' | 'meta-muse' | 'opencode-go' | 'deepseek' | 'zai' | ''
+
+// AccountKind is store.Kind, how an account signed in.
+export type AccountKind = 'oauth' | 'api_key' | ''
+
 // Plan is store.Plan.
 export interface Plan {
   id: string
@@ -24,8 +32,8 @@ export interface UsageWindow {
   remainingPercent?: number
 }
 
-// UsageAccount is service.Account, an account as Usage shows it. Times are ISO strings.
-export interface UsageAccount {
+// Account is service.Account, one saved provider sign-in. Times are ISO strings.
+export interface Account {
   usageError?: string
   expiresAt?: string
   refreshMessage?: string
@@ -34,6 +42,9 @@ export interface UsageAccount {
   blockingQuotaWindows?: string[]
   id: string
   harness: string
+  provider?: Provider
+  kind?: AccountKind
+  repos: string[] | null
   label: string
   providerId: string
   routeId?: string
@@ -50,9 +61,39 @@ export interface UsageAccount {
   needsLogin: boolean
 }
 
-// UsageSnapshot is service.Snapshot.
-export interface UsageSnapshot {
-  accounts: UsageAccount[] | null
+// ScopeAccount is service.ScopeAccount: an account with its place in the scope
+// the page asked about. activeHere is the account its provider uses in that
+// scope; active is the global one.
+export interface ScopeAccount extends Account {
+  activeHere: boolean
+}
+
+// ProviderAccounts is service.ProviderAccounts: every listed account of one
+// provider.
+export interface ProviderAccounts {
+  provider: Provider
+  accounts: ScopeAccount[]
+}
+
+// AccountProblemReason is runtime.AccountProblemReason, why the list skipped a
+// saved row.
+export type AccountProblemReason = 'unknown-harness' | 'unsafe-home' | 'missing-home' | 'unreadable'
+
+// AccountProblem is runtime.AccountProblem, one saved row the list skipped. It
+// is a result for that row alone, never a reason to fail the whole list.
+export interface AccountProblem {
+  id: string
+  harness?: string
+  label?: string
+  reason: AccountProblemReason
+}
+
+// AccountsSnapshot is service.AccountsSnapshot, the account view grouped by
+// provider. scope is the room it was taken for, or empty for the global one.
+export interface AccountsSnapshot {
+  scope?: string
+  providers: ProviderAccounts[] | null
+  problems: AccountProblem[] | null
   checkedAt: string
   message?: string
 }

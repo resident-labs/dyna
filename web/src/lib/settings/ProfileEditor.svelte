@@ -6,7 +6,7 @@
   import { api } from '../../api.ts'
   import HarnessIcon from './harnesses/HarnessIcon.svelte'
   import { normalizeModels, profileEffort, chooseEffort, compactBlock, compactFor, compactWindows, compactHint, type EditableProfile, type EditorDraft, type ModelSummary } from './profiles/state.ts'
-  import { requestGate } from './usage/state.ts'
+  import { requestGate } from './accounts/state.ts'
   import { stateLabel, observedRows, driftText, probeRows, runProbe, healthChip, type ProbeResult } from './support.ts'
   import type { Catalog } from '../api/account.ts'
   import type { ProfileCheck, ProfileView } from '../api/profile.ts'
