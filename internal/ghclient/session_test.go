@@ -6,8 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -86,6 +88,38 @@ esac
 		if child.Env["GH_TOKEN"] != want || child.Env["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
 			t.Fatal("child changed account or accumulated duplicate Git guards")
 		}
+	}
+}
+
+func TestSessionRunsWithoutTheGitHubCLI(t *testing.T) {
+	records := setupRooms(t, "work/service")
+	// An empty PATH has no gh, so a turn in a GitHub repository must still run.
+	t.Setenv("PATH", t.TempDir())
+	for _, access := range []string{ReadWrite, ReadOnly} {
+		t.Run(access, func(t *testing.T) {
+			if err := SetAccess(room.DefaultStore(), records[0].ID, access); err != nil {
+				t.Fatal(err)
+			}
+			scratch := t.TempDir()
+			session, err := SessionEnvironment(context.Background(), records[0].ID, scratch, "/real/dyna", os.Environ())
+			if err != nil {
+				t.Fatalf("a missing GitHub CLI failed the turn: %v", err)
+			}
+			if !strings.Contains(session.Notice, "not installed") {
+				t.Fatalf("notice = %q, want the missing CLI line", session.Notice)
+			}
+			target, linkErr := os.Readlink(filepath.Join(scratch, "github-bin", "gh"))
+			if access == ReadOnly {
+				if session.Env[ReadOnlyEnv] != "1" || target != "/real/dyna" {
+					t.Fatalf("read-only guard lost: read-only=%q target=%q", session.Env[ReadOnlyEnv], target)
+				}
+			} else if session.Env[ReadOnlyEnv] != "" || linkErr == nil {
+				t.Fatalf("write room received a gh target: %q", target)
+			}
+			if helper := gitConfigValue(session.Env, "credential.https://github.com/work/service.helper"); helper != "" {
+				t.Fatalf("git received a credential helper: %q", helper)
+			}
+		})
 	}
 }
 

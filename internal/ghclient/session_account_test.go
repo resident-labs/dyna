@@ -126,8 +126,12 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("GH_REPLY", "deny")
-	if _, err := SessionEnvironment(context.Background(), records[0].ID, t.TempDir(), "/real/dyna", inherited); err == nil {
-		t.Fatal("a denied repository did not report its error")
+	denied, err := SessionEnvironment(context.Background(), records[0].ID, t.TempDir(), "/real/dyna", inherited)
+	if err != nil {
+		t.Fatalf("a denied account failed the turn: %v", err)
+	}
+	if denied.Env["GH_TOKEN"] != "" || !strings.Contains(denied.Notice, "No signed-in GitHub account") {
+		t.Fatalf("denied turn token=%q notice=%q, want the sign-in line", denied.Env["GH_TOKEN"], denied.Notice)
 	}
 
 	// An outage follows. It must not restore the account GitHub just denied.
