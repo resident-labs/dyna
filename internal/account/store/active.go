@@ -49,7 +49,8 @@ type Selection struct {
 }
 
 // Selections reads every saved selection, so a reader can place each account in
-// its scopes without one query per account.
+// its scopes without one query per account. A row that names no account is kept:
+// it overrides the global row with no selection of its own.
 func (s *Store) Selections() ([]Selection, error) {
 	db, err := s.db()
 	if err != nil {
@@ -68,9 +69,7 @@ func (s *Store) Selections() ([]Selection, error) {
 			if err := rows.Scan(&sel.Provider, &sel.Harness, &sel.Scope, &sel.Account); err != nil {
 				return err
 			}
-			if sel.Account != "" {
-				out = append(out, sel)
-			}
+			out = append(out, sel)
 		}
 		return rows.Err()
 	})

@@ -10,6 +10,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/account/service"
 	"dyna-agent/internal/account/store"
@@ -287,7 +288,7 @@ func writeAccounts(out io.Writer, snap service.AccountsSnapshot, room string) {
 			if a.ActiveHere {
 				mark = "*"
 			}
-			fmt.Fprintf(out, "%s %s  %s  %s  %s%s\n", mark, label(a.Account), kind(a.Account), a.Status, usage(a.Account), elsewhere(a, room))
+			fmt.Fprintf(out, "%s %s  %s  %s  %s%s%s\n", mark, label(a.Account), kind(a.Account), a.Status, usage(a.Account), reading(a.Account), elsewhere(a, room))
 		}
 	}
 }
@@ -298,6 +299,19 @@ func elsewhere(a service.ScopeAccount, room string) string {
 		return "  (global)"
 	}
 	return ""
+}
+
+// reading shows how old the saved usage reading is and marks a stale one, so an
+// old reading is never shown as current.
+func reading(a service.Account) string {
+	out := ""
+	if !a.ObservedAt.IsZero() {
+		out = fmt.Sprintf("  (observed %s ago)", max(time.Duration(0), time.Since(a.ObservedAt)).Truncate(time.Second))
+	}
+	if a.Stale {
+		out += "  (stale)"
+	}
+	return out
 }
 
 func label(a service.Account) string {

@@ -258,3 +258,41 @@ func TestSwitchIfIdleKeepsActivationTimeouts(t *testing.T) {
 		t.Fatal("activation timeout was reported as running turns", err)
 	}
 }
+
+// A room can choose another account than the globally active one. Turn
+// preparation and the launch environment must read the resolved account's own
+// credentials, not the global selection's, or the turn runs as another identity.
+func TestClaudeRoomAccountLaunchesFromItsOwnCredentials(t *testing.T) {
+	a := testAccounts(t)
+	global := signedClaude(t, a, "personal", "aaaaaaaa-bbbb-cccc-dddd-000000000001")
+	room := signedClaude(t, a, "work", "aaaaaaaa-bbbb-cccc-dddd-000000000002")
+	if err := a.Switch(context.Background(), global.ID, "/fake/native"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SelectInScope(room, "room-a"); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := a.HarnessHome("claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := a.launchEnv(room.ID)
+	if err != nil || env[pinnedSecretKey] != room.Home || env["CLAUDE_CONFIG_DIR"] != shared {
+		t.Fatalf("room launch env = %v, %v; want the room account's credentials in the shared history home", env, err)
+	}
+	m, err := a.launchManager(room.ID, "/fake/native")
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured, err := m.Capture(context.Background(), "")
+	if err != nil || len(captured) != 1 || captured[0].Identity != room.Identity {
+		t.Fatalf("readiness read %+v, %v; want the room account %q", captured, err, room.Identity)
+	}
+
+	// The global account still launches from its own folder.
+	globalEnv, err := a.launchEnv(global.ID)
+	if err != nil || globalEnv[pinnedSecretKey] != global.Home {
+		t.Fatalf("global launch env = %v, %v", globalEnv, err)
+	}
+}
