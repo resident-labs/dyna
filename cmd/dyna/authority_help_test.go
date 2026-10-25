@@ -30,6 +30,9 @@ var serviceAuthorityActions = map[string]bool{
 	"post @voice-call":        true,
 	// goal amend is a flag of `dyna goal edit`, not a command path of its own.
 	"goal amend": true,
+	// owner display grant is the `--owner-display` flag of `dyna subagent
+	// start`, so it has no command path of its own.
+	"owner display grant": true,
 }
 
 func TestAuthorityRulesResolveToCommands(t *testing.T) {
