@@ -94,6 +94,9 @@ func (s *Store) SelectorContext(meta Meta) string {
 // to the run's parent session, or to the run's room owner. A shell cannot
 // receive either; it has no reply address. A session sender is found by the
 // ID bound to its post, so a renamed sender still gets its current address.
+// A registered engine event reports state and asks for no answer, so it has
+// no reply address either: the engine sender is not a recipient, and its name
+// can also be a room's name.
 func (s *Store) ReplyAddress(msg room.Message) string {
 	from := msg.From
 	ref := from
@@ -120,6 +123,12 @@ func (s *Store) ReplyAddress(msg room.Message) string {
 		if meta, err := runstore.ReadMeta(ev.RunID); err == nil {
 			return meta.Room
 		}
+		return ""
+	}
+	// Every other registered engine event only reports state. A reply would
+	// name the engine sender, which can also be a room's name, so the answer
+	// would land in that room's root seat instead of where the agent works.
+	if msg.EngineEvent() {
 		return ""
 	}
 	// TODO: legacy/shim remove later — a shell or run result stored before the
