@@ -169,7 +169,7 @@ func IsOpenCodeIntegration(integration string) bool {
 // runs.
 func KnownHarness(h string) bool {
 	switch h {
-	case "claude-code", "grok", "kimi-code", "muse", "opencode", "pi":
+	case "claude-code", "grok", "kimi-code", "pi":
 		return true
 	}
 	return false
@@ -178,10 +178,9 @@ func KnownHarness(h string) bool {
 // AccountsRetired reports whether the owner retired the saved accounts of
 // harness h on 2026-10-25, when Pi took over its provider: those sign-ins were
 // moved into Pi accounts by hand, so the harness-bound rows are dead weight and
-// the migration drops them. Codex has since left KnownHarness, so nothing writes
-// a row for it; Muse and OpenCode still run in this release and keep their entry
-// until their own removal. A database older than the migration still needs every
-// name here, because it upgrades straight to this release. Pi's own accounts for
+// the migration drops them. All three have since left KnownHarness, so nothing
+// writes a row for them either. The names stay here because a database older
+// than the migration upgrades straight to this release. Pi's own accounts for
 // chatgpt, meta-muse and opencode-go are not harness-bound and stay.
 func AccountsRetired(h string) bool {
 	switch h {
