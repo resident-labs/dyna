@@ -107,9 +107,9 @@ test('a visual chip uses the current title instead of the old version title', ()
 })
 
 
-test('a feed with a call row hides the empty message and an empty feed keeps it', () => {
+test('a feed with a call row hides first-session guidance and an empty feed shows it', () => {
   const calls = html('callOnlyFeed')
   assert.match(calls, /Review the call request/)
-  assert.doesNotMatch(calls, /No messages yet/)
-  assert.match(html('emptyFeed'), /No messages yet/)
+  assert.doesNotMatch(calls, /Start your first session/)
+  assert.match(html('emptyFeed'), /Start your first session/)
 })
