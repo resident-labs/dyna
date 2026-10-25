@@ -428,6 +428,21 @@ func (s *Store) nextIssueNumber(roomID string) (int, error) {
 	return number, err
 }
 
+// Issue reads one room issue by message ID or D-N label.
+func (s *Store) Issue(roomID, id string) (Issue, error) {
+	rows, err := s.Issues(roomID, true)
+	if err != nil {
+		return Issue{}, err
+	}
+	number, numbered := issueNumber(id)
+	for _, i := range rows {
+		if i.ID == id || numbered && i.Number == number {
+			return i, nil
+		}
+	}
+	return Issue{}, fmt.Errorf("issue %q not found", id)
+}
+
 // ChangeIssue serializes triage, including its side effect, so concurrent
 // requests cannot create two goals or export the same open issue twice.
 func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (Issue, error) {

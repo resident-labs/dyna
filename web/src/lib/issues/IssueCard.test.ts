@@ -99,7 +99,7 @@ test('Assign gives the issue to a goal through the engine', async () => {
   need(assign, 'the Assign button').click()
   await new Promise((resolve) => setTimeout(resolve, 0))
   web.flushSync()
-  assert.deepEqual(calls, [{ path: '/api/IssueGoal', body: ['room_1', 'msg_0123456789abcdef', ''] }])
+  assert.deepEqual(calls, [{ path: '/api/IssueGoal', body: ['room_1', 'msg_0123456789abcdef'] }])
   assert.match(textOf(target), /Assigned/)
   web.unmount(mounted)
   target.remove()
