@@ -143,6 +143,18 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 	return s.savedTrialCI(ctx, job)
 }
 
+// localSyncCI is the CI of an integration sync head. It runs on the same
+// machines as a trial, and the machine view names it as a sync instead of a
+// change.
+func (s *Service) localSyncCI(ctx context.Context, r Record, head string) (trialCI, error) {
+	job, err := s.localTrialJob(r, head)
+	if err != nil {
+		return trialCI{}, err
+	}
+	job.sync = true
+	return s.savedTrialCI(ctx, job)
+}
+
 // localTrialJob names the scheduled CI job for a local head, with the frozen
 // base of the batch that owns a trial head. Only a plain local head needs the
 // first parent as its base, and withLocalTrialBase reads that then.
