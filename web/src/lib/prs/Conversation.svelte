@@ -1,9 +1,10 @@
 <script lang="ts">
   // The Conversation tab of a pull request: the Thread timeline with the
-  // reviewer's rounds inline. The latest round opens its verdict and findings
-  // (ChangeReview); earlier rounds are one line each. While the latest
-  // round has open findings, a card on top links to it. The merge box follows
-  // the timeline.
+  // reviewer's rounds inline. The latest round opens its verdict and typed
+  // findings (ChangeReview); earlier rounds are one line each. A round with
+  // findings shows that list once, plus a one-line summary, and one control
+  // folds it away. While the latest round has open findings, a card on top
+  // links to it. The merge box follows the timeline.
   //
   // Props:
   //   detail, events, bots   as for Thread; detail is null for a local change
@@ -48,12 +49,16 @@
       passed: { tone: 'sage', icon: '✓', line: `CI passed · ${passed.length} of ${total} checks` },
     }[state]
   })
-  let shown = $state(new Set<number>()) // rounds whose full findings are open
-  const toggle = (n: number) => (shown = new Set(shown.has(n) ? [...shown].filter((x) => x !== n) : [...shown, n]))
+  // The latest round is open until the user closes it, as GitHub shows a new
+  // review open. When a round has typed findings, that list is the only copy:
+  // the summary stays one line and its markdown finding text is not shown.
+  let shown = $state(new Map<number, boolean>()) // round -> open, once the user chose
+  const isShown = (r: ReviewRound) => shown.get(r.round) ?? r.round === latest?.round
+  const toggle = (r: ReviewRound) => (shown = new Map(shown).set(r.round, !isShown(r)))
   const reviewer = $derived((change?.reviewerSession && names[change.reviewerSession]) || 'Reviewer')
   // reveal opens the latest round and scrolls to it, for the pinned card and for "Read the review".
   export async function reveal() {
-    if (latest) shown = new Set([...shown, latest.round])
+    if (latest) shown = new Map(shown).set(latest.round, true)
     await tick()
     document.getElementById('latest-round')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -63,25 +68,18 @@
   {@const vm = verdictMeta(r.verdict)}
   {@const n = r.findings?.length ?? 0}
   {@const isLatest = r.round === latest?.round}
-  {@const left = new Set(openFindings(r).map((f) => f.id))}
+  {@const expanded = isShown(r)}
   <div class="it" id={isLatest ? 'latest-round' : undefined}>
     <span class="av"><Chip tone={vm?.tone === 'ok' ? 'sage' : 'gold'}>R{r.round}</Chip></span>
     <div class="rcard" class:ok={vm?.tone === 'ok'}>
       <header><strong>{reviewer}</strong> {vm ? vm.label.toLowerCase() : 'reviewed'} · round {r.round} · {n} {n === 1 ? 'finding' : 'findings'}{r.head ? ` · at ${shortSha(r.head)}` : ''} · {ago(r.at)}</header>
       <div class="rbody">
-        {#if r.summary}
-          {#if shown.has(r.round)}<div class="prose">{@html markdown(r.summary)}</div>{:else}<p class="first">{firstSentence(r.summary)}</p>{/if}
-        {/if}
-        {#if !shown.has(r.round)}
-          <ul class="lines">
-            {#each r.findings ?? [] as f (f.id)}
-              <li class:done={!left.has(f.id)}><b>{f.severity}</b> · {f.file}{f.line ? `:${f.line}` : ''} — {f.why}</li>
-            {/each}
-          </ul>
-        {/if}
-        {#if n || r.summary}
-          <button class="link" aria-expanded={shown.has(r.round)} onclick={() => toggle(r.round)}>{shown.has(r.round) ? 'Hide review' : 'Show review'}</button>
-          {#if shown.has(r.round) && n}<ChangeReview {...roundReview(change, r, latest, roomId)} {onchange} />{/if}
+        {#if n}
+          {#if r.summary}<p class="first">{firstSentence(r.summary)}</p>{/if}
+          {#if expanded}<ChangeReview {...roundReview(change, r, latest, roomId)} {onchange} />{/if}
+          <button class="link" aria-expanded={expanded} onclick={() => toggle(r)}>{expanded ? 'Hide review' : 'Show review'}</button>
+        {:else if r.summary}
+          <div class="prose">{@html markdown(r.summary)}</div>
         {/if}
       </div>
     </div>
@@ -115,12 +113,8 @@
   .rcard > header { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--faint); }
   .rcard > header strong { color: var(--ink); }
   .rbody { padding: 4px 12px 10px; }
-  .first { margin: 0; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+  .first { margin: 0 0 6px; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
   .rbody .prose { font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-  .lines { list-style: none; margin: 6px 0; padding: 0; font-size: 12.5px; color: var(--ink-2); }
-  .lines li { padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lines li.done { color: var(--faint); text-decoration: line-through; }
-  .lines b { font-weight: 600; }
   .link { font-size: 12.5px; color: var(--iris); font-weight: 600; padding: 0; }
   .link:hover { text-decoration: underline; }
 </style>
