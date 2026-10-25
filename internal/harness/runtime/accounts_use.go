@@ -31,32 +31,29 @@ func (a *Accounts) SelectInScope(n NativeAccount, roomID string) error {
 // records the choice. Any other scope is a room ID, and needs a harness that
 // pins credentials per account, because a room selection is read from the
 // account's own home at turn launch.
-func (r *Runtime) UseAccount(ctx context.Context, id, scope string) (PrivateRuntimeSnapshot, error) {
+//
+// It returns no snapshot: building one reads vendor metadata over the network,
+// and its only caller re-reads the accounts view it shows instead.
+func (r *Runtime) UseAccount(ctx context.Context, id, scope string) error {
 	n, err := r.Accounts.Find(id)
 	if err != nil {
-		return PrivateRuntimeSnapshot{}, err
+		return err
 	}
 	if n.Status != "ready" {
-		return PrivateRuntimeSnapshot{}, errors.New("Sign in to this account before using it.")
+		return errors.New("Sign in to this account before using it.")
 	}
 	if scope != "" {
 		if !pinsPerAccount(n.Harness) {
-			return PrivateRuntimeSnapshot{}, errors.New("This harness keeps one shared sign-in, so a room cannot choose its own account. Choose a global account.")
+			return errors.New("This harness keeps one shared sign-in, so a room cannot choose its own account. Choose a global account.")
 		}
-		if err := r.Accounts.SelectInScope(n, scope); err != nil {
-			return PrivateRuntimeSnapshot{}, err
-		}
-		return r.PrivateRuntimes(ctx)
+		return r.Accounts.SelectInScope(n, scope)
 	}
 	b, err := r.Bundles.Resolve(n.Harness, "")
 	if err != nil {
-		return PrivateRuntimeSnapshot{}, err
+		return err
 	}
 	if err := r.Accounts.SwitchIfIdle(ctx, n.ID, b.Executable); err != nil {
-		return PrivateRuntimeSnapshot{}, err
+		return err
 	}
-	if err := r.Regenerate(n.Harness); err != nil {
-		return PrivateRuntimeSnapshot{}, err
-	}
-	return r.PrivateRuntimes(ctx)
+	return r.Regenerate(n.Harness)
 }
