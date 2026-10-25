@@ -174,8 +174,6 @@ func TestFailureCacheErrorsAndExpiry(t *testing.T) {
 
 func TestMultiModelProfileUsesModelCooldowns(t *testing.T) {
 	storetest.Isolate(t)
-	harness.ResetModelCooldownsForTest()
-	t.Cleanup(harness.ResetModelCooldownsForTest)
 	now := time.Now()
 	p := profile.Profile{Name: "chain", Model: "a", Models: []string{"a", "b"}}
 	failures := map[string]time.Time{p.Name: now}
@@ -202,8 +200,6 @@ func TestMultiModelProfileUsesModelCooldowns(t *testing.T) {
 // holds for a completed capacity failure and a rejected sign-in.
 func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	storetest.Isolate(t)
-	harness.ResetModelCooldownsForTest()
-	t.Cleanup(harness.ResetModelCooldownsForTest)
 	now := time.Now()
 	profiles := []profile.Profile{
 		{Name: "chain", Model: "a", Models: []string{"a", "b"}, Taste: 9},

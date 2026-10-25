@@ -3,12 +3,13 @@ package harness
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
+	"dyna-agent/internal/harness/modelcooldown"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
 )
@@ -18,58 +19,56 @@ const ModelCooldownDuration = time.Hour
 
 var cooldownNow = time.Now
 
-type modelKey struct {
-	profile string
-	model   string
-}
+// modelCooldowns is the durable record of model failures. Its zero value uses
+// the owner's data folder, so a turn runner in any process sees the rows that
+// another process wrote, including the detached runner of the next turn.
+var modelCooldowns modelcooldown.Store
 
-var modelCooldowns = struct {
-	sync.Mutex
-	failures map[modelKey]time.Time
-}{failures: make(map[modelKey]time.Time)}
-
-// ResetModelCooldownsForTest clears process-local model failures.
-func ResetModelCooldownsForTest() {
-	modelCooldowns.Lock()
-	defer modelCooldowns.Unlock()
-	modelCooldowns.failures = make(map[modelKey]time.Time)
-}
-
+// RecordModelFailure keeps the newest failure time of one model of one profile.
+// Model bookkeeping is best effort: a storage error is logged and the turn
+// still runs, as with the harness health record.
 func RecordModelFailure(profileName, model string, now time.Time) {
-	modelCooldowns.Lock()
-	defer modelCooldowns.Unlock()
-	key := modelKey{profileName, model}
-	at, exists := modelCooldowns.failures[key]
-	if !exists || now.After(at) {
-		modelCooldowns.failures[key] = now
+	if err := modelCooldowns.Record(context.Background(), profileName, model, now); err != nil {
+		log.Printf("record model cooldown %s %s: %v", profileName, model, err)
 	}
 }
 
+// ClearModelFailure deletes a model's failure, because a turn on it succeeded.
 func ClearModelFailure(profileName, model string) {
-	modelCooldowns.Lock()
-	defer modelCooldowns.Unlock()
-	delete(modelCooldowns.failures, modelKey{profileName, model})
+	if err := modelCooldowns.Clear(context.Background(), profileName, model); err != nil {
+		log.Printf("clear model cooldown %s %s: %v", profileName, model, err)
+	}
 }
 
+// IsModelCoolingDown reports whether the model failed less than the cooldown
+// window ago. An unreadable store reports no cooldown, so a turn still runs.
 func IsModelCoolingDown(profileName, model string, now time.Time) bool {
-	modelCooldowns.Lock()
-	defer modelCooldowns.Unlock()
-	at, ok := modelCooldowns.failures[modelKey{profileName, model}]
+	failures, err := modelCooldowns.Failures(context.Background(), profileName)
+	if err != nil {
+		log.Printf("read model cooldowns of profile %s: %v", profileName, err)
+		return false
+	}
+	at, ok := failures[model]
 	return ok && now.Before(at.Add(ModelCooldownDuration))
 }
 
 // SelectHealthyModel preserves profile order among healthy models. If all
 // models are cooling down, it retries them in order of oldest failure first.
+// It reads the durable cooldowns, so a failure another process recorded still
+// counts. An unreadable store keeps profile order, so the turn still starts.
 func SelectHealthyModel(p profile.Profile, now time.Time) (string, []string) {
 	models := p.EffectiveModels()
 	if len(models) <= 1 {
 		return p.Model, models
 	}
-	modelCooldowns.Lock()
-	defer modelCooldowns.Unlock()
+	failures, err := modelCooldowns.Failures(context.Background(), p.Name)
+	if err != nil {
+		log.Printf("read model cooldowns of profile %s: %v", p.Name, err)
+		return models[0], models
+	}
 	var healthy, cooling []string
 	for _, model := range models {
-		at, ok := modelCooldowns.failures[modelKey{p.Name, model}]
+		at, ok := failures[model]
 		if !ok || !now.Before(at.Add(ModelCooldownDuration)) {
 			healthy = append(healthy, model)
 		} else {
@@ -80,7 +79,7 @@ func SelectHealthyModel(p profile.Profile, now time.Time) (string, []string) {
 		return healthy[0], healthy
 	}
 	sort.SliceStable(cooling, func(i, j int) bool {
-		return modelCooldowns.failures[modelKey{p.Name, cooling[i]}].Before(modelCooldowns.failures[modelKey{p.Name, cooling[j]}])
+		return failures[cooling[i]].Before(failures[cooling[j]])
 	})
 	return cooling[0], cooling
 }
