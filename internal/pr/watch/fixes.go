@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 )
@@ -30,7 +31,7 @@ func (s *Service) closeFixedIssues(ctx context.Context, r Record, mergeCommit st
 	for _, fix := range r.Fixes {
 		switch fix.Kind {
 		case state.IssueKindDyna:
-			if err := s.closeRoomIssue(rec, fix, reason, r.Number, mergeCommit); err != nil {
+			if err := s.closeRoomIssue(ctx, rec, fix, reason, r.Number, mergeCommit); err != nil {
 				failures = append(failures, err)
 			}
 		case state.IssueKindGitHub:
@@ -45,7 +46,7 @@ func (s *Service) closeFixedIssues(ctx context.Context, r Record, mergeCommit st
 // closeRoomIssue closes one open issue of the PR's room. An issue that is
 // already closed, or gone, is not an error: the same close may have run
 // before, or a person closed it first.
-func (s *Service) closeRoomIssue(rec room.Record, fix state.IssueRef, reason string, pr int, commit string) error {
+func (s *Service) closeRoomIssue(ctx context.Context, rec room.Record, fix state.IssueRef, reason string, pr int, commit string) error {
 	open, err := s.Notify.Rooms.Issues(rec.ID, true)
 	if err != nil {
 		return fmt.Errorf("read room issues: %w", err)
@@ -60,8 +61,11 @@ func (s *Service) closeRoomIssue(rec room.Record, fix state.IssueRef, reason str
 	if id == "" {
 		return nil
 	}
-	// An automatic close acts as the room's root, like any engine-side triage.
-	_, err = s.Notify.Rooms.CloseIssue(rec.ID, id, rec.Name+":"+room.RootAgent, reason, room.CloseOrigin{PR: pr, Commit: commit})
+	// An automatic close is the engine's own triage, so it acts as the room's
+	// root seat. The address below stays attribution: the event shows the root
+	// seat, and no address decides what the close may do.
+	ctx = authority.WithActor(ctx, authority.EngineRoomActor(rec.ID))
+	_, err = s.Notify.Rooms.CloseIssue(ctx, rec.ID, id, rec.Name+":"+room.RootAgent, reason, room.CloseOrigin{PR: pr, Commit: commit})
 	if err != nil && strings.Contains(err.Error(), "is already ") {
 		return nil
 	}
