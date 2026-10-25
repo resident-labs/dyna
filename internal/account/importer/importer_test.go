@@ -19,14 +19,14 @@ type fixture struct {
 	source string
 }
 
-// newFixture saves one Codex sign-in with one repository rule.
+// newFixture saves one Kimi Code sign-in with one repository rule.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dir := t.TempDir()
 	st := &store.Store{Root: filepath.Join(dir, "accounts")}
 	var source string
 	if err := st.Update(func(state *store.State) error {
-		meta, err := state.Save("codex", "chatgpt", "openai:user:workspace", "Work", codexCredential(1_800_000_000))
+		meta, err := state.Save("kimi-code", "", "kimi:kimi-user", "Work", kimiCredential(1_800_000_000))
 		source = meta.ID
 		return err
 	}); err != nil {
@@ -106,7 +106,7 @@ func (f *fixture) entry(t *testing.T) *store.Entry {
 func TestImportMovesTheSignInOnlyAfterThePiAccountReadsBack(t *testing.T) {
 	f := newFixture(t)
 	im := &Importer{Store: f.store, Host: f.host}
-	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,10 +119,10 @@ func TestImportMovesTheSignInOnlyAfterThePiAccountReadsBack(t *testing.T) {
 	if got := f.entry(t); got != nil {
 		t.Fatalf("the source row stayed: %+v", got)
 	}
-	if f.host.login.EntryID != "openai-codex" || !reflect.DeepEqual(f.host.login.Repos, []string{"github.com/org/name"}) {
+	if f.host.login.EntryID != "kimi-coding" || !reflect.DeepEqual(f.host.login.Repos, []string{"github.com/org/name"}) {
 		t.Fatalf("Pi login = %+v", f.host.login)
 	}
-	want := []Moved{{Source: f.source, Label: "Work", Account: "pi-account", Provider: store.ProviderChatGPT, Kind: store.KindOAuth}}
+	want := []Moved{{Source: f.source, Label: "Work", Account: "pi-account", Provider: store.ProviderKimiCode, Kind: store.KindOAuth}}
 	if !reflect.DeepEqual(result.Moved, want) {
 		t.Fatalf("moved = %+v", result.Moved)
 	}
@@ -135,7 +135,7 @@ func TestImportLeavesTheSourceOnAFailedWrite(t *testing.T) {
 	before, _ := f.store.Read()
 	f.host.failCreate = errors.New("Pi's home is not writable")
 	im := &Importer{Store: f.store, Host: f.host}
-	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code"})
 	if err != nil {
 		t.Fatalf("a per-row failure ended the import: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestImportRollsBackWhenALaterStepFails(t *testing.T) {
 	f := newFixture(t)
 	f.host.failRepos = errors.New("the rules could not be copied")
 	im := &Importer{Store: f.store, Host: f.host}
-	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code"})
 	if err != nil {
 		t.Fatalf("a per-row failure ended the import: %v", err)
 	}
@@ -177,14 +177,14 @@ func TestImportRollsBackWhenALaterStepFails(t *testing.T) {
 func TestImportReportsTheMovesBeforeAFailedSignIn(t *testing.T) {
 	f := newFixture(t)
 	if err := f.store.Update(func(state *store.State) error {
-		_, err := state.Save("codex", "chatgpt", "openai:other:workspace", "Home", codexCredential(1_800_000_001))
+		_, err := state.Save("kimi-code", "", "kimi:kimi-home", "Home", kimiCredential(1_800_000_001))
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	f.host.failCreateForName = "Work"
 	im := &Importer{Store: f.store, Host: f.host}
-	result, err := im.Run(context.Background(), Request{Harness: "codex"})
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,8 +204,8 @@ func TestImportReportsTheMovesBeforeAFailedSignIn(t *testing.T) {
 func TestImportRefusesAHarnessInUse(t *testing.T) {
 	f := newFixture(t)
 	im := &Importer{Store: f.store, Host: f.host}
-	use := Use{Profiles: []UseProfile{{Name: "sol", Harness: "codex"}}, Sessions: []UseSession{{Ref: "dyna:worker", Harness: "pi"}}}
-	result, err := im.Run(context.Background(), Request{Harness: "codex", DryRun: true, Use: use})
+	use := Use{Profiles: []UseProfile{{Name: "sol", Harness: "kimi-code"}}, Sessions: []UseSession{{Ref: "dyna:worker", Harness: "pi"}}}
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code", DryRun: true, Use: use})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,11 +215,11 @@ func TestImportRefusesAHarnessInUse(t *testing.T) {
 	if len(result.Moved) != 0 || len(f.host.calls) != 0 || f.entry(t) == nil {
 		t.Fatal("a harness in use was moved")
 	}
-	if got := result.Refused[0].Describe("codex"); got == "" || got == "Dyna did not import codex: an enabled profile or an open session still runs on it ()." {
+	if got := result.Refused[0].Describe("kimi-code"); got == "" || got == "Dyna did not import kimi-code: an enabled profile or an open session still runs on it ()." {
 		t.Fatalf("refusal text = %q", got)
 	}
 	// The same harness with no enabled profile and no open session imports.
-	result, err = im.Run(context.Background(), Request{Harness: "codex"})
+	result, err = im.Run(context.Background(), Request{Harness: "kimi-code"})
 	if err != nil || len(result.Moved) != 1 {
 		t.Fatalf("import after the user left = %+v, %v", result, err)
 	}
@@ -229,9 +229,9 @@ func TestImportRefusesAHarnessInUse(t *testing.T) {
 // enabled profile or an open session of the harness refuses it.
 func TestImportKeepsAnOpenSessionAndADisabledProfileApart(t *testing.T) {
 	f := newFixture(t)
-	use := Use{Sessions: []UseSession{{Ref: "dyna:worker", Harness: "codex"}}}
+	use := Use{Sessions: []UseSession{{Ref: "dyna:worker", Harness: "kimi-code"}}}
 	im := &Importer{Store: f.store, Host: f.host}
-	result, err := im.Run(context.Background(), Request{Harness: "codex", DryRun: true, Use: use})
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code", DryRun: true, Use: use})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,13 +245,13 @@ func TestImportKeepsAnOpenSessionAndADisabledProfileApart(t *testing.T) {
 func TestDryRunListsTheMoveWithoutWriting(t *testing.T) {
 	f := newFixture(t)
 	if err := f.store.Update(func(state *store.State) error {
-		_, err := state.Save("codex", "chatgpt", "openai:other:workspace", "Home", codexCredential(1_800_000_001))
+		_, err := state.Save("kimi-code", "", "kimi:kimi-home", "Home", kimiCredential(1_800_000_001))
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	im := &Importer{Store: f.store, Host: f.host}
-	result, err := im.Run(context.Background(), Request{Harness: "codex", Account: "Home", DryRun: true})
+	result, err := im.Run(context.Background(), Request{Harness: "kimi-code", Account: "Home", DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,4 +269,11 @@ func TestDryRunListsTheMoveWithoutWriting(t *testing.T) {
 	if string(raw) == "" || !json.Valid(raw) {
 		t.Fatalf("result is not JSON: %s", raw)
 	}
+}
+
+// kimiCredential is Kimi Code's saved login in its native shape.
+func kimiCredential(exp int64) store.Credential {
+	token, _ := json.Marshal(map[string]any{"access_token": "kimi-access", "refresh_token": "kimi-refresh", "expires_at": exp})
+	payload, _ := json.Marshal(map[string]string{"credentials/kimi-code.json": string(token)})
+	return store.Credential{Schema: "kimi-code/native-files@1", Payload: payload}
 }
