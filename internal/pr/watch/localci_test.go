@@ -484,6 +484,71 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 	}
 }
 
+// A settled PR with a new saved local result must poll again, so a manual
+// `dyna git ci run` result replaces the old verdict without a GitHub change.
+// The marker is the result itself, so a manual rerun's pass re-arms it too.
+func TestSavedLocalResultRefreshesASettledPR(t *testing.T) {
+	repo := t.TempDir()
+	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	sha := strings.Repeat("a", 40)
+	key := "pr"
+	read := time.Unix(700, 0)
+	settled := &Record{Kind: "github", Key: key, Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: sha, Branch: "feature", RepoPath: repo, Watching: true, State: "open", CI: "failed", Polling: Polling{PullHead: sha, Next: read, FullChecked: read, CIVersion: "probe", PullVersion: "pull"}}
+	result := localci.Result{Repo: repo, SHA: sha, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}
+	s := &Service{LocalCIRegistry: &savedCIRegistry{result: result}, Store: &Store{Root: t.TempDir()}}
+	if err := s.Store.update(func(st *State) error {
+		st.Records[key] = settled
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		t.Fatalf("a saved local result reached GitHub: %v", cmd.Args)
+		return nil
+	}
+	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{key: settled}}); err != nil {
+		t.Fatal(err)
+	}
+	refreshed := savedRecord(t, s, key)
+	if refreshed.Polling.LocalCI != savedLocalResultKey(result) {
+		t.Fatalf("the PR did not record which local result it read: %+v", refreshed.Polling)
+	}
+	if !refreshed.Polling.Next.IsZero() || !refreshed.Polling.FullChecked.IsZero() {
+		t.Fatalf("a new saved result did not force a full poll: %+v", refreshed.Polling)
+	}
+	// Once the poll runs, the same result must not invalidate it again.
+	if err := s.Store.update(func(st *State) error {
+		st.Records[key].Polling.Next = read.Add(time.Minute)
+		st.Records[key].Polling.FullChecked = read.Add(time.Minute)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{key: settled}}); err != nil {
+		t.Fatal(err)
+	}
+	again := savedRecord(t, s, key)
+	if !again.Polling.FullChecked.Equal(read.Add(time.Minute)) {
+		t.Fatalf("the same saved result forced another full poll: %+v", again.Polling)
+	}
+}
+
+// savedRecord reads one stored PR record.
+func savedRecord(t *testing.T, s *Service, key string) Record {
+	t.Helper()
+	st, err := s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := st.Records[key]
+	if !ok {
+		t.Fatalf("record %q is gone", key)
+	}
+	return *r
+}
+
 func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 	nodes := []localci.Node{
 		{Name: "local", Slots: 1, Enabled: true},
