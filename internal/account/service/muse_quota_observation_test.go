@@ -46,7 +46,7 @@ func newQuotaObservationFixture(t *testing.T) quotaObservationFixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.SetActive("muse", second.ID); err != nil {
+	if err := registry.SetActive(accountstore.ProviderMetaMuse, "", second.ID); err != nil {
 		t.Fatal(err)
 	}
 	db, err := database.Open(dir)

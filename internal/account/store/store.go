@@ -57,6 +57,8 @@ type Metadata struct {
 	NativeHome     string        `json:"nativeHome,omitempty"`
 	Observation    *Observation  `json:"observation,omitempty"`
 	ID             string        `json:"id"`
+	Provider       Provider      `json:"provider"`
+	Kind           Kind          `json:"kind"`
 	Harness        string        `json:"harness"`
 	Integration    string        `json:"integration,omitempty"`
 	Identity       string        `json:"identity"`
@@ -65,6 +67,70 @@ type Metadata struct {
 	RefreshPending bool          `json:"refreshPending,omitempty"`
 	CreatedAt      time.Time     `json:"createdAt"`
 	UpdatedAt      time.Time     `json:"updatedAt"`
+}
+
+// Provider is the sign-in service an account belongs to. A harness consumes an
+// account; it does not own it.
+type Provider string
+
+const (
+	ProviderAnthropic  Provider = "anthropic"
+	ProviderChatGPT    Provider = "chatgpt"
+	ProviderKimiCode   Provider = "kimi-code"
+	ProviderXAI        Provider = "xai"
+	ProviderMetaMuse   Provider = "meta-muse"
+	ProviderOpenCodeGo Provider = "opencode-go"
+	ProviderDeepSeek   Provider = "deepseek"
+	ProviderZAI        Provider = "zai"
+	ProviderGoogle     Provider = "google"
+)
+
+// Kind is how an account signed in: an interactive sign-in or a pasted key.
+type Kind string
+
+const (
+	KindOAuth  Kind = "oauth"
+	KindAPIKey Kind = "api_key"
+)
+
+// ProviderFor maps a saved harness sign-in to its provider and kind.
+// Integration names the provider where one harness keeps several; it is empty
+// for a harness that holds one. An unmapped pair keeps no provider, so a later
+// release can claim it.
+func ProviderFor(harness, integration string) (Provider, Kind) {
+	switch harness {
+	case "claude-code":
+		return ProviderAnthropic, KindOAuth
+	case "codex":
+		return ProviderChatGPT, KindOAuth
+	case "kimi-code":
+		return ProviderKimiCode, KindOAuth
+	case "grok":
+		return ProviderXAI, KindOAuth
+	case "muse":
+		return ProviderMetaMuse, KindOAuth
+	case "antigravity":
+		return ProviderGoogle, KindOAuth
+	case "opencode":
+		switch integration {
+		case "", "opencode", "opencode-go":
+			return ProviderOpenCodeGo, KindOAuth
+		case "anthropic":
+			return ProviderAnthropic, KindAPIKey
+		case "openai":
+			return ProviderChatGPT, KindAPIKey
+		case "xai":
+			return ProviderXAI, KindAPIKey
+		case "deepseek":
+			return ProviderDeepSeek, KindAPIKey
+		case "zai":
+			return ProviderZAI, KindAPIKey
+		}
+	case "pi":
+		// Pi keeps every provider in one home, so its row names no provider yet.
+		return "", KindOAuth
+	}
+	return "", ""
 }
 
 // Credential is adapter-owned JSON. Schema identifies its native format.
@@ -248,7 +314,8 @@ func (state *State) Save(harness, integration, identity, label string, credentia
 	if _, err := rand.Read(id); err != nil {
 		return Metadata{}, errors.New("A saved account ID could not be created.")
 	}
-	meta := Metadata{ID: hex.EncodeToString(id), Harness: harness, Integration: integration, Identity: identity, Label: label, CreatedAt: now, UpdatedAt: now}
+	provider, kind := ProviderFor(harness, integration)
+	meta := Metadata{ID: hex.EncodeToString(id), Provider: provider, Kind: kind, Harness: harness, Integration: integration, Identity: identity, Label: label, CreatedAt: now, UpdatedAt: now}
 	state.Entries = append(state.Entries, Entry{Metadata: meta, Credential: credential})
 	return meta, nil
 }
