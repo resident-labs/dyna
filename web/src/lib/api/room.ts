@@ -116,6 +116,14 @@ export interface PostDetail {
   turn?: number
 }
 
+// ReplyTarget is roomsvc.ReplyTarget: who a reply answers. Address is the
+// address the reply names; the room's own address is @root.
+export interface ReplyTarget {
+  kind: 'session' | 'room'
+  id?: string
+  address: string
+}
+
 // Post is roomsvc.Post. Go embeds room.Message, so its fields sit at the top
 // level of the JSON.
 export interface Post extends Message {
@@ -124,6 +132,9 @@ export interface Post extends Message {
   fromHue: number
   speaker: string
   detail?: PostDetail
+  // reply names who a reply to this post answers, read from the post's stored
+  // sender identity. A post with no reply target keeps the draft's recipients.
+  reply?: ReplyTarget
   preview?: string
   hidden?: number
   unread?: boolean
