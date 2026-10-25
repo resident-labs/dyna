@@ -6,9 +6,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"dyna-agent/internal/account/native"
@@ -79,19 +81,41 @@ func runPiRenewScript(ctx context.Context, home, provider, executable string) er
 	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if runErr := cmd.Run(); runErr != nil {
+	runErr := cmd.Run()
+	out := strings.TrimSpace(stderr.String())
+	if line, _, _ := strings.Cut(out, "\n"); strings.HasPrefix(line, "error ") {
+		return classifyPiRenewFailure(line)
+	}
+	if runErr != nil {
 		var exit *exec.ExitError
-		if errors.As(runErr, &exit) {
-			switch exit.ExitCode() {
-			case 3:
-				return native.ErrNotSignedIn
-			case 4:
-				return native.ErrInvalidGrant
-			}
+		if errors.As(runErr, &exit) && exit.ExitCode() == 3 {
+			return native.ErrNotSignedIn
 		}
 		return errors.New("Pi could not renew this sign-in")
 	}
 	return nil
+}
+
+// classifyPiRenewFailure decides whether a renewal failure is a rejected grant
+// or a transient one. Only the provider's own signal counts: an authentication
+// status or the invalid_grant code. Pi wraps every refresh failure in the same
+// message, so its wording is never used, and a network error, a timeout, a 429
+// or a 5xx stays transient and never asks the owner to sign in again.
+func classifyPiRenewFailure(line string) error {
+	fields := strings.Fields(line)
+	if len(fields) < 3 || !strings.HasPrefix(fields[0], "error") {
+		return errors.New("Pi could not renew this sign-in")
+	}
+	status, _ := strconv.Atoi(fields[1])
+	switch fields[2] {
+	case "invalid_grant":
+		return native.ErrInvalidGrant
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusBadRequest:
+		return native.ErrInvalidGrant
+	}
+	return errors.New("Pi could not renew this sign-in")
 }
 
 // readPiAuthEntries reads one account's auth.json entry map.

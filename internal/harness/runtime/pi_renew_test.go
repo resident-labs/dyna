@@ -3,7 +3,9 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -167,4 +169,73 @@ func savePiLogin(t *testing.T, accounts *Accounts, account NativeAccount, access
 		return NativeAccount{}, err
 	}
 	return accounts.Find(account.ID)
+}
+
+// Only the provider's own signal makes a renewal a rejected grant. Pi wraps
+// every refresh failure in the same message, so a network error, a timeout, a
+// 429 or a 5xx must stay transient and never ask for a new sign-in.
+func TestPiRenewalFailureClassification(t *testing.T) {
+	for _, tc := range []struct {
+		line    string
+		rejected bool
+	}{
+		{"error 401 unknown", true},
+		{"error 403 unknown", true},
+		{"error 400 unknown", true},
+		{"error 0 invalid_grant", true},
+		{"error 429 unknown", false},
+		{"error 500 unknown", false},
+		{"error 0 network", false},
+		{"error 0 timeout", false},
+		{"error 0 unknown", false},
+		{"renewed", false},
+	} {
+		err := classifyPiRenewFailure(tc.line)
+		if got := errors.Is(err, native.ErrInvalidGrant); got != tc.rejected {
+			t.Errorf("%q classified as rejected=%t, want %t (err=%v)", tc.line, got, tc.rejected, err)
+		}
+	}
+}
+
+// The script's own classification reaches Dyna end to end: a stub Pi package
+// throws the way Pi wraps a refresh failure, and the run decides whether the
+// grant was rejected or the failure was transient. No network, no live sign-in.
+func TestPiRenewScriptClassifiesAProviderFailure(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	for _, tc := range []struct {
+		name     string
+		cause    string
+		rejected bool
+	}{
+		{"rejected", `new Error('OpenAI Codex token refresh failed (401): {"error":"invalid_grant"}')`, true},
+		{"rate limited", `new Error('OpenAI Codex token refresh failed (429): too many requests')`, false},
+		{"provider error", `new Error('OpenAI Codex token refresh failed (500): upstream')`, false},
+		{"network", `new Error('OpenAI Codex token refresh error: fetch failed')`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := t.TempDir()
+			pkg := filepath.Join(prefix, "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist")
+			if err := os.MkdirAll(pkg, 0700); err != nil {
+				t.Fatal(err)
+			}
+			stub := `export const ModelRuntime = { async create() { return { async getAuth() {
+	const cause = ` + tc.cause + `;
+	throw new Error("OAuth refresh failed for openai-codex", { cause });
+} }; } };`
+			if err := os.WriteFile(filepath.Join(pkg, "index.js"), []byte(stub), 0600); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(prefix, "bin")
+			if err := os.MkdirAll(bin, 0700); err != nil {
+				t.Fatal(err)
+			}
+			home := t.TempDir()
+			err := runPiRenewScript(t.Context(), home, "openai-codex", filepath.Join(bin, "pi"))
+			if got := errors.Is(err, native.ErrInvalidGrant); got != tc.rejected {
+				t.Fatalf("rejected=%t, want %t (err=%v)", got, tc.rejected, err)
+			}
+		})
+	}
 }
