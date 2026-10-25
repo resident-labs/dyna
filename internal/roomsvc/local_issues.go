@@ -68,17 +68,17 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	return out, nil
 }
 
-// Issue mutations use the same triage policy as the CLI, with the actor
-// supplied by the engine instead of the engine process's owner identity.
+// Issue mutations use the same triage policy as the CLI, with the caller that
+// the engine verified instead of the engine process's owner identity.
 func (s *Service) CloseIssue(ctx context.Context, roomRef, id, reason string) (room.Issue, error) {
-	return s.triageIssueAsCaller(ctx, roomRef, id, "close", reason)
+	return s.TriageIssue(ctx, roomRef, id, "close", reason, "")
 }
 func (s *Service) IssueGoal(ctx context.Context, roomRef, id string) (room.Issue, error) {
 	r, err := s.rooms().Resolve(roomRef)
 	if err != nil {
 		return room.Issue{}, err
 	}
-	actor, err := authority.ActorIn(ctx, r.ID)
+	actor, err := s.issueCaller(ctx, r.ID)
 	if err != nil {
 		return room.Issue{}, err
 	}
@@ -102,53 +102,68 @@ func (s *Service) IssueGoal(ctx context.Context, roomRef, id string) (room.Issue
 	// first link. The claim takes only an issue still open, so two assignments
 	// of one issue start one goal: the loser's goal is deleted.
 	req := goalStart{In: in, Selectors: []string{"@room"}, Fixes: []int{issue.Number}, Claim: goals.ClaimOpen}
-	if _, err = s.startGoal(ctx, r.ID, req); err != nil {
+	if _, err = s.startGoal(authority.WithActor(ctx, actor), r.ID, req); err != nil {
 		return room.Issue{}, err
 	}
 	return s.rooms().Issue(r.ID, id)
 }
 
-func (s *Service) triageIssueAsCaller(ctx context.Context, roomRef, id, action, value string) (room.Issue, error) {
-	rec, err := s.rooms().Resolve(roomRef)
+func (s *Service) ExportIssue(ctx context.Context, roomRef, id string) (room.Issue, error) {
+	return s.TriageIssue(ctx, roomRef, id, "export", "", "")
+}
+
+// issueCaller is the caller of an issue change. The engine verifies the callers
+// that reach it; a session's own process states only its ID, so its stored role
+// and room decide, as no address it can type ever does.
+func (s *Service) issueCaller(ctx context.Context, roomID string) (authority.Actor, error) {
+	actor := authority.Of(ctx)
+	if _, verified := authority.ContextActor(ctx); !verified && actor.Role == authority.Session {
+		stored, err := s.sessions().SessionActor(actor.Session)
+		if err != nil {
+			return authority.Actor{}, err
+		}
+		actor = stored
+	}
+	return authority.ActorIn(authority.WithActor(ctx, actor), roomID)
+}
+
+// issueAddress is the address that credits an issue change: the room name for
+// the owner, and the session's own address for a session or root seat.
+func (s *Service) issueAddress(actor authority.Actor, r room.Record) (string, error) {
+	if actor.Role == authority.Owner || actor.Session == "" {
+		return r.Name, nil
+	}
+	info, err := s.sessions().Inspect(actor.Session)
+	if err != nil {
+		return "", err
+	}
+	return info.Address(), nil
+}
+
+// TriageIssue closes or exports an issue for the caller on ctx; starting a goal
+// from one goes through IssueGoal and the goal creation path of dyna goal. by
+// is the address that credits the change, and an empty one is derived from the
+// caller, so an address never grants authority.
+func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, by string) (room.Issue, error) {
+	r, err := s.rooms().Resolve(roomRef)
 	if err != nil {
 		return room.Issue{}, err
 	}
-	actor, err := authority.ActorIn(ctx, rec.ID)
+	actor, err := s.issueCaller(ctx, r.ID)
 	if err != nil {
 		return room.Issue{}, err
 	}
 	if err := authority.Check("ChangeIssue", actor, nil); err != nil {
 		return room.Issue{}, err
 	}
-	by := rec.Name
-	if actor.Role != authority.Owner {
-		info, err := s.sessions().Inspect(actor.Session)
-		if err != nil {
+	if by == "" {
+		if by, err = s.issueAddress(actor, r); err != nil {
 			return room.Issue{}, err
 		}
-		by = info.Address()
 	}
-	return s.TriageIssue(ctx, rec.ID, id, action, value, by)
-}
-
-func (s *Service) ExportIssue(ctx context.Context, roomRef, id string) (room.Issue, error) {
-	return s.triageIssueAsCaller(ctx, roomRef, id, "export", "")
-}
-
-// TriageIssue takes the actor derived by the CLI, or empty for the owner API.
-// It closes or exports an issue; starting a goal from one goes through
-// IssueGoal and the goal creation path of dyna goal.
-func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, by string) (room.Issue, error) {
-	r, err := s.rooms().Resolve(roomRef)
-	if err != nil {
-		return room.Issue{}, err
-	}
-	if by == "" {
-		by = r.Name
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(authority.WithActor(ctx, actor), 30*time.Second)
 	defer cancel()
-	return s.rooms().ChangeIssue(r.ID, id, by, func(i *room.Issue) error {
+	return s.rooms().ChangeIssue(ctx, r.ID, id, by, func(i *room.Issue) error {
 		switch action {
 		case "close":
 			i.State = room.IssueStateClosed

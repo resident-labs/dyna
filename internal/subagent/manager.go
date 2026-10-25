@@ -257,7 +257,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (Info, Turn, err
 	case actor.Role == authority.Owner:
 		owner = opts.Owner
 	}
-	return m.start(opts, parent, owner)
+	return m.start(ctx, opts, parent, owner)
 }
 
 // StartForEngine starts a session for the engine's own work, for no caller:
@@ -265,12 +265,12 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (Info, Turn, err
 // PR notice escalates to. It checks no caller and sets no parent. It must never be an engine call
 // (TestEngineMaintenanceIsNeverACall).
 func (m *Manager) StartForEngine(opts StartOptions) (Info, Turn, error) {
-	return m.start(opts, "", "")
+	return m.start(context.Background(), opts, "", "")
 }
 
 // start creates the session under parent, which is "" for a top-level one,
 // with owner as its owner label.
-func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, error) {
+func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner string) (Info, Turn, error) {
 	goal := strings.TrimSpace(opts.Goal)
 	if goal == "" {
 		return Info{}, Turn{}, errors.New(`--goal is required: pass the outcome and done condition, as in dyna subagent start --goal "<outcome; done when>" "<brief>"`)
@@ -316,6 +316,11 @@ func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, er
 	roomRec, err := m.resolveStartRoom(opts.Room)
 	if err != nil {
 		return Info{}, Turn{}, err
+	}
+	// An engine-side start has no caller, so the issue links of its work act as
+	// the room's root seat, like every other engine-side action.
+	if authority.Of(ctx).Role == "" {
+		ctx = authority.WithActor(ctx, authority.EngineRoomActor(roomRec.ID))
 	}
 	dir, err := m.startDir(opts, roomRec, parent)
 	if err != nil {
@@ -425,7 +430,7 @@ func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, er
 	if err := store.writeMeta(meta); err != nil {
 		return Info{}, Turn{}, err
 	}
-	if meta.Goal, meta.Item, err = m.addSpawnGoal(meta, opts.Under, goal, task, opts.Fixes); err == nil {
+	if meta.Goal, meta.Item, err = m.addSpawnGoal(ctx, meta, opts.Under, goal, task, opts.Fixes); err == nil {
 		if err = store.writeMeta(meta); err != nil {
 			if meta.Item == "" {
 				_, _ = m.goalStore().Finish(roomRec.ID, meta.Goal, id, "The session failed to start.", true)

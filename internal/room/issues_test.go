@@ -34,17 +34,17 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 	if !strings.Contains(post.Text, "alpha:agent filed issue D-1: First") {
 		t.Fatalf("post text: %q", post.Text)
 	}
-	if _, err = s.ChangeIssue(rec.ID, a.ID, "alpha:agent", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil }); err == nil {
+	if _, err = s.ChangeIssue(sessionCtx(rec.ID), rec.ID, a.ID, "alpha:agent", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil }); err == nil {
 		t.Fatal("agent triaged issue")
 	}
-	if _, err = s.ChangeIssue(rec.ID, a.ID, "alpha", func(i *Issue) error { i.State = "closed"; return nil }); err == nil {
+	if _, err = s.ChangeIssue(ownerCtx(), rec.ID, a.ID, "alpha", func(i *Issue) error { i.State = "closed"; return nil }); err == nil {
 		t.Fatal("closed without reason")
 	}
-	got, err := s.ChangeIssue(rec.ID, "d1", "alpha:root", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil })
+	got, err := s.ChangeIssue(ownerCtx(), rec.ID, "d1", "alpha:root", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil })
 	if err != nil || got.ChangedBy != "alpha:root" || got.ChangedAt == 0 || got.Label() != "D-1" {
 		t.Fatalf("close: %+v %v", got, err)
 	}
-	if _, err = s.ChangeIssue(rec.ID, a.ID, "alpha", func(i *Issue) error { i.State = "goal"; i.GoalID = "g1"; return nil }); err == nil {
+	if _, err = s.ChangeIssue(ownerCtx(), rec.ID, a.ID, "alpha", func(i *Issue) error { i.State = "goal"; i.GoalID = "g1"; return nil }); err == nil {
 		t.Fatal("triaged closed issue")
 	}
 	rows, _ = s.Issues(rec.ID, false)
@@ -78,7 +78,7 @@ func TestIssueTriageDoesNotBlockRoomPosts(t *testing.T) {
 	}
 	entered, release, triaged := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
-		_, err := s.ChangeIssue(rec.ID, i.ID, rec.Name, func(i *Issue) error {
+		_, err := s.ChangeIssue(ownerCtx(), rec.ID, i.ID, rec.Name, func(i *Issue) error {
 			close(entered)
 			<-release
 			i.State = "exported"
@@ -120,7 +120,7 @@ func TestIssueWritesLeaveTheLegacyFileUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ChangeIssue(rec.ID, i.ID, rec.Name, func(i *Issue) error { i.State = "closed"; i.Reason = "done"; return nil }); err != nil {
+	if _, err := s.ChangeIssue(ownerCtx(), rec.ID, i.ID, rec.Name, func(i *Issue) error { i.State = "closed"; i.Reason = "done"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != string(legacy) {
@@ -176,7 +176,7 @@ func TestIssuesRevisionChangesOnEveryWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	filed := rev()
-	if _, err := s.ChangeIssue(rec.ID, i.ID, rec.Name, func(i *Issue) error { i.State = "closed"; i.Reason = "seen"; return nil }); err != nil {
+	if _, err := s.ChangeIssue(ownerCtx(), rec.ID, i.ID, rec.Name, func(i *Issue) error { i.State = "closed"; i.Reason = "seen"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if changed := rev(); !(start < filed && filed < changed) {

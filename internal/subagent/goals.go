@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -17,7 +18,9 @@ func (m *Manager) goalStore() *goals.Store {
 // addSpawnGoal creates the work a new session holds: an existing goal, a
 // delegation item on an effective goal, or a goal of its own when none is
 // eligible. Service sessions hold no goals, and root holds no goals either.
-func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int) (goalID, itemID string, err error) {
+// The caller on ctx is the session that asks for the work, and the address set
+// here is attribution only.
+func (m *Manager) addSpawnGoal(ctx context.Context, meta Meta, under, text, brief string, fixes []int) (goalID, itemID string, err error) {
 	if meta.Service {
 		if len(fixes) > 0 {
 			return "", "", fmt.Errorf("--fixes needs a worker goal")
@@ -49,17 +52,17 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 		if m.rootHeld(meta.RoomID, goal) {
 			return "", "", fmt.Errorf("goal %s is held by root, which holds no goals", goal)
 		}
-		links, err := store.PrepareIssueLinks(meta.RoomID, actor, fixes)
+		links, err := store.PrepareIssueLinks(ctx, meta.RoomID, fixes)
 		if err != nil {
 			return "", "", err
 		}
-		if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links, goals.ClaimAny); err != nil {
+		if err := store.LinkPreparedIssues(ctx, meta.RoomID, goal, actor, links, goals.ClaimAny); err != nil {
 			return "", "", err
 		}
 		if !g.Shared && !g.HeldBy(meta.ID) {
 			holders := append(append([]string{}, g.Holders...), meta.ID)
 			if _, err := store.Edit(meta.RoomID, goal, setter, "", &holders, false); err != nil {
-				return "", "", errors.Join(fmt.Errorf("cannot assign the session's goal: %w", err), store.RestoreIssueLinks(meta.RoomID, actor, links))
+				return "", "", errors.Join(fmt.Errorf("cannot assign the session's goal: %w", err), store.RestoreIssueLinks(ctx, meta.RoomID, actor, links))
 			}
 		}
 		return goal, "", nil
@@ -74,11 +77,11 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 			if m.rootHeld(meta.RoomID, goal) {
 				return "", "", fmt.Errorf("goal %s is held by root, which holds no goals; start without --under, or use a goal an agent holds", goal)
 			}
-			links, err := store.PrepareIssueLinks(meta.RoomID, actor, fixes)
+			links, err := store.PrepareIssueLinks(ctx, meta.RoomID, fixes)
 			if err != nil {
 				return "", "", err
 			}
-			if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links, goals.ClaimAny); err != nil {
+			if err := store.LinkPreparedIssues(ctx, meta.RoomID, goal, actor, links, goals.ClaimAny); err != nil {
 				return "", "", err
 			}
 			itemText := text
@@ -87,12 +90,12 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 			}
 			item, err := store.AddItem(meta.RoomID, goal, setter, itemText, meta.ID)
 			if err != nil {
-				return "", "", errors.Join(fmt.Errorf("cannot create the session's item: %w", err), store.RestoreIssueLinks(meta.RoomID, actor, links))
+				return "", "", errors.Join(fmt.Errorf("cannot create the session's item: %w", err), store.RestoreIssueLinks(ctx, meta.RoomID, actor, links))
 			}
 			return goal, item.ID, nil
 		}
 	}
-	g, err := store.AddWithIssues(meta.RoomID, setter, actor, goals.Input{Text: text, Detail: brief, Holders: []string{meta.ID}}, fixes, goals.ClaimAny)
+	g, err := store.AddWithIssues(ctx, meta.RoomID, setter, actor, goals.Input{Text: text, Detail: brief, Holders: []string{meta.ID}}, fixes, goals.ClaimAny)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot create the session's goal: %w", err)
 	}

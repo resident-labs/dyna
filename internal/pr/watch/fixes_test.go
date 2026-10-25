@@ -8,12 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	roomfixture "dyna-agent/internal/room/testfixture"
 	"dyna-agent/internal/subagent"
 )
+
+// ownerCtx acts for the owner, which issue links need now that they check the
+// caller on ctx instead of a credited address.
+func ownerCtx() context.Context {
+	return authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner})
+}
 
 // fixesEnv gives a service whose GitHub calls are recorded and answered from
 // a small map, so the merge close needs no network and no waiting.
@@ -66,7 +73,7 @@ func TestMergedPRClosesItsLinkedIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.rooms.LinkIssueGoal(e.room.ID, issue.ID, "g7", e.room.Name, "open"); err != nil {
+	if _, err := e.rooms.LinkIssueGoal(ownerCtx(), e.room.ID, issue.ID, "g7", e.room.Name, "open"); err != nil {
 		t.Fatal(err)
 	}
 	r := e.mergedRecord(
