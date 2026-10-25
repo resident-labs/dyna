@@ -45,6 +45,7 @@
     // opens Settings > Hooks, which holds the built-in and machine-wide hooks.
     room: Room
     profiles?: ProfileChoice[]
+    onrootprofile?: (roomId: string, profile: string) => void
     start?: string
     hookRun?: HookLogTarget | null
     reviewer?: ReviewerStatus | null
@@ -57,7 +58,7 @@
     onopenglobal?: () => unknown
     onclose: () => void
   }
-  let { room, profiles = [], start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], onrootprofile = () => {}, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
   let rootProfile = $state(untrack(() => room.rootProfile || ''))
   let rootProfileBusy = $state(false)
   let rootProfileError = $state('')
@@ -65,10 +66,12 @@
 
   async function saveRootProfile() {
     const target = room.id
+    const value = rootProfile
     rootProfileBusy = true
     rootProfileError = ''
     try {
-      await api.setRoomRootProfile(target, rootProfile)
+      await api.setRoomRootProfile(target, value)
+      onrootprofile(target, value)
     } catch (e) {
       if (room.id === target) {
         rootProfile = room.rootProfile || ''

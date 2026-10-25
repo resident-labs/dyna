@@ -22,6 +22,74 @@ const compiled = await bundle({
   format: FORMAT + '; export const roomLabel = (room) => room.name; export const duration = () => "now";',
 })
 const policy = (next: Partial<Policy> = {}): Policy => ({ ...DEFAULT_POLICY, ...DEFAULT_CI_BUDGET, requiredChecks: ['base'], ciTestAllowNotes: {}, ...next })
+
+test('the saved root profile survives reopening and can return to the global default', async () => {
+  let stored = ''
+  let write = Promise.resolve()
+  let rejectWrite = false
+  const room = { id: 'r', name: 'work', rootProfile: '' }
+  const dom = installDom({
+    roomPolicyRefreshAPI: {
+      setRoomRootProfile: (id: string, value: string) => {
+        assert.equal(id, room.id)
+        write = rejectWrite ? Promise.reject(new Error('save failed')) : Promise.resolve().then(() => { stored = value })
+        return write
+      },
+    },
+    matchMedia: () => ({ matches: true }),
+  })
+  const built: Harness = await importBundle(compiled, 'RoomSettings')
+  const target = document.getElementById('app')
+  assert.ok(target)
+  let instance: object | undefined
+  const open = () => built.flushSync(() => {
+    instance = built.mount(built.default, { target, props: {
+      room, profiles: [{ name: 'sol' }, { name: 'opus' }], onclose() {},
+      onrootprofile: (id: string, value: string) => { if (room.id === id) room.rootProfile = value },
+    } })
+  })
+  const select = () => {
+    const input = target.querySelector<HTMLSelectElement>('select[aria-label="Root profile"]')
+    assert.ok(input)
+    return input
+  }
+  const choose = async (value: string) => {
+    built.flushSync(() => {
+      select().value = value
+      select().dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await write.catch(() => {})
+    built.flushSync()
+  }
+  const close = async () => {
+    if (instance) await built.unmount(instance)
+    instance = undefined
+  }
+  try {
+    open()
+    await choose('sol')
+    assert.equal(stored, 'sol')
+    await close()
+    open()
+    assert.equal(select().value, 'sol', 'reopening must use the saved room profile')
+    rejectWrite = true
+    await choose('opus')
+    assert.equal(select().value, 'sol', 'a failed save must restore the saved profile')
+    assert.match(target.textContent || '', /save failed/)
+    rejectWrite = false
+    await choose('')
+    assert.equal(stored, '', 'Global default must clear the saved override')
+    await close()
+    open()
+    assert.equal(select().value, '')
+  } finally {
+    await close()
+    dom.window.close()
+    for (const name of [...domNames, 'roomPolicyRefreshAPI', 'matchMedia']) Reflect.deleteProperty(globalThis, name)
+    await rm(built.dir, { recursive: true, force: true })
+  }
+})
+
 function deferred<T>() {
   let resolveValue: (value: T) => void = () => { throw new Error('promise is not ready') }
   let rejectValue: (reason: unknown) => void = () => { throw new Error('promise is not ready') }
