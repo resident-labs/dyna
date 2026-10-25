@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/goals"
 	harnesshealth "dyna-agent/internal/harness/health"
+	"dyna-agent/internal/harness/modelcooldown"
 	"dyna-agent/internal/harness/preferences"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hookinstall"
@@ -67,6 +68,8 @@ var migrations = []func(dataDir string) error{
 	escalate.Migrate,
 	goals.Migrate,
 	harnesshealth.Migrate,
+	// Model cooldowns are read by detached turn runners, which cannot migrate.
+	modelcooldown.Migrate,
 	preferences.Migrate,
 	hooks.Migrate,
 	hooks.MigrateRuns,
