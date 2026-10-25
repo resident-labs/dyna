@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 )
@@ -13,6 +14,14 @@ func TestModelRatingColumnsPickTheBaseline(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node.js is unavailable")
+	}
+	// Node reads these files, and Go's test cache only follows files this
+	// binary opens. Reading them here makes an edit to either one rerun the
+	// test instead of returning a stale pass.
+	for _, name := range []string{"model-ratings-columns.mjs", "model-ratings-columns.test.mjs"} {
+		if _, err := os.ReadFile(name); err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
 	}
 	out, err := exec.CommandContext(t.Context(), node, "--test", "model-ratings-columns.test.mjs").CombinedOutput()
 	if err != nil {

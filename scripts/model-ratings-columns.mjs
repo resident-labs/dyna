@@ -9,6 +9,17 @@
 
 export const toSlug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
+// A bare slug, a model page and a comparison page all name the same model. A
+// comparison path holds the baseline after "-vs-", and the page kinds
+// "releases" and "comparisons" may stand in front of the slug, so all three
+// forms yield the model slug alone.
+export const slugOf = (arg) => {
+  const text = String(arg ?? '').trim();
+  const path = /^https?:\/\//.test(text) ? new URL(text).pathname : text;
+  const after = path.match(/\/models\/(?:(?:releases|comparisons)\/)*(.+)$/)?.[1];
+  return (after ?? path).replace(/[?#].*$/, '').replace(/\/+$/, '').split('-vs-')[0];
+};
+
 // A cell such as "$2.11", "70%" or "845.63s" becomes a number, and anything
 // else becomes null so a missing value never counts as zero.
 export const num = (cell) => {
