@@ -1028,15 +1028,18 @@ func (s Store) RemoveRole(ctx context.Context, name string, role Role) error {
 			return err
 		}
 		if !m.HasRole(RoleCI) {
+			// A machine without the ci role keeps no setting that only that role
+			// uses, as Save also holds.
 			m.CISlots = 0
 			m.HostChecksGrants = nil
+			m.Rooms, m.Suites = nil, nil
 		}
 		if err := m.Validate(); err != nil {
 			return err
 		}
 		m.Updated = time.Now()
-		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, host_checks_grants=?, updated_ms=? WHERE id=?`,
-			marshalRoles(m.Roles), m.CISlots, marshalGrants(m.HostChecksGrants), m.Updated.UnixMilli(), m.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, host_checks_grants=?, rooms=?, suites=?, updated_ms=? WHERE id=?`,
+			marshalRoles(m.Roles), m.CISlots, marshalGrants(m.HostChecksGrants), marshalNames(m.Rooms), marshalNames(m.Suites), m.Updated.UnixMilli(), m.ID)
 		return err
 	})
 }

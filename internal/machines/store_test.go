@@ -188,6 +188,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	local.Roles = append(local.Roles, RoleCI)
 	local.CISlots = 1
 	local.HostChecksGrants = []HostChecksGrant{{By: GrantorOwner}}
+	local.Rooms, local.Suites = []string{"room_dyna"}, []string{"go"}
 	if _, err := s.Save(ctx, local); err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +198,10 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	local, err = s.GetLocal(ctx)
 	if err != nil || local.HasHostChecksGrants() {
 		t.Fatalf("removing the CI role kept host permission: %#v, %v", local, err)
+	}
+	// The limits only the ci role uses go with it.
+	if len(local.Rooms) != 0 || len(local.Suites) != 0 {
+		t.Fatalf("removing the CI role kept rooms %v and suites %v", local.Rooms, local.Suites)
 	}
 	local.Roles = []Role{RoleAgents}
 	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
