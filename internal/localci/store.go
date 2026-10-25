@@ -33,6 +33,9 @@ type Node struct {
 	SSH     string `json:"ssh,omitempty"`
 	Slots   int    `json:"slots"`
 	Enabled bool   `json:"enabled"`
+	// AllowHostChecks lets repository-defined checks run outside a container.
+	// It is a machine owner's decision and defaults to false.
+	AllowHostChecks bool `json:"allowHostChecks,omitempty"`
 	// LowDisk marks a machine whose last probe found less free space than the
 	// floor on the filesystem that holds its /var/tmp, so Dyna starts no CI
 	// work there until space is freed.
@@ -144,7 +147,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, LowDisk: m.HoldsCI()})
+		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, AllowHostChecks: m.AllowHostChecks, LowDisk: m.HoldsCI()})
 	}
 	return nodes, nil
 }

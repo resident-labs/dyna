@@ -262,6 +262,7 @@ type Record struct {
 	Checked          time.Time                    `json:"checked,omitempty"`
 	CI               string                       `json:"ci,omitempty"`
 	CIReason         string                       `json:"ciReason,omitempty"`
+	LocalCIConfig    string                       `json:"localCIConfig,omitempty"`
 	BotReviews       []BotReview                  `json:"botReviews,omitempty"`
 	Checks           []CheckSummary               `json:"checks"`
 	CIKey            string                       `json:"ciKey,omitempty"`

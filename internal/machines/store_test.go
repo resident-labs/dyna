@@ -145,7 +145,10 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved.Name, saved.Enabled = "hermeslab", false
+	if saved.AllowHostChecks {
+		t.Fatal("host checks were enabled by default")
+	}
+	saved.Name, saved.Enabled, saved.AllowHostChecks = "hermeslab", false, true
 	renamed, err := s.Save(ctx, saved)
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +160,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 		t.Fatalf("old name remains: %v", err)
 	}
 	stored, err := s.Get(ctx, "hermeslab")
-	if err != nil || stored.Enabled || stored.CISlots != 2 {
+	if err != nil || stored.Enabled || stored.CISlots != 2 || !stored.AllowHostChecks {
 		t.Fatalf("stored machine = %#v, %v", stored, err)
 	}
 	if _, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
@@ -175,6 +178,18 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	}
 	if err := s.Remove(ctx, local.Name); !errors.Is(err, ErrLocal) {
 		t.Fatalf("removed this machine: %v", err)
+	}
+	local.Roles = append(local.Roles, RoleCI)
+	local.CISlots, local.AllowHostChecks = 1, true
+	if _, err := s.Save(ctx, local); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveRole(ctx, local.Name, RoleCI); err != nil {
+		t.Fatal(err)
+	}
+	local, err = s.GetLocal(ctx)
+	if err != nil || local.AllowHostChecks {
+		t.Fatalf("removing the CI role kept host permission: %#v, %v", local, err)
 	}
 	local.Roles = []Role{RoleAgents}
 	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
