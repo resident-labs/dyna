@@ -409,6 +409,32 @@ func TestCIBudgetMatrixAndDuplicateNames(t *testing.T) {
 	}
 }
 
+// An aggregate job and the matrix job it needs share a display base name here:
+// "frontend (0)" is a shard, and "frontend" is the aggregate. An optional
+// suffix on every name matched both, so the budget reported two matches, fell
+// back to summed busy time, and cancelled parallel runs that fit the budget.
+func TestCIBudgetMapsAggregateAndItsShardsApart(t *testing.T) {
+	e := newEnv(t)
+	e.clock = time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
+	budgetFixture(e, e.clock, "pull_request")
+	e.f.Raw[budgetWorkflowPath] = budgetWorkflow("jobs:\n  changes: {}\n  frontend-shard:\n    name: frontend (${{ matrix.shard }})\n    needs: changes\n    strategy: {matrix: {shard: [0, 1]}}\n  frontend:\n    needs: [changes, frontend-shard]\n")
+	e.f.Raw["repos/owner/repo/actions/runs/81/attempts/1/jobs?per_page=100"] = "HTTP/2.0 200 OK\r\n\r\n{\"jobs\":[" + strings.Join([]string{
+		jobJSON("changes", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T00:00:02Z"),
+		jobJSON("frontend (0)", "2026-01-01T00:00:02Z", "2026-01-01T00:00:02Z", "2026-01-01T00:02:22Z"),
+		jobJSON("frontend (1)", "2026-01-01T00:00:02Z", "2026-01-01T00:00:02Z", "2026-01-01T00:02:00Z"),
+		jobJSON("frontend", "2026-01-01T00:02:22Z", "2026-01-01T00:02:22Z", "2026-01-01T00:02:32Z"),
+	}, ",") + "]}"
+	e.track()
+	e.tick()
+	r := e.record()
+	if r.CIBudgetErrors["81/1"] != "" {
+		t.Fatalf("a shard and its aggregate did not map to one job each: %s", r.CIBudgetErrors["81/1"])
+	}
+	if got := r.CIBudgetRuns["81/1"]; !strings.HasPrefix(got, "warned") {
+		t.Fatalf("budget = %q, want the 152s chain to warn", got)
+	}
+}
+
 // The repository's CI workflow must map each API job name to one workflow job.
 func TestCIWorkflowNamesMapToOneJob(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "ci.yml"))
@@ -420,7 +446,14 @@ func TestCIWorkflowNamesMapToOneJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		"go-test": "test",
+		"go-test":           "test",
+		"go-static":         "go-static",
+		"go-test-shard (0)": "go-shard",
+		"frontend":          "frontend",
+		"frontend build":    "frontend-build",
+		"frontend test (0)": "frontend-shard",
+		"frontend test (5)": "frontend-shard",
+		"frontend-check":    "frontend-check",
 	} {
 		var keys []string
 		for key, job := range jobs {

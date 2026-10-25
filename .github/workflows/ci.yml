@@ -268,14 +268,15 @@ jobs:
             if [ "$r" != success ]; then echo "A Go job ended with $r" >&2; exit 1; fi
           done
 
-  frontend:
-    name: frontend
+  # The frontend suite runs in one job per shard, so no single job spends the
+  # room's time budget alone. The build is its own job: the test shards need no
+  # built assets, and this one also checks that a build leaves the tree clean.
+  frontend-build:
+    name: frontend build
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
-    # Its own job, so the frontend build and tests do not spend go-test's time
-    # budget, and both run at once.
-    timeout-minutes: 15
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -286,18 +287,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Build and test frontend and export JUnit
-        run: bash ../scripts/ci.sh frontend test
-        env:
-          JUNIT_REPORT_PATH: ${{ runner.temp }}/frontend-test.xml
-      - name: Upload frontend test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-test-report
-          path: ${{ runner.temp }}/frontend-test.xml
-          if-no-files-found: error
-          retention-days: 1
+      - name: Build frontend and require a clean tree
+        run: bash ../scripts/ci.sh frontend build
       # computer-smoke reads these assets.
       - name: Upload frontend assets
         uses: actions/upload-artifact@v4
@@ -306,6 +297,68 @@ jobs:
           path: web/dist
           if-no-files-found: error
           retention-days: 1
+
+  # FRONTEND_SHARD splits the test files, as the local lane does, so each shard
+  # reports its own JUnit file and stays well inside the time budget. The name
+  # does not start with the aggregate's name, so a shard and the aggregate can
+  # never be mistaken for one another.
+  frontend-shard:
+    name: frontend test (${{ matrix.shard }})
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: 0, part: '1/6' }
+          - { shard: 1, part: '2/6' }
+          - { shard: 2, part: '3/6' }
+          - { shard: 3, part: '4/6' }
+          - { shard: 4, part: '5/6' }
+          - { shard: 5, part: '6/6' }
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Test frontend shard and export JUnit
+        run: bash ../scripts/ci.sh frontend test-shard
+        env:
+          FRONTEND_SHARD: ${{ matrix.part }}
+          JUNIT_REPORT_PATH: ${{ runner.temp }}/frontend-test-${{ matrix.shard }}.xml
+      - name: Upload frontend test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-report-${{ matrix.shard }}
+          path: ${{ runner.temp }}/frontend-test-${{ matrix.shard }}.xml
+          if-no-files-found: error
+          retention-days: 1
+
+  # The single frontend check name that the merge gate and the go-test job wait
+  # on. It passes only when the build and every shard passed.
+  frontend:
+    name: frontend
+    needs: [changes, frontend-build, frontend-shard]
+    if: ${{ always() && needs.changes.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the build and every shard
+        env:
+          RESULTS: ${{ needs.frontend-build.result }} ${{ needs.frontend-shard.result }}
+        run: |
+          echo "Results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != success ]; then echo "A frontend job ended with $r" >&2; exit 1; fi
+          done
 
   frontend-check:
     name: frontend-check
