@@ -560,7 +560,14 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 			// reply can arrive before the terminal record reaches disk.
 			var kimiCloseErr error
 			if p.Harness == profile.HarnessKimiCode {
-				kimiCloseErr = s.agent.CloseSession(ctx, s.session)
+				closeCtx, cancelClose := context.WithTimeout(context.WithoutCancel(ctx), acpCancelWait)
+				kimiCloseErr = s.agent.CloseSession(closeCtx, s.session)
+				cancelClose()
+				if kimiCloseErr != nil {
+					// An unconfirmed close can still be tearing down native
+					// state. Drop the child before any later session/load.
+					s.settled = false
+				}
 			}
 			runErr := acpStopReasonError(p.Harness, st.res.StopReason)
 			if runErr == nil && p.Harness == profile.HarnessKimiCode {
