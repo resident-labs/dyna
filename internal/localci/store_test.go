@@ -208,3 +208,43 @@ func TestStoreHostedAttemptsPersist(t *testing.T) {
 		t.Fatalf("another head inherited hosted attempts = %v", err)
 	}
 }
+
+// A machine that names no suite takes every suite, and a run whose suites no
+// one machine allows reports the suite that stops it, so a trial never waits
+// for a machine that cannot take it.
+func TestBlockedSuiteNamesTheSuiteNoMachineAllows(t *testing.T) {
+	everySuite := []Node{{Name: "all", Enabled: true}}
+	split := []Node{{Name: "go-only", Enabled: true, Suites: []string{"go"}}, {Name: "web-only", Enabled: true, Suites: []string{"frontend"}}}
+	for _, tc := range []struct {
+		name   string
+		nodes  []Node
+		suites []Suite
+		want   Suite
+		all    bool
+	}{
+		{name: "no suite named", nodes: everySuite, suites: []Suite{SuiteGo, SuiteFrontend}, all: true},
+		{name: "one machine allows all", nodes: split[:1], suites: []Suite{SuiteGo}, all: true},
+		{name: "each allowed elsewhere", nodes: split, suites: []Suite{SuiteGo, SuiteFrontend}},
+		{name: "no machine allows it", nodes: split, suites: []Suite{SuiteGo, SuiteComputerSmoke}, want: SuiteComputerSmoke},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := BlockedSuite(tc.nodes, tc.suites)
+			if tc.all {
+				if err != nil {
+					t.Fatalf("blocked a run the fleet can take: %v", err)
+				}
+				return
+			}
+			var blocked SuiteBlockedError
+			if !errors.As(err, &blocked) {
+				t.Fatalf("blocked run = %v, want a typed SuiteBlockedError", err)
+			}
+			if blocked.Suite != tc.want {
+				t.Fatalf("blocked suite = %q, want %q", blocked.Suite, tc.want)
+			}
+			if tc.want != "" && !strings.Contains(err.Error(), string(tc.want)) {
+				t.Fatalf("error does not name the suite: %v", err)
+			}
+		})
+	}
+}

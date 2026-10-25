@@ -245,6 +245,13 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
 	}
 	started, err := s.startRegisteredCI(ctx, job)
+	// A suite that no machine allows never becomes available, so the trial fails
+	// now with an error that names it instead of waiting for a machine that
+	// cannot take the run.
+	var blocked localci.SuiteBlockedError
+	if errors.As(err, &blocked) {
+		return trialCI{Status: VerdictFailed, Logs: blocked.Error(), Reason: blocked.Error()}, nil
+	}
 	if err != nil {
 		return trialCI{}, err
 	}

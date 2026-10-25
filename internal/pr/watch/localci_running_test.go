@@ -31,8 +31,8 @@ func (r *runningCIRegistry) LoadResult(context.Context, string, string) (localci
 	return localci.Result{}, os.ErrNotExist
 }
 
-// scheduledCIRunFixture offers one PR whose head needs local CI, and a service
-// that can schedule it.
+// scheduledCIRunFixture offers one pull request in a merge trial whose head
+// needs local CI, and a service that can schedule it.
 func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 	t.Helper()
 	repo := t.TempDir()
@@ -67,8 +67,9 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 		t.Fatal(err)
 	}
 
-	record := &Record{Key: "pr", Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Number: 17, RoomID: rm.ID, Title: "Show running local CI per machine", URL: "https://github.com/owner/repo/pull/17", Head: head, Base: base, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
-	saved := State{Version: 1, Records: map[string]*Record{record.Key: record}}
+	record := &Record{Key: "pr", Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Number: 17, RoomID: rm.ID, Title: "Show running local CI per machine", URL: "https://github.com/owner/repo/pull/17", Head: head, Base: base, Branch: "dyna/merge-trial/7", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
+	batch := &state.MergeTrial{Phase: state.MergeTrialPhaseRunning, Branch: record.Branch, Base: base, Head: head, Changes: []state.MergeTrialChange{{Key: record.Key, Head: head}}, Created: time.Unix(2, 0)}
+	saved := State{Version: 1, Records: map[string]*Record{record.Key: record}, MergeTrials: map[string]*state.MergeTrial{defaultRepo(*record): batch}}
 	if err := state.Write(root, saved); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,22 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 	// Each fixture owns its run set, so no run from another test can wait on this
 	// test's engine stop.
 	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Notify: notify.New(rooms, subagent.NewManager()), Now: func() time.Time { return started }, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{}}}
-	s.GH.run = func(context.Context, *exec.Cmd) error { return nil }
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		if filepath.Base(cmd.Path) == "git" {
+			return nil
+		}
+		for _, arg := range cmd.Args {
+			switch {
+			case strings.Contains(arg, "check-runs?"):
+				return writeFakeJSON(cmd.Stdout, checkRunsResponse{})
+			case strings.Contains(arg, "actions/runs?"):
+				return writeFakeJSON(cmd.Stdout, workflowRunsResponse{})
+			case strings.Contains(arg, "/statuses?"):
+				return writeFakeJSON(cmd.Stdout, []Status{})
+			}
+		}
+		return writeFakeJSON(cmd.Stdout, emptyResponse{})
+	}
 	return s, saved, started
 }
 
@@ -116,13 +132,14 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 		t.Fatalf("running CI = %+v", list)
 	}
 	got := list[0]
-	if got.Machine != "hermes" || got.Slots != registeredCIRunSlots || got.Repo != "owner/repo" || got.Number != 17 || got.Head != head[:7] || got.Trial || !got.Started.Equal(started) {
+	if got.Machine != "hermes" || got.Slots != registeredCIRunSlots || got.Repo != "owner/repo" || got.Number != 17 || got.Head != head[:7] || !got.Trial || !got.Started.Equal(started) {
 		t.Fatalf("running CI = %+v", got)
 	}
 	if got.Title != record.Title || got.URL != record.URL {
 		t.Fatalf("running CI names %q at %q, want the PR", got.Title, got.URL)
 	}
-	if suites := strings.Join(got.Suites, ","); suites != "go,cross" {
+	// A merge trial runs every workflow suite, not only the ones its files select.
+	if suites := strings.Join(got.Suites, ","); suites != "relay,go,cross,computer-smoke" {
 		t.Fatalf("running CI suites = %q", suites)
 	}
 
@@ -264,9 +281,10 @@ func hostedJob(t *testing.T, e *testEnv, local Record) *Record {
 	return &r
 }
 
-// A local trial enters the one admission queue before ordinary pull request
-// heads, so a backlog of hosted work cannot starve a local merge.
-func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
+// One slot is enough for the local trial: a tracked pull request head never
+// queues for a machine, so a backlog of pull requests cannot starve a local
+// merge.
+func TestLocalTrialTakesTheOnlySlotWithoutPullRequestHeads(t *testing.T) {
 	e, record, dir, ci := localCIEnv(t)
 	e.s.LocalCIRegistry = &oneSlotRegistry{}
 	hostedJob(t, e, record)
@@ -289,10 +307,9 @@ func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
 	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
 		t.Fatal(err)
 	}
-	// Both kinds of work are queued, and the one slot went to the local trial, so
-	// the pull request head still waits.
-	if jobs := registeredCIJobs(st); len(jobs) != 2 {
-		t.Fatalf("queue holds %d jobs, want the local trial and the pull request", len(jobs))
+	// The queue holds the trial alone, and the pull request head is not in it.
+	if jobs := registeredCIJobs(st); len(jobs) != 1 || !jobs[0].trial {
+		t.Fatalf("queue holds %+v, want the local trial alone", jobs)
 	}
 	runs := e.s.RunningCI()
 	if len(runs) != 1 || runs[0].Head != trialHead[:7] || runs[0].Kind != RunningCILocalChange {
