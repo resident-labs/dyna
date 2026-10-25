@@ -187,6 +187,9 @@ var Rules = []Rule{
 	{Action: "root attach", Allowed: []Role{Owner}, Instead: "run dyna root attach from an external shell"},
 	{Action: "root detach", Allowed: []Role{Owner}, Instead: "run dyna root detach from an external shell"},
 	{Action: "subagent start", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
+	// The owner display belongs to the human owner, so no agent session grants
+	// it, not even one that already holds a grant.
+	{Action: "owner display grant", Allowed: []Role{Owner, Root}, Instead: "ask root or the owner to start a session that uses your display"},
 	{Action: "subagent stop", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control sessions"},
 	{Action: "subagent close", Allowed: []Role{Owner, Root}, Relations: []Relation{NotSelf}, Instead: "a session becomes dormant when its turn ends, so it does not close itself"},
 	{Action: "subagent reopen", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
