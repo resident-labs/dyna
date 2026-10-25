@@ -323,6 +323,14 @@ func (a *Agent) Prompt(ctx context.Context, sessionID string, blocks []PromptBlo
 	return result, nil
 }
 
+// CloseSession releases a native session while retaining its persisted history.
+func (a *Agent) CloseSession(ctx context.Context, sessionID string) error {
+	params := struct {
+		SessionID string `json:"sessionId"`
+	}{SessionID: sessionID}
+	return a.c.Request(ctx, "session/close", params, nil)
+}
+
 // Cancel asks the agent to interrupt the running prompt for sessionID.
 func (a *Agent) Cancel(sessionID string) error {
 	return a.c.Notify("session/cancel", CancelParams{SessionID: sessionID, Meta: CancelMeta{CancelTrigger: CancelTriggerInterrupt}})

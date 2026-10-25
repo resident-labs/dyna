@@ -1496,9 +1496,9 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 			errTail = tail(strings.TrimSpace(a.stdout), 2000)
 		}
 		if errTail == "" {
-			return fmt.Errorf("worker %s (%s) failed: %v", p.Name, commandName(argv), a.runErr)
+			return fmt.Errorf("worker %s (%s) failed: %w", p.Name, commandName(argv), a.runErr)
 		}
-		return fmt.Errorf("worker %s (%s) failed: %v: %s", p.Name, commandName(argv), a.runErr, errTail)
+		return fmt.Errorf("worker %s (%s) failed: %w: %s", p.Name, commandName(argv), a.runErr, errTail)
 	}
 	if a.output == "" && p.Harness == profile.HarnessCodex && !workeroutput.CodexTurnCompleted(a.stdout) {
 		return fmt.Errorf("worker %s returned no final response without turn.completed", p.Name)
