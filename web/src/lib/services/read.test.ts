@@ -45,7 +45,8 @@ test('test health counts only regressions over the limit and account readings ke
     { ignored: 'allowed', runs: [{ durationMs: 1100 }, { durationMs: 900 }] },
     { runs: [{ durationMs: 1100 }] },
   ] }), { count: 1, limitMs: 1000 })
-  assert.deepEqual(readAccounts({ accounts: [{ observedAt: '2026-10-21T01:00:00Z', stale: true }] }), { count: 1, at: '2026-10-21T01:00:00Z', stale: true })
+  assert.deepEqual(readAccounts({ providers: [{ provider: 'zai', accounts: [{ observedAt: '2026-10-21T01:00:00Z', stale: true }] }] }), { count: 1, at: '2026-10-21T01:00:00Z', stale: true })
+  assert.equal(readAccounts({ accounts: [] }), null, 'the retired account list shape is not read')
   assert.equal(readHookSummary({}), null)
   assert.equal(readTestHealth({}), null)
 })

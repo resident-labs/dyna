@@ -73,8 +73,11 @@ export { termAttach }
 
 export const api = {
 
-  accountUsageCached: () => app.AccountUsageCached(),
-  accountUsage: (refresh = false) => app.AccountUsage(refresh),
+  accountsView: (scope = '') => app.AccountsView(scope),
+  accountsList: (scope = '', refresh = false) => app.AccountsList(scope, refresh),
+  accountsUse: (id: string, scope = '') => app.AccountsUse(id, scope),
+  accountsAdd: (harness: string, provider: string, label: string, key: string) => app.AccountsAdd(harness, provider, label, key),
+  accountsRemove: (id: string) => app.AccountsRemove(id),
   profileModels: (harness: string, refresh = false) => app.ProfileModels(harness, refresh),
   usageRollup: (roomId = '', from: string, to: string) => app.UsageRollup(roomId, from, to),
   profileUsage: (from: string, to: string) => app.ProfileUsage(from, to),
@@ -306,7 +309,6 @@ export const api = {
  privateRuntimeSwitchState: (harness: string) => app.PrivateRuntimeSwitchState(harness),
  cancelPrivateRuntimeAccountSwitch: (harness: string, requestId: string) => app.CancelPrivateRuntimeAccountSwitch(harness,requestId),
  confirmPrivateRuntimeAccountSwitch: (harness: string, requestId: string, stopConfirmed = false) => app.ConfirmPrivateRuntimeAccountSwitch(harness,requestId,stopConfirmed),
- switchPrivateRuntimeAccount: (id: string, confirmed: boolean) => app.SwitchPrivateRuntimeAccount(id,confirmed),
  previewPrivateConfig: (id: string) => app.PreviewPrivateConfig(id),
  importPrivateConfig: (id: string, hash: string) => app.ImportPrivateConfig(id,hash),
  privateRuntimes: () => app.PrivateRuntimes(),
@@ -323,7 +325,6 @@ export const api = {
  cancelPrivateRuntimeLogin: (id: string) => app.CancelPrivateRuntimeLogin(id),
  finishPrivateRuntimeLogin: (id: string) => app.FinishPrivateRuntimeLogin(id),
  removePrivateRuntimeAccount: (id: string, confirmed: boolean) => app.RemovePrivateRuntimeAccount(id,confirmed),
- harnessProviderKeys: (harness: string, action: string, provider = "", key = "") => app.HarnessProviderKeys(harness,action,provider,key),
  setAccountRepos: (id: string, repos: string[]) => app.SetAccountRepos(id,repos),
  setHarnessConfigEnabled: (kind: string, name: string, harness: string, enabled: boolean) => app.SetHarnessConfigEnabled(kind,name,harness,enabled),
  syncPrivateRuntime: (harness: string) => app.SyncPrivateRuntime(harness),

@@ -157,7 +157,7 @@ func (o Options) addCommand() *cobra.Command {
 				return err
 			}
 			var snap service.AccountsSnapshot
-			if err := o.Client.Call(c.Context(), "AccountsAdd", []any{args[0], label, key}, &snap); err != nil {
+			if err := o.Client.Call(c.Context(), "AccountsAdd", []any{"pi", args[0], label, key}, &snap); err != nil {
 				return err
 			}
 			provider := ""

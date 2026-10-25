@@ -1,9 +1,5 @@
-import type { Bundle, Capability, Doctor, HarnessAccount, HarnessSnapshot, PrivateLogin, RecommendedVersion } from '../../api/harness.ts'
+import type { Bundle, Capability, Doctor, HarnessAccount, HarnessSnapshot, RecommendedVersion } from '../../api/harness.ts'
 import { errorText } from '../../errorText.ts'
-
-// LoginFlow is a sign-in card that a harness account waits on. The pane keeps
-// it while Settings closes or changes panes.
-export type LoginFlow = PrivateLogin & { harness: string }
 
 // Confirmation is a question the pane asks before a sign-in or switch goes ahead.
 export interface Confirmation {
@@ -34,17 +30,8 @@ export const HARNESS_ORDER: HarnessMeta[] = [
   { id: 'muse', iconId: 'muse', name: 'Muse', short: 'Muse' },
 ]
 
-// Harnesses that take API keys for providers, kept in their private home.
-export const takesProviderKeys = (id: string): boolean => ['pi', 'opencode'].includes(id)
-
 // Pi offers its providers' OAuth logins alongside the API-key form.
 export const hasSubscriptionLogin = (id: string): boolean => HARNESS_ORDER.some((harness) => harness.id === id)
-
-// filterProviders narrows the picker to names or IDs that contain every typed word.
-export function filterProviders<C extends { name: string; id: string }>(choices: C[] | null | undefined, query?: string | null): C[] {
-  const words = String(query ?? '').toLowerCase().split(/\s+/).filter(Boolean)
-  return (choices ?? []).filter((c) => words.every((w) => `${c.name} ${c.id}`.toLowerCase().includes(w)))
-}
 
 export function harnessMeta(id: string): HarnessMeta {
   return HARNESS_ORDER.find((h) => h.id === id) ?? { id, iconId: id, name: id, short: id }
@@ -97,59 +84,8 @@ export function recommendedVersion(row?: { recommendation?: RecommendedVersion |
   return ['pinned', 'resolved'].includes(candidate?.status ?? '') && exactVersion(candidate?.version) ? candidate.version.trim() : ''
 }
 
-export function recoveredLogins<F extends { accountId: string; harness?: string }>(flows: F[] | null | undefined, accounts: HarnessAccount[] | null | undefined): (F & { harness: string })[] {
-  return (flows ?? []).flatMap((flow) => {
-    const harness = (accounts ?? []).find((account) => account.id === flow.accountId)?.harness ?? flow.harness
-    return harness ? [{ ...flow, harness }] : []
-  })
-}
-
-// signInStatus words the step of an in-app sign-in for the shared card. A
-// failure repeats the engine's message, which names the missing step.
-const SIGN_IN_STATUS: Record<string, string> = {
-  waiting: 'Waiting for you to approve the sign-in.',
-  verifying: 'Checking the sign-in…',
-  succeeded: 'Signed in.',
-  cancelled: 'Sign-in cancelled.',
-}
-export function signInStatus(state?: { phase?: string; message?: string } | null): string {
-  if (state?.phase === 'waiting' && state.message) return state.message
-  if (state?.phase === 'failed') return state.message || 'Sign-in did not finish. Try again.'
-  return SIGN_IN_STATUS[state?.phase ?? ''] ?? 'Starting sign-in…'
-}
-
 export function accountNeedsSignIn(account?: { needsLogin?: boolean; status?: string } | null): boolean {
   return !!account && (!!account.needsLogin || ['not signed in', 'needs_auth', 'needs-sign-in'].includes(account.status ?? ''))
-}
-
-// accountScopeLabel says how far an account's repo limit reaches.
-export function accountScopeLabel(account: HarnessAccount): string {
-  const n = account.repos?.length ?? 0
-  return n ? `${n} ${n === 1 ? 'repo' : 'repos'} only` : 'All repos'
-}
-
-// parseScopeList turns the one-repo-per-line field into the list the engine takes.
-export function parseScopeList(text: string): string[] {
-  return text.split('\n').map((line) => line.trim()).filter(Boolean)
-}
-
-// personalLoginChoice words the dialog that offers the user's own login. A login
-// that Dyna already saved can only lead to another account.
-export function personalLoginChoice(name: string, found: { saved?: boolean; label: string }): { title: string; lines: string[]; action: string; alternative: string } {
-  if (found.saved) {
-    return {
-      title: `Sign in to ${name}`,
-      lines: [`Your personal account ${found.label} is already saved in Dyna.`],
-      action: 'Sign in with another account',
-      alternative: '',
-    }
-  }
-  return {
-    title: `Sign in to ${name}`,
-    lines: [`Dyna found your personal ${name} account ${found.label}.`, 'Use it, and Dyna copies the login once. Or sign in with another account.'],
-    action: 'Use this account',
-    alternative: 'Sign in instead',
-  }
 }
 
 // What a harness row shows: its copy, sign-in, update and status.

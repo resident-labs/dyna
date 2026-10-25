@@ -18,22 +18,36 @@ import (
 const piProviderSignInID = "pi:provider"
 
 // beginPiProviderSignIn runs Pi's provider login in a scratch home, then adds
-// the signed-in providers as accounts.
-func (a *Runtime) beginPiProviderSignIn(exe string) (PrivateLogin, error) {
+// the signed-in providers as accounts. target names the saved account whose
+// provider must take the new credential, which a sign-in again passes so a
+// second account of that provider is never written by mistake.
+func (a *Runtime) beginPiProviderSignIn(exe, target string) (PrivateLogin, error) {
 	if login := a.findPrivateLogin(piProviderSignInID); login != nil && login.signIn != nil && !login.signIn.snapshot().final() {
+		if login.target != target {
+			return PrivateLogin{}, errors.New("A Pi sign-in is already running for another account. Finish or cancel it first.")
+		}
 		state := login.signIn.snapshot()
-		return PrivateLogin{AccountID: piProviderSignInID, Harness: "pi", SignIn: &state}, nil
+		return PrivateLogin{AccountID: piProviderSignInID, Harness: "pi", Target: login.target, SignIn: &state}, nil
 	}
-	flow, err := a.piProviderFlow(exe)
+	flow, err := a.piProviderFlow(exe, target)
 	if err != nil {
 		return PrivateLogin{}, err
 	}
 	login, err := a.startPrivateSignIn(piProviderSignInID, "pi", signInSpecs["pi"], flow)
+	if err != nil {
+		return login, err
+	}
+	a.privateLoginMu.Lock()
+	if running := a.privateLogins[piProviderSignInID]; running != nil {
+		running.target = target
+	}
+	a.privateLoginMu.Unlock()
 	login.Harness = "pi"
-	return login, err
+	login.Target = target
+	return login, nil
 }
 
-func (a *Runtime) piProviderFlow(exe string) (*NativeLogin, error) {
+func (a *Runtime) piProviderFlow(exe, target string) (*NativeLogin, error) {
 	dir, err := a.Accounts.harnessDirectory("pi")
 	if err != nil {
 		return nil, err
@@ -79,7 +93,7 @@ func (a *Runtime) piProviderFlow(exe string) (*NativeLogin, error) {
 			}
 			finished = true
 			defer cleanup()
-			if result, resultErr = a.addPiSignIn(ctx, scratch); resultErr == nil {
+			if result, resultErr = a.addPiSignIn(ctx, scratch, target); resultErr == nil {
 				result, resultErr = a.Accounts.Find(result.ID)
 			}
 			return result, resultErr
@@ -99,7 +113,8 @@ func (a *Runtime) piProviderFlow(exe string) (*NativeLogin, error) {
 
 // addPiSignIn stores each provider a finished sign-in saved in scratch in that
 // provider's own account. It returns one of them, for the card that started it.
-func (a *Runtime) addPiSignIn(ctx context.Context, scratch string) (NativeAccount, error) {
+// target is the account a sign-in again must write, or empty for a new account.
+func (a *Runtime) addPiSignIn(ctx context.Context, scratch, target string) (NativeAccount, error) {
 	entries, err := piEditAuth(ctx, scratch, nil)
 	if err != nil {
 		return NativeAccount{}, err
@@ -107,7 +122,7 @@ func (a *Runtime) addPiSignIn(ctx context.Context, scratch string) (NativeAccoun
 	if len(entries) == 0 {
 		return NativeAccount{}, errors.New("Pi did not save a sign-in.")
 	}
-	saved, err := a.savePiProviderEntries(ctx, entries)
+	saved, err := a.savePiProviderEntries(ctx, entries, target)
 	if err != nil {
 		return NativeAccount{}, err
 	}

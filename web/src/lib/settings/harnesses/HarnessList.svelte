@@ -10,18 +10,14 @@
     rows,
     selected,
     busy = false,
-    signingIn = false,
     onselect,
     oninstall,
-    onsignin,
   }: {
     rows: HarnessRow[]
     selected: string
     busy?: boolean
-    signingIn?: boolean
     onselect: (id: string) => void
     oninstall: (row: HarnessRow, pin?: string) => void
-    onsignin: (row: HarnessRow) => void
   } = $props()
 </script>
 
@@ -38,11 +34,9 @@
       {#if r.installing}
         <span class="progress" role="progressbar" aria-label={`Installing ${r.meta.name}`} in:fade={{ duration: motion(BASE) }}></span>
       {:else if r.needsInstall}
-        <button class="btn pri" disabled={busy || signingIn || !r.capability?.installSupported} onclick={() => oninstall(r)}>Install</button>
-      {:else if r.needsSignIn && !r.capability?.accountBlocked}
-        <button class="btn pri" disabled={busy || signingIn} onclick={() => onsignin(r)}>Sign in</button>
+        <button class="btn pri" disabled={busy || !r.capability?.installSupported} onclick={() => oninstall(r)}>Install</button>
       {:else if r.update}
-        <button class="btn" disabled={busy || signingIn} title={`Update to ${r.update}`} onclick={() => oninstall(r, r.update)}><span class="up" aria-hidden="true">↑</span>Update</button>
+        <button class="btn" disabled={busy} title={`Update to ${r.update}`} onclick={() => oninstall(r, r.update)}><span class="up" aria-hidden="true">↑</span>Update</button>
       {/if}
     </div>
   {/each}

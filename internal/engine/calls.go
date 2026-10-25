@@ -404,7 +404,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "CreateRoom", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.createRoom},
 		{Name: "CreateRoomRecord", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.createRoomRecord},
 		{Name: "RestartPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.RestartPrivateRuntimeLogin},
-		{Name: "SwitchPrivateRuntimeAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.switchAccount},
 		{Name: "PrivateRuntimeSwitchState", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.PrivateRuntimeSwitchState},
 		{Name: "CancelPrivateRuntimeAccountSwitch", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.CancelPrivateRuntimeAccountSwitch},
 		{Name: "ConfirmPrivateRuntimeAccountSwitch", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.ConfirmPrivateRuntimeAccountSwitch},
@@ -439,11 +438,13 @@ func bindings(s services) []websvc.Binding {
 		{Name: "AddHarnessSkill", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.AddHarnessSkill},
 		{Name: "RemoveHarnessConfig", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.RemoveHarnessConfig},
 		{Name: "HarnessConfig", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.HarnessConfig},
-		{Name: "AccountUsage", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accounts.AccountUsage},
-		{Name: "AccountUsageCached", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.accounts.AccountUsageCached},
 		// AccountsList is a write call because refresh asks each provider for
-		// usage and saves the answer, like AccountUsage above.
+		// usage and saves the answer. AccountsView reads the saved view only, so
+		// a read-only page (or a read-only QA pass) can still show the accounts.
+		// It keeps the read scope of the retired AccountUsageCached call, because
+		// the summary is the same data a paired read-only client already read.
 		{Name: "AccountsList", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsList},
+		{Name: "AccountsView", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.accountsView},
 		{Name: "AccountsUse", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsUse},
 		{Name: "AccountsRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsRemove},
 		// AccountsAdd saves an API key from the Accounts add form and the CLI,
@@ -551,16 +552,6 @@ func (s services) systemLoad() SystemLoad {
 	return out
 }
 
-// switchAccount activates an account, then reads its usage in the background,
-// so the Usage page and turn headers show a current reading, not an old one.
-func (s services) switchAccount(id string, confirmed bool) (harnessruntime.PrivateRuntimeSnapshot, error) {
-	snap, err := s.runtime.SwitchPrivateRuntimeAccount(id, confirmed)
-	if err == nil {
-		go s.accounts.AccountUsage(context.Background(), true)
-	}
-	return snap, err
-}
-
 // accountsList returns the Accounts view grouped by provider. scope is a room
 // reference, whose row overrides the global one, or empty for the global
 // selection alone.
@@ -570,6 +561,16 @@ func (s services) accountsList(ctx context.Context, scope string, refresh bool) 
 		return service.AccountsSnapshot{}, err
 	}
 	return s.accounts.Accounts(ctx, roomID, refresh), nil
+}
+
+// accountsView returns the Accounts view of its saved readings, without asking a
+// provider for new usage: a read that changes nothing.
+func (s services) accountsView(ctx context.Context, scope string) (service.AccountsSnapshot, error) {
+	roomID, err := s.accountScope(scope)
+	if err != nil {
+		return service.AccountsSnapshot{}, err
+	}
+	return s.accounts.Accounts(ctx, roomID, false), nil
 }
 
 // accountsUse makes an account the one its provider uses in scope: that room
@@ -614,9 +615,11 @@ func (s services) accountScope(scope string) (string, error) {
 	return rec.ID, nil
 }
 
-// accountsAdd adds an API key as a new account of one provider. The CLI reads
-// the key from standard input and sends it once; it is never a CLI argument.
-func (s services) accountsAdd(ctx context.Context, provider, label, key string) (service.AccountsSnapshot, error) {
+// accountsAdd adds an API key as a new account of one provider for harness:
+// empty or "pi" keeps it in a Pi account, and "opencode" creates an OpenCode
+// account. The CLI reads the key from standard input and sends it once; it is
+// never a CLI argument.
+func (s services) accountsAdd(ctx context.Context, harness, provider, label, key string) (service.AccountsSnapshot, error) {
 	p, ok := harnessruntime.PiProvider(provider)
 	if !ok {
 		return service.AccountsSnapshot{}, errors.New("Unknown provider. Choose a provider Dyna knows, such as anthropic, deepseek or zai.")
@@ -624,7 +627,7 @@ func (s services) accountsAdd(ctx context.Context, provider, label, key string) 
 	if key == "" {
 		return service.AccountsSnapshot{}, errors.New("An API key is required on standard input.")
 	}
-	if _, err := s.runtime.AddProviderKey(ctx, p, label, key); err != nil {
+	if _, err := s.runtime.AddProviderKey(ctx, harness, p, label, key); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
 	return s.accounts.Accounts(ctx, "", false), nil

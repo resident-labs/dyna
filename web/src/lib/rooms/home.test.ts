@@ -1,18 +1,31 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { accountRows, updateRows, rootQuestions, allClear } from './home.ts'
+import { account } from '../../../test/account-fixtures.ts'
+import type { ScopeAccount } from '../api/account.ts'
 
-test('working accounts with a usage reading are cards; login and quota problems are alert rows', () => {
-  const { cards, alerts } = accountRows({ accounts: [
-    { id: 'c', harness: 'claude-code', label: 'claude-code', active: true, windows: [{ id: 'five_hour', label: '5h', remainingPercent: 40 }] },
-    { id: 'q', harness: 'codex', label: 'quiet', active: true, windows: [] },
-    { id: 'n', harness: 'grok', label: 'grok', active: true, windows: [{ id: 'weekly', label: 'Weekly' }] },
-    { id: 'o', harness: 'opencode', label: 'argon', active: true, quotaBlocked: true, blockingQuotaWindows: ['seven_day'] },
-    { id: 'x', harness: 'codex', label: 'spare', active: false, needsLogin: true },
+// One row of a provider group, with every account field its type requires.
+const row = (fields: Partial<ScopeAccount> & Pick<ScopeAccount, 'id'>): ScopeAccount => ({ ...account({ id: fields.id, harness: 'pi' }), activeHere: true, ...fields })
+
+test('working accounts with a usage reading are cards of their provider; login and quota problems are alert rows', () => {
+  const { cards, alerts } = accountRows({ providers: [
+    { provider: 'anthropic', accounts: [
+      row({ id: 'c', provider: 'anthropic', label: 'Claude work', windows: [{ id: 'five_hour', label: '5h', remainingPercent: 40 }] }),
+      row({ id: 'q', provider: 'anthropic', label: 'Claude home', windows: [] }),
+    ] },
+    { provider: 'xai', accounts: [
+      row({ id: 'n', provider: 'xai', label: 'Grok', windows: [{ id: 'weekly', label: 'Weekly' }] }),
+    ] },
+    { provider: 'meta-muse', accounts: [
+      row({ id: 'o', provider: 'meta-muse', label: 'Muse', quotaBlocked: true, blockingQuotaWindows: ['seven_day'] }),
+    ] },
+    { provider: 'chatgpt', accounts: [
+      row({ id: 'x', provider: 'chatgpt', label: 'Spare', activeHere: false, needsLogin: true }),
+    ] },
   ] })
-  assert.deepEqual(cards.map((a) => a.id), ['c'])
+  assert.deepEqual(cards.map((group) => [group.provider, group.accounts.map((a) => a.id)]), [['anthropic', ['c']]])
   assert.deepEqual(alerts.map((a) => [a.id, a.text, a.action]), [
-    ['o', 'argon: Weekly limit reached', 'Details'],
+    ['o', 'Muse: Weekly limit reached', 'Details'],
   ])
 })
 
@@ -54,15 +67,15 @@ test('the home screen shows only open questions root asked the human', () => {
   assert.deepEqual(rootQuestions(rooms, questions).map((r) => [r.key, r.room.id, r.text]), [['a:q1', 'a', 'Ship it?'], ['c:q1', 'c', 'Merge?']])
 })
 
-test('home uses the shared grouping and includes known subscriptions without percentages', async () => {
-  const { usageGroups } = await import('../settings/usage/state.ts')
-  const accounts = [
-    { id: 'weekly', harness: 'grok', active: true, plan: { id: 'x-subscription', label: 'X Subscription (weekly)' }, windows: [{ id: 'weekly', label: 'Weekly' }] },
-    { id: 'second', harness: 'grok', active: true, plan: { id: 'x-subscription', label: 'X Subscription (weekly)' } },
-    { id: 'legacy', harness: 'grok', active: true, plan: { id: 'grok-legacy', label: 'Legacy (monthly)' } },
-    { id: 'inactive', harness: 'grok', active: false, plan: { id: 'x-subscription', label: 'X Subscription (weekly)' } },
-  ]
-  assert.deepEqual(accountRows({ accounts }).cards, usageGroups(accounts.filter(a => a.active)))
+test('home keeps a provider card for a known plan that reports a period without a percentage', () => {
+  const { cards } = accountRows({ providers: [
+    { provider: 'xai', accounts: [
+      row({ id: 'weekly', provider: 'xai', plan: { id: 'x-subscription', label: 'X Subscription (weekly)' }, windows: [{ id: 'weekly', label: 'Weekly' }] }),
+      row({ id: 'legacy', provider: 'xai', plan: { id: 'grok-legacy', label: 'Legacy (monthly)' } }),
+      row({ id: 'inactive', provider: 'xai', activeHere: false, plan: { id: 'x-subscription', label: 'X Subscription (weekly)' } }),
+    ] },
+  ] })
+  assert.deepEqual(cards.map((group) => [group.provider, group.accounts.map((a) => a.id)]), [['xai', ['weekly', 'legacy']]])
 })
 
 test('home says all clear only after every source loaded and none needs the owner', () => {

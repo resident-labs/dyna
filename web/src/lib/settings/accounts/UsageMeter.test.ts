@@ -5,7 +5,7 @@ import { createTestServer } from '../../../../test/ssr-server.ts'
 // The server starts outside the test clock; the test measures only the render.
 const vite = await createTestServer({ after })
 const { render } = await vite.ssrLoadModule('svelte/server')
-const { default: Meter } = await vite.ssrLoadModule('/src/lib/settings/usage/UsageMeter.svelte')
+const { default: Meter } = await vite.ssrLoadModule('/src/lib/settings/accounts/UsageMeter.svelte')
 
 test('usage meters show uncertain resets without a numeric meter in both layouts', () => {
   for (const compact of [false, true]) {
@@ -21,7 +21,7 @@ test('usage meters show uncertain resets without a numeric meter in both layouts
 
 // Bundle outside the test clock; the regression measures only a mounted view.
 const { bundle, domNames, importBundle, installDom } = await import('../../prs/prDetailHarness.ts')
-const meterCode = await bundle({ component: '../settings/usage/UsageMeter' })
+const meterCode = await bundle({ component: '../settings/accounts/UsageMeter' })
 type Harness = {
   dir: string
   default: unknown
