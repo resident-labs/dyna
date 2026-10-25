@@ -105,8 +105,7 @@ func TestReplyAddressForSenderClasses(t *testing.T) {
 // a reply hint would send the agent's answer to the wrong room.
 func TestEngineNoticeHeaderNamesNoReply(t *testing.T) {
 	e := newTestEnv(t)
-	lead := startNamed(e, "lead", "RESPOND: lead")
-	e.owner()
+	lead := completedFixtureSession(t, e)
 	msg, err := e.m.rooms().PostEventInput(room.PostEventInput{
 		RoomID:     e.room.ID,
 		Event:      room.SessionEvent{Type: room.SessionInstructions, Session: lead.Address(), Detail: "- a changed line"},
