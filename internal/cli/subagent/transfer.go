@@ -31,7 +31,9 @@ conversation instead. Every other pair starts a fresh conversation as described
 above.
 
 The handoff wait is bounded (default 30 seconds). A failed old agent uses the
-transcript immediately. Status and cancel are durable; repeating the same
+transcript immediately. A running old turn holds the ask until that bound ends;
+the transfer then stops the turn and uses the transcript, so it never waits
+without end. Status and cancel are durable; repeating the same
 request while it runs recovers a dead coordinator without creating another
 replacement. Naming the profile and model the session already runs starts
 another conversation in the same session instead.
