@@ -32,8 +32,8 @@ func (s services) machineCI() []websvc.MachineCIRun {
 	out := make([]websvc.MachineCIRun, 0, len(runs))
 	for _, run := range runs {
 		out = append(out, websvc.MachineCIRun{
-			Machine: run.Machine, Number: run.Number, Title: run.Title, URL: run.URL,
-			Slots: run.Slots, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
+			Machine: run.Machine, Number: run.Number, Kind: string(run.Kind), Branch: run.Branch,
+			Title: run.Title, URL: run.URL, Slots: run.Slots, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
 		})
 	}
 	return out

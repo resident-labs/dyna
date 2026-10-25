@@ -322,6 +322,45 @@ func TestHeldMergeQueueAdmitsNoLocalRun(t *testing.T) {
 	}
 }
 
+// The machine view names what a run checks, so a local change and an
+// integration sync, which have no pull request number, read clearly.
+func TestRunningCINamesLocalAndSyncWork(t *testing.T) {
+	s, saved, _ := scheduledCIRunFixture(t)
+	record := saved.Records["pr"]
+	localHead := addCommit(t, record.RepoPath, "local.txt")
+	local := *record
+	local.Key, local.Kind, local.Head, local.Number = "local", "local", localHead, 0
+	local.Title, local.Branch = "Add parser bounds", "fix/parser-bounds"
+	syncHead := addCommit(t, record.RepoPath, "sync.txt")
+	sync := Record{Kind: "local", Key: "integration", RepoPath: record.RepoPath, Head: syncHead, RoomID: record.RoomID}
+	lane := newFakeNodeWork()
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		return lane.work(ctx)
+	}
+	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
+		t.Fatal(err)
+	}
+	<-lane.started
+	if _, err := s.localSyncCI(context.Background(), sync, syncHead); err != nil {
+		t.Fatal(err)
+	}
+	runs := map[string]RunningCI{}
+	for _, run := range s.RunningCI() {
+		runs[run.Head] = run
+	}
+	change, ok := runs[localHead[:7]]
+	if !ok || change.Kind != RunningCILocalChange || change.Branch != local.Branch || change.Number != 0 {
+		t.Fatalf("local change run = %+v", change)
+	}
+	integration, ok := runs[syncHead[:7]]
+	if !ok || integration.Kind != RunningCISync || integration.Number != 0 || integration.Title != "" {
+		t.Fatalf("sync run = %+v", integration)
+	}
+	s.CancelLocalCI()
+	close(lane.teardown)
+	<-lane.finished
+}
+
 // A poll tick never cancels a local head's run. No hosted poll decides that
 // head, so only the engine's stop ends its run.
 func TestPollTickKeepsALocalRunInFlight(t *testing.T) {
