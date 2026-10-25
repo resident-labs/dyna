@@ -9,6 +9,37 @@ import (
 	"time"
 )
 
+// Every published wrapper execs the copy the current link names. Pruning older
+// images must keep it, or the next harness turn starts a wrapper with no
+// executable.
+func TestPruneKeepsCurrentImage(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "dyna-0000000000000001")
+	if err := os.WriteFile(current, []byte("image"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(current, filepath.Join(dir, currentImageLink)); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(current, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < stableImageCopies; i++ {
+		newer := filepath.Join(dir, "dyna-100000000000000"+string(rune('0'+i)))
+		if err := os.WriteFile(newer, []byte("image"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(newer, stamp.Add(time.Duration(i)*time.Minute), stamp.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneStableExecutables(dir, filepath.Join(dir, "dyna-2000000000000000"))
+	if _, err := os.Stat(current); err != nil {
+		t.Fatalf("pruned the image the current link names: %v", err)
+	}
+}
+
 // dyna publishes this path as $DYNA_BIN, in every harness MCP server command
 // and in the tool home it hands to workers. A turn that ends must not take the
 // binary with it, or the next turn starts an MCP server that cannot run and
