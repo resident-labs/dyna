@@ -31,6 +31,7 @@
 
   interface Props {
     readOnly?: boolean
+    onstop?: ((member: Member) => void) | null
     onreopen?: ((member: Member) => Promise<void>) | null
     reopening?: string
     ondismisssession?: ((member: Member) => Promise<void>) | null
@@ -64,7 +65,7 @@
     readingHistory?: boolean
     onpending?: ((pending: boolean) => void) | null
   }
-  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onsession = onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false), onpending = null }: Props = $props()
+  let { readOnly = false, onstop = null, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onsession = onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false), onpending = null }: Props = $props()
   // One selected post for the message list and one for the open thread (postSelect.ts).
   const listSelection = createSelection()
   const threadSelection = createSelection()
@@ -273,7 +274,7 @@
       </HistoryList>
       {/key}
       {#if m.state === 'live'}
-        <p class="working"><span class="dot" aria-hidden="true"></span>{m.name} is {sessionStatus(m)}</p>
+        <p class="working"><span class="dot" aria-hidden="true"></span><span>{m.name} is {sessionStatus(m)}</span>{#if onstop && !readOnly}<button onclick={() => onstop(m)}>Stop</button>{/if}</p>
       {/if}
     </div>
 
@@ -384,7 +385,8 @@
   .notice { color: var(--gold); padding: var(--s2) var(--s4); margin: 0; font-size: var(--t-ui); border-bottom: 1px solid var(--line-soft); }
   .notice button { color: inherit; text-decoration: underline; font: inherit; }
   .working { display: flex; align-items: center; gap: var(--s2); margin: 14px var(--s4) 0 56px; font-size: var(--t-ui); color: var(--gold); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: pulse 1.6s ease-in-out infinite; }
+  .working button { flex: none; padding: var(--s2) var(--s1); color: var(--coral); }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: 0.35; } }
 
   .composer { padding: 0 var(--s4) 6px; flex: none; }
