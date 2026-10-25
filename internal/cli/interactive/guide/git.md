@@ -207,16 +207,100 @@ Manual CI can also run one commit over the configured SSH destination:
 
 ```sh
 dyna git ci run <sha>
-dyna git ci run <sha> --suite go
-dyna git ci run <sha> --node local --suite relay
+dyna git ci run <sha> --suite test
+dyna git ci run <sha> --node local
 dyna git ci show <sha> --json
 ```
 
 `--node local` selects this machine, so older scripts keep working. Any other
 name selects the machine with that name.
 
-Use `--suite relay,frontend,go,cross-build` to select suites.
+Use `--suite test` to select one or more suites from `.dyna/local-ci.yaml`,
+comma separated.
+
 The configured SSH destination is `localci.remote`.
+
+### The repository file
+
+A repository opts in with `.dyna/local-ci.yaml` at its root. Dyna reads the
+file from the Git commit, not from the working tree. A repository without the
+file keeps hosted CI and starts no local run.
+
+The file must be one YAML document with `version: 1`. Dyna rejects unknown
+keys. `checks`, `suites` and `trial` must be nonempty. `trial` lists the suites
+a merge trial runs and the suites a pull request can select.
+
+- `checks` declares commands. Every check needs `id` and `command`, and `image`
+  unless it sets `host: true`. Other keys are `name` (defaults to `id`), `env`,
+  `caches`, `reports` (`none`, `junit` or `go`), `providerGroup`, `priority`,
+  `hostUser` and `setup`.
+- `caches` declares `name`, `target` (a clean absolute container path) and
+  `env` (the variable that receives the host path). A container check needs the
+  cache `target`; a host check needs the cache `env`.
+- `suites` groups checks for one run: `id`, `checks`, optional RE2 `files`
+  patterns, and an optional aggregate `group`. A trial suite runs when one
+  `files` pattern matches a changed repository path. A suite without `files`
+  is not selected by a pull request.
+
+A `host: true` check runs on the machine without a container. It cannot set
+`image`, `hostUser` or `setup`. Host checks stay off even when the file asks
+for them: only the machine owner can allow them, with
+`dyna machine edit <name> --allow-host-checks`.
+
+A Rust repository with cargo test and clippy:
+
+```yaml
+version: 1
+
+trial: [test]
+
+caches:
+  - name: cargo
+    target: /cache/cargo
+    env: CARGO_HOME
+
+checks:
+  - id: cargo-test
+    image: rust:slim
+    command: cargo test --locked
+    caches: [cargo]
+  - id: clippy
+    image: rust:slim
+    command: cargo clippy --locked -- -D warnings
+    caches: [cargo]
+
+suites:
+  - id: test
+    files: ['^src/', '^Cargo\.toml$', '^Cargo\.lock$']
+    checks: [cargo-test, clippy]
+```
+
+A Python repository with pytest:
+
+```yaml
+version: 1
+
+trial: [test]
+
+caches:
+  - name: pip
+    target: /cache/pip
+    env: PIP_CACHE_DIR
+
+checks:
+  - id: pytest
+    image: python:3.13-slim
+    command: python -m pip install -e . && python -m pytest --junitxml=/reports/pytest.xml
+    caches: [pip]
+    reports: junit
+
+suites:
+  - id: test
+    files: ['^src/', '^tests/', '^pyproject\.toml$']
+    checks: [pytest]
+```
+
+The full reference is `docs/local-ci.md` in the dyna repository.
 
 ## Hold and release
 

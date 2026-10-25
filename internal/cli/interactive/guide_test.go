@@ -344,6 +344,22 @@ func TestGitGuideRootMergeControls(t *testing.T) {
 	}
 }
 
+// An agent in any repository must find the local CI file and its keys from the
+// git guide, not only from the dyna checkout's docs/local-ci.md.
+func TestGitGuideDocumentsRepositoryLocalCIDefinition(t *testing.T) {
+	doc := topicDocument(t, "git")
+	for _, want := range []string{
+		"`.dyna/local-ci.yaml`", "`checks`, `suites` and `trial`",
+		"`image`", "`caches`", "RE2 `files`", "`host: true`",
+		"--allow-host-checks", "docs/local-ci.md",
+		"rust:slim", "python:3.13-slim",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("git guide misses local CI definition %q", want)
+		}
+	}
+}
+
 func TestSteeringGuideAsksForNoAcknowledgement(t *testing.T) {
 	doc := topicDocument(t, "steering")
 	if strings.Contains(doc, "acknowledge at the next safe boundary") {
