@@ -192,7 +192,7 @@
   .rail.phone .room-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; line-height: var(--leading-tight); }
   .rail.phone .badge { position: static; flex: none; min-width: 20px; height: 20px; border: 0; }
   .rail.phone .live { position: static; flex: none; width: 8px; height: 8px; border: 0; }
-  .rail.phone .room-actions { display: grid; place-items: center; flex: none; width: 40px; height: 44px; border-radius: 8px; color: var(--muted); }
+  .rail.phone .room-actions { display: grid; place-items: center; flex: none; width: 40px; height: 44px; border-radius: 8px; color: var(--muted); transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   .rail.phone .sep { width: calc(100% - 16px); margin: var(--s1) var(--s2); align-self: center; }
   .rail.phone .slot.sel .tile { border-radius: 8px; background: var(--select); color: var(--ink); }
   .rail.phone .slot.sel .home { color: var(--iris); }
@@ -201,4 +201,5 @@
     .rail.phone .slot:hover .tile { border-radius: 8px; background: var(--hover); color: var(--ink); }
     .rail.phone .room-actions:hover { background: var(--hover); color: var(--ink); }
   }
+  .rail.phone .room-actions:active { background: var(--select); color: var(--ink); }
 </style>
