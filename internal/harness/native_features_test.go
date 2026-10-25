@@ -282,3 +282,24 @@ func TestPiSessionKeepsMCPWhileExcludingNativeBash(t *testing.T) {
 		}
 	}
 }
+
+// Catalog MCP servers keep Pi's default codemode exposure, and Pi reaches
+// those tools only through builtin:codemode. Without it they connect but
+// cannot be called (D-99).
+func TestPiSessionLoadsCodemodeForCatalogMCPTools(t *testing.T) {
+	inv, err := buildInvocationWithExecution(profile.Profile{Harness: profile.HarnessPi}, "task", ExecutionOptions{DisableNativeSubagents: true, DynaShell: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.cleanup != nil {
+		defer inv.cleanup()
+	}
+	for _, spec := range []commandSpec{inv.initial, inv.resume("session-id", "next")} {
+		if !hasOptionValue(spec.argv, "-e", "builtin:codemode") {
+			t.Errorf("catalog MCP tools are unreachable: %v", spec.argv)
+		}
+		if !hasOptionValue(spec.argv, "-e", "builtin:mcp") {
+			t.Errorf("MCP support is not loaded: %v", spec.argv)
+		}
+	}
+}
