@@ -3,6 +3,7 @@ package ci
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,24 @@ func TestFindNodeSelectsMachines(t *testing.T) {
 	}
 	if _, ok := findNode([]localci.Node{{Name: "this-box", Enabled: false}}, "local"); ok {
 		t.Fatal("findNode used a disabled local machine")
+	}
+}
+
+func TestDefaultNodeUsesTheOnlyEnabledMachine(t *testing.T) {
+	one := []localci.Node{{Name: "this-box", Enabled: true}, {Name: "paused", SSH: "ari@paused"}}
+	if node, err := defaultNode(one); err != nil || node.Name != "this-box" {
+		t.Fatalf("defaultNode(one) = %q, %v", node.Name, err)
+	}
+	if _, err := defaultNode([]localci.Node{{Name: "paused", SSH: "ari@paused"}}); err == nil {
+		t.Fatal("defaultNode accepted a registry with no enabled machine")
+	}
+	two := []localci.Node{{Name: "hermes", SSH: "pip@hermeslab", Enabled: true}, {Name: "builder", SSH: "ari@builder", Enabled: true}}
+	node, err := defaultNode(two)
+	if err == nil || node.Name != "" {
+		t.Fatalf("defaultNode(two) = %q, %v; want a request for --node", node.Name, err)
+	}
+	if want := "builder, hermes"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not name the machines %q", err, want)
 	}
 }
 
