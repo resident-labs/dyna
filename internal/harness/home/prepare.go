@@ -28,7 +28,10 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	if !filepath.IsAbs(nativeScope) {
 		return nil, fmt.Errorf("native scope must be absolute")
 	}
-	realDyna = stableDynaPath(realDyna)
+	realDyna, err := stableDynaPath(realDyna, nativeScope)
+	if err != nil {
+		return nil, err
+	}
 	owner := envMap(inherited)
 	home, err := ownerHome(owner)
 	if err != nil {
@@ -295,18 +298,26 @@ func execTarget(script string) string {
 	return rest[:end]
 }
 
-// stableDynaPath replaces a running-image path, or a copied image, with the
-// current link that names the running build. A bridge, an MCP server command
-// and $DYNA_BIN are read again on later turns; naming one build's copy there
+// stableDynaPath replaces a running image, or a copy of one, with this scope's
+// current link and points that link at the image. A bridge, an MCP server
+// command and $DYNA_BIN are read again on later turns, so the link is what keeps
+// a running session on the engine's current build: naming one build's copy here
 // kept a session on the build it first published, and pruning that copy later
 // left a wrapper with no executable. /proc/<pid>/exe also stops existing when
 // that process exits, which left harness sessions with no Dyna tools.
-func stableDynaPath(realDyna string) string {
-	current, err := fsutil.CurrentImage(realDyna)
-	if err != nil || !filepath.IsAbs(current) {
-		return realDyna
+func stableDynaPath(realDyna, nativeScope string) (string, error) {
+	image, copied, err := fsutil.CurrentBuild(realDyna)
+	if err != nil || !copied {
+		return realDyna, err
 	}
-	return current
+	link, err := fsutil.CurrentLink(nativeScope)
+	if err != nil {
+		return "", err
+	}
+	if err := fsutil.SetLink(link, image); err != nil {
+		return "", err
+	}
+	return link, nil
 }
 
 func bridge(owner map[string]string, target string, isDyna bool) string {
