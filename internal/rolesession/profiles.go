@@ -54,7 +54,8 @@ func notReadyKey(profileName string) string { return profileName + " (not ready)
 // RankProfiles excludes disabled profiles, profiles that carry a failure of the
 // whole profile, and profiles that are unavailable until a later time.
 // Multi-model profiles remain available while any model is healthy, unless the
-// whole-profile key excludes them. role orders the result; see rankBefore.
+// whole-profile key excludes them. A single-model profile stays out while that
+// model cools down. role orders the result; see rankBefore.
 func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now time.Time, role string) []profile.Profile {
 	out := []profile.Profile{}
 	accounts := runtime.NewAccounts()
@@ -76,6 +77,7 @@ func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now
 		}
 		models := p.EffectiveModels()
 		if len(models) > 1 {
+			// A multi-model profile stays available while any model is healthy.
 			for _, model := range models {
 				if !harness.IsModelCoolingDown(p.Name, model, now) {
 					out = append(out, p)
@@ -83,7 +85,16 @@ func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now
 				}
 			}
 		} else if !now.Before(failures[p.Name]) {
-			out = append(out, p)
+			// A single-model profile has no other model to fall back on, so both
+			// its failure entry and its model's cooldown keep it out. The model key
+			// is the one effective models give, else Model for a harness default.
+			model := p.Model
+			if len(models) == 1 {
+				model = models[0]
+			}
+			if !harness.IsModelCoolingDown(p.Name, model, now) {
+				out = append(out, p)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return rankBefore(role, out[i], out[j]) })

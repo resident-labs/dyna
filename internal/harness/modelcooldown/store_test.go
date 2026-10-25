@@ -62,4 +62,24 @@ func TestFailureSurvivesTheTurnThatRecordedIt(t *testing.T) {
 	if got := rolesession.RankProfiles([]profile.Profile{p}, nil, now, ""); len(got) != 1 {
 		t.Fatalf("role ranking ignored the deletion: %v", got)
 	}
+
+	// A single-model profile has no other model to fall back on, so its own
+	// model's cooldown keeps it out even when no recent-turn failure is cached.
+	one := profile.Profile{Name: "single", Model: "solo", Taste: 1}
+	harness.RecordModelFailure(one.Name, "solo", now)
+	if got := rolesession.RankProfiles([]profile.Profile{one}, nil, now, ""); len(got) != 0 {
+		t.Fatalf("role ranking kept a cooling single-model profile: %v", got)
+	}
+	harness.ClearModelFailure(one.Name, "solo")
+	if got := rolesession.RankProfiles([]profile.Profile{one}, nil, now, ""); len(got) != 1 {
+		t.Fatalf("role ranking kept a single-model profile out after success: %v", got)
+	}
+
+	// A profile that names no model runs its harness default, so its failure is
+	// recorded under the empty model key that effective models resolve to.
+	empty := profile.Profile{Name: "default"}
+	harness.RecordModelFailure(empty.Name, "", now)
+	if got := rolesession.RankProfiles([]profile.Profile{empty}, nil, now, ""); len(got) != 0 {
+		t.Fatalf("role ranking kept a cooling default-model profile: %v", got)
+	}
 }
