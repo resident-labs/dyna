@@ -341,6 +341,9 @@ func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) 
 			closeNext = append(closeNext, child.ID)
 			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultClosed, ID: child.ID, Name: child.Name})
 		} else if err = m.reparentLockedContext(ctx, child.ID, parent, depth); err != nil {
+			// The child names the failure itself: the client can then offer to
+			// move it, which needs its name.
+			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, ID: child.ID, Name: child.Name, Failure: sessionclose.FailureChildHandoff})
 			return closeNext, summary, err
 		} else {
 			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultMoved, ID: child.ID, Name: child.Name, To: heir.Address()})

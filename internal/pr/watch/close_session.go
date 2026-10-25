@@ -101,16 +101,24 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 		}
 		if heir.ID == "" {
 			errs = append(errs, fmt.Errorf("PR #%d author has no open ancestor or root", r.Number))
+			summary = append(summary, failedPR(r.Number))
 			continue
 		}
 		moved, err := s.transfer(ctx, key, "author", heir, "", transferOptions{expectAuthor: from.ID, inheritUnread: true})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("PR #%d author handoff: %w", r.Number, err))
+			summary = append(summary, failedPR(r.Number))
 		} else if moved {
 			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultMoved, Number: r.Number, To: heir.Address()})
 		}
 	}
 	return summary, errors.Join(errs...)
+}
+
+// failedPR is the outcome of a PR author handoff that did not run. It names the
+// PR, so a client can show which work stayed behind and open it.
+func failedPR(number int) sessionclose.Outcome {
+	return sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultFailed, Number: number, Failure: sessionclose.FailureHandoff}
 }
 
 // releaseDeferredReviewers finishes the releases CloseSession deferred, once

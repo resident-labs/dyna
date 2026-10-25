@@ -89,7 +89,11 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionc
 		summary = append(summary, moved...)
 		if err != nil {
 			errs = append(errs, err)
-			summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityPR, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureHandoff})
+			// Each PR failure names its PR. Only a failure that names no work
+			// adds the close-level row, so the result never shows "PR #0".
+			if !failedOutcome(moved) {
+				summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureHandoff})
+			}
 		}
 	}
 	items, err := m.Responsibilities(ctx, info)
@@ -132,6 +136,17 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionc
 		}
 	}
 	return summary, errors.Join(errs...)
+}
+
+// failedOutcome reports whether a list already names a failed step, so the
+// close does not repeat it with no work to name.
+func failedOutcome(outcomes []sessionclose.Outcome) bool {
+	for _, outcome := range outcomes {
+		if outcome.Result == sessionclose.ResultFailed {
+			return true
+		}
+	}
+	return false
 }
 
 // closeJournalLines records the typed outcomes as the journal's log text, so a

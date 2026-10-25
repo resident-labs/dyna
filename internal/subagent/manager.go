@@ -1099,11 +1099,15 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureChildHeir})
 	}
 	// The session is closed now. A hand-over failure leaves that child open
-	// under a closed parent, so record it and finish the close.
-	var children []sessionclose.Outcome
-	if cascade, children, err = m.handOverChildren(ctx, fresh, heir); err != nil {
-		store.appendJournal(info.ID, ChildHandoverFailedJournal{Error: err.Error()})
-		summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureChildHandoff})
+	// under a closed parent, so record it and finish the close. The failing
+	// child names itself in the summary; only a failure that named no child
+	// adds a child row here.
+	cascade, children, childErr := m.handOverChildren(ctx, fresh, heir)
+	if childErr != nil {
+		store.appendJournal(info.ID, ChildHandoverFailedJournal{Error: childErr.Error()})
+		if !failedOutcome(children) {
+			children = append(children, sessionclose.Outcome{Kind: sessionclose.ResponsibilityChild, Result: sessionclose.ResultFailed, Failure: sessionclose.FailureChildHandoff})
+		}
 	}
 	summary = append(summary, children...)
 	for _, key := range []string{"session/" + info.ID, info.ID} {
