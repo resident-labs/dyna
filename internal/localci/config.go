@@ -62,6 +62,10 @@ type ExecutableCheck struct {
 	Reports  ReportMode
 	Provider CheckName
 	Priority int
+	// CPUs and MemoryMiB are the resources the check asks for, and zero when it
+	// keeps the default. The node bounds them before the check runs.
+	CPUs      int
+	MemoryMiB int64
 }
 
 // Definition is the validated local CI graph at one repository revision.
@@ -110,6 +114,8 @@ type checkFile struct {
 	Reports       ReportMode        `yaml:"reports"`
 	ProviderGroup CheckName         `yaml:"providerGroup"`
 	Priority      int               `yaml:"priority"`
+	CPUs          int               `yaml:"cpus"`
+	Memory        string            `yaml:"memory"`
 }
 
 type suiteFile struct {
@@ -120,9 +126,30 @@ type suiteFile struct {
 }
 
 var (
-	definitionID  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
-	definitionEnv = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	definitionID     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	definitionEnv    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	definitionMemory = regexp.MustCompile(`^([1-9][0-9]{0,6})([mMgG])$`)
 )
+
+// parseMemory reads a check's memory request, such as 512m or 16g, as MiB. The
+// unit is required, so a bare number cannot mean two different sizes.
+func parseMemory(value string) (int64, error) {
+	match := definitionMemory.FindStringSubmatch(strings.TrimSpace(value))
+	if match == nil {
+		return 0, fmt.Errorf("memory %q must be a whole number with m or g, such as 512m or 16g", value)
+	}
+	size, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("memory %q: %w", value, err)
+	}
+	if strings.EqualFold(match[2], "g") {
+		size *= 1024
+	}
+	if size < 16 {
+		return 0, fmt.Errorf("memory %q must be at least 16m", value)
+	}
+	return size, nil
+}
 
 // LoadDefinition reads and validates DefinitionPath at ref. Git first resolves
 // ref to a commit, so all later reads name one immutable revision.
@@ -263,6 +290,17 @@ func ParseDefinition(body []byte) (*Definition, error) {
 		if input.Priority < 0 {
 			return nil, fmt.Errorf("check %q priority cannot be negative", input.ID)
 		}
+		if input.CPUs < 0 {
+			return nil, fmt.Errorf("check %q cpus must be at least 1", input.ID)
+		}
+		var memoryMiB int64
+		if input.Memory != "" {
+			parsed, parseErr := parseMemory(input.Memory)
+			if parseErr != nil {
+				return nil, fmt.Errorf("check %q: %w", input.ID, parseErr)
+			}
+			memoryMiB = parsed
+		}
 		for name, value := range input.Env {
 			if !definitionEnv.MatchString(name) || strings.ContainsRune(value, '\x00') {
 				return nil, fmt.Errorf("check %q has invalid environment entry %q", input.ID, name)
@@ -274,16 +312,18 @@ func ParseDefinition(body []byte) (*Definition, error) {
 			return nil, fmt.Errorf("check %q provider group: %w", input.ID, err)
 		}
 		check := ExecutableCheck{
-			Check:    Check{ID: input.ID, Name: input.Name},
-			Command:  input.Command,
-			Image:    input.Image,
-			Host:     input.Host,
-			HostUser: input.HostUser,
-			Setup:    input.Setup,
-			Env:      cloneStrings(input.Env),
-			Reports:  input.Reports,
-			Provider: input.ProviderGroup,
-			Priority: input.Priority,
+			Check:     Check{ID: input.ID, Name: input.Name},
+			Command:   input.Command,
+			Image:     input.Image,
+			Host:      input.Host,
+			HostUser:  input.HostUser,
+			Setup:     input.Setup,
+			Env:       cloneStrings(input.Env),
+			Reports:   input.Reports,
+			Provider:  input.ProviderGroup,
+			Priority:  input.Priority,
+			CPUs:      input.CPUs,
+			MemoryMiB: memoryMiB,
 		}
 		seenCaches := map[string]bool{}
 		for _, name := range input.Caches {
