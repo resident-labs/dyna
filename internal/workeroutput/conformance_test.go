@@ -10,15 +10,14 @@ import (
 // conformanceFixtures lists captures per dialect. Multiple captures cover
 // each stream feature without altering real records.
 var conformanceFixtures = map[string][]string{
-	DialectGrokJSON:              {"grok-acp.jsonl"},
-	DialectAcpJSON:               {"acp-grok.jsonl"},
-	DialectPiJSON:                {"pi-stream.jsonl"},
-	DialectText:                  {"plain-text.txt"},
-	DialectCodexJSONL:            {"codex-tools.jsonl"},
-	DialectClaudeStreamJSON:      {"claude-tools.jsonl"},
-	DialectAntigravityStreamJSON: {"antigravity-stream.jsonl", "antigravity-usage.jsonl"},
-	DialectOpenCodeJSON:          {"opencode-stream.jsonl"},
-	DialectMuseJSONL:             {"muse-stream.jsonl"},
+	DialectGrokJSON:         {"grok-acp.jsonl"},
+	DialectAcpJSON:          {"acp-grok.jsonl"},
+	DialectPiJSON:           {"pi-stream.jsonl"},
+	DialectText:             {"plain-text.txt"},
+	DialectCodexJSONL:       {"codex-tools.jsonl"},
+	DialectClaudeStreamJSON: {"claude-tools.jsonl"},
+	DialectOpenCodeJSON:     {"opencode-stream.jsonl"},
+	DialectMuseJSONL:        {"muse-stream.jsonl"},
 }
 
 func fixtureLines(t *testing.T, path string) []string {

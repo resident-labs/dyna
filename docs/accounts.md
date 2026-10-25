@@ -10,7 +10,7 @@ Open **Settings → Harnesses** to manage accounts:
 - **Switch** makes another saved account active. A switch blocks new turns and waits for running turns to finish.
 - **Remove** deletes a saved account after confirmation.
 
-The CLI does the same with `dyna harness login <harness>` and `dyna harness accounts activate <account-id>`. See [private harness runtimes](private-harness-runtimes.md) for homes, sign-in details and the Antigravity keyring limit.
+The CLI does the same with `dyna harness login <harness>` and `dyna harness accounts activate <account-id>`. See [private harness runtimes](private-harness-runtimes.md) for homes and sign-in details.
 
 ## Usage
 

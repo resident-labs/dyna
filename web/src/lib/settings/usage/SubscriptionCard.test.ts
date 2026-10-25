@@ -13,7 +13,6 @@ test('usage cards name the harness above the account in both layouts, without a 
   const accounts: [string, string, string, { id: string; label: string }?][] = [
     ['grok', 'Grok', 'Current Grok account', { id: 'x-subscription', label: 'X' }],
     ['grok', 'Grok', 'Legacy account', { id: 'grok-legacy', label: 'Legacy' }],
-    ['antigravity', 'Antigravity', 'Antigravity account'],
     ['claude-code', 'Claude Code', '3'],
     ['claude-code', 'Claude Code', 'Work account'],
     ['codex', 'Codex', 'ChatGPT account'],

@@ -91,14 +91,3 @@ func TestCompactDueOnlyForTriggerHarnesses(t *testing.T) {
 		t.Fatal("due without a trigger harness or a threshold")
 	}
 }
-
-func TestAntigravityACPRefusesManualCompaction(t *testing.T) {
-	p := Profile{Harness: HarnessAntigravity, Compact: &Compact{Tokens: 95000}}
-	_, _, err := CompactNative(p)
-	if err == nil || !strings.Contains(err.Error(), "not supported by Antigravity ACP 1.3.0") {
-		t.Fatalf("manual compaction was not refused clearly: %v", err)
-	}
-	if CompactDue(p, 100000) {
-		t.Fatal("unsupported manual compaction became due")
-	}
-}

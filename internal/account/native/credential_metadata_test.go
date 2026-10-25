@@ -228,38 +228,6 @@ func TestActiveRefreshRejectsChangedNativeAccount(t *testing.T) {
 	}
 }
 
-// A legacy account's CLI token lives only in its saved payload: active refresh
-// checkpoints the refreshed payload and writes no native file.
-func TestAntigravityActiveRefreshCheckpointsTheSavedPayloadOnly(t *testing.T) {
-	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
-	c := directTestAgy(t, now.Add(-time.Hour))
-	m := agyTestManager(t)
-	m.now = func() time.Time { return now }
-	m.clientSecret = func(context.Context) (string, error) { return "fake-secret", nil }
-	m.client = directTestClient(func(r *http.Request) (*http.Response, error) {
-		return directTestResponse(200, `{"access_token":"new-access","refresh_token":"rotated","expires_in":3600}`), nil
-	})
-	checkpoints := 0
-	got, err := m.RefreshActive(context.Background(), c, func(next Captured) error {
-		checkpoints++
-		if !NewerCredential(next, c) {
-			t.Error("checkpoint is not the refreshed payload")
-		}
-		return nil
-	})
-	if err != nil || checkpoints != 1 || !NewerCredential(got, c) {
-		t.Fatal("active Antigravity refresh failed", err)
-	}
-	if entries, _ := os.ReadDir(m.host.Home); len(entries) != 0 {
-		t.Fatal("active refresh wrote native files")
-	}
-	// An ACP-only account has nothing to refresh.
-	saved := agyACPTestSaved(t, "acp")
-	if next, err := m.RefreshActive(context.Background(), saved, func(Captured) error { t.Error("checkpointed an ACP-only account"); return nil }); err != nil || next.Identity != saved.Identity {
-		t.Fatal(err)
-	}
-}
-
 type credentialSupportFixture struct {
 	Manager
 	caps      Caps
@@ -277,7 +245,7 @@ func TestCredentialRefreshSupportIsSharedAndConservative(t *testing.T) {
 		}
 	}
 	// Existing adapters without a credential-specific gate retain their
-	// capability. Antigravity gates on the credential (see its own test).
+	// capability.
 	for _, harness := range []string{"claude-code", "codex", "muse", "opencode"} {
 		manager, ok := For(harness, Host{})
 		if !ok {

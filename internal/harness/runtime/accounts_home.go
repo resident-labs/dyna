@@ -37,9 +37,6 @@ func privateAccountFiles(h, scope string) []string {
 	roots := harnesshome.Roots(scope)
 	config := roots["XDG_CONFIG_HOME"]
 	switch h {
-	case "antigravity":
-		home := harnesshome.Home(scope)
-		return []string{filepath.Join(home, native.AntigravityACPTokenFile), filepath.Join(home, native.AntigravityAccountFile)}
 	case "muse":
 		return []string{filepath.Join(config, "muse", "auth.json"), filepath.Join(config, "muse", ".auth.json.lock")}
 	case "opencode":
@@ -206,12 +203,6 @@ func validateAccountManagerEnv(h, scope string, env map[string]string) error {
 		expected["OPENCODE_DB"] = filepath.Join(scope, "opencode.db")
 	case "muse":
 		expected["MUSE_AUTH_PATH"] = privateAccountFiles(h, scope)[0]
-	case "antigravity":
-		for key, want := range native.AntigravityFileEnv() {
-			if env[key] != want {
-				return errAccountPath
-			}
-		}
 	default:
 		return native.ErrUnsupported
 	}

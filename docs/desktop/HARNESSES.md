@@ -2,7 +2,7 @@
 
 Open **Settings → Harnesses** in Dyna desktop, the paired web app, or the mobile web app. The same Svelte components call the same Go service through Wails or the authenticated web and Connect API.
 
-The page manages Dyna's private copy of each catalog harness: Codex, Claude Code, Grok, OpenCode v2, Antigravity, Pi and Muse. For each harness it installs and selects exact versions, signs in, switches and removes accounts, and shows the doctor status. The **Tools** tab edits the managed MCP servers and skills.
+The page manages Dyna's private copy of each catalog harness: Codex, Claude Code, Grok, OpenCode v2, Pi and Muse. For each harness it installs and selects exact versions, signs in, switches and removes accounts, and shows the doctor status. The **Tools** tab edits the managed MCP servers and skills.
 
 Dyna does not use or change a global harness binary on PATH. See [private harness runtimes](../private-harness-runtimes.md) for bundles, homes, accounts and first-use install.
 

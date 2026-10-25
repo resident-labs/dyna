@@ -14,17 +14,6 @@ import (
 	"dyna-agent/internal/profile"
 )
 
-// The ACP server has no compact slash command. A configured manual
-// threshold must fail before an ordinary model prompt can receive /compact.
-func TestAntigravityACPDoesNotTreatCompactAsModelInput(t *testing.T) {
-	_, err := buildInvocation(profile.Profile{
-		Harness: profile.HarnessAntigravity, Compact: &profile.Compact{Tokens: 1},
-	}, "task")
-	if err == nil || !strings.Contains(err.Error(), "not supported by Antigravity ACP 1.3.0") {
-		t.Fatalf("manual compaction was not refused: %v", err)
-	}
-}
-
 // The service owns usage and compaction state; a client can miss usage events.
 func TestOpenCodeCompactReadsStoredContextAndWaitsBeforeResume(t *testing.T) {
 	log, steering := installOpenCodeCompactCLI(t)

@@ -143,30 +143,6 @@ func TestWorkflowDefaultSkipsSubagentsOnly(t *testing.T) {
 	}
 }
 
-func TestLoadMigratesPreviousReleaseAntigravityProfile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles.json")
-	old := `{"profiles":[
-		{"name":"agy","harness":"antigravity","model":"` + AntigravityModel + `","output":{"dialect":"antigravity-stream-json"},"taste":6,"intelligence":7,"cost":9,"extraArgs":["--effort","high"]},
-		{"name":"agy-eq","harness":"antigravity","model":"` + AntigravityModel + `","taste":6,"intelligence":7,"cost":9,"extraArgs":["--effort=low"]},
-		{"name":"other","harness":"mock","taste":5,"intelligence":5,"cost":5}]}`
-	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	store, err := Load(path)
-	if err != nil {
-		t.Fatalf("previous-release store did not load: %v", err)
-	}
-	for _, name := range []string{"agy", "agy-eq"} {
-		p, ok := store.Get(name)
-		if !ok || p.EffectiveDialect() != workeroutput.DialectAcpJSON || len(p.ExtraArgs) != 0 {
-			t.Fatalf("%s not migrated: %#v", name, p)
-		}
-	}
-	if _, ok := store.Get("other"); !ok {
-		t.Fatal("other profile missing")
-	}
-}
-
 func TestLoadRejectsInvalidProfile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	contents := `{"version":2,"profiles":[{"name":"broken","harness":"custom","taste":5,"intelligence":5,"cost":5}]}`
@@ -265,26 +241,6 @@ func TestValidateRejectsNegativeExecutionLimits(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want negative-limit rejection", err)
 			}
 		})
-	}
-}
-
-func TestAntigravityValidationAllowsDiscoveredModels(t *testing.T) {
-	valid := Profile{
-		Name: "agy", Harness: HarnessAntigravity, Model: AntigravityModel,
-		Taste: 5, Intelligence: 5, Cost: 5,
-	}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("valid Antigravity profile: %v", err)
-	}
-	invalid := valid
-	invalid.Model = "gemini-other"
-	if err := invalid.Validate(); err != nil {
-		t.Fatalf("alternate Antigravity model: %v", err)
-	}
-	invalid = valid
-	invalid.ExtraArgs = []string{"--model", AntigravityModel}
-	if err := invalid.Validate(); err == nil || !strings.Contains(err.Error(), "may not override --model") {
-		t.Fatalf("Antigravity model override error = %v", err)
 	}
 }
 

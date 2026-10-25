@@ -27,8 +27,6 @@ func Models(ctx context.Context, harness, executable string, env []string) ([]Mo
 		return modelsCodex(ctx, executable, env)
 	case "claude", "claude-code":
 		return modelsClaude(ctx, executable, env)
-	case "antigravity":
-		return modelsAntigravity(ctx, executable, env)
 	case "muse":
 		return modelsMuse(ctx, executable, env)
 	case "grok":

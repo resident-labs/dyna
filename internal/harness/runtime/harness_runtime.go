@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -150,37 +149,7 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 	if err != nil {
 		return PrivateLogin{}, err
 	}
-	// Antigravity still needs the scoped ACP helper before its card starts.
-	flow.Argv, err = a.privateSignInCommand(id, exe, flow)
-	if err != nil {
-		_ = flow.Cancel()
-		return PrivateLogin{}, err
-	}
 	return a.startPrivateSignIn(id, n.Harness, spec, flow)
-}
-
-// privateSignInCommand returns the helper command for one private sign-in.
-func (a *Runtime) privateSignInCommand(id, exe string, flow *NativeLogin) ([]string, error) {
-	n, err := a.Accounts.Find(id)
-	if err != nil {
-		return nil, err
-	}
-	return privateSignInArgv(n.Harness, exe, flow.Cwd, n.Identity, flow.Argv)
-}
-
-// privateSignInArgv runs Antigravity's sign-in through its ACP server, so the
-// owner sees the Google link and never the agy CLI's color-scheme and Terms
-// screens. Every other harness keeps the command its manager chose. scope is
-// the native login scope; the helper derives the paired HOME from it.
-func privateSignInArgv(harness, exe, scope, identity string, native []string) ([]string, error) {
-	if harness != "antigravity" {
-		return native, nil
-	}
-	dyna, err := os.Executable()
-	if err != nil {
-		return nil, errors.New("Dyna cannot start the Antigravity ACP sign-in.")
-	}
-	return []string{dyna, "harness", "accounts", acpSignInCommand, "--agy", exe, "--scope", scope, "--expect", identity}, nil
 }
 
 func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ bool) (PrivateLogin, error) {

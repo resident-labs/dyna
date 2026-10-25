@@ -49,18 +49,15 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
     capabilities: [
       { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
       { harness: 'codex', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
-      { harness: 'antigravity', status: 'partial', reason: 'Shares login with personal CLI.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: true },
       { harness: 'grok', status: 'partial', reason: 'Home compatibility skills remain.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
     ],
     bundles: [
       { harness: 'claude-code', version: '2.1.299', executable: '/dyna/claude' },
       { harness: 'codex', version: '0.61.0', executable: '/dyna/codex' },
-      { harness: 'antigravity', version: '1.3.2', executable: '/dyna/agy' },
     ],
     accounts: [
       { id: 'acc-1', harness: 'claude-code', label: 'work@acme.dev', status: 'ready', active: true },
       { id: 'acc-2', harness: 'codex', label: 'me@personal', status: 'ready', active: true },
-      { id: 'acc-3', harness: 'antigravity', label: 'me@mail', status: 'ready', active: true },
     ],
     profiles: [
       { profile: 'codex-prof', harness: 'codex', status: 'switch pending', reason: 'switch pending: 2 turns running', switchPending: true, runningTurns: 2 },
@@ -77,10 +74,6 @@ test('harnessRowState derives ready, partial, not signed in, and switch pending 
   assert.equal(codex.switchPending, true)
   assert.equal(codex.runningTurns, 2)
   assert.match(codex.reason, /switch pending: 2 turns running/)
-
-  const agy = harnessRowState('antigravity', snapshot)
-  assert.equal(agy.status, 'partial')
-  assert.equal(agy.sharedPersonalLogin, true)
 
   const grok = harnessRowState('grok', snapshot)
   assert.equal(grok.status, 'not installed')
@@ -101,7 +94,7 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
   assert.equal(toolSummary('mcp', { command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
-  assert.equal(HARNESS_ORDER.length, 8)
+  assert.equal(HARNESS_ORDER.length, 7)
 })
 
 test('tool selection sends the runtime harness ID to the catalog', async () => {
@@ -144,12 +137,12 @@ test('shared personal login harnesses require confirmation before sign-in, resta
   }
   runFunctions(paneSource, ['signInVersion', 'requestBeginLogin', 'performBeginLogin', 'requestRestartLogin', 'performRestartLogin', 'requestSwitchAccount', 'performSwitchAccount'], context)
 
-  const sharedRow = { id: 'antigravity', meta: { name: 'Antigravity' }, version: '1.3.2', sharedPersonalLogin: true, capability: {} }
+  const sharedRow = { id: 'muse', meta: { name: 'Muse' }, version: '1.4.10', sharedPersonalLogin: true, capability: {} }
   call(context, 'requestBeginLogin', sharedRow)
   assert.equal(calls.length, 0)
   assert.equal(need(context.confirm).kind, 'begin-login')
   await need(context.confirm).run()
-  assert.deepEqual(calls[0], ['begin', 'antigravity', '1.3.2', 'Work', true])
+  assert.deepEqual(calls[0], ['begin', 'muse', '1.4.10', 'Work', true])
 
   context.login = null
   call(context, 'requestRestartLogin', sharedRow, { id: 'acc-1', label: 'Personal' })
@@ -431,7 +424,7 @@ test('not-signed-in rows expose Sign in on installed harness rows', () => {
   }
 })
 test('shared-login capability overrides legacy harness defaults', () => {
-  for (const harness of ['muse', 'antigravity']) {
+  for (const harness of ['muse']) {
     for (const sharedPersonalLogin of [false, true]) {
       const snapshot = loose({ capabilities: [{ harness, sharedPersonalLogin }] })
       assert.equal(harnessRowState(harness, snapshot).sharedPersonalLogin, sharedPersonalLogin)
@@ -609,13 +602,13 @@ test('current harness rows ignore unsupported cached aliases', () => {
   assert.deepEqual(row.bundles, [])
 })
 
-// The engine says why Finish failed, for example a Google account it could
+// The engine says why Finish failed, for example an account it could
 // not confirm. The pane keeps its words.
 test('finish sign-in shows the engine message', async () => {
-  const message = 'Google did not confirm the account of this Antigravity sign-in, so nothing was saved.'
+  const message = 'The provider did not confirm the account of this sign-in, so nothing was saved.'
   const context: { [name: string]: unknown } = {
     ...helpers, busy: false, stopped: false, error: '', notice: '', labelInput: '', pendingLogin: null,
-    login: { accountId: 'a1', signIn: { phase: 'waiting' }, harness: 'antigravity' }, loginFlows: [],
+    login: { accountId: 'a1', signIn: { phase: 'waiting' }, harness: 'muse' }, loginFlows: [],
     api: { finishPrivateRuntimeLogin: async () => { throw new Error(message) } },
   }
   runFunctions(paneSource, ['finishLogin'], context)
@@ -624,10 +617,6 @@ test('finish sign-in shows the engine message', async () => {
   context.api = { finishPrivateRuntimeLogin: async () => { throw null } }
   await call(context, 'finishLogin')
   assert.equal(context.error, 'Sign-in is not complete yet.')
-})
-
-test('Antigravity sign-in does not promise a personal login copy', () => {
-  assert.match(paneMarkup, /\{#if row\.id !== 'antigravity'\}\s*<p class="muted small">If you already use \{row\.meta\.name\}, Dyna can copy that login once\.<\/p>/)
 })
 
 // The shared card words each step of an in-app sign-in, and repeats the

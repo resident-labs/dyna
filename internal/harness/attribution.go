@@ -24,8 +24,8 @@ import (
 //     that feature per launch with -c features.codex_git_commit=false.
 //   - OpenCode (v2 builds Dyna runs) adds no commit or PR attribution at all;
 //     there is nothing to disable.
-//   - agy and muse expose no attribution switch Dyna knows, so
-//     their launches carry no attribution flags.
+//   - Muse exposes no attribution switch Dyna knows, so
+//     its launches carry no attribution flags.
 
 // claudeAttributionSettings is the --settings layer that hides Claude Code's
 // commit and pull request attribution. An empty string hides that attribution;
