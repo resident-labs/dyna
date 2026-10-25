@@ -21,8 +21,12 @@ on `https://cli-chat-proxy.grok.com`. It uses the captured first-party OIDC sess
 and the CLI's account headers. Dyna does not run the CLI, renew tokens, or write
 native credentials during a usage check. Redirects are refused.
 
-The verified response identifies a seven-day unified-billing period. Dyna shows
-its reset time with usage marked **Not reported**. The live response omitted
-`creditUsagePercent`, and its scale remains unverified.
+The response names its period as `USAGE_PERIOD_TYPE_WEEKLY` or
+`USAGE_PERIOD_TYPE_MONTHLY`. Dyna shows that as a Weekly or Monthly window:
+`creditUsagePercent` is the used share, and `currentPeriod.end` is the reset.
+Grok omits a zero percentage while keeping the full period, so a missing
+percentage on a valid weekly or monthly period is 0, as T3 Code reads it. A
+period that is missing, unparseable or ends before it starts is an unusable
+response.
 HTTP 401 offers Sign in and clears old quota. Temporary provider failures preserve
 the saved observation. Use Refresh in Usage to check the active private login.

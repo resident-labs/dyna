@@ -26,7 +26,7 @@ func grokUsageFixture(t *testing.T) Captured {
 
 const grokWeeklyFixture = `{"config":{"isUnifiedBillingUser":true,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-18T05:11:47.565+00:00","end":"2026-10-25T05:11:47.565+00:00"},"prepaidBalance":{"val":0}}}`
 
-func TestSavedGrokBillingUsesNativeSessionAndPreservesUnknownUsage(t *testing.T) {
+func TestSavedGrokBillingUsesNativeSessionAndReadsTheZeroWindow(t *testing.T) {
 	c := grokUsageFixture(t)
 	before := append([]byte(nil), c.Credential.Payload...)
 	now := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
@@ -43,14 +43,11 @@ func TestSavedGrokBillingUsesNativeSessionAndPreservesUnknownUsage(t *testing.T)
 		t.Fatal("missing weekly observation", err)
 	}
 	w := observation.Windows[0]
-	rawWindow, _ := json.Marshal(w)
-	var view map[string]any
-	_ = json.Unmarshal(rawWindow, &view)
-	if view["unavailableReason"] != "Grok did not return a usage percentage." {
-		t.Fatalf("weekly period hid missing allowance reason: %s", rawWindow)
+	if w.UsedPercent == nil || *w.UsedPercent != 0 || w.UnavailableReason != "" {
+		t.Fatalf("weekly period did not read the omitted zero: %+v", w)
 	}
-	if w.Period != "week" || w.ResetsAt != "2026-10-25T05:11:47.565Z" || w.PeriodStart != "2026-10-18T05:11:47.565Z" || w.UsedPercent != nil || w.Used != nil || w.Limit != nil {
-		t.Fatal("invented quota", w)
+	if w.Label != "Weekly" || w.Period != "week" || w.ResetsAt != "2026-10-25T05:11:47.565Z" || w.PeriodStart != "2026-10-18T05:11:47.565Z" || w.Used != nil || w.Limit != nil {
+		t.Fatal("wrong weekly window", w)
 	}
 	// isUnifiedBillingUser is the X Subscription: Grok's shared weekly pool.
 	if observation.Plan == nil || observation.Plan.ID != "x-subscription" || observation.Plan.Label != "X Subscription (weekly)" {
@@ -88,16 +85,36 @@ func TestSavedGrokBillingRejectsWrongAuthWithoutInvalidatingGrant(t *testing.T) 
 		}
 	}
 }
-func TestGrokBillingRequiresVerifiedWeeklyPeriod(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"config":{}}`, strings.Replace(grokWeeklyFixture, "WEEKLY", "MONTHLY", 1), strings.Replace(grokWeeklyFixture, "2026-10-25", "2026-10-26", 1), strings.Replace(grokWeeklyFixture, "2026-10-25", "invalid", 1)} {
+func TestGrokBillingRejectsUnusablePeriods(t *testing.T) {
+	for _, raw := range []string{
+		`{}`,
+		`{"config":{}}`,
+		strings.Replace(grokWeeklyFixture, "2026-10-18", "2026-10-26", 1),
+		strings.Replace(grokWeeklyFixture, "2026-10-25", "invalid", 1),
+	} {
 		if _, err := grokBillingObservation([]byte(raw), time.Now()); err == nil {
-			t.Fatal("accepted unverified weekly period")
+			t.Fatal("accepted an unusable period")
 		}
 	}
 }
 
-// A billing user who is not unified is on an older monthly plan. Its usage
-// schema is unverified, so Dyna names the plan and reads no usage.
+func TestGrokBillingReadsMonthlyWindow(t *testing.T) {
+	now := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	raw := `{"config":{"isUnifiedBillingUser":false,"creditUsagePercent":42,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY","start":"2026-10-01T00:00:00Z","end":"2026-11-01T00:00:00Z"}}}`
+	observation, err := grokBillingObservation([]byte(raw), now)
+	if err != nil || len(observation.Windows) != 1 {
+		t.Fatalf("monthly window missing: %+v, %v", observation, err)
+	}
+	w := observation.Windows[0]
+	if w.ID != "grok-monthly" || w.Label != "Monthly" || w.Period != "month" || w.UsedPercent == nil || *w.UsedPercent != 42 || w.ResetsAt != "2026-11-01T00:00:00Z" {
+		t.Fatalf("wrong monthly window: %+v", w)
+	}
+	if observation.Plan == nil || observation.Plan.ID != "grok-legacy" {
+		t.Fatalf("legacy monthly plan not named: %+v", observation.Plan)
+	}
+}
+
+// A legacy billing user with no period data is named; no window is invented.
 func TestGrokLegacyBillingNamesThePlanWithoutUsage(t *testing.T) {
 	now := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
 	observation, err := grokBillingObservation([]byte(`{"config":{"isUnifiedBillingUser":false,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY"}}}`), now)
