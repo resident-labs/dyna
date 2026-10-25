@@ -410,6 +410,13 @@
     showMembers = false
     goalId = ''
   }
+  // A member selection in the phone sheet takes Escape first: it cancels the
+  // selection and keeps the sheet open. The next Escape closes the sheet.
+  function escapePhonePanel(): boolean {
+    if (!selectingSessions) return false
+    toggleSessionSelection()
+    return true
+  }
   // rules is the list in the Room settings Rules section.
   const rules = $derived(goalView.rules)
   // An inline rules edit keeps the list it started from until the edit closes.
@@ -1910,7 +1917,7 @@
       {/if}
       <!-- On a wide screen this wrapper adds no box; on a narrow one it is a dialog sheet. -->
       <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div class="panel" use:dialog={{ active: phonePanelOpen, close: closePhonePanel }} role={phonePanelOpen ? 'dialog' : undefined} aria-modal={phonePanelOpen ? 'true' : undefined} aria-label={phonePanelOpen ? phonePanelLabel : undefined} tabindex={phonePanelOpen ? -1 : undefined}>
+      <div class="panel" use:dialog={{ active: phonePanelOpen, close: closePhonePanel, escape: escapePhonePanel }} role={phonePanelOpen ? 'dialog' : undefined} aria-modal={phonePanelOpen ? 'true' : undefined} aria-label={phonePanelOpen ? phonePanelLabel : undefined} tabindex={phonePanelOpen ? -1 : undefined}>
       {#if roomId && room && view === 'goals' && selectedGoal}
         {#key selectedGoal.id}<GoalDetail roomId={room.id} goal={selectedGoal} members={hierarchy} onchanged={loadGoals} onclose={() => (goalId = '')} onexpedite={expediteGoal} />{/key}
       {:else if roomId && room && showPins}

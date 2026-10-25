@@ -5,6 +5,8 @@ interface DialogOptions {
   close: () => unknown
   active?: boolean
   busy?: boolean
+  /** An inner control takes Escape first; return true when it did. */
+  escape?: () => boolean
   initial?: () => HTMLElement | null | undefined
   preventScroll?: boolean
   select?: boolean
@@ -27,22 +29,29 @@ export const dialog = ((node, options: DialogOptions) => {
   let active = false
   let previous: Element | null = null
   const top = () => active && activeDialog() === entry
-  const otherModal = () => {
-    const modal = document.activeElement?.closest?.('[aria-modal="true"]')
-    return modal && modal !== node && !modal.contains(node)
+  // An overlay above this dialog that owns focus, such as a context menu or a
+  // dialog mounted elsewhere, handles Escape and Tab itself. This dialog stays
+  // open and leaves both keys alone.
+  const externalOwner = () => {
+    const owner = document.activeElement?.closest?.('[aria-modal="true"], [role="menu"]')
+    return !!owner && owner !== node && !node.contains(owner) && !owner.contains(node)
   }
   const dismiss = () => { if (!options.busy) options.close() }
   const click = (event: MouseEvent) => {
     if (event.target === backdrop && top()) dismiss()
   }
   const keydown = (event: KeyboardEvent) => {
-    if (!top() || otherModal()) return
+    if (!top() || externalOwner()) return
     if (event.key === 'Escape') {
       // Busy: a control inside the dialog owns Escape. So does an armed inline
       // confirm, but only for keys pressed inside it; elsewhere Escape closes.
       if (options.busy && node.contains(event.target as Node | null)) return
       if (node.querySelector('[data-esc]')?.contains(event.target as Node | null)) return
+      // The inner control acted on Escape, so mark the key handled without
+      // closing the dialog or letting a lower handler cancel the same work.
+      const inner = options.escape?.() ?? false
       event.preventDefault()
+      if (inner) return
       event.stopImmediatePropagation()
       dismiss()
     } else if (event.key === 'Tab') {
@@ -59,7 +68,7 @@ export const dialog = ((node, options: DialogOptions) => {
   }
   const deactivate = () => {
     if (!active) return
-    const restore = top() && !otherModal()
+    const restore = top() && !externalOwner()
     const index = dialogs.indexOf(entry)
     if (index >= 0) dialogs.splice(index, 1)
     active = false
