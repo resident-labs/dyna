@@ -34,10 +34,14 @@ const postOnChangePrompt = `Post only to the session that must act next, and onl
 const parentCheckInPrompt = `All parents, including root, remain responsible for their direct children. Check-ins cover running, queued, or idle children, listed stalest first with state, duration, goal/item, and PR state. Dormant and closed children do not count. Act on stuck work. If everything is on track, end your turn without posting.`
 
 // sessionRules is the core contract and topic triggers, without task or worker
-// metadata. Service sessions hold no goals, so they get no goal rule.
-func sessionRules(holdsGoals bool) string {
+// metadata. Service sessions hold no goals. A session holds a goal of its own,
+// or one item of another session's goal, and each one ends its own work.
+func sessionRules(holdsGoals, holdsItem bool) string {
 	goalRule := ""
-	if holdsGoals {
+	switch {
+	case holdsItem:
+		goalRule = "Finish the goal item you hold with `dyna goal item done <goal> <item>`. Its holder ends that goal, so never run `dyna goal done` for a goal you do not hold. Set your own goal for work of your own: `dyna goal --for @<you> \"<outcome; done when>\"` and `dyna goal done <id> \"<summary>\"` when it is done. "
+	case holdsGoals:
 		goalRule = "Across turns, set `dyna goal --for @<you> \"<outcome; done when>\"`. When done, run `dyna goal done <id> \"<summary>\"` and set your next goal. "
 	}
 	return `[DYNA SESSION]
@@ -84,7 +88,7 @@ func rulesFor(meta Meta) string {
 	if meta.Role == RoleRoot {
 		return rootRules()
 	}
-	return sessionRules(!meta.Service)
+	return sessionRules(!meta.Service, meta.Item != "")
 }
 
 // guideTriggers lists every guide topic a session may read, one per line.

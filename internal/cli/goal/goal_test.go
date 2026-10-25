@@ -108,12 +108,18 @@ func TestCommandsAndSelectors(t *testing.T) {
 	if g.State != "active" || !g.HeldBy(ids[2]) || g.Edits[len(g.Edits)-1].By != ids[0] {
 		t.Fatal(g)
 	}
+	// The goal's holder ends it, not the session that set it.
+	actor = authority.Actor{Role: authority.Session, Session: ids[1]}
 	if out, err := call("drop", "g2"); err != nil || out != "g2 dropped\n" {
 		t.Fatalf("drop output = %q, %v", out, err)
 	}
 	dropped, err := s.Store.Get(rec.ID, "g2")
-	if err != nil || dropped.Done == nil || dropped.Done.By != ids[0] {
+	if err != nil || dropped.Done == nil || dropped.Done.By != ids[1] {
 		t.Fatalf("drop = %+v, %v", dropped, err)
+	}
+	actor = authority.Actor{Role: authority.Session, Session: ids[0]}
+	if _, err := call("drop", "g2"); err == nil {
+		t.Fatal("a session that does not hold the goal dropped it")
 	}
 	if out, err := call("--all"); err != nil || !strings.Contains(out, "g2") {
 		t.Fatal(out, err)

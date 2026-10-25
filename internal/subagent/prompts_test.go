@@ -12,7 +12,7 @@ func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 		ID: "ses_20260101-120000-abcdef12", Name: "decoder",
 		RoomID: "room_20260101-120000-abcdef12", Room: "amber-otter-42", Depth: 2,
 	}
-	got := sessionRules(true) + "\n\n" + workerContext(meta, "amber-otter-42:lead", 3)
+	got := sessionRules(true, false) + "\n\n" + workerContext(meta, "amber-otter-42:lead", 3)
 	for _, want := range []string{
 		"You are amber-otter-42:decoder", "Room: amber-otter-42   You: amber-otter-42:decoder",
 		"`dyna post @<mention>... \"...\"`", "From: amber-otter-42:lead",
@@ -60,7 +60,7 @@ func TestTurnPromptsCarryTaskAndLiveContextOnly(t *testing.T) {
 		t.Error("a brief-only first turn does not point at the instructions")
 	}
 	follow := followUpPrompt(2, "next", roomContext)
-	if !strings.Contains(follow, "turn 2") || !strings.Contains(follow, roomContext) || strings.Contains(follow, sessionRules(true)) || !strings.HasSuffix(follow, "\n\nnext") {
+	if !strings.Contains(follow, "turn 2") || !strings.Contains(follow, roomContext) || strings.Contains(follow, sessionRules(true, false)) || !strings.HasSuffix(follow, "\n\nnext") {
 		t.Errorf("follow-up prompt = %q", follow)
 	}
 	withFormat := withSchema(first, `{"type":"object"}`)
@@ -70,7 +70,7 @@ func TestTurnPromptsCarryTaskAndLiveContextOnly(t *testing.T) {
 }
 
 func TestSessionCoreBudgetAndGuideTriggers(t *testing.T) {
-	core := strings.ReplaceAll(sessionRules(true), clearEnglishPrompt, "")
+	core := strings.ReplaceAll(sessionRules(true, false), clearEnglishPrompt, "")
 	// The owner-blocker rule added words to the post line; keep the core lean.
 	if words := len(strings.Fields(core)); words >= 540 {
 		t.Fatalf("session core is %d words; must stay under 520", words)
@@ -101,7 +101,7 @@ func TestSessionRuleSizesStayComparable(t *testing.T) {
 	if !strings.Contains(rootRules(), parentCheckInPrompt) {
 		t.Fatal("root instructions omit parent check-in responsibility")
 	}
-	root, worker := len(rootRules()), len(sessionRules(true))
+	root, worker := len(rootRules()), len(sessionRules(true, false))
 	t.Logf("root session part: %d bytes; worker session part: %d bytes", root, worker)
 	shorter, longer := root, worker
 	if shorter > longer {

@@ -100,7 +100,7 @@ const fixtures: Record<string, EventPayload> = {
     ]),
   ),
   ...Object.fromEntries(
-    (['added', 'edited', 'amended', 'finished', 'dropped'] as const).map((type) => [
+    (['added', 'edited', 'amended', 'items_done', 'finished', 'dropped'] as const).map((type) => [
       `goal/${type}`,
       {
         type,
@@ -108,7 +108,7 @@ const fixtures: Record<string, EventPayload> = {
         title: 'Ship typed issue events',
         actor: 'dyna:notice-issues',
         state: type === 'finished' ? 'done' : type === 'dropped' ? 'dropped' : 'active',
-        summary: type === 'finished' ? 'Merged as PR #542' : type === 'amended' ? 'Own internal/issues only.' : undefined,
+        summary: type === 'finished' ? 'Merged as PR #542' : type === 'amended' ? 'Own internal/issues only.' : type === 'items_done' ? 'i1 done; the goal stays open until its holder finishes it' : undefined,
       },
     ]),
   ),

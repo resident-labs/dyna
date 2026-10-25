@@ -45,12 +45,16 @@ type Goal struct {
 	Holders    []string    `json:"holders"`
 	Shared     bool        `json:"shared"`
 	// NextItem allocates the goal's item IDs: i1, i2, ...
-	NextItem  int       `json:"nextItem,omitempty"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	Edits     []Edit    `json:"edits"`
-	Done      *Outcome  `json:"done,omitempty"`
+	NextItem int `json:"nextItem,omitempty"`
+	// ItemsClosed counts the times the goal went from some open items to none.
+	// Each of those closes posts one notice keyed by this number, so a reopen
+	// and a second close notify the holders again.
+	ItemsClosed int       `json:"itemsClosed,omitempty"`
+	State       string    `json:"state"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	Edits       []Edit    `json:"edits"`
+	Done        *Outcome  `json:"done,omitempty"`
 	// ExpediteUntil marks the room's one expedited goal until that time.
 	// Readers drop an expired value; see Store.Expedite.
 	ExpediteUntil *time.Time `json:"expediteUntil,omitempty"`
