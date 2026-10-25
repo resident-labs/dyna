@@ -24,3 +24,20 @@ func ConvertSessionTurn(events []Event) []int {
 	slices.Sort(out)
 	return out
 }
+
+// ConvertRunAgent restores tool fields in retained workflow output.
+// TODO: legacy/shim remove later — remove after retained workflow artifacts
+// expire or migrate.
+func ConvertRunAgent(events []Event) []int {
+	changed := []int{}
+	for i, event := range events {
+		upgraded := UpgradeLegacyEvent(event)
+		sameExit := upgraded.Exit == nil && event.Exit == nil ||
+			upgraded.Exit != nil && event.Exit != nil && *upgraded.Exit == *event.Exit
+		if upgraded.Input != event.Input || upgraded.Output != event.Output || !sameExit {
+			events[i] = upgraded
+			changed = append(changed, i)
+		}
+	}
+	return changed
+}

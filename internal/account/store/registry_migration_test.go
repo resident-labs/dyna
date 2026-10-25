@@ -237,3 +237,66 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 		}
 	}
 }
+
+// Version 9 must not re-read the current selection table as the legacy one: a
+// database at version 8 keeps its global choice, its room choices and its
+// explicit empty choice.
+func TestRegistryMigrationKeepsSelectionsAtVersionEight(t *testing.T) {
+	dataDir := t.TempDir()
+	ctx := context.Background()
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE accounts (
+ id TEXT PRIMARY KEY,
+ ord INTEGER NOT NULL,
+ metadata BLOB NOT NULL CHECK(json_valid(metadata)),
+ credential_schema TEXT NOT NULL DEFAULT ''
+);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, activeSchema); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct{ id, provider string }{
+		{"pi-chatgpt", "chatgpt"},
+		{"pi-chatgpt-work", "chatgpt"},
+	} {
+		metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": "pi", "provider": row.provider, "kind": "oauth"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES(?, 0, ?)", row.id, metadata); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, active := range []struct{ scope, account string }{
+		{"", "pi-chatgpt"},
+		{"room-a", "pi-chatgpt-work"},
+		{"room-b", ""},
+	} {
+		if _, err := db.ExecContext(ctx, "INSERT INTO account_active(provider, harness, scope, account) VALUES('chatgpt','pi',?,?)", active.scope, active.account); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO meta(key, value) VALUES('account.registry', '8')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct{ scope, account string }{
+		{"", "pi-chatgpt"},
+		{"room-a", "pi-chatgpt-work"},
+		{"room-b", ""},
+	} {
+		var account string
+		if err := db.QueryRowContext(ctx, "SELECT account FROM account_active WHERE provider = 'chatgpt' AND harness = 'pi' AND scope = ?", want.scope).Scan(&account); err != nil {
+			t.Fatalf("scope %q: %v", want.scope, err)
+		}
+		if account != want.account {
+			t.Fatalf("scope %q holds %q, want %q", want.scope, account, want.account)
+		}
+	}
+}

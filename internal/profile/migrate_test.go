@@ -120,3 +120,36 @@ func TestProfileV3MigrationPreservesUnknownFields(t *testing.T) {
 	})
 
 }
+
+// A version-2 configuration that still holds a retired harness must upgrade, so
+// the engine starts writable and the owner can repair the profile. Running it
+// stays refused by Load.
+func TestProfileV3MigrationKeepsARetiredHarnessForRepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	raw := []byte(`{"version":2,"profiles":[
+ {"name":"old-muse","harness":"muse","taste":5,"intelligence":5,"cost":5},
+ {"name":"kept","harness":"pi","taste":5,"intelligence":5,"cost":5}]}`)
+	if err := os.WriteFile(path, raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(path); err != nil {
+		t.Fatalf("migration refused a retired harness: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Version  int
+		Profiles []map[string]any
+	}
+	if err := json.Unmarshal(after, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Version != 3 || len(doc.Profiles) != 2 {
+		t.Fatalf("migrated document = %s", after)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load accepted a profile of a retired harness")
+	}
+}

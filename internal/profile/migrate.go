@@ -61,6 +61,12 @@ func Migrate(path string) error {
 		if err := json.Unmarshal(encoded, &p); err != nil {
 			return err
 		}
+		// A profile of a harness this release no longer runs keeps its row as it
+		// is. Load refuses to run it, and the owner repairs it with the CLI or the
+		// app, so the migration must not fail and leave the engine read-only.
+		if _, known := HarnessDefinitionFor(p.Harness); !known {
+			continue
+		}
 		oldArgs := slices.Clone(p.ExtraArgs)
 		p.DeclareOutput()
 		if err := p.Validate(); err != nil {
@@ -107,6 +113,9 @@ func Migrate(path string) error {
 		return err
 	}
 	for _, p := range check.Profiles {
+		if _, known := HarnessDefinitionFor(p.Harness); !known {
+			continue
+		}
 		if err := p.Validate(); err != nil {
 			return err
 		}

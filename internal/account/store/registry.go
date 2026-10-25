@@ -60,33 +60,37 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 				return err
 			}
 		}
-		// TODO: legacy/shim remove later — the per-harness selection table moves
-		// to the provider-scoped one in this version, and nothing reads it after.
-		legacyActive, err := movedHarnessActive(ctx, conn)
-		if err != nil {
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
-			return err
-		}
-		if err := fillProviders(ctx, conn); err != nil {
-			return err
-		}
-		if err := fillActiveSelections(ctx, conn, legacyActive); err != nil {
-			return err
-		}
-		if err := fillActiveHarness(ctx, conn); err != nil {
-			return err
-		}
-		// Version 8 drops the leftover tables of the retired JSON registry: its
-		// version row and the mirrored accounts.json. Version 9 drops the rows of
-		// a harness this release stopped running, so a row written between the two
-		// versions cannot survive to fail activation.
-		if _, err := conn.ExecContext(ctx, "DROP TABLE IF EXISTS accounts_registry"); err != nil {
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "DELETE FROM state_mirrors WHERE key = 'accounts/registry'"); err != nil {
-			return err
+		// Version 8 moves the per-harness selection table to the provider-scoped
+		// one and retires the JSON registry. It runs only for a database older
+		// than 8: the table it converts is the legacy one, which has no provider
+		// column, so running it again would read the new table as legacy and
+		// collapse room selections into the global scope. Version 9 then drops
+		// the rows of a harness this release stopped running.
+		if old < 8 {
+			// TODO: legacy/shim remove later — the per-harness selection table moves
+			// to the provider-scoped one in this version, and nothing reads it after.
+			legacyActive, err := movedHarnessActive(ctx, conn)
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
+				return err
+			}
+			if err := fillProviders(ctx, conn); err != nil {
+				return err
+			}
+			if err := fillActiveSelections(ctx, conn, legacyActive); err != nil {
+				return err
+			}
+			if err := fillActiveHarness(ctx, conn); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "DROP TABLE IF EXISTS accounts_registry"); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "DELETE FROM state_mirrors WHERE key = 'accounts/registry'"); err != nil {
+				return err
+			}
 		}
 		if old < 9 {
 			if err := dropRemovedHarnessRows(ctx, conn); err != nil {
