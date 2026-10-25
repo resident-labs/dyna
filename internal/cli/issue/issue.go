@@ -126,7 +126,7 @@ func Command(o Options) *cobra.Command {
 		title := strings.TrimSpace(a[0])
 		// A lone issue reference names an issue to read, never a new title. An
 		// agent that meant to read D-61 filed an empty issue titled "D-61".
-		if room.IsIssueNumber(title) || strings.HasPrefix(title, "msg_") {
+		if room.IsIssueNumber(title) || room.IsMessageID(title) {
 			if c.Flags().Changed("note") || c.Flags().Changed("at") {
 				return fmt.Errorf("%s reads an issue; --note and --at belong to a new issue", title)
 			}

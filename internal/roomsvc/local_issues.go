@@ -23,7 +23,26 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	openGoals, err := s.goalService().Store.ListOpen(r.ID)
+	if issues, err = s.issueState(r.ID, issues); err != nil {
+		return nil, err
+	}
+	out := issues[:0]
+	for _, issue := range issues {
+		// The default is unhandled work. Closed goals leave their historical
+		// goal ID, but do not keep the issue in progress.
+		if !all && (issue.InProgress || issue.State != room.IssueStateOpen && issue.State != room.IssueStateGoal) {
+			continue
+		}
+		out = append(out, issue)
+	}
+	return out, nil
+}
+
+// issueState fills the live state an issue does not store: whether an open
+// goal holds it, who that goal's holders are, and which open PR fixes it. The
+// list and the single-issue read share it, so both describe the same work.
+func (s *Service) issueState(roomID string, issues []room.Issue) ([]room.Issue, error) {
+	openGoals, err := s.goalService().Store.ListOpen(roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +52,7 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	}
 	var fixes map[int]int
 	if s.PRs != nil {
-		fixes, err = s.PRs.IssueFixes(r.ID)
+		fixes, err = s.PRs.IssueFixes(roomID)
 		if err != nil {
 			return nil, err
 		}
@@ -43,8 +62,8 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	for _, member := range sessions {
 		names[member.ID] = member.Name
 	}
-	out := issues[:0]
-	for _, issue := range issues {
+	for i := range issues {
+		issue := &issues[i]
 		if goal, ok := active[issue.GoalID]; ok {
 			issue.InProgress, issue.GoalShared = true, goal.Shared
 			holders := []string{}
@@ -58,18 +77,13 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 		if pr := fixes[issue.Number]; pr > 0 {
 			issue.FixPR, issue.InProgress = pr, true
 		}
-		// The default is unhandled work. Closed goals leave their historical
-		// goal ID, but do not keep the issue in progress.
-		if !all && (issue.InProgress || issue.State != room.IssueStateOpen && issue.State != room.IssueStateGoal) {
-			continue
-		}
-		out = append(out, issue)
 	}
-	return out, nil
+	return issues, nil
 }
 
 // Issue reads one issue by D-N, its compact spelling or the ID of the post it
-// was filed with, with the note the filer gave it.
+// was filed with, with the note the filer gave it and the same live state the
+// list shows.
 func (s *Service) Issue(roomRef, id string) (room.Issue, string, error) {
 	r, err := s.rooms().Resolve(roomRef)
 	if err != nil {
@@ -79,11 +93,15 @@ func (s *Service) Issue(roomRef, id string) (room.Issue, string, error) {
 	if err != nil {
 		return room.Issue{}, "", err
 	}
+	one, err := s.issueState(r.ID, []room.Issue{i})
+	if err != nil {
+		return room.Issue{}, "", err
+	}
 	post, err := s.rooms().Message(r.ID, i.ID)
 	if err != nil {
 		return room.Issue{}, "", err
 	}
-	return i, strings.TrimSpace(issueText(post)), nil
+	return one[0], strings.TrimSpace(issueText(post)), nil
 }
 
 // Issue mutations use the same triage policy as the CLI, with the caller that
@@ -227,17 +245,21 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 }
 
 // issueText is the issue's own body: the note it was filed with, without the
-// event's one-line summary. An issue filed before the typed events still
-// carries its note in the post text.
+// event's one-line summary. A typed event carries the note even when the filer
+// gave none, so the summary never reads as a note. A post stored before the
+// typed events still carries its note in the post text.
 func issueText(msg room.Message) string {
-	if ev, ok := msg.Issue(); ok && ev.Detail != "" {
+	if ev, ok := msg.Issue(); ok {
 		return ev.Detail
 	}
 	return msg.Text
 }
 
 func issueDetail(i room.Issue, text string) string {
-	detail := fmt.Sprintf("Local issue %s\n\n%s", i.Label(), text)
+	detail := "Local issue " + i.Label()
+	if text = strings.TrimSpace(text); text != "" {
+		detail += "\n\n" + text
+	}
 	if i.File != "" {
 		detail += "\n\nLocation: " + i.File
 		if i.Line > 0 {
