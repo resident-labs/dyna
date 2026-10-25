@@ -3,6 +3,7 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -551,7 +552,7 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 					// Replace this session's dead child on the next attach.
 					_ = s.host.Close()
 				}
-				return finishAttempt(spec, rawLines.String(), stderr.String(), st.err, true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
+				return finishAttempt(spec, rawLines.String(), stderr.String(), acpPromptError(st.err), true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
 			}
 			finalStderr := s.finishStderr()
 			if finalStderr != "" {
@@ -621,6 +622,36 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 			return finishAttempt(spec, rawLines.String(), stderr.String(), nil, true, true, false, false, nil, nil)
 		}
 	}
+}
+
+// acpPromptError tags a JSON-RPC error reply with the provider reason its
+// structured message or data names. The reply is the provider's own answer. A
+// transport error or a local failure is not, so it stays untyped.
+func acpPromptError(err error) error {
+	var rpc *jsonrpc.Error
+	if !errors.As(err, &rpc) {
+		return err
+	}
+	if reason, ok := providerfailure.Classify(rpc.Message); ok {
+		return providerfailure.Tag(reason, err)
+	}
+	var data struct {
+		Status json.RawMessage `json:"status"`
+		Code   json.RawMessage `json:"code"`
+		Type   json.RawMessage `json:"type"`
+	}
+	if len(rpc.Data) > 0 && json.Unmarshal(rpc.Data, &data) == nil {
+		for _, field := range []json.RawMessage{data.Status, data.Code, data.Type} {
+			if len(field) == 0 {
+				continue
+			}
+			if reason, ok := providerfailure.ClassifyJSONField(field); ok {
+				return providerfailure.Tag(reason, err)
+			}
+		}
+		return providerfailure.TagDetail(err, string(rpc.Data))
+	}
+	return err
 }
 
 // acpStopReasonError turns a prompt stopReason into a turn error.

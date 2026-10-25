@@ -44,17 +44,6 @@ func TestProcessErrorDoesNotLeakStructuredStdout(t *testing.T) {
 	}
 }
 
-// reasonFor runs one failed attempt through attemptError, which is the boundary
-// that turns a protocol error field or a process's stderr into a reason.
-func reasonFor(t *testing.T, harnessName, stdout, stderr string) error {
-	t.Helper()
-	a := attempt{stdout: stdout, stderr: stderr}
-	if harnessName != profile.HarnessCodex {
-		a.runErr = errors.New("exit status 1")
-	}
-	return attemptError(context.Background(), profile.Profile{Name: "worker", Harness: harnessName}, []string{"tool"}, a)
-}
-
 // A provider failure reason comes only from a trusted boundary, and each reason
 // allows exactly one recovery. Model output that talks about a limit or credit
 // routes nothing, so it can never move an account, a model or a profile.
@@ -64,6 +53,7 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 		harness string
 		stdout  string
 		stderr  string
+		runErr  error
 		want    providerfailure.Reason
 	}{
 		{
@@ -129,13 +119,26 @@ func TestProviderFailureReasonsRouteRecovery(t *testing.T) {
 			want:    providerfailure.Auth,
 		},
 		{
+			// The protocol record is opaque, but the harness already named the reason
+			// of that same failure.
+			name:    "opencode opaque record keeps the harness reason",
+			harness: profile.HarnessOpenCode,
+			stdout:  `{"type":"error","sessionID":"s","error":{"name":"APIError","data":{"message":"the provider said no"}}}`,
+			runErr:  providerfailure.Tag(providerfailure.Auth, errors.New("OpenCode turn failed: the provider said no")),
+			want:    providerfailure.Auth,
+		},
+		{
 			name:    "codex protocol failure is unclear",
 			harness: profile.HarnessCodex,
 			stdout:  `{"type":"turn.failed","error":{"message":"stream closed unexpectedly"}}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := reasonFor(t, tc.harness, tc.stdout, tc.stderr)
+			a := attempt{stdout: tc.stdout, stderr: tc.stderr, runErr: tc.runErr}
+			if a.runErr == nil && tc.harness != profile.HarnessCodex {
+				a.runErr = errors.New("exit status 1")
+			}
+			err := attemptError(context.Background(), profile.Profile{Name: "worker", Harness: tc.harness}, []string{"tool"}, a)
 			if err == nil {
 				t.Fatal("the attempt succeeded")
 			}
