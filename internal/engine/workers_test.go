@@ -296,6 +296,10 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	w.sweep, w.sessions = idle, idle
 	idleTimed := func(context.Context) (time.Time, error) { return time.Time{}, nil }
 	w.questions, w.prs = idleTimed, idleTimed
+	// A machine probe runs a shell script that samples CPU for a second, and the
+	// worker wait for it on shutdown. Probing a machine is not what this test
+	// checks, so it stays idle.
+	w.probe = idleTimed
 	signals := newWorkerSignals(nil)
 	done := make(chan struct{})
 	go func() {
