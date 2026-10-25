@@ -39,7 +39,7 @@ func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 	if _, err := r.AddProviderKey(ctx, "pi", store.ProviderZAI, "", testProviderKey); err != nil {
 		t.Fatal(err)
 	}
-	flow, err := r.piProviderFlow(bundle.Executable, "")
+	flow, err := r.piProviderFlow(bundle.Executable, "", store.ProviderKimiCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 	ctx := context.Background()
 	anthropic := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep-a"}`)
 	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
-	if info, err := r.beginPiProviderSignIn(bundle.Executable, anthropic.ID); err != nil || info.Target != anthropic.ID {
+	if info, err := r.beginPiProviderSignIn(bundle.Executable, anthropic.ID, store.ProviderAnthropic); err != nil || info.Target != anthropic.ID {
 		t.Fatalf("begin = %+v, %v", info, err)
 	}
 	login := r.findPrivateLogin(piProviderSignInID)
@@ -182,7 +182,7 @@ func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
 	ctx := context.Background()
 	gone := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep-a"}`)
 	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
-	if _, err := r.beginPiProviderSignIn(bundle.Executable, gone.ID); err != nil {
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, gone.ID, store.ProviderAnthropic); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Accounts.Remove(gone.ID, true); err != nil {

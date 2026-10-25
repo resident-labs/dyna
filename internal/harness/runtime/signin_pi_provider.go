@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	accountstore "dyna-agent/internal/account/store"
 )
 
 // piProviderSignInID names Pi's provider sign-in card. Pi saves the credentials
@@ -21,15 +23,15 @@ const piProviderSignInID = "pi:provider"
 // the signed-in providers as accounts. target names the saved account whose
 // provider must take the new credential, which a sign-in again passes so a
 // second account of that provider is never written by mistake.
-func (a *Runtime) beginPiProviderSignIn(exe, target string) (PrivateLogin, error) {
+func (a *Runtime) beginPiProviderSignIn(exe, target string, provider accountstore.Provider) (PrivateLogin, error) {
 	if login := a.findPrivateLogin(piProviderSignInID); login != nil && login.signIn != nil && !login.signIn.snapshot().final() {
-		if login.target != target {
-			return PrivateLogin{}, errors.New("A Pi sign-in is already running for another account. Finish or cancel it first.")
+		if login.target != target || login.provider != provider {
+			return PrivateLogin{}, errors.New("A Pi sign-in is already running for another account or provider. Finish or cancel it first.")
 		}
 		state := login.signIn.snapshot()
 		return PrivateLogin{AccountID: piProviderSignInID, Harness: "pi", Target: login.target, SignIn: &state}, nil
 	}
-	flow, err := a.piProviderFlow(exe, target)
+	flow, err := a.piProviderFlow(exe, target, provider)
 	if err != nil {
 		return PrivateLogin{}, err
 	}
@@ -40,6 +42,7 @@ func (a *Runtime) beginPiProviderSignIn(exe, target string) (PrivateLogin, error
 	a.privateLoginMu.Lock()
 	if running := a.privateLogins[piProviderSignInID]; running != nil {
 		running.target = target
+		running.provider = provider
 	}
 	a.privateLoginMu.Unlock()
 	login.Harness = "pi"
@@ -47,7 +50,15 @@ func (a *Runtime) beginPiProviderSignIn(exe, target string) (PrivateLogin, error
 	return login, nil
 }
 
-func (a *Runtime) piProviderFlow(exe, target string) (*NativeLogin, error) {
+func (a *Runtime) piProviderFlow(exe, target string, provider accountstore.Provider) (*NativeLogin, error) {
+	providerID := ""
+	if provider != "" {
+		id, ok := PiOAuthProviderID(provider)
+		if !ok {
+			return nil, errors.New("This provider has no Pi OAuth sign-in.")
+		}
+		providerID = id
+	}
 	dir, err := a.Accounts.harnessDirectory("pi")
 	if err != nil {
 		return nil, err
@@ -84,7 +95,7 @@ func (a *Runtime) piProviderFlow(exe, target string) (*NativeLogin, error) {
 	finished := false
 	var result NativeAccount
 	var resultErr error
-	return &NativeLogin{Argv: piLoginArgs(exe, scratch), Env: env, Cwd: scratch,
+	return &NativeLogin{Argv: piOAuthArgv(exe, providerID), Env: env, Cwd: scratch,
 		Complete: func(ctx context.Context) (NativeAccount, error) {
 			mu.Lock()
 			defer mu.Unlock()
