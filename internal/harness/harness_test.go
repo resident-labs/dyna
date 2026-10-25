@@ -56,46 +56,6 @@ func TestObservedBufferFlushesPendingOnlyToExplicitSideChannel(t *testing.T) {
 	}
 }
 
-func TestCancellationDuringNativeJournalSteerNeverResumes(t *testing.T) {
-	journalPath := createHarnessJournal(t, 37)
-	p, logPath := installFakeCodex(t, fakeCodexHold)
-	p.Name = "cancel-journal-steer"
-	p.Env[runstore.AgentJournalEnv] = journalPath
-	// Codex receives idle journal reminders as turn/steer. The fake holds that
-	// steer, so cancellation lands while the steer request is still in flight.
-	steers := fakeCodexGate(t, p.Env, envFakeCodexSteerGate)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	type outcome struct {
-		result Result
-		err    error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		result, err := RunWithJournal(ctx, p, "cancel during flush", t.TempDir(), true, JournalOptions{
-			Path: journalPath, IdleAfter: 30 * time.Millisecond, MaxToolWait: noBoundaryWait,
-		})
-		done <- outcome{result: result, err: err}
-	}()
-	held := awaitDoorbell(t, "the live input channel", steers)
-	cancel()
-	// Release the steer only after cancellation. Otherwise the interrupt waits
-	// behind the held steer until its timeout.
-	held.Close()
-	select {
-	case got := <-done:
-		if got.err == nil || !strings.Contains(got.err.Error(), "canceled/timed out") || got.result.JournalNudges != 0 {
-			t.Fatalf("cancellation outcome = %#v, %v", got.result, got.err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("cancellation during native journal steer did not stop the worker")
-	}
-	log := readTestFile(t, logPath)
-	if fakeCodexSpawns(log) != 1 || fakeCodexRequests(log, "thread/resume") != 0 {
-		t.Fatalf("canceled journal steer resumed the session:\n%s", log)
-	}
-}
-
 func TestJournalSupervisorValidEntryResetsInactivity(t *testing.T) {
 	journalPath := createHarnessJournal(t, 2)
 	var entries []runstore.AgentJournalEntry
@@ -296,104 +256,11 @@ printf '%s' 'worker completed'
 	}
 }
 
-func TestCancellationWinsWithoutJournalContinuation(t *testing.T) {
-	journalPath := createHarnessJournal(t, 31)
-	p, logPath := installFakeCodex(t, fakeCodexHold)
-	p.Name = "cancel-codex"
-	cwd := t.TempDir()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	type outcome struct {
-		result Result
-		err    error
-	}
-	done := make(chan outcome, 1)
-	nudgeCalls := 0
-	go func() {
-		// OnStart runs after turn/start is answered, so cancellation hits a live turn.
-		result, err := RunWithOptions(ctx, p, "cancel me", cwd, true, JournalOptions{
-			Path: journalPath, IdleAfter: 5 * time.Second,
-			OnNudge: func(JournalNudge) { nudgeCalls++ },
-		}, SteeringOptions{Source: &armedSource{}, OnStart: cancel}, SessionOptions{}, ExecutionOptions{})
-		done <- outcome{result: result, err: err}
-	}()
-
-	var got outcome
-	select {
-	case got = <-done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("RunWithJournal did not return after cancellation")
-	}
-	if got.err == nil || !strings.Contains(got.err.Error(), "canceled/timed out") {
-		t.Fatalf("error = %v, want cancellation", got.err)
-	}
-	if got.result.Nudged || got.result.JournalNudges != 0 || nudgeCalls != 0 {
-		t.Fatalf("cancellation triggered continuation: result=%#v OnNudge=%d", got.result, nudgeCalls)
-	}
-	log := readTestFile(t, logPath)
-	if fakeCodexSpawns(log) != 1 || fakeCodexRequests(log, "thread/resume") != 0 || fakeCodexRequests(log, "turn/start") != 1 {
-		t.Fatalf("canceled worker was continued:\n%s", log)
-	}
-}
-
-func TestCodexFailureWithoutSessionDoesNotRetry(t *testing.T) {
-	p, logPath := installFakeCodex(t, "normal")
-	// Thread start fails, so the run never gets a session to resume.
-	p.Env[envFakeCodexFailStart] = "1"
-
-	result, err := runTest(context.Background(), p, "task", t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "fake thread start failed") {
-		t.Fatalf("Run() error = %v, want the thread start error", err)
-	}
-	if result.Nudged {
-		t.Fatalf("Run() unexpectedly nudged without a session: %#v", result)
-	}
-	if got := fakeCodexSpawns(readTestFile(t, logPath)); got != 1 {
-		t.Fatalf("spawn count = %d, want 1", got)
-	}
-}
-
-func TestRecoveryBudgetCanDisableNudge(t *testing.T) {
-	p, logPath := installFakeCodex(t, "normal")
-	p.Env[envFakeCodexFailTurns] = "1"
-	p.Env[envFakeCodexFailMessages] = "temporary failure"
-
-	result, err := RunWithRecovery(context.Background(), p, "task", t.TempDir(), false)
-	if err == nil || result.Nudged {
-		t.Fatalf("RunWithRecovery() = %#v, %v; want unrecovered failure", result, err)
-	}
-	if got := fakeCodexRequests(readTestFile(t, logPath), "turn/start"); got != 1 {
-		t.Fatalf("turn count = %d, want 1", got)
-	}
-}
-
-func TestCodexCancellationDoesNotNudge(t *testing.T) {
-	p, logPath := installFakeCodex(t, fakeCodexHold)
-	p.Name = "sol-max"
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	// OnStart runs after turn/start is answered, so cancellation hits a live
-	// turn. OnStart needs a steering source; this one stays idle.
-	result, err := RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{Source: &armedSource{}, OnStart: cancel}, SessionOptions{}, ExecutionOptions{})
-	if ctx.Err() == context.DeadlineExceeded {
-		t.Fatal("OnStart never canceled the live turn")
-	}
-	if err == nil || !strings.Contains(err.Error(), "canceled/timed out") {
-		t.Fatalf("Run() error = %v, want timeout", err)
-	}
-	if result.Nudged {
-		t.Fatalf("Run() nudged after cancellation: %#v", result)
-	}
-	if got := fakeCodexRequests(readTestFile(t, logPath), "turn/start"); got != 1 {
-		t.Fatalf("turn count = %d, want 1", got)
-	}
-}
-
 func TestContextTerminationDoesNotLookLikeEmptyOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := attemptError(ctx, profile.Profile{Name: "luna"}, []string{"codex"}, attempt{
+	err := attemptError(ctx, profile.Profile{Name: "luna"}, []string{"worker"}, attempt{
 		started: true, contextDone: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "canceled/timed out") {
@@ -408,13 +275,13 @@ func TestContextTerminationDoesNotLookLikeEmptyOutput(t *testing.T) {
 func TestStoppedTurnIsNotASteeringFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := attemptError(ctx, profile.Profile{Name: "luna"}, []string{"codex"}, attempt{
+	err := attemptError(ctx, profile.Profile{Name: "luna"}, []string{"worker"}, attempt{
 		started: true, contextDone: true, steeringErr: context.Canceled,
 	})
 	if err == nil || !strings.Contains(err.Error(), "canceled/timed out") || strings.Contains(err.Error(), "steering source failed") {
 		t.Fatalf("attemptError() = %v, want cancellation", err)
 	}
-	err = attemptError(context.Background(), profile.Profile{Name: "luna"}, []string{"codex"}, attempt{
+	err = attemptError(context.Background(), profile.Profile{Name: "luna"}, []string{"worker"}, attempt{
 		started: true, steeringErr: errors.New("read steering"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "steering source failed") {
@@ -464,24 +331,6 @@ func TestWorkerEnvPWDMatchesWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestCodexReportsBothFailures(t *testing.T) {
-	p, logPath := installFakeCodex(t, "normal")
-	p.Name = "sol-max"
-	p.Env[envFakeCodexFailTurns] = "2"
-	p.Env[envFakeCodexFailMessages] = "first capacity failure|capacity persists"
-
-	result, err := runTest(context.Background(), p, "task", t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "first capacity failure") || !strings.Contains(err.Error(), "same-session nudge failed") || !strings.Contains(err.Error(), "capacity persists") {
-		t.Fatalf("Run() error = %v, want both diagnostics", err)
-	}
-	if !result.Nudged {
-		t.Fatalf("Run() result = %#v, want attempted nudge", result)
-	}
-	if got := fakeCodexRequests(readTestFile(t, logPath), "turn/start"); got != 2 {
-		t.Fatalf("turn count = %d, want 2", got)
-	}
-}
-
 func TestExplicitControlsDisableNudge(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -490,7 +339,6 @@ func TestExplicitControlsDisableNudge(t *testing.T) {
 		{"claude", profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--no-session-persistence"}}},
 		{"claude-budget", profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--max-budget-usd", "1"}}},
 		{"claude-fork", profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--fork-session"}}},
-		{"codex", profile.Profile{Harness: profile.HarnessCodex, ExtraArgs: []string{"--ephemeral"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -508,132 +356,10 @@ func TestExplicitControlsDisableNudge(t *testing.T) {
 	}
 }
 
-func TestCodexSandboxAndDirArgsStayResumable(t *testing.T) {
-	for _, extra := range [][]string{
-		{"--sandbox", "read-only"},
-		{"--cd=/tmp/project"},
-		{"--add-dir", "/tmp/other"},
-	} {
-		inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessCodex, ExtraArgs: extra}, "task")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if inv.cleanup != nil {
-			defer inv.cleanup()
-		}
-		if inv.resume == nil || inv.sessionID == nil {
-			t.Fatalf("Codex args %#v lost exact-session resume", extra)
-		}
-	}
-}
-
-func TestCodexProfileAndProviderArgsAreRejected(t *testing.T) {
-	for _, extra := range [][]string{
-		{"--profile", "locked-down"},
-		{"-p", "locked-down"},
-		{"--oss"},
-		{"--local-provider", "ollama"},
-	} {
-		inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessCodex, ExtraArgs: extra}, "task")
-		if inv.cleanup != nil {
-			inv.cleanup()
-		}
-		if err == nil || !strings.Contains(err.Error(), "does not support --profile/--oss/--local-provider") {
-			t.Fatalf("buildInvocation(%v) error = %v, want the unsupported provider error", extra, err)
-		}
-	}
-}
-
-func TestCodexPermissionPolicyParams(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		p        profile.Profile
-		approval string
-		sandbox  string
-	}{
-		{name: "safe mode requests read-only", p: profile.Profile{Harness: profile.HarnessCodex, SafeMode: true}, approval: "on-request", sandbox: "read-only"},
-		{name: "default bypasses", p: profile.Profile{Harness: profile.HarnessCodex}, approval: "never", sandbox: "danger-full-access"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			inv, err := buildInvocation(tc.p, "task")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if inv.cleanup != nil {
-				defer inv.cleanup()
-			}
-			thread := inv.initial.codexPolicy.params(true)
-			if thread["approvalPolicy"] != tc.approval || thread["sandbox"] != tc.sandbox {
-				t.Fatalf("thread params = %#v, want approval %q and sandbox %q", thread, tc.approval, tc.sandbox)
-			}
-			turn, _ := inv.initial.codexPolicy.params(false)["sandboxPolicy"].(map[string]any)
-			if want := map[string]string{"read-only": "readOnly", "danger-full-access": "dangerFullAccess"}[tc.sandbox]; turn["type"] != want {
-				t.Fatalf("turn sandboxPolicy = %#v, want type %q", turn, want)
-			}
-		})
-	}
-}
-
-// A custom permission profile owns the sandbox, so dyna sends no overrides.
-func TestCodexCustomPermissionConfigOmitsOverrides(t *testing.T) {
-	inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessCodex, SafeMode: true, ExtraArgs: []string{"-c", `default_permissions="dyna-journal"`}}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inv.cleanup != nil {
-		defer inv.cleanup()
-	}
-	if got := inv.initial.codexPolicy.params(true); len(got) != 0 {
-		t.Fatalf("custom permission config sent overrides: %#v", got)
-	}
-}
-
-func TestReadOnlyCodexJournalUsesNarrowResumablePermissionProfile(t *testing.T) {
-	journalPath := filepath.Join(t.TempDir(), "wf_permissions", "agents", "7", "journal.jsonl")
-	for _, extra := range [][]string{
-		{"--sandbox", "read-only", "-c", "model_reasoning_effort=high"},
-		{"--sandbox=read-only"},
-		{"-s", "read-only"},
-		{"-c", `sandbox_mode="read-only"`},
-		{"--config", `default_permissions=":read-only"`},
-	} {
-		p, err := withJournalPermissions(profile.Profile{
-			Name: "readonly", Harness: profile.HarnessCodex, ExtraArgs: extra,
-		}, journalPath)
-		if err != nil {
-			t.Fatalf("withJournalPermissions(%v) error = %v", extra, err)
-		}
-		if !p.SafeMode || hasAnyOption(p.ExtraArgs, "--sandbox", "-s") || hasArg(p.ExtraArgs, "--dangerously-bypass-approvals-and-sandbox") {
-			t.Fatalf("read-only conversion weakened or retained conflicting flags: %#v", p)
-		}
-		joined := strings.Join(p.ExtraArgs, " ")
-		if !strings.Contains(joined, `default_permissions="dyna-journal"`) ||
-			!strings.Contains(joined, `approval_policy="never"`) ||
-			!strings.Contains(joined, `extends=":read-only"`) ||
-			!strings.Contains(joined, strconv.Quote(filepath.Dir(journalPath))+`="write"`) {
-			t.Fatalf("narrow journal permission config missing from %#v", p.ExtraArgs)
-		}
-
-		inv, err := buildInvocation(p, "inspect only")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if inv.resume == nil || inv.sessionID == nil {
-			t.Fatalf("converted read-only invocation is not exact-session resumable: %#v", inv.initial.argv)
-		}
-		resumed := inv.resume("thread-readonly", "continue")
-		if strings.Contains(strings.Join(inv.initial.argv, " "), "dangerously-bypass") ||
-			strings.Contains(strings.Join(resumed.argv, " "), "dangerously-bypass") ||
-			!strings.Contains(strings.Join(resumed.argv, " "), `default_permissions="dyna-journal"`) {
-			t.Fatalf("permission profile was not preserved safely on resume: initial=%#v resume=%#v", inv.initial.argv, resumed.argv)
-		}
-	}
-}
-
 func TestExplicitHarnessPermissionsAreNeverAutoBypassed(t *testing.T) {
 	tests := []profile.Profile{
-		{Harness: profile.HarnessCodex, ExtraArgs: []string{"--sandbox", "read-only"}},
-		{Harness: profile.HarnessCodex, ExtraArgs: []string{"-c", `default_permissions="locked-down"`}},
+		{Harness: profile.HarnessMuse, ExtraArgs: []string{"--yolo"}},
+		{Harness: profile.HarnessMuse, ExtraArgs: []string{"--approval-mode", "never"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--permission-mode", "plan"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--allowedTools", "Read,Grep"}},
 	}
@@ -668,22 +394,6 @@ func TestClaudeSettingsFileKeepsPermissionBypass(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(inv.initial.argv, " "), "--dangerously-skip-permissions") {
 		t.Fatalf("settings file disabled the permission bypass: %v", inv.initial.argv)
-	}
-}
-
-func TestCodexReservedOutputArgsAreRejected(t *testing.T) {
-	for _, extra := range [][]string{
-		{"-o", "/tmp/result"},
-		{"--output-last-message=/tmp/result"},
-		{"-o=/tmp/result"},
-		{"-o/tmp/result"},
-	} {
-		if inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessCodex, ExtraArgs: extra}, "task"); err == nil {
-			if inv.cleanup != nil {
-				inv.cleanup()
-			}
-			t.Fatalf("buildInvocation(%v) accepted reserved output argument", extra)
-		}
 	}
 }
 
@@ -786,7 +496,6 @@ func TestLeafExecutionNativeControlsInitialAndResume(t *testing.T) {
 		value   string
 	}{
 		{"claude", profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--verbose"}}, "--disallowedTools", "Agent"},
-		{"codex", profile.Profile{Harness: profile.HarnessCodex, ExtraArgs: []string{"-c", "model_reasoning_effort=high"}}, "--disable", "multi_agent"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -815,7 +524,6 @@ func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 	// Dyna owns native delegation on every invocation.
 	for _, p := range []profile.Profile{
 		{Harness: profile.HarnessClaudeCode},
-		{Harness: profile.HarnessCodex},
 		{Harness: profile.HarnessOpenCode},
 	} {
 		inv, err := buildInvocation(p, "task")
@@ -826,7 +534,7 @@ func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 			defer inv.cleanup()
 		}
 		joined := strings.Join(inv.initial.argv, " ")
-		if p.Harness == profile.HarnessClaudeCode && !hasOptionValue(inv.initial.argv, "--disallowedTools", "Agent") || p.Harness == profile.HarnessCodex && !hasOptionValue(inv.initial.argv, "--disable", "multi_agent") {
+		if p.Harness == profile.HarnessClaudeCode && !hasOptionValue(inv.initial.argv, "--disallowedTools", "Agent") {
 			t.Fatalf("profile %#v lacks its native feature policy: %s", p, joined)
 		}
 	}
@@ -842,7 +550,7 @@ func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 			defer inv.cleanup()
 		}
 		joined := strings.Join(inv.initial.argv, " ")
-		if strings.Contains(joined, "--disallowedTools Agent") || strings.Contains(joined, "--disable multi_agent") {
+		if strings.Contains(joined, "--disallowedTools Agent") {
 			t.Fatalf("profile %#v received an unsupported native control: %s", p, joined)
 		}
 	}
@@ -854,8 +562,6 @@ func TestLeafExecutionRejectsExplicitConflicts(t *testing.T) {
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--allowedTools", "Read,Agent"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--allowed-tools", "Workflow"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--allowedTools", "Read", "Agent(reviewer)"}},
-		{Harness: profile.HarnessCodex, ExtraArgs: []string{"--enable", "multi_agent"}},
-		{Harness: profile.HarnessCodex, ExtraArgs: []string{"-c", "features.multi_agent=true"}},
 	} {
 		if inv, err := buildInvocationWithExecution(p, "task", leaf); err == nil {
 			if inv.cleanup != nil {
@@ -904,6 +610,24 @@ func optionIndex(args []string, option string) int {
 		}
 	}
 	return -1
+}
+
+// configArgs returns the values of the -c/--config options in argv, in order.
+// Muse passes its generated settings this way, one key=value pair per option.
+func configArgs(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case (args[i] == "-c" || args[i] == "--config") && i+1 < len(args):
+			out = append(out, args[i+1])
+			i++
+		case strings.HasPrefix(args[i], "-c="):
+			out = append(out, strings.TrimPrefix(args[i], "-c="))
+		case strings.HasPrefix(args[i], "--config="):
+			out = append(out, strings.TrimPrefix(args[i], "--config="))
+		}
+	}
+	return out
 }
 
 func createHarnessJournal(t *testing.T, agentID int) string {
@@ -1192,7 +916,6 @@ func TestProfileKnobsReachEveryTurn(t *testing.T) {
 		want           []string
 	}{
 		{profile.HarnessClaudeCode, "haiku", []string{"--effort", "high"}, &profile.Compact{Tokens: 95000}, []string{"--effort\x00high", `"autoCompactWindow":128000`}},
-		{profile.HarnessCodex, "gpt-x", []string{"-c", "model_reasoning_effort=high"}, &profile.Compact{Tokens: 95000}, []string{"-c\x00model_reasoning_effort=high", "-c\x00model_auto_compact_token_limit=95000"}},
 		{profile.HarnessMuse, "muse-x", []string{"--reasoning-effort", "high"}, &profile.Compact{Tokens: 95000, Windows: map[string]int64{"muse-x": 1000000}}, []string{"-c\x00context_compaction.soft_threshold=0.095"}},
 		{profile.HarnessPi, "anthropic/claude-x", []string{"--thinking", "high"}, nil, []string{"--thinking\x00high"}},
 		{profile.HarnessOpenCode, "opencode/beam-free#low", nil, nil, []string{"opencode", "serve"}},
@@ -1230,7 +953,6 @@ func TestInstructionsReachEveryTurnNatively(t *testing.T) {
 		file    bool
 	}{
 		{profile.HarnessClaudeCode, "--append-system-prompt-file", true},
-		{profile.HarnessCodex, "-c", false},
 		{profile.HarnessPi, "--append-system-prompt", true},
 		{profile.HarnessMuse, "-c", false},
 	} {
@@ -1265,7 +987,7 @@ func TestInstructionsReachEveryTurnNatively(t *testing.T) {
 	if NativeInstructions(profile.HarnessMock) || NativeInstructions(profile.HarnessOpenCode) {
 		t.Fatal("custom, mock and OpenCode keep prompt injection")
 	}
-	huge := profile.Profile{Harness: profile.HarnessCodex, RuntimeInstructions: strings.Repeat("x", 70*1024)}
+	huge := profile.Profile{Harness: profile.HarnessMuse, RuntimeInstructions: strings.Repeat("x", 70*1024)}
 	if _, err := buildInvocation(huge, "task"); err == nil || !strings.Contains(err.Error(), "64 KB") {
 		t.Fatalf("an instructions argv over 64 KB was accepted: %v", err)
 	}

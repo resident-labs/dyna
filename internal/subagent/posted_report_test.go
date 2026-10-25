@@ -17,12 +17,9 @@ func TestEmptyFinalAfterPostedReport(t *testing.T) {
 		name, recipient            string
 		workerFails, protocolFails bool
 		schema, silent, liveOwes   bool
-		missingTerminal, wantOK    bool
+		wantOK                     bool
 	}{
-		{name: "silent native completion", silent: true, wantOK: true},
 		{name: "parent steering requires output", silent: true, liveOwes: true},
-		{name: "silent missing terminal", silent: true, missingTerminal: true},
-		{name: "posted report missing terminal", recipient: "root", missingTerminal: true},
 		{name: "silent protocol error", silent: true, protocolFails: true},
 		{name: "silent process error", silent: true, workerFails: true},
 		{name: "silent schema requires output", silent: true, schema: true},
@@ -37,9 +34,9 @@ func TestEmptyFinalAfterPostedReport(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t, mockProfile("mock"), profile.Profile{
-				Name: "codex-test", Harness: profile.HarnessCodex,
+				Name: "muse-test", Harness: profile.HarnessMuse,
 				Taste: 5, Intelligence: 5, Cost: 5,
-				Output: &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
+				Output: &workeroutput.Declaration{Dialect: workeroutput.DialectMuseJSONL},
 			})
 			parent := completedFixtureSession(t, e)
 			root := completedFixtureSession(t, e)
@@ -51,7 +48,7 @@ func TestEmptyFinalAfterPostedReport(t *testing.T) {
 			delay := time.Duration(0)
 			e.m.RecoveryDelay = &delay
 			info, _ := e.start("Report the result.", func(o *StartOptions) {
-				o.Profile = "codex-test"
+				o.Profile = "muse-test"
 				if tc.schema {
 					o.Schema = `{"type":"object"}`
 				}
@@ -84,13 +81,13 @@ func TestEmptyFinalAfterPostedReport(t *testing.T) {
 						return err
 					}
 				}
-				fmt.Fprintln(stdout, `{"type":"thread.started","thread_id":"posted-report-test"}`)
-				fmt.Fprintln(stdout, `{"type":"item.completed","item":{"type":"agent_message","text":""}}`)
-				if !tc.protocolFails && !tc.missingTerminal {
-					fmt.Fprintln(stdout, `{"type":"turn.completed"}`)
+				fmt.Fprintln(stdout, `{"payload_type":"session.run.linked","stream":{"kind":"session","id":"posted-report-test"}}`)
+				fmt.Fprintln(stdout, `{"payload_type":"run.output.delta","payload":{"text":""}}`)
+				if !tc.protocolFails {
+					fmt.Fprintln(stdout, `{"payload_type":"run.terminal.completed","payload":{"text":""}}`)
 				}
 				if tc.protocolFails {
-					fmt.Fprintln(stdout, `{"type":"turn.failed","error":{"message":"provider request failed"}}`)
+					fmt.Fprintln(stdout, `{"payload_type":"run.terminal.failed","payload":{"text":"provider request failed"}}`)
 				}
 				if tc.workerFails {
 					return errors.New("worker process failed")
