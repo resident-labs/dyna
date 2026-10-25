@@ -77,16 +77,16 @@ async function read(slug) {
     const res = await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => null);
     if (!res || res.status() >= 400) continue;
     await page.waitForTimeout(2500);
-    const rows = await table(slug);
+    const t = await table(slug);
     const out = {
       url,
-      intelligence: rows.read('Intelligence Index'),
-      automation: rows.read('AutomationBench'),
-      terminal: rows.read('Terminal-Bench'),
-      cost: rows.read('Cost per Task'),
-      time: rows.read('Time per Task'),
+      intelligence: t.read('Intelligence Index'),
+      automation: t.read('AutomationBench'),
+      terminal: t.read('Terminal-Bench'),
+      cost: t.read('Cost per Task'),
+      time: t.read('Time per Task'),
       traits: {},
-      missing: [...rows.missing],
+      missing: [...t.missing],
     };
     // Name each metric row that was not found, so an n/a cell says why.
     for (const [name, pair] of [
@@ -95,7 +95,7 @@ async function read(slug) {
       ['Cost per Task', out.cost],
       ['Time per Task', out.time],
     ]) {
-      if (!rows.missing.length && (pair[0] == null || pair[1] == null)) out.missing.push(name);
+      if (!t.missing.length && (pair[0] == null || pair[1] == null)) out.missing.push(name);
     }
     for (const tab of TABS) {
       const btn = page.getByRole('button', { name: tab, exact: true }).or(page.getByRole('tab', { name: tab, exact: true })).first();
