@@ -3,7 +3,7 @@
 // level must not hide a model, and the last cell is not a model.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isColumn, num, pickColumns, toSlug } from './model-ratings-columns.mjs';
+import { isColumn, num, pickColumns, slugOf, toSlug } from './model-ratings-columns.mjs';
 
 test('pickColumns finds the baseline behind a vendor prefix', () => {
   const head = ['', 'Kimi Kimi K3.1 Pro', 'Anthropic Claude Opus 5.5 (Max, Default Fallback)', 'Add model'];
@@ -36,4 +36,17 @@ test('num reads priced and unit cells and rejects gaps', () => {
   assert.equal(num('70%'), 70);
   assert.equal(num(''), null);
   assert.equal(num(undefined), null);
+});
+
+test('slugOf reads a bare slug, a model page and a comparison page', () => {
+  assert.equal(slugOf('kimi-k3-1-pro'), 'kimi-k3-1-pro');
+  assert.equal(slugOf('https://artificialanalysis.ai/models/kimi-k3-1-pro'), 'kimi-k3-1-pro');
+  assert.equal(
+    slugOf('https://artificialanalysis.ai/models/comparisons/kimi-k3-1-pro-vs-claude-opus-5-5'),
+    'kimi-k3-1-pro',
+  );
+  assert.equal(
+    slugOf('https://artificialanalysis.ai/models/releases/comparisons/gpt-5-1-vs-claude-opus-5-5?tab=1'),
+    'gpt-5-1',
+  );
 });
