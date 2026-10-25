@@ -24,13 +24,15 @@
   // The machine list owns the load card now: Home shows what needs the owner.
   interface Props {
     rooms?: Room[]
+    roomsLoaded?: boolean
     update?: UpdateNotice | null
     onroom: (id: string, view?: string) => void
     onaccount: (id: string) => void
+    onnewroom: () => void
     // onsettings opens a Settings pane, the place an owner notice sends you.
     onsettings: (pane: string) => void
   }
-  let { rooms = [], update = null, onroom, onaccount, onsettings }: Props = $props()
+  let { rooms = [], roomsLoaded = false, update = null, onroom, onaccount, onnewroom, onsettings }: Props = $props()
 
   let usage = $state<UsageSnapshot | null>(null)
   let runtimes = $state<HarnessSnapshot | null>(null)
@@ -48,6 +50,7 @@
   let questionsLoaded = $state(false)
   let noticesLoaded = $state(false)
   let clear = $derived($heldComments.loaded && allClear({ usage, runtimes, questionsLoaded, noticesLoaded, cards: accounts.cards.length, asked: asked.length, alerts: alertCount, updates: updates.length }))
+  let firstRoom = $derived(roomsLoaded && rooms.length === 0)
 
   onMount(() => {
     refresh()
@@ -164,6 +167,10 @@
 
 <section class="home">
 <div class="dash">
+  {#if firstRoom}
+    <EmptyState title="Create your first room">Choose a project folder for your agents and their work.<br /><button class="new-room" onclick={onnewroom}>New room</button></EmptyState>
+  {/if}
+
   {#if accounts.cards.length}
     <div class="cards">
       {#each accounts.cards as group (group.id)}
@@ -215,7 +222,7 @@
   {/if}
 
   {#if $heldComments.error}<p class="err" role="alert">Could not load held PR comments: {$heldComments.error}</p>{/if}
-  {#if clear}<EmptyState title="All clear">No questions, alerts or updates need you.</EmptyState>{/if}
+  {#if clear && !firstRoom}<EmptyState title="All clear">No questions, alerts or updates need you.</EmptyState>{/if}
 </div>
 </section>
 
@@ -223,6 +230,7 @@
   .home { flex: 1; overflow-y: auto; }
   .dash { padding: var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 1240px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s3); }
+  .new-room { padding: var(--s2) 0; color: var(--ink); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
   .link { color: var(--faint); font-size: var(--t-sm); transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .link:hover { color: var(--ink); text-decoration: underline; }
