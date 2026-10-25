@@ -198,7 +198,8 @@ func TestMultiModelProfileUsesModelCooldowns(t *testing.T) {
 }
 
 // A signed-out runtime fails before any model runs, so no model cooldown is
-// recorded. The whole profile must still step aside for a healthy one.
+// recorded. The whole profile must still step aside for a healthy one. The same
+// holds for a completed capacity failure and a rejected sign-in.
 func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	storetest.Isolate(t)
 	harness.ResetModelCooldownsForTest()
@@ -218,6 +219,16 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	rejected := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Auth, Error: "worker chain: authentication_error: invalid api key"}
 	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, rejected, now), now, "reviewer"); err != nil || got != "spare" {
 		t.Fatalf("a rejected sign-in kept the profile selectable: %q %v", got, err)
+	}
+	// A capacity failure that ended the turn already spent the whole model chain,
+	// so the profile steps aside for the spare even though this engine process
+	// holds no model cooldown for it.
+	busy := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Capacity, Error: "worker chain: Selected model is at capacity"}
+	if got := RankProfiles(profiles, RecordFailure(nil, info, busy, now), now, "reviewer"); len(got) != 1 || got[0].Name != "spare" {
+		t.Fatalf("a completed capacity failure kept the multi-model profile: %+v", got)
+	}
+	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, busy, now), now, "reviewer"); err != nil || got != "spare" {
+		t.Fatalf("a completed capacity failure kept the profile selectable: %q %v", got, err)
 	}
 	signedOut := subagent.Turn{Status: subagent.TurnError, Ended: now, Error: "worker chain runtime is not ready: the active private account is not signed in"}
 	failures := RecordFailure(nil, info, signedOut, now)
