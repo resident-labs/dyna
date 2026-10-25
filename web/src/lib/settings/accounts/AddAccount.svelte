@@ -5,7 +5,7 @@
   import { dialog } from '../../ui/dialog.ts'
   import SignInCard from './SignInCard.svelte'
   import { PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, providerName } from './state.ts'
-  import { harnessLabel, harnessPin, NATIVE_HARNESSES, runningFlow, sharedLogin } from './signin.ts'
+  import { harnessLabel, harnessPin, NATIVE_HARNESSES, openCodeKey, runningFlow, sharedLogin } from './signin.ts'
   import type { AccountsSnapshot, Provider } from '../../api/account.ts'
   import type { HarnessSnapshot, PersonalLogin, PrivateLogin, SignInState } from '../../api/harness.ts'
 
@@ -25,6 +25,7 @@
   let provider = $state<Provider>(untrack(() => account?.provider ?? 'anthropic'))
   let harnessChoice = $state<HarnessChoice | ''>(untrack(() => account ? (account.harness === 'pi' ? 'pi' : 'claude-code') : ''))
   let piMethod = $state<PiMethod>('oauth')
+  let keyWhere = $state<'pi' | 'opencode'>('pi')
   let label = $state('')
   let key = $state('')
   let busy = $state(false)
@@ -39,9 +40,13 @@
   let stopped = false
 
   const piProviders = $derived(piMethod === 'oauth' ? PI_OAUTH_PROVIDERS : PI_KEY_PROVIDERS)
+  const openCode = $derived(openCodeKey(provider))
   $effect(() => {
     const fallback = piProviders[0]
     if (fallback && !piProviders.includes(provider)) provider = fallback
+  })
+  $effect(() => {
+    if (!openCode) keyWhere = 'pi'
   })
   const canSubmit = $derived(account !== null || (harnessChoice !== '' && harnessChoice !== 'pi') || (harnessChoice === 'pi' && (piMethod === 'oauth' || key.length > 0)))
   const title = $derived(account ? `Sign in again to ${account.label}` : 'Add account')
@@ -98,7 +103,7 @@
   async function submit() {
     if (busy || flow || personal) return
     if (account) return startRestart()
-    if (harnessChoice === 'claude-code') return startNative()
+    if (harnessChoice !== '' && harnessChoice !== 'pi') return startNative()
     if (harnessChoice === 'pi') return piMethod === 'key' ? saveKey() : startPi()
   }
 
@@ -193,6 +198,13 @@
     if (busy || !key) return
     busy = true; error = ''
     try {
+      if (keyWhere === 'opencode') {
+        if (!openCode) throw new Error(`${providerName(provider)} has no API key in OpenCode.`)
+        const next = await api.accountsAdd('opencode', provider, label.trim(), key)
+        key = ''
+        if (!stopped) onsaved(next)
+        return
+      }
       const next = await api.accountsAdd('pi', provider, label.trim(), key)
       key = ''
       if (!stopped) onsaved(next)
@@ -297,6 +309,15 @@
           </select>
         </label>
         {#if piMethod === 'key'}
+          {#if openCode}
+            <label>
+              <span class="muted small">Save the key in</span>
+              <select class="field" bind:value={keyWhere} disabled={busy} aria-label="Save the key in">
+                <option value="pi">Pi</option>
+                <option value="opencode">OpenCode</option>
+              </select>
+            </label>
+          {/if}
           <label>
             <span class="muted small">Label (optional)</span>
             <input class="field" bind:value={label} placeholder="e.g. Work" autocomplete="off" disabled={busy} aria-label="Account label" />
@@ -305,7 +326,7 @@
             <span class="muted small">API key for {providerName(provider)}</span>
             <input class="field mono" type="password" bind:value={key} autocomplete="off" spellcheck="false" disabled={busy} aria-label="API key" />
           </label>
-          <p class="muted small">Dyna saves the key in the account’s own Pi home. It never shows the key again.</p>
+          <p class="muted small">{keyWhere === 'opencode' ? 'Dyna saves the key in OpenCode’s private home.' : 'Dyna saves the key in the account’s own Pi home.'} It never shows the key again.</p>
         {:else}
           <p class="muted small">Dyna starts {providerName(provider)}’s Pi OAuth sign-in directly. Pi asks only for the approval it needs.</p>
         {/if}
