@@ -1,12 +1,14 @@
 package watch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/pr/state"
 )
 
 func TestRegisteredCIGateUsesBaseAndCommandsUseHead(t *testing.T) {
@@ -97,6 +99,61 @@ suites:
 	}
 	if state, _, _, _ := got.CIStatus(); state != "passed" {
 		t.Fatalf("hosted CI did not remain authoritative: %s", state)
+	}
+}
+
+func TestLocalTrialUsesFrozenBaseForRequiredChecks(t *testing.T) {
+	repo, _ := changeRepo(t)
+	writeTrialDefinition(t, repo, `version: 1
+trial: [test]
+checks:
+  - id: unit
+    image: python:3.13-slim
+    command: python -m pytest
+  - id: lint
+    image: python:3.13-slim
+    command: python -m ruff check
+suites:
+  - id: test
+    checks: [unit, lint]
+`)
+	base := changeCommit(t, repo, "base definition\n")
+	writeTrialDefinition(t, repo, `version: 1
+trial: [test]
+checks:
+  - id: unit
+    image: python:3.13-slim
+    command: python -m pytest
+suites:
+  - id: test
+    checks: [unit]
+`)
+	first := changeCommit(t, repo, "first change removes lint\n")
+	second := changeCommit(t, repo, "second change\n")
+	record := Record{Kind: "local", Key: "second", RepoPath: repo, Base: base, Branch: "feature"}
+	service := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}}
+	for _, stack := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stack=%t", stack), func(t *testing.T) {
+			batch := &state.MergeTrial{Base: base, Head: second, Branch: "dyna/merge-trial/1"}
+			if stack {
+				batch.Head = "another-head"
+				batch.Stacks = []state.MergeTrialStack{{Head: second, Branch: "dyna/merge-trial/2"}}
+			}
+			if err := service.Store.update(func(st *State) error {
+				st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(record): batch}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := service.planLocalLaneCI(t.Context(), record, second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			required := plan.required.RequiredChecks(plan.suites)
+			if !slices.Contains(required, localci.CheckName("lint")) {
+				t.Fatalf("trial with changes %s and %s lost base-required lint: %v", first, second, required)
+			}
+		})
 	}
 }
 

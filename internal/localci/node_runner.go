@@ -792,7 +792,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
 	setup := "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
 	for _, cache := range check.caches {
-		setup += "mkdir -p " + q(path.Join(base, cache.Name)) + "; "
+		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
 	}
 	if check.host {
 		setup += "cd " + q(work) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
@@ -803,7 +803,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		}
 		for _, cache := range check.caches {
 			if cache.Env != "" {
-				environment[cache.Env] = path.Join(base, cache.Name)
+				environment[cache.Env] = repositoryCachePath(base, cache.Name)
 			}
 		}
 		for key, value := range check.env {
@@ -837,7 +837,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		"JUNIT_REPORT_PATH": "/reports/" + string(check.id) + "-test.xml",
 	}
 	for _, cache := range check.caches {
-		args += " -v " + q(path.Join(base, cache.Name)+":"+cache.Target)
+		args += " -v " + q(repositoryCachePath(base, cache.Name)+":"+cache.Target)
 		if cache.Env != "" {
 			environment[cache.Env] = cache.Target
 		}

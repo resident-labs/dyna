@@ -77,7 +77,7 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 // that finds real directories takes no lock and prints no repair fact.
 func TestCacheRepairPreservesLinkedCaches(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "base")
-	if err := os.MkdirAll(base, 0o700); err != nil {
+	if err := os.MkdirAll(repositoryCacheRoot(base), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "host-go-build")
@@ -88,11 +88,11 @@ func TestCacheRepairPreservesLinkedCaches(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("shared"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(base, "go-build")
+	link := repositoryCachePath(base, "go-build")
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	realMod := filepath.Join(base, "go-mod")
+	realMod := repositoryCachePath(base, "go-mod")
 	if err := os.MkdirAll(realMod, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -230,11 +230,11 @@ func TestCacheRepairPreservesLinkedCaches(t *testing.T) {
 func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 	t.Run("npm link", func(t *testing.T) {
 		base := filepath.Join(t.TempDir(), "base")
-		if err := os.MkdirAll(base, 0o700); err != nil {
+		if err := os.MkdirAll(repositoryCacheRoot(base), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		target := t.TempDir()
-		if err := os.Symlink(target, filepath.Join(base, "npm")); err != nil {
+		if err := os.Symlink(target, repositoryCachePath(base, "npm")); err != nil {
 			t.Fatal(err)
 		}
 		out, err := exec.Command("bash", "-c", cacheLinkGuard(base, []string{"go-build", "go-mod", "npm"})).CombinedOutput()
@@ -242,7 +242,7 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 		if !errors.As(err, &exit) || exit.ExitCode() != 69 {
 			t.Fatalf("guard accepted a linked npm cache: %v: %s", err, out)
 		}
-		for _, want := range []string{filepath.Join(base, "npm"), target} {
+		for _, want := range []string{repositoryCachePath(base, "npm"), target} {
 			if !strings.Contains(string(out), want) {
 				t.Fatalf("guard did not name %s: %s", want, out)
 			}
@@ -252,7 +252,7 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 	t.Run("all real directories", func(t *testing.T) {
 		base := t.TempDir()
 		for _, name := range []string{"go-build", "go-mod", "npm"} {
-			if err := os.MkdirAll(filepath.Join(base, name), 0o755); err != nil {
+			if err := os.MkdirAll(repositoryCachePath(base, name), 0o755); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -277,11 +277,11 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 
 	t.Run("link inside the base", func(t *testing.T) {
 		base := filepath.Join(t.TempDir(), "base")
-		real := filepath.Join(base, "go-mod-real")
+		real := repositoryCachePath(base, "go-mod-real")
 		if err := os.MkdirAll(real, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(base, "go-mod")
+		link := repositoryCachePath(base, "go-mod")
 		if err := os.Symlink(real, link); err != nil {
 			t.Fatal(err)
 		}
@@ -300,12 +300,12 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 
 	t.Run("link with no target", func(t *testing.T) {
 		base := filepath.Join(t.TempDir(), "base")
-		if err := os.MkdirAll(base, 0o700); err != nil {
+		if err := os.MkdirAll(repositoryCacheRoot(base), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		targetParent := t.TempDir()
 		target := filepath.Join(targetParent, "missing")
-		link := filepath.Join(base, "go-build")
+		link := repositoryCachePath(base, "go-build")
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
 		}
@@ -328,10 +328,10 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 	t.Run("existing backup", func(t *testing.T) {
 		base := filepath.Join(t.TempDir(), "base")
 		target := t.TempDir()
-		if err := os.MkdirAll(base, 0o700); err != nil {
+		if err := os.MkdirAll(repositoryCacheRoot(base), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		link := filepath.Join(base, "go-build")
+		link := repositoryCachePath(base, "go-build")
 		if err := os.Symlink(target, link); err != nil {
 			t.Fatal(err)
 		}

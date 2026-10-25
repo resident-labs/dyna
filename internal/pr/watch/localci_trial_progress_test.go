@@ -332,6 +332,25 @@ func runningTrialRun() Run {
 	return Run{ID: 81, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", Event: "push", Status: "in_progress"}
 }
 
+// A saved infrastructure error must not hide the graph that distinguishes a
+// cancellation-only hosted aggregate from a real failure.
+func TestSavedInfraErrorKeepsCancellationGraphForHostedFallback(t *testing.T) {
+	result := localci.Result{Node: "worker", Status: localci.OutcomeError, Error: "node unavailable"}
+	run := cancelledTrialRun()
+	run.Conclusion = "cancelled"
+	s, r, _, branch, reruns := savedLocalEnv(t, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}, &result, []Run{run}, cancelledTrialChecks(), nil, false)
+	got, err := s.mergeTrialCI(t.Context(), r, branch, result.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != VerdictPending {
+		t.Fatalf("ci=%s reason=%q; a cancellation-only aggregate became a test failure", got.Status, got.Reason)
+	}
+	if *reruns != 1 {
+		t.Fatalf("reran hosted CI %d times, want one fallback run", *reruns)
+	}
+}
+
 // A saved local pass decides a head on its own. A host that is briefly
 // unavailable must not restart the hosted run that local CI replaced: that wait
 // costs a full hosted run and holds work the local pass already released.
