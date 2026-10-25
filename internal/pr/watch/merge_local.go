@@ -151,7 +151,9 @@ func (s *Service) localSyncCI(ctx context.Context, r Record, head string) (trial
 	if err != nil {
 		return trialCI{}, err
 	}
-	job.sync = true
+	// A sync runs every workflow suite, but it is not a merge trial: the
+	// machine view must not call it one.
+	job.sync, job.trial = true, false
 	return s.savedTrialCI(ctx, job)
 }
 
@@ -159,7 +161,7 @@ func (s *Service) localSyncCI(ctx context.Context, r Record, head string) (trial
 // base of the batch that owns a trial head. Only a plain local head needs the
 // first parent as its base, and withLocalTrialBase reads that then.
 func (s *Service) localTrialJob(r Record, head string) (registeredCIJob, error) {
-	job := registeredCIJob{record: r, head: head, branch: r.Branch, trial: true}
+	job := registeredCIJob{record: r, head: head, branch: r.Branch, trial: true, wholeSuite: true}
 	if s.Store == nil {
 		return job, nil
 	}
