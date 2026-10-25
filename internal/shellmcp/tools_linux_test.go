@@ -380,7 +380,7 @@ func TestServeSpeaksMCP(t *testing.T) {
 	for _, tool := range list["result"].(map[string]any)["tools"].([]any) {
 		names = append(names, tool.(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, ",") != "shell,shell_output,shell_stop,shell_jobs" {
+	if strings.Join(names, ",") != "shell,shell_output,shell_stop,shell_jobs,web_search" {
 		t.Fatalf("tools = %v", names)
 	}
 	result := exchange(`{"jsonrpc":"2.0","id":"three","method":"tools/call","params":{"name":"shell","arguments":{"command":"echo mcp","description":"Echo"}}}`)

@@ -370,7 +370,7 @@ func TestEveryCallHasOneScope(t *testing.T) {
 		names string
 	}{
 		{websvc.ScopeRead, `RunnerWaitInput Health SystemLoad Machines Machine Rooms FeedTail FeedAfter FeedAround SearchFeed OpenRoom Members MentionChoices Preview Transcript TranscriptMore RootSession HeldPRComments TranscriptPage TranscriptAfter TranscriptTurn Profile Profiles RoomSessionControls SessionTransfer SessionConsolidations RoomCIBudget CIHealth CIHealthRun CIHealthTest RoomChangePolicy Changes ChangeDetail MergeStatus MergeControlStatus RoomMergeStatus RoomMergeHistory ReviewerStatus ListServices GitHubList GitHubView GitHubDiff Runs RunDetail RunResult AttachmentText Pins Issues Library CallRequests Questions Visuals Rules Goals Goal GoalJournal GoalItems GoalItemCounts GoalStatus GoalEvents ListTemplates SessionQueue Notices AccountsView UsageRollup ProfileUsage VoiceStatus PRSettings PRNoiseRules SyncStatus`},
-		{websvc.ScopeOperate, "StampPlanAncestry AdmitNativeAttempt AddRunDirectories FinishRun ObserveClaudeUsage"},
+		{websvc.ScopeOperate, "StampPlanAncestry AdmitNativeAttempt AddRunDirectories FinishRun ObserveClaudeUsage WebSearch"},
 		{websvc.ScopeOperate, `WakeLibrarian FileLibrarySmell AddLibraryEntry UpdateLibraryEntry LinkLibraryEntry RetireLibraryEntry NewWorktree GCWorktrees RemoveWorktrees PruneWorktrees ApplyRunWorktreeDisposition MarkRead MarkReadMany SendToSession SendWithReferences SendToSessionWithReferences Send Post StopSession BulkSessionAction PauseRoomSessions ResumeRoomSessions ClearDormantSessions DismissSession ReturnSeat CloseSession CloseSessionOptions ReopenSession ForceCloseSession PromoteSession TransferSession CancelSessionTransfer SubmitTransferHandoff ConsolidateSessions ResumeSessionConsolidation CancelSessionConsolidation ReplyToFinding SendDiffComments SendWorktreeComments RestartReviewer StartIssueWork DismissPRComment AdmitPRComment CommentPR PostPRReview LearnPRNoise UntrackPR ResumePR TrackPR TrackPRRef TransferPR SetPRDraft RequirePRReviewers CloseChange OpenChange RecordReviewResult RecordPRVerdict Attach Pin Unpin CloseIssue IssueGoal RequestCall WithdrawCall CallRequestShown DeclineCallRequest AskQuestion WithdrawQuestion AnswerQuestion AddGoal AddGoalItem MoveGoalItem EditGoalSelectors EditGoalItem EditGoal AmendGoalBrief FinishGoal ExpediteGoal SetPRGoal SetGoalItemState NoteGoal RunnerSetPid RunnerSetRuntimePin RunnerSetInstructionsStale RunnerSetHarnessSession RunnerSetDMCursor RunnerFinish RunnerTurnStart RunnerTurnNote RunnerTurnEnd RunnerCompleteTurn RunnerReturnDormant RunnerInstructions RunnerClaimInput CancelRun PauseRun RemoveRun ClearRuns ArchiveRun UnarchiveRun SteerRun DeletePendingSteer DismissPendingPost DismissNotice VoiceStart VoiceResume VoiceStop AttachSeat AdoptSession RenameSession StartSubagent`},
 		{websvc.ScopeFiles, `ListEntries ReadFile SyncFetch SyncRefresh GitExport GitStatus GitLastCommits GitReadFile GitHistory GitBlame GitDiff BrowseInfo BrowseDirs InspectPath`},
 		{websvc.ScopeTerminal, `TermOpen Terms TermAttach TermWrite TermResize TermClose ShellJobs ShellLog ShellLogRange StopShell`},
@@ -484,8 +484,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 		}
 	}
 	// VoiceResume can dial a provider, like VoiceStart.
-	if n := len(callspec.LongCalls); n != 94 {
-		t.Fatalf("LongCalls has %d calls, want 94; a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 95 {
+		t.Fatalf("LongCalls has %d calls, want 95; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 
