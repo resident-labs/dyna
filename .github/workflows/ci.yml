@@ -66,6 +66,15 @@ jobs:
   # Saves the shared Go build and module cache on main. Only main caches are
   # readable by every pull request and merge trial. The cache holds the objects
   # for the tests, vet and the CI checker, so every Go job starts warm. Run it by hand with workflow_dispatch on main to refresh it.
+  #
+  # This job compiles from an empty build cache on purpose. Go keeps every
+  # object it ever built, so restoring the previous cache here made the saved
+  # archive grow with each main push: 5.75 GB after a few dozen commits, and a
+  # restore alone took over two minutes on every Go job. A cache built only from
+  # this commit is complete for the moment it is saved, and objects are
+  # content-addressed, so a pull request still hits every package it did not
+  # change. The module cache is downloaded again too, which is one network wait
+  # that does not grow.
   cache-warm:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -82,13 +91,6 @@ jobs:
           echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
           echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
           echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: go-build-${{ github.sha }}
-          restore-keys: go-build-
       - name: Compile every Go object the other jobs need
         run: |
           mkdir -p web/dist && touch web/dist/.keep
@@ -96,6 +98,10 @@ jobs:
           go vet ./...
           go test -run '^$' ./... >/dev/null
           go clean -testcache
+      - name: Report the cache size
+        # A jump here is what makes a restore slow again, so the size is visible
+        # in the run that saved it.
+        run: du -sh /root/.cache/go-build /go/pkg/mod
       - uses: actions/cache/save@v4
         with:
           path: |
