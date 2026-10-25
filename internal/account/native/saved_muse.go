@@ -59,13 +59,34 @@ func (*museManager) ProbeSaved(ctx context.Context, c Captured) (store.Observati
 	if !expiry.IsZero() && !expiry.After(now) {
 		return o, usageAuthError()
 	}
-	body, err := directRequest(ctx, nil, http.MethodPost, "https://api.meta.ai/muse-code/key", `{"onboard":false}`, map[string]string{"Authorization": "Bearer " + credential.AccessToken, "x-api-version": "1.0.0", "Content-Type": "application/json", "Accept": "*/*", "User-Agent": "muse-build/0.1.0"}, now)
+	body, err := museUsageRequest(ctx, nil, now, credential.AccessToken)
 	if err != nil {
 		if errors.Is(err, ErrInvalidGrant) {
 			return o, usageAuthError()
 		}
 		return o, err
 	}
+	observation, err := museUsageObservation(body, now, c.Identity)
+	if err != nil {
+		return observation, err
+	}
+	return observation, nil
+}
+
+// museUsageRequest mints a key with a Muse identity token. The same response
+// carries subs_usage, so the caller reads the plan without keeping the key. It
+// never writes the saved login or renews the identity token.
+func museUsageRequest(ctx context.Context, client claudeHTTPClient, now time.Time, identityToken string) ([]byte, error) {
+	return directRequest(ctx, client, http.MethodPost, "https://api.meta.ai/muse-code/key", `{"onboard":false}`, map[string]string{
+		"Authorization": "Bearer " + identityToken, "x-api-version": "1.0.0",
+		"Content-Type": "application/json", "Accept": "*/*", "User-Agent": "muse-build/0.1.0",
+	}, now)
+}
+
+// museUsageObservation parses the plan from a key-mint response. A non-empty
+// expectedIdentity checks the account email before any idle or error result.
+func museUsageObservation(body []byte, now time.Time, expectedIdentity string) (store.Observation, error) {
+	var o store.Observation
 	var response struct {
 		Email    string `json:"user_email"`
 		TierID   string `json:"subs_tier_id"`
@@ -86,7 +107,7 @@ func (*museManager) ProbeSaved(ctx context.Context, c Captured) (store.Observati
 	if json.Unmarshal(body, &response) != nil {
 		return o, errors.New("Muse usage response could not be read.")
 	}
-	if strings.TrimSpace(response.Email) == "" || "meta:email:"+strings.ToLower(strings.TrimSpace(response.Email)) != c.Identity {
+	if expectedIdentity != "" && (strings.TrimSpace(response.Email) == "" || "meta:email:"+strings.ToLower(strings.TrimSpace(response.Email)) != expectedIdentity) {
 		return o, ErrNoIdentity
 	}
 	o.ObservedAt = now

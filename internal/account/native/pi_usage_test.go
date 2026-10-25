@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -130,6 +131,24 @@ func TestPiZAIUsageReadsTheCodingPlanLimits(t *testing.T) {
 	}
 	if o.Windows[1].ID != "five_hour" || o.Windows[1].UsedPercent == nil || *o.Windows[1].UsedPercent != 1 {
 		t.Fatalf("wrong z.ai token window: %+v", o.Windows[1])
+	}
+}
+
+func TestPiMetaOAuthUsageUsesTheIdentityToken(t *testing.T) {
+	c := piCaptured(t, "meta", map[string]any{
+		"type": "oauth", "access": "fixture-minted-key", "refresh": "fixture-identity",
+	})
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	client := directTestClient(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != "POST" || r.URL.String() != "https://api.meta.ai/muse-code/key" || r.Header.Get("Authorization") != "Bearer fixture-identity" || string(body) != `{"onboard":false}` {
+			t.Fatal("wrong Muse OAuth usage request")
+		}
+		return directTestResponse(200, `{"user_email":"fixture@example.test","subs_tier_id":"max","subs_tier_name":"Muse Code Max Usage","is_subs_active":true,"subs_usage":{"window":{"used_percent":12.5,"window_duration_mins":300,"resets_at":2000000000},"weekly":{"used_percent":45,"resets_at":2000600000}}}`), nil
+	})
+	o, err := probePiSaved(context.Background(), c, client, now)
+	if err != nil || len(o.Windows) != 2 || *o.Windows[0].UsedPercent != 12.5 || *o.Windows[1].UsedPercent != 45 || o.Plan == nil || o.Plan.Label != "Muse Code Max Usage" {
+		t.Fatalf("unexpected Muse OAuth observation: %+v, %v", o, err)
 	}
 }
 
