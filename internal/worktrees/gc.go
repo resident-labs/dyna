@@ -367,7 +367,7 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 	}
 	defaultRef := ""
 	if resolved, err := defaultBranch(ctx, repo); err == nil {
-		defaultRef = resolved.Ref
+		defaultRef = "refs/remotes/origin/" + resolved.Name
 	}
 	var trees []Tree
 	for index, block := range blocks {

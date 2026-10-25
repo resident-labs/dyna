@@ -173,7 +173,7 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 			if err != nil {
 				return finish("failed", err.Error())
 			}
-			op.Base, err = gitRead(ctx, repo, "rev-parse", "--verify", resolved.Ref+"^{commit}")
+			op.Base, err = gitRead(ctx, repo, "rev-parse", "--verify", "refs/remotes/origin/"+resolved.Name+"^{commit}")
 			if err != nil {
 				return finish("failed", err.Error())
 			}
@@ -199,7 +199,7 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 			paths, _ := mergeConflictPaths(ctx, repo, op.Base, op.OldIntegration)
 			base := "the repository default branch"
 			if resolved, resolveErr := repoid.DefaultBranch(ctx, repo, gitRead); resolveErr == nil {
-				base = resolved.Ref
+				base = "origin/" + resolved.Name
 			}
 			text := "dyna/integration conflicts with " + base
 			if len(paths) > 0 {

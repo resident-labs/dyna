@@ -146,6 +146,35 @@ func TestRefreshPublishesTestedMergeAndSurvivesRestart(t *testing.T) {
 		t.Fatal("trial ref remains")
 	}
 }
+func TestLaneOperationsUseFetchedDefaultWithoutOriginHead(t *testing.T) {
+	for _, kind := range []string{"refresh", "export"} {
+		t.Run(kind, func(t *testing.T) {
+			e, repo, remote, _ := syncEnv(t)
+			useSyncTrunk(t, repo, remote)
+			changeGit(t, repo, "config", "remote.origin.followRemoteHEAD", "never")
+			upstream := changeGit(t, repo, "rev-parse", "trunk")
+			changeGit(t, repo, "reset", "--hard", "trunk^")
+			changeGit(t, repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+			changeGit(t, repo, "update-ref", "refs/remotes/origin/trunk", "trunk")
+			if kind == "export" {
+				fakeExportGitHub(t, e, repo, remote)
+				if _, err := e.s.GitExport(context.Background(), e.author.RoomID, repo); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := e.s.SyncRefresh(context.Background(), e.author.RoomID, repo); err != nil {
+				t.Fatal(err)
+			}
+			// Build once without starting CI. Inspect the exact commit CI will test.
+			stepSync(t, e)
+			op := savedOperation(t, repo)
+			if op.State != "testing" || op.Base != upstream {
+				t.Fatalf("operation did not select the fetched default: %+v; want base %s", op, upstream)
+			}
+			changeGit(t, repo, "merge-base", "--is-ancestor", upstream, op.Head)
+		})
+	}
+}
+
 func TestRefreshLeaseRejectsOutsideMove(t *testing.T) {
 	e, repo, _, _ := syncEnv(t)
 	if _, err := e.s.SyncRefresh(context.Background(), e.author.RoomID, repo); err != nil {
@@ -209,7 +238,7 @@ func fakeExportGitHub(t *testing.T, e *testEnv, repo, remote string) *exportGitH
 	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
 		if filepath.Base(cmd.Path) == "git" {
 			if strings.Contains(strings.Join(cmd.Args, " "), "fetch") {
-				real := exec.CommandContext(ctx, "/usr/bin/git", "-C", repo, "fetch", "--prune", remote)
+				real := exec.CommandContext(ctx, "/usr/bin/git", "-C", repo, "fetch", "--prune", remote, "+refs/heads/*:refs/remotes/origin/*")
 				real.Stdout, real.Stderr = cmd.Stdout, cmd.Stderr
 				return real.Run()
 			}
