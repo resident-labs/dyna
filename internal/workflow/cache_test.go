@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
@@ -115,9 +116,10 @@ func TestExecuteResumeReverseCompletionOrderWithCanceledHole(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			store := &profile.Store{Profiles: []profile.Profile{{Name: "local", Harness: profile.HarnessCustom, Default: true,
-				Command: []string{"/bin/sh", "-c", `answer=$(cat answer); if [ "$answer" = slow ]; then while [ ! -f "$GATE" ]; do sleep 0.01; done; fi; printf '%s' "$answer"`},
-				Env:     map[string]string{"GATE": gate}, Taste: 5, Intelligence: 5, Cost: 5}}}
+			worker := fakeworker.InstallClaude(t, `answer=$(cat answer); if [ "$answer" = slow ]; then while [ ! -f "$GATE" ]; do sleep 0.01; done; fi; printf '%s' "$answer"`)
+			worker.Name, worker.Default = "local", true
+			worker.Env = mergedEnv(worker.Env, map[string]string{"GATE": gate})
+			store := &profile.Store{Profiles: []profile.Profile{worker}}
 			script := `return await parallel(args.jobs.map(job => () => agent("identical task", {profile:"local",label:job.label,cwd:job.cwd})));`
 			jobs := func(names ...string) any {
 				entries := []map[string]string{}
@@ -264,8 +266,9 @@ func TestExecuteResumeRequiresMatchingExecutionConfiguration(t *testing.T) {
 	t.Setenv(runstore.AgentJournalRootEnv, "")
 	t.Setenv("DYNA_RUN_ID", "wf_config-source")
 	base := t.TempDir()
-	original := profile.Profile{Name: "local", Harness: profile.HarnessCustom, Model: "first",
-		Command: []string{"/bin/sh", "-c", "printf fresh"}, Env: map[string]string{"TOKEN": "private-token"}}
+	original := fakeworker.InstallClaude(t, "printf fresh")
+	original.Name, original.Model = "local", "first"
+	original.Env = mergedEnv(original.Env, map[string]string{"TOKEN": "private-token"})
 	script := `return await agent("task", {profile:"local",label:"job"});`
 	source, err := runstore.Create("config source", script, nil)
 	if err != nil {
@@ -302,8 +305,7 @@ func TestExecuteResumeRequiresMatchingExecutionConfiguration(t *testing.T) {
 		{"model chain", func(p *profile.Profile) { p.Models = []string{"first", "fallback"} }, 0},
 		{"harness", func(p *profile.Profile) { p.Harness = profile.HarnessMock }, 0},
 		{"args", func(p *profile.Profile) { p.ExtraArgs = []string{"--different"} }, 0},
-		{"env", func(p *profile.Profile) { p.Env = map[string]string{"TOKEN": "new-private-token"} }, 0},
-		{"command", func(p *profile.Profile) { p.Command = []string{"/bin/sh", "-c", "printf changed"} }, 0},
+		{"env", func(p *profile.Profile) { p.Env = mergedEnv(p.Env, map[string]string{"TOKEN": "new-private-token"}) }, 0},
 		{"safety", func(p *profile.Profile) { p.SafeMode = true }, 0},
 		{"timeout", func(p *profile.Profile) { p.TimeoutSec = 1 }, 0},
 		{"equivalent models", func(p *profile.Profile) { p.Models = []string{"first"} }, 1},
@@ -325,7 +327,7 @@ func TestExecuteResumeRequiresMatchingExecutionConfiguration(t *testing.T) {
 }
 
 func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
-	original := profile.Profile{Harness: profile.HarnessCustom, Model: "first", Models: []string{"first", "fallback"}, Env: map[string]string{"A": "one", "B": "two"}}
+	original := profile.Profile{Harness: profile.HarnessClaudeCode, Model: "first", Models: []string{"first", "fallback"}, Env: map[string]string{"A": "one", "B": "two"}}
 	base := executionConfigDigest(original, time.Minute)
 	for _, tc := range []struct {
 		name   string
@@ -334,8 +336,8 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 		{"runtime version", func(p *profile.Profile) { p.RuntimeVersion = "2" }},
 		{"runtime executable", func(p *profile.Profile) { p.RuntimeExecutable = "/other/executable" }},
 		{"runtime skills", func(p *profile.Profile) { p.RuntimeSkillPaths = []string{"/other/skill"} }},
-		{"output", func(p *profile.Profile) {
-			p.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectClaudeStreamJSON}
+		{"effective dialect", func(p *profile.Profile) {
+			p.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectMuseJSONL}
 		}},
 		{"chain order", func(p *profile.Profile) { p.Models = []string{"fallback", "first"} }},
 		{"fallback model", func(p *profile.Profile) { p.Models = []string{"first", "other"} }},
@@ -363,13 +365,12 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 	if executionConfigDigest(p, time.Minute) != base {
 		t.Fatal("equivalent effective settings have different digests")
 	}
-	p = profile.Profile{Harness: profile.HarnessCustom, Model: "first"}
+	p = profile.Profile{Harness: profile.HarnessClaudeCode, Model: "first"}
 	q := p
 	q.Models = []string{"first"}
 	q.Output = p.EffectiveOutput()
 	q.Env = map[string]string{}
 	q.ExtraArgs = []string{}
-	q.Command = []string{}
 	if executionConfigDigest(p, time.Minute) != executionConfigDigest(q, time.Minute) {
 		t.Fatal("equivalent empty settings have different digests")
 	}
@@ -377,7 +378,7 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 
 func TestRetiredProfileAccountPreservesReplayIdentity(t *testing.T) {
 	var p profile.Profile
-	if err := json.Unmarshal([]byte(`{"name":"retained-worker","harness":"custom","model":"fixture-model","command":["/bin/sh","-c","exit 97"],"timeoutSec":60,"runtimeAccount":"retired-account"}`), &p); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"retained-worker","harness":"claude-code","model":"fixture-model","timeoutSec":60,"runtimeAccount":"retired-account"}`), &p); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(p)
@@ -385,7 +386,7 @@ func TestRetiredProfileAccountPreservesReplayIdentity(t *testing.T) {
 		t.Errorf("retired account survived profile encoding: %v", err)
 	}
 	// Freeze the key from the old empty-account profile. Keep exec-v1 and v3 stable.
-	const retainedKey = "v3:a6e7ffaef437075ff8c164349c7279bc05b72164c74975fb453ddaa6a34762c6"
+	const retainedKey = "v3:75db16fa7ff9044565d32d6843d2abc9d6236cb53134d510e9cf304e50d3160c"
 	key := callKey(p, "Return the retained result.", "", "/retained/workdir", "completed-job", time.Minute)
 	if key != retainedKey {
 		t.Errorf("replay key = %s, want %s", key, retainedKey)

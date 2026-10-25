@@ -246,3 +246,4 @@ not-state internal/userservices/engine_restart_legacy.go retireEngineRestart 1 #
 not-state internal/harness/opencode_run.go runOpenCodeTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/websvc/devicestore/store.go Store.Key 2 # the immutable web signing key and its creation lock stay files
 not-state internal/harness/runtime/signin_pi_provider.go Runtime.piProviderFlow 2 # makes and removes the scratch home of a Pi sign-in, a harness CLI private home
+not-state internal/harness/fakeworker/fakeworker.go InstallClaude 1 # writes the fake CLI executable into a test temp dir; nothing shared is stored

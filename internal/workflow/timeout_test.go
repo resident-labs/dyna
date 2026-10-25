@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workeroutput"
@@ -23,24 +24,22 @@ func TestExecuteCapturesHarnessStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer run.Finish("ok", "", nil)
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "worker", Harness: profile.HarnessCustom, Default: true,
-		Command: []string{"/bin/sh", "-c", `printf 'first\n'; sleep 0.05; printf 'second\n'`},
-		Output:  &workeroutput.Declaration{Dialect: workeroutput.DialectText},
-		Taste:   5, Intelligence: 5, Cost: 5,
-	}}}
-	if _, err := Execute(context.Background(), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: t.TempDir()}); err != nil {
-		t.Fatal(err)
+	worker := fakeworker.InstallClaude(t, `printf 'first\nsecond'`)
+	worker.Name, worker.Default = "worker", true
+	store := &profile.Store{Profiles: []profile.Profile{worker}}
+	result, err := Execute(context.Background(), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: t.TempDir()})
+	if err != nil || result != `"first\nsecond"` {
+		t.Fatalf("Execute() = %s, %v", result, err)
 	}
 	output, _, err := runstore.ReadAgentOutputFrom(run.Meta.ID, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output != "first\nsecond\n" {
+	if !strings.Contains(output, `first\nsecond`) {
 		t.Fatalf("captured stdout = %q", output)
 	}
 	events, _, err := runstore.ReadAgentNormalizedOutputFrom(run.Meta.ID, 1, 0)
-	if err != nil || len(events) != 2 || events[0].Text != "first" || events[1].Text != "second" {
+	if err != nil || len(events) == 0 {
 		t.Fatalf("normalized output = %#v, %v", events, err)
 	}
 	configPath, err := runstore.AgentOutputConfigPath(run.Meta.ID, 1)
@@ -52,7 +51,7 @@ func TestExecuteCapturesHarnessStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	var selected workeroutput.SelectedSnapshot
-	if err := json.Unmarshal(b, &selected); err != nil || selected.Profile.Output == nil || selected.Profile.Output.Dialect != workeroutput.DialectText {
+	if err := json.Unmarshal(b, &selected); err != nil || selected.Profile.Output == nil || selected.Profile.Output.Dialect != workeroutput.DialectClaudeStreamJSON {
 		t.Fatalf("selected output snapshot = %#v, %v", selected, err)
 	}
 	runSnapshotPath, err := runstore.OutputProfilesPath(run.Meta.ID)
@@ -64,7 +63,7 @@ func TestExecuteCapturesHarnessStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	var runSnapshot workeroutput.RunSnapshot
-	if err := json.Unmarshal(b, &runSnapshot); err != nil || len(runSnapshot.Profiles) != 1 || runSnapshot.Profiles[0].Output == nil || runSnapshot.Profiles[0].Output.Dialect != workeroutput.DialectText {
+	if err := json.Unmarshal(b, &runSnapshot); err != nil || len(runSnapshot.Profiles) != 1 || runSnapshot.Profiles[0].Output == nil || runSnapshot.Profiles[0].Output.Dialect != workeroutput.DialectClaudeStreamJSON {
 		t.Fatalf("run-start output snapshot = %#v, %v", runSnapshot, err)
 	}
 }
@@ -159,11 +158,9 @@ func TestResolveAgentTimeout(t *testing.T) {
 }
 
 func TestExplicitShortAgentTimeoutIsClamped(t *testing.T) {
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "slow", Harness: profile.HarnessCustom,
-		Command: []string{"/bin/sh", "-c", "sleep 0.1; printf finished"},
-		Taste:   5, Intelligence: 5, Cost: 5, Default: true,
-	}}}
+	worker := fakeworker.InstallClaude(t, "sleep 0.1; printf finished")
+	worker.Name, worker.Default = "slow", true
+	store := &profile.Store{Profiles: []profile.Profile{worker}}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 

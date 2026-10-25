@@ -54,8 +54,8 @@
   const catalogGate = requestGate()
   const accountGate = requestGate()
   const iconIds = ['opencode', 'codex', 'claude', 'muse', 'pi']
-  const choices = $derived([...knownHarnesses, ...harnesses.filter(id => !knownHarnesses.some(h => h.id === id) && !['custom', 'mock'].includes(id)).map(id => ({ id, label: id, description: 'Use an exact model ID or the harness default.', icon: '' }))])
-  const selectedHarness = $derived(choices.find(h => h.id === harness) || { id: harness, label: harness === 'custom' ? 'Custom harness' : harness === 'mock' ? 'Mock harness' : harness, icon: '', description: '' })
+  const choices = $derived([...knownHarnesses, ...harnesses.filter(id => !knownHarnesses.some(h => h.id === id) && id !== 'mock').map(id => ({ id, label: id, description: 'Use an exact model ID or the harness default.', icon: '' }))])
+  const selectedHarness = $derived(choices.find(h => h.id === harness) || { id: harness, label: harness === 'mock' ? 'Mock harness' : harness, icon: '', description: '' })
   const models = $derived(catalog?.models ?? [])
   const filtered = $derived(filterModels(models, { category, provider, search }))
   const providers = $derived([...new Set(models.filter(m => inCategory(m, category)).map(m => m.publisher || m.providerId).filter((x): x is string => !!x))].sort())
@@ -65,7 +65,7 @@
   const fallbackIds = $derived(fallbackModels.map(fallbackId))
   const fallbackChoices = $derived(models.filter(m => m.id !== primaryId && !fallbackIds.includes(m.id) && inCategory(m, category)))
   const account = $derived(selectedAccount(accounts, harness, model, connectionId))
-  const editorHarnesses = $derived([...new Set([...harnesses, ...choices.map(h => h.id), 'custom', 'mock'])])
+  const editorHarnesses = $derived([...new Set([...harnesses, ...choices.map(h => h.id), 'mock'])])
 
   async function focusHeading() { await tick(); heading?.focus() }
   async function loadAccounts(refresh = false) {
@@ -126,7 +126,7 @@
     fallbackModels = []; fallbackPick = ''; fallbackManual = ''
     step = 1
     focusHeading()
-    if (!['custom', 'mock'].includes(id)) loadModels()
+    if (id !== 'mock') loadModels()
     else catalogBusy = false
   }
   function chooseModel(value: CatalogModel) { fallbackModels = fallbackModels.filter(m => fallbackId(m) !== value.id); if (value !== model) forgetKnobs(); model = value; manual = false; step = 2; focusHeading() }
@@ -169,7 +169,7 @@
       harness = profileDraft.harness
       category = harness === 'opencode' ? 'opencode' : 'all'
       provider = ''; search = ''; catalog = null; preselectionMessage = ''
-      if (!['custom', 'mock'].includes(harness)) loadModels()
+      if (harness !== 'mock') loadModels()
       else catalogBusy = false
     }
     const chain = normalizeModels(profileDraft.model, profileDraft.models ?? [])
@@ -189,7 +189,7 @@
   function back() { step = Math.max(0, step - 1); focusHeading() }
   onMount(() => {
     loadAccounts()
-    if (step === 1 && !['custom', 'mock'].includes(harness)) loadModels(false, initial?.routeId)
+    if (step === 1 && harness !== 'mock') loadModels(false, initial?.routeId)
     return () => { catalogGate.invalidate(); accountGate.invalidate() }
   })
 </script>
@@ -219,13 +219,12 @@
               </button>
             {/each}
           </div>
-          <button class="custom" onclick={() => chooseHarness('custom')}><span class="command-icon" aria-hidden="true">&gt;_</span><div><strong>Bring your own harness</strong><p>Use a custom command and model ID.</p></div><span class="arrow">→</span></button>
           <details class="developer"><summary>Developer tools</summary><button class="text" onclick={() => chooseHarness('mock')}>Use the mock harness for testing →</button></details>
         {:else if step === 1}
           <div class="context">{#if iconIds.includes(selectedHarness.icon)}<HarnessIcon id={selectedHarness.icon} />{/if}<strong>{selectedHarness.label}</strong><button class="text push" onclick={() => { step = 0; focusHeading() }}>Change harness</button></div>
-          {#if ['custom', 'mock'].includes(harness)}
+          {#if harness === 'mock'}
             <label>Model ID<input bind:value={manualId} placeholder="Leave blank for the harness default" spellcheck="false" /></label>
-            <p class="callout">{harness === 'custom' ? 'Add your command in the profile settings.' : 'The mock harness produces test output without calling a model.'}</p>
+            <p class="callout">The mock harness produces test output without calling a model.</p>
             <button class="btn fill lg" onclick={enterManually}>Model details →</button>
           {:else}
             <div class="searchbar"><input aria-label="Search models" bind:value={search} placeholder="Search models or providers…" /><select aria-label="Filter provider" bind:value={provider}><option value="">All providers</option>{#each providers as value}<option value={value}>{value}</option>{/each}</select></div>
@@ -322,10 +321,6 @@
   .h-top { display: flex; align-items: center; gap: 10px; font-size: var(--t-body); }
   .harness p { margin: var(--s4) 0 0; font-size: var(--t-sm); }
   .arrow { color: var(--faint); margin-left: auto; font-size: var(--t-page); }
-  .custom { display: flex; align-items: center; gap: 15px; width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 15px 18px; margin-top: 18px; text-align: left; }
-  .custom strong { font-size: var(--t-ui); font-weight: 500; }
-  .custom p { margin: 3px 0 0; font-size: var(--t-sm); }
-  .command-icon { font-family: var(--mono); font-size: var(--t-page); color: var(--muted); }
   .developer { margin-top: 20px; font-size: var(--t-sm); color: var(--muted); }
   .developer button { margin-top: var(--s3); }
   .context, .account-summary { display: flex; align-items: center; gap: 14px; padding-bottom: 18px; margin-bottom: 23px; border-bottom: 1px solid var(--line); font-size: var(--t-ui); }

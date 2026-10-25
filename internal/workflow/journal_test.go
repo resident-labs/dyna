@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 )
@@ -152,12 +153,10 @@ func TestWorkerPromptsOfferNoGuidesAndKeepSchemaLast(t *testing.T) {
 
 func TestWorkflowRestrictionPromptReachesEveryWorker(t *testing.T) {
 	capture := filepath.Join(t.TempDir(), "prompt.txt")
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "custom", Harness: profile.HarnessCustom, Default: true,
-		Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `cat > "$CAPTURE"; printf done`},
-		Env:     map[string]string{"CAPTURE": capture},
-	}}}
+	worker := fakeworker.InstallClaude(t, `printf '%s\n%s' "$DYNA_FAKE_PROMPT" "$DYNA_FAKE_INSTRUCTIONS" > "$CAPTURE"; printf done`)
+	worker.Name, worker.Default = "custom", true
+	worker.Env = mergedEnv(worker.Env, map[string]string{"CAPTURE": capture})
+	store := &profile.Store{Profiles: []profile.Profile{worker}}
 	result, err := Execute(context.Background(), Options{
 		ScriptSrc: `return await agent("caller task", {profile: "custom"});`,
 		Store:     store, WorkDir: t.TempDir(),
@@ -213,12 +212,10 @@ return "workflow done";
 		_, err := io.ReadFull(ready, signal[:])
 		started <- err
 	}()
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "slow", Harness: profile.HarnessCustom,
-		Command: []string{"/bin/sh", "-c", `printf ready > "$READY_FIFO"; read gate < "$HOLD_FIFO"`},
-		Env:     map[string]string{"READY_FIFO": readyPath, "HOLD_FIFO": holdPath},
-		Taste:   5, Intelligence: 5, Cost: 5, Default: true, MaxConcurrent: 1,
-	}}}
+	worker := fakeworker.InstallClaude(t, `printf ready > "$READY_FIFO"; read gate < "$HOLD_FIFO"`)
+	worker.Name, worker.Default, worker.MaxConcurrent = "slow", true, 1
+	worker.Env = mergedEnv(worker.Env, map[string]string{"READY_FIFO": readyPath, "HOLD_FIFO": holdPath})
+	store := &profile.Store{Profiles: []profile.Profile{worker}}
 	// A hang guard only. Both the ready signal and Execute's worker drain are
 	// event-driven, including on a busy race-enabled CI runner.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

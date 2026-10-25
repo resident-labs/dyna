@@ -14,7 +14,7 @@ func TestDoctorsShareChecksAndBoundSlowOnes(t *testing.T) {
 		{Name: "opus", Harness: "claude-code"},
 		{Name: "sonnet", Harness: "claude-code"},
 		{Name: "luna", Harness: "codex"},
-		{Name: "own", Harness: profile.HarnessCustom},
+		{Name: "own", Harness: profile.HarnessMock},
 	}
 	var calls atomic.Int32
 	release := make(chan struct{})

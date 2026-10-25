@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/scratch"
@@ -20,11 +21,10 @@ func TestWorkflowWorkersGetModeEnvAndForcedNoDelegation(t *testing.T) {
 	t.Setenv("DYNA_RUN_ID", "wf_engine-mode-env")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
 	capture := filepath.Join(t.TempDir(), "env.txt")
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "leafy", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `printf '%s|%s|%s|%s|%s' "$DYNA_MODE" "$DYNA_WORKER_RUN" "$DYNA_WORKER_AGENT" "$DYNA_SCRATCH" "$(stat -c %a "$DYNA_SCRATCH")" > "$CAPTURE"; printf done`},
-		Env:     map[string]string{"CAPTURE": capture},
-	}}}
+	worker := fakeworker.InstallClaude(t, `printf '%s|%s|%s|%s|%s' "$DYNA_MODE" "$DYNA_WORKER_RUN" "$DYNA_WORKER_AGENT" "$DYNA_SCRATCH" "$(stat -c %a "$DYNA_SCRATCH")" > "$CAPTURE"; printf done`)
+	worker.Name, worker.Default = "leafy", true
+	worker.Env = mergedEnv(worker.Env, map[string]string{"CAPTURE": capture})
+	store := &profile.Store{Profiles: []profile.Profile{worker}}
 	run, err := runstore.Create("mode env", `return await agent("task")`, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -44,27 +44,21 @@ func TestWorkflowWorkersGetModeEnvAndForcedNoDelegation(t *testing.T) {
 	}
 }
 
-func subagentOnlyTestStore() *profile.Store {
-	return &profile.Store{Profiles: []profile.Profile{
-		{
-			// Marked default on purpose: it may be the configured default
-			// for subagent sessions, but workflows must never pick it.
-			Name: "solo", Harness: profile.HarnessCustom, Default: true, Uses: []string{profile.UseAgents},
-			Taste: 5, Intelligence: 5, Cost: 5,
-			Command: []string{"/bin/sh", "-c", `cat >/dev/null; printf solo`},
-		},
-		{
-			Name: "worker", Harness: profile.HarnessCustom,
-			Taste: 5, Intelligence: 5, Cost: 5,
-			Command: []string{"/bin/sh", "-c", `cat >/dev/null; printf worker`},
-		},
-	}}
+func subagentOnlyTestStore(t *testing.T) *profile.Store {
+	t.Helper()
+	solo := fakeworker.InstallClaude(t, `printf solo`)
+	// Marked default on purpose: it may be the configured default for subagent
+	// sessions, but workflows must never pick it.
+	solo.Name, solo.Default, solo.Uses = "solo", true, []string{profile.UseAgents}
+	worker := fakeworker.InstallClaude(t, `printf worker`)
+	worker.Name = "worker"
+	return &profile.Store{Profiles: []profile.Profile{solo, worker}}
 }
 
 func TestWorkflowHidesLimitedProfilesFromProfilesGlobal(t *testing.T) {
 	result, err := Execute(context.Background(), Options{
 		ScriptSrc: `return profiles.map(p => p.name).join(",") + "|" + profiles.map(p => p.uses.join("+")).join(",") + "|" + profiles.map(p => String(p.disableSubagents)).join(",")`,
-		Store:     subagentOnlyTestStore(), WorkDir: t.TempDir(),
+		Store:     subagentOnlyTestStore(t), WorkDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +71,7 @@ func TestWorkflowHidesLimitedProfilesFromProfilesGlobal(t *testing.T) {
 func TestWorkflowRejectsExplicitSubagentsOnlyProfile(t *testing.T) {
 	result, err := Execute(context.Background(), Options{
 		ScriptSrc: `try { return await agent("task", {profile: "solo"}); } catch (e) { return "rejected: " + String(e); }`,
-		Store:     subagentOnlyTestStore(), WorkDir: t.TempDir(),
+		Store:     subagentOnlyTestStore(t), WorkDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +87,7 @@ func TestWorkflowRejectsExplicitSubagentsOnlyProfile(t *testing.T) {
 func TestWorkflowDefaultSkipsSubagentsOnlyProfile(t *testing.T) {
 	result, err := Execute(context.Background(), Options{
 		ScriptSrc: `return await agent("task")`,
-		Store:     subagentOnlyTestStore(), WorkDir: t.TempDir(),
+		Store:     subagentOnlyTestStore(t), WorkDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,11 +108,10 @@ func TestWorkflowStartsWithScratchUnavailable(t *testing.T) {
 	if err := os.Chmod(root, 0777); err != nil {
 		t.Fatal(err)
 	}
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "p", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-		Command: []string{"/bin/sh", "-c", `cat >/dev/null; if [ "${DYNA_SCRATCH+x}" = x ]; then printf stale; else printf done; fi`},
-		Env:     map[string]string{"DYNA_SCRATCH": "/stale/profile"},
-	}}}
+	worker := fakeworker.InstallClaude(t, `if [ "${DYNA_SCRATCH+x}" = x ]; then printf stale; else printf done; fi`)
+	worker.Name, worker.Default = "p", true
+	worker.Env = mergedEnv(worker.Env, map[string]string{"DYNA_SCRATCH": "/stale/profile"})
+	store := &profile.Store{Profiles: []profile.Profile{worker}}
 	result, err := Execute(context.Background(), Options{ScriptSrc: `return await agent("task")`, Store: store, WorkDir: t.TempDir()})
 	if err != nil || result != `"done"` {
 		t.Fatalf("worker did not run without scratch: %s %v", result, err)

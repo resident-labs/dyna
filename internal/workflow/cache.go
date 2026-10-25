@@ -74,7 +74,6 @@ func executionConfigDigest(p profile.Profile, timeout time.Duration) string {
 		Harness string
 		Models  []string
 		Args    []string          `json:",omitempty"`
-		Command []string          `json:",omitempty"`
 		Env     map[string]string `json:",omitempty"`
 		// Keep the empty retired member in place to preserve existing replay keys.
 		RetiredAccount    string `json:"RuntimeAccount"`
@@ -88,7 +87,6 @@ func executionConfigDigest(p profile.Profile, timeout time.Duration) string {
 		Harness:           p.Harness,
 		Models:            p.EffectiveModels(),
 		Args:              p.ExtraArgs,
-		Command:           p.Command,
 		Env:               p.Env,
 		RuntimeVersion:    p.RuntimeVersion,
 		RuntimeExecutable: p.RuntimeExecutable,

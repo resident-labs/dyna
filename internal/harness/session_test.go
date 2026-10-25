@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/workeroutput"
 )
@@ -44,17 +45,23 @@ func TestClaudeStreamJSONInvocationAndResume(t *testing.T) {
 func TestResumableReflectsHarnessSessionSupport(t *testing.T) {
 	for p, want := range map[string]bool{
 		profile.HarnessClaudeCode: true, profile.HarnessCodex: true, profile.HarnessMock: true,
-		profile.HarnessCustom: false,
 	} {
-		prof := profile.Profile{Harness: p, Command: []string{"x"}}
+		prof := profile.Profile{Harness: p}
 		if got := Resumable(prof); got != want {
 			t.Errorf("Resumable(%s) = %v, want %v", p, got, want)
 		}
 	}
+	// A profile that keeps no session cannot be resumed.
+	plain := profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--no-session-persistence"}}
+	if Resumable(plain) {
+		t.Error("a profile without session persistence reported resumable")
+	}
 }
 
 func TestRunSessionTurnRefusesToResumeNonResumableHarness(t *testing.T) {
-	p := profile.Profile{Name: "custom", Harness: profile.HarnessCustom, Command: []string{"echo", "{{prompt}}"}}
+	p := fakeworker.InstallClaude(t, "printf done")
+	p.Name = "plain"
+	p.ExtraArgs = []string{"--no-session-persistence"}
 	_, err := RunSessionTurn(context.Background(), p, "x", t.TempDir(), true, JournalOptions{}, SteeringOptions{},
 		SessionOptions{ResumeID: "abc"})
 	if err == nil || !strings.Contains(err.Error(), "cannot resume") {

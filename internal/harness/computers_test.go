@@ -3,7 +3,7 @@ package harness
 import (
 	"context"
 	"dyna-agent/internal/computers"
-	"dyna-agent/internal/profile"
+	"dyna-agent/internal/harness/fakeworker"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,8 +20,10 @@ func TestComputerFailureDoesNotFailHarnessTurn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "labwc"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin)
-	p := profile.Profile{Name: "computer-failure", Harness: profile.HarnessCustom, Command: []string{"/bin/sh", "-c", "printf ran-without-desktop"}, Env: map[string]string{"DYNA_SESSION": "failed-computer"}}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	p := fakeworker.InstallClaude(t, "printf ran-without-desktop")
+	p.Name = "computer-failure"
+	p.Env = mergedEnv(p.Env, map[string]string{"DYNA_SESSION": "failed-computer"})
 	result, err := Run(context.Background(), p, "continue", t.TempDir())
 	if err != nil || !strings.Contains(result.Output, "ran-without-desktop") {
 		t.Fatalf("turn: %+v %v", result, err)

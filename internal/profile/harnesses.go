@@ -31,7 +31,6 @@ var harnessDefinitions = []HarnessDefinition{
 	{HarnessOpenCode, "opencode", []string{"--version"}, workeroutput.DialectOpenCodeJSON, "opencode-run", "--session", harnessProbePrompt, []string{"opencode-stream.jsonl"}},
 	{HarnessMuse, "muse", []string{"--version"}, workeroutput.DialectMuseJSONL, "muse-exec", "--session-id", harnessProbePrompt, []string{"muse-stream.jsonl"}},
 	{HarnessPi, "pi", []string{"--version"}, workeroutput.DialectPiJSON, "pi-print", "--session", harnessProbePrompt, []string{"pi-stream.jsonl"}},
-	{HarnessCustom, "", nil, workeroutput.DialectText, "command", "", harnessProbePrompt, []string{"plain-text.txt"}},
 	{HarnessMock, "", nil, workeroutput.DialectText, "mock", "mock", harnessProbePrompt, []string{"plain-text.txt"}},
 }
 
