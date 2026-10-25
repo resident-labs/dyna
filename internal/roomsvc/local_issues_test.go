@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
 	prstate "dyna-agent/internal/pr/state"
 	prfixture "dyna-agent/internal/pr/view/testfixture"
@@ -22,10 +23,10 @@ func TestIssueGoalAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.svc.TriageIssue(context.Background(), r.ID, i.ID, "goal", "", r.Name+":agent"); err == nil {
-		t.Fatal("agent triaged")
+	if _, err = e.svc.IssueGoal(authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: r.Name + ":agent", Room: r.ID}), r.ID, i.ID); err == nil || !strings.HasPrefix(err.Error(), "ChangeIssue is ") {
+		t.Fatalf("agent assigned an issue: %v", err)
 	}
-	got, err := e.svc.IssueGoal(t.Context(), r.ID, i.ID, "")
+	got, err := e.svc.IssueGoal(t.Context(), r.ID, i.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +43,32 @@ func TestIssueGoalAndClose(t *testing.T) {
 	}
 }
 
+func TestIssueGoalPostsGoalMilestone(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	issue, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Assign me", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.IssueGoal(t.Context(), r.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msg := range e.posts(r.ID) {
+		if ev, ok := msg.Goal(); ok && ev.Type == room.GoalAdded && ev.GoalID == got.GoalID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no goal milestone for %s", got.GoalID)
+	}
+	goal, err := e.svc.goalService().Store.Get(r.ID, got.GoalID)
+	if err != nil || !goal.Shared || len(goal.Holders) != 0 {
+		t.Fatalf("issue goal is not a room goal: %+v, %v", goal, err)
+	}
+}
+
 func TestIssueProgressUsesOpenGoalAndPR(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
@@ -49,7 +76,7 @@ func TestIssueProgressUsesOpenGoalAndPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	linked, err := e.svc.IssueGoal(t.Context(), r.ID, issue.ID, "")
+	linked, err := e.svc.IssueGoal(t.Context(), r.ID, issue.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,6 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/goals"
-	"dyna-agent/internal/notify"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
 )
@@ -74,8 +73,37 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 func (s *Service) CloseIssue(ctx context.Context, roomRef, id, reason string) (room.Issue, error) {
 	return s.triageIssueAsCaller(ctx, roomRef, id, "close", reason)
 }
-func (s *Service) IssueGoal(ctx context.Context, roomRef, id, holder string) (room.Issue, error) {
-	return s.triageIssueAsCaller(ctx, roomRef, id, "goal", holder)
+func (s *Service) IssueGoal(ctx context.Context, roomRef, id string) (room.Issue, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	actor, err := authority.ActorIn(ctx, r.ID)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	if err := authority.Check("ChangeIssue", actor, nil); err != nil {
+		return room.Issue{}, err
+	}
+	issue, err := s.rooms().Issue(r.ID, id)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	if issue.State != room.IssueStateOpen {
+		return room.Issue{}, fmt.Errorf("issue %s is already %s", issue.Label(), issue.State)
+	}
+	post, err := s.rooms().Message(r.ID, issue.ID)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	in := goals.Input{Text: issue.Title, Detail: issueDetail(issue, issueText(post))}
+	// The whole room holds a goal that starts from an issue: the issue names
+	// no holder. The goal is the one dyna goal creates, and the issue is its
+	// first link.
+	if _, err = s.startGoal(ctx, r.ID, in, []string{"@room"}, []int{issue.Number}); err != nil {
+		return room.Issue{}, err
+	}
+	return s.rooms().Issue(r.ID, id)
 }
 
 func (s *Service) triageIssueAsCaller(ctx context.Context, roomRef, id, action, value string) (room.Issue, error) {
@@ -106,7 +134,8 @@ func (s *Service) ExportIssue(ctx context.Context, roomRef, id string) (room.Iss
 }
 
 // TriageIssue takes the actor derived by the CLI, or empty for the owner API.
-// A goal holder is an optional @name selector. Without one the goal is shared.
+// It closes or exports an issue; starting a goal from one goes through
+// IssueGoal and the goal creation path of dyna goal.
 func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, by string) (room.Issue, error) {
 	r, err := s.rooms().Resolve(roomRef)
 	if err != nil {
@@ -122,54 +151,6 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 		case "close":
 			i.State = room.IssueStateClosed
 			i.Reason = strings.TrimSpace(value)
-		case "goal":
-			in := goals.Input{Text: i.Title, Shared: true}
-			post, err := s.rooms().Message(r.ID, i.ID)
-			if err != nil {
-				return err
-			}
-			in.Detail = issueDetail(*i, issueText(post))
-			setter := "owner"
-			if by != r.Name {
-				members, err := s.sessions().ListSnapshot(false)
-				if err != nil {
-					return err
-				}
-				for _, m := range members {
-					if m.RoomID == r.ID && m.Address() == by {
-						setter = m.ID
-						break
-					}
-				}
-				if setter == "owner" {
-					return fmt.Errorf("root session is not available in this room")
-				}
-			}
-			if value != "" {
-				if !strings.HasPrefix(value, "@") || strings.Contains(value, ":") {
-					return fmt.Errorf("--for needs @name in this room")
-				}
-				sessions, err := s.Notify.ResolveSessions(notify.Sender{Kind: notify.SenderOwner, Room: r.Name}, []string{value})
-				if err != nil {
-					return err
-				}
-				in.Shared = false
-				for _, m := range sessions {
-					if m.RoomID != r.ID {
-						return fmt.Errorf("goal holder must belong to this room")
-					}
-					in.Holders = append(in.Holders, m.ID)
-					i.Assignee = m.Address()
-				}
-				if err = s.validGoalHolders(r.ID, in); err != nil {
-					return err
-				}
-			}
-			g, err := s.goalService().Store.AddWithIssues(r.ID, setter, by, in, nil)
-			if err != nil {
-				return err
-			}
-			i.State, i.GoalID = room.IssueStateGoal, g.ID
 		case "export":
 			if ghclient.Access(ctx, r) != ghclient.ReadWrite {
 				return fmt.Errorf("room %s has read-only GitHub access", r.Name)
