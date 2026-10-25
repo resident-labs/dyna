@@ -1448,7 +1448,22 @@ PYTHON
 		t.Fatalf("promotion interrupted work: %+v", turn)
 	}
 	ownerCommand("subagent", "close", child.Session)
-	if got := show(grandchild.Session); got.Depth != 1 || got.ParentSession != "" || got.Status == "closed" {
+	// The promoted agent's post to @parent reached the seat and started the
+	// room's root, so root is the nearest open ancestor that takes its child.
+	root := subagent.Info{}
+	all, err := sessions.ListSnapshot(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range all {
+		if info.Role == subagent.RoleRoot && info.RoomID == lead.RoomID {
+			root = info
+		}
+	}
+	if root.ID == "" {
+		t.Fatal("the promoted agent's post to @parent did not start root")
+	}
+	if got := show(grandchild.Session); got.Depth != 2 || got.ParentSession != root.ID || got.Status == "closed" {
 		t.Fatalf("close hand-over = %+v", got)
 	}
 }

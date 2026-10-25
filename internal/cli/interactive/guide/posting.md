@@ -38,8 +38,7 @@ Bare mentions use `DYNA_ROOM`. An unstamped external shell must qualify every me
 Groups include running, queued, and idle members. The sender is removed from groups; duplicate recipients get one delivery.
 Workflow workers can post only to `@root` and workers of their own run; the script reaches sessions with `post()`.
 A desktop draft with no mention goes to `@root`, the root orchestrator. Human and Voice requests wake root.
-Worker posts to `@root`, including depth-1 `@parent`, stay quiet by default. Root reads them in its next-turn digest.
-Use `dyna post @parent --needs-root "..."` only when root must decide, unblock, or act now.
+Worker posts to `@root`, including depth-1 `@parent`, wake root.
 `--alert` and failed reports still wake root. A post to a real parent below depth 1 still wakes that parent.
 The desktop also reads mentions within text, except inside backticks or escaped as `\@name`.
 CLI and script mentions must lead the text.
@@ -78,7 +77,7 @@ Change limits with `dyna settings`: `content.maxFileBytes` and `content.maxCardB
 ## Visuals
 
 Post a visual for requested visuals, charts, HTML reports, “visualize,” or “viz.”
-Use the session that asked, or `@parent`. Add `--needs-root` when root asked for the visual.
+Use the session that asked, or `@parent`. Both wake root when it asked for the visual.
 Read `dyna post --help` before posting a card.
 Write one self-contained HTML file with inline data and a `<title>`.
 Scripts run in a sandbox without app access. Nothing loads from the network unless you pass `--allow-net`.

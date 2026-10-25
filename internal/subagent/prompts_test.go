@@ -28,9 +28,9 @@ func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 		"address the session that asked.",
 		`If dyna is absent from PATH, use "$DYNA_BIN" for all commands, including guides.`,
 		"You are at depth 2 of 3.",
-		"Only root uses dyna ask; ask @parent otherwise, and post @root with --needs-root when only the owner can unblock you.",
+		"Only root uses dyna ask; ask @parent otherwise, and post @root when only the owner can unblock you.",
 		"Success goes to the current parent",
-		"Use --needs-root only when root must act.",
+		"A post to @root, or to your parent root, wakes root.",
 		"Give a full, self-contained final result.",
 		"A recorded verdict, a tracked PR, and a finished goal need no extra post.",
 	} {
