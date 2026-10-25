@@ -46,34 +46,60 @@ async function mountForm(t: { after: (fn: () => Promise<void>) => void }, dom: R
 }
 const settle = async (flushSync: () => void) => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); flushSync() }
 const submit = (target: HTMLElement) => element(target, 'form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-const choose = (target: HTMLElement, value: string) => element<HTMLInputElement>(target, `input[name="how"][value="${value}"]`).click()
+const selectHarness = (target: HTMLElement, value: 'claude-code' | 'pi') => {
+  const select = element<HTMLSelectElement>(target, 'select[aria-label="Harness"]')
+  select.value = value
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+}
+const chooseMethod = (target: HTMLElement, value: 'oauth' | 'key') => element<HTMLInputElement>(target, `input[name="pi-method"][value="${value}"]`).click()
+const selectProvider = (target: HTMLElement, value: string) => {
+  const select = element<HTMLSelectElement>(target, 'select[aria-label="Provider"]')
+  select.value = value
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+}
 const type = (target: HTMLElement, selector: string, value: string) => {
   const input = element<HTMLInputElement>(target, selector)
   input.value = value
   input.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-test('a new account signs in instead of restarting a saved one', async (t) => {
+test('one provider choice starts that Pi OAuth flow', async (t) => {
   const calls: unknown[][] = []
   const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
   try {
-    submit(target)
-    await settle(flushSync)
-    assert.deepEqual(calls, [['begin', 'pi', '', '', false]], 'Pi is the default sign-in of a new account')
-  } finally { await unmount(app) }
-})
-
-test('the native path offers a saved login and starts the native harness', async (t) => {
-  const calls: unknown[][] = []
-  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
-  const { target, unmount, flushSync, app } = await mountForm(t, dom)
-  try {
-    choose(target, 'native')
+    selectHarness(target, 'pi')
+    flushSync()
+    chooseMethod(target, 'oauth')
+    selectProvider(target, 'kimi-code')
     flushSync()
     submit(target)
     await settle(flushSync)
-    assert.deepEqual(calls, [['find', 'claude-code', '2.1.302'], ['begin', 'claude-code', '2.1.302', '', false]])
+    assert.deepEqual(calls, [['begin', 'pi', '', '', 'kimi-code', false]], 'the chosen provider is sent once, so Pi does not ask again')
+  } finally { await unmount(app) }
+})
+
+test('the form waits for a harness before it starts', async (t) => {
+  const calls: unknown[][] = []
+  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom)
+  try {
+    submit(target)
+    await settle(flushSync)
+    assert.deepEqual(calls, [], 'no sign-in starts before the harness choice')
+  } finally { await unmount(app) }
+})
+
+test('the native path offers a saved login and starts Claude Code', async (t) => {
+  const calls: unknown[][] = []
+  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom)
+  try {
+    selectHarness(target, 'claude-code')
+    flushSync()
+    submit(target)
+    await settle(flushSync)
+    assert.deepEqual(calls, [['find', 'claude-code', '2.1.302'], ['begin', 'claude-code', '2.1.302', '', '', false]])
   } finally { await unmount(app) }
 })
 
@@ -82,11 +108,11 @@ test('an API key is sent once and cleared from the form', async (t) => {
   const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
   try {
-    choose(target, 'key')
+    selectHarness(target, 'pi')
     flushSync()
-    const provider = element<HTMLSelectElement>(target, 'select[aria-label="Provider"]')
-    provider.value = 'deepseek'
-    provider.dispatchEvent(new Event('change', { bubbles: true }))
+    chooseMethod(target, 'key')
+    flushSync()
+    selectProvider(target, 'deepseek')
     type(target, 'input[aria-label="Account label"]', 'Work')
     type(target, 'input[aria-label="API key"]', 'sk-test')
     flushSync()
@@ -128,28 +154,5 @@ test('a reopened Pi sign-in finds the account it was started for', async (t) => 
   try {
     await settle(flushSync)
     assert.match(textOf(target), /Approve the sign-in in your browser/, 'the Pi card is recovered by target')
-  } finally { await unmount(app) }
-})
-
-test('an OpenCode Go key creates an OpenCode account', async (t) => {
-  const calls: unknown[][] = []
-  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
-  const { target, unmount, flushSync, app } = await mountForm(t, dom)
-  try {
-    choose(target, 'key')
-    flushSync()
-    const provider = element<HTMLSelectElement>(target, 'select[aria-label="Provider"]')
-    provider.value = 'opencode-go'
-    provider.dispatchEvent(new Event('change', { bubbles: true }))
-    flushSync()
-    const where = element<HTMLSelectElement>(target, 'select[aria-label="Save the key in"]')
-    where.value = 'opencode'
-    where.dispatchEvent(new Event('change', { bubbles: true }))
-    type(target, 'input[aria-label="Account label"]', 'Go work')
-    type(target, 'input[aria-label="API key"]', 'sk-go')
-    flushSync()
-    submit(target)
-    await settle(flushSync)
-    assert.deepEqual(calls, [['add', 'opencode', 'opencode-go', 'Go work', 'sk-go']], 'the key creates an OpenCode account, not a Pi one')
   } finally { await unmount(app) }
 })
