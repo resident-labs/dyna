@@ -387,3 +387,39 @@ func TestDefaultsFollowProfileUse(t *testing.T) {
 		}
 	}
 }
+
+// A store from a Dyna that still had a retired harness is refused, not
+// rewritten: Load names the file, the profile, the retired harness, the
+// harnesses Dyna runs, and how to fix the file. No profile is dropped for the
+// owner, so the mistake stays visible.
+func TestLoadRefusesAProfileOfARetiredHarness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	contents := `{"version":2,"profiles":[
+		{"name":"old-custom","harness":"custom","command":["/bin/true"],"taste":5,"intelligence":5,"cost":5},
+		{"name":"kept","harness":"pi","taste":5,"intelligence":5,"cost":5}]}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() accepted a store that names a retired harness")
+	}
+	for _, want := range []string{path, `"old-custom"`, `unknown harness "custom"`, "harnesses", "remove the profile"} {
+		if want == "harnesses" {
+			if !strings.Contains(err.Error(), HarnessPi) || !strings.Contains(err.Error(), HarnessMock) {
+				t.Errorf("Load() error does not name the harnesses Dyna runs: %v", err)
+			}
+			continue
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load() error lacks %q: %v", want, err)
+		}
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != contents {
+		t.Fatalf("Load() rewrote the store:\n%s", after)
+	}
+}
