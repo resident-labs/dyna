@@ -110,10 +110,34 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 
 // TODO: legacy/shim remove later — Antigravity was removed on 2026-10-25. Its
 // saved rows predate that and nothing can sign in or refresh them, so version 6
-// drops them instead of leaving a provider no code names.
+// drops them instead of leaving a provider no code names. Each store's
+// dependent rows go in the same write, so a repository rule cannot outlive the
+// account it names.
 func dropRetiredHarnessRows(ctx context.Context, conn *sql.Conn) error {
-	_, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE json_extract(CAST(metadata AS TEXT), '$.harness') = 'antigravity'")
-	return err
+	rows, err := conn.QueryContext(ctx, "SELECT id FROM accounts WHERE json_extract(CAST(metadata AS TEXT), '$.harness') = 'antigravity'")
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE id = ?", id); err != nil {
+			return err
+		}
+	}
+	return forgetAccounts(ctx, conn, ids)
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the
