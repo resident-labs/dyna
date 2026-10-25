@@ -18,7 +18,7 @@ import (
 // Dyna owns memory, delegation, messaging, and session wakeups. Keep every
 // verified native control here, including explicit gaps. Evidence applies to
 // Claude 2.1.302, Codex 0.163.0, Grok 1.0.62, Pi 1.3.0, OpenCode 2.0.32,
-// Muse 1.4.10-R6427.1, and Antigravity ACP 1.3.0 (2026-10-21).
+// and Muse 1.4.10-R6427.1.
 type nativeFeaturePolicy struct {
 	Env       map[string]string
 	Config    map[string]any // dotted native setting paths
@@ -182,26 +182,14 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 		DynaShell: true,
 		Shell:     []string{"Bash", "TaskList", "TaskOutput", "TaskStop", "WaitFor"},
 	},
-	"antigravity": {
-		// Pinned ACP tool_filter.py accepts _meta.agy.disabledTools on new/load/resume.
-		// server.py removes these builtins before constructing localharness capabilities.
-		DenyTools: []string{"start_subagent", "schedule"},
-		DynaShell: true,
-		Shell:     []string{"run_command"},
-		NoSwitch: []string{
-			"No switch verified for Antigravity native memory.",
-			"No switch verified for Antigravity native messaging.",
-			"No switch verified for Antigravity ACP /plan expansion.",
-		},
-	},
 }
 
 // grokShellTools are Grok's native shell tool and its background-task tools.
 var grokShellTools = []string{"run_terminal_command", "get_command_or_subagent_output", "wait_commands_or_subagents", "kill_command_or_subagent"}
 
 // grokDenyHook builds one config.toml [[hooks.PreToolUse]] entry that denies
-// the tools matching the regex with a fixed command, mirroring the Antigravity
-// plugin hook. A deny stands under --always-approve; only an ask would be
+// the tools matching the regex with a fixed command. A deny stands under
+// --always-approve; only an ask would be
 // auto-approved away (grok 1.0.62 hooks guide).
 func grokDenyHook(matcher string) map[string]any {
 	return map[string]any{

@@ -1,7 +1,6 @@
 package workeroutput
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestAllowlistedAdaptersNormalizeRepresentedDialects(t *testing.T) {
@@ -29,79 +27,6 @@ func TestAllowlistedAdaptersNormalizeRepresentedDialects(t *testing.T) {
 				t.Fatalf("NormalizeLine() = %#v, want %#v", got, []Event{test.want})
 			}
 		})
-	}
-}
-
-func TestAntigravityFixtureNormalizesNestedStream(t *testing.T) {
-	f, err := os.Open("testdata/antigravity-stream.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-
-	var normalized bytes.Buffer
-	n := NewNormalizer(&Declaration{Dialect: DialectAntigravityStreamJSON}, &normalized)
-	stamp := time.UnixMilli(1791160000000)
-	n.Now = func() time.Time { return stamp }
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		if err := n.WriteLine(scanner.Text()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
-	}
-	var got []Event
-	scanner = bufio.NewScanner(bytes.NewReader(normalized.Bytes()))
-	for scanner.Scan() {
-		var event Event
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			t.Fatal(err)
-		}
-		if event.TS != stamp.UnixMilli() {
-			t.Fatalf("event not stamped: %#v", event)
-		}
-		event.TS = 0
-		got = append(got, event)
-	}
-	want := []Event{
-		{V: 1, Kind: "raw", Raw: `{"event":"init","conversation_id":"conversation-agy","init":{"model":"gemini-3.8-flash-high","cwd":"/home/user/dyna-agent","tools":["run_command"],"permission_mode":"always-proceed"}}`},
-		{V: 1, Kind: "raw", Raw: `{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":0,"state":"DONE","step_type":"user_input"}}`},
-		{V: 1, Kind: "tool", Name: "run_command", State: "completed", Input: `{"CommandLine":"pwd"}`, Output: "/home/user/dyna-agent\r\n"},
-		{V: 1, Kind: "tool", Name: "run_command", State: "failed", Input: `{"CommandLine":"exit 7"}`, Output: "EXECUTION_ERROR: command exited with status 7"},
-		{V: 1, Kind: "message", Role: "assistant", State: "delta", ID: "response:3", Text: "Inspected"},
-		{V: 1, Kind: "message", Role: "assistant", State: "delta", ID: "response:3", Text: ".\n"},
-		{V: 1, Kind: "status", Name: "response", State: "completed"},
-		{V: 1, Kind: "status", Name: "result", State: "success"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("normalized Antigravity fixture = %#v, want %#v", got, want)
-	}
-}
-
-func TestAntigravityResultPreservesResponseWithoutDeltas(t *testing.T) {
-	var out bytes.Buffer
-	n := NewNormalizer(&Declaration{Dialect: DialectAntigravityStreamJSON}, &out)
-	if err := n.WriteLine(`{"event":"result","result":{"conversation_id":"conversation-agy","status":"SUCCESS","response":"final only\n"}}`); err != nil {
-		t.Fatal(err)
-	}
-	var got []Event
-	scanner := bufio.NewScanner(bytes.NewReader(out.Bytes()))
-	for scanner.Scan() {
-		var event Event
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			t.Fatal(err)
-		}
-		event.TS = 0
-		got = append(got, event)
-	}
-	want := []Event{
-		{V: 1, Kind: "status", Name: "result", State: "success"},
-		{V: 1, Kind: "message", Role: "assistant", Text: "final only\n"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("normalized result-only response = %#v, want %#v", got, want)
 	}
 }
 
@@ -280,7 +205,6 @@ func TestToolTrackerFollowsEachDialect(t *testing.T) {
 		// codex file_change arrives only as item.completed: it never opens a call.
 		{DialectCodexJSONL, "codex-tools.jsonl", 2, 2},
 		{DialectClaudeStreamJSON, "claude-tools.jsonl", 2, 2},
-		{DialectAntigravityStreamJSON, "antigravity-stream.jsonl", 1, 2},
 		{DialectMuseJSONL, "muse-stream.jsonl", 1, 1},
 	}
 	for _, tt := range tests {

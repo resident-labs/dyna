@@ -47,7 +47,7 @@ func NewAccounts() *Accounts { return &Accounts{Root: filepath.Join(runtimeDataD
 func canonicalAccountHarness(h string) (string, error) {
 	h = canonicalRuntimeID(h)
 	switch h {
-	case "claude-code", "codex", "opencode", "antigravity", "muse", "grok", "pi", "kimi-code":
+	case "claude-code", "codex", "opencode", "muse", "grok", "pi", "kimi-code":
 		return h, nil
 	}
 	return "", native.ErrUnsupported
@@ -55,7 +55,7 @@ func canonicalAccountHarness(h string) (string, error) {
 
 // These native backends need a drained harness gate for interactive login.
 func sharedServiceAccount(h string) bool {
-	return h == "opencode" || h == "antigravity" || h == "muse" || h == "kimi-code"
+	return h == "opencode" || h == "muse" || h == "kimi-code"
 }
 
 var errAccountPath = errors.New("The private account path is unsafe.")
@@ -104,26 +104,6 @@ func (a *Accounts) transaction(fn func(*store.State) error, write bool) error {
 		}
 		return nil
 	})
-}
-
-// RepairAntigravityACPAccount gives a HOME signed in before ACP-only accounts
-// the identity of its grant. Activation only ever wrote the active account's
-// grant there, so the active account names it. It is best effort and never
-// stops startup: a HOME it cannot repair stays signed out until its account
-// signs in again.
-//
-// TODO: legacy/shim remove later — once every such HOME has its record.
-func (a *Accounts) RepairAntigravityACPAccount() {
-	id, err := a.activeID("antigravity")
-	if err != nil || id == "" {
-		return
-	}
-	n, err := a.Find(id)
-	scope, scopeErr := a.HarnessHome("antigravity")
-	if err != nil || scopeErr != nil || n.Identity == "" {
-		return
-	}
-	_ = native.RecordAntigravityACPAccount(harnesshome.Home(scope), n.Identity, n.Label)
 }
 
 func nativeEntryFor(state *store.State, h, integration, identity string) *store.Entry {
@@ -408,7 +388,7 @@ func (a *Accounts) scopedManagerWith(h, home, executable string, pin map[string]
 	if !ok {
 		return nil, nil, native.ErrUnsupported
 	}
-	if h == "muse" || h == "opencode" || h == "antigravity" || h == "kimi-code" {
+	if h == "muse" || h == "opencode" || h == "kimi-code" {
 		manager = checkedHomeManager{Manager: manager, harness: h, scope: home}
 	}
 	return manager, overrides, nil

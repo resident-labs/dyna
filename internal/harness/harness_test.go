@@ -634,7 +634,6 @@ func TestExplicitHarnessPermissionsAreNeverAutoBypassed(t *testing.T) {
 		{Harness: profile.HarnessCodex, ExtraArgs: []string{"-c", `default_permissions="locked-down"`}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--permission-mode", "plan"}},
 		{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--allowedTools", "Read,Grep"}},
-		{Harness: profile.HarnessAntigravity, Model: profile.AntigravityModel, SafeMode: true},
 	}
 	for _, p := range tests {
 		inv, err := buildInvocation(p, "inspect only")
@@ -683,31 +682,6 @@ func TestCodexReservedOutputArgsAreRejected(t *testing.T) {
 			}
 			t.Fatalf("buildInvocation(%v) accepted reserved output argument", extra)
 		}
-	}
-}
-
-func TestAntigravityReservedArgsAndSafeMode(t *testing.T) {
-	for _, extra := range [][]string{
-		{"--output-format", "json"}, {"--output-format=stream-json"},
-		{"--input-format", "stream-json"}, {"--print", "other"}, {"--prompt=other"},
-		{"--prompt-interactive", "other"}, {"-i", "other"}, {"--model", profile.AntigravityModel},
-		{"--conversation", "existing"}, {"--sandbox"}, {"--mode", "yolo"},
-	} {
-		if _, err := buildInvocation(profile.Profile{
-			Harness: profile.HarnessAntigravity, Model: profile.AntigravityModel, ExtraArgs: extra,
-		}, "task"); err == nil {
-			t.Fatalf("buildInvocation(%v) accepted reserved Antigravity arguments", extra)
-		}
-	}
-
-	inv, err := buildInvocationInDir(profile.Profile{
-		Harness: profile.HarnessAntigravity, Model: profile.AntigravityModel, SafeMode: true,
-	}, "inspect only", "/tmp/project")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(inv.initial.argv) != 0 || inv.initial.acpPrompt != "inspect only" || inv.resume == nil {
-		t.Fatalf("Antigravity SafeMode must use ACP's cwd and permission handler: %+v", inv.initial)
 	}
 }
 
@@ -840,7 +814,6 @@ func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 	for _, p := range []profile.Profile{
 		{Harness: profile.HarnessClaudeCode},
 		{Harness: profile.HarnessCodex},
-		{Harness: profile.HarnessAntigravity, Model: profile.AntigravityModel},
 		{Harness: profile.HarnessOpenCode},
 		{Harness: profile.HarnessCustom, Command: []string{"worker"}},
 	} {
@@ -858,7 +831,6 @@ func TestNativeFeatureControlsCoverKnownHarnesses(t *testing.T) {
 	}
 	// With the leaf option, harnesses without a known control still get none.
 	for _, p := range []profile.Profile{
-		{Harness: profile.HarnessAntigravity, Model: profile.AntigravityModel},
 		{Harness: profile.HarnessOpenCode},
 		{Harness: profile.HarnessCustom, Command: []string{"worker"}},
 	} {
@@ -1434,7 +1406,7 @@ func TestUsageLimitAndUnknownErrorsAreNotRetried(t *testing.T) {
 }
 
 func TestACPInstructionsUsePromptSnapshot(t *testing.T) {
-	for _, h := range []string{profile.HarnessGrok, profile.HarnessAntigravity} {
+	for _, h := range []string{profile.HarnessGrok, profile.HarnessKimiCode} {
 		p := profile.Profile{Harness: h, RuntimeInstructions: "ACP_RULE_CANARY"}
 		if NativeInstructions(h) {
 			t.Fatalf("%s still uses a CLI instruction flag", h)
@@ -1447,23 +1419,5 @@ func TestACPInstructionsUsePromptSnapshot(t *testing.T) {
 		if err != nil || inv.initial.acpPrompt != prompt {
 			t.Fatalf("%s did not deliver the snapshot through ACP: %+v, %v", h, inv.initial, err)
 		}
-	}
-}
-
-func TestAntigravityACPDoesNotIgnoreCLIExtraArgs(t *testing.T) {
-	for _, args := range [][]string{
-		{"--sandbox"}, {"--settings", "/settings"}, {"--add-dir", "/project"}, {"--unknown"},
-	} {
-		_, err := buildInvocation(profile.Profile{Harness: profile.HarnessAntigravity, ExtraArgs: args}, "task")
-		if err == nil || !strings.Contains(err.Error(), "Antigravity ACP does not support CLI extraArgs") {
-			t.Fatalf("silently ignored CLI args %q: %v", args, err)
-		}
-	}
-	// The private runtime appends its catalog path after saving user arguments.
-	p := profile.Profile{Harness: profile.HarnessAntigravity,
-		ExtraArgs: []string{"--add-dir", "/private/catalog"}, RuntimePermissionArgs: []string{}}
-	inv, err := buildInvocation(p, "task")
-	if err != nil || inv.initial.acpPrompt != "task" {
-		t.Fatalf("generated catalog args rejected: %+v, %v", inv.initial, err)
 	}
 }

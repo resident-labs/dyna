@@ -163,8 +163,7 @@ func TestCheckNativeBinaryUsesProfileEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	for harnessName, binary := range map[string]string{
 		profile.HarnessClaudeCode: "claude", profile.HarnessCodex: "codex",
-		profile.HarnessAntigravity: "agy",
-		profile.HarnessOpenCode:    "opencode", profile.HarnessMuse: "muse",
+		profile.HarnessOpenCode: "opencode", profile.HarnessMuse: "muse",
 	} {
 		path := filepath.Join(dir, binary)
 		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {

@@ -166,15 +166,6 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 			fakeMark("auth " + params.MethodID)
 			reply(msg.ID, map[string]any{})
 		case "session/new":
-			var params struct {
-				Meta struct {
-					Agy struct{ DisabledTools []string }
-				} `json:"_meta"`
-			}
-			_ = json.Unmarshal(msg.Params, &params)
-			if len(params.Meta.Agy.DisabledTools) > 0 {
-				fakeMark("disabled " + strings.Join(params.Meta.Agy.DisabledTools, ","))
-			}
 			write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": session, "update": map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "starting"}}}})
 			reply(msg.ID, map[string]any{"sessionId": session, "models": map[string]any{"currentModelId": "fake-model"}, "modes": map[string]any{"currentModeId": "default", "availableModes": []any{}}})
 		case "session/close":
@@ -931,36 +922,6 @@ func TestGrokAcpConcurrentSessionsUseSeparateStdioChildren(t *testing.T) {
 	}
 }
 
-func TestAntigravityACPReusesStdioHostAcrossTurns(t *testing.T) {
-	dir := acpScript(t, map[string]string{"task": "{\"stopReason\":\"end_turn\"}"})
-	p, mark := antigravityACPTestProfile(t, dir)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	nativeID := ""
-	for range 2 {
-		s, err := acpDial(ctx, p, dir, nativeID, ExecutionOptions{HealthProbe: true, DynaShell: true}, nil, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		nativeID = s.session
-		if _, err := s.agent.Prompt(ctx, s.session, []acp.PromptBlock{acp.TextBlock("task")}); err != nil {
-			s.close()
-			t.Fatal(err)
-		}
-		s.settled = true
-		s.close()
-	}
-	body, err := os.ReadFile(mark)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for text, want := range map[string]int{"boot ": 1, "initialize 2": 1, "auth oauth-personal": 1, "session/resume fake-session-1": 1, "disabled start_subagent,schedule,run_command": 1, "mode yolo": 2} {
-		if got := strings.Count(string(body), text); got != want {
-			t.Fatalf("%q count=%d, want %d:\n%s", text, got, want, body)
-		}
-	}
-}
-
 func TestGrokACPHardCancelStopsWithoutWaitingForProtocolGrace(t *testing.T) {
 	dir := acpScript(t, map[string]string{"hard deadline": `{"ignoreCancel":true,"waitForCancel":true}`})
 	env, mark := acpTestEnv(t, dir)
@@ -978,59 +939,5 @@ func TestGrokACPHardCancelStopsWithoutWaitingForProtocolGrace(t *testing.T) {
 	}
 	if strings.Contains(string(body), "cancel\n") {
 		t.Fatalf("hard deadline waited on session/cancel instead of killing the child:\n%s", body)
-	}
-}
-
-func antigravityACPTestProfile(t *testing.T, scriptDir string) (profile.Profile, string) {
-	t.Helper()
-	env, mark := acpTestEnv(t, scriptDir)
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, "antigravity-acp"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "antigravity-acp", "acp_token.json"), []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	env["HOME"] = home
-	cli := filepath.Join(strings.Split(env["PATH"], ":")[0], "grok")
-	if err := os.Symlink(cli, filepath.Join(filepath.Dir(cli), "agy_acp_server.par")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(cli), "localharness_external"), []byte("fixture"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	p := profile.Profile{Harness: profile.HarnessAntigravity, Env: env, RuntimeExecutable: cli, RuntimeBindProcess: func(json.RawMessage) error { return nil }}
-
-	return p, mark
-}
-
-func TestAntigravityACPReadsBackendErrorMarkersBeforeSuccess(t *testing.T) {
-	for _, tc := range []struct {
-		name, stderr string
-		wantError    bool
-	}{
-		{"current-session", "Antigravity SDK error processing prompt for session fake-session-1\nResourceExhausted: quota exhausted", true},
-		{"another-session", "Antigravity SDK error processing prompt for session fake-session-10", false},
-		{"ordinary-text", "The assistant discussed a quota exhausted error.", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			first, err := json.Marshal(map[string]string{"stderr": tc.stderr})
-			if err != nil {
-				t.Fatal(err)
-			}
-			script := string(first) + "|" + `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"answer"}}}|{"stopReason":"end_turn"}`
-			dir := acpScript(t, map[string]string{"task": script})
-			p, _ := antigravityACPTestProfile(t, dir)
-			declaration := &workeroutput.Declaration{Dialect: workeroutput.DialectAcpJSON}
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			result := runAcpAttempt(ctx, p, dir, commandSpec{acpPrompt: "task"}, &sessionTracker{}, nil, nil, false, "", "", declaration, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{HealthProbe: true})
-			if (result.runErr != nil) != tc.wantError {
-				t.Fatalf("backend error=%v, want error=%v", result.runErr, tc.wantError)
-			}
-			if tc.wantError && !providerfailure.Is(result.runErr, providerfailure.Quota) {
-				t.Fatalf("quota classification lost: %v", result.runErr)
-			}
-		})
 	}
 }

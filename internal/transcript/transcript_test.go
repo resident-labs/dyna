@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -322,50 +321,6 @@ func TestSessionTurnPreservesUsageProvenance(t *testing.T) {
 	}
 }
 
-func TestAntigravityToolShownOnceOnDone(t *testing.T) {
-	decl := &workeroutput.Declaration{Dialect: workeroutput.DialectAntigravityStreamJSON}
-	var events []workeroutput.Event
-	for _, state := range []string{"ACTIVE", "DONE"} {
-		line := fmt.Sprintf(`{"event":"step_update","step_update":{"step_index":1,"state":%q,"step_type":"tool","tool_name":"run_command","tool_info":{"parameters":{"CommandLine":"echo hello"},"output":"hello"}}}`, state)
-		events = append(events, workeroutput.NormalizeLine(decl, line)...)
-	}
-	items, _ := FromEvents(events)
-	if len(items) != 1 || items[0].Kind != ToolUse || !items[0].Tool.Done || items[0].Tool.Target != "echo hello" || items[0].Tool.Output != "hello" {
-		t.Fatalf("tool transcript = %#v", items)
-	}
-}
-
-func TestAntigravityReplyFragments(t *testing.T) {
-	raw, err := os.ReadFile("testdata/antigravity-fragments.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var events []workeroutput.Event
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		events = append(events, workeroutput.NormalizeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectAntigravityStreamJSON}, line)...)
-	}
-	want := "The transcript preserves words, even when a long fragment arrives in the middle of a word.\n\nA second paragraph\nkeeps its line break.\n"
-	items, _ := FromEvents(events)
-	if len(items) != 2 || items[0].Text != want || items[1].Text != "Next message." {
-		t.Fatalf("fragment replies = %#v", items)
-	}
-	// The same stored records before the delta marker was introduced.
-	for i := range events {
-		events[i].State = strings.TrimSuffix(events[i].State, "delta")
-		events[i].ID = ""
-	}
-	turn := SessionTurn(subagent.Turn{OutputDialect: workeroutput.DialectAntigravityStreamJSON}, events, false)
-	var replies []string
-	for _, item := range turn.Items {
-		if item.Kind == Reply {
-			replies = append(replies, item.Text)
-		}
-	}
-	if len(replies) != 2 || replies[0] != want || replies[1] != "Next message." {
-		t.Fatalf("legacy replies = %q", replies)
-	}
-}
-
 func TestDistinctShortRepliesHaveParagraphBoundary(t *testing.T) {
 	items, _ := FromEvents([]workeroutput.Event{
 		{Kind: "message", Text: "First."},
@@ -666,18 +621,5 @@ func TestGrokMCPShellJobs(t *testing.T) {
 	items, hidden := FromEvents(events)
 	if hidden != 0 || len(items) != 2 || items[0].Tool.Description != "Print hello" || items[1].Tool.JobOp != "stop" {
 		t.Fatalf("items = %+v; hidden = %d", items, hidden)
-	}
-}
-
-// This completion comes from ses_20261020-014826-f8c35fee (agy 1.4.2).
-func TestAntigravityMCPShellStop(t *testing.T) {
-	line := `{"event":"step_update","step_update":{"conversation_id":"468b3011-b023-4519-8833-f7e74d588927","step_index":18,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool","duration_seconds":0.141773991,"tool_info":{"name":"call_mcp_tool","parameters":{"Arguments":{"job_id":"sh_20261020-014955-6adc1631"},"ServerName":"dyna-catalog_dyna","ToolName":"shell_stop"},"output":"Exit code -1 (terminated).\n\n[dyna: stop requested; sending SIGTERM to the process group]\n"}}}`
-	events := workeroutput.NormalizeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectAntigravityStreamJSON}, line)
-	if len(events) != 1 || events[0].Name != "dyna__shell_stop" || events[0].Input != `{"job_id":"sh_20261020-014955-6adc1631"}` {
-		t.Fatalf("events = %+v", events)
-	}
-	tool := Summarize(events[0])
-	if tool.JobOp != "stop" || tool.JobID != "sh_20261020-014955-6adc1631" || !tool.Done {
-		t.Fatalf("stop = %+v", tool)
 	}
 }

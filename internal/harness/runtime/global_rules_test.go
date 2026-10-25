@@ -22,7 +22,6 @@ func TestGenerationRemovesLegacyGlobalRulesFiles(t *testing.T) {
 		"pi":          "AGENTS.md",
 		"kimi-code":   "AGENTS.md",
 		"muse":        "~/.config/muse/AGENTS.md",
-		"antigravity": "~/.gemini/GEMINI.md",
 	}
 	for _, a := range RuntimeAdapters() {
 		if _, ok := targets[a.Harness]; !ok {

@@ -10,7 +10,7 @@ import "slices"
 // event shapes; remove with the render-time repairs in transcript.
 func ConvertSessionTurn(dialect string, events []Event) []int {
 	changed := map[int]bool{}
-	streamed := dialect == DialectAntigravityStreamJSON || dialect == DialectGrokJSON || dialect == DialectMuseJSONL
+	streamed := dialect == DialectGrokJSON || dialect == DialectMuseJSONL
 	started := map[string]bool{}
 	for i := range events {
 		e := &events[i]

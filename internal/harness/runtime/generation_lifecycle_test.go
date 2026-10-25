@@ -96,7 +96,7 @@ func writeGenerationSession(t *testing.T, name string, pin Pin, closed bool) {
 }
 
 func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "antigravity", "grok", "pi", "muse"} {
+	for _, h := range []string{"claude-code", "codex", "opencode", "grok", "pi", "muse"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
 			t.Setenv("MCP_TOKEN", "first-secret-canary")

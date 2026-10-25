@@ -508,30 +508,6 @@ func TestOwnerLoginImportOpenCodePrivateCapture(t *testing.T) {
 	}
 }
 
-// Antigravity signs in through its ACP server, so Sign in never offers to copy
-// the owner's agy CLI login.
-func TestPersonalLoginNotOfferedForAntigravity(t *testing.T) {
-	r, ownerHome := ownerImportFixture(t)
-	ownerState := &sharedLoginFixture{current: []native.Captured{fixtureLogin("shared-owner")}}
-	r.Accounts.NativeManager = func(h string, host native.Host) (native.Manager, bool) {
-		state, owner := &sharedLoginFixture{}, host.Home == ownerHome
-		if owner {
-			state = ownerState
-		}
-		return ownerImportReadOnlyManager{sharedLoginManager{h, state}, owner, new(int), new(int)}, true
-	}
-	found, err := r.FindPersonalLogin(context.Background(), "antigravity")
-	if err != nil || found != nil {
-		t.Fatalf("Sign in offered a personal Antigravity login: %v %v", found, err)
-	}
-	if _, err = r.UsePersonalLogin(context.Background(), "antigravity"); !errors.Is(err, errNoPersonalLogin) {
-		t.Fatalf("UsePersonalLogin did not refuse: %v", err)
-	}
-	if accounts, _ := r.Accounts.List(); len(accounts) != 0 {
-		t.Fatalf("a personal Antigravity login was copied: %v", accounts)
-	}
-}
-
 func TestOwnerLoginImportBrokenPrivateLoginDoesNotRecopy(t *testing.T) {
 	r, home := ownerImportFixture(t)
 	ownerImportSeed(t, home, "grok")

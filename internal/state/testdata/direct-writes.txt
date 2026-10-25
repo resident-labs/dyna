@@ -7,9 +7,6 @@
 not-state internal/account/store/registry.go Store.removeCredential 1 # deletes an account's private credential file after its row is removed; secrets stay out of dyna.db and its backups
 not-state internal/account/store/registry.go Store.writeCredential 2 # the one writer of an account's private 0600 credential file (login, refresh, switch checkpoint, import); secrets stay out of dyna.db and its backups
 not-state internal/account/store/store.go Store.lock 1 # accounts.lock, the registry's flock lock file, not state
-not-state internal/account/native/antigravity.go agyFileStore.Write 1 # a harness CLI's own credential and config files
-not-state internal/account/native/antigravity_acp.go agyFileStore.remove 1 # a harness CLI's own credential and config files
-not-state internal/account/native/antigravity_acp_login.go AntigravityACPLogin.Run 1 # creates the ACP server's folders in a harness CLI's private home
 not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's own credential and config files
 not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
 not-state internal/account/native/codex.go codexManager.activate 3 # a harness CLI's own credential and config files
@@ -111,8 +108,6 @@ not-state internal/harness/runtime/accounts_switch.go Accounts.SwitchWithProgres
 not-state internal/harness/runtime/accounts_switch.go Accounts.dropNewEntries 1 # removes the private homes a failed switch created
 not-state internal/harness/runtime/accounts_switch.go openAccountLock 1 # flock lock file, not state
 not-state internal/harness/runtime/accounts_switch.go writePrivateAccountJSONChecked 2 # the one writer of a harness CLI's private home files (login markers, leases, service config, provider keys); the account selection lives in dyna.db
-not-state internal/harness/runtime/adapter_antigravity.go installAntigravityArchive 2 # a harness CLI's own runtime files
-not-state internal/harness/runtime/antigravity_acp.go installAntigravityACPArchive 2 # a harness CLI's own runtime files
 not-state internal/harness/runtime/adapter_muse.go installMuseArtifact 2 # a harness CLI's own runtime files
 not-state internal/harness/runtime/bundle.go BundleManager.InstallAndSelect 1 # publishes the staged candidate under the manager lock
 not-state internal/harness/runtime/bundle.go BundleManager.Rollback 1 # installed harness bundles: clears the rollback marker it consumed

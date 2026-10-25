@@ -60,7 +60,7 @@ const dynaMCPName = "dyna"
 // Version 6: Muse run and compaction members use separate -c paths.
 // Version 7: harnesses with DynaShell get Dyna's MCP shell server.
 // Version 8: OpenCode denies its native shell and lists Dyna's server directly.
-// Version 8: Antigravity denies its native shell with a plugin hook.
+// Version 8: a harness denies its native shell with a plugin hook.
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
 const generationInputsVersion = 10
 
@@ -353,7 +353,7 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 	}
 	if a.SkillDir != "" {
 		viewHome := home
-		if h == "muse" || h == "antigravity" {
+		if h == "muse" {
 			viewHome = harnesshome.Home(home)
 		}
 		target := filepath.Join(viewHome, a.SkillDir)
@@ -378,7 +378,6 @@ var legacyGlobalRulesFiles = map[string]func(home string) string{
 	"muse": func(home string) string {
 		return filepath.Join(harnesshome.Roots(home)["XDG_CONFIG_HOME"], "muse", "AGENTS.md")
 	},
-	"antigravity": func(home string) string { return filepath.Join(harnesshome.Home(home), ".gemini", "GEMINI.md") },
 }
 
 // removeLegacyGlobalRules deletes the global rules file Dyna once wrote for
@@ -779,7 +778,7 @@ func (r *Runtime) sharedGenerationPins(keep map[string]bool) error {
 		if err != nil {
 			return err
 		}
-		if a.Harness == "muse" || a.Harness == "antigravity" {
+		if a.Harness == "muse" {
 			home = harnesshome.Home(home)
 		}
 		view := filepath.Join(home, a.SkillDir)
