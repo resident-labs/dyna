@@ -88,12 +88,18 @@ type privateRuntimeLogin struct {
 	signIn  *privateSignIn
 	// harness is set for a sign-in that has no account of its own.
 	harness string
+	// target is the saved account a sign-in again writes, when the flow has no
+	// account of its own.
+	target string
 }
 
 type PrivateLogin struct {
 	AccountID string `json:"accountId"`
 	// Harness names the harness of a sign-in that has no account of its own.
-	Harness string       `json:"harness,omitempty"`
+	Harness string `json:"harness,omitempty"`
+	// Target names the saved account a sign-in again writes, for a flow that has
+	// no account of its own, such as Pi's provider sign-in.
+	Target  string       `json:"target,omitempty"`
 	Warning string       `json:"warning,omitempty"`
 	SignIn  *SignInState `json:"signIn,omitempty"`
 }
@@ -108,7 +114,7 @@ func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version
 		return PrivateLogin{}, err
 	}
 	if h == "pi" {
-		return a.beginPiProviderSignIn(b.Executable)
+		return a.beginPiProviderSignIn(b.Executable, "")
 	}
 	n, err := a.Accounts.Create(harness, label)
 	if err != nil {
@@ -153,20 +159,25 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 }
 
 func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ bool) (PrivateLogin, error) {
-	harness := "pi"
+	harness, target := "pi", ""
 	if id != piProviderSignInID {
 		n, err := a.Accounts.Find(id)
 		if err != nil {
 			return PrivateLogin{}, err
 		}
 		harness = n.Harness
+		if harness == "pi" {
+			// Pi keeps its provider entries in one login, so the card has no
+			// account of its own; target keeps this account's entry its own.
+			target = n.ID
+		}
 	}
 	b, err := EnsureBundle(ctx, harness, "")
 	if err != nil {
 		return PrivateLogin{}, err
 	}
 	if harness == "pi" {
-		return a.beginPiProviderSignIn(b.Executable)
+		return a.beginPiProviderSignIn(b.Executable, target)
 	}
 	return a.startPrivateLogin(id, b.Executable)
 }
