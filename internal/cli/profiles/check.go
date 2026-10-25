@@ -3,6 +3,7 @@ package profiles
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"dyna-agent/internal/harness"
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/path"
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/profilecheck"
 	"dyna-agent/internal/workeroutput"
@@ -25,8 +27,8 @@ func newCheckCommand() *cobra.Command {
 	var live bool
 	cmd := &cobra.Command{
 		Use:   "check [name...]",
-		Short: "Check enabled profiles, installed binaries, and output capabilities",
-		Long:  "Check enabled profiles, including subagent-only profiles. --live starts each harness and can incur provider charges.",
+		Short: "Check enabled profiles, installed binaries, output capabilities, and accounts",
+		Long:  "Check enabled profiles, including subagent-only profiles, and report each managed profile's private sign-in state. --live starts each harness and can incur provider charges.",
 		RunE: func(c *cobra.Command, names []string) error {
 			store, err := loadStore()
 			if err != nil {
@@ -41,35 +43,42 @@ func newCheckCommand() *cobra.Command {
 				return nil
 			}
 			failed := 0
+			docs := accountDoctors(c.Context(), selected)
 			for _, p := range selected {
+				problem := false
 				dialect := p.EffectiveDialect()
 				caps := workeroutput.Capabilities(dialect)
 				binary, binaryErr := checkBinary(p)
 				fmt.Fprintf(c.OutOrStdout(), "%s\n  harness: %s  effective dialect: %s\n", p.Name, p.Harness, orDash(dialect))
 				if binaryErr != nil {
 					fmt.Fprintf(c.OutOrStdout(), "  binary: missing (%v)\n", binaryErr)
+					problem = true
 				} else {
 					fmt.Fprintf(c.OutOrStdout(), "  binary: installed (%s)\n", binary)
+				}
+				if doc, managed := docs[p.Name]; managed && !printAccount(c.OutOrStdout(), doc) {
+					problem = true
 				}
 				fmt.Fprintf(c.OutOrStdout(), "  Capabilities: transcript=%t tool-events=%t safe-points=%t usage=%s session-resume=%t\n", caps.Transcript, caps.ToolEvents, caps.SafePoints, caps.Usage, caps.SessionResume)
 				if caps.UsageReason != "" {
 					fmt.Fprintf(c.OutOrStdout(), "  usage: %s\n", caps.UsageReason)
 				}
-				if binaryErr != nil {
-					failed++
-					continue
-				}
-				version := harnesshealth.VersionDetector(c.Context(), p)
-				health := harnesshealth.New("").View(p, version.Version)
-				fmt.Fprintf(c.OutOrStdout(), "  version: %s  observed health: %s (%s)\n", orDash(version.Version), health.Status, health.Reason)
-				if live {
-					fmt.Fprintln(c.OutOrStdout(), "  live: running (timeout: 2 minutes)")
-					if err := runProfileProbe(c.Context(), p); err != nil {
-						failed++
-						fmt.Fprintf(c.OutOrStdout(), "  live: FAIL (%v)\n", err)
-					} else {
-						fmt.Fprintln(c.OutOrStdout(), "  live: PASS (text, supported tool events, and supported usage confirmed)")
+				if binaryErr == nil {
+					version := harnesshealth.VersionDetector(c.Context(), p)
+					health := harnesshealth.New("").View(p, version.Version)
+					fmt.Fprintf(c.OutOrStdout(), "  version: %s  observed health: %s (%s)\n", orDash(version.Version), health.Status, health.Reason)
+					if live {
+						fmt.Fprintln(c.OutOrStdout(), "  live: running (timeout: 2 minutes)")
+						if err := runProfileProbe(c.Context(), p); err != nil {
+							problem = true
+							fmt.Fprintf(c.OutOrStdout(), "  live: FAIL (%v)\n", err)
+						} else {
+							fmt.Fprintln(c.OutOrStdout(), "  live: PASS (text, supported tool events, and supported usage confirmed)")
+						}
 					}
+				}
+				if problem {
+					failed++
 				}
 			}
 			if failed > 0 {
@@ -108,6 +117,42 @@ func selectCheckProfiles(store *profile.Store, names []string) ([]profile.Profil
 		}
 	}
 	return selected, nil
+}
+
+// accountDoctors reports the private sign-in state each managed profile needs
+// before its first turn. A direct harness runs its own command, so Dyna checks
+// no account for it.
+func accountDoctors(ctx context.Context, selected []profile.Profile) map[string]harnessruntime.Doctor {
+	managed := []profile.Profile{}
+	for _, p := range selected {
+		if p.DynaManaged() {
+			managed = append(managed, p)
+		}
+	}
+	docs := make(map[string]harnessruntime.Doctor, len(managed))
+	if len(managed) == 0 {
+		return docs
+	}
+	for _, doc := range harnessruntime.New().Doctors(ctx, managed) {
+		docs[doc.Profile] = doc
+	}
+	return docs
+}
+
+// printAccount writes the account state a managed profile starts with. It
+// returns false when a turn cannot start, and names the command that fixes it.
+func printAccount(w io.Writer, doc harnessruntime.Doctor) bool {
+	fmt.Fprintf(w, "  account: %s", doc.Status)
+	if doc.Reason != "" {
+		fmt.Fprintf(w, " (%s)", doc.Reason)
+	}
+	fmt.Fprintln(w)
+	switch doc.Status {
+	case "blocked", "not signed in":
+		fmt.Fprintf(w, "  next: dyna harness login %s\n", doc.Harness)
+		return false
+	}
+	return true
 }
 
 func checkBinary(p profile.Profile) (string, error) {
