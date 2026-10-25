@@ -92,6 +92,18 @@ func (m *nativeFilesManager) Capture(_ context.Context, root string) ([]native.C
 	}
 	payload, _ := json.Marshal(files)
 	c := native.Captured{Identity: m.adapter.Harness + ":native", Label: m.adapter.Harness + " native login", Credential: store.Credential{Schema: m.adapter.Harness + "/native-files@1", Payload: payload}}
+	// A Pi account holds one provider's login, so the provider part of the
+	// stored identity names it. A home with several entries keeps the
+	// placeholder: it cannot say which provider this account is.
+	if m.adapter.Harness == "pi" {
+		var providers map[string]json.RawMessage
+		if json.Unmarshal(files["auth.json"], &providers) == nil && len(providers) == 1 {
+			for id := range providers {
+				c.Identity = "pi:" + id
+				c.Label = id + " login"
+			}
+		}
+	}
 	// A Grok OIDC login names its user, so it gets the stable identity that
 	// usage and saved accounts use. Other logins keep the placeholder.
 	if m.adapter.Harness == "grok" {

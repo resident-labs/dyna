@@ -29,26 +29,26 @@ func preparedAccountFixture(t *testing.T) (*Accounts, NativeAccount) {
 func TestCheckPreparedAccount(t *testing.T) {
 	a, n := preparedAccountFixture(t)
 	for _, harness := range []string{"claude", "claude-code"} {
-		got, err := a.CheckPreparedAccount(harness, n.ID, "")
+		got, err := a.CheckPreparedAccount(harness, n.ID, "", "")
 		if err != nil || got.ID != n.ID || !got.Active || got.Status != "ready" {
 			t.Fatalf("got %+v, %v", got, err)
 		}
 	}
 	for _, harness := range []string{"codex", "unknown"} {
-		if _, err := a.CheckPreparedAccount(harness, n.ID, ""); err == nil {
+		if _, err := a.CheckPreparedAccount(harness, n.ID, "", ""); err == nil {
 			t.Fatalf("accepted %s", harness)
 		}
 	}
-	if _, err := a.CheckPreparedAccount("claude", "different-account", ""); err == nil {
+	if _, err := a.CheckPreparedAccount("claude", "different-account", "", ""); err == nil {
 		t.Fatal("accepted a different prepared account")
 	}
 	if err := a.SetRepos(n.ID, []string{workRepo}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CheckPreparedAccount("claude", n.ID, ""); !errors.Is(err, errScopeRefused) {
+	if _, err := a.CheckPreparedAccount("claude", n.ID, "", ""); !errors.Is(err, errScopeRefused) {
 		t.Fatalf("no-origin error = %v", err)
 	}
-	if _, err := a.CheckPreparedAccount("claude", n.ID, workRepo); err != nil {
+	if _, err := a.CheckPreparedAccount("claude", n.ID, "", workRepo); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -63,7 +63,7 @@ func TestCheckPreparedAccountRejectsChangedLogin(t *testing.T) {
 	if err := writePrivateAccountJSON(filepath.Join(n.Home, ".login-pending.json"), login); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CheckPreparedAccount("claude", n.ID, ""); err == nil {
+	if _, err := a.CheckPreparedAccount("claude", n.ID, "", ""); err == nil {
 		t.Fatal("accepted a changed login identity")
 	}
 }
@@ -73,7 +73,7 @@ func TestCheckPreparedAccountRejectsSignedOut(t *testing.T) {
 	if err := a.transaction(func(s *store.State) error { s.Find(n.ID).NeedsLogin = true; return nil }, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CheckPreparedAccount("claude", n.ID, ""); !errors.Is(err, native.ErrNotSignedIn) {
+	if _, err := a.CheckPreparedAccount("claude", n.ID, "", ""); !errors.Is(err, native.ErrNotSignedIn) {
 		t.Fatalf("signed-out error = %v", err)
 	}
 }
@@ -89,7 +89,9 @@ func TestRecheckPreparedAccount(t *testing.T) {
 		{name: "active changed", query: "UPDATE account_active SET account = ? WHERE provider = ?", args: func(n NativeAccount) []any {
 			return []any{"00000000000000000000000000000000", accountProvider(n.Harness)}
 		}, wantErr: true},
-		{name: "active cleared", query: "DELETE FROM account_active", wantErr: true},
+		// Without a row the harness still resolves to its own account, so the
+		// prepared account serves the turn unchanged.
+		{name: "selection cleared"},
 		{name: "identity changed", query: "UPDATE accounts SET metadata = json_set(metadata, '$.identity', 'other')", wantErr: true},
 		{name: "signed out", query: "UPDATE accounts SET metadata = json_set(metadata, '$.needsLogin', json('true'))", wantErr: true},
 		{name: "deleted", query: "DELETE FROM accounts", wantErr: true},
@@ -103,7 +105,7 @@ func TestRecheckPreparedAccount(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, n := preparedAccountFixture(t)
-			expected, err := a.CheckPreparedAccount("claude", n.ID, personalRepo)
+			expected, err := a.CheckPreparedAccount("claude", n.ID, "", personalRepo)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,7 +138,7 @@ func TestRecheckPreparedAccount(t *testing.T) {
 
 func TestRecheckPreparedAccountUsesOnlySQL(t *testing.T) {
 	a, n := preparedAccountFixture(t)
-	expected, err := a.CheckPreparedAccount("claude", n.ID, "")
+	expected, err := a.CheckPreparedAccount("claude", n.ID, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

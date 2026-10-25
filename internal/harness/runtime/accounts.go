@@ -22,14 +22,16 @@ import (
 type NativeAccount struct {
 	proof     *store.PrivateProof
 	prepared  *preparedAccount
-	ID        string     `json:"id"`
-	Harness   string     `json:"harness"`
-	Label     string     `json:"label"`
-	Home      string     `json:"home"`
-	Identity  string     `json:"identity"`
-	Status    string     `json:"status"`
-	Active    bool       `json:"active"`
-	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	ID        string         `json:"id"`
+	Harness   string         `json:"harness"`
+	Provider  store.Provider `json:"provider,omitempty"`
+	Kind      store.Kind     `json:"kind,omitempty"`
+	Label     string         `json:"label"`
+	Home      string         `json:"home"`
+	Identity  string         `json:"identity"`
+	Status    string         `json:"status"`
+	Active    bool           `json:"active"`
+	ExpiresAt *time.Time     `json:"expiresAt,omitempty"`
 	// Repos lists the repositories this account is limited to; empty means any.
 	Repos []string `json:"repos"`
 }
@@ -154,7 +156,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 			}
 		}
 	}
-	active, err := a.activeID(h)
+	active, err := a.activeForEntry(e)
 	if err != nil {
 		return NativeAccount{}, err
 	}
@@ -172,7 +174,15 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 			}
 		}
 	}
-	return NativeAccount{ID: e.ID, Harness: h, Label: e.Label, Home: home, Identity: e.Identity, Status: status, Active: active == e.ID, ExpiresAt: expiresAt, proof: e.PrivateProof}, nil
+	return NativeAccount{ID: e.ID, Harness: h, Provider: e.Provider, Kind: e.Kind, Label: e.Label, Home: home, Identity: e.Identity, Status: status, Active: active == e.ID, ExpiresAt: expiresAt, proof: e.PrivateProof}, nil
+}
+
+// activeForEntry returns the account the registry marks active for the entry.
+// Every harness keeps one selection per provider, so two Pi accounts of
+// different providers are active together and a Pi account never marks the
+// account Claude Code uses for the same provider.
+func (a *Accounts) activeForEntry(e *store.Entry) (string, error) {
+	return (&store.Store{Root: a.Root}).Active(selectionProvider(e.Harness, e.Provider), e.Harness, "")
 }
 
 func (a *Accounts) Create(harness, label string) (result NativeAccount, err error) {
@@ -180,6 +190,21 @@ func (a *Accounts) Create(harness, label string) (result NativeAccount, err erro
 	if err != nil {
 		return result, err
 	}
+	provider, kind := store.ProviderFor(h, "")
+	return a.createProvider(h, provider, kind, label)
+}
+
+// CreateProvider makes an account of one provider in its own home. A harness
+// that runs several providers, such as Pi, gives each provider its own account.
+func (a *Accounts) CreateProvider(harness string, provider store.Provider, kind store.Kind, label string) (NativeAccount, error) {
+	h, err := canonicalAccountHarness(harness)
+	if err != nil {
+		return NativeAccount{}, err
+	}
+	return a.createProvider(h, provider, kind, label)
+}
+
+func (a *Accounts) createProvider(h string, provider store.Provider, kind store.Kind, label string) (result NativeAccount, err error) {
 	err = a.transaction(func(state *store.State) error {
 		id := make([]byte, 16)
 		if _, err := rand.Read(id); err != nil {
@@ -201,7 +226,6 @@ func (a *Accounts) Create(harness, label string) (result NativeAccount, err erro
 			return err
 		}
 		now := time.Now().UTC()
-		provider, kind := store.ProviderFor(h, "")
 		e := store.Entry{Metadata: store.Metadata{ID: key, Provider: provider, Kind: kind, Harness: h, Label: label, NativeHome: home, NeedsLogin: true, CreatedAt: now, UpdatedAt: now}}
 		state.Entries = append(state.Entries, e)
 		result, err = a.native(&e)
@@ -416,12 +440,77 @@ func (a *Accounts) activeScope(id, executable string) (NativeAccount, native.Man
 	m, env, err := a.scopedManager(n.Harness, home, executable)
 	return n, m, env, err
 }
+
 func (a *Accounts) Env(id string) (map[string]string, error) {
 	_, _, env, err := a.activeScope(id, "")
 	return env, err
 }
+
+// launchScope returns the account a turn resolved and its native home. A turn
+// may resolve to an account that another harness's provider selection pushed
+// aside, so this scope checks no active mark: the turn's own selection already
+// chose the account.
+func (a *Accounts) launchScope(id, executable string) (NativeAccount, native.Manager, map[string]string, error) {
+	n, err := a.Find(id)
+	if err != nil {
+		return n, nil, nil, err
+	}
+	if err := requirePrivateSnapshot(n); err != nil {
+		return n, nil, nil, err
+	}
+	home, err := a.HarnessHome(n.Harness)
+	if err != nil {
+		return n, nil, nil, err
+	}
+	m, env, err := a.scopedManager(n.Harness, home, executable)
+	return n, m, env, err
+}
+
+// launchEnv returns the launch environment of the account a turn resolved.
+func (a *Accounts) launchEnv(id string) (map[string]string, error) {
+	_, _, env, err := a.launchScope(id, "")
+	return env, err
+}
+
+// launchManager returns the manager of the account a turn resolved.
+func (a *Accounts) launchManager(id, executable string) (native.Manager, error) {
+	n, err := a.Find(id)
+	if err != nil {
+		return nil, err
+	}
+	if n.Harness == "pi" {
+		// Pi reads its whole agent directory from the account's own home.
+		if err := requirePrivateSnapshot(n); err != nil {
+			return nil, err
+		}
+		m, _, err := a.scopedManager(n.Harness, n.Home, executable)
+		return m, err
+	}
+	_, m, _, err := a.launchScope(id, executable)
+	if err != nil {
+		return nil, err
+	}
+	home, _ := a.HarnessHome(n.Harness)
+	return privateAccountManager{Manager: m, home: home, nativeRoot: sharedServiceAccount(n.Harness) || pinsCredentials(n.Harness)}, nil
+}
 func (a *Accounts) Manager(id, executable string) (native.Manager, error) {
-	n, m, _, err := a.activeScope(id, executable)
+	n, err := a.Find(id)
+	if err != nil {
+		return nil, err
+	}
+	// A Pi account reads its whole agent directory from its own home, so its
+	// manager works there instead of the shared harness home.
+	if n.Harness == "pi" {
+		if err := requirePrivateSnapshot(n); err != nil {
+			return nil, err
+		}
+		if !n.Active {
+			return nil, errors.New("Select this account before starting a harness turn.")
+		}
+		m, _, err := a.scopedManager(n.Harness, n.Home, executable)
+		return m, err
+	}
+	_, m, _, err := a.activeScope(id, executable)
 	if err != nil {
 		return nil, err
 	}
