@@ -104,7 +104,7 @@ printf '%s\n' '{"type":"result","session_id":"doorbell-session","result":"doorbe
 `}}
 	done := make(chan attempt, 1)
 	go func() {
-		done <- runOnce(ctx, profile.Profile{Harness: profile.HarnessCustom}, t.TempDir(), spec, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{Dialect: workeroutput.DialectClaudeStreamJSON}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
+		done <- runOnce(ctx, profile.Profile{Harness: profile.HarnessMock}, t.TempDir(), spec, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{Dialect: workeroutput.DialectClaudeStreamJSON}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
 	}()
 	// A worker that stops before it waits on input reports its own error here
 	// instead of waiting out the timer.
@@ -185,7 +185,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"d
 `}}
 	done := make(chan attempt, 1)
 	go func() {
-		done <- runOnce(ctx, profile.Profile{Harness: profile.HarnessCustom, Env: map[string]string{"BOUNDARY_CONTROL": path}}, dir, spec, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
+		done <- runOnce(ctx, profile.Profile{Harness: profile.HarnessMock, Env: map[string]string{"BOUNDARY_CONTROL": path}}, dir, spec, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
 	}()
 	awaitDoorbell(t, "the session observation", source.observed)
 	if _, err := control.WriteString("boundary\n"); err != nil {

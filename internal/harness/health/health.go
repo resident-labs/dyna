@@ -75,11 +75,10 @@ func Fingerprint(p profile.Profile) string {
 	b, _ := json.Marshal(struct {
 		Harness          string
 		Model            string
-		Command          []string
 		ExtraArgs        []string
 		Output           *workeroutput.Declaration
 		EffectiveDialect string
-	}{p.Harness, p.Model, p.Command, p.ExtraArgs, p.Output, p.EffectiveDialect()})
+	}{p.Harness, p.Model, p.ExtraArgs, p.Output, p.EffectiveDialect()})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }

@@ -413,6 +413,7 @@ func TestNativeAdmissionSkipsOtherExecution(t *testing.T) {
 				w.WriteHeader(http.StatusForbidden)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "non-native execution must not request account admission"})
 			})
+			prompt := "task"
 			ran := false
 			if injected {
 				exec.ProcessRunner = func(_ context.Context, _ []string, stdout, _ io.Writer) error {
@@ -424,10 +425,11 @@ func TestNativeAdmissionSkipsOtherExecution(t *testing.T) {
 					return err
 				}
 			} else {
-				p.Harness = profile.HarnessCustom
-				p.Command = []string{"/bin/sh", "-c", "printf done"}
+				// The mock harness manages no account, so it asks for none.
+				p = profile.Profile{Name: "mock", Harness: profile.HarnessMock}
+				prompt = "SLEEP:0\nRESPOND: done"
 			}
-			result, err := runJournaled(t.Context(), p, "task", t.TempDir(), true, 0, JournalOptions{}, SteeringOptions{}, SessionOptions{}, exec)
+			result, err := runJournaled(t.Context(), p, prompt, t.TempDir(), true, 0, JournalOptions{}, SteeringOptions{}, SessionOptions{}, exec)
 			if err != nil || result.Output != "done" || (injected && !ran) {
 				t.Fatalf("non-native execution: %+v, %v; injected runner called: %t", result, err, ran)
 			}

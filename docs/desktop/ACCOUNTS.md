@@ -58,7 +58,7 @@ Tests never read or switch the developer's actual accounts.
 
 `web/tests/usage.html` and `tests/profiles.html` are separate browser
 fixtures. They are not imported by the production application. Profile fixture
-queries `?screen=test` and `?screen=custom-error` run browser interaction checks;
+queries `?screen=test` and `?screen=save-error` run browser interaction checks;
 their `body.dataset.smoke` result is `passed` or `failed`. Production components use the native
 account and model APIs and never fall back to illustrative quota data.
 

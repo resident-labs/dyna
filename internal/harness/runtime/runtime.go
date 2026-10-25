@@ -59,7 +59,7 @@ func New() *Runtime {
 func (r *Runtime) Doctor(ctx context.Context, p profile.Profile) Doctor {
 	d := Doctor{Profile: p.Name, Harness: p.Harness}
 	if !p.DynaManaged() {
-		d.Status, d.Reason = "direct", "This harness runs its own command. Dyna does not manage a copy of it."
+		d.Status, d.Reason = "direct", "The mock harness runs no external copy, so Dyna manages none."
 		return d
 	}
 	a, err := Adapter(p.Harness)

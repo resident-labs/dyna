@@ -993,6 +993,11 @@ func (r *journaledRun) completeAttempt(a attempt) (stepAct, Result, error) {
 	// A short worker can finish before the inactivity deadline. Give every
 	// resumable worker one exact-session chance to satisfy the journal
 	// contract, while preserving its already-successful task result.
+	if r.supervisor != nil {
+		// Read the journal once more: a worker can write its entry and finish
+		// between two polls, so the last word on the entry must be this check.
+		r.supervisor.poll()
+	}
 	if r.supervisor != nil && !r.supervisor.hasAgentEntry() {
 		if r.completionReminderAttempted {
 			r.supervisor.markNudged(false, JournalNudgeMissing)

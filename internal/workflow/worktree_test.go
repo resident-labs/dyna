@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/settings"
@@ -113,10 +114,7 @@ func TestExecuteJournalsRetainedWorktreeGitChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "", nil) })
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "worktree-writer", Harness: profile.HarnessCustom, Default: true,
-		Taste: 5, Intelligence: 5, Cost: 10,
-		Command: []string{"/bin/sh", "-c", `
+	writer := fakeworker.InstallClaude(t, `
 printf 'untracked\n' > created.txt
 rm deleted.txt
 printf 'new one\nnew two\nnew three\n' > modified.txt
@@ -127,8 +125,9 @@ printf 'second\n' > committed-two.txt
 git add committed-two.txt
 git commit -m 'second isolated commit' >/dev/null
 printf done
-`},
-	}}}
+`)
+	writer.Name, writer.Default, writer.Cost = "worktree-writer", true, 10
+	store := &profile.Store{Profiles: []profile.Profile{writer}}
 
 	if _, err := Execute(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo}); err != nil {
 		t.Fatal(err)
@@ -280,16 +279,15 @@ func TestPerCallRetentionNoneRetainsDirtyWorktreeAndJournalsChanges(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "", nil) })
-	store := &profile.Store{Profiles: []profile.Profile{{
-		Name: "writer", Harness: profile.HarnessCustom, Default: true,
-		Taste: 5, Intelligence: 5, Cost: 10,
-		Command: []string{"/bin/sh", "-c", `
+	writer := fakeworker.InstallClaude(t, `
 set -eu
+printf '%s' "$DYNA_AGENT_JOURNAL" > /tmp/fake-journal-path
 printf 'discarded\n' > discarded.txt
 printf '%s\n' '{"ts":1,"kind":"verification","message":"Wrote discarded.txt.","source":"agent"}' >> "$DYNA_AGENT_JOURNAL"
 printf done
-`},
-	}}}
+`)
+	writer.Name, writer.Default, writer.Cost = "writer", true, 10
+	store := &profile.Store{Profiles: []profile.Profile{writer}}
 	if _, err := Execute(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo, WorktreeRetention: settings.WorktreesRetentionChanged}); err != nil {
 		t.Fatal(err)
 	}

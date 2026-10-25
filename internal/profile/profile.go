@@ -25,7 +25,6 @@ const (
 	HarnessOpenCode   = "opencode"
 	HarnessMuse       = "muse"
 	HarnessPi         = "pi"
-	HarnessCustom     = "custom"
 	HarnessMock       = "mock"
 )
 
@@ -77,7 +76,6 @@ type Profile struct {
 	ExtraArgs    []string                  `json:"extraArgs,omitempty"`
 	// Compact sets the harness's native auto-compact threshold; nil keeps its default.
 	Compact    *Compact          `json:"compact,omitempty"`
-	Command    []string          `json:"command,omitempty"` // custom harness: argv, {{prompt}}/{{model}} placeholders
 	Env        map[string]string `json:"env,omitempty"`
 	TimeoutSec int               `json:"timeoutSec,omitempty"`
 	Default    bool              `json:"default,omitempty"`
@@ -153,7 +151,7 @@ func (p Profile) EffectiveModels() []string {
 }
 
 // DynaManaged reports whether Dyna runs this profile on its private harness copy.
-// Custom and mock harnesses run their own command.
+// The mock harness runs no executable.
 func (p Profile) DynaManaged() bool {
 	def, ok := HarnessDefinitionFor(p.Harness)
 	return ok && def.Binary != ""
@@ -218,9 +216,6 @@ func (p *Profile) Validate() error {
 	if p.Diagnostics != 0 && (p.Diagnostics < 1 || p.Diagnostics > 10) {
 		return fmt.Errorf("diagnostics must be 1..10 (got %d)", p.Diagnostics)
 	}
-	if p.Harness == HarnessCustom && len(p.Command) == 0 {
-		return errors.New("custom harness requires a command")
-	}
 	if err := validateCompact(*p); err != nil {
 		return err
 	}
@@ -229,8 +224,8 @@ func (p *Profile) Validate() error {
 			return err
 		}
 		definition, _ := HarnessDefinitionFor(p.Harness)
-		if p.Harness != HarnessCustom && p.EffectiveDialect() != definition.Dialect {
-			return fmt.Errorf("harness %q emits %q, so output dialect %q cannot decode it; omit output.dialect to use the native format (use custom for another format)", p.Harness, definition.Dialect, p.EffectiveDialect())
+		if p.EffectiveDialect() != definition.Dialect {
+			return fmt.Errorf("harness %q emits %q, so output dialect %q cannot decode it; omit output.dialect to use the native format", p.Harness, definition.Dialect, p.EffectiveDialect())
 		}
 	}
 	for _, v := range []struct {
@@ -294,7 +289,6 @@ func cloneProfile(p Profile) Profile {
 	p.ExtraArgs = slices.Clone(p.ExtraArgs)
 	p.RuntimePermissionArgs = slices.Clone(p.RuntimePermissionArgs)
 	p.Compact = cloneCompact(p.Compact)
-	p.Command = slices.Clone(p.Command)
 	p.Env = maps.Clone(p.Env)
 	return p
 }

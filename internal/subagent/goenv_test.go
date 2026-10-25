@@ -3,7 +3,7 @@ package subagent
 import (
 	"testing"
 
-	"dyna-agent/internal/profile"
+	"dyna-agent/internal/harness/fakeworker"
 )
 
 func TestSubagentTurnGoFlags(t *testing.T) {
@@ -19,10 +19,10 @@ func TestSubagentTurnGoFlags(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("GOFLAGS", "-tags=inherited")
 			original := tc.env["GOFLAGS"]
-			e := newTestEnv(t, profile.Profile{
-				Name: "mock", Harness: profile.HarnessCustom, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
-				Command: []string{"/bin/sh", "-c", `printf '%s' "$GOFLAGS"`}, Env: tc.env,
-			})
+			p := fakeworker.InstallClaude(t, `printf '%s' "$GOFLAGS"`)
+			p.Name, p.Default = "mock", true
+			p.Env = mergedEnv(p.Env, tc.env)
+			e := newTestEnv(t, p)
 			e.joinRunners()
 			info, _ := e.start("task")
 			_, turn := e.wait(info.ID, 1)

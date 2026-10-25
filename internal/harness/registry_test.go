@@ -17,10 +17,10 @@ func TestEveryHarnessRegistryEntryConforms(t *testing.T) {
 			if !ok || d.Dialect == "" || d.Invocation == "" || d.ProbePrompt == "" || len(d.Fixtures) == 0 {
 				t.Fatalf("incomplete harness registry entry: %#v", d)
 			}
-			if name != profile.HarnessCustom && name != profile.HarnessMock && (d.Binary == "" || len(d.VersionArgs) == 0) {
+			if name != profile.HarnessMock && (d.Binary == "" || len(d.VersionArgs) == 0) {
 				t.Fatal("native harness lacks executable or version detection")
 			}
-			p := profile.Profile{Harness: name, Command: []string{"true"}}
+			p := profile.Profile{Harness: name}
 			if name != profile.HarnessMock {
 				invocation, err := buildInvocation(p, "probe")
 				if err != nil {

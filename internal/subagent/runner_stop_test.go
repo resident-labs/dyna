@@ -127,7 +127,7 @@ func TestStopBeforeRunnerRegistrationIsHonouredAtStart(t *testing.T) {
 // the harness starts or ends.
 func startedStopFixture(t *testing.T) (*testEnv, Info, <-chan struct{}) {
 	t.Helper()
-	e := newTestEnv(t, profile.Profile{Name: "hold", Harness: profile.HarnessCustom, Command: []string{"/bin/true"}})
+	e := newTestEnv(t, profile.Profile{Name: "hold", Harness: profile.HarnessClaudeCode})
 	started, cancelled := make(chan struct{}), make(chan struct{})
 	e.m.ProcessRunner = func(ctx context.Context, _ []string, _, _ io.Writer) error {
 		close(started)
