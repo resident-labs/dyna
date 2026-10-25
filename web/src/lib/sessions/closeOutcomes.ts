@@ -14,7 +14,7 @@ export interface CloseRow {
   key: string
   /** What the work was, such as 'PR #42' or 'Goal g7'. */
   subject: string
-  /** What the close did with it. */
+  /** What the close did with it, and where it went when it moved. */
   result: string
   /** Why a step did not run. */
   failure?: string
@@ -65,7 +65,7 @@ export function closeRows(outcomes: CloseOutcome[]): CloseRow[] {
     return {
       key: `${outcome.kind ?? 'close'}:${outcome.id ?? outcome.number ?? outcome.name ?? index}`,
       subject: subjectOf(outcome),
-      result: RESULT_TEXT[outcome.result],
+      result: resultOf(outcome),
       failure: failure ? FAILURE_TEXT[failure] : undefined,
       target: targetOf(outcome),
       choice: failure ? choiceOf(failure, outcome) : undefined,
@@ -79,6 +79,12 @@ export function closeSummaryText(outcomes: CloseOutcome[]): string {
   return closeRows(outcomes)
     .map((row) => [row.subject, row.result].join(' '))
     .join('; ')
+}
+
+function resultOf(outcome: CloseOutcome): string {
+  // Work that moved says who took it, and says when it became top level.
+  if (outcome.result === 'moved') return `handed over to ${outcome.to || 'top level'}`
+  return RESULT_TEXT[outcome.result]
 }
 
 function subjectOf(outcome: CloseOutcome): string {
