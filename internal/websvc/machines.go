@@ -47,13 +47,23 @@ type MachineCISlots struct {
 
 // MachineCIRun is one local CI run in flight on a machine. Title and URL name
 // the PR it checks, so the page shows the PR and not only a number.
+// MachineCIRunKind is the work a machine run checks. It is watch.RunningCIKind
+// as the page contract states it, so a client words a run that has no pull
+// request number.
+type MachineCIRunKind string
+
+// Machine run kinds.
+const (
+	MachineCIRunPullRequest MachineCIRunKind = "pull-request"
+	MachineCIRunLocalChange MachineCIRunKind = "local-change"
+	MachineCIRunSync        MachineCIRunKind = "sync"
+)
+
 type MachineCIRun struct {
 	Machine string `json:"machine"`
 	Number  int    `json:"number"`
-	// Kind is the work the run checks: a pull request, a local branch change or
-	// an integration sync. A client words it, so a run without a pull request
-	// number still reads clearly.
-	Kind string `json:"kind"`
+	// Kind is the work the run checks, which a client words.
+	Kind MachineCIRunKind `json:"kind"`
 	// Branch names a local change's branch, which has no pull request number.
 	Branch  string    `json:"branch,omitempty"`
 	Title   string    `json:"title"`
