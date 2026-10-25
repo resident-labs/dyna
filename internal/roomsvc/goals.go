@@ -465,36 +465,27 @@ func (s *Service) SetGoalItemState(ctx context.Context, roomRef, goal, item, sta
 		return goals.Item{}, err
 	}
 	service := s.goalService()
-	it, err := service.Store.SetItemState(r.ID, goal, item, author.ID, state)
+	change, err := service.Store.SetItemState(r.ID, goal, item, author.ID, state)
 	if err != nil {
-		return it, err
+		return change.Item, err
 	}
-	if state != goals.ItemOpen {
-		s.postLastItem(service, r, author, goal, it)
+	if change.Closed {
+		s.postLastItem(service, r, author, goal, change)
 	}
-	return it, nil
+	return change.Item, nil
 }
 
 // postLastItem tells a goal's holders that the goal's last open item is
 // closed, so a holder can finish the goal itself. The post belongs to the
 // holders alone, so a shared goal, which the room holds, sends nothing. The
 // item is already closed, so a lost post costs a nudge and not the change.
-func (s *Service) postLastItem(service *goalsvc.Service, rec room.Record, author goalAuthor, goal string, it goals.Item) {
+func (s *Service) postLastItem(service *goalsvc.Service, rec room.Record, author goalAuthor, goal string, change goals.ItemChange) {
 	g, err := service.Store.Get(rec.ID, goal)
 	if err != nil || !g.Open() || g.Shared || g.HeldBy(author.ID) {
 		return
 	}
-	items, err := service.Store.Items(rec.ID, goal)
-	if err != nil {
-		return
-	}
-	for _, other := range items {
-		if other.State == goals.ItemOpen {
-			return
-		}
-	}
 	to, bound := s.holderAddresses(g, rec.Name)
-	ev := room.GoalEvent{Type: room.GoalItemsDone, GoalID: g.ID, Title: goals.Clip(g.Text, 60), Actor: author.Name, State: room.GoalState(g.State), Summary: it.ID + " " + it.State + "; the goal stays open until its holder finishes it"}
+	ev := room.GoalEvent{Type: room.GoalItemsDone, GoalID: g.ID, Title: goals.Clip(g.Text, 60), Actor: author.Name, State: room.GoalState(g.State), Summary: change.Item.ID + " " + change.Item.State + "; the goal stays open until its holder finishes it", ItemsClosed: change.Sequence}
 	_, _ = s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, To: to, SessionIDs: bound})
 }
 
