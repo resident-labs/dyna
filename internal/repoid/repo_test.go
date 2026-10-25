@@ -53,3 +53,32 @@ func TestResolveWithoutRemoteUsesRootCommit(t *testing.T) {
 		t.Fatalf("common Git directory: %#v %v, want %#v", fromCommon, err, r)
 	}
 }
+
+func TestDefaultBranchUsesOriginHeadThenCurrentBranch(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if _, err := Git(ctx, dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(repo, "init", "-b", "trunk")
+	git(repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "--allow-empty", "-m", "base")
+	remote := t.TempDir()
+	git(remote, "init", "--bare", "--initial-branch=trunk")
+	git(repo, "remote", "add", "origin", remote)
+	git(repo, "push", "origin", "trunk")
+	git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	git(repo, "checkout", "-b", "feature")
+
+	branch, err := DefaultBranch(ctx, repo, Git)
+	if err != nil || branch.Name != "trunk" || branch.Ref != "origin/trunk" {
+		t.Fatalf("origin/HEAD default = %+v, %v", branch, err)
+	}
+	git(repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+	branch, err = DefaultBranch(ctx, repo, Git)
+	if err != nil || branch.Name != "feature" || branch.Ref != "feature" {
+		t.Fatalf("current-branch default = %+v, %v", branch, err)
+	}
+}

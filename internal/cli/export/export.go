@@ -8,5 +8,5 @@ import (
 )
 
 func NewCommand() *cobra.Command {
-	return clisync.OperationCommand("export", "GitExport", "Test integration against origin/main and open or update its export PR")
+	return clisync.OperationCommand("export", "GitExport", "Test integration against the repository default branch and open or update its export PR")
 }

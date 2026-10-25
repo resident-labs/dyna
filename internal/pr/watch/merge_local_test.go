@@ -106,6 +106,7 @@ func localMergeEnvFor(t *testing.T, bad bool, names ...string) (*testEnv, string
 	e, _, _ := mergeEnv(t)
 	dir, base := changeRepo(t)
 	changeGit(t, dir, "update-ref", "refs/remotes/origin/main", base)
+	changeGit(t, dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	v, err := settings.Load("")
 	if err != nil {
 		t.Fatal(err)

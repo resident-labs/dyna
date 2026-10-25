@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"dyna-agent/internal/hooks"
@@ -301,13 +302,20 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 }
 
 // MainHead returns the commit of the remote default branch, or of the local
-// HEAD for a repository without a remote.
+// HEAD for a repository without a resolvable default branch, such as a
+// detached checkout that has no origin/HEAD.
 func MainHead(ctx context.Context, main string) (string, error) {
-	ref, err := repoid.Git(ctx, main, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
-	if err != nil || ref == "" {
-		ref = "refs/remotes/origin/main"
+	revs := []string{"HEAD"}
+	if branch, err := repoid.DefaultBranch(ctx, main, repoid.Git); err == nil {
+		// The remote-tracking ref wins, because the local branch of the same
+		// name can lag behind the remote default branch.
+		for _, ref := range []string{branch.Ref, "origin/" + branch.Name} {
+			if !slices.Contains(revs, ref) {
+				revs = append([]string{ref}, revs...)
+			}
+		}
 	}
-	for _, rev := range []string{ref, "HEAD"} {
+	for _, rev := range revs {
 		if sha, err := repoid.Git(ctx, main, "rev-parse", "-q", "--verify", rev+"^{commit}"); err == nil {
 			return sha, nil
 		}

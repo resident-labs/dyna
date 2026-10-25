@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/processguard"
+	"dyna-agent/internal/repoid"
 )
 
 type driver struct {
@@ -63,36 +64,57 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		return err
 	}
 	d := driver{s, c, out}
+	gitAt := func(ctx context.Context, dir string, args ...string) (string, error) {
+		return d.run(ctx, dir, append([]string{"/usr/bin/git", "-C", dir}, args...)...)
+	}
 	git := func(args ...string) (string, error) {
-		return d.run(ctx, c.Main, append([]string{"/usr/bin/git", "-C", c.Main}, args...)...)
+		return gitAt(ctx, c.Main, args...)
 	}
-	if _, err = git("fetch", "-q", "origin", "main"); err != nil {
-		return err
-	}
-	head, err := git("rev-parse", "origin/main")
+	// The main checkout follows whichever branch the remote calls default, so
+	// a fork whose default is trunk or develop installs its latest commit.
+	branch, err := repoid.DefaultBranch(ctx, c.Main, gitAt)
 	if err != nil {
+		return fmt.Errorf("cannot resolve the default branch of %s: %w", c.Main, err)
+	}
+	if _, err = git("fetch", "-q", "origin", branch.Name); err != nil {
 		return err
 	}
-	if !shaPattern.MatchString(head) {
-		return fmt.Errorf("origin/main is not a full commit SHA")
+	refs := []string{"origin/" + branch.Name}
+	if branch.Ref != refs[0] {
+		refs = append(refs, branch.Ref)
 	}
-	branch, err := git("branch", "--show-current")
+	ref, head := "", ""
+	for _, candidate := range refs {
+		out, readErr := git("rev-parse", candidate)
+		if readErr != nil {
+			continue
+		}
+		if !shaPattern.MatchString(out) {
+			return fmt.Errorf("%s is not a full commit SHA", candidate)
+		}
+		ref, head = candidate, out
+		break
+	}
+	if ref == "" {
+		return fmt.Errorf("the default branch %s has no commit in %s", branch.Name, c.Main)
+	}
+	current, err := git("branch", "--show-current")
 	if err != nil {
 		return err
 	}
 	warning := Warning{}
-	if branch != "main" {
-		label := branch
+	if current != branch.Name {
+		label := current
 		if label == "" {
 			label = "detached"
 		}
-		warning = Warning{Cause: "branch:" + branch, Text: fmt.Sprintf("The main checkout %s is on branch '%s'. Switch it back with: git -C %s switch main", c.Main, label, c.Main)}
+		warning = Warning{Cause: "branch:" + current, Text: fmt.Sprintf("The main checkout %s is on branch '%s'. Switch it back with: git -C %s switch %s", c.Main, label, c.Main, branch.Name)}
 	} else if _, err = git("diff", "--quiet"); err != nil {
 		warning = Warning{Cause: "dirty", Text: fmt.Sprintf("The main checkout %s has tracked edits. See: git -C %s status", c.Main, c.Main)}
 	} else if _, err = git("diff", "--cached", "--quiet"); err != nil {
 		warning = Warning{Cause: "dirty", Text: fmt.Sprintf("The main checkout %s has tracked edits. See: git -C %s status", c.Main, c.Main)}
-	} else if _, err = git("merge", "-q", "--ff-only", "origin/main"); err != nil {
-		warning = Warning{Cause: "diverged", Text: fmt.Sprintf("The main checkout %s has local commits outside origin/main. See: git -C %s log origin/main..main", c.Main, c.Main)}
+	} else if _, err = git("merge", "-q", "--ff-only", ref); err != nil {
+		warning = Warning{Cause: "diverged", Text: fmt.Sprintf("The main checkout %s has local commits outside %s. See: git -C %s log %s..%s", c.Main, ref, c.Main, ref, branch.Name)}
 	}
 	if warning.Cause != "" {
 		if state.Alerted != warning.Cause {

@@ -387,6 +387,28 @@ func TestMovingRoomsClosesTheOldSession(t *testing.T) {
 	}
 }
 
+// The librarian follows the default branch the checkout is on, so a fork whose
+// default is trunk does not read a stale origin/main left by an earlier fetch.
+func TestMainHeadFollowsTheDefaultBranch(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-q", "-b", "trunk")
+	commitFile(t, repo, "agents/run.go", "package agents\n\nfunc Run() {}\n")
+	stale := git(t, repo, "rev-parse", "HEAD")
+	git(t, repo, "update-ref", "refs/remotes/origin/main", stale)
+	commitFile(t, repo, "agents/run.go", "package agents\n\nfunc Run() { _ = 1 }\n")
+	trunk := git(t, repo, "rev-parse", "HEAD")
+	ctx := context.Background()
+	if got, err := MainHead(ctx, repo); err != nil || got != trunk {
+		t.Fatalf("trunk head = %s, %v; want %s", got, err, trunk)
+	}
+	git(t, repo, "update-ref", "refs/remotes/origin/trunk", trunk)
+	git(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	git(t, repo, "checkout", "-q", "--detach", stale)
+	if got, err := MainHead(ctx, repo); err != nil || got != trunk {
+		t.Fatalf("detached origin/HEAD = %s, %v; want %s", got, err, trunk)
+	}
+}
+
 // The gate also runs the librarian for a pin left stale by an earlier run,
 // but not for a whitespace-only change since the pin.
 func TestGateRunsForStalePins(t *testing.T) {

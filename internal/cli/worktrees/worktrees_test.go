@@ -228,15 +228,16 @@ func TestNewPrintsOnlyPathOnStdout(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	repo := commandRepo(t)
 	remote := t.TempDir()
-	commandGit(t, remote, "init", "--bare")
+	commandGit(t, remote, "init", "--bare", "--initial-branch=trunk")
 	commandGit(t, repo, "remote", "add", "origin", remote)
-	commandGit(t, repo, "push", "origin", "HEAD:main")
+	commandGit(t, repo, "push", "origin", "HEAD:trunk")
+	commandGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
 	cmd := NewCommand()
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"new", "feat/ports-cli", "--repo", repo, "--base", "origin/main", "--no-deps"})
+	cmd.SetArgs([]string{"new", "feat/ports-cli", "--repo", repo, "--no-deps"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("new: %v: %s", err, stderr.String())
 	}
@@ -245,8 +246,8 @@ func TestNewPrintsOnlyPathOnStdout(t *testing.T) {
 		t.Fatalf("stdout = %q; want the worktree path alone", stdout.String())
 	}
 	stored, err := worktrees.Get(path)
-	if err != nil || stored.Session != "verified-session" {
-		t.Fatalf("owner = %+v, %v", stored, err)
+	if err != nil || stored.Session != "verified-session" || stored.Base != "origin/trunk" {
+		t.Fatalf("new worktree = %+v, %v", stored, err)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q; want no output with --no-deps", stderr.String())

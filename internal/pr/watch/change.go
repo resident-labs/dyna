@@ -160,7 +160,6 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 	}
 	baseRef := opts.Base
 	if baseRef == "" {
-		baseRef = "origin/main"
 		enabled, err := locallane.Enabled(ctx, dir)
 		if err != nil {
 			return Record{}, false, err
@@ -170,13 +169,15 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 				return Record{}, false, err
 			}
 			baseRef = locallane.Integration
+		} else {
+			resolved, err := repoid.DefaultBranch(ctx, dir, gitRead)
+			if err != nil {
+				return Record{}, false, err
+			}
+			baseRef = resolved.Ref
 		}
 	}
 	base, err := gitRead(ctx, dir, "rev-parse", "--verify", "--end-of-options", baseRef+"^{commit}")
-	if err != nil && opts.Base == "" {
-		baseRef = "main"
-		base, err = gitRead(ctx, dir, "rev-parse", "--verify", "main^{commit}")
-	}
 	if err != nil {
 		return Record{}, false, fmt.Errorf("base is unavailable; supply --base <ref>: %w", err)
 	}

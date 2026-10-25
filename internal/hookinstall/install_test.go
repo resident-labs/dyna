@@ -88,8 +88,12 @@ func goTelemetryDir(t *testing.T) string {
 	return filepath.Join(dir, "go", "telemetry")
 }
 
-func fakeInstaller(t *testing.T, j Job, branch, fail string, calls *[]string) processguard.Executor {
+func fakeInstaller(t *testing.T, j Job, branch, fail string, calls *[]string, defaultBranch ...string) processguard.Executor {
 	t.Helper()
+	def := "main"
+	if len(defaultBranch) > 0 {
+		def = defaultBranch[0]
+	}
 	return func(ctx context.Context, p processguard.Process) error {
 		command := strings.Join(p.Args, " ")
 		*calls = append(*calls, command)
@@ -116,7 +120,10 @@ func fakeInstaller(t *testing.T, j Job, branch, fail string, calls *[]string) pr
 				},
 			})
 		}
-		if strings.Contains(command, "rev-parse origin/main") {
+		if strings.Contains(command, "symbolic-ref") && strings.Contains(command, "refs/remotes/origin/HEAD") {
+			fmt.Fprintln(p.Output, "refs/remotes/origin/"+def)
+		}
+		if strings.Contains(command, "rev-parse origin/") {
 			fmt.Fprintln(p.Output, testSHA)
 		}
 		if strings.Contains(command, "branch --show-current") {
@@ -354,6 +361,30 @@ func TestRecoverKilledUnitAndAppendLogOnce(t *testing.T) {
 	}
 }
 
+func TestInstallerFollowsTrunkDefaultBranch(t *testing.T) {
+	s, j := fixture(t)
+	var calls []string
+	if err := os.MkdirAll(filepath.Dir(j.Config.State), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Jobs.saveInstallState(j.Config.State, installState{Installed: testSHA}); err != nil {
+		t.Fatal(err)
+	}
+	s.Exec = fakeInstaller(t, j, "trunk", "", &calls, "trunk")
+	if err := s.Locked(context.Background(), j.ID, "", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(calls, "\n")
+	for _, want := range []string{"fetch -q origin trunk", "merge -q --ff-only origin/trunk"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("missing %q in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "origin/main") {
+		t.Fatalf("installer assumed main:\n%s", all)
+	}
+}
+
 func TestOlderQueuedUnitCannotDowngradeInstalledCommit(t *testing.T) {
 	s, j := fixture(t)
 	var calls []string
@@ -381,7 +412,7 @@ func TestOlderQueuedUnitCannotDowngradeInstalledCommit(t *testing.T) {
 	if err != nil || got.Installed != testSHA {
 		t.Fatalf("downgraded: %#v %v", got, err)
 	}
-	if len(calls) == 0 || !strings.Contains(calls[0], "fetch -q origin main") {
+	if len(calls) == 0 || !strings.Contains(strings.Join(calls, "\n"), "fetch -q origin main") {
 		t.Fatal("worker did not refresh main under the lock")
 	}
 }

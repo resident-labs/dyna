@@ -169,7 +169,11 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 			if err := lanesync.FetchOrigin(fetchCtx, repo, s.trialClient(remoteRecord).Run); err != nil {
 				return finish("failed", err.Error())
 			}
-			op.Base, err = gitRead(ctx, repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
+			resolved, err := repoid.DefaultBranch(ctx, repo, gitRead)
+			if err != nil {
+				return finish("failed", err.Error())
+			}
+			op.Base, err = gitRead(ctx, repo, "rev-parse", "--verify", "refs/remotes/origin/"+resolved.Name+"^{commit}")
 			if err != nil {
 				return finish("failed", err.Error())
 			}
@@ -193,7 +197,11 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 		}
 		if len(result.Conflicts) > 0 {
 			paths, _ := mergeConflictPaths(ctx, repo, op.Base, op.OldIntegration)
-			text := "dyna/integration conflicts with origin/main"
+			base := "the repository default branch"
+			if resolved, resolveErr := repoid.DefaultBranch(ctx, repo, gitRead); resolveErr == nil {
+				base = "origin/" + resolved.Name
+			}
+			text := "dyna/integration conflicts with " + base
 			if len(paths) > 0 {
 				text += "\n" + strings.Join(paths, "\n")
 			}
@@ -432,7 +440,11 @@ func (s *Service) publishLaneExport(ctx context.Context, r Record, op lanesync.O
 		}
 		prURL = pr.URL
 	} else {
-		out, err := g.command(ctx, r.RepoPath, false, "pr", "create", "--repo", remote.Host+"/"+remote.Repo, "--base", "main", "--head", branch, "--title", "Export local integration changes", "--body-file", file)
+		resolved, err := repoid.DefaultBranch(ctx, r.RepoPath, gitRead)
+		if err != nil {
+			return "", err
+		}
+		out, err := g.command(ctx, r.RepoPath, false, "pr", "create", "--repo", remote.Host+"/"+remote.Repo, "--base", resolved.Name, "--head", branch, "--title", "Export local integration changes", "--body-file", file)
 		if err != nil {
 			return "", err
 		}
