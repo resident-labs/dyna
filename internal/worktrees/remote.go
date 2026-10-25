@@ -3,6 +3,7 @@ package worktrees
 import (
 	"bytes"
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,10 +25,17 @@ func gitOriginOutput(ctx context.Context, dir string, args ...string) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	host, name, hosted := strings.Cut(identity, "/")
+	host, _, hosted := strings.Cut(identity, "/")
 	if !hosted || host != "github.com" || !strings.HasPrefix(remote, "https://") {
 		return gitOutput(ctx, dir, args...)
 	}
+	origin, err := url.Parse(remote)
+	if err != nil {
+		return nil, err
+	}
+	// Git matches credential paths case-sensitively. Keep the URL's path;
+	// ghclient compares repository identities without regard to case.
+	name := strings.TrimSuffix(strings.Trim(origin.Path, "/"), ".git")
 	ctx = ghclient.WithRepository(ctx, host, name)
 	cmd := gitexec.Command(ctx, dir, args...)
 	cmd.Dir = dir
