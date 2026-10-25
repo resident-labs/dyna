@@ -1,7 +1,7 @@
 <script lang="ts">
   import UsageDrawer from './UsageDrawer.svelte'
   import UsageMeter from './UsageMeter.svelte'
-  import { accountKindLabel, accountLabel, accountStatus, dateTime, needsSignIn, observation, providerName, reposLabel, usageUnavailableText } from './state.ts'
+  import { accountKindLabel, accountLabel, accountStatus, dateTime, needsSignIn, providerName, reposLabel, usageUnavailableText } from './state.ts'
   import { blockUntil } from './reset.ts'
   import { deadlineClock } from './clock.svelte.ts'
   import type { ScopeAccount } from '../../api/account.ts'
@@ -45,7 +45,7 @@
     {#if account.source}<dt>Source</dt><dd>{account.source}</dd>{/if}
     <dt>Repos</dt><dd>{reposLabel(account)}</dd>
     {#if account.observedAt}<dt>Checked</dt><dd>{dateTime(account.observedAt) || 'Not reported'}</dd>{/if}
-  </dl>{#if observation(account)}<p class="muted">{observation(account)}</p>{/if}</section>
+  </dl></section>
   <section><h3>Linked profiles</h3><div class="profiles">
     {#each account.profiles ?? [] as name}<button class="quiet" onclick={() => onprofile(name)}>{name} ↗</button>{:else}<p class="muted">No linked profiles reported</p>{/each}
   </div><div class="actions"><button class="btn pri" onclick={createProfile} disabled={!account.activeHere} aria-describedby={!account.activeHere ? 'profile-account-hint' : undefined}>Create profile</button></div>{#if !account.activeHere}<p id="profile-account-hint" class="muted">Use this account in this scope before creating a profile.</p>{/if}</section>
