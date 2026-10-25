@@ -426,16 +426,14 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		if names := machineFailureRetryFrom(result); names != "" {
 			retriedFrom = names
 		} else {
-			// Only a hosted head has GitHub work to resume or commit statuses to
-			// publish. A local head's reader takes its evidence from the registry.
+			// Only a hosted head has GitHub work to resume. A local result needs
+			// no GitHub call: its evidence stays in the local CI records.
 			if job.hosted() {
 				applyLocalBudgets(&result, EffectivePolicy(st, job.record))
 				if localInfrastructureError(result) {
 					if err := s.resumeHostedCI(ctx, job, repo); err != nil {
 						return false, err
 					}
-				} else if err := s.publishLocalStatuses(ctx, job, result); err != nil {
-					return false, err
 				}
 			}
 			return false, nil
@@ -661,10 +659,6 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			if err := s.resumeHostedCI(ctx, job, repo); err != nil {
 				log.Printf("resume hosted CI: %v", err)
 			}
-		}
-	} else if job.hosted() {
-		if err := s.publishLocalStatuses(ctx, job, result); err != nil {
-			log.Printf("publish local CI: %v", err)
 		}
 	}
 	// A local completion must force a full snapshot even if GitHub did not change.
