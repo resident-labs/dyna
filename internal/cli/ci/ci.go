@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,11 +106,16 @@ func NewCommand() *cobra.Command {
 					return closeErr
 				}
 			}
-			if !report.Write(c.OutOrStdout(), time.Duration(math.MaxInt64), nil) {
-				return fmt.Errorf("test budget check failed")
-			}
+			// The room's test limit belongs to the PR watcher, which reads this
+			// report's JUnit artifact. This summary states durations only, so it
+			// never claims a budget verdict of its own. A failed test still fails
+			// the command here.
+			report.WriteTimings(c.OutOrStdout())
 			if len(report.Tests) == 0 {
 				return fmt.Errorf("report contains no completed tests")
+			}
+			if len(report.Failures) > 0 {
+				return fmt.Errorf("report contains %d failed packages or cases", len(report.Failures))
 			}
 			return nil
 		},

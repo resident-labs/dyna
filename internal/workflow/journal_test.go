@@ -181,6 +181,11 @@ func TestExecuteWaitsForDanglingWorkerTerminalJournal(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-dangling-journal")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
+	// The canceled fake workers never answer the interrupt, so waiting the whole
+	// grace cost this test 2s on a slow CI machine, which is the per-test limit.
+	// The harness lets a test shorten the grace.
+	previous := harness.SetClaudeInterruptGraceForTest(50 * time.Millisecond)
+	t.Cleanup(func() { harness.SetClaudeInterruptGraceForTest(previous) })
 	// The fake claude reads its input only after a turn's body returns, and this
 	// body blocks until the test ends, so a canceled turn waits the whole grace.
 	// The wait is not what this test proves, so shorten it.
