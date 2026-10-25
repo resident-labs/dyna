@@ -56,9 +56,13 @@ type registeredCIRun struct {
 	stopped  chan struct{}
 	stopOnce sync.Once
 
-	repo    string
-	number  int
-	trial   bool
+	repo   string
+	number int
+	trial  bool
+	// local marks a run for a local head. No hosted poll decides that head: the
+	// trial or the sync operation that admitted the run reads its own saved
+	// result, and only the engine's stop cancels the run.
+	local   bool
 	head    string
 	title   string
 	url     string
@@ -72,6 +76,11 @@ type registeredCIJob struct {
 	trial        bool
 	created      time.Time
 }
+
+// hosted reports whether this job's CI evidence comes from GitHub. A local
+// change has no hosted provider, so its evidence and publication stay in the
+// local lane and the job skips every GitHub step.
+func (j registeredCIJob) hosted() bool { return changeKind(j.record) == "github" }
 
 // nodeRuns returns the run set for this service. Every service over the same
 // PR store shares the set of the process, so a read-only service reports the
@@ -103,7 +112,7 @@ type localCIStopTarget struct {
 	stopped <-chan struct{}
 }
 
-// closeLocalCIAdmission stops both run sets from admitting new runs and copies
+// closeLocalCIAdmission stops the run set from admitting new runs and copies
 // the runs admitted so far. Admission closes before a snapshot waits for the
 // scheduled runs' lock, which a tick holds over its own work, so a tick that is
 // still finishing cannot add a run that the snapshot then misses.
@@ -111,9 +120,6 @@ func (s *Service) closeLocalCIAdmission() []localCIStopTarget {
 	runs := s.nodeRuns()
 	runs.closed.Store(true)
 	var targets []localCIStopTarget
-	for _, run := range s.localRuns().close() {
-		targets = append(targets, localCIStopTarget{label: ciLocalRunLabel(run.head), cancel: run.cancel, stopped: run.done})
-	}
 	runs.Lock()
 	for _, run := range runs.runs {
 		targets = append(targets, localCIStopTarget{label: ciRunLabel(run), cancel: run.cancel, stopped: run.stopped})
@@ -158,11 +164,6 @@ func (s *Service) StopLocalCI(ctx context.Context) []string {
 // ciRunLabel names one scheduled run in a log line: its head and its machine.
 func ciRunLabel(run *registeredCIRun) string {
 	return shortHead(run.head) + " on " + run.node
-}
-
-// ciLocalRunLabel names one local-lane run in a log line.
-func ciLocalRunLabel(head string) string {
-	return shortHead(head) + " on the local lane"
 }
 
 func shortHead(head string) string {
@@ -277,23 +278,17 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	}
 	active := map[string]int{}
 	for key, run := range runs.runs {
-		if _, ok := desired[key]; !ok {
-			run.cancel()
-			active[run.node] += max(1, run.slots)
-			continue
-		}
-		found := false
-		for _, node := range enabled {
-			if node.Name == run.node {
-				found = true
-			}
-		}
-		if !found {
-			run.cancel()
-			active[run.node] += max(1, run.slots)
-			continue
-		}
 		active[run.node] += max(1, run.slots)
+		ready := false
+		for _, node := range enabled {
+			ready = ready || node.Name == run.node
+		}
+		_, wanted := desired[key]
+		// A local head's run belongs to the trial or the sync operation that
+		// asked for it, and the list of wanted hosted jobs never names it.
+		if !ready || !run.local && !wanted {
+			run.cancel()
+		}
 	}
 	for _, job := range jobs {
 		// A stopping engine admits no new run: the runs it has are being torn
@@ -301,74 +296,143 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if runs.closed.Load() {
 			break
 		}
-		key := registeredJobKey(job)
-		repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
+		another, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, active, runs)
 		if err != nil {
 			return err
 		}
-		result, err := registry.LoadResult(ctx, repo, job.head)
-		if err == nil && s.registeredJobResultComplete(ctx, job, result) {
+		started = started || another
+	}
+	return nil
+}
+
+// startRegisteredCI admits one job from outside the tick. A trial head that a
+// merge trial or a sync operation asks about goes through the same admission,
+// budget and machine choice as a pull request head, so both get one run.
+func (s *Service) startRegisteredCI(ctx context.Context, job registeredCIJob) (bool, error) {
+	registry := s.ciRegistry()
+	enabled, err := s.registeredCINodes(ctx)
+	if err != nil || len(enabled) == 0 {
+		return false, err
+	}
+	st, err := s.Store.Read()
+	if err != nil {
+		return false, err
+	}
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	if runs.closed.Load() {
+		return false, nil
+	}
+	started, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, activeRegisteredCISlots(runs), runs)
+	if started {
+		s.runningCIChanged()
+	}
+	return started, err
+}
+
+// registeredCINodes lists the machines that can take a run now.
+func (s *Service) registeredCINodes(ctx context.Context) ([]localci.Node, error) {
+	nodes, err := s.ciRegistry().Nodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var enabled []localci.Node
+	for _, node := range nodes {
+		if node.Enabled && node.Slots > 0 {
+			enabled = append(enabled, node)
+		}
+	}
+	return enabled, nil
+}
+
+// activeRegisteredCISlots counts the slots the runs in flight hold per machine.
+func activeRegisteredCISlots(runs *registeredCIRuns) map[string]int {
+	active := map[string]int{}
+	for _, run := range runs.runs {
+		active[run.node] += max(1, run.slots)
+	}
+	return active
+}
+
+// admitRegisteredCI is the one admission path for a job: it reports the saved
+// result a head already has, plans the suites from the base definition, picks
+// the machine with a free slot, and starts the run. It returns whether it
+// started a run. Callers hold the runs lock.
+func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistry, st State, job registeredCIJob, enabled []localci.Node, active map[string]int, runs *registeredCIRuns) (bool, error) {
+	key := registeredJobKey(job)
+	repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
+	if err != nil {
+		return false, err
+	}
+	result, err := registry.LoadResult(ctx, repo, job.head)
+	if err == nil && s.registeredJobResultComplete(ctx, job, result) {
+		// Only a hosted head has GitHub work to resume or commit statuses to
+		// publish. A local head's reader takes its evidence from the registry.
+		if job.hosted() {
 			applyLocalBudgets(&result, EffectivePolicy(st, job.record))
 			if localInfrastructureError(result) {
 				if err := s.resumeHostedCI(ctx, job, repo); err != nil {
-					return err
+					return false, err
 				}
+			} else if err := s.publishLocalStatuses(ctx, job, result); err != nil {
+				return false, err
 			}
-			if !localInfrastructureError(result) {
-				if err := s.publishLocalStatuses(ctx, job, result); err != nil {
-					return err
-				}
-			}
-			continue
 		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if runs.runs[key] != nil {
+		return false, nil
+	}
+	chosen := availableCINode(enabled, active)
+	if chosen == nil {
+		return false, nil
+	}
+	plan, err := s.prepareRegisteredCI(ctx, job)
+	if err != nil {
+		result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Error: Sanitize(err.Error())}
+		if saveErr := registry.SaveResult(ctx, result); saveErr != nil {
+			log.Printf("save local CI preparation failure: %v", saveErr)
 		}
-		if runs.runs[key] != nil {
-			continue
-		}
-		chosen := availableCINode(enabled, active)
-		if chosen == nil {
-			continue
-		}
-		plan, err := s.prepareRegisteredCI(ctx, job)
-		if err != nil {
-			result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Error: Sanitize(err.Error())}
-			if saveErr := registry.SaveResult(ctx, result); saveErr != nil {
-				log.Printf("save local CI preparation failure: %v", saveErr)
-			}
+		if job.hosted() {
 			if resumeErr := s.resumeHostedCI(ctx, job, repo); resumeErr != nil {
 				log.Printf("resume hosted CI after preparation failure: %v", resumeErr)
 			}
-			continue
 		}
-		if !plan.runnable() {
-			continue
-		}
+		return false, nil
+	}
+	if !plan.runnable() {
+		return false, nil
+	}
+	// A local change has no hosted provider, so only a hosted job can already
+	// hold conclusive evidence for its head.
+	if job.hosted() {
 		settled, err := s.scheduledCIConclusive(ctx, job, repo, plan.execution)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if settled {
-			continue
+			return false, nil
 		}
 		chosen = availableCINode(enabled, active)
 		if chosen == nil {
-			continue
+			return false, nil
 		}
-		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-		slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
-		run := &registeredCIRun{
-			node: chosen.Name, slots: slots, cancel: cancel, stopped: make(chan struct{}),
-			repo: job.record.Repo, number: job.record.Number, trial: job.trial,
-			head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
-		}
-		runs.runs[key] = run
-		started = true
-		active[chosen.Name] += slots
-		go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run)
 	}
-	return nil
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
+	run := &registeredCIRun{
+		node: chosen.Name, slots: slots, cancel: cancel, stopped: make(chan struct{}),
+		repo: job.record.Repo, number: job.record.Number, trial: job.trial, local: !job.hosted(),
+		head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
+	}
+	runs.runs[key] = run
+	active[chosen.Name] += slots
+	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run)
+	return true, nil
 }
 
 // Bound each run so queued heads can share a node. Slot locks in the runner
@@ -433,8 +497,12 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	if err == nil && len(suites) > 0 {
 		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}
 		req.OnStart = func(startCtx context.Context) error {
-			if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
-				log.Printf("cancel queued hosted CI: %v", err)
+			// Hosted work is only replaced for a hosted head. A local change has
+			// no queued GitHub run to cancel.
+			if job.hosted() {
+				if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
+					log.Printf("cancel queued hosted CI: %v", err)
+				}
 			}
 			return startCtx.Err()
 		}
@@ -473,10 +541,12 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		return
 	}
 	if localInfrastructureError(result) {
-		if err := s.resumeHostedCI(ctx, job, repo); err != nil {
-			log.Printf("resume hosted CI: %v", err)
+		if job.hosted() {
+			if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+				log.Printf("resume hosted CI: %v", err)
+			}
 		}
-	} else {
+	} else if job.hosted() {
 		if err := s.publishLocalStatuses(ctx, job, result); err != nil {
 			log.Printf("publish local CI: %v", err)
 		}
@@ -495,6 +565,11 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 
 func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) (localCIPlan, error) {
 	r := job.record
+	if !job.hosted() {
+		// A local head is already in this checkout: a merge trial and a sync
+		// operation write their own refs, so there is nothing to fetch.
+		return s.planRegisteredCI(ctx, job)
+	}
 	args := []string{"fetch", "--quiet", "--no-tags", "--", "https://" + r.Host + "/" + r.Repo + ".git", job.head}
 	base := job.base
 	if base == "" {
@@ -533,6 +608,11 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 			break
 		}
 	}
+	if !job.hosted() {
+		// A local head belongs to the trial or the sync operation that asked
+		// for it, so its timeout result stays readable for that reader.
+		current = true
+	}
 	if !current {
 		return nil
 	}
@@ -543,6 +623,9 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 		result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
 		result.Status, result.Error = "error", "local CI exceeded its overall time limit"
 		saveErr = s.ciRegistry().SaveResult(recoveryCtx, result)
+	}
+	if !job.hosted() {
+		return saveErr
 	}
 	return errors.Join(saveErr, s.resumeHostedCI(recoveryCtx, job, repo))
 }

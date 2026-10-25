@@ -145,7 +145,11 @@ suites:
 			}); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := service.planLocalLaneCI(t.Context(), record, second)
+			job, err := service.localTrialJob(record, second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := service.planRegisteredCI(t.Context(), job)
 			if err != nil {
 				t.Fatal(err)
 			}

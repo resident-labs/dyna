@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/locallane"
@@ -43,80 +41,6 @@ func recordLocalLane(ctx context.Context, r Record) (bool, error) {
 }
 
 var localCIInit sync.Mutex
-
-func (s *Service) localRuns() *localCIStore {
-	localCIInit.Lock()
-	defer localCIInit.Unlock()
-	if s.localCIRuns == nil {
-		s.localCIRuns = &localCIStore{}
-	}
-	return s.localCIRuns
-}
-
-// localCIStore is the local lane's admitted CI runs, by repository and head. One
-// mutex covers admission, the runs and a snapshot, so a closing engine refuses a
-// new run at the same moment it takes the runs it has.
-type localCIStore struct {
-	mu     sync.Mutex
-	closed bool
-	runs   map[string]*localCIRun
-}
-
-// admit keeps run for key when no other run holds that head and the engine still
-// admits work. The caller starts the run only when start is true.
-func (l *localCIStore) admit(key string, run *localCIRun) (current *localCIRun, start, ok bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.closed {
-		return nil, false, false
-	}
-	if existing, found := l.runs[key]; found {
-		return existing, false, true
-	}
-	if l.runs == nil {
-		l.runs = map[string]*localCIRun{}
-	}
-	l.runs[key] = run
-	return run, true, true
-}
-
-// load returns the run for one repository and head.
-func (l *localCIStore) load(key string) (*localCIRun, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	run, ok := l.runs[key]
-	return run, ok
-}
-
-// forget drops one finished run.
-func (l *localCIStore) forget(key string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.runs, key)
-}
-
-// snapshot copies the runs admitted so far.
-func (l *localCIStore) snapshot() []*localCIRun {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	runs := make([]*localCIRun, 0, len(l.runs))
-	for _, run := range l.runs {
-		runs = append(runs, run)
-	}
-	return runs
-}
-
-// close refuses new runs and returns the ones admitted so far, in one step.
-func (l *localCIStore) close() []*localCIRun {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.closed = true
-	runs := make([]*localCIRun, 0, len(l.runs))
-	for _, run := range l.runs {
-		runs = append(runs, run)
-	}
-	return runs
-}
 
 func localMergeReady(r Record) bool {
 	return len(facts.MissingRequiredReviewers(r)) == 0 && !facts.OpenOwnerFinding(r) && r.Watching && r.State == "open" && facts.HeadVerified(r) && facts.ApprovedAtHead(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head)
@@ -176,18 +100,6 @@ func (s *Service) refreshLocalMergeFacts(ctx context.Context) error {
 	return nil
 }
 
-type localCIRunner interface {
-	Show(string, string) (localci.Result, error)
-	Run(context.Context, localci.Request) (localci.Result, error)
-}
-type localCIRun struct {
-	done   chan struct{}
-	cancel context.CancelFunc
-	head   string
-	result localci.Result
-	err    error
-}
-
 // completeLocalCI excludes cached manual runs of only part of the base-defined trial suite.
 func completeLocalCI(result localci.Result, definition *localci.Definition, suites []localci.Suite) bool {
 	return definition.CoversSuites(result, suites)
@@ -224,122 +136,121 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 }
 
 func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (trialCI, error) {
-	dataDir := filepath.Dir(s.Store.Root)
-	runner := s.LocalCI
-	if runner == nil {
-		runner = localci.Runner{DataDir: dataDir}
+	job, err := s.localTrialJob(r, head)
+	if err != nil {
+		return trialCI{}, err
 	}
-	result, err := runner.Show(r.RepoPath, head)
-	if err == nil && result.Node != "" && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError) {
-		status, logs, reason, statusErr := localCIStatus(result, r.RepoPath, head, nil, nil)
-		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
+	return s.savedTrialCI(ctx, job)
+}
+
+// localTrialJob names the scheduled CI job for a local head, with the frozen
+// base of the batch that owns a trial head. Only a plain local head needs the
+// first parent as its base, and withLocalTrialBase reads that then.
+func (s *Service) localTrialJob(r Record, head string) (registeredCIJob, error) {
+	job := registeredCIJob{record: r, head: head, branch: r.Branch, trial: true}
+	if s.Store == nil {
+		return job, nil
 	}
-	plan, err := s.planLocalLaneCI(ctx, r, head)
+	st, err := s.Store.Read()
+	if err != nil {
+		return job, err
+	}
+	batch := st.MergeTrials[defaultRepo(r)]
+	if batch == nil {
+		return job, nil
+	}
+	if batch.Head == head {
+		job.base = batch.Base
+	}
+	if job.base == "" {
+		for _, stack := range batch.Stacks {
+			if stack.Head == head {
+				job.base = batch.Base
+				break
+			}
+		}
+	}
+	return job, nil
+}
+
+// withLocalTrialBase fills in the base of a head that no batch owns. A hosted
+// job names its base commit, and a local head's first parent is the commit its
+// definition had before the change.
+func (s *Service) withLocalTrialBase(ctx context.Context, job registeredCIJob) (registeredCIJob, error) {
+	if job.base != "" {
+		return job, nil
+	}
+	base, err := gitRead(ctx, job.record.RepoPath, "rev-parse", "--verify", "--end-of-options", job.head+"^1^{commit}")
+	if err != nil {
+		return job, fmt.Errorf("resolve local trial base: %w", err)
+	}
+	job.base = base
+	return job, nil
+}
+
+// savedTrialCI reports what a local head's own scheduled run proves. A run that
+// has not started yet is admitted here, on the same machines, with the same
+// budget as a pull request head.
+func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialCI, error) {
+	registry := s.ciRegistry()
+	repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
+	if err != nil {
+		return trialCI{}, err
+	}
+	st, err := s.Store.Read()
+	if err != nil {
+		return trialCI{}, err
+	}
+	result, err := registry.LoadResult(ctx, repo, job.head)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return trialCI{}, err
+	}
+	saved := err == nil && result.Node != ""
+	if saved {
+		// The budget of the room judges the saved run exactly as the gate does.
+		applyLocalBudgets(&result, EffectivePolicy(st, job.record))
+		if result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError {
+			// A saved failure stays readable without the commits that produced it.
+			status, logs, reason, statusErr := localCIStatus(result, repo, job.head, nil, nil)
+			return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
+		}
+	}
+	job, err = s.withLocalTrialBase(ctx, job)
+	if err != nil {
+		return trialCI{}, err
+	}
+	plan, err := s.planRegisteredCI(ctx, job)
 	if err != nil {
 		return trialCI{}, err
 	}
 	if !plan.runnable() {
 		return trialCI{Status: VerdictPending, Reason: "local CI is not configured at the trial head and its base"}, nil
 	}
-	show := func(result localci.Result) (trialCI, error) {
-		status, logs, reason, err := localCIStatus(result, r.RepoPath, head, plan.required, plan.suites)
-		return trialCI{Status: status, Logs: logs, Reason: reason}, err
+	if saved && completeLocalCI(result, plan.required, plan.suites) {
+		status, logs, reason, statusErr := localCIStatus(result, repo, job.head, plan.required, plan.suites)
+		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
 	}
-	if err == nil && completeLocalCI(result, plan.required, plan.suites) {
-		s.localRuns().forget(r.RepoPath + "\x00" + head)
-		return show(result)
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	started, err := s.startRegisteredCI(ctx, job)
+	if err != nil {
 		return trialCI{}, err
 	}
-	key := r.RepoPath + "\x00" + head
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Minute)
-	run := &localCIRun{done: make(chan struct{}), cancel: cancel, head: head}
-	current, start, admitted := s.localRuns().admit(key, run)
-	if !admitted {
-		cancel()
-		return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
-	}
-	if !start {
-		cancel()
-		run = current
-		select {
-		case <-run.done:
-			if run.err != nil {
-				return trialCI{Status: VerdictFailed, Logs: run.err.Error(), Reason: "local CI failed"}, nil
-			}
-			return show(run.result)
-		default:
-			return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
+	if !started {
+		if node := s.runningCINode(job); node != "" {
+			return trialCI{Status: VerdictPending, Reason: "running local CI on " + node}, nil
 		}
 	}
-	go func() {
-		defer close(run.done)
-		defer cancel()
-		runRunner := runner
-		if s.LocalCI == nil {
-			node, err := (localci.Store{DataDir: dataDir}).LegacyRemoteNode(runCtx)
-			if err != nil {
-				run.err = err
-				return
-			}
-			nodeRunner := localci.Runner{DataDir: dataDir, Node: &node}
-			nodeRunner.OnCacheRepair = s.CacheRepairReporter(r.RoomID)
-			runRunner = nodeRunner
-		}
-		run.result, run.err = runRunner.Run(runCtx, localci.Request{Definition: plan.execution, Repo: r.RepoPath, SHA: head, Suites: plan.suites})
-	}()
 	return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
 }
 
-func (s *Service) planLocalLaneCI(ctx context.Context, r Record, head string) (localCIPlan, error) {
-	var plan localCIPlan
-	execution, err := localci.LoadDefinition(ctx, r.RepoPath, head)
-	if errors.Is(err, localci.ErrDefinitionNotFound) {
-		plan.headMissing = true
-		return plan, nil
+// runningCINode names the machine of a run in flight for this job.
+func (s *Service) runningCINode(job registeredCIJob) string {
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	if run := runs.runs[registeredJobKey(job)]; run != nil {
+		return run.node
 	}
-	if err != nil {
-		return plan, err
-	}
-	plan.execution = execution
-	base := ""
-	if s.Store != nil {
-		st, err := s.Store.Read()
-		if err != nil {
-			return plan, err
-		}
-		if batch := st.MergeTrials[defaultRepo(r)]; batch != nil {
-			if batch.Head == head {
-				base = batch.Base
-			}
-			if base == "" {
-				for _, stack := range batch.Stacks {
-					if stack.Head == head {
-						base = batch.Base
-						break
-					}
-				}
-			}
-		}
-	}
-	if base == "" {
-		base, err = gitRead(ctx, r.RepoPath, "rev-parse", "--verify", "--end-of-options", head+"^1^{commit}")
-		if err != nil {
-			return plan, fmt.Errorf("resolve local trial base: %w", err)
-		}
-	}
-	required, err := localci.LoadDefinition(ctx, r.RepoPath, base)
-	if errors.Is(err, localci.ErrDefinitionNotFound) {
-		plan.baseMissing = true
-		return plan, nil
-	}
-	if err != nil {
-		return plan, err
-	}
-	plan.required = required
-	plan.suites = required.WorkflowSuites()
-	return plan, nil
+	return ""
 }
 
 func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, trialID string) error {
