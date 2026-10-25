@@ -509,6 +509,11 @@ func machineFailureRetryFrom(result localci.Result) string {
 	}
 	failed := false
 	for _, check := range result.Checks {
+		// A group's row is derived from its members, so it has no cause of its
+		// own. Only a member says why the group failed.
+		if check.Aggregate {
+			continue
+		}
 		if check.Status == localci.OutcomePassed {
 			continue
 		}
