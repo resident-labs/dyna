@@ -560,7 +560,7 @@ export function installSelection(state: object): SelectionSlice {
 const confirmSource = read('confirm.svelte.ts')
 
 /** The confirm module's own functions, which a vm can run in a flat state. */
-export const CONFIRM_FUNCTIONS = ['askConfirm', 'dismiss', 'forceCloseLines', 'runConfirm'] as const
+export const CONFIRM_FUNCTIONS = ['askConfirm', 'dismiss', 'forceCloseLines', 'closeConfirm', 'runConfirm'] as const
 
 export const confirmCode = moduleCode(confirmSource, CONFIRM_FUNCTIONS)
 
@@ -569,7 +569,7 @@ export interface ConfirmSlice {
   readonly confirm: unknown
   askConfirm(request: unknown): void
   dismiss(): void
-  runConfirm(force?: boolean): Promise<void>
+  runConfirm(): Promise<void>
 }
 
 /**
@@ -594,7 +594,7 @@ export function installConfirm(state: object): ConfirmSlice {
     get confirm(): unknown { return read_(fields, 'confirm') },
     askConfirm: (request: unknown) => call(fields, 'askConfirm', request),
     dismiss: () => call(fields, 'dismiss'),
-    runConfirm: (force?: boolean) => call(fields, 'runConfirm', force) as Promise<void>,
+    runConfirm: () => call(fields, 'runConfirm') as Promise<void>,
   }
   write(fields, 'confirmView', view)
   return view
