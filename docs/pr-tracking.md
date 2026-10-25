@@ -301,9 +301,10 @@ cache declarations, and host-check permission.
 
 Dyna can run CI on this machine or on registered SSH machines. These machines
 are separate from GitHub runners and come from the shared machine registry
-(`dyna machine list`). The engine gives merge trials priority, then takes PR
-heads in oldest-first order. It cancels work for superseded heads and never
-runs fork PRs on these machines.
+(`dyna machine list`). Local machines run merge trials only: GitHub's hosted CI
+checks a pull request head, so a PR head push starts no local run. The engine
+cancels work for superseded trial heads and never runs fork PRs on these
+machines. `dyna git ci run <sha>` still checks one commit by hand.
 
 Slots limit concurrent checks across all runs on a machine. Each scheduled run
 reserves up to six slots, so other heads can start while capacity is free.
@@ -346,6 +347,27 @@ for a machine that does instead of running next to another room's work.
 `dyna machine show <name>` prints the list, and taking the ci role away clears
 it.
 
+### Suites of a machine
+
+A machine can also name the suites it takes, so a merge trial runs where its
+suites can run:
+
+```sh
+dyna machine edit hermeslab --suites go
+dyna machine edit arch --suites go,frontend
+dyna machine edit hermeslab --suites ""
+```
+
+The suite IDs come from the `trial` list in
+[the repository definition](local-ci.md), such as `go`, `cross-build` or
+`computer-smoke`. An empty list is the default and lets the machine take every
+suite. Merge trial scheduling sends a run only to a machine that allows every
+suite of that run, and an integration sync follows the same rule. When no
+enabled machine allows a suite of the run, the trial fails at once with an
+error that names the suite, so a trial never waits for a machine that cannot
+take it. `dyna machine show <name>` prints the list, and taking the ci role away
+clears it.
+
 ## Probing machines
 
 Dyna reads what a machine has, and whether it is reachable, with one bounded
@@ -376,17 +398,21 @@ changes, and every five minutes. It runs at most four probes at once. A failed
 probe keeps what the last good probe read, and marks the machine offline with
 the error. A disabled machine is not probed, and shows `disabled`.
 
-The mode applies to the current room. The default, `github`, keeps hosted CI.
-`local` and `both` let local and GitHub results race. A conclusive pass permits
-progress when every required check has passed. An observed failure from either
-source blocks it. No enabled
-machines means GitHub remains the source. Review approval remains required.
+The mode applies to the current room. A pull request head is always checked by
+GitHub's hosted CI: no mode starts a local run for it. The default, `github`,
+reads only hosted evidence. `local` and `both` use a saved local result for the
+head when one exists, such as the result of `dyna git ci run`, and fall back to
+hosted CI otherwise. A conclusive pass permits progress when every required
+check has passed. An observed failure from either source blocks it. Review
+approval remains required. A merge trial runs on the local machines that can
+take its suites, whatever the mode.
 
-When a machine starts a PR head or merge trial, Dyna cancels that head's queued
-or waiting runs of `.github/workflows/ci.yml`. Running jobs and other workflows
+When a machine starts a merge trial, Dyna cancels that trial head's queued or
+waiting runs of `.github/workflows/ci.yml`. Running jobs and other workflows
 finish. An infrastructure error makes Dyna rerun those cancelled runs. A test
-failure remains a failure. Dyna never cancels main pushes or fork PR runs.
-The GitHub workflow stays unchanged and always checks landed code on main.
+failure remains a failure. Dyna never cancels a pull request head, a main push
+or a fork PR run. The GitHub workflow stays unchanged and always checks landed
+code on main.
 
 Each machine limits concurrent checks with its slot count. Local work runs with
 systemd CPU and memory limits and a lower process priority. Containers also

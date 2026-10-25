@@ -61,7 +61,9 @@ unknown keys, duplicate identities, invalid references, and files over 1 MiB.
 ## Top-level fields
 
 - `trial` lists suites run for every merge trial. It also defines the suites
-  eligible for pull-request file selection and their order.
+  eligible for pull-request file selection and their order. A machine can limit
+  itself to some of these suites; see
+  [Registered CI machines](pr-tracking.md#registered-ci-machines).
 - `caches` declares managed caches that checks can reference.
 - `checks` declares executable commands.
 - `suites` groups checks for selection, manual runs, and aggregates.

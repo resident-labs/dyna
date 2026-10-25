@@ -68,6 +68,10 @@ type Machine struct {
 	// list allows every room, which is what every machine allowed before it
 	// could name rooms.
 	Rooms []string `json:"rooms,omitempty"`
+	// Suites limits the local CI work this machine takes to those suites. An
+	// empty list allows every suite, which is what every machine allowed before
+	// it could name suites.
+	Suites []string `json:"suites,omitempty"`
 	// Enabled turns the machine's work off. A disabled machine takes no new CI
 	// runs. On the local row it stops that work, not the engine, which keeps
 	// running.
@@ -159,6 +163,12 @@ func (m Machine) AllowsRoom(roomID string) bool {
 	return len(m.Rooms) == 0 || slices.Contains(m.Rooms, roomID)
 }
 
+// AllowsSuite reports whether the machine takes CI work for the suite. A
+// machine that names no suite takes every suite.
+func (m Machine) AllowsSuite(suite string) bool {
+	return len(m.Suites) == 0 || slices.Contains(m.Suites, suite)
+}
+
 // RoleNames joins the roles for a table cell.
 func (m Machine) RoleNames() string {
 	names := make([]string, 0, len(m.Roles))
@@ -225,8 +235,19 @@ func (m Machine) Validate() error {
 	if m.HasRole(RoleCI) && m.CISlots < 1 {
 		return errors.New("a machine with the ci role needs at least one CI slot")
 	}
-	seen := make(map[string]bool, len(m.Rooms))
-	for _, room := range m.Rooms {
+	if err := validateRoomList(m.Rooms); err != nil {
+		return err
+	}
+	if err := validateSuiteList(m.Suites); err != nil {
+		return err
+	}
+	return validateGrants(m.HostChecksGrants)
+}
+
+// validateRoomList reports whether a room limit is storable.
+func validateRoomList(rooms []string) error {
+	seen := make(map[string]bool, len(rooms))
+	for _, room := range rooms {
 		if strings.TrimSpace(room) != room || room == "" || len(room) > 64 || strings.ContainsAny(room, " ,\t\r\n") {
 			return fmt.Errorf("room %q must be a room ID of at most 64 bytes", room)
 		}
@@ -235,7 +256,7 @@ func (m Machine) Validate() error {
 		}
 		seen[room] = true
 	}
-	return validateGrants(m.HostChecksGrants)
+	return nil
 }
 
 // validateGrants reports whether every host-check grant names the owner, or the
@@ -252,7 +273,23 @@ func validateGrants(grants []HostChecksGrant) error {
 	return nil
 }
 
-const schemaVersion = 6
+// validateSuiteList reports whether a suite limit is storable. A suite ID comes
+// from a repository definition, so only its shape is checked here.
+func validateSuiteList(suites []string) error {
+	seen := make(map[string]bool, len(suites))
+	for _, suite := range suites {
+		if strings.TrimSpace(suite) != suite || suite == "" || len(suite) > 64 || strings.ContainsAny(suite, " ,\t\r\n") {
+			return fmt.Errorf("suite %q must be a suite ID of at most 64 bytes", suite)
+		}
+		if seen[suite] {
+			return fmt.Errorf("suite %q is named twice", suite)
+		}
+		seen[suite] = true
+	}
+	return nil
+}
+
+const schemaVersion = 7
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -272,7 +309,8 @@ const schema = `CREATE TABLE machines (
 	probe_error    TEXT    NOT NULL DEFAULT '',
 	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
 	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
-	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))
+	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
+	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites))
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -309,7 +347,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -391,6 +429,13 @@ func prepare(conn *sql.Conn, old int) error {
 			if _, err := conn.ExecContext(ctx, statement); err != nil {
 				return fmt.Errorf("record who allows host checks: %w", err)
 			}
+		}
+	}
+	if old < 7 {
+		// A machine with no suite list takes every suite, which is what every
+		// machine allowed before it could name suites.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN suites TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(suites))`); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -656,10 +701,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, reason, load, probeError, grants, rooms string
+	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites string
 	var created, updated, probed, seen int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites); err != nil {
 		return Machine{}, err
 	}
 	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
@@ -678,6 +723,14 @@ func scan(row scanner) (Machine, error) {
 	// has one meaning of "every room".
 	if len(m.Rooms) == 0 {
 		m.Rooms = nil
+	}
+	if err := json.Unmarshal([]byte(suites), &m.Suites); err != nil {
+		return Machine{}, fmt.Errorf("machine %s suites: %w", m.Name, err)
+	}
+	// A machine that names no suite reads back with no list, as it does for
+	// rooms, so every stored row has one meaning of "every suite".
+	if len(m.Suites) == 0 {
+		m.Suites = nil
 	}
 	if err := json.Unmarshal([]byte(capabilities), &m.Capabilities); err != nil {
 		return Machine{}, fmt.Errorf("machine %s capabilities: %w", m.Name, err)
@@ -834,12 +887,13 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		m.CISlots = 0
 		m.HostChecksGrants = nil
 		m.Rooms = nil
+		m.Suites = nil
 	}
 	m.Updated = now
 	if err := m.Validate(); err != nil {
 		return Machine{}, err
 	}
-	rooms := marshalRooms(m.Rooms)
+	rooms, suites := marshalNames(m.Rooms), marshalNames(m.Suites)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
 			// An edit keeps who allows host checks: the engine changes grants
@@ -850,8 +904,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -861,9 +915,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites)
 		return err
 	})
 	if err != nil {
@@ -1035,13 +1089,13 @@ func marshalGrants(grants []HostChecksGrant) string {
 	return string(raw)
 }
 
-// marshalRooms stores a machine's room list in one stable order, so a row that
-// names the same rooms twice reads back the same way.
-func marshalRooms(rooms []string) string {
-	out := make([]string, 0, len(rooms))
-	for _, room := range rooms {
-		if !slices.Contains(out, room) {
-			out = append(out, room)
+// marshalNames stores a name list in one stable order, so a row that names the
+// same entries twice reads back the same way.
+func marshalNames(names []string) string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if !slices.Contains(out, name) {
+			out = append(out, name)
 		}
 	}
 	slices.Sort(out)

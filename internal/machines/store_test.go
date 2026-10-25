@@ -371,6 +371,59 @@ func TestMigrateAddsRoomListToVersionFour(t *testing.T) {
 	}
 }
 
+// machinesVersionFiveSchema is the registry with a room list but no suite list,
+// so a data folder from that version still migrates.
+const machinesVersionFiveSchema = `CREATE TABLE machines (
+	id             TEXT    PRIMARY KEY,
+	name           TEXT    NOT NULL UNIQUE,
+	roles          TEXT    NOT NULL CHECK(json_valid(roles)),
+	ssh            TEXT    NOT NULL,
+	ci_slots       INTEGER NOT NULL CHECK(ci_slots >= 0),
+	enabled        INTEGER NOT NULL CHECK(enabled IN (0,1)),
+	local          INTEGER NOT NULL CHECK(local IN (0,1)),
+	created_ms     INTEGER NOT NULL,
+	updated_ms     INTEGER NOT NULL,
+	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
+	health         TEXT    NOT NULL DEFAULT 'unknown',
+	health_reason  TEXT    NOT NULL DEFAULT '',
+	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
+	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
+	probe_error    TEXT    NOT NULL DEFAULT '',
+	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
+	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1)),
+	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))
+);
+CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
+INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms,allow_host_checks,rooms) VALUES
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,1,'["room_dyna"]');
+INSERT INTO meta(key,value) VALUES('machines.version','5');`
+
+// A version 5 registry reaches the version 6 step, which adds only the suite
+// list. A machine that named no suite before it could allows every suite.
+func TestMigrateAddsSuiteListToVersionFive(t *testing.T) {
+	ctx := context.Background()
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := db.Exec(machinesVersionFiveSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := Store{DataDir: dir}.Get(ctx, "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.AllowsRoom("room_dyna") || m.AllowsRoom("room_other") {
+		t.Fatalf("migrated machine rooms = %v", m.Rooms)
+	}
+	if len(m.Suites) != 0 || !m.AllowsSuite("go") {
+		t.Fatalf("migrated machine suites = %v", m.Suites)
+	}
+}
+
 func TestMigrateAddsProbeColumns(t *testing.T) {
 	ctx := context.Background()
 	dir := storetest.DataDir(t)
