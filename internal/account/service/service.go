@@ -55,16 +55,18 @@ func opaque(parts ...string) string {
 	return hex.EncodeToString(h[:16])
 }
 
-func (s *Service) installations() map[string]Installation {
-	out := map[string]Installation{}
+func (s *Service) installations() map[string][]Installation {
+	out := map[string][]Installation{}
 	for _, i := range s.installed() {
-		out[i.Harness] = i
+		out[i.Harness] = append(out[i.Harness], i)
 	}
 	return out
 }
 
 // privateInstallations finds Dyna's private copy of each harness and the
-// launch environment of its active account. The environment also carries the
+// launch environment of every active account. It reads the global account
+// selections, so a harness that keeps one selection per provider, such as Pi,
+// gets one installation for each provider. The environment also carries the
 // owner tool roots a turn gets (harnesshome.ToolRoots), so a launcher script
 // whose interpreter resolves through PATH, such as Pi's `env node` under a
 // mise shim, still finds the owner state it trusts.
@@ -75,14 +77,20 @@ func (s *Service) privateInstallations() []Installation {
 	}
 	accounts := &runtime.Accounts{Root: s.o.Store.Root}
 	bundles := &runtime.BundleManager{Root: filepath.Join(filepath.Dir(s.o.Store.Root), "harnesses")}
-	for _, a := range runtime.RuntimeAdapters() {
-		h := a.Harness
-		b, err := bundles.Resolve(h, "")
+	selections, err := (&store.Store{Root: s.o.Store.Root}).Selections()
+	if err != nil {
+		return out
+	}
+	for _, selection := range selections {
+		if selection.Scope != "" || selection.Account == "" {
+			continue
+		}
+		b, err := bundles.Resolve(selection.Harness, "")
 		if err != nil {
 			continue
 		}
-		active, err := accounts.Active(h)
-		if err != nil {
+		active, err := accounts.Find(selection.Account)
+		if err != nil || active.Harness != selection.Harness || active.Provider != selection.Provider {
 			continue
 		}
 		native, err := accounts.Env(active.ID)
@@ -93,7 +101,7 @@ func (s *Service) privateInstallations() []Installation {
 		if err != nil {
 			continue
 		}
-		env := slices.DeleteFunc(runtime.NativeEnvironmentBase(h, os.Environ()), func(pair string) bool {
+		env := slices.DeleteFunc(runtime.NativeEnvironmentBase(selection.Harness, os.Environ()), func(pair string) bool {
 			key, _, _ := strings.Cut(pair, "=")
 			_, replaced := native[key]
 			_, rooted := tools[key]
@@ -105,7 +113,7 @@ func (s *Service) privateInstallations() []Installation {
 		for key, value := range tools {
 			env = append(env, key+"="+value)
 		}
-		out = append(out, Installation{Harness: h, Executable: b.Executable, AccountID: active.ID, Env: env})
+		out = append(out, Installation{Harness: selection.Harness, Executable: b.Executable, AccountID: active.ID, Env: env})
 	}
 	return out
 }

@@ -19,6 +19,17 @@ import (
 //go:embed catalog/opencode.json
 var openCodeMetadata []byte
 
+// installationKey names the accounts and executables a catalog belongs to, so
+// a provider switch on a harness such as Pi gets a fresh catalog.
+func installationKey(installations []Installation) string {
+	parts := make([]string, 0, len(installations))
+	for _, i := range installations {
+		parts = append(parts, i.Executable+"\x00"+i.AccountID)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\x01")
+}
+
 // ProfileModels discovers models within the account API request deadline.
 func (s *Service) ProfileModels(ctx context.Context, harness string, refresh bool) (Catalog, error) {
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
@@ -28,23 +39,32 @@ func (s *Service) ProfileModels(ctx context.Context, harness string, refresh boo
 	if _, err := runtime.Adapter(harness); err != nil && harness != "mock" {
 		return Catalog{}, errors.New("Unknown harness.")
 	}
-	installation := s.installations()[harness]
-	exe := installation.Executable
-	cacheKey := opaque(harness, exe, installation.AccountID)
+	installations := s.installations()[harness]
+	cacheKey := opaque(harness, installationKey(installations))
 	if c, ok := s.catalogs[cacheKey]; ok && !refresh && time.Since(c.ObservedAt) < 5*time.Minute {
 		return c, nil
 	}
 	out := Catalog{Models: []Model{}, Compact: profile.CompactRuleFor(harness), Source: "native harness catalog", ObservedAt: time.Now().UTC()}
-	if exe == "" {
+	if len(installations) == 0 {
 		out.Message = "Model discovery is unavailable. Enter an exact model ID or use the harness default."
 		return out, nil
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
 	defer cancel()
-	models, err := s.o.Models(probeCtx, harness, exe, installation.Env)
-	if err != nil {
+	models, firstErr := []adapters.Model{}, error(nil)
+	for _, i := range installations {
+		part, err := s.o.Models(probeCtx, harness, i.Executable, i.Env)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		models = append(models, part...)
+	}
+	if len(models) == 0 && firstErr != nil {
 		// Adapter errors carry a safe outcome string, never harness output.
-		reason := strings.TrimPrefix(err.Error(), adapters.ErrProbe.Error()+": ")
+		reason := strings.TrimPrefix(firstErr.Error(), adapters.ErrProbe.Error()+": ")
 		out.Message = "The harness model catalog could not be refreshed: " + reason + ". Enter a model ID or retry."
 		return out, nil
 	}

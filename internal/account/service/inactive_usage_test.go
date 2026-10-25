@@ -128,7 +128,7 @@ func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
 	if err != nil || string(before) != string(after) {
 		t.Fatal("inactive probe changed active native credentials", err)
 	}
-	selected, err := accounts.Active("codex")
+	selected, err := accounts.Active(store.ProviderChatGPT, "codex")
 	if err != nil || selected.ID != active.ID {
 		t.Fatal("inactive probe changed the active account", err)
 	}

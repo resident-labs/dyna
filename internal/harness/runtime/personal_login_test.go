@@ -18,7 +18,7 @@ func TestFindPersonalLoginReadsWithoutCopying(t *testing.T) {
 	if err != nil || found == nil || found.Harness != "muse" || found.Label != "owner@example.test" || found.Saved {
 		t.Fatalf("got %+v, %v", found, err)
 	}
-	if _, err := r.Accounts.Active("muse"); err == nil {
+	if _, err := r.Accounts.Active(accountProvider("muse"), "muse"); err == nil {
 		t.Fatal("the scan copied the login")
 	}
 }

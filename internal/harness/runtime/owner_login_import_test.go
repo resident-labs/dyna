@@ -83,7 +83,7 @@ func TestOwnerLoginImportNativeFiles(t *testing.T) {
 			if err := r.copyPersonalLogin(context.Background(), h); err != nil {
 				t.Fatal(err)
 			}
-			n, err := r.Accounts.Active(h)
+			n, err := r.Accounts.Active(accountProvider(h), h)
 			if err != nil || n.Status != "ready" {
 				t.Fatalf("private account unavailable: %v, %s", err, n.Status)
 			}
@@ -168,7 +168,7 @@ func TestCopyPersonalLoginMissingOrBroken(t *testing.T) {
 			if err := r.copyPersonalLogin(context.Background(), "grok"); !errors.Is(err, errNoPersonalLogin) {
 				t.Fatal("missing login was not reported", err)
 			}
-			if _, err := r.Accounts.Active("grok"); !errors.Is(err, errAccountMissing) {
+			if _, err := r.Accounts.Active(accountProvider("grok"), "grok"); !errors.Is(err, errAccountMissing) {
 				t.Fatal("failed copy did not leave Sign in")
 			}
 			// The failed attempt leaves nothing behind, so a later choice copies.
@@ -176,7 +176,7 @@ func TestCopyPersonalLoginMissingOrBroken(t *testing.T) {
 			if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 				t.Fatal(err)
 			}
-			if n, err := r.Accounts.Active("grok"); err != nil || n.Status != "ready" {
+			if n, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil || n.Status != "ready" {
 				t.Fatal("later copy failed", err)
 			}
 		})
@@ -190,7 +190,7 @@ func TestCopyPersonalLoginNeverReplacesSavedLogin(t *testing.T) {
 			if err := r.copyPersonalLogin(context.Background(), h); err != nil {
 				t.Fatal(err)
 			}
-			n, _ := r.Accounts.Active(h)
+			n, _ := r.Accounts.Active(accountProvider(h), h)
 			saved, _ := readAccountLogin(n.Home)
 			for _, path := range ownerImportSeed(t, home, h) {
 				raw, _ := os.ReadFile(path)
@@ -199,7 +199,7 @@ func TestCopyPersonalLoginNeverReplacesSavedLogin(t *testing.T) {
 			if err := r.copyPersonalLogin(context.Background(), h); !errors.Is(err, errPrivateHomeUsed) {
 				t.Fatal("second copy was not refused", err)
 			}
-			current, err := r.Accounts.Active(h)
+			current, err := r.Accounts.Active(accountProvider(h), h)
 			if err != nil || current.ID != n.ID || current.Status != "ready" {
 				t.Fatal("existing account changed", err)
 			}
@@ -228,7 +228,7 @@ func TestOwnerLoginImportIgnoresNestedAliases(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := r.Accounts.Active("grok")
+	n, err := r.Accounts.Active(accountProvider("grok"), "grok")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestOwnerLoginImportPartialFailureNeverRecopies(t *testing.T) {
 	if calls != 1 || string(before) != string(after) {
 		t.Fatal("partial failure was copied again")
 	}
-	if _, err := r.Accounts.Active("grok"); !errors.Is(err, errAccountMissing) {
+	if _, err := r.Accounts.Active(accountProvider("grok"), "grok"); !errors.Is(err, errAccountMissing) {
 		t.Fatal("partial failure was marked active")
 	}
 }
@@ -380,7 +380,7 @@ func TestOwnerLoginImportEmptySavedSlot(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := r.Accounts.Active("grok"); err != nil || n.Status != "ready" {
+	if n, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil || n.Status != "ready" {
 		t.Fatal("empty saved slot prevented import", err)
 	}
 }
@@ -420,7 +420,7 @@ func TestOwnerLoginImportSuccessAfterCancellation(t *testing.T) {
 			if ctx.Err() != context.Canceled {
 				t.Fatal("private capture did not cancel the context")
 			}
-			if n, err := r.Accounts.Active(h); err != nil || n.Status != "ready" {
+			if n, err := r.Accounts.Active(accountProvider(h), h); err != nil || n.Status != "ready" {
 				t.Fatal("completed import did not activate the private account", err)
 			}
 			pending := filepath.Join(r.Accounts.Root, h, ".owner-login-import.pending")
@@ -478,7 +478,7 @@ func TestOwnerLoginImportOpenCodePrivateCapture(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "opencode"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := r.Accounts.Active("opencode")
+	n, err := r.Accounts.Active(accountProvider("opencode"), "opencode")
 	if err != nil || n.Status != "ready" {
 		t.Fatal("private OpenCode account unavailable", err)
 	}
@@ -606,7 +606,7 @@ func TestOwnerLoginImportOwnerCanariesAfterFailedRefresh(t *testing.T) {
 				t.Fatal("import refreshed or wrote owner credentials")
 			}
 			checkOwner()
-			n, err := r.Accounts.Active(h)
+			n, err := r.Accounts.Active(accountProvider(h), h)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -666,7 +666,7 @@ func TestOwnerLoginImportBusyLockLeavesAttemptAvailable(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Accounts.Active("grok"); err != nil {
+	if _, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil {
 		t.Fatal("retry could not import", err)
 	}
 }
@@ -707,7 +707,7 @@ func TestOwnerLoginImportDeadlineLeavesAttemptAvailable(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Accounts.Active("grok"); err != nil {
+	if _, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil {
 		t.Fatal("retry could not import", err)
 	}
 }
@@ -784,7 +784,7 @@ func TestOwnerLoginImportRetryIndexesInterruptedCopy(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Accounts.Active("grok"); err != nil {
+	if _, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil {
 		t.Fatal("pending file with an empty scope lost the import", err)
 	}
 	r, home = ownerImportFixture(t)
@@ -813,7 +813,7 @@ func TestOwnerLoginImportRetryIndexesInterruptedCopy(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "grok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Accounts.Active("grok"); err != nil {
+	if _, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil {
 		t.Fatal("retry did not index the private copy", err)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, ".owner-login-import.pending")); !os.IsNotExist(err) {
@@ -835,7 +835,7 @@ func TestOwnerLoginImportActivatesPrivateEntryOverLegacyGrant(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "claude-code"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := r.Accounts.Active("claude-code")
+	n, err := r.Accounts.Active(accountProvider("claude-code"), "claude-code")
 	if err != nil || n.ID == "legacy" || n.Home == "" {
 		t.Fatalf("active account = %+v, %v; want the private entry", n, err)
 	}
@@ -865,7 +865,7 @@ func TestOwnerLoginImportRetriesAfterFailedCommand(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := r.Accounts.Active("grok"); err != nil || n.Status != "ready" {
+	if n, err := r.Accounts.Active(accountProvider("grok"), "grok"); err != nil || n.Status != "ready" {
 		t.Fatal("retry did not import the login", err)
 	}
 }
@@ -883,7 +883,7 @@ func TestOwnerLoginImportOpenCodeRetriesAfterFailedCommand(t *testing.T) {
 	if err := r.copyPersonalLogin(context.Background(), "opencode"); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := r.Accounts.Active("opencode"); err != nil || n.Status != "ready" {
+	if n, err := r.Accounts.Active(accountProvider("opencode"), "opencode"); err != nil || n.Status != "ready" {
 		t.Fatal("retry did not import the OpenCode login", err)
 	}
 }
