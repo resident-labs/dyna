@@ -524,10 +524,13 @@ func machineFailureRetryFrom(result localci.Result) string {
 }
 
 // machineCause reports a failure the machine caused, which says nothing about
-// the commit.
+// the commit. An unclassified failure is one where the check proved no test
+// result at all, such as a scope that the node's systemd refused or a container
+// that never ran; only a check that proves a test failure is evidence about the
+// commit.
 func machineCause(cause localci.FailureCause) bool {
 	switch cause {
-	case localci.CauseContainerFailure, localci.CauseSSHDrop, localci.CauseDiskFull:
+	case localci.CauseContainerFailure, localci.CauseSSHDrop, localci.CauseDiskFull, localci.CauseUnclassified:
 		return true
 	}
 	return false

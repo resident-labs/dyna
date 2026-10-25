@@ -31,6 +31,15 @@ func TestMachineFailureMovesTheRunToAnotherMachineOnce(t *testing.T) {
 		t.Fatalf("a timeout retried from %q, want no retry", got)
 	}
 
+	// A node whose systemd refuses the scope proves no test result at all, which
+	// is the same kind of machine fault as a container that never started.
+	unproven := localci.Result{Node: "pve", Status: localci.OutcomeError, Checks: []localci.SuiteResult{
+		{CheckName: "relay", Status: localci.OutcomeError, Cause: localci.CauseUnclassified},
+	}}
+	if got := machineFailureRetryFrom(unproven); got != "pve" {
+		t.Fatalf("a check that proved no test result started from %q, want pve", got)
+	}
+
 	passed := localci.Result{Node: "arch", Status: localci.OutcomePassed}
 	if got := machineFailureRetryFrom(passed); got != "" {
 		t.Fatalf("a passed result retried from %q, want no retry", got)
