@@ -665,7 +665,7 @@ const cancelledCIReason = "The last CI run was cancelled. Push or rerun CI to te
 // and queues a CI notice for the author.
 func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string, jobs, logs []string, budgetsDue bool, n *pollNotices) {
 	r.CI = ci
-	r.LocalCIConfig = string(snap.localCIConfig)
+	r.LocalCIConfig = snap.localCIConfig
 	r.CIReason, _ = budgetFailure(*r, snap, EffectivePolicy(*st, *r))
 	// Cancelled CI did not test the head: it needs a push or rerun, but it
 	// neither wakes the author nor counts toward the failure pause.
@@ -675,7 +675,7 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 	}
 	if ci == "absent" {
 		switch {
-		case snap.localCIConfig == localCIConfigNotConfigured:
+		case snap.localCIConfig == state.LocalCIConfigNotConfigured:
 			r.CIReason = "Local CI is not configured; this repository uses hosted CI only."
 		case snap.NoPRWorkflows:
 			r.CIReason = "This repository has no active pull request workflows."
@@ -683,7 +683,7 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 			r.CIReason = "No CI ran for this change within 5 minutes."
 		}
 	}
-	if ci == "pending" && snap.localCIConfig == localCIConfigHeadMissing && r.CIReason == "" {
+	if ci == "pending" && snap.localCIConfig == state.LocalCIConfigHeadMissing && r.CIReason == "" {
 		r.CIReason = "This head removed the local CI definition; checks required by the base definition still apply."
 	}
 	if ci != "pending" && !cancelled && ciKey != r.CIKey {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/pr/state"
 )
 
 // CIVerdict is the merge gate's reading of a commit's CI: it proves the commit,
@@ -274,7 +275,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			}
 		}
 		if plan.baseMissing {
-			snap.localCIConfig = localCIConfigNotConfigured
+			snap.localCIConfig = state.LocalCIConfigNotConfigured
 			snap = withoutLocalHostedCancellations(snap, saved, nil)
 			if len(saved.IDs) > 0 {
 				if err := s.resumeHostedCI(ctx, job, repo); err != nil {
@@ -284,7 +285,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			return snap, nil
 		}
 		if plan.headMissing {
-			snap.localCIConfig = localCIConfigHeadMissing
+			snap.localCIConfig = state.LocalCIConfigHeadMissing
 		}
 	} else if len(saved.IDs) > 0 {
 		needsDefinition := false
