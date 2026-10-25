@@ -32,11 +32,12 @@ type Service struct {
 	// beforeCloseTransfer lets a test act after the notice scan, before the transfer commits.
 	beforeCloseTransfer func(key string)
 	tickReads           *tickReadView
-	LocalCI             localCIRunner
-	LocalCIRegistry     localCIRegistry
-	RunNodeCI           func(context.Context, localci.Node, localci.Request) (localci.Result, error)
-	registeredRuns      *registeredCIRuns
-	localCIRuns         *localCIStore
+	// RunNodeCI runs one admitted job on a machine. LocalCIRegistry holds the
+	// saved results, machines and CI mode that both a local head and a pull
+	// request head use.
+	LocalCIRegistry localCIRegistry
+	RunNodeCI       func(context.Context, localci.Node, localci.Request) (localci.Result, error)
+	registeredRuns  *registeredCIRuns
 	// RunningCIChanged tells clients that the local CI runs in flight changed,
 	// so they read the machine view again. nil when no client hears of them.
 	RunningCIChanged func()
