@@ -432,13 +432,20 @@ type workflowJob struct {
 var expression = regexp.MustCompile(`\$\{\{.*?\}\}`)
 
 // namePattern matches the API names of a job: its display name, with each ${{ }}
-// expression as a wildcard, and an optional matrix suffix " (...)".
-func namePattern(display string) *regexp.Regexp {
+// expression as a wildcard. Only a matrix job can gain a suffix " (value)" that
+// its display name does not already carry, because GitHub adds one per matrix
+// combination. A job without a matrix keeps an exact name, so a shard named
+// "frontend (0)" cannot also match an aggregate named "frontend".
+func namePattern(display string, matrix bool) *regexp.Regexp {
 	parts := expression.Split(display, -1)
 	for i, part := range parts {
 		parts[i] = regexp.QuoteMeta(part)
 	}
-	return regexp.MustCompile("^" + strings.Join(parts, ".+?") + `(?: \(.*\))?$`)
+	suffix := "$"
+	if matrix {
+		suffix = `(?: \(.*\))?$`
+	}
+	return regexp.MustCompile("^" + strings.Join(parts, ".+?") + suffix)
 }
 
 // criticalPath is the longest chain of job run times through the needs graph.
@@ -500,8 +507,11 @@ func (g GitHub) workflowNeeds(ctx context.Context, ref Ref, run Run) (map[string
 func parseWorkflowJobs(body []byte) (map[string]workflowJob, error) {
 	var workflow struct {
 		Jobs map[string]struct {
-			Name  string `yaml:"name"`
-			Needs any    `yaml:"needs"`
+			Name     string `yaml:"name"`
+			Needs    any    `yaml:"needs"`
+			Strategy struct {
+				Matrix any `yaml:"matrix"`
+			} `yaml:"strategy"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(body, &workflow); err != nil {
@@ -509,7 +519,7 @@ func parseWorkflowJobs(body []byte) (map[string]workflowJob, error) {
 	}
 	jobs := map[string]workflowJob{}
 	for key, job := range workflow.Jobs {
-		w := workflowJob{name: namePattern(cmp.Or(job.Name, key))}
+		w := workflowJob{name: namePattern(cmp.Or(job.Name, key), job.Strategy.Matrix != nil)}
 		switch v := job.Needs.(type) {
 		case string:
 			w.needs = []string{v}
