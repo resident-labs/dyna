@@ -56,6 +56,7 @@ var (
 type Record struct {
 	MergeMaxParallel int          `json:"mergeMaxParallel,omitempty"`
 	GitHubAccess     string       `json:"githubAccess,omitempty"`
+	RootProfile      string       `json:"rootProfile,omitempty"`
 	SessionPause     SessionPause `json:"sessionPause,omitempty"`
 	// Seat is the row's seat column, which only writeSeat writes.
 	Seat          Seat      `json:"-"`
@@ -604,6 +605,8 @@ type CreateInput struct {
 	Name      string
 	Repo      string
 	CreatedBy string
+	// RootProfile applies only to new rooms. Empty inherits root.profile.
+	RootProfile string
 }
 
 // Create returns the room for in.Repo, or for in.Name without a repo. A
@@ -671,6 +674,7 @@ func (s *Store) Create(in CreateInput) (Record, error) {
 		out = Record{
 			ID: newID(now), Name: name, Repo: in.Repo, CreatedBy: strings.TrimSpace(in.CreatedBy),
 			CreatedAt: now, LastActivity: now,
+			RootProfile: strings.TrimSpace(in.RootProfile),
 		}
 		return s.createRecordLocked(out)
 	})

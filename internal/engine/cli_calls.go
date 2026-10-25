@@ -12,6 +12,7 @@ import (
 // their existing CLI access; room and run services check the target room.
 var cliCalls = []string{
 	"SetSetting",
+	"SetRoomRootProfile",
 	"SaveProfile",
 	"UpsertProfile",
 	"SetProfileUses",

@@ -18,7 +18,7 @@
   import PRNoiseRules from '../prs/PRNoiseRules.svelte'
   import { normalizePolicy, parseChecks, checksText, saveRoomPolicy, budgetForm, parseTestAllow } from '../prs/pr.ts'
   import type { BudgetForm, PolicyForm, NormalizedPolicy } from '../prs/pr.ts'
-  import type { Room } from '../api/room.ts'
+  import type { Room, ProfileChoice } from '../api/room.ts'
   import type { ChangePolicy, PRConfig, ReviewerStatus } from '../api/change.ts'
   import type { HookLogTarget } from '../settings/hookLog.ts'
   import type { RoomControlValue } from './roomSessionControls.ts'
@@ -44,6 +44,7 @@
     // hookRun is the hook run a feed card asked to open, or null. onopenglobal
     // opens Settings > Hooks, which holds the built-in and machine-wide hooks.
     room: Room
+    profiles?: ProfileChoice[]
     start?: string
     hookRun?: HookLogTarget | null
     reviewer?: ReviewerStatus | null
@@ -56,7 +57,27 @@
     onopenglobal?: () => unknown
     onclose: () => void
   }
-  let { room, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
+  let rootProfile = $state(untrack(() => room.rootProfile || ''))
+  let rootProfileBusy = $state(false)
+  let rootProfileError = $state('')
+  $effect(() => { rootProfile = room.rootProfile || '' })
+
+  async function saveRootProfile() {
+    const target = room.id
+    rootProfileBusy = true
+    rootProfileError = ''
+    try {
+      await api.setRoomRootProfile(target, rootProfile)
+    } catch (e) {
+      if (room.id === target) {
+        rootProfile = room.rootProfile || ''
+        rootProfileError = errorText(e)
+      }
+    } finally {
+      rootProfileBusy = false
+    }
+  }
   const nav: { id: string; label: string }[] = [
     { id: 'general', label: 'General' },
     { id: 'review', label: 'Review & landing' },
@@ -250,6 +271,15 @@
       </Row>
       <Row title="Pause agents" help={paused ? 'Paused. New turns and messages wait until you resume.' : 'Holds new turns and messages until you resume.'} error={controls?.error || controls?.statusError || ''}>
         {#snippet control()}<Switch on={paused} label="Pause agents" onchange={() => onsessions(paused ? 'resume' : 'pause')} disabled={!controls?.state || controls.busy} />{/snippet}
+      </Row>
+      <Row title="Root profile" help="Used for the next new root session in this room. Existing sessions keep their profile." error={rootProfileError}>
+        {#snippet control()}
+          <select class="field" aria-label="Root profile" bind:value={rootProfile} onchange={saveRootProfile} disabled={rootProfileBusy}>
+            <option value="">Global default</option>
+            {#if rootProfile && !profiles.some((p) => p.name === rootProfile)}<option value={rootProfile} disabled>{rootProfile} (unavailable)</option>{/if}
+            {#each profiles as p}<option value={p.name}>{p.name}</option>{/each}
+          </select>
+        {/snippet}
       </Row>
     </Group>
     <Group title="Danger zone">
