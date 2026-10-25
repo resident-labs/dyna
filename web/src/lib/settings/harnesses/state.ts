@@ -24,9 +24,7 @@ export interface HarnessMeta {
 }
 export const HARNESS_ORDER: HarnessMeta[] = [
   { id: 'claude-code', iconId: 'claude', name: 'Claude Code', short: 'Claude' },
-  { id: 'opencode', iconId: 'opencode', name: 'OpenCode', short: 'OpenCode' },
   { id: 'pi', iconId: 'pi', name: 'Pi', short: 'Pi' },
-  { id: 'muse', iconId: 'muse', name: 'Muse', short: 'Muse' },
 ]
 
 // Pi offers its providers' OAuth logins alongside the API-key form.
@@ -46,8 +44,7 @@ export function preferenceStatusLabel(st?: string): string {
   return st || 'not imported'
 }
 
-// npm versions follow semantic precedence. Muse release and date identifiers
-// use the vendor's numeric order. Build metadata never changes precedence.
+// npm versions follow semantic precedence. Build metadata never changes precedence.
 export function newer(a: string, b: string): boolean {
   const left = a.split('+')[0] ?? ''
   const right = b.split('+')[0] ?? ''
@@ -124,7 +121,7 @@ export function harnessRowState(harnessId: string, snapshot: Partial<HarnessSnap
     version: bundles.find((bundle) => bundle.version === snapshot?.selectedVersions?.[id])?.version || bundles[0]?.version || dynaDoc?.version || '',
     // Explicit backend capabilities take precedence, including false. The list
     // preserves warnings for older snapshots that omit this capability.
-    sharedPersonalLogin: !!(cap?.sharedPersonalLogin ?? id === 'muse'),
+    sharedPersonalLogin: !!(cap?.sharedPersonalLogin ?? false),
     switchPending: !!pendingDoc, runningTurns: pendingDoc?.runningTurns ?? 0,
     needsSignIn: hasSubscriptionLogin(id) && (!activeAccount || accountNeedsSignIn(activeAccount) || doctors.some((d) => d.status === 'not signed in')),
     update: '',

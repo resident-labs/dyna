@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,13 +22,10 @@ import (
 const maxInstructionsArg = 64 * 1024
 
 // nativeInstructions lists the harnesses whose CLI takes per-run instructions
-// as a system-prompt addition. OpenCode uses the shared prompt path: its
-// service loads ambient config at startup, not from each client environment.
-// Grok over ACP has no per-launch flag, so it uses the prompt path on
-// a session's first turn.
+// as a system-prompt addition. Grok over ACP has no per-launch flag, so it uses
+// the prompt path on a session's first turn.
 var nativeInstructions = map[string]bool{
 	profile.HarnessClaudeCode: true, profile.HarnessPi: true,
-	profile.HarnessMuse: true,
 }
 
 // NativeInstructions reports whether harness takes Profile.RuntimeInstructions
@@ -91,7 +87,6 @@ func writeFileOnce(path string, data []byte) error {
 // p.RuntimeInstructions to p's harness. Each verified on 2026-10-18:
 //   - Claude Code: --append-system-prompt-file.
 //   - Pi: --append-system-prompt, which reads a file's contents.
-//   - Muse: -c run.developer_prompt (a JSON string).
 //   - Grok over ACP: the first prompt of a session
 //     carries them (WithPromptInstructions).
 func instructionsNative(p profile.Profile) ([]string, error) {
@@ -112,9 +107,6 @@ func instructionsNative(p profile.Profile) ([]string, error) {
 			flag = "--append-system-prompt"
 		}
 		args = []string{flag, file}
-	case profile.HarnessMuse:
-		args = []string{"-c", "run.developer_prompt=" + quotedString(text)}
-
 	}
 	for _, a := range args {
 		if len(a) > maxInstructionsArg {
@@ -122,16 +114,6 @@ func instructionsNative(p profile.Profile) ([]string, error) {
 		}
 	}
 	return args, nil
-}
-
-// quotedString is a JSON string. Muse parses -c values as
-// JSON; a JSON string without HTML escaping is valid.
-func quotedString(s string) string {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(s)
-	return string(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 }
 
 // claudeRepositoryInstructions restores repository instructions while Claude's

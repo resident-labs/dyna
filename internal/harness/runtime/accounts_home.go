@@ -18,13 +18,7 @@ import (
 // Check only credential/config/lock paths. Tool sockets and bridges in the
 // paired HOME are valid and must never enter the native credential tree walk.
 func privateAccountFiles(h, scope string) []string {
-	roots := harnesshome.Roots(scope)
-	config := roots["XDG_CONFIG_HOME"]
 	switch h {
-	case "muse":
-		return []string{filepath.Join(config, "muse", "auth.json"), filepath.Join(config, "muse", ".auth.json.lock")}
-	case "opencode":
-		return []string{filepath.Join(roots["XDG_DATA_HOME"], "opencode", "auth.json"), filepath.Join(roots["XDG_STATE_HOME"], "opencode", ".dyna-account.lock")}
 	case "kimi-code":
 		files := []string{filepath.Join(scope, "config.toml"), filepath.Join(scope, ".dyna-account.lock"), filepath.Join(scope, "credentials", "kimi-code.json")}
 		entries, err := os.ReadDir(filepath.Join(scope, "credentials"))
@@ -170,7 +164,7 @@ func (m checkedHomeManager) Refresh(ctx context.Context, c native.Captured) (nat
 }
 
 // Validate the final manager environment after adapter values have been merged.
-// Active native scopes stay at scope; Muse and Cursor use exact checked HOME paths.
+// Active native scopes stay at scope.
 func validateAccountManagerEnv(h, scope string, env map[string]string) error {
 	return validateAccountManagerEnvAt(h, scope, scope, env)
 }
@@ -207,11 +201,6 @@ func validateAccountManagerEnvAt(h, scope, credentialHome string, env map[string
 		expected[piSessionDirKey] = filepath.Join(scope, "sessions")
 	case "kimi-code":
 		expected["KIMI_CODE_HOME"] = scope
-	case "opencode":
-		expected["OPENCODE_CONFIG_DIR"] = scope
-		expected["OPENCODE_DB"] = filepath.Join(scope, "opencode.db")
-	case "muse":
-		expected["MUSE_AUTH_PATH"] = privateAccountFiles(h, scope)[0]
 	default:
 		return native.ErrUnsupported
 	}

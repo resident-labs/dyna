@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"strings"
-
 	"golang.org/x/mod/semver"
 )
 
@@ -13,11 +11,6 @@ import (
 // T3 Code keeps the same kind of per-provider compatibility ranges.
 func supportedVersionRange(harness, version string) (bool, string) {
 	switch harness {
-	case "opencode":
-		if strings.HasPrefix(version, "2.") || strings.HasPrefix(version, "0.0.0-v2-") {
-			return true, ""
-		}
-		return false, "Dyna supports OpenCode v2 builds only (2.x or 0.0.0-v2-*)."
 	case "pi":
 		if versionAtLeast(version, "1.1.0") {
 			return true, ""

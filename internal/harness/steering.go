@@ -45,16 +45,6 @@ type steeringSupervisor struct {
 	active     bool
 	pending    []runstore.SteeringMessage
 	err        error
-	// hook delivers steering through the harness's post-tool hook (nil when
-	// the harness has none).
-	hook *steerHook
-}
-
-func (s *steeringSupervisor) hookValue() *steerHook {
-	if s == nil {
-		return nil
-	}
-	return s.hook
 }
 
 func newSteeringSupervisor(opts SteeringOptions, resumable bool) *steeringSupervisor {

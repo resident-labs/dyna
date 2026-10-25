@@ -121,12 +121,6 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 		}
 		return inv, nil
 
-	case "opencode-run":
-		return openCodeInvocation(p, prompt, exec)
-
-	case "muse-exec":
-		return museInvocation(p, prompt, exec)
-
 	case "pi-print":
 		return piInvocation(p, prompt, exec)
 	}

@@ -23,7 +23,7 @@ func WindowPercent(w Window) (float64, bool) {
 }
 
 // WindowsSummary renders "5-hour 12% · weekly 41%, resets Sat 20:00".
-// Muse includes every reset; other providers show the busiest window’s reset.
+// The busiest window names the reset.
 // Readings from before a passed reset show uncertainty and their check time.
 func WindowsSummary(a Account) string { return windowsSummary(a, time.Now()) }
 
@@ -61,8 +61,6 @@ func windowsSummary(a Account, now time.Time) string {
 				if resets == "" {
 					resets = "unknown (refreshing)"
 				}
-			} else if a.Harness == "muse" {
-				parts[len(parts)-1] += ", resets " + t.Local().Format("Mon 15:04")
 			} else if p > busiest || resets == "unknown (refreshing)" {
 				busiest, resets = p, t.Local().Format("Mon 15:04")
 			}

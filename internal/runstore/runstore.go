@@ -106,9 +106,6 @@ func OwnerFromEnv() string {
 	if c := clip(os.Getenv("CLAUDE_CODE_SESSION_ID")); c != "" {
 		return clip("claude:" + c)
 	}
-	if m := clip(os.Getenv("MUSE_SESSION_ID")); m != "" {
-		return clip("muse:" + m)
-	}
 	return ""
 }
 

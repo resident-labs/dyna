@@ -140,8 +140,8 @@ func signalProcessGroup(cmd *exec.Cmd, signal syscall.Signal) error {
 
 // withWorkingDirectoryEnv points PWD (and clears OLDPWD) at the worker's
 // working directory. cmd.Dir changes the real cwd but leaves the inherited
-// PWD variable at dyna's own directory, and some harnesses (opencode) trust
-// $PWD over getcwd — which silently ran every worker in the wrong directory.
+// PWD variable at dyna's own directory, and a harness that trusts $PWD over
+// getcwd would run every worker in the wrong directory.
 func withWorkingDirectoryEnv(env []string, cwd string) []string {
 	if cwd == "" {
 		return env

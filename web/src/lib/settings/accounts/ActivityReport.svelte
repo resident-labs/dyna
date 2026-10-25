@@ -90,7 +90,7 @@
     {/each}
     <div class="tr workflows" role="row"><div class="who"><div><strong>Workflows</strong><p>workflow agent calls</p></div></div><div class="num"><span class="unk">not recorded</span></div></div>
   </div>
-  {#if noData}<p class="note"><b>{turnsText(noData)} of {turnsText(totals.turns)} turns</b> report no usage, for example Muse turns and failed or stopped turns. Totals marked <b>≥</b> are lower bounds. Cost is known only for harnesses that report it.</p>{/if}
+  {#if noData}<p class="note"><b>{turnsText(noData)} of {turnsText(totals.turns)} turns</b> report no usage, for example failed or stopped turns. Totals marked <b>≥</b> are lower bounds. Cost is known only for harnesses that report it.</p>{/if}
 {/if}
 {#snippet rate(row: UsageRow)}{#if cacheRate(row) === null}cache rate unknown{:else}{percent(cacheRate(row))} cache rate · {turnsText(row.cachePaired.turns)} turns with both{/if}{/snippet}
 {#snippet value(text: string)}{#if text === 'unknown'}<span class="unk">unknown</span>{:else}{text}{/if}{/snippet}

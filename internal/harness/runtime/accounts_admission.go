@@ -92,7 +92,7 @@ func (a *Accounts) RecheckPreparedAccount(ctx context.Context, conn *sql.Conn, e
 	if expected.ID != old.ID || expected.Harness != old.Harness || expected.Identity != old.Identity ||
 		expected.Home != filepath.Join(a.Root, old.Harness, old.ID) || expected.Status != "ready" ||
 		// The account keeps its own provider; the selection is keyed by the
-		// provider its harness serves, and an OpenCode key account names another.
+		// provider its harness serves, and an API-key account names another.
 		expected.Provider != old.Provider || snapshot.provider != SelectionProvider(old.Harness, old.Provider) ||
 		!slices.Equal(expected.Repos, snapshot.repos) {
 		return errPreparedAccountChanged

@@ -257,3 +257,16 @@ func validKimiRatio(value float64) (float64, bool) {
 	}
 	return value, true
 }
+
+// validReset keeps a parseable reset time and drops anything else, so a bad
+// provider value never reaches the owner as an exact time.
+func validReset(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	v, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return ""
+	}
+	return v.UTC().Format(time.RFC3339Nano)
+}

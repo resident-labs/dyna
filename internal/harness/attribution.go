@@ -17,10 +17,6 @@ import (
 //   - Claude Code accepts a --settings JSON layer. The attribution object sets
 //     the commit trailer and the PR footer to empty and disables commit
 //     trailers and the session URL.
-//   - OpenCode (v2 builds Dyna runs) adds no commit or PR attribution at all;
-//     there is nothing to disable.
-//   - Muse exposes no attribution switch Dyna knows, so
-//     its launches carry no attribution flags.
 
 // claudeAttributionSettings is the --settings layer that hides Claude Code's
 // commit and pull request attribution. An empty string hides that attribution;

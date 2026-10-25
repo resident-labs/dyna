@@ -33,8 +33,8 @@ type Caps struct {
 	RunningEffect string // what running processes do after a switch, or "unknown"
 }
 
-// Captured is one signed-in account read from a native root. Integration is
-// the OpenCode provider ID and is empty for single-account harnesses.
+// Captured is one signed-in account read from a native root. Integration
+// names the provider where a harness keeps several.
 type Captured struct {
 	Integration string
 	Identity    string // "<provider>:<stable provider account ID>"; never an email or label
@@ -47,11 +47,9 @@ type Captured struct {
 // and finds the executable on PATH. Tests set Home and Env so no adapter
 // touches real sign-in state.
 type Host struct {
-	// OpenCodeService uses the managed service in a prepared private scope.
-	OpenCodeService bool
-	Executable      string
-	Home            string
-	Env             func(string) string
+	Executable string
+	Home       string
+	Env        func(string) string
 }
 
 func (h Host) HomeDir() string {
@@ -93,17 +91,8 @@ type Manager interface {
 	// it write only to root; an empty root is an in-place native login that
 	// changes the host's active account. env holds overrides merged onto the
 	// host environment. It must have no side effects. ErrUnsupported means
-	// Dyna cannot run this login. For OpenCode, integration selects the
-	// provider; others ignore it.
+	// Dyna cannot run this login.
 	LoginCommand(root, integration string) (argv []string, env []string, err error)
-}
-
-// NativeLister is optional. A Manager implements it when the harness keeps
-// several saved credentials natively (OpenCode v2). ListNative returns every
-// native credential, active or not, for a one-time import. Dyna never
-// refreshes here; a native self-refresh of native-owned grants is allowed.
-type NativeLister interface {
-	ListNative(ctx context.Context) ([]Captured, error)
 }
 
 var constructors = map[string]func(Host) Manager{}

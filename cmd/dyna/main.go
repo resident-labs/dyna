@@ -1,5 +1,5 @@
 // dyna: harness-agnostic dynamic multi-agent workflows.
-// CLI for agents (claude-code, opencode, muse, grok, pi); humans use the desktop app.
+// CLI for agents (claude-code, grok, pi); humans use the desktop app.
 package main
 
 import (
@@ -25,7 +25,6 @@ import (
 	clidoctor "dyna-agent/internal/cli/doctor"
 	cligit "dyna-agent/internal/cli/git"
 	"dyna-agent/internal/cli/goal"
-	"dyna-agent/internal/cli/harnesshook"
 	"dyna-agent/internal/cli/interactive"
 	cliissue "dyna-agent/internal/cli/issue"
 	"dyna-agent/internal/cli/journal"
@@ -63,16 +62,6 @@ func main() {
 	// The Settings sign-in runs this in a private harness HOME. It needs that
 	// HOME, so it runs before RestoreOwner and before the root command, whose
 	// stores cannot open a data folder inside a harness home.
-	if harnessruntime.IsOpenCodeGoSignInCommand(os.Args[1:]) {
-		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		err := harnessruntime.OpenCodeGoSignInCommand(ctx, os.Args[1:])
-		cancel()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error:", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if harnessruntime.IsPiSignInCommand(os.Args[1:]) {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		err := harnessruntime.PiSignInCommand(ctx, os.Args[1:])
@@ -133,7 +122,7 @@ func newRootCommand() *cobra.Command {
 		Short:   "Dynamic multi-agent workflows for any coding agent",
 		Version: resolvedVersion,
 		Long: "dyna runs JavaScript workflow scripts that orchestrate registered worker\n" +
-			"profiles (claude-code, opencode, muse, grok, pi, custom CLIs). Agents use the CLI;\n" +
+			"profiles (claude-code, grok, pi, custom CLIs). Agents use the CLI;\n" +
 			"humans use the Dyna desktop app (desktop/) to run rooms, watch runs, and edit settings.",
 		SilenceUsage: true,
 	}
@@ -170,7 +159,6 @@ func newRootCommand() *cobra.Command {
 		machine.NewCommand(),
 		computer.NewBrowserCommand(),
 		computer.NewDaemonCommand(),
-		harnesshook.NewCommand(),
 		clilibrary.NewCommand(),
 		interactive.NewGuideCommand(),
 		workflows.NewDemoCommand(),

@@ -8,7 +8,7 @@
   import HarnessIcon from './harnesses/HarnessIcon.svelte'
   import UsageMeter from './accounts/UsageMeter.svelte'
   import { accountStatus, accountsOf, observation, dateTime, requestGate } from './accounts/state.ts'
-  import { harnesses as knownHarnesses, filterModels, inCategory, routeModel, selectedAccount, blankProfile, normalizeModels, accessLabel, publisherIcon, withEffort, routeEffort, type EditableProfile, type EditorDraft, type ModelSelection } from './profiles/state.ts'
+  import { harnesses as knownHarnesses, filterModels, routeModel, selectedAccount, blankProfile, normalizeModels, accessLabel, publisherIcon, withEffort, routeEffort, type EditableProfile, type EditorDraft, type ModelSelection } from './profiles/state.ts'
   import type { Catalog, CatalogModel, Account } from '../api/account.ts'
   import type { ProfileView } from '../api/profile.ts'
 
@@ -24,9 +24,8 @@
   let { harnesses = [], unready = {}, initialSelection = null, onsaved, oncancel, onusage }: Props = $props()
   // Read initialSelection once. Returning to this wizard must not reset a choice.
   const initial = untrack(() => initialSelection)
-  let harness = $state(initial?.harness || 'opencode')
+  let harness = $state(initial?.harness || 'claude-code')
   let step = $state(initial?.harness ? 1 : 0)
-  let category = $state((initial?.harness || 'opencode') === 'opencode' ? 'opencode' : 'all')
   let provider = $state('')
   let search = $state('')
   let catalog = $state<Catalog | null>(null)
@@ -39,7 +38,7 @@
   let connectionId = $state(initial?.connectionId || '')
   let model = $state<CatalogModel | null>(null)
   // exactId is a requested or saved model ID that names one effort of model,
-  // such as an OpenCode #variant. The profile editor picks efforts.
+  // such as a #variant route. The profile editor picks efforts.
   let exactId = $state('')
   let manual = $state(false)
   let manualId = $state(initial?.routeId || '')
@@ -53,17 +52,17 @@
   let heading = $state<HTMLElement>()
   const catalogGate = requestGate()
   const accountGate = requestGate()
-  const iconIds = ['opencode', 'claude', 'muse', 'pi']
+  const iconIds = ['claude', 'pi']
   const choices = $derived([...knownHarnesses, ...harnesses.filter(id => !knownHarnesses.some(h => h.id === id) && id !== 'mock').map(id => ({ id, label: id, description: 'Use an exact model ID or the harness default.', icon: '' }))])
   const selectedHarness = $derived(choices.find(h => h.id === harness) || { id: harness, label: harness === 'mock' ? 'Mock harness' : harness, icon: '', description: '' })
   const models = $derived(catalog?.models ?? [])
-  const filtered = $derived(filterModels(models, { category, provider, search }))
-  const providers = $derived([...new Set(models.filter(m => inCategory(m, category)).map(m => m.publisher || m.providerId).filter((x): x is string => !!x))].sort())
+  const filtered = $derived(filterModels(models, { provider, search }))
+  const providers = $derived([...new Set(models.map(m => m.publisher || m.providerId).filter((x): x is string => !!x))].sort())
   const primaryId = $derived(manual ? manualId.trim() : exactId || model?.id || '')
   const fallbackId = (m: CatalogModel | string) => typeof m === 'string' ? m : m.id
   const fallbackLabel = (m: CatalogModel | string) => typeof m === 'string' ? (models.find(x => x.id === m)?.label || m) : m.label || m.id
   const fallbackIds = $derived(fallbackModels.map(fallbackId))
-  const fallbackChoices = $derived(models.filter(m => m.id !== primaryId && !fallbackIds.includes(m.id) && inCategory(m, category)))
+  const fallbackChoices = $derived(models.filter(m => m.id !== primaryId && !fallbackIds.includes(m.id)))
   const account = $derived(selectedAccount(accounts, harness, model, connectionId))
   const editorHarnesses = $derived([...new Set([...harnesses, ...choices.map(h => h.id), 'mock'])])
 
@@ -121,7 +120,6 @@
     catalogGate.invalidate()
     if (id !== harness) connectionId = ''
     harness = id
-    category = id === 'opencode' ? 'opencode' : 'all'
     provider = ''; search = ''; catalog = null; model = null; manual = false; manualId = ''; preselectionMessage = ''
     fallbackModels = []; fallbackPick = ''; fallbackManual = ''
     step = 1
@@ -167,7 +165,6 @@
       catalogGate.invalidate()
       connectionId = ''
       harness = profileDraft.harness
-      category = harness === 'opencode' ? 'opencode' : 'all'
       provider = ''; search = ''; catalog = null; preselectionMessage = ''
       if (harness !== 'mock') loadModels()
       else catalogBusy = false
@@ -228,13 +225,6 @@
             <button class="btn fill lg" onclick={enterManually}>Model details →</button>
           {:else}
             <div class="searchbar"><input aria-label="Search models" bind:value={search} placeholder="Search models or providers…" /><select aria-label="Filter provider" bind:value={provider}><option value="">All providers</option>{#each providers as value}<option value={value}>{value}</option>{/each}</select></div>
-            {#if harness === 'opencode'}
-              <div class="tabs" role="group" aria-label="Model access">
-                {#each ([['opencode', 'OpenCode'], ['go', 'OpenCode Go'], ['free', 'Free'], ['all', 'All models']] as const) as [value, label]}
-                  <button class:active={category === value} class:secondary={value === 'all'} aria-pressed={category === value} onclick={() => { category = value; provider = '' }}>{label}<span>{models.filter(m => inCategory(m, value)).length}</span></button>
-                {/each}
-              </div>
-            {/if}
             {#if preselectionMessage}<p class="callout" role="status">{preselectionMessage}</p>{/if}
             {#if catalogBusy}<Loading>Loading models…</Loading>
             {:else if catalogError}<div class="empty" role="alert"><p class="error">Could not load models: {catalogError}</p><button class="text" onclick={() => loadModels(true)}>Retry model discovery</button></div>

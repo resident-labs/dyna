@@ -3,7 +3,6 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,8 +13,7 @@ import (
 
 // Dyna owns memory, delegation, messaging, and session wakeups. Keep every
 // verified native control here, including explicit gaps. Evidence applies to
-// Claude 2.1.302, Grok 1.0.62, Pi 1.3.0, OpenCode 2.0.32,
-// and Muse 1.4.10-R6427.1.
+// Claude 2.1.302, Grok 1.0.62, Pi 1.3.0 and Kimi Code 2.3.1.
 type nativeFeaturePolicy struct {
 	Env       map[string]string
 	Config    map[string]any // dotted native setting paths
@@ -57,56 +55,6 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 		DenyFlags: []string{"--exclude-tools", "-xt"},
 		DynaShell: true,
 		Shell:     []string{"bash"},
-	},
-	"opencode": {
-		// opencode.ai/v2/docs/policies: hard denies run after agent permissions.
-		// OpenCode has no per-launch switch, so DynaShell turns the native shell
-		// off in the generation that every launch of the account shares. A
-		// permission deny drops the tool from the model's list; a tool.use
-		// policy would only block its calls. The shared service gives the MCP
-		// server no session of its own, so "dyna mcp shell" maps each call to
-		// its Dyna session by OpenCode's session ID. Shell stays empty:
-		// nothing is removed per launch.
-		DynaShell: true,
-		Config: map[string]any{"permission.shell": "deny", "policies": []any{
-			map[string]any{"action": "tool.use", "resource": "subagent:*", "effect": "deny"},
-			map[string]any{"action": "tool.use", "resource": "question:*", "effect": "deny"},
-			// Project discovery reaches ancestor homes. Only generation-managed
-			// skills may load; names alone cannot safely identify built-ins.
-			map[string]any{"action": "integration.use", "resource": "skill:*", "effect": "deny"},
-		}},
-	},
-	"muse": {
-		Args: []string{"--disable-request-user-input", "--no-foreign-personal-context"},
-		// Muse has no tool denylist, so its Shell entries are forced flags:
-		// --disable-shell is the one switch that removes both native shell
-		// tools, shell and bash_input.
-		DynaShell: true,
-		Shell:     []string{"--disable-shell"},
-		// Native config validation and plugins reject resolve these exact IDs.
-		// An echo-provider startup probe confirms enabled=false removes the
-		// observer roster without a version-specific trusted_definition_hash.
-		Config: map[string]any{
-			"local_session_messaging.enabled": false,
-			"run.subagent_delegation_mode":    "off",
-			"run.workflow_trigger_mode":       "off",
-			"agents.execution_capacity":       1,
-			"runtime_capabilities": map[string]any{
-				"plugin:memory-reminder:reminder:memory-reminder": map[string]any{"enabled": false},
-				"plugin:skill-reminder:reminder:skill-reminder":   map[string]any{"enabled": false},
-				"plugin:todo-reminder:reminder:todo-reminder":     map[string]any{"enabled": false},
-				"plugin:goal-reminder:reminder:goal-reminder":     map[string]any{"enabled": false},
-				"plugin:verify-reminder:reminder:verify-reminder": map[string]any{"enabled": false},
-				"plugin:scope-reminder:reminder:scope-reminder":   map[string]any{"enabled": false},
-			},
-		},
-		// Native memory tools (read_memory, add_memory, edit_memory) are denied
-		// by the PreToolUse hook in steerhook.go. Muse before 1.4.7 cannot load
-		// that hook, so its memory tools stay enabled there.
-		NoSwitch: []string{
-			"No switch verified for Muse persistent memory loading; disabling observers does not disable the startup memory index.",
-			"Muse before 1.4.7 cannot load Dyna's managed hooks, so its native memory tools stay enabled.",
-		},
 	},
 	"kimi-code": {
 		// Kimi Code 2.3.1 documents these switches and tool names. ACP has no
@@ -172,16 +120,8 @@ func NativeFeatureDenyTools(h string, dynaShell bool) []string {
 func NativeFeatureArgs(h string, args []string, dynaShell bool) []string {
 	h = canonicalRuntimeID(h)
 	policy := nativeFeaturePolicies[h]
-	if dynaShell {
-		switch {
-		case len(policy.DenyFlags) != 0:
-			policy.DenyTools = NativeFeatureDenyTools(h, true)
-		case len(policy.Shell) != 0 && strings.HasPrefix(policy.Shell[0], "-"):
-			// Muse has no tool denylist: its Shell entries are the flags
-			// that remove both native shell tools, merged like the forced
-			// args.
-			policy.Args = append(slices.Clone(policy.Args), policy.Shell...)
-		}
+	if dynaShell && len(policy.DenyFlags) != 0 {
+		policy.DenyTools = NativeFeatureDenyTools(h, true)
 	}
 	out, denied := nativeFeatureDenyArgs(policy, args)
 	// Normalize no-value forced flags before merging denials. Otherwise an
@@ -219,40 +159,6 @@ func DynaShellEnvNames(launchEnv []string) []string {
 	}
 	slices.Sort(names)
 	return names
-}
-
-// DynaShellMuseArgs completes Muse's generated "mcpServers.dyna" -c pair with
-// the whole launch environment, as the native shell gets it. Muse starts a
-// server with a small default set only. Muse refuses both a repeated -c key and
-// a dotted one beside its parent, so the launch replaces its own pair in place.
-// Every value is a whole-value ${VAR} reference naming a variable of that same
-// launch: Muse's -c shape accepts no other secret form, not even a ${VAR:-}
-// default (Muse 1.4.10 probe), and every name here is set in the launch
-// environment it comes from.
-func DynaShellMuseArgs(argv, launchEnv []string) ([]string, error) {
-	const prefix = "mcpServers." + dynaMCPName + "="
-	env := map[string]string{}
-	for _, name := range DynaShellEnvNames(launchEnv) {
-		env[name] = "${" + name + "}"
-	}
-	out := slices.Clone(argv)
-	for i := 1; i < len(out); i++ {
-		raw, ok := strings.CutPrefix(out[i], prefix)
-		if !ok || out[i-1] != "-c" {
-			continue
-		}
-		entry := map[string]any{}
-		if json.Unmarshal([]byte(raw), &entry) != nil {
-			return nil, errors.New("the generated Muse MCP pair for Dyna's shell server is not JSON")
-		}
-		entry["env"] = env
-		next, err := json.Marshal(entry)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = prefix + string(next)
-	}
-	return out, nil
 }
 
 func nativeFeatureDenyArgs(policy nativeFeaturePolicy, args []string) ([]string, []string) {

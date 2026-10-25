@@ -220,12 +220,8 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 			return p, pin, fmt.Errorf("Sign in to %s in Dyna: %w", a.Harness, err)
 		}
 	}
-	// OpenCode readiness must use the service after its generation is selected.
-	// A probe before this step could start the service with an old config.
-	if a.Harness != "opencode" || leaseOut == nil {
-		if err := r.requireAccount(ctx, active.ID, b.Executable); err != nil {
-			return p, pin, err
-		}
+	if err := r.requireAccount(ctx, active.ID, b.Executable); err != nil {
+		return p, pin, err
 	}
 	env := map[string]string{}
 	for k, v := range p.Env {
@@ -291,9 +287,6 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	}
 	if a.NativeEnv != nil {
 		for k, v := range a.NativeEnv(home) {
-			if k == "OPENCODE_CONFIG" {
-				continue
-			}
 			env[k] = v
 		}
 	}
@@ -376,11 +369,8 @@ func privateHomeWarnings(nativeHome, harness string, tools []string) []string {
 		"Cloud and registry configuration is unavailable by default. Add trusted CLI names to toolHomeBridges in harness-config.json to use owner configuration.",
 	}
 	switch harness {
-	case "claude-code", "muse":
+	case "claude-code":
 		warnings = append(warnings, "A copied login shares its refresh-token family with the personal login. A refresh on either side can require a new sign-in on the other side. Dyna does not repeat the import.")
-	}
-	if harness == "opencode" {
-		warnings = append(warnings, "Legacy native history and snapshots in personal XDG_DATA_HOME/opencode are not imported without proof of Dyna ownership. Dyna transcripts remain available; some old native sessions may need a new session.")
 	}
 	return warnings
 }

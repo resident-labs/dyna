@@ -21,12 +21,8 @@ var ErrIdentity = errors.New("native account identity did not match")
 // private copy; nil inherits this process's environment.
 func Models(ctx context.Context, harness, executable string, env []string) ([]Model, error) {
 	switch harness {
-	case "opencode":
-		return modelsOpenCode(ctx, executable, env)
 	case "claude", "claude-code":
 		return modelsClaude(ctx, executable, env)
-	case "muse":
-		return modelsMuse(ctx, executable, env)
 	case "pi":
 		return modelsPi(ctx, executable, env)
 	}

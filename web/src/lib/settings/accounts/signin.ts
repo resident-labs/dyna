@@ -9,8 +9,6 @@ import type { Provider } from '../../api/account.ts'
 // serves every provider, so it is the fallback and never listed here.
 const NATIVE_HARNESS: Partial<Record<Provider, string>> = {
   anthropic: 'claude-code',
-  'opencode-go': 'opencode',
-  'meta-muse': 'muse',
 }
 
 // NATIVE_HARNESSES are the harnesses with their own sign-in, in the order the
@@ -27,23 +25,6 @@ export function harnessLabel(harness: string): string {
   return harnessMeta(harness).name
 }
 
-// OPENCODE_KEY maps a provider to the provider ID OpenCode keeps its API key
-// for, or '' when OpenCode takes no key for it. Source: store.ProviderFor.
-const OPENCODE_KEY: Partial<Record<Provider, string>> = {
-  'opencode-go': 'opencode-go',
-  anthropic: 'anthropic',
-  chatgpt: 'openai',
-  xai: 'xai',
-  deepseek: 'deepseek',
-  zai: 'zai',
-}
-
-// openCodeKey names the OpenCode integration of a provider, or '' when it has
-// no API key there.
-export function openCodeKey(provider: Provider): string {
-  return OPENCODE_KEY[provider] ?? ''
-}
-
 // harnessPin is the exact version a sign-in installs or uses: Dyna's copy, or
 // the version Dyna recommends. Empty means Dyna knows no version, so the owner
 // must install the harness first.
@@ -56,7 +37,7 @@ export function harnessPin(snapshot: HarnessSnapshot | null | undefined, harness
 // login, which needs a confirmation first.
 export function sharedLogin(snapshot: HarnessSnapshot | null | undefined, harness: string): boolean {
   const capability = (snapshot?.capabilities ?? []).find((c) => c.harness === harness)
-  return !!(capability?.sharedPersonalLogin ?? harness === 'muse')
+  return !!capability?.sharedPersonalLogin
 }
 
 // runningFlow finds the sign-in that belongs to this dialog, so closing and

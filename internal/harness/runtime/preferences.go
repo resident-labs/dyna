@@ -413,7 +413,7 @@ func (r *Runtime) PreferenceValues(accountID string) (map[string]any, error) {
 
 func preferenceLayerSupported(h string) bool {
 	switch canonicalRuntimeID(h) {
-	case "claude-code", "opencode", "muse":
+	case "claude-code":
 		return true
 	}
 	return false

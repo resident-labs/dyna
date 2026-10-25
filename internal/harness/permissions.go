@@ -12,12 +12,6 @@ func claudeHasExplicitPermissions(args []string) bool {
 	)
 }
 
-func museHasExplicitPermissions(args []string) bool {
-	return hasAnyOption(args,
-		"--yolo", "--disable-approval", "--approval-mode", "--permission-profile",
-	)
-}
-
 func hasOptionValue(args []string, option, want string) bool {
 	for i, arg := range args {
 		switch {

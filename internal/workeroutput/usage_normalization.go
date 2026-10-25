@@ -155,21 +155,11 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 	if dialect == DialectPiJSON {
 		return n.observePi(record)
 	}
-	if dialect == DialectMuseJSONL && (record.Type == "run.terminal.completed" || record.Type == "run.terminal.failed") {
-		// muse exec --json omits provider usage, even though Muse stores it
-		// internally. Do not turn an absent report into measured zero usage.
-		n.markReason(Capabilities(dialect).UsageReason)
-		return Usage{}, false
-	}
 	if dialect == DialectText {
 		n.markReason(Capabilities(dialect).UsageReason)
 		return Usage{}, false
 	}
-	if (dialect == DialectOpenCodeJSON && record.Type != "step_finish") ||
-		(dialect == DialectClaudeStreamJSON && record.Type != "result") {
-		return Usage{}, false
-	}
-	if dialect != DialectClaudeStreamJSON && dialect != DialectOpenCodeJSON {
+	if dialect != DialectClaudeStreamJSON || record.Type != "result" {
 		return Usage{}, false
 	}
 	if record.Usage == nil {
@@ -187,7 +177,7 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 		return &v
 	}
 	in, cached, out := read("input_tokens"), read("cached_input_tokens"), read("output_tokens")
-	if dialect == DialectClaudeStreamJSON || dialect == DialectOpenCodeJSON {
+	if dialect == DialectClaudeStreamJSON {
 		readCache, writeCache := read("cache_read_input_tokens"), read("cache_creation_input_tokens")
 		cached = readCache
 		if in != nil {
@@ -204,16 +194,6 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 			}
 			in = &v
 		}
-		if dialect == DialectOpenCodeJSON && out != nil {
-			// OpenCode separates visible output from reasoning tokens, and
-			// uncached input from cache reads and writes. Dyna totals include both.
-			if reasoning := read("reasoning_tokens"); reasoning != nil {
-				v := *out + *reasoning
-				out = &v
-			} else {
-				n.output.missing = true
-			}
-		}
 	}
 	value := func(v *int64, c *metricCoverage) int64 {
 		if v == nil {
@@ -224,11 +204,7 @@ func (n *UsageNormalizer) ObserveRecord(decoded Record) (Usage, bool) {
 		return *v
 	}
 	u := Usage{InputTokens: value(in, &n.input), CachedTokens: value(cached, &n.cached), OutputTokens: value(out, &n.output)}
-	if dialect == DialectOpenCodeJSON && record.Cost != nil && *record.Cost >= 0 {
-		// Each step reports an additive cost, not a process snapshot.
-		u.CostUSD = *record.Cost
-		n.cost.observed = true
-	} else if dialect == DialectClaudeStreamJSON && record.Cost != nil && *record.Cost >= 0 {
+	if record.Cost != nil && *record.Cost >= 0 {
 		// total_cost_usd is cumulative for the Claude session across resumed
 		// turns, so a turn's cost is the step from the saved total.
 		total := *record.Cost

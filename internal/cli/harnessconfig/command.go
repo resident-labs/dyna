@@ -37,7 +37,7 @@ func shellCommand() *cobra.Command {
 		if owner == "" {
 			// Grok's shared agent process spawns one MCP server per session with
 			// GROK_SESSION_ID in its environment; the server maps that harness
-			// session to its Dyna identity, as the OpenCode service path does.
+			// session to its Dyna identity.
 			if grokSession := os.Getenv("GROK_SESSION_ID"); grokSession != "" {
 				if caller, ok := sessionResolver(subagent.DefaultStore())(grokSession); ok {
 					owner = caller.Owner
@@ -57,9 +57,9 @@ func shellCommand() *cobra.Command {
 }
 
 // sessionResolver finds the open session whose harness session has the given
-// ID. OpenCode runs one MCP server for every session of an account, and names
-// the calling session in each call. The job gets the session's Dyna identity,
-// as its worker would.
+// ID. A harness that runs one MCP server for many sessions names the calling
+// session in each call. The job gets the session's Dyna identity, as its
+// worker would.
 func sessionResolver(store *subagent.Store) func(string) (shellmcp.Caller, bool) {
 	return func(harnessSession string) (shellmcp.Caller, bool) {
 		list, err := store.ListSnapshot(false)

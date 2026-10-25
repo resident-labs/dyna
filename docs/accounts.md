@@ -22,7 +22,7 @@ One account is one provider sign-in: anthropic, chatgpt, kimi-code, xai, meta-mu
 - `dyna accounts add --import <harness> [--account A] [--dry-run]` moves the saved sign-ins of one native harness into the Pi accounts of their providers, then retires the source, so Dyna never keeps two saved copies that renew one refresh token. A native CLI that the owner still runs outside Dyna keeps its own login. `--dry-run` lists the move and writes nothing. Dyna refuses a harness that an enabled profile or an open session still runs, and names them.
 - `dyna accounts remove <account>` deletes an account and its homes.
 
-An account is named by ID, an ID prefix, or a label that names one account only. A saved row Dyna cannot read shows as a skipped row with its reason; it never hides the other accounts. A harness that keeps one shared sign-in, such as OpenCode or Muse, has a global account only: a room cannot choose its own account for it.
+An account is named by ID, an ID prefix, or a label that names one account only. A saved row Dyna cannot read shows as a skipped row with its reason; it never hides the other accounts. A harness that keeps one shared sign-in has a global account only: a room cannot choose its own account for it.
 
 `dyna usage` was removed. Use `dyna accounts list --refresh` instead.
 

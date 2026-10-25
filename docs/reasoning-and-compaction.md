@@ -1,7 +1,7 @@
 # Reasoning and compaction output contract
 
-Research checked on 2026-10-18 against Claude Code 2.1.302,
-OpenCode 2.0.32 and Pi 1.3.0, plus real Dyna session captures.
+Research checked on 2026-10-18 against Claude Code 2.1.302
+and Pi 1.3.0, plus real Dyna session captures.
 Each adapter in `internal/workeroutput` turns one harness's stdout into
 normalized events. This page says what every adapter must emit for reasoning
 and for context compaction. `internal/transcript` and the session DM rely on it.
@@ -11,13 +11,8 @@ and for context compaction. `internal/transcript` and the session DM rely on it.
 This page is the target contract. Until the PRs below land, Dyna has these gaps:
 
 - Claude runs without `--thinking-display summarized`, so most thinking text
-  is hidden (#465). OpenCode runs without `--thinking`, so it shows no
-  reasoning (#466).
-- Muse reports no compaction in its MSP output, and the OpenCode CLI prints
-  none, so their compaction shows only when Dyna ran the compact command
-  itself (trigger `dyna`).
-- Pi emits a message's thinking after its text (#467). OpenCode can emit
-  empty reasoning events (#468).
+  is hidden (#465).
+- Pi emits a message's thinking after its text (#467).
 
 Remove this section when those PRs have landed.
 
@@ -36,7 +31,7 @@ Remove this section when those PRs have landed.
    so a thought that came before a reply stays before it.
 6. `id` is optional. Set it only when the source gives one. Readers do not need it.
 7. When a harness shows readable reasoning only behind a flag, Dyna passes that
-   flag: Claude `--thinking-display summarized` and OpenCode `--thinking`.
+   flag: Claude `--thinking-display summarized`.
 
 ## Compaction
 
@@ -74,13 +69,7 @@ wizard's last step is the same editor.
 | Harness | Native setting |
 | --- | --- |
 | `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 compacts 33K below the window, and the window must be 100K to 1M, so N is 67K to 967K. |
-| `muse` | `-c context_compaction.soft_threshold=N/window` |
-| `opencode` | Before a resumed turn, Dyna reads the stored context size with `session.context`. At N tokens, it admits `session.compact` and waits with `experimental.session.wait`. The shared service keeps its default automatic compaction. |
 | `pi` | none; Dyna runs `pi --mode rpc --session <id>` with `{"type":"compact"}` |
-
-OpenCode uses its stored session context because a fast service response can
-replay without a step-finish usage event. Client `OPENCODE_CONFIG_CONTENT`
-cannot change the running service and is not a per-session setting channel.
 
 Pi has no threshold setting, but it has a compact command. Its decoder reports `Record.ContextTokens`, the prompt size of
 each model call. The session stores the last one, and before the next resumed
@@ -105,9 +94,7 @@ The table lists what each harness sends.
 | Dialect | Reasoning source | Shape | Compaction source |
 | --- | --- | --- | --- |
 | `claude-stream-json` | `thinking` content block, one per assistant record | whole | `system` `status` `compacting` (started); `status` null with `compact_result: "failed"` (failed); `compact_boundary` (completed, with `compact_metadata.trigger`, `pre_tokens` and `post_tokens`) |
-| `opencode-json` | `reasoning` part when `--thinking` is set | whole | none on stdout; Dyna's own `session.compact` request shows as trigger `dyna` |
 | `pi-json` | `thinking` blocks in `message_end`; `message_update` deltas are ignored | whole | `compaction_start` and `compaction_end` with `reason` (rate), `result.tokensBefore` and `result.estimatedTokensAfter` |
-| `muse-jsonl` | none seen | none | none in the MSP records Dyna captures |
 | `text` | none | none | none |
 
 Claude omits thinking text unless `--thinking-display summarized` is set. In

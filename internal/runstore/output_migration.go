@@ -123,7 +123,9 @@ func migrateOutputArtifact(db *sql.DB, key, path string) error {
 			if len(line.Raw) == 0 {
 				return nil
 			}
-			return pack.Add([]projection.Line{line}, workeroutput.ConvertRunAgent)
+			// Retained workflow output needs no field repair: every current
+			// dialect writes complete tool events.
+			return pack.Add([]projection.Line{line}, func([]workeroutput.Event) []int { return nil })
 		})
 		if err != nil {
 			return err

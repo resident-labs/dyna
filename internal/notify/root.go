@@ -92,7 +92,7 @@ var harnessName = regexp.MustCompile(`^[a-z0-9-]{0,32}$`)
 func (s *Service) AttachSeat(ctx context.Context, rec room.Record, harness string) (SeatAttach, error) {
 	name := strings.ToLower(strings.TrimSpace(harness))
 	if !harnessName.MatchString(name) {
-		return SeatAttach{}, fmt.Errorf("--harness takes one word, such as claude, opencode, pi, grok or muse; got %q", harness)
+		return SeatAttach{}, fmt.Errorf("--harness takes one word, such as claude, pi or grok; got %q", harness)
 	}
 	var out SeatAttach
 	if !rec.Seat.External {

@@ -33,20 +33,6 @@ func ToolSignals(decl *Declaration, line string) []ToolSignal {
 	return DecodeLine(decl, line).Signals
 }
 
-// OpenCode emits tool_use only after completion, with no tool-start record.
-// Hold the whole step busy instead. step_finish follows the step's tool results,
-// so steering and journal reminders can safely wait for that boundary.
-func openCodeToolSignals(record *openCodeRecord) []ToolSignal {
-	id := "opencode-step:" + record.Part.MessageID
-	switch record.Type {
-	case "step_start":
-		return []ToolSignal{{ID: id, Start: true}}
-	case "step_finish":
-		return []ToolSignal{{ID: id}}
-	}
-	return nil
-}
-
 func claudeToolSignals(record *claudeRecord) []ToolSignal {
 	var out []ToolSignal
 	for _, block := range record.Message.Content {
@@ -58,11 +44,6 @@ func claudeToolSignals(record *claudeRecord) []ToolSignal {
 		}
 	}
 	return out
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }
 
 // ToolTracker follows which tool calls are in flight on a live stream. It is
@@ -141,9 +122,8 @@ func (u *Usage) Add(o Usage) {
 }
 
 // ExtractUsage reads token usage from one raw line when the dialect reports it
-// (claude result, opencode step_finish).
-// OpenCode step usage is additive. Other values are raw
-// thread snapshots; use UsageNormalizer for additive per-call accounting.
+// (claude result). Other values are raw thread snapshots; use
+// UsageNormalizer for additive per-call accounting.
 func ExtractUsage(decl *Declaration, line string) (Usage, bool) {
 	if decl == nil || strings.TrimSpace(line) == "" {
 		return Usage{}, false
@@ -151,9 +131,6 @@ func ExtractUsage(decl *Declaration, line string) (Usage, bool) {
 	decoded := DecodeLine(decl, line)
 	if !decoded.valid {
 		return Usage{}, false
-	}
-	if decoded.dialect == DialectOpenCodeJSON {
-		return NewUsageNormalizer("", nil).ObserveRecord(decoded)
 	}
 	record := decoded.recordUsage
 	var u struct{ Input, Output, Cached, CacheRead, CacheCreation int64 }

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"strings"
 	"time"
 
 	"dyna-agent/internal/account/native"
@@ -32,12 +31,8 @@ func applySavedObservation(a *Account, e accountstore.Entry, now time.Time) {
 		if a.Active {
 			ttl = activeUsageTTL
 		}
-		checked := o.ObservedAt
-		if museIdle(a) {
-			checked = o.LastAttemptAt
-		}
-		a.usageCheckedAt = checked
-		a.Stale = o.Unavailable || checked.IsZero() || now.Sub(checked) >= ttl
+		a.usageCheckedAt = o.ObservedAt
+		a.Stale = o.Unavailable || o.ObservedAt.IsZero() || now.Sub(o.ObservedAt) >= ttl
 		if o.Unavailable && !e.NeedsLogin {
 			a.Status = "unavailable"
 		}
@@ -78,11 +73,7 @@ func (s *Service) AccountUsageCached() Snapshot {
 			if a.Active {
 				ttl = activeUsageTTL
 			}
-			checked := a.ObservedAt
-			if museIdle(a) {
-				checked = a.usageCheckedAt
-			}
-			a.Stale = a.Stale || checked.IsZero() || now.Sub(checked) >= ttl
+			a.Stale = a.Stale || a.ObservedAt.IsZero() || now.Sub(a.ObservedAt) >= ttl
 			resetWindows(a, now)
 		}
 		ApplyBlockingQuota(out.Accounts, now)
@@ -118,16 +109,4 @@ func CachedUsage(store *accountstore.Store, now time.Time) Snapshot {
 	}
 	ApplyBlockingQuota(out.Accounts, now)
 	return out
-}
-
-func museIdle(a *Account) bool {
-	if a.Harness != "muse" {
-		return false
-	}
-	for _, w := range a.Windows {
-		if w.ID == "subscription" && strings.HasSuffix(w.Label, " (idle)") {
-			return true
-		}
-	}
-	return false
 }

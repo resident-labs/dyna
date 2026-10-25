@@ -162,9 +162,6 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 	if !ok {
 		return a.unavailableSignIn(id, n.Harness), nil
 	}
-	if openCodeKeySignIn(n) {
-		spec = openCodeGoSignInSpec
-	}
 	flow, err := a.Accounts.BeginLogin(a.lifetimeContext(), id, exe)
 	if err != nil {
 		return PrivateLogin{}, err

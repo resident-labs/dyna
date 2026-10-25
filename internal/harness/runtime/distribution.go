@@ -8,11 +8,9 @@ var harnessDistributions = map[string]struct {
 	Package string
 }{
 	"claude-code": {"npm", "@anthropic-ai/claude-code"},
-	"opencode":    {"npm", "@opencode/cli"},
 	"grok":        {"npm", "@xai-official/grok"},
 	"pi":          {"npm", piNPMPackage},
 	"kimi-code":   {"npm", "@moonshot-ai/kimi-code"},
-	"muse":        {"muse-stable", ""},
 }
 
 // npmDistributionMetadata is the registry receipt used for lookup and install.

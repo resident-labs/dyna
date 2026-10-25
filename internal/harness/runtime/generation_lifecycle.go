@@ -59,13 +59,10 @@ const dynaMCPName = "dyna"
 
 // generationInputsVersion is part of the content address. Bump it whenever the
 // lowering of inputs to native files or args changes, so a generation written
-// by an older build is not reused. Version 3: one Muse -c pair per MCP server.
-// Version 4: Claude loads the user setting source for its private CLAUDE.md.
-// Version 5: native feature policy is part of every generation.
-// Version 6: Muse run and compaction members use separate -c paths.
-// Version 7: harnesses with DynaShell get Dyna's MCP shell server.
-// Version 8: OpenCode denies its native shell and lists Dyna's server directly.
-// Version 8: a harness denies its native shell with a plugin hook.
+// by an older build is not reused. Version 4: Claude loads the user setting
+// source for its private CLAUDE.md. Version 5: native feature policy is part of
+// every generation. Version 7: harnesses with DynaShell get Dyna's MCP shell
+// server. Version 9: a harness denies its native shell with a plugin hook.
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
 const generationInputsVersion = 10
 
@@ -331,7 +328,7 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 	if a.ConfigFormat == "toml" {
 		file = "settings.toml"
 	}
-	if h == "pi" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
+	if h == "pi" || a.ConfigFile != "" {
 		if err = r.recordGenerationView(h, home, dir, true); err != nil {
 			return err
 		}
@@ -341,23 +338,19 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 			return err
 		}
 	}
-	if a.ConfigFile != "" && h != "opencode" && h != "muse" {
+	if a.ConfigFile != "" {
 		if err = publishGenerationFile(dir, file, home, a.ConfigFile); err != nil {
 			return err
 		}
 	}
-	if h == "pi" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
+	if h == "pi" || a.ConfigFile != "" {
 		if err = r.recordGenerationView(h, home, dir, false); err != nil {
 			return err
 		}
 	}
 	if a.SkillDir != "" {
-		viewHome := home
-		if h == "muse" {
-			viewHome = harnesshome.Home(home)
-		}
-		target := filepath.Join(viewHome, a.SkillDir)
-		if !inside(viewHome, target) || safeAccountPath(filepath.Dir(target)) != nil {
+		target := filepath.Join(home, a.SkillDir)
+		if !inside(home, target) || safeAccountPath(filepath.Dir(target)) != nil {
 			return lifecycleError("skills view is outside the account home", target)
 		}
 		return harnessmgr.PublishSkillView(target, filepath.Join(dir, "skills"))
@@ -371,12 +364,8 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 var legacyGlobalRulesFiles = map[string]func(home string) string{
 	"claude-code": func(home string) string { return filepath.Join(home, "CLAUDE.md") },
 	"grok":        func(home string) string { return filepath.Join(home, "AGENTS.md") },
-	"opencode":    func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"pi":          func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"kimi-code":   func(home string) string { return filepath.Join(home, "AGENTS.md") },
-	"muse": func(home string) string {
-		return filepath.Join(harnesshome.Roots(home)["XDG_CONFIG_HOME"], "muse", "AGENTS.md")
-	},
 }
 
 // removeLegacyGlobalRules deletes the global rules file Dyna once wrote for
@@ -777,9 +766,6 @@ func (r *Runtime) sharedGenerationPins(keep map[string]bool) error {
 		home, err := r.Accounts.HarnessHome(a.Harness)
 		if err != nil {
 			return err
-		}
-		if a.Harness == "muse" {
-			home = harnesshome.Home(home)
 		}
 		view := filepath.Join(home, a.SkillDir)
 		if safeAccountPath(filepath.Dir(view)) != nil {

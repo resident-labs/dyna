@@ -1,9 +1,8 @@
 # Profiles, accounts, and usage
 
-New profile opens a guided harness, model, details, and profile flow. OpenCode is
-the initial harness. Its initial model section contains Go and free routes; All
-models reveals the remaining native catalog. Manual model IDs, native defaults,
-custom commands, and the existing profile editor remain available.
+New profile opens a guided harness, model, details, and profile flow. Claude Code
+is the initial harness. Manual model IDs, native defaults, custom commands, and
+the existing profile editor remain available.
 
 Profiles and Usage consume the same account service in `internal/account/service`.
 Usage lists Dyna's private harness accounts; see [private harness accounts](../accounts.md).
@@ -13,9 +12,7 @@ The wizard does not create a per-profile account binding or silently switch one.
 
 | Harness | Model source |
 | --- | --- |
-| OpenCode | Native model/provider API, then native model listing |
 | Claude Code | Installed help's model aliases |
-| Muse | Version-negotiated MSP `model/list` |
 | Pi | Native `--list-models`, one probe per active provider |
 
 Discovery runs Dyna's private copy of the harness with the active private
@@ -26,10 +23,8 @@ not support discovery, the catalog is empty and shows a message. Enter an exact
 model ID or use the harness default then.
 
 Context and maximum input/output limits come from the native model catalog.
-Pinned OpenCode metadata supplements only exact discovered routes. Bundled
-metadata and published allowance comparisons do not establish account access.
-The published free offering says 200 requests per day; current shared versus
-per-model enforcement is not established and is not assumed by the UI.
+Bundled metadata and published allowance comparisons do not establish account
+access.
 
 Account sign-in and switching happen on the Harnesses page, not in Usage.
 

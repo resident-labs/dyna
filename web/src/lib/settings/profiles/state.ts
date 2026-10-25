@@ -8,13 +8,11 @@ export interface HarnessChoice {
   description: string
 }
 export const harnesses: HarnessChoice[] = [
-  { id: 'opencode', label: 'OpenCode', icon: 'opencode', description: 'One harness, many providers. Browse Go, free, and API models.' },
   { id: 'claude-code', label: 'Claude Code', icon: 'claude', description: 'Anthropic’s coding agent, with Claude models and familiar controls.' },
-  { id: 'muse', label: 'Muse', icon: 'muse', description: 'A dedicated harness for Muse models and agent sessions.' },
   { id: 'pi', label: 'Pi', icon: 'pi', description: 'A minimal agent harness. Sign in to Anthropic, OpenAI or Copilot inside Pi, or use API keys.' },
 ]
 export function inCategory(model: Pick<CatalogModel, 'category'>, category: string): boolean {
-  return category === 'all' || (category === 'opencode' ? ['go', 'free'].includes(model.category) : model.category === category)
+  return category === 'all' || model.category === category
 }
 export function filterModels(models: CatalogModel[], { category = 'all', provider = '', search = '' }: { category?: string; provider?: string; search?: string } = {}): CatalogModel[] {
   const query = search.trim().toLocaleLowerCase()
@@ -29,7 +27,7 @@ export function selectedAccount(accounts: readonly Account[], harness: string, m
   const candidates = accounts.filter(a => a.harness === harness)
   // Provider identifies model billing; integration identifies its credentials.
   const integration = model?.integrationId || model?.providerId
-  const matchesRoute = (a: Account) => (harness !== 'opencode' || !integration || a.providerId === integration) && (!a.routeId || a.routeId === model?.id)
+  const matchesRoute = (a: Account) => (!integration || a.providerId === integration) && (!a.routeId || a.routeId === model?.id)
   if (connectionId) return candidates.find(a => a.id === connectionId && a.active && matchesRoute(a)) ?? null
   const active = candidates.filter(a => a.active && matchesRoute(a))
   return active.length === 1 ? active[0] ?? null : null
@@ -54,7 +52,7 @@ export type ProfileDraft = Omit<ProfileView, 'runtimeVersion' | 'fallback' | 'su
   extraArgs: string[]
   envKeys: string[]
 }
-export function blankProfile(harness = 'opencode', model = '', models: readonly unknown[] | undefined = undefined): ProfileDraft {
+export function blankProfile(harness = 'claude-code', model = '', models: readonly unknown[] | undefined = undefined): ProfileDraft {
   const chain = normalizeModels(model, models)
   return { name: '', description: '', harness, model: chain[0] ?? '', models: chain, taste: 5, diagnostics: 5, intelligence: 5, cost: 5, timeoutSec: 0, maxConcurrent: 0, maxCallsPerRun: 0, default: false, disabled: false, uses: USES.map(([u]) => u), safeMode: false, extraArgs: [], compact: null, envKeys: [] }
 }
@@ -129,7 +127,7 @@ export function compactHint(rule: CompactRule | null | undefined, off = '', max 
 const ACCESS: Record<string, string> = { go: 'OpenCode Go', free: 'Free', other: 'Provider access' }
 export const accessLabel = (model?: Pick<CatalogModel, 'category'> | null): string => ACCESS[model?.category ?? ''] ?? 'Manual entry'
 
-const PUBLISHER_ICONS: Record<string, string> = { openai: 'pi', anthropic: 'claude', muse: 'muse', xai: 'grok', opencode: 'opencode', 'opencode-go': 'opencode', 'managed:kimi-code': 'kimi-code', kimi: 'kimi-code', moonshot: 'kimi-code' }
+const PUBLISHER_ICONS: Record<string, string> = { openai: 'pi', anthropic: 'claude', xai: 'grok', 'managed:kimi-code': 'kimi-code', kimi: 'kimi-code', moonshot: 'kimi-code' }
 export function publisherIcon(model?: Pick<CatalogModel, 'publisher' | 'providerId'> | null): string {
   const publisher = (model?.publisher || model?.providerId || '').toLowerCase()
   return PUBLISHER_ICONS[publisher] || ''

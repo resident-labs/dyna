@@ -15,10 +15,7 @@ import (
 
 const SchemaVersion = 1
 
-const (
-	DialectText         = "text"
-	DialectOpenCodeJSON = "opencode-json"
-)
+const DialectText = "text"
 
 // Declaration is the optional, profile-specific description of a model's
 // stdout. Dialect names resolve only through the registry below; profiles
@@ -84,9 +81,7 @@ type adapter func([]byte) Record
 var adapters = map[string]adapter{
 	DialectPiJSON:           decodePi,
 	DialectText:             decodeText,
-	DialectOpenCodeJSON:     decodeOpenCode,
 	DialectClaudeStreamJSON: decodeClaude,
-	DialectMuseJSONL:        decodeMuse,
 }
 
 // Dialects returns the stable allowlist accepted by profile declarations.
@@ -259,27 +254,15 @@ func compactJSON(raw json.RawMessage) string {
 
 // PairTools folds each tool completion into its start (matched by ID): the
 // start gains the completion's Output, Exit, and State, and the completion is
-// dropped. A completion whose ID matches no start folds into the oldest
-// still-open start with the same tool name instead: artifacts written before
-// the muse adapter keyed starts by call id pair a task-id start with a
-// call-id result, and same-name calls complete in start order there.
-// Completions with neither stay as they are. The second result maps each
-// folded start's index to the completion time (TS), so a reader can show
-// durations.
+// dropped. A completion whose ID matches no open start stays as it is. The
+// second result maps each folded start's index to the completion time (TS), so
+// a reader can show durations.
 func PairTools(events []Event) ([]Event, map[int]int64) {
 	out := make([]Event, 0, len(events))
 	open := map[string]int{}
-	openByName := map[string][]int{}
 	ended := map[int]int64{}
 	closeStart := func(i int) {
 		delete(open, out[i].ID)
-		queue := openByName[out[i].Name]
-		for j, k := range queue {
-			if k == i {
-				openByName[out[i].Name] = append(queue[:j], queue[j+1:]...)
-				break
-			}
-		}
 	}
 	fold := func(i int, e Event) {
 		s := &out[i]
@@ -306,18 +289,10 @@ func PairTools(events []Event) ([]Event, map[int]int64) {
 					}
 					continue
 				}
-				if _, ok := open[e.ID]; !ok {
-					openByName[e.Name] = append(openByName[e.Name], len(out))
-				}
 				open[e.ID] = len(out)
 			case "completed", "failed":
 				if i, ok := open[e.ID]; ok {
 					fold(i, e)
-					continue
-				}
-				// TODO: legacy/shim remove later — pairs old Muse task IDs with result call IDs by tool name; remove after affected artifacts expire or migrate
-				if queue := openByName[e.Name]; len(queue) > 0 {
-					fold(queue[0], e)
 					continue
 				}
 			}

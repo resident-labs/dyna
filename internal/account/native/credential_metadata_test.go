@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"dyna-agent/internal/account/store"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -142,22 +141,6 @@ func TestActiveRefreshUsesCheckpointAfterNativeWriteFailure(t *testing.T) {
 	}
 }
 
-func TestCredentialExpiryReportsMissingMetadata(t *testing.T) {
-	meta := json.RawMessage(`{"mechanism":"oauth","access_token":"fake-access","refresh_token":"fake-refresh","user_email":"fixture@example.invalid"}`)
-	rows, err := museCaptureMeta(meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := &museManager{}
-	if _, err = m.CredentialExpiry(rows[0]); !errors.Is(err, ErrUnsupported) {
-		t.Fatal("missing expiry was not unsupported", err)
-	}
-	rows[0].ExpiresAt = time.Now().Add(time.Hour)
-	if !CredentialExpiry(rows[0].Credential).IsZero() {
-		t.Fatal("cached expiry was trusted")
-	}
-}
-
 func TestCredentialRecoveryCancellation(t *testing.T) {
 	m := claudeTestManager(t, nil)
 	c := Captured{Identity: "anthropic:" + claudeTestAccountA, Credential: claudeTestPayload(t, m, claudeTestAccountA, "old", -time.Hour)}
@@ -196,7 +179,7 @@ func TestCredentialRefreshSupportIsSharedAndConservative(t *testing.T) {
 	}
 	// Existing adapters without a credential-specific gate retain their
 	// capability.
-	for _, harness := range []string{"claude-code", "muse", "opencode"} {
+	for _, harness := range []string{"claude-code"} {
 		manager, ok := For(harness, Host{})
 		if !ok {
 			t.Fatal(harness)
@@ -207,18 +190,3 @@ func TestCredentialRefreshSupportIsSharedAndConservative(t *testing.T) {
 	}
 }
 
-func TestAPIKeyFallbackRequiresValidIdentity(t *testing.T) {
-	payload := json.RawMessage(`{"metaCredential":{"api_key":"fixture-key","access_token":"fixture-access","user_email":"fixture@example.test","expires_at":1}}`)
-	c := Captured{Identity: "meta:email:fixture@example.test", Credential: store.Credential{Schema: museAuthSchema, Payload: payload}}
-	if !CredentialUsesAPIKey(c) || CredentialExpired(c, time.Now()) {
-		t.Fatal("valid key fallback rejected")
-	}
-	c.Identity = "meta:email:another@example.test"
-	if CredentialUsesAPIKey(c) || !CredentialExpired(c, time.Now()) {
-		t.Fatal("mismatched key accepted")
-	}
-	c.Credential.Payload = json.RawMessage(`{`)
-	if CredentialUsesAPIKey(c) {
-		t.Fatal("malformed key accepted")
-	}
-}

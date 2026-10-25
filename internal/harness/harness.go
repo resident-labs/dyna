@@ -1,6 +1,5 @@
 // Package harness executes a single worker turn on a concrete agent CLI
-// (claude-code, opencode, muse, grok, pi, a custom argv, or
-// the built-in mock).
+// (claude-code, grok, pi, a custom argv, or the built-in mock).
 package harness
 
 import (
@@ -201,16 +200,6 @@ type commandSpec struct {
 	// acpPrompt runs the text as a session/prompt over the session's
 	// long-lived ACP agent process instead of spawning a CLI per turn.
 	acpPrompt string
-	// openCode runs the pinned v2 HTTP protocol on a retained server.
-	openCode                     bool
-	openCodeKey, openCodeSession string
-	openCodeOperation            string
-	// muse runs MSP on the shared session host.
-	muse                         bool
-	museKey, museSession         string
-	musePermission, museApproval string
-	museReasoning                string
-	museResume                   bool
 	// streamInput keeps stdin open and writes the prompt, steering, and
 	// journal reminders as stream-json user messages (claude-stream-json).
 	streamInput bool
@@ -753,16 +742,7 @@ func (r *journaledRun) startSteering() (stop func(), err error) {
 	if steering == nil {
 		return func() {}, nil
 	}
-	var hook *steerHook
-	// Without a usable hook, steering keeps the interrupt path.
-	if h, err := newSteerHookForTurn(r.p); err == nil && h != nil {
-		steering.hook = h
-		hook = h
-	}
 	stop = func() {
-		if hook != nil {
-			hook.cleanup()
-		}
 		steering.close()
 	}
 	return stop, steering.activateIfReady(r.tracker.idValue())
@@ -772,18 +752,6 @@ func (r *journaledRun) startSteering() (stop func(), err error) {
 // command: a fresh start or a resume of the given session.
 func (r *journaledRun) compactBeforeTurn() error {
 	r.spec = r.inv.initial
-	if r.session.ResumeID != "" && r.p.Harness == profile.HarnessOpenCode && r.p.Compact != nil {
-		tokens, err := openCodeContextTokens(r.ctx, r.p, r.cwd, r.session.ResumeID, r.steering, r.exec, r.admitNativeAttempt)
-		if isNativeAdmissionError(err) {
-			return err
-		}
-		if err != nil {
-			r.state.setCompactError(openCodeCompactError(err))
-			r.session.ContextTokens = 0
-		} else {
-			r.session.ContextTokens = tokens
-		}
-	}
 	if r.session.ResumeID == "" {
 		return nil
 	}
@@ -792,15 +760,7 @@ func (r *journaledRun) compactBeforeTurn() error {
 		if isNativeAdmissionError(err) {
 			return err
 		}
-		if r.p.Harness == profile.HarnessOpenCode && completed > 0 {
-			// Once preflight passed, admission can have changed the context even
-			// if the final wait failed. Restore the snapshot before continuing.
-			r.prompt = WithPromptInstructions(r.p, r.prompt)
-		}
 		if err != nil {
-			if r.p.Harness == profile.HarnessOpenCode {
-				err = openCodeCompactError(err)
-			}
 			r.state.setCompactError(err)
 			r.compaction = &Compaction{State: "failed", Reason: err.Error(), Before: r.session.ContextTokens}
 		} else if completed > 0 {
@@ -862,10 +822,8 @@ func (r *journaledRun) runAttempt() attempt {
 			attemptCtx, cancelAttempt = context.WithTimeout(r.ctx, limit)
 		}
 	}
-	recordMuseQuota := captureMuseQuota(attemptCtx, r.p, r.execution, r.exec.Outbox)
 	recordClaudeUsage := captureClaudeUsage(attemptCtx, r.p, r.execution, r.exec.Outbox)
 	a := runOnce(attemptCtx, r.p, r.cwd, r.spec, r.tracker, r.supervisor, r.steering, r.inv.resume != nil, r.journal.OutputPath, r.journal.NormalizedOutputPath, r.journal.Output, recordClaudeUsage.Observe, r.gate, r.state, r.exec)
-	recordMuseQuota(a.stdout, a.stderr)
 	recordClaudeUsage.Finish()
 	cancelAttempt()
 	r.journalNudges += a.streamNudges
@@ -1504,10 +1462,6 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 	switch p.Harness {
 	case profile.HarnessPi:
 		protocolErr = workeroutput.PiResultError(a.stdout)
-	case profile.HarnessMuse:
-		protocolErr = workeroutput.MuseRunError(a.stdout)
-	case profile.HarnessOpenCode:
-		protocolErr = workeroutput.OpenCodeError(a.stdout)
 	}
 	if protocolErr != nil {
 		err := fmt.Errorf("worker %s: %w", p.Name, protocolErr)
@@ -1569,24 +1523,6 @@ func newSessionID() (string, error) {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
-}
-
-func museSessionID(stdout string) string {
-	_, sessionID := workeroutput.MuseStreamResult(stdout)
-	return sessionID
-}
-
-func museOutput(stdout string) string {
-	result, _ := workeroutput.MuseStreamResult(stdout)
-	return result
-}
-
-func openCodeSessionID(stdout string) string {
-	return workeroutput.OpenCodeSessionID(stdout)
-}
-
-func openCodeOutput(stdout string) string {
-	return workeroutput.OpenCodeOutput(stdout)
 }
 
 func hasArg(args []string, flag string) bool {
