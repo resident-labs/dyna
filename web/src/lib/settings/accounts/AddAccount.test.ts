@@ -16,7 +16,6 @@ const api = `export const api = {
   restartPrivateRuntimeLogin: (...args) => { globalThis.addCalls.push(['restart', ...args]); return Promise.resolve({ accountId: 'saved', signIn: { phase: 'waiting' } }) },
   accountsAdd: (...args) => { globalThis.addCalls.push(['add', ...args]); return Promise.resolve(globalThis.addSnapshot) },
   accountsView: () => Promise.resolve(globalThis.addSnapshot),
-  harnessProviderKeys: (...args) => { globalThis.addCalls.push(['keys', ...args]); return Promise.resolve({ providers: [] }) },
 }`
 
 const built = await bundle({ component: '../settings/accounts/AddAccount', api })
@@ -93,7 +92,7 @@ test('an API key is sent once and cleared from the form', async (t) => {
     flushSync()
     submit(target)
     await settle(flushSync)
-    assert.deepEqual(calls, [['add', 'deepseek', 'Work', 'sk-test']])
+    assert.deepEqual(calls, [['add', 'deepseek', 'Work', 'sk-test', 'pi']])
     assert.equal(element<HTMLInputElement>(target, 'input[aria-label="API key"]').value, '', 'the key is cleared after submit')
     assert.doesNotMatch(target.textContent ?? '', /sk-test/)
   } finally { await unmount(app) }
@@ -129,5 +128,28 @@ test('a reopened Pi sign-in finds the account it was started for', async (t) => 
   try {
     await settle(flushSync)
     assert.match(textOf(target), /Approve the sign-in in your browser/, 'the Pi card is recovered by target')
+  } finally { await unmount(app) }
+})
+
+test('an OpenCode Go key creates an OpenCode account', async (t) => {
+  const calls: unknown[][] = []
+  const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
+  const { target, unmount, flushSync, app } = await mountForm(t, dom)
+  try {
+    choose(target, 'key')
+    flushSync()
+    const provider = element<HTMLSelectElement>(target, 'select[aria-label="Provider"]')
+    provider.value = 'opencode-go'
+    provider.dispatchEvent(new Event('change', { bubbles: true }))
+    flushSync()
+    const where = element<HTMLSelectElement>(target, 'select[aria-label="Save the key in"]')
+    where.value = 'opencode'
+    where.dispatchEvent(new Event('change', { bubbles: true }))
+    type(target, 'input[aria-label="Account label"]', 'Go work')
+    type(target, 'input[aria-label="API key"]', 'sk-go')
+    flushSync()
+    submit(target)
+    await settle(flushSync)
+    assert.deepEqual(calls, [['add', 'opencode-go', 'Go work', 'sk-go', 'opencode']], 'the key creates an OpenCode account, not a Pi one')
   } finally { await unmount(app) }
 })

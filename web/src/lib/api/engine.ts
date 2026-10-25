@@ -16,7 +16,7 @@ import type { DiffComment } from '../files/diffComments.ts'
 import type { Browse, BrowseInfo, CreatedRoom, CreateRoomInput, DirectoryEntries, GitBlameResult, GitDiffResult, GitHistoryResult, GitLastCommitsResult, GitStatusResult, PathCheck, WorkspaceFile } from './file.ts'
 import type { GitHubDetail, GitHubListResult } from './github.ts'
 import type { Goal, GoalEvent, GoalItem, GoalJournalEntry, GoalRule, GoalStatus, RulesView } from './goal.ts'
-import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, PrivateRuntimeSwitchControl, ProviderKeysResult, SignInState } from './harness.ts'
+import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, PrivateRuntimeSwitchControl, SignInState } from './harness.ts'
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
 import type { MachineDetail, MachinePatch, MachineSummary } from './machine.ts'
 import type { LibraryView } from './library.ts'
@@ -45,7 +45,7 @@ export interface Engine {
   AccountsView(scope: string): Promise<AccountsSnapshot>
   AccountsList(scope: string, refresh: boolean): Promise<AccountsSnapshot>
   AccountsUse(id: string, scope: string): Promise<AccountsSnapshot>
-  AccountsAdd(provider: string, label: string, key: string): Promise<AccountsSnapshot>
+  AccountsAdd(provider: string, label: string, key: string, harness: string): Promise<AccountsSnapshot>
   AccountsRemove(id: string): Promise<AccountsSnapshot>
   ProfileModels(harness: string, refresh: boolean): Promise<Catalog>
   UsageRollup(roomId: string, from: string, to: string): Promise<ActivityRollup>
@@ -291,7 +291,6 @@ export interface Engine {
   CancelPrivateRuntimeLogin(id: string): Promise<null>
   FinishPrivateRuntimeLogin(id: string): Promise<HarnessSnapshot>
   RemovePrivateRuntimeAccount(id: string, confirmed: boolean): Promise<HarnessSnapshot>
-  HarnessProviderKeys(harness: string, action: string, provider: string, key: string): Promise<ProviderKeysResult>
   SetAccountRepos(id: string, repos: string[]): Promise<HarnessSnapshot>
   SetHarnessConfigEnabled(kind: string, name: string, harness: string, enabled: boolean): Promise<HarnessConfig>
   SyncPrivateRuntime(harness: string): Promise<HarnessSnapshot>
