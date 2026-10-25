@@ -52,7 +52,12 @@ func (s *Service) Accounts(ctx context.Context, scope string, refresh bool) Acco
 		key := runtime.SelectionProvider(a.Harness, a.Provider)
 		here := a.Active
 		if scope != "" {
-			here = selections[selectionKey{key, a.Harness, scope}] == a.ID
+			// A room with no row of its own uses the global account, as the
+			// launcher does. A room row that names no account overrides it with
+			// no selection.
+			if id, found := selections[selectionKey{key, a.Harness, scope}]; found {
+				here = id == a.ID
+			}
 		}
 		groups[a.Provider] = append(groups[a.Provider], ScopeAccount{Account: a, ActiveHere: here})
 	}

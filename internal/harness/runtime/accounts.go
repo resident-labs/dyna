@@ -503,7 +503,9 @@ func (a *Accounts) Env(id string) (map[string]string, error) {
 // launchScope returns the account a turn resolved and its native home. A turn
 // may resolve to an account that another harness's provider selection pushed
 // aside, so this scope checks no active mark: the turn's own selection already
-// chose the account.
+// chose the account. A harness that keeps credentials per account reads the
+// folder of the account this turn resolved, because a room choice can differ
+// from the globally active account.
 func (a *Accounts) launchScope(id, executable string) (NativeAccount, native.Manager, map[string]string, error) {
 	n, err := a.Find(id)
 	if err != nil {
@@ -516,7 +518,11 @@ func (a *Accounts) launchScope(id, executable string) (NativeAccount, native.Man
 	if err != nil {
 		return n, nil, nil, err
 	}
-	m, env, err := a.scopedManager(n.Harness, home, executable)
+	var pin map[string]string
+	if pinsCredentials(n.Harness) {
+		pin = map[string]string{pinnedSecretKey: n.Home}
+	}
+	m, env, err := a.scopedManagerWith(n.Harness, home, executable, pin)
 	return n, m, env, err
 }
 
@@ -540,12 +546,21 @@ func (a *Accounts) launchManager(id, executable string) (native.Manager, error) 
 		m, _, err := a.scopedManager(n.Harness, n.Home, executable)
 		return m, err
 	}
+	if pinsCredentials(n.Harness) {
+		// Readiness reads the account's own credentials folder. The shared
+		// config belongs to the globally active account, which a room choice can
+		// differ from, and it would answer with that account's identity.
+		if err := requirePrivateSnapshot(n); err != nil {
+			return nil, err
+		}
+		return a.pinManager(n, executable)
+	}
 	_, m, _, err := a.launchScope(id, executable)
 	if err != nil {
 		return nil, err
 	}
 	home, _ := a.HarnessHome(n.Harness)
-	return privateAccountManager{Manager: m, home: home, nativeRoot: sharedServiceAccount(n.Harness) || pinsCredentials(n.Harness)}, nil
+	return privateAccountManager{Manager: m, home: home, nativeRoot: sharedServiceAccount(n.Harness)}, nil
 }
 func (a *Accounts) Manager(id, executable string) (native.Manager, error) {
 	n, err := a.Find(id)

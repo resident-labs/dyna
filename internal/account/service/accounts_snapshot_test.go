@@ -51,4 +51,20 @@ func TestAccountsMarksTheRoomAccountAndTheGlobalOne(t *testing.T) {
 	if !global.Providers[0].Accounts[0].ActiveHere || global.Providers[0].Accounts[0].Label != "Work" {
 		t.Fatalf("global Accounts = %+v, want Work first and active", global)
 	}
+
+	// A room with no row of its own uses the global account, as the launcher
+	// does. A room row that names no account overrides it with no selection.
+	inherited := s.Accounts(t.Context(), "room-b", false)
+	if !inherited.Providers[0].Accounts[0].ActiveHere || inherited.Providers[0].Accounts[0].Label != "Work" {
+		t.Fatalf("unset room = %+v, want the global account inherited", inherited)
+	}
+	if err := selections.SetActive(store.ProviderChatGPT, "codex", "room-b", ""); err != nil {
+		t.Fatal(err)
+	}
+	cleared := s.Accounts(t.Context(), "room-b", false)
+	for _, row := range cleared.Providers[0].Accounts {
+		if row.ActiveHere {
+			t.Fatalf("room row that names no account still marks %s", row.Label)
+		}
+	}
 }

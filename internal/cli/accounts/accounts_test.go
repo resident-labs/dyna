@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/account/service"
 	"dyna-agent/internal/account/store"
@@ -96,5 +97,21 @@ func TestUseRoomChangesOnlyThatRoom(t *testing.T) {
 	}
 	if len(fake.used) != 2 || fake.used[0][1] != "room-a" || fake.used[1][1] != "" {
 		t.Fatalf("engine calls = %v, want a room use then a global use", fake.used)
+	}
+}
+
+// A saved reading shows its age and a stale mark, so an old percentage never
+// looks current.
+func TestListShowsTheReadingAgeAndStaleMark(t *testing.T) {
+	used := 41.0
+	snap := service.AccountsSnapshot{Providers: []service.ProviderAccounts{{Provider: store.ProviderAnthropic, Accounts: []service.ScopeAccount{{
+		Account:    service.Account{ID: strings.Repeat("a", 32), Provider: store.ProviderAnthropic, Label: "Work", Status: "ready", ObservedAt: time.Now().Add(-3 * time.Minute), Stale: true, Windows: []service.Window{{ID: "weekly", Label: "weekly", UsedPercent: &used}}},
+		ActiveHere: true,
+	}}}}}
+	var out bytes.Buffer
+	writeAccounts(&out, snap, "")
+	text := out.String()
+	if !strings.Contains(text, "weekly 41%") || !strings.Contains(text, "observed 3m") || !strings.Contains(text, "(stale)") {
+		t.Fatalf("list = %q, want the usage, its age and the stale mark", text)
 	}
 }
