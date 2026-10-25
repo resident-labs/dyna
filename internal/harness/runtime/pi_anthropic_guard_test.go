@@ -43,6 +43,16 @@ func TestPiProfileRefusesAnthropicOAuth(t *testing.T) {
 	}
 }
 
+// The Pi sign-in button must not start a Claude Pro/Max OAuth flow, even if a
+// caller asks for the anthropic provider directly.
+func TestPiSignInRefusesAnthropicOAuth(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0")
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, "", accountstore.ProviderAnthropic); !errors.Is(err, ErrPiAnthropicOAuth) {
+		t.Fatalf("Pi anthropic sign-in = %v, want the Anthropic OAuth refusal", err)
+	}
+}
+
 // An anthropic OAuth entry that already exists in a Pi auth.json is never used
 // for a turn. An Anthropic API key is the one allowed exception.
 func TestPiAnthropicOAuthEntryNeverRunsATurn(t *testing.T) {

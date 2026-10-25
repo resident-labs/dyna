@@ -24,6 +24,9 @@ const piProviderSignInID = "pi:provider"
 // provider must take the new credential, which a sign-in again passes so a
 // second account of that provider is never written by mistake.
 func (a *Runtime) beginPiProviderSignIn(exe, target string, provider accountstore.Provider) (PrivateLogin, error) {
+	if provider == accountstore.ProviderAnthropic {
+		return PrivateLogin{}, ErrPiAnthropicOAuth
+	}
 	if login := a.findPrivateLogin(piProviderSignInID); login != nil && login.signIn != nil && !login.signIn.snapshot().final() {
 		if login.target != target || login.provider != provider {
 			return PrivateLogin{}, errors.New("A Pi sign-in is already running for another account or provider. Finish or cancel it first.")
