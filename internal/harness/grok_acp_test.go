@@ -181,6 +181,9 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 			}
 			_ = json.Unmarshal(msg.Params, &params)
 			fakeMark(msg.Method + " " + params.SessionID)
+			if history, err := os.ReadFile(filepath.Join(s.scriptDir, "load.jsonl")); err == nil {
+				s.runScript(write, params.SessionID, cancel, history)
+			}
 			reply(msg.ID, map[string]any{"sessionId": params.SessionID, "models": map[string]any{"currentModelId": "fake-model"}})
 		case "session/set_mode":
 			var params struct{ ModeID string }
