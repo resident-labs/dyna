@@ -15,7 +15,6 @@ import (
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 )
 
@@ -61,17 +60,6 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 	base := commit("README", "before\n")
 	head := commit("main.go", "package main\n")
 
-	// The repository is in the local lane, so a local head's trial hold passes.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	lane, err := settings.Load("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lane.LocalLaneRepos = []string{repo}
-	if err := lane.Save(); err != nil {
-		t.Fatal(err)
-	}
 	root := filepath.Join(t.TempDir(), "prs")
 	rooms := &room.Store{Root: t.TempDir()}
 	rm, err := rooms.Create(room.CreateInput{Name: "ci-queue"})
@@ -182,50 +170,56 @@ func (f *fakeNodeWork) work(ctx context.Context) (localci.Result, error) {
 	return localci.Result{}, ctx.Err()
 }
 
+// localCIEnv opens one local change in the local lane, with a fake machine and
+// a blocked GitHub, so a local head can take a run.
+func localCIEnv(t *testing.T) (*testEnv, Record, string, *fakeLocalCI) {
+	t.Helper()
+	e, dir, records, ci := localMergeEnvFor(t, false, "local")
+	return e, records[0], dir, ci
+}
+
 // A local CI run must end with its engine. A run that outlives the engine leaves
 // a keeper on the machine, and that keeper holds the cache lock for hours, so an
-// engine that stops cancels every run it admitted, a pull request head and a
-// local head alike, and waits for their work on the machine to end.
+// engine that stops cancels every run it admitted and waits for its work on the
+// machine to end.
 func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
-	s, saved, _ := scheduledCIRunFixture(t)
-	record := saved.Records["pr"]
-	head := record.Head
-	localHead := addCommit(t, record.RepoPath, "local.txt")
-	local := *record
-	local.Key, local.Kind, local.Head = "local", "local", localHead
-	scheduled, lane := newFakeNodeWork(), newFakeNodeWork()
+	e, record, dir, _ := localCIEnv(t)
+	s := e.s
+	trialHead := addCommit(t, dir, "trial.txt")
+	syncHead := addCommit(t, dir, "sync.txt")
+	trial, integration := newFakeNodeWork(), newFakeNodeWork()
 	s.RunNodeCI = func(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
-		if req.SHA == head {
-			return scheduled.work(ctx)
+		if req.SHA == trialHead {
+			return trial.work(ctx)
 		}
-		return lane.work(ctx)
+		return integration.work(ctx)
 	}
-
-	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
+	sync := Record{Kind: "local", Key: "integration", RoomID: record.RoomID, RepoPath: record.RepoPath}
+	if _, err := s.localTrialCI(context.Background(), record, trialHead); err != nil {
 		t.Fatal(err)
 	}
-	<-scheduled.started
-	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
+	if _, err := s.localSyncCI(context.Background(), sync, syncHead); err != nil {
 		t.Fatal(err)
 	}
 	// Admission registers a run before it starts, so a missing run fails here
 	// instead of waiting.
 	if runs := s.RunningCI(); len(runs) != 2 {
-		t.Fatalf("machine runs = %+v, want the pull request and the local head", runs)
+		t.Fatalf("machine runs = %+v, want the trial and the sync", runs)
 	}
-	<-lane.started
+	<-trial.started
+	<-integration.started
 
 	// Cancellation starts with the engine and does not wait for the teardown.
 	s.CancelLocalCI()
-	if scheduled.ctx.Err() == nil || lane.ctx.Err() == nil {
-		t.Fatalf("a run was not cancelled with the engine: scheduled=%v local=%v", scheduled.ctx.Err(), lane.ctx.Err())
+	if trial.ctx.Err() == nil || integration.ctx.Err() == nil {
+		t.Fatalf("a run was not cancelled with the engine: trial=%v sync=%v", trial.ctx.Err(), integration.ctx.Err())
 	}
 
 	// A stop whose budget is already gone names the runs still working on the
 	// machine, because neither has ended its node work.
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
-	want := []string{head[:7] + " on hermes", localHead[:7] + " on hermes"}
+	want := []string{trialHead[:7] + " on hermes", syncHead[:7] + " on hermes"}
 	slices.Sort(want)
 	left := s.StopLocalCI(expired)
 	slices.Sort(left)
@@ -234,10 +228,10 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	}
 
 	// Both teardowns end, so a stop with a live budget finds nothing left.
-	close(scheduled.teardown)
-	close(lane.teardown)
-	<-scheduled.finished
-	<-lane.finished
+	close(trial.teardown)
+	close(integration.teardown)
+	<-trial.finished
+	<-integration.finished
 	if left := s.StopLocalCI(context.Background()); len(left) != 0 {
 		t.Fatalf("stop reported %v", left)
 	}
@@ -251,72 +245,97 @@ func (r *oneSlotRegistry) Nodes(context.Context) ([]localci.Node, error) {
 	return []localci.Node{{Name: "hermes", Slots: 1, Enabled: true}}, nil
 }
 
-// localTrialQueueFixture offers a one-slot machine, a running local trial batch
-// and a pending pull request head, so the queue order decides what runs.
-func localTrialQueueFixture(t *testing.T) (*Service, State, *Record, string) {
+// hostedJob is a tracked pull request record that shares the local repository, so
+// one queue can hold both kinds of work. Its head is a placeholder: the local
+// trial takes the machine's only slot, so the pull request never prepares.
+func hostedJob(t *testing.T, e *testEnv, local Record) *Record {
 	t.Helper()
-	s, saved, _ := scheduledCIRunFixture(t)
-	s.LocalCIRegistry = &oneSlotRegistry{}
-	record := saved.Records["pr"]
-	localHead := addCommit(t, record.RepoPath, "local.txt")
-	local := *record
-	local.Key, local.Kind, local.Head, local.Number = "local", "local", localHead, 0
-	batch := &state.MergeTrial{Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/7", Base: record.Base, Head: localHead,
-		Changes: []state.MergeTrialChange{{Key: local.Key, Head: localHead}}, Created: record.Created.Add(time.Hour)}
-	st := State{Version: 1, Records: map[string]*Record{record.Key: record, local.Key: &local}, MergeTrials: map[string]*state.MergeTrial{defaultRepo(local): batch}}
-	if err := state.Write(s.Store.Root, st); err != nil {
+	r := local
+	r.Key, r.ChangeID, r.Kind = "pull-request", "pull-request", "github"
+	r.Host, r.Repo, r.HeadRepo, r.Number = "github.com", "owner/repo", "owner/repo", 17
+	r.Head, r.Branch, r.Title = strings.Repeat("c", 40), "feature", "Fix the parser"
+	r.URL = "https://github.com/owner/repo/pull/17"
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[r.Key] = &r
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	return s, st, &local, localHead
+	return &r
 }
 
 // A local trial enters the one admission queue before ordinary pull request
 // heads, so a backlog of hosted work cannot starve a local merge.
 func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
-	s, st, _, localHead := localTrialQueueFixture(t)
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		<-ctx.Done()
-		return localci.Result{}, ctx.Err()
-	}
-	t.Cleanup(s.CancelLocalCI)
-	if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
+	e, record, dir, ci := localCIEnv(t)
+	e.s.LocalCIRegistry = &oneSlotRegistry{}
+	hostedJob(t, e, record)
+	trialHead := addCommit(t, dir, "trial.txt")
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+		e.s.CancelLocalCI()
+	})
+	st, err := e.s.Store.Read()
+	if err != nil {
 		t.Fatal(err)
 	}
-	// The one slot went to the local trial, so the pull request head still waits.
-	runs := s.RunningCI()
-	if len(runs) != 1 || runs[0].Head != localHead[:7] {
-		t.Fatalf("machine runs = %+v, want the local trial head %s", runs, localHead[:7])
+	st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(record): {Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/7", Base: record.Base, Head: trialHead,
+		Changes: []state.MergeTrialChange{{Key: record.Key, Head: record.Head}}, Created: e.clock}}
+	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
+	// Both kinds of work are queued, and the one slot went to the local trial, so
+	// the pull request head still waits.
+	if jobs := registeredCIJobs(st); len(jobs) != 2 {
+		t.Fatalf("queue holds %d jobs, want the local trial and the pull request", len(jobs))
+	}
+	runs := e.s.RunningCI()
+	if len(runs) != 1 || runs[0].Head != trialHead[:7] || runs[0].Kind != RunningCILocalChange {
+		t.Fatalf("machine runs = %+v, want the local trial head %s", runs, trialHead[:7])
 	}
 }
 
 // A held merge queue admits no local run. The trial that reads the result cannot
 // stop a run the scheduler started on its own.
 func TestHeldMergeQueueAdmitsNoLocalRun(t *testing.T) {
-	s, st, local, localHead := localTrialQueueFixture(t)
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		<-ctx.Done()
-		return localci.Result{}, ctx.Err()
-	}
-	t.Cleanup(s.CancelLocalCI)
-	if err := s.Store.update(func(read *State) error {
-		read.MergePauses = map[string]state.MergePause{local.RoomID: {Reason: "merge queue paused for recovery"}}
+	e, record, dir, ci := localCIEnv(t)
+	trialHead := addCommit(t, dir, "trial.txt")
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+		e.s.CancelLocalCI()
+	})
+	if err := e.s.Store.update(func(read *State) error {
+		read.MergePauses = map[string]state.MergePause{record.RoomID: {Reason: "merge queue paused for recovery"}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Only the local trial is queued, so any admitted run is its own.
-	only := st
-	only.Records = map[string]*Record{local.Key: local}
-	if err := s.scheduleRegisteredCI(context.Background(), only); err != nil {
+	st, err := e.s.Store.Read()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if head := runningLocalCIHead(s); head != "" {
+	st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(record): {Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/7", Base: record.Base, Head: trialHead,
+		Changes: []state.MergeTrialChange{{Key: record.Key, Head: record.Head}}, Created: e.clock}}
+	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
+	if head := runningLocalCIHead(e.s); head != "" {
 		t.Fatalf("a held queue admitted the run for %s", head)
 	}
-	if _, err := s.localTrialCI(context.Background(), *local, localHead); err != nil {
+	if _, err := e.s.localTrialCI(context.Background(), record, trialHead); err != nil {
 		t.Fatal(err)
 	}
-	if head := runningLocalCIHead(s); head != "" {
+	if head := runningLocalCIHead(e.s); head != "" {
 		t.Fatalf("a held queue admitted the run for %s", head)
 	}
 }
@@ -324,131 +343,112 @@ func TestHeldMergeQueueAdmitsNoLocalRun(t *testing.T) {
 // The machine view names what a run checks, so a local change and an
 // integration sync, which have no pull request number, read clearly.
 func TestRunningCINamesLocalAndSyncWork(t *testing.T) {
-	s, saved, _ := scheduledCIRunFixture(t)
-	record := saved.Records["pr"]
-	localHead := addCommit(t, record.RepoPath, "local.txt")
-	local := *record
-	local.Key, local.Kind, local.Head, local.Number = "local", "local", localHead, 0
-	local.Title, local.Branch = "Add parser bounds", "fix/parser-bounds"
-	syncHead := addCommit(t, record.RepoPath, "sync.txt")
-	sync := Record{Kind: "local", Key: "integration", RepoPath: record.RepoPath, Head: syncHead, RoomID: record.RoomID}
-	lane := newFakeNodeWork()
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		return lane.work(ctx)
-	}
-	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
+	e, record, dir, ci := localCIEnv(t)
+	trialHead := addCommit(t, dir, "trial.txt")
+	syncHead := addCommit(t, dir, "sync.txt")
+	ci.started = make(chan struct{}, 2)
+	ci.release = make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+		e.s.CancelLocalCI()
+	})
+	sync := Record{Kind: "local", Key: "integration", RoomID: record.RoomID, RepoPath: record.RepoPath}
+	if _, err := e.s.localTrialCI(context.Background(), record, trialHead); err != nil {
 		t.Fatal(err)
 	}
-	<-lane.started
-	if _, err := s.localSyncCI(context.Background(), sync, syncHead); err != nil {
+	if _, err := e.s.localSyncCI(context.Background(), sync, syncHead); err != nil {
 		t.Fatal(err)
 	}
+	<-ci.started
 	runs := map[string]RunningCI{}
-	for _, run := range s.RunningCI() {
+	for _, run := range e.s.RunningCI() {
 		runs[run.Head] = run
 	}
-	change, ok := runs[localHead[:7]]
-	if !ok || change.Kind != RunningCILocalChange || change.Branch != local.Branch || change.Number != 0 {
+	change, ok := runs[trialHead[:7]]
+	if !ok || change.Kind != RunningCILocalChange || change.Number != 0 || change.Title != record.Title {
 		t.Fatalf("local change run = %+v", change)
 	}
 	integration, ok := runs[syncHead[:7]]
-	if !ok || integration.Kind != RunningCISync || integration.Number != 0 || integration.Title != "" {
+	if !ok || integration.Kind != RunningCISync || integration.Number != 0 || integration.Trial {
 		t.Fatalf("sync run = %+v", integration)
 	}
-	s.CancelLocalCI()
-	close(lane.teardown)
-	<-lane.finished
 }
 
 // A poll tick never cancels a local head's run. No hosted poll decides that
 // head, so only the engine's stop ends its run.
 func TestPollTickKeepsALocalRunInFlight(t *testing.T) {
-	s, saved, _ := scheduledCIRunFixture(t)
-	record := saved.Records["pr"]
-	localHead := addCommit(t, record.RepoPath, "local.txt")
-	local := *record
-	local.Key, local.Kind, local.Head = "local", "local", localHead
-	lane := newFakeNodeWork()
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		return lane.work(ctx)
-	}
-	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
+	e, record, dir, ci := localCIEnv(t)
+	trialHead := addCommit(t, dir, "trial.txt")
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+		e.s.CancelLocalCI()
+	})
+	if _, err := e.s.localTrialCI(context.Background(), record, trialHead); err != nil {
 		t.Fatal(err)
 	}
-	<-lane.started
-	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
+	<-ci.started
+	st, err := e.s.Store.Read()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := lane.ctx.Err(); err != nil {
-		t.Fatalf("a poll tick cancelled the local run: %v", err)
+	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
+		t.Fatal(err)
 	}
-	s.CancelLocalCI()
-	close(lane.teardown)
-	<-lane.finished
+	if head := runningLocalCIHead(e.s); head != trialHead {
+		t.Fatalf("a poll tick dropped the local run for %s", head)
+	}
 }
 
 // A stop closes admission once. A tick and a local trial that are still
 // finishing cannot start a run after the engine has cancelled the runs it knew:
 // that run's keeper would outlive the process.
 func TestStopLocalCIRefusesRunsScheduledAfterTheStop(t *testing.T) {
-	s, saved, _ := scheduledCIRunFixture(t)
-	record := saved.Records["pr"]
-	head := record.Head
-	localHead := addCommit(t, record.RepoPath, "local.txt")
-	local := *record
-	local.Key, local.Kind, local.Head = "local", "local", localHead
-	scheduled, lane := newFakeNodeWork(), newFakeNodeWork()
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
-		if req.SHA == head {
-			return scheduled.work(ctx)
+	e, record, dir, ci := localCIEnv(t)
+	s := e.s
+	trialHead := addCommit(t, dir, "trial.txt")
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
 		}
-		return lane.work(ctx)
-	}
-	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
+	})
+	if _, err := s.localTrialCI(context.Background(), record, trialHead); err != nil {
 		t.Fatal(err)
 	}
-	<-scheduled.started
-	if _, err := s.localTrialCI(context.Background(), local, localHead); err != nil {
-		t.Fatal(err)
+	<-ci.started
+	if runs := s.RunningCI(); len(runs) != 1 {
+		t.Fatalf("machine runs = %+v, want the local trial", runs)
 	}
-	<-lane.started
-
 	s.CancelLocalCI()
-	known := len(s.RunningCI())
-	if known != 2 {
-		t.Fatalf("the engine knows %d runs, want both heads it started", known)
-	}
 
-	// The run set refuses both kinds of work, so only the runs the engine already
-	// had stay in it.
-	lateHead := addCommit(t, record.RepoPath, "late.txt")
-	late := *record
-	late.Key, late.Number, late.Head = "late", 18, lateHead
-	lateState := State{Version: 1, Records: map[string]*Record{late.Key: &late}}
-	if err := s.scheduleRegisteredCI(context.Background(), lateState); err != nil {
+	// The run set refuses new work, so a head that arrives after the stop gets no
+	// run of its own.
+	lateHead := addCommit(t, dir, "late.txt")
+	late := record
+	late.Key, late.Head = "late", lateHead
+	if _, err := s.localTrialCI(context.Background(), late, lateHead); err != nil {
 		t.Fatal(err)
 	}
-	if runs := s.RunningCI(); len(runs) != known {
-		t.Fatalf("a scheduled run was admitted after the stop: %+v", runs)
-	}
-	lateLocal := late
-	lateLocal.Kind = "local"
-	if _, err := s.localTrialCI(context.Background(), lateLocal, lateHead); err != nil {
-		t.Fatal(err)
-	}
-	job, err := s.localTrialJob(lateLocal, lateHead)
+	job, err := s.localTrialJob(late, lateHead)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if admittedRun(s, job) {
 		t.Fatal("a local head's run was admitted after the stop")
 	}
-
-	// Release the two runs the engine already had.
-	close(scheduled.teardown)
-	close(lane.teardown)
-	<-scheduled.finished
-	<-lane.finished
+	if head := runningLocalCIHead(s); head == lateHead {
+		t.Fatalf("a run was admitted for %s after the stop", head)
+	}
 }
 
 // addCommit writes one file and commits it, and returns the new head.
