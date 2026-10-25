@@ -85,9 +85,11 @@ func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 // active account's credential, and the selection must not move.
 func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	r := providerKeysRuntime(t)
-	// Restart installs Pi's copy on first use, and this tree is read-only.
-	t.Cleanup(func() { _ = removeBundle(filepath.Join(os.Getenv("XDG_DATA_HOME"), "dyna", "harnesses")) })
-	install(t, r.Bundles, "pi", "1.3.0")
+	// Restart resolves Pi's copy from the default manager, so put the fake copy
+	// there: the test never runs a real installer.
+	defaultBundles := NewBundleManager()
+	t.Cleanup(func() { _ = removeBundle(defaultBundles.Root) })
+	install(t, &BundleManager{Root: defaultBundles.Root, Run: fixtureInstall}, "pi", "1.3.0")
 	ctx := context.Background()
 	expired := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"old"}`)
 	active := seedPiAccount(t, r, "anthropic", `{"type":"api_key","key":"keep"}`)
