@@ -23,7 +23,7 @@ const built = await bundle({ component: '../settings/accounts/AddAccount', api }
 const runtimes: HarnessSnapshot = {
   bundles: [
     { harness: 'claude-code', version: '2.1.302', executable: '/dyna/claude', directory: '/dyna/claude' },
-    { harness: 'codex', version: '1.2.3', executable: '/dyna/codex', directory: '/dyna/codex' },
+    { harness: 'opencode', version: '2.0.32', executable: '/dyna/opencode', directory: '/dyna/opencode' },
   ],
   accounts: [],
   profiles: [],
@@ -99,7 +99,7 @@ test('the native path offers a saved login and starts Claude Code', async (t) =>
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
   try {
     const options = [...element<HTMLSelectElement>(target, 'select[aria-label="Harness"]').options].map((option) => option.value)
-    assert.deepEqual(options, ['', 'claude-code', 'codex', 'muse', 'opencode', 'pi'], 'the other native harnesses keep their sign-in path')
+    assert.deepEqual(options, ['', 'claude-code', 'muse', 'opencode', 'pi'], 'the other native harnesses keep their sign-in path')
     selectHarness(target, 'claude-code')
     flushSync()
     submit(target)
@@ -108,16 +108,16 @@ test('the native path offers a saved login and starts Claude Code', async (t) =>
   } finally { await unmount(app) }
 })
 
-test('a Codex native choice starts the Codex sign-in', async (t) => {
+test('an OpenCode native choice starts the OpenCode sign-in', async (t) => {
   const calls: unknown[][] = []
   const dom = installDom({ addCalls: calls, addRuntimes: runtimes, addSnapshot: snapshot })
   const { target, unmount, flushSync, app } = await mountForm(t, dom)
   try {
-    selectHarness(target, 'codex')
+    selectHarness(target, 'opencode')
     flushSync()
     submit(target)
     await settle(flushSync)
-    assert.deepEqual(calls, [['find', 'codex', '1.2.3'], ['begin', 'codex', '1.2.3', '', '', false]], 'every native harness starts its own sign-in')
+    assert.deepEqual(calls, [['find', 'opencode', '2.0.32'], ['begin', 'opencode', '2.0.32', '', '', false]], 'every native harness starts its own sign-in')
   } finally { await unmount(app) }
 })
 
