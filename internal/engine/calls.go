@@ -468,6 +468,7 @@ func callsFor(s services, readOnly bool) (map[string]websvc.Call, map[string]web
 	protectSessionCalls(calls)
 	protectPRCalls(calls)
 	protectIssueCalls(calls)
+	protectMachineCalls(calls)
 	protectOwnerCalls(calls)
 	protectCLICalls(calls)
 	if readOnly {

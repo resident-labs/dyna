@@ -145,12 +145,18 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.AllowHostChecks {
-		t.Fatal("host checks were enabled by default")
+	if saved.HasHostChecksGrants() {
+		t.Fatal("host checks were allowed by default")
 	}
-	saved.Name, saved.Enabled, saved.AllowHostChecks = "hermeslab", false, true
+	saved.Name, saved.Enabled = "hermeslab", false
 	renamed, err := s.Save(ctx, saved)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The engine writes a grant, and the rename above keeps it.
+	if _, err := s.UpdateHostChecksGrants(ctx, saved.ID, func(Machine) ([]HostChecksGrant, error) {
+		return []HostChecksGrant{{By: GrantorOwner}}, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if renamed.ID != saved.ID || renamed.Created.IsZero() {
@@ -160,7 +166,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 		t.Fatalf("old name remains: %v", err)
 	}
 	stored, err := s.Get(ctx, "hermeslab")
-	if err != nil || stored.Enabled || stored.CISlots != 2 || !stored.AllowHostChecks {
+	if err != nil || stored.Enabled || stored.CISlots != 2 || !stored.HostChecksAllowed("") {
 		t.Fatalf("stored machine = %#v, %v", stored, err)
 	}
 	if _, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
@@ -180,7 +186,8 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 		t.Fatalf("removed this machine: %v", err)
 	}
 	local.Roles = append(local.Roles, RoleCI)
-	local.CISlots, local.AllowHostChecks = 1, true
+	local.CISlots = 1
+	local.HostChecksGrants = []HostChecksGrant{{By: GrantorOwner}}
 	if _, err := s.Save(ctx, local); err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +195,104 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 		t.Fatal(err)
 	}
 	local, err = s.GetLocal(ctx)
-	if err != nil || local.AllowHostChecks {
+	if err != nil || local.HasHostChecksGrants() {
 		t.Fatalf("removing the CI role kept host permission: %#v, %v", local, err)
 	}
 	local.Roles = []Role{RoleAgents}
 	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
 		t.Fatalf("dropped the engine role from this machine: %v", err)
+	}
+}
+
+// A grant change reads the stored list inside the writer transaction, so a
+// change that lands after another caller's refusal cannot restore what that
+// caller removed.
+func TestHostChecksGrantReadsTheStoredList(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	pve, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true,
+		HostChecksGrants: []HostChecksGrant{{By: GrantorOwner}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A room root took the list before the owner refused. Its allow then runs.
+	if _, err := s.UpdateHostChecksGrants(ctx, pve.ID, func(Machine) ([]HostChecksGrant, error) {
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.UpdateHostChecksGrants(ctx, pve.ID, func(m Machine) ([]HostChecksGrant, error) {
+		if len(m.HostChecksGrants) != 0 {
+			t.Fatalf("change read grants %#v after the owner refused them", m.HostChecksGrants)
+		}
+		return append(m.HostChecksGrants, HostChecksGrant{By: GrantorRoot, Room: "room_a"}), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.HostChecksAllowed("room_a") || stored.HostChecksAllowed("room_b") || len(stored.HostChecksGrants) != 1 {
+		t.Fatalf("stored grants = %#v, want the root's room alone", stored.HostChecksGrants)
+	}
+}
+
+// A machine edit keeps who allows host checks, so a save from a reader that took
+// the row before another caller's refusal cannot restore the old grant.
+func TestRegistryEditKeepsHostChecksGrants(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	pve, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true,
+		HostChecksGrants: []HostChecksGrant{{By: GrantorOwner}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := pve
+	if _, err := s.UpdateHostChecksGrants(ctx, pve.ID, func(Machine) ([]HostChecksGrant, error) {
+		return nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stale.Name, stale.SSH = "pve2", "pip@pve2"
+	if _, err := s.Save(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := s.Get(ctx, "pve2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.HasHostChecksGrants() {
+		t.Fatalf("edited machine = %#v, want the refused grants left off", edited.HostChecksGrants)
+	}
+}
+
+// TestMigrateKeepsAnEarlierHostCheckGrant checks the version 4 data folder that
+// kept host checks as one switch: a machine that allows them becomes the
+// owner's grant for every room, and a machine that refuses them keeps none.
+func TestMigrateKeepsAnEarlierHostCheckGrant(t *testing.T) {
+	ctx := context.Background()
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := db.Exec(machinesVersionFourSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	s := Store{DataDir: dir}
+	m, err := s.Get(ctx, "pve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.HostChecksAllowed("") || !m.HostChecksAllowed("room_other") {
+		t.Fatalf("migrated machine = %#v, want the owner's grant for every room", m)
+	}
+	refused, err := s.Get(ctx, "quiet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refused.HasHostChecksGrants() {
+		t.Fatalf("migrated machine = %#v, want the refused permission kept off", refused)
 	}
 }
 
@@ -215,9 +314,9 @@ INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated
  ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000);
 INSERT INTO meta(key,value) VALUES('machines.version','1');`
 
-// machinesVersionFourSchema is the registry with probes and explicit host-check
-// permission but no room list, so a data folder from that version still
-// migrates.
+// machinesVersionFourSchema is the registry with probes and the host-check
+// permission as one switch, before a machine recorded who allows host checks or
+// named rooms, so a data folder from that version still migrates.
 const machinesVersionFourSchema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
 	name           TEXT    NOT NULL UNIQUE,
@@ -239,11 +338,14 @@ const machinesVersionFourSchema = `CREATE TABLE machines (
 );
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
 INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms,allow_host_checks) VALUES
- ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,1);
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,1),
+ ('m_grant','pve','["ci"]','pip@pve',2,1,0,1000,1000,1),
+ ('m_quiet','quiet','["ci"]','pip@quiet',1,1,0,1000,1000,0);
 INSERT INTO meta(key,value) VALUES('machines.version','4');`
 
-// A version 4 registry reaches the version 5 step, which must add only the room
-// list: the columns the earlier steps added are already there.
+// A version 4 registry reaches the version 6 step in one start: it gains the
+// room list and the owner's grant for the permission that was on, and it keeps
+// its route and slots.
 func TestMigrateAddsRoomListToVersionFour(t *testing.T) {
 	ctx := context.Background()
 	dir := storetest.DataDir(t)
@@ -260,7 +362,7 @@ func TestMigrateAddsRoomListToVersionFour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !m.AllowHostChecks || m.SSH != "pip@hermeslab" || m.CISlots != 2 {
+	if !m.HostChecksAllowed("") || m.SSH != "pip@hermeslab" || m.CISlots != 2 {
 		t.Fatalf("migrated machine = %#v", m)
 	}
 	// The machine named no room before it could, so it takes every room.
@@ -327,27 +429,28 @@ INSERT INTO local_ci_results VALUES('repo','def','{"node":"setup","sha":"def","s
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hermes.AllowHostChecks {
+	if !hermes.HostChecksAllowed("") {
 		t.Fatal("migration did not preserve an existing computer-smoke machine's host permission")
 	}
 	other, err := s.Get(context.Background(), "other")
-	if err != nil || other.AllowHostChecks {
+	if err != nil || other.HasHostChecksGrants() {
 		t.Fatalf("unrelated machine gained host permission: %#v, %v", other, err)
 	}
 	setup, err := s.Get(context.Background(), "setup")
-	if err != nil || setup.AllowHostChecks {
+	if err != nil || setup.HasHostChecksGrants() {
 		t.Fatalf("failed setup granted host permission: %#v, %v", setup, err)
 	}
 	added, err := s.Save(context.Background(), Machine{Name: "added", Roles: []Role{RoleCI}, SSH: "ari@added", CISlots: 1, Enabled: true})
-	if err != nil || added.AllowHostChecks {
+	if err != nil || added.HasHostChecksGrants() {
 		t.Fatalf("new machine gained host permission: %#v, %v", added, err)
 	}
-	hermes.AllowHostChecks = false
-	if _, err := s.Save(context.Background(), hermes); err != nil {
+	if _, err := s.UpdateHostChecksGrants(context.Background(), hermes.ID, func(Machine) ([]HostChecksGrant, error) {
+		return nil, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	hermes, err = s.Get(context.Background(), "hermes")
-	if err != nil || hermes.AllowHostChecks {
+	if err != nil || hermes.HasHostChecksGrants() {
 		t.Fatalf("migration re-enabled an explicit owner decision: %#v, %v", hermes, err)
 	}
 }

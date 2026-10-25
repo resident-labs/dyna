@@ -19,7 +19,20 @@ func (s services) machineAPI() websvc.MachineAPI {
 	if s.rooms != nil && s.rooms.Notify != nil {
 		alerter = machineDiskAlerter{notify: s.rooms.Notify}
 	}
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, DiskFloor: ciDiskFloor, Alerter: alerter}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, DiskFloor: ciDiskFloor, Alerter: alerter, RoomName: s.machineRoomName}
+}
+
+// machineRoomName names the room whose root allowed host checks, so the Machine
+// page says which room it was. A room the registry no longer holds keeps its ID.
+func (s services) machineRoomName(roomID string) string {
+	if roomID == "" || s.rooms == nil || s.rooms.Notify == nil || s.rooms.Notify.Rooms == nil {
+		return roomID
+	}
+	rec, err := s.rooms.Notify.Rooms.Resolve(roomID)
+	if err != nil || rec.Name == "" {
+		return roomID
+	}
+	return rec.Name
 }
 
 // machineCI lists the local CI runs in flight on every machine. The runs live

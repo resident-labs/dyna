@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/machines"
 )
 
 func TestRepositoryDefinitionDrivesNonGoRun(t *testing.T) {
@@ -74,6 +76,34 @@ func TestHostCheckNeedsMachineConsent(t *testing.T) {
 	}
 	if strings.Contains(script, "docker run") {
 		t.Fatal("host check was placed in a container")
+	}
+}
+
+// A room root's grant of host checks covers its own room only, so another
+// room's repository commands stay in their container until someone allows them.
+func TestHostChecksRunOnlyForTheGrantedRoom(t *testing.T) {
+	definition := parseRepositoryDefinition(t, true)
+	node := &Node{Name: "local", Slots: 1, Enabled: true,
+		HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorRoot, Room: "room_a"}}}
+	if !node.HostChecksAllowed("room_a") {
+		t.Fatal("the granting room was refused")
+	}
+	if node.HostChecksAllowed("room_b") {
+		t.Fatal("one room's grant allowed another room's host checks")
+	}
+	runner := Runner{DataDir: t.TempDir(), Node: node, Command: func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error {
+		t.Fatal("host check ran a command for a room that no one allows")
+		return nil
+	}}
+	_, err := runner.Run(t.Context(), Request{Definition: definition, Repo: t.TempDir(), Suites: []Suite{"test"}, RoomID: "room_b"})
+	if !errors.Is(err, ErrHostChecksDisabled) {
+		t.Fatalf("host check for another room = %v, want ErrHostChecksDisabled", err)
+	}
+	// The owner's grant covers every room, including work that names none.
+	owner := &Node{Name: "local", Slots: 1, Enabled: true,
+		HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
+	if !owner.HostChecksAllowed("room_b") || !owner.HostChecksAllowed("") {
+		t.Fatal("the owner's grant did not cover every room")
 	}
 }
 

@@ -232,7 +232,10 @@
         </Row>
         {#if machine.roles.includes('ci')}
           <Row dense text="Host checks">
-            {#snippet meta()}<span class="note">Off by default. Allow only repositories you trust to run outside containers.</span>{/snippet}
+            {#snippet meta()}
+              <span class="note">Off by default. Allow only repositories you trust to run outside containers.</span>
+              {#if machine.allowHostChecks && machine.hostChecksAllowedBy?.length}<span class="note">Allowed by {machine.hostChecksAllowedBy.join(' and ')}.</span>{/if}
+            {/snippet}
             {#snippet trail()}<Switch on={machine.allowHostChecks} label="Allow host checks" disabled={busy} onchange={(on: boolean) => onsave({ allowHostChecks: on })} />{/snippet}
           </Row>
         {/if}
