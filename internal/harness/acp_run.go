@@ -579,6 +579,9 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 				continue
 			}
 			_ = cancelAndDrain()
+			// A confirmed cancel settles the prompt, but a child that stalled
+			// at startup must be replaced before the next session restore.
+			s.settled = false
 			at := finishAttempt(spec, rawLines.String(), stderr.String(), fmt.Errorf("no harness event within %s of startup", startupWait), true, false, false, false, nil, nil)
 			at.startupStalled = true
 			return at
