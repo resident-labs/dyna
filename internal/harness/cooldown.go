@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/modelcooldown"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
@@ -91,6 +92,10 @@ func notReady(ctx context.Context, p profile.Profile, err error) error {
 	if ctx.Err() != nil {
 		return err
 	}
+	// The runtime produced no output at all. Record the failure so health cannot
+	// keep showing an older success while this profile cannot start, and a later
+	// passing check can prove that the cause is gone.
+	harnesshealth.New("").RecordStartFailure(p, time.Now().UTC())
 	return fmt.Errorf("worker %s %s %w", p.Name, notReadyText, err)
 }
 
