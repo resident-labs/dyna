@@ -77,6 +77,46 @@ func TestComputerSessionBinsReusePreparedToolHome(t *testing.T) {
 	}
 }
 
+// A resumed session whose pinned generation names another Dyna command must
+// rebuild. Otherwise its shell tools and MCP servers keep calling the build the
+// session first started on, and the updated engine refuses them as a version
+// mismatch.
+func TestResumeRebuildsGenerationForANewDynaCommand(t *testing.T) {
+	r, p := runtimeFixture(t, "claude-code")
+	p.Env = map[string]string{"DYNA_BIN": dynaCommandStub(t, "first")}
+	_, pin, err := r.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Env = map[string]string{"DYNA_BIN": dynaCommandStub(t, "second")}
+	selected, next, err := r.Prepare(context.Background(), p, &pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Generation == pin.Generation {
+		t.Fatal("resume kept a generation that names the previous Dyna command")
+	}
+	raw, err := os.ReadFile(filepath.Join(next.Generation, "mcp.json"))
+	if err != nil || !strings.Contains(string(raw), selected.Env["DYNA_BIN"]) {
+		t.Fatalf("rebuilt generation does not name this turn's Dyna command: %s (%v)", raw, err)
+	}
+	// The rebuilt generation fits that command, so later turns keep it.
+	if _, steady, err := r.Prepare(context.Background(), p, &next); err != nil || steady.Generation != next.Generation {
+		t.Fatalf("resume rebuilt a usable generation again: %v %+v", err, steady)
+	}
+}
+
+// dynaCommandStub writes a runnable stand-in Dyna command that still launches,
+// so only the recorded path decides whether a pinned generation is reused.
+func dynaCommandStub(t *testing.T, build string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "dyna-"+build)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // Exercise the final Prepare merge rather than only individual adapter maps.
 // A pinned fake binary avoids provider installs and account network requests.
 func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {

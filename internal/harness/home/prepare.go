@@ -295,19 +295,18 @@ func execTarget(script string) string {
 	return rest[:end]
 }
 
-// stableDynaPath replaces a running-image path with a copy of the same build
-// that outlives its process. A bridge, an MCP server command and $DYNA_BIN are
-// read again on later turns; /proc/<pid>/exe stops existing when that process
-// exits, which left harness sessions with no Dyna tools.
+// stableDynaPath replaces a running-image path, or a copied image, with the
+// current link that names the running build. A bridge, an MCP server command
+// and $DYNA_BIN are read again on later turns; naming one build's copy there
+// kept a session on the build it first published, and pruning that copy later
+// left a wrapper with no executable. /proc/<pid>/exe also stops existing when
+// that process exits, which left harness sessions with no Dyna tools.
 func stableDynaPath(realDyna string) string {
-	if !strings.HasPrefix(realDyna, "/proc/") {
+	current, err := fsutil.CurrentImage(realDyna)
+	if err != nil || !filepath.IsAbs(current) {
 		return realDyna
 	}
-	stable, err := fsutil.StableImage(realDyna)
-	if err != nil || !filepath.IsAbs(stable) {
-		return realDyna
-	}
-	return stable
+	return current
 }
 
 func bridge(owner map[string]string, target string, isDyna bool) string {
