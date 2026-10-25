@@ -583,7 +583,7 @@ func (s services) accountsUse(ctx context.Context, id, scope string) (service.Ac
 			return service.AccountsSnapshot{}, err
 		}
 	}
-	if _, err := s.runtime.UseAccount(ctx, id, roomID); err != nil {
+	if err := s.runtime.UseAccount(ctx, id, roomID); err != nil {
 		return service.AccountsSnapshot{}, err
 	}
 	return s.accounts.Accounts(ctx, roomID, false), nil
