@@ -51,6 +51,18 @@ func nativeSessionLaunch(p profile.Profile, cwd string, spec commandSpec, execut
 	if err != nil {
 		return sessionhost.Launch{}, err
 	}
+	if p.Harness == profile.HarnessKimiCode && p.RuntimeInstructions != "" {
+		home, err := kimiInstructionsHome(p.Env["KIMI_CODE_HOME"], p.RuntimeInstructions)
+		if err != nil {
+			return sessionhost.Launch{}, err
+		}
+		env := make(map[string]string, len(p.Env))
+		for k, v := range p.Env {
+			env[k] = v
+		}
+		env["KIMI_CODE_HOME"] = home
+		p.Env = env
+	}
 	cmd, err := harnessCommand(context.Background(), p, cwd, spec.argv, execution)
 	if err != nil {
 		return sessionhost.Launch{}, err

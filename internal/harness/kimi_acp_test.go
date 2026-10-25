@@ -123,3 +123,59 @@ func TestKimiAcpSteeringInterruptsAndResumes(t *testing.T) {
 		t.Fatalf("steering used a concurrent Kimi prompt:\n%s", text)
 	}
 }
+
+func TestKimiACPLaunchUsesNativeSystemPrompt(t *testing.T) {
+	home := t.TempDir()
+	for _, dir := range []string{"credentials", "sessions", "oauth", "skills"} {
+		if err := os.Mkdir(filepath.Join(home, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := profile.Profile{Harness: profile.HarnessKimiCode,
+		Env:                 map[string]string{"KIMI_CODE_HOME": home},
+		RuntimeInstructions: "Use Dyna worktrees. KIMI_SYSTEM_CANARY",
+		RuntimeExecutable:   "/bin/true"}
+	if !NativeInstructions(p.Harness) || WithPromptInstructions(p, "task") != "task" {
+		t.Fatal("Kimi instructions must use its system channel, not the user prompt")
+	}
+	if _, err := instructionsNative(p); err != nil {
+		t.Fatal(err)
+	}
+	launch, err := nativeSessionLaunch(p, t.TempDir(), commandSpec{argv: []string{"/bin/true", "acp"}}, ExecutionOptions{SkipComputer: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	systemHome := environmentValue(launch.Env, "KIMI_CODE_HOME")
+	if systemHome == home || systemHome == "" {
+		t.Fatalf("launch uses shared Kimi home: %q", systemHome)
+	}
+	want := "${base_prompt}\n\n" + p.RuntimeInstructions
+	if raw, err := os.ReadFile(filepath.Join(systemHome, "SYSTEM.md")); err != nil || string(raw) != want {
+		t.Fatalf("system prompt = %q, %v", raw, err)
+	}
+	for _, name := range []string{"config.toml", "credentials", "oauth", "sessions", "skills"} {
+		if target, err := os.Readlink(filepath.Join(systemHome, name)); err != nil || target != filepath.Join(home, name) {
+			t.Fatalf("shared %s = %q, %v", name, target, err)
+		}
+	}
+	// Kimi replaces its workspace cache atomically; keep that file local.
+	if err := os.WriteFile(filepath.Join(systemHome, "workspaces.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A cold launch must reuse the same prompt and native session storage.
+	reloaded, err := nativeSessionLaunch(p, launch.Dir, commandSpec{argv: []string{"/bin/true", "acp"}}, ExecutionOptions{SkipComputer: true})
+	if err != nil || environmentValue(reloaded.Env, "KIMI_CODE_HOME") != systemHome {
+		t.Fatalf("cold launch lost its system home: %+v, %v", reloaded, err)
+	}
+	p.RuntimeInstructions = "A different Dyna session."
+	other, err := nativeSessionLaunch(p, launch.Dir, commandSpec{argv: []string{"/bin/true", "acp"}}, ExecutionOptions{SkipComputer: true})
+	if err != nil || environmentValue(other.Env, "KIMI_CODE_HOME") == systemHome {
+		t.Fatalf("sessions share mutable system instructions: %+v, %v", other, err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(systemHome, "SYSTEM.md")); err != nil || string(raw) != want {
+		t.Fatalf("another session replaced the system prompt: %q, %v", raw, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "SYSTEM.md")); !os.IsNotExist(err) {
+		t.Fatalf("shared account system prompt was changed: %v", err)
+	}
+}

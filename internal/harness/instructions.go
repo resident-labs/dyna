@@ -29,7 +29,7 @@ const maxInstructionsArg = 64 * 1024
 // a session's first turn.
 var nativeInstructions = map[string]bool{
 	profile.HarnessClaudeCode: true, profile.HarnessCodex: true, profile.HarnessPi: true,
-	profile.HarnessMuse: true,
+	profile.HarnessMuse: true, profile.HarnessKimiCode: true,
 }
 
 // NativeInstructions reports whether harness takes Profile.RuntimeInstructions
@@ -87,12 +87,13 @@ func writeFileOnce(path string, data []byte) error {
 	return err
 }
 
-// instructionsNative returns the args that pass
-// p.RuntimeInstructions to p's harness. Each verified on 2026-10-18:
+// instructionsNative prepares the native channel for RuntimeInstructions
+// and returns any CLI args it needs:
 //   - Claude Code: --append-system-prompt-file.
 //   - Codex: -c developer_instructions (a TOML string).
 //   - Pi: --append-system-prompt, which reads a file's contents.
 //   - Muse: -c run.developer_prompt (a JSON string).
+//   - Kimi Code: SYSTEM.md in a private home view (no CLI args).
 //   - Grok and Antigravity over ACP: the first prompt of a session
 //     carries them (WithPromptInstructions).
 func instructionsNative(p profile.Profile) ([]string, error) {
@@ -117,6 +118,9 @@ func instructionsNative(p profile.Profile) ([]string, error) {
 		args = []string{"-c", "developer_instructions=" + quotedString(text)}
 	case profile.HarnessMuse:
 		args = []string{"-c", "run.developer_prompt=" + quotedString(text)}
+	case profile.HarnessKimiCode:
+		_, err := kimiInstructionsHome(p.Env["KIMI_CODE_HOME"], text)
+		return nil, err
 
 	}
 	for _, a := range args {
