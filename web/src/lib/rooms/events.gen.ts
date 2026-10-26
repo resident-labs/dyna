@@ -31,7 +31,7 @@ export type AccountReason = "usage-limit" | "fallback"
 export type InstructionAction = "items" | "body" | "removed"
 
 // AlertSource is a named string type of an event payload.
-export type AlertSource = "doctor" | "engine"
+export type AlertSource = "doctor" | "engine" | "consolidation"
 
 // AlertSeverity is a named string type of an event payload.
 export type AlertSeverity = "warning" | "critical"
@@ -314,7 +314,7 @@ export interface InstructionBatchEvent {
   notes: string[]
 }
 
-// AlertEvent is the payload of the alert/doctor and alert/engine events.
+// AlertEvent is the payload of the alert/doctor and alert/engine and alert/consolidation events.
 export interface AlertEvent {
   source: AlertSource
   reportId?: string
@@ -400,7 +400,7 @@ export interface TurnEvent {
 export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -980,6 +980,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "The engine has been read-only for more than 2 minutes because migration failed:",
   },
   {
+    family: "alert",
+    type: "consolidation",
+    renderer: "AlertCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "A session consolidation paused with an error:",
+  },
+  {
     family: "service",
     type: "failed",
     renderer: "ServiceAlertCard",
@@ -1081,7 +1091,7 @@ const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"
 const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned", "transfer-request"])
 const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
 const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
-const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine"])
+const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine", "consolidation"])
 const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
 const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
@@ -1495,6 +1505,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "session" && type === "transfer-request") return isSessionEvent(v)
   if (family === "alert" && type === "doctor") return isAlertEvent(v)
   if (family === "alert" && type === "engine") return isAlertEvent(v)
+  if (family === "alert" && type === "consolidation") return isAlertEvent(v)
   if (family === "service" && type === "failed") return isServiceFailedEvent(v)
   if (family === "service" && type === "helper-outcome") return isHelperOutcomeEvent(v)
   if (family === "engine" && type === "root-flush") return isEngineEvent(v)
