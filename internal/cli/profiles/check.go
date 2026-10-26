@@ -28,10 +28,11 @@ func newCheckCommand() *cobra.Command {
 		Short: "Check enabled profiles, installed binaries, output capabilities, and accounts",
 		Long:  "Check enabled profiles, including subagent-only profiles, and report each managed profile's private sign-in state. --live starts each harness and can incur provider charges.",
 		RunE: func(c *cobra.Command, names []string) error {
-			store, err := loadStore()
+			reg, err := loadRegistry()
 			if err != nil {
 				return err
 			}
+			store := reg.Store
 			selected, err := selectCheckProfiles(store, names)
 			if err != nil {
 				return err

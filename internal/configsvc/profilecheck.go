@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/profilecheck"
 )
 
@@ -25,13 +26,18 @@ func CheckProfile(ctx context.Context, name string, live bool) (ProfileCheck, er
 			return ProfileCheck{}, err
 		}
 	}
-	store, err := loadProfiles()
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return ProfileCheck{}, err
 	}
-	p, ok := store.Get(name)
+	p, ok := reg.Store.Get(name)
 	if !ok {
 		return ProfileCheck{}, fmt.Errorf("no profile named %q", name)
+	}
+	// The checked profile itself must be launchable, whatever other saved
+	// profiles are.
+	if report := reg.Reports[name]; report.Status != profile.StatusOK {
+		return ProfileCheck{}, fmt.Errorf("profile %q cannot run: %s", name, report.Detail)
 	}
 	if p.Disabled {
 		return ProfileCheck{}, fmt.Errorf("profile %q is disabled", name)

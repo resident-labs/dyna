@@ -18,8 +18,10 @@ import (
 // engineClient lets failure tests use a private socket without a restart wait.
 var engineClient = func() *engineclient.Client { return engineclient.New("") }
 
-func loadStore() (*profile.Store, error) {
-	return profile.Load(profile.DefaultPath())
+// loadRegistry is the one management read: every saved profile with its typed
+// status, so a profile this release cannot run still lists and can be repaired.
+func loadRegistry() (profile.Registry, error) {
+	return profile.ReadConfig(profile.DefaultPath())
 }
 
 // ---------- profiles ----------
@@ -44,10 +46,11 @@ func NewCommand() *cobra.Command {
 			if stats && (statsDays < 1 || statsDays > 365) {
 				return fmt.Errorf("--days must be between 1 and 365")
 			}
-			s, err := loadStore()
+			reg, err := loadRegistry()
 			if err != nil {
 				return err
 			}
+			s := reg.Store
 			visible := s.Profiles
 			if !all {
 				visible = s.EnabledProfiles()
@@ -69,6 +72,7 @@ func NewCommand() *cobra.Command {
 				rows := make([]profileListRow, 0, len(visible))
 				for _, p := range visible {
 					row := newProfileListRow(p)
+					row.Problem = reg.Reports[p.Name].Status
 					if stats {
 						value := byName[p.Name]
 						value.Profile = p.Name
@@ -103,6 +107,9 @@ func NewCommand() *cobra.Command {
 				}
 				if p.Disabled {
 					def += "  (DISABLED)"
+				}
+				if report := reg.Reports[p.Name]; report.Status != profile.StatusOK {
+					def += "  (NEEDS REPAIR: " + string(report.Status) + ")"
 				}
 				if len(p.Uses) > 0 {
 					def += "  (" + strings.Join(p.Uses, ", ") + " only)"
@@ -152,15 +159,17 @@ func NewCommand() *cobra.Command {
 		Short: "Show one profile (JSON)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, a []string) error {
-			s, err := loadStore()
+			reg, err := loadRegistry()
 			if err != nil {
 				return err
 			}
-			p, ok := s.Get(a[0])
+			p, ok := reg.Store.Get(a[0])
 			if !ok {
 				return fmt.Errorf("no profile named %q", a[0])
 			}
-			b, _ := json.MarshalIndent(newProfileListRow(*p), "", "  ")
+			row := newProfileListRow(*p)
+			row.Problem = reg.Reports[a[0]].Status
+			b, _ := json.MarshalIndent(row, "", "  ")
 			fmt.Fprintln(c.OutOrStdout(), string(b))
 			return nil
 		},
@@ -280,6 +289,8 @@ type profileListRow struct {
 	Diagnostics      int                         `json:"diagnostics"`
 	EffectiveDialect string                      `json:"effectiveDialect"`
 	Stats            *subagent.ProfileUsageStats `json:"stats,omitempty"`
+	// Problem is the typed reason this profile cannot run; empty means launchable.
+	Problem profile.Status `json:"problem,omitempty"`
 }
 
 // profileListSnapshot preserves the selected window in machine-readable output.
