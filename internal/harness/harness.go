@@ -307,10 +307,11 @@ type ExecutionOptions struct {
 	// It cannot suppress process, protocol, cancellation, or steering errors.
 	AcceptEmptyOutput func() bool
 
-	// AcceptCleanEmptyStop confirms that this invocation owes no report, so a
-	// turn the harness ended cleanly with no final text is finished. It cannot
+	// AcceptCleanEmptyStop finishes a turn the harness ended cleanly with no
+	// final text, even when it owes a report: the report then carries no
+	// summary. A turn that needs a structured result must not set it. It cannot
 	// suppress process, protocol, cancellation, or steering errors.
-	AcceptCleanEmptyStop func() bool
+	AcceptCleanEmptyStop bool
 
 	// ConstrainProfile applies service permissions after private runtime
 	// preparation, so generated configuration cannot widen those permissions.
@@ -896,8 +897,8 @@ func (r *journaledRun) attemptFailure(a attempt) error {
 	if a.output == "" && r.exec.AcceptEmptyOutput != nil {
 		a.allowEmptyOutput = r.exec.AcceptEmptyOutput()
 	}
-	if a.output == "" && !a.allowEmptyOutput && r.exec.AcceptCleanEmptyStop != nil {
-		a.allowEmptyOutput = cleanEmptyStop(r.p, a.stdout) && r.exec.AcceptCleanEmptyStop()
+	if a.output == "" && r.exec.AcceptCleanEmptyStop && cleanEmptyStop(r.p, a.stdout) {
+		a.allowEmptyOutput = true
 	}
 	return attemptError(r.ctx, r.p, r.spec.argv, a)
 }

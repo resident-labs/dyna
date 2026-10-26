@@ -438,3 +438,34 @@ func TestDefaultRunnerRunsSystemctlOnce(t *testing.T) {
 		t.Fatalf("argv =\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestRestartPendingSince(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	window := 30 * time.Minute
+	mark := func(age time.Duration) {
+		t.Helper()
+		if err := MarkRestartPending(dir); err != nil {
+			t.Fatal(err)
+		}
+		at := now.Add(-age)
+		if err := os.Chtimes(filepath.Join(dir, RestartPending), at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := now.Add(-time.Hour)
+	if RestartPendingSince(dir, started, now, window) {
+		t.Fatal("no marker counted as pending")
+	}
+	mark(10 * time.Minute)
+	if !RestartPendingSince(dir, started, now, window) {
+		t.Fatal("a recent marker after the service started was ignored")
+	}
+	if RestartPendingSince(dir, now.Add(-5*time.Minute), now, window) {
+		t.Fatal("a marker older than the service start still blocks: the restart already happened")
+	}
+	mark(time.Hour)
+	if RestartPendingSince(dir, now.Add(-2*time.Hour), now, window) {
+		t.Fatal("a marker older than the window blocks for good")
+	}
+}

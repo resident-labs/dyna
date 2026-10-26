@@ -75,6 +75,14 @@ func dailyBackups(ctx context.Context, dataDir string) {
 	}
 }
 
+// keepCheckpointed moves WAL frames into dyna.db on a timer, so no COMMIT
+// pays for the checkpoint while it holds the writer lock. It stops with ctx.
+func keepCheckpointed(ctx context.Context, dataDir string) {
+	ticker := time.NewTicker(database.CheckpointEvery)
+	defer ticker.Stop()
+	database.KeepCheckpointed(ctx, dataDir, ticker.C)
+}
+
 // recoverStores waits for a known old-format writer to exit before restarting.
 // It never migrates while read-only handlers are running. Unknown failures stay
 // read-only. Both cases alert through the room feed once after two minutes.

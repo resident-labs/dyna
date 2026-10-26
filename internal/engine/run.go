@@ -408,6 +408,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	readOnly, migrateStatus, connectRefused, migrateCause := startMode(dataDir, f.ReadOnly, group, ownerData)
 	if !readOnly {
 		go dailyBackups(ctx, store.DataDir())
+		go keepCheckpointed(ctx, store.DataDir())
 	}
 	if f.Addr == "" {
 		f.Addr = defaultServeAddr
