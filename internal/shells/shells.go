@@ -957,12 +957,22 @@ func StartSupervisor(exe, id string) error {
 		_, cleanup := stopOrphans(id)
 		return errors.Join(err, cleanup)
 	}
-	if _, err := gateWrite.Write([]byte{'g'}); err != nil {
+	if err := sendGoAhead(gateWrite); err != nil {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_, _ = cmd.Process.Wait()
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// sendGoAhead tells a waiting supervisor to start its command. A supervisor
+// that already ended without reading it never starts the command; its own
+// error is in the job folder, so a closed gate is not a launch failure.
+func sendGoAhead(gate io.Writer) error {
+	if _, err := gate.Write([]byte{'g'}); err != nil && !errors.Is(err, syscall.EPIPE) {
+		return err
+	}
+	return nil
 }
 
 // launchGateEnv names the file descriptor on which a supervisor waits for its
