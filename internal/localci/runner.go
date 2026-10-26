@@ -155,6 +155,9 @@ type Result struct {
 	// another run on the same machine. One marker bounds that retry, so a run the
 	// engine keeps stopping cannot loop for ever.
 	Resumed bool `json:"resumed,omitempty"`
+	// Warnings are what went wrong after the checks, such as a cleanup on the
+	// node that did not finish. They never change the status of the run.
+	Warnings []CleanupWarning `json:"warnings,omitempty"`
 }
 
 // CleanupWarning is a cleanup the runner did after a check that still decided
@@ -170,6 +173,10 @@ const (
 	// after the node had already recorded the check's exit, so the check was
 	// judged from the node's own record that came back with the reports.
 	TransportDiedAfterCompletion CleanupWarning = "transport-died-after-completion"
+	// NodeCleanupUnfinished means the cleanup after the run did not finish on
+	// the node. The checks decided the commit. Nothing retries the cleanup later
+	// (D-263), so what it left may need removing by hand.
+	NodeCleanupUnfinished CleanupWarning = "node-cleanup-unfinished"
 )
 
 // Label is the sentence the checks view shows for a cleanup warning.
@@ -179,6 +186,8 @@ func (w CleanupWarning) Label() string {
 		return "a process left by the check held its output open; the runner killed it"
 	case TransportDiedAfterCompletion:
 		return "the connection to the CI machine died after the check completed; its exit came from the machine's own record"
+	case NodeCleanupUnfinished:
+		return "the cleanup on the CI machine did not finish after the run; a container or process the run started may still be there and may need removing by hand"
 	}
 	return ""
 }
