@@ -48,6 +48,36 @@ func find(list []machines.Machine, name string) (machines.Machine, bool) {
 	return machines.Machine{}, false
 }
 
+// The owner sets a machine's ssh connect timeout with edit and reads it back
+// with show; zero restores the default, and a value ssh cannot read is refused.
+func TestMachineEditSetsSSHConnectTimeout(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "pve", "--ssh", "pip@pve", "--ci-slots", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "show", "pve"); err != nil || !strings.Contains(out, "SSH connect timeout: 10s") {
+		t.Fatalf("default timeout = %q, %v", out, err)
+	}
+	if _, err := run(t, "edit", "pve", "--ssh-connect-timeout", "60s"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "show", "pve"); err != nil || !strings.Contains(out, "SSH connect timeout: 1m0s") {
+		t.Fatalf("timeout after edit = %q, %v", out, err)
+	}
+	for _, bad := range []string{"-5s", "1500ms", "2h"} {
+		if _, err := run(t, "edit", "pve", "--ssh-connect-timeout", bad); err == nil {
+			t.Fatalf("timeout %s was accepted", bad)
+		}
+	}
+	if _, err := run(t, "edit", "pve", "--ssh-connect-timeout", "0"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "show", "pve"); err != nil || !strings.Contains(out, "SSH connect timeout: 10s") {
+		t.Fatalf("timeout after reset = %q, %v", out, err)
+	}
+}
+
 func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	storetest.DataDir(t)
 	stubEngine(t)

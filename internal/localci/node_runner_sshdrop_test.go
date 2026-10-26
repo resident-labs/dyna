@@ -2,9 +2,12 @@ package localci
 
 import (
 	"context"
+	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sshDropError is the error an SSH client leaves when it loses the connection.
@@ -38,6 +41,36 @@ func TestNodeProgramOptsOutOfConnectionMultiplexing(t *testing.T) {
 	// A local node still runs the program itself.
 	if name, args := (Runner{Node: &Node{Name: "this-machine"}}).nodeProgram("bash", []string{"-c", "true"}); name != "bash" || len(args) != 2 {
 		t.Fatalf("local node lost its program: %q %v", name, args)
+	}
+}
+
+// A node reached through a slow jump host dials with its own connect timeout, so
+// a fixed ten seconds does not fail a healthy machine (D-195, D-197).
+func TestNodeProgramUsesNodeConnectTimeout(t *testing.T) {
+	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve", SSHConnectTimeout: 60 * time.Second}}
+	_, args := r.nodeProgram("bash", []string{"-c", "true"})
+	if !slices.Contains(args, "ConnectTimeout=60") || slices.Contains(args, "ConnectTimeout=10") {
+		t.Fatalf("ssh args %v, want ConnectTimeout=60", args)
+	}
+}
+
+// The commit push to a node goes over the same slow relay, so it dials with the
+// node's connect timeout too, set for that one git command.
+func TestPushCommitToNodeUsesNodeConnectTimeout(t *testing.T) {
+	var pushed []string
+	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve", SSHConnectTimeout: 60 * time.Second}}
+	r.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
+		if name == "git" {
+			pushed = args
+		}
+		return nil
+	}
+	if err := r.pushCommitToNode(t.Context(), "/repo", "/var/tmp/cache", "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=60", "push", "fl-rea-pve:/var/tmp/cache", "abc123:refs/dyna/ci/abc123"}
+	if !slices.Equal(pushed, want) {
+		t.Fatalf("git args = %q, want %q", pushed, want)
 	}
 }
 
