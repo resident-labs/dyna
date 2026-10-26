@@ -69,7 +69,6 @@ type Service struct {
 	WarmDefinition  func(context.Context, string, string) (*localci.Definition, error)
 	WarmRun         func(context.Context, localci.Node, localci.WarmRequest) error
 	registeredWarms *warmRuns
-	warmOnce        sync.Once
 }
 
 func New() *Service { return &Service{Store: DefaultStore(), Notify: notify.Default(), Now: time.Now} }
