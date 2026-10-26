@@ -1,10 +1,16 @@
 package localci
 
 import (
+	"encoding/json"
+	"fmt"
 	"path"
 	"strconv"
 
 	"dyna-agent/internal/shellquote"
+
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 )
 
 // actVersion is the nektos/act release Dyna installs on a CI node. Dyna pins
@@ -54,6 +60,133 @@ func actContainerOptions(check nodeCheck, runID string) string {
 		" --memory " + strconv.FormatInt(check.resources.MemoryMiB, 10) + "m" +
 		" --label dyna.run=" + runID +
 		" --label dyna.check=" + string(check.id)
+}
+
+// tagWorkflowBody returns content with its top-level name value replaced by
+// tag. act names a job's containers after the workflow, so two act processes
+// that share one workflow fight over one container name, and every job check
+// tags its own copy of the workflow it runs. The name is replaced through the
+// parsed document, because a valid name takes forms a line edit corrupts: a
+// quoted key gains a duplicate name, a block scalar keeps its content behind
+// the replaced line, and a value on the line after its key never matches a
+// same-line pattern at all. Everything outside the name value keeps its
+// structure. A document without a name key gains one in the parsed mapping.
+func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
+	file, err := parser.ParseBytes(content, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow: %w", err)
+	}
+	if len(file.Docs) != 1 {
+		return nil, fmt.Errorf("the workflow is not one document")
+	}
+	body, ok := file.Docs[0].Body.(*ast.MappingNode)
+	if !ok {
+		return nil, fmt.Errorf("the workflow is not a mapping")
+	}
+	// A node parsed from the tag itself replaces the value, so no node is ever
+	// built by hand and the value renders as the plain scalar act reads.
+	tagged, err := parser.ParseBytes([]byte("name: "+tag), 0)
+	if err != nil {
+		return nil, err
+	}
+	tagName := tagged.Docs[0].Body.(*ast.MappingNode).Values[0]
+	for _, entry := range body.Values {
+		key, ok := entry.Key.(*ast.StringNode)
+		if !ok || key.Value != "name" {
+			continue
+		}
+		// Replacing an anchored value drops the anchor, and an alias elsewhere
+		// in the file that points at it would then name nothing, which act's
+		// decoder rejects. Each alias becomes a copy of the original value
+		// first, so every other field keeps the value it had.
+		if anchor, ok := entry.Value.(*ast.AnchorNode); ok {
+			// The decoder resolves the value the way act will read it, block
+			// scalar headers and folding included.
+			var named struct {
+				Name *string `yaml:"name"`
+			}
+			if err := yaml.Unmarshal(content, &named); err != nil {
+				return nil, fmt.Errorf("read the workflow name: %w", err)
+			}
+			if err := inlineAlias(file.Docs[0], anchor, named.Name); err != nil {
+				return nil, err
+			}
+		}
+		if err := entry.Replace(tagName.Value); err != nil {
+			return nil, fmt.Errorf("replace the name value: %w", err)
+		}
+		return []byte(file.String()), nil
+	}
+	// No name key: the name joins the parsed mapping, ahead of the other keys.
+	// Text in front of the content cannot do this, because a comment, a
+	// directive or a document marker before the mapping would leave the tag in
+	// a document of its own.
+	// The node comes from text at column 1, and the printer keeps every node's
+	// own column, so the name moves to the column the mapping's keys start at.
+	if len(body.Values) > 0 {
+		tagName.AddColumn(body.Values[0].Key.GetToken().Position.Column - tagName.Key.GetToken().Position.Column)
+	}
+	body.Values = append([]*ast.MappingValueNode{tagName}, body.Values...)
+	return []byte(file.String()), nil
+}
+
+// inlineAlias replaces every alias of anchor in the document with a copy of the
+// anchored value. A string value is written as a double-quoted scalar of its
+// resolved text, because a block scalar's content is printed from its original
+// position and would land outside the mapping that holds the copy. Each copy is
+// parsed from that text, so it is a node of its own.
+func inlineAlias(root ast.Node, anchor *ast.AnchorNode, resolved *string) error {
+	name := anchor.Name.String()
+	text := anchor.Value.String()
+	if resolved != nil {
+		quoted, err := json.Marshal(*resolved)
+		if err != nil {
+			return fmt.Errorf("quote the anchored value: %w", err)
+		}
+		text = string(quoted)
+	}
+	var failed error
+	copyOf := func(at ast.Node) ast.Node {
+		doc, err := parser.ParseBytes([]byte("k: "+text), 0)
+		if err != nil {
+			failed = fmt.Errorf("copy the anchored value: %w", err)
+			return at
+		}
+		value := doc.Docs[0].Body.(*ast.MappingNode).Values[0].Value
+		value.AddColumn(at.GetToken().Position.Column - value.GetToken().Position.Column)
+		return value
+	}
+	var visit func(node ast.Node) ast.Node
+	visit = func(node ast.Node) ast.Node {
+		switch n := node.(type) {
+		case *ast.AliasNode:
+			if n.Value.String() == name {
+				return copyOf(n)
+			}
+		case *ast.DocumentNode:
+			n.Body = visit(n.Body)
+		case *ast.MappingNode:
+			for _, entry := range n.Values {
+				visit(entry)
+			}
+		case *ast.MappingValueNode:
+			n.Value = visit(n.Value)
+		case *ast.SequenceNode:
+			for i, value := range n.Values {
+				n.Values[i] = visit(value)
+			}
+			for _, entry := range n.Entries {
+				entry.Value = visit(entry.Value)
+			}
+		case *ast.AnchorNode:
+			n.Value = visit(n.Value)
+		case *ast.TagNode:
+			n.Value = visit(n.Value)
+		}
+		return node
+	}
+	visit(root)
+	return failed
 }
 
 // actArtifactPortBase is the first port the artifact server of a node's slot
