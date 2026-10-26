@@ -165,13 +165,12 @@ func TestCallsActForTheirCaller(t *testing.T) {
 		{websvc.Caller{Kind: websvc.Session, Session: agent}, authority.Actor{Role: authority.Session, Session: agent, Room: "room"}},
 		{websvc.Caller{Kind: websvc.Session, Session: root}, authority.Actor{Role: authority.Root, Session: root, Room: "room"}},
 		{websvc.Caller{Kind: websvc.Worker, Run: "run_a"}, authority.Actor{Role: authority.Worker, Run: "run_a", Room: "room"}},
-		{websvc.Caller{Kind: websvc.Worker, Run: "run_a", Agent: 2}, authority.Actor{Role: authority.Worker, Run: "run_a", Agent: 2, Room: "room"}},
 	} {
 		if got, err := callers.actor(tc.caller); err != nil || got != tc.want {
 			t.Errorf("actor(%+v) = %+v, %v; want %+v", tc.caller, got, err, tc.want)
 		}
 	}
-	for _, bad := range []websvc.Caller{{Kind: "admin"}, {Kind: websvc.Worker}, {Kind: websvc.Worker, Run: "run_a", Agent: -1}} {
+	for _, bad := range []websvc.Caller{{Kind: "admin"}, {Kind: websvc.Worker}, {Kind: websvc.Worker, Run: "run_a", Agent: -1}, {Kind: websvc.Worker, Run: "run_a", Agent: 2}} {
 		if _, err := callers.actor(bad); err == nil {
 			t.Errorf("caller %+v was served", bad)
 		}
@@ -188,45 +187,5 @@ func TestCallsActForTheirCaller(t *testing.T) {
 	callers.actForCallers(calls)
 	if got, err := calls["Who"](context.Background(), nil); err != nil || got != (authority.Actor{Role: authority.Owner}) {
 		t.Fatalf("a device call acts for %+v, %v; want the owner", got, err)
-	}
-}
-
-// A workflow agent's harness process is recorded for its agent number, so
-// the agent acts as itself with no claim at all: a pin, which carries no
-// claim, names agent 2, even when callers are enforced.
-func TestARecordedAgentActsAsItsOwnNumber(t *testing.T) {
-	data := t.TempDir()
-	cmd := exec.Command("/bin/sh", "-c", "read line")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
-	agent := callerid.Identity{Kind: callerid.Worker, Run: "wf_1", Agent: 2}
-	if err := callerid.RecordStarted(context.Background(), cmd.Process.Pid, callerid.Launch{DataDir: data, Name: "wf_1", Actor: agent, Launcher: "workflow"}); err != nil {
-		t.Fatal(err)
-	}
-	store, err := callerid.OpenStore(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := callerid.New("/proc", os.Getpid(), store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	callers := &socketCallers{resolve: func(net.Conn) callerid.Identity { return r.Resolve(cmd.Process.Pid) }, runRoom: func(string) (string, error) { return "room", nil }}
-	caller, err := callers.identify(nil)
-	if err != nil || caller != (websvc.Caller{Kind: websvc.Worker, Run: "wf_1", Agent: 2}) {
-		t.Fatalf("identify = %+v, %v; want agent 2 of wf_1", caller, err)
-	}
-	actor, err := callers.actor(caller)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if by, err := pinnedBy(caller, true, actor, true, t.Logf, nil); err != nil || by != "run wf_1 agent 2" {
-		t.Fatalf("pinned by %q, %v; want run wf_1 agent 2", by, err)
 	}
 }

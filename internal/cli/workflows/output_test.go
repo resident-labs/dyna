@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -362,12 +364,14 @@ func createOutputFixture(t *testing.T, runID string, agentID int) *runstore.Run 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "null", nil) })
-	if _, err := run.StartAgentOutput(agentID); err != nil {
+	dir := filepath.Join(run.Dir, "agents", strconv.Itoa(agentID))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	selected := workeroutput.ProfileSnapshot{Name: "sol", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectText}}
-	if _, err := run.StartAgentNormalizedOutput(agentID, selected); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"stdout.log", "output.jsonl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return run
 }

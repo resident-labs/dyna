@@ -8,8 +8,8 @@ import (
 	"dyna-agent/internal/workeroutput"
 )
 
-// SteeringSource is what a steering supervisor drains. Run workers use the
-// run-owned agent queue (workerSteering); subagent sessions bring their turn gate.
+// SteeringSource is what a steering supervisor drains. Every agent, including a
+// workflow agent, is a session and brings its turn gate.
 type SteeringSource interface {
 	// Activate opens the source to submissions. It must be idempotent.
 	Activate() error
@@ -26,17 +26,6 @@ type steeringWake interface {
 	Wake() <-chan struct{}
 }
 
-type workerSteering struct {
-	runID   string
-	agentID int
-}
-
-func (m workerSteering) Activate() error { return runstore.ActivateAgentSteering(m.runID, m.agentID) }
-func (m workerSteering) Read(offset int64, final bool) ([]runstore.SteeringMessage, int64, error) {
-	return runstore.ReadAgentSteeringFrom(m.runID, m.agentID, offset, final)
-}
-func (m workerSteering) Deactivate() { _ = runstore.DeactivateAgentSteering(m.runID, m.agentID) }
-
 type steeringSupervisor struct {
 	dispatched map[runstore.SteeringMessage]bool
 	opts       SteeringOptions
@@ -51,14 +40,10 @@ func newSteeringSupervisor(opts SteeringOptions, resumable bool) *steeringSuperv
 	if !resumable {
 		return nil
 	}
-	source := opts.Source
-	if source == nil {
-		if opts.RunID == "" || opts.AgentID <= 0 {
-			return nil
-		}
-		source = workerSteering{runID: opts.RunID, agentID: opts.AgentID}
+	if opts.Source == nil {
+		return nil
 	}
-	return &steeringSupervisor{opts: opts, source: source}
+	return &steeringSupervisor{opts: opts, source: opts.Source}
 }
 
 func (s *steeringSupervisor) activateIfReady(sessionID string) error {

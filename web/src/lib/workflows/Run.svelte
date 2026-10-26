@@ -20,7 +20,7 @@
     error?: string
     oncancel?: ((run: RunSummary) => void) | null
     onpause?: ((run: RunSummary) => Promise<void>) | null
-    onsteer?: ((run: RunSummary, agent: RunAgent) => void) | null
+    onopen?: ((run: RunSummary, agent: RunAgent) => void) | null
   }
   interface Group {
     phase: string
@@ -28,7 +28,7 @@
     state: string
     done: number
   }
-  let { detail = null, error = '', oncancel = null, onpause = null, onsteer = null }: Props = $props()
+  let { detail = null, error = '', oncancel = null, onpause = null, onopen = null }: Props = $props()
 
   const label: Record<string, string> = { running: 'Running', ok: 'Done', error: 'Failed', canceled: 'Canceled', unknown: 'No end recorded' }
 
@@ -194,7 +194,7 @@
               {#if a.cached}<span class="pill">cached</span>{/if}
             </span>
             <span class="time">
-              {#if a.status === 'running' && onsteer && run.status === 'running'}<button class="steer" onclick={() => onsteer?.(run, a)} title="Send this agent a message">Steer</button>{/if}
+              {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Session</button>{/if}
               {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
               {#if a.status === 'ok' || a.status === 'running'}<button class="open" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {a.label || `agent ${a.id}`}" onclick={() => workers.toggle(run.id, a.id, a.status)}><span aria-hidden="true">›</span></button>{/if}
             </span>
@@ -282,11 +282,11 @@
     .pause:hover:not(:disabled) { background: var(--raise-hover); }
   }
   .pause:active:not(:disabled) { background: var(--select); }
-  .steer { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 3px 10px; margin-right: 10px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
+  .session { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 3px 10px; margin-right: 10px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
-    .steer:hover { color: var(--ink); background: var(--raise-hover); }
+    .session:hover { color: var(--ink); background: var(--raise-hover); }
   }
-  .steer:active { background: var(--select); }
+  .session:active { background: var(--select); }
   .bar { height: 6px; border-radius: 3px; background: var(--rail); overflow: hidden; margin: 16px 0 14px; }
   .fill { display: block; height: 100%; border-radius: 3px; background: var(--faint); transition: width var(--motion-slow); }
   .fill.running { background: linear-gradient(90deg, #b59654, var(--gold)); }
@@ -334,7 +334,7 @@
     .title { flex-wrap: wrap; }
     .cancel, .pause { min-height: 44px; width: 100%; order: 5; }
     dl { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
-    .steer { min-height: 36px; padding: 0 12px; margin-right: 6px; }
+    .session { min-height: 36px; padding: 0 12px; margin-right: 6px; }
     .time { white-space: nowrap; }
     .line.live { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   }

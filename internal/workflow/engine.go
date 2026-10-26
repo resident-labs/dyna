@@ -28,7 +28,6 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/textutil"
-	"dyna-agent/internal/workeroutput"
 	"dyna-agent/internal/workflowresolve"
 	"dyna-agent/internal/worktrees"
 )
@@ -89,20 +88,6 @@ type outcome struct {
 // Execute runs the script to completion and returns the workflow's return
 // value as JSON.
 func Execute(ctx context.Context, o Options) (string, error) {
-	if o.Run != nil && o.Store != nil {
-		profiles := make([]workeroutput.ProfileSnapshot, 0, len(o.Store.Profiles))
-		for _, p := range o.Store.Profiles {
-			profiles = append(profiles, workeroutput.ProfileSnapshot{
-				Name: p.Name, Model: p.Model, Output: p.EffectiveOutput(),
-			})
-		}
-		if err := o.Run.SnapshotOutputProfiles(profiles); err != nil {
-			o.Run.Append(runstore.Event{
-				T: "log", Msg: fmt.Sprintf("output profile snapshot unavailable: %v", err),
-				Provenance: runstore.LogProvenanceSystem,
-			})
-		}
-	}
 	return execute(ctx, o, nil, 0, "", nil)
 }
 

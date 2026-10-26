@@ -169,7 +169,7 @@ func (l Launch) checkActor(owner bool) error {
 	a := l.Actor
 	switch {
 	case a.Kind == Session && a.Session != "" && a.Run == "" && a.Agent == 0:
-	case a.Kind == Worker && a.Run != "" && a.Session == "" && a.Agent >= 0:
+	case a.Kind == Worker && a.Run != "" && a.Session == "" && a.Agent == 0:
 	case a.Kind == Owner && owner && a.Session == "" && a.Run == "" && a.Agent == 0:
 	default:
 		return fmt.Errorf("a %s launch cannot be recorded for %+v", l.Launcher, a)

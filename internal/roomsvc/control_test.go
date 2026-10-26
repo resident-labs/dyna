@@ -611,3 +611,22 @@ func TestStartSubagentActsForTheCaller(t *testing.T) {
 		t.Fatalf("start event has no cwd %s: %s, %v", in.Cwd, raw, err)
 	}
 }
+
+// An agent that ran as a session names it; an agent of an older run has none.
+func TestRunDetailNamesTheAgentSessions(t *testing.T) {
+	e := newEnv(t)
+	alpha := e.room("alpha")
+	id := "wf_20261016-000004-dddddddd"
+	writeRun(t, runstore.Meta{ID: id, Name: "sessions", Status: "ok", RoomID: alpha.ID, StartedAt: time.Now(), EndedAt: time.Now()}, []runstore.Event{
+		{T: "agent_start", ID: 1, Label: "new"}, {T: "agent_end", ID: 1, Status: "ok"},
+		{T: "agent_start", ID: 2, Label: "old"}, {T: "agent_end", ID: 2, Status: "ok"},
+	}, "")
+	session := runstore.AgentSessionID(id, 1)
+	if err := os.MkdirAll(filepath.Join(runstore.SessionsDir(), session), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d, err := e.svc.RunDetail(id)
+	if err != nil || len(d.Agents) != 2 || d.Agents[0].Session != session || d.Agents[1].Session != "" {
+		t.Fatalf("agent sessions = %+v, %v; want %q for agent 1 and none for agent 2", d.Agents, err, session)
+	}
+}

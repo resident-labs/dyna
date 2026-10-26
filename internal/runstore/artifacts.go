@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -49,12 +48,6 @@ func AgentNormalizedOutputKey(runID string, agentID int) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("runs/%s/agents/%d", runID, agentID), nil
-}
-
-// AgentOutputConfigPath returns the selected profile/model declaration frozen
-// immediately before one worker invocation starts.
-func AgentOutputConfigPath(runID string, agentID int) (string, error) {
-	return agentArtifactPath(runID, agentID, "output-config.json")
 }
 
 // AgentSessionID is the ID of the leaf session that serves agent agentID of
@@ -111,26 +104,6 @@ func (r *Run) agentJournalPath(agentID int) (string, error) {
 	return path, nil
 }
 
-func (r *Run) agentOutputPath(agentID int) (string, error) {
-	if r == nil || r.Dir == "" {
-		return "", fmt.Errorf("run has no directory")
-	}
-	if err := validateAgentID(agentID); err != nil {
-		return "", err
-	}
-	return filepath.Abs(filepath.Join(r.Dir, "agents", strconv.Itoa(agentID), "stdout.log"))
-}
-
-func (r *Run) agentNormalizedOutputPath(agentID int) (string, error) {
-	if r == nil || r.Dir == "" {
-		return "", fmt.Errorf("run has no directory")
-	}
-	if err := validateAgentID(agentID); err != nil {
-		return "", err
-	}
-	return filepath.Abs(filepath.Join(r.Dir, "agents", strconv.Itoa(agentID), "output.jsonl"))
-}
-
 // StartAgentJournal creates an agent journal and writes its first, system-
 // authored record. Prompt is stored in full; it is deliberately not the
 // truncated preview used by events.jsonl.
@@ -150,49 +123,6 @@ func (r *Run) StartAgentJournal(agentID int, label, profile, phase, prompt strin
 		return "", err
 	}
 	return path, nil
-}
-
-// StartAgentOutput creates the append-only stdout artifact before the harness
-// starts. The harness writes raw bytes to it as they arrive.
-func (r *Run) StartAgentOutput(agentID int) (string, error) {
-	path, err := r.agentOutputPath(agentID)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("create agent output directory: %w", err)
-	}
-	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_EXCL|syscall.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("create agent output: %w", err)
-	}
-	return path, syscall.Close(fd)
-}
-
-// StartAgentNormalizedOutput snapshots the selected declaration and creates
-// its append-only normalized stream. Raw stdout setup remains independent.
-func (r *Run) StartAgentNormalizedOutput(agentID int, selected workeroutput.ProfileSnapshot) (string, error) {
-	path, err := r.agentNormalizedOutputPath(agentID)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("create agent output directory: %w", err)
-	}
-	snapshot := workeroutput.SelectedSnapshot{Version: workeroutput.SchemaVersion, Profile: selected}
-	b, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	configPath := filepath.Join(filepath.Dir(path), "output-config.json")
-	if err := writeExclusiveFile(configPath, append(b, '\n')); err != nil {
-		return "", fmt.Errorf("snapshot selected output: %w", err)
-	}
-	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_EXCL|syscall.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("create normalized agent output: %w", err)
-	}
-	return path, syscall.Close(fd)
 }
 
 // AppendAgentJournal appends a timestamped, system-authored record to an
