@@ -364,10 +364,13 @@ func (r Runner) nodeDial(ctx context.Context, fn Command, out, stderr io.Writer,
 	// buffer that is not safe for that.
 	var forward sync.Mutex
 	var wrote countingWriter
-	var dialErr tailBuffer
-	stdout := lockedWriter{mu: &forward, dst: io.MultiWriter(out, &wrote)}
-	diagnostics := lockedWriter{mu: &forward, dst: io.MultiWriter(stderr, &dialErr)}
 	for attempt := 0; ; attempt++ {
+		// One fresh diagnostic tail per attempt, behind the shared lock: a kept
+		// tail would let an earlier dial error answer for a later attempt that
+		// reached the node and then lost it, and re-run a command that ran.
+		var dialErr tailBuffer
+		stdout := lockedWriter{mu: &forward, dst: io.MultiWriter(out, &wrote)}
+		diagnostics := lockedWriter{mu: &forward, dst: io.MultiWriter(stderr, &dialErr)}
 		err := fn(ctx, "", nil, &stdout, &diagnostics, name, args...)
 		if err == nil || attempt == sshDialAttempts-1 || wrote.n > 0 || !sshDialExit(err, &dialErr) {
 			return err

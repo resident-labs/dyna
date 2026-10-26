@@ -223,16 +223,19 @@ func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 // after the command started, without ssh's own transport exit, or without a
 // dial error, never retries.
 func TestNodeCommandRetriesSSHDial(t *testing.T) {
-	for _, tc := range []struct {
+	type attemptCase struct {
 		name      string
 		stdout    string
 		stderr    string
 		exit      int
+		stderr2   string
+		exit2     int
 		failures  int
 		wantCalls int
 		wantErr   bool
 		wantNote  bool
-	}{
+	}
+	for _, tc := range []attemptCase{
 		{
 			name:      "banner exchange timeout clears",
 			stderr:    "ssh: connect to host node port 22: Operation timed out\r\nConnection timed out during banner exchange\r\nConnection to UNKNOWN port 65535 timed out\n",
@@ -276,6 +279,17 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 			wantErr:   true,
 		},
 		{
+			name:      "dial failure then started command drops",
+			stderr:    "ssh: connect to host node port 22: Connection refused\n",
+			exit:      255,
+			stderr2:   "client_loop: send disconnect: Connection reset\n",
+			exit2:     255,
+			failures:  2,
+			wantCalls: 2,
+			wantErr:   true,
+			wantNote:  true,
+		},
+		{
 			name:      "not a dial failure",
 			stderr:    "error: build failed\n",
 			exit:      1,
@@ -304,10 +318,14 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 						t.Errorf("ssh args %v, want an explicit ConnectTimeout=10 like the machine probe", args)
 					}
 				}
+				diagnostic, exit := tc.stderr, tc.exit
+				if calls >= 2 && tc.stderr2 != "" {
+					diagnostic, exit = tc.stderr2, tc.exit2
+				}
 				if calls <= tc.failures {
-					fmt.Fprint(stderr, tc.stderr)
+					fmt.Fprint(stderr, diagnostic)
 					fmt.Fprint(out, tc.stdout)
-					return exitStatus(tc.exit)
+					return exitStatus(exit)
 				}
 				fmt.Fprint(stderr, tc.stderr)
 				fmt.Fprint(out, tc.stdout)
