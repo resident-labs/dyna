@@ -127,13 +127,13 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 	})
 	base := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", base))
-	select {
-	case req := <-started:
-		if req.SHA != base || req.Job != "cache-warm" || req.Workflow != ".github/workflows/ci.yml" || req.RoomID != "room_dyna" {
-			t.Fatalf("warm request = %+v", req)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no warm run started for a moved default branch")
+	// Admission is synchronous, so a missing run fails here without waiting.
+	if got := s.warmRuns().count(); got != 1 {
+		t.Fatalf("%d warm runs started for a moved default branch, want one", got)
+	}
+	req := <-started
+	if req.SHA != base || req.Job != "cache-warm" || req.Workflow != ".github/workflows/ci.yml" || req.RoomID != "room_dyna" {
+		t.Fatalf("warm request = %+v", req)
 	}
 	// A second tick while the first run is in flight starts nothing.
 	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", base))
@@ -198,17 +198,13 @@ func TestWarmTakesTheRoomEachMachineServes(t *testing.T) {
 	base := strings.Repeat("a", 40)
 	state := warmStateIn(t, "owner/repo", []roomCheckout{{room: "room_one", path: t.TempDir()}, {room: "room_two", path: t.TempDir()}}, base)
 	s.scheduleCacheWarm(context.Background(), state)
+	if got := s.warmRuns().count(); got != 2 {
+		t.Fatalf("%d warm runs started, want one per room", got)
+	}
 	rooms := map[string]string{}
 	for range 2 {
-		select {
-		case req := <-requests:
-			rooms[req.RepoDir] = req.RoomID
-		case <-time.After(5 * time.Second):
-			t.Fatalf("only %d warm runs started, want one per room", len(rooms))
-		}
-	}
-	if len(rooms) != 2 {
-		t.Fatalf("warm runs = %v, want one per room", rooms)
+		req := <-requests
+		rooms[req.RepoDir] = req.RoomID
 	}
 	for _, room := range rooms {
 		if room != "room_one" && room != "room_two" {
@@ -246,12 +242,10 @@ func TestWarmUsesALiveCheckoutOfAMergedChange(t *testing.T) {
 	live := matchingRepoDir(t, "owner/repo")
 	state := warmStateIn(t, "owner/repo", []roomCheckout{{room: "room_dyna", lookup: live}}, strings.Repeat("a", 40))
 	s.scheduleCacheWarm(context.Background(), state)
-	select {
-	case req := <-requests:
-		if req.RepoDir != live {
-			t.Fatalf("warm run works in %q, want the live checkout %q", req.RepoDir, live)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no warm run started from the live checkout")
+	if got := s.warmRuns().count(); got != 1 {
+		t.Fatalf("%d warm runs started from the live checkout, want one", got)
+	}
+	if req := <-requests; req.RepoDir != live {
+		t.Fatalf("warm run works in %q, want the live checkout %q", req.RepoDir, live)
 	}
 }
