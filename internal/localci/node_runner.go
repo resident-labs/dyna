@@ -1133,8 +1133,29 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	if !check.host {
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
-	cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
-	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+	if check.job != nil {
+		// A job check's workspace is copied into the job container, so its
+		// repository must stand alone: a worktree's .git points back at the
+		// node's cache, which does not exist inside the container, and the
+		// workflow's own git steps then fail. A local clone keeps the objects
+		// shared with the cache and takes the commit under the ref the runner
+		// pushed.
+		cleanup += "rm -rf " + q(work) + " >/dev/null 2>&1 || true"
+	} else {
+		cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
+	}
+	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
+	if check.job != nil {
+		// The checkout is a branch, not a detached commit: act copies the
+		// workspace into the job container file by file, so an empty refs tree
+		// never arrives and a detached commit leaves the copy a directory git
+		// refuses. A named ref is a file and lands with the copy.
+		setup += "git clone --quiet --no-checkout " + q(cache) + " " + q(work) + " || exit 69; " +
+			"git -C " + q(work) + " fetch --quiet " + q(cache) + " +refs/dyna/ci/*:refs/dyna/ci/* || exit 69; " +
+			"git -C " + q(work) + " checkout --quiet -B dyna-ci " + q(sha) + " || exit 69; "
+	} else {
+		setup += "git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+	}
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
 	}
@@ -1155,6 +1176,19 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			actEvent = "push"
 		}
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
+		// act names a job's containers after the workflow and the job alone, so
+		// two act processes that share a workflow fight over one container name,
+		// starting with the job every other job needs: nine checks of one run
+		// each started the workflow's "changes" job and collided. Each check
+		// renames its own copy of the workflow to this run and check, which
+		// names every container it starts, its volumes included, alone. The
+		// workflow name is the one value a job can read of it (github.workflow);
+		// a repository that keys on that name sees the tagged one under act.
+		workflowFile := path.Join(work, check.job.Workflow)
+		tag := "CI-dyna-" + runID + "-" + string(check.id)
+		setup += "if grep -q '^name:' " + q(workflowFile) + "; then sed -i '0,/^name:.*/s//name: " + tag + "/' " + q(workflowFile) + "; " +
+			"elif [ \"$(head -n1 " + q(workflowFile) + ")\" = '---' ]; then sed -i '1a name: " + tag + "' " + q(workflowFile) + "; " +
+			"else sed -i '1i name: " + tag + "' " + q(workflowFile) + "; fi; "
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
 		// harness variable on this machine must never reach a job container. The
