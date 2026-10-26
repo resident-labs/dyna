@@ -30,6 +30,41 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+// initializeResult is the answer to a client's initialize request.
+type initializeResult struct {
+	ProtocolVersion string       `json:"protocolVersion"`
+	Capabilities    capabilities `json:"capabilities"`
+	ServerInfo      serverInfo   `json:"serverInfo"`
+}
+
+// capabilities advertises what this server offers.
+type capabilities struct {
+	Tools struct{} `json:"tools"`
+}
+
+// serverInfo names this server to the client.
+type serverInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// toolListResult is the answer to tools/list.
+type toolListResult struct {
+	Tools []toolDefinition `json:"tools"`
+}
+
+// callResult is the answer to tools/call.
+type callResult struct {
+	Content []contentItem `json:"content"`
+	IsError bool          `json:"isError"`
+}
+
+// contentItem is one piece of a tool answer.
+type contentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 // Serve answers newline-delimited JSON-RPC requests until in ends. Tool calls
 // run concurrently, so a long wait does not block pings or cancellations.
 func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error {
@@ -70,15 +105,15 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 			if p.ProtocolVersion == "" {
 				p.ProtocolVersion = "2025-06-18"
 			}
-			send(response{ID: req.ID, Result: map[string]any{
-				"protocolVersion": p.ProtocolVersion,
-				"capabilities":    map[string]any{"tools": map[string]any{}},
-				"serverInfo":      map[string]string{"name": "dyna", "version": "1"},
+			send(response{ID: req.ID, Result: initializeResult{
+				ProtocolVersion: p.ProtocolVersion,
+				Capabilities:    capabilities{},
+				ServerInfo:      serverInfo{Name: "dyna", Version: "1"},
 			}})
 		case "ping":
-			send(response{ID: req.ID, Result: map[string]any{}})
+			send(response{ID: req.ID, Result: struct{}{}})
 		case "tools/list":
-			send(response{ID: req.ID, Result: map[string]any{"tools": tools.tools()}})
+			send(response{ID: req.ID, Result: toolListResult{Tools: tools.tools()}})
 		case "tools/call":
 			var p struct {
 				Name      string          `json:"name"`
@@ -105,7 +140,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 				mu.Lock()
 				delete(running, key)
 				deliver(callCtx, tools, r, func(r Result) error {
-					return send(response{ID: req.ID, Result: map[string]any{"content": []map[string]string{{"type": "text", "text": r.Text}}, "isError": r.Failed}})
+					return send(response{ID: req.ID, Result: callResult{Content: []contentItem{{Type: "text", Text: r.Text}}, IsError: r.Failed}})
 				})
 				mu.Unlock()
 				stop()
