@@ -614,8 +614,8 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	if in.Status == "lost" {
 		// The supervisor died, but the command and its children may run on.
 		// Only processes stamped with this job's ID are ours to end (D-190).
-		logErr := s.logStop(id, "supervisor is gone; sending SIGTERM to the job's processes")
-		found, err := stopOrphans(id, 5*time.Second)
+		logErr := s.logStop(id, "supervisor is gone; sending SIGKILL to the job's processes")
+		found, err := stopOrphans(id)
 		if err != nil {
 			return in, errors.Join(logErr, err)
 		}

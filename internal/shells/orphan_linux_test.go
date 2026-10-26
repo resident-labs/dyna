@@ -81,57 +81,56 @@ func TestStopKillsUnstampedGroupMemberThatIgnoresSigterm(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
 	// The child prints its PID, then ignores SIGTERM; the script's first line comes from the leader.
 	id, out := startLostJob(t, s, `env -i /bin/sh -c 'trap "" TERM; echo $$; exec sleep 600' & wait`, 0)
-	requireEnded(t, out, func() { mustStop(t, id, 0) })
+	requireEnded(t, out, func() { mustStop(t, id) })
 }
 
-// A child that a SIGTERM handler starts has no stamp-holding process left to
-// find it, once the first processes end. The stop still scans for it.
-func TestStopEndsChildStartedByTermHandler(t *testing.T) {
-	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
-	id, out := startLostJob(t, s, `trap 'env -i sleep 600 & echo $!; exit 0' TERM; echo ready; sleep 600 & wait`, 1)
-	requireEnded(t, out, func() { mustStop(t, id, time.Minute) })
-}
-
-// A held process whose number was released and reused must not vouch for the
-// group of the new, unrelated process.
-func TestReusedNumberDoesNotAdmitUnrelatedGroup(t *testing.T) {
+// The anchor of a group may end and be reaped after the group is read. Its
+// number can then name another group, so the candidates read afterwards must
+// not be admitted.
+func TestReleasedAnchorDoesNotAdmitUnrelatedGroup(t *testing.T) {
 	bystander := exec.Command("sleep", "600")
 	bystander.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := bystander.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = bystander.Process.Kill(); _ = bystander.Wait() })
-	gone := exec.Command("true")
-	if err := gone.Start(); err != nil {
+	anchor := exec.Command("sleep", "600")
+	if err := anchor.Start(); err != nil {
 		t.Fatal(err)
 	}
-	fd, err := unix.PidfdOpen(gone.Process.Pid, 0)
+	t.Cleanup(func() { _ = anchor.Process.Kill(); _ = anchor.Wait() })
+	fd, err := unix.PidfdOpen(anchor.Process.Pid, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer unix.Close(fd)
-	if err := gone.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	// Pretend the number of the reaped process now names the bystander's group.
-	realRead := readGroup
+	// The anchor reads as a member of the bystander's group; when the bystander
+	// is read as a candidate, the anchor ends and is reaped.
+	realRead, released := readGroup, false
 	readGroup = func(pid int) (int, bool) {
-		if pid == gone.Process.Pid {
+		switch pid {
+		case anchor.Process.Pid:
 			return bystander.Process.Pid, true
+		case bystander.Process.Pid:
+			if !released {
+				released = true
+				_ = anchor.Process.Kill()
+				_ = anchor.Wait()
+			}
 		}
 		return realRead(pid)
 	}
 	t.Cleanup(func() { readGroup = realRead })
-	set := jobProcesses("sh_20261026-000000-00000000", map[int]pinned{gone.Process.Pid: {pid: gone.Process.Pid, fd: fd}})
+	set := jobProcesses("sh_20261026-000000-00000000", map[int]pinned{anchor.Process.Pid: {pid: anchor.Process.Pid, fd: fd}})
 	if _, admitted := set[bystander.Process.Pid]; admitted {
-		t.Fatal("an unrelated process was admitted through a released number")
+		t.Fatal("an unrelated process was admitted after its group's anchor was released")
 	}
 }
 
-// mustStop runs the orphan stop for job id with grace and fails the test on error.
-func mustStop(t *testing.T, id string, grace time.Duration) {
+// mustStop runs the orphan stop for job id and fails the test on error.
+func mustStop(t *testing.T, id string) {
 	t.Helper()
-	if _, err := stopOrphans(id, grace); err != nil {
+	if _, err := stopOrphans(id); err != nil {
 		t.Fatal(err)
 	}
 }
