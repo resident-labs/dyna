@@ -58,7 +58,7 @@ func TestHostedCancellationClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			run := Run{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", Status: tc.status, Conclusion: tc.conclusion}
 			snap := Snapshot{Runs: []Run{run}, localCIDef: watchDynaDefinition(t)}
-			for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
+			for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "desktop", "go-test"} {
 				check := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "success"})
 				check.CheckSuite.ID = 20
 				if i == 0 {
@@ -87,7 +87,7 @@ func TestHostedCancellationClassification(t *testing.T) {
 			if ignored := len(general.Checks) == 0; ignored != !tc.wantGeneral {
 				t.Fatalf("general filter dropped the suite checks = %t, want %t", ignored, !tc.wantGeneral)
 			}
-			if len(snap.Runs) != 1 || len(snap.Checks) != 5 {
+			if len(snap.Runs) != 1 || len(snap.Checks) != 6 {
 				t.Fatal("filter changed input snapshot")
 			}
 		})
@@ -176,6 +176,7 @@ func TestHostedCancellationTreatsTheFrontendShardsAsCancelledOnly(t *testing.T) 
 	add("frontend", "failure")
 	add("frontend-check", "cancelled")
 	add("go-static", "cancelled")
+	add("desktop", "cancelled")
 	add("go-test", "failure")
 
 	if group, cancelled := aggregateCancelled(definition, snap.currentSuiteChecks(), 20); !cancelled || group.Name() != "go-test" {

@@ -36,7 +36,7 @@ func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			run := Run{ID: 10, Attempt: 2, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", Status: tc.runStatus, Conclusion: tc.conclusion}
 			snap := Snapshot{Runs: []Run{run}}
-			for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
+			for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "desktop", "go-test"} {
 				c := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "success"})
 				c.CheckSuite.ID = 20
 				if i == 0 {
@@ -60,7 +60,7 @@ func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
 			if got.Status != tc.want {
 				t.Fatalf("CI = %s, want %s (hosted %s)", got.Status, tc.want, state)
 			}
-			if len(snap.Runs) != 1 || len(snap.Checks) != 5 {
+			if len(snap.Runs) != 1 || len(snap.Checks) != 6 {
 				t.Fatal("filter changed input snapshot")
 			}
 		})
@@ -87,7 +87,7 @@ func TestLocalCancellationAggregateResumesAfterInfrastructureError(t *testing.T)
 					return writeFakeJSON(cmd.Stdout, run)
 				case strings.Contains(endpoint, "/attempts/1/jobs?"):
 					var jobs []budgetJob
-					for _, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
+					for _, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "desktop", "go-test"} {
 						j := budgetJob{Name: name, Status: "completed", Conclusion: "success"}
 						if name == "go-test-shard (0)" {
 							j.Conclusion = dependency
@@ -141,7 +141,7 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 	r := Record{Kind: "github", Key: "pr", Head: head, Base: base, Host: "github.com", Repo: "owner/repo", RepoPath: repo, Branch: branch}
 	snap := Snapshot{Runs: []Run{{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "in_progress"}}}
 	snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, r.Repo
-	for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
+	for i, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "desktop", "go-test"} {
 		c := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "success"})
 		c.CheckSuite.ID = 20
 		if i == 0 {
