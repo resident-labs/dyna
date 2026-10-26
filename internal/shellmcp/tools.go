@@ -218,7 +218,7 @@ var toolList = []toolDefinition{
 	},
 	{
 		Name:        "shell_stop",
-		Description: "Stop a background job and its whole process group: SIGTERM, then SIGKILL after 5 seconds.",
+		Description: "Stop a background job and its whole process group: SIGTERM, then SIGKILL after 5 seconds. A stop ends local processes only: a remote command started over ssh without -t keeps running.",
 		InputSchema: inputSchema{
 			Type:       "object",
 			Properties: map[string]schemaProperty{"job_id": {Type: "string"}},
@@ -559,6 +559,9 @@ func (t *Tools) own(id string) (shells.Info, error) {
 // is how the transcript links the call to its job: keep it first.
 func (t *Tools) exitLine(in shells.Info) string {
 	switch {
+	case in.Exit == nil && (in.Status == "running" || in.Status == "starting"):
+		// A stop or wait that ran out of time sees a job whose supervisor lives.
+		return fmt.Sprintf("Job %s is still running: it did not end in time.", in.ID)
 	case in.Exit == nil:
 		line := fmt.Sprintf("Job %s was lost: its supervisor ended without an exit code.", in.ID)
 		if errs := t.Store.SupervisorErrors(in.ID); errs != "" {
