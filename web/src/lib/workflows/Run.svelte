@@ -14,6 +14,8 @@
   import { previewLine } from './runPreview.ts'
   import Segmented from '../ui/Segmented.svelte'
   import RunIcon from './RunIcon.svelte'
+  import RunGrid from './RunGrid.svelte'
+  import { cellOf, laneGrid, type CellRef, type CellState } from './lanes.ts'
 
   interface Props {
     detail?: RunDetail | null
@@ -25,8 +27,15 @@
   interface Group {
     phase: string
     agents: RunAgent[]
-    state: string
+    state: CellState
     done: number
+  }
+  // One thing the owner should look at: a failed agent, or the longest worker.
+  interface Attention {
+    key: string
+    text: string
+    failed: boolean
+    group: number
   }
   let { detail = null, error = '', oncancel = null, onpause = null, onopen = null }: Props = $props()
 
@@ -65,6 +74,36 @@
       }
     })
   })
+  // Phases that share stages show as a lanes grid; the chosen cell opens its agents.
+  let grid = $derived(laneGrid(groups.map((g) => ({ phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))))
+  let picked = $state<CellRef | null>(null)
+  // A new run starts with no cell open. Only the id is read, so the refresh that
+  // replaces `detail` every 2 seconds keeps the open cell.
+  let runId = $derived(detail?.run.id ?? '')
+  $effect(() => {
+    void runId
+    picked = null
+  })
+  let shownGroups = $derived.by(() => {
+    if (!grid) return groups
+    const cell = picked ? grid.lanes.find((l) => l.name === picked?.lane)?.cells[picked.col] : null
+    return (cell?.phases ?? []).map((i) => groups[i]).filter((g): g is Group => !!g)
+  })
+  const maxAttention = 3
+  let attention = $derived.by(() => {
+    const out: Attention[] = []
+    groups.forEach((g, group) => {
+      for (const a of g.agents) if (a.status === 'error' || a.status === 'failed') out.push({ key: `f${a.id}`, text: `${a.label || `agent ${a.id}`} failed in ${g.phase}`, failed: true, group })
+    })
+    const items = out.slice(0, maxAttention)
+    const running = groups.flatMap((g, group) => g.agents.filter((a) => a.status === 'running' && a.started).map((a) => ({ a, group, since: a.started ?? now })))
+    const slow = running.reduce<(typeof running)[number] | null>((best, r) => (!best || r.since < best.since ? r : best), null)
+    if (slow) items.push({ key: `r${slow.a.id}`, text: `${slow.a.label || `agent ${slow.a.id}`} has run ${elapsed(now - slow.since)} in ${groups[slow.group]?.phase}`, failed: false, group: slow.group })
+    return { items, more: Math.max(0, out.length - maxAttention) }
+  })
+  function pickGroup(group: number) {
+    if (grid) picked = cellOf(grid, group)
+  }
   // The phase chain wraps, and a connector joins only two pills on one line:
   // hide the connectors that fall across a wrap as the chain changes width.
   let steps = $state<HTMLOListElement | null>(null)
@@ -141,7 +180,15 @@
           <button class="cancel" onclick={() => oncancel?.(run)}>Cancel run</button>
         {/if}
       </div>
-      <div class="bar"><span class="fill {run.status}" style="width:{run.status === 'running' ? pct : 100}%"></span></div>
+      {#if counts.total}
+        <div class="bar stacked" role="img" aria-label="{counts.total - counts.running - counts.error} done, {counts.running} running, {counts.error} failed of {counts.total} agents">
+          <span class="seg ok" style="width:{((counts.total - counts.running - counts.error) / counts.total) * 100}%"></span>
+          <span class="seg error" style="width:{(counts.error / counts.total) * 100}%"></span>
+          <span class="seg running" style="width:{(counts.running / counts.total) * 100}%"></span>
+        </div>
+      {:else}
+        <div class="bar"><span class="fill {run.status}" style="width:{run.status === 'running' ? pct : 100}%"></span></div>
+      {/if}
       <dl>
         <div><dt>Started</dt><dd>{ago(run.startedAt)}</dd></div>
         <div><dt>Duration</dt><dd>{duration(run.startedAt, run.status === 'running' ? null : run.endedAt)}</dd></div>
@@ -162,7 +209,18 @@
       {/if}
     </header>
 
-    {#if groups.length > 1}
+    {#if grid}
+      {#if attention.items.length}
+        <div class="attention" role="group" aria-label="Needs attention">
+          {#each attention.items as item (item.key)}
+            <button class="att" class:failed={item.failed} onclick={() => pickGroup(item.group)}>{item.text}</button>
+          {/each}
+          {#if attention.more}<span class="quiet">and {attention.more} more failed</span>{/if}
+        </div>
+      {/if}
+      <RunGrid {grid} {picked} onpick={(ref) => (picked = ref)} />
+      {#if !picked}<p class="quiet">Tap a cell to see its agents.</p>{/if}
+    {:else if groups.length > 1}
       <ol class="steps" aria-label="Phases" bind:this={steps}>
         {#each groups as g, i}
           <li class={g.state}>
@@ -181,7 +239,7 @@
     {#if detail.agentTotal > detail.agents.length}
       <p class="quiet">Showing the last {detail.agents.length} of {detail.agentTotal} agents.</p>
     {/if}
-    {#each groups as g}
+    {#each shownGroups as g}
       <h2>{g.phase}<span>{g.agents.length} agent{g.agents.length === 1 ? '' : 's'}</span></h2>
       <div class="agents">
         {#each g.agents as a (a.id)}
@@ -288,6 +346,15 @@
   }
   .session:active { background: var(--select); }
   .bar { height: 6px; border-radius: 3px; background: var(--rail); overflow: hidden; margin: 16px 0 14px; }
+  .stacked { display: flex; }
+  .seg { display: block; height: 100%; transition: width var(--motion-slow); }
+  .seg.ok { background: var(--sage); }
+  .seg.error { background: var(--coral); }
+  .seg.running { background: var(--gold); }
+  .attention { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; }
+  .att { font-size: 13px; color: var(--gold); background: var(--gold-wash); border: 1px solid color-mix(in srgb, var(--gold) 28%, transparent); border-radius: 8px; padding: 6px 10px; text-align: left; overflow-wrap: anywhere; }
+  .att.failed { color: var(--coral); background: color-mix(in srgb, var(--coral) 8%, transparent); border-color: color-mix(in srgb, var(--coral) 30%, transparent); }
+  @media (max-width: 760px) { .att { min-height: 44px; width: 100%; } }
   .fill { display: block; height: 100%; border-radius: 3px; background: var(--faint); transition: width var(--motion-slow); }
   .fill.running { background: linear-gradient(90deg, #b59654, var(--gold)); }
   .fill.ok { background: linear-gradient(90deg, #6fa66d, var(--sage)); }
