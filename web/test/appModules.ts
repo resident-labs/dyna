@@ -57,9 +57,15 @@ export function moduleCode(source: string, names: readonly string[]): Map<string
   return moduleFunctions(source, names)
 }
 
-export const goalsCode = moduleCode(goalsSource, GOALS_FUNCTIONS)
-export const machinesCode = moduleCode(machinesSource, MACHINES_FUNCTIONS)
-export const toastsCode = moduleCode(toastsSource, TOAST_FUNCTIONS)
+/** lazyCode slices a module on first use, so importing this file does not
+ * transform modules a test never runs. */
+function lazyCode(source: string, names: readonly string[]): () => Map<string, string> {
+  let code: Map<string, string> | undefined
+  return () => (code ??= moduleCode(source, names))
+}
+
+export const goalsCode = lazyCode(goalsSource, GOALS_FUNCTIONS)
+export const machinesCode = lazyCode(machinesSource, MACHINES_FUNCTIONS)
 
 type State = Record<string, unknown>
 
@@ -228,12 +234,6 @@ export const SYNC_FUNCTIONS = ['loadSync', 'syncAction'] as const
 /** The pull requests module's own functions, which a vm can run in a flat state. */
 export const PRS_FUNCTIONS = ['loadReviewer', 'reviewerSoon', 'loadChanges', 'untrackPR', 'trackPR', 'resumePR'] as const
 
-export const questionsCode = moduleCode(questionsSource, QUESTIONS_FUNCTIONS)
-export const pinsCode = moduleCode(pinsSource, PINS_FUNCTIONS)
-export const issuesCode = moduleCode(issuesSource, ISSUES_FUNCTIONS)
-export const syncCode = moduleCode(syncSource, SYNC_FUNCTIONS)
-export const prsCode = moduleCode(prsSource, PRS_FUNCTIONS)
-
 /** The questions module's rows, as App reads them through questionView. */
 export interface QuestionsSlice {
   loadQuestions(): Promise<void>
@@ -385,8 +385,6 @@ export const SESSION_VIEW_FUNCTIONS = [
   'presentSession', 'unqueue', 'dismissPendingPost', 'setSession',
 ] as const
 
-export const sessionViewCode = moduleCode(sessionViewSource, SESSION_VIEW_FUNCTIONS)
-
 /** The session view's rows, as App reads them through transcripts. */
 export interface SessionViewSlice {
   session: unknown
@@ -469,8 +467,6 @@ export const SELECTION_FUNCTIONS = [
   'toggleSessionSelection', 'pickSession', 'openConsolidation', 'consolidationChanged',
   'closeConsolidation', 'clear', 'destroy',
 ] as const
-
-export const selectionCode = moduleCode(selectionSource, SELECTION_FUNCTIONS)
 
 /** The member selection, as App reads it through selectionView. */
 export interface SelectionSlice {
@@ -563,8 +559,6 @@ const confirmSource = read('confirm.svelte.ts')
 /** The confirm module's own functions, which a vm can run in a flat state. */
 export const CONFIRM_FUNCTIONS = ['askConfirm', 'dismiss', 'forceCloseLines', 'closeConfirm', 'runConfirm'] as const
 
-export const confirmCode = moduleCode(confirmSource, CONFIRM_FUNCTIONS)
-
 /** The confirm dialog, as App reads it through confirmView. */
 export interface ConfirmSlice {
   readonly confirm: unknown
@@ -607,8 +601,6 @@ const computersSource = read('computers.svelte.ts')
 
 /** The computers module's own functions, which a vm can run in a flat state. */
 export const COMPUTERS_FUNCTIONS = ['loadComputers', 'handleComputer', 'computerOf', 'clear'] as const
-
-export const computersCode = moduleCode(computersSource, COMPUTERS_FUNCTIONS)
 
 /** The room's computers, as App reads them through computerView. */
 export interface ComputersSlice {
