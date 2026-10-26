@@ -375,6 +375,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Unlock()
 		execution := writes.nativeExecution(meta.Role)
 		execution.ProcessRunner = m.ProcessRunner
+		execution.IdleUnload = settingsValues.HarnessIdleUnload()
 		if turn.Schema == "" {
 			execution.AcceptEmptyOutput = func() bool { return m.turnAcceptsEmptyOutput(id, n) }
 			execution.AcceptCleanEmptyStop = true

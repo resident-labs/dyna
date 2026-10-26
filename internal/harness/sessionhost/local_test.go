@@ -594,3 +594,50 @@ func TestWatchSocketStopsHostWhenSocketIsGone(t *testing.T) {
 		t.Fatalf("the host stopped %d times after its socket was removed; want 1", stops)
 	}
 }
+
+// A launch sets how long its child may sit idle: the default for zero, its own
+// time otherwise, and never for a negative value. A quiet child is closed only
+// when a time is set; no timer is armed for "never".
+func TestLocalSessionIdleCloseFollowsLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		close time.Duration
+		after time.Duration
+	}{
+		{"default", 0, DefaultIdleClose},
+		{"owner time", 3 * time.Minute, 3 * time.Minute},
+		{"never", -1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := Local()
+			launch := childLaunch("echo", "idle-"+tc.name, "f1", &pidRecorder{}, &refRecorder{})
+			launch.IdleClose = tc.close
+			s, err := host.Session(context.Background(), launch)
+			if err != nil {
+				t.Fatalf("session: %v", err)
+			}
+			defer s.Close()
+			ls := s.(*localSession)
+			if ls.idleAfter != tc.after || (tc.after > 0) != (ls.idleTimer != nil) {
+				t.Fatalf("idleAfter %v, timer armed %v; want %v", ls.idleAfter, ls.idleTimer != nil, tc.after)
+			}
+			// An idle check that finds a never-close child must leave it running.
+			s.Detach(DetachIdle)
+			if tc.after == 0 {
+				ls.idleClose()
+				if got := roundTrip(t, mustAttach(t, host, launch), "still"); got != "got:still" {
+					t.Fatalf("answer %q", got)
+				}
+			}
+		})
+	}
+}
+
+func mustAttach(t *testing.T, host Host, launch Launch) Session {
+	t.Helper()
+	s, err := host.Session(context.Background(), launch)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	return s
+}
