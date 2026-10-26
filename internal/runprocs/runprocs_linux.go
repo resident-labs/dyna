@@ -25,10 +25,12 @@ const exitWait = 3 * time.Second
 // Kill sends SIGKILL to every process group that holds a process stamped with
 // runID, and to the group led by leader (the run's own process, which starts
 // in its own session; 0 for none). It then waits for those processes to exit.
-// It never signals the caller's own group or a group in keep (the groups of
-// jobs that outlive the run), and it touches only processes that carry the
-// run's stamp.
-func Kill(runID string, leader int, keep map[int]bool) error {
+// It never signals the caller's own group, a group in keep, or a group that
+// holds a process of a job in keepJobs (assignments such as
+// "DYNA_SHELL_JOB=<id>" for jobs that outlive the run). One pass over /proc
+// decides both, so a kept process that changes group afterwards is never
+// selected. It touches only processes that carry the run's stamp.
+func Kill(runID string, leader int, keep map[int]bool, keepJobs []string) error {
 	if runID == "" {
 		return errors.New("a run id is required")
 	}
@@ -40,14 +42,28 @@ func Kill(runID string, leader int, keep map[int]bool) error {
 	if leader > 1 {
 		groups[leader] = true
 	}
-	for _, pid := range Stamped(mode.EnvWorkerRun + "=" + runID) {
-		if st, ok := readStat(pid); ok && st.state != 'Z' {
+	kept := map[int]bool{}
+	for g := range keep {
+		kept[g] = true
+	}
+	stamp := mode.EnvWorkerRun + "=" + runID
+	forEachProcess(func(pid int, env []byte) {
+		st, ok := readStat(pid)
+		if !ok || st.state == 'Z' {
+			return
+		}
+		for _, job := range keepJobs {
+			if hasAssignment(env, job) {
+				kept[st.group] = true
+			}
+		}
+		if hasAssignment(env, stamp) {
 			groups[st.group] = true
 		}
-	}
+	})
 	var errs []error
 	for g := range groups {
-		if g <= 1 || g == own || keep[g] {
+		if g <= 1 || g == own || kept[g] {
 			delete(groups, g)
 			continue
 		}
@@ -110,33 +126,33 @@ func anyLive(groups map[int]bool, own int) bool {
 // Stamped returns the processes, other than the caller, whose environment
 // holds the exact assignment "NAME=value".
 func Stamped(assignment string) []int {
+	var pids []int
+	forEachProcess(func(pid int, env []byte) {
+		if hasAssignment(env, assignment) {
+			pids = append(pids, pid)
+		}
+	})
+	return pids
+}
+
+// forEachProcess calls fn with each readable process, other than the caller,
+// and its environment.
+func forEachProcess(fn func(pid int, env []byte)) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil
+		return
 	}
-	stamp := []byte("\x00" + assignment + "\x00")
-	var pids []int
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil || pid == os.Getpid() {
 			continue
 		}
-		env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-		if err == nil && bytes.Contains(append([]byte{0}, env...), stamp) {
-			pids = append(pids, pid)
+		if env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid)); err == nil {
+			fn(pid, env)
 		}
 	}
-	return pids
 }
 
-// Groups returns the process groups that hold a live process whose
-// environment holds the exact assignment "NAME=value".
-func Groups(assignment string) []int {
-	var groups []int
-	for _, pid := range Stamped(assignment) {
-		if st, ok := readStat(pid); ok && st.state != 'Z' {
-			groups = append(groups, st.group)
-		}
-	}
-	return groups
+func hasAssignment(env []byte, assignment string) bool {
+	return bytes.Contains(append([]byte{0}, env...), []byte("\x00"+assignment+"\x00"))
 }
