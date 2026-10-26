@@ -731,6 +731,9 @@ func (w *runnerWrites) waitInput(ctx context.Context, input InputClaim) (bool, e
 // the engine stops or restarts under a running wait. The reply says nothing about
 // this runner's turn, which stays current: the wait must retry, not fail the
 // turn with a steering error (D-267). A revoked turn still fails as a 403.
+// TODO: legacy/shim remove later — an engine from before D-269 sends this as a
+// 4xx with no code; a current engine sends a 503 engine_stopping, which is never
+// final. Remove when no such engine can still be running.
 func remoteCanceled(remote *engineclient.RemoteError) bool {
 	return strings.Contains(remote.Message, context.Canceled.Error()) || strings.Contains(remote.Message, context.DeadlineExceeded.Error())
 }

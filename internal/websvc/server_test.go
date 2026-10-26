@@ -384,7 +384,7 @@ func (testCloseRefusal) CloseRecovery() sessionclose.Recovery {
 
 func TestCallErrorIncludesCloseRecovery(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeCallError(w, http.StatusUnprocessableEntity, testCloseRefusal{})
+	writeCallError(w, http.StatusUnprocessableEntity, "", testCloseRefusal{})
 	var got struct {
 		Error string                `json:"error"`
 		Close sessionclose.Recovery `json:"close"`
