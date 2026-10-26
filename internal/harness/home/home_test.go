@@ -29,6 +29,10 @@ func write(t *testing.T, path, contents string, mode os.FileMode) {
 }
 func fixture(t *testing.T) (string, string, []string) {
 	t.Helper()
+	// No test spawns the owner's real login shell.
+	old := loginPathSource
+	loginPathSource = func() string { return "" }
+	t.Cleanup(func() { loginPathSource = old })
 	base := t.TempDir()
 	owner := filepath.Join(base, "owner ' dollar$ ` tick")
 	bin := filepath.Join(base, "tools ' bin")
