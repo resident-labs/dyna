@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/subagent"
 )
 
 func changeGit(t *testing.T, dir string, args ...string) string {
@@ -127,6 +128,34 @@ func TestLocalChangeOpenQueueHeadReplacementAndClose(t *testing.T) {
 		t.Fatal("local close did not stop tracking")
 	}
 }
+
+// Closing a change closes its reviewer for the engine, not for a caller: the
+// engine refuses a close that names no caller (D-206).
+func TestClosingAChangeClosesItsReviewerAsTheEngine(t *testing.T) {
+	e := newEnv(t)
+	r, _ := localChange(t, e)
+	e.tick()
+	assigned, _ := e.s.Store.Get(r.ChangeID)
+	if assigned.Reviewer == "" {
+		t.Fatalf("no reviewer assigned: %+v", assigned)
+	}
+	closeFake := e.s.CloseReviewer
+	var closeErr error
+	e.s.CloseReviewer = func(ctx context.Context, id string) error {
+		if closeErr = authority.Check("subagent close", authority.Of(ctx), nil); closeErr != nil {
+			return closeErr
+		}
+		return closeFake(ctx, id)
+	}
+	t.Cleanup(authority.InEngine())
+	if err := e.s.CloseChange(r.ChangeID, r.Author); err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil || e.reviewers[assigned.Reviewer].Status != subagent.StatusClosed {
+		t.Fatalf("reviewer close = %v, status %v; want it closed", closeErr, e.reviewers[assigned.Reviewer].Status)
+	}
+}
+
 func TestLocalChangeRejectsDirtyAndDetachedWorktrees(t *testing.T) {
 	e := newEnv(t)
 	_, dir := localChange(t, e)
