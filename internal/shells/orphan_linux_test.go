@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -168,8 +167,10 @@ func TestStopReportsChildLostToReapingZombie(t *testing.T) {
 		}
 		_ = syscall.Kill(pid, syscall.SIGUSR1)
 		out.Scan() // the child exists once its PID is printed
-		for state, _, _ := processStat(leader.Process.Pid); state != 'Z'; state, _, _ = processStat(leader.Process.Pid) {
-			runtime.Gosched()
+		// Wait for the exit without reaping: the process stays a zombie.
+		var info unix.Siginfo
+		if err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOWAIT, nil); err != nil {
+			t.Errorf("wait for the leader to exit: %v", err)
 		}
 	}
 	afterContain = func(pid int) {
