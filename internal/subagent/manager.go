@@ -33,6 +33,7 @@ import (
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
@@ -245,7 +246,10 @@ func (m *Manager) executable() string {
 
 // StartOptions describes a new session and its first turn.
 type StartOptions struct {
-	Service   bool      // exclude this managed session from general group posts
+	Service bool // exclude this managed session from general group posts
+	// ID is the caller's session ID, so a caller whose answer arrives late can
+	// find the session. Empty lets the manager mint one.
+	ID        string
 	Deadline  time.Time // absolute turn deadline; zero keeps ordinary sessions unlimited
 	Role      string    // stored service role; empty for user agents
 	Profile   string    // empty = the default profile
@@ -384,7 +388,14 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	// close and promotion in every room. Check the name first so a duplicate
 	// fails without Git work, create the tree outside the lock, then recheck
 	// the name under it before the session is written.
-	id := NewID()
+	id := opts.ID
+	if id == "" {
+		id = NewID()
+	} else if !runstore.IsSessionDirID(id) {
+		return Info{}, Turn{}, fmt.Errorf("invalid session id %q", id)
+	} else if _, err := store.ReadMeta(id); err == nil {
+		return Info{}, Turn{}, fmt.Errorf("session %s already exists", id)
+	}
 	name, err := checkAvailableName(store, roomRec, opts.Name, id)
 	if err != nil {
 		return Info{}, Turn{}, err

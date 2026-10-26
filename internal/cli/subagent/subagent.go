@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/cli/exitcode"
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/engineclient"
@@ -220,9 +221,18 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 				}
 			}
 			var info subagent.Info
-			in := roomsvc.SubagentStart{Profile: profileName, Name: name, Dir: dir, Cwd: cwd, Schema: schema, Goal: goal, Under: under, Fixes: fixes, Task: task, Owner: runstore.OwnerFromEnv(), OwnerDisplay: ownerDisplay}
-			if err := engineClient().Call(c.Context(), "StartSubagent", []any{rec.ID, in}, &info); err != nil {
-				return err
+			// The caller names the session, so a late answer can be matched to
+			// the session the engine created.
+			in := roomsvc.SubagentStart{ID: subagent.NewID(), Profile: profileName, Name: name, Dir: dir, Cwd: cwd, Schema: schema, Goal: goal, Under: under, Fixes: fixes, Task: task, Owner: runstore.OwnerFromEnv(), OwnerDisplay: ownerDisplay}
+			if callErr := engineClient().Call(c.Context(), "StartSubagent", []any{rec.ID, in}, &info); callErr != nil {
+				// The engine may have created the session and finished its
+				// slow setup after answering late. Report it instead of an
+				// error that invites a duplicate start.
+				created, ok := lateStart(newManager(), in.ID, callErr, c.ErrOrStderr())
+				if !ok {
+					return callErr
+				}
+				info = created
 			}
 			if asJSON {
 				return jsonout.Write(c.OutOrStdout(), startView{
@@ -252,6 +262,21 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd.Flags().BoolVar(&ownerDisplay, "owner-display", false, "let this session's own shells use your display; owner or root only")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
 	return cmd
+}
+
+// lateStart looks up the session a StartSubagent call created when the engine
+// answered past its deadline. The caller names the session, so the lookup is
+// exact, and no second start is needed.
+func lateStart(m *subagent.Manager, id string, err error, stderr io.Writer) (subagent.Info, bool) {
+	if id == "" || !callspec.IsLate(err) {
+		return subagent.Info{}, false
+	}
+	info, lookupErr := m.Store.Info(id)
+	if lookupErr != nil {
+		return subagent.Info{}, false
+	}
+	fmt.Fprintf(stderr, "dyna: the engine answered StartSubagent late; session %s exists, so this start is not repeated\n", info.Address())
+	return info, true
 }
 
 // ---- list / show ----
