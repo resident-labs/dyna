@@ -1,5 +1,10 @@
 package localci
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Suite names one suite or check of a repository CI graph. A saved result stores
 // the value, so its spelling must not change during a definition migration.
 type Suite string
@@ -66,4 +71,79 @@ func containsName(names []CheckName, want CheckName) bool {
 // and it holds either a decided outcome or an infrastructure error.
 func (r Result) Complete() bool {
 	return r.Node != "" && (r.Status == OutcomeError || len(r.Checks) > 0 && r.Status.Decided())
+}
+
+// SuiteBlockedError names a suite that a local run needs and no machine can
+// take. A run that waits for such a machine waits for ever, so the trial that
+// asked for it fails with this error instead.
+type SuiteBlockedError struct {
+	// Suite is a suite that no enabled machine allows. It is empty when each
+	// suite is allowed somewhere, but no one machine allows them all.
+	Suite Suite
+	// Suites is every suite the run needs, so the message can name the set.
+	Suites []Suite
+}
+
+func (e SuiteBlockedError) Error() string {
+	if e.Suite != "" {
+		return fmt.Sprintf("no enabled CI machine allows the %s suite that this run needs; allow it with dyna machine edit <name> --suites %s", e.Suite, e.Suite)
+	}
+	return fmt.Sprintf("no enabled CI machine allows every suite that this run needs (%s); allow them on one machine with dyna machine edit <name> --suites %s",
+		strings.Join(SuiteNames(e.Suites), ", "), strings.Join(SuiteNames(e.Suites), ","))
+}
+
+// NodesForRoom keeps the machines that take CI work for the room. A machine
+// that names no room takes work from every room, so it stays.
+func NodesForRoom(nodes []Node, roomID string) []Node {
+	kept := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.AllowsRoom(roomID) {
+			kept = append(kept, node)
+		}
+	}
+	return kept
+}
+
+// NodesForSuites keeps the machines that allow every suite of a run. A machine
+// that names no suite allows every suite, so it stays.
+func NodesForSuites(nodes []Node, suites []Suite) []Node {
+	kept := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if allowsSuites(node, suites) {
+			kept = append(kept, node)
+		}
+	}
+	return kept
+}
+
+// BlockedSuite reports why no machine can take a run with these suites. Pass
+// only the machines that may take the run at all, such as those of its room: a
+// machine another room owns cannot take the suite either. It returns nil when
+// at least one machine allows every suite, or when the run names no suite. A
+// machine that is busy or low on disk still allows a suite, so a caller must
+// keep those in the list.
+func BlockedSuite(nodes []Node, suites []Suite) error {
+	if len(NodesForSuites(nodes, suites)) > 0 {
+		return nil
+	}
+	for _, suite := range suites {
+		allowed := false
+		for _, node := range nodes {
+			allowed = allowed || node.AllowsSuite(suite)
+		}
+		if !allowed {
+			return SuiteBlockedError{Suite: suite, Suites: suites}
+		}
+	}
+	return SuiteBlockedError{Suites: suites}
+}
+
+// allowsSuites reports whether the machine allows every suite of the run.
+func allowsSuites(node Node, suites []Suite) bool {
+	for _, suite := range suites {
+		if !node.AllowsSuite(suite) {
+			return false
+		}
+	}
+	return true
 }

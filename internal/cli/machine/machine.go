@@ -157,6 +157,7 @@ func showCommand() *cobra.Command {
 			if m.HasRole(machines.RoleCI) {
 				fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
 				fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
+				fmt.Fprintf(out, "Suites:   %s\n", suiteList(m.Suites))
 			}
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
@@ -340,6 +341,7 @@ func editCommand() *cobra.Command {
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
+	var suites []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
 		Short: "Change a machine",
@@ -387,11 +389,18 @@ func editCommand() *cobra.Command {
 				}
 				changed = true
 			}
+			if c.Flags().Changed("suites") {
+				m.Suites = parseSuites(suites)
+				changed = true
+			}
 			if !changed && !allowHostChecks && !disallowHostChecks {
-				return fmt.Errorf("edit %s: give a machine, host-check or room setting to change", args[0])
+				return fmt.Errorf("edit %s: give a machine, host-check, room or suite setting to change", args[0])
 			}
 			if len(m.Rooms) > 0 && !m.HasRole(machines.RoleCI) && c.Flags().Changed("rooms") {
 				return fmt.Errorf("a room list requires the ci role")
+			}
+			if len(m.Suites) > 0 && !m.HasRole(machines.RoleCI) && c.Flags().Changed("suites") {
+				return fmt.Errorf("a suite list requires the ci role")
 			}
 			if allowHostChecks && !m.HasRole(machines.RoleCI) {
 				return fmt.Errorf("host checks require the ci role")
@@ -423,6 +432,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
+	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
@@ -525,6 +535,33 @@ func roomList(ids []string) string {
 	}
 	slices.Sort(names)
 	return strings.Join(names, ", ")
+}
+
+// parseSuites reads the suite names a command line names. A suite ID comes from
+// a repository definition, so there is nothing to resolve: the list only has to
+// be trimmed, sorted and free of repeats.
+func parseSuites(names []string) []string {
+	suites := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !slices.Contains(suites, name) {
+			suites = append(suites, name)
+		}
+	}
+	slices.Sort(suites)
+	return suites
+}
+
+// suiteList words a machine's suite limit: the suites it takes work for, or
+// every suite when it names none.
+func suiteList(suites []string) string {
+	if len(suites) == 0 {
+		return "every suite"
+	}
+	return strings.Join(suites, ", ")
 }
 
 // orNone prints a value, or a dash when the probe read none.

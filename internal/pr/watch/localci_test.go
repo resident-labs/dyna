@@ -89,23 +89,28 @@ func TestRegisteredCIRequiresCompleteWorkflowChecks(t *testing.T) {
 	}
 }
 
-func TestRegisteredCIQueuesTrialsBeforeOldestSameRepoHeads(t *testing.T) {
+// Only a merge trial asks for a local run. A pull request head is checked by
+// GitHub's hosted CI, so the queue never lists one, however old or reviewed.
+func TestRegisteredCIDoesNotQueuePullRequestHeads(t *testing.T) {
 	now := time.Unix(1000, 0)
 	record := func(key string, created time.Time) *Record {
 		return &Record{Kind: "github", Key: key, Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: key, Branch: key, Watching: true, State: "open", Created: created}
 	}
-	oldest, recent, fork := record("old", now), record("recent", now.Add(time.Minute)), record("fork", now.Add(-time.Minute))
+	ready, recent, fork := record("ready", now), record("recent", now.Add(time.Minute)), record("fork", now.Add(-time.Minute))
 	fork.HeadRepo = "other/repo"
-	st := State{Records: map[string]*Record{"old": oldest, "recent": recent, "fork": fork}, MergeTrials: map[string]*state.MergeTrial{"repo": {Head: "trial", Branch: "dyna/merge-trial/1", Phase: "running", Changes: []state.MergeTrialChange{{Key: "recent", Head: "recent"}}}}}
+	st := State{Records: map[string]*Record{"ready": ready, "recent": recent, "fork": fork}, MergeTrials: map[string]*state.MergeTrial{
+		"repo":       {Head: "trial", Branch: "dyna/merge-trial/1", Phase: "running", Changes: []state.MergeTrialChange{{Key: "recent", Head: "recent"}}, Created: now},
+		"older/repo": {Head: "older", Branch: "dyna/merge-trial/2", Phase: "running", Changes: []state.MergeTrialChange{{Key: "ready", Head: "ready"}}, Created: now.Add(-time.Hour)},
+	}}
 	jobs := registeredCIJobs(st)
-	if len(jobs) != 3 || !jobs[0].trial || jobs[0].head != "trial" || jobs[1].head != "old" || jobs[2].head != "recent" {
+	if len(jobs) != 2 || !jobs[0].trial || jobs[0].head != "older" || jobs[1].head != "trial" {
 		t.Fatalf("queue: %+v", jobs)
 	}
+	// A fork cannot enter a local merge trial, and its head needs no local run.
 	recent.HeadRepo = "other/repo"
-	for _, job := range registeredCIJobs(st) {
-		if job.trial {
-			t.Fatal("fork code entered a local merge trial")
-		}
+	jobs = registeredCIJobs(st)
+	if len(jobs) != 1 || jobs[0].head != "older" {
+		t.Fatalf("fork code entered local CI: %+v", jobs)
 	}
 }
 
@@ -226,7 +231,14 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	// A current-head node cancellation restores hosted CI before replacement.
 	s.Store = &Store{Root: filepath.Join(t.TempDir(), "prs")}
 	job.record.Key, job.record.State, job.record.Watching = "pr", "open", true
-	if err := s.Store.update(func(st *State) error { st.Records[job.record.Key] = &job.record; return nil }); err != nil {
+	trialHead := func(st *State) *state.MergeTrial {
+		return st.MergeTrials[defaultRepo(job.record)]
+	}
+	if err := s.Store.update(func(st *State) error {
+		st.Records[job.record.Key] = &job.record
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(job.record): {Phase: state.MergeTrialPhaseRunning, Branch: job.branch, Head: head, Changes: []state.MergeTrialChange{{Key: job.record.Key, Head: head}}}}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	registry.hosted.Resumed = false
@@ -246,9 +258,13 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	if !registry.hosted.Resumed || len(registry.results) != 1 || registry.results[0].Status != "error" {
 		t.Fatalf("timeout recovery: %+v results=%v", registry.hosted, registry.results)
 	}
-	// An old head must not restart work after a replacement is tracked.
+	// An old trial head must not restart work after the batch moved on.
 	registry.hosted.Resumed = false
-	if err := s.Store.update(func(st *State) error { st.Records[job.record.Key].Head = strings.Repeat("b", 40); return nil }); err != nil {
+	if err := s.Store.update(func(st *State) error {
+		st.Records[job.record.Key].Head = strings.Repeat("b", 40)
+		trialHead(st).Head = strings.Repeat("b", 40)
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.recoverInterruptedCI(interrupted, job, "repo", localci.Node{Name: "node"}, localci.Result{}); err != nil {
@@ -336,17 +352,18 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t)); err != nil || done {
 		t.Fatalf("unrelated main push settled trial: %t %v", done, err)
 	}
-	// A settled record does not remove an already active run from the queue.
+	// A settled trial result does not remove an already active run from the queue.
 	repo := t.TempDir()
 	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
 		t.Fatalf("init repository: %v: %s", err, raw)
 	}
-	r = Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "feature", RepoPath: repo, Watching: true, State: "open", CI: "passed", Polling: Polling{PullHead: head}}
-	activeJob := registeredCIJob{record: r, head: head}
+	r = Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo, Watching: true, State: "open", CI: "passed", Polling: Polling{PullHead: head}}
+	activeJob := registeredCIJob{record: r, head: head, branch: r.Branch, trial: true}
 	cancelled := false
 	active := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
 	s = &Service{LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{registeredJobKey(activeJob): active}}}
-	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: &r}}); err != nil {
+	batch := &state.MergeTrial{Phase: state.MergeTrialPhaseRunning, Branch: r.Branch, Head: head, Changes: []state.MergeTrialChange{{Key: r.Key, Head: head}}}
+	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: &r}, MergeTrials: map[string]*state.MergeTrial{defaultRepo(r): batch}}); err != nil {
 		t.Fatal(err)
 	}
 	if cancelled || s.registeredRuns.runs[registeredJobKey(activeJob)] != active {
@@ -458,7 +475,7 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 	for _, earlierWaiting := range []bool{false, true} {
 		t.Run(fmt.Sprintf("earlier_waiting=%t", earlierWaiting), func(t *testing.T) {
 			head := strings.Repeat("a", 40)
-			r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
+			r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
 			registry := &savedCIRegistry{result: localci.Result{Repo: repo, SHA: head, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}}
 			key := registeredJobKey(registeredCIJob{record: *r, head: head})
 			cancelled := false
@@ -468,12 +485,11 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 				t.Fatalf("a local CI result reached GitHub: %v", cmd.Args)
 				return nil
 			}
-			st := State{Records: map[string]*Record{r.Key: r}}
+			batch := &state.MergeTrial{Phase: state.MergeTrialPhaseRunning, Branch: r.Branch, Head: head, Changes: []state.MergeTrialChange{{Key: r.Key, Head: head}}, Created: time.Unix(2, 0)}
 			if earlierWaiting {
-				waiting := *r
-				waiting.Key, waiting.Head, waiting.Created = "waiting", strings.Repeat("b", 40), time.Unix(1, 0)
-				st.Records[waiting.Key] = &waiting
+				batch.Stacks = []state.MergeTrialStack{{Branch: "dyna/merge-trial/8", Head: strings.Repeat("b", 40), Phase: state.MergeTrialPhaseRunning}}
 			}
+			st := State{Records: map[string]*Record{r.Key: r}, MergeTrials: map[string]*state.MergeTrial{defaultRepo(*r): batch}}
 			if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
 				t.Fatal(err)
 			}
@@ -484,31 +500,23 @@ func TestRegisteredCISavedResultPostsNoGitHubStatus(t *testing.T) {
 	}
 }
 
-// A settled PR with a new saved local result must poll again, so a manual
-// `dyna git ci run` result replaces the old verdict without a GitHub change.
-// The marker is the result itself, so a manual rerun's pass re-arms it too.
-func TestSavedLocalResultRefreshesASettledPR(t *testing.T) {
-	repo := t.TempDir()
-	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
-		t.Fatalf("init repository: %v: %s", err, raw)
-	}
+// A manual `dyna git ci run` on a pull request head must poll the PR again, so
+// its new result replaces the old verdict without a GitHub change. The marker
+// is the result itself, so a manual rerun's pass re-arms it too.
+func TestRefreshSavedLocalResultForcesOneFullPoll(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	key := "pr"
 	read := time.Unix(700, 0)
-	settled := &Record{Kind: "github", Key: key, Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: sha, Branch: "feature", RepoPath: repo, Watching: true, State: "open", CI: "failed", Polling: Polling{PullHead: sha, Next: read, FullChecked: read, CIVersion: "probe", PullVersion: "pull"}}
-	result := localci.Result{Repo: repo, SHA: sha, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}
-	s := &Service{LocalCIRegistry: &savedCIRegistry{result: result}, Store: &Store{Root: t.TempDir()}}
+	settled := &Record{Kind: "github", Key: key, Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: sha, Branch: "feature", Watching: true, State: "open", CI: "failed", Polling: Polling{PullHead: sha, Next: read, FullChecked: read, CIVersion: "probe", PullVersion: "pull"}}
+	result := localci.Result{Repo: "repo", SHA: sha, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}
+	s := &Service{Store: &Store{Root: t.TempDir()}}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[key] = settled
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
-		t.Fatalf("a saved local result reached GitHub: %v", cmd.Args)
-		return nil
-	}
-	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{key: settled}}); err != nil {
+	if err := s.RefreshSavedLocalResult(result); err != nil {
 		t.Fatal(err)
 	}
 	refreshed := savedRecord(t, s, key)
@@ -526,12 +534,20 @@ func TestSavedLocalResultRefreshesASettledPR(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{key: settled}}); err != nil {
+	if err := s.RefreshSavedLocalResult(result); err != nil {
 		t.Fatal(err)
 	}
 	again := savedRecord(t, s, key)
 	if !again.Polling.FullChecked.Equal(read.Add(time.Minute)) {
 		t.Fatalf("the same saved result forced another full poll: %+v", again.Polling)
+	}
+	// A result for another head leaves this PR alone.
+	other := localci.Result{Repo: "repo", SHA: strings.Repeat("b", 40), Node: "node", Status: "passed"}
+	if err := s.RefreshSavedLocalResult(other); err != nil {
+		t.Fatal(err)
+	}
+	if got := savedRecord(t, s, key); !got.Polling.FullChecked.Equal(read.Add(time.Minute)) {
+		t.Fatalf("another head refreshed this PR: %+v", got.Polling)
 	}
 }
 
@@ -627,20 +643,16 @@ func (r *preparationCIRegistry) SaveResult(_ context.Context, result localci.Res
 }
 
 func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
-	repo, base := changeRepo(t)
-	writeTrialDefinition(t, repo, "version: 1\nunknown: true\n")
-	changeGit(t, repo, "add", ".")
-	changeGit(t, repo, "commit", "-m", "invalid local CI")
-	invalid := changeGit(t, repo, "rev-parse", "HEAD")
-	writeWatchDefinition(t, repo)
-	if err := os.WriteFile(filepath.Join(repo, "change.go"), []byte("package fixture\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	changeGit(t, repo, "add", ".")
-	changeGit(t, repo, "commit", "-m", "valid local CI")
-	valid := changeGit(t, repo, "rev-parse", "HEAD")
-	invalidRecord := &Record{Kind: "github", Key: "invalid", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: invalid, Base: base, Branch: "invalid", RepoPath: repo, Watching: true, State: "open", CI: "pending", Created: time.Unix(1, 0)}
-	validRecord := &Record{Kind: "github", Key: "valid", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: valid, Base: base, Branch: "valid", RepoPath: repo, Watching: true, State: "open", CI: "pending", Created: time.Unix(2, 0)}
+	invalidRepo, invalidBase := changeRepo(t)
+	writeTrialDefinition(t, invalidRepo, "version: 1\nunknown: true\n")
+	changeGit(t, invalidRepo, "add", ".")
+	changeGit(t, invalidRepo, "commit", "-m", "invalid local CI")
+	invalid := changeGit(t, invalidRepo, "rev-parse", "HEAD")
+	validRepo, validBase := changeRepo(t)
+	changeCommit(t, validRepo, "valid local CI\n")
+	valid := changeGit(t, validRepo, "rev-parse", "HEAD")
+	invalidRecord := &Record{Kind: "github", Key: "invalid", Host: "github.com", Repo: "owner/invalid", HeadRepo: "owner/invalid", Head: invalid, Base: invalidBase, Branch: "dyna/merge-trial/1", RepoPath: invalidRepo, Watching: true, State: "open", CI: "pending", Created: time.Unix(1, 0)}
+	validRecord := &Record{Kind: "github", Key: "valid", Host: "github.com", Repo: "owner/valid", HeadRepo: "owner/valid", Head: valid, Base: validBase, Branch: "dyna/merge-trial/2", RepoPath: validRepo, Watching: true, State: "open", CI: "pending", Created: time.Unix(2, 0)}
 	started := make(chan struct{})
 	release := make(chan struct{})
 	validSaved := make(chan struct{})
@@ -655,6 +667,10 @@ func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
 	if err := s.Store.update(func(st *State) error {
 		st.Records[invalidRecord.Key] = invalidRecord
 		st.Records[validRecord.Key] = validRecord
+		st.MergeTrials = map[string]*state.MergeTrial{
+			defaultRepo(*invalidRecord): {Phase: state.MergeTrialPhaseRunning, Branch: invalidRecord.Branch, Base: invalidBase, Head: invalid, Changes: []state.MergeTrialChange{{Key: invalidRecord.Key, Head: invalid}}},
+			defaultRepo(*validRecord):   {Phase: state.MergeTrialPhaseRunning, Branch: validRecord.Branch, Base: validBase, Head: valid, Changes: []state.MergeTrialChange{{Key: validRecord.Key, Head: valid}}},
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -662,6 +678,17 @@ func TestRegisteredCIPreparationFailureDoesNotBlockLaterJobs(t *testing.T) {
 	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
 		if filepath.Base(cmd.Path) == "git" {
 			return nil
+		}
+		// The valid trial head has no hosted evidence, so it reads an empty one.
+		for _, arg := range cmd.Args {
+			switch {
+			case strings.Contains(arg, "check-runs?"):
+				return writeFakeJSON(cmd.Stdout, checkRunsResponse{})
+			case strings.Contains(arg, "actions/runs?"):
+				return writeFakeJSON(cmd.Stdout, workflowRunsResponse{})
+			case strings.Contains(arg, "/statuses?"):
+				return writeFakeJSON(cmd.Stdout, []Status{})
+			}
 		}
 		return fmt.Errorf("unexpected GitHub call: %v", cmd.Args)
 	}
