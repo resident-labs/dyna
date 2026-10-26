@@ -64,6 +64,11 @@ type Request struct {
 	OnStart func(context.Context) error
 	// DeferSave lets the scheduler apply room budgets before publishing a result.
 	DeferSave bool
+	// Event is the GitHub event a job check runs, "pull_request" by default.
+	// A cache-warming job runs only on the default branch, so a warm run sends
+	// "push" and names Branch in the payload.
+	Event  string
+	Branch string
 }
 
 // Outcome is how one local CI check or a whole run ended. A check that could

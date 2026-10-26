@@ -134,6 +134,10 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 			continue
 		}
 		repo, room, base := defaultRepo(*record), record.RoomID, record.Base
+		branch := record.DefaultBranch
+		if branch == "" {
+			branch = "main"
+		}
 		if repo == "" || base == "" || record.RepoPath == "" {
 			continue
 		}
@@ -164,7 +168,7 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 			}
 			s.startWarm(ctx, store, node, localci.WarmRequest{
 				Repo: repo, RepoDir: record.RepoPath, RoomID: room, SHA: base,
-				Workflow: warm.Workflow, Job: warm.Name, Timeout: warmTimeout,
+				Workflow: warm.Workflow, Job: warm.Name, Branch: branch, Timeout: warmTimeout,
 			})
 		}
 	}

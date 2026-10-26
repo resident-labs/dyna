@@ -3,6 +3,7 @@ package localci
 import (
 	"context"
 	"dyna-agent/internal/database"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -102,5 +103,19 @@ func TestDefinitionNamesTheWarmJob(t *testing.T) {
 		if _, err := ParseDefinition([]byte("version: 1\ntrial: [go]\n" + bad + "\nchecks:\n  - id: build\n    image: golang:1.26.3\n    command: go build ./...\nsuites:\n  - id: go\n    checks: [build]\n")); err == nil {
 			t.Fatalf("%q was accepted", bad)
 		}
+	}
+}
+
+// A warm run sends the default branch's push event, because the workflow scopes
+// its cache-warming job to that ref, and its payload names the branch.
+func TestWarmRunSendsTheDefaultBranchPush(t *testing.T) {
+	dir := t.TempDir()
+	check := nodeCheck{id: "cache-warm", name: "cache-warm", event: "push", branch: "main", job: &JobRef{Workflow: ".github/workflows/ci.yml", Name: "cache-warm"}, resources: checkResources{CPUs: 2, MemoryMiB: 4096}}
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-warm", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, "")
+	if !strings.Contains(script, "act push -W") && !strings.Contains(script, " push -W ") {
+		t.Fatalf("the warm run does not send a push event: %s", script)
+	}
+	if !strings.Contains(script, `refs/heads/main`) {
+		t.Fatalf("the warm payload does not name the default branch: %s", script)
 	}
 }

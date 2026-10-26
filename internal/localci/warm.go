@@ -26,6 +26,8 @@ type WarmRequest struct {
 	// Workflow is the provider workflow file and Job the job inside it that
 	// fills the cache. A repository without such a job cannot be warmed.
 	Workflow, Job string
+	// Branch is the default branch the workflow warms the cache for.
+	Branch string
 	// Timeout bounds the whole warm run.
 	Timeout time.Duration
 }
@@ -75,5 +77,9 @@ func (r Runner) Warm(ctx context.Context, req WarmRequest) (Result, error) {
 		SHA:        req.SHA,
 		Suites:     []Suite{warmSuite},
 		Timeout:    req.Timeout,
+		// The workflow scopes its cache-warming job to the default branch, so
+		// the run sends that branch's push event.
+		Event:  "push",
+		Branch: req.Branch,
 	})
 }
