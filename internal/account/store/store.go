@@ -161,11 +161,6 @@ type Credential struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// SchemaPiNativeFiles is the Pi credential envelope: one auth.json holding the
-// provider entry. The retirement migration reads it to decide whether a Pi
-// account really holds the sign-in it would replace (D-125).
-const SchemaPiNativeFiles = "pi/native-files@1"
-
 type Entry struct {
 	Metadata
 	Credential Credential `json:"credential"`
@@ -206,10 +201,9 @@ func KnownHarness(h string) bool {
 // harness h on 2026-10-25, when Pi took over its provider. All three have since
 // left KnownHarness, so nothing writes a row for them either, and the names stay
 // here because a database older than the migration upgrades straight to this
-// release. Such a row is dropped only when a Pi account already holds the same
-// provider sign-in; an unmoved sign-in is kept for the owner to repair (D-125).
-// Pi's own accounts for chatgpt, meta-muse and opencode-go are not harness-bound
-// and are never candidates.
+// release. Such a row is never deleted by the migration: it keeps the saved
+// sign-in, its checks, and its credential until the importer moves exactly that
+// sign-in into Pi or the owner removes the row (D-125). Only its selection goes.
 func AccountsRetired(h string) bool {
 	switch h {
 	case "codex", "muse", "opencode":
