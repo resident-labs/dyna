@@ -468,6 +468,11 @@ func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, ho
 	case hostedState == VerdictFailed:
 		o.Status, o.Jobs, o.Runs = VerdictFailed, hostedJobs, hostedRuns
 		o.Key = hostedKey
+	case localState == VerdictAbsent && hostedState == VerdictAbsent:
+		// Neither provider has anything to wait for: this head has no CI to read.
+		// A wait here never ends, so the change reports absent and the merge trial
+		// decides it instead.
+		o.Status, o.Key = VerdictAbsent, "absent:"+head
 	case localState == VerdictPassed:
 		o.Status, o.Key = VerdictPassed, "local-passed:"+head
 	case hostedState == VerdictPassed:
