@@ -249,14 +249,12 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	if err != nil {
 		return Record{}, err
 	}
-	// A fetch keeps a remote-tracking base such as origin/main current. A local
-	// base starts from the commit the repository already has, and a repository
-	// without origin has nothing to fetch: the authenticated fetch asks origin
-	// for its URL first, which failed on a plain git init (D-137).
-	if !localBase(ctx, main, base) && hasRemote(ctx, main, "origin") {
-		if out, err := gitOriginOutput(ctx, main, "fetch", "origin"); err != nil {
-			return Record{}, fmt.Errorf("fetch origin: %w: %s", err, out)
-		}
+	// Pin the base to a commit before the worktree is created: the refresh
+	// fetch rewrites FETCH_HEAD (D-164), and the new branch must start at
+	// exactly the commit the caller's repository resolves the base to.
+	pinned, err := pinBase(ctx, repo, main, base)
+	if err != nil {
+		return Record{}, err
 	}
 	// A hash keeps branch names such as a/b and a-b distinct.
 	sum := sha256.Sum256([]byte(branch))
@@ -268,7 +266,7 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return Record{}, err
 	}
-	if out, err := gitOutput(ctx, main, "worktree", "add", "-b", branch, path, base); err != nil {
+	if out, err := gitOutput(ctx, main, "worktree", "add", "-b", branch, path, pinned); err != nil {
 		return Record{}, fmt.Errorf("create worktree: %w: %s", err, out)
 	}
 	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
