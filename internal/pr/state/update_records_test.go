@@ -316,7 +316,7 @@ func TestUpdateRecordsPrunesUntouchedRowsWithoutChangingRetainedSnapshot(t *test
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	if err := writer.Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "UPDATE pr_records SET body=?, rev=rev+1 WHERE key=?", body, expired.Key); err != nil {
+		if _, err := conn.ExecContext(ctx, "UPDATE pr_rows SET body=?, rev=rev+1 WHERE key=?", body, expired.Key); err != nil {
 			return err
 		}
 		for name, part := range parts {
