@@ -34,6 +34,7 @@ const (
 	KeyRootProfile           = "root.profile"
 	KeySubagentMaxDepth      = "subagent.maxDepth"
 	KeySteeringToolWait      = "steering.maxToolWait"
+	KeyIdleUnloadMinutes     = "harness.idleUnloadMinutes"
 	KeyMaxCardBytes          = "content.maxCardBytes"
 	KeyMaxFileBytes          = "content.maxFileBytes"
 	KeyCIDiskFloorGB         = "machines.ciDiskFloorGB"
@@ -54,6 +55,7 @@ const (
 const (
 	DefaultSubagentMaxDepth            = 3
 	DefaultSteeringToolWait            = 120 * time.Second
+	DefaultIdleUnloadMinutes           = 10
 	DefaultWorktreesMinFreeBytes int64 = 10 << 30
 )
 
@@ -100,6 +102,9 @@ type Values struct {
 	// SteeringMaxToolWait bounds how long a steering message or journal
 	// reminder waits for an in-flight tool call before interrupting it.
 	SteeringMaxToolWait time.Duration
+	// HarnessIdleUnloadMinutes is how long a session's harness process may sit
+	// idle before it is stopped; zero keeps it loaded.
+	HarnessIdleUnloadMinutes int
 	// VoiceProvider, VoiceModel and VoiceURL choose the call's realtime
 	// voice provider.
 	VoiceProvider string
@@ -118,31 +123,32 @@ func DefaultPath() string {
 
 func Defaults() Values {
 	return Values{
-		PRTrustedBots:          []string{"coderabbitai", "copilot-pull-request-reviewer"},
-		LocalCIRemote:          DefaultLocalCIRemote,
-		RootProfile:            "opus",
-		BrowserUseFlagsFile:    true,
-		BrowserProfileMode:     "shared",
-		BrowserOwnerProfile:    "Default",
-		BrowserSaveBack:        true,
-		ComputersEnabled:       true,
-		SessionCheckInInterval: 15 * time.Minute,
-		AdmissionMode:          AdmissionObserve,
-		LibraryReadmeMaxLines:  DefaultLibraryReadmeMaxLines,
-		LibrarySmellsPerDay:    DefaultLibrarySmellsPerDay,
-		MaxCardBytes:           DefaultContentBytes,
-		MaxFileBytes:           DefaultContentBytes,
-		AutoCheck:              true,
-		RunsRetention:          14 * 24 * time.Hour,
-		WorktreesRetention:     WorktreesRetentionChanged,
-		WorktreesRoot:          "~/.dyna-worktrees",
-		WorktreesMinFreeBytes:  DefaultWorktreesMinFreeBytes,
-		CIDiskFloorGB:          DefaultCIDiskFloorGB,
-		SubagentMaxDepth:       DefaultSubagentMaxDepth,
-		SteeringMaxToolWait:    DefaultSteeringToolWait,
-		VoiceProvider:          "openai",
-		Extra:                  map[string]any{},
-		fromFile:               map[string]bool{},
+		PRTrustedBots:            []string{"coderabbitai", "copilot-pull-request-reviewer"},
+		LocalCIRemote:            DefaultLocalCIRemote,
+		RootProfile:              "opus",
+		BrowserUseFlagsFile:      true,
+		BrowserProfileMode:       "shared",
+		BrowserOwnerProfile:      "Default",
+		BrowserSaveBack:          true,
+		ComputersEnabled:         true,
+		SessionCheckInInterval:   15 * time.Minute,
+		AdmissionMode:            AdmissionObserve,
+		LibraryReadmeMaxLines:    DefaultLibraryReadmeMaxLines,
+		LibrarySmellsPerDay:      DefaultLibrarySmellsPerDay,
+		MaxCardBytes:             DefaultContentBytes,
+		MaxFileBytes:             DefaultContentBytes,
+		AutoCheck:                true,
+		RunsRetention:            14 * 24 * time.Hour,
+		WorktreesRetention:       WorktreesRetentionChanged,
+		WorktreesRoot:            "~/.dyna-worktrees",
+		WorktreesMinFreeBytes:    DefaultWorktreesMinFreeBytes,
+		CIDiskFloorGB:            DefaultCIDiskFloorGB,
+		SubagentMaxDepth:         DefaultSubagentMaxDepth,
+		SteeringMaxToolWait:      DefaultSteeringToolWait,
+		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
+		VoiceProvider:            "openai",
+		Extra:                    map[string]any{},
+		fromFile:                 map[string]bool{},
 	}
 }
 
@@ -321,6 +327,12 @@ func Load(path string) (Values, error) {
 		if wait, err := parseToolWait(fmt.Sprint(steer["maxToolWait"])); steer["maxToolWait"] != nil && err == nil {
 			v.SteeringMaxToolWait = wait
 			v.fromFile[KeySteeringToolWait] = true
+		}
+	}
+	if h, ok := raw["harness"].(map[string]any); ok {
+		if n, ok := asInt(h["idleUnloadMinutes"]); ok && n >= 0 {
+			v.HarnessIdleUnloadMinutes = n
+			v.fromFile[KeyIdleUnloadMinutes] = true
 		}
 	}
 	if section, exists := raw["machines"]; exists {
@@ -526,10 +538,26 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.SteeringMaxToolWait = d
 		v.fromFile[key] = true
+	case KeyIdleUnloadMinutes:
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s must be a whole number of minutes, 0 or more (0 keeps idle processes loaded)", key)
+		}
+		v.HarnessIdleUnloadMinutes = n
+		v.fromFile[key] = true
 	default:
 		return fmt.Errorf("unknown settings key %q", key)
 	}
 	return nil
+}
+
+// HarnessIdleUnload is the idle time for a harness process in the form
+// harness.ExecutionOptions takes: negative when the owner set 0 (never unload).
+func (v Values) HarnessIdleUnload() time.Duration {
+	if v.HarnessIdleUnloadMinutes == 0 {
+		return -1
+	}
+	return time.Duration(v.HarnessIdleUnloadMinutes) * time.Minute
 }
 
 func (v Values) Save() error {
@@ -586,6 +614,9 @@ func (v Values) Save() error {
 	steer := nested(raw, "steering")
 	steer["maxToolWait"] = v.SteeringMaxToolWait.String()
 	raw["steering"] = steer
+	harnessSection := nested(raw, "harness")
+	harnessSection["idleUnloadMinutes"] = v.HarnessIdleUnloadMinutes
+	raw["harness"] = harnessSection
 	b, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err

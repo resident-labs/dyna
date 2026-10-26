@@ -30,6 +30,8 @@ var ErrNotRunning = errors.New("Dyna engine is not running; start it with system
 type RemoteError struct {
 	Status  int
 	Message string
+	// Code is the reply's machine-readable name, such as callspec.CodeEngineStopping.
+	Code string
 }
 
 // Final reports whether a retry of the call would get the same answer: the
@@ -221,11 +223,12 @@ func (c *Client) send(ctx context.Context, method string, body []byte, result an
 	if res.StatusCode != http.StatusOK {
 		var reply struct {
 			Error string `json:"error"`
+			Code  string `json:"code"`
 		}
 		if err := json.NewDecoder(res.Body).Decode(&reply); err != nil {
 			return fmt.Errorf("engine: %s", res.Status)
 		}
-		return &RemoteError{Status: res.StatusCode, Message: reply.Error}
+		return &RemoteError{Status: res.StatusCode, Message: reply.Error, Code: reply.Code}
 	}
 	if result == nil {
 		return nil

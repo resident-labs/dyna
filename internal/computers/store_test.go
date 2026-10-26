@@ -62,7 +62,7 @@ func TestInjectRegistersStampedSessionWithFake(t *testing.T) {
 	t.Setenv("DYNA_COMPUTERS_TEST_ENABLE", "1")
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	runtime, err := os.MkdirTemp("/tmp", "dci-")
+	runtime, err := testsafe.ShortTemp("dci-")
 	if err != nil {
 		t.Fatal(err)
 	}
