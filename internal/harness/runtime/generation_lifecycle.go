@@ -65,7 +65,8 @@ const dynaMCPName = "dyna"
 // every generation. Version 7: harnesses with DynaShell get Dyna's MCP shell
 // server. Version 9: a harness denies its native shell with a plugin hook.
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
-const generationInputsVersion = 10
+// Version 11: Pi's MCP servers carry a request timeout and exposure.
+const generationInputsVersion = 11
 
 type generationInputs struct {
 	NativeFeatures                                           nativeFeaturePolicy

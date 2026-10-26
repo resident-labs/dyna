@@ -1,9 +1,12 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/authority"
@@ -43,5 +46,106 @@ func TestPiMCPTimeoutAndExposure(t *testing.T) {
 	wantShell := int(shellmcp.MaxRequestTimeout.Seconds())
 	if entry := root.MCP[dynaMCPName]; entry.Timeout != wantShell || entry.Exposure != "direct" {
 		t.Fatalf("dyna shell server = %+v, want timeout %d and direct exposure in %s", entry, wantShell, raw)
+	}
+}
+
+// A session pinned to a Pi generation from before the shell timeout keeps that
+// generation until the pin is refused. The inputs version refuses it, so the
+// resumed turn publishes a config whose shell server outlasts its longest wait.
+func TestOldPiPinIsRebuiltWithTheShellTimeout(t *testing.T) {
+	r, p := runtimeFixture(t, "pi")
+	_, pin, err := r.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model the pin a build before the timeout would carry: its own content
+	// address, the previous inputs version, and a shell server without a
+	// timeout. Its lifecycle hash is rebuilt, so only the version marks it as
+	// outdated, exactly as it would be under the older build.
+	oldDir := filepath.Join(r.Generations, generationPrefix+strings.Repeat("ab", 32))
+	copyGeneration(t, pin.Generation, oldDir)
+	mcpPath := filepath.Join(oldDir, "pi-mcp.json")
+	raw, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		MCP map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	delete(doc.MCP[dynaMCPName], "timeout")
+	if raw, err = json.MarshalIndent(doc, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, append(raw, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The inputs version of the build that wrote pins without a timeout.
+	const previousInputsVersion = 10
+	oldFeatures, err := json.MarshalIndent(nativeFeatureSnapshot{previousInputsVersion, "pi", nativeFeaturePolicies["pi"]}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldDir, nativeFeatureFile), append(oldFeatures, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	metaPath := filepath.Join(oldDir, generationMetadata)
+	var meta generationOwnership
+	if err := readGenerationJSON(metaPath, &meta); err != nil {
+		t.Fatal(err)
+	}
+	meta.InputHash = strings.TrimPrefix(filepath.Base(oldDir), generationPrefix)
+	if meta.PayloadHash, err = generationTreeHash(oldDir, true); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err = json.MarshalIndent(meta, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, append(raw, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pin.Generation = oldDir
+
+	_, next, err := r.Prepare(context.Background(), p, &pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err = os.ReadFile(filepath.Join(next.Generation, "pi-mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	want := float64(shellmcp.MaxRequestTimeout.Seconds())
+	if got := doc.MCP[dynaMCPName]["timeout"]; got != want {
+		t.Fatalf("resumed shell server timeout = %v, want %v in %s", got, want, raw)
+	}
+}
+
+// copyGeneration copies a published generation tree for a pin fixture.
+func copyGeneration(t *testing.T, from, to string) {
+	t.Helper()
+	if err := filepath.WalkDir(from, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(from, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(to, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0700)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0600)
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
