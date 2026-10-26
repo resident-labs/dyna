@@ -307,3 +307,21 @@ func TestDefaultPathUsesConfigDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestIdleUnloadMinutesSettingValidatesAndConverts(t *testing.T) {
+	v := Defaults()
+	if v.HarnessIdleUnload() != 10*time.Minute {
+		t.Fatalf("default %v", v.HarnessIdleUnload())
+	}
+	for _, bad := range []string{"-1", "x", "1.5", ""} {
+		if err := v.Set(KeyIdleUnloadMinutes, bad); err == nil {
+			t.Fatalf("%q accepted", bad)
+		}
+	}
+	if err := v.Set(KeyIdleUnloadMinutes, "0"); err != nil || v.HarnessIdleUnload() >= 0 {
+		t.Fatalf("0 must mean never unload (negative): %v, %v", err, v.HarnessIdleUnload())
+	}
+	if err := v.Set(KeyIdleUnloadMinutes, "30"); err != nil || v.HarnessIdleUnload() != 30*time.Minute || v.Source(KeyIdleUnloadMinutes) != SourceFile {
+		t.Fatalf("30: %v, %v", err, v.HarnessIdleUnload())
+	}
+}
