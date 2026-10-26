@@ -90,6 +90,30 @@ func (s *Store) CloseIssue(ctx context.Context, roomID, id, by, reason string, o
 	})
 }
 
+// ErrIssueLeftGoal reports that an issue no longer names the goal a
+// conditional close was given, because another goal took the issue after the
+// caller read it. Callers take it as "nothing left to close", not a failure.
+var ErrIssueLeftGoal = errors.New("issue no longer links that goal")
+
+// CloseIssueGoal closes an issue only while it still names goalID, keeping
+// the goal ID as the closed issue's history. The link check and the write
+// share one locked step, so a goal that takes the issue after the caller read
+// it keeps its link: the close returns ErrIssueLeftGoal and changes nothing.
+// The caller on ctx decides whether the close is allowed; by only credits it.
+func (s *Store) CloseIssueGoal(ctx context.Context, roomID, id, goalID, by, reason string, origin CloseOrigin) (Issue, error) {
+	if strings.TrimSpace(goalID) == "" {
+		return Issue{}, errors.New("a goal close needs the goal ID")
+	}
+	return s.changeIssueFrom(ctx, roomID, id, by, origin, true, "ChangeIssue", func(i *Issue) error {
+		if i.State != IssueStateGoal || i.GoalID != goalID {
+			return ErrIssueLeftGoal
+		}
+		i.State = IssueStateClosed
+		i.Reason = reason
+		return nil
+	})
+}
+
 // checkIssueState rejects a stored state the issue protocol does not define,
 // so a typo cannot pass from storage to a view as a finite state.
 func checkIssueState(i Issue) error {
