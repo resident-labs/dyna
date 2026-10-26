@@ -33,14 +33,14 @@ func TestLocalMergeQueueUsesExactApproval(t *testing.T) {
 		r.CI = ""
 		st.RepositoryFacts = map[string]state.RepositoryFacts{defaultRepo(*r): {DefaultBranch: "dyna/integration", MergeTrialCI: true, CheckedAt: e.clock}}
 	}
-	rows := mergeQueue(st)
+	rows := mergeQueue(st, nil)
 	if len(rows) != 1 || rows[0].State != "ready" {
 		t.Fatalf("local queue = %+v", rows)
 	}
 	for _, r := range st.Records {
 		r.RoundHead = "old-head"
 	}
-	if rows := mergeQueue(st); len(rows) != 1 || rows[0].State != "review" {
+	if rows := mergeQueue(st, nil); len(rows) != 1 || rows[0].State != "review" {
 		t.Fatalf("stale approval = %+v", rows)
 	}
 }
@@ -406,7 +406,7 @@ func TestGitHubLaneQueueIsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := f.e.s.Store.Read()
-	rows := mergeQueue(st)
+	rows := mergeQueue(st, nil)
 	if len(rows) != 1 || rows[0].State != "ready" {
 		t.Fatalf("GitHub queue: %+v", rows)
 	}

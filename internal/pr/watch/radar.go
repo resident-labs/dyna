@@ -70,7 +70,7 @@ func (s *Service) refreshOverlaps(ctx context.Context) error {
 			}
 		}
 		order := map[string]int{}
-		for i, item := range mergeQueue(*cur) {
+		for i, item := range mergeQueue(*cur, s.LocalTrialRooms(ctx)) {
 			order[item.ChangeID] = i
 		}
 		for _, r := range cur.Records {

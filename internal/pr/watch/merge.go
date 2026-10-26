@@ -97,10 +97,22 @@ type MainCI struct {
 	Wait  *MainWait `json:"wait,omitempty"`
 }
 
-// MergeQueueSnapshot derives queue facts from a saved PR snapshot without GitHub requests.
-func MergeQueueSnapshot(st State) []MergeQueueItem { return mergeQueue(st) }
+// MergeQueueSnapshot derives queue facts from a saved PR snapshot without GitHub
+// requests. where says which rooms evaluate their merge trials on local CI, so a
+// room without hosted push CI can still take a trial; a nil report keeps the
+// hosted requirement.
+func MergeQueueSnapshot(st State, where LocalTrialRooms) []MergeQueueItem {
+	return mergeQueue(st, where)
+}
 
-func mergeQueue(st State) []MergeQueueItem {
+// trialCIReady reports whether a merge trial can be evaluated for this change: a
+// repository with confirmed hosted push CI, or a room that evaluates the trial
+// on local CI.
+func trialCIReady(f RepositoryFacts, where LocalTrialRooms, roomID string) bool {
+	return f.MergeTrialCI || where != nil && where(roomID)
+}
+
+func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 	var queue []MergeQueueItem
 	for _, r := range st.Records {
 		if !r.Watching || r.State != "open" {
@@ -144,7 +156,7 @@ func mergeQueue(st State) []MergeQueueItem {
 			item.State, item.Reason = "ready", ""
 			if f := st.RepositoryFacts[defaultRepo(*r)]; f.CheckedAt.IsZero() {
 				item.State, item.Reason = "waiting-repository", "waiting for repository facts"
-			} else if !f.MergeTrialCI {
+			} else if !trialCIReady(f, where, r.RoomID) {
 				item.State, item.Reason = "trial-unavailable", "requires confirmed push CI for dyna/merge-trial/**"
 			}
 		case !facts.HeadVerified(*r):

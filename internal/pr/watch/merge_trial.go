@@ -118,7 +118,8 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	if roomID != "" {
 		delete(st.MergePauses, roomID)
 	}
-	for _, item := range mergeQueue(st) {
+	where := s.LocalTrialRooms(ctx)
+	for _, item := range mergeQueue(st, where) {
 		next = s.now().Add(pollEvery)
 		if item.State != "ready" {
 			continue
@@ -137,7 +138,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		} else if why != "" {
 			continue
 		}
-		if !st.RepositoryFacts[repo].MergeTrialCI {
+		if !trialCIReady(st.RepositoryFacts[repo], where, r.RoomID) {
 			continue
 		}
 		current, ready, err := s.mergeReady(ctx, r)
@@ -204,6 +205,12 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				limit = settings.MaxParallel
 			}
 		}
+		// The batch belongs to the room of its changes, which is the room whose CI
+		// decides whether the trial can be evaluated at all.
+		batchRoom := ""
+		if changes := groups[repo]; len(changes) > 0 {
+			batchRoom = changes[0].RoomID
+		}
 		var batch state.MergeTrial
 		if err := s.Store.update(func(st *State) error {
 			if st.MergeTrials == nil {
@@ -213,7 +220,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				return errors.New("another trial already owns this repository")
 			}
 			base := st.RepositoryFacts[repo]
-			if base.Head == "" || base.DefaultBranch == "" || !base.MergeTrialCI {
+			if base.Head == "" || base.DefaultBranch == "" || !trialCIReady(base, where, batchRoom) {
 				return errors.New("merge-trial push CI or default branch could not be confirmed")
 			}
 			st.NextMergeTrial++

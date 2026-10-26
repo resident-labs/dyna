@@ -301,13 +301,11 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 	return out, rates, errors.Join(failures...)
 }
 
-// repositoryMergeTrialCI reports whether a merge trial can be evaluated for a
-// repository. A room in local mode takes the trial verdict from local CI, so it
-// needs no hosted push CI on dyna/merge-trial/**; every other room does.
-func repositoryMergeTrialCI(probe defaultBranchProbe, previous RepositoryFacts, localTrial bool) bool {
-	if localTrial {
-		return true
-	}
+// repositoryMergeTrialCI reports the hosted push CI a repository has for trial
+// branches. It is a fact about the repository, never about a room, so two rooms
+// that share a repository cannot overwrite each other's answer. A room decides at
+// its own gate whether it needs that CI at all; see LocalTrialRooms.
+func repositoryMergeTrialCI(probe defaultBranchProbe, previous RepositoryFacts) bool {
 	// A read that could not see the workflow files proves nothing about the trial
 	// pipeline, so the last conclusive answer stands instead of dropping to false
 	// and blocking every merge.
@@ -317,26 +315,30 @@ func repositoryMergeTrialCI(probe defaultBranchProbe, previous RepositoryFacts, 
 	return probe.MergeTrialCI
 }
 
-// localTrialRooms names the rooms whose merge trials are evaluated by local CI.
-func (s *Service) localTrialRooms(ctx context.Context, st State) map[string]bool {
-	rooms := map[string]bool{}
-	for _, r := range st.Records {
-		if !r.Watching || r.RoomID == "" {
-			continue
-		}
-		if _, known := rooms[r.RoomID]; known {
-			continue
-		}
-		mode, err := s.ciRegistry().Mode(ctx, r.RoomID)
-		if err != nil {
-			// A mode that cannot be read keeps the hosted requirement, which is
-			// the stricter answer.
-			rooms[r.RoomID] = false
-			continue
-		}
-		rooms[r.RoomID] = mode == localci.ModeLocal || mode == localci.ModeBoth
+// LocalTrialRooms reports a room whose merge trials are evaluated by local CI.
+// Such a room needs no hosted push CI on dyna/merge-trial/**, because the
+// scheduler admits the trial head as a local run and the gate reads that result.
+// A nil report keeps the hosted requirement, which is what a caller without a CI
+// store knows.
+type LocalTrialRooms func(roomID string) bool
+
+// localTrialRoom reports whether this room evaluates merge trials on local CI.
+func (s *Service) localTrialRoom(ctx context.Context, roomID string) bool {
+	if roomID == "" {
+		return false
 	}
-	return rooms
+	mode, err := s.ciRegistry().Mode(ctx, roomID)
+	if err != nil {
+		// A mode that cannot be read keeps the hosted requirement, the stricter
+		// answer.
+		return false
+	}
+	return mode == localci.ModeLocal || mode == localci.ModeBoth
+}
+
+// LocalTrialRooms reports the local-trial rule for every room of this snapshot.
+func (s *Service) LocalTrialRooms(ctx context.Context) LocalTrialRooms {
+	return func(roomID string) bool { return s.localTrialRoom(ctx, roomID) }
 }
 
 func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time, pauses map[string]bool, discovery ...*Record) (map[string]headProbe, error) {
@@ -465,7 +467,6 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	gh.requests = &requestCache{rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
 	heads, rates, readErr := gh.readHeads(ctx, records)
 	recheckErr := s.recheckCancelledMainCI(ctx, gh, records, localRepos, heads)
-	localTrial := s.localTrialRooms(ctx, st)
 	saveErr := s.Store.update(func(current *State) error {
 		for key, probe := range heads {
 			if r := current.Records[key]; r != nil && probe.Account != "" {
@@ -489,13 +490,7 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 				next := RepositoryFacts{
 					DefaultBranch: probe.Default.Name, Head: probe.Default.Head,
 					Verdict: defaultVerification(probe.Default), CheckedAt: observedAt, NoPushCI: probe.Default.NoPushCI,
-					MergeTrialCI: repositoryMergeTrialCI(probe.Default, previous, localTrial[r.RoomID]),
-				}
-				// A read that could not see the workflow files proves nothing about
-				// the trial pipeline, so the last conclusive answer stands instead
-				// of dropping to false and blocking every merge.
-				if !probe.Default.MergeTrialKnown {
-					next.MergeTrialCI = previous.MergeTrialCI
+					MergeTrialCI: repositoryMergeTrialCI(probe.Default, previous),
 				}
 				current.RepositoryFacts[defaultRepo(*r)] = next
 			}
