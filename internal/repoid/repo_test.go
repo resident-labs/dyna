@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	_ "dyna-agent/internal/testsafe"
 )
 
 func TestRemoteTransportIdentity(t *testing.T) {
