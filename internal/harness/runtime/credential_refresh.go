@@ -76,24 +76,14 @@ func (a *Accounts) CredentialStatus(ctx context.Context, id, executable string) 
 }
 
 // RefreshCredentials renews a private login without changing its selection.
-// The switch gate drains native turns before the store and account locks are
-// taken. A rotated grant reaches its durable snapshot before any native write.
+//
+// A login that lives in the account's own home is renewed there, under the
+// account lock and the harness's own credential lock, and it never waits for the
+// harness's turns: Pi renews that same file during a turn, so a refresh and a
+// turn already order their writes with Pi's lock. A login in a shared harness
+// home is different, because its renewal writes a file every turn of that
+// harness reads, so it takes the switch gate and waits for those turns to end.
 func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string) (result CredentialRefreshResult, err error) {
-	return a.refreshCredentials(ctx, id, executable, true)
-}
-
-// RefreshCredentialsDuringTurn renews a private login for a caller that holds a
-// harness turn lease, such as a turn asking for a web search. It does not take
-// the switch gate, because that gate waits for every turn of the harness to
-// end, including the caller's own, so a caller inside a turn would wait for
-// itself. Selection does not change, and the account lock and the harness's own
-// credential lock still order every write against a refresh or a delete.
-func (a *Accounts) RefreshCredentialsDuringTurn(ctx context.Context, id, executable string) (result CredentialRefreshResult, err error) {
-	return a.refreshCredentials(ctx, id, executable, false)
-}
-
-// refreshCredentials is one renewal, with or without the switch gate.
-func (a *Accounts) refreshCredentials(ctx context.Context, id, executable string, drain bool) (result CredentialRefreshResult, err error) {
 	if err = ctx.Err(); err != nil {
 		return result, err
 	}
@@ -111,9 +101,7 @@ func (a *Accounts) refreshCredentials(ctx context.Context, id, executable string
 	if err != nil {
 		return result, err
 	}
-	// A pinned account refreshes under Claude Code's own locks in its folder;
-	// it never writes the shared home that running turns read.
-	if !pinsCredentials(n.Harness) && drain {
+	if !pinsCredentials(n.Harness) && !ownHomeLogin(n) {
 		release, err := a.switchGate(ctx, n.Harness)
 		if err != nil {
 			return result, err
@@ -293,6 +281,18 @@ func (a *Accounts) refreshCredentials(ctx context.Context, id, executable string
 		})
 	})
 	return result, err
+}
+
+// ownHomeLogin reports a login that its account holds in its own home, which a
+// refresh rewrites in place: a Pi account's auth.json. A Pi turn reads that same
+// file, and Pi renews it there under its own lock, so such a refresh needs no
+// drain of the harness's turns.
+func ownHomeLogin(n NativeAccount) bool {
+	if n.Harness != "pi" {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(n.Home, "auth.json"))
+	return err == nil
 }
 
 // refreshManager returns the manager for the account's native login. native
