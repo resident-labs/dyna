@@ -70,7 +70,7 @@
   {:else if pane === 'accounts'}
     <AccountsPane accountId={accountToOpen} {roomId} {oncreateprofile} onprofile={viewProfile} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}
-    <SettingsPane />
+    <SettingsPane {roomId} />
   {:else if pane === 'hooks'}
     <HooksPane scope="global" onmodal={(open) => (busy = open)} />
   {:else if pane === 'devices'}
