@@ -221,6 +221,10 @@ type Meta struct {
 	// publication refuses new worker shells for the run behind the cancel
 	// cleanup's snapshot (D-165).
 	Canceling bool `json:"canceling,omitempty"`
+	// ProcessesEnded is when the engine ended the processes the ended run's
+	// workers left running (D-246). Nil until then, so a failed cleanup is
+	// tried again, including after an engine restart.
+	ProcessesEnded *time.Time `json:"processesEnded,omitempty"`
 }
 
 // Run is an open, writable run directory.
