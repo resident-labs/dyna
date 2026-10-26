@@ -1351,7 +1351,9 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		artifacts := path.Join(reportDir, "artifacts")
 		cachePath := path.Join(base, "actcache")
 		label := "dyna.run=" + runID
-		event := path.Join(reportDir, "event.json")
+		// The event is the run's own input, not a report: a file named *.json in
+		// the report directory is read as a Go event stream, which rejects it.
+		event := path.Join(path.Dir(work), "event.json")
 		eventBody := `{"pull_request":{"base":{"sha":"` + baseCommit + `"},"head":{"sha":"` + sha + `"}}}`
 		actEvent := "pull_request"
 		if check.event == "push" {
