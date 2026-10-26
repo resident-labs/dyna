@@ -25,11 +25,20 @@ import (
 const Engine = agentslice.EngineUnit
 const Computers = "dyna-computers.service"
 
+// Tunnel runs the managed cloudflared connector. It is its own unit, so an
+// engine restart does not drop the tunnel and the remote app stays reachable
+// while the new engine starts.
+const Tunnel = "dyna-tunnel.service"
+
 type Options struct {
 	Binary           string
 	Dir              string
 	Environment      []string
 	RestartComputers bool
+	// NoTunnel keeps the owner's tunnel opt-out: no connector unit is installed,
+	// and an installed one is stopped. Install keeps the setting an existing
+	// engine unit already carries.
+	NoTunnel bool
 	// Quiet returns why restarting the computer service would disturb users, or
 	// "" when it is safe. Nil means always safe.
 	Quiet  func(context.Context) (string, error)
@@ -114,6 +123,34 @@ func Dir() string {
 	return filepath.Join(home, ".config", "systemd", "user")
 }
 
+// TunnelInstalled is gone: whether the connector runs is a question for
+// systemd, not for the presence of a unit file. Write leaves a file behind
+// without starting anything, and a failed install can leave one too.
+
+// TunnelActive reports whether the managed tunnel service is running. The engine
+// leaves its own connector to that service only when this proves it is up, so a
+// written or leftover unit file never leaves remote access without a connector.
+func TunnelActive(ctx context.Context) bool {
+	env := os.Environ()
+	return tunnelActive(ctx, func(ctx context.Context, argv ...string) (string, error) {
+		return systemctlUser(ctx, env, argv[1:]...)
+	})
+}
+
+func tunnelActive(ctx context.Context, run func(context.Context, ...string) (string, error)) bool {
+	ctx, cancel := context.WithTimeout(ctx, commandBound)
+	defer cancel()
+	out, err := run(ctx, "systemctl", "show", Tunnel, "--property=ActiveState")
+	if err != nil {
+		return false
+	}
+	switch property(out, "ActiveState") {
+	case "active", "activating", "reloading":
+		return true
+	}
+	return false
+}
+
 func quote(value string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`, "%", "%%").Replace(value) + `"`
 }
@@ -129,14 +166,18 @@ const engineStopGrace = 15 * time.Second
 // machine's cache lock.
 func engineStopTimeout() time.Duration { return localci.TeardownBudget + engineStopGrace }
 
-func engineUnit(binary string) string {
+func engineUnit(binary string, noTunnel bool) string {
+	run := ` engine run --allow-agent`
+	if noTunnel {
+		run += " --no-tunnel"
+	}
 	return `[Unit]
 Description=Dyna engine
-After=network-online.target dyna-computers.service
+After=network-online.target dyna-computers.service dyna-tunnel.service
 Wants=network-online.target dyna-computers.service
 
 [Service]
-ExecStart=` + quote(binary) + ` engine run --allow-agent
+ExecStart=` + quote(binary) + run + `
 Restart=always
 RestartSec=3
 KillMode=process
@@ -145,6 +186,23 @@ TimeoutStopSec=` + strconv.Itoa(int(engineStopTimeout()/time.Second)) + `
 Slice=` + agentslice.ForegroundSlice + `
 CPUWeight=` + agentslice.EngineWeight + `
 IOWeight=` + agentslice.EngineWeight + `
+
+[Install]
+WantedBy=default.target
+`
+}
+
+func tunnelUnit(binary string) string {
+	return `[Unit]
+Description=Dyna tunnel connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=` + quote(binary) + ` engine tunnel
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target
@@ -207,6 +265,13 @@ func ComputerEnvironment(dir string, env []string) error {
 	return fsutil.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600, true)
 }
 
+// engineOptsOut reports whether the installed engine unit runs with --no-tunnel.
+// The owner set it, and an install must not start a connector against it.
+func engineOptsOut(dir string) bool {
+	body, err := os.ReadFile(filepath.Join(dir, Engine))
+	return err == nil && strings.Contains(string(body), "--no-tunnel")
+}
+
 // Write writes the shared unit definitions without contacting systemd or enabling
 // units. The image build uses it before a user manager exists.
 func Write(o Options) error {
@@ -219,14 +284,29 @@ func Write(o Options) error {
 	if o.Dir == "" {
 		o.Dir = Dir()
 	}
+	if !o.NoTunnel && engineOptsOut(o.Dir) {
+		// Keep the choice an earlier install wrote, instead of rewriting it away.
+		o.NoTunnel = true
+	}
 	if err := os.MkdirAll(o.Dir, 0755); err != nil {
 		return err
 	}
 	if _, err := agentslice.WriteSlice(o.Dir); err != nil {
 		return err
 	}
-	for name, text := range map[string]string{Engine: engineUnit(o.Binary), Computers: computersUnit(o.Binary)} {
+	units := map[string]string{Engine: engineUnit(o.Binary, o.NoTunnel), Computers: computersUnit(o.Binary)}
+	if !o.NoTunnel {
+		units[Tunnel] = tunnelUnit(o.Binary)
+	}
+	for name, text := range units {
 		if err := fsutil.WriteFile(filepath.Join(o.Dir, name), []byte(text), 0644, true); err != nil {
+			return err
+		}
+	}
+	if o.NoTunnel {
+		// An engine that opted out must not keep the connector of an earlier
+		// install around.
+		if err := os.Remove(filepath.Join(o.Dir, Tunnel)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -241,6 +321,10 @@ func Install(ctx context.Context, o Options) error {
 	}
 	if o.Dir == "" {
 		o.Dir = Dir()
+	}
+	if !o.NoTunnel && engineOptsOut(o.Dir) {
+		// Keep the choice an earlier install wrote, instead of rewriting it away.
+		o.NoTunnel = true
 	}
 	if o.Environment == nil {
 		o.Environment = os.Environ()
@@ -267,6 +351,20 @@ func Install(ctx context.Context, o Options) error {
 	}
 	// TODO: legacy/shim remove later — preserves the pre-unit transient computer service until it stops and is collected; remove after all installs use the persistent unit.
 	transient := strings.Contains(state, "Transient=yes")
+	// Stop an opted-out connector before Write removes its unit, so the service
+	// still exists when systemctl is asked to stop it. A machine that never had
+	// one is already done.
+	if o.NoTunnel {
+		state, err := run("show", Tunnel, "--property=LoadState,ActiveState")
+		if err != nil && !strings.Contains(state, "LoadState=not-found") {
+			return fmt.Errorf("inspect tunnel service before removal: %w", err)
+		}
+		if !strings.Contains(state, "LoadState=not-found") {
+			if _, err := run("disable", "--now", Tunnel); err != nil {
+				return err
+			}
+		}
+	}
 	if err := retireEngineRestart(ctx, o.Dir, run); err != nil {
 		return err
 	}
@@ -282,8 +380,15 @@ func Install(ctx context.Context, o Options) error {
 	if err := os.MkdirAll(wants, 0755); err != nil {
 		return err
 	}
-	for _, name := range []string{Engine, Computers} {
+	for _, name := range []string{Engine, Computers, Tunnel} {
 		path := filepath.Join(wants, name)
+		if o.NoTunnel && name == Tunnel {
+			// An engine that opted out enables no connector.
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			continue
+		}
 		if target, err := os.Readlink(path); err == nil && target == "../"+name {
 			continue
 		}
@@ -317,6 +422,15 @@ func Install(ctx context.Context, o Options) error {
 	}
 	if _, err := run("daemon-reload"); err != nil {
 		return err
+	}
+	// The connector now runs as its own unit. Start it before the engine restarts,
+	// so remote access never waits for the new engine, and the old engine's own
+	// connector leaves with that restart. An opted-out install stopped an earlier
+	// connector before Write removed its unit.
+	if !o.NoTunnel {
+		if _, err := run("start", Tunnel); err != nil {
+			return err
+		}
 	}
 	if transient {
 		fmt.Fprintln(o.Output, "Keeping the transient computer service and its live desktops; the persistent unit applies after it stops.")

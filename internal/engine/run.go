@@ -697,8 +697,10 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 				wait = min(wait*2, 10*time.Minute)
 			}
 		})
-		if !f.NoTunnel {
+		if !f.NoTunnel && !userservices.TunnelActive(ctx) {
 			startService(func() { connect.RunTunnel(ctx, cstore, f.Cloudflared, log.Printf) })
+		} else if !f.NoTunnel {
+			log.Printf("connect: the tunnel runs as %s, so it stays up when this engine restarts", userservices.Tunnel)
 		}
 	} else {
 		fmt.Println("For a phone, see docs/desktop/WEB.md (tailscale serve, a cloudflared tunnel) or docs/desktop/CONNECT.md (dyna engine connect link).")

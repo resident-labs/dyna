@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -50,6 +51,21 @@ you pass --allow-agent.
 
 func connectStore() (*connect.Store, error) {
 	return connect.OpenStore(filepath.Join(store.DataDir(), "connect"))
+}
+
+// TunnelMain runs the managed tunnel connector until the context ends. The
+// installed dyna-tunnel.service runs it, so the connector stays up while the
+// engine restarts. An empty cloudflared path means the one on PATH. It returns
+// the exit code.
+func TunnelMain(ctx context.Context, cloudflared string) int {
+	st, err := connectStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "connect: %v\n", err)
+		return 1
+	}
+	log.SetPrefix("dyna-tunnel: ")
+	connect.RunTunnel(ctx, st, cloudflared, log.Printf)
+	return 0
 }
 
 // connectMain runs "dyna engine connect". It returns the exit code.
@@ -233,7 +249,7 @@ func connectUnlink(ctx context.Context, st *connect.Store, local bool, out io.Wr
 		return err
 	}
 	st.Audit("unlink", l.Machine)
-	fmt.Fprintf(out, "Unlinked %s. Every Connect session ended. Restart dyna engine run to stop the tunnel.\n", l.Name)
+	fmt.Fprintf(out, "Unlinked %s. Every Connect session ended. The tunnel connector stops now: dyna-tunnel.service restarts it, and a running engine stops its own.\n", l.Name)
 	return nil
 }
 
