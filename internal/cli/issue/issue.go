@@ -34,9 +34,17 @@ func Command(o Options) *cobra.Command {
 	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (default: the current room)")
 	root.Flags().StringVar(&at, "at", "", "source file and line, such as internal/parser.go:12")
 	root.Flags().StringVar(&note, "note", "", "issue details")
-	caller := func() (*roomsvc.Service, room.Record, string, error) {
+	// caller resolves the room and the filer. quiet allows filing into another room,
+	// which wakes nobody (D-111); every other command keeps the room rules.
+	caller := func(quiet bool) (*roomsvc.Service, room.Record, string, error) {
 		s := o.Service()
-		r, err := s.Notify.Rooms.ResolveContext(roomRef, false)
+		var r room.Record
+		var err error
+		if quiet {
+			r, err = s.Notify.Rooms.ResolveQuietWrite(roomRef)
+		} else {
+			r, err = s.Notify.Rooms.ResolveContext(roomRef, false)
+		}
 		if err != nil {
 			return s, r, "", err
 		}
@@ -45,7 +53,7 @@ func Command(o Options) *cobra.Command {
 			return s, r, "", err
 		}
 		if snd.Kind == notify.SenderSession {
-			if snd.Session.RoomID != r.ID {
+			if snd.Session.RoomID != r.ID && !quiet {
 				return s, r, "", fmt.Errorf("use the current session's room")
 			}
 			return s, r, snd.Session.Address(), nil
@@ -78,7 +86,7 @@ func Command(o Options) *cobra.Command {
 	// show prints one issue as the board shows it: its state and title, its
 	// origin and link, and the note the filer gave it.
 	show := func(c *cobra.Command, ref string) error {
-		s, r, _, err := caller()
+		s, r, _, err := caller(false)
 		if err != nil {
 			return err
 		}
@@ -136,11 +144,11 @@ func Command(o Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		s, r, by, err := caller()
+		s, r, by, err := caller(true)
 		if err != nil {
 			return err
 		}
-		i, err := s.Notify.Rooms.FileIssue(r.ID, room.IssueInput{Title: a[0], Note: note, File: file, Line: line, Filer: by})
+		i, err := s.Notify.Rooms.FileQuietIssue(r.ID, room.IssueInput{Title: a[0], Note: note, File: file, Line: line, Filer: by})
 		if err != nil {
 			return err
 		}
@@ -151,7 +159,7 @@ func Command(o Options) *cobra.Command {
 	}})
 	var all bool
 	list := &cobra.Command{Use: "list", Short: "List unhandled room issues", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		s, r, _, err := caller()
+		s, r, _, err := caller(false)
 		if err != nil {
 			return err
 		}
@@ -187,7 +195,7 @@ func Command(o Options) *cobra.Command {
 					return fmt.Errorf("provide a close reason as a second argument or --reason")
 				}
 			}
-			s, r, by, err := caller()
+			s, r, by, err := caller(false)
 			if err != nil {
 				return err
 			}
