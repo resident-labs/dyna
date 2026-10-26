@@ -182,39 +182,84 @@ func (r *recorder) button(name string, pressed bool) error {
 	r.log = append(r.log, name+" "+state)
 	return nil
 }
+func (r *recorder) scroll(x, y int) error {
+	r.log = append(r.log, fmt.Sprintf("scroll %d,%d", x, y))
+	return nil
+}
 func (r *recorder) wait(_ context.Context, d time.Duration) error {
 	r.log = append(r.log, "wait "+d.String())
 	return nil
 }
 
-func always() bool { return true }
-
-func TestDragStopsAndReleasesWhenAPersonTakesControl(t *testing.T) {
+func TestTakeoverDuringAHeldWaitReleasesAtOnce(t *testing.T) {
 	r := &recorder{}
-	moves := 0
-	// The agent keeps control for the first two moves, then a person takes over.
-	agent := func() bool { moves++; return moves <= 3 }
-	err := dragPath(context.Background(), r, []point{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1}}, time.Second, true, r.wait, agent)
-	if !errors.Is(err, errControlLost) {
-		t.Fatalf("err = %v, want the control-lost error", err)
+	g := newGuardedPointer(r)
+	downCtx, cancelDown := context.WithCancel(context.Background())
+	g.begin(cancelDown)
+	for _, a := range parseActions(t, `[{"type":"pointer_down","x":5,"y":6}]`) {
+		if err := pointerButtonAction(g, a); err != nil {
+			t.Fatal(err)
+		}
 	}
-	want := "move 1,1|left down|wait 1s|move 2,1|wait 1s|move 3,1|wait 1s|left up"
-	if got := strings.Join(r.log, "|"); got != want {
-		t.Fatalf("events = %s, want %s", got, want)
+	if err := g.end(nil); err != nil {
+		t.Fatal(err)
+	}
+	// The next action is a long wait. The takeover lands during it.
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	g.begin(cancelWait)
+	g.interrupt()
+	if waitCtx.Err() == nil {
+		t.Fatal("the held wait was not cancelled by the takeover")
+	}
+	if got := strings.Join(r.log, "|"); got != "move 5,6|left down|left up" {
+		t.Fatalf("events = %s, want the button released at the takeover", got)
+	}
+	if err := g.end(waitCtx.Err()); !errors.Is(err, errControlLost) {
+		t.Fatalf("wait error = %v, want the control-lost error", err)
+	}
+	_ = downCtx
+}
+
+func TestTakeoverAtTheHandoffBoundaryPressesNothing(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedPointer(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	// A person takes control after the action began and before its press.
+	g.interrupt()
+	err := pointerButtonAction(g, parseActions(t, `[{"type":"pointer_down","x":5,"y":6}]`)[0])
+	if !errors.Is(err, errControlLost) || len(r.log) != 0 {
+		t.Fatalf("err = %v, events = %v, want no input after the takeover", err, r.log)
 	}
 }
 
-func TestDragNeverStartsWhenAPersonHasControl(t *testing.T) {
+func TestDragStopsAndReleasesAtTheTakeover(t *testing.T) {
 	r := &recorder{}
-	if err := dragPath(context.Background(), r, []point{{1, 1}, {2, 1}}, 0, false, r.wait, func() bool { return false }); !errors.Is(err, errControlLost) || len(r.log) != 0 {
-		t.Fatalf("err = %v, events = %v, want no input", err, r.log)
+	g := newGuardedPointer(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	waits := 0
+	wait := func(ctx context.Context, d time.Duration) error {
+		waits++
+		if waits == 2 {
+			g.interrupt()
+		}
+		return r.wait(ctx, d)
+	}
+	err := g.end(dragPath(context.Background(), g, []point{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1}}, time.Second, true, wait))
+	if !errors.Is(err, errControlLost) {
+		t.Fatalf("err = %v, want the control-lost error", err)
+	}
+	want := "move 1,1|left down|wait 1s|move 2,1|left up|wait 1s"
+	if got := strings.Join(r.log, "|"); got != want {
+		t.Fatalf("events = %s, want %s", got, want)
 	}
 }
 
 func TestDragPathEventSequence(t *testing.T) {
 	path := []point{{1, 1}, {2, 1}, {3, 1}}
 	plain := &recorder{}
-	if err := dragPath(context.Background(), plain, path, 10*time.Millisecond, false, plain.wait, always); err != nil {
+	if err := dragPath(context.Background(), plain, path, 10*time.Millisecond, false, plain.wait); err != nil {
 		t.Fatal(err)
 	}
 	want := "move 1,1|left down|move 2,1|wait 10ms|move 3,1|wait 10ms|left up"
@@ -222,7 +267,7 @@ func TestDragPathEventSequence(t *testing.T) {
 		t.Fatalf("default drag = %s, want %s", got, want)
 	}
 	paced := &recorder{}
-	if err := dragPath(context.Background(), paced, path, 120*time.Millisecond, true, paced.wait, always); err != nil {
+	if err := dragPath(context.Background(), paced, path, 120*time.Millisecond, true, paced.wait); err != nil {
 		t.Fatal(err)
 	}
 	want = "move 1,1|left down|wait 120ms|move 2,1|wait 120ms|move 3,1|wait 120ms|left up"
