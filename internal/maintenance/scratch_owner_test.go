@@ -5,7 +5,32 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/shells"
 )
+
+// A workflow worker's job names its session as Owner and the run as Run, so a
+// run's scratch must match on Run.
+func TestLiveShellForMatchesSessionOwnerAndWorkflowRun(t *testing.T) {
+	const session, run = "ses_20261026-081252-a9074582", "wf_20261026-010101-abcdef01"
+	job := func(status string) []shells.Info {
+		return []shells.Info{{Meta: shells.Meta{Owner: session, Run: run}, Status: status}}
+	}
+	for _, tc := range []struct {
+		name, id, status string
+		want             bool
+	}{
+		{"session with a running job", session, "running", true},
+		{"run with a running job", run, "running", true},
+		{"run with a starting job", run, "starting", true},
+		{"run whose job exited", run, "exited", false},
+		{"other run", "wf_20261026-020202-abcdef02", "running", false},
+	} {
+		if got := liveShellFor(job(tc.status), tc.id); got != tc.want {
+			t.Errorf("%s: live = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+}
 
 // A scratch folder is kept whenever the owner may still use it: a read that
 // fails for any reason but a missing record, or a shell job that still runs.

@@ -467,15 +467,22 @@ func scratchOwner(owner string) scratch.Owner {
 			return ended, err
 		},
 		liveShell: func(id string) (bool, error) {
-			list, err := shells.DefaultStore().ListOwner(id)
-			for _, in := range list {
-				if in.Status == "running" || in.Status == "starting" {
-					return true, err
-				}
-			}
-			return false, err
+			list, err := shells.DefaultStore().List(false)
+			return liveShellFor(list, id), err
 		},
 	})
+}
+
+// liveShellFor reports whether a running or starting job belongs to id. A
+// workflow worker's job names its session in Owner and the run in Run, so a run
+// ID matches on Run.
+func liveShellFor(list []shells.Info, id string) bool {
+	for _, in := range list {
+		if (in.Owner == id || in.Run == id) && (in.Status == "running" || in.Status == "starting") {
+			return true
+		}
+	}
+	return false
 }
 
 // ownerReaders are the state reads behind scratchOwner. Each close-time reader
