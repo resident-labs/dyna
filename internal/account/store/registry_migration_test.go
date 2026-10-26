@@ -12,6 +12,20 @@ import (
 	"dyna-agent/internal/database"
 )
 
+// saveFixtureCredential writes a saved credential file the migration can
+// validate, so a fixture Pi account is signed in rather than a bare row.
+func saveFixtureCredential(t *testing.T, dataDir, id, schema string) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "accounts", "credentials")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"schema":"` + schema + `","payload":{"token":"` + id + `-sign-in"}}`
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A saved account names a harness this release runs, unless it names the
 // harnesses the owner retired when Pi took over their providers. Version 8
 // drops both kinds of row, together with their active marks, repository scopes
@@ -54,13 +68,17 @@ CREATE TABLE accounts_registry (
 			if err != nil {
 				return err
 			}
-			// Only a signed-in Pi account can have taken over a sign-in.
+			// Only a signed-in Pi account can have taken over a sign-in, and its
+			// saved credential is what proves the sign-in exists.
 			schema := ""
 			if row.harness == "pi" {
 				schema = "claude-oauth"
 			}
 			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES(?, 0, ?, ?)", row.id, metadata, schema); err != nil {
 				return err
+			}
+			if schema != "" {
+				saveFixtureCredential(t, dataDir, row.id, schema)
 			}
 		}
 		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
@@ -227,6 +245,9 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 		}
 		if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES(?, 0, ?, ?)", row.id, metadata, schema); err != nil {
 			t.Fatal(err)
+		}
+		if schema != "" {
+			saveFixtureCredential(t, dataDir, row.id, schema)
 		}
 		if _, err := db.ExecContext(ctx, "INSERT INTO account_active(provider, harness, scope, account) VALUES(?,?,?,?)", row.provider, row.harness, "", row.id); err != nil {
 			t.Fatal(err)
@@ -450,14 +471,14 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 		t.Fatal(err)
 	}
 	// The Pi slot names the provider, waits for a sign-in, and holds no identity.
-	slot, err := json.Marshal(map[string]any{"id": "pi-chatgpt-slot", "harness": "pi", "provider": "chatgpt", "kind": "oauth", "needsLogin": true})
+	slot, err := json.Marshal(Metadata{ID: "pi-chatgpt-slot", Harness: "pi", Provider: ProviderChatGPT, Kind: KindOAuth, NeedsLogin: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES('pi-chatgpt-slot', 0, ?)", slot); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := json.Marshal(map[string]string{"id": "codex", "harness": "codex", "provider": "chatgpt", "kind": "oauth", "identity": "owner@example.test"})
+	moved, err := json.Marshal(Metadata{ID: "codex", Harness: "codex", Provider: ProviderChatGPT, Kind: KindOAuth, Identity: "owner@example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,5 +513,74 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 	}
 	if _, err := os.Stat(s.credentialPath("codex")); err != nil {
 		t.Fatalf("the unsigned Pi slot discarded the only saved sign-in: %v", err)
+	}
+}
+
+// D-125 review: a Pi row can carry a schema and an identity while its credential
+// file is missing or damaged, which Store.load reads as signed out. Such a row is
+// not a replacement, or the migration would delete the only saved sign-in it
+// cannot actually stand in for.
+func TestRegistryMigrationKeepsASignInWhenThePiCredentialIsMissing(t *testing.T) {
+	s := registryStore(t)
+	dataDir := filepath.Dir(s.Root)
+	ctx := context.Background()
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE accounts (
+ id TEXT PRIMARY KEY,
+ ord INTEGER NOT NULL,
+ metadata BLOB NOT NULL CHECK(json_valid(metadata)),
+ credential_schema TEXT NOT NULL DEFAULT ''
+);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, activeSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE account_repo_scopes (account_id TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY (account_id, repo));
+CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`); err != nil {
+		t.Fatal(err)
+	}
+	// The Pi row looks signed in: same identity, schema recorded. Its credential
+	// file was never written, as a crash between the row and its secret leaves it.
+	pi, err := json.Marshal(Metadata{ID: "pi-chatgpt", Harness: "pi", Provider: ProviderChatGPT, Kind: KindOAuth, Identity: "owner@example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES('pi-chatgpt', 0, ?, 'claude-oauth')", pi); err != nil {
+		t.Fatal(err)
+	}
+	codex, err := json.Marshal(Metadata{ID: "codex", Harness: "codex", Provider: ProviderChatGPT, Kind: KindOAuth, Identity: "owner@example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES('codex', 1, ?)", codex); err != nil {
+		t.Fatal(err)
+	}
+	saveFixtureCredential(t, dataDir, "codex", "fixture-v1")
+	if _, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO meta(key, value) VALUES('account.registry', '8')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	state, err := s.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]bool{}
+	for _, entry := range state.Entries {
+		kept[entry.ID] = true
+	}
+	if !kept["codex"] {
+		t.Fatalf("migration kept %v, want the Codex sign-in whose Pi account has no saved credential", kept)
+	}
+	if err := s.Update(func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.credentialPath("codex")); err != nil {
+		t.Fatalf("a Pi row without a credential discarded the saved sign-in: %v", err)
 	}
 }
