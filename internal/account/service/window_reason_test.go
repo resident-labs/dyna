@@ -12,23 +12,16 @@ import (
 // D-124: a window's missing reading crossed the API as the reader's own sentence,
 // so the UI rendered reader wording and the client compared that sentence as a
 // literal. Window reasons are typed codes now, and each client shows its copy.
+// A saved reading is replaced on the next read, so a reason Dyna no longer knows
+// needs no migration: both clients treat it as not reported.
 func TestWindowReasonsAreCodesNotReaderText(t *testing.T) {
-	// Accounts saved before the change carry the reader's prose. It loads as the
-	// not-reported code, so every client can show its own sentence.
-	var legacy accountstore.Window
-	if err := json.Unmarshal([]byte(`{"id":"grok-weekly","label":"Weekly","unavailableReason":"Grok does not report remaining allowance."}`), &legacy); err != nil {
-		t.Fatal(err)
-	}
-	if legacy.Reason != accountstore.WindowReasonNotReported {
-		t.Fatalf("legacy window reason = %q, want %q", legacy.Reason, accountstore.WindowReasonNotReported)
-	}
 	var account Account
-	if err := json.Unmarshal([]byte(`{"windows":[{"id":"grok-weekly","label":"Weekly period","resetsAt":"2027-01-01T00:00:00Z","reason":"not-reported"}]}`), &account); err != nil {
+	if err := json.Unmarshal([]byte(`{"windows":[{"id":"grok-weekly","label":"Weekly period","resetsAt":"2027-01-01T00:00:00Z"},{"id":"other","label":"Other","reason":"a-code-dyna-dropped"}]}`), &account); err != nil {
 		t.Fatal(err)
 	}
 	summary := WindowsSummary(account)
-	if strings.Contains(summary, "Grok does not report") || !strings.Contains(summary, "Remaining allowance not reported.") {
-		t.Fatalf("summary did not use designed copy: %q", summary)
+	if strings.Contains(summary, "a-code-dyna-dropped") || strings.Count(summary, "Remaining allowance not reported.") != 2 {
+		t.Fatalf("summary did not use designed copy for absent and unknown reasons: %q", summary)
 	}
 	// A passed reset marks the code the app reads to say when it last checked.
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
