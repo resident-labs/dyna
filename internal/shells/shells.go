@@ -127,6 +127,9 @@ type Store struct {
 	// exitWrite replaces the write of a finished job's exit; nil uses Save. A
 	// test sets it to act as a state store that times out.
 	exitWrite func(m Meta, ex *Exit) error
+	// afterStop waits for a finished command's output to drain; nil uses time.After.
+	// A test sets it to a channel that is already ready.
+	afterStop func(time.Duration) <-chan time.Time
 	// CommandEnv prepares the environment of a new command. The shell CLI sets
 	// it to the display policy of managed shells; nil keeps the supervisor's
 	// launch environment, which is the owner display.
@@ -405,10 +408,18 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	// Without a terminal, a pager or color codes only get in the way.
 	cmd.Env = append(env, "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	pr, pw := io.Pipe()
+	// A file, not an io.Pipe: Wait then returns when the command ends, even
+	// if a child it left behind still holds the output open.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer pr.Close()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	cmd.Stdin = nil
-	if err := childenv.Clean(cmd).Start(); err != nil {
+	err = childenv.Clean(cmd).Start()
+	pw.Close() // the command holds its own copies
+	if err != nil {
 		_ = s.Save(m, &Exit{Code: -1, Error: err.Error(), Ended: time.Now()})
 		return err
 	}
@@ -459,7 +470,20 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 			werr = <-waitErr
 		}
 	}
-	pw.Close()
+	// The command has ended. A child it left behind (an ssh connection master,
+	// for example) can hold the output open for as long as it runs, and nothing
+	// would then wake this supervisor, stopped or not. The copier gets a short
+	// time to drain, then loses its input, so the exit is always recorded.
+	after := s.afterStop
+	if after == nil {
+		after = time.After
+	}
+	select {
+	case <-copied:
+	case <-after(outputDrainWait):
+		_ = pr.Close()
+		<-copied
+	}
 	<-copied
 	grew.stop()
 	ex := Exit{Ended: time.Now()}
@@ -523,6 +547,10 @@ func (s *Store) writeExit(m Meta, ex *Exit) error {
 func timedOut(err error) bool {
 	return err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), context.DeadlineExceeded.Error()))
 }
+
+// outputDrainWait is how long a supervisor lets a job's output drain after
+// its command ended, before it stops reading (D-190, D-210).
+const outputDrainWait = 3 * time.Second
 
 // ReadMeta loads a job's launch record.
 func (s *Store) ReadMeta(id string) (Meta, error) {
@@ -929,12 +957,22 @@ func StartSupervisor(exe, id string) error {
 		_, cleanup := stopOrphans(id)
 		return errors.Join(err, cleanup)
 	}
-	if _, err := gateWrite.Write([]byte{'g'}); err != nil {
+	if err := sendGoAhead(gateWrite); err != nil {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_, _ = cmd.Process.Wait()
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// sendGoAhead tells a waiting supervisor to start its command. A supervisor
+// that already ended without reading it never starts the command; its own
+// error is in the job folder, so a closed gate is not a launch failure.
+func sendGoAhead(gate io.Writer) error {
+	if _, err := gate.Write([]byte{'g'}); err != nil && !errors.Is(err, syscall.EPIPE) {
+		return err
+	}
+	return nil
 }
 
 // launchGateEnv names the file descriptor on which a supervisor waits for its
