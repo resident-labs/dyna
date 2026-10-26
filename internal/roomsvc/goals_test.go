@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -257,14 +258,17 @@ func TestFinishGoalClosesOnlyNamedIssues(t *testing.T) {
 	if want := []string{unfixed.Label()}; len(done.LeftOpen) != 1 || done.LeftOpen[0] != want[0] {
 		t.Fatalf("left open = %v, want %v", done.LeftOpen, want)
 	}
+	if data, err := json.Marshal(done); err != nil || !strings.Contains(string(data), `"leftOpen":["`+unfixed.Label()+`"]`) {
+		t.Fatalf("JSON result %s, %v; want the left-open labels", data, err)
+	}
 	closed, err := e.svc.rooms().Issue(r.ID, fixed.Label())
 	if err != nil || closed.State != room.IssueStateClosed || closed.Reason != "D-2 remains open" {
 		t.Fatalf("named issue = %+v, %v; want closed with the done note", closed, err)
 	}
 	for _, issue := range []room.Issue{unfixed, unlinked} {
 		got, err := e.svc.rooms().Issue(r.ID, issue.Label())
-		if err != nil || got.State == room.IssueStateClosed {
-			t.Fatalf("%s = %+v, %v; want still open", issue.Label(), got, err)
+		if err != nil || got.State != room.IssueStateOpen || got.GoalID != "" {
+			t.Fatalf("%s = %+v, %v; want open and linked to no goal", issue.Label(), got, err)
 		}
 	}
 	kept := file("Dropped work resumes")
