@@ -186,6 +186,14 @@ func (r *recorder) scroll(x, y int) error {
 	r.log = append(r.log, fmt.Sprintf("scroll %d,%d", x, y))
 	return nil
 }
+func (r *recorder) key(name string, pressed bool) error {
+	state := "up"
+	if pressed {
+		state = "down"
+	}
+	r.log = append(r.log, "key "+name+" "+state)
+	return nil
+}
 func (r *recorder) wait(_ context.Context, d time.Duration) error {
 	r.log = append(r.log, "wait "+d.String())
 	return nil
@@ -193,7 +201,7 @@ func (r *recorder) wait(_ context.Context, d time.Duration) error {
 
 func TestTakeoverDuringAHeldWaitReleasesAtOnce(t *testing.T) {
 	r := &recorder{}
-	g := newGuardedPointer(r)
+	g := newGuardedInput(r)
 	downCtx, cancelDown := context.WithCancel(context.Background())
 	g.begin(cancelDown)
 	for _, a := range parseActions(t, `[{"type":"pointer_down","x":5,"y":6}]`) {
@@ -222,7 +230,7 @@ func TestTakeoverDuringAHeldWaitReleasesAtOnce(t *testing.T) {
 
 func TestTakeoverAtTheHandoffBoundaryPressesNothing(t *testing.T) {
 	r := &recorder{}
-	g := newGuardedPointer(r)
+	g := newGuardedInput(r)
 	_, cancel := context.WithCancel(context.Background())
 	g.begin(cancel)
 	// A person takes control after the action began and before its press.
@@ -235,7 +243,7 @@ func TestTakeoverAtTheHandoffBoundaryPressesNothing(t *testing.T) {
 
 func TestDragStopsAndReleasesAtTheTakeover(t *testing.T) {
 	r := &recorder{}
-	g := newGuardedPointer(r)
+	g := newGuardedInput(r)
 	_, cancel := context.WithCancel(context.Background())
 	g.begin(cancel)
 	waits := 0
@@ -286,5 +294,60 @@ func TestPointerDownAndUpAreSeparateEvents(t *testing.T) {
 	want := "move 5,6|left down|move 9,6|right up|left up"
 	if got := strings.Join(r.log, "|"); got != want {
 		t.Fatalf("events = %s, want %s", got, want)
+	}
+}
+
+func TestKeyActionValidation(t *testing.T) {
+	good := `[{"type":"key_down","keys":["SHIFT","a"]},{"type":"key_up","keys":["SHIFT","a"]},{"type":"keypress","keys":["e"],"hold_ms":600}]`
+	if err := ValidateActions(parseActions(t, good), 1280, 800); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`[{"type":"key_down"}]`,
+		`[{"type":"key_down","keys":["not_a_keysym"]}]`,
+		`[{"type":"key_up","keys":[]}]`,
+		`[{"type":"key_down","keys":["a"],"hold_ms":5}]`,
+		`[{"type":"keypress","keys":["a"],"hold_ms":10001}]`,
+		`[{"type":"keypress","keys":["a"],"hold_ms":-1}]`,
+	} {
+		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+func TestHeldKeysReleaseInReverseAtTheTakeoverAndKeyUpIsIdempotent(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	g.setKeys(r)
+	ctx, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	for _, k := range []string{"Shift_L", "e"} {
+		if err := g.key(k, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.interrupt()
+	if ctx.Err() == nil {
+		t.Fatal("the takeover did not cancel the held key action")
+	}
+	if got := strings.Join(r.log, "|"); got != "key Shift_L down|key e down|key e up|key Shift_L up" {
+		t.Fatalf("events = %s", got)
+	}
+	if err := g.key("e", true); !errors.Is(err, errControlLost) {
+		t.Fatalf("press after the takeover = %v, want the control-lost error", err)
+	}
+	n := len(r.log)
+	if err := g.key("e", false); err != nil || len(r.log) != n {
+		t.Fatalf("key_up of a released key = %v, events %v, want nothing", err, r.log[n:])
+	}
+}
+
+func TestKeypressHoldDefaultsAndSetting(t *testing.T) {
+	if d, err := keypressHold(parseActions(t, `[{"type":"keypress","keys":["e"]}]`)[0]); err != nil || d != defaultKeypressHold {
+		t.Fatalf("default hold = %v, %v", d, err)
+	}
+	if d, err := keypressHold(parseActions(t, `[{"type":"keypress","keys":["e"],"hold_ms":600}]`)[0]); err != nil || d != 600*time.Millisecond {
+		t.Fatalf("hold_ms 600 = %v, %v", d, err)
 	}
 }

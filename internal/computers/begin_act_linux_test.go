@@ -9,7 +9,7 @@ import (
 
 func TestActionNeverBeginsUnderHumanControl(t *testing.T) {
 	r := &recorder{}
-	g := newGuardedPointer(r)
+	g := newGuardedInput(r)
 	_, cancel := context.WithCancel(context.Background())
 	s := &supervisor{}
 	s.state.Control = ControlHuman
@@ -21,7 +21,7 @@ func TestActionNeverBeginsUnderHumanControl(t *testing.T) {
 // The takeover can land right after beginAct returns, before the first event.
 func TestTakeoverRightAfterBeginActStopsTheFirstEvent(t *testing.T) {
 	r := &recorder{}
-	g := newGuardedPointer(r)
+	g := newGuardedInput(r)
 	_, cancel := context.WithCancel(context.Background())
 	s := &supervisor{}
 	s.state.Control = ControlAgent
