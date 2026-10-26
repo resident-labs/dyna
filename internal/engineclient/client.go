@@ -4,7 +4,9 @@ package engineclient
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"dyna-agent/internal/enginesocket"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -124,10 +127,23 @@ func New(path string, opts ...Option) *Client {
 // refused), it retries for up to the restart wait, every 100 ms rising to
 // 1 s. A call the engine accepted is never retried: past its deadline it
 // fails with "engine did not answer".
+//
+// A call without a request ID gets one, so the engine applies it once. When the
+// engine closes the connection before it answers (a restart for an update),
+// the call is sent once more with the same ID: the engine returns the first
+// result or applies the write, never both.
 func (c *Client) Call(ctx context.Context, method string, args []any, result any) error {
 	if args == nil {
 		args = []any{}
 	}
+	if callspec.RequestOf(ctx) == "" && !ownsRequestID(method) {
+		id, err := newRequestID()
+		if err != nil {
+			return err
+		}
+		ctx = callspec.WithRequest(ctx, id)
+	}
+	cutOff := false
 	body, err := json.Marshal(args)
 	if err != nil {
 		return err
@@ -136,6 +152,10 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 	giveUp := time.Now().Add(c.restartWait)
 	for delay := 100 * time.Millisecond; ; delay = min(2*delay, time.Second) {
 		err := c.call(ctx, method, body, deadline, result)
+		if callspec.IsCutOff(err) && !cutOff && ctx.Err() == nil && callspec.RequestOf(ctx) != "" && !ownsRequestID(method) {
+			cutOff = true
+			err = ErrNotRunning
+		}
 		if !errors.Is(err, ErrNotRunning) {
 			return err
 		}
@@ -205,4 +225,23 @@ func (c *Client) send(ctx context.Context, method string, body []byte, result an
 		return nil
 	}
 	return json.NewDecoder(res.Body).Decode(result)
+}
+
+// ownsRequestID reports calls whose request ID has a meaning of its own: a
+// session's runner calls and run records carry IDs the engine checks against
+// the caller, and a wait for input takes none.
+func ownsRequestID(method string) bool {
+	switch method {
+	case "FinishRun", "AddRunDirectories", "AdmitNativeAttempt", "ObserveClaudeUsage":
+		return true
+	}
+	return strings.HasPrefix(method, "Runner")
+}
+
+func newRequestID() (string, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "cli-" + hex.EncodeToString(b[:]), nil
 }
