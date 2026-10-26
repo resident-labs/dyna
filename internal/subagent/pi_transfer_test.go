@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/profile"
 )
@@ -116,6 +117,23 @@ func piTestProfile(name, model, path, logPath string) profile.Profile {
 	}
 }
 
+// persistFakePiSession writes the session file a real pi keeps once a session
+// exists, so a later resume of the id finds it. The fake itself writes none.
+func persistFakePiSession(t *testing.T, id string) {
+	t.Helper()
+	home, err := harnessruntime.NewAccounts().HarnessHome(profile.HarnessPi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "20260101-000000_"+id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestPiTransferKeepsTheSamePiSession proves a move between two Pi profiles
 // resumes the exact Pi session with the target model: no handoff ask, no
 // handoff packet and no fresh conversation. Other pairs keep that path, so a
@@ -133,6 +151,7 @@ func TestPiTransferKeepsTheSamePiSession(t *testing.T) {
 	if first.HarnessSession == "" {
 		t.Fatal("first turn reported no Pi session")
 	}
+	persistFakePiSession(t, first.HarnessSession)
 	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "pi-next", WaitSeconds: 30})
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +183,7 @@ func TestPiTransferKeepsTheSamePiSession(t *testing.T) {
 	}
 	var resumed bool
 	for _, line := range strings.Split(string(log), "\n") {
-		if strings.HasPrefix(line, "SPAWN ") && strings.Contains(line, "--session "+first.HarnessSession) &&
+		if strings.HasPrefix(line, "SPAWN ") && strings.Contains(line, "--session ") && strings.Contains(line, first.HarnessSession) &&
 			strings.Contains(line, "--model new/provider-model") {
 			resumed = true
 		}
@@ -249,7 +268,9 @@ func driveTransfer(t *testing.T, e *testEnv, state TransferState) {
 
 // assertFreshFallback checks that the native attempt was abandoned for the
 // bounded handoff conversation, and that the fresh turn carried the packet.
-func assertFreshFallback(t *testing.T, e *testEnv, id string, state TransferState, logPath string) {
+// wantResume says whether a resume launch was expected first: a session file
+// that never existed is refused before any launch.
+func assertFreshFallback(t *testing.T, e *testEnv, id string, state TransferState, logPath string, wantResume bool) {
 	t.Helper()
 	got, err := e.m.TransferStatus(id)
 	if err != nil {
@@ -288,15 +309,16 @@ func assertFreshFallback(t *testing.T, e *testEnv, id string, state TransferStat
 			fresh = true
 		}
 	}
-	if !resumed || !fresh {
-		t.Fatalf("fallback did not try a resume then a fresh launch:\n%s", log)
+	if resumed != wantResume || !fresh {
+		t.Fatalf("fallback launches (resume=%v, want %v; fresh=%v):\n%s", resumed, wantResume, fresh, log)
 	}
 }
 
 // A first Pi launch can fail before Pi writes any session file, while Dyna has
-// already recorded the preassigned id. The native resume then cannot work, so
-// the transfer must recover with the fresh conversation instead of repeating
-// the same failure.
+// already recorded the preassigned id. The turn recovers with a fresh
+// session (never a nudge at the missing session), but no session file ever
+// exists, so a later transfer cannot resume natively and must recover with
+// the fresh handoff conversation instead of repeating the same failure.
 func TestPiTransferFallsBackWhenNoSessionExists(t *testing.T) {
 	path, logPath := installFakePiTurn(t)
 	old := piTestProfile("pi-old", "old/provider-model", path, logPath)
@@ -308,8 +330,8 @@ func TestPiTransferFallsBackWhenNoSessionExists(t *testing.T) {
 	e := piFallbackEnv(t, &old, &next, path)
 	info, _ := e.start("RESPOND: keep the decoder work", func(so *StartOptions) { so.Profile = "pi-old" })
 	info, first := e.wait(info.ID, 1)
-	if first.Status != TurnError {
-		t.Fatalf("first launch did not fail: %+v", first)
+	if first.Status != TurnOK {
+		t.Fatalf("first launch did not recover with a fresh session: %+v", first)
 	}
 	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "pi-next", WaitSeconds: 30})
 	if err != nil {
@@ -318,8 +340,10 @@ func TestPiTransferFallsBackWhenNoSessionExists(t *testing.T) {
 	if state.Phase != "stopping" {
 		t.Fatalf("Pi transfer did not skip the handoff wait: %+v", state)
 	}
+	// No session file exists, so the resume is refused before any launch and
+	// the fallback starts at once.
 	driveTransfer(t, e, state)
-	assertFreshFallback(t, e, info.ID, state, logPath)
+	assertFreshFallback(t, e, info.ID, state, logPath, false)
 }
 
 // A history that no longer fits the target model can fail both Pi's compaction
@@ -337,10 +361,11 @@ func TestPiTransferFallsBackWhenTheSessionCannotFit(t *testing.T) {
 	if first.Status != TurnOK || first.HarnessSession == "" {
 		t.Fatalf("first turn did not produce a Pi session: %+v", first)
 	}
+	persistFakePiSession(t, first.HarnessSession)
 	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "pi-next", WaitSeconds: 30})
 	if err != nil {
 		t.Fatal(err)
 	}
 	driveTransfer(t, e, state)
-	assertFreshFallback(t, e, info.ID, state, logPath)
+	assertFreshFallback(t, e, info.ID, state, logPath, true)
 }
