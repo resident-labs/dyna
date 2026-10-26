@@ -67,8 +67,17 @@ const (
 	defaultCheckCPUs          = 2
 	defaultContainerMemoryMiB = int64(4096)
 	defaultHostMemoryMiB      = int64(5120)
-	// hostTasksMax bounds the processes one host check may start.
+	// hostTasksMax is the least a check may start, and what every scope that is
+	// not a check keeps.
 	hostTasksMax = 768
+	// tasksPerCPU is how many more tasks a check may start for each CPU it was
+	// given. A compiler and its linker threads need many tasks per CPU, so a
+	// large build with a fixed bound runs out of them.
+	tasksPerCPU = 256
+	// sccachePortBase is the first port a check's own sccache server may use. A
+	// shared server would be killed with the check that started it, while other
+	// checks still use it, so each check gets a server of its own.
+	sccachePortBase = 4226
 )
 
 // checkResources is the CPU count and memory one check runs with, after the node
@@ -170,7 +179,20 @@ func (c checkResources) scope(host bool) scopeLimits {
 	if !host {
 		memory += 1024
 	}
-	return scopeLimits{CPUs: c.CPUs, MemoryMiB: memory, TasksMax: hostTasksMax}
+	return scopeLimits{CPUs: c.CPUs, MemoryMiB: memory, TasksMax: tasksMaxFor(c.CPUs)}
+}
+
+// tasksMaxFor bounds the tasks a check with this many CPUs may start: a compiler
+// and its linker threads need many tasks per CPU, so the bound follows the CPUs
+// the check was given and never drops below the fixed minimum.
+func tasksMaxFor(cpus int) int {
+	if cpus < 1 {
+		cpus = 1
+	}
+	if tasks := tasksPerCPU * cpus; tasks > hostTasksMax {
+		return tasks
+	}
+	return hostTasksMax
 }
 
 // nodeDropCIRef removes the commit ref a previous run of the same commit left on
@@ -1031,7 +1053,7 @@ const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pg
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
+		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; printf 'local CI: every slot is busy, waiting for slot %d\\n' >&2; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
 }
 
 // noteScript writes at the start of a check's log what Dyna changed about its
@@ -1182,7 +1204,11 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			"if systemctl --user is-active --quiet " + unit + " 2>/dev/null; then printf 'local CI: the check scope %s is still active after cleanup\\n' " + q(unitName) + " >&2; fi; " +
 			"systemctl --user reset-failed " + unit + " >/dev/null 2>&1 || true; "
 		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
-		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
+		serverPort := ""
+		if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
+			serverPort = " SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
+		}
+		setup += hostEnvironment(environment) + serverPort + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if node.SSH == "" {
@@ -1218,6 +1244,12 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	}
 	for key, value := range check.env {
 		environment[key] = value
+	}
+	// A check that starts sccache must not lose it to another check's cleanup:
+	// the port follows the slot this check holds, and the cache directory stays
+	// where the repository put it.
+	if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
+		args += " -e SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
 	}
 	args += dockerEnvironment(environment) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) " + q(check.image)
 	// Both host and container deadlines survive a disconnected SSH client.
