@@ -2,11 +2,48 @@ package version
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"runtime/debug"
+	"strings"
 	"testing"
+
+	"dyna-agent/internal/computers"
 )
 
+func stubComputersBuild(t *testing.T, build string, err error) {
+	t.Helper()
+	original := computersBuild
+	t.Cleanup(func() { computersBuild = original })
+	computersBuild = func(context.Context) (string, error) { return build, err }
+}
+
+func TestVersionReportsComputerServiceBuild(t *testing.T) {
+	for name, tc := range map[string]struct {
+		build string
+		err   error
+		want  string
+	}{
+		"same":    {"dev+a", nil, "computers dev+a\n"},
+		"differs": {"dev+old", nil, "computers dev+old (differs from dyna; restart pending)\n"},
+		"none":    {"", fmt.Errorf("%w: refused", computers.ErrNoDaemon), "computers not running\n"},
+		"old":     {"", fmt.Errorf("%w: invalid id", computers.ErrUnknownBuild), "computers older build (restart pending)\n"},
+		"other":   {"", errors.New("boom"), "computers unknown: boom\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stubComputersBuild(t, tc.build, tc.err)
+			var out bytes.Buffer
+			printComputers(context.Background(), &out, "dev+a")
+			if out.String() != tc.want {
+				t.Fatalf("got %q, want %q", out.String(), tc.want)
+			}
+		})
+	}
+}
+
 func TestVersionReportsInstalledCommitAndDirtyState(t *testing.T) {
+	stubComputersBuild(t, "", computers.ErrNoDaemon)
 	originalRead, originalRevision := readBuildInfo, buildRevision
 	t.Cleanup(func() { readBuildInfo, buildRevision = originalRead, originalRevision })
 	for _, tc := range []struct {
@@ -42,7 +79,7 @@ func TestVersionReportsInstalledCommitAndDirtyState(t *testing.T) {
 			if err := cmd.Execute(); err != nil {
 				t.Fatal(err)
 			}
-			if got, want := out.String(), "dyna "+tc.want+"\n"; got != want {
+			if got, want := out.String(), "dyna "+tc.want+"\n"; !strings.HasPrefix(got, want) {
 				t.Fatalf("version = %q, want %q", got, want)
 			}
 		})
