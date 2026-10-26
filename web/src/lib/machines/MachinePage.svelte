@@ -226,8 +226,8 @@
           {#snippet trail()}<Switch on={machine.enabled} label="Enabled" disabled={busy} onchange={(on: boolean) => onsave({ enabled: on })} />{/snippet}
         </Row>
         <Row dense text="Roles">
-          {#snippet trail()}
-            <span class="chips">
+          {#snippet detail()}
+            <span class="chips roles">
               {#each ROLES as role (role)}
                 <button
                   class="role"
@@ -310,6 +310,7 @@
   .usage { display: grid; gap: var(--s3); }
   .value { color: var(--ink-2); }
   .chips { display: inline-flex; flex-wrap: wrap; gap: var(--s1); justify-content: flex-end; }
+  .chips.roles { display: flex; justify-content: flex-start; margin-top: var(--s2); }
   .note { color: var(--faint); }
   .open { color: var(--iris); text-decoration: none; }
   @media (hover: hover) { .open:hover { text-decoration: underline; } }
