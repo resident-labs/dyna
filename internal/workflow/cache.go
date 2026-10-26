@@ -17,6 +17,7 @@ import (
 type Cache struct {
 	mu         sync.Mutex
 	current    map[string]any
+	execs      map[string]execRecord
 	priorCalls int
 	hits       int
 }
@@ -30,12 +31,22 @@ type CacheStats struct {
 // NewCache builds a resume cache. Counts include errors and isolated calls:
 // dropping holes before checking uniqueness could replay another job's result.
 func NewCache(entries []runstore.JournalEntry) *Cache {
-	c := &Cache{current: map[string]any{}, priorCalls: len(entries)}
+	c := &Cache{current: map[string]any{}, execs: map[string]execRecord{}}
 	keys := map[string]int{}
+	var execEntries []runstore.JournalEntry
 	for _, e := range entries {
+		if e.Kind == "exec" {
+			execEntries = append(execEntries, e)
+			continue
+		}
+		c.priorCalls++
 		keys[e.Key]++
 	}
+	c.addExecs(execEntries)
 	for _, e := range entries {
+		if e.Kind == "exec" {
+			continue
+		}
 		// Older keys cannot prove that the execution configuration matches.
 		// Do not let a changed configuration fall back to a stale result.
 		if !strings.HasPrefix(e.Key, "v3:") || keys[e.Key] != 1 || e.Error != "" || e.Dir != "" || e.Worktree != "" {
@@ -44,6 +55,44 @@ func NewCache(entries []runstore.JournalEntry) *Cache {
 		c.current[e.Key] = e.Result
 	}
 	return c
+}
+
+// addExecs keeps one record per run() call: its last journal entry. A call
+// that succeeded gives its result; one that was still running gives its shell,
+// so a resumed run waits for it instead of starting it again. A failed call
+// runs again, like a failed agent. A key two calls share stays uncached.
+func (c *Cache) addExecs(entries []runstore.JournalEntry) {
+	last := map[int]runstore.JournalEntry{}
+	for _, e := range entries {
+		last[e.ID] = e
+	}
+	calls := map[string]int{}
+	for _, e := range last {
+		calls[e.Key]++
+	}
+	for _, e := range last {
+		c.priorCalls++
+		if calls[e.Key] != 1 || !strings.HasPrefix(e.Key, "x1:") || e.Error != "" {
+			continue
+		}
+		switch e.State {
+		case "done":
+			c.execs[e.Key] = execRecord{Shell: e.Shell, Done: true, Result: e.Result}
+		case "running":
+			c.execs[e.Key] = execRecord{Shell: e.Shell}
+		}
+	}
+}
+
+func (c *Cache) popExec(key string) (execRecord, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rec, ok := c.execs[key]
+	if ok {
+		delete(c.execs, key)
+		c.hits++
+	}
+	return rec, ok
 }
 
 func (c *Cache) pop(key string) (any, bool) {
