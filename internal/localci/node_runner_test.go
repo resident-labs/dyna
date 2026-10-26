@@ -939,11 +939,12 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 
 // A detached descendant can hold the check's output open, which keeps a
 // transport that waits for the pipe alive after the wrapper exits. The node
-// must therefore clean the check's scope before the wrapper finishes, not after
-// a transport gives up. The fake node records the order of the command's end
-// and the cleanup, so the test proves the order without a timer, a sleep or a
-// real deadline.
-func TestHostCheckCleansItsScopeBeforeItFinishes(t *testing.T) {
+// must therefore kill it before the wrapper finishes, not after a transport
+// gives up. The fake node records the order of the command's end and the
+// cleanup, and the holder is a child the test owns: the test starts it, the
+// cleanup kills it, and the test reaps it, so no timer and no zombie decide the
+// result.
+func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -955,22 +956,29 @@ func TestHostCheckCleansItsScopeBeforeItFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := filepath.Join(dir, "events")
-	pidFile := filepath.Join(dir, "holder.pid")
+	// The holder: a detached process, blocked reading a pipe the test owns, so
+	// it behaves like a daemon that a check left behind.
+	holder := exec.Command("sh", "-c", "read line")
+	holder.Stdin = gate
+	holder.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		_ = gateWriter.Close()
 		_ = gate.Close()
-		if data, readErr := os.ReadFile(pidFile); readErr == nil {
-			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil {
-				_ = syscall.Kill(pid, syscall.SIGKILL)
-			}
-		}
+		_ = holder.Process.Kill()
 	})
+	events := filepath.Join(dir, "events")
+	pidFile := filepath.Join(dir, "holder.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(holder.Process.Pid)), 0600); err != nil {
+		t.Fatal(err)
+	}
 	fakes := map[string]string{
 		"systemd-run": "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n",
-		// The node's systemctl: is-active says inactive, stop kills the holder
-		// and records itself, reset-failed does nothing.
-		"systemctl": "#!/bin/sh\ncase \"$2\" in\n  is-active) exit 1 ;;\n  stop) printf 'stop\\n' >> " + events + "; [ -s " + pidFile + " ] && kill -KILL \"$(cat " + pidFile + ")\" 2>/dev/null; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+		// The node's systemctl: is-active says inactive, kill records itself and
+		// kills the holder, everything else does nothing.
+		"systemctl": "#!/bin/sh\ncase \"$2\" in\n  is-active) exit 1 ;;\n  kill) printf 'kill\\n' >> " + events + "; kill -KILL \"$(cat " + pidFile + ")\" 2>/dev/null; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
 	}
 	for name, body := range fakes {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
@@ -978,11 +986,10 @@ func TestHostCheckCleansItsScopeBeforeItFinishes(t *testing.T) {
 		}
 	}
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
-		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; printf 'check-end\\n' >> " + events + "; exit 0"}
+		inner: "printf 'check-end\\n' >> " + events + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0, false)
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.ExtraFiles = []*os.File{gate}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -996,18 +1003,12 @@ func TestHostCheckCleansItsScopeBeforeItFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(recorded); got != "check-end\nstop\n" {
-		t.Fatalf("events = %q, want the command to end, then the scope cleanup", got)
+	if got := string(recorded); got != "check-end\nkill\n" {
+		t.Fatalf("events = %q, want the command to end, then the scope kill", got)
 	}
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
-	if convErr != nil {
-		t.Fatal(convErr)
-	}
-	if err := syscall.Kill(pid, 0); err == nil {
-		t.Fatalf("the detached child %d outlived the check", pid)
+	// Reap the holder: a kill that worked leaves a signaled exit, so the test
+	// never asks whether a pid exists.
+	if err := holder.Wait(); err == nil {
+		t.Fatalf("the detached child %d outlived the check", holder.Process.Pid)
 	}
 }
