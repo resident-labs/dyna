@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -26,6 +26,7 @@ async function load() {
   const file = join(dir, 'Conversation.mjs')
   await writeFile(file, need(result.outputFiles?.[0]).contents)
   const module = await import(pathToFileURL(file).href)
+  await rm(dir, { recursive: true, force: true })
   return (props: object): string => module.render(module.default, { props }).body
 }
 
