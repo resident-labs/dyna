@@ -165,18 +165,6 @@ jobs:
         run: |
           export HOME="$(mktemp -d)" XDG_DATA_HOME="$(mktemp -d)" XDG_CONFIG_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)"
           bash scripts/ci.sh go test
-      # The desktop is its own Go module, so the root ./... skips it. It needs
-      # no WebKit and no cgo. No built frontend exists in this job, so a stub
-      # page stands in for the assets.
-      - name: Desktop module
-        # Shard 6 holds the lightest packages, so the desktop module's compile
-        # fits under the budget here where it did not on the packed shard.
-        if: matrix.shard == 6
-        working-directory: desktop
-        shell: bash
-        run: |
-          touch ../web/dist/index.html
-          bash ../scripts/ci.sh go desktop
       - name: Upload Go test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -191,16 +179,6 @@ jobs:
         with:
           name: go-test-raw-${{ matrix.shard }}
           path: ${{ runner.temp }}/go-test.json
-          if-no-files-found: ignore
-          retention-days: 1
-      - name: Upload desktop test report
-        # Runs where the desktop tests run, so the shard that owns them reports
-        # them and the others do not look for a file they never make.
-        if: always() && matrix.shard == 6
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-test-report
-          path: ${{ runner.temp }}/desktop-test.xml
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload Go diagnostics
@@ -259,18 +237,73 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+  # The desktop is its own Go module, so the root ./... skips it. It gets a job
+  # of its own: its test binary is linked and started here, which cost the test
+  # shards about 25 seconds they did not have room for. It needs no WebKit and
+  # no cgo, and a stub page stands in for the assets no build produced.
+  desktop:
+    name: desktop
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: golang:1.26.3
+    env:
+      GOCACHE: /root/.cache/go-build
+      GOMODCACHE: /go/pkg/mod
+    steps:
+      - uses: actions/checkout@v6
+      - name: Trust workspace
+        run: |
+          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
+          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Restore Go caches
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /root/.cache/go-build
+            /go/pkg/mod
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
+      - name: Build CI checker
+        run: bash scripts/ci.sh go build
+      - name: Desktop module
+        working-directory: desktop
+        shell: bash
+        run: |
+          touch ../web/dist/index.html
+          bash ../scripts/ci.sh go desktop
+      - name: Upload desktop test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-report
+          path: ${{ runner.temp }}/desktop-test.xml
+          if-no-files-found: ignore
+          retention-days: 1
+      - name: Upload Go diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-diagnostics
+          path: ${{ runner.temp }}/ci-diagnostics.jsonl
+          if-no-files-found: ignore
+          retention-days: 1
+
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, frontend, frontend-check]
+    needs: [changes, go-shard, go-static, desktop, frontend, frontend-check]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every Go job
         env:
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"
           for r in $RESULTS; do
