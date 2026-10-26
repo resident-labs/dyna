@@ -124,7 +124,13 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	bin := filepath.Join(publication, "bin")
 	out["PATH"] = bin + string(os.PathListSeparator) + path
 	out["DYNA_BIN"] = filepath.Join(bin, "dyna")
-	out["GIT_CONFIG_GLOBAL"] = filepath.Join(publication, "gitconfig")
+	// Tools write the global Git config (gh auth setup-git, git config --global),
+	// so GIT_CONFIG_GLOBAL is a writable file that includes the immutable one.
+	writable := filepath.Join(Home(nativeScope), ".dyna-gitconfig")
+	if err := writableGitConfig(writable, filepath.Join(publication, "gitconfig")); err != nil {
+		return nil, err
+	}
+	out["GIT_CONFIG_GLOBAL"] = writable
 	return out, nil
 }
 
@@ -392,6 +398,34 @@ func bridge(owner map[string]string, target string, isDyna bool) string {
 	}
 	fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
 	return script.String()
+}
+
+// gitConfigMarker starts the lines of a writable Git config that Prepare owns.
+const gitConfigMarker = "# dyna: the next three lines name the published settings and are rewritten at each launch; write below them"
+
+// writableGitConfig keeps path as a Git config that includes the published,
+// immutable one and keeps whatever a tool wrote below that include. Only the
+// include lines change, because a published set is named by its hash.
+func writableGitConfig(path, published string) error {
+	header := gitConfigMarker + "\n[include]\n\tpath = " + gitQuote(published) + "\n"
+	rest := ""
+	if data, err := os.ReadFile(path); err == nil {
+		if after, ok := strings.CutPrefix(string(data), gitConfigMarker+"\n"); ok {
+			// Drop the old [include] line and its path line.
+			lines := strings.SplitN(after, "\n", 3)
+			if len(lines) == 3 {
+				rest = lines[2]
+			}
+		} else {
+			rest = string(data)
+		}
+		if string(data) == header+rest {
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return atomicFile(path, []byte(header+rest), 0600)
 }
 func gitQuote(value string) string {
 	value = strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n", "\t", "\\t", "\b", "\\b").Replace(value)
