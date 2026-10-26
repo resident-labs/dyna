@@ -44,6 +44,11 @@ func (m *Manager) StartRunAgent(ctx context.Context, opts StartOptions) (Info, e
 	// A close of this agent (or its run) that came first wins: the start may
 	// have outlived its caller's request, and a session must not appear after
 	// the close that was meant to stop it.
+	done, ok := m.gates().begin(opts.Run.ID)
+	if !ok {
+		return Info{}, fmt.Errorf("run agent %d of %s is closed", opts.Run.Agent, opts.Run.ID)
+	}
+	defer done()
 	release, err := m.gates().acquire(ctx, opts.ID)
 	if err != nil {
 		return Info{}, err
@@ -122,7 +127,11 @@ func (m *Manager) CloseRunAgent(ctx context.Context, run string, agent int) erro
 
 // CloseRunAgents closes every open session that serves an agent call of run.
 func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
-	m.gates().markRunClosed(run)
+	// No start of this run begins after this, and the ones in flight finish
+	// first, so the snapshot below holds every session the run made.
+	if err := m.gates().closeRun(ctx, run); err != nil {
+		return err
+	}
 	infos, err := m.store().ListSnapshot(false)
 	if err != nil {
 		return err
@@ -225,6 +234,46 @@ type runAgentGates struct {
 	slots      map[string]chan struct{}
 	closedID   map[string]bool
 	closedRuns map[string]bool
+	inflight   map[string]*sync.WaitGroup
+}
+
+// begin registers a start of run, or reports that the run's agents are closed.
+// The caller calls done when the start has ended.
+func (g *runAgentGates) begin(run string) (done func(), ok bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closedRuns[run] {
+		return nil, false
+	}
+	if g.inflight == nil {
+		g.inflight = map[string]*sync.WaitGroup{}
+	}
+	wg := g.inflight[run]
+	if wg == nil {
+		wg = &sync.WaitGroup{}
+		g.inflight[run] = wg
+	}
+	wg.Add(1)
+	return wg.Done, true
+}
+
+// closeRun refuses later starts of run and waits for the ones in flight.
+func (g *runAgentGates) closeRun(ctx context.Context, run string) error {
+	g.markRunClosed(run)
+	g.mu.Lock()
+	wg := g.inflight[run]
+	g.mu.Unlock()
+	if wg == nil {
+		return nil
+	}
+	drained := make(chan struct{})
+	go func() { wg.Wait(); close(drained) }()
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // acquire waits for id's gate. It gives up when ctx ends.
