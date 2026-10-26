@@ -39,8 +39,19 @@ type memberPage struct {
 }
 
 // snapshot returns every session with current status, without repairing turns.
+//
+// A failed read, such as a session record caught mid-write at a turn's end,
+// serves the last roster that read cleanly. An empty roster would draw every
+// post of that response with no avatar.
 func (s *Service) snapshot() ([]subagent.Info, string) {
-	all, rev, _ := s.readSnapshot(s.sessions().Inspect)
+	all, rev, err := s.readSnapshot(s.sessions().Inspect)
+	if err != nil {
+		s.snap.mu.Lock()
+		defer s.snap.mu.Unlock()
+		if last := s.snap.view; last != nil {
+			return last.all, last.records
+		}
+	}
 	return all, rev
 }
 
