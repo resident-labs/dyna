@@ -117,7 +117,7 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	}
 	s := shells.DefaultStore()
 	meta, err := s.Create(shells.StartOptions{Run: runID, Keep: true, Cwd: t.TempDir(),
-		Cmd: []string{"sh", "-c", `setsid sh -c "sleep 600 & echo $$ > ` + fifo + `; wait" & wait`}})
+		Cmd: []string{"sh", "-c", `setsid sh -c 'sleep 600 & echo $$ > ` + fifo + `; wait' & wait`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +146,9 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	}
 	if detachedGroup, err = strconv.Atoi(strings.TrimSpace(string(raw))); err != nil {
 		t.Fatal(err)
+	}
+	if detachedGroup == pid {
+		t.Fatalf("the detached shell reported the job's own PID %d, not its own", pid)
 	}
 	jobPids = runprocs.Stamped(shells.JobEnv + "=" + meta.ID)
 	if len(jobPids) < 2 {
