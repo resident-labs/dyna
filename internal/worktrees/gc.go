@@ -255,7 +255,7 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	pinned, err := pinBase(ctx, repo, main, base)
 	if err != nil {
 		return Record{}, err
-	}	// A hash keeps branch names such as a/b and a-b distinct.
+	} // A hash keeps branch names such as a/b and a-b distinct.
 	sum := sha256.Sum256([]byte(branch))
 	name := slug(branch)
 	if len(name) > 80 {
@@ -286,7 +286,12 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 		}
 		return Record{}, fmt.Errorf("base %q moved from %s while the worktree was created; retry with the exact commit", base, pinned)
 	}
-	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
+	head, status, _, err := Fingerprint(ctx, path, pinned)
+	if err != nil {
+		gitOutput(ctx, main, "worktree", "remove", "--force", path)
+		return Record{}, fmt.Errorf("fingerprint the new worktree: %w", err)
+	}
+	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Head: head, Status: status, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
 	if err := Track(rec); err != nil {
 		// No user work exists yet. Roll back only the directory, never the branch.
 		gitOutput(ctx, main, "worktree", "remove", path)
