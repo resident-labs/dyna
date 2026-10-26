@@ -54,7 +54,7 @@ func TestStoppedLocalRunIsRetriedOnce(t *testing.T) {
 // A room with no hosted CI has no fallback, so a trial whose checks could not run
 // fails with the typed cause instead of waiting for a provider that does not
 // exist. That is what D-146 saw as "waiting for hosted CI fallback" for ever.
-func TestLocalOnlyTrialFailsWhenItsChecksCouldNotRun(t *testing.T) {
+func TestTrialWithoutAHostedFallbackFailsWithItsCause(t *testing.T) {
 	definition := watchDynaDefinition(t)
 	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: strings.Repeat("a", 40), Branch: "dyna/merge-trial/1", Watching: true, State: "open"}
 	plan := localCIPlan{execution: definition, required: definition, suites: definition.WorkflowSuites()}
@@ -63,7 +63,7 @@ func TestLocalOnlyTrialFailsWhenItsChecksCouldNotRun(t *testing.T) {
 	// Dyna stopped the run and no replacement has started yet: the retry is
 	// pending, so the trial waits with a truthful reason.
 	stopped := stoppedRun()
-	obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, true, true)
+	obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, true, false)
 	if obs.Status != VerdictPending {
 		t.Fatalf("stopped run = %s, want pending until the retry starts", obs.Status)
 	}
@@ -71,10 +71,10 @@ func TestLocalOnlyTrialFailsWhenItsChecksCouldNotRun(t *testing.T) {
 		t.Fatalf("retry reason names a hosted fallback that does not exist: %q", obs.Reason)
 	}
 
-	// The replacement was stopped too, or no retry is possible: the trial fails
-	// and names the cause.
+	// The replacement was stopped too, or no retry is possible, and no hosted run
+	// exists to fall back to: the trial fails and names the cause.
 	stopped.Resumed = true
-	obs = s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, true, true)
+	obs = s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, true, false)
 	if obs.Status != VerdictFailed {
 		t.Fatalf("settled interruption = %s, want failed", obs.Status)
 	}
@@ -85,12 +85,23 @@ func TestLocalOnlyTrialFailsWhenItsChecksCouldNotRun(t *testing.T) {
 		t.Fatal("failure names no check that did not run")
 	}
 
-	// A room with a hosted provider still falls back, so the same result waits.
-	if obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, true, false); obs.Status != VerdictPending {
-		t.Fatalf("hosted room = %s, want it to wait for the fallback", obs.Status)
+	// A hosted run that exists or can be restarted still decides, so the same
+	// result waits for it instead of failing the trial.
+	if obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, true, true); obs.Status != VerdictPending {
+		t.Fatalf("hosted fallback available = %s, want it to wait for that run", obs.Status)
+	}
+	// A machine failure with its retry already spent behaves the same way.
+	dropped := stoppedRun()
+	dropped.Cause = localci.CauseSSHDrop
+	dropped.RetriedFrom = dropped.Node
+	for i := range dropped.Checks {
+		dropped.Checks[i].Cause = localci.CauseSSHDrop
+	}
+	if obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, dropped, true, false); obs.Status != VerdictFailed {
+		t.Fatalf("spent ssh-drop retry = %s, want failed with the cause", obs.Status)
 	}
 	// A pull request head is never failed by a local run it does not have.
-	if obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, false, true); obs.Status == VerdictFailed {
+	if obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, false, false); obs.Status == VerdictFailed {
 		t.Fatalf("pull request head = %s, want no local failure", obs.Status)
 	}
 }
@@ -226,5 +237,54 @@ func TestSavedTrialCIAdmitsARetryableStopAndFailsASpentOne(t *testing.T) {
 			close(ci.release)
 			released = true
 		})
+	}
+}
+
+// A machine failure whose retry has nowhere else to go runs on the machine that
+// failed, once. Without it, a room whose only eligible machine is the failed one
+// waits with nothing running, which is what D-151 reported.
+func TestMachineFailureRerunsOnTheSameMachineWhenNoOtherCanTakeIt(t *testing.T) {
+	e, record, dir, ci := localCIEnv(t)
+	repo, err := localci.CanonicalRepo(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := record.Head
+	dropped := stoppedRun()
+	dropped.Repo, dropped.SHA = repo, head
+	dropped.Node = "hermeslab"
+	dropped.Cause = localci.CauseSSHDrop
+	for i := range dropped.Checks {
+		dropped.Checks[i].Cause = localci.CauseSSHDrop
+	}
+	ci.results[head] = dropped
+	// One machine only, and it is the one that failed.
+	ci.nodes = []localci.Node{{Name: "hermeslab", Slots: 4, Enabled: true}}
+	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
+
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	ci.saved = make(chan struct{}, 1)
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+		e.s.CancelLocalCI()
+	})
+	started, err := e.s.startRegisteredCI(t.Context(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started {
+		t.Fatal("the failed machine was the only one that could run the retry, and nothing started")
+	}
+	<-ci.started
+	close(ci.release)
+	released = true
+	<-ci.saved
+	saved := ci.results[head]
+	if saved.Node != "hermeslab" || !saved.Resumed {
+		t.Fatalf("the same-machine replacement = %+v, want hermeslab marked resumed", saved)
 	}
 }
