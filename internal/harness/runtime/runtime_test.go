@@ -207,6 +207,7 @@ func TestMissingPrivateLoginAndProtectedEnvironment(t *testing.T) {
 
 func TestPrivateRuntimeLaunchLetsDynaRestoreOwnerRoots(t *testing.T) {
 	r, p := runtimeFixture(t, "pi")
+	noInstalledDyna(t)
 	ownerHome, ownerConfig, ownerData := os.Getenv("HOME"), os.Getenv("XDG_CONFIG_HOME"), os.Getenv("XDG_DATA_HOME")
 	realDyna := filepath.Join(t.TempDir(), "real dyna")
 	p.Env = map[string]string{"DYNA_BIN": realDyna, "DYNA_ROOM": "owner-room"}

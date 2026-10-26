@@ -47,6 +47,12 @@ func shellCommand() *cobra.Command {
 			}
 		}
 		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch}
+		// An update replaces the binary this server started from; when the
+		// state it serves moves past this build, restart on that binary so a
+		// schema bump never cuts the session's shells off (D-171).
+		if restart := restartOutdatedServer(); restart != nil {
+			tools.SetRestart(restart)
+		}
 		// Only a session hears when a background job ends. Elsewhere, for
 		// example in a workflow worker, each command runs to its end.
 		if !runstore.IsSessionDirID(tools.Owner) {
