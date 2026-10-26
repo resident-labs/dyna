@@ -18,6 +18,7 @@ func TestMergedPRCleanupSkipsProtectedScratch(t *testing.T) {
 		t.Skip("root bypasses directory permissions")
 	}
 	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_SCRATCH_ROOT", filepath.Join(t.TempDir(), "scratch"))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	old := time.Now().Add(-4 * 24 * time.Hour)

@@ -40,7 +40,7 @@ func TestSessionTurnStartsWithScratchUnavailable(t *testing.T) {
 	e := newTestEnv(t, p)
 	t.Setenv("TMPDIR", tmp)
 	root := scratch.Root()
-	if err := os.Mkdir(root, 0700); err != nil {
+	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(root, 0777); err != nil {
