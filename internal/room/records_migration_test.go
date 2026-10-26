@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestRoomRecordsMigrateBeforeAnyRead(t *testing.T) {
 				t.Fatalf("startup did not import room: %v", err)
 			}
 			got, err := scanRecord(body, seat)
-			if err != nil || got != want || seat.Valid != (mode != "canonical default") {
+			if err != nil || !reflect.DeepEqual(got, want) || seat.Valid != (mode != "canonical default") {
 				t.Fatalf("eager room = %+v, seat=%+v, %v; want %+v", got, seat, err, want)
 			}
 			for name, raw := range files {

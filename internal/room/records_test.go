@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -180,7 +181,7 @@ func TestRoomWritesPreserveRetainedSources(t *testing.T) {
 		t.Fatalf("canonical record = %+v, %v", got, err)
 	}
 	list, err := s.List(true)
-	if err != nil || len(list) != 1 || list[0] != got {
+	if err != nil || len(list) != 1 || !reflect.DeepEqual(list[0], got) {
 		t.Fatalf("canonical listing = %+v, %v", list, err)
 	}
 	if err := s.SetArchived(rec.ID, true); err != nil {
