@@ -3,6 +3,7 @@ package localci
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,30 @@ func sshDropError(t *testing.T) error {
 		t.Fatal("the fixture did not fail")
 	}
 	return err
+}
+
+// Every ssh command a node run starts owns its end-to-end connection. An alias
+// configured with ControlMaster hands commands a stream the shared master may
+// have truncated when it died after the remote exit status arrived, and ssh
+// then reports success. A run must never trust a multiplexed stream it did not
+// open: a report fetch archived that way ended mid-entry and turned every check
+// of the run into an infrastructure error (D-166).
+func TestNodeProgramOptsOutOfConnectionMultiplexing(t *testing.T) {
+	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve"}}
+	name, args := r.nodeProgram("bash", []string{"-c", "true"})
+	if name != "ssh" {
+		t.Fatalf("program = %q, want ssh", name)
+	}
+	joined := " " + strings.Join(args, " ") + " "
+	for _, option := range []string{" -o ControlMaster=no ", " -o ControlPath=none "} {
+		if !strings.Contains(joined, option) {
+			t.Fatalf("ssh args %v lack %q: every node command must own its connection", args, strings.TrimSpace(option))
+		}
+	}
+	// A local node still runs the program itself.
+	if name, args := (Runner{Node: &Node{Name: "this-machine"}}).nodeProgram("bash", []string{"-c", "true"}); name != "bash" || len(args) != 2 {
+		t.Fatalf("local node lost its program: %q %v", name, args)
+	}
 }
 
 // A check that wrote its own marker before the SSH client lost the connection
