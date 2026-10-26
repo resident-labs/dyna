@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/locallane"
 	"encoding/json"
 	"errors"
 	"os"
@@ -511,5 +512,26 @@ func TestReplyToAFindingFromAnEarlierRoundIsRecorded(t *testing.T) {
 	}
 	if err := e.s.ReplyFinding(context.Background(), r.Key, r.Author, e.author.ID, "f99-9", "fixed", "x"); err == nil {
 		t.Fatal("a reply to a finding no round has was accepted")
+	}
+}
+
+// A repository with no remote and no main or master branch cannot guess its
+// base. The first change names it with --base, and that also starts
+// integration, so the merge watcher's later Ensure finds it.
+func TestOpenChangeWithExplicitBaseStartsIntegrationInTrunkOnlyRepo(t *testing.T) {
+	e := newEnv(t)
+	dir, base := changeRepo(t)
+	changeGit(t, dir, "branch", "-M", "trunk")
+	changeGit(t, dir, "checkout", "-b", "feature")
+	changeCommit(t, dir, "feature\n")
+	e.author.Dir = dir
+	if _, _, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir, Base: "trunk"}); err != nil {
+		t.Fatalf("open change: %v", err)
+	}
+	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
+		t.Fatalf("integration at %s, want the trunk head %s", got, base)
+	}
+	if head, err := locallane.Ensure(context.Background(), dir); err != nil || head != base {
+		t.Fatalf("later Ensure = %q, %v; want %s", head, err, base)
 	}
 }

@@ -171,15 +171,18 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 		return Record{}, false, err
 	}
 	baseRef := opts.Base
-	if baseRef == "" {
-		enabled, err := locallane.Enabled(ctx, dir)
-		if err != nil {
+	enabled, err := locallane.Enabled(ctx, dir)
+	if err != nil {
+		return Record{}, false, err
+	}
+	if enabled {
+		// An explicit base also starts integration, so the merge watcher finds it.
+		if _, err := locallane.EnsureFrom(ctx, dir, opts.Base); err != nil {
 			return Record{}, false, err
 		}
+	}
+	if baseRef == "" {
 		if enabled {
-			if _, err := locallane.Ensure(ctx, dir); err != nil {
-				return Record{}, false, err
-			}
 			baseRef = locallane.Integration
 		} else {
 			resolved, err := repoid.DefaultBranch(ctx, dir, gitRead)
