@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/database"
 	harnessmgr "dyna-agent/internal/harness/config"
+	"dyna-agent/internal/harness/runtime/genstate"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store"
 )
@@ -213,8 +215,11 @@ func TestGenerationLeaseDeadOwnerAndBindingReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A dead runner does not release a surviving guarded process.
-	lease.use.OwnerPID = 1 << 30
-	if err := writePrivateAccountJSON(lease.path, lease.use); err != nil {
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dead := genstate.Lease{ID: genstate.NewID(), Generation: g.Directory, OwnerPID: 1 << 30, Native: []byte(`{"attempt":2}`)}
+	if err := r.generationState().Create(context.Background(), dead); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.GCGenerationsWithProbe(context.Background(), func(ref json.RawMessage) (bool, error) {
@@ -232,15 +237,89 @@ func TestGenerationLeaseDeadOwnerAndBindingReplacement(t *testing.T) {
 	assertGenerationExists(t, g.Directory, false)
 	// An abandoned pre-start record with a dead owner can expire.
 	g = buildGeneration(t, r, "claude-code", home, id)
-	prestart := leaseGeneration(t, r, g.Directory)
-	prestart.use.OwnerPID = 1 << 30
-	if err := writePrivateAccountJSON(prestart.path, prestart.use); err != nil {
+	prestart := genstate.Lease{ID: genstate.NewID(), Generation: g.Directory, OwnerPID: 1 << 30}
+	if err := r.generationState().Create(context.Background(), prestart); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.GCGenerations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	assertGenerationExists(t, g.Directory, false)
+}
+
+// A detached runner of an earlier build writes its lease file after the engine
+// migrated. Cleanup imports it under the lifecycle lock, so the generation
+// stays while that process can still read it.
+func TestGenerationGCAdoptsALegacyLeaseWrittenAfterMigration(t *testing.T) {
+	r, home, id := generationFixture(t, "claude-code")
+	g := buildGeneration(t, r, "claude-code", home, id)
+	uses := filepath.Join(r.Generations, ".uses")
+	if err := os.MkdirAll(uses, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := struct {
+		Version    int             `json:"version"`
+		Generation string          `json:"generation"`
+		OwnerPID   int             `json:"ownerPid"`
+		Native     json.RawMessage `json:"native,omitempty"`
+	}{Version: 1, Generation: g.Directory, OwnerPID: 1 << 30, Native: json.RawMessage(`{"pid":3}`)}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uses, "use-late.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The guarded process still runs, so the generation stays.
+	if err := r.GCGenerationsWithProbe(context.Background(), func(ref json.RawMessage) (bool, error) {
+		if string(ref) != `{"pid":3}` {
+			t.Fatalf("probe reference = %s", ref)
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertGenerationExists(t, g.Directory, true)
+	// Once the probe is gone, the imported lease no longer protects it.
+	if err := r.GCGenerationsWithProbe(context.Background(), func(json.RawMessage) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	assertGenerationExists(t, g.Directory, false)
+}
+
+// A legacy view that a complete publication superseded stops pinning its old
+// generation: cleanup imports the unchanged file, does not restore the
+// generation, and collects it.
+func TestGenerationGCClearsALegacyViewItSuperseded(t *testing.T) {
+	r, home, id := generationFixture(t, "pi")
+	superseded := buildGeneration(t, r, "pi", home, id)
+	views := filepath.Join(r.Generations, ".views")
+	if err := os.MkdirAll(views, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := struct {
+		Harness     string
+		Home        string
+		Generations []string
+	}{Harness: "pi", Home: home, Generations: []string{superseded.Directory}}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(views, "pi-view.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A complete publication replaces the view, as the new build records it.
+	addGenerationMCP(t, r, "pi", "later")
+	current := buildGeneration(t, r, "pi", home, id)
+	if err := r.recordGenerationView("pi", home, current.Directory, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.GCGenerations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertGenerationExists(t, superseded.Directory, false)
+	assertGenerationExists(t, current.Directory, true)
 }
 
 func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
@@ -258,8 +337,15 @@ func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 			case "session":
 				recordtest.WriteRaw(t, filepath.Join(store.DataDir(), "sessions"), "broken", []byte("{"))
 			case "lease":
-				lease := leaseGeneration(t, r, a.Directory)
-				if err := os.WriteFile(lease.path, []byte("{"), 0600); err != nil {
+				// A lease index that cannot be read stops every deletion.
+				if err := genstate.Migrate(store.DataDir()); err != nil {
+					t.Fatal(err)
+				}
+				db, err := database.Open(store.DataDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`DROP TABLE generation_leases`); err != nil {
 					t.Fatal(err)
 				}
 			case "candidate-link":
@@ -587,8 +673,7 @@ func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
 	if _, err := validateOwnedGeneration(retired.Directory); !errors.Is(err, errGenerationUnsupported) {
 		t.Fatalf("a replaced harness was not reported as unsupported: %v", err)
 	}
-	viewPath := filepath.Join(r.Generations, ".views", "replaced-harness.json")
-	if err := writeGenerationJSON(viewPath, generationView{Harness: "codex", Home: home, Generations: []string{retired.Directory}}, 0600); err != nil {
+	if err := r.generationState().RecordView(context.Background(), genstate.View{Harness: "codex", Home: home, Generations: []string{retired.Directory}}, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -604,8 +689,14 @@ func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
 	if err := r.GCGenerations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(viewPath); !os.IsNotExist(err) {
-		t.Fatalf("a view of a replaced harness survived: %v", err)
+	views, err := r.generationState().Views(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range views {
+		if view.Harness == "codex" {
+			t.Fatalf("a view of a replaced harness survived: %+v", view)
+		}
 	}
 	assertGenerationExists(t, retired.Directory, false)
 	assertGenerationExists(t, live.Directory, true)
