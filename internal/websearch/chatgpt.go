@@ -17,7 +17,13 @@ const (
 	ChatGPTEndpoint = "https://chatgpt.com/backend-api/codex"
 	// ChatGPTModel is the model that runs the search. The engine passes its own
 	// choice in ChatGPT.Model.
-	ChatGPTModel = "gpt-5-codex"
+	//
+	// Only a model that the Codex client itself serves runs on a ChatGPT
+	// account: any other id makes the backend answer HTTP 400 model_not_found.
+	// This is the current Codex model list (codex 0.164.0) that the backend
+	// accepted for a search on the owner's sign-in; gpt-5-codex, which this tool
+	// sent first, is no longer among them.
+	ChatGPTModel = "gpt-5.6-luna"
 	// chatGPTInstructions is the system prompt the Codex backend requires. The
 	// installed Pi Codex client always sends one, and a request without it is
 	// refused, so it is a constant rather than an option.
@@ -98,8 +104,10 @@ func (c ChatGPT) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
-		return nil, statusError("chatgpt", response.StatusCode)
+		// The backend names the cause, such as a model the account cannot use,
+		// in the body. The access token never leaves this provider, so it is the
+		// one secret the body is cleared of.
+		return nil, statusError("chatgpt", response.StatusCode, response.Body, access)
 	}
 	stream, err := readChatGPTStream(response.Body)
 	if err != nil {

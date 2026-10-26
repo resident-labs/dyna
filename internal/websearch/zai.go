@@ -124,8 +124,7 @@ func (z Zai) open(ctx context.Context, client *http.Client, endpoint, key string
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
-		return "", statusError("zai", response.StatusCode)
+		return "", statusError("zai", response.StatusCode, response.Body, key)
 	}
 	session := response.Header.Get(zaiSessionHeader)
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, zaiMaxBody))
@@ -143,8 +142,7 @@ func (z Zai) call(ctx context.Context, client *http.Client, endpoint, key, sessi
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
-		return zaiEnvelope{}, statusError("zai", response.StatusCode)
+		return zaiEnvelope{}, statusError("zai", response.StatusCode, response.Body, key)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, zaiMaxBody))
 	if err != nil {
