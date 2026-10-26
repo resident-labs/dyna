@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"dyna-agent/internal/localci"
 )
 
 // shutdownTimeout bounds engine stop. The longest work it waits for is a local
@@ -27,6 +29,9 @@ var streamShutdownDeadline = func() time.Duration { return streamShutdownTimeout
 // stopEngine cancels every engine service before joining cleanup. HTTP, workers
 // and foreground process cleanup share one deadline, including error exits.
 func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*http.Server, cleanup ...func()) error {
+	// Tell the local CI runner that a cancellation from here is Dyna's own stop,
+	// not evidence about the commit: that run is repeated, not counted.
+	localci.MarkEngineStopping()
 	cancel()
 	ctx, stop := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer stop()
