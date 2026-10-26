@@ -75,6 +75,9 @@ func inheritedRoot() bool {
 // uses the user's own folders, such as the owner's live dyna.db or the CI
 // user's.
 func Check(dir string) error {
+	if rel, err := filepath.Rel(shortRoot, dir); err == nil && filepath.IsLocal(rel) && strings.HasPrefix(rel, shortPrefix) {
+		return nil
+	}
 	if rel, err := filepath.Rel(tempRoot, dir); err != nil || !filepath.IsLocal(rel) {
 		return fmt.Errorf("a test's dyna folder %s is outside the temporary folder %s; give the test a temporary one (storetest.DataDir)", dir, tempRoot)
 	}
@@ -238,22 +241,22 @@ func folderPID(name string) (int, bool) {
 	return pid, err == nil && pid > 0
 }
 
-// shortBase is the longest test root that still leaves room for a unix socket
-// path (108 bytes) under a folder made by ShortTemp.
-const shortBase = 40
+// shortRoot holds the folders ShortTemp makes. A unix socket path is limited to
+// 108 bytes, and a test root can be deeper than that leaves room for, so these
+// folders stand beside the root and Check accepts them.
+const shortRoot = "/tmp"
+
+// shortPrefix starts the name of every folder ShortTemp makes; Check accepts
+// only these under shortRoot, never the rest of /tmp.
+const shortPrefix = "dt-"
 
 // ShortTemp makes a folder with a short path and a name that starts with
-// prefix. It is inside the test root, which is the system temporary folder (a
-// CI check's own folder on a node), so a test binary that a test starts keeps
-// it: testsafe replaces every XDG folder outside the root, and a daemon that
-// lost its runtime folder that way listens where its client does not look.
-// A root too long for a socket path falls back to /tmp.
+// "dt-" and then prefix. Check accepts it, so a test binary that a test starts
+// (a computer daemon) keeps it: testsafe replaces every XDG folder that Check
+// refuses, and a daemon that lost its runtime folder that way listens where its
+// client does not look.
 func ShortTemp(prefix string) (string, error) {
-	base := tempRoot
-	if len(base) > shortBase {
-		base = "/tmp"
-	}
-	return os.MkdirTemp(base, prefix)
+	return os.MkdirTemp(shortRoot, shortPrefix+prefix)
 }
 
 // ShortTempDir is ShortTemp for a test, removed when the test ends. A unix
@@ -262,7 +265,7 @@ func ShortTemp(prefix string) (string, error) {
 // socket (an XDG_RUNTIME_DIR, for one) uses this.
 func ShortTempDir(t testing.TB) string {
 	t.Helper()
-	dir, err := ShortTemp("dt-")
+	dir, err := ShortTemp("")
 	if err != nil {
 		t.Fatal(err)
 	}
