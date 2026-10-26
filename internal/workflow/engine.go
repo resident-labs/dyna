@@ -321,7 +321,11 @@ func (e *engine) closeAgent(id int) {
 		return
 	}
 	ref := callspec.RunAgentRef{Run: e.runID(), Agent: id}
-	if err := e.opts.Engine.Call(context.WithoutCancel(e.ctx), "CloseRunAgent", []any{ref}, nil); err != nil {
+	// The caller keeps its slots and worktree until the stop is confirmed, so a
+	// call cut off by an engine restart is asked again (closing twice is safe).
+	ctx := context.WithoutCancel(e.ctx)
+	err := retryEngine(ctx, func() error { return e.opts.Engine.Call(ctx, "CloseRunAgent", []any{ref}, nil) })
+	if err != nil {
 		e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("could not close agent %d's session: %v", id, err))
 	}
 }
