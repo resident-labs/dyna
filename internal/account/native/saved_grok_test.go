@@ -43,7 +43,7 @@ func TestSavedGrokBillingUsesNativeSessionAndReadsTheZeroWindow(t *testing.T) {
 		t.Fatal("missing weekly observation", err)
 	}
 	w := observation.Windows[0]
-	if w.UsedPercent == nil || *w.UsedPercent != 0 || w.UnavailableReason != "" {
+	if w.UsedPercent == nil || *w.UsedPercent != 0 || w.Reason != "" {
 		t.Fatalf("weekly period did not read the omitted zero: %+v", w)
 	}
 	if w.Label != "Weekly" || w.Period != "week" || w.ResetsAt != "2026-10-25T05:11:47.565Z" || w.PeriodStart != "2026-10-18T05:11:47.565Z" || w.Used != nil || w.Limit != nil {
@@ -141,7 +141,7 @@ func TestGrokBillingReadsRemainingAllowance(t *testing.T) {
 			if err := json.Unmarshal([]byte(percent), &want); err != nil {
 				t.Fatal(err)
 			}
-			if w.UsedPercent == nil || *w.UsedPercent != want || w.UnavailableReason != "" || w.Unit != "percent" {
+			if w.UsedPercent == nil || *w.UsedPercent != want || w.Reason != "" || w.Unit != "percent" {
 				t.Fatal("reported allowance is unavailable", w)
 			}
 		})

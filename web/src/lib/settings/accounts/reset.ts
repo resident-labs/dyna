@@ -1,6 +1,8 @@
+import type { WindowReason } from '../../api/account.ts'
+
 export interface WindowTiming {
   resetsAt?: string
-  unavailableReason?: string
+  reason?: WindowReason
 }
 
 // A quota window as the account reading carries it.
@@ -67,16 +69,17 @@ export function blockUntil(account: BlockedAccount | null | undefined, now = Dat
 }
 
 // Mirrors service.resetWindows: a reading exactly at its reset is fresh.
-// The host also marks projected windows whose numeric fields are absent.
-const probablyResetReason = 'probably reset'
+// The host also marks projected windows whose numeric fields are absent, and the
+// window's typed reason says so, so this never reads reader prose.
+const probableReset = 'probable-reset'
 
 export function resetNotice(window: WindowTiming, observedAt: string, now = Date.now()): string {
   const reset = Date.parse(window.resetsAt ?? '')
   const observed = Date.parse(observedAt)
-  if (window.unavailableReason !== probablyResetReason &&
+  if (window.reason !== probableReset &&
       !(Number.isFinite(reset) && reset <= now && (!Number.isFinite(observed) || observed < reset))) return ''
   const checked = Number.isFinite(observed) && !observedAt.startsWith('0001-')
     ? new Date(observed).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
     : 'unknown'
-  return `${probablyResetReason} · last checked ${checked}`
+  return `probably reset · last checked ${checked}`
 }
