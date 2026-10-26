@@ -167,3 +167,21 @@ func TestFolderPID(t *testing.T) {
 		}
 	}
 }
+
+// A session exports a long disk TMPDIR and GOTMPDIR. A test binary ignores them:
+// t.TempDir would otherwise sit under them and break the unix sockets and the
+// folder check of tests that run inside a session.
+func TestTestBinaryIgnoresSessionTemporaryFolder(t *testing.T) {
+	const session = "/home/owner/.cache/dyna/tmp/0a1b2c3d"
+	if os.Getenv("TESTSAFE_TMP_CHILD") == "1" {
+		if dir := t.TempDir(); strings.Contains(dir, "/.cache/dyna/tmp") {
+			t.Fatalf("t.TempDir = %s sits under the session's temporary folder", dir)
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestTestBinaryIgnoresSessionTemporaryFolder$")
+	cmd.Env = append(os.Environ(), "TESTSAFE_TMP_CHILD=1", "TMPDIR="+session, "TMP="+session, "TEMP="+session, "GOTMPDIR="+session)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child test binary: %v\n%s", err, out)
+	}
+}
