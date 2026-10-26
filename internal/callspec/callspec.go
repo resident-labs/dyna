@@ -38,7 +38,8 @@ var LongCalls = map[string]time.Duration{
 	// Librarian setup resolves git, installs hooks, and can close a session.
 	"EnableLibrarian": 2 * time.Minute, "DisableLibrarian": 2 * time.Minute,
 	// A wake syncs a git worktree and starts or assigns a harness turn.
-	"WakeLibrarian": 2 * time.Minute,
+	"WakeLibrarian":          2 * time.Minute,
+	"WakeLibrarianSmellsNow": 2 * time.Minute,
 	// Smell validation resolves git and waits for the repository smell lock.
 	"FileLibrarySmell": 30 * time.Second,
 	// Posting delivers to sessions, which can start a harness: delivery to a

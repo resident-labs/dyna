@@ -114,6 +114,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "EnableLibrarian", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.enableLibrarian},
 		{Name: "DisableLibrarian", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.disableLibrarian},
 		{Name: "WakeLibrarian", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.wakeLibrarian},
+		{Name: "WakeLibrarianSmellsNow", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.wakeLibrarianSmellsNow},
 		{Name: "FileLibrarySmell", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.fileLibrarySmell},
 		{Name: "AddLibraryEntry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.addLibraryEntry},
 		{Name: "UpdateLibraryEntry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.updateLibraryEntry},

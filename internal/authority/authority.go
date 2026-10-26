@@ -230,6 +230,7 @@ var Rules = []Rule{
 	{Action: "SendWorktreeComments", Allowed: []Role{Owner}, Instead: "ask the owner to send review comments"},
 	{Action: "ResolveFinding", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "library enable", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
+	{Action: "library wake now", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to start the smell pass"},
 	{Action: "library disable", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "room clear-dormant", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "subagent dismiss-pending", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
