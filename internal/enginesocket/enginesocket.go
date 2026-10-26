@@ -10,6 +10,11 @@ import (
 )
 
 // Path is the socket the engine listens on and the CLI dials.
+//
+// The path follows the runtime folder, not the data folder: every process on
+// this runtime folder meets the same engine, which is what the CLI relies on.
+// An engine on another data folder is refused by the owner record written beside
+// the socket (internal/engine), so it can never serve this one's traffic.
 func Path() (string, error) {
 	runtime := os.Getenv("XDG_RUNTIME_DIR")
 	if !filepath.IsAbs(runtime) {
