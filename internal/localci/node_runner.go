@@ -26,8 +26,9 @@ import (
 	"dyna-agent/internal/systemdver"
 )
 
-// The two steps of a cancelled run's teardown, on a machine that may answer
-// slowly. A caller that stops a run and waits for that teardown must allow both.
+// The two steps of a finished or cancelled run's teardown, on a machine that may
+// answer slowly. An engine stop does not run them: checks are detached, so the
+// engine only stops polling and a restarted engine reattaches.
 const (
 	// containerCleanupTimeout bounds the node command that stops a run's
 	// containers, scopes and worktrees.
@@ -35,9 +36,9 @@ const (
 	// runRemovalTimeout bounds the node command that stops the run's keeper,
 	// which then removes the run directory and releases its locks.
 	runRemovalTimeout = 2 * time.Minute
-	// TeardownBudget is how long a cancelled run can take to leave its machine:
-	// it stops the containers and then the keeper, in that order.
-	TeardownBudget = containerCleanupTimeout + runRemovalTimeout
+	// StopWait is how long an engine stop waits for local CI runs to stop
+	// polling their machines. The checks keep running there.
+	StopWait = 10 * time.Second
 )
 
 type nodeCheck struct {
@@ -211,7 +212,7 @@ func nodeDropCIRef(cache, sha string) string {
 // of the same commit replaces whatever an interrupted first run left behind.
 func (r Runner) pushCommitToNode(ctx context.Context, repo, cache, sha string) error {
 	var output tailBuffer
-	if err := r.nodeCommand(ctx, &output, &output, "", nodeDropCIRef(cache, sha)); err != nil {
+	if err := r.nodeCommand(ctx, &output, &output, nodeDropCIRef(cache, sha)); err != nil {
 		return fmt.Errorf("clear commit ref on node: %w: %s", err, &output)
 	}
 	dest := cache
@@ -290,36 +291,35 @@ func nodeCacheNames(checks []nodeCheck) []string {
 	return names
 }
 
-func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, script string) error {
-	return r.nodeCommandScoped(ctx, out, stderr, scope, defaultScopeLimits, script)
-}
-
-// nodeCommandScoped runs a node script in a systemd scope with the given limits.
-// A check passes the limits the node granted it, so a host check cannot use more
-// of the machine than the repository asked for.
-func (r Runner) nodeCommandScoped(ctx context.Context, out, stderr io.Writer, scope string, limits scopeLimits, script string) error {
+// nodeExec runs a script on the node once, with positional arguments and input.
+// The script is the argument of bash, and every call is short: the engine never
+// holds one connection for the length of a check.
+func (r Runner) nodeExec(ctx context.Context, in io.Reader, out, stderr io.Writer, script string, args ...string) error {
 	fn := r.Command
 	if fn == nil {
 		fn = command
 	}
-	name, args := "bash", []string{"-o", "pipefail", "-c", script}
-	if scope != "" {
-		bounded := []string{"--user", "--scope", "--quiet"}
-		if r.systemdNeedsNoExpandFlag(ctx) {
-			bounded = append(bounded, systemdver.NoExpandFlag)
-		}
-		bounded = append(bounded, "--unit", scope,
-			"-p", "CPUQuota="+strconv.Itoa(limits.CPUs*100)+"%",
-			"-p", "MemoryMax="+systemdMemory(limits.MemoryMiB),
-			"-p", "TasksMax="+strconv.Itoa(limits.TasksMax),
-			"--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c", script)
-		name, args = "systemd-run", bounded
+	argv := []string{"-o", "pipefail", "-c", script}
+	if len(args) > 0 {
+		argv = append(append(argv, "dyna-ci"), args...)
 	}
-	name, args = r.nodeProgram(name, args)
-	if r.Node.SSH == "" {
-		return fn(ctx, "", nil, out, stderr, name, args...)
-	}
-	return r.nodeDial(ctx, fn, out, stderr, name, args...)
+	name, argv := r.nodeProgram("bash", argv)
+	return fn(ctx, "", in, out, stderr, name, argv...)
+}
+
+// nodeCommand runs a short, repeatable script on the node and retries it while
+// the connection fails. Its output reaches out and stderr only when the call
+// ends, so a retry never repeats half a reply.
+func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, script string) error {
+	var stdout, diagnostics bytes.Buffer
+	err := r.retry(ctx, longCallTimeout, func(ctx context.Context) error {
+		stdout.Reset()
+		diagnostics.Reset()
+		return r.nodeExec(ctx, nil, &stdout, &diagnostics, script)
+	})
+	_, _ = out.Write(stdout.Bytes())
+	_, _ = stderr.Write(diagnostics.Bytes())
+	return err
 }
 
 // nodeProgram wraps a program in ssh when the node is another machine. The
@@ -338,97 +338,7 @@ func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	for _, arg := range args {
 		remote += " " + shellquote.Quote(arg)
 	}
-	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none"}, r.Node.SSH, remote)
-}
-
-// dialFailureNote matches what the ssh client prints when a connection died
-// before the node saw it: the dial or the banner exchange failed, so nothing
-// ran remotely. A node whose accept path stalls under load holds fresh
-// connections tens of seconds before its banner, while every connection that
-// reuses a warm ControlMaster socket passes instantly, so a run fails where a
-// direct shell and a machine probe still succeed (D-162).
-var dialFailureNote = regexp.MustCompile(`(?i)banner exchange|kex_exchange_identification|connection refused|connection timed out|no route to host|network is unreachable|could not resolve hostname`)
-
-// sshServerTimeout matches what the ssh client prints when a live connection
-// stops answering: its keepalive gives up, or a read times out. The client may
-// then end with a status other than 255, so the check carries no marker and no
-// exit code that names the drop. Without the node's completion marker the
-// output proves the command never reported back, so a drop note on a node
-// reached over ssh is a transport failure (D-218).
-var sshServerTimeout = regexp.MustCompile(`(?i)timeout, server \S+ not responding|server \S+ not responding|connection to \S+ (?:port \d+ )?timed out|connection timed out`)
-
-// sshDialAttempts bounds how often a node command retries a dial that never
-// reached the node. Two retries with a growing wait outlast a stall of about
-// half a minute, while each dial still fails within its ConnectTimeout, so an
-// unreachable node costs a bounded wait and not a hang.
-const sshDialAttempts = 3
-
-var sshDialWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
-
-// nodeDial runs one node command over ssh and retries a dial that failed
-// before the node saw it. Such a failure proves nothing ran remotely: ssh
-// exited 255 with a dial error and the command wrote no output, so a retry
-// re-runs nothing. Any other failure, or one after the command started,
-// returns as is.
-func (r Runner) nodeDial(ctx context.Context, fn Command, out, stderr io.Writer, name string, args ...string) error {
-	wait := r.dialWait
-	if wait == nil {
-		wait = sleepContext
-	}
-	// Callers often pass one buffer as both outputs. os/exec serializes the
-	// two copy pipes only while it sees the same writer for both, so the
-	// retry's counting and tail capture keep one shared lock instead of two
-	// distinct MultiWriters, and the pipes never write concurrently to a
-	// buffer that is not safe for that.
-	var forward sync.Mutex
-	var wrote countingWriter
-	for attempt := 0; ; attempt++ {
-		// One fresh diagnostic tail per attempt, behind the shared lock: a kept
-		// tail would let an earlier dial error answer for a later attempt that
-		// reached the node and then lost it, and re-run a command that ran.
-		var dialErr tailBuffer
-		stdout := lockedWriter{mu: &forward, dst: io.MultiWriter(out, &wrote)}
-		diagnostics := lockedWriter{mu: &forward, dst: io.MultiWriter(stderr, &dialErr)}
-		err := fn(ctx, "", nil, &stdout, &diagnostics, name, args...)
-		if err == nil || attempt == sshDialAttempts-1 || wrote.n > 0 || !sshDialExit(err, &dialErr) {
-			return err
-		}
-		fmt.Fprintf(stderr, "retrying ssh dial (attempt %d of %d)\n", attempt+2, sshDialAttempts)
-		if waitErr := wait(ctx, sshDialWaits[min(attempt, len(sshDialWaits)-1)]); waitErr != nil {
-			return errors.Join(err, waitErr)
-		}
-	}
-}
-
-// sshDialExit reports whether err is ssh's own transport exit, 255, with a
-// diagnostic the ssh client prints when its connection died before the node
-// saw it. A script the node ran cannot produce that pair: it may echo the
-// text, but then ssh relays its own exit status and the dial never retries.
-func sshDialExit(err error, tail *tailBuffer) bool {
-	var exit *exec.ExitError
-	return errors.As(err, &exit) && exit.ExitCode() == 255 && dialFailureNote.MatchString(tail.String())
-}
-
-// lockedWriter serializes one command output behind a lock that a sibling
-// writer shares, so os/exec's two copy goroutines write one buffer at a time.
-type lockedWriter struct {
-	mu  *sync.Mutex
-	dst io.Writer
-}
-
-func (w *lockedWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.dst.Write(p)
-}
-
-// countingWriter counts the bytes that reached a command's output, so a
-// retry never re-runs a command that had already started.
-type countingWriter struct{ n int64 }
-
-func (w *countingWriter) Write(p []byte) (int, error) {
-	w.n += int64(len(p))
-	return len(p), nil
+	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}, r.Node.SSH, remote)
 }
 
 // sleepContext waits for d or until the context ends, so a cancelled run
@@ -560,12 +470,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}()
 	base := cacheBase(node.Name)
 	cache := path.Join(base, repoKey(common)+".git")
-	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
-	runDir := path.Join(base, "runs", runID)
-	// A run holds a lock on this file while it runs. A cleanup takes the lock to
-	// learn that the run died, so a crashed run's directory never stays forever.
-	active := path.Join(runDir, ".active")
-	reports := path.Join(runDir, "reports")
+	// A restarted engine follows the checks an earlier engine left running on this
+	// machine; it starts a new run only when there are none.
+	localStore := Store{DataDir: r.root()}
+	attachKey, err := canonicalKey(common)
+	if err != nil {
+		return result, err
+	}
+	// The report folder comes first: a run that fails here has claimed no record.
 	dir := r.resultDir(common, sha)
 	if err := os.MkdirAll(dir, 0700); err != nil { // not-state: report blobs live outside SQLite.
 		return result, err
@@ -574,6 +486,22 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if err != nil {
 		return result, err
 	}
+	// The run takes over only a record whose run has no live process, so it never
+	// touches the record of a run that another engine or command is executing.
+	resume, err := r.resumeRun(ctx, localStore, attachKey, sha, cache, checks)
+	if err != nil {
+		_ = os.Remove(reportRoot) // not-state: the folder is still empty.
+		return result, err
+	}
+	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
+	if resume != nil {
+		runID = resume.RunID
+	}
+	runDir := path.Join(base, "runs", runID)
+	// A run holds a lock on this file while it runs. A cleanup takes the lock to
+	// learn that the run died, so a crashed run's directory never stays forever.
+	active := path.Join(runDir, ".active")
+	reports := path.Join(runDir, "reports")
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
 	// A run removes its own directory on the node, whatever ended it: a finished
@@ -583,32 +511,59 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// own context, so a cancelled run still removes it, and it runs last, after
 	// the reports were copied back.
 	defer func() {
+		if EngineStopping() {
+			// An engine stop leaves the run on its machine: its checks keep running
+			// and a restarted engine reattaches.
+			return
+		}
 		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), runRemovalTimeout)
 		defer stop()
 		var log tailBuffer
-		if e := r.nodeCommand(remove, &log, &log, "", removeRunDir(base, active)); e != nil {
+		if e := r.nodeCommand(remove, &log, &log, removeRunDir(base, active)); e != nil {
 			err = errors.Join(err, fmt.Errorf("remove run directory: %w: %s", e, log.String()))
 		}
 	}()
 	output.Reset()
-	// A machine that is close to a full disk cleans Dyna's own caches first, so
-	// the checks do not die on a full disk halfway through.
-	if e := r.cleanBeforeRun(control, node); e != nil {
-		log.Printf("local CI %s: free space check: %v", node.Name, e)
+	// The record of started checks lasts until the run ends for good. An engine
+	// stop keeps it, so the next engine reattaches.
+	attached := attachment{RunID: runID}
+	if resume != nil {
+		attached = *resume
 	}
-	setup := nodeSetupScript(base, cache, reports, active, nodeCacheNames(checks))
-	setupErr := r.nodeCommand(control, &output, &output, "", setup)
-	// A repair is a fact whether or not the run then succeeded, so report it
-	// before the setup error returns.
-	if kinds := parseCacheRepairs(output.String()); len(kinds) > 0 && r.OnCacheRepair != nil {
-		r.OnCacheRepair(control, CacheRepair{Node: node.Name, Kinds: kinds})
-	}
-	if setupErr != nil {
-		return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
-	}
-	output.Reset()
-	if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
-		return result, err
+	defer func() {
+		background := context.WithoutCancel(ctx)
+		if EngineStopping() {
+			// The checks stay on the machine, and the record passes to whoever runs
+			// the commit next.
+			if e := localStore.releaseAttachment(background, attachKey, sha, node.Name, runID); e != nil {
+				log.Printf("local CI %s: hand over started checks: %v", node.Name, e)
+			}
+			return
+		}
+		if e := localStore.deleteAttachment(background, attachKey, sha, node.Name, runID); e != nil {
+			log.Printf("local CI %s: forget started checks: %v", node.Name, e)
+		}
+	}()
+	if resume == nil {
+		// A machine that is close to a full disk cleans Dyna's own caches first, so
+		// the checks do not die on a full disk halfway through.
+		if e := r.cleanBeforeRun(control, node); e != nil {
+			log.Printf("local CI %s: free space check: %v", node.Name, e)
+		}
+		setup := nodeSetupScript(base, cache, reports, active, nodeCacheNames(checks))
+		setupErr := r.nodeCommand(control, &output, &output, setup)
+		// A repair is a fact whether or not the run then succeeded, so report it
+		// before the setup error returns.
+		if kinds := parseCacheRepairs(output.String()); len(kinds) > 0 && r.OnCacheRepair != nil {
+			r.OnCacheRepair(control, CacheRepair{Node: node.Name, Kinds: kinds})
+		}
+		if setupErr != nil {
+			return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
+		}
+		output.Reset()
+		if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
+			return result, err
+		}
 	}
 	// Job checks each run act on a copy of the workflow whose name carries the
 	// run and the check, so parallel checks never share one container name.
@@ -631,31 +586,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		taggedWorkflows[string(check.id)] = string(tagged)
 	}
 	defer func() {
+		if EngineStopping() {
+			return
+		}
 		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
 		var log tailBuffer
-		// Stop daemon-owned containers before scopes, so a scope keeps its slot
-		// until its container has stopped, including after a lost SSH client.
-		script := "set -e; docker=(docker); "
-		if node.SSH == "" {
-			script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
-		}
-		for _, check := range checks {
-			name := "dyna-ci-" + runID + "-" + string(check.id)
-			if check.image != "" {
-				script += `timeout 20s "${docker[@]}" rm -f ` + shellquote.Quote(name) + " >/dev/null 2>&1 || true; "
-			}
-			if check.image != "" {
-				script += `if [ "$(timeout 10s "${docker[@]}" inspect -f '{{.State.Running}}' ` + shellquote.Quote(name) + ` 2>/dev/null)" = true ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
-			}
-			script += "timeout 10s systemctl --user stop " + shellquote.Quote(name+".scope") + " >/dev/null 2>&1 || true; "
-			script += "git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
-		}
-		// The run directory itself is left to the removal defer, which stops the
-		// run's keeper first: deleting the directory here would take the keeper's
-		// process ID away before anything could stop it.
-		script += "git --git-dir=" + shellquote.Quote(cache) + " worktree prune"
-		if e := r.nodeCommand(cleanup, &log, &log, "", script); e != nil {
+		script := teardownScript(node, cache, runDir, runID, checks)
+		if e := r.nodeCommand(cleanup, &log, &log, script); e != nil {
 			err = errors.Join(err, fmt.Errorf("cleanup node: %w: %s", e, log.String()))
 		}
 	}()
@@ -689,13 +627,34 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			result.Checks = append(result.Checks, SuiteResult{Suite: Suite(group), CheckName: group.Name(), Node: node.Name, Status: status, Aggregate: true})
 		}
 	}()
+	// One poller follows every check of this run with one call at a time.
+	poller, stopPoller := r.newPoller(control)
+	defer stopPoller()
+	var attachedMu sync.Mutex
+	poller.started = func(spec detachSpec) {
+		attachedMu.Lock()
+		defer attachedMu.Unlock()
+		attached.Checks = append(attached.Checks, spec.ID)
+		if e := localStore.saveAttachment(control, attachKey, sha, node.Name, attached); e != nil {
+			log.Printf("local CI %s: record started check: %v", node.Name, e)
+		}
+	}
+	resumed := func(id Suite) bool { return resume != nil && resume.has(id) }
+	noExpand := r.systemdNeedsNoExpandFlag(control)
 	jobs := make(chan int, len(checks))
 	order := make([]int, len(checks))
 	for i := range checks {
 		order[i] = i
 	}
-	// Higher-priority checks start first; equal priorities keep definition order.
-	sort.SliceStable(order, func(i, j int) bool { return checks[order[i]].priority > checks[order[j]].priority })
+	// Checks that are already running come first, and they hold no slot to wait
+	// for. Higher-priority checks start first; equal priorities keep definition
+	// order.
+	sort.SliceStable(order, func(i, j int) bool {
+		if a, b := resumed(checks[order[i]].id), resumed(checks[order[j]].id); a != b {
+			return a
+		}
+		return checks[order[i]].priority > checks[order[j]].priority
+	})
 	for _, index := range order {
 		jobs <- index
 	}
@@ -724,35 +683,30 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				} else {
 					writer = io.MultiWriter(&output, blob)
 				}
-				scopeName := "dyna-ci-" + runID + "-" + string(check.id)
-				checkScope := scopeName
-				if check.host {
-					// A host check runs its command in its own scope from inside
-					// the wrapper, so the wrapper stays outside it and can kill
-					// what is left there before the transport waits on output.
-					checkScope = ""
+				spec := detachSpec{
+					ID:     check.id,
+					Dir:    detachedDir(runDir, check.id),
+					Unit:   checkUnit(runID, check.id),
+					Attach: resumed(check.id),
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)]))
+				if !spec.Attach {
+					spec.Script = nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, noExpand, req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)])
+				}
+				if !check.host {
+					// A host check runs its command in its own scope from inside the
+					// script, so the unit that holds the script stays unbounded.
+					limits := check.resources.scope(false)
+					spec.Limits = &limits
+				}
+				runErr := poller.Run(checkCtx, spec, writer)
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
-				// A command that exited 0 is judged by its own marker even when
-				// os/exec reports ErrWaitDelay, which only means a child it left
-				// behind held the output pipe open: an sccache server does that
-				// on every run. The leftover is a cleanup warning, and command()
-				// killed what remained of the group.
-				if errors.Is(runErr, exec.ErrWaitDelay) && markerExitedCleanly(markers) {
-					sr.Warnings = append(sr.Warnings, CleanupLeftoverOutput)
-					runErr = nil
-				}
 				if runErr != nil || len(markers) == 0 {
 					sr.Status, sr.Error = OutcomeError, "check command did not complete"
 					if runErr != nil {
 						sr.Error = runErr.Error()
 					}
 					sr.Cause = checkCause(node, checkCtx, runErr, markers, check.image != "")
-					if sr.Cause == CauseUnclassified && len(markers) == 0 && node.SSH != "" && sshServerTimeout.MatchString(sr.LogTail) {
-						sr.Cause = CauseSSHDrop
-					}
 					if sr.Cause == CauseTestFailure {
 						sr.Status = OutcomeFailed
 					}
@@ -790,7 +744,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	var copyErr error
 	stopped := control.Err()
 	if stopped == nil {
-		copyErr = r.fetchReportsRetrying(control, reportRoot, reports)
+		copyErr = r.fetchReports(control, reportRoot, reports)
 		// The deadline can end the copy itself, and then the reports are gone.
 		stopped = control.Err()
 	}
@@ -816,10 +770,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			// The reports say what the exit status cannot: the execution timing,
 			// the structured failures, the slow tests and the diagnostics links.
 			// Read them for every check, including one whose command failed; the
-			// command's own outcome and cause stay the check's. A check whose
-			// transport died after the node recorded its exit is judged from that
-			// record first, so the reports below still apply to what it proved.
-			rejudgeTransportDeath(sr, reportRoot)
+			// command's own outcome and cause stay the check's.
 			readReports(sr, checks[i].reports, reportRoot, req.MaxTest, req.Allowed)
 		}
 		result.Status = combinedStatus(result.Status, sr.Status)
@@ -859,12 +810,6 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	return result, nil
 }
 
-// reportCopyAttempts bounds how often the report copy runs. Every check's
-// reports come back in one copy right after the checks end, and a node that
-// drops a new connection under a burst of logins accepts it again a moment
-// later (D-192).
-const reportCopyAttempts = 3
-
 // reportCopyCause names a failed copy as an SSH drop when its client lost the
 // connection, and as unavailable reports otherwise (D-170).
 func reportCopyCause(node Node, ctx context.Context, err error) FailureCause {
@@ -874,71 +819,36 @@ func reportCopyCause(node Node, ctx context.Context, err error) FailureCause {
 	return CauseReports
 }
 
-var reportCopyWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
-
-// fetchReportsRetrying repeats a failed report copy a few times with a growing
-// wait. The copy only reads the node and each attempt starts a new archive, so
-// a repeat is safe. A stopped run ends the loop at once.
-func (r Runner) fetchReportsRetrying(ctx context.Context, reportRoot, reports string) error {
-	wait := r.dialWait
-	if wait == nil {
-		wait = sleepContext
-	}
-	var err error
-	for attempt := 0; attempt < reportCopyAttempts; attempt++ {
-		if err = r.fetchReports(ctx, reportRoot, reports); err == nil || ctx.Err() != nil || attempt == reportCopyAttempts-1 {
-			return err
-		}
-		if waitErr := wait(ctx, reportCopyWaits[min(attempt, len(reportCopyWaits)-1)]); waitErr != nil {
-			return errors.Join(err, waitErr)
-		}
-	}
-	return err
-}
-
-// rejudgeTransportDeath decides a check whose connection to the node died.
-// The wrapper on the node wrote its exit record after the command ran, and the
-// report copy brought that record back, so an exit 0 in it is better evidence
-// than the transport's own exit 255: the check passed, and only the connection
-// was lost after the fact. Any other exit, or a missing record, proves nothing
-// new and keeps what the command already proved.
-func rejudgeTransportDeath(sr *SuiteResult, reportRoot string) {
-	if sr.Cause != CauseSSHDrop || sr.Status != OutcomeError {
-		return
-	}
-	var record struct {
-		ExitCode int `json:"exitCode"`
-	}
-	data, err := os.ReadFile(filepath.Join(reportRoot, "reports", string(sr.Suite), checkExitFile))
-	if err != nil || json.Unmarshal(data, &record) != nil {
-		return
-	}
-	if record.ExitCode != 0 {
-		return
-	}
-	sr.Status, sr.Error, sr.Cause = OutcomePassed, "", ""
-	sr.Warnings = append(sr.Warnings, TransportDiedAfterCompletion)
-}
-
 // fetchReports copies the node's report files into the local report blob folder.
 // The caller treats a failure as evidence about a check and not as a reason to
-// drop the run: the checks keep their logs either way.
+// drop the run: the checks keep their logs either way. It only reads the node,
+// so it follows the same retry rule as every other node call, and each attempt
+// starts a new archive.
 func (r Runner) fetchReports(ctx context.Context, reportRoot, reports string) error {
-	archive, err := os.CreateTemp(reportRoot, "reports-*.tar") // not-state: temporary report transport.
-	if err != nil {
-		return err
-	}
-	defer os.Remove(archive.Name())
-	defer archive.Close()
 	script := "cd " + shellquote.Quote(reports) + " && find . -mindepth 2 -maxdepth 2 -type f \\( -name '*.xml' -o -name '*.json' -o -name 'ci-diagnostics.jsonl' \\) -print0 | tar -C " + shellquote.Quote(reports) + " --null -T - -cf -"
-	var stderr tailBuffer
-	if err := r.nodeCommand(ctx, &boundedWriter{writer: archive, remaining: 70 << 20}, &stderr, "", script); err != nil {
-		return fmt.Errorf("%w: %s", err, stderr.String())
-	}
-	if _, err := archive.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	return readArchive(archive, reportRoot)
+	return r.retry(ctx, longCallTimeout, func(ctx context.Context) error {
+		archive, err := os.CreateTemp(reportRoot, "reports-*.tar") // not-state: temporary report transport.
+		if err != nil {
+			return &permanentError{err}
+		}
+		defer os.Remove(archive.Name())
+		defer archive.Close()
+		var stderr tailBuffer
+		if err := r.nodeExec(ctx, nil, &boundedWriter{writer: archive, remaining: 70 << 20}, &stderr, script); err != nil {
+			err = fmt.Errorf("%w: %s", err, stderr.String())
+			if errors.Is(err, errReportsTooLarge) {
+				return &permanentError{err}
+			}
+			return err
+		}
+		if _, err := archive.Seek(0, io.SeekStart); err != nil {
+			return &permanentError{err}
+		}
+		if err := readArchive(archive, reportRoot); err != nil {
+			return &permanentError{err}
+		}
+		return nil
+	})
 }
 
 // readReports fills one check's duration, reports and test failures from the
@@ -994,27 +904,9 @@ var checkMarker = regexp.MustCompile(`(?m)^DYNA_CI_CHECK_EXIT=([0-9]+)$`)
 // Its name matches no report filter, so it never leaves the node.
 const commandStartedFile = ".command-started"
 
-// checkExitFile is the node's own record of a check's exit status, written by
-// the check wrapper's exit trap after the command ran. Unlike the completion
-// markers on the stream, it survives a connection that dies right after the
-// check, because the report copy brings it back in a fresh connection. Its name
-// has no dash: the report directory's dash-separated N-M names belong to the
-// unpacked artifact entries, and this record must not read as one of them.
-const checkExitFile = "exit.json"
-
 // commandMarker is what the node writes about that sentinel: 1 when the
 // container started the command, 0 when it never got that far.
 var commandMarker = regexp.MustCompile(`(?m)^DYNA_CI_COMMAND_STARTED=([01])$`)
-
-// markerExitedCleanly reports whether the check's own last completion marker
-// says its command exited 0.
-func markerExitedCleanly(markers [][]string) bool {
-	if len(markers) == 0 {
-		return false
-	}
-	code, err := strconv.Atoi(markers[len(markers)-1][1])
-	return err == nil && code == 0
-}
 
 // commandStarted reports what the node's marker proves. A log without the marker
 // proves nothing either way, so it counts as started.
@@ -1052,18 +944,16 @@ func endCause(node Node, ctx context.Context, err error, markers [][]string, con
 		}
 		return CauseCancelled
 	}
-	var exit *exec.ExitError
-	hasExit := errors.As(err, &exit)
-	// An SSH client that ends with 255 lost the connection, whatever the check's
-	// own marker says. Its marker may already report the check's exit code, but a
-	// result that never crossed the wire cannot be trusted, so this is a machine
-	// cause and the run is retried.
-	if hasExit && exit.ExitCode() == 255 && node.SSH != "" {
+	// A node that stayed unreachable lost the check, whatever the check's own
+	// marker says: a result that never crossed the wire cannot be trusted, so this
+	// is a machine cause and the run is retried.
+	if unreachable(node, err) {
 		return CauseSSHDrop
 	}
+	code, hasExit := commandExitStatus(err)
 	if len(markers) == 0 {
 		if hasExit {
-			switch code := exit.ExitCode(); {
+			switch {
 			case code == 69:
 				return CauseContainerFailure
 			case code == 124:
@@ -1117,11 +1007,22 @@ func runCause(node Node, ctx context.Context, err error) FailureCause {
 		}
 		return CauseCancelled
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) && exit.ExitCode() == 255 && node.SSH != "" {
+	if unreachable(node, err) {
 		return CauseSSHDrop
 	}
 	return CauseUnclassified
+}
+
+// unreachable reports a failure that proves the node did not answer: a node
+// that stayed unreachable beyond the bound, or a call that ssh ended with 255
+// after its retries.
+func unreachable(node Node, err error) bool {
+	var lost *nodeLostError
+	if errors.As(err, &lost) {
+		return !lost.gone
+	}
+	var exit *exec.ExitError
+	return node.SSH != "" && errors.As(err, &exit) && exit.ExitCode() == 255
 }
 
 // checkExit is the typed end of a check log: it says why the check stopped, so
@@ -1142,11 +1043,8 @@ func checkExitCode(err error, markers [][]string) int {
 		}
 		return 0
 	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return exit.ExitCode()
-	}
-	return 0
+	code, _ := commandExitStatus(err)
+	return code
 }
 
 // checkLogHead and checkLogTail bound what one check keeps in its local log: the
@@ -1285,25 +1183,81 @@ func combinedStatus(a, b Outcome) Outcome {
 	return OutcomePassed
 }
 
+// teardownScript stops what a run's checks left on the machine, without removing
+// the run folder: the containers first, so a scope keeps its slot until its
+// container has stopped, then each check's scope and detached unit, then the
+// worktrees. It fails when a container is still running afterwards. The run
+// folder is left to the removal that stops the run's keeper first: deleting it
+// here would take the keeper's process ID away before anything could stop it.
+func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) string {
+	script := unitStoppedFunction + "set -e; docker=(docker); "
+	if node.SSH == "" {
+		script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
+	}
+	q := shellquote.Quote
+	// A status query that fails proves nothing: only a query that answers and
+	// finds nothing left counts. Each one exits 69 on a failed query and on a
+	// survivor, and the caller then keeps the run's workspace and record.
+	script += `no_container() { local out; out=$(timeout 15s "${docker[@]}" ps --format '{{.Names}}' "${@:2}") || { echo 'container status unavailable' >&2; return 69; }; if printf '%s\n' "$out" | grep -qx -- "$1"; then echo 'container cleanup failed' >&2; return 69; fi; }; `
+	script += `no_labelled() { local out; out=$(timeout 15s "${docker[@]}" ps -q "$@") || { echo 'container status unavailable' >&2; return 69; }; if [ -n "$out" ]; then echo 'container cleanup failed' >&2; return 69; fi; }; `
+	for _, check := range checks {
+		name := "dyna-ci-" + runID + "-" + string(check.id)
+		// A check known only by its id, such as one outside the current suite
+		// selection, may have started a container or a workflow job, so both are
+		// cleaned.
+		unknown := !check.host && check.job == nil && check.image == ""
+		if check.image != "" || unknown {
+			script += `timeout 20s "${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
+			script += "no_container " + q(name) + "; "
+		}
+		if check.job != nil || unknown {
+			filters := "--filter " + q("label=dyna.run="+runID) + " --filter " + q("label=dyna.check="+string(check.id))
+			script += `ids=$(timeout 15s "${docker[@]}" ps -aq ` + filters + `) || { echo 'container status unavailable' >&2; exit 69; }; `
+			script += `if [ -n "$ids" ]; then timeout 30s "${docker[@]}" rm -f $ids >/dev/null 2>&1 || true; fi; `
+			script += "no_labelled " + filters + "; "
+		}
+		// A host check's scope is forced down, and the user manager must confirm it
+		// is gone.
+		if check.host || unknown {
+			scope := q(name + ".scope")
+			script += "timeout 10s systemctl --user stop " + scope + " >/dev/null 2>&1 || true; "
+			script += "systemctl --user kill --signal=KILL " + scope + " >/dev/null 2>&1 || true; "
+			script += "if command -v systemctl >/dev/null 2>&1; then unit_stopped " + scope + " || { echo 'check scope is not confirmed stopped' >&2; exit 69; }; fi; "
+		}
+		// The check's detached unit goes last: a check that ended on its own has
+		// nothing left to stop, and one that a lost poll left behind dies here. A
+		// unit that survives, or whose state cannot be read, fails the teardown.
+		script += "bash -c " + q(detachedStopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
+		script += "git --git-dir=" + q(cache) + " worktree remove --force " + q(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
+	}
+	return script + "git --git-dir=" + q(cache) + " worktree prune"
+}
+
 // nodeSetupScript prepares one run on its node. The prepare stage repairs a
 // linked go-build or go-mod path under the exclusive cache lock, before the run
 // takes its ordinary shared lock, and refuses any remaining unsafe link. A run
 // therefore never mounts or trims a cache that Dyna does not own.
 func nodeSetupScript(base, cache, reports, active string, cacheNames []string) string {
 	q := shellquote.Quote
+	// A setup that already started this run's keeper but lost the answer is
+	// repeated: the keeper holds the run's lock and a share of the cache lock, so
+	// the repeat skips the locking and only completes what is left.
+	keeper := q(keeperPID(active))
 	return "set -e; umask 077; " + baseLinkGuard(base) +
 		"mkdir -p " + q(base) + " " + q(reports) + "; " +
-		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) +
+		"if [ -s " + keeper + " ] && kill -0 \"$(cat " + keeper + ")\" 2>/dev/null; then :; else " +
+		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) + "fi; " +
 		"flock " + q(path.Join(base, "init.lock")) + " bash -c " + q("if [ ! -d "+q(cache)+" ]; then git init --bare "+q(cache)+"; fi")
 }
 
 // Slots belong to checks, across repositories and runner processes. A waiter
 // tries every slot before blocking on one slot without polling.
 // killGroupLeftovers kills every process in the wrapper's group except the
-// wrapper itself. A check that leaves a child behind, such as a compiler daemon
+// wrapper itself and its parent. The parent is the detached wrapper that writes
+// the check's exit record after the check returns, and it shares the group. A check that leaves a child behind, such as a compiler daemon
 // or a shell that outlived its deadline, must not hold the check's output pipe
 // or the next check's slot.
-const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
+const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || [ "$p" = "$PPID" ] || kill -KILL "$p" 2>/dev/null || true; done`
 
 // nodeSlotScript runs inner while holding one of the node's slots. A wrapper
 // that waits for a slot installs its deadline and its signal trap first, and
@@ -1356,12 +1310,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// is a file because the check's own output can be longer than the tail a run
 	// keeps.
 	startedMarker := `if [ -e ` + q(path.Join(reportDir, commandStartedFile)) + ` ]; then printf 'DYNA_CI_COMMAND_STARTED=1\n'; else printf 'DYNA_CI_COMMAND_STARTED=0\n'; fi; `
-	// The node's own record of the check's exit outlives the connection: a
-	// transport that dies after the command ran can still be judged from this
-	// file once the reports are copied back. It is written only after the
-	// wrapper reached the command, and its name matches the report filters.
-	exitRecord := `printf '{"exitCode":%s}\n' "$check_status" > ` + q(path.Join(reportDir, checkExitFile)) + "; "
-	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then ` + exitRecord + `printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `fi; `
+	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then { printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `} | emit; fi; `
 	if !check.host {
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
@@ -1376,7 +1325,11 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	} else {
 		cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
 	}
-	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
+	// The exit markers go to the trailer file the detached wrapper appends to the
+	// log after the output has drained, past the limit it puts on the output.
+	// Without that file they go to the output.
+	emit := `emit() { if [ -n "${DYNA_CI_TRAILER:-}" ]; then cat >> "$DYNA_CI_TRAILER"; else cat; fi; }; `
+	setup := emit + noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
 	if check.job != nil {
 		// The checkout is a branch, not a detached commit: act copies the
 		// workspace into the job container file by file, so an empty refs tree

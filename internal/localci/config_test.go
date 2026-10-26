@@ -220,19 +220,20 @@ suites:
 	if host := clampCheckResources(nodeCheck{host: true}, node); host.MemoryMiB != defaultHostMemoryMiB {
 		t.Fatalf("host check granted %+v", host)
 	}
-	// A host check receives its granted CPU share and memory through its systemd
-	// scope.
-	var scope []string
+	// A check receives its granted CPU share and memory through its unit: the
+	// start call carries the limits as arguments of the start script.
+	var started []string
 	runner := Runner{Node: &node}
 	runner.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
-		scope = append([]string{name}, args...)
+		started = append([]string{name}, args...)
 		return nil
 	}
-	if err := runner.nodeCommandScoped(t.Context(), io.Discard, io.Discard, "dyna-ci-x", checkResources{CPUs: 16, MemoryMiB: 32 * 1024}.scope(true), "true"); err != nil {
+	limits := checkResources{CPUs: 16, MemoryMiB: 32 * 1024}.scope(true)
+	if err := runner.startDetached(t.Context(), detachSpec{Dir: "/run/x/detached", Unit: "dyna-ci-x.service", Script: "true", Limits: &limits}); err != nil {
 		t.Fatal(err)
 	}
-	if joined := strings.Join(scope, " "); !strings.Contains(joined, "CPUQuota=1600%") || !strings.Contains(joined, "MemoryMax=32G") {
-		t.Fatalf("host scope = %s", joined)
+	if joined := strings.Join(started, " "); !strings.Contains(joined, "1600%") || !strings.Contains(joined, "32G") {
+		t.Fatalf("start call = %s, want the CPU share and memory limit", joined)
 	}
 	// A container keeps the GiB above its own limit that it always had, so the
 	// docker client fits in the scope.
