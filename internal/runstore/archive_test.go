@@ -16,7 +16,6 @@ import (
 	"dyna-agent/internal/plan/ancestry"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
-	"dyna-agent/internal/workeroutput"
 )
 
 // archiveFixture creates a finished run with every artifact kind a reader
@@ -34,14 +33,8 @@ func archiveFixture(t *testing.T, id string) *Run {
 	if _, err := run.StartAgentJournal(1, "a", "mock", "", "prompt"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run.StartAgentOutput(1); err != nil {
-		t.Fatal(err)
-	}
-	selected := workeroutput.ProfileSnapshot{Name: "mock", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectText}}
-	normalized, err := run.StartAgentNormalizedOutput(1, selected)
-	if err != nil {
-		t.Fatal(err)
-	}
+	legacyArtifact(t, run, 1, "stdout.log")
+	normalized := legacyArtifact(t, run, 1, "output.jsonl")
 	if err := os.WriteFile(normalized, []byte(`{"v":1,"kind":"message","role":"assistant","text":"hi"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

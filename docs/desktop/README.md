@@ -320,8 +320,7 @@ See [WEB.md](WEB.md#api).
   `SendToSession`, `StopSession`, `CloseSession`, `ForceCloseSession`,
   `PromoteSession`, `TransferSession`,
   `SessionTransfer`, `CancelSessionTransfer`.
-- Workflows: `Runs`, `RunDetail`, `ListTemplates`, `StartRun`, `CancelRun`,
-  `SteerRun`.
+- Workflows: `Runs`, `RunDetail`, `ListTemplates`, `StartRun`, `CancelRun`.
 - Files and changes: `ListEntries(roomRef, sessionRef, path, showHidden)`,
   `ReadFile(roomRef, sessionRef, path)`, `GitStatus(roomRef, sessionRef)`,
   `GitDiff(roomRef, sessionRef, path, staged)`. An empty session reference
@@ -474,9 +473,9 @@ the room's working directory. `input` is any JSON value, passed as `--args`,
 at most 256 KiB. Global uses your home folder; other rooms need a repo.
 Start uses `dyna run --detach --room --dir`; Cancel uses `dyna runs cancel`.
 A cancelled run shows "Canceled" in the feed. Failed runs still show their
-error. `SteerRun(runID, agentID, text)` sends a normal room post to
-`@run:<id>/agent:<n>`. Choose a live worker from RunDetail;
-there is no run-wide broadcast or workflow script steering.
+error. Each agent in RunDetail carries its `session` ID. Steer an agent
+with `SendToSession` on that ID; there is no run-wide broadcast or workflow
+script steering.
 
 `Devices()` lists paired browsers and live Connect sessions without token
 hashes or keys. Each row has `current`: true only for the paired browser or

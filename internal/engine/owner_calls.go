@@ -27,7 +27,6 @@ var ownerCalls = []string{
 	"SendWithReferences",
 	"SendToSessionWithReferences",
 	"SendToSession",
-	"SteerRun",
 	"DeclineCallRequest",
 	"VoiceStart",
 	"VoiceResume",

@@ -76,3 +76,20 @@ test('a group keeps every completed row whole, with or without a preview', async
   assert.match(failed, /<span class="label[^"]*">handback-c<\/span>/)
   assert.match(failed, /<p class="line[^"]*bad[^"]*">the worker exited before it wrote a result<\/p>/)
 })
+
+test('an agent that ran as a session offers to open it; an agent of an older run does not', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const agents: RunAgent[] = [
+    { id: 1, label: 'new', status: 'running', session: 'ses_20261026-000000-aaaa' },
+    { id: 2, label: 'old', status: 'running' },
+  ]
+  const detail = {
+    run: { id: 'wf_a', name: 'research', status: 'running', startedAt: new Date().toISOString() },
+    agents, agentTotal: 2, agentRunning: 2, agentFailed: 0, logs: [], phases: [],
+  }
+  const body = render(Run, { props: { detail, onopen: () => {} } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.equal(body.match(/<button class="session[^"]*"/g)?.length, 1)
+  assert.doesNotMatch(body, />Steer</)
+})

@@ -92,9 +92,6 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	if err := migrateMeta(db, dataDir); err != nil {
 		return db, err
 	}
-	if err := migrateSteering(db, dataDir); err != nil {
-		return db, err
-	}
 	return db, migrateDirectories(db, dataDir)
 }
 
@@ -501,7 +498,7 @@ func IsPaused(id string) bool {
 	return err == nil && paused
 }
 
-// deleteMeta removes a run's rows (meta, steering and ancestry) and their
+// deleteMeta removes a run's rows (meta and ancestry) and their
 // copies' stamps, in one write.
 func deleteMeta(db *sql.DB, id string) error {
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
@@ -509,13 +506,10 @@ func deleteMeta(db *sql.DB, id string) error {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM runs WHERE id=?", id); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, "DELETE FROM run_agent_steering WHERE run=?", id); err != nil {
-			return err
-		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM run_directories WHERE run_id=?", id); err != nil {
 			return err
 		}
-		// The meta's and the workers' steering copies are all under runs/<id>.
+		// The meta's copies are all under runs/<id>.
 		if err := state.ForgetMirrors(ctx, conn, "runs/"+id); err != nil {
 			return err
 		}

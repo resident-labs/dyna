@@ -43,7 +43,7 @@ type Identity struct {
 	Kind    Kind
 	Session string // for Session
 	Run     string // for Worker
-	Agent   int    // for Worker: the run's agent, or 0 for the run itself
+	Agent   int    // for Worker: always 0, the run itself; a workflow agent is a session
 	Reason  string
 }
 

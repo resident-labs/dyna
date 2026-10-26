@@ -66,6 +66,11 @@ func (s *socketCallers) actor(caller websvc.Caller) (authority.Actor, error) {
 	case websvc.Owner:
 		return authority.Actor{Role: authority.Owner}, nil
 	case websvc.Worker:
+		// Only the coordinator is a worker; each workflow agent is a session.
+		if caller.Agent != 0 {
+			s.refused.Add(1)
+			return authority.Actor{}, fmt.Errorf("workflow agent %d acts as a session, not as a worker", caller.Agent)
+		}
 		actor, err := authority.WorkerActor(caller.Run, caller.Agent)
 		if err != nil {
 			return authority.Actor{}, err
