@@ -317,6 +317,15 @@ func (a *Accounts) SwitchStatus(harness string) (pending bool, running int) {
 
 // switchGate blocks admission before draining every native process for this harness.
 func (a *Accounts) switchGate(ctx context.Context, harness string) (func(), error) {
+	if a.SwitchGate != nil {
+		return a.SwitchGate(ctx, harness)
+	}
+	return a.realSwitchGate(ctx, harness)
+}
+
+// realSwitchGate drains the harness's turns, so no turn runs while another
+// selects an account or renews a login it holds.
+func (a *Accounts) realSwitchGate(ctx context.Context, harness string) (func(), error) {
 	dir, err := a.harnessDirectory(harness)
 	if err != nil {
 		return nil, err

@@ -91,6 +91,19 @@ func PiAccessToken(entry json.RawMessage) (string, error) {
 	return e.Access, nil
 }
 
+// PiGrantExpiry is when the access token of a Pi OAuth login entry expires. A
+// grant without an expiry never counts as due.
+func PiGrantExpiry(entry json.RawMessage) (time.Time, error) {
+	var e piAuthEntry
+	if json.Unmarshal(entry, &e) != nil || e.Type != "oauth" || e.Access == "" {
+		return time.Time{}, ErrSchema
+	}
+	if e.Expires <= 0 {
+		return time.Time{}, nil
+	}
+	return time.UnixMilli(e.Expires).UTC(), nil
+}
+
 // PiOAuthOrAPIKey returns the inference credential of a Pi login entry,
 // whichever shape Pi saved it in: the access token of an OAuth sign-in, or a
 // pasted API key. Meta Muse stores its minted inference key in access on an
