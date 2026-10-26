@@ -92,6 +92,11 @@
     openAgentIds = []
   })
   const isOpenGroup = (g: Group) => g.agents.some((a) => openAgentIds.includes(a.id))
+  // An open phase takes in the agents it gains, so trimming the old ones later keeps it open.
+  $effect(() => {
+    const gained = groups.filter(isOpenGroup).flatMap((g) => g.agents.map((a) => a.id)).filter((id) => !openAgentIds.includes(id))
+    if (gained.length) openAgentIds = [...openAgentIds, ...gained]
+  })
   function togglePhase(key: number) {
     const g = groups.find((x) => x.agents[0]?.id === key)
     if (!g) return
