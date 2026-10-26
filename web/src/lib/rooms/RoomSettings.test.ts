@@ -14,9 +14,7 @@ import { errorText } from '../errorText.ts'
 import { stripTypes, topLevelFunctions } from '../../../test/svelte-source.ts'
 import type { Action } from '../ui/actions.ts'
 
-// Render the real Room settings modal on the server and read the text. The
-// ServiceHeader is a stub that prints its role, so each section shows which
-// services it holds.
+// Render the real Room settings modal on the server and read the text.
 async function load() {
   const dir = await mkdtemp(join(tmpdir(), 'dyna-room-settings-'))
   const result = await build({
@@ -24,7 +22,6 @@ async function load() {
     stdin: { contents: "export { default } from './RoomSettings.svelte'; export { render } from 'svelte/server'; export { createRawSnippet } from 'svelte'", resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     plugins: [{ name: 'settings-fixture', setup(builder) {
-      builder.onLoad({ filter: /[/\\]ServiceHeader\.svelte$/ }, ({ path }) => ({ contents: compile('<script>let { roomId, role } = $props()</script><b>service {role} in {roomId}</b>', { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}; export const openExternal = () => {}; export const features = {}', loader: 'js' }))
     } }, svelteEsbuildPlugin('server')],
   })
@@ -44,7 +41,7 @@ test('the modal uses the Settings shell with the room sections in order', async 
     const rules = createRawSnippet(() => ({ render: () => '<p>the rules list</p>' }))
     const html = render(component, { props: { room, rules, onclose() {} } }).body
     assert.match(html, /class="shell[^"]*" role="dialog" aria-modal="true" aria-label="Dyna settings"/)
-    assert.match(text(html), /^ Dyna settings General Review &amp; landing CI time Services Rules Hooks Bot noise rules General /)
+    assert.match(text(html), /^ Dyna settings General Review &amp; landing CI time Rules Hooks Bot noise rules General /)
     assert.match(html, /aria-label="Close dyna settings"/)
     assert.match(text(render(component, { props: { room, rules, start: 'rules', onclose() {} } }).body), /Bot noise rules the rules list/)
   } finally { await rm(dir, { recursive: true, force: true }) }
@@ -72,7 +69,6 @@ test('each section shows its moved controls in one shared layout', async () => {
     assert.doesNotMatch(review, /Review starts after/) // the room policy loads after mount
     assert.doesNotMatch(text(show('review')), /Automatic review/)
 
-    assert.match(text(show('services')), /service reviewer in room-1/)
     // The room's repo is fixed, so the hooks list has no repo picker.
     const hooks = show('hooks')
     assert.match(text(hooks), /Hooks Shell commands/)
