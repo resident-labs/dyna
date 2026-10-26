@@ -15,8 +15,8 @@ func TestRequiredReviewsUseEachReviewersLatestExactHeadVerdict(t *testing.T) {
 		if got := MissingRequiredReviewers(r); !reflect.DeepEqual(got, want) {
 			t.Fatalf("missing = %v, want %v", got, want)
 		}
-		if Ready(r, g) != (len(want) == 0) {
-			t.Fatalf("ready = %v with missing %v", Ready(r, g), want)
+		if Ready(r, g, nil) != (len(want) == 0) {
+			t.Fatalf("ready = %v with missing %v", Ready(r, g, nil), want)
 		}
 	}
 	require([]string{"architecture", "safety"})

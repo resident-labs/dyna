@@ -33,7 +33,7 @@ func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 	if len(items) != 1 || items[0].State != "required-reviews" || !reflect.DeepEqual(items[0].MissingRequiredReviewers, []string{safety}) || !strings.Contains(items[0].Reason, safety) {
 		t.Fatalf("queue lost missing review: %+v", items)
 	}
-	if localMergeReady(e.record()) {
+	if localMergeReady(e.record(), nil) {
 		t.Fatal("local publication bypasses required review")
 	}
 	if err := e.s.Verdict(t.Context(), r.Key, safety, "old", "approve", "Old head", 0); err == nil {
@@ -43,7 +43,7 @@ func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := e.record()
-	if len(got.ReviewRounds) != 2 || got.Reviewer != "" || len(e.launches) != 0 || !reflect.DeepEqual(got.RequiredReviewers, []string{namedReviewerID, safety}) || len(facts.MissingRequiredReviewers(got)) != 0 || !localMergeReady(got) {
+	if len(got.ReviewRounds) != 2 || got.Reviewer != "" || len(e.launches) != 0 || !reflect.DeepEqual(got.RequiredReviewers, []string{namedReviewerID, safety}) || len(facts.MissingRequiredReviewers(got)) != 0 || !localMergeReady(got, nil) {
 		t.Fatalf("required verdict did not use shared history: %+v", got)
 	}
 	if err := e.s.Store.update(func(st *State) error {
@@ -65,7 +65,7 @@ func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 	e.f.Pull.Head.SHA = strings.Repeat("b", 40)
 	e.tick()
 	got = e.record()
-	if got.Head != e.f.Pull.Head.SHA || !reflect.DeepEqual(got.RequiredReviewers, []string{namedReviewerID, safety}) || !reflect.DeepEqual(facts.MissingRequiredReviewers(got), got.RequiredReviewers) || localMergeReady(got) {
+	if got.Head != e.f.Pull.Head.SHA || !reflect.DeepEqual(got.RequiredReviewers, []string{namedReviewerID, safety}) || !reflect.DeepEqual(facts.MissingRequiredReviewers(got), got.RequiredReviewers) || localMergeReady(got, nil) {
 		t.Fatal("remote push did not reset required approvals and preserve requirements")
 	}
 }
@@ -187,7 +187,7 @@ func TestRequiredReviewsBlockLocalAndGitHubQueueEntries(t *testing.T) {
 		if len(got) != 1 || got[0].State != "required-reviews" || !reflect.DeepEqual(got[0].MissingRequiredReviewers, []string{"required"}) {
 			t.Fatalf("%s queue: %+v", kind, got)
 		}
-		if facts.Ready(r, facts.FromRecord(r)) || localMergeReady(r) {
+		if facts.Ready(r, facts.FromRecord(r), nil) || localMergeReady(r, nil) {
 			t.Fatalf("%s publication was ready", kind)
 		}
 	}
