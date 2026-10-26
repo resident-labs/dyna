@@ -217,3 +217,16 @@ func TestErrorsLeaveExistingDocument(t *testing.T) {
 		t.Fatalf("missing lock parent: %v", err)
 	}
 }
+
+func TestDataDirEnvWinsOverXDG(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	dir := filepath.Join(t.TempDir(), "owner", "dyna")
+	t.Setenv(store.DataDirEnv, dir)
+	if got := store.DataDir(); got != dir {
+		t.Fatalf("dataDir = %q, want %q", got, dir)
+	}
+	t.Setenv(store.DataDirEnv, "relative/dir")
+	if got := store.DataDir(); got == "relative/dir" {
+		t.Fatal("a relative data folder was accepted")
+	}
+}

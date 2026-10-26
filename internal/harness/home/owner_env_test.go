@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/shellquote"
+	"dyna-agent/internal/store"
 )
 
 // setProcessEnv replaces the process environment with env until the test ends.
@@ -76,6 +77,40 @@ func TestRestoreOwnerKeepsCallerRoots(t *testing.T) {
 	t.Setenv(OwnerEnvKey, "{not json")
 	if err := RestoreOwner(nil); err == nil {
 		t.Fatal("invalid owner record accepted")
+	}
+}
+
+// A game helper sets fresh XDG roots, then runs a dyna client command. The
+// caller keeps its roots, but the client must still reach the owner's data.
+func TestRestoreOwnerKeepsOwnerDataForClientsWithCallerRoots(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want bool
+	}{
+		"client command": {[]string{"computer", "env"}, true},
+		"engine":         {[]string{"engine", "run"}, false},
+		"no command":     {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scope, owner, env := fixture(t)
+			out, err := Prepare(scope, "", env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh := filepath.Join(t.TempDir(), "fresh-data")
+			setProcessEnv(t, merged(env, out))
+			t.Setenv("XDG_DATA_HOME", fresh)
+			if err := RestoreOwner(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			if os.Getenv("XDG_DATA_HOME") != fresh {
+				t.Fatal("the caller's data root was replaced")
+			}
+			got, set := os.LookupEnv(store.DataDirEnv)
+			if set != tc.want || tc.want && got != filepath.Join(owner, ".local", "share", "dyna") {
+				t.Fatalf("%s = %q, %v; want the owner's folder: %v", store.DataDirEnv, got, set, tc.want)
+			}
+		})
 	}
 }
 
