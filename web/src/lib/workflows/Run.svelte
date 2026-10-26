@@ -171,18 +171,27 @@
       <div class="agents">
         {#each g.agents as a (a.id)}
           {@const row = workerRows[a.id]}
+          {@const expandable = a.status === 'ok' || a.status === 'running'}
+          {@const name = a.label || `agent ${a.id}`}
           <div class="agent {a.status}" class:expanded={row?.open}>
-            <RunIcon status={a.status} size={18} />
-            <span class="who">
-              <span class="label">{a.label || `agent ${a.id}`}</span>
-              {#if a.profile}<span class="pill">{a.profile}</span>{/if}
-              {#if a.cached}<span class="pill">cached</span>{/if}
-            </span>
-            <span class="time">
-              {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Session</button>{/if}
-              {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
-              {#if a.status === 'ok' || a.status === 'running'}<button class="open" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {a.label || `agent ${a.id}`}" onclick={() => workers.toggle(run.id, a.id, a.status)}><span aria-hidden="true">›</span></button>{/if}
-            </span>
+            <!-- The whole header opens and folds the card; a failed or stopped agent has no result to open. -->
+            {#snippet head()}
+              <RunIcon status={a.status} size={18} />
+              <span class="who">
+                <span class="label">{name}</span>
+                {#if a.profile}<span class="pill">{a.profile}</span>{/if}
+                {#if a.cached}<span class="pill">cached</span>{/if}
+              </span>
+              <span class="time">
+                {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
+                {#if expandable}<span class="open" aria-hidden="true">›</span>{/if}
+              </span>
+            {/snippet}
+            {#if expandable}
+              <button type="button" class="head action" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {name}" onclick={() => workers.toggle(run.id, a.id, a.status)}>{@render head()}</button>
+            {:else}
+              <div class="head">{@render head()}</div>
+            {/if}
             {#if a.error}
               <p class="line bad">{a.error}</p>
             {:else if a.status === 'running'}
@@ -192,8 +201,10 @@
               {@const line = previewLine(a.preview)}
               {#if line}<p class="line">{line}</p>{/if}
             {/if}
+            {#if !expandable && a.session && onopen}<p class="line"><button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Open session</button></p>{/if}
             {#if row?.open}
               <div class="full">
+                {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Open session</button>{/if}
                 {#if row.value}<WorkerDetail value={row.value} />{/if}
                 {#if row.loading}<p class="quiet" role="status">{row.value ? 'Refreshing the result…' : 'Loading the result…'}</p>{/if}
                 {#if row.error}<div class="retry-row"><p class="err">Could not load the result: {row.error}</p><button class="retry" aria-label="Retry result for {a.label || ('agent ' + a.id)}" onclick={() => workers.retry(run.id, a.id, a.status)}>Retry</button></div>{/if}
@@ -302,9 +313,9 @@
   .retry { min-height: 44px; padding: 8px 14px; border-radius: var(--r-xs); background: var(--raise); color: var(--ink); flex: none; }
   .line.live.long { font-weight: 600; }
   .line.live { color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .open { margin-left: 8px; color: var(--faint); width: 22px; height: 22px; border-radius: 5px; display: inline-grid; place-items: center; transition: transform var(--motion-fast) var(--ease); }
+  .open { margin-left: 8px; color: var(--faint); width: 22px; height: 22px; display: inline-grid; place-items: center; transition: transform var(--motion-fast) var(--ease); }
   .agent.expanded .open { transform: rotate(90deg); }
-  .full { grid-column: 2 / 4; margin-top: 10px; min-width: 0; overflow-wrap: anywhere; }
+  .full { grid-column: 2 / 4; margin-top: 4px; min-width: 0; overflow-wrap: anywhere; }
   .rhead { display: flex; align-items: center; gap: 10px; margin: 22px 0 8px; }
   .rhead h2 { margin: 0; flex: 1; }
   .raw { white-space: pre-wrap; overflow-wrap: anywhere; background: #19181b; border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 16px; font-size: 12.5px; max-height: 70vh; overflow: auto; margin: 0; }
@@ -338,7 +349,7 @@
     .pause:hover:not(:disabled) { background: var(--raise-hover); }
   }
   .pause:active:not(:disabled) { background: var(--select); }
-  .session { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 3px 10px; margin-right: 10px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
+  .session { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 3px 10px; margin: 0 0 8px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .session:hover { color: var(--ink); background: var(--raise-hover); }
   }
@@ -367,7 +378,10 @@
   /* A group never clips or shrinks a row, so every row keeps its whole content:
      the corners are rounded on the group and on its first and last rows. */
   .agents { background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; }
-  .agent { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; padding: 11px 14px; min-width: 0; }
+  .agent { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; padding: 0 14px 11px; min-width: 0; }
+  .head { grid-column: 1 / -1; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; margin: 0 -14px; padding: 11px 14px; min-height: 44px; min-width: 0; border-radius: inherit; text-align: left; color: inherit; font: inherit; transition: background-color var(--motion-fast) var(--ease); }
+  .head.action { cursor: pointer; width: calc(100% + 28px); }
+  .head:focus-visible { outline: 2px solid var(--iris); outline-offset: -2px; }
   .agent:first-child { border-radius: 11px 11px 0 0; }
   .agent:last-child { border-radius: 0 0 11px 11px; }
   .agent:only-child { border-radius: 11px; }
@@ -378,6 +392,10 @@
   .pill { font-size: 11.5px; color: var(--muted); background: var(--raise); border-radius: 10px; padding: 1px 8px; }
   .time { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; align-items: center; }
   .agent.running .time { color: var(--gold); }
+  @media (hover: hover) {
+    .head.action:hover { background: var(--hover); }
+  }
+  .head.action:active { background: var(--select); }
   .line { grid-column: 2 / 4; margin: 4px 0 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .line.bad { color: var(--coral); }
   .logs { background: #19181b; border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 14px; font-size: 12.5px; color: var(--ink-2); max-height: 260px; overflow-y: auto; }
@@ -393,7 +411,7 @@
     .title { flex-wrap: wrap; }
     .cancel, .pause { min-height: 44px; width: 100%; order: 5; }
     dl { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
-    .session { min-height: 36px; padding: 0 12px; margin-right: 6px; }
+    .session { min-height: 44px; padding: 0 14px; }
     .time { white-space: nowrap; }
     .line.live { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   }
