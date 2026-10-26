@@ -294,6 +294,9 @@ type generationDestination struct {
 }
 
 func (m *ConfigManager) generateWithPreferences(harness, accountHome, generationRoot string, lookup func(string) (string, bool), preferences map[string]any, destination *generationDestination) (out ConfigGeneration, err error) {
+	// This materializer writes a Claude Code generation and nothing else. Every
+	// other harness is materialized at runtime by internal/harness/runtime, which
+	// also owns its MCP execution manifest.
 	hs, err := selectedHarnesses(harness)
 	if err != nil || len(hs) != 1 || hs[0] != "claude-code" {
 		return out, errors.New("native config generation supports only Claude Code")
@@ -318,7 +321,6 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 		}
 	}
 	servers := map[string]any{}
-	execSpecs := map[string]MCPExecSpec{}
 	envRefs := map[string]string{}
 	out.Env = map[string]string{}
 	for _, x := range c.MCP {
@@ -335,9 +337,7 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 		native := map[string]any{}
 		if d.URL != "" {
 			native["url"] = d.URL
-			if h == "claude-code" {
-				native["type"] = "http"
-			}
+			native["type"] = "http"
 		} else {
 			native["command"] = d.Command
 			native["args"] = slices.Clone(d.Args)
@@ -363,33 +363,11 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 					out.EnvKeys = append(out.EnvKeys, key)
 				}
 			}
-			if h == "claude-code" {
-				references := map[string]string{}
-				for key := range env {
-					references[key] = "${" + MCPEnvironmentName(key) + "}"
-				}
-				native["env"] = references
-			} else {
-				names := []string{}
-				refs := map[string]string{}
-				wrapped := false
-				for _, key := range d.EnvKeys {
-					alias := MCPEnvironmentName(key)
-					names = append(names, alias)
-					refs[key] = alias
-					wrapped = wrapped || alias != key
-				}
-				native["env_vars"] = names
-				if wrapped {
-					cli, err := dynaMCPExecutable(lookup)
-					if err != nil {
-						return ConfigGeneration{}, err
-					}
-					native["command"] = cli
-					native["args"] = []string{"mcp", "serve", "__DYNA_GENERATION__", x.Name}
-					execSpecs[x.Name] = MCPExecSpec{d.Command, d.Args, refs}
-				}
+			references := map[string]string{}
+			for key := range env {
+				references[key] = "${" + MCPEnvironmentName(key) + "}"
 			}
+			native["env"] = references
 		}
 		if _, exists := servers[x.Name]; exists {
 			return ConfigGeneration{}, errors.New("duplicate enabled MCP name")
@@ -424,22 +402,6 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 			return errors.New("cannot write private config generation")
 		}
 		return nil
-	}
-	for _, value := range servers {
-		if row, ok := value.(map[string]any); ok {
-			if args, ok := row["args"].([]string); ok {
-				for i, arg := range args {
-					if arg == "__DYNA_GENERATION__" {
-						args[i] = published
-					}
-				}
-			}
-		}
-	}
-	if len(execSpecs) > 0 {
-		if err := write("mcp-exec.json", execSpecs); err != nil {
-			return ConfigGeneration{}, err
-		}
 	}
 	if err := write("mcp.json", map[string]any{"mcpServers": servers}); err != nil {
 		return ConfigGeneration{}, err
