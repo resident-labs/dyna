@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -313,5 +314,49 @@ func TestResumeRunKeepsTheRecordWhenTeardownFails(t *testing.T) {
 	}
 	if node, _ := store.AttachedNode(t.Context(), repo, sha); node != "pve" {
 		t.Fatal("the record was dropped although the teardown failed")
+	}
+}
+
+// A run that fails before it reaches its checks must not leave the record it
+// took over owned by the live engine, or no later run could take it.
+func TestEarlyFailureLeavesTheRecordForTheNextRun(t *testing.T) {
+	f := newReattachFixture(t)
+	f.stopEngineDuringRun(t)
+	// The next run cannot make its report folder.
+	results := filepath.Join(f.runner.DataDir, "local-ci")
+	if err := os.RemoveAll(results); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(results, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.runner.Run(t.Context(), f.request); err == nil {
+		t.Fatal("the run did not fail")
+	}
+	store := Store{DataDir: f.runner.DataDir}
+	key, _ := canonicalKey(f.request.Repo)
+	rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40))
+	if err != nil || len(rows) != 1 || !rows[0].orphaned() {
+		t.Fatalf("records = %+v, %v, want the one record still free to take", rows, err)
+	}
+}
+
+// The teardown of an old run proves that nothing survives: it forces every scope
+// down and fails while one is active, and it cleans the containers of a check
+// that is known only by its id.
+func TestTeardownProvesThatSurvivorsStopped(t *testing.T) {
+	script := teardownScript(Node{Name: "pve", SSH: "pip@pve"}, "/cache", "/runs/r1", "r1", []nodeCheck{{id: "known", image: "go:1"}, {id: "only-id"}, {id: "host", host: true}})
+	for _, want := range []string{
+		"docker[@]}\" rm -f 'dyna-ci-r1-only-id'",
+		"label=dyna.run=r1",
+		"systemctl --user kill --signal=KILL 'dyna-ci-r1-host.scope'",
+		"systemctl --user is-active --quiet 'dyna-ci-r1-host.scope'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("teardown lacks %q", want)
+		}
+	}
+	if strings.Contains(script, "stop.sh") || strings.Contains(script, detachedStopScript+"|| true") {
+		t.Error("the detached stop result is masked")
 	}
 }

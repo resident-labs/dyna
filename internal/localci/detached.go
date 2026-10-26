@@ -90,8 +90,10 @@ exec 4> "$1/out"
 bash -o pipefail "$1/run.sh" >&4 2>&1 </dev/null
 code=$?
 exec 4>&-
-for i in $(seq 1 50); do kill -0 "$writer" 2>/dev/null || break; sleep 0.1; done
-kill -KILL "$writer" 2>/dev/null || true
+for i in $(seq 1 "${DYNA_CI_DRAIN_TENTHS:-50}"); do kill -0 "$writer" 2>/dev/null || break; sleep 0.1; done
+kill -KILL -- "-$writer" 2>/dev/null || true
+wait "$writer" 2>/dev/null || true
+for i in $(seq 1 40); do kill -0 -- "-$writer" 2>/dev/null || break; sleep 0.05; done
 if [ -f "$1/trailer" ]; then cat "$1/trailer" >> "$1/log"; fi
 printf '{"exitCode":%s}\n' "$code" > "$1/exit.tmp" && mv "$1/exit.tmp" "$1/exit.json"
 WRAP
@@ -146,6 +148,10 @@ if [ -s "$d/pid" ]; then
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- "-$pid" 2>/dev/null || break; sleep 1; done
   kill -KILL -- "-$pid" 2>/dev/null || true
 fi
+# The stop counts only when nothing is left: a unit or a process group that
+# survives fails the call, so the caller keeps the check's workspace.
+if systemctl --user is-active --quiet "$unit" 2>/dev/null; then echo "unit $unit is still active" >&2; exit 1; fi
+if [ -s "$d/pid" ] && kill -0 -- "-$(cat "$d/pid")" 2>/dev/null; then echo "check process group is still running" >&2; exit 1; fi
 `
 
 // detachSpec is everything the node needs to run and find one check.
