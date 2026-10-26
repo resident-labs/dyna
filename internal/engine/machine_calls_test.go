@@ -50,6 +50,13 @@ func TestRoomRootGrantsHostChecks(t *testing.T) {
 	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"ciSlots":2}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("a root changing CI slots = %v, want an owner-only refusal", err)
 	}
+	// Creating a machine and naming it decide where work goes too.
+	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"create":true,"roles":["ci"],"ciSlots":1,"ssh":"pip@hermeslab"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root creating a machine = %v, want an owner-only refusal", err)
+	}
+	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"name":"renamed"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root renaming a machine = %v, want an owner-only refusal", err)
+	}
 }
 
 // A session cannot allow host checks, and the refusal names the owner's command.

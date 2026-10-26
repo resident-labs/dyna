@@ -1,17 +1,29 @@
 package ci
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"text/tabwriter"
 
 	"dyna-agent/internal/cli/jsonout"
+	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/watch"
+	"dyna-agent/internal/websvc"
 	"github.com/spf13/cobra"
 )
+
+// saveMachine sends one machine change to the engine, the one writer of the
+// registry, so this alias obeys the same authority and rules as dyna machine.
+var saveMachine = func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
+	var detail websvc.MachineDetail
+	err := engineclient.New("").Call(ctx, "SaveMachine", []any{ref, patch}, &detail)
+	return detail, err
+}
 
 func registryCommands() []*cobra.Command {
 	s := localci.Store{}
@@ -34,6 +46,7 @@ func nodeCommand(s localci.Store) *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			store := machines.Store{DataDir: s.DataDir}
 			m, err := store.Get(c.Context(), args[0])
+			create := false
 			if errors.Is(err, os.ErrNotExist) {
 				if ssh == "" {
 					local, err := store.GetLocal(c.Context())
@@ -42,21 +55,32 @@ func nodeCommand(s localci.Store) *cobra.Command {
 					}
 					return fmt.Errorf("CI machine %q needs --ssh user@host; this machine is the local machine %q, so add its CI slots with: dyna machine edit %s --ci-slots %d", args[0], local.Name, local.Name, slots)
 				}
-				m = machines.Machine{Name: args[0], Enabled: true}
+				create = true
+				m = machines.Machine{Name: args[0]}
 			} else if err != nil {
 				return err
 			}
-			if !m.HasRole(machines.RoleCI) {
-				m.Roles = append(m.Roles, machines.RoleCI)
+			roles := m.Roles
+			if !slices.Contains(roles, machines.RoleCI) {
+				roles = append(roles, machines.RoleCI)
 			}
+			enabled := true
+			patch := websvc.MachinePatch{Create: create, Enabled: &enabled, Roles: &roles, CISlots: &slots}
 			if ssh != "" {
-				m.SSH = ssh
+				patch.SSH = &ssh
 			}
-			m.CISlots, m.Enabled = slots, true
-			if _, err := store.Save(c.Context(), m); err != nil {
+			// An update names the stored machine by ID: a name can equal another
+			// machine's ID, and the engine resolves IDs first. Creation keeps the
+			// name the owner typed.
+			ref := args[0]
+			if !create {
+				ref = m.ID
+			}
+			saved, err := saveMachine(c.Context(), ref, patch)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved CI machine %s with %d slots.\n", m.Name, m.CISlots)
+			fmt.Fprintf(c.OutOrStdout(), "Saved CI machine %s with %d slots.\n", saved.Name, saved.CISlots)
 			return nil
 		},
 	}
