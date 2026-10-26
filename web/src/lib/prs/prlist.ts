@@ -118,6 +118,13 @@ export interface MergeState {
   tone: string
   reason: string
 }
+function mergeDependencyLabel(dependency: MergeItem['dependency']): string {
+  const number = dependency?.number ? `#${dependency.number}` : ''
+  const title = dependency?.title?.trim() ?? ''
+  if (number && title) return `${number} · ${title}`
+  return number || title || 'Unresolved change'
+}
+
 export function mergeState(c: Row, item: MergeItem | null = null, pos = 0): MergeState {
   const m = !isDone(c) && !isUntracked(c) && item ? MERGE[item.state] : undefined
   if (!m && !isLocal(c) && isReady(c)) return { id: 'approved', lane: 'progress', label: 'Approved', tone: 'sage', reason: 'Waiting for the merge service' }
@@ -127,6 +134,7 @@ export function mergeState(c: Row, item: MergeItem | null = null, pos = 0): Merg
     return { id, lane: LANE[group], label, tone, reason: '' }
   }
   const [lane, label, tone] = m
+  if (item.state === 'waiting-dependency') return { id: item.state, lane, label, tone, reason: mergeDependencyLabel(item.dependency) }
   // The reason shows under the title only when it says more than the chip.
   const said = (item.reason || '').trim()
   const reason = said.toLowerCase() === label.toLowerCase() ? '' : said.charAt(0).toUpperCase() + said.slice(1)
