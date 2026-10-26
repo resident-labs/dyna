@@ -100,6 +100,19 @@ func TestConsolidationFailedSourcesImmediateAndRetryRestoresNativeConversation(t
 	if c.Phase != "failed" {
 		t.Fatalf("startup did not fail: %+v", c)
 	}
+	posts, err := e.m.rooms().Messages(c.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alerted := false
+	for _, post := range posts {
+		if alert, ok := post.Alert(); ok && alert.Source == room.AlertConsolidation && strings.Contains(alert.Detail, "phase starting") {
+			alerted = true
+		}
+	}
+	if !alerted {
+		t.Fatal("startup failure did not alert root")
+	}
 	meta, _ := e.m.Store.ReadMeta(a.ID)
 	source, _ := e.m.Store.ReadMeta(b.ID)
 	if meta.HarnessSession != old.HarnessSession || meta.Profile != "mock" || !source.Closed.IsZero() || source.ConsumedBy != "" || source.Consolidating != c.ID {
