@@ -6,8 +6,8 @@
   import type { CellState } from './lanes.ts'
 
   export interface PhaseRow {
-    // key is the id of the phase group's first agent; it only keys the row.
-    key: number
+    // key identifies the phase group's first step, agent or command; it only keys the row.
+    key: string
     open: boolean
     phase: string
     state: CellState
@@ -16,8 +16,8 @@
   }
   interface Props {
     rows: PhaseRow[]
-    ontoggle: (key: number) => void
-    agents: Snippet<[number]>
+    ontoggle: (key: string) => void
+    agents: Snippet<[string]>
   }
   let { rows, ontoggle, agents }: Props = $props()
 </script>
