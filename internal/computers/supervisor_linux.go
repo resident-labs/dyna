@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store"
@@ -516,12 +517,8 @@ func (s *supervisor) owned() map[int]string {
 		roots[pid] = start
 	}
 	owned := descendants(all, roots)
-	for pid, p := range all {
-		if pid == os.Getpid() {
-			continue
-		}
-		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-		if err == nil && strings.Contains(string(b), "DYNA_COMPUTER_PROCESS="+s.meta.SessionID+"\x00") {
+	for _, pid := range runprocs.Stamped("DYNA_COMPUTER_PROCESS=" + s.meta.SessionID) {
+		if p, ok := all[pid]; ok {
 			owned[pid] = p.start
 		}
 	}
