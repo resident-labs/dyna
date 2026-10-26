@@ -147,9 +147,10 @@
   function pickGroup(group: number) {
     if (grid) picked = cellOf(grid, group)
   }
-  // Counts come from Go over every agent, not just the shown ones.
-  let counts = $derived({ running: detail?.agentRunning ?? 0, error: detail?.agentFailed ?? 0, total: detail?.agentTotal ?? 0 })
+  // Counts come from Go over every agent and command, not just the shown ones.
   let commandCounts = $derived({ running: detail?.commandRunning ?? 0, error: detail?.commandFailed ?? 0, total: detail?.commandTotal ?? 0 })
+  // The bar and the Working and Failed cells count every step, agent or command.
+  let counts = $derived({ running: (detail?.agentRunning ?? 0) + commandCounts.running, error: (detail?.agentFailed ?? 0) + commandCounts.error, total: (detail?.agentTotal ?? 0) + commandCounts.total })
   let pct = $derived(counts.total ? Math.round(((counts.total - counts.running) / counts.total) * 100) : 0)
   // The result loads on its own, in full; run details carry only its size.
   let full = $state<LoadedResult>(null)
@@ -278,7 +279,7 @@
         {/if}
       </div>
       {#if counts.total}
-        <div class="bar stacked" role="img" aria-label="{counts.total - counts.running - counts.error} done, {counts.running} running, {counts.error} failed of {counts.total} agents">
+        <div class="bar stacked" role="img" aria-label="{counts.total - counts.running - counts.error} done, {counts.running} running, {counts.error} failed of {counts.total} {commandCounts.total ? 'steps' : 'agents'}">
           <span class="seg ok" style="width:{((counts.total - counts.running - counts.error) / counts.total) * 100}%"></span>
           <span class="seg error" style="width:{(counts.error / counts.total) * 100}%"></span>
           <span class="seg running" style="width:{(counts.running / counts.total) * 100}%"></span>
@@ -289,7 +290,7 @@
       <dl class:wide={commandCounts.total > 0}>
         <div><dt>Started</dt><dd>{ago(run.startedAt)}</dd></div>
         <div><dt>Duration</dt><dd>{duration(run.startedAt, run.status === 'running' ? null : run.endedAt)}</dd></div>
-        <div><dt>Agents</dt><dd>{counts.total}</dd></div>
+        <div><dt>Agents</dt><dd>{detail.agentTotal}</dd></div>
         {#if commandCounts.total}<div><dt>Commands</dt><dd>{commandCounts.total}</dd></div>{/if}
         <div><dt>Working</dt><dd class:gold={counts.running}>{counts.running}</dd></div>
         <div><dt>Failed</dt><dd class:bad={counts.error}>{counts.error}</dd></div>

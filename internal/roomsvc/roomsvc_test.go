@@ -662,3 +662,12 @@ func TestFoldRunCommands(t *testing.T) {
 		t.Fatalf("foldRun kept the wrong end: %#v", last)
 	}
 }
+
+func TestFoldRunCommandTailKeepsTheEnd(t *testing.T) {
+	tail := strings.Repeat("x", MaxRunTail+50) + "LAST ERROR"
+	f := foldAll([]runstore.Event{{T: "exec_end", ID: 1, Status: "error", Tail: tail}}, true)
+	got := f.commands[0].Tail
+	if !strings.HasSuffix(got, "LAST ERROR") || len([]rune(got)) != MaxRunTail+1 {
+		t.Fatalf("tail has %d runes and ends %q; want the last %d runes behind an ellipsis", len([]rune(got)), got[len(got)-10:], MaxRunTail)
+	}
+}
