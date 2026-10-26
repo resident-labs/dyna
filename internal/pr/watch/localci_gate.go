@@ -366,6 +366,12 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	}
 	if result.Status == localci.OutcomePassed && (!plan.runnable() || !plan.required.CoversSuites(result, plan.suites)) {
 		localState = VerdictPending
+		if !trial {
+			// A manual run on a pull request head may miss the checks the plan
+			// names, for example the changes check of a docs-only change. No
+			// run for that head is coming to complete it, so it is no evidence.
+			localState, localJobs, logs = VerdictAbsent, nil, ""
+		}
 	}
 	// Without a hosted run to fall back to, and with no local retry left, waiting
 	// here would never end. The trial fails and names the cause instead. A run
