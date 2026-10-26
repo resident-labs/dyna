@@ -70,11 +70,11 @@ func (w *warmRuns) cancelAll() {
 }
 
 func (s *Service) warmRuns() *warmRuns {
-	s.warmOnce.Do(func() {
-		if s.registeredWarms == nil {
-			s.registeredWarms = &warmRuns{runs: map[string]context.CancelFunc{}}
-		}
-	})
+	localCIInit.Lock()
+	defer localCIInit.Unlock()
+	if s.registeredWarms == nil {
+		s.registeredWarms = &warmRuns{runs: map[string]context.CancelFunc{}}
+	}
 	return s.registeredWarms
 }
 
