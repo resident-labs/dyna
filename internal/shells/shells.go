@@ -21,6 +21,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -118,6 +120,10 @@ type Store struct {
 	// pause waits between attempts to record an exit; nil sleeps. A test sets
 	// it so no timer decides the result.
 	pause func(time.Duration)
+	// failWrite, when set, makes a write fail before it reaches the state
+	// store; its argument is "save" or the SQL of the write. A test sets it to
+	// act as a store that times out.
+	failWrite func(op string) error
 	// exitWrite replaces the write of a finished job's exit; nil uses Save. A
 	// test sets it to act as a state store that times out.
 	exitWrite func(m Meta, ex *Exit) error
@@ -164,6 +170,9 @@ type StartOptions struct {
 	Run    string
 	RoomID string
 	Room   string
+	// Hold, when set, is stored with the new job in the same write: a foreground
+	// caller waits for the job until then, so its exit does not also wake the owner.
+	Hold time.Time
 }
 
 // Create records a new shell (not started yet) and returns its id.
@@ -225,7 +234,108 @@ func (s *Store) create(opts StartOptions) (Meta, error) {
 		return Meta{}, err
 	}
 	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, Run: strings.TrimSpace(opts.Run), RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
-	return m, s.Save(m, nil)
+	return m, s.saveNew(m, opts.Hold)
+}
+
+// startBusy opens the error of a job that could not begin because the state
+// store did not answer in time (D-220).
+const startBusy = "job did not start: the state store was busy; retry"
+
+// startError says why a job did not start. A state-store timeout gets the
+// plain busy message, never a bare "context deadline exceeded".
+func startError(err error) error {
+	if timedOut(err) {
+		return fmt.Errorf("%s: %w", startBusy, err)
+	}
+	return fmt.Errorf("job did not start: %w", err)
+}
+
+// startSaveTries and startSaveWait bound how long a supervisor keeps trying to
+// record itself before its command starts.
+const (
+	startSaveTries = 3
+	startSaveWait  = 2 * time.Second
+)
+
+// saveStart records the supervisor's identity, trying again while the state
+// store times out. A final failure reads as a job that did not start.
+func (s *Store) saveStart(m Meta) error {
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
+	var err error
+	for i := 0; i < startSaveTries; i++ {
+		if err = s.Save(m, nil); !timedOut(err) {
+			break
+		}
+		if i < startSaveTries-1 {
+			pause(startSaveWait)
+		}
+	}
+	if err != nil {
+		return startError(err)
+	}
+	return nil
+}
+
+// StartJob records a new job together with its exit hold, and calls spawn to
+// start its supervisor. If a step fails, the job is removed so that no lost job
+// and no command are left behind, and the error says the job did not start
+// (D-220). The row is deleted first, with the same retries a supervisor makes,
+// and the folder stays until that delete has succeeded. The returned Meta keeps
+// the job's ID on failure, so a caller can forget it.
+func (s *Store) StartJob(opts StartOptions, hold time.Time, spawn func(Meta) error) (Meta, error) {
+	opts.Hold = hold
+	meta, err := s.Create(opts)
+	if err == nil {
+		err = spawn(meta)
+	}
+	if err == nil {
+		return meta, nil
+	}
+	if ValidID(meta.ID) {
+		if derr := s.discardStart(meta.ID); derr != nil {
+			// The row may stay, so keep its folder and say so.
+			return meta, errors.Join(startError(err), fmt.Errorf("the job %s could not be removed: %w", meta.ID, derr))
+		}
+	}
+	return meta, startError(err)
+}
+
+// discardStart deletes a job that did not start, then its folder. A write that
+// timed out earlier may still commit, so the delete queues behind it and is
+// tried again while the store times out.
+func (s *Store) discardStart(id string) error {
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
+	var err error
+	for i := 0; i < startSaveTries; i++ {
+		if _, err = s.exec(id, `DELETE FROM shell_jobs WHERE id=?`, id); !timedOut(err) {
+			break
+		}
+		if i < startSaveTries-1 {
+			pause(startSaveWait)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	dir, err := s.dir(id)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+// injected returns the error a test made a write fail with, or nil.
+func (s *Store) injected(op string) error {
+	if s.failWrite != nil {
+		return s.failWrite(op)
+	}
+	return nil
 }
 
 // Supervise runs the shell's command to completion (the detached `_run`
@@ -240,12 +350,15 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := awaitLaunch(); err != nil {
+		return err
+	}
 	m.Supervisor = os.Getpid()
 	m.SupervisorStartTime, err = s.processStartTime(m.Supervisor)
 	if err != nil {
 		return fmt.Errorf("record supervisor identity: %w", err)
 	}
-	if err := s.Save(m, nil); err != nil {
+	if err := s.saveStart(m); err != nil {
 		return err
 	}
 	out, err := os.OpenFile(filepath.Join(dir, "output.log"), os.O_APPEND|os.O_WRONLY, 0o600)
@@ -280,7 +393,8 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	}
 	cmd := exec.Command(m.Cmd[0], m.Cmd[1:]...)
 	cmd.Dir = m.Cwd
-	env, noDisplay := home.LaunchEnv(), false
+	// LaunchEnv was captured before awaitLaunch consumed the gate marker.
+	env, noDisplay := slices.DeleteFunc(home.LaunchEnv(), func(kv string) bool { return strings.HasPrefix(kv, launchGateEnv+"=") }), false
 	if s.CommandEnv != nil {
 		env, noDisplay = s.CommandEnv(ctx, dir, m, env)
 	}
@@ -783,11 +897,22 @@ func StartSupervisor(exe, id string) error {
 	defer errLog.Close()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, errLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// The supervisor starts its command only after the launcher has recorded
+	// the supervisor: it waits on this pipe for the launcher's go-ahead, and an
+	// end without one means the launch failed.
+	gateRead, gateWrite, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer gateWrite.Close()
+	cmd.ExtraFiles = []*os.File{gateRead}
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%d", launchGateEnv, 3))
 	if sessionlife.IsSessionID(m.Owner) {
 		err = callerid.Start(context.Background(), childenv.Clean(cmd), callerid.Launch{DataDir: store.DataDir(), Name: m.Owner, Actor: callerid.Identity{Kind: callerid.Session, Session: m.Owner}, Launcher: "shell"})
 	} else {
 		err = childenv.Clean(cmd).Start()
 	}
+	gateRead.Close() // the supervisor holds its own copy
 	if err != nil {
 		return err
 	}
@@ -796,9 +921,49 @@ func StartSupervisor(exe, id string) error {
 	started, _ := procident.StartTime(cmd.Process.Pid)
 	launched := fmt.Sprintf("%d %d\n", cmd.Process.Pid, started)
 	if err := os.WriteFile(filepath.Join(dir, supervisorPID), []byte(launched), 0o600); err != nil {
+		// Closing the gate unsent keeps the command from ever starting: the
+		// supervisor ends by itself, and is waited for. Every process stamped
+		// with the job is stopped too, in case the command had started anyway.
+		gateWrite.Close()
+		_, _ = cmd.Process.Wait()
+		_, cleanup := stopOrphans(id)
+		return errors.Join(err, cleanup)
+	}
+	if _, err := gateWrite.Write([]byte{'g'}); err != nil {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_, _ = cmd.Process.Wait()
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// launchGateEnv names the file descriptor on which a supervisor waits for its
+// launcher's go-ahead before it starts its command.
+const launchGateEnv = "DYNA_SHELL_LAUNCH_GATE"
+
+// awaitLaunch blocks until the launcher has recorded this supervisor. A
+// supervisor started without a gate (a test, or an older launcher) goes on at
+// once. If the launcher closes the gate without the go-ahead, the command is
+// never started.
+func awaitLaunch() error {
+	v := os.Getenv(launchGateEnv)
+	if v == "" {
+		return nil
+	}
+	fd, err := strconv.Atoi(v)
+	if err != nil || fd < 3 {
+		return fmt.Errorf("invalid %s %q", launchGateEnv, v)
+	}
+	// The marker is consumed: the descriptor is closed below, so no later process
+	// may read it as a gate.
+	_ = os.Unsetenv(launchGateEnv)
+	gate := os.NewFile(uintptr(fd), "launch gate")
+	defer gate.Close()
+	var b [1]byte
+	if n, _ := gate.Read(b[:]); n != 1 {
+		return errors.New("the launcher did not record this supervisor; the command was not started")
+	}
+	return nil
 }
 
 // supervisorPID holds the launched supervisor's PID and start time.
