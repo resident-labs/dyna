@@ -53,7 +53,7 @@ func checkMachineWrite(actor authority.Actor, args []json.RawMessage) error {
 		if rootMayPatch(patch) {
 			return nil
 		}
-		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, slots, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout and the container socket (for example %s)", hostChecksCommand)
+		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout, the container socket and CI slots (for example %s)", hostChecksCommand)
 	}
 	return fmt.Errorf("SaveMachine is owner only; the owner allows host checks with %s", hostChecksCommand)
 }
@@ -72,14 +72,17 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 }
 
 // rootMayPatch reports whether a room root may apply the patch. A root changes
-// the operating settings of a machine: host checks, the SSH connect timeout and
-// a local container runtime socket. The creation, name, roles, slots, switch, route
+// the operating settings of a machine: host checks, the SSH connect timeout, a
+// local container runtime socket and the CI slot count. Slots set capacity and
+// route no work; the patch carries no roles, so a root cannot give a machine the
+// ci role through them, and a slot count on a machine without the role changes
+// nothing. The creation, name, roles, switch, route
 // host, room list and suite list stay the owner's: they decide which machine
 // the engine reaches and which rooms' code runs on it, so a root could send
 // another room's work, or its own SSH credentials, to a host the owner never
 // chose.
 func rootMayPatch(patch websvc.MachinePatch) bool {
-	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
+	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.Enabled == nil && patch.Roles == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
 }
 
 // localSocket reports whether a patch leaves the container socket alone, restores
