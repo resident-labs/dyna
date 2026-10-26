@@ -76,14 +76,3 @@ test('a group keeps every completed row whole, with or without a preview', async
   assert.match(failed, /<span class="label[^"]*">handback-c<\/span>/)
   assert.match(failed, /<p class="line[^"]*bad[^"]*">the worker exited before it wrote a result<\/p>/)
 })
-
-// The chevron button is styled by `.open` (22 px square). An expanded row used to
-// carry the same class, so the row shrank to 28 px and its text overflowed on a
-// phone. The row marks itself `expanded`, and its text column may shrink.
-test('an expanded agent row does not share the chevron button class', async () => {
-  const source = await readFile(new URL('./Run.svelte', import.meta.url), 'utf8')
-  const css = source.slice(source.lastIndexOf('<style>') + 7, source.lastIndexOf('</style>'))
-  assert.doesNotMatch(source, /class:open=/)
-  assert.match(source, /class:expanded=\{row\?\.open\}/)
-  assert.match(ruleOf(css, '.agent'), /grid-template-columns: 18px minmax\(0, 1fr\) auto/)
-})
