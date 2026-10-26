@@ -820,3 +820,50 @@ func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 		t.Fatalf("structured output lost from the tail: %q", check.LogTail)
 	}
 }
+
+// A command that exited 0 must be judged by its own completion marker even when
+// os/exec reports ErrWaitDelay, which only means a child it started kept the
+// output pipe open. An sccache server started by cargo does exactly that on
+// every run, and the check passed: it must not be saved as an error.
+func TestNodePassesACheckWhoseCommandLeftAChildHoldingOutput(t *testing.T) {
+	definition := testDynaDefinition(t)
+	checks, _, err := nodeChecks(definition, []Suite{SuiteGoStatic}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := Node{Name: "local", Slots: 1, Enabled: true}
+	runner := Runner{DataDir: t.TempDir(), Node: &node}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+			return nil
+		case strings.Contains(script, "tar -C"):
+			return fakeNodeReports(out, checks, false)
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			fmt.Fprintln(out, "ok  dyna-agent/internal/voice")
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
+			fmt.Fprintln(out, "DYNA_CI_COMMAND_STARTED=1")
+			return exec.ErrWaitDelay
+		}
+		return nil
+	}
+	result, err := runner.Run(t.Context(), Request{Definition: definition, Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Status != OutcomePassed || len(result.Checks) != 1 || result.Checks[0].Status != OutcomePassed {
+		t.Fatalf("a check that exited 0 was judged by its leftover child: %+v", result)
+	}
+	if got := result.Checks[0].Warnings; len(got) != 1 || got[0] != CleanupLeftoverOutput {
+		t.Fatalf("the leftover pipe holder was not recorded as a cleanup warning: %+v", got)
+	}
+}
