@@ -22,6 +22,10 @@ an app open; a running desktop with no app, however recent its input, does not
 hold it back. `dyna computer list` shows "restart pending since <time>" while one
 waits.
 
+A service built before the 10-minute window still refuses for 30 minutes from the
+marker's mtime. The install stamps the marker 20 minutes old, so that service
+stops refusing after 10 minutes too, without a restart.
+
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit
 without restarting the transient service. The new definition takes effect after
