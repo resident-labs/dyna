@@ -2,6 +2,9 @@ package watch
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,11 +65,33 @@ func (warmNodes) SaveHostedRuns(context.Context, string, string, localci.HostedR
 // warmState is the tracked state a warm run reads its repository from: the
 // change names the room and the checkout, the facts name the default branch and
 // its head.
-func warmState(repo, room, base string) State {
+func warmState(t *testing.T, repo, room, base string) State {
+	t.Helper()
+	return warmStateIn(t, repo, []roomCheckout{{room: room, path: t.TempDir()}}, base)
+}
+
+// roomCheckout is one room's change of a repository and the checkout it keeps.
+type roomCheckout struct {
+	room, path, lookup string
+}
+
+// warmStateIn builds tracked state with one change per room. A change carries no
+// worktree of its own when lookup is set, which is how a merged change looks
+// after its session's worktree was removed.
+func warmStateIn(t *testing.T, repo string, rooms []roomCheckout, base string) State {
+	t.Helper()
+	records := map[string]*state.Record{}
+	for i, rc := range rooms {
+		record := &state.Record{Host: "github.com", Repo: repo, RoomID: rc.room, Base: "old-base", Watching: false}
+		if rc.lookup != "" {
+			record.LookupDir = rc.lookup
+		} else {
+			record.RepoPath = rc.path
+		}
+		records[fmt.Sprintf("change-%d", i)] = record
+	}
 	return State{
-		Records: map[string]*state.Record{
-			"change-1": {Host: "github.com", Repo: repo, RoomID: room, RepoPath: "/checkout/" + repo, Base: "old-base", Watching: false},
-		},
+		Records: records,
 		RepositoryFacts: map[string]state.RepositoryFacts{
 			"github.com/" + repo: {DefaultBranch: "main", Head: base},
 		},
@@ -101,7 +126,7 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 		return nil
 	})
 	base := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	s.scheduleCacheWarm(context.Background(), warmState("owner/repo", "room_dyna", base))
+	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", base))
 	select {
 	case req := <-started:
 		if req.SHA != base || req.Job != "cache-warm" || req.Workflow != ".github/workflows/ci.yml" || req.RoomID != "room_dyna" {
@@ -111,7 +136,7 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 		t.Fatal("no warm run started for a moved default branch")
 	}
 	// A second tick while the first run is in flight starts nothing.
-	s.scheduleCacheWarm(context.Background(), warmState("owner/repo", "room_dyna", base))
+	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", base))
 	if got := s.warmRuns().count(); got != 1 {
 		t.Fatalf("%d warm runs started, want one", got)
 	}
@@ -121,7 +146,7 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 		t.Fatalf("%d warmed commits recorded, want one", store.saved())
 	}
 	// The commit is now warm, so the next tick starts nothing.
-	s.scheduleCacheWarm(context.Background(), warmState("owner/repo", "room_dyna", base))
+	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", base))
 	if got := s.warmRuns().count(); got != 1 {
 		t.Fatalf("%d warm runs started after the commit was warm, want one", got)
 	}
@@ -140,7 +165,7 @@ func TestWarmWaitsForAFreeSlotAndNeedsAJob(t *testing.T) {
 	s.nodeRuns().Lock()
 	s.nodeRuns().runs = map[string]*registeredCIRun{"pr": {node: "busy", slots: 1}}
 	s.nodeRuns().Unlock()
-	s.scheduleCacheWarm(context.Background(), warmState("owner/repo", "room_dyna", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	s.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	if got := s.warmRuns().count(); got != 0 || runs != 0 {
 		t.Fatalf("%d warm runs started on a busy machine, want none", got)
 	}
@@ -152,8 +177,81 @@ func TestWarmWaitsForAFreeSlotAndNeedsAJob(t *testing.T) {
 	plain.WarmDefinition = func(context.Context, string, string) (*localci.Definition, error) {
 		return localci.ParseDefinition([]byte("version: 1\ntrial: [go]\nchecks:\n  - id: build\n    image: golang:1.26.3\n    command: go build ./...\nsuites:\n  - id: go\n    checks: [build]\n"))
 	}
-	plain.scheduleCacheWarm(context.Background(), warmState("owner/repo", "room_dyna", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+	plain.scheduleCacheWarm(context.Background(), warmState(t, "owner/repo", "room_dyna", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
 	if got := plain.warmRuns().count(); got != 0 || runs != 0 {
 		t.Fatalf("%d warm runs started without a warm job, want none", got)
+	}
+}
+
+// A repository can have changes in two rooms with machines that serve only one
+// room each, and every machine warms through the room it serves.
+func TestWarmTakesTheRoomEachMachineServes(t *testing.T) {
+	store := newFakeWarmStore()
+	requests := make(chan localci.WarmRequest, 4)
+	s := warmService(t, []localci.Node{
+		{Name: "hermeslab", Slots: 2, Enabled: true, Rooms: []string{"room_one"}},
+		{Name: "pve", Slots: 2, Enabled: true, Rooms: []string{"room_two"}},
+	}, store, func(_ context.Context, node localci.Node, req localci.WarmRequest) error {
+		requests <- req
+		return nil
+	})
+	base := strings.Repeat("a", 40)
+	state := warmStateIn(t, "owner/repo", []roomCheckout{{room: "room_one", path: t.TempDir()}, {room: "room_two", path: t.TempDir()}}, base)
+	s.scheduleCacheWarm(context.Background(), state)
+	rooms := map[string]string{}
+	for range 2 {
+		select {
+		case req := <-requests:
+			rooms[req.RepoDir] = req.RoomID
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d warm runs started, want one per room", len(rooms))
+		}
+	}
+	if len(rooms) != 2 {
+		t.Fatalf("warm runs = %v, want one per room", rooms)
+	}
+	for _, room := range rooms {
+		if room != "room_one" && room != "room_two" {
+			t.Fatalf("warm run took room %q", room)
+		}
+	}
+}
+
+// matchingRepoDir makes a checkout whose remote names the repository, which is
+// what a fallback directory has to prove before Dyna reads it.
+func matchingRepoDir(t *testing.T, repo string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"remote", "add", "origin", "https://github.com/" + repo},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// A merged change keeps no worktree of its own, so the warm run reads the
+// definition from the directory that is still there instead of skipping.
+func TestWarmUsesALiveCheckoutOfAMergedChange(t *testing.T) {
+	store := newFakeWarmStore()
+	requests := make(chan localci.WarmRequest, 2)
+	s := warmService(t, []localci.Node{{Name: "hermeslab", Slots: 2, Enabled: true}}, store, func(_ context.Context, _ localci.Node, req localci.WarmRequest) error {
+		requests <- req
+		return nil
+	})
+	live := matchingRepoDir(t, "owner/repo")
+	state := warmStateIn(t, "owner/repo", []roomCheckout{{room: "room_dyna", lookup: live}}, strings.Repeat("a", 40))
+	s.scheduleCacheWarm(context.Background(), state)
+	select {
+	case req := <-requests:
+		if req.RepoDir != live {
+			t.Fatalf("warm run works in %q, want the live checkout %q", req.RepoDir, live)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no warm run started from the live checkout")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -117,8 +118,9 @@ func (s *Service) runWarm(ctx context.Context, node localci.Node, req localci.Wa
 //
 // The default branch and its head come from the repository facts, which the
 // head refresh writes for every repository Dyna knows, so a repository whose
-// pull requests have all merged still warms and a stacked change never warms
-// the branch it is stacked on.
+// changes have all merged still warms and a stacked change never warms the
+// branch it is stacked on. A machine takes the room it serves, because one
+// repository can have changes in rooms with different machines.
 func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 	if s.Store == nil {
 		return
@@ -132,56 +134,102 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 	if store == nil {
 		return
 	}
-	// A repository's room and checkout come from its changes: every change of a
-	// repository shares both, and an idle repository keeps its last change.
-	rooms, paths := map[string]string{}, map[string]string{}
-	for _, record := range st.Records {
-		if record == nil {
-			continue
-		}
-		repo := defaultRepo(*record)
-		if repo == "" || record.RepoPath == "" {
-			continue
-		}
-		rooms[repo], paths[repo] = record.RoomID, record.RepoPath
-	}
 	active := s.activeCISlots()
-	for repo, facts := range st.RepositoryFacts {
+	repos := make([]string, 0, len(st.RepositoryFacts))
+	for repo := range st.RepositoryFacts {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	for _, repo := range repos {
+		facts := st.RepositoryFacts[repo]
 		base, branch := facts.Head, facts.DefaultBranch
-		if base == "" || paths[repo] == "" {
+		if base == "" {
 			continue
 		}
 		if branch == "" {
 			branch = "main"
 		}
-		definition, err := s.warmDefinitionAt(ctx, paths[repo], base)
-		if err != nil {
-			// A checkout that has not fetched this commit, or a repository
-			// without a definition, warms nothing; the next tick tries again.
+		byRoom := s.recordsByRoom(st, repo)
+		if len(byRoom) == 0 {
 			continue
 		}
-		warm, ok := definition.Warm()
+		warm, ok := s.warmJobAt(ctx, st, repo, base, byRoom)
 		if !ok {
 			continue
 		}
-		room := rooms[repo]
 		for i := range nodes {
 			node := nodes[i]
 			// A warm run takes a slot, so it waits for a machine with a free
 			// one: a pull request's checks come first.
-			if node.LowDisk || !node.AllowsRoom(room) || node.Slots-active[node.Name] < 1 {
+			if node.LowDisk || node.Slots-active[node.Name] < 1 {
 				continue
 			}
 			warmed, err := store.WarmedHead(ctx, repo, node.Name)
 			if err != nil || warmed == base {
 				continue
 			}
-			s.startWarm(ctx, store, node, localci.WarmRequest{
-				Repo: repo, RepoDir: paths[repo], RoomID: room, SHA: base,
-				Workflow: warm.Workflow, Job: warm.Name, Branch: branch, Timeout: warmTimeout,
-			})
+			// The machine warms once per commit, for the first room it serves.
+			for _, room := range sortedRooms(byRoom) {
+				if !node.AllowsRoom(room) {
+					continue
+				}
+				dir, err := s.checkoutDir(ctx, byRoom[room])
+				if err != nil {
+					continue
+				}
+				s.startWarm(ctx, store, node, localci.WarmRequest{
+					Repo: repo, RepoDir: dir, RoomID: room, SHA: base,
+					Workflow: warm.Workflow, Job: warm.Name, Branch: branch, Timeout: warmTimeout,
+				})
+				break
+			}
 		}
 	}
+}
+
+// recordsByRoom keeps one change per room for a repository, so a machine takes
+// the room it serves and the checkout that room's change still has.
+func (s *Service) recordsByRoom(st State, repo string) map[string]Record {
+	byRoom := map[string]Record{}
+	for _, record := range st.Records {
+		if record == nil || record.RoomID == "" || defaultRepo(*record) != repo {
+			continue
+		}
+		if _, ok := byRoom[record.RoomID]; !ok {
+			byRoom[record.RoomID] = *record
+		}
+	}
+	return byRoom
+}
+
+func sortedRooms(byRoom map[string]Record) []string {
+	rooms := make([]string, 0, len(byRoom))
+	for room := range byRoom {
+		rooms = append(rooms, room)
+	}
+	sort.Strings(rooms)
+	return rooms
+}
+
+// warmJobAt reads the cache-warming job from the definition at base, through a
+// checkout that is still on disk: a change keeps the worktree of the session
+// that tracked it, and that worktree goes when the session closes.
+func (s *Service) warmJobAt(ctx context.Context, st State, repo, base string, byRoom map[string]Record) (localci.JobRef, bool) {
+	for _, room := range sortedRooms(byRoom) {
+		dir, err := s.checkoutDir(ctx, byRoom[room])
+		if err != nil {
+			continue
+		}
+		definition, err := s.warmDefinitionAt(ctx, dir, base)
+		if err != nil {
+			continue
+		}
+		if warm, ok := definition.Warm(); ok {
+			return warm, true
+		}
+		return localci.JobRef{}, false
+	}
+	return localci.JobRef{}, false
 }
 
 // activeCISlots counts the slots the runs in flight hold, under the run set's
