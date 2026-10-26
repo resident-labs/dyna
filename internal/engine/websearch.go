@@ -76,31 +76,25 @@ func (s services) webSearchChain(room, repo string) websearch.Chain {
 	}
 }
 
-// piChatGPTCredential reads the Pi ChatGPT login that may run in the search's
-// room and repository.
+// piChatGPTCredential reads the ChatGPT sign-in that may run in the search's
+// room and repository, through the same reader the voice service uses, so both
+// follow one set of selection, validation and renewal rules.
 type piChatGPTCredential struct {
 	accounts   *harnessruntime.Accounts
 	room, repo string
-	// Renew runs before the read when the engine has a renewal to do. PR #472
-	// adds the renewal script that sets it.
-	Renew func(ctx context.Context) error
 }
 
-// Token is the access token and account ID of the ChatGPT sign-in.
+// Token is the access token and account ID of the ChatGPT sign-in, renewed when
+// it is due.
 func (c piChatGPTCredential) Token(ctx context.Context) (access, account string, err error) {
-	if c.Renew != nil {
-		if err := c.Renew(ctx); err != nil {
-			return "", "", err
-		}
-	}
-	access, account, err = c.accounts.PiChatGPTLogin(ctx, c.room, c.repo)
+	grant, err := c.accounts.ChatGPTGrant(ctx, c.room, c.repo)
 	if errors.Is(err, native.ErrNotSignedIn) {
 		return "", "", websearch.ErrNotSignedIn
 	}
 	if err != nil {
 		return "", "", err
 	}
-	return access, account, nil
+	return grant.Access, grant.Account, nil
 }
 
 // savedClaudeToken reads the access token of the Claude Code account that may
