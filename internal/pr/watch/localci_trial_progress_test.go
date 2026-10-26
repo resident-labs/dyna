@@ -466,7 +466,6 @@ func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 	for i, job := range []struct{ name, conclusion string }{
 		{"changes", "success"}, {"cache-warm", "skipped"}, {"computer-smoke", "success"}, {"relay", "success"},
 		{"frontend", "cancelled"}, {"frontend-check", "success"}, {"go-static", "cancelled"},
-		{"desktop", "cancelled"},
 		{"go-test-shard (0)", "cancelled"}, {"go-test-shard (1)", "cancelled"},
 		{"go-test", "failure"},
 	} {
@@ -509,7 +508,6 @@ func cancelledTrialChecks() []Check {
 	for i, job := range []struct{ name, conclusion string }{
 		{"changes", "success"}, {"cache-warm", "skipped"}, {"computer-smoke", "success"}, {"relay", "success"},
 		{"frontend", "cancelled"}, {"frontend-check", "success"}, {"go-static", "cancelled"},
-		{"desktop", "cancelled"},
 		{"go-test-shard (0)", "cancelled"}, {"go-test-shard (1)", "cancelled"},
 		{"go-test", "failure"},
 	} {
