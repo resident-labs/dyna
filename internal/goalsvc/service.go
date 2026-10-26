@@ -22,8 +22,9 @@ func New() *Service {
 	return &Service{Store: goals.DefaultStore(), Notify: notify.Default(), Now: time.Now}
 }
 
-func (s *Service) readPRState() (state.State, error) {
-	return state.Read(state.Root(store.DataDir()))
+// readPRState reads only the room's PRs that the holders author or review.
+func (s *Service) readPRState(roomID string, holders []string) (state.State, error) {
+	return state.ReadForSessions(state.Root(store.DataDir()), roomID, holders...)
 }
 
 func (s *Service) now() time.Time {
