@@ -605,6 +605,36 @@ func TestNewLocalLaneDefaultsToIntegrationAndExplicitBaseWins(t *testing.T) {
 	}
 }
 
+// D-164: a supplied base such as FETCH_HEAD must resolve to a commit in the
+// caller's repo before the worktree is created. The refresh fetch rewrote
+// FETCH_HEAD, so the branch silently started at origin's default branch.
+func TestNewForPinsASuppliedBaseBeforeTheRefreshFetch(t *testing.T) {
+	repo := gcRepo(t)
+	// Publish a side branch, then fetch only it, so FETCH_HEAD names the
+	// side branch's tip rather than origin's default branch.
+	git(t, repo, "checkout", "-q", "-b", "side")
+	git(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "side tip")
+	git(t, repo, "push", "-q", "origin", "side")
+	git(t, repo, "checkout", "-q", "main")
+	git(t, repo, "fetch", "-q", "origin", "side")
+	fetched := git(t, repo, "rev-parse", "FETCH_HEAD")
+	rec, err := NewFor(context.Background(), repo, "pin-fetch-head", "FETCH_HEAD", "owner", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, rec.Path, "rev-parse", "HEAD"); got != fetched {
+		t.Fatalf("worktree head = %s, want the fetched commit %s", got, fetched)
+	}
+	if rec.Base != "FETCH_HEAD" {
+		t.Fatalf("record base = %s, want FETCH_HEAD", rec.Base)
+	}
+	// A base the engine cannot resolve to a commit is refused before the
+	// worktree is created.
+	if _, err := NewFor(context.Background(), repo, "pin-refused", "origin/no-such-branch", "owner", ""); err == nil || !strings.Contains(err.Error(), "does not name a commit") {
+		t.Fatalf("unresolvable base error = %v", err)
+	}
+}
+
 // An outside clone whose remote has no main branch keeps its trees, and that
 // is not a cleanup failure. An unreachable remote still fails closed.
 func TestGCKeepsTreesOfARemoteWithoutMainWithoutFailing(t *testing.T) {
