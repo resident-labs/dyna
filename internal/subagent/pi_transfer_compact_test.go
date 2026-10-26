@@ -1,0 +1,105 @@
+package subagent
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// nativePiTransferStarting starts a Pi session, then moves a native Pi-to-Pi
+// transfer into "starting" with its replacement turn held open and no output.
+func nativePiTransferStarting(t *testing.T) (*testEnv, *time.Time, Info, TransferState, *heldTurnSpawner, Spawner) {
+	t.Helper()
+	path, logPath := installFakePiTurn(t)
+	old := piTestProfile("pi-old", "old/provider-model", path, logPath)
+	next := piTestProfile("pi-next", "new/provider-model", path, logPath)
+	e := newTestEnv(t, old, next)
+	now := time.Now()
+	e.m.TransferNow = func() time.Time { return now }
+	e.m.TransferLaunch = func(*Manager, string, string) error { return nil }
+	info, _ := e.start("RESPOND: first turn", func(so *StartOptions) { so.Profile = "pi-old" })
+	info, _ = e.wait(info.ID, 1)
+	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "pi-next", WaitSeconds: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != "stopping" {
+		t.Fatalf("Pi-to-Pi transfer did not start native: %+v", state)
+	}
+	runner := e.m.Spawner
+	held := &heldTurnSpawner{}
+	e.m.Spawner = held
+	advance(t, e, state, 2)
+	if held.lock == nil {
+		t.Fatal("replacement turn did not start")
+	}
+	return e, &now, info, state, held, runner
+}
+
+// A Pi history larger than the target window is compacted before the first
+// request. That compaction is startup progress: it moves the deadline once,
+// so a slow compact is not mistaken for a stalled model.
+func TestPiTransferCountsCompactionAsStartupProgress(t *testing.T) {
+	e, now, info, state, held, runner := nativePiTransferStarting(t)
+	normalized, err := e.m.Store.NormalizedPath(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(normalized), 0700); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(normalized, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"v":1,"kind":"status","name":"compaction","state":"started"}` + "\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(61 * time.Second)
+	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.m.TransferStatus(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Phase != "starting" || !got.CompactionExtended {
+		t.Fatalf("compaction did not extend the startup deadline: %+v", got)
+	}
+	if !got.StartupDeadline.After(now.Add(30 * time.Second)) {
+		t.Fatalf("deadline did not move for compaction: %+v", got)
+	}
+	held.lock.Close()
+	e.m.Spawner = runner
+	if _, err := e.m.Store.UpdateTurn(info.ID, 2, func(turn *Turn) {
+		turn.Status, turn.Ended = TurnOK, *now
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A native resume that still produces no output after its deadline falls back
+// to the written handoff instead of failing the whole transfer.
+func TestPiTransferStartupTimeoutUsesTheHandoff(t *testing.T) {
+	e, now, info, state, held, runner := nativePiTransferStarting(t)
+	held.lock.Close()
+	e.m.Spawner = runner
+	*now = now.Add(61 * time.Second)
+	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.m.TransferStatus(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Phase != "stopping" || got.Source != "transcript" || !strings.Contains(got.Reason, "no model output") {
+		t.Fatalf("startup timeout did not fall back: %+v", got)
+	}
+}
