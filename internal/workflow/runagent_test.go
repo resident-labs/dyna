@@ -9,19 +9,27 @@ import (
 	"time"
 
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workflow/enginefake"
+	"io"
 )
 
 type fakeEngine struct {
-	calls  []string
-	states []callspec.RunAgentState
-	errs   []error
+	startErrs []error
+	calls     []string
+	states    []callspec.RunAgentState
+	errs      []error
 }
 
 func (f *fakeEngine) Call(_ context.Context, method string, _ []any, result any) error {
 	f.calls = append(f.calls, method)
 	if method != "WaitRunAgent" {
+		if len(f.startErrs) > 0 {
+			var err error
+			err, f.startErrs = f.startErrs[0], f.startErrs[1:]
+			return err
+		}
 		return nil
 	}
 	var err error
@@ -83,6 +91,9 @@ func TestAgentCallAsksTheEngineForOneLeafSessionAndTheRunEndClosesIt(t *testing.
 		t.Fatalf("StartRunAgent calls = %+v; want one", starts)
 	}
 	start := starts[0]
+	if start.Inline == nil || start.Inline.Name != "mock" {
+		t.Fatalf("a mock profile must come with the run, got %+v", start.Inline)
+	}
 	if start.Run != run.Meta.ID || start.Agent != 1 || start.Profile != "mock" || start.Dir != dir || start.Task != "RESPOND: fine" || start.Schema != "" {
 		t.Fatalf("start = %+v", start)
 	}
@@ -92,5 +103,50 @@ func TestAgentCallAsksTheEngineForOneLeafSessionAndTheRunEndClosesIt(t *testing.
 	}
 	if engine.Closes() != 1 {
 		t.Fatalf("CloseRunAgents calls = %d; want one when the run ends", engine.Closes())
+	}
+}
+
+func TestRunAgentSessionRetriesCallsAnEngineRestartCutsOff(t *testing.T) {
+	engine := &fakeEngine{
+		startErrs: []error{&engineclient.RemoteError{Status: 503, Message: "engine is stopping"}},
+		states:    []callspec.RunAgentState{{}, {Done: true, OK: true, Result: json.RawMessage(`"fine"`)}},
+		errs:      []error{io.EOF, nil},
+	}
+	state, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1", Agent: 1})
+	if err != nil || !state.Done {
+		t.Fatalf("state = %+v, %v; want the result after the restart", state, err)
+	}
+	if want := 4; len(engine.calls) != want {
+		t.Fatalf("calls = %v; want a start retry and a wait retry (%d calls)", engine.calls, want)
+	}
+}
+
+func TestRunAgentSessionKeepsARefusalTerminal(t *testing.T) {
+	refusal := &engineclient.RemoteError{Status: 403, Message: "run agents need the run's verified coordinator"}
+	engine := &fakeEngine{startErrs: []error{refusal}}
+	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}); !errors.Is(err, refusal) && err != error(refusal) {
+		t.Fatalf("err = %v; want the refusal", err)
+	}
+	if len(engine.calls) != 1 {
+		t.Fatalf("calls = %v; a refusal must not be retried", engine.calls)
+	}
+}
+
+func TestNestedWorkflowThatEndsWithARunningAgentStopsItFirst(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	dir := t.TempDir()
+	writeWorkflowScript(t, dir, "child.js", `agent("`+enginefake.HoldTask+`", {label: "left running"}); await agent("`+enginefake.AfterHeldTask+`"); return "child done";`)
+	run, err := runstore.Create("nested", `return await workflow("child");`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { run.Finish("ok", "", nil) })
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0)}
+	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
+	if err != nil || got != `"child done"` {
+		t.Fatalf("result = %s, %v", got, err)
+	}
+	if closed := engine.ClosedAgents(); len(closed) != 1 || closed[0].Agent != 1 {
+		t.Fatalf("closed agents = %+v; want the nested script's agent closed when the child ended", closed)
 	}
 }
