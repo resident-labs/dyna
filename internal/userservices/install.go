@@ -351,6 +351,20 @@ func Install(ctx context.Context, o Options) error {
 	}
 	// TODO: legacy/shim remove later — preserves the pre-unit transient computer service until it stops and is collected; remove after all installs use the persistent unit.
 	transient := strings.Contains(state, "Transient=yes")
+	// Stop an opted-out connector before Write removes its unit, so the service
+	// still exists when systemctl is asked to stop it. A machine that never had
+	// one is already done.
+	if o.NoTunnel {
+		state, err := run("show", Tunnel, "--property=LoadState,ActiveState")
+		if err != nil && !strings.Contains(state, "LoadState=not-found") {
+			return fmt.Errorf("inspect tunnel service before removal: %w", err)
+		}
+		if !strings.Contains(state, "LoadState=not-found") {
+			if _, err := run("disable", "--now", Tunnel); err != nil {
+				return err
+			}
+		}
+	}
 	if err := retireEngineRestart(ctx, o.Dir, run); err != nil {
 		return err
 	}
@@ -411,14 +425,12 @@ func Install(ctx context.Context, o Options) error {
 	}
 	// The connector now runs as its own unit. Start it before the engine restarts,
 	// so remote access never waits for the new engine, and the old engine's own
-	// connector leaves with that restart. An engine that opted out stops an
-	// earlier connector instead.
-	if o.NoTunnel {
-		if _, err := run("disable", "--now", Tunnel); err != nil {
+	// connector leaves with that restart. An opted-out install stopped an earlier
+	// connector before Write removed its unit.
+	if !o.NoTunnel {
+		if _, err := run("start", Tunnel); err != nil {
 			return err
 		}
-	} else if _, err := run("start", Tunnel); err != nil {
-		return err
 	}
 	if transient {
 		fmt.Fprintln(o.Output, "Keeping the transient computer service and its live desktops; the persistent unit applies after it stops.")

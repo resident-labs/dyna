@@ -257,8 +257,21 @@ func TestInstallHonoursTheTunnelOptOut(t *testing.T) {
 	run := func(_ context.Context, args ...string) (string, error) {
 		command := strings.Join(args, " ")
 		calls = append(calls, command)
-		if strings.Contains(command, " show ") {
+		switch {
+		case strings.Contains(command, " show "+Tunnel):
+			// The unit is installed, so the installer must stop it here, before
+			// Write removes the file.
+			if _, err := os.Stat(filepath.Join(dir, Tunnel)); err != nil {
+				return "LoadState=not-found\n", errors.New("unit is gone")
+			}
+			return "LoadState=loaded\nActiveState=active\n", nil
+		case strings.Contains(command, " show "):
 			return "Transient=no\nActiveState=active\nLoadState=loaded\n", nil
+		case command == "systemctl --user disable --now "+Tunnel:
+			// systemctl refuses this once the file is gone.
+			if _, err := os.Stat(filepath.Join(dir, Tunnel)); err != nil {
+				return "Unit file does not exist.\n", errors.New("exit status 1")
+			}
 		}
 		return "", nil
 	}
@@ -275,6 +288,8 @@ func TestInstallHonoursTheTunnelOptOut(t *testing.T) {
 	if strings.Contains(all, "start "+Tunnel) {
 		t.Fatalf("an opted-out install started a connector: %s", all)
 	}
+	// The fake refuses to disable a unit whose file is already gone, so reaching
+	// this point proves the stop came before Write removed the unit.
 	if !strings.Contains(all, "disable --now "+Tunnel) {
 		t.Fatalf("an opted-out install did not stop an earlier connector: %s", all)
 	}
