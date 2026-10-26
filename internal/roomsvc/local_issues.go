@@ -296,11 +296,17 @@ func (s *Service) closeNamedGoalIssues(ctx context.Context, r room.Record, g goa
 	var failures []error
 	var left []string
 	for _, issue := range linked {
-		if !named[issue.Label()] {
-			left = append(left, issue.Label())
-			continue
+		var err error
+		if named[issue.Label()] {
+			_, err = s.rooms().CloseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by, reason, room.CloseOrigin{})
+		} else {
+			// The ended goal must not keep the issue in its goal state, or no
+			// other goal could take it.
+			_, err = s.rooms().ReleaseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by)
+			if err == nil {
+				left = append(left, issue.Label())
+			}
 		}
-		_, err := s.rooms().CloseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by, reason, room.CloseOrigin{})
 		// Another goal may take the issue after the read above, and a merged
 		// PR may close it first: both leave this goal nothing to close.
 		if errors.Is(err, room.ErrIssueLeftGoal) || (err != nil && strings.Contains(err.Error(), "is already ")) {

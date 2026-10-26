@@ -288,10 +288,13 @@ func Command(o Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if asJSON, _ := c.Flags().GetBool("json"); asJSON {
+				return json.NewEncoder(c.OutOrStdout()).Encode(g)
+			}
 			if err := printGoal(c, g.Goal); err != nil {
 				return err
 			}
-			if asJSON, _ := c.Flags().GetBool("json"); !asJSON && len(g.LeftOpen) > 0 {
+			if len(g.LeftOpen) > 0 {
 				_, err = fmt.Fprintf(c.OutOrStdout(), "left open: %s (close one with dyna goal done --close D-N)\n", strings.Join(g.LeftOpen, ", "))
 				return err
 			}
