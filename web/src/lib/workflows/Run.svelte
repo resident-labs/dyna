@@ -89,7 +89,7 @@
     picked = null
     openPhases = []
   })
-  const togglePhase = (i: number) => (openPhases = openPhases.includes(i) ? openPhases.filter((n) => n !== i) : [...openPhases, i])
+  const togglePhase = (key: number) => (openPhases = openPhases.includes(key) ? openPhases.filter((n) => n !== key) : [...openPhases, key])
   let shownGroups = $derived.by(() => {
     if (!grid) return groups.length > 1 ? [] : groups
     const cell = picked ? grid.lanes.find((l) => l.name === picked?.lane)?.cells[picked.col] : null
@@ -246,8 +246,8 @@
       <RunGrid {grid} {picked} onpick={(ref) => (picked = ref)} />
       {#if !picked}<p class="quiet">Tap a cell to see its agents.</p>{/if}
     {:else if groups.length > 1}
-      <PhaseList rows={groups.map((g) => ({ phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))} open={openPhases} ontoggle={togglePhase}>
-        {#snippet agents(i)}{#if groups[i]}{@render agentRows(groups[i])}{/if}{/snippet}
+      <PhaseList rows={groups.map((g) => ({ key: g.agents[0]?.id ?? 0, phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))} open={openPhases} ontoggle={togglePhase}>
+        {#snippet agents(key)}{@const g = groups.find((x) => x.agents[0]?.id === key)}{#if g}{@render agentRows(g)}{/if}{/snippet}
       </PhaseList>
     {/if}
 
