@@ -2,22 +2,35 @@
   import { errorText } from '../../errorText.ts'
   import { api } from '../../../api.ts'
   import type { HarnessConfig } from '../../api/harness.ts'
+
+  // Add one MCP server to Dyna's catalog: a local command with its arguments
+  // and environment variable names, or a remote URL. A new server is off for
+  // every harness until the MCP pane turns it on.
   let { onsave, oncancel }: { onsave: (catalog: HarnessConfig) => void; oncancel: () => void } = $props()
   let name = $state(''), mode = $state('command'), command = $state(''), args = $state('')
   let url = $state(''), env = $state(''), busy = $state(false), error = $state('')
+
+  // argumentList reads a JSON array of strings, or null when the text is not one.
+  function argumentList(text: string): string[] | null {
+    const parsed: unknown = JSON.parse(text.trim() || '[]')
+    if (!Array.isArray(parsed)) return null
+    const items: unknown[] = parsed
+    if (!items.every((item) => typeof item === 'string')) return null
+    return items.map((item) => String(item))
+  }
 
   async function save() {
     if (busy) return
     busy = true; error = ''
     try {
-      const entry = { name: name.trim(), enabledHarnesses: [] }
+      const base = { name: name.trim(), enabledHarnesses: [] }
       let next: HarnessConfig
       if (mode === 'url') {
-        next = await api.addHarnessMCP({ ...entry, url: url.trim() })
+        next = await api.addHarnessMCP({ ...base, url: url.trim() })
       } else {
-        const argv = JSON.parse(args.trim() || '[]')
-        if (!Array.isArray(argv) || argv.some((arg) => typeof arg !== 'string')) throw new Error('Arguments must be a JSON array of strings.')
-        next = await api.addHarnessMCP({ ...entry, command: command.trim(), args: argv, envKeys: env.split(/[\s,]+/).filter(Boolean) })
+        const argv = argumentList(args)
+        if (!argv) throw new Error('Arguments must be a JSON array of strings.')
+        next = await api.addHarnessMCP({ ...base, command: command.trim(), args: argv, envKeys: env.split(/[\s,]+/).filter(Boolean) })
       }
       onsave(next)
     } catch (e) { error = e ? errorText(e) : 'Could not add this MCP server.' }
@@ -31,14 +44,14 @@
   <label>Connection<select bind:value={mode} disabled={busy}><option value="command">Local command</option><option value="url">Remote URL</option></select></label>
   {#if mode === 'command'}
     <label>Command<input bind:value={command} required disabled={busy} placeholder="e.g. npx" /></label>
-    <label>Arguments (JSON array)<input bind:value={args} disabled={busy} placeholder={'["-y", "@playwright/mcp@latest"]'} /></label>
+    <label>Arguments (JSON array)<input bind:value={args} disabled={busy} placeholder={'["-y", "@playwright/mcp@latest"]'} spellcheck="false" /></label>
     <label>Environment variable names<input bind:value={env} disabled={busy} placeholder="e.g. API_TOKEN" /><span>Names only. Dyna reads the values from its environment.</span></label>
   {:else}
     <label>URL<input type="url" bind:value={url} required disabled={busy} placeholder="https://example.com/mcp" /></label>
   {/if}
-  <p>After you add this server, turn it on for each harness that needs it.</p>
+  <p>New servers are off. Turn one on for each harness that should load it.</p>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  <div class="actions"><button type="button" class="btn quiet" disabled={busy} onclick={oncancel}>Cancel</button><button class="btn pri" disabled={busy}>{busy ? 'Adding…' : 'Add'}</button></div>
+  <div class="actions"><button type="button" class="btn quiet" disabled={busy} onclick={oncancel}>Cancel</button><button class="btn pri" disabled={busy}>{busy ? 'Adding…' : 'Add server'}</button></div>
 </form>
 
 <style>

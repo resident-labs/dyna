@@ -22,7 +22,7 @@ import type { HarnessSnapshot, RecommendedVersion } from '../../api/harness.ts'
 const loose = (value: object): Partial<HarnessSnapshot> => JSON.parse(JSON.stringify(value))
 const paneSource = readFileSync(new URL('./HarnessesPane.svelte', import.meta.url), 'utf8')
 // The pane and the section components that now hold its markup, for markup checks.
-const paneMarkup = ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallControls', 'SettingsImportSection', 'HarnessToolsSection', 'ToolsTab']
+const paneMarkup = ['HarnessesPane', 'HarnessList', 'InstallControls', 'SettingsImportSection']
   .map((name) => readFileSync(new URL(`./${name}.svelte`, import.meta.url), 'utf8'))
   .join('\n')
 // The helpers the pane's functions call from their own script.
@@ -79,18 +79,9 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
   assert.equal(toolSummary({ command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
+  assert.equal(toolSummary({ url: 'https://example.com/mcp' }), 'https://example.com/mcp')
+  assert.equal(toolSummary(null), 'Dyna MCP server')
   assert.equal(HARNESS_ORDER.length, 2)
-})
-
-test('tool selection sends the runtime harness ID to the catalog', async () => {
-  const calls: unknown[][] = []
-  const context = {
-    ...harnessState, ...helpers, busy: false, stopped: false, error: '', notice: '', catalog: null,
-    api: { setHarnessConfigEnabled: async (...args: unknown[]) => { calls.push(args); return {} } },
-  }
-  runFunctions(paneSource, ['toggleTool'], context)
-  await call(context, 'toggleTool', 'mcp', 'proof', 'claude-code', true)
-  assert.deepEqual(calls, [['mcp', 'proof', 'claude-code', true]])
 })
 
 test('settings import requires matching preview hash and account', async () => {
@@ -137,12 +128,12 @@ test('invalid MCP arguments stop before any catalog write', async () => {
   const calls: { enabledHarnesses: string[]; args: string[] }[] = []
   const context: { args: string; error: string; [name: string]: unknown } = {
     errorText,
-    busy: false, error: '', name: 'browser', kind: 'mcp', mode: 'command',
+    busy: false, error: '', name: 'browser', mode: 'command',
     args: '["valid", 3]', command: 'npx', env: '',
     api: { addHarnessMCP: async (entry: { enabledHarnesses: string[]; args: string[] }) => { calls.push(entry); return {} } },
     onsave: () => {},
   }
-  runFunctions(readFileSync(new URL('./ToolEditor.svelte', import.meta.url), 'utf8'), ['save'], context)
+  runFunctions(readFileSync(new URL('../mcp/McpForm.svelte', import.meta.url), 'utf8'), ['argumentList', 'save'], context)
   await call(context, 'save')
   assert.equal(calls.length, 0)
   assert.match(context.error, /array of strings/)

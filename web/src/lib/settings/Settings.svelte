@@ -8,6 +8,7 @@
   import ProfilesPane from './ProfilesPane.svelte'
   import HarnessesPane from './harnesses/HarnessesPane.svelte'
   import SkillsPane from './skills/SkillsPane.svelte'
+  import McpPane from './mcp/McpPane.svelte'
   import AccountsPane from './accounts/AccountsPane.svelte'
   import SettingsPane from './SettingsPane.svelte'
   import HooksPane from './HooksPane.svelte'
@@ -39,6 +40,7 @@
     { id: 'profiles', label: 'Profiles', hint: 'Who does the work' },
     { id: 'harnesses', label: 'Harnesses', hint: 'Install and maintain coding agents' },
     { id: 'skills', label: 'Skills', hint: 'Skills every session can read' },
+    { id: 'mcp', label: 'MCP', hint: 'MCP servers Dyna manages' },
     { id: 'accounts', label: 'Accounts', hint: 'Sign-ins, usage and active account' },
     { id: 'hooks', label: 'Hooks', hint: 'Automatic passes and shell hooks' },
     { id: 'settings', label: 'Settings', hint: 'How Dyna behaves' },
@@ -56,13 +58,15 @@
 
 {#snippet foot()}{#if pane === 'settings'}Display preferences apply at once in this browser. Other changes save{:else}Changes save{/if} at once and apply to new sessions and runs. The <span class="mono">dyna</span> CLI sees the same values.{/snippet}
 
-<SettingsShell label="Settings" title="Configuration" nav={nav.map((n) => (n.id === 'about' && update?.text ? { ...n, dot: 'Update available' } : n))} {pane} onselect={selectPane} {busy} wide={pane === 'harnesses'} {onclose} foot={['harnesses', 'accounts'].includes(pane) ? null : foot}>
+<SettingsShell label="Settings" title="Configuration" nav={nav.map((n) => (n.id === 'about' && update?.text ? { ...n, dot: 'Update available' } : n))} {pane} onselect={selectPane} {busy} wide={pane === 'harnesses' || pane === 'mcp'} {onclose} foot={['harnesses', 'accounts'].includes(pane) ? null : foot}>
   {#if pane === 'profiles'}
     <ProfilesPane initialSelection={profileSelection} initialProfile={profileToOpen} {roomId} onusage={viewAccount} onmodal={(open) => (busy = open)} />
   {:else if pane === 'harnesses'}
     <HarnessesPane onmodal={(open) => (busy = open)} />
   {:else if pane === 'skills'}
     <SkillsPane />
+  {:else if pane === 'mcp'}
+    <McpPane />
   {:else if pane === 'accounts'}
     <AccountsPane accountId={accountToOpen} {roomId} {oncreateprofile} onprofile={viewProfile} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}
