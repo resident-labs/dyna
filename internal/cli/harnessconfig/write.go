@@ -19,6 +19,8 @@ func AddWriteCommands(parent *cobra.Command, kind string) {
 	for _, verb := range []string{"add", "rm", "enable", "disable", "sync"} {
 		var harness, command, url, source string
 		var args, envKeys []string
+		var timeoutSeconds int
+		var exposure string
 		c := &cobra.Command{Use: verb + " <name>", Short: verb + " Dyna " + kind + " entries", Args: cobra.ExactArgs(1)}
 		if verb == "sync" {
 			c.Use = "sync"
@@ -33,6 +35,8 @@ func AddWriteCommands(parent *cobra.Command, kind string) {
 				c.Flags().StringArrayVar(&args, "arg", nil, "MCP argument (repeatable)")
 				c.Flags().StringArrayVar(&envKeys, "env-key", nil, "environment key reference (repeatable; never a value)")
 				c.Flags().StringVar(&url, "url", "", "HTTP MCP endpoint without credentials")
+				c.Flags().IntVar(&timeoutSeconds, "timeout-seconds", 0, "per-server request timeout in seconds (0 keeps the harness default)")
+				c.Flags().StringVar(&exposure, "exposure", "", "Pi tool exposure: codemode, deferred, direct or hidden (empty keeps the default)")
 			} else {
 				c.Flags().StringVar(&source, "source", "", "absolute skill directory containing SKILL.md")
 			}
@@ -64,7 +68,7 @@ func AddWriteCommands(parent *cobra.Command, kind string) {
 					enabled = append(enabled, harness)
 				}
 				if kind == "mcp" {
-					entry := harnessmgr.ManagedMCP{Name: name, MCPDefinition: harnessmgr.MCPDefinition{Command: command, Args: args, EnvKeys: envKeys, URL: url}, EnabledHarnesses: enabled}
+					entry := harnessmgr.ManagedMCP{Name: name, MCPDefinition: harnessmgr.MCPDefinition{Command: command, Args: args, EnvKeys: envKeys, URL: url, TimeoutSeconds: timeoutSeconds, Exposure: harnessmgr.MCPExposure(exposure)}, EnabledHarnesses: enabled}
 					err = engineClient().Call(cmd.Context(), "AddCatalogMCP", []any{entry, harness}, nil)
 				} else {
 					entry := harnessmgr.ManagedSkill{Name: name, Source: source, EnabledHarnesses: enabled}
