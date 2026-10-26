@@ -3,6 +3,7 @@ package watch
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/localci"
 )
@@ -92,5 +93,124 @@ func TestLocalOnlyTrialFailsWhenItsChecksCouldNotRun(t *testing.T) {
 	// A pull request head is never failed by a local run it does not have.
 	if obs := s.registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, stopped, false, true); obs.Status == VerdictFailed {
 		t.Fatalf("pull request head = %s, want no local failure", obs.Status)
+	}
+}
+
+// A trial whose saved run Dyna stopped is admitted again, but only once: the
+// replacement carries the marker, and a busy fleet never spends that retry.
+func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
+	e, record, dir, ci := localCIEnv(t)
+	repo, err := localci.CanonicalRepo(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := record.Head
+	stopped := stoppedRun()
+	stopped.Repo, stopped.SHA = repo, head
+	ci.results[head] = stopped
+	ci.nodes = []localci.Node{{Name: "hermes", Slots: 1, Enabled: true}}
+	job := registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true}
+
+	// The only machine is busy, so the retry cannot start and must not be spent.
+	runs := e.s.nodeRuns()
+	runs.Lock()
+	runs.runs["another-head"] = &registeredCIRun{node: "hermes", slots: 1, head: "another", local: true, cancel: func() {}, stopped: make(chan struct{})}
+	runs.Unlock()
+	started, err := e.s.startRegisteredCI(t.Context(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started {
+		t.Fatal("a busy machine started the retry")
+	}
+	if ci.results[head].Resumed {
+		t.Fatal("a retry that never started was spent")
+	}
+
+	// Free the slot: the retry starts, and the replacement is what carries the
+	// marker.
+	runs.Lock()
+	delete(runs.runs, "another-head")
+	runs.Unlock()
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	ci.saved = make(chan struct{}, 1)
+	changed := make(chan struct{}, 8)
+	e.s.RunningCIChanged = func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(ci.release)
+		}
+		e.s.CancelLocalCI()
+	})
+	started, err = e.s.startRegisteredCI(t.Context(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started {
+		t.Fatal("the freed machine did not start the retry")
+	}
+	<-ci.started
+	close(ci.release)
+	released = true
+	<-ci.saved
+	if saved := ci.results[head]; !saved.Resumed {
+		t.Fatalf("the replacement does not carry the marker: %+v", saved)
+	}
+	// The replacement must leave the run set before the next admission, or a busy
+	// key rather than the marker would decide the outcome.
+	for runningLocalCIHead(e.s) != "" {
+		select {
+		case <-changed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the replacement never left the run set")
+		}
+	}
+
+	// The engine stops the replacement too. That second shutdown is the bound, so
+	// no third run starts.
+	second := stoppedRun()
+	second.Repo, second.SHA, second.Resumed = repo, head, true
+	ci.results[head] = second
+	if act := savedResultActionFor(second); act != settleSavedResult {
+		t.Fatalf("a stopped replacement action = %v, want settleSavedResult", act)
+	}
+	started, err = e.s.startRegisteredCI(t.Context(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started {
+		t.Fatal("a second shutdown started another run")
+	}
+}
+
+// The local-change reader of a trial follows the same rules as the gate: a fresh
+// stop waits for the run that replaces it, and a stopped replacement fails the
+// trial with the cause instead of waiting for a run that will never come.
+func TestStoppedReplacementFailsTheLocalTrial(t *testing.T) {
+	definition := watchDynaDefinition(t)
+	stopped := stoppedRun()
+	stopped.Suites = stopped.Checks
+	suites := definition.WorkflowSuites()
+	verdict, _, reason, err := localCIStatus(stopped, stopped.Repo, stopped.SHA, definition, suites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict != VerdictPending {
+		t.Fatalf("a fresh stop = %s (%s), want pending until it is retried", verdict, reason)
+	}
+	stopped.Resumed = true
+	verdict, _, reason, err = localCIStatus(stopped, stopped.Repo, stopped.SHA, definition, suites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict != VerdictFailed || !strings.Contains(reason, "local CI could not run its checks on pve") {
+		t.Fatalf("a stopped replacement = %s (%s), want a failure that names the cause", verdict, reason)
 	}
 }
