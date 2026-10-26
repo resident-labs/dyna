@@ -100,13 +100,6 @@ func (s *supervisor) capture(fresh, frame bool) (Shot, error) {
 	s.record("shot", &shot)
 	return shot, nil
 }
-// agentHasControl reports whether the agent may send input now.
-func (s *supervisor) agentHasControl() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.state.Control == ControlAgent
-}
-
 func (s *supervisor) agentTarget(ctx context.Context) (comp *process, env []string, display string, width, height int, err error) {
 	for {
 		s.mu.Lock()
@@ -165,10 +158,15 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 	defer cancel()
 	started := time.Now()
 	result := ActionResult{Frames: []Frame{}}
-	var pointer *virtualPointer
+	var pointer *guardedPointer
+	var rawPointer *virtualPointer
 	defer func() {
+		s.mu.Lock()
+		s.actPointer = nil
+		s.mu.Unlock()
 		if pointer != nil {
-			pointer.close()
+			pointer.release()
+			rawPointer.close()
 		}
 	}()
 	var keyboard *virtualKeyboard
@@ -177,11 +175,6 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 	for i, a := range r.Actions {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
-		}
-		// A person who takes control must not find a button the agent left
-		// pressed by a pointer_down, so release it before waiting for control back.
-		if pointer != nil && !s.agentHasControl() {
-			pointer.releaseHeld()
 		}
 		comp, _, display, width, height, err := s.agentTarget(waitctx)
 		if err != nil {
@@ -208,11 +201,14 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 		switch kind {
 		case "click", "double_click", "move", "drag", "scroll", "pointer_down", "pointer_up":
 			if pointer == nil {
-				pointer, err = newVirtualPointer(ctx, display, width, height)
+				raw, err := newVirtualPointer(ctx, display, width, height)
 				if err != nil {
 					return result, err
 				}
-				pointer.agent = s.agentHasControl
+				rawPointer, pointer = raw, newGuardedPointer(raw)
+				s.mu.Lock()
+				s.actPointer = pointer
+				s.mu.Unlock()
 			}
 		}
 		if kind == "screenshot" {
@@ -224,7 +220,7 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 			index := i
 			result.Frames = append(result.Frames, Frame{Shot: shot, ActionIndex: &index, OffsetMS: time.Since(started).Milliseconds()})
 			result.Shot = shot
-		} else if err := executeInputAction(ctx, a, pointer, keyboard, display); err != nil {
+		} else if err := s.runInputAction(ctx, a, pointer, keyboard, display); err != nil {
 			return result, fmt.Errorf("action %d: %w", i, err)
 		}
 		result.ActionsExecuted++
@@ -253,12 +249,24 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 	return result, nil
 }
 
+// runInputAction runs one input action under its own cancel, so a takeover
+// during a held gesture ends the action's waits at once.
+func (s *supervisor) runInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtualKeyboard, display string) error {
+	if p == nil {
+		return executeInputAction(ctx, a, nil, k, display)
+	}
+	actCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	p.begin(cancel)
+	return p.end(executeInputAction(actCtx, a, p, k, display))
+}
+
 // A compositor roundtrip acknowledges input, not the application's focus work.
 // Damage after a click or modifier shortcut lets the application redraw
 // before later input. Other windows can also damage the output; this is a
 // bounded scheduling aid, not an application-level acknowledgement. It fails
 // open: without damage, a fixed pause stands in and the action still succeeds.
-func executeInputAction(ctx context.Context, a Action, p *virtualPointer, k *virtualKeyboard, display string) error {
+func executeInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtualKeyboard, display string) error {
 	var damage *outputDamage
 	var damageErr error
 	waitForFocus := isShortcut(a) || actionType(a) == "click" || actionType(a) == "double_click"
@@ -321,7 +329,7 @@ const (
 	keypressHold  = time.Second * 3 / (2 * idleRefreshHz)
 )
 
-func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *virtualKeyboard) (err error) {
+func executeAction(ctx context.Context, a Action, p *guardedPointer, keyboard *virtualKeyboard) (err error) {
 	kind := actionType(a)
 	keys, _ := actionValue[[]string](a, "keys")
 	if kind == "keypress" {
@@ -388,7 +396,7 @@ func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *v
 		if err != nil {
 			return err
 		}
-		return dragPath(ctx, p, path, step, paced, inputPause, p.agentHasControl)
+		return dragPath(ctx, p, path, step, paced, inputPause)
 	case "pointer_down", "pointer_up":
 		return pointerButtonAction(p, a)
 	case "scroll":
@@ -451,4 +459,12 @@ func shiftedKeys(keys []string) []string {
 		}
 	}
 	return out
+}
+
+// interruptActLocked is the takeover: the running batch's held buttons are
+// released and its gesture stops now. The caller holds s.mu.
+func (s *supervisor) interruptActLocked() {
+	if s.actPointer != nil {
+		s.actPointer.interrupt()
+	}
 }
