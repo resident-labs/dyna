@@ -374,9 +374,11 @@ func (m *Manager) CancelConsolidation(ctx context.Context, roomID, id string) (C
 		if s.Phase == "cancelled" {
 			return nil
 		}
-		// A paused consolidation (one with a saved error) can always be
-		// cancelled; its sources still hold their reservations.
-		if s.Phase != "waiting" && s.Phase != "failed" && s.Error == "" {
+		// A paused consolidation (one with a saved error) can be cancelled
+		// before the commit starts, while its sources still hold their
+		// reservations. A committing one may have changed hierarchy and closed
+		// sources, so it can only resume.
+		if s.Phase != "waiting" && s.Phase != "failed" && (s.Error == "" || s.Phase == "committing") {
 			return errors.New("startup has begun; resume consolidation to finish safely")
 		}
 		s.Phase = "cancelled"
@@ -727,6 +729,7 @@ func (m *Manager) advanceConsolidation(ctx context.Context, c ConsolidationState
 					s.Ended = m.transferNow()
 					return nil
 				})
+				m.postConsolidationPaused(c, e)
 				return true, nil
 			}
 			return false, e
@@ -1011,6 +1014,13 @@ func (m *Manager) foldGoalItems(room, from, to, toGoal string) error {
 	if fromGoal != "" {
 		if toGoal == "" || toGoal == fromGoal {
 			toGoal = ""
+		}
+		if toGoal == "" {
+			// No goal can take the checklist, so the kept session takes the
+			// unfinished goal itself. Closing the source must not drop it.
+			if _, err := store.HandoffHolder(room, fromGoal, from, to); err != nil {
+				return err
+			}
 		}
 		if toGoal != "" {
 			moved, err := store.MoveItems(room, fromGoal, toGoal)

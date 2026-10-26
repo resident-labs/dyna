@@ -107,6 +107,40 @@ func TestConsolidationCommitsWhenKeptGoalIsDone(t *testing.T) {
 	if err != nil || len(items) != 0 {
 		t.Fatalf("done goal received items: %v, %v", items, err)
 	}
+	// The source's unfinished goal stays open with its checklist, and the kept
+	// session holds it.
+	src, err := gs.Get(b.RoomID, b.Goal)
+	if err != nil || !src.Open() || !src.HeldBy(a.ID) || src.HeldBy(b.ID) {
+		t.Fatalf("source goal = %+v, err %v", src, err)
+	}
+	kept, err := gs.Items(b.RoomID, b.Goal)
+	if err != nil || len(kept) != 1 {
+		t.Fatalf("source checklist changed: %v, %v", kept, err)
+	}
+}
+
+// A saved error in the committing phase never allows cancellation: the commit
+// may have closed sources already, so the run can only resume.
+func TestConsolidationCommittingWithErrorCannotCancel(t *testing.T) {
+	e, _ := consolidationEnv(t)
+	a, _ := e.start("RESPOND: a")
+	a, _ = e.wait(a.ID, 1)
+	b, _ := e.start("RESPOND: b")
+	b, _ = e.wait(b.ID, 1)
+	c := consolidatePair(t, e, a, b)
+	if err := e.m.updateConsolidation(c.Target, c.ID, func(s *ConsolidationState) error {
+		s.Phase, s.Error = "committing", "Paused: a later fold step failed. Resume to continue."
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.CancelConsolidation(context.Background(), c.RoomID, c.ID); err == nil {
+		t.Fatal("cancelled a committing consolidation")
+	}
+	got, err := e.m.consolidation(c.RoomID, c.ID)
+	if err != nil || got.Phase != "committing" {
+		t.Fatalf("state = %+v, err %v", got, err)
+	}
 }
 
 // A consolidation that pauses in a startup phase tells root with a typed
