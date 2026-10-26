@@ -16,10 +16,6 @@ import (
 )
 
 const (
-	// idleClose stops a session process after this much time with no turn
-	// attached and no output, so idle sessions hold no memory. The next turn
-	// resumes the same session file in a fresh process.
-	localIdleClose = 10 * time.Minute
 	// localStopGrace bounds the orderly exit after stdin closes; a
 	// straggler is killed.
 	localStopGrace = 5 * time.Second
@@ -192,6 +188,9 @@ type localSession struct {
 	events      [][]byte
 	turn        bool
 	idleTimer   *time.Timer
+	// idleAfter is how long the child may sit quiet before idleClose stops it,
+	// from the launch that started it. Zero means never.
+	idleAfter time.Duration
 }
 
 // lineWriter splits one child's stdout strictly on LF, strips one trailing
@@ -242,8 +241,8 @@ func (s *localSession) wake() {
 
 func (s *localSession) markActive() {
 	s.mu.Lock()
-	if s.idleTimer != nil {
-		s.idleTimer.Reset(localIdleClose)
+	if s.idleTimer != nil && s.idleAfter > 0 {
+		s.idleTimer.Reset(s.idleAfter)
 	}
 	s.mu.Unlock()
 }
@@ -449,8 +448,8 @@ func stopChild(c *child) {
 func (s *localSession) idleClose() {
 	s.mu.Lock()
 	if s.turn || s.child == nil {
-		if s.child != nil && s.idleTimer != nil {
-			s.idleTimer.Reset(localIdleClose)
+		if s.child != nil && s.idleTimer != nil && s.idleAfter > 0 {
+			s.idleTimer.Reset(s.idleAfter)
 		}
 		s.mu.Unlock()
 		return
@@ -512,10 +511,16 @@ func (s *localSession) startChild(launch Launch) error {
 	s.fingerprint = launch.Fingerprint
 	s.child, s.last = c, c
 	s.exitErr = nil
-	if s.idleTimer == nil {
-		s.idleTimer = time.AfterFunc(localIdleClose, s.idleClose)
-	} else {
-		s.idleTimer.Reset(localIdleClose)
+	s.idleAfter = launch.idleAfter()
+	switch {
+	case s.idleAfter == 0:
+		if s.idleTimer != nil {
+			s.idleTimer.Stop()
+		}
+	case s.idleTimer == nil:
+		s.idleTimer = time.AfterFunc(s.idleAfter, s.idleClose)
+	default:
+		s.idleTimer.Reset(s.idleAfter)
 	}
 	s.mu.Unlock()
 	if launch.OnStart != nil {

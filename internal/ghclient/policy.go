@@ -2,11 +2,15 @@ package ghclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/repoid"
@@ -190,6 +194,67 @@ func isRead(args []string) bool {
 		return (method == "" || method == "GET" || method == "POST") && (strings.HasPrefix(query, "query") || strings.HasPrefix(query, "{")) && !mutation.MatchString(query)
 	}
 	return method == "GET" || method == "HEAD" || (method == "" && !fields)
+}
+
+// publicRepo reports whether a repository is public. Tests replace it.
+var publicRepo = fetchPublicRepo
+
+// publicAPIRead returns the repository of a REST read, `gh api repos/<o>/<r>/...`
+// with a GET and no body, when that repository is public right now (D-272). The
+// repository comes from the endpoint the command reads, never from the checkout,
+// so the check binds to what the command fetches. GraphQL, other endpoints and
+// every other gh command are not public reads: they need an account.
+func publicAPIRead(ctx context.Context, r repository, args []string) (string, bool) {
+	if r.host != "github.com" || len(args) < 2 || args[0] != "api" || !isRead(args) {
+		return "", false
+	}
+	var endpoint []string
+	valueFlags := map[string]bool{"-X": true, "--method": true, "-q": true, "--jq": true, "-t": true, "--template": true, "-H": true, "--header": true, "--cache": true}
+	for i := 1; i < len(args); i++ {
+		switch {
+		case valueFlags[args[i]]:
+			i++
+		case strings.HasPrefix(args[i], "-"):
+			if args[i] == "--hostname" || strings.HasPrefix(args[i], "--hostname=") {
+				return "", false
+			}
+		default:
+			endpoint = append(endpoint, args[i])
+		}
+	}
+	if len(endpoint) != 1 {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(endpoint[0], "/"), "/")
+	if len(parts) < 3 || parts[0] != "repos" || parts[1] == "" || parts[2] == "" {
+		return "", false
+	}
+	name := parts[1] + "/" + parts[2]
+	if !publicRepo(ctx, repository{r.host, name}) {
+		return "", false
+	}
+	return name, true
+}
+
+// fetchPublicRepo asks GitHub, without credentials and on every call, whether a
+// repository is public now, so a repository that turns private stops qualifying.
+func fetchPublicRepo(ctx context.Context, r repository) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+r.name, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Private bool `json:"private"`
+	}
+	return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) == nil && !body.Private
 }
 
 func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string) error {

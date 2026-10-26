@@ -5,6 +5,7 @@ package computers
 import (
 	"context"
 	"crypto/rand"
+	"dyna-agent/internal/testsafe"
 	"flag"
 	"fmt"
 	"net"
@@ -161,7 +162,7 @@ func (d *sharedTestDaemon) use(t *testing.T) (context.Context, *exec.Cmd) {
 func (d *sharedTestDaemon) start() error {
 	dirs := [3]string{}
 	for i, pattern := range []string{"dc-", "dcd-", "dcc-"} {
-		dir, err := os.MkdirTemp("/tmp", pattern)
+		dir, err := testsafe.ShortTemp(pattern)
 		if err != nil {
 			return err
 		}
