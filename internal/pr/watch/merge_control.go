@@ -76,6 +76,24 @@ func controlRepositories(st State, roomID string) []string {
 	return repos
 }
 
+// retryRebuildFailure explains why a retry built no replacement batch: it names
+// each change in the room queue with its state and reason, and says how to let
+// the engine rebuild the batch once the changes are ready.
+func retryRebuildFailure(queue []MergeQueueItem) string {
+	if len(queue) == 0 {
+		return "merge retry built no batch: the room has no open changes in the merge queue. Run dyna git merge resume after a change is ready."
+	}
+	var rows []string
+	for _, item := range queue {
+		row := fmt.Sprintf("%s is %s", item.URL, item.State)
+		if item.Reason != "" {
+			row += ": " + item.Reason
+		}
+		rows = append(rows, row)
+	}
+	return "merge retry built no batch. " + strings.Join(rows, "; ") + ". Run dyna git merge resume to let the engine rebuild the batch when a change is ready."
+}
+
 func controlPR(st State, roomID, ref string) (Record, error) {
 	var found *Record
 	for _, r := range st.Records {
@@ -351,7 +369,11 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 			return err
 		}
 		if len(controlRepositories(current, rm.ID)) == 0 {
-			return fmt.Errorf("no eligible PRs for this retry")
+			queue, err := s.RoomMergeQueue(rm.ID)
+			if err != nil {
+				return err
+			}
+			return errors.New(retryRebuildFailure(queue))
 		}
 		return nil
 	case "bisect":
