@@ -200,8 +200,16 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 	if opts.Title == "" {
 		opts.Title = branch
 	}
-	record := Record{PolicyOverride: opts.PolicyOverride, Key: key, ChangeID: key, Kind: "local", Repo: repo, RepoPath: path, Branch: branch, Base: base, BaseRef: baseRef, Title: Sanitize(opts.Title), Head: head, Author: author.ID, Parent: author.ParentSession, RoomID: author.RoomID, Dir: dir, LookupDir: dir, State: "open", Watching: true, Created: s.now(), Notes: cleanNotes(opts.Notes), Category: opts.Category, Dependencies: opts.Dependencies, Seen: map[string]string{}, Findings: []Finding{}, ReviewRounds: []state.ReviewRound{}}
+	record := Record{PolicyOverride: opts.PolicyOverride, Key: key, ChangeID: key, Kind: "local", Repo: repo, RepoPath: path, Branch: branch, Base: base, BaseRef: baseRef, Title: Sanitize(opts.Title), Head: head, Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: dir, LookupDir: dir, State: "open", Watching: true, Created: s.now(), Notes: cleanNotes(opts.Notes), Category: opts.Category, Dependencies: opts.Dependencies, Seen: map[string]string{}, Findings: []Finding{}, ReviewRounds: []state.ReviewRound{}}
 	created := false
+	// A run-owned caller of the same controller first takes over a change
+	// this branch holds whose earlier run author closed or whose role a close
+	// handed to the room's root session (issue D-252).
+	if _, err := s.takeoverRunChange(ctx, author, dir, func(old Record) bool {
+		return old.Branch == branch && (old.RepoPath == path || old.Repo == repo)
+	}); err != nil {
+		return Record{}, false, err
+	}
 	err = s.Store.update(func(st *State) error {
 		if err := sessionlife.Activate(filepath.Join(filepath.Dir(s.Store.Root), "sessions"), author.ID); err != nil {
 			return err
