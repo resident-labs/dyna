@@ -443,7 +443,7 @@ func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, lin
 		}
 	}
 	journal("running", shell, stderrPath, nil, "")
-	e.emit(runstore.Event{T: "exec_run", ID: id, Label: label, Shell: shell})
+	e.emit(runstore.Event{T: "exec_run", ID: id, Label: label, Shell: shell, Command: textutil.ClipOneLine(line, 400)})
 
 	start := time.Now()
 	wctx, cancel := context.WithTimeout(e.ctx, o.timeout)
