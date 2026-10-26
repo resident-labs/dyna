@@ -216,3 +216,17 @@ func TestShortcutWaitFailsOpen(t *testing.T) {
 		t.Fatalf("cancellation was lost: %v", err)
 	}
 }
+
+// key_down with SHIFT and a non-ASCII letter presses its uppercase form, so the
+// map must hold that form, as it does for keypress.
+func TestKeyboardMapCoversShiftedKeysOfKeyDown(t *testing.T) {
+	for _, kind := range []string{"keypress", "key_down", "key_up"} {
+		_, codes, err := keyboardMap(parseActions(t, `[{"type":"`+kind+`","keys":["SHIFT","ä"]}]`), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := codes[keyName("Ä")]; !ok {
+			t.Errorf("%s: the map lacks the shifted key", kind)
+		}
+	}
+}
