@@ -1,6 +1,7 @@
 package enginesocket
 
 import (
+	"dyna-agent/internal/testsafe"
 	"path/filepath"
 	"testing"
 )
@@ -10,7 +11,7 @@ import (
 // socket another data folder owns (internal/engine), which is what stops a
 // second engine taking this one.
 func TestPathFollowsTheRuntimeFolder(t *testing.T) {
-	runtime := t.TempDir()
+	runtime := testsafe.ShortTempDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtime)
 	if got, err := Path(); err != nil || got != filepath.Join(runtime, "dyna", "engine.sock") {
 		t.Fatalf("path = %q, %v", got, err)

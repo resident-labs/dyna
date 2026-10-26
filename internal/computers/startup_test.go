@@ -2,6 +2,7 @@ package computers
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"errors"
 	"net"
 	"os"
@@ -12,7 +13,7 @@ import (
 
 func startupEnvironment(t *testing.T) {
 	t.Helper()
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 }

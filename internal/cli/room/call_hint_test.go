@@ -2,13 +2,14 @@ package room
 
 import (
 	"bytes"
+	"dyna-agent/internal/testsafe"
 	"strings"
 	"testing"
 )
 
 func TestVoicePostPrintsExplicitCallHint(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	clearStamp(t)
 	rec := workRoom(t)
 	cmd := PostCmd()

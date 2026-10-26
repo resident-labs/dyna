@@ -2,6 +2,7 @@ package agentslice
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,7 +153,7 @@ func TestWrapDisabled(t *testing.T) {
 	}
 
 	t.Setenv("DYNA_SLICE", "")
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir()) // no user manager socket
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t)) // no user manager socket
 	Wrap(cmd, "x")
 	if cmd.Path != "/bin/true" {
 		t.Fatalf("Wrap without a user manager changed cmd: %q", cmd.Path)

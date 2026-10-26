@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -46,7 +47,7 @@ func TestDoctorReportsMockHarnessAsDirect(t *testing.T) {
 
 func TestComputerSessionBinsReusePreparedToolHome(t *testing.T) {
 	r, p := runtimeFixture(t, "pi")
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	var bridge, firstPath string
 	for _, id := range []string{"first-computer", "second-computer"} {
 		p.Env = map[string]string{"DYNA_BIN": "/fake/dyna", "DYNA_SESSION": id}

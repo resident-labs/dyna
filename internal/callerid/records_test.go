@@ -3,6 +3,7 @@ package callerid
 import (
 	"context"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/testsafe"
 	"errors"
 	"io"
 	"os"
@@ -289,7 +290,7 @@ func TestRecordUsesTheProcessWriter(t *testing.T) {
 // DYNA_* variables, the mistake behind g3411; the environment never decides.
 func TestSelfIgnoresTheEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir()) // no engine answers here
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t)) // no engine answers here
 	storetest.ClearStamp(t)
 	t.Setenv("DYNA_OWNER_ENV", "")
 	s, err := OpenStore(dir)

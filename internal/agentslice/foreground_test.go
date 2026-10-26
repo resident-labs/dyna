@@ -2,6 +2,7 @@ package agentslice
 
 import (
 	"bytes"
+	"dyna-agent/internal/testsafe"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +54,7 @@ func TestRunForegroundFallbackAndGuard(t *testing.T) {
 	for _, marker := range []string{"desktop", ""} {
 		t.Setenv("DYNA_FOREGROUND_SCOPE", marker)
 		if marker == "" {
-			t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+			t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 		}
 		cmd := exec.Command("/must-not-run")
 		handled, err := RunForeground(cmd, "desktop")
