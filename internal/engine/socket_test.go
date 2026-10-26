@@ -134,3 +134,28 @@ func TestRefuseOwnerSocketForASessionLaunchedEngine(t *testing.T) {
 		}
 	}
 }
+
+// An engine refuses a socket that belongs to an engine on another data folder,
+// so a second engine cannot serve the owner's socket.
+func TestEngineRefusesAnotherDataFoldersSocket(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engine.sock")
+	owner, other := filepath.Join(dir, "owner-data"), filepath.Join(dir, "other-data")
+	if err := writeSocketOwner(path, owner); err != nil {
+		t.Fatal(err)
+	}
+	err := checkSocketOwner(path, other)
+	if err == nil {
+		t.Fatal("an engine accepted a socket that belongs to another data folder")
+	}
+	if !strings.Contains(err.Error(), owner) {
+		t.Fatalf("the refusal does not name the owning data folder: %v", err)
+	}
+	if err := checkSocketOwner(path, owner); err != nil {
+		t.Fatalf("the owning data folder was refused its own socket: %v", err)
+	}
+	// A socket with no owner record is not refused; the running check decides.
+	if err := checkSocketOwner(filepath.Join(dir, "fresh.sock"), other); err != nil {
+		t.Fatalf("a socket without an owner record was refused: %v", err)
+	}
+}
