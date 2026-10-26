@@ -6,39 +6,32 @@
   import { api } from '../../../api.ts'
   import HarnessIcon from './HarnessIcon.svelte'
   import HarnessList from './HarnessList.svelte'
-  import HarnessTabs from './HarnessTabs.svelte'
   import InstallControls from './InstallControls.svelte'
   import SettingsImportSection from './SettingsImportSection.svelte'
-  import HarnessToolsSection from './HarnessToolsSection.svelte'
-  import ToolsTab from './ToolsTab.svelte'
   import Confirm from '../../ui/Confirm.svelte'
   import TabHeader from '../../rooms/TabHeader.svelte'
   import { HARNESS_ORDER, exactVersion, failText, harnessRowState, recommendedVersion } from './state.ts'
   import type { Confirmation, HarnessRow } from './state.ts'
-  import type { HarnessAccount, HarnessConfig, HarnessSnapshot, PreferencePreview } from '../../api/harness.ts'
+  import type { HarnessAccount, HarnessSnapshot, PreferencePreview } from '../../api/harness.ts'
 
-  // Dyna's own copies of the coding agents: install, update, uninstall, the
-  // tools they may use and the safe preferences Dyna can import. Sign-ins and
-  // usage belong to the Accounts pane.
+  // Dyna's own copies of the coding agents: install, update and uninstall, plus
+  // the safe preferences Dyna can import. Sign-ins and usage belong to the
+  // Accounts pane; MCP servers and skills have their own panes.
   let { onmodal = () => {} }: { onmodal?: (open: boolean) => void } = $props()
 
   let snapshot = $state<HarnessSnapshot | null>(null)
-  let catalog = $state<HarnessConfig | null>(null)
   let loading = $state(true)
   let busy = $state(false)
   let error = $state('')
   let notice = $state('')
-  let tab = $state('harnesses')
   let selectedId = $state('claude-code')
 
   let versionInput = $state('')
   let installing = $state('') // the harness this screen is installing now
   let chooseVersion = $state(false) // the exact-version field is open
-  let removingTool = $state<{ kind: string; name: string } | null>(null) // {kind, name} waiting for an inline confirm
   let removing = $state('') // 'copy' while uninstall waits for an inline confirm
   let preview = $state<PreferencePreview | null>(null)
   let confirm = $state<Confirmation | null>(null)
-  let addToolHint = $state('')
   let detailPanel: HTMLElement | undefined
 
   let stopped = false
@@ -50,7 +43,6 @@
   }))
   const selectedRow = $derived(rows.find((r) => r.id === selectedId) ?? rows[0])
   const anySwitchPending = $derived(rows.some((r) => r.switchPending || r.installing))
-  const mcpRows = $derived(catalog?.mcp ?? [])
   const allowedPreviewCount = $derived((preview?.keys ?? []).filter((k) => k.status === 'allowed').length)
 
   $effect(() => {
@@ -80,10 +72,9 @@
     loading = true
     error = ''
     try {
-      const [runtimes, cfg] = await Promise.all([fresh ? api.refreshPrivateRuntimes() : api.privateRuntimes(), api.harnessConfig()])
+      const runtimes = await (fresh ? api.refreshPrivateRuntimes() : api.privateRuntimes())
       if (stopped) return
       snapshot = runtimes
-      catalog = cfg
     } catch (e) {
       if (!stopped) error = failText(e, 'Could not load harnesses.')
     } finally {
@@ -191,53 +182,19 @@
       if (!stopped) busy = false
     }
   }
-
-  async function toggleTool(kind: string, name: string, harnessId: string, enabled: boolean) {
-    if (busy || stopped) return
-    busy = true
-    error = ''
-    notice = ''
-    try {
-      const next = await api.setHarnessConfigEnabled(kind, name, harnessId, enabled)
-      if (!stopped) {
-        catalog = next
-        notice = 'Tool selection saved for future turns.'
-      }
-    } catch {
-      if (!stopped) error = 'Could not update tool selection. Try again.'
-    } finally {
-      if (!stopped) busy = false
-    }
-  }
-
-  async function removeTool() {
-    if (!removingTool) return
-    const { kind, name } = removingTool
-    busy = true; error = ''
-    try {
-      catalog = await api.removeHarnessConfig(kind, name)
-      if (!stopped) { removingTool = null; notice = 'Tool removed.' }
-    } catch (e) { if (!stopped) error = failText(e, 'Could not remove this tool.') }
-    finally { if (!stopped) busy = false }
-  }
 </script>
 
 <section class="harnesses" aria-busy={loading || busy}>
-  <TabHeader flush title="Harnesses" blurb={tab === 'harnesses' ? 'Dyna installs and keeps its own copy of each agent. Pick one to manage it.' : 'Dyna’s own list of tools, and which agent can use each one.'}>
+  <TabHeader flush title="Harnesses" blurb="Dyna installs and keeps its own copy of each agent. Pick one to manage it.">
     {#snippet action()}<button class="btn quiet" onclick={() => load(true)} disabled={loading || busy}>{loading ? 'Refreshing…' : 'Refresh'}</button>{/snippet}
   </TabHeader>
 
-  <HarnessTabs bind:tab />
-
-  {#if tab === 'tools' || !snapshot}
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-    {#if notice}<p class="notice" role="status">{notice}</p>{/if}
-  {/if}
+  {#if error && !snapshot}<p class="error" role="alert">{error}</p>{/if}
 
   {#if loading && !snapshot}
     <Loading>Loading harnesses…</Loading>
-  {:else if tab === 'harnesses'}
-    <div id="harnesses-panel" role="tabpanel" aria-labelledby="harnesses-harnesses-tab" class="split">
+  {:else}
+    <div class="split">
       <HarnessList
         {rows}
         selected={selectedRow?.id ?? ''}
@@ -280,30 +237,12 @@
             onpreview={() => loadPreview(r.activeAccount)}
             onimport={() => confirmImport(r.activeAccount)}
           />
-
-          <HarnessToolsSection
-            row={r}
-            mcp={mcpRows}
-            {busy}
-            ontoggle={(kind, name, enabled) => toggleTool(kind, name, r.id, enabled)}
-          />
           {/if}
           </div>
           {/key}
         </aside>
       {/if}
     </div>
-  {:else}
-    <ToolsTab
-      mcp={mcpRows}
-      {rows}
-      {busy}
-      bind:addToolHint
-      bind:removingTool
-      onadded={(next) => { catalog = next; addToolHint = ''; notice = 'MCP server added. Turn it on for each harness that needs it.' }}
-      ontoggle={toggleTool}
-      onremovetool={removeTool}
-    />
   {/if}
 </section>
 

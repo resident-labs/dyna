@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs'
 
 const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8')
 // The Harnesses pane and the section components that now hold its markup.
-const harnessSections = (): string => ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallControls', 'SettingsImportSection', 'HarnessToolsSection', 'ToolsTab'].map((f) => read(`./harnesses/${f}.svelte`)).join('\n')
+const harnessSections = (): string => ['HarnessesPane', 'HarnessList', 'InstallControls', 'SettingsImportSection'].map((f) => read(`./harnesses/${f}.svelte`)).join('\n')
+// The Skills and MCP panes, which now own the tool catalog.
+const catalogPanes = (): string => ['skills/SkillsPane', 'skills/SkillForm', 'mcp/McpPane', 'mcp/McpForm'].map((f) => read(`./${f}.svelte`)).join('\n')
 
 test('every settings loading line with an unknown layout is the shared muted Loading element', () => {
   const files = ['ProfileModal', 'ProfileWizard', 'harnesses/HarnessesPane', 'accounts/AccountsPane', 'accounts/LocalActivity']
@@ -25,9 +27,9 @@ test('empty lists in the settings panes use EmptyState', () => {
     assert.match(text, /<EmptyState\b/, f)
     assert.doesNotMatch(text, /class="empty"/, f)
   }
-  const harnesses = harnessSections()
-  assert.match(harnesses, /<EmptyState\b/)
-  assert.doesNotMatch(harnesses, /class="empty"/)
+  const panes = catalogPanes()
+  assert.match(panes, /<EmptyState\b/)
+  assert.doesNotMatch(panes, /class="empty"/)
 })
 
 test('Usage tabs use the shared filter-chip look', () => {
@@ -47,7 +49,7 @@ test('the phone settings menu is two rows of four', () => {
 
 test('the settings browser fixture mocks every api call each pane makes', () => {
   const fixture = read('../../../tests/settings.ts')
-  for (const f of ['ProfilesPane', 'accounts/AccountsPane', 'SettingsPane', 'DevicesPane']) {
+  for (const f of ['ProfilesPane', 'accounts/AccountsPane', 'SettingsPane', 'DevicesPane', 'skills/SkillsPane', 'mcp/McpPane']) {
     const calls = new Set([...read(`./${f}.svelte`).matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1] ?? ''))
     for (const name of calls) assert.ok(fixture.includes(`api.${name} = `), `${f}: api.${name}`)
   }
@@ -87,7 +89,7 @@ test('settings buttons use the one global .btn', () => {
   const css = read('../../app.css')
   assert.match(css, /\.btn \{[^}]*min-height: 30px/)
   for (const v of ['pri', 'quiet', 'danger', 'fill']) assert.match(css, new RegExp(`\\.btn\\.${v} \\{`), v)
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'HookForm', 'harnesses/HarnessesPane', 'harnesses/ToolEditor', 'accounts/AccountsPane']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'HookForm', 'harnesses/HarnessesPane', 'skills/SkillsPane', 'skills/SkillForm', 'mcp/McpPane', 'mcp/McpForm', 'accounts/AccountsPane']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /class="btn\b/, f)
     const style = text.slice(text.indexOf('<style>'))
@@ -100,16 +102,16 @@ test('settings buttons use the one global .btn', () => {
   assert.match(read('./accounts/AccountsPane.svelte'), /pointer: coarse\) \{ \.btn, /)
 })
 
-test('Harnesses uses the shared Switch, which keeps its size on phones', () => {
-  const pane = harnessSections()
-  assert.match(pane, /import Switch from '..\/..\/ui\/Switch\.svelte'/)
-  assert.doesNotMatch(pane, /class="sw"|\.sw\b/)
+test('the catalog panes use the shared Switch, which keeps its size on phones', () => {
+  const panes = catalogPanes()
+  assert.match(panes, /import Switch from '..\/..\/ui\/Switch\.svelte'/)
+  assert.doesNotMatch(panes, /class="sw"|\.sw\b/)
   const sw = read('../ui/Switch.svelte')
   assert.match(sw, /width: 42px; height: 24px/)
   assert.doesNotMatch(sw, /min-height/)
   assert.match(sw, /@media \(max-width: 760px\) \{[^}]*::before/)
   // The touch area is 50 px wide, so no tool grid column may be narrower.
-  for (const [, px] of pane.matchAll(/repeat\(8, (\d+)px\)/g)) assert.ok(Number(px) >= 50, `grid column ${px}px`)
+  for (const [, px] of panes.matchAll(/repeat\(2, (\d+)px\)/g)) assert.ok(Number(px) >= 50, `grid column ${px}px`)
 })
 
 test('lists with a known layout load as skeleton rows', () => {
@@ -133,7 +135,7 @@ test('removing one row asks inline, not in a dialog', () => {
   assert.match(inline, /btn danger/)
   assert.match(inline, /btn quiet/)
   for (const f of ['DevicesPane', 'HooksPane']) assert.match(read(`./${f}.svelte`), /<InlineConfirm\b/, f)
-  assert.match(harnessSections(), /<InlineConfirm\b/)
+  assert.match(catalogPanes(), /<InlineConfirm\b/)
   assert.doesNotMatch(read('./HooksPane.svelte'), /<Confirm\b/)
   assert.doesNotMatch(harnessSections(), /requestRemoveTool/)
   // Harnesses has no local copy of the inline confirm: no coral button or Cancel of its own.
