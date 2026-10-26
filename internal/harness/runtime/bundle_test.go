@@ -72,6 +72,9 @@ func manager(t *testing.T) *BundleManager {
 	t.Helper()
 	m := &BundleManager{Root: filepath.Join(t.TempDir(), "harnesses"), Run: fixtureInstall}
 	t.Cleanup(func() { _ = removeBundle(m.Root) })
+	// A shared first-use install keeps writing after a caller stops waiting, so
+	// wait for it before this test's temp tree is removed (D-143).
+	t.Cleanup(func() { _ = WaitInstalls(context.Background()) })
 	return m
 }
 func install(t *testing.T, m *BundleManager, h, v string) Bundle {

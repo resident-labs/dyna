@@ -29,6 +29,9 @@ func privateClaudeAccount(t *testing.T) (*runtime.Accounts, runtime.Bundle, runt
 			return nil
 		})
 	})
+	// A shared first-use install keeps writing after a caller stops waiting, so
+	// wait for it before this test's temp tree is removed (D-143).
+	t.Cleanup(func() { _ = runtime.WaitInstalls(context.Background()) })
 	bundles := &runtime.BundleManager{Root: filepath.Join(root, "harnesses"), Run: func(_ context.Context, args, _ []string) error {
 		prefix := args[4]
 		pkg := filepath.Join(prefix, "lib", "node_modules", "@anthropic-ai", "claude-code")
