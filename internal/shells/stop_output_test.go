@@ -58,3 +58,48 @@ func TestSuperviseRecordsStopDespiteChildHoldingOutput(t *testing.T) {
 		t.Fatalf("the holder should still run: %v", err)
 	}
 }
+
+// An ordinary stop signals the command's group and never cancels the
+// supervisor's context. It must be bounded the same way.
+func TestStopRecordsExitDespiteChildHoldingOutput(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells"), afterStop: func(time.Duration) <-chan time.Time { return ready }}
+	fifo := filepath.Join(t.TempDir(), "pid")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := s.Create(StartOptions{Cmd: []string{"sh", "-c", "setsid sleep 600 & echo $! > " + fifo + "; wait"}, Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var holder int
+	started := make(chan struct{})
+	s.OnStarted = func(int) {
+		raw, err := os.ReadFile(fifo) // blocks until the command writes the holder's PID
+		if err != nil {
+			t.Error(err)
+		} else if holder, err = strconv.Atoi(strings.TrimSpace(string(raw))); err != nil {
+			t.Error(err)
+		}
+		close(started)
+	}
+	t.Cleanup(func() {
+		if holder > 0 {
+			_ = syscall.Kill(holder, syscall.SIGKILL)
+		}
+	})
+	done := make(chan error, 1)
+	go func() { done <- s.Supervise(context.Background(), meta.ID) }()
+	<-started
+	in, err := s.Stop(meta.ID, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if in.Status != "exited" || in.Exit == nil || in.Exit.Signal == "" {
+		t.Fatalf("stopped job = %#v; want exited by a signal", in)
+	}
+}
