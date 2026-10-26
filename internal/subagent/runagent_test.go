@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,22 @@ func TestEngineClosesRunAgentsOfAnEndedRunOnly(t *testing.T) {
 		got, err := e.m.store().Info(id)
 		if err != nil || (want == StatusClosed) != (got.Status == StatusClosed) {
 			t.Fatalf("session %s status %q, %v; want closed=%v", id, got.Status, err, want == StatusClosed)
+		}
+	}
+}
+
+func TestRunAgentIDsDifferAndKeepTheRunsDate(t *testing.T) {
+	seen := map[string]string{}
+	for _, run := range []string{"wf_20261026-094500-aaaaaaaa", "wf_20261026-094500-aaaaaaab", "wf_20261027-010101-aaaaaaaa"} {
+		for agent := 1; agent <= 40; agent++ {
+			id := RunAgentID(run, agent)
+			if prev, dup := seen[id]; dup {
+				t.Fatalf("%s agent %d and %s share ID %s", run, agent, prev, id)
+			}
+			seen[id] = run
+			if !ValidID(id) || !strings.HasPrefix(id, "ses_"+run[3:18]+"-") {
+				t.Fatalf("ID %s is not valid or does not keep the date and time of %s", id, run)
+			}
 		}
 	}
 }
