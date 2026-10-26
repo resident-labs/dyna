@@ -105,7 +105,7 @@ func init() {
 			os.Setenv(f.key, temporary(f.key, dir))
 		}
 	}
-	// Session scratch is a disk folder under the owner's cache, not a
+	// Session scratch uses a disk base under the owner's cache, not a
 	// temporary-folder variable, so a test must redirect it explicitly. Keep
 	// this redirect quiet: hook tests compare a hook's captured log exactly,
 	// and a diagnostic line there would look like hook output.
