@@ -357,6 +357,18 @@ type IssueInput struct {
 // post is an issue/filed event, so every filer gets the same card, and a new
 // issue wakes nobody: it is backlog.
 func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
+	return s.fileIssue(roomID, in, false)
+}
+
+// FileQuietIssue files an issue into roomID for a filer that may live in another
+// room. A filed issue notifies nobody, so a session in another room can report a
+// Dyna problem here without switching rooms (D-111). Every other write keeps the
+// rule that its filer belongs to the room.
+func (s *Store) FileQuietIssue(roomID string, in IssueInput) (Issue, error) {
+	return s.fileIssue(roomID, in, true)
+}
+
+func (s *Store) fileIssue(roomID string, in IssueInput, otherRoomFiler bool) (Issue, error) {
 	title, by := strings.TrimSpace(in.Title), strings.TrimSpace(in.Filer)
 	if title == "" || strings.ContainsAny(title, "\r\n") || by == "" || in.Line < 0 {
 		return Issue{}, errors.New("an issue needs a one-line title, a filer and a nonnegative line")
@@ -371,7 +383,9 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 		return Issue{}, err
 	}
 	if by != rec.Name && !strings.HasPrefix(by, rec.Name+":") {
-		return Issue{}, errors.New("issue filer must belong to this room")
+		if !otherRoomFiler || !s.filerNamesRoom(by) {
+			return Issue{}, errors.New("issue filer must belong to this room")
+		}
 	}
 	note := strings.TrimSpace(in.Note)
 	files := in.Files
@@ -646,4 +660,15 @@ func (s *Store) withIssuesLock(roomID string, fn func() error) error {
 	}
 	defer unlock()
 	return fn()
+}
+
+// filerNamesRoom reports whether a filer address names an existing room,
+// optionally with a member of it, such as "fl-rea:merge-captain".
+func (s *Store) filerNamesRoom(by string) bool {
+	name, _, _ := strings.Cut(by, ":")
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	_, err := s.Resolve(name)
+	return err == nil
 }
