@@ -772,7 +772,10 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			// The reports say what the exit status cannot: the execution timing,
 			// the structured failures, the slow tests and the diagnostics links.
 			// Read them for every check, including one whose command failed; the
-			// command's own outcome and cause stay the check's.
+			// command's own outcome and cause stay the check's. A check whose
+			// transport died after the node recorded its exit is judged from that
+			// record first, so the reports below still apply to what it proved.
+			rejudgeTransportDeath(sr, reportRoot)
 			readReports(sr, checks[i].reports, reportRoot, req.MaxTest, req.Allowed)
 		}
 		result.Status = combinedStatus(result.Status, sr.Status)
@@ -804,6 +807,30 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, fmt.Errorf("copy reports: %w", copyErr)
 	}
 	return result, nil
+}
+
+// rejudgeTransportDeath decides a check whose connection to the node died.
+// The wrapper on the node wrote its exit record after the command ran, and the
+// report copy brought that record back, so an exit 0 in it is better evidence
+// than the transport's own exit 255: the check passed, and only the connection
+// was lost after the fact. Any other exit, or a missing record, proves nothing
+// new and keeps what the command already proved.
+func rejudgeTransportDeath(sr *SuiteResult, reportRoot string) {
+	if sr.Cause != CauseSSHDrop || sr.Status != OutcomeError {
+		return
+	}
+	var record struct {
+		ExitCode int `json:"exitCode"`
+	}
+	data, err := os.ReadFile(filepath.Join(reportRoot, "reports", string(sr.Suite), checkExitFile))
+	if err != nil || json.Unmarshal(data, &record) != nil {
+		return
+	}
+	if record.ExitCode != 0 {
+		return
+	}
+	sr.Status, sr.Error, sr.Cause = OutcomePassed, "", ""
+	sr.Warnings = append(sr.Warnings, TransportDiedAfterCompletion)
 }
 
 // fetchReports copies the node's report files into the local report blob folder.
@@ -879,6 +906,14 @@ var checkMarker = regexp.MustCompile(`(?m)^DYNA_CI_CHECK_EXIT=([0-9]+)$`)
 // commandStartedFile is the sentinel a check's command writes before it runs.
 // Its name matches no report filter, so it never leaves the node.
 const commandStartedFile = ".command-started"
+
+// checkExitFile is the node's own record of a check's exit status, written by
+// the check wrapper's exit trap after the command ran. Unlike the completion
+// markers on the stream, it survives a connection that dies right after the
+// check, because the report copy brings it back in a fresh connection. Its name
+// has no dash: the report directory's dash-separated N-M names belong to the
+// unpacked artifact entries, and this record must not read as one of them.
+const checkExitFile = "exit.json"
 
 // commandMarker is what the node writes about that sentinel: 1 when the
 // container started the command, 0 when it never got that far.
@@ -1234,7 +1269,12 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// is a file because the check's own output can be longer than the tail a run
 	// keeps.
 	startedMarker := `if [ -e ` + q(path.Join(reportDir, commandStartedFile)) + ` ]; then printf 'DYNA_CI_COMMAND_STARTED=1\n'; else printf 'DYNA_CI_COMMAND_STARTED=0\n'; fi; `
-	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `fi; `
+	// The node's own record of the check's exit outlives the connection: a
+	// transport that dies after the command ran can still be judged from this
+	// file once the reports are copied back. It is written only after the
+	// wrapper reached the command, and its name matches the report filters.
+	exitRecord := `printf '{"exitCode":%s}\n' "$check_status" > ` + q(path.Join(reportDir, checkExitFile)) + "; "
+	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then ` + exitRecord + `printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `fi; `
 	if !check.host {
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
