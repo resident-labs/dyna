@@ -172,11 +172,9 @@ func quote(value string) string {
 const engineStopGrace = 15 * time.Second
 
 // engineStopTimeout is the unit's stop deadline. An engine that stops waits for
-// a cancelled local CI run to remove itself from its machine, which is the
-// runner's teardown budget: dropping the containers, then the run's keeper. A
-// shorter unit deadline would kill that cleanup and leave the keeper holding the
-// machine's cache lock.
-func engineStopTimeout() time.Duration { return localci.TeardownBudget + engineStopGrace }
+// its local CI runs to stop polling, which is localci.StopWait; their checks run
+// detached on the machines and keep running.
+func engineStopTimeout() time.Duration { return localci.StopWait + engineStopGrace }
 
 func engineUnit(binary string, noTunnel bool) string {
 	run := ` engine run --allow-agent`

@@ -19,7 +19,7 @@ func TestContainerThatNeverStartedIsAnInfrastructureFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "arch", Slots: 1, Enabled: true}}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
@@ -39,6 +39,7 @@ func TestContainerThatNeverStartedIsAnInfrastructureFailure(t *testing.T) {
 		}
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(t.Context(), Request{Definition: definition, Repo: t.TempDir(), Suites: []Suite{"test"}, MaxTest: time.Second, DeferSave: true})
 	if err != nil {
 		t.Fatalf("a machine failure is not a run error: %v", err)
@@ -67,7 +68,7 @@ func TestContainerThatStartedKeepsItsTestFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", Slots: 1, Enabled: true}}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
@@ -83,6 +84,7 @@ func TestContainerThatStartedKeepsItsTestFailure(t *testing.T) {
 		}
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(t.Context(), Request{Definition: definition, Repo: t.TempDir(), Suites: []Suite{"test"}, MaxTest: time.Second, DeferSave: true})
 	if err != nil {
 		t.Fatalf("run: %v", err)
