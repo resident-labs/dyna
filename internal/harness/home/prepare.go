@@ -402,6 +402,40 @@ func bridge(owner map[string]string, target string, isDyna bool) string {
 	return script.String()
 }
 
+func gitConfigHeader(published string) string {
+	return "[include]\n\tpath = " + gitQuote(published) + "\n"
+}
+
+// earlierToolSettings returns what tools wrote to the newest other writable
+// config in dir: its text after the include lines that Prepare put first.
+func earlierToolSettings(dir, self string) string {
+	matches, _ := filepath.Glob(filepath.Join(dir, ".dyna-gitconfig-*"))
+	newest, newestTime := "", time.Time{}
+	for _, match := range matches {
+		info, err := os.Lstat(match)
+		if match == self || err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if newest == "" || info.ModTime().After(newestTime) {
+			newest, newestTime = match, info.ModTime()
+		}
+	}
+	if newest == "" {
+		return ""
+	}
+	data, err := os.ReadFile(newest)
+	if err != nil {
+		return ""
+	}
+	text := string(data)
+	if !strings.HasPrefix(text, "[include]\n\tpath = ") {
+		return text
+	}
+	_, rest, _ := strings.Cut(text, "\n")
+	_, rest, _ = strings.Cut(rest, "\n")
+	return rest
+}
+
 // createWritableGitConfig creates path as a Git config that includes the
 // published, immutable one. An existing file stays as it is: it may hold what a
 // tool wrote, and a running session reads it. The file appears whole or not at
@@ -421,7 +455,10 @@ func createWritableGitConfig(path, published string) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	_, err = tmp.WriteString("[include]\n\tpath = " + gitQuote(published) + "\n")
+	// A tool's earlier writes carry over from the most recently written config of
+	// another publication, so a changed PATH does not drop `gh auth setup-git`.
+	// They are copied, not included: includes nest at most ten deep.
+	_, err = tmp.WriteString(gitConfigHeader(published) + earlierToolSettings(dir, path))
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
