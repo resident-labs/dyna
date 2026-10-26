@@ -231,6 +231,10 @@ type Meta struct {
 	// Paused is set while a running run starts no new workers. SetPaused
 	// writes it; the end of the run clears it.
 	Paused bool `json:"paused,omitempty"`
+	// Canceling is set once cancellation has started, before the signal: shell
+	// publication refuses new worker shells for the run behind the cancel
+	// cleanup's snapshot (D-165).
+	Canceling bool `json:"canceling,omitempty"`
 }
 
 // Run is an open, writable run directory.
@@ -1017,18 +1021,13 @@ func ReadResult(id string) (string, bool) {
 
 func pausePath(id string) string { return filepath.Join(RunsDir(), id, "paused") }
 
-func cancelingPath(id string) string { return filepath.Join(RunsDir(), id, "canceling") }
-
-// Canceling reports whether run id's cancellation has started: the cancel
-// marker exists, or the run already ended as canceled. Shell publication
-// refuses a canceling run, so a worker cannot launch a shell behind the
-// cancel cleanup's snapshot (D-165).
+// Canceling reports whether run id's cancellation has started: the run is
+// marked canceling, or it already ended as canceled. Shell publication
+// refuses such a run, so a worker cannot launch a shell behind the cancel
+// cleanup's snapshot (D-165).
 func Canceling(id string) bool {
-	if _, err := os.Stat(cancelingPath(id)); err == nil {
-		return true
-	}
 	m, err := ReadMeta(id)
-	return err == nil && m.Status == "canceled"
+	return err == nil && (m.Canceling || m.Status == "canceled")
 }
 
 // SetPaused pauses or resumes a running run in its row: while paused, the
@@ -1053,7 +1052,7 @@ func Cancel(id string) error {
 	// Fence new worker shells before the signal: publication refuses a run
 	// whose cancellation has started, so no supervisor launches behind the
 	// cancel cleanup's snapshot (D-165).
-	if err := os.WriteFile(cancelingPath(id), []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600); err != nil {
+	if _, err := setCanceling(RunDir(id), id); err != nil {
 		return err
 	}
 	if Alive(m) {
