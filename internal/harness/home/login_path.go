@@ -2,7 +2,6 @@ package home
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,10 +13,8 @@ import (
 	"dyna-agent/internal/childenv"
 )
 
-// loginPathTimeout bounds the login shell that reports the owner's PATH, and
-// the wait for its output pipe: a background process that shell startup leaves
-// holding stdout must not stall the caller.
-var loginPathTimeout = 5 * time.Second
+// loginPathTimeout bounds the login shell that reports the owner's PATH.
+const loginPathTimeout = 5 * time.Second
 
 // ownerLoginPath asks the owner's login shell for its PATH once per process. The
 // engine often starts from a service manager whose PATH lacks the owner's tool
@@ -34,20 +31,29 @@ var ownerLoginPath = sync.OnceValue(func() string {
 	return loginPathFrom(shell, os.Environ())
 })
 
-// loginPathFrom runs `shell -lc` and returns the PATH it prints on its last
-// line, or "" when the shell fails or does not answer in time.
+// loginPathFrom runs `shell -lc` and returns the PATH it writes to a temporary
+// file, or "" when the shell fails or does not answer in time. The shell's own
+// output goes nowhere, so a background process that shell startup leaves behind
+// holds no pipe the caller would wait on.
 func loginPathFrom(shell string, env []string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), loginPathTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, shell, "-lc", `printf '\n%s' "$PATH"`)
-	cmd.Env = env
-	cmd.WaitDelay = loginPathTimeout
-	out, err := childenv.Clean(cmd).Output()
-	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+	file, err := os.CreateTemp("", "dyna-login-path-")
+	if err != nil {
 		return ""
 	}
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-	return lines[len(lines)-1]
+	defer os.Remove(file.Name())
+	file.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), loginPathTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, shell, "-lc", `printf '%s' "$PATH" >"$0"`, file.Name())
+	cmd.Env = env
+	if childenv.Clean(cmd).Run() != nil {
+		return ""
+	}
+	out, err := os.ReadFile(file.Name())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // withLoginPath keeps path as it is and appends each absolute directory of the
