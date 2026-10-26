@@ -77,7 +77,10 @@ func watchSocket(ticks <-chan time.Time, socket string, stop func(), done <-chan
 		select {
 		case <-done:
 			return
-		case <-ticks:
+		case _, open := <-ticks:
+			if !open {
+				return
+			}
 			if socketGone(socket) {
 				stop()
 				return
