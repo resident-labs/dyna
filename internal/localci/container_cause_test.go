@@ -100,6 +100,34 @@ func TestContainerThatStartedKeepsItsTestFailure(t *testing.T) {
 // The checks decide the commit. A cleanup on the node that times out after every
 // check passed is a warning on the run and never turns the result into an error.
 func TestSlowNodeCleanupDoesNotChangeAPassedRun(t *testing.T) {
+	result := runWithCleanup(t, func(attempt int) error { return context.DeadlineExceeded })
+	if result.Status != OutcomePassed {
+		t.Fatalf("run status = %q, want %q", result.Status, OutcomePassed)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != NodeCleanupUnfinished {
+		t.Fatalf("warnings = %v, want the unfinished cleanup", result.Warnings)
+	}
+}
+
+// A cleanup that fails once is tried again before the run's directory and record
+// are removed, so a node that was only busy leaves no survivor and no warning.
+func TestNodeCleanupIsTriedAgainBeforeWarning(t *testing.T) {
+	result := runWithCleanup(t, func(attempt int) error {
+		if attempt == 1 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	})
+	if result.Status != OutcomePassed || len(result.Warnings) != 0 {
+		t.Fatalf("status = %q, warnings = %v, want a passed run with no warning", result.Status, result.Warnings)
+	}
+}
+
+// runWithCleanup runs one passing check on a fake node whose cleanup answers
+// with the given function, called with 1 for the first attempt.
+func runWithCleanup(t *testing.T, cleanup func(attempt int) error) Result {
+	t.Helper()
+	attempts := 0
 	definition := parseRepositoryDefinition(t, false)
 	checks, _, err := nodeChecks(definition, []Suite{"test"}, false)
 	if err != nil {
@@ -113,8 +141,8 @@ func TestSlowNodeCleanupDoesNotChangeAPassedRun(t *testing.T) {
 		script := args[len(args)-1]
 		switch {
 		case strings.Contains(script, "no_container()"):
-			// The cleanup runs out of its time.
-			return context.DeadlineExceeded
+			attempts++
+			return cleanup(attempts)
 		case strings.Contains(script, "tar -C"):
 			return fakeNodeReports(out, checks, false)
 		case strings.Contains(script, "run --rm --init"):
@@ -129,10 +157,5 @@ func TestSlowNodeCleanupDoesNotChangeAPassedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a slow cleanup failed the run: %v", err)
 	}
-	if result.Status != OutcomePassed {
-		t.Fatalf("run status = %q, want %q", result.Status, OutcomePassed)
-	}
-	if len(result.Warnings) != 1 || result.Warnings[0] != NodeCleanupUnfinished {
-		t.Fatalf("warnings = %v, want the unfinished cleanup", result.Warnings)
-	}
+	return result
 }
