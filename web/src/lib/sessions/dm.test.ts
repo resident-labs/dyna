@@ -111,7 +111,7 @@ test('sameText ignores whitespace only', () => {
   ]) assert.equal(sameText(a, b), false, `${a} | ${b}`)
   assert.equal(sameText('', ''), false)
 })
-test('one timeline retains tool failures while thoughts and steering remain visible', () => {
+test('tools, thoughts, replies and steering keep the order they happened in', () => {
   const items = [
     { kind: 'prompt', from: 'room (human)', text: 'start', ts: ts(0) },
     { kind: 'tool', tool: 'read 6 files', ts: ts(1) },
@@ -122,9 +122,20 @@ test('one timeline retains tool failures while thoughts and steering remain visi
     { kind: 'tool', tool: 'edited', ts: ts(51) }, { kind: 'error', text: 'failed', ts: ts(52) },
   ]
   const dm = dmView({ address, turns: [{ n: 1, started: ts(0), items }] }, room)
-  assert.deepEqual(dm.rows.map((r) => r.kind), ['turn', 'message', 'timeline', 'thought', 'message', 'message', 'error'])
-  assert.deepEqual(expectKind('timeline', dm.rows[2]).steps.map((s) => s.failed), [undefined, true, undefined])
-  assert.equal(need(dm.rows[5]).itemKind, 'steering')
+  assert.deepEqual(dm.rows.map((r) => r.kind), ['turn', 'message', 'timeline', 'thought', 'timeline', 'message', 'message', 'timeline', 'error'])
+  assert.deepEqual(dm.rows.filter(isKind('timeline')).flatMap((r) => r.steps.map((s) => s.failed)), [undefined, true, undefined])
+  assert.equal(need(dm.rows[6]).itemKind, 'steering')
+  assert.equal(new Set(dm.rows.map((r) => r.key)).size, dm.rows.length, 'row keys stay unique')
+})
+test('an item that has no time, or an earlier one, stays after the item before it', () => {
+  const items = [
+    { kind: 'tool', tool: 'read', ts: ts(5) },
+    { kind: 'thought', text: 'thinking' },
+    { kind: 'tool', tool: 'ran', ts: ts(3) },
+    { kind: 'reply', text: 'done', ts: ts(6) },
+  ]
+  const dm = dmView({ address, turns: [{ n: 1, started: ts(0), items }] }, room)
+  assert.deepEqual(dm.rows.map((r) => r.kind), ['turn', 'timeline', 'thought', 'timeline', 'message'])
 })
 test('grouping uses author and a seven minute window and resets at turn boundaries', () => {
   const message = (author: string, s: number): DmRow => ({ kind: 'message', key: `${author}:${s}`, author, ts: ts(s) })
@@ -350,8 +361,8 @@ test('compaction dividers stay visible beside the turn timeline', () => {
   ]
   const session = { member: { name: 'lead' }, turns: [{ n: 1, status: 'running', started: ts(1), items }] }
   const rows = dmView(session, room).rows
-  assert.deepEqual(rows.map((r) => r.kind), ['turn', 'timeline', 'compaction', 'compaction'])
-  assert.deepEqual(rows.filter(isKind('timeline')).map((r) => r.steps.length), [2])
+  assert.deepEqual(rows.map((r) => r.kind), ['turn', 'timeline', 'compaction', 'compaction', 'timeline'])
+  assert.deepEqual(rows.filter(isKind('timeline')).map((r) => r.steps.length), [1, 1])
 })
 
 test('a compaction divider is one row that the compaction setting hides', () => {
@@ -455,7 +466,15 @@ test('a shell completion outside the page remains an expandable shell step', () 
   assert.deepEqual(steps.filter((s) => s.kind === 'shell').map((s) => s.jobId), [id])
 })
 
-test('each turn has one timeline with tools, shell output and child sessions', () => {
+test('a child post after a reply joins the child step and adds no empty timeline', () => {
+  const child = { id: 'child-1', name: 'helper', address: 'room:helper', parent: 'lead-1', created: ts(1), state: 'live', status: 'running' }
+  const items = [{ kind: 'reply', text: 'Started a helper.', ts: ts(2) }]
+  const session = { address, turns: [{ n: 1, started: ts(0), status: 'running', items }], posts: [post('c1', 'room:helper', [address], 3)] }
+  const timelines = dmView(session, room, {}, [], [child]).rows.filter(isKind('timeline'))
+  assert.deepEqual(timelines.map((r) => r.steps.map((s) => s.kind)), [['child']])
+  assert.deepEqual(timelines[0]?.steps.flatMap((s) => (s.kind === 'child' ? s.posts.map((p) => p.id) : [])), ['c1'])
+})
+test('a run of steps shares one timeline with tools, shell output and child sessions', () => {
   const job: ShellJob = { id: 'sh_1', command: ['bash', '-c', 'npm test'], cwd: '/', state: 'exited', code: 1, started: ts(2), ended: ts(8) }
   const child = { id: 'child-1', name: 'test-helper', address: 'room:test-helper', parent: 'lead-1', created: ts(4), state: 'live', status: 'running' }
   const session = { address, turns: [
@@ -471,7 +490,7 @@ test('each turn has one timeline with tools, shell output and child sessions', (
   ], posts: [post('finished', `shell:${job.id}`, [address], 8, { completion: true })] }
   const dm = dmView(session, room, {}, [], [child])
   const timelines = dm.rows.filter(isKind('timeline'))
-  assert.deepEqual(timelines.map((r) => [r.turn?.n, r.steps.map((s) => s.kind)]), [[14, ['tool', 'shell', 'child', 'tool']], [15, ['tool']]])
+  assert.deepEqual(timelines.map((r) => [r.turn?.n, r.steps.map((s) => s.kind)]), [[14, ['tool', 'shell']], [14, ['child', 'tool']], [15, ['tool']]])
   const shell = need(timelines[0]?.steps.find((s) => s.kind === 'shell'))
   assert.equal(shell.waits, 1)
   assert.deepEqual(shell.posts.map((p) => p.id), ['finished'])
