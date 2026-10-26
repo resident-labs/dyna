@@ -52,6 +52,8 @@ type Spawner interface {
 type Manager struct {
 	// runAgentStartHook lets a test hold a run agent start inside its gate.
 	runAgentStartHook func(id string)
+	// runAgentDrainHook lets a test see CloseRunAgents begin to wait for starts.
+	runAgentDrainHook func()
 	// TurnReporter schedules the normal report, or uses the supplied terminal
 	// context for an earlier engine that cannot own completion yet.
 	TurnReporter     func(context.Context, *Manager, string, int) error
