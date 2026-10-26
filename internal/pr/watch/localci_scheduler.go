@@ -464,7 +464,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	// A machine with a free slot must exist before the plan does any work, so a
 	// fleet that is only busy keeps the job waiting without a fetch.
-	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
+	chosen := preferAttachedCINode(ctx, registry, repo, job.head, enabled, active, job.record.RoomID, retriedFrom, availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom))
 	if chosen == nil && retriedFrom != "" {
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
@@ -513,7 +513,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// caller gets a typed error that names it; a fleet that is only busy or low
 	// on disk keeps waiting.
 	suited := localci.NodesForSuites(enabled, plan.suites)
-	chosen = availableCINodeExcept(suited, active, job.record.RoomID, retriedFrom)
+	chosen = preferAttachedCINode(ctx, registry, repo, job.head, suited, active, job.record.RoomID, retriedFrom, availableCINodeExcept(suited, active, job.record.RoomID, retriedFrom))
 	if chosen == nil && retriedFrom != "" {
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
@@ -712,6 +712,34 @@ func availableCINode(nodes []localci.Node, active map[string]int, roomID string)
 
 // availableCINodeExcept is availableCINode without the machine the run just
 // failed on, so a retry lands somewhere else.
+// attachedCINodes names the machine that still holds checks of an earlier engine
+// for a commit.
+type attachedCINodes interface {
+	AttachedNode(ctx context.Context, repo, sha string) (string, error)
+}
+
+// preferAttachedCINode places a run on the machine that still runs its checks
+// from before an engine restart, when that machine can take the work. Any other
+// machine would start the checks again and leave the first ones unattended. It
+// returns the normal choice otherwise.
+func preferAttachedCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, active map[string]int, roomID, skip string, chosen *localci.Node) *localci.Node {
+	finder, ok := registry.(attachedCINodes)
+	if !ok {
+		return chosen
+	}
+	name, err := finder.AttachedNode(ctx, repo, head)
+	if err != nil || name == "" || name == skip {
+		return chosen
+	}
+	for i := range nodes {
+		node := &nodes[i]
+		if node.Name == name && node.Enabled && !node.LowDisk && node.AllowsRoom(roomID) && node.Slots-active[node.Name] > 0 {
+			return node
+		}
+	}
+	return chosen
+}
+
 func availableCINodeExcept(nodes []localci.Node, active map[string]int, roomID, skip string) *localci.Node {
 	var chosen *localci.Node
 	free := 0

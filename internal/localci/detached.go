@@ -42,13 +42,26 @@ const (
 	nodeLostBound = 3 * time.Minute
 	// stopTimeout bounds the call that stops a cancelled check.
 	stopTimeout = time.Minute
+	// callTimeout bounds one attempt of a short call: start, poll or stop. The
+	// ssh client also gives up on a silent connection after about 45 seconds.
+	callTimeout = 2 * time.Minute
+	// longCallTimeout bounds one attempt of a call that can run long, such as the
+	// node setup and the report copy.
+	longCallTimeout = 15 * time.Minute
 )
 
 // detachedStartScript runs on the node. It takes the check's folder, its unit
 // name and the limits of its unit ($3 to $5, empty for none), and reads the
-// check's script from its input. The folder is the start lock: a retried start
-// whose first attempt reached the node finds the folder and does nothing, so a
-// check never starts twice.
+// check's script from its input. A lock file serializes starts, and a start
+// that finds its check running or finished does nothing, so a retry never
+// starts a check twice. A folder left by a start that stopped half way has no
+// running unit and no exit record, so the retry prepares it again.
+//
+// The wrapper writes the check's output to the log up to a limit and discards
+// the rest, so one noisy check cannot fill the node's disk. The check's own
+// exit markers go straight to the log, past that limit. The writer of the log
+// runs in a session of its own, so the cleanup of a host check, which kills the
+// rest of its process group, cannot cut the log off.
 //
 // A transient unit survives the SSH session only when the user manager does, so
 // the script enables lingering first. Without a user manager, or without
@@ -57,13 +70,18 @@ const detachedStartScript = `set -eu
 d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5
 umask 077
 mkdir -p "$(dirname "$d")"
-mkdir "$d" 2>/dev/null || exit 0
+exec 8>"$d.lock"
+flock -w 60 8
+alive() { systemctl --user is-active --quiet "$unit" 2>/dev/null || { [ -s "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; }; }
+if [ -s "$d/exit.json" ] || alive; then exit 0; fi
+rm -rf "$d"
+mkdir "$d"
 cat > "$d/run.sh"
 : > "$d/log"
 cat > "$d/wrap.sh" <<'WRAP'
-exec >>"$1/log" 2>&1 </dev/null
-bash -o pipefail "$1/run.sh"
-code=$?
+export DYNA_CI_LOG="$1/log"
+bash -o pipefail "$1/run.sh" 2>&1 </dev/null | setsid bash -c 'head -c "${DYNA_CI_LOG_CAP:-134217728}" >> "$1/log"; if IFS= read -r -n 1 _; then printf "\n[... the rest of the output was discarded on the node ...]\n" >> "$1/log"; cat > /dev/null; fi' dyna-cap "$1"
+code=${PIPESTATUS[0]}
 printf '{"exitCode":%s}\n' "$code" > "$1/exit.tmp" && mv "$1/exit.tmp" "$1/exit.json"
 WRAP
 unitOK=0
@@ -73,9 +91,9 @@ if command -v systemd-run >/dev/null 2>&1 && systemctl --user show-environment >
 fi
 if [ "$unitOK" = 1 ]; then
   if [ -n "$cpu" ]; then set -- -p "CPUQuota=$cpu" -p "MemoryMax=$mem" -p "TasksMax=$tasks"; else set --; fi
-  systemd-run --user --quiet --collect --unit "$unit" "$@" -- nice -n 10 bash "$d/wrap.sh" "$d" || { rm -rf "$d"; exit 1; }
+  systemd-run --user --quiet --collect --unit "$unit" "$@" -- nice -n 10 bash "$d/wrap.sh" "$d" 8>&- || { rm -rf "$d"; exit 1; }
 else
-  setsid nohup nice -n 10 bash "$d/wrap.sh" "$d" >/dev/null 2>&1 </dev/null &
+  setsid nohup nice -n 10 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
   echo $! > "$d/pid"
 fi
 `
@@ -90,8 +108,9 @@ const detachedPollScript = `chunk=262144
 while [ "$#" -ge 3 ]; do
   d=$1; unit=$2; off=$3; shift 3
   alive() { systemctl --user is-active --quiet "$unit" 2>/dev/null || { [ -s "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; }; }
-  if [ -s "$d/exit.json" ]; then state=exited
-  elif [ -d "$d" ] && alive; then state=running
+  if [ ! -d "$d" ]; then state=missing
+  elif [ -s "$d/exit.json" ]; then state=exited
+  elif alive; then state=running
   elif [ -s "$d/exit.json" ]; then state=exited
   else state=gone; fi
   code=
@@ -219,13 +238,18 @@ func (r Runner) transient(err error) bool {
 	return !errors.As(err, &exit) || exit.ExitCode() == 255
 }
 
-// retry runs attempt again while it fails on the connection. It gives up when
-// the node has been unreachable for nodeLostBound, measured on the runner's
-// clock, and a stopped context ends it at once.
-func (r Runner) retry(ctx context.Context, attempt func() error) error {
+// retry runs attempt again while it fails on the connection. Each attempt has
+// its own timeout. It gives up when the node has been unreachable for
+// nodeLostBound, measured on the runner's clock, and a stopped context ends it
+// at once.
+func (r Runner) retry(ctx context.Context, timeout time.Duration, attempt func(context.Context) error) error {
 	var since time.Time
 	for {
-		err := attempt()
+		// One attempt never outlasts its bound, so a connection that is up but
+		// silent returns here and counts toward the unreachable window.
+		callCtx, cancel := context.WithTimeout(ctx, timeout)
+		err := attempt(callCtx)
+		cancel()
 		var permanent *permanentError
 		if err == nil || ctx.Err() != nil || errors.As(err, &permanent) || !r.transient(err) {
 			return err
@@ -251,7 +275,7 @@ func (r Runner) startDetached(ctx context.Context, spec detachSpec) error {
 		args[3] = systemdMemory(spec.Limits.MemoryMiB)
 		args[4] = strconv.Itoa(spec.Limits.TasksMax)
 	}
-	return r.retry(ctx, func() error {
+	return r.retry(ctx, callTimeout, func(ctx context.Context) error {
 		var stderr tailBuffer
 		if err := r.nodeExec(ctx, strings.NewReader(spec.Script), io.Discard, &stderr, detachedStartScript, args...); err != nil {
 			return fmt.Errorf("%w: %s", err, stderr.String())
@@ -265,9 +289,9 @@ func (r Runner) startDetached(ctx context.Context, spec detachSpec) error {
 func (r Runner) stopDetached(ctx context.Context, spec detachSpec) error {
 	stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
 	defer cancel()
-	return r.retry(stop, func() error {
+	return r.retry(stop, callTimeout, func(ctx context.Context) error {
 		var stderr tailBuffer
-		if err := r.nodeExec(stop, nil, io.Discard, &stderr, detachedStopScript, spec.Dir, spec.Unit); err != nil {
+		if err := r.nodeExec(ctx, nil, io.Discard, &stderr, detachedStopScript, spec.Dir, spec.Unit); err != nil {
 			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
 		return nil
@@ -318,15 +342,20 @@ func (r Runner) newPoller(ctx context.Context) (*detachedPoller, func()) {
 // stopped context stops the check on the node and returns the context's error.
 func (p *detachedPoller) Run(ctx context.Context, spec detachSpec, out io.Writer) error {
 	if !spec.Attach {
+		// The intent is recorded before the launch, so a restarted engine finds a
+		// check whose launch the engine stop cut off. A check that was never
+		// launched has no folder, and the restarted run starts it afresh.
+		if p.started != nil {
+			p.started(spec)
+		}
 		if err := p.r.startDetached(ctx, spec); err != nil {
 			if ctx.Err() != nil {
-				_ = p.r.stopDetached(ctx, spec)
+				if !EngineStopping() {
+					_ = p.r.stopDetached(ctx, spec)
+				}
 				return ctx.Err()
 			}
 			return fmt.Errorf("start check: %w", err)
-		}
-		if p.started != nil {
-			p.started(spec)
 		}
 	}
 	w := &watch{spec: spec, out: out, done: make(chan error, 1)}
@@ -465,6 +494,8 @@ const (
 	pollRunning pollState = "running"
 	pollExited  pollState = "exited"
 	pollGone    pollState = "gone"
+	// pollMissing is a check whose folder does not exist: it was never launched.
+	pollMissing pollState = "missing"
 )
 
 // pollFrame is what one poll learned about one check.
@@ -475,7 +506,7 @@ type pollFrame struct {
 	payload []byte
 }
 
-var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone) code=(-?[0-9]*) size=([0-9]+) bytes=([0-9]+)$`)
+var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone|missing) code=(-?[0-9]*) size=([0-9]+) bytes=([0-9]+)$`)
 
 // pollNode asks the node about every check in the batch with one call, and
 // retries the call when the connection fails.
@@ -485,7 +516,7 @@ func (r Runner) pollNode(ctx context.Context, batch []*watch) (map[string]pollFr
 		args = append(args, w.spec.Dir, w.spec.Unit, strconv.FormatInt(w.offset, 10))
 	}
 	var frames map[string]pollFrame
-	err := r.retry(ctx, func() error {
+	err := r.retry(ctx, callTimeout, func(ctx context.Context) error {
 		var out bytes.Buffer
 		var stderr tailBuffer
 		if err := r.nodeExec(ctx, nil, &out, &stderr, detachedPollScript, args...); err != nil {
