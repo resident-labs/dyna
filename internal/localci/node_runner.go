@@ -1067,8 +1067,12 @@ func nodeSlotScript(base string, slots, index int, active string, deadline time.
 		fmt.Sprintf("deadline=$(( $(date +%%s) + %d )); ", int(seconds)) +
 		"acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; printf 'local CI: every slot is busy, waiting for slot %d\\n' %d >&2; exec 9>%s; ", index%slots, index%slots, index%slots, q(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots)))) +
-		"while ! flock -n 9; do " +
+		"if [ \"$acquired\" = 0 ]; then printf 'local CI: every slot is busy, waiting for any free slot\\n' >&2; " +
+		"while [ \"$acquired\" = 0 ]; do " +
+		// Every poll tries every slot, so a waiting check takes the first one that
+		// frees up instead of queueing behind one named slot.
+		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
+		"[ \"$acquired\" = 0 ] || break; " +
 		// The run's keeper holds this file, and it goes when the run is cancelled
 		// or removed: a queued check then has nothing left to wait for.
 		"[ -e " + q(active) + " ] || exit 75; " +
