@@ -267,15 +267,20 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	}
 	// The base ref, not the pinned id, is the start point: git derives the new
 	// branch's upstream from it exactly as before (branch.autoSetupMerge), and
-	// a raw commit id would drop that tracking.
-	if out, err := gitOutput(ctx, main, "worktree", "add", "-b", branch, path, base); err != nil {
+	// a raw commit id would drop that tracking. The add runs in the caller's
+	// checkout, because HEAD and FETCH_HEAD are per-worktree refs that the
+	// main checkout can resolve differently or not at all.
+	if out, err := gitOutput(ctx, repo, "worktree", "add", "-b", branch, path, base); err != nil {
 		return Record{}, fmt.Errorf("create worktree: %w: %s", err, out)
 	}
-	// The fetch and the add are separate git runs, so a concurrent fetch can
+	// The pin and the add are separate git runs, so a concurrent fetch can
 	// still move the base between them. Refuse loudly instead of starting the
 	// branch at a commit other than the pinned one.
 	if out, err := gitOutput(ctx, path, "rev-parse", "HEAD"); err != nil || strings.TrimSpace(string(out)) != pinned {
 		gitOutput(ctx, main, "worktree", "remove", "--force", path)
+		// No user work exists on the new branch yet; remove it, so a retry
+		// with the same name starts cleanly.
+		gitOutput(ctx, main, "branch", "-D", branch)
 		if err != nil {
 			return Record{}, fmt.Errorf("verify the new worktree's commit: %w: %s", err, out)
 		}

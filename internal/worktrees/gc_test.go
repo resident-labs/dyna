@@ -649,6 +649,30 @@ func TestNewForKeepsUpstreamTrackingForARemoteBase(t *testing.T) {
 	}
 }
 
+// A caller inside a linked worktree pins that worktree's FETCH_HEAD: HEAD
+// and FETCH_HEAD are per-worktree refs, and resolving the base in the main
+// checkout cannot see them (D-164).
+func TestNewForPinsFETCH_HEADFromTheCallersLinkedWorktree(t *testing.T) {
+	repo := gcRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	git(t, repo, "worktree", "add", "-q", "--detach", linked, "HEAD")
+	git(t, linked, "checkout", "-q", "-b", "side")
+	git(t, linked, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "side tip")
+	git(t, linked, "push", "-q", "origin", "side")
+	git(t, linked, "fetch", "-q", "origin", "side")
+	fetched := git(t, linked, "rev-parse", "FETCH_HEAD")
+	if out, err := gitOutput(context.Background(), repo, "rev-parse", "--verify", "--quiet", "FETCH_HEAD"); err == nil && strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("the main checkout unexpectedly resolves FETCH_HEAD: %s", out)
+	}
+	rec, err := NewFor(context.Background(), linked, "pin-linked-fetch-head", "FETCH_HEAD", "owner", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, rec.Path, "rev-parse", "HEAD"); got != fetched {
+		t.Fatalf("worktree head = %s, want the linked worktree's fetched commit %s", got, fetched)
+	}
+}
+
 // An outside clone whose remote has no main branch keeps its trees, and that
 // is not a cleanup failure. An unreachable remote still fails closed.
 func TestGCKeepsTreesOfARemoteWithoutMainWithoutFailing(t *testing.T) {
