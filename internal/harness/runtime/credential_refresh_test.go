@@ -258,6 +258,84 @@ func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
 	}
 }
 
+// A request a running turn makes renews the grant it needs without waiting for
+// the switch gate, which waits for every Pi turn to end, including its own. The
+// account lock and Pi's credential lock still order the write.
+func TestRefreshCredentialsDuringTurnRenewsWhileTheLeaseIsHeld(t *testing.T) {
+	a, n, m := setupCredentialRefresh(t, true)
+	release, err := a.TurnLease(context.Background(), "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := a.RefreshCredentialsDuringTurn(ctx, n.ID, "/fake/pi")
+	if err != nil {
+		t.Fatalf("renewal under a held turn lease: %v", err)
+	}
+	if m.activeCalls != 1 {
+		t.Fatalf("renewal calls = %d, want one", m.activeCalls)
+	}
+	if time.Until(result.ExpiresAt) < 30*time.Minute {
+		t.Fatalf("expiry = %v, want the renewed grant", result.ExpiresAt)
+	}
+}
+
+// The whole reader runs under a held lease: a search from a Pi turn renews the
+// due grant and returns the rotated token.
+func TestChatGPTGrantDuringTurnRenewsUnderALease(t *testing.T) {
+	a, n, m := setupCredentialRefresh(t, true)
+	// The fixture writes the OpenAI entry, so its account serves that provider.
+	if err := a.transaction(func(st *accountstore.State) error {
+		if e := st.Find(n.ID); e != nil {
+			e.Provider = accountstore.ProviderChatGPT
+		}
+		return nil
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	// Pi reads its login from auth.json, so the fixture's entry is written there
+	// as well as in the saved snapshot.
+	login, err := readAccountLogin(n.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files map[string]json.RawMessage
+	if err := json.Unmarshal(login.Credential.Payload, &files); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(n.Home, "auth.json"), files["auth.json"], 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The fixture manager renews in place, so the resolved Pi copy is a path only.
+	a.PiExecutable = func() (string, error) { return "/fake/pi", nil }
+	stored, err := a.Find(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.setActiveAccount(stored); err != nil {
+		t.Fatal(err)
+	}
+	release, err := a.TurnLease(context.Background(), "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	grant, err := a.ChatGPTGrantDuringTurn(ctx, "", "")
+	if err != nil {
+		t.Fatalf("grant under a held turn lease: %v", err)
+	}
+	if m.activeCalls != 1 {
+		t.Fatalf("renewal calls = %d, want one", m.activeCalls)
+	}
+	if grant.Access == "" || grant.Account != "workspace" {
+		t.Fatalf("grant = %+v, want the renewed sign-in", grant)
+	}
+}
+
 type credentialGateFixture struct{ *credentialRefreshFixture }
 
 func (credentialGateFixture) SupportsCredentialRefresh(native.Captured) bool { return false }

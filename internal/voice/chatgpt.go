@@ -21,14 +21,16 @@ func ChatGPTCredentials(ctx context.Context) (token, account string, err error) 
 }
 
 // chatGPTError is what Voice says when the one reader cannot supply the grant.
+// A missing Pi copy is checked first: the reader reports that failure under both
+// errors, and it is a different fix from signing in again.
 func chatGPTError(err error) error {
 	switch {
 	case errors.Is(err, native.ErrNotSignedIn):
 		return errors.New("sign in to a ChatGPT account in Settings > Accounts first")
-	case errors.Is(err, runtime.ErrGrantExpired):
-		return errors.New("the ChatGPT sign-in expired and could not be renewed; sign in again")
 	case errors.Is(err, runtime.ErrPiMissing):
 		return errors.New("Dyna's copy of Pi is not installed; Voice cannot renew the ChatGPT sign-in")
+	case errors.Is(err, runtime.ErrGrantExpired):
+		return errors.New("the ChatGPT sign-in expired and could not be renewed; sign in again")
 	}
 	return err
 }
