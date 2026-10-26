@@ -144,6 +144,9 @@ func TestFailedTurnReportsWorkerStderrAsDetailNotCause(t *testing.T) {
 	if !strings.Contains(ev.Error, "no harness event within 2m0s of startup") || strings.Contains(ev.Error, warning) {
 		t.Fatalf("failed turn cause = %q", ev.Error)
 	}
+	if ev.WorkerStderr != warning {
+		t.Fatalf("failed turn lost its typed stderr evidence: %q", ev.WorkerStderr)
+	}
 	if !strings.Contains(ev.Detail, "Worker stderr: "+warning) {
 		t.Fatalf("failed turn detail lost the worker stderr: %q", ev.Detail)
 	}
