@@ -21,8 +21,16 @@ type pipeWakeup struct{ r, w int }
 
 func newWakeup() wakeup {
 	var fds [2]int
-	if err := unix.Pipe2(fds[:], unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
+	if err := unix.Pipe(fds[:]); err != nil {
 		return nil
+	}
+	for _, fd := range fds {
+		unix.CloseOnExec(fd)
+		if err := unix.SetNonblock(fd, true); err != nil {
+			_ = unix.Close(fds[0])
+			_ = unix.Close(fds[1])
+			return nil
+		}
 	}
 	return &pipeWakeup{r: fds[0], w: fds[1]}
 }
