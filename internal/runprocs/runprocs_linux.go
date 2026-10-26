@@ -34,6 +34,15 @@ func Kill(runID string, leader int, keep map[int]bool, keepJobs []string) error 
 	if runID == "" {
 		return errors.New("a run id is required")
 	}
+	return KillStamped(mode.EnvWorkerRun+"="+runID, leader, keep, keepJobs)
+}
+
+// KillStamped is Kill for any exact "NAME=value" stamp, such as one session's
+// DYNA_SESSION, which ends that session's processes and no sibling's.
+func KillStamped(stamp string, leader int, keep map[int]bool, keepJobs []string) error {
+	if stamp == "" {
+		return errors.New("a stamp is required")
+	}
 	own, err := syscall.Getpgid(0)
 	if err != nil {
 		return err
@@ -46,7 +55,6 @@ func Kill(runID string, leader int, keep map[int]bool, keepJobs []string) error 
 	for g := range keep {
 		kept[g] = true
 	}
-	stamp := mode.EnvWorkerRun + "=" + runID
 	forEachProcess(func(pid int, env []byte) {
 		st, ok := readStat(pid)
 		if !ok || st.state == 'Z' {

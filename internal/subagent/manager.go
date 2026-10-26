@@ -35,6 +35,7 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/settings"
 	storepkg "dyna-agent/internal/store"
 	"dyna-agent/internal/structuredoutput"
@@ -52,6 +53,9 @@ type Spawner interface {
 type Manager struct {
 	// runAgentStartHook lets a test hold a run agent start inside its gate.
 	runAgentStartHook func(id string)
+	// killProcs replaces the process kill of run and run-agent cleanup in
+	// tests; nil kills for real.
+	killProcs shells.KillFunc
 	// TurnReporter schedules the normal report, or uses the supplied terminal
 	// context for an earlier engine that cannot own completion yet.
 	TurnReporter     func(context.Context, *Manager, string, int) error
