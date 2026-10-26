@@ -193,6 +193,12 @@ The mode applies to the current room. `github` is the default. `local` and
 `both` accept the first conclusive local or GitHub result; any observed failure
 blocks merging. Every configured required check must pass. With no enabled
 machines, GitHub remains the CI source.
+A pull request head needs no local result of its own. In `local` mode the merge
+queue runs local CI on the merge trial, the head merged into the frozen default
+branch (a batch runs once for its tip), and lands the change only when that run
+passes every required suite. A manual `dyna git ci run <head>` is extra evidence;
+`dyna git ci show <head>` can report no result while the trial run decides.
+Check the landed commit with `dyna git ci show <merge commit>`.
 Use `dyna machine edit <name> --disable` or `dyna machine rm <name>` to stop
 assigning a machine CI work.
 
