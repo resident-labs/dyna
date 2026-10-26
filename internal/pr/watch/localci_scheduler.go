@@ -416,7 +416,12 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		}
 	}
 	key := registeredJobKey(job)
-	repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
+	dir, err := s.checkoutDir(ctx, job.record)
+	if err != nil {
+		return false, err
+	}
+	job.record.RepoPath = dir
+	repo, err := localci.CanonicalRepo(ctx, dir)
 	if err != nil {
 		return false, err
 	}

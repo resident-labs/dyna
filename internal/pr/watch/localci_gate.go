@@ -233,10 +233,15 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			enabled = enabled || node.Enabled && node.Slots > 0
 		}
 	}
-	if r.RepoPath == "" {
-		return snap, nil
+	dir, dirErr := s.checkoutDir(ctx, r)
+	if dirErr != nil {
+		if !enabled {
+			return snap, nil
+		}
+		return snap, dirErr
 	}
-	repo, err := localci.CanonicalRepo(ctx, r.RepoPath)
+	r.RepoPath = dir
+	repo, err := localci.CanonicalRepo(ctx, dir)
 	if err != nil {
 		if !enabled {
 			return snap, nil
