@@ -2,7 +2,7 @@
 // with its state and last result. Failing rows come first and the healthy rows
 // fold into one line. The functions are pure; ServicesCard.svelte loads the
 // data and draws the result.
-import type { HookSummary } from '../api/settings.ts'
+import type { HookRunLog, HookSummary } from '../api/settings.ts'
 import type { ServiceView } from '../api/service.ts'
 import { listedHooks, runTone } from '../settings/hooks.ts'
 
@@ -28,8 +28,8 @@ const resultWords: Record<string, string> = { pass: 'Passed', fail: 'Failed', er
 // hookRows lists the machine's hooks that are not a service trigger. A hook
 // that is off or has never run is quiet, not failing.
 export function hookRows(summaries: readonly HookSummary[]): ServiceCardRow[] {
-  const shown = new Set(listedHooks(summaries.map((s) => s.hook), 'global').map((h) => h.name))
-  return summaries.filter((s) => shown.has(s.hook.name)).map((s): ServiceCardRow => {
+  const shown = new Set(listedHooks(summaries.map((s) => s.hook), 'global'))
+  return summaries.filter((s) => shown.has(s.hook)).map((s): ServiceCardRow => {
     const run = s.lastRun
     const name = s.hook.label || s.hook.name
     const log: LogTarget | null = run ? { kind: 'hook', hook: s.hook.name, runId: run.id } : null
@@ -66,4 +66,14 @@ export function groupRows(rows: readonly ServiceCardRow[]): { failing: ServiceCa
 // healthyLine is the folded line over the healthy rows.
 export function healthyLine(count: number, failing: number): string {
   return `${count} ${failing ? 'others ' : ''}running normally`
+}
+
+// readLog is the text of a hook row's log: the tail of the run it names, or the
+// reason the read failed, so a failed run always shows something.
+export async function readLog(read: (hook: string, runId: string) => Promise<HookRunLog>, target: Extract<LogTarget, { kind: 'hook' }>): Promise<string> {
+  try {
+    return (await read(target.hook, target.runId)).tail || '(empty log)'
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupRows, healthyLine, hookRows, serviceRows } from './servicesCard.ts'
+import { groupRows, healthyLine, hookRows, readLog, serviceRows } from './servicesCard.ts'
 import type { Hook, HookRun, HookSummary } from '../api/settings.ts'
 import type { ServiceView } from '../api/service.ts'
 
@@ -16,7 +16,7 @@ test('a failed hook run is failing, a pass is healthy, and its log is that run',
 })
 
 test('a hook that is off or never ran is quiet, and the doctor trigger is not listed', () => {
-  const rows = hookRows([summary({ name: 'a', disabled: true }, run('error')), summary({ name: 'b' }), summary({ name: 'doctor' }, run('error'))])
+  const rows = hookRows([summary({ name: 'a', disabled: true }, run('error')), summary({ name: 'b' }), summary({ name: 'doctor', builtin: 'doctor' }, run('error'))])
   assert.deepEqual(rows.map((r) => [r.id, r.tone, r.state]), [['hook:a', 'idle', 'Off'], ['hook:b', 'idle', 'Never run']])
 })
 
@@ -37,4 +37,14 @@ test('failing rows come first and the healthy rows fold into one line', () => {
   assert.equal(healthy.length, 2)
   assert.equal(healthyLine(8, 0), '8 running normally')
   assert.equal(healthyLine(2, 1), '2 others running normally')
+})
+
+test('a failed global run opens its log, and a failed read shows the reason', async () => {
+  const [bad] = hookRows([summary({ name: 'maintenance' }, run('error', 'x'))])
+  assert.equal(bad?.log?.kind, 'hook')
+  if (bad?.log?.kind !== 'hook') return
+  const seen: string[] = []
+  const tail = await readLog(async (hook, id) => { seen.push(`${hook}/${id}`); return { tail: 'disk read failed', exitCode: 1 } }, bad.log)
+  assert.deepEqual([tail, seen], ['disk read failed', ['maintenance/x']])
+  assert.equal(await readLog(async () => { throw new Error('log is gone') }, bad.log), 'log is gone')
 })

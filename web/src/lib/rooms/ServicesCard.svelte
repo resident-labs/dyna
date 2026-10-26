@@ -10,8 +10,7 @@
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import type { Room } from '../api/room.ts'
-  import type { HookRunLog } from '../api/settings.ts'
-  import { groupRows, healthyLine, hookRows, serviceRows, type ServiceCardRow } from './servicesCard.ts'
+  import { groupRows, healthyLine, hookRows, readLog, serviceRows, type ServiceCardRow } from './servicesCard.ts'
 
   let { rooms = [], onroom }: { rooms?: Room[]; onroom: (id: string, view?: string) => void } = $props()
 
@@ -20,7 +19,7 @@
   let error = $state('')
   let folded = $state(true) // the healthy line is closed
   let open = $state('') // id of the hook row whose log shows
-  let logs = $state<Record<string, HookRunLog | string>>({}) // row id -> log tail, or its error
+  let logs = $state<Record<string, string>>({}) // row id -> log text
 
   let groups = $derived(groupRows(rows))
   const live = (room: Room) => !room.archived
@@ -45,16 +44,7 @@
     if (log.kind === 'room') return onroom(log.room, 'services')
     open = open === row.id ? '' : row.id
     if (!open || logs[row.id]) return
-    try {
-      logs[row.id] = await api.globalHookRunLog(log.hook, log.runId)
-    } catch (e) {
-      logs[row.id] = errorText(e)
-    }
-  }
-
-  const tail = (id: string): string => {
-    const log = logs[id]
-    return log === undefined ? 'Loading…' : typeof log === 'string' ? log : log.tail || '(empty log)'
+    logs[row.id] = await readLog(api.globalHookRunLog, log)
   }
 
   // The first read, and a read again when the room list changes.
@@ -71,7 +61,7 @@
     {#snippet meta()}<span class:err={row.tone === 'bad'}>{row.state}</span>{#if row.at}<span>{ago(row.at)}</span>{/if}{/snippet}
     {#snippet trail()}{#if row.log}<span class="go">{row.log.kind === 'hook' ? (open === row.id ? 'Hide log' : 'Log') : 'Open'}</span>{/if}{/snippet}
   </Row>
-  {#if open === row.id}<pre class="log mono">{tail(row.id)}</pre>{/if}
+  {#if open === row.id}<pre class="log mono">{logs[row.id] ?? 'Loading…'}</pre>{/if}
 {/snippet}
 
 {#if rows.length || error}
