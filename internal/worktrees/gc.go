@@ -255,8 +255,7 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	pinned, err := pinBase(ctx, repo, main, base)
 	if err != nil {
 		return Record{}, err
-	}
-	// A hash keeps branch names such as a/b and a-b distinct.
+	}	// A hash keeps branch names such as a/b and a-b distinct.
 	sum := sha256.Sum256([]byte(branch))
 	name := slug(branch)
 	if len(name) > 80 {
@@ -266,8 +265,21 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return Record{}, err
 	}
-	if out, err := gitOutput(ctx, main, "worktree", "add", "-b", branch, path, pinned); err != nil {
+	// The base ref, not the pinned id, is the start point: git derives the new
+	// branch's upstream from it exactly as before (branch.autoSetupMerge), and
+	// a raw commit id would drop that tracking.
+	if out, err := gitOutput(ctx, main, "worktree", "add", "-b", branch, path, base); err != nil {
 		return Record{}, fmt.Errorf("create worktree: %w: %s", err, out)
+	}
+	// The fetch and the add are separate git runs, so a concurrent fetch can
+	// still move the base between them. Refuse loudly instead of starting the
+	// branch at a commit other than the pinned one.
+	if out, err := gitOutput(ctx, path, "rev-parse", "HEAD"); err != nil || strings.TrimSpace(string(out)) != pinned {
+		gitOutput(ctx, main, "worktree", "remove", "--force", path)
+		if err != nil {
+			return Record{}, fmt.Errorf("verify the new worktree's commit: %w: %s", err, out)
+		}
+		return Record{}, fmt.Errorf("base %q moved from %s while the worktree was created; retry with the exact commit", base, pinned)
 	}
 	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
 	if err := Track(rec); err != nil {
