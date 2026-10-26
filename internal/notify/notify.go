@@ -1164,7 +1164,12 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 	if kind == "stopped" && turn.StopReason == "recipient" {
 		return nil, nil
 	}
-	if kind == "failed" && turn.N > 1 {
+	// A transfer replacement turn is exempt: its failure either starts the
+	// written-handoff fallback, which the notice says to wait for, or ends the
+	// move and needs the recovery notice. Suppression by a matching earlier
+	// error would leave a parent who was told to wait without the final
+	// report that asks for recovery.
+	if kind == "failed" && turn.N > 1 && turn.TransferID == "" {
 		previous, err := store.ReadTurn(info.ID, turn.N-1)
 		// Finish each turn, but alert only once for the same error
 		// across consecutive failed turns. Missing history must not hide it.
