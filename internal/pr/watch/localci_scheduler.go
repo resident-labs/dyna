@@ -476,7 +476,9 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	plan, err := s.prepareRegisteredCI(ctx, job)
 	if err != nil {
-		result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Error: Sanitize(err.Error())}
+		// The run never started, so the result says nothing about the commit. The
+		// cause keeps a trial from reporting it as a failed test.
+		result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: chosen.Name, Started: s.now(), Status: localci.OutcomeError, Cause: localci.CauseScheduling, Error: Sanitize(err.Error())}
 		if saveErr := registry.SaveResult(ctx, result); saveErr != nil {
 			log.Printf("save local CI preparation failure: %v", saveErr)
 		}
@@ -560,6 +562,11 @@ func savedResultActionFor(result localci.Result) savedResultAction {
 	}
 	if machineFailureRetryFrom(result) != "" {
 		return retryOnAnotherMachine
+	}
+	if result.Cause == localci.CauseScheduling && !result.Resumed {
+		// Preparing the run failed, so no check ran. That is a scheduling
+		// failure, not evidence about the commit, so it runs once more.
+		return retryStoppedRun
 	}
 	if stoppedLocalResult(result) && !result.Resumed {
 		return retryStoppedRun
@@ -848,6 +855,8 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 	cmd := gitexec.Command(ctx, r.RepoPath, args...)
 	g := s.github(r.RoomID)
 	ctx = ghclient.WithRepository(ghclient.WithRoom(ghclient.WithRooms(ctx, g.Rooms), r.RoomID), r.Host, r.Repo)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
 	var err error
 	if g.run != nil {
 		err = g.run(ctx, cmd)
@@ -855,6 +864,10 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 		err = ghclient.RunGit(ctx, g.Executable, cmd)
 	}
 	if err != nil {
+		detail := strings.TrimSpace(Sanitize(stderr.String()))
+		if detail != "" {
+			return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w: %s", err, clip(detail, 500))
+		}
 		return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w", err)
 	}
 	return s.planRegisteredCI(ctx, job)
