@@ -1500,6 +1500,27 @@ func fallbackReasonText(reason providerfailure.Reason) string {
 	return "the provider rejected the model"
 }
 
+// stderrDetailError carries a worker's standard-error tail beside its cause.
+// The tail never joins Error(): the failure card shows the cause, and the tail
+// reaches the owner as separate detail on its own.
+type stderrDetailError struct {
+	err    error
+	stderr string
+}
+
+func (e *stderrDetailError) Error() string { return e.err.Error() }
+func (e *stderrDetailError) Unwrap() error { return e.err }
+
+// StderrDetail returns the worker standard-error tail an error chain carries
+// as separate detail, or "". It is evidence for the owner, never cause text.
+func StderrDetail(err error) string {
+	var d *stderrDetailError
+	if errors.As(err, &d) {
+		return d.stderr
+	}
+	return ""
+}
+
 func attemptError(ctx context.Context, p profile.Profile, argv []string, a attempt) error {
 	// A stopped turn also cancels the steering read; report the stop.
 	stopped := a.contextDone && (errors.Is(a.steeringErr, context.Canceled) || errors.Is(a.steeringErr, context.DeadlineExceeded))
@@ -1517,12 +1538,14 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		return fmt.Errorf("worker %s (model %s) stopped: %w", p.Name, p.Model, a.runErr)
 	}
 	if a.startupStalled {
-		errTail := tail(strings.TrimSpace(a.stderr), 2000)
-		var err error
-		if errTail == "" {
-			err = fmt.Errorf("worker %s (model %s) failed to start: %w", p.Name, p.Model, a.runErr)
-		} else {
-			err = fmt.Errorf("worker %s (model %s) failed to start: %w: %s", p.Name, p.Model, a.runErr, errTail)
+		// The startup bound is the cause the owner reads. The worker's stderr
+		// is separate detail (StderrDetail), never part of that text, because a
+		// harness may print harmless warnings on every turn. The typed reason
+		// still comes only from a trusted boundary, never from this display
+		// text.
+		err := &stderrDetailError{
+			err:    fmt.Errorf("worker %s (model %s) failed to start: %w", p.Name, p.Model, a.runErr),
+			stderr: tail(strings.TrimSpace(a.stderr), 2000),
 		}
 		return providerfailure.TagStderr(err, a.stderr)
 	}
