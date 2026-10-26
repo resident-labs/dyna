@@ -11,7 +11,7 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-const startupTimeoutError = "replacement startup produced no model output within 60 seconds"
+const startupTimeoutError = "replacement startup produced no model output within 5 minutes"
 
 // A transfer replacement turn that fails with no model output moves the
 // transfer to the written-handoff fallback, so its failure notice must say
