@@ -113,21 +113,39 @@ func nodeCommand(s localci.Store) *cobra.Command {
 	remove := &cobra.Command{
 		Use: "rm <name>", Short: "Remove a CI machine, or only its ci role", Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			return (machines.Store{DataDir: s.DataDir}).RemoveRole(c.Context(), args[0], machines.RoleCI)
+			m, err := (machines.Store{DataDir: s.DataDir}).Get(c.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if !m.HasRole(machines.RoleCI) {
+				return fmt.Errorf("machine %q has no %s role: %w", args[0], machines.RoleCI, os.ErrNotExist)
+			}
+			roles := slices.DeleteFunc(append([]machines.Role(nil), m.Roles...), func(r machines.Role) bool { return r == machines.RoleCI })
+			patch := websvc.MachinePatch{}
+			if len(roles) == 0 {
+				patch.Remove = true
+			} else {
+				patch.Roles = &roles
+			}
+			if _, err := saveMachine(c.Context(), m.ID, patch); err != nil {
+				return err
+			}
+			return nil
 		},
 	}
 	disable := &cobra.Command{
 		Use: "disable <name>", Short: "Stop scheduling new runs on a CI machine", Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			store := machines.Store{DataDir: s.DataDir}
-			m, err := store.Get(c.Context(), args[0])
+			m, err := (machines.Store{DataDir: s.DataDir}).Get(c.Context(), args[0])
 			if err != nil {
 				return err
 			}
 			if !m.HasRole(machines.RoleCI) {
 				return fmt.Errorf("machine %q: %w", args[0], os.ErrNotExist)
 			}
-			return store.SetEnabled(c.Context(), args[0], false)
+			disabled := false
+			_, err = saveMachine(c.Context(), m.ID, websvc.MachinePatch{Enabled: &disabled})
+			return err
 		},
 	}
 	root.AddCommand(add, list, remove, disable)
