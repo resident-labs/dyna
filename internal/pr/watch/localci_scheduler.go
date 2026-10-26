@@ -669,7 +669,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	}
 	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
 	if err == nil && len(suites) > 0 {
-		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}
+		req := localci.Request{Definition: plan.execution, Repo: job.record.RepoPath, SHA: job.head, Base: job.record.Base, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}
 		req.OnStart = func(startCtx context.Context) error {
 			// Hosted work is only replaced for a hosted head. A local change has
 			// no queued GitHub run to cancel.
