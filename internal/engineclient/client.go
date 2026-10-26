@@ -156,7 +156,7 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 			// may have run for minutes before the engine stopped.
 			cutOff = true
 			giveUp = time.Now().Add(c.restartWait)
-			delay = 0
+			delay = 50 * time.Millisecond
 			continue
 		}
 		if !errors.Is(err, ErrNotRunning) {
