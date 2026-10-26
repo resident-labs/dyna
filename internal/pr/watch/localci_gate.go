@@ -233,9 +233,6 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			enabled = enabled || node.Enabled && node.Slots > 0
 		}
 	}
-	// A room in local mode whose head has no hosted CI has no provider to fall
-	// back to, so a trial decides on its own local result alone.
-	localOnly := mode == localci.ModeLocal && !snap.hasRealCI(policy.RequiredChecks...)
 	dir, dirErr := s.checkoutDir(ctx, r)
 	if dirErr != nil {
 		if !enabled {
@@ -255,6 +252,9 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
 	}
+	// A hosted fallback can only decide a head that has a hosted run, or one Dyna
+	// cancelled and can start again. Without either, a trial decides alone.
+	hostedFallback := snap.hasRealCI(policy.RequiredChecks...) || len(saved.IDs) > 0
 	var job registeredCIJob
 	if mode == localci.ModeLocal || mode == localci.ModeBoth || len(saved.IDs) > 0 {
 		job, err = s.registeredJobForRecord(r)
@@ -330,7 +330,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		// hosted fallback untouched.
 		if mode == localci.ModeLocal || mode == localci.ModeBoth {
 			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(plan, local, policy) {
-				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local, job.trial, localOnly)
+				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local, job.trial, hostedFallback)
 				return snap, nil
 			}
 		}
@@ -344,7 +344,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		snap.localCI = &registeredCIObservation{Status: verdictFromHosted(ci), Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
-	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result, job.trial, localOnly)
+	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result, job.trial, hostedFallback)
 	return snap, nil
 }
 
@@ -352,9 +352,9 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 // hosted read. Either provider's failure vetoes a pass, a local pass needs its
 // whole suite and the required checks, and a pending provider does not block a
 // conclusive pass. trial reports a head of a merge trial, the only work local CI
-// runs for now, and localOnly reports a room with no hosted provider to fall back
-// to.
-func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result, trial, localOnly bool) *registeredCIObservation {
+// runs for now, and hostedFallback reports a hosted run that can still decide the
+// head.
+func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result, trial, hostedFallback bool) *registeredCIObservation {
 	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	budgetNote := applyLocalBudgets(&result, policy)
 	localState, localJobs, logs := registeredResultStatus(result)
@@ -367,12 +367,11 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	if result.Status == localci.OutcomePassed && (!plan.runnable() || !plan.required.CoversSuites(result, plan.suites)) {
 		localState = VerdictPending
 	}
-	// A room with no hosted provider has nothing to fall back to, and no retry is
-	// coming for this run, so waiting here would never end. The trial fails and
-	// names the cause instead. A run Dyna stopped is retried first, and its
-	// replacement is the one that decides.
+	// Without a hosted run to fall back to, and with no local retry left, waiting
+	// here would never end. The trial fails and names the cause instead. A run
+	// Dyna stopped is retried first, and its replacement is the one that decides.
 	localFailure := ""
-	if trial && localOnly && localInfrastructureError(result) && savedResultActionFor(result) == settleSavedResult {
+	if trial && !hostedFallback && localInfrastructureError(result) && savedResultActionFor(result) == settleSavedResult {
 		localState, localJobs, logs = VerdictFailed, localFailedChecks(result), localFailureNote(result)
 		localFailure = localFailureNote(result)
 	}
@@ -400,7 +399,8 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 			// No hosted provider is coming in a local-only room: name the retry
 			// that really is, instead of a fallback that never arrives.
 			observation.Reason = hostedFallbackReason(snap)
-			if localOnly {
+			if !hostedFallback {
+				// Name the retry that really is coming, not a fallback that is not.
 				observation.Reason = "retrying local CI"
 			}
 		}
