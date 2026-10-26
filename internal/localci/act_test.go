@@ -27,6 +27,9 @@ func TestTagWorkflowBodyNamesEveryForm(t *testing.T) {
 		{"document marker", "---\nname: CI\non: push\n"},
 		{"no name", "on: push\n"},
 		{"marker then no name", "---\non: push\n"},
+		{"comment before the marker", "# comment\n---\non: push\njobs:\n  a: {runs-on: x}\n"},
+		{"comment only before the keys", "# comment\non: push\n"},
+		{"flow mapping", "{on: push, jobs: {a: {runs-on: x}}}\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
