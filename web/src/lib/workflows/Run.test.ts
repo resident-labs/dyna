@@ -136,3 +136,16 @@ test('a running agent card is one button that folds it; Session is not in the cl
   assert.doesNotMatch(body, /aria-label="[^"]*of bad"/, 'a failed agent has no result to open')
   assert.doesNotMatch(body, /<button class="session[^"]*"[^>]*>Session</, 'the Session button moved into the open body')
 })
+
+test('the run header is one line with the exact start time in its tooltip, and no stat tiles', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const detail = {
+    run: { id: 'wf_a', name: 'build', status: 'running', startedAt: new Date(Date.now() - 48 * 60000).toISOString() },
+    agents: [], agentTotal: 33, agentRunning: 5, agentFailed: 0, logs: [], phases: [],
+  }
+  const html = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(html, /<p class="runline[^"]*" title="Started [^"]+">Running for 48m · 5 working · 33 agents<\/p>/)
+  assert.doesNotMatch(html, /<dl|<dt>/, 'the stat tiles are gone')
+})
