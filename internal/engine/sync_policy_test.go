@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/store/storetest"
@@ -30,11 +31,25 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 	type syncCall struct {
 		name string
 		args []json.RawMessage
+		want string
+	}
+	account, err := s.runtime.Accounts.Create("pi", "sync fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := s.runtime.Accounts.HarnessHome("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := accountstore.DefaultStore().SetActive(accountstore.ProviderZAI, "pi", "", account.ID); err != nil {
+		t.Fatal(err)
 	}
 	cases := []syncCall{
-		{"SyncCatalogAccount", cliArgs(t, "mcp", "pi", "selected")},
-		{"SyncCatalogAccount", cliArgs(t, "skill", "pi", "selected")},
-		{"SyncPrivateRuntime", cliArgs(t, "pi")},
+		{"SyncCatalogAccount", cliArgs(t, "mcp", "pi", account.ID), "invalid character"},
+		{"SyncPrivateRuntime", cliArgs(t, "pi"), "invalid character"},
 	}
 	check := func(ctx context.Context, allowed bool) {
 		t.Helper()
@@ -42,7 +57,7 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 			_, err := calls[tc.name](ctx, tc.args)
 			if allowed {
 				// Valid owner/root calls reach the deliberately invalid catalog.
-				if err == nil || !strings.Contains(err.Error(), "invalid character") {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Errorf("%s did not reach generation: %v", tc.name, err)
 				}
 			} else if err == nil || !(strings.Contains(err.Error(), "is owner or root only") || strings.Contains(err.Error(), "could not verify")) {
@@ -74,7 +89,12 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 	if _, err := calls["SyncPrivateRuntime"](paired, cliArgs(t, "pi")); err == nil || !strings.Contains(err.Error(), "invalid character") {
 		t.Errorf("browser locality changed: %v", err)
 	}
-	if _, err := calls["SyncCatalogAccount"](paired, cliArgs(t, "mcp", "pi", "selected")); err == nil || !strings.Contains(err.Error(), "only through the local engine socket") {
+	if _, err := calls["SyncCatalogAccount"](paired, cliArgs(t, "mcp", "pi", account.ID)); err == nil || !strings.Contains(err.Error(), "only through the local engine socket") {
 		t.Errorf("account sync accepted remote owner: %v", err)
+	}
+	// The skill catalog has no native sync, even for the owner.
+	local := localCallerContext(t, websvc.Caller{Kind: websvc.Owner}, authority.Actor{Role: authority.Owner})
+	if _, err := calls["SyncCatalogAccount"](local, cliArgs(t, "skill", "pi", account.ID)); err == nil || !strings.Contains(err.Error(), "only MCP config syncs") {
+		t.Errorf("skill sync = %v", err)
 	}
 }

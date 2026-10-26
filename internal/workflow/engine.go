@@ -30,6 +30,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/harness"
+	harnessconfig "dyna-agent/internal/harness/config"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/instructions"
 	"dyna-agent/internal/mode"
@@ -38,6 +39,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/settings"
+	dynaskills "dyna-agent/internal/skills"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/structuredoutput"
 	"dyna-agent/internal/textutil"
@@ -276,6 +278,9 @@ type engine struct {
 	planStage      int
 	planItem       int
 	planIndexSet   bool
+	// Skills reads Dyna's global skill catalog. Tests set it; production
+	// reads the owner's catalog file.
+	Skills func() ([]harnessconfig.ManagedSkill, error)
 }
 
 type callPlan struct {
@@ -1116,8 +1121,8 @@ You must complete this task yourself. Do not spawn, delegate to, or invoke any s
 [/DYNA WORKFLOW RESTRICTION]`
 
 // workerInstructions is a workflow worker's standing instructions: the work
-// journal when it keeps one, the workflow restriction, and the global and room
-// rules, from the same pieces sessions use.
+// journal when it keeps one, the workflow restriction, the global and room
+// rules, from the same pieces sessions use, and the enabled skills.
 func (e *engine) workerInstructions(journal bool) instructions.Snapshot {
 	parts := []instructions.Section{{Name: "Workflow restriction", Text: workflowRestriction}}
 	if journal {
@@ -1127,7 +1132,26 @@ func (e *engine) workerInstructions(journal bool) instructions.Snapshot {
 	if e.opts.Run != nil {
 		roomID = e.opts.Run.Meta.RoomID
 	}
-	return instructions.Build(append(parts, goals.DefaultStore().InstructionSections(roomID)...)...)
+	parts = append(parts, goals.DefaultStore().InstructionSections(roomID)...)
+	parts = append(parts, e.skillSection())
+	return instructions.Build(parts...)
+}
+
+// skillSection lists the enabled skills through the same renderer sessions use.
+func (e *engine) skillSection() instructions.Section {
+	var entries []harnessconfig.ManagedSkill
+	var err error
+	if e.Skills != nil {
+		entries, err = e.Skills()
+	} else {
+		var catalog harnessconfig.HarnessConfig
+		catalog, err = harnessconfig.NewConfigManager().Read()
+		entries = catalog.Skills
+	}
+	if err != nil {
+		return instructions.Section{Name: "Skills"}
+	}
+	return dynaskills.Section(entries)
 }
 
 // workerTaskPrompt is the task, with the run-owned journal path in a trailing

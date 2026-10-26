@@ -1,5 +1,5 @@
 // Browser fixture only. This entry is not imported by the production app.
-// Open tests/settings.html?pane=harnesses to see a pane with sample data.
+// Open tests/settings.html?pane=skills or ?pane=mcp to see a pane with sample data.
 import '@fontsource/ibm-plex-sans/400.css'
 import '@fontsource/ibm-plex-sans/500.css'
 import '@fontsource/ibm-plex-sans/600.css'
@@ -14,7 +14,7 @@ import Settings from '../src/lib/settings/Settings.svelte'
 import { fixtureWindow, rollupFixture } from './usageRollupFixture.ts'
 import { account } from '../test/account-fixtures.ts'
 import { need } from '../test/need.ts'
-import type { Capability, HarnessAccount, HarnessConfig, HarnessSnapshot, Bundle } from '../src/lib/api/harness.ts'
+import type { Capability, HarnessAccount, HarnessConfig, HarnessSnapshot, Bundle, ManagedMCP, ManagedSkill } from '../src/lib/api/harness.ts'
 import type { HarnessSupport } from '../src/lib/settings/support.ts'
 import type { ProfileList, ProfileUsageStats, ProfileView } from '../src/lib/api/profile.ts'
 import type { ProfileSave } from '../src/lib/api/engine.ts'
@@ -27,7 +27,7 @@ const pane = query.get('pane') || 'harnesses'
 // ?empty=1 shows every list with no rows. ?delay=<ms> slows every api call, to see loading states.
 const empty = query.has('empty')
 const delay = Number(query.get('delay') || 120)
-const caps: Capability[] = ['claude-code', 'pi', 'mock'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: false }))
+const caps: Capability[] = ['claude-code', 'pi', 'mock'].map((harness) => ({ harness, status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, concurrent: false, sharedPersonalLogin: false }))
 const bundle = (harness: string, version: string): Bundle => ({ harness, version, executable: '', directory: '' })
 const harnessAccount = (id: string, harness: string, label: string, active: boolean): HarnessAccount => ({ id, harness, label, home: '', identity: '', status: 'ready', active, repos: null })
 // The runtime snapshot the fixture changes in place: its lists are never null.
@@ -50,10 +50,36 @@ const snapshot: Snapshot = {
   recommendedVersions: [{ harness: 'claude-code', version: '2.1.310', status: 'resolved', source: 'npm' }],
   installing: [],
 }
-const catalog: HarnessConfig = { mcp: [{ name: 'github', command: 'gh-mcp', enabledHarnesses: ['claude-code', 'pi'] }], skills: [{ name: 'release-notes', source: '~/.dyna/skills/release-notes', enabledHarnesses: ['claude-code'] }] }
+const catalog: HarnessConfig = {
+  mcp: empty ? [] : [
+    { name: 'github', command: 'gh-mcp', enabledHarnesses: ['claude-code', 'pi'] },
+    { name: 'browser', url: 'https://mcp.example.com/browser', enabledHarnesses: ['pi'] },
+  ],
+  skills: empty ? [] : [
+    { name: 'release-notes', source: '/home/user/.dyna/skills/release-notes', enabled: true },
+    { name: 'code-review', source: '/home/user/.dyna/skills/code-review', enabled: false },
+  ],
+}
 const later = <T>(value: T, ms = delay): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms))
 api.privateRuntimes = () => later(snapshot)
 api.harnessConfig = () => later(catalog)
+api.addHarnessSkill = (entry: ManagedSkill) => { catalog.skills = [...catalog.skills, entry]; return later(catalog) }
+api.addHarnessMCP = (entry: ManagedMCP) => { catalog.mcp = [...catalog.mcp, entry]; return later(catalog) }
+api.setHarnessConfigEnabled = (kind: string, name: string, harness: string, enabled: boolean) => {
+  if (kind === 'skill') {
+    const skill = need(catalog.skills.find((s) => s.name === name))
+    skill.enabled = enabled
+  } else {
+    const server = need(catalog.mcp.find((m) => m.name === name))
+    server.enabledHarnesses = enabled ? [...new Set([...server.enabledHarnesses, harness])] : server.enabledHarnesses.filter((h) => h !== harness)
+  }
+  return later(catalog)
+}
+api.removeHarnessConfig = (kind: string, name: string) => {
+  if (kind === 'skill') catalog.skills = catalog.skills.filter((s) => s.name !== name)
+  else catalog.mcp = catalog.mcp.filter((m) => m.name !== name)
+  return later(catalog)
+}
 api.privateRuntimeLogins = () => later([])
 api.installPrivateRuntime = (harness: string, version: string) => {
   snapshot.bundles = [...snapshot.bundles.filter((b) => b.harness !== harness), bundle(harness, version)]

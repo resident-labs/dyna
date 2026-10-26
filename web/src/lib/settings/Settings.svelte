@@ -7,6 +7,7 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import ProfilesPane from './ProfilesPane.svelte'
   import HarnessesPane from './harnesses/HarnessesPane.svelte'
+  import SkillsPane from './skills/SkillsPane.svelte'
   import AccountsPane from './accounts/AccountsPane.svelte'
   import SettingsPane from './SettingsPane.svelte'
   import HooksPane from './HooksPane.svelte'
@@ -37,6 +38,7 @@
   const nav = [
     { id: 'profiles', label: 'Profiles', hint: 'Who does the work' },
     { id: 'harnesses', label: 'Harnesses', hint: 'Install and maintain coding agents' },
+    { id: 'skills', label: 'Skills', hint: 'Skills every session can read' },
     { id: 'accounts', label: 'Accounts', hint: 'Sign-ins, usage and active account' },
     { id: 'hooks', label: 'Hooks', hint: 'Automatic passes and shell hooks' },
     { id: 'settings', label: 'Settings', hint: 'How Dyna behaves' },
@@ -59,6 +61,8 @@
     <ProfilesPane initialSelection={profileSelection} initialProfile={profileToOpen} {roomId} onusage={viewAccount} onmodal={(open) => (busy = open)} />
   {:else if pane === 'harnesses'}
     <HarnessesPane onmodal={(open) => (busy = open)} />
+  {:else if pane === 'skills'}
+    <SkillsPane />
   {:else if pane === 'accounts'}
     <AccountsPane accountId={accountToOpen} {roomId} {oncreateprofile} onprofile={viewProfile} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}

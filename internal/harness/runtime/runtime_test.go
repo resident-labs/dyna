@@ -115,19 +115,10 @@ func TestPreparePrivateProfilePinsGenerationAndIsolatesHome(t *testing.T) {
 	}
 }
 
-// Pi turns must keep preparing after Dyna links its skills into the
-// account home and after Pi adds its own links there. A regeneration
-// between turns relinks the skills to the new generation.
-func TestPiPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
+// Pi adds its own links inside the account home between turns. A second turn
+// must keep preparing, and a regeneration must still publish its views.
+func TestPiPrepareRepeatsWithHarnessLinks(t *testing.T) {
 	r, p := runtimeFixture(t, "pi")
-	source := t.TempDir()
-	skill := filepath.Join(source, "SKILL.md")
-	if err := os.WriteFile(skill, []byte("first"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"pi"}}); err != nil {
-		t.Fatal(err)
-	}
 	_, first, err := r.Prepare(context.Background(), p, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +144,7 @@ func TestPiPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
 	if _, _, err = r.Prepare(context.Background(), p, &first); err != nil {
 		t.Fatal("second turn:", err)
 	}
-	if err = os.WriteFile(skill, []byte("second"), 0600); err != nil {
+	if err = r.Config.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedMCP{Name: "later", MCPDefinition: harnessmgr.MCPDefinition{Command: "later"}, EnabledHarnesses: []string{"pi"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = r.Regenerate("pi"); err != nil {
@@ -165,10 +156,6 @@ func TestPiPrepareRepeatsWithSkillAndHarnessLinks(t *testing.T) {
 	}
 	if next.Generation == first.Generation {
 		t.Fatal("regeneration kept the old generation")
-	}
-	target, err := os.Readlink(filepath.Join(home, "skills", "review"))
-	if err != nil || target != filepath.Join(next.Generation, "skills", "review") {
-		t.Fatal("skill link does not follow the regeneration", target, err)
 	}
 }
 func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
@@ -250,10 +237,9 @@ func TestDoctorReportsPrivateHomeAndRemainingLimits(t *testing.T) {
 	if doctor.Home != harnesshome.Home(nativeHome) || doctor.Status != "ready" || doctor.Reason != "" {
 		t.Fatalf("unexpected private doctor state: %+v", doctor)
 	}
-	// Claude Code pins its skill set per generation, and that is a capability
-	// flag, not a partial reason.
+	// Claude Code keeps no skill state in its generation, so it stays ready.
 	for _, c := range Capabilities() {
-		if c.Harness == "claude-code" && (c.Status != "ready" || !c.SkillsPinned) {
+		if c.Harness == "claude-code" && c.Status != "ready" {
 			t.Fatalf("claude-code capability = %+v", c)
 		}
 	}
@@ -480,8 +466,8 @@ func TestPiPrepareUsesTheActiveProviderAccountHome(t *testing.T) {
 		t.Fatal("the account changed the immutable config generation")
 	}
 	// The account home holds the Dyna-managed part of Pi's agent directory, so
-	// the turn keeps its MCP servers, skills and model definitions.
-	for _, name := range []string{"settings.json", "mcp.json", "skills"} {
+	// the turn keeps its MCP servers and model definitions.
+	for _, name := range []string{"settings.json", "mcp.json"} {
 		if _, err = os.Lstat(filepath.Join(second.Home, name)); err != nil {
 			t.Fatalf("the account home lacks %s: %v", name, err)
 		}

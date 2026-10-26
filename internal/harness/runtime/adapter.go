@@ -22,21 +22,17 @@ type RuntimeAdapter struct {
 	ConfigFormat string // json or toml
 	MCPKey       string
 	ConfigFile   string // relative native config path, when no generation flag exists
-	SkillDir     string // relative native skill directory
 	NativeEnv    func(home string) map[string]string
 	// UnsetEnv removes inherited credentials, endpoints and personal model
 	// settings before NativeEnv and explicit profile values are applied.
 	UnsetEnv            []string
-	ConfigArgs          func(home, configPath, skillPath string) []string
+	ConfigArgs          func(home, configPath string) []string
 	LoginArgs           func(executable, home string) []string
 	AuthFiles           []string // native relative paths for an offline sign-in check
 	ConfigAllowlist     []string
 	PersonalConfigFiles []string
 	AccountBlocked      string
 	PartialReasons      []string
-	// SkillsPinned is true when each generation passes its own skill set,
-	// so a resumed session keeps the skills it started with.
-	SkillsPinned bool
 	// Requires names the files a bundle must hold beside its executable. A
 	// bundle without them is never resolved, selected or reused.
 	Requires []string
