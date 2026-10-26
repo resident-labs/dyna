@@ -48,6 +48,7 @@ func TestSocketPathFollowsTheDataFolder(t *testing.T) {
 // a scratch HOME cannot claim the owner's socket.
 func TestSocketPathIgnoresAChangedHome(t *testing.T) {
 	runtime := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtime)
 	owner := OwnerDataDir()
 	want, err := PathFor(runtime, owner)
 	if err != nil {
