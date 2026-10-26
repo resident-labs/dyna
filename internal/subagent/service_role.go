@@ -43,3 +43,16 @@ func isServiceRole(role string) bool {
 // tree, and `dyna services` is the way to read or change it. The room's
 // internal root session is not one, because it holds the room's seat.
 func (m Meta) ManagedService() bool { return m.Service && m.Role != RoleRoot }
+
+// RunOwner ties a leaf session to the workflow run and agent call it serves.
+// Journal and JournalRoot are the run-owned journal that `dyna journal` writes
+// for the agent; the session's environment carries both.
+type RunOwner struct {
+	ID          string `json:"id"`
+	Agent       int    `json:"agent"`
+	Journal     string `json:"journal,omitempty"`
+	JournalRoot string `json:"journalRoot,omitempty"`
+}
+
+// RunOwned reports a session that a workflow run started for one agent() call.
+func (m Meta) RunOwned() bool { return m.Run != nil }

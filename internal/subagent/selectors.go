@@ -71,7 +71,7 @@ func (s *Store) SelectorContext(meta Meta) string {
 	var siblings, children []Info
 	if sessions, err := s.ListSnapshot(false); err == nil {
 		for _, info := range sessions {
-			if info.ID == meta.ID || info.RoomID != meta.RoomID {
+			if info.ID == meta.ID || info.RoomID != meta.RoomID || info.RunOwned() {
 				continue
 			}
 			if !info.Service && info.ParentSession == meta.ParentSession {

@@ -105,6 +105,7 @@ func SessionCalls(rooms *roomsvc.Service) (map[string]websvc.Call, error) {
 func bindings(s services) []websvc.Binding {
 	lead := append(append(SessionBindings(s.rooms), SeatBindings(s.rooms)...), RunnerBindings(func() *subagent.Manager { return s.rooms.Notify.Sessions })...)
 	lead = append(lead, RunLifecycleBindings()...)
+	lead = append(lead, RunAgentBindings(func() *subagent.Manager { return s.rooms.Notify.Sessions })...)
 	machine := s.machineAPI()
 	return append(lead, []websvc.Binding{
 		s.admissionBinding(),
