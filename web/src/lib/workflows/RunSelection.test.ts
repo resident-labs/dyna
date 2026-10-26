@@ -7,7 +7,7 @@ import { importBundle, installDom, domNames } from '../prs/prDetailHarness.ts'
 
 const fixture = (phases: [string, string, string]) => `<script>
  import Run from './Run.svelte'
- const agent = (id, phase) => ({ id, label: 'T' + id, phase, status: 'ok' })
+ const agent = (id, phase) => ({ id, label: 'T' + id, phase, status: 'ok', session: 'ses_' + id })
  const make = (run) => ({ run: { id: run, name: 'continuous', status: 'running', startedAt: new Date().toISOString() },
   agents: [agent(1, '${phases[0]}'), agent(4, '${phases[0]}'), agent(2, '${phases[1]}'), agent(3, '${phases[2]}')], agentTotal: 4, agentRunning: 0, agentFailed: 0, logs: [], phases: [] })
  let detail = $state(make('wf_a'))
@@ -16,7 +16,7 @@ const fixture = (phases: [string, string, string]) => `<script>
  export function addAgent(id, phase) { detail = { ...detail, agents: [...detail.agents.slice(0, 2), agent(id, phase), ...detail.agents.slice(2)] } }
  export function dropAgent(id) { detail = { ...detail, agents: detail.agents.filter((a) => a.id !== id) } }
 </script>
-<Run {detail} />`
+<Run {detail} onopen={() => {}} />`
 const bundle = async (source: string) => {
   const compiled = await build({ bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
     stdin: { contents: compileSvelte(source, 'RunFixture.svelte') + '\nexport { mount, unmount, flushSync } from "svelte"', resolveDir: new URL('.', import.meta.url).pathname },
@@ -123,6 +123,25 @@ test('an open phase row stays open when it gains an agent and the window then tr
     assert.deepEqual(labels(), ['T1', 'T4', 'T5'])
     ui.flushSync(() => app.dropAgent(1)); ui.flushSync(() => app.dropAgent(4))
     assert.deepEqual(labels(), ['T5'], 'the Plan row stays open on the agent it gained')
+  } finally {
+    await ui.unmount(app); dom.window.close()
+    for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('opening an agent card shows its Session button in the body', async () => {
+  const dom = installDom()
+  const ui = await importBundle(plain.contents, 'RunFixture')
+  const app = ui.mount(ui.default, { target: document.getElementById('app') })
+  try {
+    ui.flushSync()
+    document.querySelector<HTMLElement>('.phases button.row')?.click()
+    ui.flushSync()
+    assert.equal(document.querySelectorAll('.agent .session').length, 0, 'a closed card has no Session button')
+    document.querySelector<HTMLElement>('.agent button.head')?.click()
+    ui.flushSync()
+    assert.equal(document.querySelectorAll('.agent .full .session').length, 1)
   } finally {
     await ui.unmount(app); dom.window.close()
     for (const name of domNames) Reflect.deleteProperty(globalThis, name)
