@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -346,6 +347,9 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	}
 	m, err := s.ReadMeta(id)
 	if err != nil {
+		return err
+	}
+	if err := awaitLaunch(); err != nil {
 		return err
 	}
 	m.Supervisor = os.Getpid()
@@ -881,11 +885,22 @@ func StartSupervisor(exe, id string) error {
 	defer errLog.Close()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, errLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// The supervisor starts its command only after the launcher has recorded
+	// the supervisor: it waits on this pipe for the launcher's go-ahead, and an
+	// end without one means the launch failed.
+	gateRead, gateWrite, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer gateWrite.Close()
+	cmd.ExtraFiles = []*os.File{gateRead}
+	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%d", launchGateEnv, 3))
 	if sessionlife.IsSessionID(m.Owner) {
 		err = callerid.Start(context.Background(), childenv.Clean(cmd), callerid.Launch{DataDir: store.DataDir(), Name: m.Owner, Actor: callerid.Identity{Kind: callerid.Session, Session: m.Owner}, Launcher: "shell"})
 	} else {
 		err = childenv.Clean(cmd).Start()
 	}
+	gateRead.Close() // the supervisor holds its own copy
 	if err != nil {
 		return err
 	}
@@ -893,25 +908,48 @@ func StartSupervisor(exe, id string) error {
 	// tell a supervisor still waiting to record itself from a dead one.
 	started, _ := procident.StartTime(cmd.Process.Pid)
 	launched := fmt.Sprintf("%d %d\n", cmd.Process.Pid, started)
-	if afterSupervisorLaunch != nil {
-		afterSupervisorLaunch()
-	}
 	if err := os.WriteFile(filepath.Join(dir, supervisorPID), []byte(launched), 0o600); err != nil {
-		// Nothing can find this supervisor now, so it must not keep running: it
-		// stops itself, and its command with it, on SIGTERM. A child of the
-		// command can ignore SIGTERM, so every process stamped with the job is
-		// stopped before the job is dropped.
-		_ = cmd.Process.Signal(syscall.SIGTERM)
+		// Closing the gate unsent keeps the command from ever starting: the
+		// supervisor ends by itself, and is waited for. Every process stamped
+		// with the job is stopped too, in case the command had started anyway.
+		gateWrite.Close()
 		_, _ = cmd.Process.Wait()
 		_, cleanup := stopOrphans(id)
 		return errors.Join(err, cleanup)
 	}
+	if _, err := gateWrite.Write([]byte{'g'}); err != nil {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_, _ = cmd.Process.Wait()
+		return err
+	}
 	return cmd.Process.Release()
 }
 
-// afterSupervisorLaunch runs in StartSupervisor after the supervisor started
-// and before its PID is recorded; a test uses it to change things at that point.
-var afterSupervisorLaunch func()
+// launchGateEnv names the file descriptor on which a supervisor waits for its
+// launcher's go-ahead before it starts its command.
+const launchGateEnv = "DYNA_SHELL_LAUNCH_GATE"
+
+// awaitLaunch blocks until the launcher has recorded this supervisor. A
+// supervisor started without a gate (a test, or an older launcher) goes on at
+// once. If the launcher closes the gate without the go-ahead, the command is
+// never started.
+func awaitLaunch() error {
+	v := os.Getenv(launchGateEnv)
+	if v == "" {
+		return nil
+	}
+	fd, err := strconv.Atoi(v)
+	if err != nil || fd < 3 {
+		return fmt.Errorf("invalid %s %q", launchGateEnv, v)
+	}
+	gate := os.NewFile(uintptr(fd), "launch gate")
+	defer gate.Close()
+	var b [1]byte
+	if n, _ := gate.Read(b[:]); n != 1 {
+		return errors.New("the launcher did not record this supervisor; the command was not started")
+	}
+	return nil
+}
 
 // supervisorPID holds the launched supervisor's PID and start time.
 const supervisorPID = "supervisor.pid"
