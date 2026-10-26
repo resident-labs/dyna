@@ -1053,7 +1053,7 @@ const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pg
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
+		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; printf 'local CI: every slot is busy, waiting for slot %d\\n' >&2; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
 }
 
 // noteScript writes at the start of a check's log what Dyna changed about its
