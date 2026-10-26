@@ -109,6 +109,16 @@ const cacheCleanSchema = `CREATE TABLE IF NOT EXISTS local_ci_cache_cleans (
  cleaned_at TEXT NOT NULL
 );`
 
+// warmSchema records the default branch commit each machine last warmed its act
+// cache from, so a machine warms once per commit.
+const warmSchema = `CREATE TABLE IF NOT EXISTS local_ci_warms (
+ repo TEXT NOT NULL,
+ node TEXT NOT NULL,
+ head TEXT NOT NULL,
+ warmed_at TEXT NOT NULL,
+ PRIMARY KEY(repo,node)
+);`
+
 // Migrate prepares the local CI tables at engine startup.
 func Migrate(dataDir string) error {
 	_, err := (Store{DataDir: dataDir}).open()
@@ -127,7 +137,7 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "localci.schema", 3, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "localci.schema", 4, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
 			// The machines migration drops this table, so it may be gone already.
@@ -146,7 +156,10 @@ func (s Store) open() (*sql.DB, error) {
 				return err
 			}
 		}
-		_, err := conn.ExecContext(context.Background(), cacheCleanSchema)
+		if _, err := conn.ExecContext(context.Background(), cacheCleanSchema); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(context.Background(), warmSchema)
 		return err
 	})
 	return db, err
@@ -401,4 +414,36 @@ func (s Store) loadPayload(ctx context.Context, table, repo, sha string, target 
 		return err
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// WarmedHead reports the default branch commit this node last warmed its act
+// cache from for this repository. A node that never warmed it has no head.
+func (s Store) WarmedHead(ctx context.Context, repo, node string) (string, error) {
+	db, err := s.open()
+	if err != nil {
+		return "", err
+	}
+	var head string
+	err = db.QueryRowContext(ctx, "SELECT head FROM local_ci_warms WHERE repo=? AND node=?", repo, node).Scan(&head)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return head, nil
+}
+
+// SaveWarm records that this node warmed its act cache from a commit, so the
+// same commit is not warmed twice.
+func (s Store) SaveWarm(ctx context.Context, repo, node, head string, at time.Time) error {
+	db, err := s.open()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "warm:" + repo + ":" + node}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_warms(repo,node,head,warmed_at) VALUES(?,?,?,?)
+ON CONFLICT(repo,node) DO UPDATE SET head=excluded.head, warmed_at=excluded.warmed_at`, repo, node, head, at.UTC().Format(time.RFC3339Nano))
+		return err
+	})
 }
