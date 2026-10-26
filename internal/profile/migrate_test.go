@@ -141,12 +141,16 @@ func TestProfileV3MigrationKeepsARetiredHarnessForRepair(t *testing.T) {
 	}
 	var doc struct {
 		Version  int
-		Profiles []map[string]any
+		Profiles []Profile
 	}
 	if err := json.Unmarshal(after, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Version != 3 || len(doc.Profiles) != 2 {
+	byName := map[string]Profile{}
+	for _, p := range doc.Profiles {
+		byName[p.Name] = p
+	}
+	if doc.Version != 3 || len(byName) != 2 || byName["old-muse"].Harness != "muse" || byName["kept"].EffectiveDialect() != "pi-json" {
 		t.Fatalf("migrated document = %s", after)
 	}
 	if _, err := Load(path); err == nil {

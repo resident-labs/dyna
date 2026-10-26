@@ -123,9 +123,11 @@ func migrateOutputArtifact(db *sql.DB, key, path string) error {
 			if len(line.Raw) == 0 {
 				return nil
 			}
-			// TODO: legacy/shim remove later — restores tool fields in retained
-			// workflow output written before the current event shapes.
-			return pack.Add([]projection.Line{line}, workeroutput.ConvertRunAgent)
+			// Retained workflow output needs no field repair: every remaining
+			// dialect writes complete tool events. Owner decision of 2026-10-25:
+			// no compatibility reader for a removed harness, and old sessions of
+			// it are deleted rather than viewed.
+			return pack.Add([]projection.Line{line}, func([]workeroutput.Event) []int { return nil })
 		})
 		if err != nil {
 			return err
