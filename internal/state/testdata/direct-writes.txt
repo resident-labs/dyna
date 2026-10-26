@@ -11,8 +11,6 @@ not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's
 not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeLock 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeManager.activate 2 # a harness CLI's own credential and config files
-not-state internal/admission/admission.go Gate.lockAlloc 1 # creates the allocation lock file that serializes turn slots; a lock, not state
-not-state internal/admission/admission.go take 1 # names the room in a turn slot's lock file, which the kernel frees when the turn's process dies; a lock, not state
 violation internal/agentslice/agentslice.go WriteSlice 1
 not-state internal/cli/ci/ci.go NewCommand 1 # exports a JUnit report to a caller-selected artifact path
 not-state internal/cli/computer/browser_deps.go playwrightModule 2 # browser launcher files of one computer

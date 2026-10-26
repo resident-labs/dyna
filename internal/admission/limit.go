@@ -2,19 +2,22 @@ package admission
 
 import "time"
 
-// Mode says what the gate does with its decision.
+// Mode says what the admission watcher does. Only off and observe exist: the
+// watcher records what a limit on concurrent turns would have held and holds
+// nothing, so an owner sees the effect before any limit is built.
 type Mode string
 
-// The modes. Observe is the default: it records what enforcing would have held
-// and holds nothing, so an owner sees the effect before choosing to enforce.
+// The modes.
 const (
 	ModeOff     Mode = "off"
 	ModeObserve Mode = "observe"
-	ModeEnforce Mode = "enforce"
 )
 
+// SampleEvery is how often the engine takes a sample.
+const SampleEvery = 45 * time.Second
+
 // Tunables of the automatic limit. They describe agent turns in general, and
-// every one is replaced by a measurement or a setting where one exists.
+// the first is replaced by a measurement where one exists.
 const (
 	// FallbackTurnBytes is the memory one turn is assumed to use until Dyna has
 	// measured real turns on this machine.
@@ -32,24 +35,9 @@ const (
 	// CalmReads is how many readings in a row must sit below half of every
 	// threshold before the machine counts as calm again.
 	CalmReads = 2
-	// DefaultMaxWait is how long an enforced turn may wait before it is admitted
-	// anyway, so no turn starves.
-	DefaultMaxWait = 2 * time.Minute
 )
 
-// Policy is the owner's setting.
-type Policy struct {
-	Mode Mode
-	// MaxTurns is a fixed limit; zero means automatic.
-	MaxTurns int
-	// Reserve is the memory kept free; zero means a tenth of the machine, at
-	// least MinReserve.
-	Reserve uint64
-	// MaxWait bounds a turn's wait; zero means DefaultMaxWait.
-	MaxWait time.Duration
-}
-
-// State is what the gate remembers between decisions, so a machine that flaps
+// State is what the watcher remembers between samples, so a machine that flaps
 // around a threshold does not flap the limit.
 type State struct {
 	Overloaded bool
@@ -68,12 +56,12 @@ func over(r Readings, factor float64) bool {
 	return r.Cores > 0 && r.Load1/float64(r.Cores) > EnterLoad*factor
 }
 
-// Decide returns the most turns of one pool that may run, given the turns that
-// run now, and the state to keep. The limit adds the turns the free memory can
-// still take to the turns that run; it adds none while the machine is
-// overloaded, and an overload ends only after CalmReads calm readings. At least
-// one turn always runs.
-func Decide(p Policy, r Readings, held int, st State) (int, State) {
+// Decide returns the most turns that could run, given the turns that run now,
+// and the state to keep. The limit adds the turns the free memory can still
+// take to the turns that run; it adds none while the machine is overloaded, and
+// an overload ends only after CalmReads calm readings. At least one turn always
+// runs.
+func Decide(r Readings, held int, st State) (int, State) {
 	switch {
 	case over(r, 1):
 		st.Overloaded, st.Calm = true, 0
@@ -84,9 +72,6 @@ func Decide(p Policy, r Readings, held int, st State) (int, State) {
 			st.Overloaded, st.Calm = false, 0
 		}
 	}
-	if p.MaxTurns > 0 {
-		return p.MaxTurns, st
-	}
 	if st.Overloaded {
 		return max(held, floorTurns), st
 	}
@@ -94,10 +79,7 @@ func Decide(p Policy, r Readings, held int, st State) (int, State) {
 	if per == 0 {
 		per = FallbackTurnBytes
 	}
-	reserve := p.Reserve
-	if reserve == 0 {
-		reserve = max(r.MemTotal/reserveDivisor, MinReserve)
-	}
+	reserve := max(r.MemTotal/reserveDivisor, MinReserve)
 	room := 0
 	if r.MemAvail > reserve {
 		room = int((r.MemAvail - reserve) / per)
@@ -105,8 +87,3 @@ func Decide(p Policy, r Readings, held int, st State) (int, State) {
 	hard := max(r.Cores, 1) * TurnsPerCore
 	return min(max(held+room, floorTurns), hard), st
 }
-
-// RoomShare is the most slots one room may hold of a pool whose limit is
-// limit: half, so another room can always start. A pool of one or two slots
-// leaves a room one.
-func RoomShare(limit int) int { return max(limit/2, 1) }

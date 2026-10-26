@@ -182,62 +182,51 @@ func TestDarwinFailsWhenACommandFails(t *testing.T) {
 	}
 }
 
-func TestMeasureTurnsSumsTheRunnersProcessTree(t *testing.T) {
-	proc := t.TempDir()
-	// Runner 100 has children 101 and 102 (a command name with a space and a
-	// parenthesis must not break the parse); runner 200 stands alone.
-	put(t, proc, map[string]string{
-		"100/stat": "100 (dyna) S 1 0\n", "100/statm": "0 1000 0 0 0 0 0\n",
-		"101/stat": "101 (claude code (x)) S 100 0\n", "101/statm": "0 3000 0 0 0 0 0\n",
-		"102/stat": "102 (sh) S 100 0\n", "102/statm": "0 500 0 0 0 0 0\n",
-		"200/stat": "200 (dyna) S 1 0\n", "200/statm": "0 2000 0 0 0 0 0\n",
-		"300/stat": "300 (other) S 1 0\n", "300/statm": "0 99999 0 0 0 0 0\n",
-	})
-	// (1000+3000+500 + 2000) / 2 runners, 4096 bytes a page.
-	if got, want := MeasureTurns(proc, []int{100, 200}, 4096), uint64(6500*4096/2); got != want {
-		t.Fatalf("measured %d, want %d", got, want)
-	}
-	if got := MeasureTurns(proc, []int{999}, 4096); got != 0 {
-		t.Fatalf("a runner that is gone measured %d, want 0 so the fallback stays", got)
-	}
-}
-
 func TestObservationsSummarizeTheLastDay(t *testing.T) {
 	o := Observed{DataDir: t.TempDir()}
 	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 	for _, ob := range []Observation{
-		{At: now.Add(-2 * time.Hour), Pool: Turns, Room: "a", Reason: ReasonLimit, Held: 7, Limit: 5},
-		{At: now.Add(-time.Hour), Pool: Turns, Room: "b", Reason: ReasonLimit, Held: 9, Limit: 5},
-		{At: now.Add(-30 * time.Hour), Pool: Turns, Room: "a", Reason: ReasonLimit, Held: 20, Limit: 5}, // too old
-		{At: now.Add(-time.Hour), Pool: Turns, Room: "c", Reason: ReasonRoomShare, Held: 2, Limit: 4},   // a room hold is not an overshoot
+		{At: now.Add(-2 * time.Hour), Running: 7, Limit: 5},
+		{At: now.Add(-time.Hour), Running: 9, Limit: 5},
+		{At: now.Add(-30 * time.Hour), Running: 20, Limit: 5}, // too old
+		{At: now.Add(-time.Minute), Running: 5, Limit: 5},     // at the limit: over by none
 	} {
 		if err := o.Record(context.Background(), ob); err != nil {
 			t.Fatal(err)
 		}
 	}
 	sum, err := o.Summarize(now.Add(-24 * time.Hour))
-	if err != nil || sum.Turns != 3 || sum.OverLimit != 2 || sum.MostOver != 5 {
+	if err != nil || sum.Samples != 3 || sum.MostOver != 4 || sum.Held() != 3*SampleEvery {
 		t.Fatalf("summary = %+v, %v", sum, err)
-	}
-}
-
-func TestMeasurePSAveragesTheProcessTrees(t *testing.T) {
-	out := []byte("  100     1   1000\n  101   100   3000\n  200     1   2000\n  300     1  99999\n junk line\n")
-	if got, want := MeasurePS(out, []int{100, 200}), uint64((4000+2000)*1024/2); got != want {
-		t.Fatalf("measured %d, want %d", got, want)
 	}
 }
 
 func TestStateSurvivesInTheDatabase(t *testing.T) {
 	s := StateStore{DataDir: t.TempDir()}
-	if st, err := s.Load(context.Background(), Turns); err != nil || st != (State{}) {
+	if st, err := s.Load(context.Background(), Watch); err != nil || st != (State{}) {
 		t.Fatalf("empty load = %+v, %v", st, err)
 	}
 	want := State{Overloaded: true, Calm: 1, TurnBytes: 3 << 30, MeasuredAt: time.Unix(1_800_000_000, 0)}
-	if err := s.Save(context.Background(), Turns, want); err != nil {
+	if err := s.Save(context.Background(), Watch, want); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.Load(context.Background(), Turns); err != nil || !got.MeasuredAt.Equal(want.MeasuredAt) || got.Overloaded != want.Overloaded || got.Calm != 1 || got.TurnBytes != want.TurnBytes {
+	if got, err := s.Load(context.Background(), Watch); err != nil || !got.MeasuredAt.Equal(want.MeasuredAt) || got.Overloaded != want.Overloaded || got.Calm != 1 || got.TurnBytes != want.TurnBytes {
 		t.Fatalf("loaded %+v, %v", got, err)
+	}
+}
+
+// Two cgroup mounts show the hierarchy: the first shows a subtree that does not
+// hold the process, the second does. A mount whose root is outside the process's
+// cgroup namespace ("/..") maps by the same text rule.
+func TestLinuxUsesTheMountThatShowsTheProcess(t *testing.T) {
+	proc, cg1, cg2 := t.TempDir(), t.TempDir(), t.TempDir()
+	put(t, proc, map[string]string{
+		"loadavg": "0.1 0 0 1/1 1\n", "meminfo": meminfo, "self/cgroup": "0::/../outer/inner\n",
+		"self/mountinfo": "30 25 0:26 /elsewhere " + cg1 + " rw - cgroup2 cgroup2 rw\n31 25 0:27 /../outer " + cg2 + " rw - cgroup2 cgroup2 rw\n",
+	})
+	put(t, cg2, map[string]string{"inner/memory.max": "2147483648\n", "inner/memory.current": "0\n"})
+	r, err := Linux{ProcDir: proc}.Read(context.Background())
+	if err != nil || r.MemTotal != 2<<30 {
+		t.Fatalf("readings = %+v, %v", r, err)
 	}
 }

@@ -722,7 +722,6 @@ func turnCommand(newManager func() *subagent.Manager) *cobra.Command {
 			m := newManager()
 			// The detached runner writes its session record through the engine.
 			m.Engine = engineclient.New("")
-			m.Admit = subagent.MachineAdmit(m)
 			return m.RunTurn(ctx, args[0], n, lock)
 		},
 	}
