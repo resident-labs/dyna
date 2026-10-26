@@ -8,6 +8,9 @@
   import { speaker } from '../ui/posts.ts'
   import { postParts } from '../ui/postParts.ts'
   import { postPreview } from '../ui/preview.ts'
+  import RunAvatar from '../workflows/RunAvatar.svelte'
+  import WorkflowMessage from './WorkflowMessage.svelte'
+  import { scriptSender, scriptLabel, scriptHref } from './scriptSender.ts'
   import { look } from './look.svelte.ts'
   import { setting } from './look.ts'
   import type { Post } from '../api/room.ts'
@@ -43,7 +46,8 @@
 
   let localExpanded = $state(false)
   let isExpanded = $derived(expanded ?? localExpanded)
-  let name = $derived(speaker(post, room.name))
+  let script = $derived(scriptSender(post))
+  let name = $derived(script ? scriptLabel(script) : speaker(post, room.name))
   let parts = $derived(postParts(post))
   let preview = $derived(postPreview(parts.text))
   // Root's ordinary posts always stay open. A turn result is not an ordinary
@@ -62,6 +66,7 @@
 <div class="message {surface}" data-id={turnResult ? post.id : undefined}>
   <span class="gutter">
     {#if cont}<time class="side-time">{clock(post.ts)}</time>
+    {:else if script}<a class="av" href={scriptHref(post.roomId ?? '', script)} aria-label="Open workflow run {name}"><RunAvatar size={40} /></a>
     {:else}<button class="av" onclick={() => onaddress?.(post.from ?? '')} aria-label={name}>
       <Avatar {name} hue={post.fromHue} owner={post.owner} emoji={post.fromEmoji} size={40} />
     </button>{/if}
@@ -69,7 +74,8 @@
   <div class="body" class:turn-result={turnResult}>
     {#if !cont}
       <header>
-        <button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{name}</button>
+        {#if script}<a class="name run-name" href={scriptHref(post.roomId ?? '', script)} title="Open workflow run {script.runId}">{name}</a><span class="tag">workflow</span>
+        {:else}<button class="name hue-{post.fromHue}" onclick={() => onaddress?.(post.from ?? '')}>{name}</button>{/if}
         {#if post.owner && post.human}<span class="tag">human</span>{/if}
         <time title={new Date(post.ts ?? 0).toLocaleString()}>{stamp(post.ts)}</time>
         {#if recipients}
@@ -81,7 +87,10 @@
         {/if}
       </header>
     {/if}
-    {#if parts.text}
+    {#if parts.text && script}
+      <WorkflowMessage id={bodyId} text={shown} />
+      {#if trim && !post.human && preview.truncated}<button class="message-toggle" aria-expanded={isExpanded} aria-controls={bodyId} onclick={toggle}>{isExpanded ? 'Show less' : 'Show more'}</button>{/if}
+    {:else if parts.text}
       <div id={bodyId} class="prose">{@html markdown(shown)}</div>
       {#if trim && !post.human && preview.truncated}<button class="message-toggle" aria-expanded={isExpanded} aria-controls={bodyId} onclick={toggle}>{isExpanded ? 'Show less' : 'Show more'}</button>{/if}
     {/if}
@@ -106,6 +115,8 @@
   header { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 8px; line-height: var(--leading-tight); }
   .name { font-weight: 600; font-size: var(--t-lead); }
   .name:hover { text-decoration: underline; }
+  .run-name { color: var(--gold); text-decoration: none; }
+  .run-name:hover { text-decoration: underline; }
   .tag {
     font-size: var(--t-cap);
     font-weight: 600;
