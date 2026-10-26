@@ -34,8 +34,15 @@ func TestIssueGoalAndClose(t *testing.T) {
 	if err != nil || g.Text != i.Title || !strings.Contains(g.Detail, "Local issue D-1\n") || strings.Contains(g.Detail, i.ID) || !strings.Contains(g.Detail, "parser.go:7") || !strings.Contains(g.Detail, "one path") {
 		t.Fatalf("goal: %+v %v", g, err)
 	}
-	if _, err = e.svc.CloseIssue(t.Context(), r.ID, i.ID, "done"); err == nil {
-		t.Fatal("closed a goal issue")
+	// Root and the owner close a goal issue directly (D-249); a session keeps
+	// no triage right in any state.
+	sessionCtx := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: r.Name + ":agent", Room: r.ID})
+	if _, err = e.svc.CloseIssue(sessionCtx, r.ID, i.ID, "not mine"); err == nil {
+		t.Fatal("a session closed a goal issue")
+	}
+	closed, err := e.svc.CloseIssue(t.Context(), r.ID, i.ID, "done by hand")
+	if err != nil || closed.State != room.IssueStateClosed || closed.Reason != "done by hand" {
+		t.Fatalf("owner close of a goal issue = %+v, %v", closed, err)
 	}
 	rows, err := e.svc.Issues(r.ID, false)
 	if err != nil || len(rows) != 0 {
