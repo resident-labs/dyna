@@ -297,17 +297,36 @@ func TestSmellWakeNowSkipsTheIntervalForOwnerAndRootOnly(t *testing.T) {
 	commitFile(t, h.repo, "agents/now.go", "package agents\n")
 	h.clock = h.clock.Add(time.Minute)
 	ctx := context.Background()
+	saved, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Get(h.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Root}, "room_other", h.repo); err == nil || !strings.Contains(err.Error(), "another room") {
+		t.Fatalf("root of another room wake now = %v, want a cross-room refusal", err)
+	}
+	if res, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Owner}, "", h.repo); err != nil || res.Action != "started" {
+		t.Fatalf("owner wake now = %+v %v, want started", res, err)
+	}
+	h.clock = h.clock.Add(time.Minute)
+	h.sessions.turns[len(h.sessions.turns)-1].Status = subagent.TurnOK
+	commitFile(t, h.repo, "agents/now2.go", "package agents\n")
 	if res, err := h.svc.wakeSmells(ctx, h.repo, false); err != nil || res.Action != "batched" {
 		t.Fatalf("scheduled smell wake inside the interval = %+v %v, want batched", res, err)
 	}
-	if _, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Session}, h.repo); err == nil || !strings.Contains(err.Error(), "owner or root only") {
+	if _, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Session}, "", h.repo); err == nil || !strings.Contains(err.Error(), "owner or root only") {
 		t.Fatalf("session wake now = %v, want an owner or root error", err)
 	}
-	if res, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Root}, h.repo); err != nil || (res.Action != "started" && res.Action != "assigned") {
+	if res, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Root}, saved.RoomID, h.repo); err != nil || (res.Action != "started" && res.Action != "assigned") {
 		t.Fatalf("root wake now inside the interval = %+v %v, want a started pass", res, err)
 	}
 	if st, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Get(h.id); err != nil || !st.SmellUncapped {
 		t.Fatalf("state after wake now = %+v %v, want the pass marked uncapped", st, err)
+	}
+	// The first pass is still on its last turn, so a second --now stays busy.
+	h.sessions.turns[len(h.sessions.turns)-1].Status = subagent.TurnRunning
+	tasks := len(h.sessions.tasks)
+	if res, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Root}, saved.RoomID, h.repo); err != nil || res.Action != "busy" || len(h.sessions.tasks) != tasks {
+		t.Fatalf("wake now while a smell turn runs = %+v %v, want busy and no new task", res, err)
 	}
 }
 
