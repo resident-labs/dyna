@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -170,25 +171,31 @@ func TestCutStartSubagentRepeatsOnceWithTheSameRequestID(t *testing.T) {
 }
 
 // After the cut, a refused socket waits with a growing delay and says so once,
-// instead of dialing in a tight loop.
+// instead of dialing in a tight loop. The clock is fake.
 func TestCutThenRefusedSocketWaitsWithBackoff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "engine.sock")
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
+	listener, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener.SetUnlinkOnClose(false)
 	go func() {
 		conn, err := listener.Accept()
+		_ = listener.Close() // removes the socket, so later dials are refused
 		if err == nil {
 			_ = conn.Close()
 		}
-		_ = listener.Close() // the socket file stays: later dials are refused
 	}()
+	at := time.Unix(0, 0)
+	var waits []time.Duration
 	var notices bytes.Buffer
-	err = engineclient.New(path, engineclient.Notices(&notices), engineclient.RestartWait(250*time.Millisecond)).Call(t.Context(), "StartSubagent", nil, nil)
+	client := engineclient.New(path, engineclient.Notices(&notices), engineclient.RestartWait(time.Second), engineclient.FakeClock(&at, &waits))
+	err = client.Call(t.Context(), "StartSubagent", nil, nil)
 	if !errors.Is(err, engineclient.ErrNotRunning) {
 		t.Fatalf("err = %v; want engine not running", err)
+	}
+	want := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 300 * time.Millisecond}
+	if !slices.Equal(waits, want) {
+		t.Fatalf("waits = %v; want %v", waits, want)
 	}
 	if strings.Count(notices.String(), "waiting for the engine") != 1 {
 		t.Fatalf("notices = %q; want one waiting line", notices.String())

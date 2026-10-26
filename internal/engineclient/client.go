@@ -73,8 +73,11 @@ var (
 type Client struct {
 	http        *http.Client
 	restartWait time.Duration
-	notices     io.Writer
-	build       string
+	// now and after are the clock; tests replace them.
+	now     func() time.Time
+	after   func(time.Duration) <-chan time.Time
+	notices io.Writer
+	build   string
 	// warned makes a build gap print one line per client, not per call.
 	warned sync.Once
 }
@@ -115,7 +118,7 @@ func New(path string, opts ...Option) *Client {
 			return conn, err
 		},
 	}
-	c := &Client{http: &http.Client{Transport: transport}, restartWait: time.Minute, notices: os.Stderr, build: callspec.Build}
+	c := &Client{http: &http.Client{Transport: transport}, restartWait: time.Minute, now: time.Now, after: time.After, notices: os.Stderr, build: callspec.Build}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -148,21 +151,21 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 		return err
 	}
 	deadline := deadline(method)
-	giveUp := time.Now().Add(c.restartWait)
+	giveUp := c.now().Add(c.restartWait)
 	for delay := 100 * time.Millisecond; ; delay = min(2*delay, time.Second) {
 		err := c.call(ctx, method, body, deadline, result)
 		if callspec.IsCutOff(err) && !cutOff && ctx.Err() == nil && repeatsAfterCutOff(method) {
 			// The restart wait starts here, not at the first send: the call
 			// may have run for minutes before the engine stopped.
 			cutOff = true
-			giveUp = time.Now().Add(c.restartWait)
+			giveUp = c.now().Add(c.restartWait)
 			delay = 50 * time.Millisecond
 			continue
 		}
 		if !errors.Is(err, ErrNotRunning) {
 			return err
 		}
-		left := time.Until(giveUp)
+		left := giveUp.Sub(c.now())
 		if left <= 0 {
 			return fmt.Errorf("%w (waited %g s)", ErrNotRunning, c.restartWait.Seconds())
 		}
@@ -172,7 +175,7 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(min(delay, left)):
+		case <-c.after(min(delay, left)):
 		}
 	}
 }
