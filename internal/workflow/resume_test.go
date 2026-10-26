@@ -11,7 +11,7 @@ import (
 
 func TestExecuteWarnsAboutResumeUnstableJavaScriptAPIs(t *testing.T) {
 	var warnings []string
-	result, err := Execute(context.Background(), Options{
+	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `
 const timestamp = Date.now();
 const instant = new Date();
@@ -43,7 +43,7 @@ func TestExecuteDoesNotWarnWithoutResumeUnstableAPIs(t *testing.T) {
 	} {
 		t.Run(script, func(t *testing.T) {
 			var warnings []string
-			_, err := Execute(context.Background(), Options{
+			_, err := executeTest(context.Background(), Options{
 				ScriptSrc: script,
 				Store:     &profile.Store{},
 				WorkDir:   t.TempDir(),

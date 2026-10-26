@@ -503,8 +503,14 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 		}
 		prof = p
 	}
-	if err := checkProfileUse(*prof, service); err != nil {
-		return Info{}, Turn{}, err
+	// A run agent's profile was checked for workflows by its coordinator; a
+	// profile limited to workflows has no subagent use.
+	if opts.Run == nil {
+		if err := checkProfileUse(*prof, service); err != nil {
+			return Info{}, Turn{}, err
+		}
+	} else if !prof.WorkflowEligible() {
+		return Info{}, Turn{}, fmt.Errorf("profile %q is not enabled for workflows", prof.Name)
 	}
 	if err := review.CheckReviewerHelper(reviewerHierarchy{m.store()}, parent, *prof, profs); err != nil {
 		return Info{}, Turn{}, err

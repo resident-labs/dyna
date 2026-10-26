@@ -32,7 +32,7 @@ func TestRunAgentStartsOneLeafSessionAndClosesAfterItsResult(t *testing.T) {
 	}
 	env := map[string]string{}
 	stampSession(env, first.Meta)
-	if env["DYNA_AGENT_JOURNAL"] != owner.Journal || env["DYNA_AGENT_JOURNAL_ROOT"] != owner.JournalRoot {
+	if env["DYNA_AGENT_JOURNAL"] != owner.Journal || env["DYNA_AGENT_JOURNAL_ROOT"] != owner.JournalRoot || env["DYNA_WORKER_RUN"] != "wf_1" {
 		t.Fatalf("session env = %v; want the run journal paths", env)
 	}
 	got, err := e.m.WaitRunAgent(e.ctx, "wf_1", 3, time.Minute)
@@ -285,4 +285,25 @@ func TestCloseRunAgentsWaitsForAStartInFlight(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestRunAgentInstructionsKeepTheJournalAndOfferNoDelegation(t *testing.T) {
+	e := newTestEnv(t)
+	meta := Meta{ID: RunAgentID("wf_1", 1), Name: "agent", Room: e.room.Name, RoomID: e.room.ID, Depth: 1, Leaf: true,
+		Run: &RunOwner{ID: "wf_1", Agent: 1, Journal: "/runs/wf_1/agents/1/journal.jsonl", JournalRoot: "/runs"}}
+	text := e.m.sessionInstructions(meta, "owner", 3, "").Text()
+	for _, want := range []string{"[DYNA WORK JOURNAL - REQUIRED]", `dyna journal "what changed or what you learned"`, "You are a leaf: complete the task yourself.", "$DYNA_SCRATCH"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("run agent instructions miss %q", want)
+		}
+	}
+	for _, unwanted := range []string{"subagent start", "dyna goal", "Start a persistent child", "Check-ins cover"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("run agent instructions offer %q", unwanted)
+		}
+	}
+	meta.Run.Journal = ""
+	if strings.Contains(e.m.sessionInstructions(meta, "owner", 3, "").Text(), "DYNA WORK JOURNAL") {
+		t.Error("a run agent without a journal still gets the journal rules")
+	}
 }
