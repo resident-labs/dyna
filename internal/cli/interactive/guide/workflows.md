@@ -113,7 +113,7 @@ A child must not call `workflow()`. Siblings may run concurrently. Child agents 
 
 ### Globals and progress
 
-- `phase(title)`: sets the default group for later agents.
+- `phase(title)` or `phase(title, {lane, stage})`: sets the default group; lane and stage place it on the run grid.
 - `log(message)`: emits durable `t=log` with `provenance: "workflow"`; truncates at 4000 characters. Engine diagnostics use `provenance: "system"`. Stderr output respects `--quiet`.
 - `sleep(ms)`: pauses the script for milliseconds.
 - `args`: JSON parsed from `--args`, or `undefined`; nested JSON strings are not parsed.
