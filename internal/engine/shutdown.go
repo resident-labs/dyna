@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,11 +53,18 @@ func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*h
 		}
 	}()
 	var pending sync.WaitGroup
-	var waiting sync.Map // part name -> struct{} while it has not finished
+	var waitingMu sync.Mutex
+	waiting := map[string]struct{}{} // part names that have not finished
 	start := func(name string, fn func()) {
 		pending.Add(1)
-		waiting.Store(name, struct{}{})
-		go func() { defer pending.Done(); defer waiting.Delete(name); fn() }()
+		waitingMu.Lock()
+		waiting[name] = struct{}{}
+		waitingMu.Unlock()
+		go func() {
+			defer pending.Done()
+			defer func() { waitingMu.Lock(); delete(waiting, name); waitingMu.Unlock() }()
+			fn()
+		}()
 	}
 	for i, server := range servers {
 		start(fmt.Sprintf("http server %d", i+1), func() {
@@ -75,9 +83,9 @@ func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*h
 		start(fmt.Sprintf("cleanup %d", i+1), closeService)
 	}
 	slow := time.AfterFunc(stopSlowAfter(), func() {
-		var names []string
-		waiting.Range(func(k, _ any) bool { names = append(names, k.(string)); return true })
-		sort.Strings(names)
+		waitingMu.Lock()
+		names := slices.Sorted(maps.Keys(waiting))
+		waitingMu.Unlock()
 		stopLogf("engine stop still waits for: %s", strings.Join(names, ", "))
 	})
 	defer slow.Stop()
