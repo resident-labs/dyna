@@ -1210,4 +1210,20 @@ func TestRepairedTurnWakesOnlyUndispatchedInput(t *testing.T) {
 	if slices.Contains(ids, dispatched.ID) {
 		t.Fatalf("a repaired turn would repeat input its harness may have run: %v", ids)
 	}
+	// The follow-up turn admits input at one boundary, so the uncertain post must
+	// stay out of its prompt as well, not only out of the wake trigger.
+	admitted, _, err := m.drainRoomMessages(current, Turn{N: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admits := make([]string, 0, len(admitted))
+	for _, msg := range admitted {
+		admits = append(admits, msg.ID)
+	}
+	if !slices.Contains(admits, queued.ID) {
+		t.Fatalf("the next turn did not admit the queued post: %v", admits)
+	}
+	if slices.Contains(admits, dispatched.ID) {
+		t.Fatalf("the next turn admitted input its harness may have run: %v", admits)
+	}
 }

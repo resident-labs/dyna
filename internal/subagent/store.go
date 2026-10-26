@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,9 +85,13 @@ var (
 type Meta struct {
 	HistoryOnly bool `json:"historyOnly,omitempty"`
 	// Service marks managed sessions and their helpers for mention routing and member grouping.
-	Service              bool                 `json:"service,omitempty"`
-	Role                 string               `json:"role,omitempty"`
-	InheritedReceipts    map[string]bool      `json:"inheritedReceipts,omitempty"`
+	Service           bool            `json:"service,omitempty"`
+	Role              string          `json:"role,omitempty"`
+	InheritedReceipts map[string]bool `json:"inheritedReceipts,omitempty"`
+	// UncertainInputIDs names posts a repaired turn had handed to its harness
+	// with no delivery receipt. The harness may already have run them, so no
+	// later turn admits them again until the owner resolves the input.
+	UncertainInputIDs    []string             `json:"uncertainInputIds,omitempty"`
 	ConsolidationHistory []ConsolidationState `json:"consolidationHistory,omitempty"`
 	ID                   string               `json:"id"`
 	Name                 string               `json:"name,omitempty"`
@@ -892,6 +897,22 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 			}
 		}
 		t.InputCutoff = cutoff
+		// Keep the live input the dead runner had handed over without a receipt
+		// from entering a later turn: the harness may already have run it. A
+		// steer read from the room log at the turn's start carries its source
+		// offset and stays with the claim that guards it.
+		for _, steer := range t.Steering {
+			if steer.ID == "" || steer.Delivered || slices.Contains(meta.UncertainInputIDs, steer.ID) {
+				continue
+			}
+			// Input the turn drained at its start was read from the room log and
+			// stays with the claim that guards it; a live post the runner handed
+			// over mid-turn is the uncertain one.
+			if slices.Contains(t.PendingInputIDs, steer.ID) {
+				continue
+			}
+			meta.UncertainInputIDs = append(meta.UncertainInputIDs, steer.ID)
+		}
 		readRevision, _ := s.turnVersion(id, n)
 		var gate gateState
 		if dir, err := s.Dir(id); err == nil {
@@ -906,6 +927,11 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 		t.Ended = time.Now()
 		if err := s.writeTurn(id, t); err != nil {
 			return err
+		}
+		if len(meta.UncertainInputIDs) > 0 {
+			if err := s.writeMeta(meta); err != nil {
+				return err
+			}
 		}
 		repaired = true
 		return nil
