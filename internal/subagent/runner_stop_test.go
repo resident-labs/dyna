@@ -209,3 +209,28 @@ BEGIN SELECT RAISE(ABORT, 'refuse stop'); END`); err != nil {
 		t.Fatalf("stop = %v; want the failed intent write", err)
 	}
 }
+
+// An engine close of a running turn records the engine as who stopped it, not
+// an incidental session in the context (D-276 review).
+func TestEngineCloseOfARunningTurnNamesTheEngine(t *testing.T) {
+	e, info, _ := startedStopFixture(t)
+	t.Cleanup(authority.InEngine())
+	incidental := authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: "ses_incidental"})
+	// A held goal would make the close refuse before it stops anything.
+	held, err := e.m.goalStore().OpenHeldBy(info.RoomID, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range held {
+		if _, err := e.m.goalStore().Finish(info.RoomID, g.ID, info.ID, "dropped for the test", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.m.CloseForEngine(incidental, info.ID, "test maintenance", CloseOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := e.m.Store.ReadTurn(info.ID, 1)
+	if err != nil || turn.StopBy != "engine: test maintenance" {
+		t.Fatalf("stop attribution = %q, %v", turn.StopBy, err)
+	}
+}
