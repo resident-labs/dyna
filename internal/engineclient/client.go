@@ -128,10 +128,9 @@ func New(path string, opts ...Option) *Client {
 // 1 s. A call the engine accepted is never retried: past its deadline it
 // fails with "engine did not answer".
 //
-// A call without a request ID gets one, so the engine applies it once. When the
-// engine closes the connection before it answers (a restart for an update),
-// the call is sent once more with the same ID: the engine returns the first
-// result or applies the write, never both.
+// A call without a request ID gets one. When the engine closes the connection
+// before it answers (a restart for an update), a call that repeatsAfterCutOff
+// is sent once more with the same ID.
 func (c *Client) Call(ctx context.Context, method string, args []any, result any) error {
 	if args == nil {
 		args = []any{}
@@ -152,9 +151,13 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 	giveUp := time.Now().Add(c.restartWait)
 	for delay := 100 * time.Millisecond; ; delay = min(2*delay, time.Second) {
 		err := c.call(ctx, method, body, deadline, result)
-		if callspec.IsCutOff(err) && !cutOff && ctx.Err() == nil && callspec.RequestOf(ctx) != "" && !ownsRequestID(method) {
+		if callspec.IsCutOff(err) && !cutOff && ctx.Err() == nil && repeatsAfterCutOff(method) {
+			// The restart wait starts here, not at the first send: the call
+			// may have run for minutes before the engine stopped.
 			cutOff = true
-			err = ErrNotRunning
+			giveUp = time.Now().Add(c.restartWait)
+			delay = 0
+			continue
 		}
 		if !errors.Is(err, ErrNotRunning) {
 			return err
@@ -245,3 +248,9 @@ func newRequestID() (string, error) {
 	}
 	return "cli-" + hex.EncodeToString(b[:]), nil
 }
+
+// repeatsAfterCutOff names the calls that are safe to send again after the
+// engine cut the connection. StartSubagent carries a session ID the caller
+// chose, and the engine refuses a second session with it. Other writes commit
+// before their receipt is stored, so a repeat could apply them twice.
+func repeatsAfterCutOff(method string) bool { return method == "StartSubagent" }
