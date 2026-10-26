@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -11,12 +12,29 @@ import (
 	"dyna-agent/internal/database"
 )
 
-// A saved account names a harness this release runs, unless it names the
-// harnesses the owner retired when Pi took over their providers. Version 8
-// drops both kinds of row, together with their active marks, repository scopes
-// and limits, so no row survives that nothing can sign in or refresh. Pi's own
-// accounts for those providers stay.
-func TestRegistryMigrationDropsRemovedHarnessRows(t *testing.T) {
+// saveCredential writes one saved credential file, so a fixture account is
+// signed in rather than a bare row.
+func saveCredential(t *testing.T, dataDir, id string, c Credential) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "accounts", "credentials")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Version 9 retires the selections of harnesses this release does not run, and
+// never deletes a saved account: a retired row can be the only copy of an owner's
+// sign-in, so it stays, with its scope, limit and credential, until the importer
+// moves that exact sign-in or the owner removes it (D-125). Pi's own accounts stay
+// selected.
+func TestRegistryMigrationKeepsRetiredHarnessRowsAndClearsSelections(t *testing.T) {
 	s := registryStore(t)
 	dataDir := filepath.Dir(s.Root)
 	ctx := context.Background()
@@ -40,16 +58,16 @@ CREATE TABLE accounts_registry (
 );`); err != nil {
 			return err
 		}
-		for _, row := range []struct{ id, harness, provider string }{
-			{"pi-chatgpt", "pi", "chatgpt"},
-			{"pi-muse", "pi", "meta-muse"},
-			{"pi-opencode", "pi", "opencode-go"},
-			{"codex", "codex", "chatgpt"},
-			{"muse", "muse", "meta-muse"},
-			{"opencode", "opencode", "opencode-go"},
-			{"unknown", "retired-agent", "google"},
+		for _, row := range []struct{ id, harness, provider, identity string }{
+			{"pi-chatgpt", "pi", "chatgpt", "owner@example.test"},
+			{"pi-muse", "pi", "meta-muse", "owner@example.test"},
+			{"pi-opencode", "pi", "opencode-go", "owner@example.test"},
+			{"codex", "codex", "chatgpt", "owner@example.test"},
+			{"muse", "muse", "meta-muse", "owner@example.test"},
+			{"opencode", "opencode", "opencode-go", "owner@example.test"},
+			{"unknown", "retired-agent", "google", "someone@example.test"},
 		} {
-			metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth"})
+			metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth", "identity": row.identity})
 			if err != nil {
 				return err
 			}
@@ -110,25 +128,44 @@ CREATE TABLE accounts_registry (
 		t.Fatal(err)
 	}
 	rows.Close()
-	if len(kept) != 3 || kept[0] != "pi-chatgpt" || kept[1] != "pi-muse" || kept[2] != "pi-opencode" {
-		t.Fatalf("accounts after migration = %v, want only the three Pi provider accounts", kept)
+	present := map[string]bool{}
+	for _, id := range kept {
+		present[id] = true
 	}
-	for _, account := range []string{"codex", "muse", "opencode", "unknown"} {
-		for _, query := range []string{
-			"SELECT count(*) FROM accounts WHERE id = ?",
-			"SELECT count(*) FROM account_active WHERE account = ?",
-			"SELECT count(*) FROM account_active WHERE harness = ?",
-			"SELECT count(*) FROM account_repo_scopes WHERE account_id = ?",
-			"SELECT count(*) FROM account_limits WHERE account_id = ?",
-		} {
-			var left int
-			if err := db.QueryRowContext(ctx, query, account).Scan(&left); err != nil {
-				t.Fatal(err)
-			}
-			if left != 0 {
-				t.Fatalf("%q kept %d rows of %q", query, left, account)
-			}
+	for _, id := range []string{"pi-chatgpt", "pi-muse", "pi-opencode", "codex", "muse", "opencode", "unknown"} {
+		if !present[id] {
+			t.Fatalf("accounts after migration = %v, want %q kept", kept, id)
 		}
+	}
+	// Every retired row keeps its account, scope and limit; only its selection
+	// goes, because no turn can select a harness this release does not run.
+	for _, account := range []string{"codex", "muse", "opencode", "unknown"} {
+		var rows, selected int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM accounts WHERE id = ?", account).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM account_active WHERE account = ?", account).Scan(&selected); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 || selected != 0 {
+			t.Fatalf("%q kept %d rows and %d selections, want the row kept and no selection", account, rows, selected)
+		}
+	}
+	for _, harness := range []string{"codex", "muse", "opencode", "retired-agent"} {
+		var selected int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM account_active WHERE harness = ?", harness).Scan(&selected); err != nil {
+			t.Fatal(err)
+		}
+		if selected != 0 {
+			t.Fatalf("%d selections of the retired harness %q stayed", selected, harness)
+		}
+	}
+	var scoped int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM account_repo_scopes WHERE account_id = 'unknown'").Scan(&scoped); err != nil {
+		t.Fatal(err)
+	}
+	if scoped != 1 {
+		t.Fatalf("the retired account lost its repository scope")
 	}
 	var active int
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM account_active WHERE account = 'pi-chatgpt'").Scan(&active); err != nil {
@@ -136,6 +173,14 @@ CREATE TABLE accounts_registry (
 	}
 	if active != 1 {
 		t.Fatalf("the selection of the Pi account is gone")
+	}
+	// The saved sign-in of the retired harness survives the next write too.
+	saveCredential(t, dataDir, "codex", Credential{Schema: "fixture-v1", Payload: json.RawMessage(`{"token":"owner-sign-in"}`)})
+	if err := s.Update(func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.credentialPath("codex")); err != nil {
+		t.Fatalf("the retired account lost its saved sign-in: %v", err)
 	}
 	var left int
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'accounts_registry'").Scan(&left); err != nil {
@@ -147,9 +192,9 @@ CREATE TABLE accounts_registry (
 }
 
 // A Muse or OpenCode row written between the version-8 cleanup and this release
-// must not survive: the version-9 step drops it, and only Pi provider accounts
-// stay.
-func TestRegistryMigrationDropsHarnessRowsWrittenAfterVersionEight(t *testing.T) {
+// also stays: version 9 never deletes a saved account, so the row survives while
+// its selection, scope and limit are kept for the owner to repair or remove.
+func TestRegistryMigrationKeepsHarnessRowsWrittenAfterVersionEight(t *testing.T) {
 	dataDir := t.TempDir()
 	ctx := context.Background()
 	for _, harness := range []string{"muse", "opencode"} {
@@ -176,14 +221,14 @@ func TestRegistryMigrationDropsHarnessRowsWrittenAfterVersionEight(t *testing.T)
 CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []struct{ id, harness, provider string }{
-		{"pi-chatgpt", "pi", "chatgpt"},
-		{"pi-muse", "pi", "meta-muse"},
-		{"pi-opencode", "pi", "opencode-go"},
-		{"muse", "muse", "meta-muse"},
-		{"opencode", "opencode", "opencode-go"},
+	for _, row := range []struct{ id, harness, provider, identity string }{
+		{"pi-chatgpt", "pi", "chatgpt", "owner@example.test"},
+		{"pi-muse", "pi", "meta-muse", "owner@example.test"},
+		{"pi-opencode", "pi", "opencode-go", "owner@example.test"},
+		{"muse", "muse", "meta-muse", "owner@example.test"},
+		{"opencode", "opencode", "opencode-go", "owner@example.test"},
 	} {
-		metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth"})
+		metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth", "identity": row.identity})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,11 +265,22 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 		kept = append(kept, id)
 	}
 	rows.Close()
-	if want := []string{"pi-chatgpt", "pi-muse", "pi-opencode"}; !reflect.DeepEqual(kept, want) {
+	if want := []string{"muse", "opencode", "pi-chatgpt", "pi-muse", "pi-opencode"}; !reflect.DeepEqual(kept, want) {
 		t.Fatalf("accounts kept = %v, want %v", kept, want)
 	}
 	for _, query := range []string{
 		"SELECT count(*) FROM account_active WHERE account IN ('muse','opencode')",
+		"SELECT count(*) FROM account_active WHERE harness IN ('muse','opencode')",
+	} {
+		var left int
+		if err := db.QueryRowContext(ctx, query).Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left != 0 {
+			t.Fatalf("%q kept %d rows, want only the selection cleared", query, left)
+		}
+	}
+	for _, query := range []string{
 		"SELECT count(*) FROM account_repo_scopes WHERE account_id IN ('muse','opencode')",
 		"SELECT count(*) FROM account_limits WHERE account_id IN ('muse','opencode')",
 	} {
@@ -232,8 +288,8 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 		if err := db.QueryRowContext(ctx, query).Scan(&left); err != nil {
 			t.Fatal(err)
 		}
-		if left != 0 {
-			t.Fatalf("%q kept %d rows", query, left)
+		if left != 1 {
+			t.Fatalf("%q = %d, want the retired account's own row kept", query, left)
 		}
 	}
 }
