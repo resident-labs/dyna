@@ -47,21 +47,24 @@ type desktop struct {
 	wayland, display, renderer string
 }
 type supervisor struct {
-	mu                                 sync.Mutex
-	rec                                *recording
-	lastRec                            Recording
-	browserMu                          sync.Mutex
-	starting                           *desktopStart
-	startOutput                        time.Duration // injected start budget; see startOutputBudget
-	captureMu                          sync.Mutex
-	inputGate                          chan struct{}
-	keyboard                           *virtualKeyboard
-	meta                               Meta
-	state                              Status
-	ctx                                context.Context
-	cancel                             context.CancelFunc
-	compositor, stream                 *process
-	privateWayland, privateDisplay     string
+	mu                             sync.Mutex
+	rec                            *recording
+	lastRec                        Recording
+	browserMu                      sync.Mutex
+	starting                       *desktopStart
+	startOutput                    time.Duration // injected start budget; see startOutputBudget
+	captureMu                      sync.Mutex
+	inputGate                      chan struct{}
+	keyboard                       *virtualKeyboard
+	meta                           Meta
+	state                          Status
+	ctx                            context.Context
+	cancel                         context.CancelFunc
+	compositor, stream             *process
+	privateWayland, privateDisplay string
+	// actPointer is the pointer of the running action batch. A takeover
+	// interrupts it while holding mu.
+	actPointer                         *guardedInput
 	listeners                          []*net.UnixListener
 	relayConns                         map[*net.UnixConn]bool
 	apps                               map[int]string
@@ -860,6 +863,7 @@ func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
 				return nil, fmt.Errorf("no desktop yet: open an app first, then ask for control")
 			}
 			s.state.Control = ControlHuman
+			s.interruptActLocked()
 			s.state.ControlReason = &ActionIntent{Text: reason, At: time.Now()}
 			s.lastActivity = time.Now()
 			s.record("control", nil)
@@ -876,6 +880,9 @@ func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
 			s.humanViewer = r.ViewerID
 		}
 		s.state.Control = r.Mode
+		if r.Mode == ControlHuman {
+			s.interruptActLocked()
+		}
 		if r.Mode == ControlAgent {
 			s.state.ControlReason = nil
 		}

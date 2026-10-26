@@ -142,8 +142,8 @@ func TestComputerHelpDescribesCommandsAndActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"click: x y button [keys]", "double_click: x y [keys]", "move: x y", "drag: path [keys]",
-		"scroll: x y scroll_x scroll_y", "keypress: keys", "type: text [secret]", "wait: [ms]", "ms: integer from 0 to 10000; default 1000 milliseconds.", "screenshot: (no fields)",
+		"click: x y button [keys]", "double_click: x y [keys]", "move: x y", "drag: path [step_ms] [keys]", "pointer_down: x y [button]", "pointer_up: [x y] [button]", "key_down: keys", "key_up: keys", "keypress: keys [hold_ms]", "step_ms:",
+		"scroll: x y scroll_x scroll_y", "type: text [secret]", "wait: [ms]", "ms: integer from 0 to 10000; default 1000 milliseconds.", "screenshot: (no fields)",
 		"5 waits", "10 screenshots", "1–50 actions", "2–200", "-3000", "1–12", "10000",
 	} {
 		if !strings.Contains(out.String(), want) {
