@@ -30,16 +30,24 @@ func TestPullRequestHeadDoesNotWaitForLocalCheckNames(t *testing.T) {
 	}
 }
 
-// A run that Dyna's own stop cancelled is not a finished head: the scheduler
-// admits the same commit again. A cancellation that a superseded head or the
-// owner asked for stays conclusive.
-func TestEngineStopResultIsRerunNotComplete(t *testing.T) {
+// A run that Dyna's own stop cancelled is saved evidence, but it never decides a
+// head: the retry decision admits the same commit again, once. A cancellation
+// that a superseded head or the owner asked for stays conclusive.
+func TestEngineStopResultIsRerunNotDecided(t *testing.T) {
 	s := &Service{}
 	job := registeredCIJob{record: Record{Key: "pr"}, head: strings.Repeat("a", 40)}
 	stopped := localci.Result{SHA: job.head, Node: "node", Status: localci.OutcomeError, Cause: localci.CauseEngineStop}
-	if s.registeredJobResultComplete(t.Context(), job, stopped) {
-		t.Fatal("an engine-stop result counted as a finished head")
+	if !s.registeredJobResultComplete(t.Context(), job, stopped) {
+		t.Fatal("a stopped run is saved evidence, so admission must consult the retry decision")
 	}
+	if act := savedResultActionFor(stopped); act != retryStoppedRun {
+		t.Fatalf("a stopped run action = %v, want retryStoppedRun", act)
+	}
+	stopped.Resumed = true
+	if act := savedResultActionFor(stopped); act != settleSavedResult {
+		t.Fatalf("a stopped replacement action = %v, want settleSavedResult", act)
+	}
+	stopped.Resumed = false
 	cancelled := localci.Result{SHA: job.head, Node: "node", Status: localci.OutcomeError, Cause: localci.CauseCancelled}
 	if !s.registeredJobResultComplete(t.Context(), job, cancelled) {
 		t.Fatal("a plain cancellation stopped being conclusive")

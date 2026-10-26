@@ -389,20 +389,20 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		if localState == VerdictAbsent {
 			observation.Reason = "waiting for CI"
 		}
-		if localInfrastructureError(result) {
+		runs := s.nodeRuns()
+		runs.Lock()
+		live := runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]
+		runs.Unlock()
+		switch {
+		case live != nil:
+			observation.Reason = "running local CI on " + live.node
+		case localInfrastructureError(result):
+			// No hosted provider is coming in a local-only room: name the retry
+			// that really is, instead of a fallback that never arrives.
 			observation.Reason = hostedFallbackReason(snap)
 			if localOnly {
-				// There is no hosted provider to fall back to: name the retry that
-				// is really coming instead of one that never arrives.
 				observation.Reason = "retrying local CI"
 			}
-		} else {
-			runs := s.nodeRuns()
-			runs.Lock()
-			if run := runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]; run != nil {
-				observation.Reason = "running local CI on " + run.node
-			}
-			runs.Unlock()
 		}
 	}
 	if observation.Status == VerdictPassed || observation.Status == VerdictPending && result.Status == localci.OutcomePassed {
@@ -508,10 +508,10 @@ func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, ho
 }
 
 func (s *Service) registeredJobResultComplete(ctx context.Context, job registeredCIJob, result localci.Result) bool {
-	if result.Status == localci.OutcomeError && result.Node != "" && result.Cause == localci.CauseEngineStop {
-		// Dyna stopped this run itself, so it tested nothing: the same head is
-		// admitted again instead of waiting for evidence that will never come.
-		return false
+	if result.Status == localci.OutcomeError && result.Node != "" && stoppedLocalResult(result) {
+		// Dyna stopped this run itself, so it tested nothing. savedResultActionFor
+		// admits the head again, and Result.Resumed bounds that to one retry.
+		return true
 	}
 	if result.Status == localci.OutcomeError && result.Node != "" {
 		return true
