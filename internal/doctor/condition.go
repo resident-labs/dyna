@@ -117,35 +117,61 @@ func parseClause(word string) (clause, error) {
 	return cl, nil
 }
 
+// Verdict is what the samples say about a condition. Unknown is not Clear: a
+// gap, a short history or a stale sample proves nothing about the machine.
+type Verdict int
+
+// The verdicts of a condition.
+const (
+	Unknown Verdict = iota
+	Met
+	Clear
+)
+
 // Holds reports whether the condition matches the samples at now, and the
 // readings of the first term that matched.
 func (c Condition) Holds(read ReadWindow, now time.Time) (bool, string, error) {
+	v, reading, err := c.Evaluate(read, now)
+	return v == Met, reading, err
+}
+
+// Evaluate judges the condition at now. It is Met when a term holds, Clear when
+// every term is proved false by a fresh sample, and Unknown otherwise.
+func (c Condition) Evaluate(read ReadWindow, now time.Time) (Verdict, string, error) {
+	verdict := Clear
 	for _, term := range c.any {
 		var seen []string
-		ok := true
+		termVerdict := Met
 		for _, cl := range term {
-			match, reading, err := cl.holds(read, now)
+			v, reading, err := cl.eval(read, now)
 			if err != nil {
-				return false, "", err
+				return Unknown, "", err
 			}
-			if !match {
-				ok = false
+			if v == Clear {
+				termVerdict = Clear
 				break
+			}
+			if v == Unknown {
+				termVerdict = Unknown
+				continue
 			}
 			seen = append(seen, reading)
 		}
-		if ok {
-			return true, strings.Join(seen, ", "), nil
+		switch termVerdict {
+		case Met:
+			return Met, strings.Join(seen, ", "), nil
+		case Unknown:
+			verdict = Unknown
 		}
 	}
-	return false, "", nil
+	return verdict, "", nil
 }
 
 // fresh is how old the newest sample may be before a clause without "for"
 // counts as unknown.
 const fresh = 2 * time.Minute
 
-func (cl clause) holds(read ReadWindow, now time.Time) (bool, string, error) {
+func (cl clause) eval(read ReadWindow, now time.Time) (Verdict, string, error) {
 	group := cl.group
 	if group == "" {
 		group = "machine"
@@ -156,27 +182,31 @@ func (cl clause) holds(read ReadWindow, now time.Time) (bool, string, error) {
 	}
 	samples, err := read(group, now.Add(-span))
 	if err != nil || len(samples) == 0 {
-		return false, "", err
+		return Unknown, "", err
 	}
 	if now.Sub(samples[len(samples)-1].At) > fresh {
-		return false, "", nil
+		return Unknown, "", nil
 	}
 	if cl.window == 0 {
 		samples = samples[len(samples)-1:]
-	} else if now.Sub(samples[0].At) < cl.window-RecordSlack {
-		// Samples started inside the window; it is not covered yet.
-		return false, "", nil
 	}
 	low, high := cl.of(samples[0]), cl.of(samples[0])
+	gap := false
 	for i, x := range samples {
 		if i > 0 && x.At.Sub(samples[i-1].At) > fresh {
-			return false, "", nil
+			gap = true
 		}
 		v := cl.of(x)
 		if cl.less && v >= cl.value || !cl.less && v <= cl.value {
-			return false, "", nil
+			// One fresh-window sample that fails the threshold proves the
+			// clause false, gap or not.
+			return Clear, "", nil
 		}
 		low, high = min(low, v), max(high, v)
+	}
+	// Samples started inside the window, or skip part of it: not covered yet.
+	if cl.window > 0 && (gap || now.Sub(samples[0].At) < cl.window-RecordSlack) {
+		return Unknown, "", nil
 	}
 	reading := cl.format(high)
 	if cl.less {
@@ -185,7 +215,7 @@ func (cl clause) holds(read ReadWindow, now time.Time) (bool, string, error) {
 	if cl.window > 0 {
 		reading += " for " + cl.window.String()
 	}
-	return true, reading, nil
+	return Met, reading, nil
 }
 
 // RecordSlack lets a window count as covered when its first sample is up to
