@@ -212,6 +212,36 @@ func TestEngineRestartFailureIsOnlyReportedWhenTheEngineDoesNotComeBack(t *testi
 
 // The install reports an engine that restarts but is not healthy, for
 // example one whose migration failed and that now runs read-only.
+// The tunnel is its own unit, so an engine restart does not drop the connector
+// and the remote app keeps a way back in.
+func TestWriteInstallsTheTunnelUnit(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(Options{Binary: "/opt/dyna/bin/dyna", Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, Tunnel))
+	if err != nil {
+		t.Fatalf("no tunnel unit: %v", err)
+	}
+	for _, want := range []string{
+		`ExecStart="/opt/dyna/bin/dyna" engine tunnel`,
+		"Restart=always",
+		"WantedBy=default.target",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("tunnel unit lacks %q:\n%s", want, body)
+		}
+	}
+	// The engine orders itself after the connector it now depends on.
+	engineUnitBody, err := os.ReadFile(filepath.Join(dir, Engine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(engineUnitBody), "After=network-online.target dyna-computers.service dyna-tunnel.service") {
+		t.Fatalf("the engine unit does not order itself after the tunnel unit:\n%s", engineUnitBody)
+	}
+}
+
 func TestInstallChecksEngineHealthAfterTheRestart(t *testing.T) {
 	run := func(_ context.Context, args ...string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), "show "+Computers) {
