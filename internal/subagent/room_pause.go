@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"dyna-agent/internal/room"
@@ -49,6 +50,11 @@ func (w *runnerWrites) waitSession(ctx context.Context, prompt string) error {
 			return err
 		}
 		if !paused {
+			// A turn that waited gives its machine slot back while held, and
+			// takes one again now.
+			if held && w.resume != nil {
+				return w.resume(ctx)
+			}
 			return nil
 		}
 		if !held {
@@ -56,6 +62,9 @@ func (w *runnerWrites) waitSession(ctx context.Context, prompt string) error {
 				return err
 			}
 			held = true
+			if w.suspend != nil {
+				w.suspend()
+			}
 		}
 		if err = m.transferSleep(ctx, 100*time.Millisecond); err != nil {
 			return err
@@ -99,4 +108,38 @@ func (m *Manager) roomExecutionGate(ctx context.Context, id string, execute func
 		}
 		return execute()
 	})
+}
+
+// turnSlot is the machine slot of one running turn. A turn gives it back while
+// its room is held, so a paused room never keeps another room from running.
+type turnSlot struct {
+	m    *Manager
+	meta Meta
+	mu   sync.Mutex
+	free func()
+}
+
+// take waits for a slot unless the turn already holds one.
+func (s *turnSlot) take(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.free != nil {
+		return nil
+	}
+	free, err := s.m.admit(ctx, s.meta)
+	if err != nil {
+		return err
+	}
+	s.free = free
+	return nil
+}
+
+// drop gives the slot back; calling it with none held does nothing.
+func (s *turnSlot) drop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.free != nil {
+		s.free()
+		s.free = nil
+	}
 }

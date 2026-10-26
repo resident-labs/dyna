@@ -317,16 +317,18 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		},
 	}
 
-	// A turn waits here for a machine slot, still queued, and frees it when the
-	// runner ends.
-	release, err := m.admit(ctx, meta)
-	if err != nil {
-		return fail(err)
-	}
-	defer release()
+	// The turn waits for its room first, then for a machine slot, so a paused
+	// room never holds a slot. A later room hold gives the slot back and takes
+	// one again on resume (see waitSession).
+	slot := &turnSlot{m: m, meta: meta}
+	writes.suspend, writes.resume = slot.drop, slot.take
 	if err := writes.waitSession(ctx, turn.HeldPrompt); err != nil {
 		return fail(err)
 	}
+	if err := slot.take(ctx); err != nil {
+		return fail(err)
+	}
+	defer slot.drop()
 	resumable := meta.Resumable
 	// The instructions stay byte for byte the same for the life of a harness
 	// conversation, so its cached prompt prefix holds. They refresh only where
