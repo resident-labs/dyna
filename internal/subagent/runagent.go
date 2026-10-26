@@ -84,6 +84,16 @@ func (m *Manager) WaitRunAgent(ctx context.Context, run string, agent int, bound
 	return RunAgentWait{Done: true, Turn: turn}, nil
 }
 
+// CloseRunAgent closes the session of one agent call of run, and stops its turn
+// if one is running. A nested script that ends with an agent still running
+// uses it before its concurrency slots are released.
+func (m *Manager) CloseRunAgent(ctx context.Context, run string, agent int) error {
+	if _, err := m.closeRunAgent(ctx, RunAgentID(run, agent)); err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
 // CloseRunAgents closes every open session that serves an agent call of run.
 func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 	infos, err := m.store().ListSnapshot(false)
