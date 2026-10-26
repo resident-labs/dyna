@@ -338,6 +338,60 @@ func Run(ctx context.Context, f Options) error {
 	}
 }
 
+// startupListeners names the listeners one engine lifetime owns.
+type startupListeners struct {
+	socket, app, card net.Listener
+}
+
+// close releases every claimed listener.
+func (l startupListeners) close() {
+	l.socket.Close()
+	l.app.Close()
+	l.card.Close()
+}
+
+// claimEngineListeners claims the engine socket, then the app and card
+// addresses, and republishes every native scope link at this build only after
+// all three are owned. The order matters: a second build whose startup the
+// socket rejects must leave the running engine's scope links unchanged, or
+// sessions follow the rejected build's CLI against the engine that kept the
+// socket (D-161). refresh gates the republish to writable engine lifetimes.
+func claimEngineListeners(socketPath, dataDir string, f Options, refresh bool) (startupListeners, error) {
+	var l startupListeners
+	var err error
+	if l.socket, err = listenSocket(socketPath); err != nil {
+		return l, err
+	}
+	if err = writeSocketOwner(socketPath, dataDir); err != nil {
+		l.socket.Close()
+		return l, err
+	}
+	defer func() {
+		if err != nil {
+			l.socket.Close()
+		}
+	}()
+	if l.app, err = net.Listen("tcp", f.Addr); err != nil {
+		return l, err
+	}
+	defer func() {
+		if err != nil {
+			l.app.Close()
+		}
+	}()
+	if l.card, err = net.Listen("tcp", f.CardAddr); err != nil {
+		return l, err
+	}
+	if refresh {
+		// Fail soft: sessions keep the build they run until the next start.
+		if err = fsutil.RefreshScopeLinks(); err != nil {
+			log.Printf("scope link refresh: %v", err)
+			err = nil
+		}
+	}
+	return l, nil
+}
+
 // run owns one complete engine lifetime. Recovery drains its read-only server
 // before Run starts the writable handlers and workers with current stores.
 func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
@@ -369,11 +423,6 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if !readOnly {
 		if err := shells.DefaultStore().Sweep(); err != nil {
 			log.Printf("shell owner sweep: %v", err)
-		}
-		// Republish every scope link at this build: sessions that keep running
-		// across the restart follow the engine onto its current CLI (D-161).
-		if err := fsutil.RefreshScopeLinks(); err != nil {
-			log.Printf("scope link refresh: %v", err)
 		}
 	}
 	appPort, err := websvc.LoopbackPort(f.Addr)
@@ -650,32 +699,18 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if err := checkSocketOwner(socketPath, dataDir); err != nil {
 		return err
 	}
-	socketLn, err := listenSocket(socketPath)
+	listeners, err := claimEngineListeners(socketPath, dataDir, f, !readOnly)
 	if err != nil {
 		return err
 	}
-	if err := writeSocketOwner(socketPath, dataDir); err != nil {
-		return err
-	}
-	if err != nil {
-		return err
-	}
-	defer socketLn.Close()
-	appLn, err := net.Listen("tcp", f.Addr)
-	if err != nil {
-		return err
-	}
-	defer appLn.Close()
-	cardLn, err := net.Listen("tcp", f.CardAddr)
-	if err != nil {
-		return err
-	}
-	defer cardLn.Close()
+	defer listeners.socket.Close()
+	defer listeners.app.Close()
+	defer listeners.card.Close()
 	servers = httpServers(requests, srv)
 	errs := make(chan error, len(servers))
-	go func() { errs <- servers[0].Serve(appLn) }()
-	go func() { errs <- servers[1].Serve(cardLn) }()
-	go func() { errs <- servers[2].Serve(socketLn) }()
+	go func() { errs <- servers[0].Serve(listeners.app) }()
+	go func() { errs <- servers[1].Serve(listeners.card) }()
+	go func() { errs <- servers[2].Serve(listeners.socket) }()
 	if !readOnly {
 		startService(func() { maintenance.Loop(ctx, log.Printf, rooms.Notify.Sessions.RetainClosedSession) })
 	}
