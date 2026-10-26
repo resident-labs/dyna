@@ -157,7 +157,7 @@ func (m *Manager) pendingWakePosts(meta Meta, previous ...Turn) ([]room.Message,
 		if meta.Consolidating != "" && !handoffPost(meta, post.ID) {
 			continue
 		}
-		if wakes(rows, post) && (fresh == nil || fresh[post.ID]) {
+		if wakes(rows, post) && (fresh == nil || fresh[post.ID]) && !last.DispatchedWithoutReceipt(post.ID) {
 			selected = append(selected, post)
 		}
 	}
