@@ -186,7 +186,7 @@
       <div class="agents">
         {#each g.agents as a (a.id)}
           {@const row = workerRows[a.id]}
-          <div class="agent {a.status}" class:open={row?.open}>
+          <div class="agent {a.status}" class:expanded={row?.open}>
             <RunIcon status={a.status} size={18} />
             <span class="who">
               <span class="label">{a.label || `agent ${a.id}`}</span>
@@ -247,12 +247,12 @@
   .line.live.long { font-weight: 600; }
   .line.live { color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .open { margin-left: 8px; color: var(--faint); width: 22px; height: 22px; border-radius: 5px; display: inline-grid; place-items: center; transition: transform var(--motion-fast) var(--ease); }
-  .agent.open .open { transform: rotate(90deg); }
-  .full { grid-column: 2 / 4; margin-top: 10px; }
+  .agent.expanded .open { transform: rotate(90deg); }
+  .full { grid-column: 2 / 4; margin-top: 10px; min-width: 0; overflow-wrap: anywhere; }
   .rhead { display: flex; align-items: center; gap: 10px; margin: 22px 0 8px; }
   .rhead h2 { margin: 0; flex: 1; }
   .raw { white-space: pre-wrap; overflow-wrap: anywhere; background: #19181b; border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 16px; font-size: 12.5px; max-height: 70vh; overflow: auto; margin: 0; }
-  .run { flex: 1; overflow-y: auto; padding: 20px 20px 32px; min-height: 0; }
+  .run { flex: 1; overflow-y: auto; padding: 20px 20px 32px; min-height: 0; min-width: 0; }
   .quiet { color: var(--faint); font-size: 13.5px; }
   .err { color: var(--coral); }
   .gold { color: var(--gold); }
@@ -308,7 +308,7 @@
   /* A group never clips or shrinks a row, so every row keeps its whole content:
      the corners are rounded on the group and on its first and last rows. */
   .agents { background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; }
-  .agent { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; column-gap: 12px; padding: 11px 14px; }
+  .agent { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; padding: 11px 14px; min-width: 0; }
   .agent:first-child { border-radius: 11px 11px 0 0; }
   .agent:last-child { border-radius: 0 0 11px 11px; }
   .agent:only-child { border-radius: 11px; }
@@ -334,6 +334,8 @@
     .title { flex-wrap: wrap; }
     .cancel, .pause { min-height: 44px; width: 100%; order: 5; }
     dl { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
-    .steer { min-height: 36px; padding: 0 12px; }
+    .steer { min-height: 36px; padding: 0 12px; margin-right: 6px; }
+    .time { white-space: nowrap; }
+    .line.live { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
   }
 </style>
