@@ -10,10 +10,9 @@ import (
 )
 
 // shutdownTimeout bounds engine stop. The longest work it waits for is a local
-// CI run that the stop cancelled and that now removes itself from its machine:
-// it stops the containers and then the keeper, which localCIStop bounds. The
-// extra second covers reaching that wait. Nothing waits for the full time when
-// the work ends sooner.
+// CI run that the stop cancelled and that now stops polling its machine, which
+// localCIStop bounds. The extra second covers reaching that wait. Nothing waits
+// for the full time when the work ends sooner.
 const shutdownTimeout = localCIStop + time.Second
 
 // streamShutdownTimeout bounds the HTTP phase on its own. A page or a terminal
