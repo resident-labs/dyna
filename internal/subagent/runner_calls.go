@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/admission"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/engineclient"
@@ -819,13 +820,15 @@ func (w *runnerWrites) close(ctx context.Context) {
 // TurnHold says why the machine's turn limit holds a turn, for the session
 // view. The turn stays queued while it waits.
 type TurnHold struct {
-	// Pool is the group of turns the limit counts: turns, or leaf sessions.
-	Pool string `json:"pool"`
+	// Pool is the group of turns the limit counts: top-level sessions, or child
+	// sessions.
+	Pool admission.Pool `json:"pool"`
 	// Limit is how many turns of the pool may run, and Running how many do.
 	Limit   int `json:"limit"`
 	Running int `json:"running"`
-	// RoomFull is true when the turn's own room holds its whole share.
-	RoomFull bool `json:"roomFull,omitempty"`
+	// Reason says whether the pool is full or the turn's own room holds its
+	// whole share.
+	Reason admission.Reason `json:"reason"`
 	// Since is when the turn began to wait.
 	Since time.Time `json:"since"`
 }

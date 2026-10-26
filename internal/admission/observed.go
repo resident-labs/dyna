@@ -15,7 +15,7 @@ const KeepObserved = 7 * 24 * time.Hour
 
 const observedSchema = `CREATE TABLE IF NOT EXISTS admission_observed (
  at INTEGER NOT NULL, pool TEXT NOT NULL, room TEXT NOT NULL,
- held INTEGER NOT NULL, lim INTEGER NOT NULL, forced INTEGER NOT NULL
+ reason TEXT NOT NULL, held INTEGER NOT NULL, lim INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS admission_observed_at ON admission_observed(at);`
 
@@ -25,9 +25,9 @@ type Observation struct {
 	At     time.Time
 	Pool   Pool
 	Room   string
+	Reason Reason
 	Held   int
 	Limit  int
-	Forced bool
 }
 
 // Observed stores observations in the shared dyna.db of DataDir.
@@ -52,15 +52,14 @@ func MigrateObserved(dataDir string) error {
 }
 
 // Record stores one observation and drops those older than KeepObserved.
-func (o Observed) Record(ob Observation) error {
+func (o Observed) Record(ctx context.Context, ob Observation) error {
 	db, err := o.open()
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
 	return state.For(db).Write(ctx, hub.Event{Topic: "admission"}, func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(ctx, `INSERT INTO admission_observed VALUES (?,?,?,?,?,?)`,
-			ob.At.Unix(), string(ob.Pool), ob.Room, ob.Held, ob.Limit, ob.Forced); err != nil {
+			ob.At.Unix(), string(ob.Pool), ob.Room, string(ob.Reason), ob.Held, ob.Limit); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, `DELETE FROM admission_observed WHERE at < ?`, ob.At.Add(-KeepObserved).Unix())
@@ -72,18 +71,23 @@ func (o Observed) Record(ob Observation) error {
 type Summary struct {
 	// Turns is how many turns the gate held or would have held since the cutoff.
 	Turns int
-	// MostOver is the largest number of turns that ran above the limit when
-	// one of them was held.
-	MostOver int
+	// OverLimit is how many of them were held because the pool was full, and
+	// MostOver the most turns that ran past the limit when one was held.
+	OverLimit int
+	MostOver  int
 }
 
-// Summarize counts the observations since the cutoff.
+// Summarize counts the observations since the cutoff. A hold for a room's own
+// share says nothing about the machine's limit, so it adds to Turns only.
 func (o Observed) Summarize(since time.Time) (Summary, error) {
 	db, err := o.open()
 	if err != nil {
 		return Summary{}, err
 	}
 	var s Summary
-	err = db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(held-lim+1),0) FROM admission_observed WHERE at >= ?`, since.Unix()).Scan(&s.Turns, &s.MostOver)
+	err = db.QueryRow(`SELECT COUNT(*),
+ COALESCE(SUM(reason='limit'),0),
+ COALESCE(MAX(CASE WHEN reason='limit' THEN MAX(held-lim+1,0) ELSE 0 END),0)
+ FROM admission_observed WHERE at >= ?`, since.Unix()).Scan(&s.Turns, &s.OverLimit, &s.MostOver)
 	return s, err
 }

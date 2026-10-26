@@ -11,7 +11,7 @@ not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's
 not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeLock 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeManager.activate 2 # a harness CLI's own credential and config files
-not-state internal/admission/admission.go Gate.attempt 1 # creates the allocation lock file that serializes turn slots; a lock, not state
+not-state internal/admission/admission.go Gate.lockAlloc 1 # creates the allocation lock file that serializes turn slots; a lock, not state
 not-state internal/admission/admission.go take 1 # names the room in a turn slot's lock file, which the kernel frees when the turn's process dies; a lock, not state
 violation internal/agentslice/agentslice.go WriteSlice 1
 not-state internal/cli/ci/ci.go NewCommand 1 # exports a JUnit report to a caller-selected artifact path
@@ -194,7 +194,6 @@ not-state internal/runstore/runstore.go create 1 # script.js, a blob written onc
 not-state internal/sessionconv/claude.go WriteClaude 1 # creates the target harness's project folder; the session transcript inside is that harness's append-only conversation log, not shared Dyna state
 not-state internal/sessionlife/lifecycle.go WithPublication 1 # a non-blocking flock that serializes one session's publication; a crash frees it, a row could not
 not-state internal/settings/settings.go writeAtomic 1 # settings.json is hand-edited config, item 20
-not-state internal/subagent/admit.go writeState 2 # the turn gate's hysteresis memory (overload flag and measured turn size) in its own lock directory; rebuilt from the next reading if lost, so not shared state
 not-state internal/shells/events.go Store.Notify 3 # a change nudge file for the room watch (#1399), created and removed at once; goes when the bus carries shell events (item 16)
 not-state internal/shells/shells.go StartSupervisor 3 # the supervisor's own error log, and supervisor.pid, a process-liveness file like turn.lock; until item 2 moves the shell supervisor's writes into engine calls, with liveness from the recorded process and a pidfd watch
 not-state internal/shells/shells.go Store.Supervise 3 # the job's append-only output.log (rule r10), and the empty exited wake marker for Wait, written after the exit is saved in dyna.db

@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,25 +23,64 @@ const (
 	// AdmissionAuto is the value that lets Dyna choose from free memory and load.
 	AdmissionAuto = "auto"
 	// The values of admission.mode.
-	AdmissionOff     = "off"
-	AdmissionObserve = "observe"
-	AdmissionEnforce = "enforce"
+	AdmissionOff     AdmissionMode = "off"
+	AdmissionObserve AdmissionMode = "observe"
+	AdmissionEnforce AdmissionMode = "enforce"
 )
+
+// AdmissionMode is what the turn limit does: nothing, record, or hold.
+type AdmissionMode string
+
+// admissionFile is the admission section of settings.json. A number or a
+// string both read as text, so 12 and "12" are the same limit.
+type admissionFile struct {
+	Mode     AdmissionMode `json:"mode"`
+	MaxWait  flexText      `json:"maxWait"`
+	MaxTurns flexText      `json:"maxTurns"`
+	Reserve  flexText      `json:"reserve"`
+}
+
+type flexText string
+
+func (t *flexText) UnmarshalJSON(data []byte) error {
+	var s string
+	if json.Unmarshal(data, &s) == nil {
+		*t = flexText(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err != nil {
+		return fmt.Errorf("must be text or a number")
+	}
+	*t = flexText(n.String())
+	return nil
+}
 
 func (v *Values) loadAdmission(raw map[string]any) error {
 	section, ok := raw["admission"]
 	if !ok {
 		return nil
 	}
-	values, ok := section.(map[string]any)
-	if !ok {
+	if _, isObject := section.(map[string]any); !isObject {
 		return fmt.Errorf("admission settings must be an object")
 	}
-	for key, name := range map[string]string{KeyAdmissionMode: "mode", KeyAdmissionMaxWait: "maxWait", KeyAdmissionMaxTurns: "maxTurns", KeyAdmissionReserve: "reserve"} {
-		if value, ok := values[name]; ok {
-			if err := v.setAdmission(key, numberText(value)); err != nil {
-				return err
-			}
+	data, err := json.Marshal(section)
+	if err != nil {
+		return err
+	}
+	var file admissionFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return fmt.Errorf("admission settings: %w", err)
+	}
+	for _, f := range []struct{ key, value string }{
+		{KeyAdmissionMode, string(file.Mode)}, {KeyAdmissionMaxWait, string(file.MaxWait)},
+		{KeyAdmissionMaxTurns, string(file.MaxTurns)}, {KeyAdmissionReserve, string(file.Reserve)},
+	} {
+		if f.value == "" {
+			continue
+		}
+		if err := v.setAdmission(f.key, f.value); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -50,10 +90,11 @@ func (v *Values) setAdmission(key, value string) error {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch key {
 	case KeyAdmissionMode:
-		if value != AdmissionOff && value != AdmissionObserve && value != AdmissionEnforce {
+		mode := AdmissionMode(value)
+		if mode != AdmissionOff && mode != AdmissionObserve && mode != AdmissionEnforce {
 			return fmt.Errorf("%s must be off, observe or enforce", key)
 		}
-		v.AdmissionMode = value
+		v.AdmissionMode = mode
 	case KeyAdmissionMaxWait:
 		d, err := time.ParseDuration(value)
 		if err != nil || d < time.Second {

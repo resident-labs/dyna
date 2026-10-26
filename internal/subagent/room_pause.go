@@ -3,7 +3,6 @@ package subagent
 import (
 	"context"
 	"errors"
-	"slices"
 	"sync"
 	"time"
 
@@ -117,7 +116,7 @@ func (m *Manager) roomExecutionGate(ctx context.Context, id string, execute func
 type turnSlot struct {
 	m     *Manager
 	meta  Meta
-	owner bool
+	owner func() bool
 	// held tells the session record that the limit holds the turn.
 	held func(admission.Hold)
 	mu   sync.Mutex
@@ -149,9 +148,22 @@ func (s *turnSlot) drop() {
 	}
 }
 
-// ownerCaused reports whether the owner's own message started this turn: the
-// owner sent the turn's first prompt, or the room's owner address is among the
-// senders the turn owes a report to.
-func ownerCaused(meta Meta, turn Turn) bool {
-	return slices.Contains(turn.ReportTo, meta.Room) || turn.N == 1 && meta.Owner != ""
+// ownerCaused reports whether the owner's own message caused this turn. It
+// reads the posts the turn would take, so it is true for a post that arrives
+// while the turn waits. The owner's first prompt to a session that no agent
+// started counts too: its Owner is a caller label, not a session ID.
+func (m *Manager) ownerCaused(meta Meta, turn Turn) bool {
+	if turn.N == 1 && meta.ParentSession == "" && meta.Owner != "" && !ValidID(meta.Owner) {
+		return true
+	}
+	posts, _, err := m.drainRoomMessages(meta, turn)
+	if err != nil {
+		return false
+	}
+	for _, p := range posts {
+		if p.From == meta.Room && !p.EngineEvent() || room.OwnerRequest(p, meta.Room) {
+			return true
+		}
+	}
+	return false
 }

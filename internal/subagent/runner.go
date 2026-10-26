@@ -321,12 +321,12 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	// The turn waits for its room first, then for a machine slot, so a paused
 	// room never holds a slot. A later room hold gives the slot back and takes
 	// one again on resume (see waitSession).
-	slot := &turnSlot{m: m, meta: meta, owner: ownerCaused(meta, turn)}
+	slot := &turnSlot{m: m, meta: meta, owner: func() bool { return m.ownerCaused(meta, turn) }}
 	slot.held = func(h admission.Hold) {
-		if h.Observed || h.Forced {
-			return // nothing waits, so the session view has nothing to show
+		if h.Forced {
+			return // the turn runs now, so the session view has nothing to show
 		}
-		writes.note(TurnNote{Hold: &TurnHold{Pool: string(h.Pool), Limit: h.Limit, Running: h.Held, RoomFull: h.RoomFull, Since: time.Now()}})
+		writes.note(TurnNote{Hold: &TurnHold{Pool: h.Pool, Reason: h.Reason, Limit: h.Limit, Running: h.Held, Since: time.Now()}})
 	}
 	writes.suspend, writes.resume = slot.drop, slot.take
 	if err := writes.waitSession(ctx, turn.HeldPrompt); err != nil {
