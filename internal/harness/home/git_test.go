@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/testsafe"
 )
 
 func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
@@ -15,6 +17,7 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 	scope, owner, env := fixture(t)
 	config := filepath.Join(owner, "xdg config ' $ ")
 	env = append(env, "XDG_CONFIG_HOME="+config, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=0")
+	env = testsafe.GitConfigWithoutAutoMaintenance(env)
 	// Use actual git, while dyna remains a fake executable.
 	fakeBin := envMap(env)["PATH"]
 	if err := os.Remove(filepath.Join(fakeBin, "git")); err != nil {
