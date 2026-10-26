@@ -39,7 +39,7 @@
 <style>
   .phases { list-style: none; margin: 18px 0 4px; padding: 0; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; }
   li + li { border-top: 1px solid var(--line-soft); }
-  .row { display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(40px, 120px) auto 14px; align-items: center; column-gap: 12px; width: 100%; min-height: 44px; padding: 8px 14px; text-align: left; color: var(--ink-2); font-size: 13.5px; font-weight: 600; }
+  .row { display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(40px, 120px) auto 14px; align-items: center; column-gap: 12px; width: 100%; min-height: 44px; padding: 8px 14px; text-align: left; color: var(--ink-2); font-size: 13.5px; font-weight: 600; transition: background-color var(--motion-fast) var(--ease); }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar { height: 5px; border-radius: 3px; background: var(--rail); overflow: hidden; }
   .fill { display: block; height: 100%; background: var(--sage); }
@@ -54,6 +54,7 @@
   @media (hover: hover) {
     .row:hover { background: var(--hover); }
   }
+  .row:active { background: var(--select); }
   @media (max-width: 760px) {
     .row { grid-template-columns: 16px minmax(0, 1fr) auto 14px; }
     .bar { display: none; }
