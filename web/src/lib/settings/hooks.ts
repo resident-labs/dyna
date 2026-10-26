@@ -22,14 +22,15 @@ export function failLabel(onFail: string): string {
   return onFail === 'block' ? 'Block' : 'Alert'
 }
 
-// serviceTriggerHooks are the global hooks that wake a service. Their interval
-// and threshold are the service's own settings, so Settings > Hooks hides them.
-const serviceTriggerHooks: readonly string[] = ['doctor']
+// serviceTriggerBuiltins names the built-in hooks that wake a service. Their
+// interval and threshold are the service's own settings. An owner's own hook
+// is never one of them, whatever its name.
+const serviceTriggerBuiltins: readonly string[] = ['doctor']
 
 // listedHooks is what a Hooks screen lists: every hook of a repository, and on
 // the global screen every hook except the service triggers.
-export const listedHooks = <H extends Pick<Hook, 'name'>>(hooks: H[], scope: HookScope): H[] =>
-  scope === 'global' ? hooks.filter((h) => !serviceTriggerHooks.includes(h.name)) : hooks
+export const listedHooks = <H extends Pick<Hook, 'builtin'>>(hooks: H[], scope: HookScope): H[] =>
+  scope === 'global' ? hooks.filter((h) => !h.builtin || !serviceTriggerBuiltins.includes(h.builtin)) : hooks
 
 // isBuiltin is true for a hook the engine seeds and runs in its own process.
 // Its command is fixed, it cannot be removed, and the owner changes only its

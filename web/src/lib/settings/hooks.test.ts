@@ -88,8 +88,8 @@ test('built-ins and their author read in words', () => {
   assert.equal(authorLabel(''), 'someone')
 })
 
-test('the global screen hides a service trigger and a repository lists every hook', () => {
-  const hooks = [{ name: 'doctor' }, { name: 'self-update' }]
-  assert.deepEqual(listedHooks(hooks, 'global').map((h) => h.name), ['self-update'])
-  assert.deepEqual(listedHooks(hooks, 'repository').map((h) => h.name), ['doctor', 'self-update'])
+test('the global screen hides the doctor built-in, never a custom hook of that name', () => {
+  const hooks = [{ name: 'doctor', builtin: 'doctor' }, { name: 'doctor-mine' }, { name: 'doctor' }]
+  assert.deepEqual(listedHooks(hooks, 'global'), [{ name: 'doctor-mine' }, { name: 'doctor' }])
+  assert.equal(listedHooks(hooks, 'repository').length, 3)
 })
