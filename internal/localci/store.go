@@ -128,16 +128,20 @@ const warmSchema = `CREATE TABLE IF NOT EXISTS local_ci_warms (
 );`
 
 // attachmentSchema records the checks a run has started on a machine, so an
-// engine that restarts reattaches to them instead of losing them. The table is
-// created when the first check is recorded, so the schema version stays 5 and
-// an older engine still opens the database after a revert.
+// engine that restarts reattaches to them instead of losing them. Each run has a
+// row of its own, owned by the process that executes it. The table is created
+// when the first check is recorded, so the schema version stays 5 and an older
+// engine still opens the database after a revert.
 const attachmentSchema = `CREATE TABLE IF NOT EXISTS local_ci_attachments (
  repo TEXT NOT NULL,
  sha TEXT NOT NULL,
  node TEXT NOT NULL,
+ run_id TEXT NOT NULL,
  payload BLOB NOT NULL CHECK(json_valid(payload)),
+ owner_pid INTEGER NOT NULL,
+ owner_start INTEGER NOT NULL,
  saved_at INTEGER NOT NULL,
- PRIMARY KEY(repo,sha,node)
+ PRIMARY KEY(repo,sha,node,run_id)
 );`
 
 // Migrate prepares the local CI tables at engine startup.

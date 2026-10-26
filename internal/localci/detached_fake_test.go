@@ -159,6 +159,13 @@ func (m *fakeMachine) vanishAll() {
 	}
 }
 
+// remove deletes a check's folder, as an operator's cleanup would.
+func (m *fakeMachine) remove(dir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.procs, dir)
+}
+
 // vanish makes one unit disappear without an exit record.
 func (m *fakeMachine) vanish(dir string) {
 	m.mu.Lock()

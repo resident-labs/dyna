@@ -59,9 +59,12 @@ const (
 //
 // The wrapper writes the check's output to the log up to a limit and discards
 // the rest, so one noisy check cannot fill the node's disk. The check's own
-// exit markers go straight to the log, past that limit. The writer of the log
-// runs in a session of its own, so the cleanup of a host check, which kills the
-// rest of its process group, cannot cut the log off.
+// exit markers go to a file of their own and are appended to the log only after
+// the output has drained, so they are always the end of the log. The writer of
+// the log runs in a session of its own, so the cleanup of a host check, which
+// kills the rest of its process group, cannot cut the log off. A daemon that
+// keeps the output open cannot hold the check: the wrapper waits a short time for
+// the writer to drain, then ends it.
 //
 // A transient unit survives the SSH session only when the user manager does, so
 // the script enables lingering first. Without a user manager, or without
@@ -79,9 +82,17 @@ mkdir "$d"
 cat > "$d/run.sh"
 : > "$d/log"
 cat > "$d/wrap.sh" <<'WRAP'
-export DYNA_CI_LOG="$1/log"
-bash -o pipefail "$1/run.sh" 2>&1 </dev/null | setsid bash -c 'head -c "${DYNA_CI_LOG_CAP:-134217728}" >> "$1/log"; if IFS= read -r -n 1 _; then printf "\n[... the rest of the output was discarded on the node ...]\n" >> "$1/log"; cat > /dev/null; fi' dyna-cap "$1"
-code=${PIPESTATUS[0]}
+export DYNA_CI_TRAILER="$1/trailer"
+mkfifo "$1/out"
+setsid bash -c 'head -c "${DYNA_CI_LOG_CAP:-134217728}" >> "$1/log"; if IFS= read -r -n 1 _; then printf "\n[... the rest of the output was discarded on the node ...]\n" >> "$1/log"; cat > /dev/null; fi' dyna-cap "$1" < "$1/out" &
+writer=$!
+exec 4> "$1/out"
+bash -o pipefail "$1/run.sh" >&4 2>&1 </dev/null
+code=$?
+exec 4>&-
+for i in $(seq 1 50); do kill -0 "$writer" 2>/dev/null || break; sleep 0.1; done
+kill -KILL "$writer" 2>/dev/null || true
+if [ -f "$1/trailer" ]; then cat "$1/trailer" >> "$1/log"; fi
 printf '{"exitCode":%s}\n' "$code" > "$1/exit.tmp" && mv "$1/exit.tmp" "$1/exit.json"
 WRAP
 unitOK=0
@@ -245,23 +256,30 @@ func (r Runner) transient(err error) bool {
 func (r Runner) retry(ctx context.Context, timeout time.Duration, attempt func(context.Context) error) error {
 	var since time.Time
 	for {
-		// One attempt never outlasts its bound, so a connection that is up but
-		// silent returns here and counts toward the unreachable window.
-		callCtx, cancel := context.WithTimeout(ctx, timeout)
+		// The unreachable window starts when the first failed attempt started, and
+		// later attempts and waits only get what is left of it, so the node counts
+		// as lost after nodeLostBound in all, not after that and one more attempt.
+		started := r.now()
+		bound := timeout
+		if !since.IsZero() {
+			bound = min(timeout, max(nodeLostBound-started.Sub(since), time.Second))
+		}
+		callCtx, cancel := context.WithTimeout(ctx, bound)
 		err := attempt(callCtx)
 		cancel()
 		var permanent *permanentError
 		if err == nil || ctx.Err() != nil || errors.As(err, &permanent) || !r.transient(err) {
 			return err
 		}
-		now := r.now()
 		if since.IsZero() {
-			since = now
+			since = started
 		}
-		if after := now.Sub(since); after >= nodeLostBound {
+		now := r.now()
+		after := now.Sub(since)
+		if after >= nodeLostBound {
 			return &nodeLostError{node: r.Node.Name, after: after, cause: err}
 		}
-		if waitErr := r.pause(ctx, retryWait); waitErr != nil {
+		if waitErr := r.pause(ctx, min(retryWait, nodeLostBound-after)); waitErr != nil {
 			return errors.Join(err, waitErr)
 		}
 	}
@@ -482,7 +500,9 @@ func (p *detachedPoller) apply(batch []*watch, frames map[string]pollFrame) {
 			} else {
 				p.finish(w, &detachedExit{Code: frame.code})
 			}
-		case pollGone:
+		case pollGone, pollMissing:
+			// A check that was launched has a folder. Without it, and without an
+			// exit record, nothing can say how the check ended.
 			p.finish(w, &nodeLostError{node: p.r.Node.Name, gone: true})
 		}
 	}
