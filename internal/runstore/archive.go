@@ -43,10 +43,14 @@ func ArchiveDir() string {
 	return store.RunArchiveDir(store.DataDir())
 }
 
+// StatusInterrupted is the final status of a run that an update broke: it
+// started on another build and an agent failed. It can be resumed.
+const StatusInterrupted = "interrupted"
+
 // IsFinishedStatus reports whether a run status is terminal and archivable.
 func IsFinishedStatus(status string) bool {
 	switch status {
-	case "ok", "canceled", "error":
+	case "ok", "canceled", "error", StatusInterrupted:
 		return true
 	}
 	return false

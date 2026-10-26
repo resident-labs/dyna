@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
@@ -150,8 +151,51 @@ func checkRunEvent(ctx context.Context, conn *sql.Conn, event hub.Event) error {
 	return nil
 }
 
+// unknownBuild names the build of a run that recorded none.
+const unknownBuild = "an unknown build"
+
+// settleInterrupted decides the run's final status. An update can break a run
+// that started on another build, while its script still returns and reports
+// ok. A run from another build with a failed agent therefore ends
+// interrupted. Other runs keep the status the coordinator reported, and a
+// cancel stays a cancel.
+func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFinish, engineBuild string) (callspec.RunFinish, error) {
+	if in.Status != "ok" && in.Status != "error" {
+		return in, nil
+	}
+	var meta runstore.Meta
+	err := w.Read(ctx, func(q state.Reader) error {
+		var err error
+		meta, err = runstore.LoadStored(ctx, q, in.Run)
+		return err
+	})
+	if err != nil || meta.Build == engineBuild {
+		return in, err
+	}
+	events, err := runstore.ReadEvents(in.Run)
+	if err != nil {
+		return in, err
+	}
+	for _, e := range events {
+		if e.T == "agent_end" && e.Status == "error" && !e.Cached {
+			from := meta.Build
+			if from == "" {
+				from = unknownBuild
+			}
+			in.Status = runstore.StatusInterrupted
+			in.Error = fmt.Sprintf("interrupted by update from %s to %s; resume it with dyna run <script.js> --resume %s", from, engineBuild, in.Run)
+			break
+		}
+	}
+	return in, nil
+}
+
 func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish) (runstore.Meta, error) {
 	event, err := runLifecycleEvent(ctx, w, in.Run)
+	if err != nil {
+		return runstore.Meta{}, err
+	}
+	in, err = settleInterrupted(ctx, w, in, callspec.Build)
 	if err != nil {
 		return runstore.Meta{}, err
 	}
