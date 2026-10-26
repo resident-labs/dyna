@@ -13,6 +13,8 @@ import (
 var cliCalls = []string{
 	"SetSetting",
 	"SetRoomRootProfile",
+	"AddRoomRepo",
+	"RemoveRoomRepo",
 	"SaveProfile",
 	"UpsertProfile",
 	"SetProfileUses",
