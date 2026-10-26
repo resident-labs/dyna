@@ -114,6 +114,11 @@ func (s *Service) runWarm(ctx context.Context, node localci.Node, req localci.Wa
 // scheduleCacheWarm starts a warm run for every machine that serves a
 // repository whose default branch moved. The run fills the act cache the job
 // checks restore, so their first check does not compile the whole tree.
+//
+// The default branch and its head come from the repository facts, which the
+// head refresh writes for every repository Dyna knows, so a repository whose
+// pull requests have all merged still warms and a stacked change never warms
+// the branch it is stacked on.
 func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 	if s.Store == nil {
 		return
@@ -127,25 +132,29 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 	if store == nil {
 		return
 	}
-	active := activeRegisteredCISlots(s.nodeRuns())
-	seen := map[string]bool{}
+	// A repository's room and checkout come from its changes: every change of a
+	// repository shares both, and an idle repository keeps its last change.
+	rooms, paths := map[string]string{}, map[string]string{}
 	for _, record := range st.Records {
-		if record == nil || !record.Watching {
+		if record == nil {
 			continue
 		}
-		repo, room, base := defaultRepo(*record), record.RoomID, record.Base
-		branch := record.DefaultBranch
+		repo := defaultRepo(*record)
+		if repo == "" || record.RepoPath == "" {
+			continue
+		}
+		rooms[repo], paths[repo] = record.RoomID, record.RepoPath
+	}
+	active := s.activeCISlots()
+	for repo, facts := range st.RepositoryFacts {
+		base, branch := facts.Head, facts.DefaultBranch
+		if base == "" || paths[repo] == "" {
+			continue
+		}
 		if branch == "" {
 			branch = "main"
 		}
-		if repo == "" || base == "" || record.RepoPath == "" {
-			continue
-		}
-		if seen[repo+"\x00"+room] {
-			continue
-		}
-		seen[repo+"\x00"+room] = true
-		definition, err := s.warmDefinitionAt(ctx, record.RepoPath, base)
+		definition, err := s.warmDefinitionAt(ctx, paths[repo], base)
 		if err != nil {
 			// A checkout that has not fetched this commit, or a repository
 			// without a definition, warms nothing; the next tick tries again.
@@ -155,6 +164,7 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 		if !ok {
 			continue
 		}
+		room := rooms[repo]
 		for i := range nodes {
 			node := nodes[i]
 			// A warm run takes a slot, so it waits for a machine with a free
@@ -167,11 +177,20 @@ func (s *Service) scheduleCacheWarm(ctx context.Context, st State) {
 				continue
 			}
 			s.startWarm(ctx, store, node, localci.WarmRequest{
-				Repo: repo, RepoDir: record.RepoPath, RoomID: room, SHA: base,
+				Repo: repo, RepoDir: paths[repo], RoomID: room, SHA: base,
 				Workflow: warm.Workflow, Job: warm.Name, Branch: branch, Timeout: warmTimeout,
 			})
 		}
 	}
+}
+
+// activeCISlots counts the slots the runs in flight hold, under the run set's
+// own lock: a run that finishes removes its entry while a tick reads them.
+func (s *Service) activeCISlots() map[string]int {
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	return activeRegisteredCISlots(runs)
 }
 
 // startWarm runs one warm run in the background and records the commit it

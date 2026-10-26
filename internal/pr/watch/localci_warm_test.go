@@ -12,9 +12,10 @@ import (
 
 // fakeWarmStore keeps the warmed heads a warm run records.
 type fakeWarmStore struct {
-	mu    sync.Mutex
-	heads map[string]string
-	saves int
+	mu      sync.Mutex
+	heads   map[string]string
+	saves   int
+	savedCh chan struct{}
 }
 
 func newFakeWarmStore() *fakeWarmStore { return &fakeWarmStore{heads: map[string]string{}} }
@@ -30,6 +31,9 @@ func (f *fakeWarmStore) SaveWarm(_ context.Context, repo, node, head string, _ t
 	defer f.mu.Unlock()
 	f.heads[repo+"\x00"+node] = head
 	f.saves++
+	if f.savedCh != nil {
+		f.savedCh <- struct{}{}
+	}
 	return nil
 }
 
@@ -55,11 +59,18 @@ func (warmNodes) SaveHostedRuns(context.Context, string, string, localci.HostedR
 	return nil
 }
 
-// warmState is the tracked state a warm run reads its repository from.
+// warmState is the tracked state a warm run reads its repository from: the
+// change names the room and the checkout, the facts name the default branch and
+// its head.
 func warmState(repo, room, base string) State {
-	return State{Records: map[string]*state.Record{
-		"change-1": {Host: "github.com", Repo: repo, RoomID: room, RepoPath: "/checkout/" + repo, Base: base, Watching: true},
-	}}
+	return State{
+		Records: map[string]*state.Record{
+			"change-1": {Host: "github.com", Repo: repo, RoomID: room, RepoPath: "/checkout/" + repo, Base: "old-base", Watching: false},
+		},
+		RepositoryFacts: map[string]state.RepositoryFacts{
+			"github.com/" + repo: {DefaultBranch: "main", Head: base},
+		},
+	}
 }
 
 func warmService(t *testing.T, nodes []localci.Node, store *fakeWarmStore, run func(context.Context, localci.Node, localci.WarmRequest) error) *Service {
@@ -80,11 +91,13 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 	store := newFakeWarmStore()
 	release := make(chan struct{})
 	started := make(chan localci.WarmRequest, 4)
-	finished := make(chan struct{}, 4)
+	// The store signals after it saved, so the assertion below reads a finished
+	// run rather than one that has not recorded its commit yet.
+	saved := make(chan struct{}, 4)
+	store.savedCh = saved
 	s := warmService(t, []localci.Node{{Name: "hermeslab", Slots: 2, Enabled: true}}, store, func(_ context.Context, _ localci.Node, req localci.WarmRequest) error {
 		started <- req
 		<-release
-		finished <- struct{}{}
 		return nil
 	})
 	base := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -103,7 +116,7 @@ func TestWarmRunsOncePerCommitAndMachine(t *testing.T) {
 		t.Fatalf("%d warm runs started, want one", got)
 	}
 	close(release)
-	<-finished
+	<-saved
 	if store.saved() != 1 {
 		t.Fatalf("%d warmed commits recorded, want one", store.saved())
 	}

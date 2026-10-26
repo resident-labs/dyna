@@ -69,17 +69,26 @@ func (r Runner) Warm(ctx context.Context, req WarmRequest) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return r.Run(ctx, Request{
+	return r.Run(ctx, warmRunRequest(definition, req))
+}
+
+// warmRunRequest is the run one warm request asks for. The checkout path is the
+// repository, because the runner reads it as a local directory, and the result
+// is not saved: a warm run proves nothing about the commit, and its row would
+// replace the test evidence real checks saved for the same commit.
+func warmRunRequest(definition *Definition, req WarmRequest) Request {
+	return Request{
 		Definition: definition,
-		Repo:       req.Repo,
+		Repo:       req.RepoDir,
 		RepoDir:    req.RepoDir,
 		RoomID:     req.RoomID,
 		SHA:        req.SHA,
 		Suites:     []Suite{warmSuite},
 		Timeout:    req.Timeout,
+		DeferSave:  true,
 		// The workflow scopes its cache-warming job to the default branch, so
 		// the run sends that branch's push event.
 		Event:  "push",
 		Branch: req.Branch,
-	})
+	}
 }
