@@ -94,7 +94,7 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 			}
 		}
 		if old < 9 {
-			if err := dropRemovedHarnessRows(ctx, conn, credentialsAt(dataDir)); err != nil {
+			if err := retireRemovedHarnessSelections(ctx, conn); err != nil {
 				return err
 			}
 		}
@@ -119,70 +119,37 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 	return err == nil, err
 }
 
-// dropRemovedHarnessRows retires the rows of harnesses this release does not run:
-// Codex, Muse and OpenCode, whose providers Pi took over, and any harness that
-// left the catalog. A retired row is dropped only when a Pi account already holds
-// the same provider sign-in, so retiring a harness never discards a saved owner
-// credential that nobody has moved yet. A row with no such replacement stays, and
-// the account views report it as an unknown-harness account the owner can repair
-// or remove; the importer can still read it for that repair. A dropped account
-// loses its active marks, repository scope, limit and, through the orphan cleanup,
-// its credential file. The engine backs up dyna.db before this migration.
-func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn, credentialDir string) error {
-	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), credential_schema, json_extract(CAST(metadata AS TEXT), '$.needsLogin') FROM accounts")
+// retireRemovedHarnessSelections clears the selections of harnesses this release
+// does not run. It never deletes a saved account: a retired row can be the only
+// copy of an owner's sign-in, and retiring a harness is no proof that a given
+// sign-in moved. The importer copies one source into a Pi account and retires
+// exactly that source after the copy verifies (importer.Importer.move), and until
+// then the account views report the row as an unknown-harness account the owner can
+// repair or remove (D-125). A selection of a harness this release does not run has
+// no meaning, so it goes, whether or not its account row stays.
+func retireRemovedHarnessSelections(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT json_extract(CAST(metadata AS TEXT), '$.harness') FROM accounts")
 	if err != nil {
 		return err
 	}
-	// covered holds the providers a signed-in Pi account proves a sign-in for. A Pi
-	// slot the owner has not signed in yet proves nothing, and a saved envelope
-	// without a usable provider entry proves nothing either (D-125).
-	covered := map[string]bool{}
-	type candidate struct{ id, harness, provider string }
-	var candidates []candidate
+	retired := map[string]bool{"": true}
 	for rows.Next() {
-		var id, harness, provider, schema sql.NullString
-		var needsLogin sql.NullBool
-		if err := rows.Scan(&id, &harness, &provider, &schema, &needsLogin); err != nil {
+		var harness sql.NullString
+		if err := rows.Scan(&harness); err != nil {
 			rows.Close()
 			return err
 		}
-		if KnownHarness(harness.String) && !AccountsRetired(harness.String) {
-			if harness.String == "pi" && provider.String != "" && schema.String == SchemaPiNativeFiles && !needsLogin.Bool {
-				if c, ok := readCredentialAt(credentialDir, id.String); ok && c.Schema == SchemaPiNativeFiles && piCoversProvider(c, Provider(provider.String)) {
-					covered[provider.String] = true
-				}
-			}
-			continue
+		if !KnownHarness(harness.String) || AccountsRetired(harness.String) {
+			retired[harness.String] = true
 		}
-		candidates = append(candidates, candidate{id.String, harness.String, provider.String})
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return err
 	}
-	var ids []string
-	retiredHarnesses := map[string]bool{"": true}
-	for _, row := range candidates {
-		retiredHarnesses[row.harness] = true
-		if !covered[row.provider] {
-			continue
-		}
-		ids = append(ids, row.id)
-	}
-	for _, id := range ids {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE id = ?", id); err != nil {
-			return err
-		}
-	}
-	if err := forgetAccounts(ctx, conn, ids); err != nil {
-		return err
-	}
-	// forgetters clear a selection but keep its row, so a room can override the
-	// global choice with none. A selection of a harness this release does not run
-	// has no such meaning and goes, whether or not its account row was kept.
-	harnesses := make([]string, 0, len(retiredHarnesses))
-	for harness := range retiredHarnesses {
+	harnesses := make([]string, 0, len(retired))
+	for harness := range retired {
 		harnesses = append(harnesses, harness)
 	}
 	sort.Strings(harnesses)
@@ -192,59 +159,6 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn, credentialDir s
 		}
 	}
 	return nil
-}
-
-// piCoversProvider reports whether a saved Pi credential really holds the sign-in
-// of provider: an envelope with exactly one auth.json entry whose Pi provider id
-// names the same provider, carrying the token kind that provider signs in with.
-// An envelope Dyna can read but Pi cannot use proves nothing, so the migration
-// keeps the source row instead of discarding the only saved copy (D-125).
-func piCoversProvider(c Credential, provider Provider) bool {
-	var files, auth map[string]json.RawMessage
-	if json.Unmarshal(c.Payload, &files) != nil || json.Unmarshal(files["auth.json"], &auth) != nil || len(auth) != 1 {
-		return false
-	}
-	for id, raw := range auth {
-		if piProviderOf(id) != provider {
-			return false
-		}
-		var entry struct {
-			Type      string `json:"type"`
-			Key       string `json:"key"`
-			Access    string `json:"access"`
-			Refresh   string `json:"refresh"`
-			AccountID string `json:"accountId"`
-		}
-		if json.Unmarshal(raw, &entry) != nil {
-			return false
-		}
-		switch provider {
-		case ProviderChatGPT:
-			return entry.Type == "oauth" && entry.Access != "" && entry.AccountID != ""
-		case ProviderMetaMuse:
-			return entry.Type == "oauth" && entry.Refresh != ""
-		case ProviderOpenCodeGo:
-			return entry.Type == "api_key" && entry.Key != ""
-		}
-		return entry.Key != "" || entry.Access != ""
-	}
-	return false
-}
-
-// piProviderOf maps a Pi provider id to the saved account provider, following the
-// aliases Pi accepts. An unknown id maps to itself.
-func piProviderOf(id string) Provider {
-	switch id {
-	case "openai-codex", "openai", "chatgpt":
-		return ProviderChatGPT
-	case "meta", "meta-muse", "muse":
-		return ProviderMetaMuse
-	case "opencode-go", "opencode":
-		return ProviderOpenCodeGo
-	case "kimi-coding", "kimi":
-		return ProviderKimiCode
-	}
-	return Provider(id)
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the
@@ -489,14 +403,7 @@ func scanMetadata(row interface{ Scan(...any) error }) (Metadata, string, error)
 // readCredential reads account id's credential file; ok is false when it is
 // missing or damaged.
 func (s *Store) readCredential(id string) (Credential, bool) {
-	return readCredentialAt(s.credentialDir(), id)
-}
-
-// readCredentialAt reads and validates one account's saved credential file. A
-// row whose file is missing or damaged reads as signed out, and so does a file
-// whose schema does not match the row.
-func readCredentialAt(dir, id string) (Credential, bool) {
-	f, err := os.OpenFile(filepath.Join(dir, id+".json"), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(s.credentialPath(id), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return Credential{}, false
 	}
@@ -841,8 +748,3 @@ func forgetAccounts(ctx context.Context, conn *sql.Conn, ids []string) error {
 	}
 	return nil
 }
-
-// credentialsAt names the private credential directory of a data directory. The
-// migration validates a saved sign-in by reading its file, so it derives the
-// layout from the data directory that openRegistryAt already receives.
-func credentialsAt(dataDir string) string { return filepath.Join(dataDir, "accounts", "credentials") }
