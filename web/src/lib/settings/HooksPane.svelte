@@ -17,7 +17,7 @@
   import { BASE, motion } from '../ui/motion.ts'
   import { ago, duration, until } from '../ui/format.ts'
   import HookForm from './HookForm.svelte'
-  import { eventLabel, exitLabel, failLabel, hookForm, hookOf, hookPatch, isBuiltin, authorLabel, newHook, newestFirst, runByHand, runTone, timeoutLabel, type HookFields, type HookInput, type HookScope } from './hooks.ts'
+  import { listedHooks, eventLabel, exitLabel, failLabel, hookForm, hookOf, hookPatch, isBuiltin, authorLabel, newHook, newestFirst, runByHand, runTone, timeoutLabel, type HookFields, type HookInput, type HookScope } from './hooks.ts'
   import type { HookLogTarget } from './hookLog.ts'
   import type { Hook, HookRun, HookRunLog, HookSummary } from '../api/settings.ts'
 
@@ -93,7 +93,7 @@
       openRun = ''
     }
     try {
-      const listed: Hook[] = (await (isGlobal() ? api.listGlobalHooks() : api.listHooks(repo))) ?? []
+      const listed: Hook[] = listedHooks((await (isGlobal() ? api.listGlobalHooks() : api.listHooks(repo))) ?? [], isGlobal() ? 'global' : 'repository')
       hooks = listed
       await Promise.all(listed.map((h) => loadRuns(h.name)))
       // The next run is a helpful extra: a failed read leaves the rows on
