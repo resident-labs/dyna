@@ -98,8 +98,12 @@ func (s *Service) ReleaseReviewers(key, author, roomID string, reviewers []strin
 // current head still needs. A named reviewer records its own verdict, so
 // without this re-assignment a dormant reviewer never learns that its older
 // verdict stopped counting, and the change stalls until someone wakes the
-// reviewer by hand.
+// reviewer by hand. A draft holds every assignment, like it holds the pool:
+// the draft release in the head pass queues them without another push.
 func requiredReviewNotices(r *Record) {
+	if r.IsDraft {
+		return
+	}
 	command := "dyna git change verdict " + shellquote.Quote(changeID(*r))
 	if changeKind(*r) == "github" {
 		command = "dyna git pr verdict " + shellquote.Quote(r.URL)

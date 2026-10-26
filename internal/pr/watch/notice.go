@@ -24,6 +24,10 @@ func staleNotice(st State, r Record, n Notice) string {
 		if r.State == "closed" || r.State == "merged" || !r.Watching {
 			return "change-ended"
 		}
+		// A draft holds the assignment, exactly as it holds the review pool.
+		if r.IsDraft {
+			return "draft-hold"
+		}
 		_, rest, hasHead := strings.Cut(n.Text, "\nHead: ")
 		head, _, _ := strings.Cut(rest, "\n\n")
 		if hasHead && head != r.Head {

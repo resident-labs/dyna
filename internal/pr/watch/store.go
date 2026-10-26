@@ -271,7 +271,11 @@ func noticeTyped(r *Record, target, text, token string, facts noticeFacts, drops
 			// A rerun can temporarily remove readiness on the same head, and
 			// a queue order flip back can make a cleared radar notice true
 			// again. Keep delivered notices deduplicated, but retry this pending one.
-			if !n.Done && (n.SupersededBy == "no-longer-landable" || n.SupersededBy == "radar-cleared") {
+			// A required-review assignment retired only because the head moved
+			// away, or the PR held as a draft, comes back when that same head or
+			// the release asks for it again: the reviewer still owes the approval.
+			if !n.Done && (n.SupersededBy == "no-longer-landable" || n.SupersededBy == "radar-cleared" ||
+				(n.Kind == "required-review" && (strings.HasPrefix(n.SupersededBy, "new-head:") || strings.HasPrefix(n.SupersededBy, "head-changed:") || n.SupersededBy == "draft-hold"))) {
 				n.SupersededBy = ""
 			}
 			// A notice saved before the pair identity existed still names its
