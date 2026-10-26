@@ -7,6 +7,8 @@ package callspec
 import (
 	"errors"
 	"fmt"
+	"io"
+	"syscall"
 	"time"
 )
 
@@ -156,4 +158,12 @@ var Build string
 // VersionGap is the one line for a call across two builds that cannot work.
 func VersionGap(engine, client string) string {
 	return fmt.Sprintf("engine is %s, this dyna is %s: restart the engine or update dyna", engine, client)
+}
+
+// IsCutOff reports a call whose connection closed before the engine answered,
+// as when the engine restarts for an update. The engine may or may not have
+// applied the call.
+func IsCutOff(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
 }
