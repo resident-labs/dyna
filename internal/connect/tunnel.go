@@ -77,6 +77,13 @@ func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...
 	}
 }
 
+// credentialDiffers reports whether the credential the connector started with is
+// gone or different. It is a pure decision, so a test can check it without a
+// clock or a child process.
+func credentialDiffers(now []byte, err error, seen []byte) bool {
+	return err != nil || !bytes.Equal(now, seen)
+}
+
 // watchTunnelToken stops the connector when its credential changes or goes away.
 // A link writes a new token, and an unlink removes it; the child in flight still
 // holds the old tunnel, so it must not keep running.
@@ -88,7 +95,7 @@ func watchTunnelToken(ctx context.Context, path string, seen []byte, ticks <-cha
 		case <-ticks:
 		}
 		now, err := os.ReadFile(path)
-		if err == nil && bytes.Equal(now, seen) {
+		if !credentialDiffers(now, err, seen) {
 			continue
 		}
 		if err != nil {
