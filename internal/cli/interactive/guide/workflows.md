@@ -92,14 +92,17 @@ Runs items concurrently through stages with no stage barrier. Each callback rece
 Use inline callbacks for exact graph attribution; callbacks passed by identifier are best-effort. Exact attribution includes calls after awaits, nested `parallel()` thunks, literal spreads, conditional/sequence expressions, static array/object selections, and immediately invoked inline factories.
 Awaited async factories and simple block-bodied factories also retain attribution. Direct recursive self-calls preserve item context. After awaits, `.call`, `.apply`, `.bind`, and `Reflect.apply` lose exact attribution and the receiver.
 
-### `post(to, text)`
+### `post(to, text, data?)`
 
-Synchronously stores and delivers a room post as `run:<id>`. `to` is a mention or mention array; non-empty `text` has a 16 KiB limit. Resolution errors throw; check returned `error` and deliveries after storage. Keep bulk output in artifacts.
+Synchronously stores and delivers a room post from the run, shown under the workflow's name. `to` is a mention or mention array; non-empty `text` has a 16 KiB limit. Resolution errors throw; check returned `error` and deliveries after storage. Keep bulk output in artifacts.
 Read `dyna guide posting` for mentions and delivery fields.
+
+Pass facts as `data` (object or array), or `post(to, { text, data })`; never inline JSON in `text`. The feed shows `data` as a collapsed key and value view. Recipients read it as a fenced JSON block after `text`; the limit counts it.
 
 ```js
 const sent = post('@root', 'Review ready. See the run result.')
 if (sent.error) throw new Error(sent.error)
+post('@integrator', 'Landing request after review.', { unit: 'CH', head: '31cdb141', evidence: '/tmp/receipt.json' })
 ```
 
 ### `workflow(nameOrRef, args?)`
