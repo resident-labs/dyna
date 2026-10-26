@@ -91,3 +91,36 @@ func TestRunRetriesFailedDelivery(t *testing.T) {
 		t.Fatalf("delivered report posted again: %v, %v", attempts, err)
 	}
 }
+
+func TestPassReportsOnlyAnUnhealthyMachineOnceWithinTheCooldown(t *testing.T) {
+	dir := t.TempDir()
+	busyMachine(t, Samples{DataDir: dir}, t0)
+	var posted []Report
+	pass := Pass{DataDir: dir, Machines: []string{"laptop"}, If: "load>2", Cooldown: DefaultCooldown, Now: t0,
+		Post: func(r Report) error { posted = append(posted, r); return nil }}
+	var log strings.Builder
+	if err := pass.Do(&log); err != nil || !strings.Contains(log.String(), "laptop") || len(posted) != 1 {
+		t.Fatalf("first pass: log %q, posted %d, %v", log.String(), len(posted), err)
+	}
+	log.Reset()
+	pass.Now = t0.Add(time.Minute)
+	if err := pass.Do(&log); err != nil || log.Len() != 0 || len(posted) != 1 {
+		t.Fatalf("repeat pass: log %q, posted %d, %v", log.String(), len(posted), err)
+	}
+	// The threshold comes from the condition, not from the doctor.
+	log.Reset()
+	pass.If = "load>50"
+	if err := pass.Do(&log); err != nil || log.Len() != 0 || len(posted) != 1 {
+		t.Fatalf("high threshold: log %q, posted %d, %v", log.String(), len(posted), err)
+	}
+}
+
+func TestPassKeepsExaminingAfterAMachineFails(t *testing.T) {
+	dir := t.TempDir()
+	busyMachine(t, Samples{DataDir: dir}, t0)
+	var log strings.Builder
+	err := Pass{DataDir: dir, Machines: []string{"remote", "laptop"}, Now: t0}.Do(&log)
+	if err == nil || !strings.Contains(err.Error(), "remote") || !strings.Contains(log.String(), "laptop") {
+		t.Fatalf("log %q, err %v", log.String(), err)
+	}
+}

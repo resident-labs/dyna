@@ -39,7 +39,7 @@ func NewCommand() *cobra.Command {
 	var h hooks.Hook
 	var timeout time.Duration
 	var recipe string
-	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe doctor for a schedule hook that examines the machine every minute while load or memory is high, or --recipe self-update for the Dyna-only Update Dyna recipe. --global saves a hook that belongs to the machine and needs an absolute working directory. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
+	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe self-update for the Dyna-only Update Dyna recipe. --global saves a hook that belongs to the machine and needs an absolute working directory. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
 		if len(a) == 0 && recipe == "" {
 			return fmt.Errorf("hook name is required")
 		}
@@ -49,6 +49,9 @@ func NewCommand() *cobra.Command {
 		}
 		if recipe != "" {
 			r, ok := hooks.Recipes[recipe]
+			if recipe == "doctor" {
+				return fmt.Errorf("the doctor hook belongs to the machine and is installed by default; change it with `dyna git hooks edit doctor --global`, and set its thresholds with `dyna settings set doctor.condition`")
+			}
 			if !ok {
 				return fmt.Errorf("unknown hook recipe %q; built-in recipes are %s", recipe, hooks.RecipeHelp())
 			}
