@@ -54,25 +54,6 @@ const (
 	WindowReasonProbableReset WindowReason = "probable-reset"
 )
 
-// UnmarshalJSON reads a window saved before reasons were typed. Its
-// unavailableReason text was always the not-reported case.
-// TODO: legacy/shim remove later — accounts saved before window reasons were typed.
-func (w *Window) UnmarshalJSON(data []byte) error {
-	type window Window
-	var raw struct {
-		*window
-		UnavailableReason string `json:"unavailableReason"`
-	}
-	raw.window = (*window)(w)
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	if raw.UnavailableReason != "" && w.Reason == "" {
-		w.Reason = WindowReasonNotReported
-	}
-	return nil
-}
-
 // UsageReason is the classified reason an account has no current usage reading.
 // It is typed so the CLI and the web app can show a designed message instead of
 // raw reader text.
