@@ -43,7 +43,7 @@ VALUES(?,'room','owner/repo',0,0,?,?)`, row.key, row.rev, `{"padding":"`+strings
 	if err := Migrate(dir); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN SELECT key FROM pr_records WHERE rev > ?", "2")
+	rows, err := db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN SELECT key FROM pr_rows WHERE rev > ?", "2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ VALUES(?,'room','owner/repo',0,0,?,?)`, row.key, row.rev, `{"padding":"`+strings
 	if readErr != nil || closeErr != nil {
 		t.Fatalf("query plan: read=%v, close=%v", readErr, closeErr)
 	}
-	if len(plan) != 1 || !strings.HasPrefix(plan[0], "SEARCH pr_records USING COVERING INDEX pr_records_revision ") || !strings.Contains(plan[0], "(rev>?)") {
+	if len(plan) != 1 || !strings.HasPrefix(plan[0], "SEARCH pr_rows USING COVERING INDEX pr_records_revision ") || !strings.Contains(plan[0], "(rev>?)") {
 		t.Errorf("PR revision lookup is not a covering index search: %v", plan)
 	}
 	for _, tc := range []struct {

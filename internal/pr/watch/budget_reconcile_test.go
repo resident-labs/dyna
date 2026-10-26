@@ -52,7 +52,7 @@ func TestBudgetCommitIsReconciledBeforeLaterRunError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TRIGGER refuse_second_budget BEFORE INSERT ON pr_records
+	_, err = db.Exec(`CREATE TRIGGER refuse_second_budget BEFORE INSERT ON pr_rows
 WHEN json_extract(NEW.body, '$.record.ciBudgetRuns."82/1"') IS NOT NULL
 BEGIN SELECT RAISE(ABORT, 'second budget refused'); END`)
 	if err != nil {

@@ -144,7 +144,7 @@ func KeysChangedSince(root, since string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.Query("SELECT key FROM pr_records WHERE rev > ?", since)
+	rows, err := db.Query("SELECT key FROM pr_rows WHERE rev > ?", since)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func OpenRecordsInRoom(root, roomID string) ([]Record, error) {
 	}
 	var bodies [][]byte
 	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
-		rows, err := r.QueryContext(context.Background(), "SELECT body FROM pr_records WHERE room=? AND closed=0", roomID)
+		rows, err := r.QueryContext(context.Background(), "SELECT body FROM pr_rows WHERE room=? AND closed=0", roomID)
 		if err != nil {
 			return err
 		}
@@ -252,7 +252,7 @@ func ReadForSessions(root, roomID string, sessions ...string) (State, error) {
 	}
 	var found []stored
 	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
-		rows, err := r.QueryContext(context.Background(), `SELECT key, body FROM pr_records WHERE room=? AND (
+		rows, err := r.QueryContext(context.Background(), `SELECT key, body FROM pr_rows WHERE room=? AND (
 json_extract(body,'$.record.authorSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerOverride') IN (`+marks+`))`, args...)
 		if err != nil {
 			return err
@@ -385,7 +385,7 @@ func fetch(q querier, root string) (fetched, error) {
 	if snapshot.index != nil && f.revision == snapshot.revision {
 		return fetched{unchanged: true}, nil
 	}
-	rows, err = q.QueryContext(ctx, "SELECT key, rev, body FROM pr_records")
+	rows, err = q.QueryContext(ctx, "SELECT key, rev, body FROM pr_rows")
 	if err != nil {
 		return fetched{}, err
 	}
@@ -426,7 +426,7 @@ func fetchParts(ctx context.Context, q querier, f *fetched) error {
 	if len(byKey) == 0 {
 		return nil
 	}
-	rows, err := q.QueryContext(ctx, "SELECT key, part, body FROM pr_record_parts WHERE key IN (SELECT key FROM pr_records WHERE rev >= ?)", lowest)
+	rows, err := q.QueryContext(ctx, "SELECT key, part, body FROM pr_record_parts WHERE key IN (SELECT key FROM pr_rows WHERE rev >= ?)", lowest)
 	if err != nil {
 		return err
 	}
