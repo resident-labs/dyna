@@ -64,12 +64,6 @@ type ProfileSnapshot struct {
 	Output *Declaration `json:"output,omitempty"`
 }
 
-// RunSnapshot freezes every profile output declaration visible at run start.
-type RunSnapshot struct {
-	Version  int               `json:"version"`
-	Profiles []ProfileSnapshot `json:"profiles"`
-}
-
 // SelectedSnapshot freezes the declaration selected for one invocation.
 type SelectedSnapshot struct {
 	Version int             `json:"version"`

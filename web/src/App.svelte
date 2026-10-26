@@ -1223,19 +1223,10 @@
     }
   }
 
-  function steerAgent(run: RunSummary, a: RunAgent) {
-    ask = {
-      title: `Steer ${a.label || 'agent ' + a.id}`,
-      lines: [`This message goes to this agent of ${run.name} while it works.`],
-      multiline: true,
-      placeholder: 'What should it do differently?',
-      action: 'Send',
-      submit: async (text) => {
-        await api.steerRun(run.id, a.id, text)
-        ask = null
-        say({ tone: 'success', subject: 'Steering sent', text: 'The agent sees it while it works.' })
-      },
-    }
+  // openRunAgent opens the session that ran an agent: its transcript and its composer.
+  function openRunAgent(run: RunSummary, a: RunAgent) {
+    if (!a.session) return
+    openAgent({ id: a.session, name: a.label || `agent ${a.id}`, hue: 0, roomId: run.roomId })
   }
 
   async function runStarted(id?: string) {
@@ -1894,7 +1885,7 @@
           {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
-            {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => askConfirm({ kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
+            {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => askConfirm({ kind: 'cancelrun', run })} onpause={pauseRun} onopen={openRunAgent} />{/key}
           {:else}
             <Runs {room} list={runs} error={runsError} onopen={showRun} onstart={() => (starting = true)} />
           {/if}

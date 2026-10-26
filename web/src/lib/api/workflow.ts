@@ -41,6 +41,8 @@ export interface RunAgent {
   doing?: Doing
   error?: string
   cached?: boolean
+  // session is the session that ran the agent; an agent of an older run has none.
+  session?: string
 }
 
 // RunLog is roomsvc.RunLog.

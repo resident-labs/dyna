@@ -2,12 +2,10 @@ package runstore
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
-
-	"dyna-agent/internal/workeroutput"
 )
 
 func TestAgentOutputPathCreateAndIncrementalRead(t *testing.T) {
@@ -19,7 +17,7 @@ func TestAgentOutputPathCreateAndIncrementalRead(t *testing.T) {
 	}
 	defer run.Finish("ok", "null", nil)
 
-	path, err := run.StartAgentOutput(3)
+	path, err := legacyArtifact(t, run, 3, "stdout.log"), error(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +67,7 @@ func TestAgentOutputPathCreateAndIncrementalRead(t *testing.T) {
 	}
 }
 
-func TestOutputSnapshotsAndNormalizedIncrementalRead(t *testing.T) {
+func TestNormalizedOutputIncrementalRead(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_normalized-output-test")
 	run, err := Create("normalized output", "return null", nil)
@@ -78,31 +76,7 @@ func TestOutputSnapshotsAndNormalizedIncrementalRead(t *testing.T) {
 	}
 	defer run.Finish("ok", "null", nil)
 
-	decl := &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}
-	selected := workeroutput.ProfileSnapshot{Name: "sol", Model: "gpt-test", Output: decl}
-	if err := run.SnapshotOutputProfiles([]workeroutput.ProfileSnapshot{selected}); err != nil {
-		t.Fatal(err)
-	}
-	eventsPath, err := run.StartAgentNormalizedOutput(2, selected)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	configPath, err := AgentOutputConfigPath(run.Meta.ID, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var snapshot workeroutput.SelectedSnapshot
-	if err := json.Unmarshal(b, &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Version != 1 || snapshot.Profile.Name != "sol" || snapshot.Profile.Output == nil || snapshot.Profile.Output.Dialect != workeroutput.DialectPiJSON {
-		t.Fatalf("selected snapshot = %#v", snapshot)
-	}
+	eventsPath := legacyArtifact(t, run, 2, "output.jsonl")
 
 	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
@@ -131,7 +105,7 @@ func TestAgentOutputLimitedReadAndCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer run.Finish("ok", "null", nil)
-	path, err := run.StartAgentOutput(4)
+	path, err := legacyArtifact(t, run, 4, "stdout.log"), error(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,11 +137,7 @@ func TestNormalizedOutputLimitedReadLeavesPartialUncommitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer run.Finish("ok", "null", nil)
-	selected := workeroutput.ProfileSnapshot{Name: "sol", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectText}}
-	path, err := run.StartAgentNormalizedOutput(5, selected)
-	if err != nil {
-		t.Fatal(err)
-	}
+	path := legacyArtifact(t, run, 5, "output.jsonl")
 	first := "{\"v\":1,\"kind\":\"message\",\"text\":\"one\"}\n"
 	second := "{\"v\":1,\"kind\":\"message\",\"text\":\"two\"}\n"
 	partial := "{\"v\":1,\"kind\":\"message\",\"text\":\"thr"
@@ -186,45 +156,11 @@ func TestNormalizedOutputLimitedReadLeavesPartialUncommitted(t *testing.T) {
 	}
 }
 
-func TestSnapshotOutputProfilesIsCreateOnce(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("DYNA_RUN_ID", "wf_output-snapshot-once")
-	run, err := Create("snapshot once", "return null", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer run.Finish("ok", "null", nil)
-
-	first := workeroutput.ProfileSnapshot{Name: "sol", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}}
-	if err := run.SnapshotOutputProfiles([]workeroutput.ProfileSnapshot{first}); err != nil {
-		t.Fatal(err)
-	}
-	second := workeroutput.ProfileSnapshot{Name: "sol", Output: &workeroutput.Declaration{Dialect: workeroutput.DialectText}}
-	if err := run.SnapshotOutputProfiles([]workeroutput.ProfileSnapshot{second}); err != nil {
-		t.Fatal(err)
-	}
-	path, err := OutputProfilesPath(run.Meta.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var snapshot workeroutput.RunSnapshot
-	if err := json.Unmarshal(b, &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if len(snapshot.Profiles) != 1 || snapshot.Profiles[0].Output == nil || snapshot.Profiles[0].Output.Dialect != workeroutput.DialectPiJSON {
-		t.Fatalf("create-once snapshot was overwritten: %#v", snapshot)
-	}
-}
-
 func TestAgentOutputReadsFromTheAgentsSessionWhenTheRunKeepsNone(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	const run = "wf_session-output"
 	session := AgentSessionID(run, 2)
-	for name, want := range map[string]string{"stdout.log": "raw", "output.jsonl": "{}\n", "output-config.json": "{}"} {
+	for name, want := range map[string]string{"stdout.log": "raw", "output.jsonl": "{}\n"} {
 		path := filepath.Join(SessionsDir(), session, "agents", "1", name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -234,7 +170,7 @@ func TestAgentOutputReadsFromTheAgentsSessionWhenTheRunKeepsNone(t *testing.T) {
 		}
 	}
 	for name, get := range map[string]func(string, int) (string, error){
-		"stdout.log": AgentOutputPath, "output.jsonl": AgentNormalizedOutputPath, "output-config.json": AgentOutputConfigPath,
+		"stdout.log": AgentOutputPath, "output.jsonl": AgentNormalizedOutputPath,
 	} {
 		got, err := get(run, 2)
 		if want := filepath.Join(SessionsDir(), session, "agents", "1", name); err != nil || got != want {
@@ -252,4 +188,18 @@ func TestAgentOutputReadsFromTheAgentsSessionWhenTheRunKeepsNone(t *testing.T) {
 	if got, err := AgentOutputPath(run, 2); err != nil || got != own {
 		t.Fatalf("path with the run's own artifact = %q, %v; want %q", got, err, own)
 	}
+}
+
+// legacyArtifact creates an empty artifact in the run's own directory, where
+// runs from before agents were sessions kept it, and returns its path.
+func legacyArtifact(t *testing.T, run *Run, agent int, name string) string {
+	t.Helper()
+	path := filepath.Join(run.Dir, "agents", strconv.Itoa(agent), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

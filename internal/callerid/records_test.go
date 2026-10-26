@@ -212,7 +212,7 @@ func TestLaunchChecksTheActor(t *testing.T) {
 	}{
 		{"turn", Identity{Kind: Session, Session: "ses_a"}, true},
 		{"workflow", Identity{Kind: Worker, Run: "run_a"}, true},
-		{"workflow", Identity{Kind: Worker, Run: "run_a", Agent: 2}, true},
+		{"workflow", Identity{Kind: Worker, Run: "run_a", Agent: 2}, false},
 		{"consolidate", Identity{Kind: Owner}, false},
 		{"transfer", Identity{Kind: Owner}, false},
 		{"resume-room", Identity{Kind: Owner}, false},
@@ -306,44 +306,6 @@ func TestSelfIgnoresTheEnvironment(t *testing.T) {
 	}
 	if got, err := Self(dir); err != nil || got != session {
 		t.Fatalf("Self() = %+v, %v; want the recorded runner's session", got, err)
-	}
-}
-
-// A workflow agent's harness CLI is not dyna, so its run-worker records it
-// right after it starts. The agent, and every command it runs, then resolves
-// to its own agent number, not to the run's agent 0.
-func TestRecordStartedResolvesTheAgent(t *testing.T) {
-	dir := t.TempDir()
-	cmd := exec.Command("/bin/sh", "-c", "read line")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
-	agent := Identity{Kind: Worker, Run: "run_a", Agent: 2}
-	if err := RecordStarted(context.Background(), cmd.Process.Pid, Launch{DataDir: dir, Name: "run_a", Actor: agent, Launcher: "workflow"}); err != nil {
-		t.Fatal(err)
-	}
-	s, err := OpenStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := New("/proc", os.Getpid(), s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := r.Resolve(cmd.Process.Pid); got != agent {
-		t.Fatalf("Resolve(agent) = %+v, want %+v", got, agent)
-	}
-	// A row from before agent numbers holds "" in the worker column: the run.
-	if _, err := s.db.Exec(`INSERT INTO caller_records(unit,pid,start,actor,session,run,worker,launcher,recorded) VALUES('',0,7,'worker','','run_b','','workflow',0)`); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok, err := s.ProcessIdentity(Process{PID: 0, Start: 7}); err != nil || !ok || got != (Identity{Kind: Worker, Run: "run_b"}) {
-		t.Fatalf("an old row = %+v, %v, %v; want run_b itself", got, ok, err)
 	}
 }
 
