@@ -1,6 +1,8 @@
 package subagent
 
 import (
+	"context"
+	"dyna-agent/internal/authority"
 	"strings"
 	"testing"
 	"time"
@@ -100,5 +102,40 @@ func TestRunAgentIDsDifferAndKeepTheRunsDate(t *testing.T) {
 				t.Fatalf("ID %s is not valid or does not keep the date and time of %s", id, run)
 			}
 		}
+	}
+}
+
+func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
+	e := newTestEnv(t)
+	coordinator := authority.WithActor(e.ctx, authority.Actor{Role: authority.Worker, Run: "wf_20261026-094500-aaaaaaaa"})
+	start := func(agent int, task string) Info {
+		info, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: "wf_20261026-094500-aaaaaaaa", Agent: agent}, Profile: "mock", Task: task, Dir: t.TempDir(), Room: e.room.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	done := start(1, "RESPOND: done")
+	if got, err := e.m.WaitRunAgent(coordinator, "wf_20261026-094500-aaaaaaaa", 1, time.Minute); err != nil || !got.Done || got.Turn.Result != "done" {
+		t.Fatalf("wait as the coordinator = %+v, %v; want the result", got, err)
+	}
+	running := start(2, "SLEEP:60\nRESPOND: late")
+	if err := e.m.CloseRunAgents(coordinator, "wf_20261026-094500-aaaaaaaa"); err != nil {
+		t.Fatalf("close as the coordinator: %v", err)
+	}
+	for _, id := range []string{done.ID, running.ID} {
+		if got, err := e.m.store().Info(id); err != nil || got.Status != StatusClosed {
+			t.Fatalf("session %s = %+v, %v; want closed", id, got.Status, err)
+		}
+	}
+	// The engine has no caller: its own cleanup closes a run's agents too.
+	late := start(3, "RESPOND: x")
+	restore := authority.InEngine()
+	defer restore()
+	if err := e.m.closeEndedRunAgents(context.Background(), []Meta{late.Meta}); err == nil {
+		t.Log("run still live in this test, so nothing to close")
+	}
+	if _, err := e.m.closeRunAgent(context.Background(), late.ID); err != nil {
+		t.Fatalf("engine close without a caller: %v", err)
 	}
 }
