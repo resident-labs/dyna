@@ -35,10 +35,10 @@
   .jhead { display: flex; gap: 8px; align-items: baseline; margin: 14px 0 6px; font-size: var(--t-sm); font-weight: 600; color: var(--muted); }
   .jhead span { color: var(--faint); font-weight: 500; }
   .journal { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .journal li { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: baseline; }
+  .journal li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
   time { color: var(--faint); font-size: var(--t-cap); font-variant-numeric: tabular-nums; }
-  .kind { font-size: var(--t-cap); color: var(--muted); background: var(--raise); border-radius: 4px; padding: 0 6px; }
-  .msg { min-width: 0; }
+  .kind { justify-self: start; font-size: var(--t-cap); color: var(--muted); background: var(--raise); border-radius: 4px; padding: 0 6px; }
+  .msg { min-width: 0; overflow-wrap: anywhere; }
   .next { margin: 2px 0 0; color: var(--muted); font-size: var(--t-sm); }
-  @media (max-width: 600px) { .journal li { grid-template-columns: auto 1fr; } .msg { grid-column: 1 / -1; } }
+  @media (max-width: 600px) { .journal li { grid-template-columns: auto minmax(0, 1fr); } .msg { grid-column: 1 / -1; } }
 </style>
