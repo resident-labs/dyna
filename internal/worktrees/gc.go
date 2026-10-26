@@ -249,16 +249,13 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	if err != nil {
 		return Record{}, err
 	}
-	// A fetch keeps a remote-tracking base such as origin/main current. A local
-	// base starts from the commit the repository already has, and a repository
-	// without origin has nothing to fetch: the authenticated fetch asks origin
-	// for its URL first, which failed on a plain git init (D-137).
-	if !localBase(ctx, main, base) && hasRemote(ctx, main, "origin") {
-		if out, err := gitOriginOutput(ctx, main, "fetch", "origin"); err != nil {
-			return Record{}, fmt.Errorf("fetch origin: %w: %s", err, out)
-		}
-	}
-	// A hash keeps branch names such as a/b and a-b distinct.
+	// Pin the base to a commit before the worktree is created: the refresh
+	// fetch rewrites FETCH_HEAD (D-164), and the new branch must start at
+	// exactly the commit the caller's repository resolves the base to.
+	pinned, err := pinBase(ctx, repo, main, base)
+	if err != nil {
+		return Record{}, err
+	}	// A hash keeps branch names such as a/b and a-b distinct.
 	sum := sha256.Sum256([]byte(branch))
 	name := slug(branch)
 	if len(name) > 80 {
@@ -268,8 +265,26 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return Record{}, err
 	}
-	if out, err := gitOutput(ctx, main, "worktree", "add", "-b", branch, path, base); err != nil {
+	// The base ref, not the pinned id, is the start point: git derives the new
+	// branch's upstream from it exactly as before (branch.autoSetupMerge), and
+	// a raw commit id would drop that tracking. The add runs in the caller's
+	// checkout, because HEAD and FETCH_HEAD are per-worktree refs that the
+	// main checkout can resolve differently or not at all.
+	if out, err := gitOutput(ctx, repo, "worktree", "add", "-b", branch, path, base); err != nil {
 		return Record{}, fmt.Errorf("create worktree: %w: %s", err, out)
+	}
+	// The pin and the add are separate git runs, so a concurrent fetch can
+	// still move the base between them. Refuse loudly instead of starting the
+	// branch at a commit other than the pinned one.
+	if out, err := gitOutput(ctx, path, "rev-parse", "HEAD"); err != nil || strings.TrimSpace(string(out)) != pinned {
+		gitOutput(ctx, main, "worktree", "remove", "--force", path)
+		// No user work exists on the new branch yet; remove it, so a retry
+		// with the same name starts cleanly.
+		gitOutput(ctx, main, "branch", "-D", branch)
+		if err != nil {
+			return Record{}, fmt.Errorf("verify the new worktree's commit: %w: %s", err, out)
+		}
+		return Record{}, fmt.Errorf("base %q moved from %s while the worktree was created; retry with the exact commit", base, pinned)
 	}
 	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
 	if err := Track(rec); err != nil {
