@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"dyna-agent/internal/admission"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/harness"
@@ -322,24 +321,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		},
 	}
 
-	// The turn waits for its room first, then for a machine slot, so a paused
-	// room never holds a slot. A later room hold gives the slot back and takes
-	// one again on resume (see waitSession).
-	slot := &turnSlot{m: m, meta: meta, owner: func() bool { return m.ownerCaused(meta, turn) }}
-	slot.held = func(h admission.Hold) {
-		if h.Forced {
-			return // the turn runs now, so the session view has nothing to show
-		}
-		writes.note(TurnNote{Hold: &TurnHold{Pool: h.Pool, Reason: h.Reason, Limit: h.Limit, Running: h.Held, Since: time.Now()}})
-	}
-	writes.suspend, writes.resume = slot.drop, slot.take
 	if err := writes.waitSession(ctx, turn.HeldPrompt); err != nil {
 		return fail(err)
 	}
-	if err := slot.take(ctx); err != nil {
-		return fail(err)
-	}
-	defer slot.drop()
 	resumable := meta.Resumable
 	// The instructions stay byte for byte the same for the life of a harness
 	// conversation, so its cached prompt prefix holds. They refresh only where

@@ -63,12 +63,8 @@ type Values struct {
 	LocalLaneRepos []string
 	// DoctorCondition holds the thresholds of the doctor hook; empty uses the default.
 	DoctorCondition string
-	// AdmissionMode is off, observe or enforce. AdmissionMaxTurns is auto or a
-	// number; AdmissionReserve is zero for auto.
+	// AdmissionMode is off or observe.
 	AdmissionMode         AdmissionMode
-	AdmissionMaxWait      time.Duration
-	AdmissionMaxTurns     string
-	AdmissionReserve      int64
 	LibraryEnabled        []string
 	LibraryProfile        string
 	LibrarySmellProfile   string
@@ -129,8 +125,6 @@ func Defaults() Values {
 		ComputersEnabled:       true,
 		SessionCheckInInterval: 15 * time.Minute,
 		AdmissionMode:          AdmissionObserve,
-		AdmissionMaxWait:       2 * time.Minute,
-		AdmissionMaxTurns:      AdmissionAuto,
 		LibraryReadmeMaxLines:  DefaultLibraryReadmeMaxLines,
 		MaxCardBytes:           DefaultContentBytes,
 		MaxFileBytes:           DefaultContentBytes,
@@ -446,7 +440,7 @@ func (v *Values) Set(key, value string) error {
 		v.fromFile[key] = true
 	case KeySessionCheckInInterval:
 		return v.setSession(key, value)
-	case KeyAdmissionMode, KeyAdmissionMaxWait, KeyAdmissionMaxTurns, KeyAdmissionReserve:
+	case KeyAdmissionMode:
 		return v.setAdmission(key, value)
 	case KeyDoctorCondition:
 		return v.setDoctor(key, value)
