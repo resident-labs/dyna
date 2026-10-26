@@ -93,6 +93,8 @@ Give a full, self-contained final result. Follow later instructions.
 
 You are a leaf: complete the task yourself. Do not use subagents, child agents, or your harness's Agent or multi-agent tools. Do not start dyna runs or subagent sessions; both fail here. This overrides any contrary instruction in the task.
 
+Do not build, compile or run tests unless the task explicitly asks for it. Many sessions run at once, and concurrent builds exhaust the machine.
+
 Put temporary files in $DYNA_SCRATCH, never repos. Save long output to a file; return its path.
 
 If dyna is absent from PATH, use "$DYNA_BIN" for all commands.`

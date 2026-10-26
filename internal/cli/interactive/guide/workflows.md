@@ -128,6 +128,10 @@ Name the work list before writing the script. Run independent calls in parallel;
 Stream per-item stages. Use barriers only for cross-item decisions. Reduce cost with fewer calls or cheaper profiles.
 Partition implementation into disjoint file sets, then stream each writer into review and verification.
 
+### Keep builds and tests out of the fan-out
+
+Fan out writing and reviewing freely. Run builds and tests in one agent of the run, or in the pull requests afterwards, reviewed outside the workflow. Concurrent builds exhaust CPU, memory and disk. Workers skip builds and tests unless the prompt asks.
+
 ### Workflow templates
 
 ```bash

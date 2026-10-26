@@ -41,8 +41,8 @@ func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 		"`phase(title)`", "`log(message)`", "`sleep(ms)`", "`args`", "`process`", "`profiles`", "`worktrees()`",
 		`provenance: "workflow"`, `provenance: "system"`,
 	}
-	if words := len(strings.Fields(guideMD)); words > 1400 {
-		t.Fatalf("workflow guide is %d words; want at most 1400", words)
+	if words := len(strings.Fields(guideMD)); words > 1450 {
+		t.Fatalf("workflow guide is %d words; want at most 1450", words)
 	}
 	for _, contract := range required {
 		if !strings.Contains(guideMD, contract) {
