@@ -56,6 +56,32 @@ func actContainerOptions(check nodeCheck, runID string) string {
 		" --label dyna.check=" + string(check.id)
 }
 
+// tagWorkflowSnippet writes a copy of the workflow at tagged whose top-level
+// name value is tag. act names a job's containers after the workflow, so two
+// act processes that share one workflow fight over one container name, and
+// every job check tags its own copy. The copy lives outside the checkout
+// because act runs a job in the workspace directly: an edit inside the
+// checkout is what the job's own git commands would see. The name value is
+// replaced structurally, because quoted keys and block scalars are valid
+// forms a line edit corrupts.
+func tagWorkflowSnippet(workflowFile, tagged, tag string) string {
+	q := shellquote.Quote
+	// A top-level name key, quoted or not. Top-level keys start at the first
+	// column, so a name inside another value never matches.
+	nameKey := "^[\"']*name[\"']*: "
+	// awk replaces the name line and drops the lines of its old value: a block
+	// scalar's content, or a plain scalar's folded continuation lines, would
+	// otherwise outlive their key. The first line at the first column ends the
+	// value. The program carries no single quote, so it travels as one word.
+	rewrite := `!done && $0 ~ re { print "name: " tag; done = 1; skip = 1; next }
+skip && (/^[[:space:]]/ || /^$/) { next }
+{ skip = 0; print }`
+	return "if grep -q " + q(nameKey) + " " + q(workflowFile) + "; then " +
+		"awk -v re=" + q(nameKey) + " -v tag=" + q(tag) + " " + q(rewrite) + " " + q(workflowFile) + " > " + q(tagged) + "; " +
+		"elif [ \"$(head -n1 " + q(workflowFile) + ")\" = \"---\" ]; then sed -e " + q("1a name: "+tag) + " " + q(workflowFile) + " > " + q(tagged) + "; " +
+		"else sed -e " + q("1i name: "+tag) + " " + q(workflowFile) + " > " + q(tagged) + "; fi; "
+}
+
 // actArtifactPortBase is the first port the artifact server of a node's slot
 // uses. Each slot takes its own port, so two checks never share one.
 const actArtifactPortBase = 34000
