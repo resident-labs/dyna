@@ -51,7 +51,11 @@ type CacheDefinition struct {
 // ExecutableCheck is one command from a repository definition. Check carries
 // its stable identity and the aggregate it feeds in the selected suite.
 type ExecutableCheck struct {
-	Check    Check
+	Check Check
+	// Job, when set, makes the check run one GitHub Actions job through act
+	// instead of running Command itself. Command, Image, Host, HostUser, Setup
+	// and Caches are empty then.
+	Job      *JobRef
 	Command  string
 	Image    string
 	Host     bool
@@ -101,10 +105,18 @@ type cacheFile struct {
 	Env    string `yaml:"env"`
 }
 
+// jobFile names one job of a GitHub Actions workflow that a check runs through
+// act instead of a command of its own.
+type jobFile struct {
+	Workflow string `yaml:"workflow"`
+	Name     string `yaml:"name"`
+}
+
 type checkFile struct {
 	ID            Suite             `yaml:"id"`
 	Name          CheckName         `yaml:"name"`
 	Command       string            `yaml:"command"`
+	Job           *jobFile          `yaml:"job"`
 	Image         string            `yaml:"image"`
 	Host          bool              `yaml:"host"`
 	HostUser      bool              `yaml:"hostUser"`
@@ -126,7 +138,12 @@ type suiteFile struct {
 }
 
 var (
-	definitionID     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	definitionID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	// jobWorkflow accepts the workflow paths a repository can run: one file
+	// under .github/workflows, never a path outside the repository.
+	jobWorkflow = regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9][A-Za-z0-9._-]*\.(yml|yaml)$`)
+	// jobName is a GitHub Actions job id, not its display name.
+	jobName          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,127}$`)
 	definitionEnv    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	definitionMemory = regexp.MustCompile(`^([1-9][0-9]{0,6})([mMgG])$`)
 )
@@ -262,14 +279,21 @@ func ParseDefinition(body []byte) (*Definition, error) {
 			return nil, fmt.Errorf("checks %q and %q share display name %q", previous, input.ID, input.Name)
 		}
 		checkNames[input.Name] = input.ID
-		if strings.TrimSpace(input.Command) == "" || strings.ContainsRune(input.Command, '\x00') {
+		if input.Job != nil {
+			if input.Command != "" || input.Image != "" || input.Host || input.HostUser || input.Setup != "" || len(input.Caches) > 0 {
+				return nil, fmt.Errorf("check %q runs a workflow job, so it cannot also set command, image, host, hostUser, setup or caches", input.ID)
+			}
+			if _, err := validateJobRef(*input.Job); err != nil {
+				return nil, fmt.Errorf("check %q job: %w", input.ID, err)
+			}
+		} else if strings.TrimSpace(input.Command) == "" || strings.ContainsRune(input.Command, '\x00') {
 			return nil, fmt.Errorf("check %q needs a nonempty command without NUL", input.ID)
 		}
-		if input.Host {
+		if input.Job == nil && input.Host {
 			if input.Image != "" || input.HostUser || input.Setup != "" {
 				return nil, fmt.Errorf("host check %q cannot set image, hostUser or setup", input.ID)
 			}
-		} else {
+		} else if input.Job == nil {
 			if input.Image == "" || strings.TrimSpace(input.Image) != input.Image || len(strings.Fields(input.Image)) != 1 || strings.ContainsRune(input.Image, '\x00') {
 				return nil, fmt.Errorf("container check %q needs one container image", input.ID)
 			}
@@ -324,6 +348,10 @@ func ParseDefinition(body []byte) (*Definition, error) {
 			Priority:  input.Priority,
 			CPUs:      input.CPUs,
 			MemoryMiB: memoryMiB,
+		}
+		if input.Job != nil {
+			ref, _ := validateJobRef(*input.Job)
+			check.Job = &ref
 		}
 		seenCaches := map[string]bool{}
 		for _, name := range input.Caches {
@@ -608,4 +636,24 @@ func (d *Definition) CoversSuites(result Result, suites []Suite) bool {
 		}
 	}
 	return true
+}
+
+// JobRef names one job of a GitHub Actions workflow that a check runs through
+// act instead of a command of its own.
+type JobRef struct {
+	Workflow string
+	Name     string
+}
+
+// validateJobRef accepts a workflow file inside the repository's
+// .github/workflows and a job id, never a display name or a path that leaves
+// the checkout.
+func validateJobRef(in jobFile) (JobRef, error) {
+	if !jobWorkflow.MatchString(in.Workflow) {
+		return JobRef{}, fmt.Errorf("workflow %q must be one file under .github/workflows ending in .yml or .yaml", in.Workflow)
+	}
+	if !jobName.MatchString(in.Name) {
+		return JobRef{}, fmt.Errorf("job name %q must be a job id, such as go-static", in.Name)
+	}
+	return JobRef{Workflow: in.Workflow, Name: in.Name}, nil
 }
