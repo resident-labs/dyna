@@ -177,10 +177,9 @@ export function nextTab(current: string, key: string): HarnessTab | null {
   return current === 'harnesses' ? 'tools' : 'harnesses'
 }
 
-export function toolSummary(kind: string, entry: { url?: string; command?: string; args?: string[]; source?: string } | null | undefined): string {
-  if (kind === 'mcp') {
-    if (entry?.url) return entry.url
-    return [entry?.command, ...(entry?.args ?? [])].filter(Boolean).join(' ') || 'Dyna MCP server'
-  }
-  return entry?.source || 'Dyna skill'
+// toolSummary is an MCP server's line under its name: its URL, or the command
+// and arguments it runs.
+export function toolSummary(entry: { url?: string; command?: string; args?: string[] } | null | undefined): string {
+  if (entry?.url) return entry.url
+  return [entry?.command, ...(entry?.args ?? [])].filter(Boolean).join(' ') || 'Dyna MCP server'
 }

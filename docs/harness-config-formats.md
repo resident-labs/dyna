@@ -4,18 +4,18 @@ Research checked on 2026-10-17. The adapters read user configuration under an ex
 
 ## Capabilities and default paths
 
-All catalog harnesses support MCP and skills. `ConfigCapabilities()` returns `harness`, `mcp`, `skills`, and optional `mcpReason` and `skillsReason`. Unsupported capabilities return an empty list through the shared readers. An unsupported capability must have a clear reason.
+All catalog harnesses support MCP. `ConfigCapabilities()` returns `harness`, `mcp` and optional `mcpReason`. Unsupported capabilities return an empty list through the shared readers. An unsupported capability must have a clear reason. The skill catalog is global and is not a harness config capability.
 
-| Catalog ID | User MCP file | Root key and format | Native user skills |
+| Catalog ID | User MCP file | Root key and format | Harness-native skill directory (Dyna does not write it) |
 | --- | --- | --- | --- |
 | `claude-code` | `~/.claude.json` | `mcpServers`, JSON | `~/.claude/skills/` |
 | `pi` | `~/.pi/agent/mcp.json` | `mcpServers`, JSON | `~/.pi/agent/skills/` |
 
-Adapters read a command string and a separate arguments array. Remote servers use `url`. Readers expose environment variable names, never their values. They exclude authentication headers. Hashes cover the complete parsed entry so changes to secret values and unknown fields still show drift. Skill hashes cover the exact `SKILL.md` bytes.
+Adapters read a command string and a separate arguments array. Remote servers use `url`. Readers expose environment variable names, never their values. They exclude authentication headers. Hashes cover the complete parsed entry so changes to secret values and unknown fields still show drift. Dyna reads no personal skill definition. The global skill catalog names a directory with a `SKILL.md`, and Dyna copies nothing from it into a harness.
 
 ## Extra adapter evidence
 
-Pi now has native MCP support. Do not classify it as unsupported based on older releases. The adapter also reads shared `.agents` user skills.
+Pi now has native MCP support. Do not classify it as unsupported based on older releases.
 
 - [Pi MCP source documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md)
 - [Pi skill source documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md)

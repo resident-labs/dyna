@@ -51,7 +51,6 @@
   const selectedRow = $derived(rows.find((r) => r.id === selectedId) ?? rows[0])
   const anySwitchPending = $derived(rows.some((r) => r.switchPending || r.installing))
   const mcpRows = $derived(catalog?.mcp ?? [])
-  const skillRows = $derived(catalog?.skills ?? [])
   const allowedPreviewCount = $derived((preview?.keys ?? []).filter((k) => k.status === 'allowed').length)
 
   $effect(() => {
@@ -285,7 +284,6 @@
           <HarnessToolsSection
             row={r}
             mcp={mcpRows}
-            skills={skillRows}
             {busy}
             ontoggle={(kind, name, enabled) => toggleTool(kind, name, r.id, enabled)}
           />
@@ -298,12 +296,11 @@
   {:else}
     <ToolsTab
       mcp={mcpRows}
-      skills={skillRows}
       {rows}
       {busy}
       bind:addToolHint
       bind:removingTool
-      onadded={(next) => { catalog = next; addToolHint = ''; notice = 'Tool added. Turn it on for each harness that needs it.' }}
+      onadded={(next) => { catalog = next; addToolHint = ''; notice = 'MCP server added. Turn it on for each harness that needs it.' }}
       ontoggle={toggleTool}
       onremovetool={removeTool}
     />

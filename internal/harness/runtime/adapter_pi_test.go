@@ -43,8 +43,8 @@ func TestPiAdapterRegistration(t *testing.T) {
 	if a.ConfigFormat != "json" || a.MCPKey != "mcpServers" {
 		t.Fatalf("ConfigFormat/MCPKey = %q/%q", a.ConfigFormat, a.MCPKey)
 	}
-	if a.ConfigFile != "settings.json" || a.SkillDir != "skills" {
-		t.Fatalf("ConfigFile/SkillDir = %q/%q", a.ConfigFile, a.SkillDir)
+	if a.ConfigFile != "settings.json" {
+		t.Fatalf("ConfigFile = %q", a.ConfigFile)
 	}
 	if !reflect.DeepEqual(a.AuthFiles, []string{"auth.json"}) {
 		t.Fatalf("AuthFiles = %q", a.AuthFiles)
@@ -106,7 +106,7 @@ func TestPiNativeEnvStaysPrivate(t *testing.T) {
 func TestPiConfigArgsStaysPrivate(t *testing.T) {
 	a := piTestAdapter(t)
 	home := piTestHome(t)
-	args := a.ConfigArgs(home, filepath.Join(home, "settings.json"), filepath.Join(home, "skills"))
+	args := a.ConfigArgs(home, filepath.Join(home, "settings.json"))
 	want := []string{"--session-dir", filepath.Join(home, "sessions")}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("ConfigArgs = %q, want %q", args, want)
@@ -138,8 +138,7 @@ func TestPiLoginArgsRunInteractiveLogin(t *testing.T) {
 
 func TestPiDeclarativePathsAreRelative(t *testing.T) {
 	a := piTestAdapter(t)
-	paths := []string{a.ConfigFile, a.SkillDir}
-	paths = append(paths, a.AuthFiles...)
+	paths := append([]string{a.ConfigFile}, a.AuthFiles...)
 	for _, path := range paths {
 		if path == "" || filepath.IsAbs(path) || strings.Contains(path, "..") || strings.HasPrefix(path, "~") {
 			t.Fatalf("declarative path %q must stay relative and clean", path)

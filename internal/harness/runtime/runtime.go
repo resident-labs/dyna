@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -297,7 +295,7 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	applyNativeFeatureEnvironment(a.Harness, env)
 	// A harness that keeps credentials per account reads them from that
 	// account's own home. Pi reads its whole agent directory there, so Dyna
-	// publishes the generation's settings, MCP servers and skills first. Session
+	// publishes the generation's settings and MCP servers first. Session
 	// history stays in the shared harness home.
 	if a.Harness == "pi" {
 		if err := publishPiAccountHome(gen.Directory, home, active.Home); err != nil {
@@ -312,15 +310,6 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		return p, pin, err
 	}
 	env["PATH"] = filepath.Dir(b.Executable) + string(os.PathListSeparator) + privateEnv["PATH"]
-	paths := []string{}
-	_ = filepath.WalkDir(gen.Directory, func(path string, e fs.DirEntry, err error) error {
-		if err == nil && !e.IsDir() && e.Name() == "SKILL.md" {
-			paths = append(paths, path)
-		}
-		return nil
-	})
-	sort.Strings(paths)
-	p.RuntimeSkillPaths = paths
 	p.RuntimeExecutable = b.Executable
 	p.Env = env
 	p.RuntimePermissionArgs = append([]string{}, p.ExtraArgs...)
@@ -455,15 +444,13 @@ func (r *Runtime) regenerateAccount(account NativeAccount) (harnessmgr.ConfigGen
 	return r.generate(account.Harness, home, account.ID, os.LookupEnv)
 }
 
-// EnsureCatalog retires the orchestrator skill older versions seeded into every
-// harness. The skill is for agents outside Dyna; `dyna skill install` owns it.
-// TODO: legacy/shim remove later — cleans catalogs seeded by older versions; remove once supported catalogs no longer hold it
+// EnsureCatalog removes skill material that older Dyna versions wrote into
+// harness homes and beside the catalog. Skills are a global catalog now, so no
+// home should hold a Dyna skill link. The cleanup is idempotent: it repeats on
+// every generation until an old home is gone, and it leaves a real directory or
+// file that the owner or a harness owns.
 func (r *Runtime) EnsureCatalog() error {
-	dir := filepath.Join(filepath.Dir(r.Config.Path), "skills", "load-dyna-orchestrator")
-	if err := r.Config.RetireManagedSkill("load-dyna-orchestrator", dir); err != nil {
-		return err
-	}
-	return os.RemoveAll(dir)
+	return r.removeLegacySkillInstalls()
 }
 func OpenPins() ([]Bundle, error) {
 	var selected struct {
@@ -525,8 +512,6 @@ type Capability struct {
 	InstallSupported    bool   `json:"installSupported"`
 	AccountBlocked      string `json:"accountBlocked"`
 	MCP                 bool   `json:"mcp"`
-	Skills              bool   `json:"skills"`
-	SkillsPinned        bool   `json:"skillsPinned"`
 	Concurrent          bool   `json:"concurrent"`
 	SharedPersonalLogin bool   `json:"sharedPersonalLogin"`
 }
@@ -534,7 +519,7 @@ type Capability struct {
 func Capabilities() []Capability {
 	out := []Capability{}
 	for _, a := range RuntimeAdapters() {
-		c := Capability{Harness: a.Harness, Status: "ready", Reason: strings.Join(a.PartialReasons, " "), InstallSupported: a.NPMPackage != "" || a.Install != nil, AccountBlocked: a.AccountBlocked, MCP: true, Skills: true, SkillsPinned: a.SkillsPinned, Concurrent: !a.Exclusive}
+		c := Capability{Harness: a.Harness, Status: "ready", Reason: strings.Join(a.PartialReasons, " "), InstallSupported: a.NPMPackage != "" || a.Install != nil, AccountBlocked: a.AccountBlocked, MCP: true, Concurrent: !a.Exclusive}
 		if c.Reason != "" {
 			c.Status = "partial"
 		}

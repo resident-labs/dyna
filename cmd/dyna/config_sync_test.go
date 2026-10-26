@@ -19,7 +19,7 @@ import (
 )
 
 func TestConfigSyncUsesRuntimeGeneration(t *testing.T) {
-	for _, kind := range []string{"skill", "mcp"} {
+	for _, kind := range []string{"mcp"} {
 		for _, harness := range []string{"pi"} {
 			t.Run(kind+"/"+harness, func(t *testing.T) {
 				storetest.Isolate(t)
@@ -57,13 +57,11 @@ func TestConfigSyncUsesRuntimeGeneration(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("sync proof"), 0600); err != nil {
 					t.Fatal(err)
 				}
-				if err := harnessconfig.NewConfigManager().AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessconfig.ManagedSkill{Name: "proof", Source: source, EnabledHarnesses: []string{harness}}); err != nil {
+				// A skill in Dyna's catalog never enters a native generation.
+				if err := harnessconfig.NewConfigManager().AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessconfig.ManagedSkill{Name: "proof", Source: source, Enabled: true}); err != nil {
 					t.Fatal(err)
 				}
-				command := skillCmd()
-				if kind == "mcp" {
-					command = mcpCmd()
-				}
+				command := mcpCmd()
 				var out bytes.Buffer
 				command.SetOut(&out)
 				command.SetErr(&out)
@@ -84,8 +82,8 @@ func TestConfigSyncUsesRuntimeGeneration(t *testing.T) {
 				if _, err := os.Stat(filepath.Join(result.Directory, "private-home.json")); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := os.Stat(filepath.Join(result.Directory, "skills", "proof", "SKILL.md")); err != nil {
-					t.Fatal(err)
+				if _, err := os.Stat(filepath.Join(result.Directory, "skills")); !os.IsNotExist(err) {
+					t.Fatalf("native generation holds a skills directory: %v", err)
 				}
 			})
 		}

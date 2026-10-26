@@ -46,8 +46,6 @@ export interface Capability {
   installSupported: boolean
   accountBlocked: string
   mcp: boolean
-  skills: boolean
-  skillsPinned: boolean
   concurrent: boolean
   sharedPersonalLogin: boolean
 }
@@ -149,7 +147,7 @@ export interface ManagedMCP {
 export interface ManagedSkill {
   name: string
   source: string
-  enabledHarnesses: string[]
+  enabled: boolean
 }
 export interface HarnessConfig {
   mcp: ManagedMCP[]

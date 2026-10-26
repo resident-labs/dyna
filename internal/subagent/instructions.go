@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
+	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/instructions"
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/shells"
+	dynaskills "dyna-agent/internal/skills"
 )
 
 // sessionInstructions builds a session's standing instructions from its live
@@ -30,7 +32,7 @@ func (m *Manager) sessionInstructions(meta Meta, creator string, maxDepth int, c
 		m.profileInstructions(meta),
 	}
 	parts = append(parts, m.goalStore().InstructionSections(meta.RoomID)...)
-	parts = append(parts, m.featureIndex(meta), m.runningJobs(meta))
+	parts = append(parts, m.featureIndex(meta), m.skillIndex(meta), m.runningJobs(meta))
 	return instructions.Build(append(parts,
 		m.openQuestions(meta),
 		instructions.Section{Name: "Service contract", Text: meta.ServiceContract().Prompt()},
@@ -91,6 +93,28 @@ func (m *Manager) featureIndex(meta Meta) instructions.Section {
 		section.Text = "[DYNA FEATURES]\nTop-level features of this repository, from its library map. Look one up with `dyna library show <id>`; see every feature with `dyna library list --tree`."
 	}
 	return section
+}
+
+// skillIndex lists the enabled skills of Dyna's global catalog through the
+// shared renderer, so sessions and workflow workers read one section format.
+func (m *Manager) skillIndex(meta Meta) instructions.Section {
+	entries, err := m.skills()
+	if err != nil {
+		return instructions.Section{Name: "Skills"}
+	}
+	return dynaskills.Section(entries)
+}
+
+// skills reads Dyna's skill catalog. A Manager with the seam set reads from it.
+func (m *Manager) skills() ([]harnessconfig.ManagedSkill, error) {
+	if m.Skills != nil {
+		return m.Skills()
+	}
+	c, err := harnessconfig.NewConfigManager().Read()
+	if err != nil {
+		return nil, err
+	}
+	return c.Skills, nil
 }
 
 // runningJobs lists the background shell jobs this session started that are

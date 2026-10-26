@@ -307,6 +307,9 @@ func (a *Runtime) SetHarnessConfigEnabled(ctx context.Context, kind, name, harne
 	if err := m.SetEnabled(ctx, kind, name, harness, enabled); err != nil {
 		return config.ConfigSnapshot{}, err
 	}
+	if kind != "mcp" {
+		return m.Catalog("")
+	}
 	if err := a.Regenerate(harness); err != nil {
 		return config.ConfigSnapshot{}, err
 	}

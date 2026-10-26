@@ -15,17 +15,19 @@ func (r *Runtime) AddCatalogMCP(ctx context.Context, entry config.ManagedMCP, re
 	return r.refreshSavedCatalog(refreshHarness)
 }
 
-// AddCatalogSkill keeps the CLI refresh scope separate from entry enablement.
-func (r *Runtime) AddCatalogSkill(ctx context.Context, entry config.ManagedSkill, refreshHarness string) error {
-	if err := r.Config.AddSkill(ctx, entry); err != nil {
-		return err
-	}
-	return r.refreshSavedCatalog(refreshHarness)
+// AddCatalogSkill saves a skill. The skill catalog is global, so the edit never
+// regenerates a native config; enabled skills reach sessions through their
+// standing instructions.
+func (r *Runtime) AddCatalogSkill(ctx context.Context, entry config.ManagedSkill, _ string) error {
+	return r.Config.AddSkill(ctx, entry)
 }
 
 func (r *Runtime) RemoveCatalogEntry(ctx context.Context, kind, name, harness string) error {
 	if err := r.Config.Remove(ctx, kind, name, harness); err != nil {
 		return err
+	}
+	if kind != "mcp" {
+		return nil
 	}
 	return r.refreshSavedCatalog(harness)
 }
@@ -33,6 +35,9 @@ func (r *Runtime) RemoveCatalogEntry(ctx context.Context, kind, name, harness st
 func (r *Runtime) SetCatalogEntryEnabled(ctx context.Context, kind, name, harness string, enabled bool) error {
 	if err := r.Config.SetEnabled(ctx, kind, name, harness, enabled); err != nil {
 		return err
+	}
+	if kind != "mcp" {
+		return nil
 	}
 	return r.refreshSavedCatalog(harness)
 }

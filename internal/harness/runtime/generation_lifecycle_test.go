@@ -37,17 +37,6 @@ func generationFixture(t *testing.T, h string) (*Runtime, string, string) {
 	return r, home, n.ID
 }
 
-// The skills view pins the current generation of harnesses with no config file.
-func addGenerationSkill(t *testing.T, r *Runtime, h string) {
-	t.Helper()
-	source := t.TempDir()
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("base"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "base", Source: source, EnabledHarnesses: []string{h}}); err != nil {
-		t.Fatal(err)
-	}
-}
 func buildGeneration(t *testing.T, r *Runtime, h, home, id string) harnessmgr.ConfigGeneration {
 	t.Helper()
 	g, err := r.generate(h, home, id, os.LookupEnv)
@@ -145,118 +134,9 @@ func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
 	}
 }
 
-func TestGenerationSkillSnapshotAndEffectiveInputs(t *testing.T) {
-	r, home, id := generationFixture(t, "pi")
-	source := t.TempDir()
-	skill := filepath.Join(source, "SKILL.md")
-	resource := filepath.Join(source, "helper.sh")
-	for path, text := range map[string]string{skill: "skill v1", resource: "echo v1"} {
-		if err := os.WriteFile(path, []byte(text), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "custom", Source: source, EnabledHarnesses: []string{"pi"}}); err != nil {
-		t.Fatal(err)
-	}
-	a := buildGeneration(t, r, "pi", home, id)
-	if err := os.Chtimes(resource, time.Unix(1, 0), time.Unix(1, 0)); err != nil {
-		t.Fatal(err)
-	}
-	b := buildGeneration(t, r, "pi", home, id)
-	if a.Directory != b.Directory {
-		t.Fatal("mtime invalidated generation")
-	}
-	addGenerationMCP(t, r, "claude-code", "unrelated")
-	b = buildGeneration(t, r, "pi", home, id)
-	if a.Directory != b.Directory {
-		t.Fatal("another harness invalidated generation")
-	}
-	if err := os.WriteFile(resource, []byte("echo v2"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	c := buildGeneration(t, r, "pi", home, id)
-	if c.Directory == a.Directory {
-		t.Fatal("resource change did not invalidate generation")
-	}
-	old, err := os.ReadFile(filepath.Join(a.Directory, "skills", "custom", "helper.sh"))
-	if err != nil || string(old) != "echo v1" {
-		t.Fatal("source change modified retained generation")
-	}
-	if err = os.Chmod(resource, 0700); err != nil {
-		t.Fatal(err)
-	}
-	d := buildGeneration(t, r, "pi", home, id)
-	if d.Directory == c.Directory {
-		t.Fatal("executable mode did not invalidate generation")
-	}
-	checkMode(t, filepath.Join(d.Directory, "skills", "custom", "helper.sh"), 0700)
-	// Reuse must republish the current shared view; resume must leave it alone.
-	if err = os.Chmod(resource, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(resource, []byte("echo v1"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	reused := buildGeneration(t, r, "pi", home, id)
-	if reused.Directory != a.Directory {
-		t.Fatal("restored content did not reuse original")
-	}
-	if _, err = loadNativeGeneration("pi", c.Directory, os.LookupEnv); err != nil {
-		t.Fatal(err)
-	}
-	target, err := os.Readlink(filepath.Join(home, "skills", "custom"))
-	if err != nil || target != filepath.Join(a.Directory, "skills", "custom") {
-		t.Fatal("resume changed the current skill view", target, err)
-	}
-}
-
-func TestGenerationCapturedSkillsSurviveSourceEdits(t *testing.T) {
-	r, home, id := generationFixture(t, "claude-code")
-	source := t.TempDir()
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("before"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "custom", Source: source, EnabledHarnesses: []string{"claude"}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.EnsureCatalog(); err != nil {
-		t.Fatal(err)
-	}
-	unlock, err := r.generationLock(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
-	input, err := os.MkdirTemp(r.Generations, ".input-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer removeBundle(input)
-	snapshot, inputs, err := r.captureGeneration("claude-code", home, id, input, os.LookupEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("after"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	stage, err := os.MkdirTemp(r.Generations, ".stage-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer removeBundle(stage)
-	if _, err = r.Config.GenerateSnapshotAt("claude-code", home, stage, filepath.Join(r.Generations, "published"), snapshot, os.LookupEnv, inputs.Preferences); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(stage, "plugin", "skills", "custom", "SKILL.md"))
-	if err != nil || string(raw) != "before" {
-		t.Fatal("materialization reread mutable source")
-	}
-}
-
 func TestGenerationGCKeepsAllReferencesAndPreferences(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
 	var gens []harnessmgr.ConfigGeneration
-	addGenerationSkill(t, r, "pi")
 	for _, name := range []string{"open", "closed", "active", "released", "current"} {
 		addGenerationMCP(t, r, "pi", name)
 		gens = append(gens, buildGeneration(t, r, "pi", home, id))
@@ -408,9 +288,8 @@ func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 	}
 }
 
-func TestGenerationReuseRebuildsTamperingAndRejectsSkillLinks(t *testing.T) {
+func TestGenerationReuseRebuildsTampering(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	addGenerationSkill(t, r, "pi")
 	g := buildGeneration(t, r, "pi", home, id)
 	original, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
 	if err != nil {
@@ -424,27 +303,6 @@ func TestGenerationReuseRebuildsTamperingAndRejectsSkillLinks(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json")); err != nil || string(raw) != string(original) {
 		t.Fatal("reused corrupt generation", string(raw), err)
-	}
-	source := t.TempDir()
-	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(g.Directory, "settings.json"), filepath.Join(source, "resource")); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Config.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedSkill{Name: "unsafe", Source: source, EnabledHarnesses: []string{"pi"}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.generate("pi", home, id, os.LookupEnv); err == nil {
-		t.Fatal("accepted interior skill symlink")
-	}
-	entries, err := os.ReadDir(filepath.Join(home, "skills"))
-	if err != nil || len(entries) != 1 {
-		t.Fatal("failed generation changed shared view", entries, err)
-	}
-	target, err := os.Readlink(filepath.Join(home, "skills", entries[0].Name()))
-	if err != nil || target != filepath.Join(g.Directory, "skills", entries[0].Name()) {
-		t.Fatal("failed generation changed shared view", target, err)
 	}
 }
 
@@ -594,8 +452,7 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
 	addGenerationMCP(t, r, "pi", "tools")
 	fresh := buildGeneration(t, r, "pi", home, id)
-	inputDir := t.TempDir()
-	_, inputs, err := r.captureGeneration("pi", home, id, inputDir, os.LookupEnv)
+	_, inputs, err := r.captureGeneration("pi", home, id, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,12 +564,11 @@ func TestGenerationGCDeletesChangedUnpinnedGeneration(t *testing.T) {
 	assertGenerationExists(t, b.Directory, false)
 }
 
-// A generation, and a skills view, of a harness this release no longer runs
-// must not stop cleanup: both are still Dyna's, and either would otherwise
-// block every other harness's collection forever.
+// A generation and a view of a harness this release no longer runs must not
+// stop cleanup: both are still Dyna's, and either would otherwise block every
+// other harness's collection forever.
 func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	addGenerationSkill(t, r, "pi")
 	addGenerationMCP(t, r, "pi", "retired-tool")
 	retired := buildGeneration(t, r, "pi", home, id)
 
@@ -736,8 +592,8 @@ func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A later Pi generation republishes the Pi skills view, so nothing points at
-	// the retired copy any more.
+	// A later Pi generation republishes the view, so nothing points at the
+	// retired copy any more.
 	addGenerationMCP(t, r, "pi", "live-tool")
 	live := buildGeneration(t, r, "pi", home, id)
 	writeGenerationSession(t, "open", Pin{Generation: live.Directory}, false)

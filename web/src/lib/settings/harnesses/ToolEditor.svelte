@@ -2,9 +2,9 @@
   import { errorText } from '../../errorText.ts'
   import { api } from '../../../api.ts'
   import type { HarnessConfig } from '../../api/harness.ts'
-  let { kind, onsave, oncancel }: { kind: string; onsave: (catalog: HarnessConfig) => void; oncancel: () => void } = $props()
+  let { onsave, oncancel }: { onsave: (catalog: HarnessConfig) => void; oncancel: () => void } = $props()
   let name = $state(''), mode = $state('command'), command = $state(''), args = $state('')
-  let url = $state(''), env = $state(''), source = $state(''), busy = $state(false), error = $state('')
+  let url = $state(''), env = $state(''), busy = $state(false), error = $state('')
 
   async function save() {
     if (busy) return
@@ -12,9 +12,7 @@
     try {
       const entry = { name: name.trim(), enabledHarnesses: [] }
       let next: HarnessConfig
-      if (kind === 'skill') {
-        next = await api.addHarnessSkill({ ...entry, source: source.trim() })
-      } else if (mode === 'url') {
+      if (mode === 'url') {
         next = await api.addHarnessMCP({ ...entry, url: url.trim() })
       } else {
         const argv = JSON.parse(args.trim() || '[]')
@@ -22,27 +20,23 @@
         next = await api.addHarnessMCP({ ...entry, command: command.trim(), args: argv, envKeys: env.split(/[\s,]+/).filter(Boolean) })
       }
       onsave(next)
-    } catch (e) { error = e ? errorText(e) : 'Could not add this tool.' }
+    } catch (e) { error = e ? errorText(e) : 'Could not add this MCP server.' }
     finally { busy = false }
   }
 </script>
 
-<form onsubmit={(event) => { event.preventDefault(); save() }} aria-label={kind === 'mcp' ? 'Add MCP server' : 'Add skill'}>
-  <h3>{kind === 'mcp' ? 'Add MCP server' : 'Add skill'}</h3>
-  <label>Name<input bind:value={name} required disabled={busy} placeholder={kind === 'mcp' ? 'e.g. browser' : 'e.g. code-review'} /></label>
-  {#if kind === 'mcp'}
-    <label>Connection<select bind:value={mode} disabled={busy}><option value="command">Local command</option><option value="url">Remote URL</option></select></label>
-    {#if mode === 'command'}
-      <label>Command<input bind:value={command} required disabled={busy} placeholder="e.g. npx" /></label>
-      <label>Arguments (JSON array)<input bind:value={args} disabled={busy} placeholder={'["-y", "@playwright/mcp@latest"]'} /></label>
-      <label>Environment variable names<input bind:value={env} disabled={busy} placeholder="e.g. API_TOKEN" /><span>Names only. Dyna reads the values from its environment.</span></label>
-    {:else}
-      <label>URL<input type="url" bind:value={url} required disabled={busy} placeholder="https://example.com/mcp" /></label>
-    {/if}
+<form onsubmit={(event) => { event.preventDefault(); save() }} aria-label="Add MCP server">
+  <h3>Add MCP server</h3>
+  <label>Name<input bind:value={name} required disabled={busy} placeholder="e.g. browser" /></label>
+  <label>Connection<select bind:value={mode} disabled={busy}><option value="command">Local command</option><option value="url">Remote URL</option></select></label>
+  {#if mode === 'command'}
+    <label>Command<input bind:value={command} required disabled={busy} placeholder="e.g. npx" /></label>
+    <label>Arguments (JSON array)<input bind:value={args} disabled={busy} placeholder={'["-y", "@playwright/mcp@latest"]'} /></label>
+    <label>Environment variable names<input bind:value={env} disabled={busy} placeholder="e.g. API_TOKEN" /><span>Names only. Dyna reads the values from its environment.</span></label>
   {:else}
-    <label>Skill directory<input bind:value={source} required disabled={busy} placeholder="/absolute/path/to/skill" /><span>The local directory must contain SKILL.md.</span></label>
+    <label>URL<input type="url" bind:value={url} required disabled={busy} placeholder="https://example.com/mcp" /></label>
   {/if}
-  <p>After you add this tool, turn it on for each harness that needs it.</p>
+  <p>After you add this server, turn it on for each harness that needs it.</p>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="actions"><button type="button" class="btn quiet" disabled={busy} onclick={oncancel}>Cancel</button><button class="btn pri" disabled={busy}>{busy ? 'Adding…' : 'Add'}</button></div>
 </form>

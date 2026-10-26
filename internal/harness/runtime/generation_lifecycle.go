@@ -53,8 +53,6 @@ type generationOwnership struct {
 	Home        string `json:"home"`
 }
 
-type generationSkillInput struct{ Name, Hash string }
-
 // dynaMCPName is the generated server that serves Dyna's shell tools.
 const dynaMCPName = "dyna"
 
@@ -66,17 +64,17 @@ const dynaMCPName = "dyna"
 // server. Version 9: a harness denies its native shell with a plugin hook.
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
 // Version 11: Pi's MCP servers carry a request timeout and exposure.
-const generationInputsVersion = 11
+// Version 12: skills are a global catalog and no longer enter a generation.
+const generationInputsVersion = 12
 
 type generationInputs struct {
-	NativeFeatures                                           nativeFeaturePolicy
-	Version                                                  int
-	Harness, Home, CLI, Format, MCPKey, ConfigFile, SkillDir string
-	NativeEnv                                                map[string]string
-	PartialReasons                                           []string
-	MCP                                                      []harnessmgr.ManagedMCP
-	Skills                                                   []generationSkillInput
-	Preferences                                              map[string]any
+	NativeFeatures                                 nativeFeaturePolicy
+	Version                                        int
+	Harness, Home, CLI, Format, MCPKey, ConfigFile string
+	NativeEnv                                      map[string]string
+	PartialReasons                                 []string
+	MCP                                            []harnessmgr.ManagedMCP
+	Preferences                                    map[string]any
 }
 
 func (r *Runtime) generationLock(ctx context.Context) (func(), error) {
@@ -109,9 +107,8 @@ func (r *Runtime) generate(h, home, account string, lookup func(string) (string,
 	return r.generateLocked(h, home, account, lookup)
 }
 
-// captureGeneration copies enabled skill trees once. Hashing and materialization
-// both consume these copies, so a source edit cannot change a published digest.
-func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup func(string) (string, bool)) (harnessmgr.HarnessConfig, generationInputs, error) {
+// captureGeneration reads the catalog and preferences into one digest input.
+func (r *Runtime) captureGeneration(h, home, account string, lookup func(string) (string, bool)) (harnessmgr.HarnessConfig, generationInputs, error) {
 	empty := harnessmgr.HarnessConfig{}
 	a, err := Adapter(h)
 	if err != nil {
@@ -130,7 +127,7 @@ func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup fu
 		return empty, generationInputs{}, err
 	}
 	snapshot := harnessmgr.HarnessConfig{MCP: []harnessmgr.ManagedMCP{}, Skills: []harnessmgr.ManagedSkill{}}
-	inputs := generationInputs{Version: generationInputsVersion, NativeFeatures: nativeFeaturePolicies[h], Harness: h, Home: home, Format: a.ConfigFormat, MCPKey: a.MCPKey, ConfigFile: a.ConfigFile, SkillDir: a.SkillDir, PartialReasons: a.PartialReasons, Preferences: prefs}
+	inputs := generationInputs{Version: generationInputsVersion, NativeFeatures: nativeFeaturePolicies[h], Harness: h, Home: home, Format: a.ConfigFormat, MCPKey: a.MCPKey, ConfigFile: a.ConfigFile, PartialReasons: a.PartialReasons, Preferences: prefs}
 	if a.NativeEnv != nil {
 		inputs.NativeEnv = a.NativeEnv(home)
 	}
@@ -180,33 +177,6 @@ func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup fu
 	}
 	slices.SortFunc(snapshot.MCP, func(a, b harnessmgr.ManagedMCP) int { return strings.Compare(a.Name, b.Name) })
 	inputs.MCP = snapshot.MCP
-	names = map[string]bool{}
-	for _, entry := range c.Skills {
-		if !slices.Contains(entry.EnabledHarnesses, h) {
-			continue
-		}
-		if entry.Name == "" || entry.Name == "." || entry.Name == ".." || filepath.Base(entry.Name) != entry.Name || names[entry.Name] {
-			return empty, inputs, errors.New("invalid or duplicate enabled skill name")
-		}
-		names[entry.Name] = true
-		source := entry.Source
-		target := filepath.Join(inputDir, entry.Name)
-		if err = copyRuntimeSkill(source, target); err != nil {
-			return empty, inputs, err
-		}
-		info, e := os.Lstat(filepath.Join(target, "SKILL.md"))
-		if e != nil || !info.Mode().IsRegular() {
-			return empty, inputs, errors.New("skill source must contain SKILL.md")
-		}
-		digest, e := generationTreeHash(target, false)
-		if e != nil {
-			return empty, inputs, e
-		}
-		inputs.Skills = append(inputs.Skills, generationSkillInput{entry.Name, digest})
-		snapshot.Skills = append(snapshot.Skills, harnessmgr.ManagedSkill{Name: entry.Name, Source: target, EnabledHarnesses: []string{h}})
-	}
-	slices.SortFunc(inputs.Skills, func(a, b generationSkillInput) int { return strings.Compare(a.Name, b.Name) })
-	slices.SortFunc(snapshot.Skills, func(a, b harnessmgr.ManagedSkill) int { return strings.Compare(a.Name, b.Name) })
 	return snapshot, inputs, nil
 }
 
@@ -232,12 +202,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if err := r.EnsureCatalog(); err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
-	inputDir, err := os.MkdirTemp(r.Generations, ".generation-input-")
-	if err != nil {
-		return harnessmgr.ConfigGeneration{}, err
-	}
-	defer removeBundle(inputDir)
-	snapshot, inputs, err := r.captureGeneration(h, home, account, inputDir, lookup)
+	snapshot, inputs, err := r.captureGeneration(h, home, account, lookup)
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
@@ -350,13 +315,6 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 			return err
 		}
 	}
-	if a.SkillDir != "" {
-		target := filepath.Join(home, a.SkillDir)
-		if !inside(home, target) || safeAccountPath(filepath.Dir(target)) != nil {
-			return lifecycleError("skills view is outside the account home", target)
-		}
-		return harnessmgr.PublishSkillView(target, filepath.Join(dir, "skills"))
-	}
 	return nil
 }
 
@@ -408,7 +366,7 @@ func publishGenerationFile(dir, file, home, relative string) error {
 }
 
 // generationTreeHash hashes paths, modes, bytes and safe relative links. It
-// excludes only our root ownership manifest, never a skill resource with that name.
+// excludes only our root ownership manifest.
 func generationTreeHash(dir string, allowLinks bool) (string, error) {
 	hash := sha256.New()
 	encoder := json.NewEncoder(hash)
@@ -430,7 +388,7 @@ func generationTreeHash(dir string, allowLinks bool) (string, error) {
 		mode := info.Mode()
 		if mode&os.ModeSymlink != 0 {
 			if !allowLinks {
-				return lifecycleError("skill resource is a symlink", path)
+				return lifecycleError("generation resource is a symlink", path)
 			}
 			target, err := os.Readlink(path)
 			if err != nil || filepath.IsAbs(target) || !inside(dir, filepath.Clean(filepath.Join(filepath.Dir(path), target))) {
@@ -523,7 +481,7 @@ func validateOwnedGeneration(dir string) (generationOwnership, error) {
 	if hash != meta.PayloadHash {
 		return meta, fmt.Errorf("%w: %w: files differ from lifecycle.json: %s", errGenerationLifecycle, errGenerationChanged, dir)
 	}
-	// A complete native manifest is mandatory even for a generation with no skills.
+	// A complete native manifest is mandatory for every generation.
 	name := "native-generation.json"
 	if meta.Harness == "claude-code" {
 		name = "generation.json"
@@ -688,9 +646,6 @@ func (r *Runtime) GCGenerationsWithProbe(ctx context.Context, probe GenerationPr
 	if err = r.openGenerationPins(keep); err != nil {
 		return err
 	}
-	if err = r.sharedGenerationPins(keep); err != nil {
-		return err
-	}
 	if err = r.currentGenerationPins(keep); err != nil {
 		return err
 	}
@@ -757,82 +712,6 @@ func (r *Runtime) keepGenerationPath(keep map[string]bool, path string) error {
 	keep[path] = true
 	return nil
 }
-func (r *Runtime) sharedGenerationPins(keep map[string]bool) error {
-	if r.Accounts == nil {
-		return lifecycleError("account manager is missing", r.Generations)
-	}
-	for _, a := range RuntimeAdapters() {
-		if a.SkillDir == "" {
-			continue
-		}
-		home, err := r.Accounts.HarnessHome(a.Harness)
-		if err != nil {
-			return err
-		}
-		view := filepath.Join(home, a.SkillDir)
-		if safeAccountPath(filepath.Dir(view)) != nil {
-			return lifecycleError("skills view parent is unsafe", view)
-		}
-		info, err := os.Lstat(view)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		// TODO: legacy/shim remove later — older builds linked the whole view to one generation; remove once every account home has republished its skills.
-		if info.Mode()&os.ModeSymlink != 0 {
-			if err = r.keepLinkedGeneration(keep, view); err != nil {
-				return err
-			}
-			continue
-		}
-		if !info.IsDir() {
-			continue
-		}
-		entries, err := os.ReadDir(view)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if entry.Type()&os.ModeSymlink == 0 {
-				continue
-			}
-			if err = r.keepLinkedGeneration(keep, filepath.Join(view, entry.Name())); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// keepLinkedGeneration keeps the generation that link points into. A link
-// outside the generation root is not a managed view and is ignored.
-func (r *Runtime) keepLinkedGeneration(keep map[string]bool, link string) error {
-	target, err := os.Readlink(link)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(link), target)
-	}
-	target = filepath.Clean(target)
-	if canonical, e := canonicalAccountDataRoot(target); e == nil {
-		target = canonical
-	}
-	if !inside(r.Generations, target) {
-		return nil
-	}
-	rel, err := filepath.Rel(r.Generations, target)
-	if err != nil || rel == "." {
-		return lifecycleError("skills view links to the generation root", link)
-	}
-	keep[filepath.Join(r.Generations, strings.Split(rel, string(filepath.Separator))[0])] = true
-	return nil
-}
 func (r *Runtime) generationUsePins(keep map[string]bool, probe GenerationProcessProbe) ([]string, error) {
 	root := filepath.Join(r.Generations, ".uses")
 	if safeAccountPath(root) != nil {
@@ -881,8 +760,8 @@ func (r *Runtime) generationUsePins(keep map[string]bool, probe GenerationProces
 	return stale, nil
 }
 
-// Shared config can contain generation paths even when a skill-link update
-// fails. Keep its latest complete target independently of the skill view.
+// Shared config can contain generation paths even when a view update fails.
+// Keep its latest complete target independently of the view.
 type generationView struct {
 	Harness, Home string
 	Generations   []string

@@ -43,9 +43,8 @@ func (p Profile) EffectiveOutput() *workeroutput.Declaration {
 
 // Profile describes one registered worker.
 type Profile struct {
-	Name              string   `json:"name"`
-	RuntimeVersion    string   `json:"runtimeVersion,omitempty"`
-	RuntimeSkillPaths []string `json:"-"`
+	Name           string `json:"name"`
+	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 	// RuntimeRepo is the repository identity of the turn, set by the runner.
 	RuntimeRepo string `json:"-"`
 	// RuntimePermissionArgs snapshots user arguments before generated tool denials.
