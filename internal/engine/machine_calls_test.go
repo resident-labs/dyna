@@ -31,8 +31,8 @@ func saveMachineArgs(patch string) []json.RawMessage {
 	return []json.RawMessage{json.RawMessage(`"m_1"`), json.RawMessage(patch)}
 }
 
-// A room root allows host checks as the owner does, and changes no other
-// machine field.
+// A room root allows host checks as the owner does, and changes no machine
+// field that routes work.
 func TestRoomRootGrantsHostChecks(t *testing.T) {
 	calls, patches := guardedSaveMachine()
 	ctx := localCallerContext(t,
@@ -57,13 +57,39 @@ func TestRoomRootGrantsHostChecks(t *testing.T) {
 	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"name":"renamed"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("a root renaming a machine = %v, want an owner-only refusal", err)
 	}
-	// The container runtime socket changes where every room's workflow jobs run,
-	// so a host-check grant cannot carry it through.
-	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"allowHostChecks":true,"containerSocket":"unix:///tmp/missing.sock"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
-		t.Fatalf("a root changing the container socket = %v, want an owner-only refusal", err)
+	// The route host decides which machine the engine reaches, so it stays the
+	// owner's even beside an operating setting.
+	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"sshConnectTimeoutSeconds":60,"ssh":"pip@elsewhere"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root changing the route host = %v, want an owner-only refusal", err)
 	}
 	if len(*patches) != 1 {
 		t.Fatalf("saved patches = %+v, want the refused patch to write nothing", *patches)
+	}
+}
+
+// A room root changes a machine's SSH connect timeout and container socket
+// with dyna machine edit, as the owner does (D-222). A session cannot.
+func TestRoomRootChangesOperatingSettings(t *testing.T) {
+	calls, patches := guardedSaveMachine()
+	root := localCallerContext(t,
+		websvc.Caller{Kind: websvc.Session, Session: "root"},
+		authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	for _, patch := range []string{`{"sshConnectTimeoutSeconds":60}`, `{"containerSocket":"unix:///run/user/1000/podman/podman.sock"}`} {
+		if _, err := calls["SaveMachine"](root, saveMachineArgs(patch)); err != nil {
+			t.Fatalf("a root sending %s = %v, want it allowed", patch, err)
+		}
+	}
+	if len(*patches) != 2 {
+		t.Fatalf("saved patches = %+v, want both settings", *patches)
+	}
+	session := localCallerContext(t,
+		websvc.Caller{Kind: websvc.Session, Session: "ses_1"},
+		authority.Actor{Role: authority.Session, Session: "ses_1", Room: "room_dyna"})
+	if _, err := calls["SaveMachine"](session, saveMachineArgs(`{"sshConnectTimeoutSeconds":60}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a session changing the timeout = %v, want an owner-only refusal", err)
+	}
+	if len(*patches) != 2 {
+		t.Fatalf("saved patches = %+v, want the session's patch refused", *patches)
 	}
 }
 
