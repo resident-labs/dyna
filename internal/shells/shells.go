@@ -115,6 +115,9 @@ type Store struct {
 	// startTime reads a process start time; nil uses procident.StartTime. A
 	// test sets it to act as a system without /proc.
 	startTime func(int) (uint64, error)
+	// pause waits between attempts to record an exit; nil sleeps. A test sets
+	// it so no timer decides the result.
+	pause func(time.Duration)
 	// CommandEnv prepares the environment of a new command. The shell CLI sets
 	// it to the display policy of managed shells; nil keeps the supervisor's
 	// launch environment, which is the owner display.
@@ -361,6 +364,39 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 		return err
 	}
 	return errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
+}
+
+// exitSaveTries and exitSaveWait bound how long a supervisor keeps trying to
+// record a finished job's exit while dyna.db is too busy to take the write
+// (D-207): about 10 minutes, after the 10 s each attempt already waits.
+const (
+	exitSaveTries = 60
+	exitSaveWait  = 10 * time.Second
+)
+
+// saveExit records an exit with save. A write that timed out waiting for the
+// state store is tried again, since the command's result must not be lost to a
+// busy writer. When the tries run out, the error names the timeout and the exit
+// the command had, so the job is not mistaken for a dead supervisor.
+func (s *Store) saveExit(save func() error, ex Exit) error {
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
+	var err error
+	for i := 0; i < exitSaveTries; i++ {
+		if err = save(); !timedOut(err) {
+			return err
+		}
+		pause(exitSaveWait)
+	}
+	return fmt.Errorf("state store timed out recording the job exit (code %d, signal %q): %w", ex.Code, ex.Signal, err)
+}
+
+// timedOut reports whether a state write ran out of time. The database driver
+// may flatten the context error to its text, so the text counts too.
+func timedOut(err error) bool {
+	return err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), context.DeadlineExceeded.Error()))
 }
 
 // ReadMeta loads a job's launch record.
