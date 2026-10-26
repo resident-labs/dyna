@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,6 +100,32 @@ suites:
 	}
 	if state, _, _, _ := got.CIStatus(); state != "passed" {
 		t.Fatalf("hosted CI did not remain authoritative: %s", state)
+	}
+}
+
+// A head definition with a field this engine does not know is a typed error,
+// so the verdict path can tell it from a failure to read CI.
+func TestHeadDefinitionWithUnknownFieldIsInvalidNotAnOpaqueError(t *testing.T) {
+	repo, base := changeRepo(t)
+	writeTrialDefinition(t, repo, `version: 1
+trial: [test]
+checks:
+  - id: unit
+    image: python:3.13-slim
+    command: python -m pytest
+    fieldFromNewerEngine: true
+suites:
+  - id: test
+    checks: [unit]
+`)
+	head := changeCommit(t, repo, "newer definition\n")
+	record := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Head: head, Base: base, Branch: "feature", RepoPath: repo}
+	snap := Snapshot{}
+	snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, record.Repo
+	service := &Service{LocalCIRegistry: &requiredCIRegistry{}}
+	_, err := service.withRegisteredCI(t.Context(), record, snap, ChangePolicy{})
+	if !errors.Is(err, localci.ErrDefinitionInvalid) {
+		t.Fatalf("err = %v, want ErrDefinitionInvalid", err)
 	}
 }
 
