@@ -2,10 +2,12 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
@@ -159,6 +161,26 @@ func (s *Service) clearSettledPause(roomID string) error {
 		delete(st.MergePauses, roomID)
 		return nil
 	})
+}
+
+// mergeRetryBudget bounds the replacement build a retry performs in the command's
+// own process. The engine builds the same batch on its next pass, so a slow build
+// must not hold the command without a word.
+var mergeRetryBudget = 60 * time.Second
+
+// runBounded calls step with a deadline and turns an expiry into a typed error
+// that says what did not finish. A step that finishes keeps its own error.
+func runBounded(ctx context.Context, budget time.Duration, what string, step func(context.Context) error) error {
+	bounded, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	err := step(bounded)
+	if clock := bounded.Err(); clock != nil {
+		if errors.Is(clock, context.DeadlineExceeded) {
+			return fmt.Errorf("%s did not finish within %s; the work is saved and the engine takes it on its next pass, and dyna git merge status shows progress: %w", what, budget, context.DeadlineExceeded)
+		}
+		return errors.Join(err, clock)
+	}
+	return err
 }
 
 func (s *Service) MergeControl(ctx context.Context, roomID, action string, args, without, flaky []string) error {
@@ -316,7 +338,12 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		// Bypass the existing pause while preparing the replacement. The
 		// batch checkpoint clears it atomically before any build can start.
 		ctx = context.WithValue(ctx, mergeControlRoom{}, rm.ID)
-		if _, err := s.mergeTickLocked(ctx, rm.ID, excluded); err != nil {
+		// The build is bounded: a retry that cannot finish says so and leaves the
+		// replacement to the engine's next pass instead of holding the command.
+		if err := runBounded(ctx, mergeRetryBudget, "merge retry", func(bounded context.Context) error {
+			_, err := s.mergeTickLocked(bounded, rm.ID, excluded)
+			return err
+		}); err != nil {
 			return err
 		}
 		current, err := s.Store.Read()
