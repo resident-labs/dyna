@@ -2,6 +2,9 @@ package scratch
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -28,6 +31,45 @@ func TestEnsurePrivateScratch(t *testing.T) {
 		if _, err := Ensure(owner); err == nil {
 			t.Fatalf("accepted owner %q", owner)
 		}
+	}
+}
+
+// A closing session's scratch folder goes at once, while the periodic pass keeps
+// a closed session's folder for its retention.
+func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
+	for _, closing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("closing=%t", closing), func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			root := Root()
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Unix(1_800_000_000, 0)
+			owner := filepath.Join(root, "ses_20261025-120000-abcd1234")
+			if err := os.Mkdir(owner, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(owner, "note"), []byte("scratch"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			result, err := Sweep(context.Background(), Options{
+				Now:     now,
+				Only:    filepath.Base(owner),
+				Closing: closing,
+				Logf:    t.Logf,
+				Lookup:  func(string) Owner { return Owner{Known: true, ClosedAt: now.Add(-time.Minute)} },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, statErr := os.Stat(owner)
+			switch {
+			case closing && !errors.Is(statErr, fs.ErrNotExist):
+				t.Fatalf("a closing session kept its scratch: %v, %+v", statErr, result)
+			case !closing && statErr != nil:
+				t.Fatalf("the periodic pass removed a closed session's scratch inside its retention: %v, %+v", statErr, result)
+			}
+		})
 	}
 }
 
