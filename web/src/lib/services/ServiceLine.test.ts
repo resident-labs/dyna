@@ -63,19 +63,15 @@ test('a switch write sends the flipped value and keeps a failed write on its own
   } finally { await page.done() }
 })
 
-test('a profile that did not save goes back to the stored choice', async () => {
+test('a service profile shows as text, because Settings sets it', async () => {
   const page = await mount([row({
     id: 'reviewer', name: 'PR reviewers', toggle: null,
     profile: { id: 'review.profile', value: 'sol', options: ['', 'luna', 'sol'] },
-  })], async () => { throw new Error('engine said no') })
+  })], async () => {})
   try {
-    const select = page.line('PR reviewers').querySelector<HTMLSelectElement>('select')
-    assert.ok(select, 'missing profile menu')
-    select.value = 'luna'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-    await page.settle()
-    assert.equal(select.value, 'sol', 'the menu shows the stored choice again')
-    assert.match(page.line('PR reviewers').querySelector('.err')?.textContent ?? '', /engine said no/)
+    const line = page.line('PR reviewers')
+    assert.equal(line.querySelector('select'), null, 'no profile menu')
+    assert.equal(line.querySelector('.sel')?.textContent, 'sol')
   } finally { await page.done() }
 })
 

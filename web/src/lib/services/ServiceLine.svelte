@@ -1,10 +1,9 @@
 <script lang="ts">
   // Service lines: one compact line per service with a dot, its name, one
   // short status and its controls. Tapping the name opens the details (turn
-  // counts, limits, retention). A switch or a profile writes through the call
-  // that owns it and shows the engine's answer on the same line. A service
-  // with no control shows none.
-  import { pickProfile } from './services.ts'
+  // counts, limits, retention). A switch writes through the call that owns it
+  // and shows the engine's answer on the same line. A service's profile shows
+  // as text, because Settings > Models sets it. A service with no control shows none.
   import type { Row } from './model.ts'
 
   interface Props {
@@ -43,11 +42,6 @@
   const write = (row: Row, id: string, value: string | boolean): Promise<void> =>
     save(row, async () => { await onWrite(id, value); return '' })
 
-  // A profile that did not save goes back to the stored choice, so the menu
-  // never shows a choice that was not saved.
-  const pick = (event: Event & { currentTarget: HTMLSelectElement }, row: Row, profile: { id: string; value: string }): Promise<void> =>
-    save(row, () => pickProfile(event.currentTarget, (chosen: string) => onWrite(profile.id, chosen), profile.value))
-
   const run = (row: Row): Promise<void> =>
     save(row, async () => { await onRun(); return '' })
 
@@ -67,17 +61,7 @@
         </button>
         <div class="ctl">
           {#if row.profile}
-            {@const profile = row.profile}
-            {#if profile.options.length}
-              <select
-                class="sel" aria-label="{row.name} profile" value={profile.value} disabled={isSaving(row.id)}
-                onchange={(e) => pick(e, row, profile)}
-              >
-                {#each profile.options as option}<option value={option}>{option || 'auto'}</option>{/each}
-              </select>
-            {:else}
-              <span class="sel flat">{profile.value || 'auto'}</span>
-            {/if}
+            <span class="sel flat" title="Set in Settings > Settings > Models">{row.profile.value || 'auto'}</span>
           {/if}
           {#if row.id === 'update' && row.toggle}
             <button class="run" disabled={isSaving(row.id)} onclick={() => run(row)}>Run now</button>
