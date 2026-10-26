@@ -80,3 +80,17 @@ func TestValidIDFollowsNewID(t *testing.T) {
 		}
 	}
 }
+
+// A start repeated after an engine restart names a session that already
+// exists. It gets the duplicate-ID refusal, not a conflict with its own name.
+func TestRepeatedNamedStartReportsTheExistingSession(t *testing.T) {
+	e := newTestEnv(t)
+	opts := StartOptions{ID: NewID(), Name: "kid", Dir: t.TempDir(), Profile: "mock", Goal: "One session", Task: "RESPOND: ready"}
+	if _, _, err := e.m.Start(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := e.m.Start(context.Background(), opts)
+	if err == nil || !strings.Contains(err.Error(), "session "+opts.ID+" already exists") {
+		t.Fatalf("repeated start = %v; want the already-exists refusal", err)
+	}
+}
