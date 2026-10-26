@@ -194,3 +194,21 @@ export function diskText(caps: Pick<MachineCapabilities, 'freeDisk' | 'diskFloor
   const free = `${sizeText(caps.freeDisk)} free`
   return caps.diskFloor ? `${free} · needs ${sizeText(caps.diskFloor)}` : free
 }
+
+// ScopeEdit is one change to a CI machine's room or suite list.
+export type ScopeEdit = { add: string } | { remove: string }
+
+// editScope applies a change to a room or suite list and returns the new list,
+// or null when nothing changes. A value is trimmed, kept once and the list is
+// sorted, as dyna machine edit --suites keeps it; an empty list means every
+// room or suite.
+export function editScope(list: readonly string[], edit: ScopeEdit): string[] | null {
+  const value = ('add' in edit ? edit.add : edit.remove).trim()
+  if (!value) return null
+  if ('add' in edit) {
+    if (list.includes(value)) return null
+    return [...list, value].sort()
+  }
+  if (!list.includes(value)) return null
+  return list.filter((v) => v !== value)
+}
