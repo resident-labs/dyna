@@ -88,6 +88,59 @@ func TestOwnCancelledHostedRunDoesNotFailTheTrial(t *testing.T) {
 	}
 }
 
+// The start race cuts both ways: a job Dyna's queued-status read missed can
+// start and genuinely fail before the cancel lands, and a standalone job the
+// definition gives no group (go-static) is a real runner, not an aggregate.
+// Its failure must stay evidence even inside Dyna's own cancelled run, so the
+// row echoes around it cannot mask it and a local pass cannot override it.
+func TestOwnCancelledRunWithAStandaloneFailureStillFailsTheTrial(t *testing.T) {
+	repo, base := changeRepo(t)
+	head := changeCommit(t, repo, "trial\n")
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo",
+		Head: head, Branch: "dyna/merge-trial/333", RepoPath: repo, Base: base, Watching: true, State: "open"}
+	s := &Service{Store: &Store{Root: t.TempDir() + "/prs"}}
+	if err := s.Store.update(func(st *State) error {
+		st.MergeTrials = map[string]*state.MergeTrial{"owner/repo": {Branch: r.Branch, Head: head, Base: base}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const suite = int64(44)
+	run := Run{ID: 9, Attempt: 1, CheckSuiteID: suite, HeadSHA: head, HeadBranch: r.Branch,
+		Event: "push", Status: "completed", Conclusion: "cancelled", Path: ".github/workflows/ci.yml"}
+	checks := []Check{
+		suiteCheck(1, "go-static", "failure", suite),
+		suiteCheck(2, "go-test", "failure", suite),
+		suiteCheck(3, "frontend", "failure", suite),
+		suiteCheck(4, "go-test-shard (${{ matrix.shard }})", "cancelled", suite),
+	}
+	registry := &ownCancelRegistry{fakeLocalCI: fakeLocalCI{results: map[string]localci.Result{}}}
+	registry.hosted = localci.HostedRuns{IDs: []int64{9}, Attempts: map[int64]int{9: 1}}
+	s.LocalCIRegistry = registry
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		args := strings.Join(cmd.Args, " ")
+		switch {
+		case strings.Contains(args, "actions/runs?"):
+			return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: []Run{run}})
+		case strings.Contains(args, "check-runs?"):
+			return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: checks})
+		case strings.Contains(args, "/statuses?"):
+			return writeFakeJSON(cmd.Stdout, []Status{})
+		}
+		return fmt.Errorf("unexpected call %s", args)
+	}
+	ci, err := s.mergeTrialCI(context.Background(), r, r.Branch, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci.Status != VerdictFailed {
+		t.Fatalf("trial = %s (%s), want failed: a standalone job that really ran and failed is evidence even under Dyna's own cancellation", ci.Status, ci.Reason)
+	}
+	if !strings.Contains(ci.Reason, "go-static") {
+		t.Fatalf("the reason lost the standalone failure: %q", ci.Reason)
+	}
+}
+
 // The same shape without a saved cancellation is someone else's run: a failed
 // check in it is real evidence, and the trial still fails. Only Dyna's own
 // cancellations are dropped.
