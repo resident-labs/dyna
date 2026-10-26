@@ -272,7 +272,7 @@ func TestForegroundRunsPastTheLimitWithoutBackgrounding(t *testing.T) {
 	if text := <-done; text != "Job "+onlyJob(t, tools).ID+". Exit code 0.\nthrough\n" {
 		t.Fatalf("foreground result = %q", text)
 	}
-	if strings.Contains(tools.tools()[0]["description"].(string), "background") {
+	if strings.Contains(tools.tools()[0].Description, "background") {
 		t.Fatal("the foreground shell tool still promises backgrounding")
 	}
 }
@@ -430,7 +430,7 @@ func TestWaitCapMovesLongCommandsToTheBackground(t *testing.T) {
 	if got := call(t, tools, "shell_output", map[string]any{"job_id": job.ID, "wait": "exit", "timeout_seconds": 600}); !strings.Contains(got, "still running after 200ms") {
 		t.Fatalf("shell_output outlived the cap: %s", got)
 	}
-	if desc := tools.tools()[1]["description"].(string); !strings.Contains(desc, "at most 200ms") {
+	if desc := tools.tools()[1].Description; !strings.Contains(desc, "at most 200ms") {
 		t.Fatalf("shell_output description does not say the cap: %s", desc)
 	}
 	release()
