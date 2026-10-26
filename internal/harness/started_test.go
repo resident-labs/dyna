@@ -48,8 +48,14 @@ func TestGuardedCancelTerminatesDescendantAndFlushes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ready.Close()
-	cmd := exec.CommandContext(guarded, os.Args[0])
-	cmd.Env = append(os.Environ(), envCancelHelper+"=parent", envCancelMarker+"="+dir)
+	// The fixture is built the way production builds a worker, so it keeps the
+	// WaitDelay that bounds a cancellation: a handler that ran longer than that
+	// would be cut off here as it is in production.
+	cmd, err := harnessCommand(guarded, profile.Profile{Harness: profile.HarnessMock}, dir, []string{os.Args[0]}, ExecutionOptions{SkipComputer: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Env = append(cmd.Env, envCancelHelper+"=parent", envCancelMarker+"="+dir)
 	cmd.Stdout, cmd.Stderr = readyWriter, readyWriter
 	wait, release, _, err := startGuarded(guarded, profile.Profile{Harness: profile.HarnessMock}, cmd, "", nil, ExecutionOptions{})
 	if err != nil {
