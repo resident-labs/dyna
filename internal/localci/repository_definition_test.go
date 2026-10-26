@@ -153,10 +153,20 @@ func TestThisRepositoryDefinitionParses(t *testing.T) {
 	if !ok {
 		t.Fatal("this repository's definition has no go suite")
 	}
+	// The hosted workflow reports the desktop module as a job named desktop,
+	// and the base graph requires that name: a local result without a check of
+	// that name is rejected, so a trial could never finish. The module is
+	// tested once, by that check, and not again inside a shard.
+	var desktop int
 	for _, command := range commands {
-		if strings.Contains(command.Command, "scripts/ci.sh go desktop") {
-			return
+		if string(command.Check.Name) == "desktop" {
+			desktop++
+		}
+		if string(command.Check.Name) != "desktop" && strings.Contains(command.Command, "scripts/ci.sh go desktop") {
+			t.Fatalf("check %s runs the desktop module a second time", string(command.Check.Name))
 		}
 	}
-	t.Fatal("the go suite lost its desktop check, which no root Go command covers")
+	if desktop != 1 {
+		t.Fatalf("the go suite has %d checks named desktop, want one", desktop)
+	}
 }
