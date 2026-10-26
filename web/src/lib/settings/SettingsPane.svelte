@@ -44,12 +44,13 @@
     ...serviceTitles,
     'subagent.maxDepth': 'Session nesting depth',
     'steering.maxToolWait': 'Interrupt a busy tool after',
+    'harness.idleUnloadMinutes': 'Unload idle agent processes after (minutes)',
   }
   const groups = [
     { title: 'Voice', keys: ['voice.ducking'] },
     { title: 'Browser', keys: ['browser.path', 'browser.extraFlags', 'browser.useFlagsFile', 'browser.profileMode', 'browser.ownerProfile', 'browser.saveBack'] },
     { title: 'Cards and files', keys: ['content.maxCardBytes', 'content.maxFileBytes'] },
-    { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait'] },
+    { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait', 'harness.idleUnloadMinutes'] },
     { title: 'Services', keys: [...SERVICE_KEYS] },
     { title: 'Workflows', keys: ['worktrees.retention'] },
     { title: 'App', keys: ['updater.autoCheck'] },

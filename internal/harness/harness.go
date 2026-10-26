@@ -293,6 +293,10 @@ type ExecutionOptions struct {
 	// identity. Reuse it across turns to share one native process.
 	SessionKey string
 
+	// IdleUnload is how long a native session process may sit idle before the
+	// host stops it. Zero uses the host default; negative keeps it loaded.
+	IdleUnload time.Duration
+
 	// Execution names the parent whose native attempts Outbox must admit.
 	// Both fields are unset for explicit engine-local embedding.
 	Execution callspec.ExecutionRef
