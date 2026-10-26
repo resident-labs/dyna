@@ -47,7 +47,7 @@ test('phases without shared stages show one row each, with agents folded', async
   }
   const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
   assert.match(body, /aria-label="Phases"/)
-  assert.match(body, /<span class="name">Build<\/span>[\s\S]*?1\/2/)
+  assert.match(body, /class="name[^"]*">Build<\/span>[\s\S]*?1\/2/)
   assert.doesNotMatch(body, /class="agent /, 'agents stay folded under their row')
   assert.doesNotMatch(body, /class="steps/, 'the chip chain is gone')
 })
