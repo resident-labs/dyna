@@ -33,7 +33,6 @@ import (
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
@@ -391,10 +390,8 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	id := opts.ID
 	if id == "" {
 		id = NewID()
-	} else if !runstore.IsSessionDirID(id) {
-		return Info{}, Turn{}, fmt.Errorf("invalid session id %q", id)
-	} else if _, err := store.ReadMeta(id); err == nil {
-		return Info{}, Turn{}, fmt.Errorf("session %s already exists", id)
+	} else if !ValidID(id) {
+		return Info{}, Turn{}, fmt.Errorf("invalid session id %q: it must be shaped like ses_20060102-150405-abcdef12", id)
 	}
 	name, err := checkAvailableName(store, roomRec, opts.Name, id)
 	if err != nil {
@@ -419,6 +416,11 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 		return Info{}, Turn{}, err
 	}
 	defer unlock()
+	// A caller-supplied ID must be free under the lock: two starts that name
+	// the same session passed the check before the worktree was built.
+	if _, err := store.ReadMeta(id); err == nil {
+		return Info{}, Turn{}, fmt.Errorf("session %s already exists", id)
+	}
 	if name, err = availableName(store, roomRec, opts.Name, id); err != nil {
 		return Info{}, Turn{}, err
 	}
