@@ -798,9 +798,19 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
 	defer cancel()
 	var saveErr error
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
 		result.Status, result.Error = "error", "local CI exceeded its overall time limit"
+		saveErr = s.ciRegistry().SaveResult(recoveryCtx, result)
+	case ctx.Err() != nil && localci.EngineStopping():
+		// Dyna's own stop cancelled this run, so it tested nothing. The saved
+		// cause says so, and the scheduler and a trial read it as unfinished work
+		// and run the same commit again. Any other cancellation belongs to its
+		// caller and stays unsaved.
+		result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
+		result.Status, result.Cause = localci.OutcomeError, localci.CauseEngineStop
+		result.Error = "local CI stopped because the engine is restarting"
 		saveErr = s.ciRegistry().SaveResult(recoveryCtx, result)
 	}
 	if !job.hosted() {

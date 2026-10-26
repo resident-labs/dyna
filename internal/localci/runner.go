@@ -504,3 +504,6 @@ func MarkEngineStopping() { engineStopping.Store(true) }
 
 // EngineStopping reports whether the engine is shutting down.
 func EngineStopping() bool { return engineStopping.Load() }
+
+// ClearEngineStopping forgets the mark, for a test that shares the process.
+func ClearEngineStopping() { engineStopping.Store(false) }
