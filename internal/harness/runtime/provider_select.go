@@ -1,10 +1,16 @@
 package runtime
 
 import (
+	"errors"
 	"strings"
 
 	"dyna-agent/internal/account/store"
 )
+
+// ErrPiAnthropicOAuth refuses an Anthropic OAuth sign-in through Pi. Anthropic
+// bills a Claude Pro/Max sign-in used by a third-party harness as extra
+// per-token usage, so only Claude Code or an Anthropic API key may run it.
+var ErrPiAnthropicOAuth = errors.New("Anthropic Claude Pro/Max sign-ins cannot run through Pi. Use the Claude Code harness, or add an Anthropic API key in Pi.")
 
 // piProviderIDs maps the provider IDs Pi stores in its login file, and the
 // model prefixes it uses, to the provider an account belongs to. Pi names a
@@ -75,6 +81,23 @@ func PiProviderID(p store.Provider) (string, bool) {
 	return id, ok
 }
 
+// piOAuthProviderName maps each provider to the ID Pi's OAuth login uses.
+// ChatGPT signs in through openai-codex, not the openai API-key provider.
+var piOAuthProviderName = map[store.Provider]string{
+	store.ProviderAnthropic: "anthropic",
+	store.ProviderChatGPT:   "openai-codex",
+	store.ProviderKimiCode:  "kimi-coding",
+	store.ProviderXAI:       "xai",
+	store.ProviderMetaMuse:  "meta",
+}
+
+// PiOAuthProviderID returns the Pi OAuth provider ID of p, or false when Pi
+// has no OAuth sign-in for that provider.
+func PiOAuthProviderID(p store.Provider) (string, bool) {
+	id, ok := piOAuthProviderName[p]
+	return id, ok
+}
+
 // PiProvider names the provider a Pi provider ID or a Dyna provider name means.
 // An ID this release does not know is not a provider Dyna can add a key for.
 func PiProvider(name string) (store.Provider, bool) {
@@ -109,7 +132,14 @@ func accountRuns(h string, n NativeAccount, p store.Provider) bool {
 		return false
 	}
 	if h == "pi" {
-		return n.Provider == p && p != ""
+		if n.Provider != p || p == "" {
+			return false
+		}
+		// A Claude Pro/Max OAuth entry in a Pi home is never used for a turn.
+		if p == store.ProviderAnthropic && n.Kind != store.KindAPIKey {
+			return false
+		}
+		return true
 	}
 	return true
 }

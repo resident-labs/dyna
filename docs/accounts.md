@@ -32,6 +32,8 @@ An account is named by ID, an ID prefix, or a label that names one account only.
 
 Pi keeps one account for each provider. A usage reader runs for the provider, not the harness, and reads the credential from that account's own Pi home: the ChatGPT plan, Kimi Code, xAI Grok credits, OpenCode Go, the DeepSeek balance, and the z.ai Coding Plan. Muse usage needs a Muse sign-in through Pi, which keeps the identity token; a Muse API key cannot read it. An Anthropic API key publishes no usage Dyna can read. Those accounts show that typed reason. A reader that returns the account's credential, or a value that looks like a key or token, has its result rejected.
 
+Dyna never uses a Claude Pro/Max sign-in through Pi. Anthropic bills a Claude Pro/Max sign-in used by a third-party harness as extra per-token usage. Use the Claude Code harness, or add an Anthropic API key in Pi.
+
 **Sign in** on a Usage row opens the Harnesses page. **Create profile** in an account's details starts a profile for that account's harness.
 
 Dyna renews private credentials in the background while the host runs. If a provider rejects a login, the account shows **Needs sign-in**.

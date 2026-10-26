@@ -20,12 +20,16 @@ import (
 const piSignInCommand = "_pi-signin"
 const piSignInPrefix = "PI_SIGNIN "
 
-func piOAuthArgv(argv []string) []string {
+func piOAuthArgv(piExe, providerID string) []string {
 	exe, err := os.Executable()
-	if err != nil || len(argv) == 0 {
+	if err != nil || piExe == "" {
 		return nil
 	}
-	return []string{exe, "harness", "accounts", piSignInCommand, "--pi", argv[0]}
+	argv := []string{exe, "harness", "accounts", piSignInCommand, "--pi", piExe}
+	if providerID != "" {
+		argv = append(argv, "--provider", providerID)
+	}
+	return argv
 }
 
 func parsePiSignIn(st *SignInState, line string) {
@@ -63,6 +67,7 @@ func IsPiSignInCommand(args []string) bool {
 func PiSignInCommand(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet(piSignInCommand, flag.ContinueOnError)
 	pi := flags.String("pi", "", "Pi executable of the selected runtime bundle")
+	provider := flags.String("provider", "", "Pi OAuth provider ID")
 	if err := flags.Parse(args[3:]); err != nil {
 		return err
 	}
@@ -70,12 +75,12 @@ func PiSignInCommand(ctx context.Context, args []string) error {
 	if *pi == "" || flags.NArg() != 0 || !filepath.IsAbs(scope) || os.Getenv("HOME") != harnesshome.Home(scope) {
 		return errors.New("Pi OAuth needs its private account home.")
 	}
-	return runPiOAuth(ctx, *pi, scope, os.Stdin, os.Stdout)
+	return runPiOAuth(ctx, *pi, scope, *provider, os.Stdin, os.Stdout)
 }
 
 // runPiOAuth uses the SDK embedded in the selected Pi binary. The extension
 // exits before Pi can create a model session or run a prompt.
-func runPiOAuth(ctx context.Context, pi, scope string, in io.Reader, out io.Writer) error {
+func runPiOAuth(ctx context.Context, pi, scope, provider string, in io.Reader, out io.Writer) error {
 	dir, err := os.MkdirTemp(scope, ".oauth-")
 	if err != nil {
 		return err
@@ -93,6 +98,7 @@ func runPiOAuth(ctx context.Context, pi, scope string, in io.Reader, out io.Writ
 	cmd := exec.CommandContext(ctx, pi, argv...)
 	cmd.Dir = scope
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, out
+	cmd.Env = append(os.Environ(), "PI_DYNA_PROVIDER="+provider)
 	cmd.WaitDelay = time.Second
 	// Pi stays in the helper's private process group. Cancellation joins it;
 	// the shared runner also kills every group in the helper's OS session.
@@ -152,7 +158,11 @@ export default async function () {
     const runtime = await ModelRuntime.create({modelsPath: null, refreshOnCreate: false});
     const providers = runtime.getProviders().filter(provider => provider.auth?.oauth)
       .map(provider => ({id: provider.id, label: provider.name ?? provider.id}));
-    const provider = await choose("Choose an OAuth provider.", providers);
+    const requested = (process.env.PI_DYNA_PROVIDER ?? "").trim();
+    const provider = requested
+      ? providers.find(entry => entry.id === requested)?.id
+      : await choose("Choose an OAuth provider.", providers);
+    if (!provider) throw new Error("Unknown OAuth provider");
     await runtime.login(provider, "oauth", {
       async prompt(prompt) {
         if (prompt.type === "select") {
