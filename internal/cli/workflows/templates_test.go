@@ -3,6 +3,7 @@ package workflows
 import (
 	"bytes"
 	"context"
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"io"
 	"os"
@@ -334,7 +335,7 @@ func TestDefaultTemplateListWarnsAndContinuesWithoutEngine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(registry, "saved.js"), []byte("return 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	var stdout, stderr bytes.Buffer
 	cmd := NewTemplatesCommand()
 	cmd.SetOut(&stdout)

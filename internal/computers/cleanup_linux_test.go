@@ -4,6 +4,7 @@ package computers
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"net"
 	"os"
 	"path/filepath"
@@ -83,7 +84,7 @@ func ownsDetachedSession(owned map[int]string) bool {
 
 func TestDestroyOfflineKeepsHistory(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	id := "offline"
 	os.MkdirAll(Dir(id), 0700)
 	m := Meta{SessionID: id, WaylandDisplay: publicName(id), Display: ":999"}

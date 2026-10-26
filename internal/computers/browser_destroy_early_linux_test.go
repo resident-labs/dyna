@@ -4,6 +4,7 @@ package computers
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 // A daemon writes its pid file only after it starts. Destroying the computer
 // before that must still stop the daemon, found by its environment.
 func TestOfflineDestroyStopsDaemonBeforePidFile(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	id := testSessionID(t, "early-destroy")
 	root := browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), id)
@@ -52,7 +53,7 @@ func TestOfflineDestroyStopsDaemonBeforePidFile(t *testing.T) {
 // Right after exec, /proc/<pid>/environ reads as empty. A destroy in that
 // window must read the process again instead of skipping it.
 func TestOfflineDestroyWaitsForEmptyEnvironment(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	id := testSessionID(t, "empty-environ")
 	root := browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), id)
@@ -97,7 +98,7 @@ func TestOfflineDestroyWaitsForEmptyEnvironment(t *testing.T) {
 // A daemon that accepts the destroy call but never answers must not leave the
 // browser running: the caller falls back to the offline path.
 func TestDestroyStopsBrowserWhenDaemonDoesNotAnswer(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	id := testSessionID(t, "hung-destroy")
 	if err := os.MkdirAll(Dir(id), 0700); err != nil {

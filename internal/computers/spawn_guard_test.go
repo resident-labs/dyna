@@ -2,6 +2,7 @@ package computers
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ func TestEnsureCannotSpawnTestBinary(t *testing.T) {
 	t.Setenv("DYNA_COMPUTERS_ENABLED", "")
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	// Ensure reaches the spawn guard without depending on installed GUI tools.
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "labwc"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
