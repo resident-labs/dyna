@@ -156,3 +156,38 @@ func requireEnded(t *testing.T, out *bufio.Scanner, stop func()) {
 		t.Fatalf("process %d still runs: %v", pid, err)
 	}
 }
+
+// D-201: a recorded supervisor PID that now names another process must not keep
+// the job listed as running.
+func TestReusedSupervisorNumberReadsAsLost(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	meta, err := s.Create(StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := exec.Command("sleep", "600")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	started, err := s.processStartTime(other.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Started = time.Now().Add(-time.Minute)
+	meta.Supervisor, meta.SupervisorStartTime = other.Process.Pid, started
+	if err := s.Save(meta, nil); err != nil {
+		t.Fatal(err)
+	}
+	if in, err := s.Info(meta.ID); err != nil || in.Status != "running" {
+		t.Fatalf("job with its own supervisor = %q, %v; want running", in.Status, err)
+	}
+	// The recorded supervisor started at another time: the number was reused.
+	meta.SupervisorStartTime = started + 1
+	if err := s.Save(meta, nil); err != nil {
+		t.Fatal(err)
+	}
+	if in, err := s.Info(meta.ID); err != nil || in.Status != "lost" {
+		t.Fatalf("job with a reused supervisor number = %q, %v; want lost", in.Status, err)
+	}
+}

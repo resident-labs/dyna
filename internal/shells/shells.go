@@ -389,7 +389,7 @@ func (s *Store) status(in Info) Info {
 	switch {
 	case in.Exit != nil:
 		in.Status = "exited"
-	case in.SupervisorAlive():
+	case in.SupervisorAlive() && s.sameSupervisor(in):
 		in.Status = "running"
 	case in.Supervisor == 0 && (time.Since(in.Started) < 10*time.Second || s.launchedSupervisor(in.ID) > 0):
 		// A live supervisor that has not recorded itself yet may be waiting
@@ -405,6 +405,17 @@ func (s *Store) status(in Info) Info {
 		}
 	}
 	return in
+}
+
+// sameSupervisor reports whether the process at the recorded supervisor PID
+// is the supervisor, not another process that reused the number (D-201). A
+// record or system without a start time keeps the plain PID probe.
+func (s *Store) sameSupervisor(in Info) bool {
+	if in.SupervisorStartTime == 0 {
+		return true
+	}
+	now, err := s.processStartTime(in.Supervisor)
+	return err != nil || now == 0 || now == in.SupervisorStartTime
 }
 
 // SupervisorAlive reports whether the job's recorded supervisor still runs.
