@@ -3,9 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
-	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -150,23 +148,16 @@ func TestARunningSampleSkipsLaterTicksAndNeverBlocksShutdown(t *testing.T) {
 
 func TestRunSamplesAtEachTick(t *testing.T) {
 	o, seen := observerFor(fixedSource{r: busy}, 6, &memState{})
-	var recorded sync.WaitGroup
-	recorded.Add(2)
-	o.Record = func(_ context.Context, ob Observation) error {
-		*seen = append(*seen, ob)
-		recorded.Done()
-		return nil
-	}
+	ended := make(chan struct{})
+	o.sampled = func() { ended <- struct{}{} }
 	ticks := make(chan time.Time)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go o.Run(ctx, ticks)
-	ticks <- time.Time{}
-	for o.busy.Load() { // the sample ends before the next tick can start one
-		runtime.Gosched()
+	for i := 0; i < 2; i++ {
+		ticks <- time.Time{}
+		<-ended // the sample ended and cleared busy, so the next tick starts one
 	}
-	ticks <- time.Time{}
-	recorded.Wait()
 	if len(*seen) != 2 {
 		t.Fatalf("observations = %+v, want one per tick", *seen)
 	}
