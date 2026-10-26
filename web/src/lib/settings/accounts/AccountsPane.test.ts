@@ -8,10 +8,12 @@ import type { AccountsSnapshot, ScopeAccount } from '../../api/account.ts'
 
 // The page lists the saved accounts by provider, and its Use button chooses an
 // account for the scope the owner shows: global, or this room.
-const api = `const view = (scope) => globalThis.accountsViewImpl ? globalThis.accountsViewImpl(scope) : Promise.resolve(globalThis.accountsPage(scope))
+const api = `const view = (scope, refresh) => refresh && globalThis.accountsRefreshImpl
+  ? globalThis.accountsRefreshImpl(scope)
+  : globalThis.accountsViewImpl ? globalThis.accountsViewImpl(scope) : Promise.resolve(globalThis.accountsPage(scope))
 export const api = {
-  accountsView: (scope) => view(scope),
-  accountsList: (scope) => view(scope),
+  accountsView: (scope) => view(scope, false),
+  accountsList: (scope, refresh) => view(scope, refresh),
   accountsUse: (id, scope) => { globalThis.accountsCalls.push([id, scope]); return globalThis.accountsUseImpl ? globalThis.accountsUseImpl(id, scope) : Promise.resolve(globalThis.accountsPage(scope)) },
   setAccountRepos: () => Promise.resolve({}),
   accountsRemove: () => Promise.resolve(globalThis.accountsPage('')),
@@ -131,6 +133,37 @@ test('a delayed switch for the old scope cannot replace the room view', async ()
     if (mounted) await unmount(mounted)
     dom.window.close()
     for (const name of [...domNames, 'accountsCalls', 'accountsPage', 'accountsViewImpl', 'accountsUseImpl']) Reflect.deleteProperty(globalThis, name)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// D-148: while the providers are asked, the page names the wait and keeps the
+// saved readings on screen, and the wait ends when the answer arrives.
+test('a refresh names the wait, keeps the saved readings, and ends with the answer', async () => {
+  const work = row({ id: 'claude-work', provider: 'anthropic', label: 'Claude · Work', active: true, observedAt: '2026-10-25T11:00:00Z', stale: true })
+  const saved: AccountsSnapshot = { providers: [{ provider: 'anthropic', accounts: [work] }], problems: [], checkedAt: '2026-10-25T12:00:00Z' }
+  const answer = Promise.withResolvers<AccountsSnapshot>()
+  const dom = installDom({ accountsCalls: [], accountsPage: () => saved, accountsRefreshImpl: () => answer.promise })
+  const { dir, default: AccountsPane, mount, flushSync, unmount } = await importBundle(built, 'AccountsPane')
+  let mounted: ReturnType<typeof mount> | undefined
+  try {
+    const target = need(document.getElementById('app'), 'app')
+    mounted = mount(AccountsPane, { target, props: { onmodal: () => {} } })
+    await settle(flushSync)
+    assert.match(elements<HTMLButtonElement>(target, 'button').map(textOf).join(' '), /Refresh/)
+    need(elements<HTMLButtonElement>(target, 'button').find((b) => textOf(b) === 'Refresh'), 'Refresh button').click()
+    await settle(flushSync)
+    assert.match(textOf(target), /Asking each provider for current usage/, 'the page names the wait')
+    assert.match(textOf(target), /Claude · Work/, 'the saved readings stay while the providers answer')
+    assert.match(elements<HTMLButtonElement>(target, 'button').map(textOf).join(' '), /Refreshing…/)
+    answer.resolve({ ...saved, checkedAt: '2026-10-25T12:05:00Z' })
+    await settle(flushSync)
+    assert.doesNotMatch(textOf(target), /Asking each provider for current usage/, 'the wait ends with the answer')
+    assert.doesNotMatch(elements<HTMLButtonElement>(target, 'button').map(textOf).join(' '), /Refreshing…/)
+  } finally {
+    if (mounted) await unmount(mounted)
+    dom.window.close()
+    for (const name of [...domNames, 'accountsCalls', 'accountsPage']) Reflect.deleteProperty(globalThis, name)
     await rm(dir, { recursive: true, force: true })
   }
 })

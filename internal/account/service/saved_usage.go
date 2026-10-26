@@ -14,8 +14,15 @@ func entryCaptured(e accountstore.Entry) native.Captured {
 
 const activeUsageTTL = 2 * time.Minute
 
+// inactiveUsageWindow is how long a saved reading of an inactive account counts
+// as current. The usage timer re-reads an inactive account when its reading
+// reaches this age, so one window decides both what the page calls stale and
+// when the timer probes again. Two different windows left an inactive reading
+// shown as stale for most of every cycle (D-148).
+const inactiveUsageWindow = 10 * time.Minute
+
 func savedTTL(string) time.Duration {
-	return 10 * time.Minute
+	return inactiveUsageWindow
 }
 func applySavedObservation(a *Account, e accountstore.Entry, now time.Time) {
 	a.ObservedAt = time.Time{}
