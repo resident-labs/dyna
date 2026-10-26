@@ -54,8 +54,9 @@ func TestPiResumeForksWhenTheSessionDirectoryIsGone(t *testing.T) {
 }
 
 // While the session's own directory exists, a resume opens the session file by
-// path. Pi keeps using that directory and never asks whether to fork.
-func TestPiResumeOpensTheSessionByPath(t *testing.T) {
+// path. The file path and the session id are one registry key, so the resume
+// reuses the live Pi process instead of starting another one.
+func TestPiResumeReusesTheSessionProcess(t *testing.T) {
 	path, logPath := installFakePiTurn(t)
 	p := piTestProfile("pi-old", "old/provider-model", path, logPath)
 	e := newTestEnv(t, p)
@@ -84,19 +85,65 @@ func TestPiResumeOpensTheSessionByPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var byPath, forked bool
+	if spawns := strings.Count(string(log), "SPAWN "); spawns != 1 {
+		t.Fatalf("pi spawned %d processes, want one reused process:\n%s", spawns, log)
+	}
+}
+
+// A forked session survives a model fallback. When the provider refuses the
+// first forked request before any output, the next model resumes the fork
+// instead of starting an empty conversation.
+func TestPiForkKeepsHistoryAcrossAModelFallback(t *testing.T) {
+	path, logPath := installFakePiTurn(t)
+	p := piTestProfile("pi-old", "a", path, logPath)
+	p.Models = []string{"a", "b"}
+	p.Env["FAKE_PI_FAIL_FORK_QUOTA"] = "1"
+	e := newTestEnv(t, p)
+	info, _ := e.start("RESPOND: first turn", func(so *StartOptions) { so.Profile = "pi-old" })
+	info, first := e.wait(info.ID, 1)
+	writePiSession(t, first.HarnessSession, "/does/not/exist/dyna-117")
+	if _, err := e.m.Assign(context.Background(), info.ID, "RESPOND: second turn", "", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	info, _ = e.wait(info.ID, 2)
+	second, err := e.m.Store.ReadTurn(info.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Status != TurnOK || second.Model != "b" {
+		t.Fatalf("fallback turn = %+v", second)
+	}
+	current, err := e.m.Store.ReadMeta(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.HarnessSession == first.HarnessSession || current.HarnessSession == "" {
+		t.Fatalf("fallback did not keep the fork id: %q", current.HarnessSession)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var afterFork, resumed, fresh bool
 	for _, line := range strings.Split(string(log), "\n") {
 		if !strings.HasPrefix(line, "SPAWN ") {
 			continue
 		}
-		if strings.Contains(line, "--session ") && strings.Contains(line, "_"+first.HarnessSession+".jsonl") {
-			byPath = true
-		}
 		if strings.Contains(line, "--fork ") {
-			forked = true
+			afterFork = true
+			continue
+		}
+		if !afterFork {
+			continue
+		}
+		if strings.Contains(line, "--model b") && strings.Contains(line, "--session ") && !strings.Contains(line, "--session-id ") {
+			resumed = true
+		}
+		if strings.Contains(line, "--model b") && strings.Contains(line, "--session-id ") {
+			fresh = true
 		}
 	}
-	if !byPath || forked {
-		t.Fatalf("pi did not open the session file by path: %s", log)
+	if !resumed || fresh {
+		t.Fatalf("fallback did not resume the forked session:\n%s", log)
 	}
 }

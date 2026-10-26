@@ -1085,11 +1085,25 @@ func (r *journaledRun) fallbackModel(a attempt, attemptErr error) (stepAct, Resu
 	}
 	r.inv = next
 	r.spec = r.inv.initial
-	if active && sid != "" && r.inv.resume != nil {
+	switch {
+	case active && sid != "" && r.inv.resume != nil:
 		r.spec = r.inv.resume(sid, sessionNudgePrompt)
-	} else if r.session.ResumeID != "" && r.inv.resume != nil {
+	case r.session.ResumeID != "" && r.inv.resume != nil:
 		r.spec = r.inv.resume(r.session.ResumeID, r.prompt)
-	} else {
+	case r.session.ForkFrom != "" && a.started && sid != "" && r.inv.resume != nil:
+		// The fork created its session before the provider refused the first
+		// request. Continue that session with the new model; starting the
+		// fresh conversation would discard the source history.
+		r.spec = r.inv.resume(sid, r.prompt)
+	case r.session.ForkFrom != "" && r.inv.fork != nil:
+		// The fork never started. Fork the source again, with this
+		// invocation's preassigned id.
+		r.spec = r.inv.fork(r.session.ForkFrom, r.prompt)
+		r.tracker = newSessionTracker(r.inv.sessionID)
+		r.tracker.onSession = r.session.OnSession
+		r.state.tracker = r.tracker
+		r.tracker.observe("")
+	default:
 		r.tracker = newSessionTracker(r.inv.sessionID)
 		r.tracker.onSession = r.session.OnSession
 		r.state.tracker = r.tracker
