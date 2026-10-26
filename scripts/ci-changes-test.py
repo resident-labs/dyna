@@ -68,6 +68,14 @@ class ChangesTest(unittest.TestCase):
         out = self.run_filter("pull_request", base)
         self.assertEqual((out["web"], out["go"]), ("true", "true"))
 
+    def test_backend_go_file_read_by_a_web_test_runs_web(self):
+        base = self.pull_request("internal/filesvc/files.go")
+        self.assertEqual(self.run_filter("pull_request", base)["web"], "true")
+
+    def test_backend_fixture_read_by_a_web_test_runs_web(self):
+        base = self.pull_request("internal/voice/realtime/testdata/page-protocol.json")
+        self.assertEqual(self.run_filter("pull_request", base)["web"], "true")
+
     def test_other_events_run_everything(self):
         base = self.pull_request("docs/guide.md")
         self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true", "web": "true"})
