@@ -16,11 +16,12 @@ import (
 // fakeEngine answers the account calls a list and a use make. A use writes a
 // real selection row, so a test can see which scope changed.
 type fakeEngine struct {
-	root     string
-	accounts []service.ScopeAccount
-	used     [][2]string
-	imported []any
-	result   importer.Result
+	root      string
+	accounts  []service.ScopeAccount
+	used      [][2]string
+	imported  []any
+	refreshed []bool
+	result    importer.Result
 }
 
 func newFake(t *testing.T) *fakeEngine {
@@ -39,6 +40,8 @@ func (f *fakeEngine) Call(_ context.Context, method string, args []any, out any)
 			return nil
 		}
 		scope, _ := args[0].(string)
+		refresh, _ := args[1].(bool)
+		f.refreshed = append(f.refreshed, refresh)
 		active, _ := (&store.Store{Root: f.root}).ActiveFor(store.ProviderAnthropic, "claude-code", scope)
 		rows := make([]service.ScopeAccount, len(f.accounts))
 		for i, a := range f.accounts {
@@ -157,5 +160,35 @@ func TestListShowsTheReadingAgeAndStaleMark(t *testing.T) {
 	text := out.String()
 	if !strings.Contains(text, "weekly 41%") || !strings.Contains(text, "observed 3m") || !strings.Contains(text, "(stale)") {
 		t.Fatalf("list = %q, want the usage, its age and the stale mark", text)
+	}
+}
+
+// D-148: a forced refresh is one short command, because rule r5 still names the
+// removed `dyna usage --refresh` and `accounts list --refresh` is easy to miss.
+func TestRefreshAsksEveryProviderForCurrentUsage(t *testing.T) {
+	run := func(args ...string) (*fakeEngine, string) {
+		t.Helper()
+		fake := newFake(t)
+		cmd := Command(Options{Client: fake})
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs(args)
+		if err := cmd.ExecuteContext(t.Context()); err != nil {
+			t.Fatal(err, out.String())
+		}
+		return fake, out.String()
+	}
+	fake, text := run("refresh")
+	if len(fake.refreshed) != 1 || !fake.refreshed[0] {
+		t.Fatalf("refresh asked for %v, want one forced refresh", fake.refreshed)
+	}
+	if !strings.Contains(text, "Work") || !strings.Contains(text, "Home") {
+		t.Fatalf("refresh did not list the accounts: %s", text)
+	}
+	// A plain list keeps the saved readings.
+	fake, _ = run("list")
+	if len(fake.refreshed) != 1 || fake.refreshed[0] {
+		t.Fatalf("list asked for %v, want the saved readings", fake.refreshed)
 	}
 }
