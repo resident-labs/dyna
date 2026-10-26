@@ -103,3 +103,28 @@ func TestRunnerInputRestartWaitStaysBoundedAndCancelable(t *testing.T) {
 		})
 	}
 }
+
+// An engine that stops under a running wait answers it with its own canceled
+// context, a 4xx reply. The wait retries; the turn keeps its steering (D-267).
+func TestRunnerInputWaitRetriesWhenTheEngineCancelsIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := restartWaitFixture(t)
+		calls := 0
+		w.waitCall = func(_ context.Context, _ string, _ []any, result any) error {
+			calls++
+			if calls < 3 {
+				return &engineclient.RemoteError{Status: http.StatusUnprocessableEntity, Message: context.Canceled.Error()}
+			}
+			ready, ok := result.(*bool)
+			if !ok {
+				t.Fatalf("wait result type: %T", result)
+			}
+			*ready = true
+			return nil
+		}
+		ready, err := w.waitInput(context.Background(), InputClaim{Turn: 7})
+		if err != nil || !ready || calls != 3 {
+			t.Fatalf("after %d reads: ready %v, error %v", calls, ready, err)
+		}
+	})
+}
