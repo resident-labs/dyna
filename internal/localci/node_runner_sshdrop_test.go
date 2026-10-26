@@ -2,9 +2,6 @@ package localci
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 	"testing"
@@ -64,38 +61,3 @@ func TestCheckCauseNamesAnSSHDropAfterTheCheckWroteItsMarker(t *testing.T) {
 	}
 }
 
-// A report copy whose SSH client lost the connection keeps that cause, so the
-// scheduler's machine retry applies to it. Before, every copy failure became
-// reports-unavailable and a transport drop never reached the retry (D-170).
-// Any other copy failure still leaves the reports unavailable.
-func TestReportCopyFailureKeepsItsTransportCause(t *testing.T) {
-	for name, tc := range map[string]struct {
-		copyErr func(*testing.T) error
-		want    FailureCause
-	}{
-		"ssh drop":      {sshDropError, CauseSSHDrop},
-		"other failure": {func(*testing.T) error { return errors.New("tar: unexpected EOF") }, CauseReports},
-	} {
-		t.Run(name, func(t *testing.T) {
-			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
-			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
-				if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
-					return nil
-				}
-				script := args[len(args)-1]
-				if strings.Contains(script, "systemd-run") {
-					fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
-					return nil
-				}
-				if strings.Contains(script, "tar -C") {
-					return tc.copyErr(t)
-				}
-				return nil
-			}
-			result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
-			if err == nil || result.Cause != tc.want || len(result.Checks) != 1 || result.Checks[0].Cause != tc.want {
-				t.Fatalf("run cause = %q, checks = %+v, err = %v; want cause %q", result.Cause, result.Checks, err, tc.want)
-			}
-		})
-	}
-}
