@@ -94,8 +94,18 @@ func TestIssueStampedCaller(t *testing.T) {
 	if _, err = run("close", i.ID, "--reason", "done"); err == nil {
 		t.Fatal("agent closed issue")
 	}
-	if _, err = run("--room", other.ID, "Other issue"); err == nil {
-		t.Fatal("agent filed in another room")
+	// D-111: a filed issue wakes nobody, so an agent may file one in another room,
+	// and its filer names the room it came from. Triage stays refused below.
+	raw, err = run("--room", other.ID, "Other issue", "--json")
+	if err != nil {
+		t.Fatalf("agent could not file an issue in another room: %v", err)
+	}
+	var foreign room.Issue
+	if err = json.Unmarshal([]byte(raw), &foreign); err != nil || foreign.Filer != "work:agent" || foreign.Title != "Other issue" {
+		t.Fatalf("issue filed in another room: %s %v", raw, err)
+	}
+	if _, err = run("--room", other.ID, "close", foreign.ID, "--reason", "done"); err == nil {
+		t.Fatal("agent triaged another room's issue")
 	}
 	if _, err = sessions.UpdateMeta(meta.ID, func(m *subagent.Meta) { m.Name = "root" }); err != nil {
 		t.Fatal(err)

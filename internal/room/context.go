@@ -54,6 +54,22 @@ func (s *Store) ResolveContext(ref string, requireStamp bool) (Record, error) {
 // room. Other errors, such as a room name taken by another repo, are not it.
 var ErrOutsideRepo = errors.New("not in a repo; pass --room <name>")
 
+// ResolveQuietWrite resolves the room of a write that wakes nobody, such as a
+// filed issue. A stamped Dyna process may name another room for such a write, so
+// an agent in one room can report a Dyna problem in another (D-111). Every other
+// cross-room write keeps the refusal in ResolveContext, and a stamped process
+// that names no room still writes to its own.
+func (s *Store) ResolveQuietWrite(ref string) (Record, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || !mode.InsideDyna() {
+		return s.ResolveContext(ref, false)
+	}
+	if _, stamped := mode.StampFromEnv(); !stamped {
+		return s.ResolveContext(ref, false)
+	}
+	return s.Resolve(ref)
+}
+
 // CurrentRepoRoom returns the room of the git repo that holds the working
 // directory, creating it on first use.
 func (s *Store) CurrentRepoRoom() (Record, error) {
