@@ -206,6 +206,9 @@ func noticeKind(token string) string {
 	if strings.HasPrefix(token, "radar:") {
 		return "radar"
 	}
+	if strings.HasPrefix(token, "required-review:") {
+		return "required-review"
+	}
 	for _, p := range ciNoticeTokens {
 		if strings.HasPrefix(token, p) {
 			return "ci"
@@ -268,7 +271,11 @@ func noticeTyped(r *Record, target, text, token string, facts noticeFacts, drops
 			// A rerun can temporarily remove readiness on the same head, and
 			// a queue order flip back can make a cleared radar notice true
 			// again. Keep delivered notices deduplicated, but retry this pending one.
-			if !n.Done && (n.SupersededBy == "no-longer-landable" || n.SupersededBy == "radar-cleared") {
+			// A required-review assignment retired only because the head moved
+			// away, or the PR held as a draft, comes back when that same head or
+			// the release asks for it again: the reviewer still owes the approval.
+			if !n.Done && (n.SupersededBy == "no-longer-landable" || n.SupersededBy == "radar-cleared" ||
+				(n.Kind == "required-review" && (strings.HasPrefix(n.SupersededBy, "new-head:") || strings.HasPrefix(n.SupersededBy, "head-changed:") || n.SupersededBy == "draft-hold"))) {
 				n.SupersededBy = ""
 			}
 			// A notice saved before the pair identity existed still names its
@@ -329,7 +336,7 @@ func typeOfToken(r Record, token string) room.PRType {
 		return room.PRChanges
 	case strings.HasPrefix(token, "owner-comments:"), strings.HasPrefix(token, "review-comments:"):
 		return room.PRComment
-	case strings.HasPrefix(token, "transfer:reviewer:"):
+	case strings.HasPrefix(token, "transfer:reviewer:"), strings.HasPrefix(token, "required-review:"):
 		return room.PRReviewAssigned
 	case strings.HasPrefix(token, "ci-budget:"), strings.HasPrefix(token, "test-budget"),
 		strings.HasPrefix(token, "test-report-error:"), strings.HasPrefix(token, "no-junit-report"):

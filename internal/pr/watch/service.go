@@ -630,6 +630,11 @@ func applyHead(r *Record, snap Snapshot, previousPullHead string, n *pollNotices
 	if changedHead {
 		rememberReviewAssignment(r)
 		retireReviewNotices(r, "new-head:"+snap.Pull.Head.SHA)
+		// A stale required-review assignment must not wake its reviewer for
+		// this head; the fresh assignment below replaces it.
+		for _, id := range r.RequiredReviewers {
+			retireSessionReviewNotices(r, id, "new-head:"+snap.Pull.Head.SHA)
+		}
 		r.Head = snap.Pull.Head.SHA
 		r.Landing = nil
 		r.CIKey = ""
@@ -643,6 +648,9 @@ func applyHead(r *Record, snap Snapshot, previousPullHead string, n *pollNotices
 		r.ReviewID = 0
 		if !r.CIPaused {
 			r.PauseReason = ""
+		}
+		if snap.Pull.State != "closed" {
+			requiredReviewNotices(r)
 		}
 	}
 	if changedHead || refreshedHead {
