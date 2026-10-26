@@ -55,7 +55,7 @@ var (
 func NewRunCommand() *cobra.Command {
 	var argsJSON, name, roomRef, dir, resumeID, workflowDir string
 	var quiet, asJSON, detach, planOnly bool
-	var maxConc, maxAgents int
+	var maxConc, maxAgents, maxCommands int
 	cmd := &cobra.Command{
 		Use:   "run <script.js>",
 		Short: "Execute a workflow script (progress on stderr, result JSON on stdout)",
@@ -99,7 +99,7 @@ func NewRunCommand() *cobra.Command {
 				fmt.Fprintln(c.OutOrStdout(), string(b))
 				return nil
 			}
-			opts := workflowsvc.Options{ScriptSrc: string(src), ScriptPath: scriptPath, Args: argsVal, Name: name, WorkDir: dir, WorkflowDir: workflowDir, ResumeFrom: resumeID, MaxConc: maxConc, MaxAgents: maxAgents}
+			opts := workflowsvc.Options{ScriptSrc: string(src), ScriptPath: scriptPath, Args: argsVal, Name: name, WorkDir: dir, WorkflowDir: workflowDir, ResumeFrom: resumeID, MaxConc: maxConc, MaxAgents: maxAgents, MaxCommands: maxCommands}
 			if detach {
 				id, err := workflowsvc.Launch(c.Context(), opts, workflowsvc.LaunchOptions{OnWarning: runObserver(c, quiet, resumeID).OnWarning})
 				if err != nil {
@@ -123,6 +123,7 @@ func NewRunCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "suppress progress on stderr")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "wrap stdout result with runId/status envelope")
 	cmd.Flags().IntVar(&maxConc, "max-concurrent", 0, "max concurrent workers (default min(16, cores-2))")
+	cmd.Flags().IntVar(&maxCommands, "max-commands", 0, "run() commands that execute at once (default 4)")
 	cmd.Flags().IntVar(&maxAgents, "max-agents", 0, "lifetime agent() cap for this run (default 1000)")
 	cmd.Flags().StringVar(&resumeID, "resume", "", "run id to resume: unchanged agent() calls replay from its journal")
 	cmd.Flags().StringVar(&workflowDir, "workflows-dir", "", "name-keyed workflow registry (default user config, then ./examples)")

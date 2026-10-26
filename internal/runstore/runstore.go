@@ -35,7 +35,7 @@ import (
 
 // Event is one line in events.jsonl.
 type Event struct {
-	T              string `json:"t"`  // run_start|workflow_start|phase|agent_start|agent_run|agent_journal|agent_nudge|agent_steer|agent_defer|agent_end|log|workflow_end|run_end
+	T              string `json:"t"`  // run_start|workflow_start|phase|agent_start|agent_run|agent_journal|agent_nudge|agent_steer|agent_defer|agent_end|exec_start|exec_run|exec_end|log|workflow_end|run_end
 	TS             int64  `json:"ts"` // unix millis
 	Title          string `json:"title,omitempty"`
 	ID             int    `json:"id,omitempty"`
@@ -62,6 +62,12 @@ type Event struct {
 	WorkflowPlanID string `json:"workflowPlanId,omitempty"`
 	StageIndex     *int   `json:"stageIndex,omitempty"`
 	ItemIndex      *int   `json:"itemIndex,omitempty"`
+	// Command, Shell, ExitCode and Tail describe a run() call (exec_start and
+	// exec_end). ID counts commands apart from agents.
+	Command  string `json:"command,omitempty"`  // the command line the script asked for
+	Shell    string `json:"shell,omitempty"`    // the managed shell that runs it
+	ExitCode *int   `json:"exitCode,omitempty"` // exec_end: the command's exit code
+	Tail     string `json:"tail,omitempty"`     // exec_end: the last lines of its output
 }
 
 // JournalEntry is one line in journal.jsonl: the full record of one agent
@@ -79,6 +85,13 @@ type JournalEntry struct {
 	Dir      string `json:"dir,omitempty"`
 	Worktree string `json:"worktree,omitempty"` // retained|removed; absent when no worktree was created
 	Workflow string `json:"workflow,omitempty"`
+	// Kind is "exec" for a run() call; an agent call leaves it empty. An exec
+	// entry is written when its shell starts (State "running", Shell set) and
+	// again when it ends (State "done"), so a resumed run can reattach to a
+	// live shell and reuse a finished result.
+	Kind  string `json:"kind,omitempty"`
+	State string `json:"state,omitempty"` // running|done|error
+	Shell string `json:"shell,omitempty"`
 }
 
 // AgentJournalEnv is injected into a worker process with the absolute path of
@@ -742,6 +755,7 @@ func JournalResult(id string, agent int) (string, bool, error) {
 	defer f.Close()
 	type entry struct {
 		ID     int             `json:"id"`
+		Kind   string          `json:"kind"`
 		Result json.RawMessage `json:"result"`
 	}
 	r := bufio.NewReader(f)
@@ -751,7 +765,7 @@ func JournalResult(id string, agent int) (string, bool, error) {
 		if len(bytes.TrimSpace(line)) > 0 {
 			var e entry
 			// A torn last record is skipped, as other journal readers do.
-			if json.Unmarshal(line, &e) == nil && e.ID == agent {
+			if json.Unmarshal(line, &e) == nil && e.Kind == "" && e.ID == agent {
 				out, found = string(e.Result), true
 			}
 		}

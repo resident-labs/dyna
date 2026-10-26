@@ -35,6 +35,8 @@ type Options struct {
 	ResumeFrom  string
 	MaxConc     int
 	MaxAgents   int
+	// MaxCommands caps the run() commands that execute at once (0 => 4).
+	MaxCommands int
 	// Demo runs the script on the unsaved mock worker profiles instead of the
 	// saved registry. Only `dyna demo` sets it.
 	Demo bool
@@ -127,11 +129,15 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 		err = ctx.Err()
 	}
 	agents := AgentEngine()
+	var commands workflow.CommandRunner
+	if err == nil {
+		commands, err = CommandRunnerFor(run, opts.ResumeFrom)
+	}
 	if err == nil {
 		value, err = workflow.Execute(ctx, workflow.Options{
 			ScriptSrc: opts.ScriptSrc, ScriptPath: opts.ScriptPath, Args: opts.Args, Store: store, Run: run,
 			OnEvent: observer.OnEvent, OnWarning: warning, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir,
-			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, Cache: cache, ResumeFrom: opts.ResumeFrom, Engine: agents,
+			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, MaxCommands: opts.MaxCommands, Commands: commands, Cache: cache, ResumeFrom: opts.ResumeFrom, Engine: agents,
 			Paused: func() bool { return runstore.IsPaused(run.Meta.ID) }, Poster: ScriptPoster,
 		})
 	}

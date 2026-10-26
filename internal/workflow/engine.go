@@ -72,6 +72,12 @@ type Options struct {
 	// Engine starts the leaf session that serves each agent() call. A run
 	// coordinator passes its engine connection; tests pass a fake.
 	Engine EngineCaller
+	// Commands runs the commands of run() calls as managed shells. Nil makes
+	// run() fail; the run coordinator passes the shells-backed runner.
+	Commands CommandRunner
+	// MaxCommands caps the run() commands that execute at once, across the
+	// run's parallel() calls; 0 => 4.
+	MaxCommands int
 	// Paused, when it returns true, blocks new worker launches (running
 	// workers finish). Polled while waiting to start each agent.
 	Paused func() bool
@@ -95,11 +101,14 @@ func Execute(ctx context.Context, o Options) (string, error) {
 // made by nested workflows. Each script still gets an isolated JS runtime.
 type sharedState struct {
 	sem chan struct{}
+	// cmdSem limits the run() commands that execute at once.
+	cmdSem chan struct{}
 
 	mu                sync.Mutex
 	scratchID         string
 	scratchWarning    sync.Once
 	agentSeq          int
+	execSeq           int // run() calls; counted apart from agents and their cap
 	workflowSeq       int
 	profSems          map[string]chan struct{}
 	profCalls         map[string]int
@@ -135,6 +144,7 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 		shared = &sharedState{
 			scratchID: runstore.NewID(),
 			sem:       make(chan struct{}, maxConc),
+			cmdSem:    newCommandLimit(o.MaxCommands),
 			profSems:  map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
 		}
 	}
