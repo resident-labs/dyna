@@ -20,6 +20,8 @@ func TestQuiet(t *testing.T) {
 	}{
 		"none":                        {nil, true},
 		"stopped":                     {[]computers.Status{{State: computers.StateIdleStopped, Apps: app, IdleSeconds: 1}}, true},
+		"created with an app":         {[]computers.Status{{State: computers.StateCreated, Apps: app}}, true},
+		"destroyed with an app":       {[]computers.Status{{State: computers.StateDestroyed, Apps: app}}, true},
 		"app open":                    {[]computers.Status{{State: computers.StateRunning, Apps: app, IdleSeconds: 9999}}, false},
 		"starting with an app":        {[]computers.Status{{State: computers.StateStarting, Apps: app}}, false},
 		"recent input and no app":     {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 5}}, true},
