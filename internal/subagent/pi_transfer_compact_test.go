@@ -7,15 +7,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/profile"
 )
 
 // nativePiTransferStarting starts a Pi session, then moves a native Pi-to-Pi
 // transfer into "starting" with its replacement turn held open and no output.
-func nativePiTransferStarting(t *testing.T) (*testEnv, *time.Time, Info, TransferState, *heldTurnSpawner, Spawner) {
+func nativePiTransferStarting(t *testing.T, configure ...func(*profile.Profile)) (*testEnv, *time.Time, Info, TransferState, *heldTurnSpawner, Spawner) {
 	t.Helper()
 	path, logPath := installFakePiTurn(t)
 	old := piTestProfile("pi-old", "old/provider-model", path, logPath)
 	next := piTestProfile("pi-next", "new/provider-model", path, logPath)
+	for _, fn := range configure {
+		fn(&next)
+	}
 	e := newTestEnv(t, old, next)
 	now := time.Now()
 	e.m.TransferNow = func() time.Time { return now }
@@ -101,5 +106,58 @@ func TestPiTransferStartupTimeoutUsesTheHandoff(t *testing.T) {
 	}
 	if got.Phase != "stopping" || got.Source != "transcript" || !strings.Contains(got.Reason, "no model output") {
 		t.Fatalf("startup timeout did not fall back: %+v", got)
+	}
+}
+
+// A due pre-turn compact gives the transfer a 120-second window. A compaction
+// event a few seconds after launch must add to that window, not replace it
+// with a shorter one.
+func TestPiTransferCompactionExtendsADueDeadline(t *testing.T) {
+	e, now, info, state, held, runner := nativePiTransferStarting(t, func(p *profile.Profile) {
+		p.Compact = &profile.Compact{Tokens: 1}
+	})
+	current, err := e.m.TransferStatus(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := current.StartupDeadline
+	if initial.Sub(*now) < 2*time.Minute {
+		t.Fatalf("a due pre-turn compact did not get a longer startup window: %v", initial.Sub(*now))
+	}
+	normalized, err := e.m.Store.NormalizedPath(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(normalized), 0700); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(normalized, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"v":1,"kind":"status","name":"compaction","state":"started"}` + "\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(2 * time.Second)
+	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.m.TransferStatus(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.CompactionExtended || !got.StartupDeadline.Equal(initial.Add(60*time.Second)) {
+		t.Fatalf("compaction deadline = %v, want the initial %v plus 60s: %+v", got.StartupDeadline, initial, got)
+	}
+	held.lock.Close()
+	e.m.Spawner = runner
+	if _, err := e.m.Store.UpdateTurn(info.ID, 2, func(turn *Turn) {
+		turn.Status, turn.Ended = TurnOK, *now
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
