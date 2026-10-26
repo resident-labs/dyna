@@ -250,14 +250,14 @@
               <span class="note">Local CI runs only for these rooms. None chosen means every room.</span>
               {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
             {/snippet}
-            {#snippet trail()}<ScopeList label="Rooms" values={machine.rooms ?? []} options={roomOptions} everyText="Every room" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ rooms: list })} />{/snippet}
+            {#snippet detail()}<ScopeList label="Rooms" values={machine.rooms ?? []} options={roomOptions} everyText="Every room" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ rooms: list })} />{/snippet}
           </Row>
           <Row dense text="Suites">
             {#snippet meta()}
               <span class="note">Local CI takes only these suites. None chosen means every suite.</span>
               {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
             {/snippet}
-            {#snippet trail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
+            {#snippet detail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
           </Row>
           <Row dense text="Host checks">
             {#snippet meta()}

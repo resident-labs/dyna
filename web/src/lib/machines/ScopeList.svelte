@@ -69,8 +69,8 @@
 </span>
 
 <style>
-  .scope { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s2); min-width: 0; }
-  .chips { display: inline-flex; flex-wrap: wrap; gap: var(--s1); justify-content: flex-end; min-width: 0; }
+  .scope { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; margin-top: var(--s2); }
+  .chips { display: inline-flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
   .chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border-radius: 9px; background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); font-size: var(--t-cap); font-weight: 600; max-width: 100%; }
   .chip:has(.x:not(:disabled)) { padding-right: 2px; }
   .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
