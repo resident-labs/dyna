@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -214,6 +215,63 @@ func OpenRecordsInRoom(root, roomID string) ([]Record, error) {
 		}
 	}
 	return records, nil
+}
+
+// ReadForSessions returns a State that holds only the room's PRs that any of
+// sessions authors or reviews, closed ones included. SQLite filters the rows,
+// so Go decodes a few records instead of every stored PR. The State has no
+// metadata and no saved responses.
+func ReadForSessions(root, roomID string, sessions ...string) (State, error) {
+	st := newState()
+	st.Records = map[string]*Record{}
+	if len(sessions) == 0 {
+		return st, nil
+	}
+	db, err := open(root)
+	if err != nil {
+		return State{}, err
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(sessions)), ",")
+	args := []any{roomID}
+	for range 3 {
+		for _, session := range sessions {
+			args = append(args, session)
+		}
+	}
+	type stored struct {
+		key  string
+		body []byte
+	}
+	var found []stored
+	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
+		rows, err := r.QueryContext(context.Background(), `SELECT key, body FROM pr_records WHERE room=? AND (
+json_extract(body,'$.record.authorSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerOverride') IN (`+marks+`))`, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row stored
+			if err := rows.Scan(&row.key, &row.body); err != nil {
+				return err
+			}
+			found = append(found, row)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return State{}, err
+	}
+	for _, row := range found {
+		var record diskRecord
+		if err := json.Unmarshal(row.body, &record); err != nil {
+			return State{}, fmt.Errorf("invalid PR record: %w", err)
+		}
+		if record.Record != nil {
+			st.Records[row.key] = record.Record
+		}
+	}
+	return st, nil
 }
 
 // ReadLocked reads while the caller owns the store's exclusive lock, before
