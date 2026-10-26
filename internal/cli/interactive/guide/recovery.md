@@ -88,7 +88,9 @@ dyna subagent transfer <session> --profile sol --retry
 ```
 
 The default handoff window is 30 seconds; `--wait-seconds` accepts 0 to 120.
-Zero or an already failed turn uses transcript context immediately. Write the
+Zero or an already failed turn uses transcript context immediately. A running
+turn holds the ask only until that window ends; the transfer then stops the turn
+and uses the transcript, so it never waits without end. Write the
 actual task directory and branch; the launch directory can be stale. A final
 handoff may start with `[DYNA HANDOFF]`, then separate `Worktree: /absolute/path`
 and `Branch: feature/name` lines.
