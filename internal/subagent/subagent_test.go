@@ -35,6 +35,8 @@ type testEnv struct {
 	m    *Manager
 	ctx  context.Context
 	room room.Record
+	// stop cancels ctx, for a test that must end its runners before its own end.
+	stop context.CancelFunc
 }
 
 func newTestEnv(t *testing.T, profiles ...profile.Profile) *testEnv {
@@ -70,7 +72,7 @@ func newTestEnv(t *testing.T, profiles ...profile.Profile) *testEnv {
 	}
 	t.Setenv(mode.EnvRoomID, rec.ID)
 	t.Setenv(mode.EnvRoom, rec.Name)
-	e := &testEnv{t: t, m: m, ctx: ctx, room: rec}
+	e := &testEnv{t: t, m: m, ctx: ctx, room: rec, stop: cancel}
 	e.joinRunners()
 	return e
 }

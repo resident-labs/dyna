@@ -129,7 +129,7 @@ func (m *Manager) CloseRunAgent(ctx context.Context, run string, agent int) erro
 func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 	// No start of this run begins after this, and the ones in flight finish
 	// first, so the snapshot below holds every session the run made.
-	if err := m.gates().closeRun(ctx, run, m.runAgentDrainHook); err != nil {
+	if err := m.gates().closeRun(ctx, run); err != nil {
 		return err
 	}
 	infos, err := m.store().ListSnapshot(false)
@@ -258,11 +258,8 @@ func (g *runAgentGates) begin(run string) (done func(), ok bool) {
 }
 
 // closeRun refuses later starts of run and waits for the ones in flight.
-func (g *runAgentGates) closeRun(ctx context.Context, run string, draining func()) error {
+func (g *runAgentGates) closeRun(ctx context.Context, run string) error {
 	g.markRunClosed(run)
-	if draining != nil {
-		draining()
-	}
 	g.mu.Lock()
 	wg := g.inflight[run]
 	g.mu.Unlock()
