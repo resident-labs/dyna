@@ -339,6 +339,7 @@ func editCommand() *cobra.Command {
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
+	var containerSocket string
 	var suites []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
@@ -390,16 +391,18 @@ func editCommand() *cobra.Command {
 				list := parseSuites(suites)
 				patch.Suites, changed = &list, true
 			}
+			if c.Flags().Changed("container-socket") {
+				if containerSocket != "" && !strings.HasPrefix(containerSocket, "unix://") {
+					return fmt.Errorf("container socket must be a unix:// path, such as unix:///var/run/docker.sock")
+				}
+				patch.ContainerSocket, changed = &containerSocket, true
+			}
 			if allowHostChecks || disallowHostChecks {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
 			if !changed {
 				return fmt.Errorf("edit %s: give a machine, host-check, room or suite setting to change", args[0])
 			}
-			// The engine owns every machine field and its rules: one patch covers
-			// the registry and the host-check permission, so a refused change
-			// writes nothing. The change names the machine by ID, because a name
-			// can equal another machine's ID and the engine resolves IDs first.
 			saved, err := saveMachine(c.Context(), current.ID, patch)
 			if err != nil {
 				return err
@@ -418,6 +421,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
 	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
+	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd

@@ -72,6 +72,10 @@ type Machine struct {
 	// empty list allows every suite, which is what every machine allowed before
 	// it could name suites.
 	Suites []string `json:"suites,omitempty"`
+	// ContainerSocket is the container runtime socket a workflow job uses on
+	// this machine, as a DOCKER_HOST value. It is empty for Docker's socket, so
+	// a rootless Podman machine can name its own without changing anything else.
+	ContainerSocket string `json:"containerSocket,omitempty"`
 	// Enabled turns the machine's work off. A disabled machine takes no new CI
 	// runs. On the local row it stops that work, not the engine, which keeps
 	// running.
@@ -111,6 +115,18 @@ type HostChecksGrant struct {
 	// Room is the room a root allowed it for. It is empty for the owner, whose
 	// grant covers every room.
 	Room string `json:"room,omitempty"`
+}
+
+// DefaultContainerSocket is the Docker socket a machine uses when it names no
+// container runtime of its own.
+const DefaultContainerSocket = "unix:///var/run/docker.sock"
+
+// DockerHost is the DOCKER_HOST value this machine's workflow jobs use.
+func (m Machine) DockerHost() string {
+	if m.ContainerSocket != "" {
+		return m.ContainerSocket
+	}
+	return DefaultContainerSocket
 }
 
 // HostChecksAllowed reports whether host checks run on this machine for the
@@ -289,7 +305,7 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -310,7 +326,8 @@ const schema = `CREATE TABLE machines (
 	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
 	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
-	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites))
+	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
+	container_socket TEXT  NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -347,7 +364,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -429,6 +446,13 @@ func prepare(conn *sql.Conn, old int) error {
 			if _, err := conn.ExecContext(ctx, statement); err != nil {
 				return fmt.Errorf("record who allows host checks: %w", err)
 			}
+		}
+	}
+	if old < 8 {
+		// A machine without its own runtime socket uses Docker's, which is what
+		// every machine allowed before it could name one.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN container_socket TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
 		}
 	}
 	if old < 7 {
@@ -704,7 +728,7 @@ func scan(row scanner) (Machine, error) {
 	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites string
 	var created, updated, probed, seen int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket); err != nil {
 		return Machine{}, err
 	}
 	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
@@ -904,8 +928,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -915,9 +939,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket)
 		return err
 	})
 	if err != nil {
