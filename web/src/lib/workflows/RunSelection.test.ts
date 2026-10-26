@@ -9,10 +9,11 @@ const fixture = (phases: [string, string, string]) => `<script>
  import Run from './Run.svelte'
  const agent = (id, phase) => ({ id, label: 'T' + id, phase, status: 'ok' })
  const make = (run) => ({ run: { id: run, name: 'continuous', status: 'running', startedAt: new Date().toISOString() },
-  agents: [agent(1, '${phases[0]}'), agent(2, '${phases[1]}'), agent(3, '${phases[2]}')], agentTotal: 3, agentRunning: 0, agentFailed: 0, logs: [], phases: [] })
+  agents: [agent(1, '${phases[0]}'), agent(4, '${phases[0]}'), agent(2, '${phases[1]}'), agent(3, '${phases[2]}')], agentTotal: 4, agentRunning: 0, agentFailed: 0, logs: [], phases: [] })
  let detail = $state(make('wf_a'))
  export function refresh(run) { detail = make(run) }
- export function dropFirst() { detail = { ...detail, agents: detail.agents.slice(1) } }
+ export function dropFirst() { detail = { ...detail, agents: detail.agents.slice(2) } }
+ export function dropAgent(id) { detail = { ...detail, agents: detail.agents.filter((a) => a.id !== id) } }
 </script>
 <Run {detail} />`
 const bundle = async (source: string) => {
@@ -37,9 +38,9 @@ test('an open cell stays open when the same run refreshes, and closes for anothe
     assert.equal(rows(), 0, 'no cell is open at first')
     document.querySelector<HTMLElement>('button.cell')?.click()
     ui.flushSync()
-    assert.equal(rows(), 1)
+    assert.equal(rows(), 2)
     ui.flushSync(() => app.refresh('wf_a'))
-    assert.equal(rows(), 1, 'a refresh of the same run keeps the cell open')
+    assert.equal(rows(), 2, 'a refresh of the same run keeps the cell open')
     ui.flushSync(() => app.refresh('wf_b'))
     assert.equal(rows(), 0, 'another run starts with no cell open')
   } finally {
@@ -59,7 +60,7 @@ test('a phase row opens its agents and folds them again', async () => {
     assert.equal(rows(), 0, 'agents start folded')
     document.querySelector<HTMLElement>('.phases button.row')?.click()
     ui.flushSync()
-    assert.equal(rows(), 1)
+    assert.equal(rows(), 2)
     document.querySelector<HTMLElement>('.phases button.row')?.click()
     ui.flushSync()
     assert.equal(rows(), 0)
@@ -82,6 +83,25 @@ test('an open phase row stays on its own group when an earlier group leaves the 
     assert.deepEqual(labels(), ['T2'])
     ui.flushSync(() => app.dropFirst())
     assert.deepEqual(labels(), ['T2'], 'the Build row stays open after the Plan group leaves')
+  } finally {
+    await ui.unmount(app); dom.window.close()
+    for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('an open phase row stays open when the window trims only some of its agents', async () => {
+  const dom = installDom()
+  const ui = await importBundle(plain.contents, 'RunFixture')
+  const app = ui.mount(ui.default, { target: document.getElementById('app') })
+  const labels = () => [...document.querySelectorAll('.agent .label')].map((n) => n.textContent)
+  try {
+    ui.flushSync()
+    document.querySelectorAll<HTMLElement>('.phases button.row')[0]?.click()
+    ui.flushSync()
+    assert.deepEqual(labels(), ['T1', 'T4'])
+    ui.flushSync(() => app.dropAgent(1))
+    assert.deepEqual(labels(), ['T4'], 'the Plan row stays open on its remaining agent')
   } finally {
     await ui.unmount(app); dom.window.close()
     for (const name of domNames) Reflect.deleteProperty(globalThis, name)
