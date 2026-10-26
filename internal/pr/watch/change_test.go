@@ -79,6 +79,8 @@ func localChange(t *testing.T, e *testEnv) (Record, string) {
 func TestLocalChangeUsesDefaultBranchAndExplicitBase(t *testing.T) {
 	e := newEnv(t)
 	dir, base := changeRepo(t)
+	// A repository with no remote uses the lane, so this one has a remote.
+	changeGit(t, dir, "remote", "add", "hosted", "https://github.com/owner/repo.git")
 	changeGit(t, dir, "branch", "-M", "trunk")
 	changeGit(t, dir, "update-ref", "refs/remotes/origin/trunk", base)
 	changeGit(t, dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
