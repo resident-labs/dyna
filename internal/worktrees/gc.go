@@ -210,6 +210,13 @@ func defaultBranch(ctx context.Context, repo string) (repoid.Branch, error) {
 }
 
 // NewFor creates a worktree with the caller identity supplied by the engine.
+// HasCommit reports whether the repository has a commit to branch from. A
+// fresh `git init` has an unborn HEAD, so it has no main to copy yet.
+func HasCommit(ctx context.Context, repo string) bool {
+	out, err := gitOutput(ctx, repo, "rev-parse", "--verify", "HEAD")
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
 func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Record, error) {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return Record{}, errors.New("branch is required and must not start with '-'")
@@ -373,7 +380,11 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 	}
 	defaultRef := ""
 	if resolved, err := defaultBranch(ctx, repo); err == nil {
-		defaultRef = "refs/remotes/origin/" + resolved.Name
+		prefix := "refs/heads/"
+		if hasRemote(ctx, repo, "origin") {
+			prefix = "refs/remotes/origin/"
+		}
+		defaultRef = prefix + resolved.Name
 	}
 	var trees []Tree
 	for index, block := range blocks {
@@ -591,6 +602,11 @@ func refreshDefaultBranch(ctx context.Context, repo string) (string, error) {
 	resolved, err := defaultBranch(ctx, repo)
 	if err != nil {
 		return "cannot resolve repository default branch", err
+	}
+	if !hasRemote(ctx, repo, "origin") {
+		// A local-only repository already has the default branch it compares
+		// against. There is nothing to fetch and no remote error to report.
+		return "", nil
 	}
 	remoteRef := "refs/heads/" + resolved.Name
 	out, err := gitOriginOutput(ctx, repo, "fetch", "--no-tags", "origin", "+"+remoteRef+":refs/remotes/origin/"+resolved.Name)
