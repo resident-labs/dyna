@@ -169,7 +169,7 @@ func TestOneSuiteDescriptionDrivesExecutionGateAndTrial(t *testing.T) {
 		trial = append(trial, expectedChecks[suite]...)
 	}
 	complete := func(result localci.Result) bool {
-		observation := service.registeredLocalObservation(Record{}, Snapshot{}, ChangePolicy{}, plan, result, true)
+		observation := service.registeredLocalObservation(Record{}, Snapshot{}, ChangePolicy{}, plan, result, true, false)
 		return observation.Status == VerdictPassed
 	}
 	if !complete(passedResult(trial)) {
