@@ -49,7 +49,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 	localci.SuiteComputerSmoke: {"computer-smoke"},
 	localci.SuiteGo: {
 		"frontend test (0)", "frontend test (1)", "frontend test (2)", "frontend test (3)", "frontend test (4)", "frontend test (5)", "frontend",
-		"frontend-check", "go-static", "go-test",
+		"frontend-check", "go-static", "desktop", "go-test",
 		"go-test-shard (0)", "go-test-shard (1)", "go-test-shard (2)", "go-test-shard (3)",
 		"go-test-shard (4)", "go-test-shard (5)", "go-test-shard (6)", "go-test-shard (7)",
 	},
