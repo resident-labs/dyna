@@ -43,41 +43,41 @@ func TestSweepTestFoldersRemovesOnlyStaleOnes(t *testing.T) {
 	}
 }
 
-// Go test, database and tool folders fill the host temp folder too, and every
-// one of them goes once it is old and its binary is gone.
-func TestSweepTestFoldersRemovesOldToolTemps(t *testing.T) {
+// The sweep removes only the folders this package makes. An unrelated program's
+// old workspace, a Go tool folder and a process guard's control folder all stay,
+// even when they are older than the retention.
+func TestSweepKeepsUnrelatedOldTemps(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
-	stale := []string{
-		"TestEngineHookWorker123456",
-		"dyna-test-4242-1",
-		"dyna-pg-4242",
-		"tmp.2f3a1b",
-		"go-build987654",
-	}
-	fresh := []string{"TestFresh123456", "go-buildfresh"}
-	running := testFolder(t, root, "dyna-test-4343-2", 2*testFolderRetention, false)
-	for _, name := range stale {
-		testFolder(t, root, name, 2*testFolderRetention, false)
-	}
-	for _, name := range fresh {
-		testFolder(t, root, name, 0, false)
-	}
-	other := testFolder(t, root, "build-cache", 2*testFolderRetention, false)
-	alive := func(pid int) bool { return pid == 4343 }
-
-	freed, err := sweepTestFolders(now, root, alive, false)
-	if err != nil || freed.Items != len(stale) {
-		t.Fatalf("sweep = %+v, %v; want %d folders", freed, err, len(stale))
-	}
-	for _, name := range stale {
-		if _, err := os.Stat(filepath.Join(root, name)); !os.IsNotExist(err) {
-			t.Fatalf("stale tool folder %q stayed: %v", name, err)
+	ours := testFolder(t, root, testFolderPrefix+"4242-1", 2*testFolderRetention, false)
+	keep := []string{"TestEngineHookWorker123456", "tmp.2f3a1b", "go-build987654", "dyna-pg-0123456789"}
+	for _, name := range keep {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// A live process guard holds this socket, and its folder carries no
+		// process ID to check. Removing it would stop the guard being signalled.
+		if err := os.WriteFile(filepath.Join(path, "control.sock"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := now.Add(-2 * testFolderRetention)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
 		}
 	}
-	for _, name := range append(fresh, filepath.Base(running), filepath.Base(other)) {
+	alive := func(int) bool { return false }
+
+	freed, err := sweepTestFolders(now, root, alive, false)
+	if err != nil || freed.Items != 1 {
+		t.Fatalf("sweep = %+v, %v; want only the test folder", freed, err)
+	}
+	if _, err := os.Stat(ours); !os.IsNotExist(err) {
+		t.Fatalf("a stale test folder stayed: %v", err)
+	}
+	for _, name := range keep {
 		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
-			t.Fatalf("folder %q must stay: %v", name, err)
+			t.Fatalf("the sweep removed %q: %v", name, err)
 		}
 	}
 }
