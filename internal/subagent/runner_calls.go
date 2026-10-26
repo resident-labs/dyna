@@ -360,7 +360,7 @@ type TurnEnd struct {
 	Status             string                          `json:"status"`
 	Result             json.RawMessage                 `json:"result,omitempty"`
 	Error              string                          `json:"error,omitempty"`
-	WorkerStderr       string                          `json:"workerStderr,omitempty"` // the failed worker's stderr tail; detail, never cause text
+	WorkerStderr       string                          `json:"workerStderr,omitempty"`  // the failed worker's stderr tail; detail, never cause text
 	FailureReason      providerfailure.Reason          `json:"failureReason,omitempty"` // named by the runner's trusted boundary; Error is display text
 	Ended              time.Time                       `json:"ended"`
 	InputCutoff        *int64                          `json:"inputCutoff,omitempty"`
