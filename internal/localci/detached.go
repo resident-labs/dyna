@@ -120,6 +120,11 @@ fi
 
 // detachSpec is everything the node needs to run and find one check.
 type detachSpec struct {
+	// ID is the check the unit belongs to.
+	ID Suite
+	// Attach follows a check that an earlier engine already started: nothing is
+	// launched, and the poll brings its whole log.
+	Attach bool
 	// Dir is the check's folder on the node.
 	Dir string
 	// Unit is the name of the check's systemd unit.
@@ -282,8 +287,11 @@ type watch struct {
 // single poll call at a time, so nine checks never open nine connections over a
 // route that takes seconds to dial.
 type detachedPoller struct {
-	r      Runner
-	mu     sync.Mutex
+	r Runner
+	// started is told about each check once it is launched, so the caller can
+	// record it for a restarted engine.
+	started func(detachSpec)
+	mu      sync.Mutex
 	active map[string]*watch
 	kick   chan struct{}
 	exited chan struct{}
@@ -309,12 +317,17 @@ func (r Runner) newPoller(ctx context.Context) (*detachedPoller, func()) {
 // *detachedExit for another status, and a *nodeLostError for a lost check. A
 // stopped context stops the check on the node and returns the context's error.
 func (p *detachedPoller) Run(ctx context.Context, spec detachSpec, out io.Writer) error {
-	if err := p.r.startDetached(ctx, spec); err != nil {
-		if ctx.Err() != nil {
-			_ = p.r.stopDetached(ctx, spec)
-			return ctx.Err()
+	if !spec.Attach {
+		if err := p.r.startDetached(ctx, spec); err != nil {
+			if ctx.Err() != nil {
+				_ = p.r.stopDetached(ctx, spec)
+				return ctx.Err()
+			}
+			return fmt.Errorf("start check: %w", err)
 		}
-		return fmt.Errorf("start check: %w", err)
+		if p.started != nil {
+			p.started(spec)
+		}
 	}
 	w := &watch{spec: spec, out: out, done: make(chan error, 1)}
 	p.mu.Lock()
