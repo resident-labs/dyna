@@ -58,6 +58,10 @@ type nodeCheck struct {
 	cpus      int
 	memoryMiB int64
 	resources checkResources
+	// event is the GitHub event a job check runs, and branch the ref a push
+	// event names. A cache-warming job is scoped to the default branch.
+	event  string
+	branch string
 }
 
 // A check's default resources. The slot pool hands every check two CPUs and the
@@ -363,6 +367,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	prepareChecks := func() error {
 		var prepareErr error
 		checks, aggregate, prepareErr = nodeChecks(req.Definition, req.Suites, node.HostChecksAllowed(req.RoomID))
+		if req.Event == "push" {
+			// A warm run sends a push event, so the workflow's cache-warming job
+			// sees the default branch it is scoped to.
+			for i := range checks {
+				checks[i].event, checks[i].branch = "push", req.Branch
+			}
+		}
 		if errors.Is(prepareErr, ErrHostChecksDisabled) {
 			return fmt.Errorf("CI node %q: %w", node.Name, prepareErr)
 		}
@@ -1120,6 +1131,13 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		label := "dyna.run=" + runID
 		event := path.Join(reportDir, "event.json")
 		eventBody := `{"pull_request":{"base":{"sha":"` + baseCommit + `"},"head":{"sha":"` + sha + `"}}}`
+		actEvent := "pull_request"
+		if check.event == "push" {
+			// A cache-warming job runs only on the default branch, so the run
+			// sends the push event that names that ref.
+			eventBody = `{"ref":"refs/heads/` + check.branch + `","after":"` + sha + `","before":"` + baseCommit + `"}`
+			actEvent = "push"
+		}
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
@@ -1136,7 +1154,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		}
 		setup += "docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); export DOCKER_HOST=" + q(containerSocket) + "; "
 		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="+q(actHome)+" DOCKER_HOST="+q(containerSocket)+" ", seconds) +
-			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
+			q(actBinaryPath(base)) + " " + actEvent + " -W " + q(work) + "/" + q(check.job.Workflow) +
 			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
