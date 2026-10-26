@@ -278,7 +278,9 @@ func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
 // A Pi login lives in the account's own home, where Pi renews it under its own
 // lock during a turn, so the usage refresh renews it while Pi turns keep running
 // instead of waiting for every one of them to end. That wait is what made every
-// Pi provider report a deadline while 64 turns were being served.
+// Pi provider report a deadline while 64 turns were being served, and it also
+// held the harness admission lock that every new turn needs, so a turn start
+// waited behind the refresh and produced no output.
 func TestPiRefreshDoesNotDrainRunningTurns(t *testing.T) {
 	a := testAccounts(t)
 	n, err := a.CreateProvider("pi", accountstore.ProviderChatGPT, accountstore.KindOAuth, "ChatGPT")
