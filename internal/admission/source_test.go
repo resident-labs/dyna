@@ -244,3 +244,25 @@ func TestLinuxFailsWhenTheCgroupIsOutsideEveryMount(t *testing.T) {
 		t.Fatalf("read host memory %d for an unresolvable cgroup", r.MemTotal)
 	}
 }
+
+// The engine runs in app.slice and the agents in dyna.slice, beside it under
+// the same user manager. The agents' slice has the tighter cap, and its usage
+// counts, even though the engine's own cgroup has none.
+func TestLinuxReadsTheAgentSlicesBudgetBesideTheEngine(t *testing.T) {
+	proc, cg := t.TempDir(), t.TempDir()
+	user := "user.slice/user-1000.slice/user@1000.service"
+	put(t, proc, map[string]string{
+		"loadavg": "0.1 0 0 1/1 1\n", "meminfo": meminfo,
+		"self/cgroup":    "0::/" + user + "/app.slice/dyna-engine.service\n",
+		"self/mountinfo": "30 25 0:26 / " + cg + " rw - cgroup2 cgroup2 rw\n",
+	})
+	put(t, cg, map[string]string{
+		user + "/app.slice/dyna-engine.service/memory.max": "max\n",
+		user + "/dyna.slice/memory.max":                    "25769803776\n", // 24 GiB: 80% of a 30 GiB host
+		user + "/dyna.slice/memory.current":                "26214400000\n", // already past most of it
+	})
+	r, err := Linux{ProcDir: proc}.Read(context.Background())
+	if err != nil || r.MemTotal != 25769803776 || r.MemAvail != 0 {
+		t.Fatalf("readings = %+v, %v", r, err)
+	}
+}

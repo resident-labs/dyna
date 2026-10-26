@@ -257,39 +257,60 @@ func (l Linux) applyCgroup(r *Readings) (string, error) {
 		case strings.Contains(","+parts[1]+",", ",memory,"):
 			mounts, limitFile, usageFile, ver = v1, "memory.limit_in_bytes", "memory.usage_in_bytes", "v1"
 		}
-		// The first mount that shows this cgroup is the one to read.
-		var m mount
-		dir, ok := "", false
-		for _, candidate := range mounts {
-			if dir, ok = candidate.cgroupDir(parts[2]); ok {
-				m = candidate
-				break
-			}
+		// The process's own cgroup, then the agents' slice beside it: Dyna's agents
+		// run in dyna.slice, a sibling of the engine's app.slice under the same
+		// user manager, and it has a memory cap of its own.
+		paths := []string{parts[2]}
+		if agents := agentSlice(parts[2]); agents != "" {
+			paths = append(paths, agents)
 		}
-		if !ok {
-			if len(mounts) > 0 {
-				// The process lives in a cgroup that no mount shows, so its limit is
-				// unknown. The host's memory must not stand in for it.
-				return "", fmt.Errorf("cgroup %s is not visible in any cgroup mount, so its memory limit is unknown", parts[2])
-			}
-			continue
-		}
-		for {
-			if limit, ok := readNumber(filepath.Join(dir, limitFile)); ok && limit < unlimited {
-				used, ok := readNumber(filepath.Join(dir, usageFile))
-				if !ok {
-					return "", fmt.Errorf("cgroup %s has a memory limit but no readable usage", dir)
+		for i, cgPath := range paths {
+			// The first mount that shows this cgroup is the one to read.
+			var m mount
+			dir, ok := "", false
+			for _, candidate := range mounts {
+				if dir, ok = candidate.cgroupDir(cgPath); ok {
+					m = candidate
+					break
 				}
-				narrow(r, limit, used)
-				version = ver
 			}
-			if dir == m.Point || dir == "/" || dir == "." {
-				break
+			if !ok {
+				if i == 0 && len(mounts) > 0 {
+					// The process lives in a cgroup that no mount shows, so its limit is
+					// unknown. The host's memory must not stand in for it.
+					return "", fmt.Errorf("cgroup %s is not visible in any cgroup mount, so its memory limit is unknown", cgPath)
+				}
+				continue
 			}
-			dir = filepath.Dir(dir)
+			for {
+				if limit, ok := readNumber(filepath.Join(dir, limitFile)); ok && limit < unlimited {
+					used, ok := readNumber(filepath.Join(dir, usageFile))
+					if !ok {
+						return "", fmt.Errorf("cgroup %s has a memory limit but no readable usage", dir)
+					}
+					narrow(r, limit, used)
+					version = ver
+				}
+				if dir == m.Point || dir == "/" || dir == "." {
+					break
+				}
+				dir = filepath.Dir(dir)
+			}
 		}
 	}
 	return version, nil
+}
+
+// agentSlice returns the cgroup path of dyna.slice beside the given path, under
+// the same systemd user manager, or "" when the path is not under one.
+func agentSlice(cgPath string) string {
+	parts := strings.Split(strings.Trim(cgPath, "/"), "/")
+	for i, p := range parts {
+		if strings.HasPrefix(p, "user@") && strings.HasSuffix(p, ".service") {
+			return "/" + strings.Join(parts[:i+1], "/") + "/dyna.slice"
+		}
+	}
+	return ""
 }
 
 // narrow lowers the machine's memory to a cgroup's limit and what it has left.
