@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"dyna-agent/internal/runstore"
 )
 
 // RunAgentID is the session ID of agent number agent in run. It is derived, so
@@ -89,4 +91,39 @@ func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// closeEndedRunAgents closes the open run agents whose run is over. The
+// engine's session pass calls it, so a run that ended any way (finished,
+// failed, canceled, or a coordinator that died) leaves no agent session open.
+func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) error {
+	ended := map[string]bool{}
+	var errs []error
+	for _, meta := range sessions {
+		if meta.Run == nil || !meta.Closed.IsZero() {
+			continue
+		}
+		over, known := ended[meta.Run.ID]
+		if !known {
+			over = runEnded(meta.Run.ID)
+			ended[meta.Run.ID] = over
+		}
+		if !over {
+			continue
+		}
+		if _, err := m.CloseWithOptions(ctx, meta.ID, CloseOptions{Force: true}); err != nil && !errors.Is(err, ErrClosed) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// runEnded reports a run that finished, or whose coordinator process is gone.
+// A run that cannot be read is not known to be over.
+func runEnded(run string) bool {
+	meta, err := runstore.ReadMeta(run)
+	if err != nil {
+		return false
+	}
+	return runstore.IsFinishedStatus(meta.Status) || meta.Status == "running" && !runstore.Alive(meta)
 }
