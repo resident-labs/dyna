@@ -106,7 +106,7 @@ func TestSessionWorkerPostEventBurstNoWakeAndDormant(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runWorker(workerCtx, signals.channels["sessions"], func(ctx context.Context) error {
+		runWorker(workerCtx, "sessions", signals.channels["sessions"], func(ctx context.Context) error {
 			err := deliverSessions(ctx, m, signals)
 			ticked <- struct{}{}
 			return err
@@ -294,7 +294,7 @@ func TestOwnerPostEventStartsInternalRootWithoutFallback(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runWorker(ctx, signals.channels["sessions"], func(ctx context.Context) error {
+		runWorker(ctx, "sessions", signals.channels["sessions"], func(ctx context.Context) error {
 			err := deliverSessions(ctx, m, signals)
 			ticked <- struct{}{}
 			return err
