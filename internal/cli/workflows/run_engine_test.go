@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"io"
 	"os"
 	"testing"
@@ -14,7 +15,7 @@ import (
 // canceled, so a call does not wait for the engine to start.
 func TestRunWritesNeedTheEngine(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	run := finishedRun(t, "wf_no-engine")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

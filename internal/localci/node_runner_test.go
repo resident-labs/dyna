@@ -1320,7 +1320,7 @@ func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen str
 func TestHostCheckTempFolderFollowsTheMachineSetting(t *testing.T) {
 	parent := t.TempDir()
 	seen := runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
-	if filepath.Dir(filepath.Dir(seen)) != parent {
+	if filepath.Dir(seen) != parent {
 		t.Fatalf("TMPDIR = %q, want a folder inside %q", seen, parent)
 	}
 	if _, err := os.Stat(seen); !os.IsNotExist(err) {
@@ -1334,7 +1334,7 @@ func TestHostCheckTempFolderDefaultsToTheNodeTempDirectory(t *testing.T) {
 	nodeTmp := t.TempDir()
 	home := t.TempDir()
 	seen := runHostCheck(t, Node{Name: "local", Slots: 1}, home, "TMPDIR="+nodeTmp)
-	if filepath.Dir(filepath.Dir(seen)) != nodeTmp {
+	if filepath.Dir(seen) != nodeTmp {
 		t.Fatalf("TMPDIR = %q, want a folder inside the node's %q", seen, nodeTmp)
 	}
 	if strings.HasPrefix(seen, home) {

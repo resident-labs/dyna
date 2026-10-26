@@ -3,6 +3,7 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"errors"
 	"os"
@@ -222,7 +223,7 @@ func TestHookWritesReturnEngineFailure(t *testing.T) {
 }
 
 func TestHookWriteWithoutEngineFailsOnCancel(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

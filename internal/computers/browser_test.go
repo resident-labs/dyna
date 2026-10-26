@@ -1,13 +1,14 @@
 package computers
 
 import (
+	"dyna-agent/internal/testsafe"
 	"path/filepath"
 	"testing"
 )
 
 func TestBrowserEnvironmentScopesDaemonsAndProfiles(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	runtime := t.TempDir()
+	runtime := testsafe.ShortTempDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtime)
 	base := []string{"PATH=/usr/bin", "XDG_RUNTIME_DIR=" + runtime, "AGENT_BROWSER_SOCKET_DIR=/owner/shared", "AGENT_BROWSER_NAMESPACE=owner", "AGENT_BROWSER_SESSION=owner", "AGENT_BROWSER_PROFILE=/owner/profile", "AGENT_BROWSER_CDP=9222", "AGENT_BROWSER_AUTO_CONNECT=1", "AGENT_BROWSER_DAEMON=1"}
 	first, err := Environment(Meta{SessionID: "first", WaylandDisplay: "first-display", Display: ":234"}, base)

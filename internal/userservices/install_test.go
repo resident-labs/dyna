@@ -2,6 +2,7 @@ package userservices
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"errors"
 	"fmt"
 	"os"
@@ -17,7 +18,7 @@ func environment(t *testing.T) string {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/temporary/fake-bus")
 	return Dir()
 }
