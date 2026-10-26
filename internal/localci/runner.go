@@ -41,9 +41,11 @@ type Runner struct {
 	// Node is the registered CI machine that runs the checks. A run needs one:
 	// there is no other execution pipeline.
 	Node *Node
-	// dialWait pauses between retries of an ssh dial that never reached the
-	// node. Tests replace it, so a retry proves itself without a real sleep.
-	dialWait func(context.Context, time.Duration) error
+	// wait pauses between polls and between retries of a node call. clock reads
+	// the time a retry measures an unreachable node by. Tests replace both, so a
+	// drop proves itself without a real sleep.
+	wait  func(context.Context, time.Duration) error
+	clock func() time.Time
 }
 type Request struct {
 	// Definition is the validated graph at SHA. A nil definition loads
@@ -359,9 +361,11 @@ type boundedWriter struct {
 	remaining int64
 }
 
+var errReportsTooLarge = errors.New("report archive exceeds 70 MiB")
+
 func (w *boundedWriter) Write(p []byte) (int, error) {
 	if int64(len(p)) > w.remaining {
-		return 0, fmt.Errorf("report archive exceeds 70 MiB")
+		return 0, errReportsTooLarge
 	}
 	n, err := w.writer.Write(p)
 	w.remaining -= int64(n)
@@ -460,10 +464,9 @@ func checkReports(sr *SuiteResult, mode ReportMode, dir string, max time.Duratio
 			return e
 		}
 		for _, file := range streams {
-			// execution.json is the run's own timing record, and checkExitFile is
-			// the node's transport evidence: neither is a Go event stream, and
-			// ReadGo rejects their bodies.
-			if filepath.Base(file) == "execution.json" || filepath.Base(file) == checkExitFile {
+			// execution.json is the run's own timing record. It is not a Go event
+			// stream, and ReadGo rejects its body.
+			if filepath.Base(file) == "execution.json" {
 				continue
 			}
 			f, e := os.Open(file)

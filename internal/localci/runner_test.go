@@ -104,7 +104,6 @@ func TestGoReportsSkipTheNodeExitRecord(t *testing.T) {
 		}
 	}
 	write("execution.json", `{"durationNanos":1000000}`)
-	write(checkExitFile, `{"exitCode":0}`)
 	write("go-test.xml", `<testsuite><testcase name="TestAlive" classname="pkg" time="0.1"/></testsuite>`)
 	write("go-test.json", "{\"Action\":\"pass\",\"Package\":\"pkg\",\"Test\":\"TestAlive\",\"Elapsed\":0.1}\n"+
 		"{\"Action\":\"pass\",\"Package\":\"pkg\"}\n")
@@ -178,7 +177,7 @@ func TestNodeRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 	var archived map[string]string
 	var remoteReports string
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
-	runner.Command = func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
+	legacy := func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if name == "git" {
 			if args[0] == "rev-parse" {
 				if args[len(args)-1] == "--git-common-dir" {
@@ -237,6 +236,7 @@ func TestNodeRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 			archived[strings.TrimPrefix(header.Name, "./")] = string(content)
 		}
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(ctx, Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteRelay}, Timeout: 30 * time.Second, MaxTest: time.Second})
 	if err != nil || result.Status != OutcomePassed {
 		t.Fatalf("report retrieval: %+v %v", result, err)

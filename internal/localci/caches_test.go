@@ -49,7 +49,7 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 			node := Node{Name: "local", Slots: 1, Enabled: true}
 			cleaned := false
 			runner := Runner{Node: &node}
-			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+			legacy := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
 				script := strings.Join(args, " ")
 				switch {
 				case strings.Contains(script, "df -Pk"):
@@ -60,6 +60,7 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 				}
 				return nil
 			}
+			newFakeMachine(t, legacy).attach(&runner)
 			if err := runner.cleanBeforeRun(t.Context(), node); err != nil {
 				t.Fatal(err)
 			}

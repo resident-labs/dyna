@@ -13,10 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -37,8 +35,6 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 	}{
 		{"early container failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
 		{"killed container", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Killed"}, 137, CauseContainerFailure, OutcomeError},
-		{"ssh drop", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Connection to port 22 timed out"}, 255, CauseSSHDrop, OutcomeError},
-		{"ssh server timeout", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Timeout, server 192.168.2.9 not responding."}, 1, CauseSSHDrop, OutcomeError},
 		{"ssh timeout text on a local node", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Timeout, server 192.168.2.9 not responding."}, 1, CauseUnclassified, OutcomeError},
 		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
 		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
@@ -46,8 +42,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
-			runner.dialWait = func(context.Context, time.Duration) error { return nil }
-			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+			legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
 				}
@@ -80,6 +75,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 				}
 				return nil
 			}
+			newFakeMachine(t, legacy).attach(&runner)
 			result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
 			if err == nil || !strings.Contains(err.Error(), "copy reports") {
 				t.Fatalf("report copy failure was not reported: %v", err)
@@ -130,19 +126,15 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 }
 
 // A burst of report copies can make the node drop a connection (D-192). The
-// copy is repeated with a wait between attempts, and a check whose command
-// exited 0 stays an error that names the missing reports, never an ssh-drop
-// machine failure and never a pass.
+// copy follows the same retry rule as every node call: it is repeated with a
+// wait between attempts until the node has been unreachable for the bound. A
+// check whose command exited 0 stays an error that names the missing reports,
+// never an ssh-drop machine failure and never a pass.
 func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
 	node := Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}
 	runner := Runner{DataDir: t.TempDir(), Node: &node}
-	var waits []time.Duration
-	runner.dialWait = func(_ context.Context, d time.Duration) error {
-		waits = append(waits, d)
-		return nil
-	}
 	copies := 0
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
@@ -159,12 +151,13 @@ func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
 		}
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
 	if err == nil {
 		t.Fatal("a run without reports must report the copy failure")
 	}
-	if copies != reportCopyAttempts || len(waits) != reportCopyAttempts-1 {
-		t.Fatalf("copies = %d, waits = %v, want %d copies with a wait between", copies, waits, reportCopyAttempts)
+	if want := int(nodeLostBound/retryWait) + 1; copies != want {
+		t.Fatalf("copies = %d, want %d: one every %s until the node was unreachable for %s", copies, want, retryWait, nodeLostBound)
 	}
 	check := result.Checks[0]
 	if check.Status != OutcomeError || check.Cause != CauseReports || !strings.Contains(check.Error, "reports unavailable") {
@@ -178,28 +171,32 @@ func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
 	}
 }
 
-// A machine that drops during the check and again during the report copy proved
-// no result, so the run keeps the ssh-drop cause and moves to another machine.
+// A machine that stays unreachable after the check started, through its polls
+// and again through the report copy, proved no result, so the run keeps the
+// ssh-drop cause and moves to another machine.
 func TestNodeKeepsSSHDropWhenCheckAndCopyBothLoseSSH(t *testing.T) {
 	node := Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}
 	runner := Runner{DataDir: t.TempDir(), Node: &node}
-	runner.dialWait = func(context.Context, time.Duration) error { return nil }
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(ctx context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
 			return nil
 		}
-		script := args[len(args)-1]
-		switch {
-		case strings.Contains(script, "df -Pk"):
+		if strings.Contains(args[len(args)-1], "df -Pk") {
 			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
 			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
-		case strings.Contains(script, "tar -C"):
-			return sshDropError(t)
-		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
-			return sshDropError(t)
+			return nil
 		}
-		return nil
+		if name != "systemd-run" {
+			return nil
+		}
+		// The check prints, then waits for a node that never answers again.
+		fmt.Fprintln(out, "building")
+		<-ctx.Done()
+		return ctx.Err()
 	}
+	machine := newFakeMachine(t, legacy)
+	machine.down = func() bool { return len(machine.startCalls()) > 0 }
+	machine.attach(&runner)
 	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
 	if err == nil {
 		t.Fatal("a run without reports must report the copy failure")
@@ -258,10 +255,10 @@ func fakeSystemdVersion(out io.Writer, name string, args []string) bool {
 }
 
 // --expand-environment=no arrived in systemd 254. An older systemd rejects it
-// and expands nothing of its own, so the scope runs without it; from 254 Dyna
-// keeps it, because a systemd that expands $ would rewrite the check script.
-// The script reaches bash as written either way.
-func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
+// and expands nothing of its own, so a host check's inner scope runs without it;
+// from 254 Dyna keeps it, because a systemd that expands $ would rewrite the
+// check script.
+func TestHostCheckScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		version  string
@@ -274,307 +271,18 @@ func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 		{"unreadable", "systemd-run: no version here\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls [][]string
-			node := Node{Name: "local", Slots: 1, Enabled: true}
-			runner := Runner{Node: &node}
-			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
-				calls = append(calls, append([]string{name}, args...))
-				if name == "systemd-run" && len(args) == 1 && args[0] == "--version" {
-					_, err := io.WriteString(out, tc.version+"\n")
-					return err
-				}
-				return nil
+			runner := Runner{Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
+				_, err := io.WriteString(out, tc.version+"\n")
+				return err
 			}
-			if err := runner.nodeCommand(t.Context(), io.Discard, io.Discard, "dyna-ci-run", "echo $isolated"); err != nil {
-				t.Fatal(err)
+			if got := runner.systemdNeedsNoExpandFlag(t.Context()); got != tc.noExpand {
+				t.Fatalf("no-expand argument = %t, want %t", got, tc.noExpand)
 			}
-			scope := calls[len(calls)-1]
-			if got := slices.Contains(scope, "--expand-environment=no"); got != tc.noExpand {
-				t.Fatalf("scope args = %v, want the no-expand argument %t", scope, tc.noExpand)
-			}
-			if last := scope[len(scope)-1]; last != "echo $isolated" {
-				t.Fatalf("script argument = %q, want it unchanged", last)
-			}
-		})
-	}
-}
-
-// A node command whose ssh dial dies before the node retries: a slow accept
-// path on the node stalls a fresh dial at the banner exchange, while a warm
-// ControlMaster socket hides the same stall from a direct shell and from the
-// machine probes, so only a run sees it (D-162). A dial-phase failure proves
-// nothing ran remotely, so a retry is safe for every node command. A failure
-// after the command started, without ssh's own transport exit, or without a
-// dial error, never retries.
-func TestNodeCommandRetriesSSHDial(t *testing.T) {
-	type attemptCase struct {
-		name      string
-		stdout    string
-		stderr    string
-		exit      int
-		stderr2   string
-		exit2     int
-		failures  int
-		wantCalls int
-		wantErr   bool
-		wantNote  bool
-	}
-	for _, tc := range []attemptCase{
-		{
-			name:      "banner exchange timeout clears",
-			stderr:    "ssh: connect to host node port 22: Operation timed out\r\nConnection timed out during banner exchange\r\nConnection to UNKNOWN port 65535 timed out\n",
-			exit:      255,
-			failures:  2,
-			wantCalls: 3,
-			wantNote:  true,
-		},
-		{
-			name:      "connection refused clears",
-			stderr:    "ssh: connect to host node port 22: Connection refused\n",
-			exit:      255,
-			failures:  1,
-			wantCalls: 2,
-			wantNote:  true,
-		},
-		{
-			name:      "dial error that never clears",
-			stderr:    "ssh: connect to host node port 22: Connection timed out\n",
-			exit:      255,
-			failures:  3,
-			wantCalls: 3,
-			wantErr:   true,
-			wantNote:  true,
-		},
-		{
-			name:      "script ran and echoed dial text",
-			stderr:    "cargo: Connection refused\n",
-			exit:      1,
-			failures:  1,
-			wantCalls: 1,
-			wantErr:   true,
-		},
-		{
-			name:      "command had already started",
-			stdout:    "remote build output\n",
-			stderr:    "Connection timed out during banner exchange\n",
-			exit:      255,
-			failures:  1,
-			wantCalls: 1,
-			wantErr:   true,
-		},
-		{
-			name:      "dial failure then started command drops",
-			stderr:    "ssh: connect to host node port 22: Connection refused\n",
-			exit:      255,
-			stderr2:   "client_loop: send disconnect: Connection reset\n",
-			exit2:     255,
-			failures:  2,
-			wantCalls: 2,
-			wantErr:   true,
-			wantNote:  true,
-		},
-		{
-			name:      "not a dial failure",
-			stderr:    "error: build failed\n",
-			exit:      1,
-			failures:  1,
-			wantCalls: 1,
-			wantErr:   true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var calls, waits int
-			runner := Runner{Node: &Node{Name: "node", SSH: "ci@node", Slots: 1, Enabled: true}}
-			runner.dialWait = func(ctx context.Context, d time.Duration) error {
-				waits++
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				if d <= 0 {
-					return errors.New("retry wait must be positive")
-				}
-				return nil
-			}
-			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
-				calls++
-				if name == "ssh" {
-					if !slices.Contains(args, "ConnectTimeout=10") {
-						t.Errorf("ssh args %v, want an explicit ConnectTimeout=10 like the machine probe", args)
-					}
-				}
-				diagnostic, exit := tc.stderr, tc.exit
-				if calls >= 2 && tc.stderr2 != "" {
-					diagnostic, exit = tc.stderr2, tc.exit2
-				}
-				if calls <= tc.failures {
-					fmt.Fprint(stderr, diagnostic)
-					fmt.Fprint(out, tc.stdout)
-					return exitStatus(exit)
-				}
-				fmt.Fprint(stderr, tc.stderr)
-				fmt.Fprint(out, tc.stdout)
-				return nil
-			}
-			var out, stderr tailBuffer
-			err := runner.nodeCommand(t.Context(), &out, &stderr, "", "true")
-			if tc.wantErr && err == nil {
-				t.Fatal("nodeCommand succeeded, want it to fail")
-			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("nodeCommand: %v", err)
-			}
-			if calls != tc.wantCalls {
-				t.Fatalf("command calls = %d, want %d", calls, tc.wantCalls)
-			}
-			if waits != tc.wantCalls-1 && tc.wantNote {
-				t.Fatalf("waits = %d, want %d", waits, tc.wantCalls-1)
-			}
-			if got := strings.Contains(stderr.String(), "retrying ssh dial"); got != tc.wantNote {
-				t.Fatalf("stderr = %q, retry note %t want %t", stderr.String(), got, tc.wantNote)
-			}
-		})
-	}
-}
-
-// exitStatus returns a real child exit with the given status, so a test
-// classifies the error exactly like the runner classifies a child's exit.
-// Tests in one package run one at a time, so the cache needs no lock.
-var exitStatusCache = map[int]error{}
-
-func exitStatus(code int) error {
-	if err, ok := exitStatusCache[code]; ok {
-		return err
-	}
-	err := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
-	if err == nil {
-		panic("exit " + strconv.Itoa(code) + " produced no error")
-	}
-	exitStatusCache[code] = err
-	return err
-}
-
-// The retry's output capture must keep os/exec's guarantee for callers that
-// pass one non-thread-safe buffer as both outputs: os/exec serializes its two
-// copy pipes only while it sees the same writer for both, and the counting
-// and tail capture made them distinct. Both pipes now write through one
-// shared lock, and the race detector proves the forced overlap stays safe.
-func TestNodeDialSerializesSharedOutput(t *testing.T) {
-	started := make(chan struct{})
-	var writers sync.WaitGroup
-	runner := Runner{Node: &Node{Name: "node", SSH: "ci@node", Slots: 1, Enabled: true}}
-	runner.Command = func(_ context.Context, _ string, _ io.Reader, out, stderr io.Writer, _ string, _ ...string) error {
-		for range 2 {
-			writers.Add(1)
-			go func() {
-				defer writers.Done()
-				<-started
-				for i := 0; i < 200; i++ {
-					fmt.Fprint(out, "output line\n")
-					fmt.Fprint(stderr, "diagnostic line\n")
-				}
-			}()
-		}
-		close(started)
-		writers.Wait()
-		return nil
-	}
-	var shared tailBuffer
-	if err := runner.nodeCommand(t.Context(), &shared, &shared, "", "true"); err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(shared.String(), "line\n"); n != 800 {
-		t.Fatalf("shared buffer holds %d lines, want 800", n)
-	}
-}
-
-// A check whose connection to the node dies can still be decided: the node's
-// wrapper wrote the check's exit record after the command ran, and the report
-// copy brought it back. An exit 0 there passes the check with a warning, while
-// any other exit or a missing record keeps what the transport proved. Trials
-// on a node behind Tailscale SSH kept losing their last checks this way (D-169):
-// the command finished, the machine's session died seconds later, and a passing
-// check was reported as a lost connection.
-func TestNodeJudgesTransportDeathFromNodeRecord(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		streamMarks bool
-		record      string
-		wantStatus  Outcome
-		wantWarning bool
-	}{
-		{
-			name:        "record proves the check passed",
-			record:      `{"exitCode":0}`,
-			wantStatus:  OutcomePassed,
-			wantWarning: true,
-		},
-		{
-			name:        "record proves the check passed despite stream markers",
-			streamMarks: true,
-			record:      `{"exitCode":0}`,
-			wantStatus:  OutcomePassed,
-			wantWarning: true,
-		},
-		{
-			name:       "record proves the check failed",
-			record:     `{"exitCode":1}`,
-			wantStatus: OutcomeError,
-		},
-		{
-			name:       "no record came back",
-			wantStatus: OutcomeError,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
-			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
-				if fakeSystemdVersion(out, name, args) {
-					return nil
-				}
-				if fakeNodeGit(dir, out, name, args) {
-					return nil
-				}
-				script := args[len(args)-1]
-				if strings.Contains(script, "systemd-run") {
-					if tc.streamMarks {
-						fmt.Fprint(out, "\nDYNA_CI_CHECK_EXIT=0\nDYNA_CI_COMMAND_STARTED=1\n")
-					}
-					return exitStatus(255)
-				}
-				if strings.Contains(script, "tar -C") {
-					tw := tar.NewWriter(out)
-					files := map[string]string{"go-static/execution.json": `{"durationNanos":1000000000}`}
-					if tc.record != "" {
-						files["go-static/"+checkExitFile] = tc.record + "\n"
-					}
-					for file, body := range files {
-						if err := tw.WriteHeader(&tar.Header{Name: file, Mode: 0600, Size: int64(len(body))}); err != nil {
-							return err
-						}
-						if _, err := io.WriteString(tw, body); err != nil {
-							return err
-						}
-					}
-					return tw.Close()
-				}
-				return nil
-			}
-			result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
-			if len(result.Checks) != 1 {
-				t.Fatalf("checks = %d, want 1: %+v", len(result.Checks), result)
-			}
-			check := result.Checks[0]
-			if check.Status != tc.wantStatus {
-				t.Fatalf("check status = %s (%s, %q), want %s", check.Status, check.Cause, check.Error, tc.wantStatus)
-			}
-			if got := slices.Contains(check.Warnings, TransportDiedAfterCompletion); got != tc.wantWarning {
-				t.Fatalf("warnings = %v, transport warning %t want %t", check.Warnings, got, tc.wantWarning)
-			}
-			if tc.wantStatus == OutcomePassed && (err != nil || result.Status != OutcomePassed) {
-				t.Fatalf("run = %s err = %v, want a passed run", result.Status, err)
-			}
-			if tc.wantStatus != OutcomePassed && check.Cause != CauseSSHDrop {
-				t.Fatalf("check cause = %s, want the ssh drop", check.Cause)
+			host := nodeCheck{id: "host", name: "host", host: true, inner: "true", resources: checkResources{CPUs: 2, MemoryMiB: 4096}}
+			script := nodeCheckScript(*runner.Node, "/base", "/cache", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), host, time.Minute, 0, tc.noExpand, DefaultActImage, machines.DefaultContainerSocket, "")
+			if got := strings.Contains(script, "--expand-environment=no"); got != tc.noExpand {
+				t.Fatalf("host check script has the no-expand argument = %t, want %t", got, tc.noExpand)
 			}
 		})
 	}
@@ -674,7 +382,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	slotsStarted := make(chan struct{})
 	release := make(chan struct{})
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 8, Enabled: true}}
-	runner.Command = func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
+	legacy := func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
 		}
@@ -695,7 +403,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if !started.Load() {
 			t.Error("check ran before OnStart")
 		}
-		for _, want := range []string{"CPUQuota=200%", "MemoryMax=5G", "nice -n 10", "--unit", "--expand-environment=no"} {
+		for _, want := range []string{"CPUQuota=200%", "MemoryMax=5G", "nice -n 10", "--unit"} {
 			if !strings.Contains(strings.Join(args, " "), want) {
 				t.Errorf("scope lacks %s", want)
 			}
@@ -751,6 +459,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	type outcome struct {
 		result Result
 		err    error
@@ -804,8 +513,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 		t.Run(fmt.Sprint(entered), func(t *testing.T) {
 			var sawSSH, sawPush, sawCleanup, sawRemove, reportsCopied bool
 			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
-			runner.dialWait = func(context.Context, time.Duration) error { return nil }
-			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+			legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
 				}
@@ -818,7 +526,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 				joined := strings.Join(args, " ")
 				sawSSH = sawSSH || name == "ssh" && strings.Contains(joined, "pip@host")
 				script := args[len(args)-1]
-				if strings.Contains(script, "systemd-run") {
+				if name == "systemd-run" {
 					if entered {
 						fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=1")
 					}
@@ -852,6 +560,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 				}
 				return nil
 			}
+			newFakeMachine(t, legacy).attach(&runner)
 			result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
 			want := OutcomeError
 			if entered {
@@ -867,10 +576,11 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		fakeNodeGit(dir, out, name, args)
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(ctx, Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"cross-build"}, OnStart: func(context.Context) error { cancel(); return ctx.Err() }})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v", err)
@@ -934,7 +644,7 @@ func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
 		}
@@ -947,6 +657,7 @@ func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
 		}
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(ctx, Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
@@ -1024,7 +735,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 		t.Run(fmt.Sprint(fullAttempts), func(t *testing.T) {
 			var attempts, cleans atomic.Int32
 			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
-			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+			legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
 				}
@@ -1054,6 +765,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 				}
 				return nil
 			}
+			newFakeMachine(t, legacy).attach(&runner)
 			result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
 			if err != nil {
 				t.Fatalf("run failed: %v", err)
@@ -1084,7 +796,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
 		}
@@ -1106,6 +818,7 @@ func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
 		}
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(ctx, Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run returned %v after its budget ended", err)
@@ -1147,7 +860,7 @@ func writeCheckReports(out io.Writer, files map[string]string) error {
 // links. The command's own outcome stays the check's outcome and cause.
 func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
 		}
@@ -1172,6 +885,7 @@ func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 		}
 		return nil
 	}
+	newFakeMachine(t, legacy).attach(&runner)
 	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteRelay}, MaxTest: time.Second, DeferSave: true})
 	if err != nil {
 		t.Fatal(err)
@@ -1198,53 +912,6 @@ func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 	}
 	if !strings.Contains(check.LogTail, "TestBroken") {
 		t.Fatalf("structured output lost from the tail: %q", check.LogTail)
-	}
-}
-
-// A command that exited 0 must be judged by its own completion marker even when
-// os/exec reports ErrWaitDelay, which only means a child it started kept the
-// output pipe open. An sccache server started by cargo does exactly that on
-// every run, and the check passed: it must not be saved as an error.
-func TestNodePassesACheckWhoseCommandLeftAChildHoldingOutput(t *testing.T) {
-	definition := testDynaDefinition(t)
-	checks, _, err := nodeChecks(definition, []Suite{SuiteGoStatic}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	node := Node{Name: "local", Slots: 1, Enabled: true}
-	runner := Runner{DataDir: t.TempDir(), Node: &node}
-	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
-		if fakeSystemdVersion(out, name, args) {
-			return nil
-		}
-		if fakeNodeGit(dir, out, name, args) {
-			return nil
-		}
-		script := args[len(args)-1]
-		switch {
-		case strings.Contains(script, "df -Pk"):
-			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
-			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
-			return nil
-		case strings.Contains(script, "tar -C"):
-			return fakeNodeReports(out, checks, false)
-		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
-			fmt.Fprintln(out, "ok  dyna-agent/internal/voice")
-			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
-			fmt.Fprintln(out, "DYNA_CI_COMMAND_STARTED=1")
-			return exec.ErrWaitDelay
-		}
-		return nil
-	}
-	result, err := runner.Run(t.Context(), Request{Definition: definition, Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if result.Status != OutcomePassed || len(result.Checks) != 1 || result.Checks[0].Status != OutcomePassed {
-		t.Fatalf("a check that exited 0 was judged by its leftover child: %+v", result)
-	}
-	if got := result.Checks[0].Warnings; len(got) != 1 || got[0] != CleanupLeftoverOutput {
-		t.Fatalf("the leftover pipe holder was not recorded as a cleanup warning: %+v", got)
 	}
 }
 
