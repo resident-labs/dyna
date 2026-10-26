@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -95,8 +96,15 @@ func refreshFixtureCredential(t *testing.T, provider string, expiry time.Time, g
 
 func setupCredentialRefresh(t *testing.T, active bool) (*Accounts, NativeAccount, *credentialRefreshFixture) {
 	t.Helper()
+	return setupCredentialRefreshFor(t, "pi", active)
+}
+
+// setupCredentialRefreshFor keeps the same fixture on another private harness,
+// so a test can cover a login that lives in the shared harness home.
+func setupCredentialRefreshFor(t *testing.T, harness string, active bool) (*Accounts, NativeAccount, *credentialRefreshFixture) {
+	t.Helper()
 	a := testAccounts(t)
-	n, err := a.Create("pi", "Fixture")
+	n, err := a.Create(harness, "Fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +120,7 @@ func setupCredentialRefresh(t *testing.T, active bool) (*Accounts, NativeAccount
 	}
 	if active {
 		m.current = c
-		if err = a.setActive("pi", n.ID); err != nil {
+		if err = a.setActive(harness, n.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -241,20 +249,81 @@ func TestCredentialRefreshRejectsChangedIdentity(t *testing.T) {
 	}
 }
 
+// A login in the shared harness home is renewed only after its turns end: the
+// renewal writes the file those turns read. The gate is the seam that waits, so
+// the test cancels the call from the gate itself instead of using a deadline.
 func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
-	a, n, m := setupCredentialRefresh(t, true)
+	a, n, m := setupCredentialRefreshFor(t, "kimi-code", true)
+	release, err := a.TurnLease(context.Background(), "kimi-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	gated := false
+	a.SwitchGate = func(ctx context.Context, _ string) (func(), error) {
+		gated = true
+		cancel()
+		return nil, ctx.Err()
+	}
+	if _, err = a.RefreshCredentials(ctx, n.ID, "/fake/pi"); !gated || !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the refresh gated behind the running turn", err)
+	}
+	if m.activeCalls != 0 || m.savedCalls != 0 {
+		t.Fatal("refresh ran while a native turn held its lease")
+	}
+}
+
+// A Pi login lives in the account's own home, where Pi renews it under its own
+// lock during a turn, so the usage refresh renews it while Pi turns keep running
+// instead of waiting for every one of them to end. That wait is what made every
+// Pi provider report a deadline while 64 turns were being served, and it also
+// held the harness admission lock that every new turn needs, so a turn start
+// waited behind the refresh and produced no output.
+func TestPiRefreshDoesNotDrainRunningTurns(t *testing.T) {
+	a := testAccounts(t)
+	n, err := a.CreateProvider("pi", accountstore.ProviderChatGPT, accountstore.KindOAuth, "ChatGPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "stale-access", Refresh: "grant", Expires: time.Now().Add(-time.Minute).UnixMilli(), AccountID: "workspace"}})
+	if n, err = a.Capture(context.Background(), n.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.setActiveAccount(n); err != nil {
+		t.Fatal(err)
+	}
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(_ context.Context, home, provider, executable string) error {
+		writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "fresh-access", Refresh: "grant", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "workspace"}})
+		return nil
+	}
+	a.SwitchGate = func(context.Context, string) (func(), error) {
+		t.Error("the Pi refresh drained the running turns")
+		return nil, errors.New("the Pi refresh took the switch gate")
+	}
 	release, err := a.TurnLease(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err = a.RefreshCredentials(ctx, n.ID, "/fake/pi"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("refresh bypassed a native turn", err)
+	result, err := a.RefreshCredentials(ctx, n.ID, "/fake/pi/bin/pi")
+	if err != nil {
+		t.Fatalf("refresh while Pi turns run: %v", err)
 	}
-	if m.activeCalls != 0 || m.savedCalls != 0 {
-		t.Fatal("refresh ran while a native turn held its lease")
+	if time.Until(result.ExpiresAt) < 30*time.Minute {
+		t.Fatalf("expiry = %v, want the renewed grant", result.ExpiresAt)
+	}
+	entries, err := readPiAuthEntries(filepath.Join(n.Home, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(entries["openai-codex"]); !strings.Contains(got, "fresh-access") {
+		t.Fatalf("auth.json = %s, want the renewed token", got)
 	}
 }
 
@@ -263,7 +332,7 @@ func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
 // every Pi turn, including the caller's own, and it must return the renewed
 // token. The Pi renewal itself is the seam the account refresh already uses, so
 // the test writes the fresh entry where Pi writes it.
-func TestChatGPTGrantDuringTurnReturnsTheRenewedToken(t *testing.T) {
+func TestChatGPTGrantReturnsTheRenewedToken(t *testing.T) {
 	a := testAccounts(t)
 	n, err := a.CreateProvider("pi", accountstore.ProviderChatGPT, accountstore.KindOAuth, "ChatGPT")
 	if err != nil {
@@ -300,7 +369,7 @@ func TestChatGPTGrantDuringTurnReturnsTheRenewedToken(t *testing.T) {
 	defer release()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	grant, err := a.ChatGPTGrantDuringTurn(ctx, "", "")
+	grant, err := a.ChatGPTGrant(ctx, "", "")
 	if err != nil {
 		t.Fatalf("grant under a held turn lease: %v", err)
 	}

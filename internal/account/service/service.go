@@ -32,7 +32,12 @@ type Options struct {
 	Now    func() time.Time
 }
 type Service struct {
-	mu        sync.Mutex // Refresh and credential renewal share one lock.
+	// mu guards the published view: the last snapshot, the catalogs and the
+	// installers. Provider I/O never runs under it.
+	mu sync.Mutex
+	// refreshMu serializes usage refreshes, so two callers never ask one
+	// provider for the same reading at once. It is never held together with mu.
+	refreshMu sync.Mutex
 	o         Options
 	installed func() []Installation // tests replace the private copies
 	last      Snapshot
@@ -127,13 +132,46 @@ func installationRuns(account runtime.NativeAccount, selection store.Selection) 
 
 // Snapshot lists Dyna's private accounts. refresh also asks each provider for
 // the active account's current usage.
+//
+// The account service lock guards the published view, not provider I/O: a
+// refresh reads the accounts and their usage without it, then publishes the new
+// view under it, so one slow provider never blocks a plain listing or a model
+// read. A refresh still runs one at a time, so two callers never ask a provider
+// twice for the same reading.
 func (s *Service) Snapshot(ctx context.Context, refresh bool) Snapshot {
+	if refresh && ctx.Err() == nil {
+		s.refreshMu.Lock()
+		if ctx.Err() != nil {
+			// The caller expired while it waited behind another refresh, so it asks
+			// no provider and records nothing.
+			s.refreshMu.Unlock()
+			return s.cached()
+		}
+		accounts, problems, err := s.nativeHomeAccounts(ctx, true)
+		s.refreshMu.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.publish(accounts, problems, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ctx.Err() != nil {
 		return s.last
 	}
-	accounts, problems, err := s.nativeHomeAccounts(ctx, refresh)
+	accounts, problems, err := s.nativeHomeAccounts(ctx, false)
+	return s.publish(accounts, problems, err)
+}
+
+// cached is the last published view.
+func (s *Service) cached() Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
+}
+
+// publish builds the view from one pass over the accounts and keeps it as the
+// answer for later reads. The caller holds the account service lock.
+func (s *Service) publish(accounts []Account, problems []runtime.AccountProblem, err error) Snapshot {
 	out := Snapshot{Accounts: accounts, Problems: problems, CheckedAt: s.o.Now().UTC()}
 	if err != nil {
 		out.Message = err.Error()
