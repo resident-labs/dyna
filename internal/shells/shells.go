@@ -475,14 +475,13 @@ func (s *Store) Resolve(ref string) (Info, error) {
 	if ValidID(ref) {
 		return s.Info(ref)
 	}
-	list, err := s.List(true)
+	// loadAll lists newest first, so the first match is the newest.
+	list, err := s.loadAll("WHERE name=?", ref)
 	if err != nil {
 		return Info{}, err
 	}
-	for _, in := range list {
-		if in.Name == ref {
-			return in, nil
-		}
+	if len(list) > 0 {
+		return s.status(list[0]), nil
 	}
 	return Info{}, fmt.Errorf("no shell with id or name %q", ref)
 }
@@ -510,6 +509,17 @@ func (s *Store) List(all bool) ([]Info, error) {
 // ListOwner returns every shell the owner started, newest first.
 func (s *Store) ListOwner(owner string) ([]Info, error) {
 	list, err := s.loadAll("WHERE owner=?", owner)
+	for i := range list {
+		list[i] = s.status(list[i])
+	}
+	return list, err
+}
+
+// ListOwnerSince returns the owner's shells that run now or ended at or after
+// since, newest first. The database filters them, so a long history is not
+// loaded and probed.
+func (s *Store) ListOwnerSince(owner string, since time.Time) ([]Info, error) {
+	list, err := s.loadAll("WHERE owner=? AND (ended IS NULL OR ended>=?)", owner, since.UTC().Format(time.RFC3339Nano))
 	for i := range list {
 		list[i] = s.status(list[i])
 	}

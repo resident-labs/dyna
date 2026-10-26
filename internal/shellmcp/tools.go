@@ -494,15 +494,12 @@ func (t *Tools) stop(r *Result, id string) error {
 }
 
 func (t *Tools) jobs() (string, error) {
-	list, err := t.Store.List(true)
+	list, err := t.Store.ListOwnerSince(t.Owner, time.Now().Add(-time.Hour))
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
 	for _, in := range list {
-		if in.Owner != t.Owner || in.Exit != nil && time.Since(in.Exit.Ended) > time.Hour {
-			continue
-		}
 		state := in.Status + " for " + time.Since(in.Started).Round(time.Second).String()
 		if in.Exit != nil {
 			state = fmt.Sprintf("exited with code %d %s ago", in.Exit.Code, time.Since(in.Exit.Ended).Round(time.Second))
