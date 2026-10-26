@@ -92,6 +92,9 @@ type JournalEntry struct {
 	Kind  string `json:"kind,omitempty"`
 	State string `json:"state,omitempty"` // running|done|error
 	Shell string `json:"shell,omitempty"`
+	// Stderr is the file a run() command writes its standard error to, so a
+	// resumed run reads it from the run that started the command.
+	Stderr string `json:"stderr,omitempty"`
 }
 
 // AgentJournalEnv is injected into a worker process with the absolute path of
