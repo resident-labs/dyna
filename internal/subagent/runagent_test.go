@@ -3,6 +3,8 @@ package subagent
 import (
 	"context"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/profile"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -106,27 +108,41 @@ func TestRunAgentIDsDifferAndKeepTheRunsDate(t *testing.T) {
 }
 
 func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
-	e := newTestEnv(t)
-	coordinator := authority.WithActor(e.ctx, authority.Actor{Role: authority.Worker, Run: "wf_20261026-094500-aaaaaaaa"})
-	start := func(agent int, task string) Info {
-		info, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: "wf_20261026-094500-aaaaaaaa", Agent: agent}, Profile: "mock", Task: task, Dir: t.TempDir(), Room: e.room.ID})
+	e := newTestEnv(t, mockProfile("mock"), profile.Profile{Name: "hold", Harness: profile.HarnessClaudeCode})
+	// The fake process waits only for cancellation, so no timer controls when
+	// the harness starts or ends.
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	e.m.ProcessRunner = func(ctx context.Context, _ []string, _, _ io.Writer) error {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		return ctx.Err()
+	}
+	const run = "wf_20261026-094500-aaaaaaaa"
+	coordinator := authority.WithActor(e.ctx, authority.Actor{Role: authority.Worker, Run: run})
+	start := func(agent int, prof, task string) Info {
+		info, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: run, Agent: agent}, Profile: prof, Task: task, Dir: t.TempDir(), Room: e.room.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return info
 	}
-	done := start(1, "RESPOND: done")
-	if got, err := e.m.WaitRunAgent(coordinator, "wf_20261026-094500-aaaaaaaa", 1, time.Minute); err != nil || !got.Done || got.Turn.Result != "done" {
+	done := start(1, "mock", "RESPOND: done")
+	if got, err := e.m.WaitRunAgent(coordinator, run, 1, time.Minute); err != nil || !got.Done || got.Turn.Result != "done" {
 		t.Fatalf("wait as the coordinator = %+v, %v; want the result", got, err)
 	}
-	// The mock turn sleeps for ten minutes, so it is still active when the
-	// close arrives, and only a stop ends it.
-	running := start(2, "SLEEP:600000\nRESPOND: late")
-	if got, err := e.m.store().Info(running.ID); err != nil || (got.Status != StatusRunning && got.Status != StatusQueued) {
-		t.Fatalf("agent 2 = %+v, %v; want an active turn", got.Status, err)
-	}
-	if err := e.m.CloseRunAgents(coordinator, "wf_20261026-094500-aaaaaaaa"); err != nil {
+	running := start(2, "hold", "wait for stop")
+	<-started
+	if err := e.m.CloseRunAgents(coordinator, run); err != nil {
 		t.Fatalf("close as the coordinator: %v", err)
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("close returned before it cancelled the harness")
+	}
+	if turn, err := e.m.store().ReadTurn(running.ID, 1); err != nil || turn.Status != TurnStopped {
+		t.Fatalf("turn of the closed agent = %+v, %v; want stopped", turn.Status, err)
 	}
 	for _, id := range []string{done.ID, running.ID} {
 		if got, err := e.m.store().Info(id); err != nil || got.Status != StatusClosed {
@@ -134,12 +150,10 @@ func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
 		}
 	}
 	// The engine has no caller: its own cleanup closes a run's agents too.
-	late := start(3, "RESPOND: x")
 	restore := authority.InEngine()
 	defer restore()
-	if err := e.m.closeEndedRunAgents(context.Background(), []Meta{late.Meta}); err == nil {
-		t.Log("run still live in this test, so nothing to close")
-	}
+	e.m.ProcessRunner = nil
+	late := start(3, "mock", "RESPOND: x")
 	if _, err := e.m.closeRunAgent(context.Background(), late.ID); err != nil {
 		t.Fatalf("engine close without a caller: %v", err)
 	}
