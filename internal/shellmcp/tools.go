@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -117,20 +116,18 @@ func (t *Tools) Close() error {
 }
 
 // tools lists the tools as this server runs them.
-func (t *Tools) tools() []map[string]any {
+func (t *Tools) tools() []toolDefinition {
 	list := slices.Clone(toolList)
-	shell := maps.Clone(list[0])
+	shell := &list[0]
 	if t.Foreground && t.Resolve == nil {
-		shell["description"] = "Run a bash command and wait for it to end. Each call starts a new shell in cwd, so cd does not carry over. " +
+		shell.Description = "Run a bash command and wait for it to end. Each call starts a new shell in cwd, so cd does not carry over. " +
 			"stdin is closed: use non-interactive flags. Output over 16 KB is cut in the middle, and the result names the full log file."
 	} else {
-		shell["description"] = strings.Replace(shell["description"].(string), "up to 30 seconds", "up to "+t.foregroundLimit().String(), 1)
+		shell.Description = strings.Replace(shell.Description, "up to 30 seconds", "up to "+t.foregroundLimit().String(), 1)
 	}
-	list[0] = shell
 	if t.WaitCap > 0 {
-		output := maps.Clone(list[1])
-		output["description"] = output["description"].(string) + fmt.Sprintf(" A wait lasts at most %s, so call it again to keep waiting.", t.WaitCap)
-		list[1] = output
+		output := &list[1]
+		output.Description += fmt.Sprintf(" A wait lasts at most %s, so call it again to keep waiting.", t.WaitCap)
 	}
 	return list
 }
@@ -144,63 +141,83 @@ func (t *Tools) foregroundLimit() time.Duration {
 	return t.capped(limit)
 }
 
-var toolList = []map[string]any{
+// toolDefinition is one MCP tool as this server publishes it.
+type toolDefinition struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	InputSchema inputSchema `json:"inputSchema"`
+}
+
+// inputSchema is the object schema of a tool's arguments.
+type inputSchema struct {
+	Type       string                    `json:"type"`
+	Properties map[string]schemaProperty `json:"properties"`
+	Required   []string                  `json:"required,omitempty"`
+}
+
+// schemaProperty is one argument of a tool: a JSON type and what it means.
+type schemaProperty struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+}
+
+var toolList = []toolDefinition{
 	{
-		"name": "shell",
-		"description": "Run a bash command. It runs in the foreground for up to 30 seconds. " +
+		Name: "shell",
+		Description: "Run a bash command. It runs in the foreground for up to 30 seconds. " +
 			"If it is still running then, it keeps running in the background and this returns its job ID. " +
 			"Dyna wakes you with the exit code and last lines of output when it ends, so do not poll. " +
 			"Each call starts a new shell in cwd, so cd does not carry over. stdin is closed: use non-interactive flags. " +
 			"Output over 16 KB is cut in the middle, and the result names the full log file.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"command":     map[string]any{"type": "string", "description": "The bash command to run."},
-				"description": map[string]any{"type": "string", "description": "One short line in active voice that says what the command does, for example \"Run the web tests\". Dyna shows it live."},
-				"cwd":         map[string]any{"type": "string", "description": "Working directory. Default: your session's working directory."},
+		InputSchema: inputSchema{
+			Type: "object",
+			Properties: map[string]schemaProperty{
+				"command":     {Type: "string", Description: "The bash command to run."},
+				"description": {Type: "string", Description: "One short line in active voice that says what the command does, for example \"Run the web tests\". Dyna shows it live."},
+				"cwd":         {Type: "string", Description: "Working directory. Default: your session's working directory."},
 			},
-			"required": []string{"command", "description"},
+			Required: []string{"command", "description"},
 		},
 	},
 	{
-		"name": "shell_output",
-		"description": "Read new output from a background job. With wait, block until the job ends (\"exit\") or until its new output matches a regular expression, " +
+		Name: "shell_output",
+		Description: "Read new output from a background job. With wait, block until the job ends (\"exit\") or until its new output matches a regular expression, " +
 			"or until timeout_seconds passes. Without wait, return at once.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"job_id":          map[string]any{"type": "string"},
-				"wait":            map[string]any{"type": "string", "description": "\"exit\", or a regular expression to wait for in new output."},
-				"timeout_seconds": map[string]any{"type": "integer", "description": "Longest wait, 1 to 600. Default 30."},
+		InputSchema: inputSchema{
+			Type: "object",
+			Properties: map[string]schemaProperty{
+				"job_id":          {Type: "string"},
+				"wait":            {Type: "string", Description: "\"exit\", or a regular expression to wait for in new output."},
+				"timeout_seconds": {Type: "integer", Description: "Longest wait, 1 to 600. Default 30."},
 			},
-			"required": []string{"job_id"},
+			Required: []string{"job_id"},
 		},
 	},
 	{
-		"name":        "shell_stop",
-		"description": "Stop a background job and its whole process group: SIGTERM, then SIGKILL after 5 seconds.",
-		"inputSchema": map[string]any{
-			"type":       "object",
-			"properties": map[string]any{"job_id": map[string]any{"type": "string"}},
-			"required":   []string{"job_id"},
+		Name:        "shell_stop",
+		Description: "Stop a background job and its whole process group: SIGTERM, then SIGKILL after 5 seconds.",
+		InputSchema: inputSchema{
+			Type:       "object",
+			Properties: map[string]schemaProperty{"job_id": {Type: "string"}},
+			Required:   []string{"job_id"},
 		},
 	},
 	{
-		"name":        "shell_jobs",
-		"description": "List your running jobs and the jobs that ended in the last hour.",
-		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+		Name:        "shell_jobs",
+		Description: "List your running jobs and the jobs that ended in the last hour.",
+		InputSchema: inputSchema{Type: "object", Properties: map[string]schemaProperty{}},
 	},
 	{
-		"name": "web_search",
-		"description": "Search the web. Returns titled results with a URL, a snippet and the provider that found them, " +
+		Name: "web_search",
+		Description: "Search the web. Returns titled results with a URL, a snippet and the provider that found them, " +
 			"as compact JSON. The provider order is fixed: ChatGPT first when the owner signed in to it, then Brave.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "What to search for."},
-				"limit": map[string]any{"type": "integer", "description": "How many results to return, 1 to 10. Default 5."},
+		InputSchema: inputSchema{
+			Type: "object",
+			Properties: map[string]schemaProperty{
+				"query": {Type: "string", Description: "What to search for."},
+				"limit": {Type: "integer", Description: "How many results to return, 1 to 10. Default 5."},
 			},
-			"required": []string{"query"},
+			Required: []string{"query"},
 		},
 	},
 }
