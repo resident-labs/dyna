@@ -937,29 +937,16 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	}
 }
 
-// A detached descendant can hold the check's output open, which is what keeps an
-// SSH channel, or any transport that waits for the pipe, up after the wrapper
-// exits. The node-side cleanup must kill the check's scope before that wait
-// starts. The holder here blocks on a pipe the test owns, and the command runs
-// with a short WaitDelay: a cleanup that runs too late shows up as
-// exec.ErrWaitDelay, exactly as a transport that waits for output would.
-func TestHostCheckCleanupEndsTheOutputHolderBeforeTheTransportWaits(t *testing.T) {
+// A detached descendant can hold the check's output open, which keeps a
+// transport that waits for the pipe alive after the wrapper exits. The node
+// must therefore clean the check's scope before the wrapper finishes, not after
+// a transport gives up. The fake node records the order of the command's end
+// and the cleanup, so the test proves the order without a timer, a sleep or a
+// real deadline.
+func TestHostCheckCleansItsScopeBeforeItFinishes(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"docker", "git"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	pidFile := filepath.Join(dir, "holder.pid")
-	fakes := map[string]string{
-		"systemd-run": "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n",
-		// The scope kill, which reaches the detached holder through its cgroup.
-		"systemctl": "#!/bin/sh\n[ -s " + pidFile + " ] && kill -KILL \"$(cat " + pidFile + ")\" 2>/dev/null\n" + "exit 0\n",
-	}
-	for name, body := range fakes {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
 		t.Fatal(err)
@@ -968,6 +955,8 @@ func TestHostCheckCleanupEndsTheOutputHolderBeforeTheTransportWaits(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	events := filepath.Join(dir, "events")
+	pidFile := filepath.Join(dir, "holder.pid")
 	t.Cleanup(func() {
 		_ = gateWriter.Close()
 		_ = gate.Close()
@@ -977,20 +966,48 @@ func TestHostCheckCleanupEndsTheOutputHolderBeforeTheTransportWaits(t *testing.T
 			}
 		}
 	})
+	fakes := map[string]string{
+		"systemd-run": "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n",
+		// The node's systemctl: is-active says inactive, stop kills the holder
+		// and records itself, reset-failed does nothing.
+		"systemctl": "#!/bin/sh\ncase \"$2\" in\n  is-active) exit 1 ;;\n  stop) printf 'stop\\n' >> " + events + "; [ -s " + pidFile + " ] && kill -KILL \"$(cat " + pidFile + ")\" 2>/dev/null; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+	}
+	for name, body := range fakes {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
-		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 & echo $! > " + pidFile + "; exit 0"}
+		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; printf 'check-end\\n' >> " + events + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0, false)
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
-	cmd.WaitDelay = 50 * time.Millisecond
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("the holder outlived the cleanup: %v: %s", err, out.String())
+		t.Fatalf("check: %v: %s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "DYNA_CI_CHECK_EXIT=0") {
 		t.Fatalf("check lost its marker: %s", out.String())
+	}
+	recorded, err := os.ReadFile(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(recorded); got != "check-end\nstop\n" {
+		t.Fatalf("events = %q, want the command to end, then the scope cleanup", got)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+	if convErr != nil {
+		t.Fatal(convErr)
+	}
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("the detached child %d outlived the check", pid)
 	}
 }
