@@ -378,6 +378,18 @@ var (
 	}
 )
 
+// refusedDesktop returns the error start would give a stopped computer that the
+// service will not start a desktop for now, and nil for a running or starting
+// computer, or one that may start.
+func (s *supervisor) refusedDesktop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.starting != nil || s.compositor.alive() || !restartPending(time.Now()) {
+		return nil
+	}
+	return ErrServiceUpdating
+}
+
 // start shares one startup attempt among this computer's first connections.
 // No caller holds mu while waiting for labwc or an existing attempt.
 func (s *supervisor) start() error {
@@ -691,6 +703,9 @@ func (s *supervisor) stop() error {
 	s.bus, s.busAddress = nil, ""
 	s.compositor.stop()
 	s.compositor = nil
+	// A stopped computer has no desktop: forget its display names, so nothing
+	// dials a socket the next desktop will not reuse.
+	s.privateWayland, s.privateDisplay = "", ""
 	s.apps = map[int]string{}
 	s.tracked = nil
 	s.state.Apps = []App{}
