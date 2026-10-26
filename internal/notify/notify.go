@@ -1265,7 +1265,7 @@ func (s *Service) turnEvent(meta subagent.Meta, turn subagent.Turn) (room.TurnEv
 	if state == room.TurnFailed {
 		ev.Error = strings.TrimSpace(turn.Error)
 	}
-	ev.Detail = turnReportDetail(meta, turn, state)
+	ev.Detail = s.turnReportDetail(meta, turn, state)
 	return ev, nil
 }
 
@@ -1317,8 +1317,9 @@ func (s *Service) turnSummary(meta subagent.Meta, turn subagent.Turn) (string, e
 }
 
 // turnReportDetail is what an agent needs past the row's own facts: where the
-// full output lives, and how to inspect or recover a failed turn.
-func turnReportDetail(meta subagent.Meta, turn subagent.Turn, state room.TurnState) string {
+// full output lives, and how to inspect the failure, recover it by hand, or
+// learn that a written-handoff fallback is already starting.
+func (s *Service) turnReportDetail(meta subagent.Meta, turn subagent.Turn, state room.TurnState) string {
 	lines := []string{"Full output: dyna subagent output " + meta.Address()}
 	if state != room.TurnFailed {
 		return strings.Join(lines, "\n")
@@ -1335,7 +1336,12 @@ func turnReportDetail(meta subagent.Meta, turn subagent.Turn, state room.TurnSta
 		lines = append(lines, line)
 	}
 	lines = append(lines,
-		fmt.Sprintf("Inspect: dyna subagent output %s --turn %d --transcript", meta.ID, turn.N),
+		fmt.Sprintf("Inspect: dyna subagent output %s --turn %d --transcript", meta.ID, turn.N))
+	if s.sessionStore().TransferFallbackFollows(meta, turn) {
+		lines = append(lines, "A written-handoff fallback is starting in this session; no action is needed unless it fails.")
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines,
 		fmt.Sprintf("Recover: dyna subagent transfer %s --profile <working-profile>", meta.ID))
 	return strings.Join(lines, "\n")
 }

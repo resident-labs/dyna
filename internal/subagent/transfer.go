@@ -297,6 +297,10 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 // conversation instead of building a handoff packet.
 const sourceNative = "native"
 
+// sourceTranscript marks a transfer that continues in a fresh conversation
+// built from a written handoff.
+const sourceTranscript = "transcript"
+
 // transferPlan names how a transfer continues the conversation: in the same
 // Pi session, in a converted Claude Code session, or in a fresh conversation
 // with a written handoff.
@@ -748,7 +752,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 					t.Phase, t.Ended = "completed", now
 					t.Handoff = packet
 					if t.Source == "" {
-						t.Source = "transcript"
+						t.Source = sourceTranscript
 					}
 					return nil
 				})
@@ -789,9 +793,9 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				meta.HarnessSession, meta.Resumable = convertedID, true
 			default:
 				if attemptedConvert {
-					t.Source, t.Reason = "transcript", conversionReason
+					t.Source, t.Reason = sourceTranscript, conversionReason
 				} else if t.Source == "" {
-					t.Source = "transcript"
+					t.Source = sourceTranscript
 				}
 				meta.HarnessSession, meta.Resumable = "", harness.Resumable(chosen)
 			}
@@ -830,7 +834,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if m.store().lockHeld(id) {
 				return false, nil
 			}
-			if (t.Source == sourceNative || t.Source == sourceConverted) && turn.Status == TurnError && !m.transferHasOutput(id, turn) {
+			if (t.Source == sourceNative || t.Source == sourceConverted) && turn.Status == TurnError && !m.store().transferHasOutput(id, turn) {
 				// The resumed session may be missing or unusable on the target
 				// model, and a converted file may not load. The fresh conversation
 				// is the bounded fallback, and it runs once: its own failure fails
@@ -838,7 +842,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				converted := t.Source == sourceConverted
 				err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
 					t.Phase, t.Turn, t.StartupDeadline = "stopping", 0, time.Time{}
-					t.Source = "transcript"
+					t.Source = sourceTranscript
 					if converted {
 						t.ConvertedSession = ""
 						t.Reason = "the converted Claude session did not load; using a written handoff: " + clipped(turn.Error, 300)
@@ -851,7 +855,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			}
 			return true, m.failTransfer(id, token, fmt.Errorf("replacement startup failed: %s", turn.Error))
 		}
-		if turn.Status == TurnOK || m.transferHasOutput(id, turn) {
+		if turn.Status == TurnOK || m.store().transferHasOutput(id, turn) {
 			err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error { t.Phase, t.Ended = "completed", now; return nil })
 			return true, err
 		}
@@ -881,7 +885,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				// bounded written handoff instead of failing the whole move.
 				return false, m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
 					t.Phase, t.Turn, t.StartupDeadline = "stopping", 0, time.Time{}
-					t.Source = "transcript"
+					t.Source = sourceTranscript
 					t.Reason = "the resumed session produced no model output; using a written handoff"
 					return nil
 				})

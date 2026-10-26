@@ -204,8 +204,8 @@ func (m *Manager) journalProgress(meta Meta) map[string]string {
 	return out
 }
 
-func (m *Manager) transferHasOutput(id string, t Turn) bool {
-	path, _ := m.store().NormalizedPath(id)
+func (s *Store) transferHasOutput(id string, t Turn) bool {
+	path, _ := s.NormalizedPath(id)
 	found := false
 	scanTail(path, t.NormStart, func(line []byte) {
 		var e workeroutput.Event
@@ -217,6 +217,33 @@ func (m *Manager) transferHasOutput(id string, t Turn) bool {
 		}
 	})
 	return found
+}
+
+// TransferFallbackFollows reports whether the engine answers this failed
+// replacement turn with a written-handoff fallback turn. It mirrors the two
+// starting-phase fallbacks in advanceTransfer, so a failure report can say
+// that a fallback is starting instead of asking for manual recovery. The
+// fallback runs once: a fresh-conversation turn that fails ends the move.
+func (s *Store) TransferFallbackFollows(meta Meta, turn Turn) bool {
+	t := meta.Transfer
+	if t == nil || !t.Active() || t.ID != turn.TransferID || turn.Status != TurnError {
+		return false
+	}
+	switch {
+	case t.Phase == "starting" && (t.Source == sourceNative || t.Source == sourceConverted):
+		// The replacement turn failed on its own before the deadline: the
+		// fallback follows unless the model already produced output.
+		return !s.transferHasOutput(meta.ID, turn)
+	case t.Phase == "stopping" && t.Source == sourceTranscript:
+		// The failed turn is the resume this fallback answers; its packet is
+		// being built.
+		return true
+	case t.Phase == "starting" && t.Source == sourceTranscript:
+		// The fallback's fresh turn is the next one due; only the failed turn
+		// it answers came before it.
+		return turn.N < t.Turn
+	}
+	return false
 }
 
 // transferCompactionSeen reports whether the replacement turn has reported
