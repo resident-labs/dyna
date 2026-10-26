@@ -274,7 +274,7 @@ func TestFinishedSessionStaysMessageableAndReopenIsRoomScoped(t *testing.T) {
 	beta := e.room("beta")
 	lead := e.start(alpha, "lead", nil)
 	other := e.start(beta, "other", nil)
-	if _, err := e.svc.FinishGoal(t.Context(), alpha.ID, lead.Goal, "done", false); err != nil {
+	if _, err := e.svc.FinishGoal(t.Context(), alpha.ID, lead.Goal, "done", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A dormant session keeps its conversation: mark it as a turn that ended
