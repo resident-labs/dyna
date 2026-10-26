@@ -13,11 +13,12 @@ import (
 )
 
 type message struct {
-	ID     int                       `json:"id"`
-	Method string                    `json:"method"`
-	Params json.RawMessage           `json:"params"`
-	Result json.RawMessage           `json:"result"`
-	Error  *struct{ Message string } `json:"error"`
+	ID        int                       `json:"id"`
+	SessionID string                    `json:"sessionId"`
+	Method    string                    `json:"method"`
+	Params    json.RawMessage           `json:"params"`
+	Result    json.RawMessage           `json:"result"`
+	Error     *struct{ Message string } `json:"error"`
 }
 type client struct {
 	input          *os.File
@@ -145,6 +146,10 @@ func (c *client) call(ctx context.Context, method string, params any, out any) e
 	}
 }
 func (c *client) event(m message) error {
+	// A closed tab may still deliver events; they belong to an earlier page.
+	if m.SessionID != "" && m.SessionID != c.session {
+		return nil
+	}
 	switch m.Method {
 	case "Network.webSocketCreated":
 		var p struct{ URL string }
