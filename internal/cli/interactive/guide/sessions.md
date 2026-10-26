@@ -37,6 +37,55 @@ Closed sessions stay closed until an explicit `dyna subagent reopen <session>`.
 Reopen preserves the conversation and turn history and returns the session to idle.
 It does not start a turn. The next coordination post can start one.
 
+## Instructions and their changes
+
+A session's standing instructions come from one snapshot. The first turn builds
+it from live state, and later turns receive the same bytes until a refresh, so
+the cached prompt prefix holds. The snapshot holds:
+
+- Dyna's session rules, and the worker context with the identity and depth.
+- The global rules and the room rules.
+- The subagent profiles the session may use.
+- The room's feature index, from its library map.
+- The background shell jobs this session started that still run.
+- The open questions and ringing calls, for root only.
+- The service contract, the consolidation charter, and the goal and brief.
+
+When live state moves on, Dyna posts an `[DYNA INSTRUCTIONS CHANGED]` note to
+the session. The note names only the sections that differ from what the session
+was last told, with the lines added or removed. A rule, the profile list, the
+feature index, a running job, the open questions and the goal or brief can
+change this way.
+
+The note never wakes the session. A running turn receives it as steering, and
+an idle session reads it at the start of its next turn. The note comes from the
+engine, so it asks for no reply.
+
+An added or edited room rule reaches every open session in the room. Each
+session reads its own note on its next turn, and the room gets one quiet row
+that lists the sessions it reached. Do not post a new rule again to each child.
+
+A quiet post differs from a waking post. A coordination post wakes an idle or
+dormant session, and the post becomes its next turn. A quiet notice, such as an
+instruction note, a shared change summary or an engine report, waits unread for
+a turn that starts for another reason. Root reads a short digest of quiet posts
+with the input of its next turn that has posts.
+
+A parent still tells its children what a snapshot cannot. A new task, a changed
+scope, a priority, an answer or a correction is a message: post it. The snapshot
+carries standing state only, and only while the session is open. Only root and
+the owner may correct a brief, with `dyna goal edit <id> --amend "<text>"`: the
+correction joins the holder's instructions and also arrives as a post. Another
+parent posts the correction, or asks root to amend the brief.
+
+A compaction or a model transfer does not lose the instructions. After a
+compaction, the next turn sends the current snapshot again, so the rules, the
+goal and brief, the open questions and the running jobs return. The note
+boundary also resets, so a later change is reported once. A transfer starts a
+new harness conversation: the incoming model reads the same fresh snapshot and
+the handoff packet, which names the saved work, the open work, the worktree and
+the branch. It does not read the old conversation.
+
 ## Services
 
 Dyna runs some sessions for itself: the librarian, the PR reviewers and Voice.
