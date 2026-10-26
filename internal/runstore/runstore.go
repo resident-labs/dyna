@@ -224,6 +224,10 @@ type Meta struct {
 	// publication refuses new worker shells for the run behind the cancel
 	// cleanup's snapshot (D-165).
 	Canceling bool `json:"canceling,omitempty"`
+	// ProcessesEnded is when the engine ended the processes the ended run's
+	// workers left running (D-246). Nil until then, so a failed cleanup is
+	// tried again, including after an engine restart.
+	ProcessesEnded *time.Time `json:"processesEnded,omitempty"`
 }
 
 // Run is an open, writable run directory.
@@ -481,6 +485,21 @@ func (r *Run) Append(e Event) {
 	if e.Workflow != "" {
 		_ = appendLog(filepath.Join(r.workflowDir(e.Workflow), "events.jsonl"), b)
 	}
+}
+
+// AppendSystemLog adds an engine diagnostic (t=log, system provenance) to the
+// events of an existing run, for code that does not hold the run open. A run
+// with no directory gets nothing.
+func AppendSystemLog(runID, msg string) error {
+	dir := RunDir(runID)
+	if _, err := os.Stat(dir); err != nil {
+		return err
+	}
+	b, err := json.Marshal(Event{T: "log", TS: time.Now().UnixMilli(), Msg: msg, Provenance: LogProvenanceSystem})
+	if err != nil {
+		return err
+	}
+	return appendLog(filepath.Join(dir, "events.jsonl"), b)
 }
 
 // Journal records the full prompt/result of one agent call.

@@ -99,6 +99,14 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	}); err != nil {
 		return db, err
 	}
+	// Runs that ended before the process-cleanup mark existed are marked once, so
+	// only a run that ends later waits for cleanup, however long that takes.
+	if err := database.Migrate(db, "runs.processes", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `UPDATE runs SET body=json_set(body,'$.processesEnded',?) WHERE status!='running' AND json_extract(body,'$.processesEnded') IS NULL`, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 
@@ -492,6 +500,38 @@ func setCanceling(dir, id string) (Meta, error) {
 		_, err = conn.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.canceling',json('true')), rev=? WHERE id=? AND status='running'`, rev, id)
 		return err
 	})
+}
+
+// MarkProcessesEnded records that the processes of an ended run were ended.
+func MarkProcessesEnded(id string) error {
+	_, err := changeMeta(RunDir(id), id, func(ctx context.Context, conn *sql.Conn) error {
+		rev, err := nextRev(ctx, conn)
+		if err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.processesEnded',?), rev=? WHERE id=? AND status!='running'`, time.Now().UTC().Format(time.RFC3339Nano), rev, id)
+		return err
+	})
+	return err
+}
+
+// WithoutProcessCleanup lists the live runs that are not marked as having
+// their processes ended. A run that still reads running is in the list too: its
+// coordinator may have died, and the caller decides.
+func WithoutProcessCleanup() ([]Meta, error) {
+	db, err := runsDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := metasWhere(db, `json_extract(body,'$.processesEnded') IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Meta, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // IsPaused reads the canonical pause state of a running run.
