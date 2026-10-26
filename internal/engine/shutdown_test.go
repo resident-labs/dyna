@@ -161,3 +161,31 @@ func TestStopEngineClosesOpenStreams(t *testing.T) {
 		t.Fatal("the engine did not stop while a stream stayed open")
 	}
 }
+
+// A stop that waits for a cleanup past the slow mark names it in the log.
+func TestSlowStopNamesWhatItWaitsFor(t *testing.T) {
+	oldAfter, oldLog := stopSlowAfter, stopLogf
+	t.Cleanup(func() { stopSlowAfter, stopLogf = oldAfter, oldLog })
+	stopSlowAfter = func() time.Duration { return 0 }
+	lines := make(chan string, 1)
+	stopLogf = func(format string, args ...any) {
+		select {
+		case lines <- fmt.Sprintf(format, args...):
+		default:
+		}
+	}
+	release := make(chan struct{})
+	stopped := make(chan error, 1)
+	_, cancel := context.WithCancel(context.Background())
+	go func() {
+		stopped <- stopEngine(cancel, nil, nil, func() { <-release })
+	}()
+	line := <-lines
+	close(release)
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(line, "cleanup 1") {
+		t.Fatalf("slow-stop line = %q; want it to name cleanup 1", line)
+	}
+}
