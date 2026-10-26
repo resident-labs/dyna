@@ -13,13 +13,16 @@ import (
 
 	accountservice "dyna-agent/internal/account/service"
 	"dyna-agent/internal/doctor"
+	"dyna-agent/internal/doctoralert"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/parentcheckin"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/subagent"
 )
 
 // The automatic hooks of this release.
@@ -141,7 +144,7 @@ func accountUsagePass(accounts *accountservice.Service) func(context.Context, in
 }
 
 // doctorPass examines this machine under the doctor.condition setting, or the
-// recipe's default condition. A healthy pass writes nothing to the run log.
+// default condition, and tells the root of each room with agents on it. A healthy pass writes nothing to the run log.
 func doctorPass(_ context.Context, _ int, log io.Writer) error {
 	host, err := os.Hostname()
 	if err != nil {
@@ -155,7 +158,18 @@ func doctorPass(_ context.Context, _ int, log io.Writer) error {
 	if cond == "" {
 		cond = hooks.DoctorCondition
 	}
-	return doctor.Pass{DataDir: store.DataDir(), Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now()}.Do(log)
+	dataDir := store.DataDir()
+	sessions := subagent.DefaultStore()
+	rooms := room.DefaultStore()
+	notifier := doctoralert.Notifier{
+		DataDir: dataDir,
+		Use: func() ([]doctoralert.RoomUse, error) {
+			infos, err := sessions.ListSnapshot(false)
+			return doctoralert.Count(infos), err
+		},
+		Send: func(n doctoralert.Note) error { return doctoralert.PostNote(rooms, n) },
+	}
+	return doctor.Pass{DataDir: dataDir, Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now(), Post: notifier.Alert, Clear: notifier.Recover}.Do(log)
 }
 
 // logger writes a pass's log lines to the hook run log, one line each.
