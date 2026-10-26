@@ -62,6 +62,12 @@ func runHost(socket string) {
 // socketCheckEvery is how often a host checks that its socket still exists.
 const socketCheckEvery = time.Minute
 
+// socketGone reports whether the socket file no longer exists.
+func socketGone(socket string) bool {
+	_, err := os.Lstat(socket)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 // watchSocket ends a host whose socket file is gone. No client can reach such a
 // host, so it and its children would run until the machine restarts: a test
 // that was killed before it could stop its host removes its folder later, and
@@ -71,8 +77,11 @@ func watchSocket(ticks <-chan time.Time, socket string, stop func(), done <-chan
 		select {
 		case <-done:
 			return
-		case <-ticks:
-			if _, err := os.Lstat(socket); errors.Is(err, fs.ErrNotExist) {
+		case _, open := <-ticks:
+			if !open {
+				return
+			}
+			if socketGone(socket) {
 				stop()
 				return
 			}

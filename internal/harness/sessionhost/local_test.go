@@ -571,27 +571,26 @@ func TestWatchSocketStopsHostWhenSocketIsGone(t *testing.T) {
 	if err := os.WriteFile(socket, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ticks := make(chan time.Time)
-	stopped := make(chan struct{})
-	finished := make(chan struct{})
-	go func() {
-		watchSocket(ticks, socket, func() { close(stopped) }, make(chan struct{}))
-		close(finished)
-	}()
-	ticks <- time.Time{}
-	select {
-	case <-stopped:
-		t.Fatal("the host stopped while its socket existed")
-	default:
+	// watch runs the watcher on the calling goroutine over three ticks and then
+	// a closed tick channel, so it always returns, and counts the stops.
+	watch := func() int {
+		ticks := make(chan time.Time, 3)
+		for range 3 {
+			ticks <- time.Time{}
+		}
+		close(ticks)
+		stops := 0
+		watchSocket(ticks, socket, func() { stops++ }, make(chan struct{}))
+		return stops
+	}
+	if stops := watch(); stops != 0 {
+		t.Fatalf("the host stopped %d times while its socket existed", stops)
 	}
 	if err := os.Remove(socket); err != nil {
 		t.Fatal(err)
 	}
-	ticks <- time.Time{}
-	<-finished
-	select {
-	case <-stopped:
-	default:
-		t.Fatal("the host kept running after its socket was removed")
+	// The watcher must stop the host once and return, not keep checking.
+	if stops := watch(); stops != 1 {
+		t.Fatalf("the host stopped %d times after its socket was removed; want 1", stops)
 	}
 }
