@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/runstore"
 )
 
@@ -77,7 +78,7 @@ func (m *Manager) WaitRunAgent(ctx context.Context, run string, agent int, bound
 		}
 		return RunAgentWait{}, err
 	}
-	if _, err := m.CloseWithOptions(ctx, id, CloseOptions{Force: true}); err != nil && !errors.Is(err, ErrClosed) {
+	if _, err := m.closeRunAgent(ctx, id); err != nil && !errors.Is(err, ErrClosed) {
 		return RunAgentWait{}, err
 	}
 	return RunAgentWait{Done: true, Turn: turn}, nil
@@ -94,7 +95,7 @@ func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 		if info.Run == nil || info.Run.ID != run || info.Status == StatusClosed {
 			continue
 		}
-		if _, err := m.CloseWithOptions(ctx, info.ID, CloseOptions{Force: true}); err != nil && !errors.Is(err, ErrClosed) {
+		if _, err := m.closeRunAgent(ctx, info.ID); err != nil && !errors.Is(err, ErrClosed) {
 			errs = append(errs, err)
 		}
 	}
@@ -129,7 +130,7 @@ func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) erro
 		if !over {
 			continue
 		}
-		if _, err := m.CloseWithOptions(ctx, meta.ID, CloseOptions{Force: true}); err != nil && !errors.Is(err, ErrClosed) {
+		if _, err := m.closeRunAgent(ctx, meta.ID); err != nil && !errors.Is(err, ErrClosed) {
 			errs = append(errs, err)
 		}
 	}
@@ -144,4 +145,21 @@ func runEnded(run string) bool {
 		return false
 	}
 	return runstore.IsFinishedStatus(meta.Status) || meta.Status == "running" && !runstore.Alive(meta)
+}
+
+// closeRunAgent closes the session of a run agent, and stops its turn if one is
+// running. Callers have verified that the session belongs to the run: the
+// coordinator by the derived ID, the engine by the stored run. The coordinator
+// is a worker, which the close and stop rules refuse, so the close acts as the
+// engine does for the session's room (as CloseForEngine does for maintenance).
+func (m *Manager) closeRunAgent(ctx context.Context, id string) (Info, error) {
+	meta, err := m.store().ReadMeta(id)
+	if err != nil {
+		return Info{}, err
+	}
+	if meta.Run == nil {
+		return Info{}, fmt.Errorf("session %s is not a run agent", id)
+	}
+	ctx = authority.WithActor(ctx, authority.EngineRoomActor(meta.RoomID))
+	return m.CloseForEngine(ctx, id, "run agent of "+meta.Run.ID, CloseOptions{Force: true})
 }
