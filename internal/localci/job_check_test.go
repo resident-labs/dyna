@@ -92,8 +92,10 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		t.Fatal(err)
 	}
 	argsFile := filepath.Join(dir, "act.args")
+	envFile := filepath.Join(dir, "act.env.seen")
 	fakeAct := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
+		"env > " + envFile + "\n" +
 		"out=\n" +
 		"while [ $# -gt 0 ]; do case \"$1\" in --artifact-server-path) out=$2; shift 2 ;; *) shift ;; esac; done\n" +
 		"mkdir -p \"$out/42/go-test-report\" && printf '<testsuite><testcase name=\"fast\" time=\"0.1\"/></testsuite>' > \"$out/42/go-test-report/go-test.xml\"\n" +
@@ -123,7 +125,8 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, script))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	// A host-only variable stands in for a session token or an account key.
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "DYNA_HOST_ONLY_SECRET=do-not-leak")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -139,6 +142,16 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("act args %q miss %q", args, want)
 		}
+	}
+	seen, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("act environment not recorded: %v", err)
+	}
+	if strings.Contains(string(seen), "DYNA_HOST_ONLY_SECRET") {
+		t.Fatalf("a host variable reached act: %s", seen)
+	}
+	if !strings.Contains(string(seen), "PATH=/usr/local/sbin:") {
+		t.Fatalf("act did not get the fixed PATH: %s", seen)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "reports", "go-static", "go-test.xml")); err != nil {
 		t.Fatalf("the uploaded JUnit did not reach the check's report directory: %v", err)
