@@ -221,7 +221,7 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	fallbackBytes, fallbackCount := int64(maxTestArtifact), 3
 	junit := false
 	var problems []string
-	uninspected, oversized, auxiliary := 0, 0, 0
+	uninspected, oversized, auxiliary, earlier := 0, 0, 0, 0
 	for _, artifact := range artifacts {
 		if artifact.Expired || artifact.ID <= 0 {
 			continue
@@ -233,6 +233,9 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 			started, startErr := time.Parse(time.RFC3339, run.Started)
 			created, createErr := time.Parse(time.RFC3339, artifact.Created)
 			if startErr != nil || createErr != nil || created.Before(started) {
+				if likelyTestArtifact(artifact.Name) {
+					earlier++
+				}
 				continue
 			}
 		}
@@ -279,6 +282,12 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		junit = junit || found
 		report.Tests = append(report.Tests, part.Tests...)
 		report.Failures = append(report.Failures, part.Failures...)
+	}
+	// A rerun of only the failed jobs keeps the reports of the jobs that passed
+	// in the first attempt. They are not read again, but the head does have
+	// JUnit reports, so the author must not be told to upload one.
+	if earlier > 0 {
+		junit = true
 	}
 	if uninspected > 0 {
 		// One line holds any number of skipped artifacts: a list per artifact
