@@ -109,7 +109,7 @@ var nonStampKeys = map[string]string{
 	"DYNA_SCRATCH_ROOT":          "The disk folder override for session scratch; a path, not a caller stamp.",
 	"DYNA_STEER_HOOKS":           "Whether harness steering hooks run.",
 	"DYNA_OWNER_ENV":             "The owner environment used to resolve data paths.",
-	"DYNA_DATA_DIR":             "The data folder that holds the state database; a path, not a caller stamp.",
+	"DYNA_DATA_DIR":              "The data folder that holds the state database; a path, not a caller stamp.",
 	"DYNA_":                      "The namespace prefix used to filter environment entries.",
 	"DYNA_CHROMIUM_EXECUTABLE":   "The Chromium executable path.",
 	"DYNA_CHROMIUM_FLAGS_FILE":   "The file that supplies Chromium launch flags.",
