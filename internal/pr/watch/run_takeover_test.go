@@ -223,6 +223,34 @@ func TestRunTakeoverSurvivesRootRefresh(t *testing.T) {
 	}
 }
 
+// TestRunTakeoverOnTrackedPRTrack covers `dyna git pr track` of a PR the
+// earlier run author tracked: the existing-record path takes the author role
+// over instead of returning a change the caller cannot act on.
+func TestRunTakeoverOnTrackedPRTrack(t *testing.T) {
+	env := newRunTakeoverEnv(t)
+	first := env.worker(t, "wf_first", env.controller, "ses_20261017-000008-11111111")
+	ref := Ref{Host: "github.com", Repo: "owner/repo", Number: 17}
+	tracked := Record{Key: ref.Key(), ChangeID: ref.Key(), Kind: "github", Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(),
+		RoomID: env.e.author.RoomID, Author: first.ID, Controller: state.Controller(env.controller),
+		Branch: "feature", Head: strings.Repeat("a", 40), State: "open", Watching: true, Created: time.Unix(0, 0)}
+	if err := env.e.s.Store.update(func(st *State) error {
+		st.Records[tracked.Key] = &tracked
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	env.closeAuthor(t, first)
+
+	second := env.worker(t, "wf_second", env.controller, "ses_20261017-000009-22222222")
+	got, created, err := env.e.s.Track(context.Background(), authority.Actor{Role: authority.Owner}, ref, second, "")
+	if err != nil || created {
+		t.Fatalf("track of the earlier run's PR: %+v created=%t %v", got, created, err)
+	}
+	if got.Author != second.ID || len(got.FormerAuthors) != 2 || got.Controller != state.Controller(env.controller) {
+		t.Fatalf("tracked PR after takeover: %+v", got)
+	}
+}
+
 // TestRunTakeoverOnPRTrack covers the same refusal when a later run agent
 // tracks the PR for the branch of the change it takes over.
 func TestRunTakeoverOnPRTrack(t *testing.T) {
