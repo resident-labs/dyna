@@ -480,6 +480,21 @@ func (r *Run) Append(e Event) {
 	}
 }
 
+// AppendSystemLog adds an engine diagnostic (t=log, system provenance) to the
+// events of an existing run, for code that does not hold the run open. A run
+// with no directory gets nothing.
+func AppendSystemLog(runID, msg string) error {
+	dir := RunDir(runID)
+	if _, err := os.Stat(dir); err != nil {
+		return err
+	}
+	b, err := json.Marshal(Event{T: "log", TS: time.Now().UnixMilli(), Msg: msg, Provenance: LogProvenanceSystem})
+	if err != nil {
+		return err
+	}
+	return appendLog(filepath.Join(dir, "events.jsonl"), b)
+}
+
 // Journal records the full prompt/result of one agent call.
 func (r *Run) Journal(e JournalEntry) {
 	b, _ := json.Marshal(e)

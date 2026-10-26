@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -142,10 +144,6 @@ func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 			errs = append(errs, err)
 		}
 	}
-	// The run is over: anything its workers left running ends too.
-	if err := m.endRunProcesses(run); err != nil {
-		errs = append(errs, err)
-	}
 	return errors.Join(errs...)
 }
 
@@ -164,7 +162,6 @@ func (m *Manager) CloseEndedRunAgents(ctx context.Context) error {
 // failed, canceled, or a coordinator that died) leaves no agent session open.
 func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) error {
 	ended := map[string]bool{}
-	cleaned := map[string]bool{}
 	var errs []error
 	for _, meta := range sessions {
 		if meta.Run == nil || !meta.Closed.IsZero() {
@@ -181,14 +178,11 @@ func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) erro
 		if _, err := m.closeRunAgent(ctx, meta.ID); err != nil && !errors.Is(err, ErrClosed) {
 			errs = append(errs, err)
 		}
-		cleaned[meta.Run.ID] = true
 	}
-	// Once per run that still had open agents: the run ended however it ended
-	// (ok, error, interrupted, canceled, lost coordinator), so its processes end.
-	for run := range cleaned {
-		if err := m.endRunProcesses(run); err != nil {
-			errs = append(errs, err)
-		}
+	// Every ended run, however it ended (ok, error, interrupted, canceled, lost
+	// coordinator) and whether or not its agents closed earlier.
+	if err := m.endPendingRuns(); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -221,16 +215,35 @@ func (m *Manager) closeRunAgent(ctx context.Context, id string) (Info, error) {
 	if err != nil || !meta.Closed.IsZero() {
 		return info, err
 	}
+	// The run's end cleanup covers this agent's processes once the run is over.
+	m.gates().markPending(meta.Run.ID)
 	// The agent is done, so its processes end with it; siblings keep running.
-	return info, m.runShells().EndSessionProcesses(id, m.killFunc())
+	// A failed kill never costs the agent its result: it goes to the run's log,
+	// and the run's end cleanup tries again.
+	if err := m.runShells().EndSessionProcesses(id, m.killFunc()); err != nil {
+		_ = runstore.AppendSystemLog(meta.Run.ID, fmt.Sprintf("could not end the processes of agent %d: %v", meta.Run.Agent, err))
+	}
+	return info, nil
 }
 
-// endRunProcesses ends what the workers of an ended run left running, as a
-// cancel does. It never takes the run's own group (leader 0), and the
+// endPendingRuns ends what the workers of each ended run left running, as a
+// cancel does, once per run: a run whose cleanup fails stays pending for the
+// next pass. It never takes the run's own group (leader 0), and the
 // coordinator carries no run stamp, so a coordinator still inside its finish
-// call is not touched.
-func (m *Manager) endRunProcesses(run string) error {
-	return m.runShells().EndRunProcesses(run, 0, m.killFunc())
+// call is not touched. A process that lost DYNA_SESSION keeps DYNA_WORKER_RUN.
+func (m *Manager) endPendingRuns() error {
+	var errs []error
+	for _, run := range m.gates().pendingRuns() {
+		if !runEnded(run) {
+			continue
+		}
+		if err := m.runShells().EndRunProcesses(run, 0, m.killFunc()); err != nil {
+			errs = append(errs, fmt.Errorf("run %s: %w", run, err))
+			continue
+		}
+		m.gates().clearPending(run)
+	}
+	return errors.Join(errs...)
 }
 
 func (m *Manager) runShells() *shells.Store {
@@ -261,6 +274,30 @@ type runAgentGates struct {
 	closedID   map[string]bool
 	closedRuns map[string]bool
 	inflight   map[string]*sync.WaitGroup
+	// pending holds the runs that had an agent session closed and whose end
+	// cleanup has not succeeded yet.
+	pending map[string]bool
+}
+
+func (g *runAgentGates) markPending(run string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending == nil {
+		g.pending = map[string]bool{}
+	}
+	g.pending[run] = true
+}
+
+func (g *runAgentGates) clearPending(run string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.pending, run)
+}
+
+func (g *runAgentGates) pendingRuns() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Collect(maps.Keys(g.pending))
 }
 
 // begin registers a start of run, or reports that the run's agents are closed.
