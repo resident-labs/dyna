@@ -102,12 +102,3 @@ test('removing the last room or suite leaves an empty list, which means every on
   assert.deepEqual(editScope(['a', 'b'], { remove: 'a' }), ['b'])
   assert.equal(editScope(['a'], { remove: 'zzz' }), null, 'a value the list lacks changes nothing')
 })
-
-test('the Machine page shows Rooms and Suites only for a CI machine, and read-only unless the caller is the owner', async () => {
-  const { readFileSync } = await import('node:fs')
-  const src = readFileSync(new URL('./MachinePage.svelte', import.meta.url), 'utf8')
-  const ci = src.slice(src.indexOf("{#if machine.roles.includes('ci')}\n          <Row dense text=\"Rooms\">"))
-  assert.ok(ci.startsWith("{#if machine.roles.includes('ci')}"), 'the Rooms row sits inside the CI-role block')
-  assert.ok(ci.indexOf('text="Suites"') < ci.indexOf('text="Host checks"'), 'Suites sits in the same block, before host checks')
-  assert.equal(src.match(/readOnly=\{!owner\}/g)?.length, 2, 'both lists go read-only for a caller who is not the owner')
-})

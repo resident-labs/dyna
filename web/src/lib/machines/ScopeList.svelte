@@ -74,10 +74,10 @@
   .chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border-radius: 9px; background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); font-size: var(--t-cap); font-weight: 600; max-width: 100%; }
   .chip:has(.x:not(:disabled)) { padding-right: 2px; }
   .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .x { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; color: inherit; line-height: 1; }
-  @media (hover: hover) { .x:hover:not(:disabled) { background: var(--hover); } }
-  .x:active:not(:disabled) { background: var(--select); }
-  .x:disabled { opacity: 0.5; }
+  .x { flex: none; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; color: inherit; line-height: 1; transition: background-color var(--motion-fast) var(--ease); }
+  @media (hover: hover) { .x:hover { background: var(--hover); } }
+  .x:active { background: var(--select); }
+  .x:disabled { opacity: 0.5; pointer-events: none; }
   .every { color: var(--faint); font-size: var(--t-sm); }
   .add { width: 120px; max-width: 100%; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font: inherit; font-size: var(--t-sm); }
   @media (max-width: 760px) {
