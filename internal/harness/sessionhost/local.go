@@ -191,6 +191,8 @@ type localSession struct {
 	// idleAfter is how long the child may sit quiet before idleClose stops it,
 	// from the launch that started it. Zero means never.
 	idleAfter time.Duration
+	// lastActive is when the child last wrote output, started, or lost its turn.
+	lastActive time.Time
 }
 
 // lineWriter splits one child's stdout strictly on LF, strips one trailing
@@ -241,6 +243,7 @@ func (s *localSession) wake() {
 
 func (s *localSession) markActive() {
 	s.mu.Lock()
+	s.lastActive = hostNow()
 	if s.idleTimer != nil && s.idleAfter > 0 {
 		s.idleTimer.Reset(s.idleAfter)
 	}
@@ -348,6 +351,7 @@ func (s *localSession) Replace(ctx context.Context, launch Launch) error {
 func (s *localSession) Detach(reason DetachReason) {
 	s.mu.Lock()
 	s.turn = false
+	s.lastActive = hostNow()
 	s.events = nil
 	c := s.child
 	if reason == DetachAbandoned {
@@ -512,6 +516,7 @@ func (s *localSession) startChild(launch Launch) error {
 	s.child, s.last = c, c
 	s.exitErr = nil
 	s.idleAfter = launch.idleAfter()
+	s.lastActive = hostNow()
 	switch {
 	case s.idleAfter == 0:
 		if s.idleTimer != nil {
@@ -558,6 +563,62 @@ func (s *localSession) Connection() []byte {
 		return nil
 	}
 	return append([]byte(nil), s.child.connection...)
+}
+
+// hostNow is the clock of idle times; a test replaces it.
+var hostNow = time.Now
+
+// idleSessions lists the sessions that hold a child and have no turn attached.
+func (h *localHost) idleSessions() []IdleSession {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := hostNow()
+	var out []IdleSession
+	for id, s := range h.sessions {
+		s.mu.Lock()
+		if s.child != nil && !s.turn {
+			out = append(out, IdleSession{ID: id, Caller: callerOf(id), Idle: now.Sub(s.lastActive)})
+		}
+		s.mu.Unlock()
+	}
+	return out
+}
+
+// callerOf is the caller key of a registry id (harness, then key, then account home).
+func callerOf(id string) string {
+	_, rest, _ := strings.Cut(id, "\x00")
+	caller, _, _ := strings.Cut(rest, "\x00")
+	return caller
+}
+
+// unloadIdle stops the child of session id when it has had no turn attached
+// and no output for minIdle, and reports whether it did. The check and the
+// removal happen under the host lock, so a turn that attaches meanwhile starts
+// a fresh child instead of finding this one half stopped.
+func (h *localHost) unloadIdle(id string, minIdle time.Duration) bool {
+	h.mu.Lock()
+	s := h.sessions[id]
+	if s == nil {
+		h.mu.Unlock()
+		return false
+	}
+	s.mu.Lock()
+	if s.child == nil || s.turn || hostNow().Sub(s.lastActive) < minIdle {
+		s.mu.Unlock()
+		h.mu.Unlock()
+		return false
+	}
+	c := s.child
+	s.child = nil
+	s.mu.Unlock()
+	delete(h.sessions, id)
+	h.mu.Unlock()
+	s.stopIdleTimer()
+	stopChild(c)
+	if h.onEmpty != nil {
+		h.onEmpty()
+	}
+	return true
 }
 
 // closeKey stops every account-home variant of a caller key.
