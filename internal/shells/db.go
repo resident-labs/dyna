@@ -115,6 +115,9 @@ func (s *Store) Save(m Meta, ex *Exit) error {
 	if !ValidID(m.ID) {
 		return fmt.Errorf("invalid shell id %q", m.ID)
 	}
+	if err := s.injected("save"); err != nil {
+		return err
+	}
 	db, err := s.db()
 	if err != nil {
 		return err
@@ -370,6 +373,9 @@ func importLegacyExits(ctx context.Context, conn *sql.Conn, root string) error {
 // exec runs one statement against the row of job id and reports whether it
 // matched.
 func (s *Store) exec(id, query string, args ...any) (bool, error) {
+	if err := s.injected(query); err != nil {
+		return false, err
+	}
 	db, err := s.db()
 	if err != nil {
 		return false, err
