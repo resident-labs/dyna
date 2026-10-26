@@ -3,12 +3,14 @@ package harness
 import (
 	"bufio"
 	"context"
+	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/profile"
 )
@@ -29,63 +31,109 @@ func TestStartedHearsTheHarnessPID(t *testing.T) {
 	}
 }
 
+// Cancelling a guarded command must reach every member of its process group and
+// let them finish what they write. The fixture installs real signal handlers in
+// a parent and a child process, so the test waits for a readiness line from the
+// fixture and for the parent to exit; it never waits on a timer or on a shell
+// trap to run, which is what made the old version flaky under load.
 func TestGuardedCancelTerminatesDescendantAndFlushes(t *testing.T) {
+	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	// A hang guard only: the fixture reports a missed signal with exit 3.
+	guarded, stop := context.WithTimeout(ctx, 30*time.Second)
+	defer stop()
 	ready, readyWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ready.Close()
-	defer readyWriter.Close()
-	hold, holdWriter, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer hold.Close()
-	defer holdWriter.Close()
-	dir := t.TempDir()
-	output, err := os.Create(filepath.Join(dir, "output"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer output.Close()
-	// Both shells flush on SIGTERM. The parent waits for the child, so its
-	// exit also proves the whole process group received cancellation.
-	script := `
-trap 'wait; printf "parent-stopped\n"; exit 0' TERM
-/bin/sh -c '
-  trap '\''printf "child-stopped\n"; exit 0'\'' TERM
-  printf "child-ready\n" >&3
-  read -r held <&4
-' &
-wait
-`
-	p := profile.Profile{Harness: profile.HarnessMock}
-	cmd, err := harnessCommand(ctx, p, dir, []string{"/bin/sh", "-c", script}, ExecutionOptions{SkipComputer: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd.Stdout, cmd.Stderr = output, output
-	cmd.ExtraFiles = []*os.File{readyWriter, hold}
-	wait, release, _, err := startGuarded(ctx, p, cmd, "", nil, ExecutionOptions{})
+	cmd := exec.CommandContext(guarded, os.Args[0])
+	cmd.Env = append(os.Environ(), envCancelHelper+"=parent", envCancelMarker+"="+dir)
+	cmd.Stdout, cmd.Stderr = readyWriter, readyWriter
+	wait, release, _, err := startGuarded(guarded, profile.Profile{Harness: profile.HarnessMock}, cmd, "", nil, ExecutionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
 	defer signalProcessGroup(cmd, syscall.SIGKILL)
 	_ = readyWriter.Close()
-	line, err := bufio.NewReader(ready).ReadString('\n')
-	if err != nil || line != "child-ready\n" {
-		t.Fatalf("child readiness = %q, %v", line, err)
+	if line, err := bufio.NewReader(ready).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("fixture readiness = %q, %v", line, err)
 	}
 	cancel()
 	_ = wait()
-	raw, err := os.ReadFile(output.Name())
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"child-stopped", "parent-stopped"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(data) != "term" {
+			t.Fatalf("%s: %q, %v", name, data, err)
+		}
 	}
-	if !strings.Contains(string(raw), "parent-stopped\n") || !strings.Contains(string(raw), "child-stopped\n") {
-		t.Fatalf("cancellation did not flush the whole process group: %q", raw)
+}
+
+const (
+	// envCancelHelper makes the test binary act as one member of the
+	// cancellation fixture: "parent" starts a "child" and waits for it.
+	envCancelHelper = "DYNA_TEST_CANCEL_HELPER"
+	// envCancelMarker names the directory the fixture writes its markers to.
+	envCancelMarker = "DYNA_TEST_CANCEL_MARKER"
+)
+
+// cancelHelperMain is one member of the cancellation fixture. A process group
+// with real signal handlers is the only way to prove that a cancel reaches
+// every member: a shell trap only runs when the shell happens to be between
+// commands, which is what made the old test flaky.
+func cancelHelperMain(mode string) {
+	terms := make(chan os.Signal, 1)
+	signal.Notify(terms, syscall.SIGTERM)
+	dir := os.Getenv(envCancelMarker)
+	switch mode {
+	case "child":
+		// Ready means the handler is installed; the parent prints it.
+		if f := os.NewFile(3, "ready"); f != nil {
+			_, _ = f.WriteString("child-ready")
+		}
+		select {
+		case <-terms:
+			_ = os.WriteFile(filepath.Join(dir, "child-stopped"), []byte("term"), 0600)
+			os.Exit(0)
+		case <-time.After(10 * time.Second):
+			os.Exit(3)
+		}
+	case "parent":
+		child := exec.Command(os.Args[0])
+		child.Env = append(os.Environ(), envCancelHelper+"=child")
+		readyRead, readyWrite, err := os.Pipe()
+		if err != nil {
+			os.Exit(3)
+		}
+		child.ExtraFiles = []*os.File{readyWrite}
+		if err := child.Start(); err != nil {
+			os.Exit(3)
+		}
+		_ = readyWrite.Close()
+		ready := make([]byte, len("child-ready"))
+		if _, err := io.ReadFull(readyRead, ready); err != nil {
+			os.Exit(3)
+		}
+		_, _ = os.Stdout.WriteString("ready\n")
+		exited := make(chan error, 1)
+		go func() { exited <- child.Wait() }()
+		select {
+		case err := <-exited:
+			if err != nil {
+				os.Exit(3)
+			}
+		case <-time.After(10 * time.Second):
+			os.Exit(3)
+		}
+		select {
+		case <-terms:
+			_ = os.WriteFile(filepath.Join(dir, "parent-stopped"), []byte("term"), 0600)
+			os.Exit(0)
+		case <-time.After(10 * time.Second):
+			os.Exit(3)
+		}
 	}
+	os.Exit(3)
 }
