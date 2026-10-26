@@ -97,6 +97,11 @@ for i in $(seq 1 40); do kill -0 -- "-$writer" 2>/dev/null || break; sleep 0.05;
 if [ -f "$1/trailer" ]; then cat "$1/trailer" >> "$1/log"; fi
 printf '{"exitCode":%s}\n' "$code" > "$1/exit.tmp" && mv "$1/exit.tmp" "$1/exit.json"
 WRAP
+# The user manager's PATH is not the owner's. A check ran in an SSH login
+# shell before it ran detached, so it gets the PATH a login shell of the node
+# gives: tools from mise, cargo, nix, brew or ~/.local/bin stay found. A login
+# shell that prints a banner leaves the PATH on the last line.
+login_path=$(timeout 10s "${SHELL:-/bin/sh}" -lc 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n 1 || true)
 unitOK=0
 if command -v systemd-run >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   user=$(id -un)
@@ -104,8 +109,10 @@ if command -v systemd-run >/dev/null 2>&1 && systemctl --user show-environment >
 fi
 if [ "$unitOK" = 1 ]; then
   if [ -n "$cpu" ]; then set -- -p "CPUQuota=$cpu" -p "MemoryMax=$mem" -p "TasksMax=$tasks"; else set --; fi
+  if [ -n "$login_path" ]; then set -- "$@" "--setenv=PATH=$login_path"; fi
   systemd-run --user --quiet --collect --unit "$unit" "$@" -- nice -n 10 bash "$d/wrap.sh" "$d" 8>&- || { rm -rf "$d"; exit 1; }
 else
+  if [ -n "$login_path" ]; then PATH=$login_path; export PATH; fi
   setsid nohup nice -n 10 bash "$d/wrap.sh" "$d" 8>&- >/dev/null 2>&1 </dev/null &
   echo $! > "$d/pid"
 fi
