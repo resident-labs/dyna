@@ -118,7 +118,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := nodeCheck{id: "go-static", name: "go-static", reports: ReportJUnit,
-		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-static"},
+		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, script))
@@ -133,7 +133,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if err != nil {
 		t.Fatalf("act did not run: %v", err)
 	}
-	for _, want := range []string{"pull_request", "-W", ".github/workflows/ci.yml", "-j", "go-static", "--rm",
+	for _, want := range []string{"pull_request", "-W", ".github/workflows/ci.yml", "-j", "go-shard", "--matrix", "shard:7", "--rm",
 		"-P", "ubuntu-latest=catthehacker/ubuntu:act-22.04", "--cache-server-path", "--artifact-server-path",
 		"--container-options", "--cpus 4", "--memory 8192m", "--label dyna.run=run-7"} {
 		if !strings.Contains(string(args), want) {
