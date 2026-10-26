@@ -1096,7 +1096,7 @@ func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
 	if got := strings.TrimSpace(out.String()); got != "slot=0 port=4226" {
 		t.Fatalf("the check ran with %q, want slot 0 and its own port", got)
 	}
-	if !strings.Contains(errOut.String(), "waiting for slot 0") {
+	if !strings.Contains(errOut.String(), "waiting for any free slot") {
 		t.Fatalf("the check's log does not say why it waited: %s", errOut.String())
 	}
 }
