@@ -94,6 +94,29 @@ func TestPiChatGPTLoginKeepsTheAccountsRepositoryScope(t *testing.T) {
 	}
 }
 
+// A provider that signs in without an account ID, such as xAI, still gives the
+// search tool its access token, and the same repository scope applies to it.
+func TestPiAccessTokenReadsASignInWithoutAnAccountID(t *testing.T) {
+	accounts := testAccounts(t)
+	limited := seedPiLogin(t, accounts, "xai", `{"type":"oauth","access":"xai-token","refresh":"refresh-token","expires":1}`, store.KindOAuth)
+	if err := accounts.SetRepos(limited.ID, []string{"github.com/acme/work"}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := accounts.PiAccessToken(t.Context(), store.ProviderXAI, "", "github.com/acme/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "xai-token" {
+		t.Fatalf("token = %q, want the saved xAI sign-in", token)
+	}
+	if token, err := accounts.PiAccessToken(t.Context(), store.ProviderXAI, "", "github.com/acme/personal"); err == nil {
+		t.Fatalf("another repository read %q, want the scope refused", token)
+	}
+	if _, err := accounts.PiAccessToken(t.Context(), store.ProviderKimiCode, "", ""); !errors.Is(err, native.ErrNotSignedIn) {
+		t.Fatalf("another provider: err = %v, want ErrNotSignedIn", err)
+	}
+}
+
 func TestPiProviderKeyReadsTheSavedKey(t *testing.T) {
 	r := providerKeysRuntime(t)
 	if _, err := r.AddProviderKey(t.Context(), "pi", store.ProviderBrave, "", "brave-key"); err != nil {

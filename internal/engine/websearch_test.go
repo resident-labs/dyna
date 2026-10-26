@@ -89,7 +89,7 @@ func TestWebSearchTriesEveryProviderInTheOwnerOrder(t *testing.T) {
 	}
 	// The sign-in providers answer first, because they cost the owner no
 	// search API key; the key providers follow in the order the owner named.
-	order := []string{"chatgpt", "brave"}
+	order := []string{"chatgpt", "claude", "muse", "kimi", "zai", "xai", "brave", "exa", "tavily"}
 	at := 0
 	for _, name := range order {
 		reason := name + " is not signed in"
