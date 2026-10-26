@@ -72,7 +72,8 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 }
 
 // rootMayPatch reports whether a room root may apply the patch. A root changes
-// the operating settings of a machine: host checks, the SSH connect timeout, a
+// the operating settings of a machine: host checks, the SSH connect timeout, the
+// check temporary folder, a
 // local container runtime socket and the CI slot count. Slots set capacity and
 // route no work; the patch carries no roles, so a root cannot give a machine the
 // ci role through them, and a slot count on a machine without the role changes
