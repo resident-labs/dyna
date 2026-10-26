@@ -79,21 +79,21 @@ VALUES(?,'room','owner/repo',0,0,?,?)`, row.key, row.rev, `{"padding":"`+strings
 			t.Errorf("keys after %s: got %v, error %v; want %v", tc.since, got, err, tc.want)
 		}
 	}
-	// A fresh handle still accepts the unchanged table version used by earlier readers.
+	// A fresh handle accepts the current table version, and the index migration does not change it.
 	if err := database.Close(dir); err != nil {
 		t.Fatal(err)
 	}
 	if db, err = database.Open(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Migrate(db, "pr.state", 1, func(*sql.Conn, int) error {
+	if err := database.Migrate(db, "pr.state", 2, func(*sql.Conn, int) error {
 		t.Fatal("the index migration changed the PR table version")
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var version string
-	if err := db.QueryRowContext(context.Background(), "SELECT value FROM meta WHERE key='pr.state'").Scan(&version); err != nil || version != "1" {
-		t.Fatalf("PR table version: %q, %v; want 1", version, err)
+	if err := db.QueryRowContext(context.Background(), "SELECT value FROM meta WHERE key='pr.state'").Scan(&version); err != nil || version != "2" {
+		t.Fatalf("PR table version: %q, %v; want 2", version, err)
 	}
 }
