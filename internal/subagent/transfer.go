@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/sessionconv"
 )
 
 // TransferState is durable state for a fresh model conversation in the same
@@ -48,9 +49,13 @@ type TransferState struct {
 	Handoff           string        `json:"handoff,omitempty"`
 	Dir               string        `json:"dir,omitempty"`
 	Branch            string        `json:"branch,omitempty"`
-	Source            string        `json:"source,omitempty"` // cooperative, transcript or native (same Pi session)
-	Reason            string        `json:"reason,omitempty"`
-	Error             string        `json:"error,omitempty"`
+	Source            string        `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
+	// ConvertedSession is the target session id of a cross-harness
+	// conversion. It is saved before the file is written, so a restarted
+	// coordinator writes the same session again instead of a second one.
+	ConvertedSession string `json:"convertedSession,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+	Error            string `json:"error,omitempty"`
 	// Notice is the one session DM that explains an automatic fallback after
 	// a usage limit. Limit says why the turn left the previous profile.
 	Notice       string `json:"notice,omitempty"`
@@ -180,10 +185,11 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 			currentModel == candidate.Model && (meta.Transfer == nil || meta.Transfer.Phase == "completed")
 		// A move between two Pi profiles keeps the session file: a resumed Pi
 		// session takes the target model, its thinking level and its account,
-		// and the whole conversation stays. That needs no written handoff, so
-		// the transfer stops the old turn and resumes at once. Every other
-		// pair still starts a fresh native conversation.
-		native := nativePiMove(ps, meta, candidate, fresh, opts)
+		// and the whole conversation stays. A move from Pi to Claude Code
+		// converts the session file instead. Both need no written handoff, so
+		// the transfer stops the old turn and resumes at once. Every other pair
+		// still starts a fresh native conversation.
+		plan := transferPlanFor(ps, meta, candidate, fresh, opts)
 		// A fallback chain continues from the profile the session is on. When the
 		// turn that this transfer moved it to hits its own limit, that move is
 		// over: the next move supersedes it here, in the same transaction. Its
@@ -207,14 +213,24 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		now := m.transferNow()
 		token := NewID()
 		phase, source, reason := "waiting", "", ""
-		if native {
+		convertedSession := ""
+		switch {
+		case plan.native:
 			phase, source, reason = "stopping", sourceNative, "the same Pi session keeps the conversation"
+		case plan.convert:
+			phase, source, reason = "stopping", sourceConverted, "converting the Pi session to Claude Code"
+			// A retry rewrites the same target session, so one failed attempt
+			// does not leave an orphaned Claude session file behind.
+			convertedSession = sessionconv.NewSessionID()
+			if opts.Retry && meta.Transfer != nil && meta.Transfer.ConvertedSession != "" {
+				convertedSession = meta.Transfer.ConvertedSession
+			}
 		}
 		out = TransferState{RootSeat: opts.rootSeat, ID: token, Session: meta.ID, Phase: phase, Profile: opts.Profile, Model: candidate.Model,
 			PreviousProfile: meta.Profile, PreviousModel: meta.Model, PreviousHarness: meta.HarnessSession, PreviousDir: meta.Dir,
 			PreviousResumable: meta.Resumable, OldTurns: meta.Turns, Requested: now, WaitFor: time.Duration(opts.WaitSeconds) * time.Second,
 			Deadline: now.Add(time.Duration(opts.WaitSeconds) * time.Second), Source: source, Reason: reason,
-			PostID: transferPostID(token)}
+			ConvertedSession: convertedSession, PostID: transferPostID(token)}
 		if opts.Fallback {
 			// Record the profiles this session has left and entered, so a later
 			// limit continues the chain and never returns to one that just ran
@@ -230,7 +246,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 			// optional chain over.
 			meta.FallbackPath = nil
 		}
-		if previous := meta.Transfer; !native && !opts.rootSeat && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
+		if previous := meta.Transfer; !plan.native && !plan.convert && !opts.rootSeat && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
 			out.WrittenHandoff, out.Handoff, out.Dir, out.Branch, out.Source = previous.WrittenHandoff, previous.WrittenHandoff, previous.Dir, previous.Branch, "cooperative"
 		}
 		// Freeze labels for records written before per-turn profile snapshots.
@@ -277,20 +293,34 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 // conversation instead of building a handoff packet.
 const sourceNative = "native"
 
-// nativePiMove reports whether a transfer keeps the session's Pi session
-// file. Pi stores one session file per conversation and a session resumed with
-// another --model continues the same history, under the new model's provider
-// and account home. The move therefore needs a resumable Pi session with an ID
-// and a Pi target; a fresh request, a root seat and a missing prior profile
-// keep the written-handoff path. Pi compacts the session before it sends a
-// request that no longer fits the new model's window, and Dyna's own compact
-// command runs first when the target profile's threshold is due.
-func nativePiMove(ps *profile.Store, meta Meta, target profile.Profile, fresh bool, opts TransferOptions) bool {
-	if opts.rootSeat || fresh || !meta.Resumable || meta.HarnessSession == "" || target.Harness != profile.HarnessPi {
-		return false
+// transferPlan names how a transfer continues the conversation: in the same
+// Pi session, in a converted Claude Code session, or in a fresh conversation
+// with a written handoff.
+type transferPlan struct {
+	native  bool
+	convert bool
+}
+
+// transferPlanFor chooses the smallest continuation that keeps the history.
+// A Pi session file can be resumed by another Pi profile as it is. It can also
+// be converted into a Claude Code session, which then resumes with Claude's
+// --resume. A fresh request, a root seat, a session without a resumable id and
+// a missing prior profile keep the written-handoff path.
+func transferPlanFor(ps *profile.Store, meta Meta, target profile.Profile, fresh bool, opts TransferOptions) transferPlan {
+	if opts.rootSeat || fresh || !meta.Resumable || meta.HarnessSession == "" {
+		return transferPlan{}
 	}
 	current, ok := ps.Get(meta.Profile)
-	return ok && current.Harness == profile.HarnessPi
+	if !ok || current.Harness != profile.HarnessPi {
+		return transferPlan{}
+	}
+	switch target.Harness {
+	case profile.HarnessPi:
+		return transferPlan{native: true}
+	case profile.HarnessClaudeCode:
+		return transferPlan{convert: true}
+	}
+	return transferPlan{}
 }
 
 func transferPostID(token string) string { // deterministic, no second room post on recovery
@@ -661,15 +691,50 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				return true, m.failTransfer(id, token, err)
 			}
 		}
-		// Resolve hints after the old turn stops, so its last messages are included.
+		// Resolve the target profile first: a conversion needs its model and
+		// harness, and every path below needs it.
+		ps, err := m.profiles()
+		if err != nil {
+			return true, m.failTransfer(id, token, err)
+		}
+		p, ok := ps.Get(t.Profile)
+		if !ok || p.Disabled {
+			return true, m.failTransfer(id, token, errors.New("target profile is unavailable"))
+		}
+		chosen := *p
+		chosen.Model = t.Model
+		chosen.Models = nil
+		if err := chosen.Validate(); err != nil {
+			return true, m.failTransfer(id, token, err)
+		}
+		// A converted session is written before the old conversation is
+		// replaced. Any failure keeps the turn, the session id and the
+		// worktree as they are and falls back to the written handoff below.
 		native := t.Source == sourceNative
+		convert := t.Source == sourceConverted
+		attemptedConvert := convert
+		convertedID := ""
+		conversionReason := ""
+		if convert {
+			convertedID, err = m.convertPiToClaude(ctx, meta, *t, chosen)
+			if err != nil {
+				convert = false
+				conversionReason = "session conversion unavailable: " + clipped(err.Error(), 300) + "; using a written handoff"
+			}
+		}
 		var packet, dir, prompt string
-		if native {
+		switch {
+		case native:
 			// The session file already holds the conversation, the files and the
 			// tool state, so no packet is built and the worktree stays as it is.
 			dir = meta.Dir
 			prompt = fmt.Sprintf("[DYNA MODEL TRANSFER] Continue this session. It now runs on %s / %s in the same Pi conversation, so the full history is intact. Resume the open work.\n", t.Profile, orNone(t.Model))
-		} else {
+		case convert:
+			// The converted Claude session keeps the same conversation and the
+			// same worktree; the target turn resumes it by its new id.
+			dir = meta.Dir
+			prompt = fmt.Sprintf("[DYNA MODEL TRANSFER] Continue this session. Its conversation was converted from Pi to Claude Code as session %s, so the full history is intact. Resume the open work.\n", convertedID)
+		default:
 			packet, dir, err = m.handoffPacket(meta, *t)
 			if err != nil {
 				return true, m.failTransfer(id, token, err)
@@ -686,19 +751,9 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			}
 			prompt = "[DYNA MODEL TRANSFER] Continue this stable session in a fresh native conversation.\n" + packet
 		}
-		ps, err := m.profiles()
-		if err != nil {
-			return true, m.failTransfer(id, token, err)
-		}
-		p, ok := ps.Get(t.Profile)
-		if !ok || p.Disabled {
-			return true, m.failTransfer(id, token, errors.New("target profile is unavailable"))
-		}
-		chosen := *p
-		chosen.Model = t.Model
-		chosen.Models = nil
-		if err := chosen.Validate(); err != nil {
-			return true, m.failTransfer(id, token, err)
+		previousHarness := ""
+		if previous, ok := ps.Get(t.PreviousProfile); ok {
+			previousHarness = previous.Harness
 		}
 		err = m.updateTransfer(id, token, func(meta *Meta, t *TransferState) error {
 			if t.Phase != "stopping" {
@@ -709,15 +764,31 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			}
 			t.Phase, t.Turn, t.StartupDeadline = "starting", meta.Turns+1, now.Add(60*time.Second)
 			t.OldTurns = meta.Turns
-			if t.Source == "" {
-				t.Source = "transcript"
-			}
 			meta.Profile, meta.Model, meta.Dir = t.Profile, t.Model, dir
-			// A native Pi move keeps HarnessSession and Resumable: the new model
-			// resumes the same session, and the turn's own account selection
-			// gives the target provider's active account home.
-			if !native {
+			switch {
+			case native:
+				// A native Pi move keeps HarnessSession and Resumable: the new model
+				// resumes the same session, and the turn's own account selection
+				// gives the target provider's active account home.
+				t.Source = sourceNative
+			case convert:
+				t.ConvertedSession = convertedID
+				t.Source = sourceConverted
+				t.Reason = "converted the Pi session to Claude Code session " + convertedID
+				meta.HarnessSession, meta.Resumable = convertedID, true
+			default:
+				if attemptedConvert {
+					t.Source, t.Reason = "transcript", conversionReason
+				} else if t.Source == "" {
+					t.Source = "transcript"
+				}
 				meta.HarnessSession, meta.Resumable = "", harness.Resumable(chosen)
+			}
+			// A harness change must not keep the old harness's runtime pin; the
+			// next turn refuses a pin whose native harness differs. Clearing it
+			// here also covers a profile change that crosses harnesses (D-109).
+			if chosen.Harness != previousHarness {
+				meta.RuntimePin = nil
 			}
 			t.Handoff = prompt // durable, so a dead worker can restart before turn creation
 			return nil
@@ -748,17 +819,21 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if m.store().lockHeld(id) {
 				return false, nil
 			}
-			if t.Source == sourceNative && turn.Status == TurnError && !m.transferHasOutput(id, turn) {
-				// Pi keeps the session file but cannot always resume it on the
-				// target model: a failed first launch can leave no file, and a
-				// history that no longer fits the new window can fail both its
-				// compaction and the continuation. The fresh conversation is
-				// the bounded fallback, and it runs once: its own failure fails
+			if (t.Source == sourceNative || t.Source == sourceConverted) && turn.Status == TurnError && !m.transferHasOutput(id, turn) {
+				// The resumed session may be missing or unusable on the target
+				// model, and a converted file may not load. The fresh conversation
+				// is the bounded fallback, and it runs once: its own failure fails
 				// the move as before.
+				converted := t.Source == sourceConverted
 				err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
 					t.Phase, t.Turn, t.StartupDeadline = "stopping", 0, time.Time{}
 					t.Source = "transcript"
-					t.Reason = "Pi could not resume the session; using a fresh conversation: " + clipped(turn.Error, 300)
+					if converted {
+						t.ConvertedSession = ""
+						t.Reason = "the converted Claude session did not load; using a written handoff: " + clipped(turn.Error, 300)
+					} else {
+						t.Reason = "Pi could not resume the session; using a fresh conversation: " + clipped(turn.Error, 300)
+					}
 					return nil
 				})
 				return false, err

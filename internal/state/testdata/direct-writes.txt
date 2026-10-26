@@ -192,6 +192,7 @@ not-state internal/runstore/runstore.go Run.FinishWorkflow 1 # a sub-workflow's 
 not-state internal/runstore/runstore.go Run.StartWorkflow 1 # a sub-workflow's script.js, a blob written once
 not-state internal/runstore/runstore.go Run.recordDirs 1 # removes a directory list (a log) that a write left broken
 not-state internal/runstore/runstore.go create 1 # script.js, a blob written once
+not-state internal/sessionconv/claude.go WriteClaude 1 # creates the target harness's project folder; the session transcript inside is that harness's append-only conversation log, not shared Dyna state
 not-state internal/sessionlife/lifecycle.go WithPublication 1 # a non-blocking flock that serializes one session's publication; a crash frees it, a row could not
 not-state internal/settings/settings.go writeAtomic 1 # settings.json is hand-edited config, item 20
 not-state internal/shells/events.go Store.Notify 3 # a change nudge file for the room watch (#1399), created and removed at once; goes when the bus carries shell events (item 16)
