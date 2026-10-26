@@ -61,7 +61,8 @@ func TestKillSparesProcessesOfKeptJobs(t *testing.T) {
 	if err := worker.Wait(); err == nil {
 		t.Fatal("worker survived")
 	}
-	if err := syscall.Kill(kept.Process.Pid, 0); err != nil {
-		t.Fatalf("kept job process was killed: %v", err)
+	// Signal 0 succeeds for an unreaped zombie, so read the state instead.
+	if st, ok := readStat(kept.Process.Pid); !ok || st.state == 'Z' {
+		t.Fatalf("kept job process was killed: %+v, found=%v", st, ok)
 	}
 }
