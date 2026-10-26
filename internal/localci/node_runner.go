@@ -546,13 +546,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					writer = io.MultiWriter(&output, blob)
 				}
 				scopeName := "dyna-ci-" + runID + "-" + string(check.id)
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, scopeName, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
-				// The wrapper cleans its own process group, but a descendant that
-				// calls setsid leaves it, and such a daemon can hold the check's
-				// output open and keep an SSH transport up. The scope is the one
-				// boundary that follows every descendant, so the node kills what is
-				// left in it once the check's command has returned.
-				r.releaseScope(control, node, scopeName)
+				checkScope := scopeName
+				if check.host {
+					// A host check runs its command in its own scope from inside
+					// the wrapper, so the wrapper stays outside it and can kill
+					// what is left there before the transport waits on output.
+					checkScope = ""
+				}
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control)))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1014,21 +1015,6 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 // or the next check's slot.
 const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
 
-// releaseScope kills whatever a check left behind in its systemd scope on the
-// node: the scope is the only boundary that follows a descendant which starts
-// its own session or process group. It runs after the check's command returns,
-// so only leftovers can be hit. A node without user systemd answers nothing,
-// and a failed cleanup never changes the check's result.
-func (r Runner) releaseScope(ctx context.Context, node Node, scope string) {
-	if scope == "" {
-		return
-	}
-	script := "systemctl --user kill --signal=KILL --kill-whom=all " + shellquote.Quote(scope+".scope") + " >/dev/null 2>&1 || true"
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	defer cancel()
-	_ = r.nodeCommandScoped(cleanupCtx, io.Discard, io.Discard, "", defaultScopeLimits, script)
-}
-
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
@@ -1044,7 +1030,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int, noExpand bool) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1089,8 +1075,28 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		// The check and everything it starts also gets no slot lock: the wrapper
 		// holds fd 9, and a daemon that leaves even the group (sccache does)
 		// would otherwise keep the slot for good.
-		setup += fmt.Sprintf("check_entered=1; check_status=0; timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
-		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + killGroupLeftovers + "; ( exit $check_status )"
+		// The wrapper stays outside the check's scope: it starts the command
+		// inside it, and once the command returns it kills what is left in the
+		// scope, so a descendant that started its own session cannot hold the
+		// output pipe and keep the transport up.
+		scopeArgs := []string{"--user", "--scope", "--quiet"}
+		if noExpand {
+			scopeArgs = append(scopeArgs, systemdver.NoExpandFlag)
+		}
+		limits := check.resources.scope(true)
+		scopeArgs = append(scopeArgs, "--unit", name,
+			"-p", "CPUQuota="+strconv.Itoa(limits.CPUs*100)+"%",
+			"-p", "MemoryMax="+systemdMemory(limits.MemoryMiB),
+			"-p", "TasksMax="+strconv.Itoa(limits.TasksMax),
+			"--", "nice", "-n", "10")
+		scope := "systemd-run"
+		for _, arg := range scopeArgs {
+			scope += " " + q(arg)
+		}
+		release := "systemctl --user kill --signal=KILL --kill-whom=all " + q(name+".scope") + " >/dev/null 2>&1 || true; " +
+			"systemctl --user reset-failed " + q(name+".scope") + " >/dev/null 2>&1 || true; "
+		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
+		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if node.SSH == "" {
