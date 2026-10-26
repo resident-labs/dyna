@@ -40,4 +40,12 @@ func TestCheckoutOfRoomAcceptsARegisteredRepository(t *testing.T) {
 	if err := CheckoutOfRoom(ctx, rec, other); err == nil {
 		t.Fatal("an unregistered repository was accepted")
 	}
+	// A registered repository still matches when the primary is missing or unset.
+	gone := filepath.Join(t.TempDir(), "gone")
+	for _, primary := range []string{gone, ""} {
+		rec := room.Record{Name: "alpha", Repo: primary, ExtraRepos: []string{sidecar}}
+		if err := CheckoutOfRoom(ctx, rec, sidecar); err != nil {
+			t.Fatalf("primary %q hid a registered repository: %v", primary, err)
+		}
+	}
 }
