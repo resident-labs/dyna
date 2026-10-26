@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"dyna-agent/internal/localci"
-	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/textutil"
 )
 
 // CIVerdict is the merge gate's reading of a commit's CI: it proves the commit,
