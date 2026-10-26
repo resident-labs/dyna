@@ -641,3 +641,45 @@ func mustAttach(t *testing.T, host Host, launch Launch) Session {
 	}
 	return s
 }
+
+// A host unloads a child only when it has no turn and has been idle long
+// enough; a turn that attaches after the unload starts a fresh child.
+func TestLocalHostUnloadIdleChecksTurnAndIdleTime(t *testing.T) {
+	clock := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	hostNow = func() time.Time { return clock }
+	defer func() { hostNow = time.Now }()
+	host := newLocalHost()
+	pids, refs := &pidRecorder{}, &refRecorder{}
+	launch := childLaunch("echo", "unload", "f1", pids, refs)
+	s, err := host.Session(context.Background(), launch)
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	id := launch.id()
+	clock = clock.Add(time.Hour)
+	if host.unloadIdle(id, 5*time.Minute) || len(host.idleSessions()) != 0 {
+		t.Fatal("a session with a turn attached was listed or unloaded")
+	}
+	s.Detach(DetachIdle)
+	if host.unloadIdle(id, 5*time.Minute) {
+		t.Fatal("a session that just lost its turn was unloaded")
+	}
+	clock = clock.Add(6 * time.Minute)
+	listed := host.idleSessions()
+	if len(listed) != 1 || listed[0].Idle != 6*time.Minute || listed[0].Caller != "unload" {
+		t.Fatalf("listed %+v", listed)
+	}
+	first := s.(*localSession).last
+	if !host.unloadIdle(id, 5*time.Minute) {
+		t.Fatal("an idle session was not unloaded")
+	}
+	waitClosed(t, first.exited, "unload")
+	s2, err := host.Session(context.Background(), launch)
+	if err != nil {
+		t.Fatalf("session after unload: %v", err)
+	}
+	defer s2.Close()
+	if got := roundTrip(t, s2, "again"); got != "got:again" || len(pids.all()) != 2 {
+		t.Fatalf("answer %q, spawns %v", got, pids.all())
+	}
+}
