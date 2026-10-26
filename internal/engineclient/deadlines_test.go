@@ -202,40 +202,61 @@ func TestCutThenRefusedSocketWaitsWithBackoff(t *testing.T) {
 	}
 }
 
-// D-275: AddGoal timed out but the engine created the goal. The client goes
-// again once with the same request ID, and the engine answers with the goal.
-func TestLateAddGoalRepeatsOnceWithTheSameRequestID(t *testing.T) {
-	engineclient.SetDeadlines(t, time.Second, 50*time.Millisecond)
-	var calls atomic.Int32
-	bound, err := websvc.Bind([]websvc.Binding{{Name: "AddGoal", Access: websvc.Read, Scope: websvc.ScopeRead,
-		Method: func(ctx context.Context) (string, error) {
-			if calls.Add(1) == 1 {
-				<-ctx.Done()
-				return "", ctx.Err()
-			}
-			return "g1", nil
-		}}})
+// lateEngine serves AddGoal on a socket. It creates a goal once per request ID,
+// like the engine's apply-once wrapper, and holds the first send until the
+// client gives up on it. The client deadline is 20 ms.
+func lateEngine(t *testing.T, holdEvery bool) (path string, ids func() []string, created func() int) {
+	t.Helper()
+	engineclient.SetDeadlines(t, time.Second, 20*time.Millisecond)
+	path = filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	enginetest.Serve(t, t.TempDir(), bound)
+	var mu sync.Mutex
+	var seen []string
+	made := map[string]bool{}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Dyna-Request")
+		mu.Lock()
+		seen = append(seen, id)
+		first := len(seen) == 1
+		made[id] = true
+		mu.Unlock()
+		if first || holdEvery {
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte(`"g1"`))
+	})}
+	t.Cleanup(func() { _ = server.Close() })
+	go func() { _ = server.Serve(listener) }()
+	return path, func() []string { mu.Lock(); defer mu.Unlock(); return slices.Clone(seen) },
+		func() int { mu.Lock(); defer mu.Unlock(); return len(made) }
+}
+
+// D-275: AddGoal was late but the engine created the goal. The client goes again
+// once with the same request ID, so the engine creates one goal and answers.
+func TestLateAddGoalRepeatsOnceWithTheSameRequestID(t *testing.T) {
+	path, ids, created := lateEngine(t, false)
 	var reply string
-	if err := engineclient.New("").Call(t.Context(), "AddGoal", nil, &reply); err != nil || reply != "g1" {
+	if err := engineclient.New(path, engineclient.Notices(nil)).Call(t.Context(), "AddGoal", nil, &reply); err != nil || reply != "g1" {
 		t.Fatalf("call = %q, %v; want g1 after one repeat", reply, err)
+	}
+	if got := ids(); len(got) != 2 || got[0] == "" || got[0] != got[1] || created() != 1 {
+		t.Fatalf("request IDs %q, goals created %d; want two sends of one ID and one goal", got, created())
 	}
 }
 
-// A creating call that is late twice says the engine may still apply it.
+// A creating call that is late twice stops after one repeat and says the engine
+// may still apply it.
 func TestLateAddGoalTwiceSaysTheEngineMayStillApplyIt(t *testing.T) {
-	engineclient.SetDeadlines(t, time.Second, 50*time.Millisecond)
-	bound, err := websvc.Bind([]websvc.Binding{{Name: "AddGoal", Access: websvc.Read, Scope: websvc.ScopeRead,
-		Method: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	enginetest.Serve(t, t.TempDir(), bound)
-	err = engineclient.New("").Call(t.Context(), "AddGoal", nil, nil)
+	path, ids, _ := lateEngine(t, true)
+	err := engineclient.New(path, engineclient.Notices(nil)).Call(t.Context(), "AddGoal", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "engine did not answer AddGoal") || !strings.Contains(err.Error(), "may still apply it") {
 		t.Fatalf("err = %v", err)
+	}
+	if n := len(ids()); n != 2 {
+		t.Fatalf("sends = %d, want 2", n)
 	}
 }
