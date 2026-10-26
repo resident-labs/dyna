@@ -9,18 +9,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// These tests launch a real Chromium per page. A hosted CI runner has two to
-// four cores, and ten browsers starting at once starve each other until the
-// browser start alone passes Inspect's 15 second budget: that is how they timed
-// out. They run one at a time instead, and a test never waits inside its own
-// body, so its measured time is the work it does. One inspection takes about
-// half a second that way, well inside the per-test budget.
+// These tests share one Chromium. Starting a browser per page made ten of them
+// compete for a two-core CI runner until the start alone passed Inspect's 15
+// second budget. The shared browser starts once, outside any page's budget, and
+// each page then gets its own 15 seconds for the work it does.
 func TestInspect(t *testing.T) {
 	fixtures := []struct {
 		name, html string
@@ -110,6 +110,19 @@ func webpSize(t *testing.T, b []byte) (int, int) {
 	return 0, 0
 }
 
+// A page that fails every check must leave nothing behind for the next page.
+func TestInspectSharedBrowserIsolatesPages(t *testing.T) {
+	bad := inspectPage(t, []byte(`<body style="color:#777;background:#888">x<img src="https://example.com/a.png"><script>console.error("x")</script></body>`), "", false)
+	if bad.Checks[1].Status != "fail" || bad.Checks[4].Status != "fail" {
+		t.Fatalf("setup page did not fail: %+v", bad.Checks)
+	}
+	for _, c := range inspectPage(t, []byte(`<h1>Hello</h1>`), "", false).Checks {
+		if c.Status != "pass" {
+			t.Errorf("state leaked from the previous page: %+v", c)
+		}
+	}
+}
+
 func TestInspectCSP(t *testing.T) {
 	r := inspectPage(t, []byte(`<p>Hello</p><img src="https://example.com/a.png"><script>console.error("must be blocked")</script>`), "default-src 'none'; style-src 'unsafe-inline'", false)
 	if r.Checks[1].Status != "pass" {
@@ -186,17 +199,38 @@ func TestInspectBlocksWebSocket(t *testing.T) {
 	}
 }
 
+var (
+	sharedOnce    sync.Once
+	sharedBrowser *browser
+	sharedErr     error
+	sharedCancel  context.CancelFunc
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if sharedBrowser != nil {
+		sharedBrowser.close(context.Background())
+		sharedCancel()
+	}
+	os.Exit(code)
+}
+
 func inspectPage(t *testing.T, doc []byte, csp string, allowNet bool) Result {
 	t.Helper()
-	// Inspect allows itself 15s; the outer deadline stays above it, so a slow
-	// browser on a two-core CI runner reports its own error instead of a bare
-	// context deadline.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	r, err := Inspect(ctx, doc, csp, allowNet)
-	if errors.Is(err, ErrNoBrowser) {
+	sharedOnce.Do(func() {
+		var ctx context.Context
+		ctx, sharedCancel = context.WithCancel(context.Background())
+		sharedBrowser, sharedErr = launchBrowser(ctx)
+	})
+	if errors.Is(sharedErr, ErrNoBrowser) {
 		t.Skip("Chromium is not installed")
 	}
+	if sharedErr != nil {
+		t.Fatal(sharedErr)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	r, err := sharedBrowser.inspect(ctx, doc, csp, allowNet)
 	if err != nil {
 		t.Fatal(err)
 	}
