@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computersText, diskText, loadText, machinesSub, memoryPct, reasonText, roleLabel, runtimeText, statusText, summaryText, systemText, versionText } from './machines.ts'
+import { computersText, diskText, loadText, machinesSub, memoryPct, reasonText, roleLabel, runtimeText, statusText, summaryText, systemText, versionText, editScope } from './machines.ts'
 import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
@@ -88,4 +88,26 @@ test('the Dyna row keeps a version short and leaves the whole string to its titl
   assert.equal(versionText('dyna v0.4.3-0.20261004142815-69873b466650'), 'v0.4.3 (dev)')
   assert.equal(versionText('dyna 0.9.412'), '0.9.412', 'the row already says Dyna')
   assert.equal(versionText('dev+707043d01018'), 'dev+707043d01018', 'a build version shows as it is')
+})
+
+test('adding to a CI machine\'s suite list trims, keeps one copy and sorts', () => {
+  assert.deepEqual(editScope([], { add: ' unit ' }), ['unit'])
+  assert.deepEqual(editScope(['web'], { add: 'unit' }), ['unit', 'web'])
+  assert.equal(editScope(['unit'], { add: 'unit' }), null, 'a repeat changes nothing')
+  assert.equal(editScope(['unit'], { add: '   ' }), null, 'an empty value changes nothing')
+})
+
+test('removing the last room or suite leaves an empty list, which means every one', () => {
+  assert.deepEqual(editScope(['a'], { remove: 'a' }), [])
+  assert.deepEqual(editScope(['a', 'b'], { remove: 'a' }), ['b'])
+  assert.equal(editScope(['a'], { remove: 'zzz' }), null, 'a value the list lacks changes nothing')
+})
+
+test('the Machine page shows Rooms and Suites only for a CI machine, and read-only unless the caller is the owner', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('./MachinePage.svelte', import.meta.url), 'utf8')
+  const ci = src.slice(src.indexOf("{#if machine.roles.includes('ci')}\n          <Row dense text=\"Rooms\">"))
+  assert.ok(ci.startsWith("{#if machine.roles.includes('ci')}"), 'the Rooms row sits inside the CI-role block')
+  assert.ok(ci.indexOf('text="Suites"') < ci.indexOf('text="Host checks"'), 'Suites sits in the same block, before host checks')
+  assert.equal(src.match(/readOnly=\{!owner\}/g)?.length, 2, 'both lists go read-only for a caller who is not the owner')
 })

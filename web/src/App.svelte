@@ -1843,7 +1843,7 @@
       <div class="center" inert={narrow && reviewOpen} in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
         <PageNotices {dropping} {dropTarget} {engineStatus} {health} {update} {updateHidden} {roomId} {loadError} {bundleReloadPending} onupdatehidden={() => (updateHidden = true)} onbundlereload={() => { if (bundleReload.retry(true)) bundleReloadPending = false }} />
         {#if !roomId && machineId}
-          <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
+          <MachinePage machine={machineDetail} {rooms} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
         {:else if !roomId}
           <Home bind:this={home} {rooms} {roomsLoaded} {update} onnewroom={() => openNewRoom()} onroom={selectRoom} onaccount={(id: string) => openSettings('accounts', false, '', id)} onsettings={(pane: string) => openSettings(pane)} />
         {:else if !room}

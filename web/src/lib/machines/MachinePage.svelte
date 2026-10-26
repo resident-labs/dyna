@@ -10,16 +10,23 @@
   import Avatar from '../ui/Avatar.svelte'
   import Switch from '../ui/Switch.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
+  import ScopeList from './ScopeList.svelte'
+  import type { Room } from '../api/room.ts'
   import SystemLoadCard from '../system/SystemLoadCard.svelte'
   import { pollLoad } from '../system/systemLoad.ts'
-  import { ago } from '../ui/format.ts'
+  import { ago, roomLabel } from '../ui/format.ts'
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
   import { ciRunDetail, ciRunText, computersText, count, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
-  let { machine, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
+  let { machine, rooms = [], owner = true, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
+    // rooms are the rooms a CI machine can be limited to. owner is whether the
+    // caller is the owner: only the owner changes the room and suite lists, so
+    // anyone else sees them read-only.
+    rooms?: Pick<Room, 'id' | 'name' | 'displayName'>[]
+    owner?: boolean
     error?: string
     busy?: boolean
     probing?: boolean
@@ -45,6 +52,7 @@
   let memory = $derived(remote ? memoryPct(remote) : null)
 
   const ROLES: MachineRole[] = ['engine', 'agents', 'ci']
+  let roomOptions = $derived(rooms.map((r) => ({ value: r.id, label: roomLabel(r) })).sort((a, b) => a.label.localeCompare(b.label)))
 
   function toggleRole(role: MachineRole) {
     if (!machine) return
@@ -237,6 +245,20 @@
           {#snippet trail()}<input class="num" type="number" min="0" step="1" aria-label="CI slots" value={machine.ciSlots} disabled={busy} onchange={setSlots} />{/snippet}
         </Row>
         {#if machine.roles.includes('ci')}
+          <Row dense text="Rooms">
+            {#snippet meta()}
+              <span class="note">Local CI runs only for these rooms. None chosen means every room.</span>
+              {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
+            {/snippet}
+            {#snippet trail()}<ScopeList label="Rooms" values={machine.rooms ?? []} options={roomOptions} everyText="Every room" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ rooms: list })} />{/snippet}
+          </Row>
+          <Row dense text="Suites">
+            {#snippet meta()}
+              <span class="note">Local CI takes only these suites. None chosen means every suite.</span>
+              {#if !owner}<span class="note">Only the owner can change this.</span>{/if}
+            {/snippet}
+            {#snippet trail()}<ScopeList label="Suites" values={machine.suites ?? []} everyText="Every suite" placeholder="Suite name" readOnly={!owner} {busy} onchange={(list: string[]) => onsave({ suites: list })} />{/snippet}
+          </Row>
           <Row dense text="Host checks">
             {#snippet meta()}
               <span class="note">Off by default. Allow only repositories you trust to run outside containers.</span>
