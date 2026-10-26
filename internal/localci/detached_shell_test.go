@@ -41,7 +41,13 @@ func startOnShell(t *testing.T, stubs, detached, script string, env ...string) e
 	// The host check kills the rest of its process group, so the script runs in a
 	// group of its own and never reaches the test binary.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(append(os.Environ(), "PATH="+stubs+":"+os.Getenv("PATH")), env...)
+	// The start script asks the login shell for a PATH. This one answers with the
+	// PATH it was given, so the host's own profiles never change the stubs.
+	shell := filepath.Join(stubs, "login-shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf '%s\\n' \"$PATH\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Env = append(append(os.Environ(), "PATH="+stubs+":"+os.Getenv("PATH"), "SHELL="+shell), env...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
@@ -264,9 +270,10 @@ func TestDetachedCheckGetsTheLoginShellPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(loginBin, "owner-tool"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// A login shell that prints a banner before it prints the PATH.
+	// A login shell that prints a banner before it prints its PATH. It ignores
+	// its arguments, so the host's profiles never change the PATH it reports.
 	shell := filepath.Join(dir, "login-shell")
-	if err := os.WriteFile(shell, []byte("#!/bin/sh\necho 'Welcome to the node'\nPATH="+loginBin+":$PATH\nexec /bin/sh \"$@\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\necho 'Welcome to the node'\nprintf '%s\\n' \""+loginBin+":$PATH\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// This systemd-run starts the unit with only the PATH the options give, as a
