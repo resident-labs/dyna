@@ -48,6 +48,31 @@ export interface RunAgent {
   session?: string
 }
 
+// RunCommand is roomsvc.RunCommand: one run() command call. Its id counts
+// commands, not agents, so an agent 1 and a command 1 can both exist.
+export interface RunCommand {
+  id: number
+  label: string
+  phase?: string
+  // lane and stage are what the script gave its phase; both are absent when it gave none.
+  lane?: string
+  stage?: string
+  status: string // running|ok|error|unknown
+  started?: number
+  // command is the command line the script asked run() to execute.
+  command?: string
+  // shell is the managed shell that ran it.
+  shell?: string
+  durMs?: number
+  // exitCode is absent until the command ended.
+  exitCode?: number
+  cached?: boolean
+  preview?: string
+  // tail is the last lines of the command's output.
+  tail?: string
+  error?: string
+}
+
 // RunLog is roomsvc.RunLog.
 export interface RunLog {
   ts: number
@@ -58,9 +83,13 @@ export interface RunLog {
 export interface RunDetail {
   run: RunSummary
   agents: RunAgent[]
+  commands: RunCommand[]
   agentTotal: number
   agentRunning: number
   agentFailed: number
+  commandTotal: number
+  commandRunning: number
+  commandFailed: number
   phases?: string[]
   logs: RunLog[]
   resultSummary?: string

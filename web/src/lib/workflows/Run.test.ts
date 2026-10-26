@@ -31,7 +31,7 @@ test('phases that share stages show a lanes grid and a failed agent in the atten
   const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
   assert.match(body, /aria-label="Progress by lane and stage"/)
   assert.match(body, /reviewer failed in BS review/)
-  assert.match(body, /Tap a cell to see its agents/)
+  assert.match(body, /Tap a cell to see its steps/)
   assert.doesNotMatch(body, /class="agent /, 'agents stay folded until a cell is opened')
 })
 
@@ -135,4 +135,60 @@ test('a running agent card is one button that folds it; Session is not in the cl
   assert.match(body, /<button type="button" class="head action[^"]*" aria-expanded="false" aria-label="Show the journal of new">/)
   assert.doesNotMatch(body, /aria-label="[^"]*of bad"/, 'a failed agent has no result to open')
   assert.doesNotMatch(body, /<button class="session[^"]*"[^>]*>Session</, 'the Session button moved into the open body')
+})
+
+// run() commands share the run view with agents: they place in the lanes grid
+// like agents, and the grid marks their cells; their cards read as commands.
+test('commands place in lane cells, which mark them, and failures draw attention', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const detail = {
+    run: { id: 'wf_a', name: 'bridge', status: 'running', startedAt: new Date().toISOString() },
+    agents: [
+      { id: 1, label: 'scan', phase: 'CH prepare', status: 'ok', started: 1000 },
+      { id: 2, label: 'rev', phase: 'CH review', status: 'ok', started: 4000 },
+    ],
+    commands: [
+      { id: 1, label: 'make', phase: 'CH prepare', status: 'ok', started: 2000, command: 'make test', durMs: 2340, exitCode: 0, tail: 'PASS\nok' },
+      { id: 2, label: 'up', phase: 'BS prepare', status: 'error', started: 3000, command: 'up --unit KG', durMs: 500, exitCode: 3, error: 'exit status 3' },
+    ],
+    agentTotal: 2, agentRunning: 0, agentFailed: 0,
+    commandTotal: 2, commandRunning: 0, commandFailed: 1, logs: [], phases: [],
+  }
+  const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, /aria-label="CH prepare: 2 of 2 done, 1 command"/)
+  assert.match(body, /aria-label="BS prepare: 1 of 1 done, 1 command"/)
+  assert.match(body, /title="run\(\) commands">\$1<\/span>/)
+  assert.match(body, /Commands<\/dt><dd[^>]*>2<\/dd>/)
+  assert.match(body, /up failed in BS prepare/)
+  assert.doesNotMatch(body, /class="agent /, 'cells stay folded until picked')
+})
+
+test('a command card shows the command line, exit code and log tail', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const detail = {
+    run: { id: 'wf_b', name: 'bridge', status: 'ok', startedAt: new Date().toISOString() },
+    agents: [{ id: 7, label: 'scan', phase: 'Build', status: 'ok', started: 1000, durMs: 9000 }],
+    commands: [
+      { id: 1, label: 'make', phase: 'Build', status: 'ok', started: 2000, command: 'make test', durMs: 2340, exitCode: 0, tail: 'PASS\nok' },
+      { id: 2, label: 'up', phase: 'Build', status: 'error', started: 3000, command: 'up --unit KG', durMs: 500, exitCode: 3, error: 'exit status 3' },
+    ],
+    agentTotal: 1, agentRunning: 0, agentFailed: 0,
+    commandTotal: 2, commandRunning: 0, commandFailed: 1, logs: [], phases: [],
+  }
+  const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, /1 agent · 2 commands/)
+  assert.match(body, /class="agent ok command[^"]*"/)
+  assert.match(body, /class="agent error command[^"]*"/)
+  assert.match(body, /<span class="pill[^"]*">\$<\/span>/, 'a command card carries the $ marker, not a profile')
+  assert.doesNotMatch(body, /<span class="pill">sonnet<\/span>/)
+  assert.match(body, /<p class="line mono cmdline[^"]*">\$ make test<\/p>/)
+  assert.match(body, /<span class="pill[^"]*">exit 0<\/span>/)
+  assert.match(body, /<span class="pill[^"]* bad">exit 3<\/span>/)
+  assert.match(body, /<p class="line bad[^"]*">exit status 3<\/p>/)
+  assert.match(body, /<pre class="tail mono[^"]*">PASS\nok<\/pre>/)
+  assert.doesNotMatch(body, /aria-label="Show the (result|journal) of (make|up)"/, 'a command has no worker result to open')
 })
