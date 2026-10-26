@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -43,8 +42,10 @@ func NewCommand() *cobra.Command {
 
 func store() machines.Store { return machines.Store{} }
 
-var saveMachine = func(ctx context.Context, id string, patch websvc.MachinePatch) error {
-	return engineclient.New("").Call(ctx, "SaveMachine", []any{id, patch}, nil)
+var saveMachine = func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
+	var detail websvc.MachineDetail
+	err := engineclient.New("").Call(ctx, "SaveMachine", []any{ref, patch}, &detail)
+	return detail, err
 }
 
 // prober is the prober the CLI saves through. It reads the same disk floor as
@@ -302,13 +303,6 @@ func addCommand() *cobra.Command {
 			"role.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			s := store()
-			switch _, err := s.Get(c.Context(), args[0]); {
-			case err == nil:
-				return fmt.Errorf("machine %s exists; use dyna machine edit", args[0])
-			case !errors.Is(err, os.ErrNotExist):
-				return err
-			}
 			roles, err := parseRoles(roleNames)
 			if err != nil {
 				return err
@@ -319,12 +313,16 @@ func addCommand() *cobra.Command {
 			if c.Flags().Changed("ci-slots") && slots > 0 && !slices.Contains(roles, machines.RoleCI) {
 				roles = append(roles, machines.RoleCI)
 			}
-			m := machines.Machine{Name: args[0], Roles: roles, SSH: ssh, CISlots: slots, Enabled: true}
-			saved, err := s.Save(c.Context(), m)
+			enabled := true
+			patch := websvc.MachinePatch{Create: true, Enabled: &enabled, Roles: &roles, SSH: &ssh}
+			if slices.Contains(roles, machines.RoleCI) {
+				patch.CISlots = &slots
+			}
+			saved, err := saveMachine(c.Context(), args[0], patch)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", saved.Name, saved.RoleNames())
+			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", saved.Name, roleList(saved.Roles))
 			return nil
 		},
 	}
@@ -350,76 +348,62 @@ func editCommand() *cobra.Command {
 			"that gets the ci role without a slot count gets one slot.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			s := store()
-			m, err := s.Get(c.Context(), args[0])
+			current, err := store().Get(c.Context(), args[0])
 			if err != nil {
 				return err
 			}
+			patch := websvc.MachinePatch{}
 			changed := false
+			roles := append([]machines.Role(nil), current.Roles...)
 			if c.Flags().Changed("rename") {
-				if err := machines.ValidateName(rename); err != nil {
-					return err
-				}
-				m.Name, changed = rename, true
+				patch.Name, changed = &rename, true
 			}
 			if c.Flags().Changed("ssh") {
-				m.SSH, changed = ssh, true
+				patch.SSH, changed = &ssh, true
 			}
 			if c.Flags().Changed("role") {
-				if m.Roles, err = parseRoles(roleNames); err != nil {
+				if roles, err = parseRoles(roleNames); err != nil {
 					return err
 				}
-				changed = true
+				patch.Roles, changed = &roles, true
 			}
 			if c.Flags().Changed("ci-slots") {
-				m.CISlots, changed = slots, true
-				if slots > 0 && !m.HasRole(machines.RoleCI) {
-					m.Roles = append(m.Roles, machines.RoleCI)
+				patch.CISlots, changed = &slots, true
+				// A positive slot count gives the machine the ci role it needs
+				// to hold those slots.
+				if slots > 0 && !slices.Contains(roles, machines.RoleCI) {
+					roles = append(roles, machines.RoleCI)
+					patch.Roles = &roles
 				}
 			}
-			if enable {
-				m.Enabled, changed = true, true
-			}
-			if disable {
-				m.Enabled, changed = false, true
+			if enable || disable {
+				patch.Enabled, changed = &enable, true
 			}
 			if c.Flags().Changed("rooms") {
-				if m.Rooms, err = resolveRooms(rooms); err != nil {
+				list, err := resolveRooms(rooms)
+				if err != nil {
 					return err
 				}
-				changed = true
+				patch.Rooms, changed = &list, true
 			}
 			if c.Flags().Changed("suites") {
-				m.Suites = parseSuites(suites)
-				changed = true
-			}
-			if !changed && !allowHostChecks && !disallowHostChecks {
-				return fmt.Errorf("edit %s: give a machine, host-check, room or suite setting to change", args[0])
-			}
-			if len(m.Rooms) > 0 && !m.HasRole(machines.RoleCI) && c.Flags().Changed("rooms") {
-				return fmt.Errorf("a room list requires the ci role")
-			}
-			if len(m.Suites) > 0 && !m.HasRole(machines.RoleCI) && c.Flags().Changed("suites") {
-				return fmt.Errorf("a suite list requires the ci role")
-			}
-			if allowHostChecks && !m.HasRole(machines.RoleCI) {
-				return fmt.Errorf("host checks require the ci role")
-			}
-			if m.HasRole(machines.RoleCI) && m.CISlots < 1 {
-				m.CISlots = 1
-			}
-			// The registry goes first, so a machine that gains the ci role in this
-			// command can take the host-check permission too. The engine owns that
-			// permission, and a registry save never writes it.
-			if _, err := s.Save(c.Context(), m); err != nil {
-				return err
+				list := parseSuites(suites)
+				patch.Suites, changed = &list, true
 			}
 			if allowHostChecks || disallowHostChecks {
-				if err := saveMachine(c.Context(), m.ID, websvc.MachinePatch{AllowHostChecks: &allowHostChecks}); err != nil {
-					return err
-				}
+				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", m.Name, m.RoleNames())
+			if !changed {
+				return fmt.Errorf("edit %s: give a machine, host-check, room or suite setting to change", args[0])
+			}
+			// The engine owns every machine field and its rules: one patch covers
+			// the registry and the host-check permission, so a refused change
+			// writes nothing.
+			saved, err := saveMachine(c.Context(), args[0], patch)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Saved machine %s with roles %s.\n", saved.Name, roleList(saved.Roles))
 			return nil
 		},
 	}
@@ -451,6 +435,15 @@ func removeCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// roleList lists roles as the saved message spells them.
+func roleList(roles []machines.Role) string {
+	names := make([]string, len(roles))
+	for i, role := range roles {
+		names[i] = string(role)
+	}
+	return strings.Join(names, ", ")
 }
 
 func parseRoles(names []string) ([]machines.Role, error) {
