@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,8 +18,9 @@ import (
 
 // These tests share one Chromium. Starting a browser per page made ten of them
 // compete for a two-core CI runner until the start alone passed Inspect's 15
-// second budget. The shared browser starts once, outside any page's budget, and
-// each page then gets its own 15 seconds for the work it does.
+// second budget. TestMain starts the shared browser and renders a warm-up page,
+// outside any page's budget, and each page then gets its own 15 seconds for the
+// work it does.
 func TestInspect(t *testing.T) {
 	fixtures := []struct {
 		name, html string
@@ -200,28 +200,34 @@ func TestInspectBlocksWebSocket(t *testing.T) {
 }
 
 var (
-	sharedOnce    sync.Once
 	sharedBrowser *browser
 	sharedErr     error
 	sharedCancel  context.CancelFunc
 )
 
+// TestMain starts the shared browser and renders a warm-up page. The first page
+// pays for renderer start, font setup and the first screenshot, which took 15
+// seconds on a loaded CI runner. Doing that here keeps it out of every test's
+// budget and time.
 func TestMain(m *testing.M) {
+	var ctx context.Context
+	ctx, sharedCancel = context.WithCancel(context.Background())
+	sharedBrowser, sharedErr = launchBrowser(ctx)
+	if sharedErr == nil {
+		warm, cancel := context.WithTimeout(ctx, time.Minute)
+		_, sharedErr = sharedBrowser.inspect(warm, []byte(`<h1>Warm up</h1><p>Text, color and a screenshot.</p>`), "", false)
+		cancel()
+	}
 	code := m.Run()
 	if sharedBrowser != nil {
 		sharedBrowser.close(context.Background())
-		sharedCancel()
 	}
+	sharedCancel()
 	os.Exit(code)
 }
 
 func inspectPage(t *testing.T, doc []byte, csp string, allowNet bool) Result {
 	t.Helper()
-	sharedOnce.Do(func() {
-		var ctx context.Context
-		ctx, sharedCancel = context.WithCancel(context.Background())
-		sharedBrowser, sharedErr = launchBrowser(ctx)
-	})
 	if errors.Is(sharedErr, ErrNoBrowser) {
 		t.Skip("Chromium is not installed")
 	}
