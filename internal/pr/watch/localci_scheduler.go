@@ -429,11 +429,17 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// A machine that could not run a check proves nothing about the head, so that
 	// run moves to another machine once instead of leaving the head pending for
 	// evidence that will never come.
-	retriedFrom := ""
+	retriedFrom, resumed := "", false
 	if err == nil && s.registeredJobResultComplete(ctx, job, result) {
-		if names := machineFailureRetryFrom(result); names != "" {
-			retriedFrom = names
-		} else {
+		switch savedResultActionFor(result) {
+		case retryOnAnotherMachine:
+			retriedFrom = machineFailureRetryFrom(result)
+		case retryStoppedRun:
+			// Dyna stopped this run, so it proves nothing about the head. The
+			// replacement on the same machine carries Result.Resumed, so the old
+			// failure stays untouched and a retry that never starts is not spent.
+			resumed = true
+		default:
 			// Only a hosted head has GitHub work to resume. A local result needs
 			// no GitHub call: its evidence stays in the local CI records.
 			if job.hosted() {
@@ -504,8 +510,60 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	runs.runs[key] = run
 	active[chosen.Name] += slots
-	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom)
+	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom, resumed)
 	return true, nil
+}
+
+// savedResultAction says what admission does with a saved result that already
+// covers a head.
+type savedResultAction int
+
+const (
+	// settleSavedResult keeps the result: it tested the commit, or Dyna has no
+	// reason to run the head again.
+	settleSavedResult savedResultAction = iota
+	// retryOnAnotherMachine moves a machine-level failure to another machine.
+	retryOnAnotherMachine
+	// retryStoppedRun runs a head again because Dyna itself stopped its run. That
+	// says nothing about the commit, so the same machine may take it.
+	retryStoppedRun
+)
+
+// savedResultActionFor picks what to do with a complete saved result of a head
+// whose local run is the only provider, such as a merge trial.
+func savedResultActionFor(result localci.Result) savedResultAction {
+	if machineFailureRetryFrom(result) != "" {
+		return retryOnAnotherMachine
+	}
+	if stoppedLocalResult(result) && !result.Resumed {
+		return retryStoppedRun
+	}
+	return settleSavedResult
+}
+
+// stoppedLocalResult reports a local result that Dyna itself stopped: an engine
+// stop or a cancelled run. Every check in such a result may carry the cause, so
+// one is enough.
+func stoppedLocalResult(result localci.Result) bool {
+	if !localInfrastructureError(result) {
+		return false
+	}
+	if stoppedCause(result.Cause) {
+		return true
+	}
+	for _, check := range result.Checks {
+		// A group's row is derived from its members, so it has no cause of its own.
+		if !check.Aggregate && stoppedCause(check.Cause) {
+			return true
+		}
+	}
+	return false
+}
+
+// stoppedCause reports a cause that names Dyna stopping the run, not the commit
+// and not the machine.
+func stoppedCause(cause localci.FailureCause) bool {
+	return cause == localci.CauseEngineStop || cause == localci.CauseCancelled
 }
 
 // machineFailureRetryFrom names the machine whose failure made the result, when
@@ -631,7 +689,7 @@ func availableCINodeExcept(nodes []localci.Node, active map[string]int, roomID, 
 	return chosen
 }
 
-func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun, retriedFrom string) {
+func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, plan localCIPlan, repo string, node localci.Node, key string, run *registeredCIRun, retriedFrom string, resumed bool) {
 	// A run that ends on any path has no work left on the node.
 	defer run.markStopped()
 	defer func() {
@@ -694,6 +752,10 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		result.Status = "passed"
 		result.Checks = []localci.SuiteResult{{Suite: localci.SuiteChanges, CheckName: localci.CheckName(localci.SuiteChanges), Node: node.Name, Status: localci.OutcomePassed}}
 	}
+	// A resumed run replaces one Dyna stopped, and says so in its own result, so a
+	// second interruption is bounded where the first was retried. The runner does
+	// not know this, so the marker is set here, before any save or recovery.
+	result.Resumed = resumed
 	if ctx.Err() != nil {
 		// Nothing is left on the node, so a stopping engine does not wait for the
 		// recovery that follows.
