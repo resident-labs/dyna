@@ -23,10 +23,11 @@ hold it back. `dyna computer list` shows "restart pending since <time>" while on
 waits.
 
 A service built before the 10-minute window still refuses for 30 minutes from the
-marker's mtime, and ignores a marker older than its own start. The install stamps the
-marker up to 20 minutes old, never older than that service's start, so a service that
-has run for a while stops refusing after 10 minutes too, and a recently started one
-still refuses, without a restart.
+marker's mtime, and ignores a marker older than its own start. When systemd says that
+service has been active for at least 25 minutes, the install stamps the marker 20
+minutes old, so the service stops refusing after 10 minutes too. A younger service,
+or one whose start is unknown, keeps its 30-minute refusal, because it would otherwise
+ignore the marker. No restart is needed either way.
 
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit
