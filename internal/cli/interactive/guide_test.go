@@ -263,6 +263,15 @@ func TestGuideLinksAndSharedContracts(t *testing.T) {
 	}
 }
 
+func TestWorkflowGuideSaysHowToWatchAndSteerAnAgent(t *testing.T) {
+	doc := topicDocument(t, "workflows")
+	for _, want := range []string{"open its session from its row on the run page", "dyna post @run:<id>/agent:<n>", "shows only the journal and the final result"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("workflow guide misses %q", want)
+		}
+	}
+}
+
 func TestWorkflowGuideStartsWithStructuredParallelExample(t *testing.T) {
 	doc := topicDocument(t, "workflows")
 	first := strings.SplitN(doc, "## Profiles", 2)[0]

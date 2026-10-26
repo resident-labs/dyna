@@ -360,7 +360,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ClearRuns", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Clear},
 		{Name: "ArchiveRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Archive},
 		{Name: "UnarchiveRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Unarchive},
-		{Name: "SteerRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.SteerRun},
 		{Name: "Devices", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.devices.Devices},
 		{Name: "RevokeDevice", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.devices.RevokeDevice},
 		{Name: "SetDeviceScopes", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.devices.SetScopes},

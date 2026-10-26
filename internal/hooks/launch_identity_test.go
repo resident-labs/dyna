@@ -153,7 +153,7 @@ func TestHookFirstSocketCallKeepsItsPrincipal(t *testing.T) {
 		{name: "scheduled", scheduled: true, want: callerid.Identity{Kind: callerid.Owner}},
 		{name: "session-lifecycle", lifecycle: true, actor: authority.Actor{Role: authority.Session, Session: "ses_trigger"}, want: callerid.Identity{Kind: callerid.Owner}},
 		{name: "explicit-session", actor: authority.Actor{Role: authority.Session, Session: "ses_caller"}, want: callerid.Identity{Kind: callerid.Session, Session: "ses_caller"}},
-		{name: "explicit-worker", actor: authority.Actor{Role: authority.Worker, Run: "run_caller", Agent: 3}, want: callerid.Identity{Kind: callerid.Worker, Run: "run_caller", Agent: 3}},
+		{name: "explicit-worker", actor: authority.Actor{Role: authority.Worker, Run: "run_caller"}, want: callerid.Identity{Kind: callerid.Worker, Run: "run_caller"}},
 		{name: "explicit-root", actor: authority.Actor{Role: authority.Root, Session: "ses_root"}, want: callerid.Identity{Kind: callerid.Session, Session: "ses_root"}},
 		{name: "explicit-owner", actor: authority.Actor{Role: authority.Owner}, want: callerid.Identity{Kind: callerid.Owner}},
 	} {

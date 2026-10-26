@@ -224,7 +224,6 @@ export const api = {
   startRun: (ref: string, source: RunSource, input: unknown) => app.StartRun(ref, source, input),
   cancelRun: (id: string) => app.CancelRun(id),
   pauseRun: (id: string, paused: boolean) => app.PauseRun(id, paused),
-  steerRun: (id: string, agent: number, text: string) => app.SteerRun(id, agent, text),
   devices: () => app.Devices(),
   revokeDevice: (kind: string, id: string) => app.RevokeDevice(kind, id),
   setDeviceScopes: (id: string, scopes: string[]) => app.SetDeviceScopes(id, scopes),
