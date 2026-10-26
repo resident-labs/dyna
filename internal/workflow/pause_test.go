@@ -33,7 +33,7 @@ func TestPausedWorkflowResumesOrCancelsBeforeWorkerLaunch(t *testing.T) {
 			})
 			go func() {
 				defer close(finished)
-				_, err := Execute(ctx, Options{
+				_, err := executeTest(ctx, Options{
 					ScriptSrc: `return await agent("SLEEP:0\nRESPOND: ok");`,
 					Store:     mockWorkflowStore(0, 0), WorkDir: workDir,
 					Paused: func() bool {
@@ -110,7 +110,7 @@ func TestCanceledWorkflowDoesNotLaunchAfterPauseCheck(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var launched atomic.Bool
-	_, err := Execute(ctx, Options{
+	_, err := executeTest(ctx, Options{
 		ScriptSrc: `return await agent("RESPOND: ok");`,
 		Store:     mockWorkflowStore(0, 0), WorkDir: t.TempDir(),
 		Paused: func() bool {

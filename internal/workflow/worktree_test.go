@@ -84,7 +84,7 @@ func TestAgentIsolationRequiresWorktreeObject(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Execute(worktreeTestContext(t), Options{ScriptSrc: tc.script, Store: store, WorkDir: t.TempDir()})
+			_, err := executeTest(worktreeTestContext(t), Options{ScriptSrc: tc.script, Store: store, WorkDir: t.TempDir()})
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("Execute() error = %v, want substring %q", err, tc.wantErr)
 			}
@@ -129,7 +129,7 @@ printf done
 	writer.Name, writer.Default, writer.Cost = "worktree-writer", true, 10
 	store := &profile.Store{Profiles: []profile.Profile{writer}}
 
-	if _, err := Execute(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo}); err != nil {
+	if _, err := executeTest(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo}); err != nil {
 		t.Fatal(err)
 	}
 	rootEntries, err := runstore.ReadJournal(run.Meta.ID)
@@ -228,7 +228,7 @@ return {tampered: first.path, trusted: worktrees().find(w => w.label === "implem
 		Name: "mock-worktree", Harness: profile.HarnessMock, Default: true,
 		Taste: 5, Intelligence: 5, Cost: 10,
 	}}}
-	result, err := Execute(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo, WorktreeRetention: settings.WorktreesRetentionChanged})
+	result, err := executeTest(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo, WorktreeRetention: settings.WorktreesRetentionChanged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ printf done
 `)
 	writer.Name, writer.Default, writer.Cost = "writer", true, 10
 	store := &profile.Store{Profiles: []profile.Profile{writer}}
-	if _, err := Execute(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo, WorktreeRetention: settings.WorktreesRetentionChanged}); err != nil {
+	if _, err := executeTest(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, Run: run, WorkDir: repo, WorktreeRetention: settings.WorktreesRetentionChanged}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := runstore.ReadJournal(run.Meta.ID)
@@ -375,7 +375,7 @@ func TestExecuteFallsBackWhenSettingsCannotLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { run.Finish("ok", "", nil) })
-			if _, err := Execute(worktreeTestContext(t), Options{ScriptSrc: `return "ok";`, Store: &profile.Store{}, Run: run}); err != nil {
+			if _, err := executeTest(worktreeTestContext(t), Options{ScriptSrc: `return "ok";`, Store: &profile.Store{}, Run: run}); err != nil {
 				t.Fatalf("Execute() rejected unreadable settings: %v", err)
 			}
 			events, err := runstore.ReadEvents(run.Meta.ID)
@@ -502,7 +502,7 @@ func TestAgentSchemaThatIsNotJSONFailsTheCall(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	store := &profile.Store{Profiles: []profile.Profile{{Name: "mock-schema", Harness: profile.HarnessMock, Default: true, Taste: 5, Intelligence: 5, Cost: 10}}}
 	script := `return await agent("task", {schema: {type: "object", check: () => true}});`
-	_, err := Execute(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, WorkDir: t.TempDir()})
+	_, err := executeTest(worktreeTestContext(t), Options{ScriptSrc: script, Store: store, WorkDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "agent schema is not valid JSON") {
 		t.Fatalf("Execute() error = %v, want the schema error", err)
 	}

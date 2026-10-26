@@ -2,7 +2,7 @@
 
 Use a workflow for independent tasks with a join; read `dyna guide workflows` before writing one.
 Use a subagent for work that needs memory across turns. Delegate only through Dyna, never through harness subagents or workflows.
-Workflow workers are leaves: they cannot delegate, start runs or sessions. They can read guides and use every other dyna command.
+Workflow agents are leaf sessions: they cannot delegate or start runs or subagents.
 Keep small or tightly coupled changes yourself. Run read-only scouts in parallel. Give each set of files one writer.
 
 ## Choosing a profile
@@ -72,14 +72,14 @@ Stored hierarchy controls parent selectors and depth, even when `DYNA_DEPTH` pre
 
 ## Environment
 
-| Variable | Workflow worker | Subagent worker |
+| Variable | Subagent worker | Workflow agent |
 |---|---|---|
-| `DYNA_MODE` | `workflow` | `subagent` |
-| `DYNA_WORKER_RUN`, `DYNA_WORKER_AGENT` | run and agent IDs | not set |
-| `DYNA_SESSION`, `DYNA_DEPTH` | not set | session ID, launch depth |
+| `DYNA_MODE` | `subagent` | `subagent` |
+| `DYNA_SESSION`, `DYNA_DEPTH` | session ID, launch depth | session ID, launch depth |
 | `DYNA_ROOM`, `DYNA_ROOM_ID` | room name and ID | room name and ID |
-| `DYNA_ADDRESS` | not set | `<room>:<name>` |
-| `DYNA_AGENT_JOURNAL` | journal path | not set |
+| `DYNA_ADDRESS` | `<room>:<name>` | `<room>:<name>` |
+| `DYNA_WORKER_RUN` | not set | run ID |
+| `DYNA_AGENT_JOURNAL` | not set | journal path |
 | `DYNA_BIN` | Dyna binary | Dyna binary |
 
 ## Questions

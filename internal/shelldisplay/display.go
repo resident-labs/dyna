@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"dyna-agent/internal/computers"
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
@@ -84,13 +83,9 @@ func CommandEnv(ctx context.Context, dir string, m shells.Meta, base []string) (
 }
 
 // ownerDisplayStays reports whether a shell runs on the owner's own display.
-// A workflow worker never inherits the exemption of the session its
-// attribution names. A shell with no session owner and no workflow mode is an
-// interactive owner terminal, which keeps its environment as it is.
+// A shell with no session owner is an interactive owner terminal, which keeps
+// its environment as it is.
 func ownerDisplayStays(m shells.Meta, base []string) bool {
-	if value(base, mode.EnvMode) == mode.Workflow {
-		return false
-	}
 	if !runstore.IsSessionDirID(m.Owner) {
 		return true
 	}

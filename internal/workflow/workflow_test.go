@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/workflow/enginefake"
 )
 
 type workflowEventRecorder struct {
@@ -52,6 +53,14 @@ func writeWorkflowScript(t *testing.T, dir, name, src string) string {
 	return path
 }
 
+// executeTest runs a workflow with the fake engine unless the test brings its own.
+func executeTest(ctx context.Context, opts Options) (string, error) {
+	if opts.Engine == nil {
+		opts.Engine = &enginefake.Engine{Profiles: opts.Store}
+	}
+	return Execute(ctx, opts)
+}
+
 func executeWorkflowTest(t *testing.T, script string, opts Options) (string, error) {
 	t.Helper()
 	if opts.Run != nil {
@@ -69,7 +78,7 @@ func executeWorkflowTest(t *testing.T, script string, opts Options) (string, err
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	opts.ScriptSrc = script
-	return Execute(ctx, opts)
+	return executeTest(ctx, opts)
 }
 
 func TestWorkflowResolvesSavedTemplateFromDefaultRegistry(t *testing.T) {
@@ -229,7 +238,7 @@ func TestNestedWorkflowSharesConcurrencyLimits(t *testing.T) {
   () => workflow("child"),
   () => agent("SLEEP:0\nRESPOND: sibling", {profile: "mock"}),
 ]);`
-			_, err := Execute(ctx, Options{ScriptSrc: script,
+			_, err := executeTest(ctx, Options{ScriptSrc: script,
 				Store: mockWorkflowStore(tc.profileMaxConcurrent, 0), WorkDir: dir,
 				WorkflowDir: registry, MaxConc: tc.maxConcurrent, OnEvent: observe,
 			})
@@ -379,7 +388,7 @@ func TestProfilesGlobalOmitsAdmissionCost(t *testing.T) {
 	store := &profile.Store{Profiles: []profile.Profile{{
 		Name: "worker", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true,
 	}}}
-	result, err := Execute(context.Background(), Options{
+	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `return {keys: Object.keys(profiles[0]).sort(), admissionCost: profiles[0].admissionCost};`,
 		Store:     store, WorkDir: t.TempDir(),
 	})

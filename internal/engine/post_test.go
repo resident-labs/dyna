@@ -15,9 +15,6 @@ import (
 // process claims (requirement 3). Claims supply only the target room.
 func TestPostSenderComesFromTheCaller(t *testing.T) {
 	senderOf := func(c notify.Claim) (notify.Sender, error) {
-		if c.Run != "" {
-			return notify.Sender{Kind: notify.SenderWorker, Room: "dyna-agent", RunID: c.Run, Agent: c.Agent}, nil
-		}
 		if c.Session == "" {
 			return notify.Sender{Kind: notify.SenderOwner, Room: "dyna-agent"}, nil
 		}
@@ -29,9 +26,6 @@ func TestPostSenderComesFromTheCaller(t *testing.T) {
 	aliceActor := authority.Actor{Role: authority.Session, Session: "ses_alice"}
 	owner := websvc.Caller{Kind: websvc.Owner}
 	unverified := websvc.Caller{Kind: websvc.Unverified}
-	worker := websvc.Caller{Kind: websvc.Worker, Run: "wf_1", Agent: 2}
-	workerActor := authority.Actor{Role: authority.Worker, Run: "wf_1", Agent: 2}
-	asWorker := notify.Claim{Run: "wf_1", Agent: 2, Room: "dyna-agent"}
 	runWorker := websvc.Caller{Kind: websvc.Worker, Run: "wf_1"}
 	runActor := authority.Actor{Role: authority.Worker, Run: "wf_1"}
 	asBob := notify.Claim{Session: "ses_bob", Room: "dyna-agent"}
@@ -43,7 +37,7 @@ func TestPostSenderComesFromTheCaller(t *testing.T) {
 		actor   authority.Actor
 		claim   notify.Claim
 		enforce bool
-		want    string // "session <id>", "worker <n> of run <id>", "owner", or "error"
+		want    string // "session <id>", "owner", or "error"
 		logged  string
 	}{
 		{"a session posts as itself", alice, true, aliceActor, notify.Claim{Session: "ses_alice", Room: "dyna-agent"}, false, "session ses_alice", ""},
@@ -56,13 +50,7 @@ func TestPostSenderComesFromTheCaller(t *testing.T) {
 		{"an unverified caller is refused", unverified, true, authority.Actor{Role: authority.Owner}, asBob, false, "error", ""},
 		{"enforced: an unverified caller is refused", unverified, true, authority.Actor{}, asBob, true, "error", ""},
 		{"a session the engine could not verify is refused", alice, true, authority.Actor{Role: authority.Owner}, asBob, false, "error", ""},
-		{"a workflow worker posts as itself", worker, true, workerActor, asWorker, false, "worker 2 of run wf_1", ""},
-		{"a worker claiming another agent is stored as itself", worker, true, workerActor, notify.Claim{Run: "wf_1", Agent: 3, Room: "dyna-agent"}, false, "worker 2 of run wf_1", ""},
-		{"enforced: a worker claiming a session is stored as itself", worker, true, workerActor, asBob, true, "worker 2 of run wf_1", ""},
-		{"the run itself never takes an agent number from its claim", runWorker, true, runActor, asWorker, false, "worker 0 of run wf_1", ""},
-		{"a worker claiming another run is stored as its run", runWorker, true, runActor, notify.Claim{Run: "wf_2", Agent: 2, Room: "dyna-agent"}, false, "worker 0 of run wf_1", ""},
-		{"enforced: a worker claiming another run is stored as its run", runWorker, true, runActor, notify.Claim{Run: "wf_2", Agent: 2, Room: "dyna-agent"}, true, "worker 0 of run wf_1", ""},
-		{"a worker the engine could not verify is refused", worker, true, authority.Actor{Role: authority.Owner}, asWorker, false, "error", ""},
+		{"a run coordinator never posts as a shell", runWorker, true, runActor, notify.Claim{Run: "wf_1", Room: "dyna-agent"}, false, "error", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs []string
@@ -73,8 +61,6 @@ func TestPostSenderComesFromTheCaller(t *testing.T) {
 				switch snd.Kind {
 				case notify.SenderSession:
 					got = "session " + snd.Session.ID
-				case notify.SenderWorker:
-					got = fmt.Sprintf("worker %d of run %s", snd.Agent, snd.RunID)
 				default:
 					got = "owner"
 				}

@@ -41,9 +41,11 @@ type RunAgentRef struct {
 }
 
 // RunAgentState is the answer to one WaitRunAgent call. A turn that is not
-// Done is still running.
+// Done is still running. OK is true when the turn ended with a result; an
+// ended turn that is not OK failed or was stopped, and Error says why.
 type RunAgentState struct {
 	Done   bool            `json:"done"`
+	OK     bool            `json:"ok,omitempty"`
 	Status string          `json:"status,omitempty"`
 	Error  string          `json:"error,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`

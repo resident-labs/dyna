@@ -34,6 +34,9 @@ func (m *Manager) sessionInstructions(meta Meta, creator string, maxDepth int, c
 	if !meta.Leaf {
 		parts = append(parts, m.profileInstructions(meta))
 	}
+	if run := meta.Run; run != nil && run.Journal != "" {
+		parts = append(parts, instructions.Section{Name: "Work journal", Text: workJournalRules})
+	}
 	parts = append(parts, m.goalStore().InstructionSections(meta.RoomID)...)
 	parts = append(parts, m.featureIndex(meta), m.skillIndex(meta), m.runningJobs(meta))
 	return instructions.Build(append(parts,

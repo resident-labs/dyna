@@ -32,8 +32,6 @@ func questionIdentity(snd Sender) string {
 		return "unverified"
 	case SenderSession:
 		return snd.Session.ID
-	case SenderWorker:
-		return fmt.Sprintf("run:%s/agent:%d", snd.RunID, snd.Agent)
 	case SenderScript:
 		return "run:" + snd.RunID
 	default:
@@ -285,8 +283,6 @@ func questionSenderAddress(snd Sender, owner string) string {
 		return "unverified"
 	case SenderSession:
 		return snd.Session.Address()
-	case SenderWorker:
-		return fmt.Sprintf("run:%s/agent:%d", snd.RunID, snd.Agent)
 	case SenderScript:
 		return "run:" + snd.RunID
 	default:

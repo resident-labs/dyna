@@ -263,6 +263,12 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			writes.note(TurnNote{Delivery: &d})
 		},
 	}
+	// A run agent keeps the run-owned work journal, which also turns on the
+	// harness's idle reminder for it.
+	if run := meta.Run; run != nil && run.Journal != "" {
+		outputOpts.Path = run.Journal
+		outputOpts.IdleAfter = harness.JournalIdleFromEnv(runJournalIdle)
+	}
 	steeringOpts := harness.SteeringOptions{
 		StartGate: func(ctx context.Context, prompt string, launch func() error) error {
 			for {
@@ -672,6 +678,10 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 // internal root acts as the room owner: root mode, with DYNA_SESSION for
 // attribution only (see mode.CurrentSession). Empty values override stamps the
 // spawning process may carry.
+// runJournalIdle is how long a run agent may go without a journal entry before
+// the harness sends a reminder.
+const runJournalIdle = 20 * time.Minute
+
 func stampSession(env map[string]string, meta Meta) {
 	env[mode.EnvMode] = mode.Subagent
 	env[mode.EnvSession] = meta.ID
@@ -679,9 +689,13 @@ func stampSession(env map[string]string, meta Meta) {
 	env[mode.EnvRoomID] = meta.RoomID
 	env[mode.EnvRoom] = meta.Room
 	env[mode.EnvAddress] = meta.Address()
-	if run := meta.Run; run != nil && run.Journal != "" {
-		env[runstore.AgentJournalEnv] = run.Journal
-		env[runstore.AgentJournalRootEnv] = run.JournalRoot
+	// A run agent's processes carry the run, so cancelling the run finds them.
+	if run := meta.Run; run != nil {
+		env[mode.EnvWorkerRun] = run.ID
+		if run.Journal != "" {
+			env[runstore.AgentJournalEnv] = run.Journal
+			env[runstore.AgentJournalRootEnv] = run.JournalRoot
+		}
 	}
 	if meta.Role == RoleRoot {
 		env[mode.EnvMode] = mode.Root

@@ -104,7 +104,7 @@ func TestDismissPendingRejectsWorkersAndActiveDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	ownerDismissEnv(t)
-	for _, env := range []struct{ key, value string }{{mode.EnvMode, mode.Workflow}, {mode.EnvMode, mode.Subagent}, {mode.EnvSession, info.ID}, {mode.EnvWorkerRun, "run_worker"}} {
+	for _, env := range []struct{ key, value string }{{mode.EnvMode, mode.Subagent}, {mode.EnvSession, info.ID}, {mode.EnvWorkerRun, "run_worker"}} {
 		t.Run(env.key+env.value, func(t *testing.T) {
 			t.Setenv(env.key, env.value)
 			if err := e.m.DismissPendingPost(e.ctx, info.ID, msg.ID, true); err == nil {

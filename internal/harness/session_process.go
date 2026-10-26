@@ -35,9 +35,6 @@ func sessionKey(p profile.Profile, execution ExecutionOptions) (string, error) {
 	if key := os.Getenv("DYNA_SESSION"); key != "" {
 		return key, nil
 	}
-	if run := p.Env["DYNA_WORKER_RUN"]; run != "" {
-		return "run/" + run + "/" + p.Env["DYNA_WORKER_AGENT"], nil
-	}
 	return newSessionID()
 }
 

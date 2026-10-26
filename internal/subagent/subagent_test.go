@@ -766,32 +766,6 @@ func TestNoTurnCap(t *testing.T) {
 	}
 }
 
-func TestWorkflowWorkersCannotStartOrControlSubagents(t *testing.T) {
-	e := newTestEnv(t)
-	info, _ := e.start("SLEEP:1 RESPOND: ok")
-	e.wait(info.ID, 1)
-	t.Setenv(mode.EnvMode, mode.Workflow)
-	if _, _, err := e.m.Start(context.Background(), StartOptions{Goal: "Finish the test task", Profile: "mock", Dir: t.TempDir(), Task: "x"}); err == nil || err.Error() != "subagent start is owner or root or session only; use subagent mode to start work" {
-		t.Fatalf("Start in workflow mode err = %v", err)
-	}
-	if _, err := e.send(info.ID, "SLEEP:1 x", WakeOptions{}); err == nil || err.Error() != "subagent start is owner or root or session only; use subagent mode to start work" {
-		t.Fatalf("Send in workflow mode err = %v", err)
-	}
-	if _, err := e.m.Stop(e.ctx, info.ID); err == nil || err.Error() != "subagent stop is owner or root or session only; use subagent mode to control sessions" {
-		t.Fatalf("Stop in workflow mode err = %v", err)
-	}
-	if _, err := e.m.Close(e.ctx, info.ID); err == nil || err.Error() != "subagent close is owner or root or another session only; a session becomes dormant when its turn ends, so it does not close itself" {
-		t.Fatalf("Close in workflow mode err = %v", err)
-	}
-	// Read-only access still works.
-	if _, err := e.m.Store.List(true); err != nil {
-		t.Fatal(err)
-	}
-	if got, t2, err := e.m.Wait(e.ctx, info.ID, 1); err != nil || got.ID != info.ID || t2.Result != "ok" {
-		t.Fatalf("Wait in workflow mode = %#v %#v %v", got, t2, err)
-	}
-}
-
 func TestSendRefusesWhenHarnessCannotResume(t *testing.T) {
 	p := fakeworker.InstallClaude(t, `printf done`)
 	p.Name, p.Default = "custom", true

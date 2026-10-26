@@ -136,7 +136,7 @@ esac
 		t.Fatalf("local verdict wrote GitHub: %v", err)
 	}
 
-	for _, agentMode := range []string{mode.Subagent, mode.Root, mode.Workflow} {
+	for _, agentMode := range []string{mode.Subagent, mode.Root} {
 		t.Setenv(mode.EnvMode, agentMode)
 		for _, args := range [][]string{
 			{"comment", url, "explicit public post", "--publish"},

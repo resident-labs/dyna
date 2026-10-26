@@ -9,13 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,26 +22,13 @@ import (
 	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/eventloop"
 
-	"dyna-agent/internal/callerid"
-	"dyna-agent/internal/childenv"
-	"dyna-agent/internal/fsutil"
-	"dyna-agent/internal/goals"
-	"dyna-agent/internal/harness"
-	harnessconfig "dyna-agent/internal/harness/config"
-	harnessruntime "dyna-agent/internal/harness/runtime"
-	"dyna-agent/internal/instructions"
-	"dyna-agent/internal/mode"
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
-	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/settings"
-	dynaskills "dyna-agent/internal/skills"
-	"dyna-agent/internal/store"
-	"dyna-agent/internal/structuredoutput"
 	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
-	"dyna-agent/internal/workerprompt"
 	"dyna-agent/internal/workflowresolve"
 	"dyna-agent/internal/worktrees"
 )
@@ -86,14 +70,9 @@ type Options struct {
 	// routing. A non-nil error with a non-empty result ID means the post was
 	// stored but at least one delivery failed.
 	Poster func(ctx context.Context, runID string, mentions []string, text string) (PostResult, error)
-	// JournalIdle controls how long a running worker may go without an
-	// agent-authored progress record before an exact-session reminder. Zero
-	// uses twenty minutes; exposed primarily as a deterministic test seam.
-	JournalIdle time.Duration
-	// MaxToolWait bounds how long a steering message or journal reminder waits
-	// for an in-flight tool call (steering.maxToolWait). Zero reads settings.json
-	// and falls back to two minutes.
-	MaxToolWait time.Duration
+	// Engine starts the leaf session that serves each agent() call. A run
+	// coordinator passes its engine connection; tests pass a fake.
+	Engine EngineCaller
 	// Paused, when it returns true, blocks new worker launches (running
 	// workers finish). Polled while waiting to start each agent.
 	Paused func() bool
@@ -143,6 +122,7 @@ type sharedState struct {
 	abortRoot         func(error)
 	worktreeRetention string
 	worktrees         []worktrees.Record
+	agentsStarted     bool // some agent() call asked the engine for a session
 }
 
 type preparedScript struct {
@@ -278,9 +258,6 @@ type engine struct {
 	planStage      int
 	planItem       int
 	planIndexSet   bool
-	// Skills reads Dyna's global skill catalog. Tests set it; production
-	// reads the owner's catalog file.
-	Skills func() ([]harnessconfig.ManagedSkill, error)
 }
 
 type callPlan struct {
@@ -335,6 +312,42 @@ func (e *engine) stopWorkers() {
 	e.cancel()
 	e.workerMu.Unlock()
 	e.workers.Wait()
+	e.closeAgents()
+}
+
+// closeAgent has the engine close and stop one agent's session.
+func (e *engine) closeAgent(id int) {
+	if e.opts.Engine == nil {
+		return
+	}
+	ref := callspec.RunAgentRef{Run: e.runID(), Agent: id}
+	// The caller keeps its slots and worktree until the stop is confirmed, so a
+	// call cut off by an engine restart is asked again with no time limit
+	// (closing twice is safe). Only a refusal ends it, and then the engine's
+	// own cleanup of an ended run's sessions is what remains.
+	ctx := context.WithoutCancel(e.ctx)
+	err := retryEngine(ctx, 0, func() error { return e.opts.Engine.Call(ctx, "CloseRunAgent", []any{ref}, nil) })
+	if err != nil {
+		e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("could not close agent %d's session: %v", id, err))
+	}
+}
+
+// closeAgents has the engine close the run's agent sessions that are still
+// open: the run joined, failed or was canceled, and no agent outlives it. Only
+// the run's root script does it, and only after it started an agent.
+func (e *engine) closeAgents() {
+	if e.depth != 0 || e.opts.Engine == nil {
+		return
+	}
+	e.shared.mu.Lock()
+	started := e.shared.agentsStarted
+	e.shared.mu.Unlock()
+	if !started {
+		return
+	}
+	if err := e.opts.Engine.Call(context.WithoutCancel(e.ctx), "CloseRunAgents", []any{e.runID()}, nil); err != nil {
+		e.emitLog(runstore.LogProvenanceSystem, "could not close the run's agent sessions: "+err.Error())
+	}
 }
 
 func (e *engine) emit(ev runstore.Event) {
@@ -613,28 +626,10 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	}
 	go func() {
 		defer e.workers.Done()
-		prof.Env = cloneEnv(prof.Env)
-		childenv.SetTrimpath(prof.Env)
-		prof.Env[mode.EnvMode] = mode.Workflow
-		prof.Env[mode.EnvWorkerAgent] = strconv.Itoa(id)
-		scratchID := e.shared.scratchID
-		if e.opts.Run != nil {
-			scratchID = e.opts.Run.Meta.ID
-		}
-		scratchPath, scratchErr := scratch.Ensure(fmt.Sprintf("%s/agent-%d", scratchID, id))
-		if scratchErr != nil {
-			e.shared.scratchWarning.Do(func() { log.Printf("workflow scratch unavailable: %v", scratchErr) })
-		}
-		prof.Env[scratch.Env] = scratchPath
-		if e.opts.Run != nil {
-			prof.Env[mode.EnvWorkerRun] = e.opts.Run.Meta.ID
-			prof.Env[mode.EnvRoomID] = e.opts.Run.Meta.RoomID
-			prof.Env[mode.EnvRoom] = e.opts.Run.Meta.Room
-			prof.Env[mode.EnvAddress] = fmt.Sprintf("run:%s/agent:%d", e.opts.Run.Meta.ID, id)
-		}
 		// The journal begins when the engine accepts the call, before any local
 		// execution queue. A workflow that finishes while this worker is
 		// still queued therefore retains a terminal, resume-safe record.
+		journalRoot := ""
 		if e.opts.Run != nil {
 			var journalErr error
 			journalPath, journalErr = e.opts.Run.StartAgentJournal(id, label, prof.Name, phase, prompt)
@@ -643,8 +638,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 				reject(fmt.Errorf("start work journal for %s: %w", label, journalErr))
 				return
 			}
-			prof.Env = cloneEnv(prof.Env)
-			prof.Env[runstore.AgentJournalEnv] = journalPath
+			journalRoot, _ = filepath.Abs(e.opts.Run.Dir)
 		}
 		if profSem != nil {
 			if err := acquireSlot(e.ctx, profSem); err != nil {
@@ -678,30 +672,6 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		actx, cancel := context.WithTimeout(e.ctx, timeout)
 		defer cancel()
 
-		outputPath := ""
-		normalizedOutputPath := ""
-		if e.opts.Run != nil {
-			var journalErr error
-			outputPath, journalErr = e.opts.Run.StartAgentOutput(id)
-			if journalErr != nil {
-				e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("%s live harness output unavailable: %v", label, journalErr))
-				outputPath = ""
-			}
-			normalizedOutputPath, journalErr = e.opts.Run.StartAgentNormalizedOutput(id, workeroutput.ProfileSnapshot{
-				Name: prof.Name, Model: prof.Model, Output: prof.EffectiveOutput(),
-			})
-			if journalErr != nil {
-				e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("%s normalized output unavailable: %v", label, journalErr))
-				normalizedOutputPath = ""
-			}
-			if runRoot, rootErr := filepath.Abs(e.opts.Run.Dir); rootErr == nil {
-				prof.Env[runstore.AgentJournalRootEnv] = runRoot
-			}
-			if exe, exeErr := fsutil.StableExecutable(); exeErr == nil {
-				prof.Env["DYNA_BIN"] = exe
-			}
-		}
-
 		// Worktree isolation: run the worker on a detached copy of the repo and
 		// apply the resolved per-call retention when it finishes.
 		retainedDir := ""
@@ -731,102 +701,35 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			worktreeBase = baseCommit
 			cleanupWT = cleanup
 		}
-		maps.Copy(prof.Env, worktrees.PortEnvForDir(actx, cwd))
 
-		journalIdle := e.opts.JournalIdle
-		if journalIdle <= 0 {
-			journalIdle = harness.JournalIdleFromEnv(defaultJournalIdle)
+		e.shared.mu.Lock()
+		e.shared.agentsStarted = true
+		e.shared.mu.Unlock()
+		// The agent is a leaf session the engine runs like any other session.
+		// The coordinator only asks for it and waits for its first turn.
+		agentStart := callspec.RunAgentStart{
+			Run: e.runID(), Agent: id, Profile: prof.Name, Dir: cwd, Task: prompt, Schema: schemaJSON,
+			Deadline: start.Add(timeout), Journal: journalPath, JournalRoot: journalRoot,
 		}
-		journalOpts := harness.JournalOptions{
-			Path: journalPath, OutputPath: outputPath, NormalizedOutputPath: normalizedOutputPath,
-			Output: prof.EffectiveOutput(), IdleAfter: journalIdle, State: harness.NewJournalState(),
-			MaxToolWait: e.maxToolWait(),
-			OnDelivery: func(note harness.DeliveryNote) {
-				e.recordDelivery(emitA, id, label, prof.Name, phase, journalPath, note)
-			},
+		// A mock profile can exist only in this run (the demo's), so the engine
+		// gets its definition. A mock harness holds no credentials.
+		if prof.Harness == profile.HarnessMock {
+			inline := prof
+			agentStart.Inline = &inline
 		}
-		steeringOpts := harness.SteeringOptions{}
-		if journalPath != "" {
-			nudgeSent := make(map[string]bool)
-			journalOpts.OnEntry = func(entry runstore.AgentJournalEntry) {
-				nudgeSent[harness.JournalNudgeIdle] = false
-				emitA(runstore.Event{
-					T: "agent_journal", ID: id, Label: label, Profile: prof.Name, Phase: phase,
-					Kind: entry.Kind, Preview: textutil.ClipOneLine(entry.Message, 240),
-				})
-			}
-			journalOpts.OnNudge = func(nudge harness.JournalNudge) {
-				wasSent := nudgeSent[nudge.Reason]
-				if nudge.Delivered {
-					nudgeSent[nudge.Reason] = true
-				}
-				msg := "journal quiet for twenty minutes; exact-session write-and-continue reminder sent"
-				next := "Write a progress entry, then continue the original task."
-				status := "sent"
-				if nudge.Reason == harness.JournalNudgeMissing {
-					msg = "worker finished without an agent-authored entry; exact-session write-now reminder sent"
-					next = "Write one brief entry; preserve the completed task result."
-				}
-				if !nudge.Delivered {
-					status = "unavailable"
-					if wasSent {
-						status = "ignored"
-						msg = "exact-session journal reminder was delivered, but the worker still wrote no agent-authored entry"
-						next = "No further reminder will be sent for this completed task."
-					} else if nudge.Reason == harness.JournalNudgeMissing {
-						msg = "worker finished without an agent-authored entry; a safe exact-session reminder was unavailable or failed"
-					} else {
-						msg = "journal quiet for twenty minutes; live reminder unavailable because this harness/session cannot be safely resumed"
-					}
-				}
-				_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{
-					Kind: "nudge", Message: msg, Next: next,
-				})
-				emitA(runstore.Event{
-					T: "agent_nudge", ID: id, Label: label, Profile: prof.Name, Phase: phase,
-					Kind: nudge.Reason, Status: status, Msg: msg,
-				})
-			}
-			steeringOpts = harness.SteeringOptions{
-				RunID: e.opts.Run.Meta.ID, AgentID: id,
-				OnDispatch: func(message runstore.SteeringMessage) error {
-					return e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{
-						Kind: "steer", Message: message.Message,
-					})
-				},
-				OnMessage: func(message runstore.SteeringMessage, _ *int64) {
-					emitA(runstore.Event{
-						T: "agent_steer", ID: id, Label: label, Profile: prof.Name, Phase: phase,
-						Status: "delivered", Msg: textutil.ClipOneLine(message.Message, 2000), Preview: textutil.ClipOneLine(message.Message, 240),
-					})
-				},
-			}
+		state, err := runAgentSession(actx, e.opts.Engine, agentStart)
+		if err != nil {
+			// The call ended without a result (canceled, timed out, or failed):
+			// stop the session before this call gives up its slots, so a script
+			// that ended with the agent still running leaves nothing running.
+			e.closeAgent(id)
 		}
-		// A worker runs one conversation, so its instructions are built once.
-		standing := e.workerInstructions(journalPath != "")
-		workerPrompt := workerTaskPrompt(prompt, journalPath)
-		prof.RuntimeInstructions = standing.Text()
-		workerPrompt = harness.WithPromptInstructions(prof, workerPrompt)
-
-		var (
-			resultAny any
-			rawOut    string
-			nudged    bool
-			err       error
-		)
-		if schemaJSON != "" {
-			resultAny, rawOut, nudged, err = e.runWithSchema(actx, prof, workerPrompt, schemaJSON, cwd, journalOpts, steeringOpts, e.agentExecution(id))
-		} else {
-			var r harness.Result
-			r, err = harness.RunWithOptions(actx, prof, workerPrompt, cwd, true, journalOpts, steeringOpts, harness.SessionOptions{}, e.agentExecution(id))
-			rawOut = r.Output
-			resultAny = r.Output
-			nudged = r.Nudged
+		var resultAny any
+		rawOut := ""
+		if err == nil {
+			resultAny, rawOut, err = agentResult(state)
 		}
 		dur := time.Since(start)
-		if nudged && err == nil {
-			e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("%s recovered by nudging the same %s session", label, prof.Harness))
-		}
 
 		if cleanupWT != nil {
 			head, status, changed, inspectErr := worktrees.Fingerprint(context.Background(), cwd, worktreeBase)
@@ -1031,169 +934,6 @@ func resolveAgentTimeout(timeout time.Duration, timeoutSet bool, prof profile.Pr
 		timeout = time.Duration(prof.TimeoutSec) * time.Second
 	}
 	return clampAgentTimeout(timeout)
-}
-
-// runWithSchema wraps the prompt with JSON-output instructions, extracts and
-// validates the JSON, retrying up to 2 times with the validation error in the
-// same session. Without exact resume support it retries the full prompt.
-// agentExecution runs agent id's harness as a leaf, and records each of its
-// processes for the agent number, so the engine tells a run's agents apart
-// (requirements item 3). A script run without a run record records nothing.
-func (e *engine) agentExecution(id int) harness.ExecutionOptions {
-	execution := harness.ExecutionOptions{DisableNativeSubagents: true}
-	if e.opts.Run == nil {
-		return execution
-	}
-	run := e.opts.Run.Meta.ID
-	execution.Started = func(pid int) {
-		launch := callerid.Launch{DataDir: store.DataDir(), Name: run, Actor: callerid.Identity{Kind: callerid.Worker, Run: run, Agent: id}, Launcher: "workflow"}
-		if err := callerid.RecordStarted(e.ctx, pid, launch); err != nil {
-			log.Printf("workflow: record agent %d of run %s: %v", id, run, err)
-		}
-	}
-	return execution
-}
-
-func (e *engine) runWithSchema(ctx context.Context, prof profile.Profile, prompt, schemaJSON, cwd string, journal harness.JournalOptions, steering harness.SteeringOptions, execution harness.ExecutionOptions) (any, string, bool, error) {
-	schema, err := structuredoutput.Compile(schemaJSON)
-	if err != nil {
-		return nil, "", false, err
-	}
-	base := workerprompt.AppendPromptSuffix(prompt, structuredoutput.SchemaSuffix(schemaJSON))
-	ask := base
-	var lastErr error
-	var raw string
-	var nudged bool
-	var session harness.SessionOptions
-	session.OnRuntime = func(pin harnessruntime.Pin) error { session.RuntimePin = &pin; return nil }
-	resumable := harness.Resumable(prof)
-	for attempt := 0; attempt < structuredoutput.SchemaAttempts; attempt++ {
-		r, err := harness.RunWithOptions(ctx, prof, ask, cwd, !nudged, journal, steering, session, execution)
-		nudged = nudged || r.Nudged
-		if err != nil {
-			return nil, r.Output, nudged, err
-		}
-		raw = r.Output
-		val, jerr := schema.Validate(raw)
-		if jerr == nil {
-			return val, raw, nudged, nil
-		}
-		lastErr = jerr
-		if resumable && r.SessionID != "" {
-			session.ResumeID = r.SessionID
-			ask = structuredoutput.SchemaCorrection(jerr, raw, false)
-		} else {
-			session.ResumeID = ""
-			ask = workerprompt.AppendPromptSuffix(base, "\n\n"+structuredoutput.SchemaCorrection(jerr, raw, true))
-		}
-	}
-	return nil, raw, nudged, fmt.Errorf("schema validation failed after 3 attempts: %w", lastErr)
-}
-
-func cloneEnv(src map[string]string) map[string]string {
-	dst := make(map[string]string, len(src)+2)
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
-}
-
-// journalBoundary is the standing text of a journaling workflow worker.
-const journalBoundary = `[DYNA WORK JOURNAL - REQUIRED]
-Keep a concise, append-only work journal while you perform this task. Its run-owned path is in the worker context at the end of the task prompt.
-
-After orienting, append your first entry. Add another after meaningful discoveries, decisions, verification, or blockers; before a long operation; and before finishing. Use:
-  dyna journal "what changed or what you learned" --kind update --next "next concrete step"
-If dyna is not on PATH, invoke the current binary as "$DYNA_BIN" journal ... instead.
-Kinds include update, finding, decision, verification, and blocker. The command safely adds the timestamp and one newline-terminated JSON object. Keep each entry brief: one or two sentences plus an optional next step. Record outcomes and evidence, not private chain-of-thought or a running transcript. Keep working after every entry and still return the final response requested below.
-
-Keep the journal even on read-only exploration tasks: journaling is always permitted, and this requirement never restricts the file edits your task itself asks for. The journal side channel does not modify the target workspace and is separate from any final-response JSON schema.
-[/DYNA WORK JOURNAL]`
-
-// workflowRestriction is the standing text of every workflow worker.
-const workflowRestriction = `[DYNA WORKFLOW RESTRICTION]
-Put throwaway files (screenshots, cards, scripts, notes) in $DYNA_SCRATCH, never in a repository.
-You must complete this task yourself. Do not spawn, delegate to, or invoke any subagent, child agent, or other agent, and do not start dyna runs or subagents. This restriction overrides any contrary instruction in the task.
-Every other dyna command and tool a session uses is available to you, including dyna computer, dyna browser, dyna post and dyna guide; dyna post reaches @root and workers of your own run.
-[/DYNA WORKFLOW RESTRICTION]`
-
-// workerInstructions is a workflow worker's standing instructions: the work
-// journal when it keeps one, the workflow restriction, the global and room
-// rules, from the same pieces sessions use, and the enabled skills.
-func (e *engine) workerInstructions(journal bool) instructions.Snapshot {
-	parts := []instructions.Section{{Name: "Workflow restriction", Text: workflowRestriction}}
-	if journal {
-		parts = append([]instructions.Section{{Name: "Work journal", Text: journalBoundary}}, parts...)
-	}
-	roomID := ""
-	if e.opts.Run != nil {
-		roomID = e.opts.Run.Meta.RoomID
-	}
-	parts = append(parts, goals.DefaultStore().InstructionSections(roomID)...)
-	parts = append(parts, e.skillSection())
-	return instructions.Build(parts...)
-}
-
-// skillSection lists the enabled skills through the same renderer sessions use.
-func (e *engine) skillSection() instructions.Section {
-	var entries []harnessconfig.ManagedSkill
-	var err error
-	if e.Skills != nil {
-		entries, err = e.Skills()
-	} else {
-		var catalog harnessconfig.HarnessConfig
-		catalog, err = harnessconfig.NewConfigManager().Read()
-		entries = catalog.Skills
-	}
-	if err != nil {
-		return instructions.Section{Name: "Skills"}
-	}
-	return dynaskills.Section(entries)
-}
-
-// workerTaskPrompt is the task, with the run-owned journal path in a trailing
-// worker context when the worker keeps a journal.
-func workerTaskPrompt(task, journalPath string) string {
-	prompt := "[ORIGINAL TASK]\n" + task
-	if journalPath == "" {
-		return prompt
-	}
-	return workerprompt.WithWorkerContext(prompt, "Run-owned journal path:\n"+journalPath)
-}
-
-// maxToolWait resolves steering.maxToolWait once per engine.
-func (e *engine) maxToolWait() time.Duration {
-	if e.opts.MaxToolWait > 0 {
-		return e.opts.MaxToolWait
-	}
-	if v, err := settings.Load(settings.DefaultPath()); err == nil && v.SteeringMaxToolWait > 0 {
-		return v.SteeringMaxToolWait
-	}
-	return harness.DefaultMaxToolWait
-}
-
-// recordDelivery writes a deferred (or undeferrable) steering/journal delivery
-// to the run's event log, and to the agent journal when it interrupted a
-// worker whose output shows no tool boundaries.
-func (e *engine) recordDelivery(emit func(runstore.Event), id int, label, profileName, phase, journalPath string, note harness.DeliveryNote) {
-	var msg string
-	switch note.Outcome {
-	case harness.DeliveryBoundary:
-		msg = fmt.Sprintf("%s delivery waited %s for an in-flight tool call to finish", note.Kind, note.Waited.Round(time.Millisecond))
-	case harness.DeliveryTurnEnd:
-		msg = fmt.Sprintf("%s delivery waited %s and was delivered as the next continuation because the turn ended first", note.Kind, note.Waited.Round(time.Millisecond))
-	case harness.DeliveryInterrupted:
-		msg = fmt.Sprintf("%s delivery waited %s; this profile's output dialect exposes no tool-call boundaries, so the worker was interrupted after steering.maxToolWait", note.Kind, note.Waited.Round(time.Millisecond))
-	default:
-		return
-	}
-	emit(runstore.Event{
-		T: "agent_defer", ID: id, Label: label, Profile: profileName, Phase: phase,
-		Kind: note.Kind, Status: note.Outcome, DurMs: note.Waited.Milliseconds(), Msg: msg,
-	})
-	if e.opts.Run != nil && journalPath != "" && note.Outcome == harness.DeliveryInterrupted {
-		_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "delivery", Message: textutil.ClipOneLine(msg, 400)})
-	}
 }
 
 func (e *engine) runID() string {
