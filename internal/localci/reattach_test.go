@@ -215,7 +215,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 		t.Fatalf("resume = %+v, %v, want a fresh run", att, err)
 	}
 	// Teardown of every recorded check comes first, then the folder goes.
-	if len(scripts) != 2 || !strings.Contains(scripts[0], spec(first).Dir) || !strings.Contains(scripts[0], spec(second).Dir) || !strings.Contains(scripts[0], ".scope") || !strings.Contains(scripts[1], "rm -rf --one-file-system") {
+	if len(scripts) != 2 || !strings.Contains(scripts[0], spec(first).Dir) || !strings.Contains(scripts[0], spec(second).Dir) || !strings.Contains(scripts[1], "rm -rf --one-file-system") {
 		t.Fatalf("cleanup = %q, want every recorded unit and scope stopped before the folder goes", scripts)
 	}
 	if rows, _ := store.attachmentRows(t.Context(), repo, sha); len(rows) != 0 {
@@ -338,25 +338,5 @@ func TestEarlyFailureLeavesTheRecordForTheNextRun(t *testing.T) {
 	rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40))
 	if err != nil || len(rows) != 1 || !rows[0].orphaned() {
 		t.Fatalf("records = %+v, %v, want the one record still free to take", rows, err)
-	}
-}
-
-// The teardown of an old run proves that nothing survives: it forces every scope
-// down and fails while one is active, and it cleans the containers of a check
-// that is known only by its id.
-func TestTeardownProvesThatSurvivorsStopped(t *testing.T) {
-	script := teardownScript(Node{Name: "pve", SSH: "pip@pve"}, "/cache", "/runs/r1", "r1", []nodeCheck{{id: "known", image: "go:1"}, {id: "only-id"}, {id: "host", host: true}})
-	for _, want := range []string{
-		"docker[@]}\" rm -f 'dyna-ci-r1-only-id'",
-		"label=dyna.run=r1",
-		"systemctl --user kill --signal=KILL 'dyna-ci-r1-host.scope'",
-		"systemctl --user is-active --quiet 'dyna-ci-r1-host.scope'",
-	} {
-		if !strings.Contains(script, want) {
-			t.Errorf("teardown lacks %q", want)
-		}
-	}
-	if strings.Contains(script, "stop.sh") || strings.Contains(script, detachedStopScript+"|| true") {
-		t.Error("the detached stop result is masked")
 	}
 }

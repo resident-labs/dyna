@@ -178,25 +178,75 @@ func TestWrapperEndsTheLogWriterWithItsGroup(t *testing.T) {
 	}
 }
 
-// A stop counts only when nothing is left: a unit that stays active fails it.
-func TestStopScriptFailsWhileTheUnitIsStillActive(t *testing.T) {
-	for _, tc := range []struct {
-		active bool
-		fails  bool
-	}{{false, false}, {true, true}} {
-		dir := t.TempDir()
-		answer := "exit 1"
-		if tc.active {
-			answer = "exit 0"
-		}
-		stubs := t.TempDir()
-		if err := os.WriteFile(filepath.Join(stubs, "systemctl"), []byte("#!/bin/sh\ncase \"$2\" in is-active) "+answer+" ;; *) exit 0 ;; esac\n"), 0o700); err != nil {
+// teardownStubs writes a docker and a systemctl whose answers a test chooses:
+// DOCKER_PS_EXIT and DOCKER_PS_OUT for the container queries, DOCKER_RM_EXIT for
+// removals, SYSTEMCTL_SHOW_EXIT and UNIT_STATE for the unit queries.
+func teardownStubs(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"docker":    "#!/bin/sh\ncase \"$1\" in info) exit 0 ;; rm) exit ${DOCKER_RM_EXIT:-0} ;; ps) printf '%s' \"$DOCKER_PS_OUT\"; exit ${DOCKER_PS_EXIT:-0} ;; esac\nexit 0\n",
+		"systemctl": "#!/bin/sh\ncase \"$2\" in show) [ \"${SYSTEMCTL_SHOW_EXIT:-0}\" = 0 ] || exit \"$SYSTEMCTL_SHOW_EXIT\"; echo \"${UNIT_STATE:-inactive}\"; exit 0 ;; *) exit 0 ;; esac\n",
+		"git":       "#!/bin/sh\nexit 0\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command("bash", "-c", detachedStopScript, "dyna-ci", filepath.Join(dir, "d"), "unit.service")
-		cmd.Env = append(os.Environ(), "PATH="+stubs+":"+os.Getenv("PATH"))
-		if err := cmd.Run(); (err != nil) != tc.fails {
-			t.Fatalf("active %v: err = %v, want failure %v", tc.active, err, tc.fails)
-		}
+	}
+	return dir
+}
+
+// A status query that fails is not proof that nothing runs. The teardown of an
+// old run passes only when each query answers and finds nothing left, so a
+// Docker or user-manager outage keeps the run's workspace and record.
+func TestTeardownNeedsAnswersThatNothingSurvives(t *testing.T) {
+	image := nodeCheck{id: "unit", image: "go:1"}
+	host := nodeCheck{id: "host", host: true}
+	for _, tc := range []struct {
+		name   string
+		check  nodeCheck
+		env    []string
+		wantOK bool
+	}{
+		{"everything stopped", image, nil, true},
+		{"docker queries fail", image, []string{"DOCKER_RM_EXIT=1", "DOCKER_PS_EXIT=1"}, false},
+		{"container still running", image, []string{"DOCKER_PS_OUT=dyna-ci-r1-unit\n"}, false},
+		{"another container is no survivor", image, []string{"DOCKER_PS_OUT=dyna-ci-r1-other\n"}, true},
+		{"host scope stopped", host, nil, true},
+		{"user manager does not answer", host, []string{"SYSTEMCTL_SHOW_EXIT=1"}, false},
+		{"host scope still active", host, []string{"UNIT_STATE=active"}, false},
+		{"unit query fails for an image check", image, []string{"SYSTEMCTL_SHOW_EXIT=1"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script := teardownScript(Node{Name: "local"}, "/cache", t.TempDir(), "r1", []nodeCheck{tc.check})
+			cmd := exec.Command("bash", "-c", script)
+			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), tc.env...)
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.wantOK {
+				t.Fatalf("teardown err = %v, want success %v: %s", err, tc.wantOK, out)
+			}
+		})
+	}
+}
+
+// A stop counts only when the user manager says the unit is down: an active unit
+// or a manager that does not answer fails it.
+func TestStopScriptNeedsAConfirmedStop(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		env    []string
+		wantOK bool
+	}{
+		{"unit inactive", nil, true},
+		{"unit active", []string{"UNIT_STATE=active"}, false},
+		{"manager does not answer", []string{"SYSTEMCTL_SHOW_EXIT=1"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", detachedStopScript, "dyna-ci", filepath.Join(t.TempDir(), "d"), "unit.service")
+			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), tc.env...)
+			if err := cmd.Run(); (err == nil) != tc.wantOK {
+				t.Fatalf("stop err = %v, want success %v", err, tc.wantOK)
+			}
+		})
 	}
 }
