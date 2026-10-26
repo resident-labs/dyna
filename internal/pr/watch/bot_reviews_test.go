@@ -159,6 +159,13 @@ func TestBotReviewsSuccessfulCheckIsNotAnApproval(t *testing.T) {
 	if got := s.BotReviews(); len(got) != 0 {
 		t.Fatalf("BotReviews() invented an approval from a check: %#v", got)
 	}
+	s.Comments = []Comment{{
+		ID: 1, Kind: "issue-comments", User: User{Login: "arismoko", Type: "Bot"}, URL: "comment",
+	}}
+	want := []state.BotReview{{Bot: "arismoko", State: "commented", URL: "comment"}}
+	if got := s.BotReviews(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("BotReviews() dropped issue-comment feedback: %#v, want %#v", got, want)
+	}
 }
 
 func TestBotReviewsRecordJSON(t *testing.T) {
