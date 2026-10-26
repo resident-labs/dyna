@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/account/store"
 )
 
 const (
@@ -22,6 +24,18 @@ func WindowPercent(w Window) (float64, bool) {
 	return 0, false
 }
 
+// windowReasonText is the CLI sentence for a window reason. The web app maps
+// the same codes to its own copy, so a reader's sentence is never UI text.
+func windowReasonText(r store.WindowReason) string {
+	switch r {
+	case store.WindowReasonNotReported:
+		return "Remaining allowance not reported."
+	case store.WindowReasonProbableReset:
+		return probablyResetText
+	}
+	return ""
+}
+
 // WindowsSummary renders "5-hour 12% · weekly 41%, resets Sat 20:00".
 // The busiest window names the reset.
 // Readings from before a passed reset show uncertainty and their check time.
@@ -32,12 +46,12 @@ func windowsSummary(a Account, now time.Time) string {
 	parts, busiest, resets := []string{}, -2.0, ""
 	reasons := []string{}
 	for _, w := range a.Windows {
-		if w.UnavailableReason == probablyResetReason {
+		if w.Reason == store.WindowReasonProbableReset {
 			checked := "unknown"
 			if !a.ObservedAt.IsZero() {
 				checked = a.ObservedAt.Local().Format("Mon 3:04 PM")
 			}
-			parts = append(parts, w.Label+": "+probablyResetReason+" · last checked "+checked)
+			parts = append(parts, w.Label+": "+probablyResetText+" · last checked "+checked)
 			continue
 		}
 		if w.Balance != nil {
@@ -49,7 +63,7 @@ func windowsSummary(a Account, now time.Time) string {
 			parts = append(parts, fmt.Sprintf("%s %.0f%%", w.Label, p))
 		} else {
 			parts = append(parts, w.Label)
-			reason := w.UnavailableReason
+			reason := windowReasonText(w.Reason)
 			if reason == "" {
 				reason = "Remaining allowance not reported."
 			}

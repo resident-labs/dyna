@@ -275,7 +275,7 @@ func (s *Service) saveNativeUsageObservation(a *Account, captured native.Capture
 				saved.Plan = observation.Plan
 			}
 			if len(saved.Windows) == 0 {
-				saved.Windows = []store.Window{{ID: "subscription", Label: "Session (5-hour)", UnavailableReason: "No previous quota reading."}}
+				saved.Windows = []store.Window{{ID: "subscription", Label: "Session (5-hour)", Reason: store.WindowReasonNotReported}}
 			}
 			for i := range saved.Windows {
 				if saved.Windows[i].ID == "subscription" {
