@@ -44,13 +44,13 @@ func (r Run) Do() (Result, error) {
 			return Result{}, err
 		}
 		read := func(group string, since time.Time) ([]Sample, error) { return samples.Window(r.Machine, group, since) }
-		ok, reading, err := cond.Holds(read, r.Now)
+		verdict, reading, err := cond.Evaluate(read, r.Now)
 		if err != nil {
 			return Result{}, err
 		}
-		if !ok {
-			latest, err := samples.Window(r.Machine, "machine", r.Now.Add(-fresh))
-			return Result{Healthy: len(latest) > 0}, err
+		if verdict != Met {
+			// Only a verdict of Clear confirms health; Unknown leaves any alert as it is.
+			return Result{Healthy: verdict == Clear}, nil
 		}
 		met = reading
 	}
