@@ -55,15 +55,16 @@ func connectStore() (*connect.Store, error) {
 
 // TunnelMain runs the managed tunnel connector until the context ends. The
 // installed dyna-tunnel.service runs it, so the connector stays up while the
-// engine restarts. It returns the exit code.
-func TunnelMain(ctx context.Context) int {
+// engine restarts. An empty cloudflared path means the one on PATH. It returns
+// the exit code.
+func TunnelMain(ctx context.Context, cloudflared string) int {
 	st, err := connectStore()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect: %v\n", err)
 		return 1
 	}
 	log.SetPrefix("dyna-tunnel: ")
-	connect.RunTunnel(ctx, st, os.Getenv("DYNA_CLOUDFLARED"), log.Printf)
+	connect.RunTunnel(ctx, st, cloudflared, log.Printf)
 	return 0
 }
 
