@@ -1227,3 +1227,79 @@ func TestRepairedTurnWakesOnlyUndispatchedInput(t *testing.T) {
 		t.Fatalf("the next turn admitted input its harness may have run: %v", admits)
 	}
 }
+
+// The quarantine is saved before the terminal turn, so a repair that stops in
+// between still keeps the uncertain input out of later turns.
+func TestInterruptedRepairKeepsTheQuarantine(t *testing.T) {
+	rooms := &room.Store{Root: t.TempDir()}
+	rec, err := rooms.Create(room.CreateInput{Name: "interrupted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &Store{Root: t.TempDir()}
+	meta := Meta{ID: NewID(), Name: "target", Room: rec.Name, RoomID: rec.ID, Resumable: true, Turns: 1}
+	dir, err := sessions.Dir(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "turns"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessions.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "turns", "1.json"), []byte(`{"n":1,"status":"queued"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Store: sessions, Rooms: rooms}
+	if err := m.startTurn(context.Background(), meta.ID, TurnStart{Turn: 1, Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	dispatched, err := rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{meta.Address()}, Text: "dispatched", Wake: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) {
+		tr.Steering = append(tr.Steering, Steer{ID: dispatched.ID, Message: dispatched.Text})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	died, err := sessions.ReadMeta(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := sessions.ReadTurn(meta.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The crash point: the quarantine is written, the terminal turn is not.
+	if _, err := sessions.quarantineUncertainInput(&died, turn); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := sessions.ReadMeta(meta.ID); err != nil || !slices.Contains(got.UncertainInputIDs, dispatched.ID) {
+		t.Fatalf("the quarantine did not survive the interrupted repair: %v, %v", got.UncertainInputIDs, err)
+	}
+	// A later repair of the same turn must not lose the saved quarantine.
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) { tr.Status = TurnRunning; tr.Ended = time.Time{} }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Info(meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	current, err := sessions.ReadMeta(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(current.UncertainInputIDs, dispatched.ID) {
+		t.Fatalf("the later repair lost the quarantine: %v", current.UncertainInputIDs)
+	}
+	admitted, _, err := m.drainRoomMessages(current, Turn{N: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range admitted {
+		if msg.ID == dispatched.ID {
+			t.Fatal("a later turn admitted input the harness may have run")
+		}
+	}
+}
