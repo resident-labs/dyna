@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/textutil"
 )
 
 // CIVerdict is the merge gate's reading of a commit's CI: it proves the commit,
@@ -192,7 +193,40 @@ func applyLocalBudgets(result *localci.Result, policy ChangePolicy) string {
 	if len(notes) == 0 {
 		return ""
 	}
-	return "Local CI on " + result.Node + ": " + clip(strings.Join(notes, "; "), 3000)
+	return "Local CI on " + result.Node + ": " + localNotes(notes, result.SHA)
+}
+
+// maxLocalNotes bounds the timing warnings of one local result in a notice.
+const maxLocalNotes = 3000
+
+// localNotes joins whole warnings up to the bound. What does not fit is counted
+// and left to the local CI result, which the GitHub-pointing clip would not name.
+func localNotes(notes []string, sha string) string {
+	joined := strings.Join(notes, "; ")
+	if len(joined) <= maxLocalNotes {
+		return joined
+	}
+	kept, size := 0, 0
+	for _, note := range notes {
+		if size+len(note)+2 > maxLocalNotes {
+			break
+		}
+		size += len(note) + 2
+		kept++
+	}
+	more := fmt.Sprintf("%d more warnings; run dyna git ci show %s for all of them", len(notes)-kept, sha)
+	if kept == 0 {
+		return clipLocal(notes[0], maxLocalNotes) + "; " + more
+	}
+	return strings.Join(notes[:kept], "; ") + "; " + more
+}
+
+// clipLocal cuts one oversized warning to a whole rune.
+func clipLocal(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return textutil.Prefix(s, n)
 }
 
 func localAggregate(result localci.Result, check localci.SuiteResult) bool {

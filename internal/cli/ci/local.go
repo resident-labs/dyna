@@ -190,6 +190,13 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 		if suite.Note != "" {
 			fmt.Fprintf(c.OutOrStdout(), "  note: %s\n", suite.Note)
 		}
+		// The timing warning in a PR notice is bounded and points here for the rest.
+		if len(suite.SlowTests) > 0 {
+			fmt.Fprintln(c.OutOrStdout(), "  slow tests:")
+			for _, test := range suite.SlowTests {
+				fmt.Fprintf(c.OutOrStdout(), "    %s ran for %s\n", test.Name, test.Duration)
+			}
+		}
 		if suite.Error != "" {
 			fmt.Fprintln(c.OutOrStdout(), suite.Error)
 		}
