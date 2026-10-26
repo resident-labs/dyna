@@ -68,10 +68,10 @@ func outsideReadError(r repository, args []string, err error) error {
 	if !errors.Is(err, errNotInRoom) || !isRead(args) {
 		return err
 	}
-	if len(args) >= 2 && args[0] == "api" && r.name != "" {
-		return fmt.Errorf("%w: reads outside the room work only for public repositories, and %s is private or missing", err, r.name)
+	if name, ok := publicReadTarget(r, args); ok {
+		return fmt.Errorf("%w: reads outside the room work only for public repositories, and %s could not be confirmed public: it is private or missing, or GitHub did not answer", err, name)
 	}
-	return fmt.Errorf("%w: reads outside the room work only for public repositories, through gh api repos/<owner>/<repo>", err)
+	return fmt.Errorf("%w: reads outside the room work only for public repositories, as a plain gh api repos/<owner>/<repo> read on github.com", err)
 }
 
 // roomFor checks local room metadata only. It never discovers GitHub repositories.
@@ -222,6 +222,16 @@ var publicRepo = fetchPublicRepo
 // so the check binds to what the command fetches. GraphQL, other endpoints and
 // every other gh command are not public reads: they need an account.
 func publicAPIRead(ctx context.Context, r repository, args []string) (string, bool) {
+	name, ok := publicReadTarget(r, args)
+	if !ok || !publicRepo(ctx, repository{r.host, name}) {
+		return "", false
+	}
+	return name, true
+}
+
+// publicReadTarget returns the repository of a plain REST read on github.com:
+// the only form of read outside the room that can qualify. It asks no one.
+func publicReadTarget(r repository, args []string) (string, bool) {
 	if r.host != "github.com" || len(args) < 2 || args[0] != "api" || !isRead(args) {
 		return "", false
 	}
@@ -246,11 +256,7 @@ func publicAPIRead(ctx context.Context, r repository, args []string) (string, bo
 	if len(parts) < 3 || parts[0] != "repos" || parts[1] == "" || parts[2] == "" {
 		return "", false
 	}
-	name := parts[1] + "/" + parts[2]
-	if !publicRepo(ctx, repository{r.host, name}) {
-		return "", false
-	}
-	return name, true
+	return parts[1] + "/" + parts[2], true
 }
 
 // fetchPublicRepo asks GitHub, without credentials and on every call, whether a
