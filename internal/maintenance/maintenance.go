@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -128,6 +129,12 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		errs = append(errs, sweepWithDryPass(ctx, &result, "stale test folders", testFolderRetention, func(dry bool) (Pruned, error) {
 			return sweepTestFolders(now, os.TempDir(), processAlive, dry)
 		}))
+		if owner, ownerErr := user.Current(); ownerErr == nil && owner.HomeDir != "" {
+			root := filepath.Join(owner.HomeDir, ".cache", "dyna", scratch.SharedTempName)
+			errs = append(errs, sweepWithDryPass(ctx, &result, "stale disk temp folders", testFolderRetention, func(dry bool) (Pruned, error) {
+				return sweepDiskTemp(now, root, dry)
+			}))
+		}
 		// PR state removes closed records 14 days after close on each write;
 		// the pass reports how many it removed since the last pass.
 		if n, err := state.TakePruned(state.Root(store.DataDir())); err != nil {

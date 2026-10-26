@@ -240,6 +240,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		log.Printf("session scratch unavailable: %v", err)
 	}
 	prof.Env[scratch.Env] = scratchPath
+	if err := scratch.SetTemp(prof.Env, scratchPath); err != nil {
+		log.Printf("session temporary folder unavailable: %v", err)
+	}
 	stampSession(prof.Env, meta)
 	prof.Env[runstore.SessionEnv] = id
 	if exe := m.executable(); exe != "" {
@@ -712,6 +715,7 @@ func StampEnv(meta Meta) []string {
 	// A shared service has no scratch directory for this session in its own environment.
 	if path, err := scratch.Ensure(meta.ID); err == nil {
 		env[scratch.Env] = path
+		_ = scratch.SetTemp(env, path)
 	}
 	var out []string
 	for k, v := range env {
