@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/runstore"
@@ -13,11 +14,18 @@ import (
 
 // RunAgentID is the session ID of agent number agent in run. It is derived, so
 // a coordinator that restarts finds the session its earlier call started
-// instead of starting a second one. The date and time parts are fixed because
-// the ID shape needs them; Created holds the real start time.
+// instead of starting a second one. The date and time are the run's own (a run
+// ID is wf_<date>-<time>-<hex>), so the agents of a run sort with it; the
+// suffix is 16 hex digits of a hash of the run and agent.
 func RunAgentID(run string, agent int) string {
+	stamp := "20000101-000000"
+	if rest, ok := strings.CutPrefix(run, "wf_"); ok && len(rest) >= len(stamp) {
+		if _, err := time.Parse("20060102-150405", rest[:len(stamp)]); err == nil {
+			stamp = rest[:len(stamp)]
+		}
+	}
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s/agent:%d", run, agent))
-	return "ses_20000101-000000-" + hex.EncodeToString(sum[:4])
+	return runstore.SessionDirPrefix + stamp + "-" + hex.EncodeToString(sum[:8])
 }
 
 // StartRunAgent starts the leaf session that serves one agent() call of
@@ -91,6 +99,16 @@ func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// CloseEndedRunAgents closes the open run agents whose run is over. The engine
+// calls it when a run's state changes.
+func (m *Manager) CloseEndedRunAgents(ctx context.Context) error {
+	sessions, err := m.store().listMeta(false, true)
+	if err != nil {
+		return err
+	}
+	return m.closeEndedRunAgents(ctx, sessions)
 }
 
 // closeEndedRunAgents closes the open run agents whose run is over. The
