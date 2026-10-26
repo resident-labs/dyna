@@ -258,6 +258,60 @@ func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
 	}
 }
 
+// A search runs inside a Pi turn that holds its lease. The one ChatGPT reader
+// must renew the due grant without waiting for the switch gate, which waits for
+// every Pi turn, including the caller's own, and it must return the renewed
+// token. The Pi renewal itself is the seam the account refresh already uses, so
+// the test writes the fresh entry where Pi writes it.
+func TestChatGPTGrantDuringTurnReturnsTheRenewedToken(t *testing.T) {
+	a := testAccounts(t)
+	n, err := a.CreateProvider("pi", accountstore.ProviderChatGPT, accountstore.KindOAuth, "ChatGPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "stale-access", Refresh: "grant", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace"}})
+	if n, err = a.Capture(context.Background(), n.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.setActiveAccount(n); err != nil {
+		t.Fatal(err)
+	}
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	renewals := 0
+	piRenewRunner = func(_ context.Context, home, provider, executable string) error {
+		renewals++
+		writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "fresh-access", Refresh: "grant", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "workspace"}})
+		return nil
+	}
+	// The managed Pi copy is only named to the renewal, which the runner stands in for.
+	a.PiExecutable = func() (string, error) { return "/fake/pi/bin/pi", nil }
+	// A reader that regressed to the draining refresh would take this gate and
+	// wait behind the lease held below. Failing at once keeps that regression a
+	// fast, deterministic failure instead of a hung test.
+	a.SwitchGate = func(context.Context, string) (func(), error) {
+		t.Error("the live reader took the switch gate that its own turn holds")
+		return nil, errors.New("the switch gate was taken during a live turn")
+	}
+	release, err := a.TurnLease(context.Background(), "pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	grant, err := a.ChatGPTGrantDuringTurn(ctx, "", "")
+	if err != nil {
+		t.Fatalf("grant under a held turn lease: %v", err)
+	}
+	if renewals != 1 {
+		t.Fatalf("renewals = %d, want one", renewals)
+	}
+	if grant.Access != "fresh-access" || grant.Account != "workspace" {
+		t.Fatalf("grant = %+v, want the token the renewal wrote", grant)
+	}
+}
+
 type credentialGateFixture struct{ *credentialRefreshFixture }
 
 func (credentialGateFixture) SupportsCredentialRefresh(native.Captured) bool { return false }

@@ -39,6 +39,13 @@ type Accounts struct {
 	Root string
 	// NativeManager permits offline adapter injection and additional account backends.
 	NativeManager func(string, native.Host) (native.Manager, bool)
+	// PiExecutable resolves Dyna's own copy of Pi, which renews a saved grant.
+	// Nil uses the installed bundle, and a test injects a path or a failure.
+	PiExecutable func() (string, error)
+	// SwitchGate permits a test to observe a call that takes the gate a live turn
+	// already holds, instead of waiting for that turn to end. Nil uses the real
+	// gate, which drains the harness's turns.
+	SwitchGate func(ctx context.Context, harness string) (release func(), err error)
 	// Quiet makes its registry writes publish no account change. See store.Store.
 	Quiet bool
 }
