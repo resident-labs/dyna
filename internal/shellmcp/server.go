@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"sync"
 )
 
@@ -84,11 +85,27 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 	}
 	var mu sync.Mutex
 	running := map[string]context.CancelFunc{}
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 64*1024), 16<<20)
-	for scanner.Scan() {
+	gate := newRestartGate(tools)
+	defer gate.close()
+	file, _ := in.(*os.File)
+	reader := bufio.NewReaderSize(in, 64*1024)
+	var readErr error
+	for {
+		// With nothing read ahead, wait for input without consuming it, so an
+		// outdated server can restart when no call runs and no request is
+		// half read (D-171). Only a file input can be polled.
+		if file != nil && gate.enabled() && reader.Buffered() == 0 {
+			gate.awaitInput(file)
+		}
+		line, err := readLine(reader, 16<<20)
+		if err != nil {
+			if err != io.EOF {
+				readErr = err
+			}
+			break
+		}
 		var req request
-		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+		if err := json.Unmarshal(line, &req); err != nil {
 			send(response{ID: json.RawMessage("null"), Error: &rpcError{-32700, "parse error"}})
 			continue
 		}
@@ -132,8 +149,10 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 			running[key] = stop
 			mu.Unlock()
 			calls.Add(1)
+			gate.begin()
 			go func() {
 				defer calls.Done()
+				defer gate.end()
 				r := tools.Call(callCtx, p.Name, p.Arguments, p.Meta.Session)
 				// Cancellation takes mu too, so it lands before or after
 				// this check, never between the check and the send.
@@ -144,6 +163,10 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 				})
 				mu.Unlock()
 				stop()
+				// The answer above is on the wire, so the model sees the error
+				// once; the gate restarts the server after every other call
+				// has answered.
+				gate.callEnded()
 			}()
 		case "notifications/cancelled":
 			var p struct {
@@ -163,7 +186,29 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 	}
 	cancel()
 	calls.Wait()
-	return errors.Join(scanner.Err(), tools.Close())
+	return errors.Join(readErr, tools.Close())
+}
+
+// readLine reads one newline-terminated request of at most max bytes.
+func readLine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	for {
+		part, err := r.ReadSlice('\n')
+		line = append(line, part...)
+		if len(line) > max {
+			return nil, bufio.ErrTooLong
+		}
+		switch {
+		case err == nil:
+			return line, nil
+		case err == bufio.ErrBufferFull:
+			continue
+		case err == io.EOF && len(line) > 0:
+			return line, nil
+		default:
+			return nil, err
+		}
+	}
 }
 
 // deliver sends a result unless its request was cancelled, and commits what
