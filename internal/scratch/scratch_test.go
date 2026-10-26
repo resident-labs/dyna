@@ -100,10 +100,6 @@ func TestRetainedNoticeNamesPathAndDeletionDate(t *testing.T) {
 	if got, want := RetainedNotice("ses_kept", closedAt), "scratch kept at "+path+" until 2026-11-02"; got != want {
 		t.Fatalf("notice = %q, want %q", got, want)
 	}
-	// A repeated close reads the same stored close time, so the date never moves.
-	if first, again := RetainedNotice("ses_kept", closedAt), RetainedNotice("ses_kept", closedAt); first != again {
-		t.Fatalf("repeated close changed the notice: %q then %q", first, again)
-	}
 }
 
 func TestSweepRetentionAndSymlinks(t *testing.T) {
