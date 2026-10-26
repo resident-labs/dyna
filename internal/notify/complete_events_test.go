@@ -116,6 +116,39 @@ func TestTurnEventsWakeTheOwnerOnlyWhenOwed(t *testing.T) {
 	}
 }
 
+// A failed turn reports its cause as the event's error and the worker's
+// stderr only as detail, so a harmless harness warning never poses as the
+// reason a turn failed (D-108).
+func TestFailedTurnReportsWorkerStderrAsDetailNotCause(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	rec := e.room()
+	lead := e.start(rec, "lead", nil)
+	child := e.start(rec, "child", &lead)
+	warning := `Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.`
+	_, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) {
+		turn.Status, turn.Profile, turn.Model = subagent.TurnError, "pi", "muse-wonder-full-1.0"
+		turn.Error = "worker pi (model muse-wonder-full-1.0) failed to start: no harness event within 2m0s of startup"
+		turn.WorkerStderr = warning
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := res.Message.TurnResult()
+	if !ok || ev.State != room.TurnFailed {
+		t.Fatalf("failed turn event = %+v, %v", ev, ok)
+	}
+	if !strings.Contains(ev.Error, "no harness event within 2m0s of startup") || strings.Contains(ev.Error, warning) {
+		t.Fatalf("failed turn cause = %q", ev.Error)
+	}
+	if !strings.Contains(ev.Detail, "Worker stderr: "+warning) {
+		t.Fatalf("failed turn detail lost the worker stderr: %q", ev.Detail)
+	}
+}
+
 // wakesRoot reports whether the root seat takes the post as a wake: the
 // registry classifies it at write time, and this is the same decision.
 func wakesRoot(msg room.Message, roomName string) bool {

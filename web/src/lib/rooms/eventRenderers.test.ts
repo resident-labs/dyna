@@ -399,6 +399,33 @@ function fixtureTip(payload: EventPayload): string {
   return payload.detail || payload.reason
 }
 
+test('a failed turn states its cause and keeps worker stderr in the detail block', () => {
+  const payload: EventPayload = {
+    session: 'dyna:notice-merge',
+    sessionId: 'ses_20261023-120000-00000000',
+    turn: 14,
+    state: 'failed',
+    error: 'worker pi (model muse-wonder-full-1.0) failed to start: no harness event within 2m0s of startup',
+    detail: 'Full output: dyna subagent output ses_20261023-120000-00000000 --turn 14\nWorker stderr: Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.',
+  }
+  const post = postFor('turn', 'failed', payload)
+  for (const surface of ['feed', 'dm'] as const) {
+    const target = document.createElement('div')
+    document.body.append(target)
+    const mounted = web.mount(web.eventComponents.TurnCompletionRow, { target, props: { post, notice: post.notice, surface } })
+    web.flushSync()
+    // The body is the cause: the startup timeout, never the harness warning.
+    const body = need(target.querySelector('.prose'), `the failed turn body on ${surface}`)
+    assert.match(body.textContent ?? '', /no harness event within 2m0s of startup/, `turn/failed on ${surface} lost its cause`)
+    assert.doesNotMatch(body.textContent ?? '', /Using custom model id/, `turn/failed on ${surface} glued stderr into the cause`)
+    // The warning stays readable as detail, on its own line.
+    const detail = need(target.querySelector('.turn-detail'), `the failed turn detail block on ${surface}`)
+    assert.match(detail.textContent ?? '', /Worker stderr: Warning: Model "muse-wonder-full-1.0" not found/, `turn/failed on ${surface} lost its worker stderr detail`)
+    web.unmount(mounted)
+    target.remove()
+  }
+})
+
 test('a call row says how the owner answered, without its request ID', () => {
   for (const [type, words] of [['joined', /Owner joined the call/], ['declined', /Owner declined the call/], ['withdrawn', /Call request withdrawn/]] as const) {
     const payload = fixtures[`call/${type}`]

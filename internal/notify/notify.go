@@ -1324,6 +1324,11 @@ func (s *Service) turnReportDetail(meta subagent.Meta, turn subagent.Turn, state
 		}
 		lines = append(lines, line)
 	}
+	// The worker's own stderr is evidence, kept out of the failure's cause
+	// text: it may hold harmless warnings on a turn that timed out (D-108).
+	if stderr := strings.TrimSpace(turn.WorkerStderr); stderr != "" {
+		lines = append(lines, "Worker stderr: "+stderr)
+	}
 	lines = append(lines,
 		fmt.Sprintf("Inspect: dyna subagent output %s --turn %d --transcript", meta.ID, turn.N))
 	if s.sessionStore().TransferFallbackFollows(meta, turn) {

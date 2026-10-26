@@ -360,6 +360,7 @@ type TurnEnd struct {
 	Status             string                          `json:"status"`
 	Result             json.RawMessage                 `json:"result,omitempty"`
 	Error              string                          `json:"error,omitempty"`
+	WorkerStderr       string                          `json:"workerStderr,omitempty"` // the failed worker's stderr tail; detail, never cause text
 	FailureReason      providerfailure.Reason          `json:"failureReason,omitempty"` // named by the runner's trusted boundary; Error is display text
 	Ended              time.Time                       `json:"ended"`
 	InputCutoff        *int64                          `json:"inputCutoff,omitempty"`
@@ -411,6 +412,7 @@ func (m *Manager) endTurn(ctx context.Context, id string, e TurnEnd) error {
 	finished, err := store.updateTurnContext(ctx, id, e.Turn, func(t *Turn) {
 		t.Status, t.Error, t.Ended = e.Status, e.Error, e.Ended
 		t.FailureReason = e.FailureReason
+		t.WorkerStderr = e.WorkerStderr
 		if t.StopReason == transferStartupTimeout {
 			t.Status, t.Error, t.FailureReason = TurnError, transferStartupTimeout, ""
 		}
