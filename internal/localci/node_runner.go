@@ -1001,6 +1001,12 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 
 // Slots belong to checks, across repositories and runner processes. A waiter
 // tries every slot before blocking on one slot without polling.
+// killGroupLeftovers kills every process in the wrapper's group except the
+// wrapper itself. A check that leaves a child behind, such as a compiler daemon
+// or a shell that outlived its deadline, must not hold the check's output pipe
+// or the next check's slot.
+const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
+
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
@@ -1052,14 +1058,17 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		for key, value := range check.env {
 			environment[key] = value
 		}
-		// --foreground keeps the check in the wrapper's process group: GNU
-		// timeout otherwise moves it into a new one, and the runner's cleanup of
-		// a leftover pipe holder kills the wrapper's group by its id.
-		setup += fmt.Sprintf("check_entered=1; timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
-		// The check and everything it starts get no slot lock: the wrapper holds
-		// fd 9, and a daemon the check leaves behind (sccache daemonises into its
-		// own session) would otherwise keep the slot for good.
-		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&-"
+		// --foreground keeps the check in the wrapper's process group, so what
+		// the check leaves behind is in the wrapper's group too: timeout still
+		// enforces the deadline on the check itself, and after it returns the
+		// wrapper kills every other member of the group. A child that held the
+		// output pipe open is gone before the caller waits on the pipe, so the
+		// ErrWaitDelay path is a fallback rather than the way out.
+		// The check and everything it starts also gets no slot lock: the wrapper
+		// holds fd 9, and a daemon that leaves even the group (sccache does)
+		// would otherwise keep the slot for good.
+		setup += fmt.Sprintf("check_entered=1; check_status=0; timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
+		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + killGroupLeftovers + "; ( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if node.SSH == "" {
