@@ -94,7 +94,7 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 			}
 		}
 		if old < 9 {
-			if err := dropRemovedHarnessRows(ctx, conn); err != nil {
+			if err := dropRemovedHarnessRows(ctx, conn, credentialsAt(dataDir)); err != nil {
 				return err
 			}
 		}
@@ -128,7 +128,7 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 // or remove; the importer can still read it for that repair. A dropped account
 // loses its active marks, repository scope, limit and, through the orphan cleanup,
 // its credential file. The engine backs up dyna.db before this migration.
-func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
+func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn, credentialDir string) error {
 	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), json_extract(CAST(metadata AS TEXT), '$.identity'), credential_schema, json_extract(CAST(metadata AS TEXT), '$.needsLogin') FROM accounts")
 	if err != nil {
 		return err
@@ -147,7 +147,7 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
 			return err
 		}
 		if KnownHarness(harness.String) && !AccountsRetired(harness.String) {
-			if harness.String == "pi" && provider.String != "" && identity.String != "" && schema.String != "" && !needsLogin.Bool {
+			if harness.String == "pi" && provider.String != "" && identity.String != "" && schema.String != "" && !needsLogin.Bool && piCredentialHolds(credentialDir, id.String, schema.String) {
 				if replacements[provider.String] == nil {
 					replacements[provider.String] = map[string]bool{}
 				}
@@ -445,7 +445,14 @@ func scanMetadata(row interface{ Scan(...any) error }) (Metadata, string, error)
 // readCredential reads account id's credential file; ok is false when it is
 // missing or damaged.
 func (s *Store) readCredential(id string) (Credential, bool) {
-	f, err := os.OpenFile(s.credentialPath(id), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	return readCredentialAt(s.credentialDir(), id)
+}
+
+// readCredentialAt reads and validates one account's saved credential file. A
+// row whose file is missing or damaged reads as signed out, and so does a file
+// whose schema does not match the row.
+func readCredentialAt(dir, id string) (Credential, bool) {
+	f, err := os.OpenFile(filepath.Join(dir, id+".json"), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return Credential{}, false
 	}
@@ -459,6 +466,15 @@ func (s *Store) readCredential(id string) (Credential, bool) {
 		return Credential{}, false
 	}
 	return c, true
+}
+
+// piCredentialHolds reports whether id's saved credential can stand in for a
+// retired harness sign-in: its file is readable, its schema matches the row, and
+// it carries a payload. Store.load treats a row whose file is missing or damaged
+// as signed out, so the migration must not trust a row's schema alone (D-125).
+func piCredentialHolds(dir, id, schema string) bool {
+	c, ok := readCredentialAt(dir, id)
+	return ok && c.Schema == schema && len(bytes.TrimSpace(c.Payload)) > 2
 }
 
 // writeCredential is the one writer of an account's credential file: login,
@@ -790,3 +806,8 @@ func forgetAccounts(ctx context.Context, conn *sql.Conn, ids []string) error {
 	}
 	return nil
 }
+
+// credentialsAt names the private credential directory of a data directory. The
+// migration validates a saved sign-in by reading its file, so it derives the
+// layout from the data directory that openRegistryAt already receives.
+func credentialsAt(dataDir string) string { return filepath.Join(dataDir, "accounts", "credentials") }
