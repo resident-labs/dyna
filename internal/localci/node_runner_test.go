@@ -1111,18 +1111,28 @@ func keepActive(t *testing.T, dir string) string {
 	return active
 }
 
-// A queued wrapper whose run is cancelled must not keep waiting for a slot: it
-// ends, so nothing outlives the client on the machine.
+// A queued wrapper whose run is cancelled must not run its check, even when the
+// slot comes free in the same moment. The fake sleep pauses the wrapper inside
+// its wait, so the run is removed and the slot released at a fixed point: only
+// the check right before the work can stop it then.
 func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 	dir := t.TempDir()
-	active := keepActive(t, dir)
-	// Hold the only slot, as a check that is running does.
-	holder := exec.Command("flock", filepath.Join(dir, "slots"), "sleep", "30")
 	if err := os.MkdirAll(filepath.Join(dir, "slots"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	slot := filepath.Join(dir, "slots", "0.lock")
-	lock, err := os.OpenFile(slot, os.O_CREATE|os.O_RDWR, 0o600)
+	active := keepActive(t, dir)
+	// The fake sleep blocks on a FIFO, so the wrapper is inside its wait when the
+	// test removes the run and releases the slot.
+	gate := filepath.Join(dir, "gate")
+	if err := syscall.Mkfifo(gate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sleeper := "#!/bin/sh\nread -r _ < " + shellquote.Quote(gate) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "sleep"), []byte(sleeper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A check holds the only slot, as a running check does.
+	lock, err := os.OpenFile(filepath.Join(dir, "slots", "0.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1130,21 +1140,91 @@ func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	_ = holder
-	// The run is cancelled while its check waits for the slot.
-	script := nodeSlotScript(dir, 1, 0, active, time.Hour, "printf 'ran\\n'")
+	ran := filepath.Join(dir, "ran")
+	script := nodeSlotScript(dir, 1, 0, active, time.Hour, "printf 'ran\\n' > "+shellquote.Quote(ran))
+	// The test holds the writing end, so the wrapper's fake sleep blocks in its
+	// read and the test decides when it resumes.
+	writerReady := make(chan *os.File, 1)
+	go func() {
+		file, err := os.OpenFile(gate, os.O_WRONLY, 0o600)
+		if err == nil {
+			writerReady <- file
+		}
+	}()
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	done := make(chan error, 1)
-	go func() { done <- exec.Command("bash", "-c", script).Run() }()
-	time.Sleep(200 * time.Millisecond)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- cmd.Wait() }()
+	// The wrapper is inside its fake sleep: its first acquisition failed.
+	waitForFifoReader(t, gate)
 	if err := os.Remove(active); err != nil {
 		t.Fatal(err)
 	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	// Resume the sleep, so the next acquisition succeeds on a cancelled run.
+	var writer *os.File
+	select {
+	case writer = <-writerReady:
+	case <-time.After(hangGuard):
+		t.Fatal("the wrapper never opened its sleep gate")
+	}
+	if _, err := writer.WriteString("go\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = writer.Close()
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Fatal("a cancelled run's queued check ran anyway")
+			t.Fatal("a cancelled run's queued check exited successfully")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("a queued check outlived its cancelled run")
 	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatal("a cancelled run's queued check started its work")
+	}
+}
+
+// hangGuard only stops a broken run from blocking the suite.
+const hangGuard = 10 * time.Second
+
+// waitForFifoReader waits until a process holds the gate open for reading: the
+// wrapper inside its fake sleep.
+func waitForFifoReader(t *testing.T, gate string) {
+	t.Helper()
+	deadline := time.Now().Add(hangGuard)
+	for time.Now().Before(deadline) {
+		if gateOpenedForRead(gate) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the wrapper never waited on its sleep")
+}
+
+func gateOpenedForRead(gate string) bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		fds, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "fd"))
+		if err != nil {
+			continue
+		}
+		for _, fd := range fds {
+			if target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name())); err == nil && target == gate {
+				return true
+			}
+		}
+	}
+	return false
 }
