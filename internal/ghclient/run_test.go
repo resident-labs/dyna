@@ -212,6 +212,8 @@ func setupRooms(t *testing.T, repos ...string) []room.Record {
 	t.Helper()
 	t.Setenv(BinaryEnv, "")
 	storetest.Isolate(t)
+	// No test asks GitHub whether a repository is public.
+	setPublic(t, false)
 	records := []room.Record{}
 	for i, repo := range repos {
 		dir := t.TempDir()
@@ -255,5 +257,64 @@ esac
 	}
 	if out.String() != "writer-secret\n" {
 		t.Fatal("read-write room selected an account that cannot write")
+	}
+}
+
+func setPublic(t *testing.T, public bool) {
+	t.Helper()
+	previous := publicRepo
+	publicRepo = func(context.Context, repository) bool { return public }
+	t.Cleanup(func() { publicRepo = previous })
+}
+
+// A REST read of a public repository outside every room runs without any
+// credentials (D-272). Writes, other commands, other endpoints and a repository
+// that is not public now are refused.
+func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T) {
+	records := setupRooms(t, "resident-labs/project")
+	ctx := WithRoom(context.Background(), records[0].ID)
+	exe := filepath.Join(t.TempDir(), "gh")
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", log)
+	t.Setenv("GH_TOKEN", "ambient-secret")
+	script := "#!/bin/sh\necho \"token=[$GH_TOKEN] config=$(ls -A \"$GH_CONFIG_DIR\" | wc -l) $*\" >> \"$GH_CALLS\"\n"
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) error {
+		return Run(ctx, Command(ctx, exe, records[0].Repo, args...))
+	}
+	var asked []string
+	publicRepo = func(_ context.Context, r repository) bool { asked = append(asked, r.name); return true }
+	t.Cleanup(func() { publicRepo = func(context.Context, repository) bool { return false } })
+	for _, args := range [][]string{
+		{"api", "repos/ludovic111/horizon/issues/1340"},
+		{"api", "repos/ludovic111/horizon/issues/1340", "-X", "GET", "--jq", ".title"},
+	} {
+		if err := run(args...); err != nil {
+			t.Fatalf("public read %q = %v, want it to run", args, err)
+		}
+	}
+	// Each access asks again; the question names the repository the command reads.
+	if strings.Join(asked, " ") != "ludovic111/horizon ludovic111/horizon" {
+		t.Fatalf("visibility asked for %v, want one check per access of the endpoint's repository", asked)
+	}
+	for _, args := range [][]string{
+		{"api", "repos/ludovic111/horizon/issues", "-X", "POST"},
+		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
+		{"issue", "create", "--repo", "ludovic111/horizon"},
+	} {
+		if err := run(args...); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
+			t.Fatalf("%q = %v, want the acting-room refusal", args, err)
+		}
+	}
+	publicRepo = func(context.Context, repository) bool { return false }
+	if err := run("api", "repos/ludovic111/horizon/issues/1340"); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
+		t.Fatalf("read of a repository that is not public now = %v, want the refusal", err)
+	}
+	calls, _ := os.ReadFile(log)
+	want := "token=[] config=0 api repos/ludovic111/horizon/issues/1340\ntoken=[] config=0 api repos/ludovic111/horizon/issues/1340 -X GET --jq .title\n"
+	if string(calls) != want {
+		t.Fatalf("gh calls =\n%s\nwant only the two anonymous public reads:\n%s", calls, want)
 	}
 }

@@ -83,6 +83,12 @@ func changeLabel(r Record) string {
 	}
 	return "Change " + r.Key
 }
+
+// noQueueStatus tells the author of an approved local change what to do next
+// when the repository has no local lane, so the merge queue never lands it.
+func noQueueStatus(r Record) string {
+	return fmt.Sprintf("This repository has no local lane, so the merge queue will not land %s. Next step: push branch %s and open a GitHub pull request for it, for example with gh pr create.", changeLabel(r), r.Branch)
+}
 func cleanNotes(notes ChangeNotes) ChangeNotes {
 	return ChangeNotes{Intent: Sanitize(notes.Intent), Testing: Sanitize(notes.Testing), Risks: Sanitize(notes.Risks), Questions: Sanitize(notes.Questions)}
 }

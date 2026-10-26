@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"dyna-agent/internal/processguard"
 )
@@ -63,14 +64,15 @@ type wireLaunch struct {
 	Argv        []string `json:"argv"`
 	Env         []string `json:"env"`
 	Dir         string   `json:"dir"`
+	IdleClose   int64    `json:"idleClose,omitempty"`
 }
 
 func toWire(l Launch) *wireLaunch {
-	return &wireLaunch{Connection: l.Connection, Harness: l.Harness, Key: l.Key, Fingerprint: l.Fingerprint, Argv: l.Argv, Env: l.Env, Dir: l.Dir}
+	return &wireLaunch{Connection: l.Connection, Harness: l.Harness, Key: l.Key, Fingerprint: l.Fingerprint, Argv: l.Argv, Env: l.Env, Dir: l.Dir, IdleClose: int64(l.IdleClose)}
 }
 
 func (w wireLaunch) launch() Launch {
-	return Launch{Connection: w.Connection, Harness: w.Harness, Key: w.Key, Fingerprint: w.Fingerprint, Argv: w.Argv, Env: w.Env, Dir: w.Dir}
+	return Launch{Connection: w.Connection, Harness: w.Harness, Key: w.Key, Fingerprint: w.Fingerprint, Argv: w.Argv, Env: w.Env, Dir: w.Dir, IdleClose: time.Duration(w.IdleClose)}
 }
 
 // id is the registry identity of a launch: the harness namespace and the

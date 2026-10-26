@@ -203,6 +203,10 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		status := TurnError
 		if ctx.Err() != nil {
 			status = TurnStopped
+			// Say who asked, so a stop reads as a stop, not as a failure.
+			if t, terr := store.ReadTurn(id, n); terr == nil && t.StopAsked && t.StopBy != "" {
+				err = fmt.Errorf("stopped by %s: %w", t.StopBy, err)
+			}
 		}
 		_ = finish(status, nil, err)
 		return err
@@ -375,6 +379,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		mu.Unlock()
 		execution := writes.nativeExecution(meta.Role)
 		execution.ProcessRunner = m.ProcessRunner
+		execution.IdleUnload = settingsValues.HarnessIdleUnload()
 		if turn.Schema == "" {
 			execution.AcceptEmptyOutput = func() bool { return m.turnAcceptsEmptyOutput(id, n) }
 			execution.AcceptCleanEmptyStop = true
