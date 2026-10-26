@@ -51,6 +51,33 @@ func TestPiChatGPTLoginWithoutASignInIsNotSignedIn(t *testing.T) {
 	}
 }
 
+// A Muse OAuth sign-in keeps its minted inference key in access, so the key
+// reader takes it from there instead of refusing a supported sign-in.
+func TestPiInferenceKeyReadsAnOAuthSignIn(t *testing.T) {
+	accounts := testAccounts(t)
+	seedPiLogin(t, accounts, "meta", `{"type":"oauth","access":"minted-key","refresh":"identity-token","expires":1}`, store.KindOAuth)
+	key, err := accounts.PiInferenceKey(t.Context(), store.ProviderMetaMuse, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "minted-key" {
+		t.Fatalf("key = %q, want the minted key of the OAuth sign-in", key)
+	}
+}
+
+// A pasted Muse key still reads as the key.
+func TestPiInferenceKeyReadsAPastedKey(t *testing.T) {
+	accounts := testAccounts(t)
+	seedPiLogin(t, accounts, "meta", `{"type":"api_key","key":"pasted-key"}`, store.KindAPIKey)
+	key, err := accounts.PiInferenceKey(t.Context(), store.ProviderMetaMuse, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "pasted-key" {
+		t.Fatalf("key = %q, want the pasted key", key)
+	}
+}
+
 // A search from one repository never reads the login of an account the owner
 // limited to another repository, and the room's own selection wins.
 func TestPiChatGPTLoginKeepsTheAccountsRepositoryScope(t *testing.T) {
@@ -91,6 +118,29 @@ func TestPiChatGPTLoginKeepsTheAccountsRepositoryScope(t *testing.T) {
 	}
 	if access, _, err = accounts.PiChatGPTLogin(t.Context(), "", "github.com/acme/personal"); err == nil {
 		t.Fatalf("the global account read %q, want its scope to refuse the repository", access)
+	}
+}
+
+// A provider that signs in without an account ID, such as xAI, still gives the
+// search tool its access token, and the same repository scope applies to it.
+func TestPiAccessTokenReadsASignInWithoutAnAccountID(t *testing.T) {
+	accounts := testAccounts(t)
+	limited := seedPiLogin(t, accounts, "xai", `{"type":"oauth","access":"xai-token","refresh":"refresh-token","expires":1}`, store.KindOAuth)
+	if err := accounts.SetRepos(limited.ID, []string{"github.com/acme/work"}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := accounts.PiAccessToken(t.Context(), store.ProviderXAI, "", "github.com/acme/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "xai-token" {
+		t.Fatalf("token = %q, want the saved xAI sign-in", token)
+	}
+	if token, err := accounts.PiAccessToken(t.Context(), store.ProviderXAI, "", "github.com/acme/personal"); err == nil {
+		t.Fatalf("another repository read %q, want the scope refused", token)
+	}
+	if _, err := accounts.PiAccessToken(t.Context(), store.ProviderKimiCode, "", ""); !errors.Is(err, native.ErrNotSignedIn) {
+		t.Fatalf("another provider: err = %v, want ErrNotSignedIn", err)
 	}
 }
 
