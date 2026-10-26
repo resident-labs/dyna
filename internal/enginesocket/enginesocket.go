@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"os/user"
 	"path/filepath"
 )
 
@@ -25,10 +26,19 @@ func DataDir() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", "dyna")
 }
 
+// OwnerHome is this user's home from the password database, not from HOME, which
+// a caller can change. The owner's identity cannot depend on that environment.
+func OwnerHome() string {
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		return u.HomeDir
+	}
+	return os.Getenv("HOME")
+}
+
 // OwnerDataDir is the data folder of this user's own engine, which keeps the
 // historical socket path so an installed engine and the CLI still meet.
 func OwnerDataDir() string {
-	return filepath.Join(os.Getenv("HOME"), ".local", "share", "dyna")
+	return filepath.Join(OwnerHome(), ".local", "share", "dyna")
 }
 
 // PathFor names the socket for one runtime folder and one data folder. The

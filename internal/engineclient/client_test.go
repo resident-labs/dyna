@@ -38,11 +38,9 @@ func TestSocketPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", root)
 	// The owner's own data folder keeps the historical path, so an installed
-	// engine and the CLI still meet. The owner's data folder is the standard one
-	// under HOME, as an installed engine has it.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	// engine and the CLI still meet. The owner's home comes from the password
+	// database, so the test points XDG_DATA_HOME at that home's share folder.
+	t.Setenv("XDG_DATA_HOME", filepath.Dir(enginesocket.OwnerDataDir()))
 	want, err := enginesocket.PathFor(root, enginesocket.OwnerDataDir())
 	if err != nil {
 		t.Fatal(err)
