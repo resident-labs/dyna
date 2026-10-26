@@ -92,6 +92,21 @@ export function laneGrid(phases: PhaseInput[]): LaneGrid | null {
   return { stages, lanes: [...lanes.values()] }
 }
 
+// CellRef names one cell by its lane name and stage column.
+export interface CellRef {
+  lane: string
+  col: number
+}
+
+// cellOf finds the cell that holds phase group i, or null.
+export function cellOf(grid: LaneGrid, i: number): CellRef | null {
+  for (const lane of grid.lanes) {
+    const col = lane.cells.findIndex((c) => c?.phases.includes(i))
+    if (col >= 0) return { lane: lane.name, col }
+  }
+  return null
+}
+
 const rank: Record<CellState, number> = { error: 0, running: 1, ok: 2 }
 
 // byUrgency lists failed lanes first, then running ones, then finished ones.
