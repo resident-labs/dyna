@@ -12,7 +12,6 @@
   import { roomLabel } from '../ui/format.ts'
   import Switch from '../ui/Switch.svelte'
   import SettingsShell from '../ui/SettingsShell.svelte'
-  import ServiceHeader from '../services/ServiceHeader.svelte'
   import HooksPane from '../settings/HooksPane.svelte'
   import CIBudgetFields from '../prs/CIBudgetFields.svelte'
   import PRNoiseRules from '../prs/PRNoiseRules.svelte'
@@ -85,7 +84,6 @@
     { id: 'general', label: 'General' },
     { id: 'review', label: 'Review & landing' },
     { id: 'ci', label: 'CI time' },
-    { id: 'services', label: 'Services' },
     { id: 'rules', label: 'Rules' },
     { id: 'hooks', label: 'Hooks' },
     { id: 'noise', label: 'Bot noise rules' },
@@ -298,7 +296,7 @@
   <Section title="Review & landing" lede="How changes in this room get reviewed and merged.">
     {#if reviewer}
       <Group title="Automatic review">
-        <Row title="Review new PRs" help="A reviewer agent reviews each tracked PR. Choose its model in Services.">
+        <Row title="Review new PRs" help="A reviewer agent reviews each tracked PR. Choose its model in Settings > Settings > Services.">
           {#snippet control()}<Switch on={reviewer.enabled} label="Automatic review" onchange={flip} disabled={!!reviewerBusy || busy} />{/snippet}
         </Row>
         <Row title="Reviewer sessions" help="Close the reviewer sessions and start new ones.">
@@ -343,12 +341,6 @@
     {/if}
     {@render policyError()}
   </Section>
-{:else if section === 'services'}
-  <Section title="Services" lede="The agents that work for this room. Pick Auto or one profile.">
-    <Group>
-      <div class="svc"><ServiceHeader {roomId} role="reviewer" onchange={onreviewer} /></div>
-    </Group>
-  </Section>
 {:else if section === 'rules'}
   {@render rules()}
 {:else if section === 'hooks'}
@@ -376,7 +368,6 @@
   .ghost:disabled { opacity: 0.5; }
   .ghost.danger { color: var(--coral); }
   .grid { display: grid; grid-template-columns: 160px 1fr; gap: var(--s2) var(--s3); align-items: center; }
-  .svc :global(.bar) { padding: var(--s3) 18px; border-bottom: 0; }
   .err { color: var(--coral); font-size: var(--t-ui); margin: var(--s3) 0 0; }
   .quiet { color: var(--faint); font-size: var(--t-ui); }
   @media (max-width: 760px) {
