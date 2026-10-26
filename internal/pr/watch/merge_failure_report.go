@@ -333,7 +333,7 @@ func mergeReportSafePath(name string) bool {
 // output that the hosted read never sees, and it stays available after the
 // trial branch is gone.
 func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, logs string) (lines, files []string) {
-	suites := localCIFailedSuites(ctx, s.ciRegistry(), r, head)
+	suites := s.localCIFailedSuites(ctx, s.ciRegistry(), r, head)
 	for _, suite := range suites {
 		text := suite.Error + "\n" + strings.Join(suite.Failures, "\n") + "\n" + suite.LogTail
 		evidence, named := localCFirstEvidence(text)
@@ -361,11 +361,15 @@ func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, lo
 }
 
 // localCIFailedSuites loads the failed suites of the saved local result.
-func localCIFailedSuites(ctx context.Context, registry localCIRegistry, r Record, head string) []localci.SuiteResult {
-	if r.RepoPath == "" || head == "" {
+func (s *Service) localCIFailedSuites(ctx context.Context, registry localCIRegistry, r Record, head string) []localci.SuiteResult {
+	if head == "" {
 		return nil
 	}
-	repo, err := localci.CanonicalRepo(ctx, r.RepoPath)
+	dir, dirErr := s.checkoutDir(ctx, r)
+	if dirErr != nil {
+		return nil
+	}
+	repo, err := localci.CanonicalRepo(ctx, dir)
 	if err != nil {
 		return nil
 	}
