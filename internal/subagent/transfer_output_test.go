@@ -25,11 +25,11 @@ func TestTransferCountsStepStartAsModelStart(t *testing.T) {
 		}
 	}
 	write(`{"v":1,"kind":"status","name":"session","state":"started"}`)
-	if m.transferHasOutput(id, Turn{}) {
+	if m.Store.transferHasOutput(id, Turn{}) {
 		t.Fatal("a session status counted as model output")
 	}
 	write(`{"v":1,"kind":"status","name":"step","state":"started"}`)
-	if !m.transferHasOutput(id, Turn{}) {
+	if !m.Store.transferHasOutput(id, Turn{}) {
 		t.Fatal("step_start did not count as model start")
 	}
 }
