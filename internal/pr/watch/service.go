@@ -122,6 +122,19 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 		return Record{}, false, err
 	}
 	if old := st.Records[ref.Key()]; old != nil {
+		// A run-owned caller of the same controller first takes over the PR its
+		// earlier run author left (issue D-252), so this existing-record path
+		// returns a change the caller may act on.
+		if moved, err := s.takeoverRunChange(ctx, author, lookupDir, func(r Record) bool { return r.Key == ref.Key() }); err != nil {
+			return Record{}, false, err
+		} else if moved {
+			if st, err = s.Store.Read(); err != nil {
+				return Record{}, false, err
+			}
+			if old = st.Records[ref.Key()]; old == nil {
+				return Record{}, false, fmt.Errorf("PR is no longer tracked")
+			}
+		}
 		if path := matchingCheckout(ctx, *old, lookupDir); path != "" {
 			if err := s.Store.update(func(live *State) error {
 				current := live.Records[ref.Key()]

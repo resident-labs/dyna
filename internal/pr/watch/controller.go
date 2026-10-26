@@ -86,6 +86,14 @@ func (s *Service) takeoverRunChange(ctx context.Context, author subagent.Info, d
 	return moved, nil
 }
 
+// TakeoverRunChange moves the author role of the tracked change key to a
+// run-owned caller of the same controller when the takeover rules allow it
+// (issue D-252). It reports whether the role moved, so its caller re-reads
+// what it checked an author against.
+func (s *Service) TakeoverRunChange(ctx context.Context, key string, author subagent.Info, dir string) (bool, error) {
+	return s.takeoverRunChange(ctx, author, dir, func(old Record) bool { return old.Key == key })
+}
+
 // runTakeoverAllowed reports whether controller may take the author role of
 // old: only an open, watched record of the same controller whose current
 // author session is closed or is the room's root session.
