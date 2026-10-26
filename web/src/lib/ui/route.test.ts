@@ -53,3 +53,10 @@ test('writeRoute adds an entry for a new screen, corrects in place on replace, a
   writeRoute('', false, loc, hist)
   assert.deepEqual(calls, [['replace', `/app?x=1#room=${room}`], ['push', `/app?x=1#room=${room}&view=files`], ['push', '/app?x=1']])
 })
+
+test('a workflow agent session address survives a reload', () => {
+  const agent = 'ses_20261017-100000-0123456789abcdef'
+  for (const r of [at({ session: agent }), at({ session: agent, turn: 2 })]) assert.deepEqual(parseRoute(routeHash(r)), r)
+  assert.deepEqual(parseRoute(detailHref({ kind: 'session', id: agent }, room)), at({ session: agent }))
+  assert.deepEqual(parseRoute(`#room=${room}&session=ses_20261017-100000-0123456789abcde`), at({}), 'a 15-digit suffix is no session')
+})

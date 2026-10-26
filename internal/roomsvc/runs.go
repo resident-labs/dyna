@@ -73,9 +73,12 @@ type RunAgent struct {
 	Preview string `json:"preview,omitempty"`
 	// Doing says what a running worker does now (see
 	// workeroutput.LastActivity); empty once it ended.
-	Doing  workeroutput.Activity `json:"doing,omitzero"`
-	Error  string                `json:"error,omitempty"`
-	Cached bool                  `json:"cached,omitempty"`
+	Doing workeroutput.Activity `json:"doing,omitzero"`
+	// Session is the ID of the session that ran this agent. It is empty
+	// for an agent of a run from before agents were sessions.
+	Session string `json:"session,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Cached  bool   `json:"cached,omitempty"`
 }
 
 // RunLog is one workflow log line.
@@ -262,6 +265,10 @@ func (s *Service) RunDetail(id string) (RunDetail, error) {
 	out.Agents, out.AgentTotal, out.Phases, out.Logs = foldRun(events, m.Status == "running")
 	out.AgentRunning, out.AgentFailed = countAgents(events, m.Status == "running")
 	for i, a := range out.Agents {
+		session := runstore.AgentSessionID(id, a.ID)
+		if _, err := os.Lstat(filepath.Join(runstore.SessionsDir(), session)); err == nil {
+			out.Agents[i].Session = session
+		}
 		if a.Status == "running" {
 			if path, err := runstore.AgentNormalizedOutputPath(id, a.ID); err == nil {
 				out.Agents[i].Doing = workeroutput.LastActivity(path)

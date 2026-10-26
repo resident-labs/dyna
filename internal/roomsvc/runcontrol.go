@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/mode"
-	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runsvc"
 	"dyna-agent/internal/workflowsvc"
@@ -106,20 +104,4 @@ func (s *Service) CancelRun(ctx context.Context, id string) error {
 		return err
 	}
 	return runsvc.Cancel(ctx, id)
-}
-
-func (s *Service) SteerRun(ctx context.Context, id string, agent int, text string) (PostResult, error) {
-	detail, err := s.RunDetail(id)
-	if err != nil {
-		return PostResult{}, err
-	}
-	if agent < 1 || strings.TrimSpace(text) == "" {
-		return PostResult{}, fmt.Errorf("worker ID and text are required")
-	}
-	rec, err := s.rooms().Resolve(detail.Run.RoomID)
-	if err != nil {
-		return PostResult{}, err
-	}
-	result, err := s.Notify.Post(ctx, notify.PostInput{Sender: notify.Sender{Kind: notify.SenderOwner, Room: rec.Name, Human: true}, Mentions: []string{"@run:" + id + "/agent:" + strconv.Itoa(agent)}, Text: text})
-	return PostResult{Message: result.Message, Deliveries: result.Deliveries}, err
 }

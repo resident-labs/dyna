@@ -4,7 +4,8 @@ import { roomIDPattern } from './posts.ts'
 export const detailIDs = {
   shell: /^sh_\d{8}-\d{6}-[a-f0-9]{8}$/,
   run: /^wf_\d{8}-\d{6}-[a-f0-9]{8}$/,
-  session: /^ses_\d{8}-\d{6}-[a-f0-9]{8}$/,
+  // A workflow agent's session ID ends in 16 hex digits, any other in 8.
+  session: /^ses_\d{8}-\d{6}-[a-f0-9]{8}(?:[a-f0-9]{8})?$/,
 }
 
 export const detailLabels = { shell: 'View log', run: 'Open workflow', session: 'View transcript' }

@@ -232,6 +232,7 @@ func printEvent(w io.Writer, e runstore.Event) {
 		fmt.Fprintln(w, stDim.Render(indent+"  ◌ queued  ")+stName.Render(e.Label)+stDim.Render("  ["+e.Profile+"]  "+e.Preview))
 	case "agent_run":
 		fmt.Fprintln(w, stDim.Render(indent+"  ▶ running ")+stName.Render(e.Label)+stDim.Render("  ["+e.Profile+"]"))
+	// TODO: legacy/shim remove later — prints agent_steer events that runs from before agents were sessions stored; remove when no such run is kept.
 	case "agent_steer":
 		fmt.Fprintln(w, stPhase.Render(indent+"  ↪ steered ")+stName.Render(e.Label)+stDim.Render("  "+e.Preview))
 	case "agent_end":

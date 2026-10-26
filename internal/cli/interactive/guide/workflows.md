@@ -49,7 +49,8 @@ They are not Node.js programs: no TypeScript, `require`, modules, filesystem, ne
 
 Each `agent()` call starts a leaf session: a regular agent session that cannot start subagents or runs. It has the same tools, instructions, and guides as any session. Dyna disables native delegation: Claude runs without the Agent tool.
 The run closes each agent session when its call resolves. Sessions of a run stay out of member lists and groups. Their results go to the run, not to a parent.
-A worker records progress with `dyna journal`; the run page shows the entries. Post to a running agent with `@run:<id>/agent:<n>`.
+A worker records progress with `dyna journal`; the run page shows the entries.
+To watch an agent, open its session from its row on the run page: it shows the same transcript as any session. To steer it, post `dyna post @run:<id>/agent:<n> "<message>"`; the session receives it like any other post. A run from before agents were sessions shows only the journal and the final result for each agent.
 Read `dyna guide delegation` for persistent sessions and `dyna guide recovery` after provider failure.
 
 Optional metadata goes first:

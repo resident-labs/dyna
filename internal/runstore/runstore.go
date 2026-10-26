@@ -139,10 +139,9 @@ const (
 	agentJournalMaxMessageBytes    = 4096
 	agentJournalMaxKindBytes       = 32
 	normalizedOutputMaxRecordBytes = 4 * 1024 * 1024
-	// MaxSteeringMessageBytes keeps interactive steering deliberately short and
-	// bounds the prompt injected into an already-running worker session.
+	// MaxSteeringMessageBytes keeps steering deliberately short and bounds
+	// the prompt injected into an already-running agent session.
 	MaxSteeringMessageBytes = 2000
-	steeringMaxRecordBytes  = MaxSteeringMessageBytes*6 + 128
 )
 
 // Durable t=log provenance. Only LogProvenanceWorkflow is authored by the
@@ -186,26 +185,13 @@ type AgentJournalEntry struct {
 	Prompt  string `json:"prompt,omitempty"`
 }
 
-// SteeringMessage is one accepted instruction for an active worker. The
-// engine consumes these records in order from agents/<id>/steering.jsonl.
+// SteeringMessage is one accepted instruction for a running agent session.
 type SteeringMessage struct {
 	TS      int64  `json:"ts"`
 	Message string `json:"message"`
 	// From and ID name the room post this message frames, when it is one.
 	From string `json:"from,omitempty"`
 	ID   string `json:"id,omitempty"`
-}
-
-type steeringState struct {
-	RunID     string `json:"runId"`
-	AgentID   int    `json:"agentId"`
-	Pid       int    `json:"pid"`
-	StartedAt int64  `json:"startedAt"`
-	Active    bool   `json:"active"`
-	// QueueStart is where reads of the queue start, after the messages
-	// from before the last activation. The queue is never truncated, so it
-	// grows for the life of the run and is deleted with the run's folder.
-	QueueStart int64 `json:"queueStart,omitempty"`
 }
 
 // Meta is a run's record. It lives in dyna.db.
@@ -315,15 +301,6 @@ func ReadProjectedNormalizedOutputTailPath(dataDir, key, path string, offset, li
 	}, workeroutput.IsCompactionEvent)
 }
 
-// OutputProfilesPath is the run-start snapshot of output-relevant profile
-// configuration.
-func OutputProfilesPath(runID string) (string, error) {
-	if err := validateRunID(runID); err != nil {
-		return "", err
-	}
-	return filepath.Abs(filepath.Join(RunDir(runID), "output-profiles.json"))
-}
-
 // NewID mints a run id; exported so a detaching parent can pre-assign one.
 func NewID() string {
 	b := make([]byte, 4)
@@ -416,30 +393,6 @@ func create(name, scriptSrc string, args any) (*Run, error) {
 func (r *Run) saveMeta() error {
 	_, err := changeMeta(r.Dir, r.Meta.ID, func(ctx context.Context, conn *sql.Conn) error { return upsertMeta(ctx, conn, r.Meta) })
 	return err
-}
-
-// SnapshotOutputProfiles freezes the profile/model output declarations before
-// workflow execution. It is intentionally create-once so a running workflow
-// cannot silently acquire a changed profile registry.
-func (r *Run) SnapshotOutputProfiles(profiles []workeroutput.ProfileSnapshot) error {
-	if r == nil || r.Dir == "" {
-		return fmt.Errorf("run has no directory")
-	}
-	snapshot := workeroutput.RunSnapshot{Version: workeroutput.SchemaVersion, Profiles: profiles}
-	b, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(r.Dir, "output-profiles.json")
-	if err := writeExclusiveFile(path, append(b, '\n')); err != nil {
-		if os.IsExist(err) {
-			// First writer wins. A later Execute on the same run must keep the
-			// original freeze instead of aborting the workflow.
-			return nil
-		}
-		return fmt.Errorf("snapshot output profiles: %w", err)
-	}
-	return nil
 }
 
 // SetWriters attaches the coordinator before workflow artifacts are written.

@@ -213,7 +213,6 @@ export interface Engine {
   StartRun(ref: string, source: RunSource, input: unknown): Promise<StartedRun>
   CancelRun(id: string): Promise<null>
   PauseRun(id: string, paused: boolean): Promise<null>
-  SteerRun(id: string, agent: number, text: string): Promise<PostResult>
   Runs(roomId: string): Promise<RunList>
   RunDetail(id: string): Promise<RunDetail>
   RunResult(id: string, agent: number): Promise<RunResultView>
