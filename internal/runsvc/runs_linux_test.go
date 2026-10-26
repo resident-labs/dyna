@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -116,7 +117,7 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	}
 	s := shells.DefaultStore()
 	meta, err := s.Create(shells.StartOptions{Run: runID, Keep: true, Cwd: t.TempDir(),
-		Cmd: []string{"sh", "-c", `setsid sh -c "echo up > ` + fifo + `; exec sleep 600" & wait`}})
+		Cmd: []string{"sh", "-c", `setsid sh -c 'sleep 600 & echo $$ > ` + fifo + `; wait' & wait`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,16 +128,27 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	go func() { done <- s.Supervise(ctx, meta.ID) }()
 	pid := <-started
 	var jobPids []int
+	detachedGroup := 0 // the detached shell leads its own group, so its PID is the group
 	t.Cleanup(func() {
 		for _, p := range jobPids {
 			_ = syscall.Kill(p, syscall.SIGKILL)
 		}
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		if detachedGroup > 0 {
+			_ = syscall.Kill(-detachedGroup, syscall.SIGKILL) // also the child a scan could miss
+		}
 		cancel()
 		<-done
 	})
-	if _, err := os.ReadFile(fifo); err != nil { // returns once the child has forked
+	raw, err := os.ReadFile(fifo) // returns once the child is up; it does not exec again, so its environment stays readable
+	if err != nil {
 		t.Fatal(err)
+	}
+	if detachedGroup, err = strconv.Atoi(strings.TrimSpace(string(raw))); err != nil {
+		t.Fatal(err)
+	}
+	if detachedGroup == pid {
+		t.Fatalf("the detached shell reported the job's own PID %d, not its own", pid)
 	}
 	jobPids = runprocs.Stamped(shells.JobEnv + "=" + meta.ID)
 	if len(jobPids) < 2 {
