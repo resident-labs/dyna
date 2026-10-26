@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -93,7 +94,7 @@ func openRegistryAt(dataDir string) (*sql.DB, error) {
 			}
 		}
 		if old < 9 {
-			if err := dropRemovedHarnessRows(ctx, conn); err != nil {
+			if err := retireRemovedHarnessSelections(ctx, conn); err != nil {
 				return err
 			}
 		}
@@ -118,29 +119,28 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 	return err == nil, err
 }
 
-// dropRemovedHarnessRows applies the owner's decision of 2026-10-25: the saved
-// harness-bound accounts of Codex, Muse and OpenCode are dead weight, because
-// those sign-ins now live in Pi provider accounts, and antigravity was removed
-// before the provider model existed. A row of a harness this release does not
-// run goes for the same reason. Each dropped account loses its active marks,
-// repository scope, limit and, through the orphan cleanup, its credential file,
-// so nothing keeps a secret for an account no turn can use. The engine backs up
-// dyna.db before this migration, so the rows stay in that backup.
-func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
-	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness') FROM accounts")
+// retireRemovedHarnessSelections clears the selections of harnesses this release
+// does not run. It never deletes a saved account: a retired row can be the only
+// copy of an owner's sign-in, and retiring a harness is no proof that a given
+// sign-in moved. The importer copies one source into a Pi account and retires
+// exactly that source after the copy verifies (importer.Importer.move), and until
+// then the account views report the row as an unknown-harness account the owner can
+// repair or remove (D-125). A selection of a harness this release does not run has
+// no meaning, so it goes, whether or not its account row stays.
+func retireRemovedHarnessSelections(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT json_extract(CAST(metadata AS TEXT), '$.harness') FROM accounts")
 	if err != nil {
 		return err
 	}
-	var ids, harnesses []string
+	retired := map[string]bool{"": true}
 	for rows.Next() {
-		var id, harness string
-		if err := rows.Scan(&id, &harness); err != nil {
+		var harness sql.NullString
+		if err := rows.Scan(&harness); err != nil {
 			rows.Close()
 			return err
 		}
-		if !KnownHarness(harness) || AccountsRetired(harness) {
-			ids = append(ids, id)
-			harnesses = append(harnesses, harness)
+		if !KnownHarness(harness.String) || AccountsRetired(harness.String) {
+			retired[harness.String] = true
 		}
 	}
 	err = rows.Err()
@@ -148,18 +148,12 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
 	if err != nil {
 		return err
 	}
-	for _, id := range ids {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE id = ?", id); err != nil {
-			return err
-		}
+	harnesses := make([]string, 0, len(retired))
+	for harness := range retired {
+		harnesses = append(harnesses, harness)
 	}
-	if err := forgetAccounts(ctx, conn, ids); err != nil {
-		return err
-	}
-	// forgetters clear a selection but keep its row, so a room can override the
-	// global choice with none. A selection of an unknown harness has no such
-	// meaning and goes.
-	for _, harness := range append(harnesses, "") {
+	sort.Strings(harnesses)
+	for _, harness := range harnesses {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM account_active WHERE harness = ?", harness); err != nil {
 			return err
 		}
