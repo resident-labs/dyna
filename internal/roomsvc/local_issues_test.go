@@ -265,3 +265,29 @@ func TestIssueEvents(t *testing.T) {
 		t.Fatalf("no triage event: %+v", events)
 	}
 }
+
+// An issue held by an open goal names the goal's holders. The list looks up
+// only those sessions, not every session including the closed ones.
+func TestIssueNamesTheHoldersOfItsOpenGoal(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	lead := e.start(r, "lead", nil)
+	issue, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Goal work", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, err := e.svc.IssueGoal(t.Context(), r.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.EditGoal(t.Context(), r.ID, linked.GoalID, "", []string{lead.ID}, false); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := e.svc.Issue(r.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.InProgress || got.GoalHolder != "lead" {
+		t.Fatalf("issue = in progress %v, holder %q; want in progress, held by lead", got.InProgress, got.GoalHolder)
+	}
+}

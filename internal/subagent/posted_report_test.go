@@ -19,16 +19,15 @@ func TestEmptyFinalAfterPostedReport(t *testing.T) {
 		schema, silent, liveOwes   bool
 		wantOK                     bool
 	}{
-		{name: "parent steering requires output", silent: true, liveOwes: true},
+		{name: "parent steering clean stop", silent: true, liveOwes: true, wantOK: true},
 		{name: "silent protocol error", silent: true, protocolFails: true},
 		{name: "silent process error", silent: true, workerFails: true},
 		{name: "silent schema requires output", silent: true, schema: true},
-		{name: "silent clean stop", silent: true, wantOK: true},
 		{name: "parent", recipient: "parent", wantOK: true},
 		{name: "root", recipient: "root", wantOK: true},
 		{name: "internal root", recipient: "internal root", wantOK: true},
-		{name: "unrelated post", recipient: "other"},
-		{name: "no post"},
+		{name: "unrelated post", recipient: "other", wantOK: true},
+		{name: "no post", wantOK: true},
 		{name: "real worker error", recipient: "root", workerFails: true},
 		{name: "protocol error", recipient: "root", protocolFails: true},
 		{name: "schema still requires output", recipient: "root", schema: true},

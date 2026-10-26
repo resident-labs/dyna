@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/websvc"
 )
 
 // machineCalls are the machine writes that act for their caller. SaveMachine is
-// here rather than in ownerCalls because a room root decides one machine field,
-// the host-check permission, as the owner does.
+// here rather than in ownerCalls because a room root decides a machine's
+// operating settings, as the owner does.
 var machineCalls = []string{"SaveMachine"}
 
 // hostChecksCommand is the command that allows host checks on a machine, which
@@ -19,10 +20,10 @@ var machineCalls = []string{"SaveMachine"}
 const hostChecksCommand = "dyna machine edit <name> --allow-host-checks"
 
 // protectMachineCalls lets the owner change any machine field and a room root
-// change only the host-check permission. A root speaks for its room, and host
-// checks run the repositories that room trusts, so the root decides that
-// permission as the owner does. The other fields decide where the engine sends
-// work, so they stay the owner's, and a repository file, a session or a
+// change its operating settings: host checks, the SSH connect timeout and the
+// container socket. A root speaks for its room and operates its machines as the
+// owner does. The other fields decide where the engine sends work, so they stay
+// the owner's, and a repository file, a session or a
 // workflow worker passes neither.
 func protectMachineCalls(calls map[string]websvc.Call) {
 	for _, name := range machineCalls {
@@ -49,10 +50,10 @@ func checkMachineWrite(actor authority.Actor, args []json.RawMessage) error {
 		return nil
 	}
 	if actor.Role == authority.Root {
-		if onlyHostChecks(patch) {
+		if rootMayPatch(patch) {
 			return nil
 		}
-		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, slots, route and switch; the owner changes them, and a room root changes host checks with %s", hostChecksCommand)
+		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, slots, route and switch; the owner changes them, and a room root changes host checks, the SSH connect timeout and the container socket (for example %s)", hostChecksCommand)
 	}
 	return fmt.Errorf("SaveMachine is owner only; the owner allows host checks with %s", hostChecksCommand)
 }
@@ -70,10 +71,22 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 	return patch, true
 }
 
-// onlyHostChecks reports whether the patch changes the host-check permission
-// and no other machine field. The room list, the suites, the name and the
-// creation of a machine decide where the engine sends work, which is the
-// owner's to set.
-func onlyHostChecks(patch websvc.MachinePatch) bool {
-	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil && patch.ContainerSocket == nil && patch.SSHConnectTimeoutSeconds == nil
+// rootMayPatch reports whether a room root may apply the patch. A root changes
+// the operating settings of a machine: host checks, the SSH connect timeout and
+// a local container runtime socket. The creation, name, roles, slots, switch, route
+// host, room list and suite list stay the owner's: they decide which machine
+// the engine reaches and which rooms' code runs on it, so a root could send
+// another room's work, or its own SSH credentials, to a host the owner never
+// chose.
+func rootMayPatch(patch websvc.MachinePatch) bool {
+	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
+}
+
+// localSocket reports whether a patch leaves the container socket alone, restores
+// the default, or names a Unix socket on the machine itself. A remote endpoint,
+// such as tcp://host:2375, would send workflow containers and repository
+// contents of every room that shares the machine to another host, so only the
+// owner may set one.
+func localSocket(socket *string) bool {
+	return socket == nil || *socket == "" || strings.HasPrefix(*socket, "unix://")
 }
