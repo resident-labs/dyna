@@ -36,6 +36,15 @@ type MergeQueueItem struct {
 	Excerpt                  string            `json:"excerpt,omitempty"`
 	Trial                    *MergeTrialStatus `json:"trial,omitempty"`
 	Overlaps                 []state.Overlap   `json:"overlaps,omitempty"`
+	Dependency               *MergeDependency  `json:"dependency,omitempty"`
+}
+
+// MergeDependency identifies a change that blocks this queue row. Clients use
+// its number and title for display; ChangeID remains the stable machine key.
+type MergeDependency struct {
+	ChangeID string `json:"changeId"`
+	Number   int    `json:"number,omitempty"`
+	Title    string `json:"title,omitempty"`
 }
 
 type MergeTrialStatus struct {
@@ -161,7 +170,8 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 		case len(item.MissingRequiredReviewers) > 0:
 			item.State, item.Reason = "required-reviews", "waiting for required reviews: "+strings.Join(item.MissingRequiredReviewers, ", ")
 		case dependencyWaiting:
-			item.State, item.Reason = "waiting-dependency", "waiting for dependency "+dependencyLabel(dependency)
+			item.State = "waiting-dependency"
+			item.Dependency = mergeDependency(st, dependency)
 		case changeKind(*r) == "local" && localMergeReady(*r, st.Records):
 			item.State = "ready"
 		case changeKind(*r) == "local" && !facts.ApprovedAtHead(*r):
@@ -303,11 +313,14 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	return rows, nil
 }
 
-func dependencyLabel(id string) string {
-	if hash := strings.LastIndex(id, "#"); hash >= 0 {
-		return id[hash:]
+func mergeDependency(st State, id string) *MergeDependency {
+	dependency := &MergeDependency{ChangeID: id}
+	if record := st.RecordByID(id); record != nil {
+		dependency.ChangeID = changeID(*record)
+		dependency.Number = record.Number
+		dependency.Title = record.Title
 	}
-	return id
+	return dependency
 }
 
 // fastLandable reports a reviewer's approve-fast decision at the current head.

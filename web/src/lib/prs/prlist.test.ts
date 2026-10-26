@@ -61,7 +61,9 @@ test('one merge state per row, from the merge service item', () => {
   assert.deepEqual(st(open({ reviewState: 'reviewing' }), { state: 'review' }), ['reviewing', 'progress', 'Reviewing', 'iris'])
   assert.deepEqual(st(open(), { state: 'ci' }), ['ci', 'progress', 'Waiting for CI', 'run'])
   assert.deepEqual(st(open(), { state: 'waiting-base' }), ['waiting-base', 'progress', 'Waiting for the base PR', 'gold'])
-  assert.deepEqual(mergeState(open(), { state: 'waiting-dependency', reason: 'waiting for dependency #2' }), { id: 'waiting-dependency', lane: 'progress', label: 'Waiting for dependency', tone: 'gold', reason: 'Waiting for dependency #2' })
+  assert.deepEqual(mergeState(open(), { state: 'waiting-dependency', dependency: { changeId: 'dependency-change', number: 2, title: 'Prepare the base' } }), { id: 'waiting-dependency', lane: 'progress', label: 'Waiting for dependency', tone: 'gold', reason: '#2 · Prepare the base' })
+  assert.equal(mergeState(open(), { state: 'waiting-dependency', dependency: { changeId: 'change_local', title: 'Prepare the local base' } }).reason, 'Prepare the local base')
+  assert.equal(mergeState(open(), { state: 'waiting-dependency', dependency: { changeId: 'change_missing' } }).reason, 'Unresolved change')
   assert.deepEqual(st(open({ state: 'merged' }), null), ['merged', 'done', 'Merged', 'done'])
   // A ready PR that the merge service has not listed does not claim a queue place.
   assert.deepEqual(st(ready(), null), ['approved', 'progress', 'Approved', 'sage'])
