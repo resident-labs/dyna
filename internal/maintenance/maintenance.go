@@ -132,7 +132,7 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		if owner, ownerErr := user.Current(); ownerErr == nil && owner.HomeDir != "" {
 			root := filepath.Join(owner.HomeDir, ".cache", "dyna", scratch.SharedTempName)
 			errs = append(errs, sweepWithDryPass(ctx, &result, "stale disk temp folders", diskTempRetention, func(dry bool) (Pruned, error) {
-				return sweepDiskTemp(now, root, dry)
+				return sweepDiskTemp(now, root, processAlive, dry)
 			}))
 		}
 		// PR state removes closed records 14 days after close on each write;

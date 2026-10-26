@@ -267,7 +267,9 @@ func (c FailureCause) Label() string {
 func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
 	c := processguard.Command(ctx, name, args...)
 	c.Dir = dir
-	c.Env = append(processguard.MetadataEnv(), scratch.SharedTempEnv()...)
+	tempEnv, removeTemp := scratch.NewRunTemp()
+	defer removeTemp()
+	c.Env = append(processguard.MetadataEnv(), tempEnv...)
 	c.Stdin = in
 	c.Stdout = out
 	c.Stderr = stderr
