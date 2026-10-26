@@ -57,8 +57,23 @@ type Options struct {
 // first quiet moment and removes the marker.
 const RestartPending = "dyna-computers.restart-pending"
 
+// legacyDrainWindow is the refusal window of the computer services built before
+// the 10-minute one, which read the marker's own mtime as the time the restart
+// became pending. markerBackdate is how much older than now MarkRestartPending
+// stamps the marker, so such a service, which cannot be restarted to learn the new
+// window, stops refusing after the new 10 minutes. Readers add it back.
+const (
+	legacyDrainWindow = 30 * time.Minute
+	markerBackdate    = legacyDrainWindow - 10*time.Minute
+)
+
 func MarkRestartPending(dir string) error {
-	return fsutil.WriteFile(filepath.Join(dir, RestartPending), []byte("1\n"), 0600, true)
+	path := filepath.Join(dir, RestartPending)
+	if err := fsutil.WriteFile(path, []byte("1\n"), 0600, true); err != nil {
+		return err
+	}
+	at := time.Now().Add(-markerBackdate)
+	return os.Chtimes(path, at, at)
 }
 
 func RestartIsPending(dir string) bool {
@@ -71,21 +86,18 @@ func RestartIsPending(dir string) bool {
 // window at now. The window keeps a marker that nothing clears from holding the
 // service back for good.
 func RestartPendingSince(dir string, started, now time.Time, window time.Duration) bool {
-	st, err := os.Stat(filepath.Join(dir, RestartPending))
-	if err != nil {
-		return false
-	}
-	return st.ModTime().After(started) && now.Sub(st.ModTime()) < window
+	at, ok := RestartPendingAt(dir)
+	return ok && at.After(started) && now.Sub(at) < window
 }
 
-// RestartPendingAt is when the install left the restart marker, which is when
-// the restart became pending.
+// RestartPendingAt is when the restart became pending: the marker's mtime plus
+// the backdate MarkRestartPending applied.
 func RestartPendingAt(dir string) (time.Time, bool) {
 	st, err := os.Stat(filepath.Join(dir, RestartPending))
 	if err != nil {
 		return time.Time{}, false
 	}
-	return st.ModTime(), true
+	return st.ModTime().Add(markerBackdate), true
 }
 
 func ClearRestartPending(dir string) error {
