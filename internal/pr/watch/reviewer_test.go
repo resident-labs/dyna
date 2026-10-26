@@ -2,8 +2,10 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/database"
 	harnesshealth "dyna-agent/internal/harness/health"
+	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
@@ -12,6 +14,7 @@ import (
 	"dyna-agent/internal/subagent"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -149,19 +152,135 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 		}
 	}
 	write("ses_20261017-000001-aaaaaaaa", subagent.TurnError, e.clock.Add(-time.Minute))
-	choice, err := e.s.chooseProfile(Reviewer{})
+	choice, err := e.s.chooseProfile(Reviewer{}, "")
 	if err != nil || choice.Name == "judge" {
 		t.Fatalf("recent failing profile: %s %v", choice.Name, err)
 	}
 	write("ses_20261017-000002-bbbbbbbb", subagent.TurnOK, e.clock)
-	cached, e2 := e.s.chooseProfile(Reviewer{})
+	cached, e2 := e.s.chooseProfile(Reviewer{}, "")
 	if e2 != nil || cached.Name == "judge" {
 		t.Fatal("profile scan did not reuse its minute cache")
 	}
 	e.clock = e.clock.Add(time.Minute)
-	choice, err = e.s.chooseProfile(Reviewer{})
+	choice, err = e.s.chooseProfile(Reviewer{}, "")
 	if err != nil || choice.Name != "judge" {
 		t.Fatalf("newer healthy turn: %s %v", choice.Name, err)
+	}
+}
+
+// signedClaudeAccount adds a ready claude-code account with a native sign-in
+// fixture, as the runtime package's own tests do.
+func signedClaudeAccount(t *testing.T, accounts *runtime.Accounts, label, uuid string) runtime.NativeAccount {
+	t.Helper()
+	n, err := accounts.Create("claude-code", label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{
+		".credentials.json": `{"claudeAiOauth":{"accessToken":"` + label + `-access","refreshToken":"` + label + `-refresh","expiresAt":1999999999999,"scopes":["user:inference"]}}`,
+		".claude.json":      `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-` + uuid + `","emailAddress":"` + label + `@example.test"}}`,
+	} {
+		if err = os.WriteFile(filepath.Join(n.Home, name), []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err = accounts.Capture(context.Background(), n.ID, "/fake/native")
+	if err != nil || n.Status != "ready" {
+		t.Fatalf("account %s capture: %v %v", label, n, err)
+	}
+	return n
+}
+
+// D-110: the account store already knows an account is out of quota, because
+// a failover recorded the limit after a real 429. Auto ranking must skip its
+// profile without first spending a turn on the same rejection, name the typed
+// cause while a room pin points at it, and take it back after the reset.
+func TestProfileChoiceSkipsExhaustedAccountQuota(t *testing.T) {
+	e := newEnv(t)
+	accounts := runtime.NewAccounts()
+	n := signedClaudeAccount(t, accounts, "main", "000000000001")
+	// A healthy account of the same harness serves another repository only,
+	// so it must not hide the exhausted account's hold in this one.
+	other := signedClaudeAccount(t, accounts, "other", "000000000002")
+	if err := accounts.SetRepos(other.ID, []string{"github.com/other/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := reposcope.Open(filepath.Dir(accounts.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := e.clock.Add(5 * time.Hour)
+	if err = scopes.MarkLimited(n.ID, reset); err != nil {
+		t.Fatal(err)
+	}
+	top := profile.Profile{Name: "top", Harness: "claude-code", Model: "claude-sonnet-4.5", Diagnostics: 10, Cost: 10}
+	spare := profile.Profile{Name: "spare", Harness: profile.HarnessMock, Diagnostics: 6, Cost: 6}
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{top, spare}, nil }
+	repo := "github.com/owner/repo"
+	choice, err := e.s.chooseProfile(Reviewer{}, repo)
+	if err != nil || choice.Name != "spare" {
+		t.Fatalf("auto chose %q %v, want the profile whose account has quota", choice.Name, err)
+	}
+	choice, err = e.s.chooseProfile(Reviewer{Profile: "top"}, repo)
+	if err != nil || choice.Name != "spare" || choice.Cause != rolesession.CauseQuotaBlocked || !strings.Contains(choice.Reason, "out of quota") {
+		t.Fatalf("pinned exhausted profile: %+v %v", choice, err)
+	}
+	// In the repository the healthy account serves, auto may pick the top one.
+	choice, err = e.s.chooseProfile(Reviewer{}, "github.com/other/repo")
+	if err != nil || choice.Name != "top" {
+		t.Fatalf("auto chose %q %v in the served repository, want the top profile", choice.Name, err)
+	}
+	// Past the reset, and past the quota cache's minute, auto takes it back.
+	e.clock = reset.Add(time.Minute)
+	choice, err = e.s.chooseProfile(Reviewer{}, repo)
+	if err != nil || choice.Name != "top" {
+		t.Fatalf("auto chose %q %v after the reset, want the top profile", choice.Name, err)
+	}
+}
+
+// D-110 review: the turn runs in the checkout reviewerDir picks, and a
+// fallback checkout can carry a different origin than the PR's repository.
+// Ranking must read that origin, or a healthy account scoped to the PR
+// repository hides the hold of the only account that may run in the checkout
+// the turn actually uses.
+func TestProfileChoiceUsesTheLaunchCheckoutRepo(t *testing.T) {
+	e := newEnv(t)
+	checkout := t.TempDir()
+	if err := gitCommand(context.Background(), checkout, "init", "--quiet").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCommand(context.Background(), checkout, "remote", "add", "origin", "https://github.com/actual/checkout.git").Run(); err != nil {
+		t.Fatal(err)
+	}
+	accounts := runtime.NewAccounts()
+	limited := signedClaudeAccount(t, accounts, "limited", "000000000001")
+	serving := signedClaudeAccount(t, accounts, "serving", "000000000002")
+	if err := accounts.SetRepos(limited.ID, []string{"github.com/actual/checkout"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.SetRepos(serving.ID, []string{"github.com/owner/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := reposcope.Open(filepath.Dir(accounts.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scopes.MarkLimited(limited.ID, e.clock.Add(5*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	top := profile.Profile{Name: "top", Harness: "claude-code", Model: "claude-sonnet-4.5", Diagnostics: 10, Cost: 10}
+	spare := profile.Profile{Name: "spare", Harness: profile.HarnessMock, Diagnostics: 6, Cost: 6}
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{top, spare}, nil }
+	// The GitHub record's own paths are gone, so the launch falls back to its
+	// session directory, a checkout of another repository.
+	r := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Key: "github.com/owner/repo#17", Dir: checkout}
+	repo := e.s.reviewRepoIdentity(context.Background(), r)
+	if repo != "github.com/actual/checkout" {
+		t.Fatalf("repo identity = %q, want the launch checkout's origin", repo)
+	}
+	choice, err := e.s.chooseProfile(Reviewer{}, repo)
+	if err != nil || choice.Name != "spare" {
+		t.Fatalf("auto chose %q %v, want the profile whose account has quota in the launch checkout", choice.Name, err)
 	}
 }
 
@@ -174,11 +293,11 @@ func TestPinnedProfileUsesNewerHealthyCheck(t *testing.T) {
 	haiku := profile.Profile{Name: "haiku", Harness: profile.HarnessMock, Diagnostics: 7, Cost: 10}
 	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{sol, haiku}, nil }
 	cfg := Reviewer{Profile: "sol", FailedProfiles: map[string]time.Time{"sol (not ready)": e.clock.Add(time.Hour)}}
-	if choice, err := e.s.chooseProfile(cfg); err != nil || choice.Name != "haiku" || choice.Cause != rolesession.CauseNotReady || !strings.Contains(choice.Reason, "pinned reviewer profile sol is unavailable") {
+	if choice, err := e.s.chooseProfile(cfg, ""); err != nil || choice.Name != "haiku" || choice.Cause != rolesession.CauseNotReady || !strings.Contains(choice.Reason, "pinned reviewer profile sol is unavailable") {
 		t.Fatalf("held profile: %+v %v", choice, err)
 	}
 	harnesshealth.New("").RecordProbe(sol, "built-in", harnesshealth.Observation{At: e.clock, Successful: true, StdoutSeen: true, RecognizedRecords: 2}, true)
-	if choice, err := e.s.chooseProfile(cfg); err != nil || choice.Name != "sol" || choice.Reason != "pinned by the room" || choice.Cause != "" {
+	if choice, err := e.s.chooseProfile(cfg, ""); err != nil || choice.Name != "sol" || choice.Reason != "pinned by the room" || choice.Cause != "" {
 		t.Fatalf("healthy check did not clear the hold: %+v %v", choice, err)
 	}
 }
