@@ -100,6 +100,13 @@ func (s *supervisor) capture(fresh, frame bool) (Shot, error) {
 	s.record("shot", &shot)
 	return shot, nil
 }
+// agentHasControl reports whether the agent may send input now.
+func (s *supervisor) agentHasControl() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Control == ControlAgent
+}
+
 func (s *supervisor) agentTarget(ctx context.Context) (comp *process, env []string, display string, width, height int, err error) {
 	for {
 		s.mu.Lock()
@@ -171,6 +178,11 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
+		// A person who takes control must not find a button the agent left
+		// pressed by a pointer_down, so release it before waiting for control back.
+		if pointer != nil && !s.agentHasControl() {
+			pointer.releaseHeld()
+		}
 		comp, _, display, width, height, err := s.agentTarget(waitctx)
 		if err != nil {
 			return result, err
@@ -200,6 +212,7 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 				if err != nil {
 					return result, err
 				}
+				pointer.agent = s.agentHasControl
 			}
 		}
 		if kind == "screenshot" {
@@ -375,7 +388,7 @@ func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *v
 		if err != nil {
 			return err
 		}
-		return dragPath(ctx, p, path, step, paced, inputPause)
+		return dragPath(ctx, p, path, step, paced, inputPause, p.agentHasControl)
 	case "pointer_down", "pointer_up":
 		return pointerButtonAction(p, a)
 	case "scroll":

@@ -182,6 +182,17 @@ type virtualPointer struct {
 	// held lists the buttons pressed and not yet released, so close releases
 	// a pointer_down that its batch never matched with a pointer_up.
 	held map[string]bool
+	// agent reports whether the agent still has control. Nil means it does.
+	agent func() bool
+}
+
+func (p *virtualPointer) agentHasControl() bool { return p.agent == nil || p.agent() }
+
+// releaseHeld releases every button the batch pressed and did not release.
+func (p *virtualPointer) releaseHeld() {
+	for button := range p.held {
+		_ = p.button(button, false)
+	}
 }
 
 func newVirtualPointer(ctx context.Context, display string, width, height int) (*virtualPointer, error) {
@@ -206,9 +217,7 @@ func newVirtualPointer(ctx context.Context, display string, width, height int) (
 	return &virtualPointer{w: w, object: object, width: width, height: height}, nil
 }
 func (p *virtualPointer) close() {
-	for button := range p.held {
-		_ = p.button(button, false)
-	}
+	p.releaseHeld()
 	p.w.conn.Close()
 }
 func (p *virtualPointer) send(op uint16, args ...uint32) error {
