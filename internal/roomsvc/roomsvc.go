@@ -348,7 +348,7 @@ func ForOwner(m room.Message, roomName string) bool {
 // and shown only in Voice's call widget, so neither is ever unread. A quiet
 // engine notice (CI, PR and service events) is informational and never counts.
 func countsUnread(m room.Message, roomName string) bool {
-	if m.From == room.EngineSender || !m.Deliverable() {
+	if !m.Deliverable() {
 		return false
 	}
 	return ForOwner(m, roomName) && !IsShellResult(m) && m.Source != room.SourceVoice
