@@ -460,7 +460,10 @@ func checkReports(sr *SuiteResult, mode ReportMode, dir string, max time.Duratio
 			return e
 		}
 		for _, file := range streams {
-			if filepath.Base(file) == "execution.json" {
+			// execution.json is the run's own timing record, and checkExitFile is
+			// the node's transport evidence: neither is a Go event stream, and
+			// ReadGo rejects their bodies.
+			if filepath.Base(file) == "execution.json" || filepath.Base(file) == checkExitFile {
 				continue
 			}
 			f, e := os.Open(file)
