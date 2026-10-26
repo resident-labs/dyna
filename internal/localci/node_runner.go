@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/systemdver"
 )
@@ -592,6 +593,26 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
 		return result, err
 	}
+	// Job checks each run act on a copy of the workflow whose name carries the
+	// run and the check, so parallel checks never share one container name.
+	// The engine tags the copy from the commit's own bytes before any check
+	// starts; a workflow it cannot parse fails the run as a clear error
+	// instead of a check that dies inside act.
+	taggedWorkflows := map[string]string{}
+	for _, check := range checks {
+		if check.job == nil {
+			continue
+		}
+		body, err := repoid.GitRaw(control, repo, "cat-file", "blob", sha+":"+check.job.Workflow)
+		if err != nil {
+			return result, fmt.Errorf("read workflow %s: %w", check.job.Workflow, err)
+		}
+		tagged, err := tagWorkflowBody([]byte(body), "CI-dyna-"+runID+"-"+string(check.id))
+		if err != nil {
+			return result, fmt.Errorf("tag workflow %s for %s: %w", check.job.Workflow, check.id, err)
+		}
+		taggedWorkflows[string(check.id)] = string(tagged)
+	}
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
@@ -694,7 +715,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					// what is left there before the transport waits on output.
 					checkScope = ""
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage(), node.ContainerSocket))
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)]))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1222,7 +1243,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket string) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1288,11 +1309,12 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// runs a tagged copy of the workflow outside its checkout, which names
 		// every container it starts, its volumes included, alone. The workflow
 		// name is the one value a job can read of it (github.workflow); a
-		// repository that keys on that name sees the tagged one under act.
-		workflowFile := path.Join(work, check.job.Workflow)
+		// repository that keys on that name sees the tagged one under act. The
+		// engine wrote the tagged copy from the commit's bytes, so the checkout
+		// keeps exactly what the commit holds and a job's own git commands see
+		// no edit.
 		tagged := path.Join(path.Dir(work), "workflow.yml")
-		tag := "CI-dyna-" + runID + "-" + string(check.id)
-		setup += tagWorkflowSnippet(workflowFile, tagged, tag)
+		setup += "printf '%s' " + q(taggedWorkflow) + " > " + q(tagged) + "; "
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
 		// harness variable on this machine must never reach a job container. The

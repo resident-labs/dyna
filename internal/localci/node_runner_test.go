@@ -803,14 +803,14 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, check := range checks {
-		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
+		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 		if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
 			t.Fatalf("%s syntax: %v: %s", check.name, err, output)
 		}
 	}
 	check := nodeCheck{id: SuiteFrontend, name: "frontend", inner: "true", image: "node:22"}
 	keepActive(t, dir)
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	output, err := cmd.CombinedOutput()
@@ -1106,7 +1106,7 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	pidFile := filepath.Join(dir, "daemon.pid")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
@@ -1181,7 +1181,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	}
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf 'check-end\\n' >> " + events + "; exit 0"}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -1246,13 +1246,13 @@ func TestCheckScopeTaskLimitFollowsTheCPUs(t *testing.T) {
 func TestEachCheckGetsItsOwnSccacheServerPort(t *testing.T) {
 	dir := t.TempDir()
 	check := nodeCheck{id: "build", name: "build", host: true, inner: "cargo build", resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "")
+	script := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
 	if !strings.Contains(script, "SCCACHE_SERVER_PORT=$(( 4226 + slot ))") {
 		t.Fatalf("a host check did not get its own sccache port: %s", script)
 	}
 	own := check
 	own.env = map[string]string{"SCCACHE_SERVER_PORT": "5000"}
-	script = nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), own, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "")
+	script = nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), own, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "", "")
 	if strings.Contains(script, "4226 + slot") || !strings.Contains(script, "SCCACHE_SERVER_PORT=5000") {
 		t.Fatalf("a check that sets the port lost it: %s", script)
 	}

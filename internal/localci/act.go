@@ -1,10 +1,15 @@
 package localci
 
 import (
+	"bytes"
+	"fmt"
 	"path"
 	"strconv"
 
 	"dyna-agent/internal/shellquote"
+
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 )
 
 // actVersion is the nektos/act release Dyna installs on a CI node. Dyna pins
@@ -56,30 +61,49 @@ func actContainerOptions(check nodeCheck, runID string) string {
 		" --label dyna.check=" + string(check.id)
 }
 
-// tagWorkflowSnippet writes a copy of the workflow at tagged whose top-level
-// name value is tag. act names a job's containers after the workflow, so two
-// act processes that share one workflow fight over one container name, and
-// every job check tags its own copy. The copy lives outside the checkout
-// because act runs a job in the workspace directly: an edit inside the
-// checkout is what the job's own git commands would see. The name value is
-// replaced structurally, because quoted keys and block scalars are valid
-// forms a line edit corrupts.
-func tagWorkflowSnippet(workflowFile, tagged, tag string) string {
-	q := shellquote.Quote
-	// A top-level name key, quoted or not. Top-level keys start at the first
-	// column, so a name inside another value never matches.
-	nameKey := "^[\"']*name[\"']*: "
-	// awk replaces the name line and drops the lines of its old value: a block
-	// scalar's content, or a plain scalar's folded continuation lines, would
-	// otherwise outlive their key. The first line at the first column ends the
-	// value. The program carries no single quote, so it travels as one word.
-	rewrite := `!done && $0 ~ re { print "name: " tag; done = 1; skip = 1; next }
-skip && (/^[[:space:]]/ || /^$/) { next }
-{ skip = 0; print }`
-	return "if grep -q " + q(nameKey) + " " + q(workflowFile) + "; then " +
-		"awk -v re=" + q(nameKey) + " -v tag=" + q(tag) + " " + q(rewrite) + " " + q(workflowFile) + " > " + q(tagged) + "; " +
-		"elif [ \"$(head -n1 " + q(workflowFile) + ")\" = \"---\" ]; then sed -e " + q("1a name: "+tag) + " " + q(workflowFile) + " > " + q(tagged) + "; " +
-		"else sed -e " + q("1i name: "+tag) + " " + q(workflowFile) + " > " + q(tagged) + "; fi; "
+// tagWorkflowBody returns content with its top-level name value replaced by
+// tag. act names a job's containers after the workflow, so two act processes
+// that share one workflow fight over one container name, and every job check
+// tags its own copy of the workflow it runs. The name is replaced through the
+// parsed document, because a valid name takes forms a line edit corrupts: a
+// quoted key gains a duplicate name, a block scalar keeps its content behind
+// the replaced line, and a value on the line after its key never matches a
+// same-line pattern at all. Everything outside the name value keeps its
+// structure. A document without a name key provably cannot gain a duplicate,
+// so the tag is prepended to it, behind a document marker if there is one.
+func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
+	file, err := parser.ParseBytes(content, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow: %w", err)
+	}
+	if len(file.Docs) != 1 {
+		return nil, fmt.Errorf("the workflow is not one document")
+	}
+	body, ok := file.Docs[0].Body.(*ast.MappingNode)
+	if !ok {
+		return nil, fmt.Errorf("the workflow is not a mapping")
+	}
+	// A node parsed from the tag itself replaces the value, so no node is ever
+	// built by hand and the value renders as the plain scalar act reads.
+	tagged, err := parser.ParseBytes([]byte("name: "+tag), 0)
+	if err != nil {
+		return nil, err
+	}
+	tagName := tagged.Docs[0].Body.(*ast.MappingNode).Values[0]
+	for _, entry := range body.Values {
+		key, ok := entry.Key.(*ast.StringNode)
+		if !ok || key.Value != "name" {
+			continue
+		}
+		if err := entry.Replace(tagName.Value); err != nil {
+			return nil, fmt.Errorf("replace the name value: %w", err)
+		}
+		return []byte(file.String()), nil
+	}
+	if bytes.HasPrefix(content, []byte("---\n")) {
+		return append([]byte("---\nname: "+tag+"\n"), content[4:]...), nil
+	}
+	return append([]byte("name: "+tag+"\n"), content...), nil
 }
 
 // actArtifactPortBase is the first port the artifact server of a node's slot
