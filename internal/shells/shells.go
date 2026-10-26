@@ -118,6 +118,9 @@ type Store struct {
 	// pause waits between attempts to record an exit; nil sleeps. A test sets
 	// it so no timer decides the result.
 	pause func(time.Duration)
+	// exitWrite replaces the write of a finished job's exit; nil uses Save. A
+	// test sets it to act as a state store that times out.
+	exitWrite func(m Meta, ex *Exit) error
 	// CommandEnv prepares the environment of a new command. The shell CLI sets
 	// it to the display policy of managed shells; nil keeps the supervisor's
 	// launch environment, which is the owner display.
@@ -360,7 +363,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	}
 	// The exit goes first: a failed line count must not lose it, or the job
 	// shows as lost once this process ends.
-	if err := s.Save(m, &ex); err != nil {
+	if err := s.saveExit(m, ex); err != nil {
 		return err
 	}
 	return errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
@@ -378,19 +381,27 @@ const (
 // state store is tried again, since the command's result must not be lost to a
 // busy writer. When the tries run out, the error names the timeout and the exit
 // the command had, so the job is not mistaken for a dead supervisor.
-func (s *Store) saveExit(save func() error, ex Exit) error {
+func (s *Store) saveExit(m Meta, ex Exit) error {
 	pause := s.pause
 	if pause == nil {
 		pause = time.Sleep
 	}
 	var err error
 	for i := 0; i < exitSaveTries; i++ {
-		if err = save(); !timedOut(err) {
+		if err = s.writeExit(m, &ex); !timedOut(err) {
 			return err
 		}
 		pause(exitSaveWait)
 	}
 	return fmt.Errorf("state store timed out recording the job exit (code %d, signal %q): %w", ex.Code, ex.Signal, err)
+}
+
+// writeExit stores the exit; a test replaces it through Store.exitWrite.
+func (s *Store) writeExit(m Meta, ex *Exit) error {
+	if s.exitWrite != nil {
+		return s.exitWrite(m, ex)
+	}
+	return s.Save(m, ex)
 }
 
 // timedOut reports whether a state write ran out of time. The database driver
