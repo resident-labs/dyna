@@ -743,7 +743,56 @@ func (r *Runtime) recordGenerationView(h, home, dir string, pending bool) error 
 	if err := r.keepGenerationPath(map[string]bool{}, dir); err != nil {
 		return err
 	}
-	return r.generationState().RecordView(context.Background(), genstate.View{Harness: h, Home: home, Generations: []string{dir}}, pending)
+	state := r.generationState()
+	ctx := context.Background()
+	if err := state.RecordView(ctx, genstate.View{Harness: h, Home: home, Generations: []string{dir}}, pending); err != nil {
+		return err
+	}
+	if pending {
+		return nil
+	}
+	// A complete publication replaced whatever the legacy view file of this
+	// home named. Record that exact revision, so only an unchanged file is
+	// skipped and any later write by an earlier build wins.
+	return state.SupersedeLegacyViews(ctx, h, home, r.legacyViewRevisions(h, home))
+}
+
+// legacyViewRevisions reads the legacy view files that name this harness and
+// home, so a complete publication marks exactly the files it replaced.
+//
+// TODO: legacy/shim remove later — remove with the .views files of earlier
+// builds, once no runner of such a build can be alive.
+func (r *Runtime) legacyViewRevisions(h, home string) []genstate.LegacyRevision {
+	dir := filepath.Join(r.Generations, ".views")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	out := []genstate.LegacyRevision{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var view struct {
+			Harness, Home string
+			Generations   []string
+		}
+		if json.Unmarshal(raw, &view) != nil || view.Harness != h || view.Home != home {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		sum := sha256.Sum256(raw)
+		out = append(out, genstate.LegacyRevision{Path: path, Digest: hex.EncodeToString(sum[:]), ModifiedNS: info.ModTime().UnixNano()})
+	}
+	return out
 }
 func (r *Runtime) currentGenerationPins(keep map[string]bool) error {
 	views, err := r.generationState().Views(context.Background())
