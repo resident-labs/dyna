@@ -804,11 +804,16 @@ func checkCause(node Node, ctx context.Context, err error, markers [][]string, c
 	}
 	var exit *exec.ExitError
 	hasExit := errors.As(err, &exit)
+	// An SSH client that ends with 255 lost the connection, whatever the check's
+	// own marker says. Its marker may already report the check's exit code, but a
+	// result that never crossed the wire cannot be trusted, so this is a machine
+	// cause and the run is retried.
+	if hasExit && exit.ExitCode() == 255 && node.SSH != "" {
+		return CauseSSHDrop
+	}
 	if len(markers) == 0 {
 		if hasExit {
 			switch code := exit.ExitCode(); {
-			case code == 255 && node.SSH != "":
-				return CauseSSHDrop
 			case code == 69:
 				return CauseContainerFailure
 			case code == 124:
