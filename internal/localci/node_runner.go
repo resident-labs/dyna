@@ -349,18 +349,27 @@ var sshDialWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
 
 // nodeDial runs one node command over ssh and retries a dial that failed
 // before the node saw it. Such a failure proves nothing ran remotely: ssh
-// reported a dial error and the command wrote no output, so a retry re-runs
-// nothing. Any other failure, or one after the command started, returns as is.
+// exited 255 with a dial error and the command wrote no output, so a retry
+// re-runs nothing. Any other failure, or one after the command started,
+// returns as is.
 func (r Runner) nodeDial(ctx context.Context, fn Command, out, stderr io.Writer, name string, args ...string) error {
 	wait := r.dialWait
 	if wait == nil {
 		wait = sleepContext
 	}
+	// Callers often pass one buffer as both outputs. os/exec serializes the
+	// two copy pipes only while it sees the same writer for both, so the
+	// retry's counting and tail capture keep one shared lock instead of two
+	// distinct MultiWriters, and the pipes never write concurrently to a
+	// buffer that is not safe for that.
+	var forward sync.Mutex
 	var wrote countingWriter
+	var dialErr tailBuffer
+	stdout := lockedWriter{mu: &forward, dst: io.MultiWriter(out, &wrote)}
+	diagnostics := lockedWriter{mu: &forward, dst: io.MultiWriter(stderr, &dialErr)}
 	for attempt := 0; ; attempt++ {
-		var dialErr tailBuffer
-		err := fn(ctx, "", nil, io.MultiWriter(out, &wrote), io.MultiWriter(stderr, &dialErr), name, args...)
-		if err == nil || attempt == sshDialAttempts-1 || wrote.n > 0 || !dialFailureNote.MatchString(dialErr.String()) {
+		err := fn(ctx, "", nil, &stdout, &diagnostics, name, args...)
+		if err == nil || attempt == sshDialAttempts-1 || wrote.n > 0 || !sshDialExit(err, &dialErr) {
 			return err
 		}
 		fmt.Fprintf(stderr, "retrying ssh dial (attempt %d of %d)\n", attempt+2, sshDialAttempts)
@@ -368,6 +377,28 @@ func (r Runner) nodeDial(ctx context.Context, fn Command, out, stderr io.Writer,
 			return errors.Join(err, waitErr)
 		}
 	}
+}
+
+// sshDialExit reports whether err is ssh's own transport exit, 255, with a
+// diagnostic the ssh client prints when its connection died before the node
+// saw it. A script the node ran cannot produce that pair: it may echo the
+// text, but then ssh relays its own exit status and the dial never retries.
+func sshDialExit(err error, tail *tailBuffer) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 255 && dialFailureNote.MatchString(tail.String())
+}
+
+// lockedWriter serializes one command output behind a lock that a sibling
+// writer shares, so os/exec's two copy goroutines write one buffer at a time.
+type lockedWriter struct {
+	mu  *sync.Mutex
+	dst io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.dst.Write(p)
 }
 
 // countingWriter counts the bytes that reached a command's output, so a

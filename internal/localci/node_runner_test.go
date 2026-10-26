@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -219,12 +220,14 @@ func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 // ControlMaster socket hides the same stall from a direct shell and from the
 // machine probes, so only a run sees it (D-162). A dial-phase failure proves
 // nothing ran remotely, so a retry is safe for every node command. A failure
-// after the command started, or without a dial error, never retries.
+// after the command started, without ssh's own transport exit, or without a
+// dial error, never retries.
 func TestNodeCommandRetriesSSHDial(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		stdout    string
 		stderr    string
+		exit      int
 		failures  int
 		wantCalls int
 		wantErr   bool
@@ -233,6 +236,7 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 		{
 			name:      "banner exchange timeout clears",
 			stderr:    "ssh: connect to host node port 22: Operation timed out\r\nConnection timed out during banner exchange\r\nConnection to UNKNOWN port 65535 timed out\n",
+			exit:      255,
 			failures:  2,
 			wantCalls: 3,
 			wantNote:  true,
@@ -240,6 +244,7 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 		{
 			name:      "connection refused clears",
 			stderr:    "ssh: connect to host node port 22: Connection refused\n",
+			exit:      255,
 			failures:  1,
 			wantCalls: 2,
 			wantNote:  true,
@@ -247,15 +252,25 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 		{
 			name:      "dial error that never clears",
 			stderr:    "ssh: connect to host node port 22: Connection timed out\n",
+			exit:      255,
 			failures:  3,
 			wantCalls: 3,
 			wantErr:   true,
 			wantNote:  true,
 		},
 		{
+			name:      "script ran and echoed dial text",
+			stderr:    "cargo: Connection refused\n",
+			exit:      1,
+			failures:  1,
+			wantCalls: 1,
+			wantErr:   true,
+		},
+		{
 			name:      "command had already started",
 			stdout:    "remote build output\n",
 			stderr:    "Connection timed out during banner exchange\n",
+			exit:      255,
 			failures:  1,
 			wantCalls: 1,
 			wantErr:   true,
@@ -263,6 +278,7 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 		{
 			name:      "not a dial failure",
 			stderr:    "error: build failed\n",
+			exit:      1,
 			failures:  1,
 			wantCalls: 1,
 			wantErr:   true,
@@ -291,7 +307,7 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 				if calls <= tc.failures {
 					fmt.Fprint(stderr, tc.stderr)
 					fmt.Fprint(out, tc.stdout)
-					return fmt.Errorf("exit status 255")
+					return exitStatus(tc.exit)
 				}
 				fmt.Fprint(stderr, tc.stderr)
 				fmt.Fprint(out, tc.stdout)
@@ -315,6 +331,57 @@ func TestNodeCommandRetriesSSHDial(t *testing.T) {
 				t.Fatalf("stderr = %q, retry note %t want %t", stderr.String(), got, tc.wantNote)
 			}
 		})
+	}
+}
+
+// exitStatus returns a real child exit with the given status, so a test
+// classifies the error exactly like the runner classifies a child's exit.
+// Tests in one package run one at a time, so the cache needs no lock.
+var exitStatusCache = map[int]error{}
+
+func exitStatus(code int) error {
+	if err, ok := exitStatusCache[code]; ok {
+		return err
+	}
+	err := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		panic("exit " + strconv.Itoa(code) + " produced no error")
+	}
+	exitStatusCache[code] = err
+	return err
+}
+
+// The retry's output capture must keep os/exec's guarantee for callers that
+// pass one non-thread-safe buffer as both outputs: os/exec serializes its two
+// copy pipes only while it sees the same writer for both, and the counting
+// and tail capture made them distinct. Both pipes now write through one
+// shared lock, and the race detector proves the forced overlap stays safe.
+func TestNodeDialSerializesSharedOutput(t *testing.T) {
+	started := make(chan struct{})
+	var writers sync.WaitGroup
+	runner := Runner{Node: &Node{Name: "node", SSH: "ci@node", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, _ string, _ io.Reader, out, stderr io.Writer, _ string, _ ...string) error {
+		for range 2 {
+			writers.Add(1)
+			go func() {
+				defer writers.Done()
+				<-started
+				for i := 0; i < 200; i++ {
+					fmt.Fprint(out, "output line\n")
+					fmt.Fprint(stderr, "diagnostic line\n")
+				}
+			}()
+		}
+		close(started)
+		writers.Wait()
+		return nil
+	}
+	var shared tailBuffer
+	if err := runner.nodeCommand(t.Context(), &shared, &shared, "", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(shared.String(), "line\n"); n != 800 {
+		t.Fatalf("shared buffer holds %d lines, want 800", n)
 	}
 }
 
