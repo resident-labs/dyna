@@ -47,6 +47,11 @@ func startRoot() string {
 	if inheritedRoot() {
 		return os.Getenv(rootEnv)
 	}
+	// A Dyna session exports a disk TMPDIR whose path is too long for the unix
+	// sockets that tests bind under t.TempDir(). Tests use the system folder.
+	if strings.Contains(os.Getenv("TMPDIR"), "/.cache/dyna/tmp") {
+		os.Unsetenv("TMPDIR")
+	}
 	return os.TempDir()
 }
 

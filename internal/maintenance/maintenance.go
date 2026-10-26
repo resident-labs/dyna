@@ -131,7 +131,7 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		}))
 		if owner, ownerErr := user.Current(); ownerErr == nil && owner.HomeDir != "" {
 			root := filepath.Join(owner.HomeDir, ".cache", "dyna", scratch.SharedTempName)
-			errs = append(errs, sweepWithDryPass(ctx, &result, "stale disk temp folders", testFolderRetention, func(dry bool) (Pruned, error) {
+			errs = append(errs, sweepWithDryPass(ctx, &result, "stale disk temp folders", diskTempRetention, func(dry bool) (Pruned, error) {
 				return sweepDiskTemp(now, root, dry)
 			}))
 		}
