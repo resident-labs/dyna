@@ -525,3 +525,24 @@ func TestPiModelChangeRestartsTheSessionProcess(t *testing.T) {
 		t.Fatalf("restart did not use rpc mode:\n%s", second)
 	}
 }
+
+// A resume by session file and a fresh launch by id name one session. The
+// registry key must stay the id, not the CLI selector, or a resume starts a
+// second Pi process and leaves the first one and its MCP connections alive.
+func TestPiSessionKeyTreatsASessionPathAsItsID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "2026-10-25T10-00-00-000Z_one.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session","version":3,"id":"one","cwd":"/work"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PATH=/bin"}
+	fresh := []string{"pi", "--mode", "rpc", "--model", "m", "--session-id", "one", "--session-dir", dir}
+	resumed := []string{"pi", "--mode", "rpc", "--model", "m", "--session", path, "--session-dir", dir}
+	if got, want := piSessionKey(resumed, env), piSessionKey(fresh, env); got != want {
+		t.Fatalf("resume key %q differs from fresh key %q", got, want)
+	}
+	compact := []string{"pi", "--mode", "rpc", "--session", path, "--session-dir", dir}
+	if got, want := piSessionKey(compact, env), piSessionKey(fresh, env); got != want {
+		t.Fatalf("compact key %q differs from fresh key %q", got, want)
+	}
+}
