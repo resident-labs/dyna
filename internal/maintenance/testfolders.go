@@ -66,6 +66,27 @@ func sweepTestFolders(now time.Time, root string, alive func(int) bool, dry bool
 	return freed, errors.Join(errs...)
 }
 
+// diskTempRetention is how long nothing under a worker's temporary folder may
+// change before the sweep removes it. A live process writes into its folder, and
+// writing a file does not touch the folder's own time, so the sweep looks at
+// every file and folder under it.
+const diskTempRetention = 24 * time.Hour
+
+// newestChange returns the latest modification time of path and everything
+// under it, starting from top.
+func newestChange(path string, top time.Time) time.Time {
+	_ = filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info, err := entry.Info(); err == nil && info.ModTime().After(top) {
+			top = info.ModTime()
+		}
+		return nil
+	})
+	return top
+}
+
 // sweepDiskTemp removes every entry in root that has stood unchanged for the
 // retention. Root is a folder Dyna owns on disk (the shared temporary folder of
 // hook runs and local checks, and the test run folder), so any name in it is
@@ -82,7 +103,7 @@ func sweepDiskTemp(now time.Time, root string, dry bool) (Pruned, error) {
 	var errs []error
 	for _, entry := range entries {
 		info, err := entry.Info()
-		if err != nil || now.Sub(info.ModTime()) <= testFolderRetention || !ownedByUser(info) {
+		if err != nil || now.Sub(newestChange(filepath.Join(root, entry.Name()), info.ModTime())) <= diskTempRetention || !ownedByUser(info) {
 			continue
 		}
 		path := filepath.Join(root, entry.Name())

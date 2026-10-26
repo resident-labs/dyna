@@ -3,6 +3,7 @@ package subagent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/harness/fakeworker"
@@ -31,14 +32,15 @@ func TestSessionTurnScratchEnv(t *testing.T) {
 	}
 }
 
-// A session's temporary files go to its disk scratch folder, never to the host
+// A session's temporary files go to a short disk folder, never to the host
 // temporary folder, which is a RAM disk on many hosts. Shell jobs, tests and Go
-// builds the session starts inherit these variables.
+// builds the session starts inherit these variables. A value the profile sets
+// stays, and the default is short enough for a unix socket under it.
 func TestSessionTurnTemporaryFolderIsOnDisk(t *testing.T) {
 	capture := filepath.Join(t.TempDir(), "temp")
 	p := fakeworker.InstallClaude(t, `printf '%s|%s|%s|%s' "$TMPDIR" "$TMP" "$TEMP" "$GOTMPDIR" > "$CAPTURE"; printf done`)
 	p.Name, p.Default = "mock", true
-	p.Env = mergedEnv(p.Env, map[string]string{"CAPTURE": capture, "TMPDIR": "/tmp"})
+	p.Env = mergedEnv(p.Env, map[string]string{"CAPTURE": capture, "TMP": "/profile/tmp"})
 	e := newTestEnv(t, p)
 	e.joinRunners()
 	info, turn := e.start("check temporary folder")
@@ -46,10 +48,19 @@ func TestSessionTurnTemporaryFolderIsOnDisk(t *testing.T) {
 	if done.Error != "" {
 		t.Fatal(done.Error)
 	}
-	dir := filepath.Join(scratch.Root(), info.ID, scratch.TempDirName)
 	got, err := os.ReadFile(capture)
-	if want := dir + "|" + dir + "|" + dir + "|" + dir; err != nil || string(got) != want {
-		t.Fatalf("temporary folder env %q, %v; want %q", got, err, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(string(got), "|")
+	if len(parts) != 4 || parts[1] != "/profile/tmp" || parts[0] == "" || parts[2] != parts[0] || parts[3] != parts[0] {
+		t.Fatalf("temporary folder env %q; want TMP from the profile and the other three one folder", got)
+	}
+	if !strings.HasPrefix(parts[0], filepath.Dir(scratch.Root())+"/") && filepath.Base(filepath.Dir(parts[0])) != scratch.SharedTempName {
+		t.Fatalf("TMPDIR %q is not under the disk temporary folder", parts[0])
+	}
+	if socket := filepath.Join(parts[0], "TestSomeLongerTestName1234567890/001/engine.sock"); len(socket) >= 108 {
+		t.Fatalf("a socket under TMPDIR is %d bytes: %s", len(socket), socket)
 	}
 }
 
