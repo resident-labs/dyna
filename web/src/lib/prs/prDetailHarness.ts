@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -32,7 +32,10 @@ export async function importBundle(code: Uint8Array | string, component = 'PRDet
   const dir = await mkdtemp(join(tmpdir(), 'dyna-pr-detail-'))
   const file = join(dir, `${basename(component)}.mjs`)
   await writeFile(file, code)
-  return { dir, ...(await import(pathToFileURL(file).href)) }
+  const module = await import(pathToFileURL(file).href)
+  // The bundle is loaded; keep no copy on disk. Callers may still rm dir.
+  await rm(dir, { recursive: true, force: true })
+  return { dir, ...module }
 }
 
 // bundle builds the component and returns its code.
