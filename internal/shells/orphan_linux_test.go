@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -147,6 +148,36 @@ func TestStopReportsChildLostToExitBeforeContainment(t *testing.T) {
 		_ = leader.Wait()
 	}
 	t.Cleanup(func() { beforeFreeze = nil })
+	if _, err := stopOrphans(id); err == nil || !strings.Contains(err.Error(), "ended before it was contained") {
+		t.Fatalf("stop error = %v; want an incomplete-cleanup error", err)
+	}
+	if pid, err := strconv.Atoi(strings.TrimSpace(out.Text())); err == nil {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// The process forks a child and ends just before it is stopped. SIGSTOP succeeds
+// on the zombie, but a zombie contains nothing, and reaping it after the check
+// drops its group.
+func TestStopReportsChildLostToReapingZombie(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	id, out, leader := startLostJob(t, s, `trap 'env -i sleep 600 & echo $!; exit 0' USR1; echo ready; read x`, 1)
+	beforeStop = func(pid int) {
+		if pid != leader.Process.Pid {
+			return
+		}
+		_ = syscall.Kill(pid, syscall.SIGUSR1)
+		out.Scan() // the child exists once its PID is printed
+		for state, _, _ := processStat(leader.Process.Pid); state != 'Z'; state, _, _ = processStat(leader.Process.Pid) {
+			runtime.Gosched()
+		}
+	}
+	afterContain = func(pid int) {
+		if pid == leader.Process.Pid {
+			_ = leader.Wait()
+		}
+	}
+	t.Cleanup(func() { beforeStop, afterContain = nil, nil })
 	if _, err := stopOrphans(id); err == nil || !strings.Contains(err.Error(), "ended before it was contained") {
 		t.Fatalf("stop error = %v; want an incomplete-cleanup error", err)
 	}
