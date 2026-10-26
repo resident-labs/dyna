@@ -42,29 +42,49 @@ type Result struct {
 func Inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	binary, err := computers.ChromiumExecutable()
-	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-		return Result{}, ErrNoBrowser
-	}
+	b, err := launchBrowser(ctx)
 	if err != nil {
 		return Result{}, err
+	}
+	defer b.close(ctx)
+	return b.inspect(ctx, doc, csp, allowNet)
+}
+
+// browser is one Chromium process that inspects pages one after another.
+type browser struct {
+	c                       *client
+	cmd                     *exec.Cmd
+	exited                  chan struct{}
+	dir                     string
+	readParent, writeParent *os.File
+}
+
+// launchBrowser starts Chromium. ctx bounds the browser's whole life.
+func launchBrowser(ctx context.Context) (*browser, error) {
+	binary, err := computers.ChromiumExecutable()
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNoBrowser
+	}
+	if err != nil {
+		return nil, err
 	}
 	dir, err := browserTempDir(browserTempBases())
 	if err != nil {
-		return Result{}, err
+		return nil, err
 	}
-	defer os.RemoveAll(dir)
 	readChild, writeParent, err := os.Pipe()
 	if err != nil {
-		return Result{}, err
+		os.RemoveAll(dir)
+		return nil, err
 	}
 	defer readChild.Close()
-	defer writeParent.Close()
 	readParent, writeChild, err := os.Pipe()
 	if err != nil {
-		return Result{}, err
+		readChild.Close()
+		writeParent.Close()
+		os.RemoveAll(dir)
+		return nil, err
 	}
-	defer readParent.Close()
 	defer writeChild.Close()
 	args := []string{"--headless", "--remote-debugging-pipe", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions", "--disable-features=Translate,MediaRouter", "--user-data-dir=" + filepath.Join(dir, "profile")}
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -73,33 +93,56 @@ func Inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stderr := &errorTail{}
 	cmd.Stderr = stderr
+	b := &browser{cmd: cmd, exited: make(chan struct{}), dir: dir, readParent: readParent, writeParent: writeParent}
 	if err := cmd.Start(); err != nil {
-		return Result{}, err
+		b.release()
+		return nil, err
 	}
-	exited := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(exited) }()
-	var c *client
-	defer func() {
-		// Closing cleanly lets Chromium reap its renderers before the browser exits.
-		if c != nil && ctx.Err() == nil {
-			c.session = ""
-			_, _ = c.send("Browser.close", map[string]any{})
-			select {
-			case <-exited:
-			case <-time.After(250 * time.Millisecond):
-			}
+	go func() { _ = cmd.Wait(); close(b.exited) }()
+	b.c = &client{input: writeParent, messages: make(chan message, 64), readError: make(chan error, 1), stderr: stderr}
+	go b.c.read(ctx, readParent)
+	return b, nil
+}
+
+// release closes the parent ends of the pipes and removes the profile.
+func (b *browser) release() {
+	b.readParent.Close()
+	b.writeParent.Close()
+	os.RemoveAll(b.dir)
+}
+
+func (b *browser) close(ctx context.Context) {
+	// Closing cleanly lets Chromium reap its renderers before the browser exits.
+	if ctx.Err() == nil {
+		b.c.session = ""
+		_, _ = b.c.send("Browser.close", map[string]any{})
+		select {
+		case <-b.exited:
+		case <-time.After(250 * time.Millisecond):
 		}
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-exited
-	}()
-	_ = readChild.Close()
-	_ = writeChild.Close()
-	c = &client{input: writeParent, messages: make(chan message, 64), readError: make(chan error, 1), doc: doc, csp: csp, allowNet: allowNet, hosts: map[string]bool{}, stderr: stderr}
-	go c.read(ctx, readParent)
+	}
+	_ = syscall.Kill(-b.cmd.Process.Pid, syscall.SIGKILL)
+	<-b.exited
+	b.release()
+}
+
+// inspect renders one page in a fresh tab. ctx bounds this inspection only.
+func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result, error) {
+	c := b.c
+	c.doc, c.csp, c.allowNet = doc, csp, allowNet
+	c.session, c.loaded, c.documentServed, c.blockedNetwork = "", false, false, false
+	c.hosts, c.console = map[string]bool{}, nil
+	var err error
 	var target struct{ TargetID string }
 	if err = c.call(ctx, "Target.createTarget", map[string]any{"url": "about:blank"}, &target); err != nil {
 		return Result{}, err
 	}
+	defer func() {
+		if ctx.Err() == nil {
+			c.session = ""
+			_ = c.call(ctx, "Target.closeTarget", map[string]any{"targetId": target.TargetID}, nil)
+		}
+	}()
 	var attached struct{ SessionID string }
 	if err = c.call(ctx, "Target.attachToTarget", map[string]any{"targetId": target.TargetID, "flatten": true}, &attached); err != nil {
 		return Result{}, err
