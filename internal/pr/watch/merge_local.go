@@ -237,10 +237,16 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 		return trialCI{}, err
 	}
 	saved := err == nil && result.Node != ""
+	// A run Dyna itself stopped tested nothing, so its replacement decides this
+	// head. A replacement that was stopped too is spent, and localCIStatus then
+	// fails the trial with the cause instead of waiting for a run that will never
+	// come. Treating a stop as final here would also keep a sync head, whose only
+	// scheduler entry is this reader, from ever retrying.
+	retryStop := saved && stoppedLocalResult(result) && !result.Resumed
 	if saved {
 		// The budget of the room judges the saved run exactly as the gate does.
 		applyLocalBudgets(&result, EffectivePolicy(st, job.record))
-		if result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError && result.Cause != localci.CauseEngineStop {
+		if !retryStop && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError) {
 			// A saved failure stays readable without the commits that produced it.
 			status, logs, reason, statusErr := localCIStatus(result, repo, job.head, nil, nil)
 			return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
@@ -257,10 +263,7 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	if !plan.runnable() {
 		return trialCI{Status: VerdictPending, Reason: "local CI is not configured at the trial head and its base"}, nil
 	}
-	// A run the engine's own stop cancelled is complete in form only: it tested
-	// nothing, so it must not answer here. It falls through to admit the same
-	// head again, which a sync head has no other scheduler entry for.
-	if saved && result.Cause != localci.CauseEngineStop && completeLocalCI(result, plan.required, plan.suites) {
+	if saved && !retryStop && completeLocalCI(result, plan.required, plan.suites) {
 		status, logs, reason, statusErr := localCIStatus(result, repo, job.head, plan.required, plan.suites)
 		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
 	}
