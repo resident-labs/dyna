@@ -180,26 +180,43 @@ func waitPath(ctx context.Context, path string, p *process) error {
 		}
 	}
 }
+// x11Root holds the X11 lock files and the .X11-unix socket directory.
+var x11Root = "/tmp"
+
+// listenX11 takes the computer's previous display when it is free, so apps that
+// outlive a daemon restart keep a working DISPLAY. A taken previous display is
+// only a preference: the computer falls back to the first free display instead
+// of staying unable to start.
 func (s *supervisor) listenX11() error {
-	if err := os.MkdirAll("/tmp/.X11-unix", os.ModeSticky|0777); err != nil {
+	socketDir := filepath.Join(x11Root, ".X11-unix")
+	if err := os.MkdirAll(socketDir, os.ModeSticky|0777); err != nil {
 		return err
 	}
-	first, last := 200, 1999
+	pinned := -1
 	if s.meta.Display != "" {
 		n, err := strconv.Atoi(strings.TrimPrefix(s.meta.Display, ":"))
 		if err != nil {
 			return err
 		}
-		first, last = n, n
+		pinned = n
 	}
-	for n := first; n <= last; n++ {
-		lock := fmt.Sprintf("/tmp/.X%d-lock", n)
-		if first == last {
+	candidates := make([]int, 0, 1801)
+	if pinned >= 0 {
+		candidates = append(candidates, pinned)
+	}
+	for n := 200; n <= 1999; n++ {
+		if n != pinned {
+			candidates = append(candidates, n)
+		}
+	}
+	for _, n := range candidates {
+		lock := filepath.Join(x11Root, fmt.Sprintf(".X%d-lock", n))
+		if n == pinned {
 			if b, err := os.ReadFile(lock); err == nil {
 				pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
 				if pid > 1 && unix.Kill(pid, 0) == unix.ESRCH {
 					_ = os.Remove(lock)
-					_ = os.Remove(fmt.Sprintf("/tmp/.X11-unix/X%d", n))
+					_ = os.Remove(filepath.Join(socketDir, fmt.Sprintf("X%d", n)))
 				}
 			}
 		}
@@ -207,7 +224,7 @@ func (s *supervisor) listenX11() error {
 		if err != nil {
 			continue
 		}
-		path := fmt.Sprintf("/tmp/.X11-unix/X%d", n)
+		path := filepath.Join(socketDir, fmt.Sprintf("X%d", n))
 		l, err := unixListener(path)
 		if err != nil {
 			f.Close()
