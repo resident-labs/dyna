@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/localci"
+	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/protectedpath"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
@@ -102,6 +104,9 @@ const (
 	rejectedSpoolRetention = 7 * 24 * time.Hour
 	// closedSessionRetention keeps a closed session's folder and record.
 	closedSessionRetention = 30 * 24 * time.Hour
+	// localCIResultRetention keeps a local CI result after it was last saved,
+	// unless its commit is an open PR's head or part of a pending merge trial.
+	localCIResultRetention = 14 * 24 * time.Hour
 )
 
 // sweepClosedSessionLogs shares the scheduled maintenance pass with archived runs.
@@ -352,4 +357,37 @@ func sweepRejectedSpools(ctx context.Context, dir string, now time.Time, dry boo
 		}
 	}
 	return freed, errors.Join(errs...)
+}
+
+// liveCommits lists the commits whose local CI result must stay: the heads and
+// review heads of open PRs, and the changes of merge trials still in progress.
+func liveCommits(st state.State) map[string]bool {
+	keep := map[string]bool{}
+	for _, r := range st.Records {
+		if r == nil || r.State != "open" {
+			continue
+		}
+		for _, sha := range []string{r.Head, r.RoundHead, r.LastReviewHead, r.CIBudgetHead, r.CITestHead} {
+			keep[sha] = true
+		}
+	}
+	for _, trial := range st.MergeTrials {
+		if trial == nil || trial.Phase == state.MergeTrialPhasePublished {
+			continue
+		}
+		for _, change := range trial.Changes {
+			keep[change.Head] = true
+		}
+	}
+	return keep
+}
+
+// pruneLocalCIResults deletes local CI results older than localCIResultRetention
+// whose commit is not live.
+func pruneLocalCIResults(ctx context.Context, dataDir string, now time.Time) (int, error) {
+	st, err := state.Read(state.Root(dataDir))
+	if err != nil {
+		return 0, err
+	}
+	return (localci.Store{DataDir: dataDir}).PruneResults(ctx, now.Add(-localCIResultRetention), liveCommits(st))
 }
