@@ -26,9 +26,11 @@ commit frozen into that trial.
 In `local` and `both` modes a pull request head needs no local result of its
 own. The merge queue runs local CI on the merge trial instead: the head merged
 into the frozen default-branch commit. A batch of changes runs once, on its tip.
-The change lands only when that run passes every required suite, so a pull
-request can merge while `dyna git ci show <head>` has no result. To see what
-gated a landed change, run `dyna git ci show <merge commit>`.
+The first conclusive local or hosted result on the trial releases the merge, and
+a failure from either provider vetoes it. A local pass must cover every required
+suite. When no CI machine is enabled, hosted trial CI decides, as in `github`
+mode. A pull request can therefore merge while `dyna git ci show <head>` has no
+result. To see what gated a landed change, run `dyna git ci show <merge commit>`.
 
 A saved failure or infrastructure result remains conclusive if its old commit
 is no longer in the checkout. A passing result must still satisfy the required
