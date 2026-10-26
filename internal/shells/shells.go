@@ -893,15 +893,25 @@ func StartSupervisor(exe, id string) error {
 	// tell a supervisor still waiting to record itself from a dead one.
 	started, _ := procident.StartTime(cmd.Process.Pid)
 	launched := fmt.Sprintf("%d %d\n", cmd.Process.Pid, started)
+	if afterSupervisorLaunch != nil {
+		afterSupervisorLaunch()
+	}
 	if err := os.WriteFile(filepath.Join(dir, supervisorPID), []byte(launched), 0o600); err != nil {
 		// Nothing can find this supervisor now, so it must not keep running: it
-		// stops itself, and its command with it, on SIGTERM.
+		// stops itself, and its command with it, on SIGTERM. A child of the
+		// command can ignore SIGTERM, so every process stamped with the job is
+		// stopped before the job is dropped.
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_, _ = cmd.Process.Wait()
-		return err
+		_, cleanup := stopOrphans(id)
+		return errors.Join(err, cleanup)
 	}
 	return cmd.Process.Release()
 }
+
+// afterSupervisorLaunch runs in StartSupervisor after the supervisor started
+// and before its PID is recorded; a test uses it to change things at that point.
+var afterSupervisorLaunch func()
 
 // supervisorPID holds the launched supervisor's PID and start time.
 const supervisorPID = "supervisor.pid"
