@@ -19,6 +19,7 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 	since := time.UnixMilli(1000)
 	failed := runstore.Event{T: "agent_end", ID: 1, TS: 2000, Status: "error", Error: "no such table"}
 	handled := runstore.Event{T: "agent_end", ID: 4, TS: 500, Status: "error", Error: "optional brief failed"}
+	ordinary := runstore.Event{T: "agent_end", ID: 5, TS: 2000, Status: "error", Error: "optional brief failed"}
 	ok := runstore.Event{T: "agent_end", ID: 2, TS: 2000, Status: "ok"}
 	cached := runstore.Event{T: "agent_end", ID: 3, TS: 2000, Status: "error", Cached: true}
 	const msg = "interrupted by update from v1 to v2; resume it with dyna run <script.js> --resume wf_settle"
@@ -38,6 +39,7 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 		{"other build, canceled stays canceled", "v1", "canceled", []runstore.Event{failed}, "canceled", ""},
 		{"same build, failed agent", "v2", "ok", []runstore.Event{failed}, "ok", ""},
 		{"other build, failure handled before the update", "v1", "ok", []runstore.Event{handled, ok}, "ok", ""},
+		{"other build, ordinary failure handled after the update", "v1", "ok", []runstore.Event{ordinary, ok}, "ok", ""},
 		{"other build, events unreadable", "v1", "ok", nil, "ok", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

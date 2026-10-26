@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/authority"
@@ -159,12 +160,28 @@ const unknownBuild = "an unknown build"
 // before it cannot come from this build, so it never marks a run interrupted.
 var engineStart = time.Now()
 
+// updateFailureMarkers are the parts of an error that show the old code met a
+// newer engine: a schema the update changed, or a call the engine no longer
+// has. An ordinary failure, which a script may handle, shows none of them.
+var updateFailureMarkers = []string{"no such table", "no such column", "the engine has no method", "restart the engine or update dyna"}
+
+func isUpdateFailure(message string) bool {
+	message = strings.ToLower(message)
+	for _, marker := range updateFailureMarkers {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // settleInterrupted decides the run's final status. An update can break a run
 // that started on another build, while its script still returns and reports
 // ok. A run from another build with an agent that failed since this engine
-// started (since) therefore ends interrupted. A failure the script handled
-// before the update does not count. Other runs keep the status the
-// coordinator reported, and a cancel stays a cancel.
+// started (since) with an update failure therefore ends interrupted. A
+// failure the script handled, or one from before the update, does not count.
+// Other runs keep the status the coordinator reported, and a cancel stays a
+// cancel.
 func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFinish, engineBuild string, since time.Time) (callspec.RunFinish, error) {
 	if in.Status != "ok" && in.Status != "error" {
 		return in, nil
@@ -185,7 +202,7 @@ func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFini
 		return in, nil
 	}
 	for _, e := range events {
-		if e.T == "agent_end" && e.Status == "error" && !e.Cached && e.TS >= since.UnixMilli() {
+		if e.T == "agent_end" && e.Status == "error" && !e.Cached && e.TS >= since.UnixMilli() && isUpdateFailure(e.Error) {
 			from := meta.Build
 			if from == "" {
 				from = unknownBuild
