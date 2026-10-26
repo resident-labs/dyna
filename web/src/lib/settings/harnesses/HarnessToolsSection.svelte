@@ -2,26 +2,25 @@
   import Switch from '../../ui/Switch.svelte'
   import EmptyState from '../../ui/EmptyState.svelte'
   import { toolEnabledForHarness, type HarnessRow } from './state.ts'
-  import type { ManagedMCP, ManagedSkill } from '../../api/harness.ts'
+  import type { ManagedMCP } from '../../api/harness.ts'
 
-  // The tools one harness may use, as switches. The pane saves each change.
+  // The MCP servers one harness may use, as switches. Skills have their own
+  // global pane, so a skill has no per-harness switch here.
   let {
     row,
     mcp = [],
-    skills = [],
     busy = false,
     ontoggle,
   }: {
     row: HarnessRow
     mcp?: ManagedMCP[]
-    skills?: ManagedSkill[]
     busy?: boolean
-    ontoggle: (kind: 'mcp' | 'skill', name: string, enabled: boolean) => void
+    ontoggle: (kind: 'mcp', name: string, enabled: boolean) => void
   } = $props()
 </script>
 
 <div class="sec">
-  <h3 class="section-label">Tools in {row.meta.name}</h3>
+  <h3 class="section-label">MCP servers in {row.meta.name}</h3>
   {#each mcp as entry (entry.name)}
     {@const on = toolEnabledForHarness(entry, row.id)}
     <div class="kv">
@@ -29,15 +28,8 @@
       <Switch {on} label={`${entry.name} MCP in ${row.meta.name}`} disabled={busy || !row.capability?.mcp} onchange={(v: boolean) => ontoggle('mcp', entry.name, v)} />
     </div>
   {/each}
-  {#each skills as entry (entry.name)}
-    {@const on = toolEnabledForHarness(entry, row.id)}
-    <div class="kv">
-      <span>{entry.name} <span class="muted small">Skill</span></span>
-      <Switch {on} label={`${entry.name} skill in ${row.meta.name}`} disabled={busy || !row.capability?.skills} onchange={(v: boolean) => ontoggle('skill', entry.name, v)} />
-    </div>
-  {/each}
-  {#if !mcp.length && !skills.length}
-    <EmptyState title="No tools yet">Add one in the MCP servers & skills tab.</EmptyState>
+  {#if !mcp.length}
+    <EmptyState title="No MCP servers yet">Add one in the MCP servers tab.</EmptyState>
   {/if}
 </div>
 

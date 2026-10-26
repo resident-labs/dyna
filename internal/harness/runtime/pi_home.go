@@ -6,11 +6,10 @@ import (
 	"path/filepath"
 
 	"dyna-agent/internal/fsutil"
-	harnessmgr "dyna-agent/internal/harness/config"
 )
 
-// Pi reads one agent directory for credentials, settings, MCP servers, skills
-// and sessions. Dyna keeps session history shared, so only the agent directory
+// Pi reads one agent directory for credentials, settings, MCP servers and
+// sessions. Dyna keeps session history shared, so only the agent directory
 // follows the account: the account home holds that account's own login.
 const (
 	piAgentDirKey    = "PI_CODING_AGENT_DIR"
@@ -19,10 +18,10 @@ const (
 )
 
 // publishPiAccountHome gives a Pi account home the parts of the agent directory
-// that Dyna manages: the generation's settings and MCP servers, its skills view,
-// and the owner's model definitions. Pi must find them next to the credential,
-// because it reads one agent directory. Pi's own files (its login and its model
-// cache) are never touched, and the shared home stays the source of models.json.
+// that Dyna manages: the generation's settings and MCP servers and the owner's
+// model definitions. Pi must find them next to the credential, because it reads
+// one agent directory. Pi's own files (its login and its model cache) are never
+// touched, and the shared home stays the source of models.json.
 func publishPiAccountHome(dir, home, accountHome string) error {
 	if err := checkedCredentialHome(home, accountHome); err != nil {
 		return err
@@ -40,9 +39,6 @@ func publishPiAccountHome(dir, home, accountHome string) error {
 		return err
 	}
 	if err := publishGenerationFile(dir, "pi-mcp.json", accountHome, "mcp.json"); err != nil {
-		return err
-	}
-	if err := harnessmgr.PublishSkillView(filepath.Join(accountHome, "skills"), filepath.Join(dir, "skills")); err != nil {
 		return err
 	}
 	return fsutil.WriteFile(marker, []byte(dir+"\n"), 0600, false)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/goals"
+	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
@@ -89,10 +90,20 @@ func TestWorkerInstructionsSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := &engine{opts: Options{Run: &runstore.Run{Meta: runstore.Meta{RoomID: "test-room"}}}}
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\ndescription: Reviews a change\n---\nBody\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	e.Skills = func() ([]harnessconfig.ManagedSkill, error) {
+		return []harnessconfig.ManagedSkill{{Name: "review", Source: source, Enabled: true}}, nil
+	}
 	leaf, journal := e.workerInstructions(false), e.workerInstructions(true)
 	for name, got := range map[string]string{"leaf": leaf.Text(), "journal": journal.Text()} {
 		if !strings.Contains(got, "[DYNA WORKFLOW RESTRICTION]") || strings.Count(got, "[DYNA RULES]") != 1 || !strings.Contains(got, "Keep code simple. · owner") {
 			t.Fatalf("%s instructions = %q", name, got)
+		}
+		if !strings.Contains(got, "[DYNA SKILLS]") || !strings.Contains(got, "- review: Reviews a change · "+filepath.Join(source, "SKILL.md")) {
+			t.Fatalf("%s instructions lack the skill section: %q", name, got)
 		}
 	}
 	if strings.Contains(leaf.Text(), "DYNA WORK JOURNAL") || !strings.HasPrefix(journal.Text(), "[DYNA WORK JOURNAL - REQUIRED]") {

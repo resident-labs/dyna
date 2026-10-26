@@ -35,7 +35,7 @@
     tabindex={tab === 'tools' ? 0 : -1}
     onclick={() => (tab = 'tools')}
   >
-    MCP servers &amp; skills
+    MCP servers
   </button>
 </div>
 

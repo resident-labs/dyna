@@ -220,33 +220,6 @@ func TestConcurrentGenerations(t *testing.T) {
 		t.Fatalf("got %d generations", len(seen))
 	}
 }
-func TestSkillGenerationCopiesAndRejectsLinks(t *testing.T) {
-	m, account, root := editManager(t)
-	source := t.TempDir()
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("original skill"), 0600))
-	mustEdit(t, m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "review", Source: source, EnabledHarnesses: []string{"claude"}}))
-	g, e := m.Generate("claude", account, root)
-	mustEdit(t, e)
-	copied := filepath.Join(g.Directory, "plugin", "skills", "review", "SKILL.md")
-	mustEdit(t, os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("new skill"), 0600))
-	if string(fileBytes(t, copied)) != "original skill" {
-		t.Fatal("skill generation is mutable")
-	}
-	if !strings.Contains(strings.Join(g.Args, " "), "--plugin-dir") {
-		t.Fatal("plugin load flag missing")
-	}
-
-	mustEdit(t, os.Symlink(filepath.Join(source, "SKILL.md"), filepath.Join(source, "link")))
-	if _, e := m.Generate("claude", account, root); e == nil {
-		t.Fatal("mutable source link accepted")
-	}
-	entries, e := os.ReadDir(root)
-	mustEdit(t, e)
-	if len(entries) != 1 {
-		t.Fatal("failed generation was retained")
-	}
-}
-
 func TestLoadGenerationRetainsFilesAndResolvesCurrentKeys(t *testing.T) {
 	m, account, root := editManager(t)
 	mustEdit(t, m.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedMCP{Name: "tool", MCPDefinition: MCPDefinition{Command: "node", EnvKeys: []string{"RESUME_SECRET"}}, EnabledHarnesses: []string{"claude"}}))
@@ -278,9 +251,6 @@ func TestLoadGenerationRetainsFilesAndResolvesCurrentKeys(t *testing.T) {
 		t.Fatalf("unsafe missing reference error: %v", e)
 	}
 	mustEdit(t, m.Remove(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), "mcp", "tool", ""))
-	if ok, reason := NativeSkillCapability("claude"); !ok || reason != "" {
-		t.Fatal("Claude plugin skills unsupported")
-	}
 }
 
 func TestConcurrentCatalogEdits(t *testing.T) {

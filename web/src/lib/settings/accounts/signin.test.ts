@@ -31,7 +31,7 @@ test('a sign-in uses the installed or recommended copy of its harness', () => {
     installing: [],
     selectedVersions: {},
     recommendedVersions: [{ harness: 'pi', version: '0.164.0', status: 'resolved', source: 'npm' }],
-    capabilities: [{ harness: 'pi', status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, skills: true, skillsPinned: false, concurrent: false, sharedPersonalLogin: true }],
+    capabilities: [{ harness: 'pi', status: 'ready', reason: '', installSupported: true, accountBlocked: '', mcp: true, concurrent: false, sharedPersonalLogin: true }],
   }
   assert.equal(harnessPin(snapshot, 'pi'), '0.163.0', 'an installed copy wins')
   assert.equal(harnessPin({ ...snapshot, bundles: [] }, 'pi'), '0.164.0', 'the recommendation is the next choice')

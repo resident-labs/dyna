@@ -37,7 +37,6 @@ func init() {
 		ConfigFormat: "json",
 		MCPKey:       "mcpServers",
 		ConfigFile:   "settings.json",
-		SkillDir:     "skills",
 		// Pi loads $PI_CODING_AGENT_DIR/AGENTS.md as global rules.
 		NativeEnv:  piNativeEnv,
 		ConfigArgs: piConfigArgs,
@@ -58,8 +57,8 @@ func init() {
 }
 
 // piNativeEnv scopes Pi to one private home. The agent directory covers
-// settings, mcp.json, auth.json, skills, and user instructions; a turn overrides
-// the agent directory with the account's own home. Shared launch code supplies
+// settings, mcp.json, auth.json and user instructions; a turn overrides the
+// agent directory with the account's own home. Shared launch code supplies
 // private HOME/XDG roots; PI_OFFLINE stops automatic network activity.
 func piNativeEnv(home string) map[string]string {
 	env := map[string]string{
@@ -75,11 +74,10 @@ func piNativeEnv(home string) map[string]string {
 	return env
 }
 
-// piConfigArgs pins sessions into the private home. Pi has no settings or skill
-// flag, so main materializes those views inside the agent directory and the
-// configPath and skillPath parameters are unused here. --session-dir takes
-// precedence over the sessionDir setting and the environment.
-func piConfigArgs(home, configPath, skillPath string) []string {
+// piConfigArgs pins sessions into the private home. Pi has no settings flag, so
+// main materializes the settings view inside the agent directory;
+// --session-dir takes precedence over the sessionDir setting and environment.
+func piConfigArgs(home, _ string) []string {
 	return []string{"--session-dir", filepath.Join(home, "sessions")}
 }
 

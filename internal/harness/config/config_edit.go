@@ -144,11 +144,6 @@ func (m *ConfigManager) AddSkill(ctx context.Context, x ManagedSkill) error {
 	if err := validateSkillSource(x.Source); err != nil {
 		return err
 	}
-	hs, err := normalizeEnabled(x.EnabledHarnesses)
-	if err != nil {
-		return err
-	}
-	x.EnabledHarnesses = hs
 	return m.update(func(c *HarnessConfig) error {
 		if slices.ContainsFunc(c.Skills, func(v ManagedSkill) bool { return v.Name == x.Name }) {
 			return errors.New("skill name already exists")
@@ -158,8 +153,8 @@ func (m *ConfigManager) AddSkill(ctx context.Context, x ManagedSkill) error {
 	})
 }
 
-// Remove without a harness removes the catalog entry. A scoped removal removes
-// its enablement.
+// Remove deletes a catalog entry. An MCP entry can be disabled for one harness
+// instead; the skill catalog is global, so a skill removal always deletes it.
 func (m *ConfigManager) Remove(ctx context.Context, kind, name, harness string) error {
 	if err := validKind(kind); err != nil {
 		return err
@@ -167,7 +162,7 @@ func (m *ConfigManager) Remove(ctx context.Context, kind, name, harness string) 
 	if err := authority.Check(kind+" rm", authority.Of(ctx), nil); err != nil {
 		return err
 	}
-	if harness != "" {
+	if harness != "" && kind == "mcp" {
 		return m.setEnabled(kind, name, harness, false)
 	}
 	if err := validateConfigName(name); err != nil {
@@ -208,44 +203,45 @@ func (m *ConfigManager) setEnabled(kind, name, harness string, enabled bool) err
 	if err := validateConfigName(name); err != nil {
 		return err
 	}
-	hs, err := selectedHarnesses(harness)
-	if err != nil {
-		return errors.New("unsupported harness ID")
+	var hs []string
+	if kind == "mcp" {
+		var err error
+		if hs, err = selectedHarnesses(harness); err != nil {
+			return errors.New("unsupported harness ID")
+		}
 	}
 	return m.update(func(c *HarnessConfig) error {
-		var selected *[]string
 		if kind == "mcp" {
 			i := slices.IndexFunc(c.MCP, func(x ManagedMCP) bool { return x.Name == name })
 			if i < 0 {
 				return errors.New("MCP name does not exist")
 			}
 			x := &c.MCP[i]
-			selected = &x.EnabledHarnesses
 			if enabled {
 				if err := validateMCPDefinition(x.MCPDefinition); err != nil {
 					return err
 				}
 			}
-		} else {
-			i := slices.IndexFunc(c.Skills, func(x ManagedSkill) bool { return x.Name == name })
-			if i < 0 {
-				return errors.New("skill name does not exist")
-			}
-			x := &c.Skills[i]
-			selected = &x.EnabledHarnesses
-			if enabled {
-				if err := validateSkillSource(x.Source); err != nil {
-					return err
+			for _, h := range hs {
+				x.EnabledHarnesses = slices.DeleteFunc(x.EnabledHarnesses, func(v string) bool { return v == h })
+				if enabled {
+					x.EnabledHarnesses = append(x.EnabledHarnesses, h)
 				}
 			}
+			sort.Strings(x.EnabledHarnesses)
+			return nil
 		}
-		for _, h := range hs {
-			*selected = slices.DeleteFunc(*selected, func(v string) bool { return v == h })
-			if enabled {
-				*selected = append(*selected, h)
+		i := slices.IndexFunc(c.Skills, func(x ManagedSkill) bool { return x.Name == name })
+		if i < 0 {
+			return errors.New("skill name does not exist")
+		}
+		x := &c.Skills[i]
+		if enabled {
+			if err := validateSkillSource(x.Source); err != nil {
+				return err
 			}
 		}
-		sort.Strings(*selected)
+		x.Enabled = enabled
 		return nil
 	})
 }
@@ -400,23 +396,6 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 		}
 		servers[x.Name] = native
 	}
-	skills := map[string]string{}
-	for _, x := range c.Skills {
-		if !slices.Contains(x.EnabledHarnesses, h) {
-			continue
-		}
-		if err := validateConfigName(x.Name); err != nil {
-			return ConfigGeneration{}, err
-		}
-		src := x.Source
-		if err := validateSkillSource(src); err != nil {
-			return ConfigGeneration{}, err
-		}
-		if _, exists := skills[x.Name]; exists {
-			return ConfigGeneration{}, errors.New("duplicate enabled skill name")
-		}
-		skills[x.Name] = src
-	}
 	var directory, published string
 	if destination == nil {
 		directory, err = os.MkdirTemp(generationRoot, "generation-")
@@ -477,21 +456,6 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 	// The user source is the private CLAUDE_CONFIG_DIR. It loads the
 	// CLAUDE.md that carries Dyna's global rules; --settings still wins.
 	out.Args = []string{"--mcp-config", filepath.Join(published, "mcp.json"), "--strict-mcp-config", "--settings", filepath.Join(published, "settings.json"), "--setting-sources", "user"}
-	if len(skills) > 0 {
-		plugin := filepath.Join(directory, "plugin")
-		if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0700); err != nil {
-			return ConfigGeneration{}, errors.New("cannot create skill plugin")
-		}
-		if err := write("plugin/.claude-plugin/plugin.json", map[string]string{"name": "dyna", "version": "1.0.0"}); err != nil {
-			return ConfigGeneration{}, err
-		}
-		for name, src := range skills {
-			if err := copyGenerationSkill(src, filepath.Join(plugin, "skills", name)); err != nil {
-				return ConfigGeneration{}, err
-			}
-		}
-		out.Args = append(out.Args, "--plugin-dir", filepath.Join(published, "plugin"))
-	}
 	sort.Strings(out.EnvKeys)
 	if err := write("generation.json", generationManifest{Version: 1, Harness: h, AccountHome: accountHome, CLI: dynaServerCommand(servers), Args: out.Args, EnvKeys: out.EnvKeys, PartialReasons: out.PartialReasons, EnvReferences: envRefs}); err != nil {
 		return ConfigGeneration{}, err
@@ -550,60 +514,6 @@ func (m *ConfigManager) validatePrivateDir(path string) error {
 		}
 	}
 	return nil
-}
-
-func copyGenerationSkill(source, target string) error {
-	// Resolve only the explicitly selected source root. Reject links inside it so
-	// a session's immutable copy cannot point back to mutable external content.
-	source, err := filepath.EvalSymlinks(source)
-	if err != nil {
-		return errors.New("cannot resolve skill source")
-	}
-	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return errors.New("cannot read skill source")
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return errors.New("invalid skill source")
-		}
-		destination := filepath.Join(target, rel)
-		if entry.IsDir() {
-			if err := os.MkdirAll(destination, 0700); err != nil {
-				return errors.New("cannot create skill generation")
-			}
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			return errors.New("skill generation requires regular files without symlinks")
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return errors.New("cannot read skill source")
-		}
-		mode := os.FileMode(0600)
-		if info.Mode().Perm()&0100 != 0 {
-			mode = 0700
-		}
-		if err := os.WriteFile(destination, data, mode); err != nil {
-			return errors.New("cannot copy skill generation")
-		}
-		return nil
-	})
-}
-
-// NativeSkillCapability describes generation support independently of personal
-// skill discovery. Claude generation skills use a session-only native plugin.
-func NativeSkillCapability(harness string) (supported bool, reason string) {
-	hs, err := selectedHarnesses(harness)
-	if err != nil || len(hs) != 1 {
-		return false, "select one supported harness"
-	}
-	if hs[0] == "claude-code" {
-		return true, ""
-	}
-	return false, "private skill generation is not implemented for this harness"
 }
 
 type generationManifest struct {
