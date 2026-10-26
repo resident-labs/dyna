@@ -3,7 +3,7 @@
   // check, a cross, or a quiet dot. Color follows the app: gold live, sage
   // done, coral failed.
   let { status = '', size = 18 }: { status?: string; size?: number } = $props()
-  let kind = $derived(status === 'running' ? 'run' : status === 'ok' ? 'ok' : status === 'error' || status === 'failed' ? 'bad' : status === 'canceled' || status === 'stopped' ? 'stop' : 'idle')
+  let kind = $derived(status === 'running' ? 'run' : status === 'ok' ? 'ok' : status === 'error' || status === 'failed' || status === 'interrupted' ? 'bad' : status === 'canceled' || status === 'stopped' ? 'stop' : 'idle')
 </script>
 
 <span class="ic {kind}" style="--s:{size}px" aria-hidden="true">
