@@ -5,13 +5,6 @@ version: 1
 # `dyna git ci run --suite` for focused manual runs.
 trial: [relay, go, cross, computer-smoke]
 
-# The Go jobs run the workflow's own jobs through act, so a local result comes
-# from the same steps the provider runs. These jobs read the act cache that Dyna
-# fills after main moves.
-warm:
-  workflow: .github/workflows/ci.yml
-  name: cache-warm
-
 caches:
   - name: go-build
     target: /cache/build
@@ -115,11 +108,29 @@ checks:
     reports: none
 
   - id: go-static
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-static
-    cpus: 4
-    memory: 8g
+    image: golang:1.26.3
+    hostUser: true
+    setup: timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69
+    command: bash scripts/ci.sh go modules && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+
+  # The desktop module is a nested module, so the root Go commands never reach
+  # it. The hosted workflow reports it as its own desktop job, and the base
+  # graph requires that name, so it stays a check of its own.
+  - id: desktop
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && touch web/dist/index.html && bash scripts/ci.sh go desktop
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
     reports: none
 
   # One check per release target. The targets cannot share build objects (the
@@ -185,97 +196,107 @@ checks:
   - id: go-test-shard-0
     name: go-test-shard (0)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:0']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env: &go-test-env
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+      CI_SHARD: 0/8
+      CI_SLICE: 0/2
     reports: go
 
   - id: go-test-shard-1
     name: go-test-shard (1)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:1']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 1/8
+      CI_SLICE: ""
     reports: go
 
   - id: go-test-shard-2
     name: go-test-shard (2)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:2']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 2/8
+      CI_SLICE: ""
     reports: go
 
   - id: go-test-shard-3
     name: go-test-shard (3)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:3']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 3/8
+      CI_SLICE: ""
     reports: go
 
   - id: go-test-shard-4
     name: go-test-shard (4)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:4']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 4/8
+      CI_SLICE: ""
     reports: go
 
   - id: go-test-shard-5
     name: go-test-shard (5)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:5']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 5/8
+      CI_SLICE: ""
     reports: go
 
   - id: go-test-shard-6
     name: go-test-shard (6)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:6']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 6/8
+      CI_SLICE: ""
     reports: go
-
-  - id: desktop
-    job:
-      workflow: .github/workflows/ci.yml
-      name: desktop
-    cpus: 2
-    memory: 4g
-    reports: none
 
   - id: go-test-shard-7
     name: go-test-shard (7)
     providerGroup: go-test-shard
-    job:
-      workflow: .github/workflows/ci.yml
-      name: go-shard
-      matrix: ['shard:7']
-    cpus: 2
-    memory: 4g
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 7/8
+      CI_SLICE: 1/2
     reports: go
 
 suites:
