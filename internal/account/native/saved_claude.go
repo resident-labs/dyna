@@ -64,3 +64,14 @@ func (m *claudeManager) ProbeSaved(ctx context.Context, c Captured) (store.Obser
 	}
 	return store.Observation{Plan: m.CachedPlan(c), Windows: windows, ObservedAt: now}, nil
 }
+
+// ClaudeAccessToken returns the access token of a saved Claude Code account.
+// A caller must never log it. The token is the sign-in's own OAuth grant; this
+// function renews nothing, so the account's renewal pass keeps it current.
+func ClaudeAccessToken(c store.Credential) (string, error) {
+	_, tok, _, _, err := claudeDecode(c)
+	if err != nil {
+		return "", err
+	}
+	return tok.AccessToken, nil
+}

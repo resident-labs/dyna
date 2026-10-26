@@ -5,8 +5,11 @@ package websearch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -152,15 +155,98 @@ func capped(provider string, q Query, results []Result) []Result {
 
 // text folds a snippet onto one line of at most maxSnippet characters.
 func text(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
+	return clip(fold(s))
+}
+
+// fold puts text on one line, because a snippet and an error reason are each
+// reported as one line.
+func fold(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// clip keeps at most maxSnippet characters.
+func clip(s string) string {
 	runes := []rune(s)
 	if len(runes) > maxSnippet {
-		s = strings.TrimSpace(string(runes[:maxSnippet])) + "…"
+		return strings.TrimSpace(string(runes[:maxSnippet])) + "…"
 	}
 	return s
 }
 
-// statusError is the failure of a provider request that answered.
-func statusError(provider string, status int) error {
-	return fmt.Errorf("%s answered HTTP %d", provider, status)
+// statusError is the failure of a provider request that answered. The body is
+// the backend's own explanation of why it refused, and the only way to see a
+// cause such as a model the account cannot use, so the error keeps it. It is
+// folded to one line and cleared of any secret first, and the caller passes each
+// secret the request carried so the body cannot echo one back.
+func statusError(provider string, status int, body io.Reader, secrets ...string) error {
+	// The whole reason is cleared of secrets before it is folded and shortened.
+	// Clearing a shortened reason would leave a fragment of a secret that no
+	// replacement or pattern matches.
+	reason := clip(redact(fold(errorReason(body)), secrets...))
+	if reason == "" {
+		return fmt.Errorf("%s answered HTTP %d", provider, status)
+	}
+	return fmt.Errorf("%s answered HTTP %d: %s", provider, status, reason)
+}
+
+// redact clears every supplied secret and every credential shape from s.
+func redact(s string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			s = strings.ReplaceAll(s, secret, redacted)
+		}
+	}
+	return redactTokens(s)
+}
+
+// redacted replaces a credential in text that may quote one.
+const redacted = "[redacted]"
+
+// redactedPatterns are the credential shapes a provider's error body may quote
+// back: a bearer header, an API key, and a signed token.
+var redactedPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
+	regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
+}
+
+// redactTokens masks every credential shape in s.
+func redactTokens(s string) string {
+	for _, pattern := range redactedPatterns {
+		s = pattern.ReplaceAllString(s, redacted)
+	}
+	return s
+}
+
+// errorBody is the shape of a refusal: OpenAI and most providers name the cause
+// in error.message, and a few use detail or message at the top level.
+type errorBody struct {
+	Detail  string `json:"detail"`
+	Message string `json:"message"`
+	Error   *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// errorReason is what the backend said went wrong in full, or empty when the
+// body names no cause. The caller folds, clears and shortens it.
+func errorReason(body io.Reader) string {
+	if body == nil {
+		return ""
+	}
+	raw, _ := io.ReadAll(io.LimitReader(body, 64<<10))
+	var refusal errorBody
+	if json.Unmarshal(raw, &refusal) == nil {
+		for _, named := range []string{refusal.Detail, refusal.Message} {
+			if trimmed := strings.TrimSpace(named); trimmed != "" {
+				return trimmed
+			}
+		}
+		if refusal.Error != nil {
+			if trimmed := strings.TrimSpace(refusal.Error.Message); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return string(raw)
 }
