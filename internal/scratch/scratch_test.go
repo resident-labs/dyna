@@ -13,11 +13,15 @@ import (
 	"time"
 )
 
-// isolateRoot points scratch at a private test folder instead of the owner's
+// isolateRoot points scratch at a private test base instead of the owner's
 // real cache.
 func isolateRoot(t *testing.T) {
 	t.Helper()
-	t.Setenv(RootEnv, filepath.Join(t.TempDir(), "scratch"))
+	base := filepath.Join(t.TempDir(), "scratch")
+	if err := os.MkdirAll(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(RootEnv, base)
 }
 
 func TestEnsurePrivateScratch(t *testing.T) {
@@ -271,30 +275,80 @@ func TestSweepCancellationAndInvalidOnly(t *testing.T) {
 	}
 }
 
-// The scratch root is one disk folder under the owner's cache. It must not
-// follow TMPDIR or a worker's private HOME/XDG, which is how scratch ended up
-// on the /tmp RAM disk and in per-account caches.
-func TestScratchRootIsOneSharedDiskFolder(t *testing.T) {
+// Scratch lives on one disk base under the owner's cache. Each store gets a
+// short namespace from its data folder, so a sweep in one store cannot reach
+// another store's open sessions. TMPDIR, the harness HOME and the cache folder
+// never move it.
+func TestScratchRootUsesTheOwnerDiskBaseAndStoreNamespace(t *testing.T) {
 	owner, err := user.Current()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(owner.HomeDir, ".cache", "dyna", "session-scratch")
+	base := filepath.Join(owner.HomeDir, ".cache", "dyna", "scratch")
 	tmp := t.TempDir()
 	t.Setenv(RootEnv, "")
 	t.Setenv("TMPDIR", tmp)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	if got := Root(); got != want {
-		t.Fatalf("scratch root = %q, want %q", got, want)
+	root := Root()
+	if filepath.Dir(root) != base {
+		t.Fatalf("scratch root = %q, want a namespace under %q", root, base)
 	}
-	if strings.HasPrefix(want, tmp) {
-		t.Fatalf("scratch root is on TMPDIR: %q", want)
+	if strings.HasPrefix(root, tmp) {
+		t.Fatalf("scratch root is on TMPDIR: %q", root)
 	}
+	first := root
 	for _, home := range []string{t.TempDir(), owner.HomeDir} {
 		t.Setenv("HOME", home)
-		if got := Root(); got != want {
-			t.Fatalf("HOME %q moved the shared scratch root to %q", home, got)
+		if got := Root(); got != first {
+			t.Fatalf("HOME %q moved the scratch root to %q", home, got)
 		}
+	}
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	other := Root()
+	if other == first || filepath.Dir(other) != base {
+		t.Fatalf("another data folder did not get its own namespace under %q: %q", base, other)
+	}
+}
+
+// A sweep in one store never reaches another store's scratch, even for a
+// session the current store's lifecycle records do not know.
+func TestSweepIsIsolatedByStore(t *testing.T) {
+	isolateRoot(t)
+	now := time.Now()
+	old := now.Add(-4 * 24 * time.Hour)
+	makeOld := func(owner string) string {
+		t.Helper()
+		dir, err := Ensure(owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := filepath.Join(dir, "note")
+		if err := os.WriteFile(file, []byte("keep"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range []string{file, dir} {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	first := makeOld("open-session")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	second := makeOld("old-session")
+	result, err := Sweep(context.Background(), Options{Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(first, "note")); err != nil {
+		t.Fatalf("a sweep removed another store's scratch: %v", err)
+	}
+	if _, err := os.Stat(second); !os.IsNotExist(err) {
+		t.Fatalf("the current store's expired scratch remains: %v", err)
+	}
+	if len(result.Removed) != 1 || result.Removed[0] != second {
+		t.Fatalf("sweep removed %+v", result.Removed)
 	}
 }
