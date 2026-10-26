@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/facts"
 	"encoding/json"
 	"errors"
@@ -300,6 +301,44 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 	return out, rates, errors.Join(failures...)
 }
 
+// repositoryMergeTrialCI reports whether a merge trial can be evaluated for a
+// repository. A room in local mode takes the trial verdict from local CI, so it
+// needs no hosted push CI on dyna/merge-trial/**; every other room does.
+func repositoryMergeTrialCI(probe defaultBranchProbe, previous RepositoryFacts, localTrial bool) bool {
+	if localTrial {
+		return true
+	}
+	// A read that could not see the workflow files proves nothing about the trial
+	// pipeline, so the last conclusive answer stands instead of dropping to false
+	// and blocking every merge.
+	if !probe.MergeTrialKnown {
+		return previous.MergeTrialCI
+	}
+	return probe.MergeTrialCI
+}
+
+// localTrialRooms names the rooms whose merge trials are evaluated by local CI.
+func (s *Service) localTrialRooms(ctx context.Context, st State) map[string]bool {
+	rooms := map[string]bool{}
+	for _, r := range st.Records {
+		if !r.Watching || r.RoomID == "" {
+			continue
+		}
+		if _, known := rooms[r.RoomID]; known {
+			continue
+		}
+		mode, err := s.ciRegistry().Mode(ctx, r.RoomID)
+		if err != nil {
+			// A mode that cannot be read keeps the hosted requirement, which is
+			// the stricter answer.
+			rooms[r.RoomID] = false
+			continue
+		}
+		rooms[r.RoomID] = mode == localci.ModeLocal || mode == localci.ModeBoth
+	}
+	return rooms
+}
+
 func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time, pauses map[string]bool, discovery ...*Record) (map[string]headProbe, error) {
 	if s.now().Before(st.LegacyPause) {
 		return map[string]headProbe{}, nil
@@ -426,6 +465,7 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	gh.requests = &requestCache{rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
 	heads, rates, readErr := gh.readHeads(ctx, records)
 	recheckErr := s.recheckCancelledMainCI(ctx, gh, records, localRepos, heads)
+	localTrial := s.localTrialRooms(ctx, st)
 	saveErr := s.Store.update(func(current *State) error {
 		for key, probe := range heads {
 			if r := current.Records[key]; r != nil && probe.Account != "" {
@@ -448,7 +488,8 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 				}
 				next := RepositoryFacts{
 					DefaultBranch: probe.Default.Name, Head: probe.Default.Head,
-					Verdict: defaultVerification(probe.Default), CheckedAt: observedAt, NoPushCI: probe.Default.NoPushCI, MergeTrialCI: probe.Default.MergeTrialCI,
+					Verdict: defaultVerification(probe.Default), CheckedAt: observedAt, NoPushCI: probe.Default.NoPushCI,
+					MergeTrialCI: repositoryMergeTrialCI(probe.Default, previous, localTrial[r.RoomID]),
 				}
 				// A read that could not see the workflow files proves nothing about
 				// the trial pipeline, so the last conclusive answer stands instead
