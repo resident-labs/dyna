@@ -745,16 +745,18 @@ func (r *Runtime) recordGenerationView(h, home, dir string, pending bool) error 
 	}
 	state := r.generationState()
 	ctx := context.Background()
-	if err := state.RecordView(ctx, genstate.View{Harness: h, Home: home, Generations: []string{dir}}, pending); err != nil {
+	view := genstate.View{Harness: h, Home: home, Generations: []string{dir}}
+	if pending {
+		return state.RecordView(ctx, view, true)
+	}
+	// A complete publication replaces whatever the legacy view file of this
+	// home names. Read those revisions first, so a read failure never leaves
+	// a complete view without the supersession that protects it.
+	revisions, err := r.legacyViewRevisions(h, home)
+	if err != nil {
 		return err
 	}
-	if pending {
-		return nil
-	}
-	// A complete publication replaced whatever the legacy view file of this
-	// home named. Record that exact revision, so only an unchanged file is
-	// skipped and any later write by an earlier build wins.
-	return state.SupersedeLegacyViews(ctx, h, home, r.legacyViewRevisions(h, home))
+	return state.RecordPublication(ctx, view, revisions)
 }
 
 // legacyViewRevisions reads the legacy view files that name this harness and
@@ -762,11 +764,14 @@ func (r *Runtime) recordGenerationView(h, home, dir string, pending bool) error 
 //
 // TODO: legacy/shim remove later — remove with the .views files of earlier
 // builds, once no runner of such a build can be alive.
-func (r *Runtime) legacyViewRevisions(h, home string) []genstate.LegacyRevision {
+func (r *Runtime) legacyViewRevisions(h, home string) ([]genstate.LegacyRevision, error) {
 	dir := filepath.Join(r.Generations, ".views")
 	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	out := []genstate.LegacyRevision{}
 	for _, entry := range entries {
@@ -776,7 +781,7 @@ func (r *Runtime) legacyViewRevisions(h, home string) []genstate.LegacyRevision 
 		path := filepath.Join(dir, entry.Name())
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		var view struct {
 			Harness, Home string
@@ -787,12 +792,12 @@ func (r *Runtime) legacyViewRevisions(h, home string) []genstate.LegacyRevision 
 		}
 		info, err := entry.Info()
 		if err != nil {
-			continue
+			return nil, err
 		}
 		sum := sha256.Sum256(raw)
 		out = append(out, genstate.LegacyRevision{Path: path, Digest: hex.EncodeToString(sum[:]), ModifiedNS: info.ModTime().UnixNano()})
 	}
-	return out
+	return out, nil
 }
 func (r *Runtime) currentGenerationPins(keep map[string]bool) error {
 	views, err := r.generationState().Views(context.Background())

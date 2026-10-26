@@ -231,41 +231,53 @@ func recordViewTx(ctx context.Context, conn *sql.Conn, view View, pending bool) 
 		}
 	}
 	for _, dir := range view.Generations {
-		if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation,pending) VALUES(?,?,?,?)`,
-			view.Harness, view.Home, dir, flag(pending)); err != nil {
+		// A pending claim on a generation this build already published keeps
+		// it protected if a legacy publication replaces the complete set
+		// before the new publication finishes.
+		if _, err := conn.ExecContext(ctx, `INSERT INTO generation_views(harness,home,generation,pending) VALUES(?,?,?,?)
+ON CONFLICT(harness,home,generation) DO UPDATE SET pending=?`, view.Harness, view.Home, dir, flag(pending), flag(pending)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// SupersedeLegacyViews records the legacy view revisions a complete
-// publication replaced, so an unchanged file does not restore a generation the
-// home no longer reads. Comparing revisions rather than timestamps keeps a
-// rewrite in the same millisecond a new publication.
-func (s Store) SupersedeLegacyViews(ctx context.Context, harness, home string, revisions []LegacyRevision) error {
-	if harness == "" || home == "" {
-		return errors.New("a legacy view supersession needs a harness and a home")
+// RecordPublication stores a complete publication and the legacy view
+// revisions it replaced in one transaction, so a failure never leaves a
+// complete view without the supersession that protects it from an older file.
+func (s Store) RecordPublication(ctx context.Context, view View, superseded []LegacyRevision) error {
+	if view.Harness == "" || view.Home == "" {
+		return errors.New("a publication needs a harness and a home")
 	}
 	db, err := s.db()
 	if err != nil {
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, `DELETE FROM legacy_view_supersessions WHERE harness=? AND home=?`, harness, home); err != nil {
+		if err := recordViewTx(ctx, conn, view, false); err != nil {
 			return err
 		}
-		for _, revision := range revisions {
-			if revision.Path == "" || revision.Digest == "" {
-				return errors.New("a legacy view revision needs a path and a digest")
-			}
-			if _, err := conn.ExecContext(ctx, `INSERT INTO legacy_view_supersessions(harness,home,path,digest,modified_ns) VALUES(?,?,?,?,?)`,
-				harness, home, revision.Path, revision.Digest, revision.ModifiedNS); err != nil {
-				return err
-			}
-		}
-		return nil
+		return supersedeTx(ctx, conn, view.Harness, view.Home, superseded)
 	})
+}
+
+// supersedeTx records the legacy view revisions one publication replaced.
+// Comparing revisions rather than timestamps keeps a rewrite in the same
+// millisecond a new publication.
+func supersedeTx(ctx context.Context, conn *sql.Conn, harness, home string, revisions []LegacyRevision) error {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM legacy_view_supersessions WHERE harness=? AND home=?`, harness, home); err != nil {
+		return err
+	}
+	for _, revision := range revisions {
+		if revision.Path == "" || revision.Digest == "" {
+			return errors.New("a legacy view revision needs a path and a digest")
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO legacy_view_supersessions(harness,home,path,digest,modified_ns) VALUES(?,?,?,?,?)`,
+			harness, home, revision.Path, revision.Digest, revision.ModifiedNS); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteView removes one harness and home's publication view, for a harness
@@ -464,8 +476,10 @@ func importLegacyViews(ctx context.Context, conn *sql.Conn, dir string) error {
 				return err
 			}
 			for _, generation := range view.Generations {
-				if _, err := conn.ExecContext(ctx, `INSERT INTO generation_views(harness,home,generation,pending) VALUES(?,?,?,0)
-ON CONFLICT(harness,home,generation) DO UPDATE SET pending=0`, view.Harness, view.Home, generation); err != nil {
+				// A generation this build is publishing stays pending: the
+				// legacy file does not complete that publication.
+				if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation,pending) VALUES(?,?,?,0)`,
+					view.Harness, view.Home, generation); err != nil {
 					return err
 				}
 			}
