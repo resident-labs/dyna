@@ -26,6 +26,8 @@
   }
   interface Group {
     phase: string
+    lane?: string
+    stage?: string
     agents: RunAgent[]
     state: CellState
     done: number
@@ -58,12 +60,12 @@
   }
   // Agents keep run order; a group starts where the phase changes.
   let groups = $derived.by(() => {
-    const phases: { phase: string; agents: RunAgent[] }[] = []
+    const phases: { phase: string; lane?: string; stage?: string; agents: RunAgent[] }[] = []
     for (const a of detail?.agents ?? []) {
       const phase = a.phase || 'Agents'
       const last = phases[phases.length - 1]
-      if (last?.phase === phase) last.agents.push(a)
-      else phases.push({ phase, agents: [a] })
+      if (last?.phase === phase && last.lane === a.lane && last.stage === a.stage) last.agents.push(a)
+      else phases.push({ phase, lane: a.lane, stage: a.stage, agents: [a] })
     }
     return phases.map((g): Group => {
       const st = g.agents.map((a) => a.status)
@@ -75,7 +77,7 @@
     })
   })
   // Phases that share stages show as a lanes grid; the chosen cell opens its agents.
-  let grid = $derived(laneGrid(groups.map((g) => ({ phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))))
+  let grid = $derived(laneGrid(groups.map((g) => ({ phase: g.phase, lane: g.lane, stage: g.stage, state: g.state, done: g.done, total: g.agents.length }))))
   let picked = $state<CellRef | null>(null)
   // A new run starts with no cell open. Only the id is read, so the refresh that
   // replaces `detail` every 2 seconds keeps the open cell.

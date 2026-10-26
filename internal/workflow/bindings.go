@@ -18,11 +18,11 @@ func (e *engine) bind(vm *goja.Runtime) error {
 	// console.Enable uses goja_nodejs internally, which also installs a module
 	// loader. Console is the only intended public part of that integration.
 	vm.Set("require", goja.Undefined())
-	vm.Set("__phase", func(title string, planNodeID string) {
+	vm.Set("__phase", func(title string, planNodeID string, lane string, stage string) {
 		e.phaseMu.Lock()
-		e.curPhase = title
+		e.curPhase, e.curLane, e.curStage = title, lane, stage
 		e.phaseMu.Unlock()
-		e.emit(runstore.Event{T: "phase", Title: title, PlanNodeID: planNodeID})
+		e.emit(runstore.Event{T: "phase", Title: title, PlanNodeID: planNodeID, Lane: lane, Stage: stage})
 	})
 	vm.Set("__log", func(msg string, planNodeID string) {
 		e.emit(runstore.Event{

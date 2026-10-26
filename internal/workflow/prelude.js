@@ -45,7 +45,12 @@ function applyPlanCtx(opts, explicitCtx) {
 }
 
 globalThis.log = function (msg) { __log(String(msg)); };
-globalThis.phase = function (title) { __phase(String(title)); };
+// phase(title, { lane?, stage? }): lane and stage place the phase's agents on the
+// run page's lanes grid (one row per lane, one column per stage).
+globalThis.phase = function (title, opts) {
+  const o = opts && typeof opts === "object" ? opts : {};
+  __phase(String(title), "", o.lane == null ? "" : String(o.lane), o.stage == null ? "" : String(o.stage));
+};
 
 globalThis.__planAgent = function (planNodeId, ...args) {
   let ctx;
@@ -58,8 +63,9 @@ globalThis.__planAgent = function (planNodeId, ...args) {
   opts.__planNodeId = String(planNodeId);
   return __spawn(String(prompt), opts);
 };
-globalThis.__planPhase = function (planNodeId, title) {
-  __phase(String(title), String(planNodeId));
+globalThis.__planPhase = function (planNodeId, title, opts) {
+  const o = opts && typeof opts === "object" ? opts : {};
+  __phase(String(title), String(planNodeId), o.lane == null ? "" : String(o.lane), o.stage == null ? "" : String(o.stage));
 };
 globalThis.__planLog = function (planNodeId, msg) {
   __log(String(msg), String(planNodeId));
@@ -113,7 +119,7 @@ for (const profile of profiles) {
 }
 
 // agent(prompt, opts?) -> Promise<string | object>
-// opts: { profile, label, phase, schema, cwd, timeout,
+// opts: { profile, label, phase, lane, stage, schema, cwd, timeout,
 //         isolation: { type: "worktree", retention?: "changed" | "all" | "none" } }
 globalThis.agent = function (prompt, opts) {
   return __spawn(String(prompt), applyPlanCtx(opts));
