@@ -39,12 +39,34 @@ export function hookRows(summaries: readonly HookSummary[]): ServiceCardRow[] {
   })
 }
 
+// RoomRead is one room's service list, or null when the read failed and no
+// earlier read of that room exists.
+export interface RoomRead { room: string; services: readonly ServiceView[] | null }
+
+// settleReads keeps a room's last good list when a new read of it fails, so a
+// failed read neither drops that room's failing service nor lets another room
+// report it healthy. A room with no good read yet stays null.
+export function settleReads(kept: Readonly<Record<string, readonly ServiceView[]>>, reads: readonly RoomRead[]): { byRoom: RoomRead[]; kept: Record<string, readonly ServiceView[]> } {
+  const next: Record<string, readonly ServiceView[]> = {}
+  const byRoom = reads.map(({ room, services }): RoomRead => {
+    const settled = services ?? kept[room] ?? null
+    if (settled) next[room] = settled
+    return { room, services: settled }
+  })
+  return { byRoom, kept: next }
+}
+
 // serviceRows turns each room's service list into one row per service. A
 // service the engine cannot run (no usable profile) is failing in any room; the
-// log opens the first room that has the problem, else the first room.
-export function serviceRows(byRoom: readonly { room: string; services: readonly ServiceView[] }[]): ServiceCardRow[] {
+// log opens the first room that has the problem, else the first room. A room
+// that could not be read is its own failing row.
+export function serviceRows(byRoom: readonly RoomRead[]): ServiceCardRow[] {
   const rows = new Map<string, ServiceCardRow>()
   for (const { room, services } of byRoom) {
+    if (!services) {
+      rows.set(`unreadable:${room}`, { id: `service:unreadable:${room}`, name: 'Services', tone: 'bad', state: 'Could not be read', at: '', log: { kind: 'room', room } })
+      continue
+    }
     for (const s of services) {
       const bad = !s.profile
       const old = rows.get(s.role)
@@ -55,6 +77,10 @@ export function serviceRows(byRoom: readonly { room: string; services: readonly 
   }
   return [...rows.values()]
 }
+
+// logKey names one run's log, so a newer run of the same hook never shows the
+// text of an older one.
+export const logKey = (target: Extract<LogTarget, { kind: 'hook' }>): string => `${target.hook}/${target.runId}`
 
 // groupRows puts failing rows first, newest failure first, and keeps the rest
 // together for the folded line.
