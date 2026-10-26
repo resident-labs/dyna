@@ -1298,6 +1298,19 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
+// checkTmpFolder makes a host check's own temporary folder and sets isolated to
+// it. The folder is made inside the machine's check-tmp setting, else inside the
+// node's own temporary directory (TMPDIR, else /tmp), never under the run's
+// source folder, which can sit on slow storage. The check's exit trap removes
+// it, so nothing builds up in a node's memory-backed directory.
+func checkTmpFolder(setting string) string {
+	parent := `"${TMPDIR:-/tmp}"`
+	if setting != "" {
+		parent = shellquote.Quote(setting)
+	}
+	return "tmpparent=" + parent + "; mkdir -p \"$tmpparent\"; isolated=$(mktemp -d -p \"$tmpparent\" dyna-ci.XXXXXX); "
+}
+
 func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
@@ -1431,7 +1444,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 	}
 	if check.host {
-		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; mkdir -p \"$HOME/.cache/dyna/tmp\"; isolated=$(mktemp -d -p \"$HOME/.cache/dyna/tmp\"); mkdir \"$isolated/tmp\"; trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
+		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; " + checkTmpFolder(node.CheckTmp) + "mkdir \"$isolated/tmp\"; trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
 		environment := map[string]string{
 			"RUNNER_TEMP": reportDir, "GITHUB_STEP_SUMMARY": path.Join(reportDir, "step-summary.md"),
 			"JUNIT_REPORT_PATH": path.Join(reportDir, string(check.id)+"-test.xml"),

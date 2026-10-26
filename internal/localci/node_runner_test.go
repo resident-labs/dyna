@@ -1270,3 +1270,68 @@ func TestEngineStopCoversEveryWayACheckEnds(t *testing.T) {
 		t.Fatalf("a plain cancellation reported %s, want %s", got, CauseCancelled)
 	}
 }
+
+// runHostCheck runs a host check's real script with fake systemd tools and
+// returns the TMPDIR the check saw. The check leaves a file in it, so the test
+// can tell whether the wrapper removed the folder when the check ended.
+func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range []string{"docker", "git", "systemctl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemd-run"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(dir, "seen-tmpdir")
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: "printf %s \"$TMPDIR\" > " + record + "; touch \"$TMPDIR/scratch\""}
+	inner := nodeCheckScript(node, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	// The wrapper kills the rest of its process group when the check ends.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+dir+":"+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, env...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("check: %v: %s", err, output)
+	}
+	data, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("the check did not run: %v", err)
+	}
+	return string(data)
+}
+
+// A host check's temporary folder lives in the machine's check-tmp setting, so
+// a machine whose /var/tmp is slow storage can use memory instead. The folder
+// is removed when the check ends.
+func TestHostCheckTempFolderFollowsTheMachineSetting(t *testing.T) {
+	parent := t.TempDir()
+	seen := runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
+	if filepath.Dir(filepath.Dir(seen)) != parent {
+		t.Fatalf("TMPDIR = %q, want a folder inside %q", seen, parent)
+	}
+	if _, err := os.Stat(seen); !os.IsNotExist(err) {
+		t.Fatalf("the check's temporary folder was not removed: %v", err)
+	}
+}
+
+// With no setting, the folder is under the node's own temporary directory, not
+// under the owner's home or the run's folder.
+func TestHostCheckTempFolderDefaultsToTheNodeTempDirectory(t *testing.T) {
+	nodeTmp := t.TempDir()
+	home := t.TempDir()
+	seen := runHostCheck(t, Node{Name: "local", Slots: 1}, home, "TMPDIR="+nodeTmp)
+	if filepath.Dir(filepath.Dir(seen)) != nodeTmp {
+		t.Fatalf("TMPDIR = %q, want a folder inside the node's %q", seen, nodeTmp)
+	}
+	if strings.HasPrefix(seen, home) {
+		t.Fatalf("TMPDIR %q is under the home folder", seen)
+	}
+}

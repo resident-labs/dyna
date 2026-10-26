@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -81,6 +82,11 @@ type Machine struct {
 	// connection. Zero means DefaultSSHConnectTimeout. A machine reached through
 	// a slow jump host needs a longer wait than a fixed one allows.
 	SSHConnectTimeout time.Duration `json:"sshConnectTimeoutNs,omitempty"`
+	// CheckTmp is the folder on this machine that holds each host check's own
+	// temporary folder. It is empty for the machine's temporary directory
+	// (TMPDIR, else /tmp). A machine whose /var/tmp is slow storage, such as
+	// ZFS, gets a faster one here.
+	CheckTmp string `json:"checkTmp,omitempty"`
 	// Enabled turns the machine's work off. A disabled machine takes no new CI
 	// runs. On the local row it stops that work, not the engine, which keeps
 	// running.
@@ -284,6 +290,9 @@ func (m Machine) Validate() error {
 	if m.SSHConnectTimeout < 0 || m.SSHConnectTimeout > MaxSSHConnectTimeout {
 		return fmt.Errorf("SSH connect timeout must not be negative or longer than %s", MaxSSHConnectTimeout)
 	}
+	if m.CheckTmp != "" && (!path.IsAbs(m.CheckTmp) || path.Clean(m.CheckTmp) != m.CheckTmp || m.CheckTmp == "/" || strings.ContainsRune(m.CheckTmp, 0)) {
+		return errors.New("the check temporary folder must be a clean absolute path other than /")
+	}
 	if m.HasRole(RoleCI) && m.CISlots < 1 {
 		return errors.New("a machine with the ci role needs at least one CI slot")
 	}
@@ -341,7 +350,7 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -364,7 +373,8 @@ const schema = `CREATE TABLE machines (
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
 	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
 	container_socket TEXT  NOT NULL DEFAULT '',
-	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0)
+	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0),
+	check_tmp TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -401,7 +411,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -496,6 +506,13 @@ func prepare(conn *sql.Conn, old int) error {
 		// A machine with no stored timeout waits the default, which is what every
 		// machine waited before it could name one.
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0)`); err != nil {
+			return err
+		}
+	}
+	if old < 10 {
+		// A machine with no folder uses the node's own temporary directory, which
+		// is where a host check's temporary folder should have been all along.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN check_tmp TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
 	}
@@ -772,7 +789,7 @@ func scan(row scanner) (Machine, error) {
 	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites string
 	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs, &m.CheckTmp); err != nil {
 		return Machine{}, err
 	}
 	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
@@ -973,8 +990,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=?, check_tmp=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -984,9 +1001,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms,check_tmp) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds())
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.CheckTmp)
 		return err
 	})
 	if err != nil {

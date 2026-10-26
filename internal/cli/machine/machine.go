@@ -344,6 +344,7 @@ func editCommand() *cobra.Command {
 	var rooms []string
 	var containerSocket string
 	var connectTimeout time.Duration
+	var checkTmp string
 	var suites []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
@@ -408,6 +409,9 @@ func editCommand() *cobra.Command {
 				}
 				patch.SSHConnectTimeoutSeconds, changed = &seconds, true
 			}
+			if c.Flags().Changed("check-tmp") {
+				patch.CheckTmp, changed = &checkTmp, true
+			}
 			if allowHostChecks || disallowHostChecks {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
@@ -434,6 +438,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
 	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the machine, such as 60s (0 restores the default of 10s)")
+	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the machine's TMPDIR, else /tmp)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd

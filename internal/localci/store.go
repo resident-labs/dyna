@@ -54,6 +54,9 @@ type Node struct {
 	// SSHConnectTimeout is how long an ssh to this machine waits for the
 	// connection. Zero means the registry default.
 	SSHConnectTimeout time.Duration `json:"sshConnectTimeoutNs,omitempty"`
+	// CheckTmp is the folder that holds each host check's temporary folder on
+	// this machine. Empty means the node's temporary directory.
+	CheckTmp string `json:"checkTmp,omitempty"`
 	// Rooms limits the machine to those rooms' CI work. An empty list takes
 	// work from every room.
 	Rooms []string `json:"rooms,omitempty"`
@@ -224,7 +227,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout}
+		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
