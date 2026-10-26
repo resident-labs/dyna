@@ -3,6 +3,7 @@ package shells
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,26 @@ func TestCreateIsTheFirstOperationOnAFreshStore(t *testing.T) {
 	}
 }
 
+// insertOldJob writes a job with the column set a version 1 table had, so
+// migration tests seed a genuine old row instead of one through upsert, which
+// always writes every current column.
+func insertOldJob(conn *sql.Conn, m Meta, ex *Exit) error {
+	cmd, err := json.Marshal(m.Cmd)
+	if err != nil {
+		return err
+	}
+	var ended any
+	var code int
+	var signal, message string
+	if ex != nil {
+		ended, code, signal, message = ex.Ended.UTC().Format(time.RFC3339Nano), ex.Code, ex.Signal, ex.Error
+	}
+	_, err = conn.ExecContext(context.Background(), `INSERT INTO shell_jobs(id, name, cmd, cwd, owner, keep, room_id, room, pid, supervisor, supervisor_start, started, ended, exit_code, exit_signal, exit_error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		m.ID, m.Name, string(cmd), m.Cwd, m.Owner, m.Keep, m.RoomID, m.Room, m.Pid, m.Supervisor, int64(m.SupervisorStartTime),
+		m.Started.UTC().Format(time.RFC3339Nano), ended, code, signal, message)
+	return err
+}
+
 func TestVersionOneStoreUpgradesAndKeepsJobs(t *testing.T) {
 	data := t.TempDir()
 	s := &Store{Root: filepath.Join(data, "shells")}
@@ -99,7 +120,7 @@ func TestVersionOneStoreUpgradesAndKeepsJobs(t *testing.T) {
 		if _, err := conn.ExecContext(context.Background(), schema); err != nil {
 			return err
 		}
-		return upsert(conn, Meta{ID: "sh_20261018-090000-aaaaaaaa", Cmd: []string{"true"}, Cwd: "/", Started: time.Now()}, &Exit{Code: 0, Ended: time.Now()})
+		return insertOldJob(conn, Meta{ID: "sh_20261018-090000-aaaaaaaa", Cmd: []string{"true"}, Cwd: "/", Started: time.Now()}, &Exit{Code: 0, Ended: time.Now()})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +148,7 @@ func TestVersionTwoStoreGainsTerminalColumnsThatSaveKeeps(t *testing.T) {
 				return err
 			}
 		}
-		return upsert(conn, stale, nil)
+		return insertOldJob(conn, stale, nil)
 	})
 	if err != nil {
 		t.Fatal(err)

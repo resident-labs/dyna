@@ -109,6 +109,23 @@ func OwnerFromEnv() string {
 	return ""
 }
 
+// WorkerRunFromEnv names the workflow run whose worker starts a process
+// (DYNA_WORKER_RUN). It is empty outside workflow workers, and an id without
+// the run id shape is ignored.
+func WorkerRunFromEnv() string {
+	run := strings.TrimSpace(os.Getenv(mode.EnvWorkerRun))
+	if len(run) > 128 {
+		run = run[:128]
+	}
+	if run == "" {
+		return ""
+	}
+	if err := ValidateRunID(run); err != nil {
+		return ""
+	}
+	return run
+}
+
 // ModeEnv names the dyna mode a process runs in: "workflow" for a workflow
 // worker, "subagent" for a subagent session's worker. Unset for humans.
 const ModeEnv = mode.EnvMode
