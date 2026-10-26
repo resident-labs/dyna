@@ -58,6 +58,12 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(tmp)
 		panic(err)
 	}
+	// Scratch is a disk folder under the owner's cache now, not under TMPDIR,
+	// so point it at this binary's temporary folder too.
+	if err := os.Setenv("DYNA_SCRATCH_ROOT", tmp+"/scratch"); err != nil {
+		os.RemoveAll(tmp)
+		panic(err)
+	}
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.RemoveAll(healthCache)

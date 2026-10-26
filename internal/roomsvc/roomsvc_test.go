@@ -56,6 +56,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	// Session scratch must be removed with the fixture after its runners stop.
 	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_SCRATCH_ROOT", filepath.Join(t.TempDir(), "scratch"))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv(runstore.AgentJournalRootEnv, "")

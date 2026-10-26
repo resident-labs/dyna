@@ -3,34 +3,52 @@ package scratch
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"dyna-agent/internal/protectedpath"
-	"dyna-agent/internal/store"
 )
 
 const Env = "DYNA_SCRATCH"
+
+// RootEnv overrides the scratch root for tests and tools. Normal runs leave it
+// unset and use the owner's disk cache.
+const RootEnv = "DYNA_SCRATCH_ROOT"
+
 const ClosedRetention = 24 * time.Hour
 const UnknownRetention = 3 * 24 * time.Hour
 
-// Root honors TMPDIR and isolates scratch by the absolute data folder path.
-// An empty result means one of those paths could not be resolved.
+// Root is the one disk folder that holds every session's scratch. It never
+// follows TMPDIR or a harness home: /tmp is a RAM disk with a per-user quota,
+// and a worker's HOME/XDG_CACHE_HOME is a private harness home. The owner home
+// comes from the account database, so the engine, a runner and a nested dyna
+// all resolve the same folder. Keep the path short so sockets created under a
+// session's scratch stay below the 108-byte unix socket limit.
 func Root() string {
-	data, err := filepath.Abs(store.DataDir())
-	if err != nil {
+	if custom := strings.TrimSpace(os.Getenv(RootEnv)); custom != "" {
+		if !filepath.IsAbs(custom) {
+			return ""
+		}
+		root, err := filepath.Abs(custom)
+		if err != nil {
+			return ""
+		}
+		return root
+	}
+	owner, err := user.Current()
+	if err != nil || owner.HomeDir == "" {
+		// Never fall back to $HOME: a harness home would split scratch per
+		// account instead of using the one owner folder.
 		return ""
 	}
-	key := sha256.Sum256([]byte(data))
-	name := fmt.Sprintf("dyna-%x", key)
-	root, err := filepath.Abs(filepath.Join(os.TempDir(), name))
+	root, err := filepath.Abs(filepath.Join(owner.HomeDir, ".cache", "dyna", "session-scratch"))
 	if err != nil {
 		return ""
 	}

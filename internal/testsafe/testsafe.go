@@ -105,6 +105,12 @@ func init() {
 			os.Setenv(f.key, temporary(f.key, dir))
 		}
 	}
+	// Session scratch is a disk folder under the owner's cache, not a
+	// temporary-folder variable, so a test must redirect it explicitly.
+	scratchRoot := os.Getenv("DYNA_SCRATCH_ROOT")
+	if scratchRoot == "" || Check(scratchRoot) != nil {
+		os.Setenv("DYNA_SCRATCH_ROOT", temporary("DYNA_SCRATCH_ROOT", scratchRoot))
+	}
 }
 
 func temporary(key, real string) string {
