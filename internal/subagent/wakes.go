@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"dyna-agent/internal/room"
 )
@@ -157,7 +158,7 @@ func (m *Manager) pendingWakePosts(meta Meta, previous ...Turn) ([]room.Message,
 		if meta.Consolidating != "" && !handoffPost(meta, post.ID) {
 			continue
 		}
-		if wakes(rows, post) && (fresh == nil || fresh[post.ID]) && !last.DispatchedWithoutReceipt(post.ID) {
+		if wakes(rows, post) && (fresh == nil || fresh[post.ID]) && !last.DispatchedWithoutReceipt(post.ID) && !slices.Contains(meta.UncertainInputIDs, post.ID) {
 			selected = append(selected, post)
 		}
 	}
