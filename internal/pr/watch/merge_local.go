@@ -42,8 +42,9 @@ func recordLocalLane(ctx context.Context, r Record) (bool, error) {
 
 var localCIInit sync.Mutex
 
-func localMergeReady(r Record) bool {
-	return len(facts.MissingRequiredReviewers(r)) == 0 && !facts.OpenOwnerFinding(r) && r.Watching && r.State == "open" && facts.HeadVerified(r) && facts.ApprovedAtHead(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head)
+func localMergeReady(r Record, records map[string]*Record) bool {
+	_, dependencyWaiting := facts.UnmergedDependency(r, records)
+	return !dependencyWaiting && len(facts.MissingRequiredReviewers(r)) == 0 && !facts.OpenOwnerFinding(r) && r.Watching && r.State == "open" && facts.HeadVerified(r) && facts.ApprovedAtHead(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head)
 }
 
 func (s *Service) refreshLocalMergeFacts(ctx context.Context) error {

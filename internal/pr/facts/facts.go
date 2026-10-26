@@ -69,16 +69,42 @@ func OpenOwnerFinding(r state.Record) bool {
 	}
 	return false
 }
-func Ready(r state.Record, g GitHub) bool { return ready(r, g, "passed") }
+
+// UnmergedDependency returns the first recorded dependency that has not
+// merged. A missing or closed-without-merging record also blocks readiness.
+func UnmergedDependency(r state.Record, records map[string]*state.Record) (string, bool) {
+	for _, id := range r.Dependencies {
+		dependency := records[id]
+		if dependency == nil {
+			for _, candidate := range records {
+				if candidate.ChangeID == id {
+					dependency = candidate
+					break
+				}
+			}
+		}
+		if dependency == nil || dependency.State != "merged" {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func Ready(r state.Record, g GitHub, records map[string]*state.Record) bool {
+	return ready(r, g, records, "passed")
+}
 
 // ReadyWithoutHeadCI reports a change whose head has no CI to read. A repository
 // that publishes no CI for pull request heads cannot supply one, so waiting for
 // it would never end: the merge trial runs the checks instead.
-func ReadyWithoutHeadCI(r state.Record, g GitHub) bool { return ready(r, g, "absent") }
+func ReadyWithoutHeadCI(r state.Record, g GitHub, records map[string]*state.Record) bool {
+	return ready(r, g, records, "absent")
+}
 
 // ready applies the one readiness rule to a head whose CI may be ci.
-func ready(r state.Record, g GitHub, ci string) bool {
-	return len(MissingRequiredReviewers(r)) == 0 && !OpenOwnerFinding(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head) && r.Watching && r.State == "open" && HeadCurrent(r, g.Head) && ApprovedAtHead(r) && r.CI == ci &&
+func ready(r state.Record, g GitHub, records map[string]*state.Record, ci string) bool {
+	_, dependencyWaiting := UnmergedDependency(r, records)
+	return !dependencyWaiting && len(MissingRequiredReviewers(r)) == 0 && !OpenOwnerFinding(r) && (r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head) && r.Watching && r.State == "open" && HeadCurrent(r, g.Head) && ApprovedAtHead(r) && r.CI == ci &&
 		g.CIHead == r.Head && g.CI == ci && !g.IsDraft &&
 		g.Mergeable != nil && *g.Mergeable && g.DefaultBranch != "" && g.Base == g.DefaultBranch && g.Base == r.BaseRef
 }

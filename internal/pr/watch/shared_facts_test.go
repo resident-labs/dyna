@@ -51,19 +51,19 @@ func TestSnapshotFactsDoNotInheritSavedGreenCI(t *testing.T) {
 	r.Mergeable = &yes
 	r.DefaultBranch = "main"
 	snap := Snapshot{Pull: e.f.Pull, Checks: []Check{actionsCheck(Check{ID: 1, Name: "test", Status: "in_progress"})}}
-	if g := snap.GitHubFacts(r); g.CI != "pending" || facts.Ready(r, g) {
+	if g := snap.GitHubFacts(r); g.CI != "pending" || facts.Ready(r, g, nil) {
 		t.Fatalf("fresh pending CI inherited saved green: %+v", g)
 	}
 	snap.Checks[0].Status, snap.Checks[0].Conclusion = "completed", "failure"
-	if g := snap.GitHubFacts(r); g.CI != "failed" || facts.Ready(r, g) {
+	if g := snap.GitHubFacts(r); g.CI != "failed" || facts.Ready(r, g, nil) {
 		t.Fatalf("fresh failed CI inherited saved green: %+v", g)
 	}
 	snap.Checks[0].Conclusion = "success"
-	if g := snap.GitHubFacts(r); !facts.Ready(r, g) {
+	if g := snap.GitHubFacts(r); !facts.Ready(r, g, nil) {
 		t.Fatalf("fresh passing CI not ready: %+v", g)
 	}
 	snap.Pull.Head.SHA = strings.Repeat("b", 40)
-	if g := snap.GitHubFacts(r); facts.Ready(r, g) {
+	if g := snap.GitHubFacts(r); facts.Ready(r, g, nil) {
 		t.Fatal("new head inherited approval")
 	}
 }
