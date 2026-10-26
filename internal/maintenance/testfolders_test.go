@@ -43,6 +43,45 @@ func TestSweepTestFoldersRemovesOnlyStaleOnes(t *testing.T) {
 	}
 }
 
+// The sweep removes only the folders this package makes. An unrelated program's
+// old workspace, a Go tool folder and a process guard's control folder all stay,
+// even when they are older than the retention.
+func TestSweepKeepsUnrelatedOldTemps(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	ours := testFolder(t, root, testFolderPrefix+"4242-1", 2*testFolderRetention, false)
+	keep := []string{"TestEngineHookWorker123456", "tmp.2f3a1b", "go-build987654", "dyna-pg-0123456789"}
+	for _, name := range keep {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// A live process guard holds this socket, and its folder carries no
+		// process ID to check. Removing it would stop the guard being signalled.
+		if err := os.WriteFile(filepath.Join(path, "control.sock"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := now.Add(-2 * testFolderRetention)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alive := func(int) bool { return false }
+
+	freed, err := sweepTestFolders(now, root, alive, false)
+	if err != nil || freed.Items != 1 {
+		t.Fatalf("sweep = %+v, %v; want only the test folder", freed, err)
+	}
+	if _, err := os.Stat(ours); !os.IsNotExist(err) {
+		t.Fatalf("a stale test folder stayed: %v", err)
+	}
+	for _, name := range keep {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("the sweep removed %q: %v", name, err)
+		}
+	}
+}
+
 // testFolder makes one folder with a frozen file, as a harness bundle leaves it.
 func testFolder(t *testing.T, root, name string, age time.Duration, readOnly bool) string {
 	t.Helper()
