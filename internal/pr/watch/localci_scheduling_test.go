@@ -1,8 +1,12 @@
 package watch
 
 import (
+	"context"
+	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/localci"
 )
@@ -73,5 +77,65 @@ func TestTrialWithNoSavedResultWaitsForAdmission(t *testing.T) {
 	// A run in flight is named, so a reader can see admission happened.
 	if obs.Status == VerdictFailed {
 		t.Fatalf("an admitted run was failed before it ended: %s", obs.Reason)
+	}
+}
+
+// A trial branch is pushed just before the trial fetches its head, so the first
+// fetch can arrive before GitHub publishes the ref. That is a wait, not a
+// scheduling failure: the fetch is tried again, bounded, and only a fetch that
+// still cannot see the ref fails the trial.
+func TestFetchWaitsForAJustPushedTrialRef(t *testing.T) {
+	repo, base := changeRepo(t)
+	head := changeCommit(t, repo, "head\n")
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo",
+		Head: head, Base: base, Branch: "dyna/merge-trial/1", RepoPath: repo}
+	job := registeredCIJob{record: r, head: head, base: base, branch: r.Branch, trial: true, wholeSuite: true}
+	s := &Service{}
+	var waits []time.Duration
+	s.Wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+	calls := 0
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		calls++
+		if calls == 1 {
+			fmt.Fprintf(cmd.Stderr, "fatal: couldn't find remote ref %s\n", head)
+			return fmt.Errorf("exit status 128")
+		}
+		return nil
+	}
+	if _, err := s.prepareRegisteredCI(context.Background(), job); err != nil {
+		t.Fatalf("a just-pushed ref was not waited for: %v", err)
+	}
+	if calls != 2 || len(waits) != 1 {
+		t.Fatalf("calls=%d waits=%v, want one more fetch after one wait", calls, waits)
+	}
+	// A failure that is not a missing ref fails at once, with git's own words.
+	calls = 0
+	waits = nil
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		calls++
+		fmt.Fprintln(cmd.Stderr, "fatal: Authentication failed for repository")
+		return fmt.Errorf("exit status 128")
+	}
+	if _, err := s.prepareRegisteredCI(context.Background(), job); err == nil || !strings.Contains(err.Error(), "Authentication failed") {
+		t.Fatalf("auth failure = %v, want the git error with its stderr", err)
+	}
+	if calls != 1 || len(waits) != 0 {
+		t.Fatalf("auth failure retried: calls=%d waits=%v", calls, waits)
+	}
+	// A ref that never appears is bounded, not retried for ever.
+	calls = 0
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		calls++
+		fmt.Fprintf(cmd.Stderr, "fatal: couldn't find remote ref %s\n", head)
+		return fmt.Errorf("exit status 128")
+	}
+	if _, err := s.prepareRegisteredCI(context.Background(), job); err == nil || !strings.Contains(err.Error(), "couldn't find remote ref") {
+		t.Fatalf("missing ref = %v, want the bounded failure", err)
+	}
+	if calls != ciRefFetchAttempts {
+		t.Fatalf("fetch attempts = %d, want %d", calls, ciRefFetchAttempts)
 	}
 }
