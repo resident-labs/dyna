@@ -638,10 +638,13 @@ func localFailureNote(result localci.Result) string {
 		node = "the CI machine"
 	}
 	note := "local CI could not run its checks on " + node
-	if label := cause.Label(); label != "" {
+	label := cause.Label()
+	switch {
+	case label != "" && result.Error != "":
+		return note + ": " + label + " (" + result.Error + ")"
+	case label != "":
 		return note + ": " + label
-	}
-	if result.Error != "" {
+	case result.Error != "":
 		return note + ": " + result.Error
 	}
 	return note

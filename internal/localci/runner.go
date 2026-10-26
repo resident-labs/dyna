@@ -207,6 +207,10 @@ const (
 	CauseReports FailureCause = "reports-unavailable"
 	// CauseUnclassified is a failure whose output proves no more specific cause.
 	CauseUnclassified FailureCause = "unclassified"
+	// CauseScheduling is a run that never started: preparing it failed, such as a
+	// fetch of the trial head or base. No check ran, so nothing in the result says
+	// anything about the commit.
+	CauseScheduling FailureCause = "scheduling"
 )
 
 // Label is how a cause reads to a person. The stored value never changes; only a
@@ -233,6 +237,8 @@ func (c FailureCause) Label() string {
 		return "reports unavailable"
 	case CauseUnclassified:
 		return "cause not proven"
+	case CauseScheduling:
+		return "the run could not start"
 	}
 	return ""
 }
