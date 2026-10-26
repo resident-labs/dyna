@@ -149,7 +149,11 @@ func hotOnlyTriggers() string {
 	slices.Sort(cold)
 	when := strings.Join(cold, " OR ")
 	const message = "pr_records holds hot fields only; this dyna is too old to write PR records"
-	return `CREATE TRIGGER IF NOT EXISTS pr_records_hot_insert BEFORE INSERT ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;
+	// A delete from a process that cached the old version removes the hot row
+	// only. The trigger removes its parts too, so a record created again under
+	// the same key cannot inherit stale notices or responses.
+	return `CREATE TRIGGER IF NOT EXISTS pr_records_delete_parts AFTER DELETE ON pr_records BEGIN DELETE FROM pr_record_parts WHERE key=OLD.key; END;
+CREATE TRIGGER IF NOT EXISTS pr_records_hot_insert BEFORE INSERT ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;
 CREATE TRIGGER IF NOT EXISTS pr_records_hot_update BEFORE UPDATE OF body ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;`
 }
 
