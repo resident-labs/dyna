@@ -857,11 +857,13 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 		}
 		if (t.Source == sourceNative || t.Source == sourceConverted) && !t.CompactionExtended && m.transferCompactionSeen(id, turn) {
 			// Pi compacts a large kept history before its first request. The
-			// compaction is startup progress, not a stalled model, so give the
-			// request a fresh window after it. One extension is the bound.
+			// compaction is startup progress, not a stalled model, so add one
+			// bounded window. Extend the existing deadline instead of replacing
+			// it: the event arrives seconds after launch, and a due pre-turn
+			// compact already has a longer window that must not shrink.
 			err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
 				t.CompactionExtended = true
-				t.StartupDeadline = now.Add(60 * time.Second)
+				t.StartupDeadline = t.StartupDeadline.Add(60 * time.Second)
 				return nil
 			})
 			return false, err
