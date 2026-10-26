@@ -192,3 +192,20 @@ test('a command card shows the command line, exit code and log tail', async (t) 
   assert.match(body, /<pre class="tail mono[^"]*">PASS\nok<\/pre>/)
   assert.doesNotMatch(body, /aria-label="Show the (result|journal) of (make|up)"/, 'a command has no worker result to open')
 })
+
+test('a run of commands only still counts them as working and failed', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const detail = {
+    run: { id: 'wf_c', name: 'ci', status: 'running', startedAt: new Date().toISOString() },
+    agents: [],
+    commands: [{ id: 1, label: 'a', status: 'running' }, { id: 2, label: 'b', status: 'error' }, { id: 3, label: 'c', status: 'ok' }],
+    agentTotal: 0, agentRunning: 0, agentFailed: 0,
+    commandTotal: 3, commandRunning: 1, commandFailed: 1, logs: [], phases: [],
+  }
+  const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, /aria-label="1 done, 1 running, 1 failed of 3 steps"/)
+  assert.match(body, /Working<\/dt><dd[^>]*>1<\/dd>/)
+  assert.match(body, /Failed<\/dt><dd[^>]*>1<\/dd>/)
+})

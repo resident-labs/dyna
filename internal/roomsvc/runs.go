@@ -25,6 +25,7 @@ const (
 	MaxRunLogs     = 100
 	MaxRunPhases   = 50
 	MaxRunPreview  = 300
+	MaxRunTail     = 4000
 	MaxRunJournal  = 200
 )
 
@@ -455,7 +456,7 @@ func foldAll(events []runstore.Event, live bool) runFold {
 			}
 			c.DurMs, c.Cached, c.Shell = e.DurMs, e.Cached, e.Shell
 			c.ExitCode = e.ExitCode
-			c.Preview, c.Tail, c.Error = textutil.Clip(e.Preview, MaxRunPreview), textutil.Clip(e.Tail, MaxRunPreview), textutil.Clip(e.Error, MaxRunPreview)
+			c.Preview, c.Tail, c.Error = textutil.Clip(e.Preview, MaxRunPreview), clipTail(e.Tail, MaxRunTail), textutil.Clip(e.Error, MaxRunPreview)
 		case "log":
 			if e.Provenance != "system" && e.Msg != "" {
 				f.logs = append(f.logs, RunLog{TS: e.TS, Msg: textutil.Clip(e.Msg, MaxRunPreview)})
@@ -578,4 +579,14 @@ func workerJournal(id string, agent int) []RunJournalEntry {
 		out = append(out, RunJournalEntry{TS: e.TS, Kind: e.Kind, Message: e.Message, Next: e.Next})
 	}
 	return out
+}
+
+// clipTail keeps the last n runes of s, where a command's latest output is,
+// marking a cut with an ellipsis at the start.
+func clipTail(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return textutil.Ellipsis + string(r[len(r)-n:])
 }
