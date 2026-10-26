@@ -97,6 +97,10 @@ jobs:
           go build -o /tmp/dyna-ci ./cmd/dyna
           go vet ./...
           go test -run '^$' ./... >/dev/null
+          # The desktop is its own module, so the root ./... skips it. Warm it
+          # too, or the shard that runs its tests pays a cold compile of the
+          # whole module in the middle of its job.
+          (cd desktop && touch ../web/dist/index.html && go build ./... && go test -run '^$' ./... >/dev/null)
           go clean -testcache
       - name: Report the cache size
         # A jump here is what makes a restore slow again, so the size is visible
@@ -164,7 +168,9 @@ jobs:
       # no WebKit and no cgo. No built frontend exists in this job, so a stub
       # page stands in for the assets.
       - name: Desktop module
-        if: matrix.shard == 4
+        # Shard 6 holds the lightest packages, so the desktop module's compile
+        # fits under the budget here where it did not on the packed shard.
+        if: matrix.shard == 6
         working-directory: desktop
         shell: bash
         run: |
@@ -187,7 +193,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload desktop test report
-        if: always() && matrix.shard == 4
+        # Runs where the desktop tests run, so the shard that owns them reports
+        # them and the others do not look for a file they never make.
+        if: always() && matrix.shard == 6
         uses: actions/upload-artifact@v4
         with:
           name: desktop-test-report
