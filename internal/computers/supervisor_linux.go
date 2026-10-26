@@ -390,7 +390,7 @@ func (s *supervisor) start() error {
 		s.keyboard = keyboard
 		s.privateWayland, s.privateDisplay = desktop.wayland, desktop.display
 		s.state.Renderer = desktop.renderer
-		s.state.RefreshHz = 10
+		s.state.RefreshHz = idleRefreshHz
 		s.state.State = StateRunning
 		s.state.StartedAt = time.Now()
 		s.state.StartupMS = time.Since(started).Milliseconds()
@@ -928,7 +928,7 @@ func (s *supervisor) releaseViewerLocked(id string) {
 	delete(s.viewers, id)
 	s.state.Viewers = len(s.viewers)
 	if len(s.viewers) == 0 {
-		if err := s.setRefresh(10); err != nil {
+		if err := s.setRefresh(idleRefreshHz); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}
