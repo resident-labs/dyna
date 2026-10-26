@@ -256,25 +256,72 @@ func DefaultPath() string {
 	return filepath.Join(dir, "dyna", "profiles.json")
 }
 
-func Load(path string) (*Store, error) {
-	s, err := LoadForRepair(path)
+// Status is the typed result of validating one saved profile. Management
+// clients show a designed message per code and never parse validation prose.
+type Status string
+
+const (
+	// StatusOK means the profile can be launched.
+	StatusOK Status = ""
+	// StatusRetiredHarness means the profile names a harness this release does
+	// not run, which a harness removal leaves behind.
+	StatusRetiredHarness Status = "retired-harness"
+	// StatusInvalid means another validation rule failed.
+	StatusInvalid Status = "invalid"
+)
+
+// Report is one saved profile's validation status. Detail names the failure for
+// an operator; each client shows its own copy per status.
+type Report struct {
+	Status Status
+	Detail string
+}
+
+// Registry is the saved profiles with the status of each one, by profile name.
+type Registry struct {
+	Store   *Store
+	Reports map[string]Report
+}
+
+// ReadConfig is the one read a management client uses: it validates every saved
+// profile separately, so a profile this release cannot run still lists and can
+// be edited or removed. Launch code uses Load, which refuses any profile that is
+// not ok, so a retired profile never reaches execution.
+func ReadConfig(path string) (Registry, error) {
+	s, err := readStore(path)
 	if err != nil {
-		return nil, err
+		return Registry{}, err
 	}
+	reg := Registry{Store: s, Reports: map[string]Report{}}
 	for i := range s.Profiles {
 		p := &s.Profiles[i]
 		if err := p.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid profile %q in %s: %w", p.Name, path, err)
+			status := StatusInvalid
+			if !slices.Contains(Harnesses, p.Harness) {
+				status = StatusRetiredHarness
+			}
+			reg.Reports[p.Name] = Report{Status: status, Detail: err.Error()}
 		}
 	}
-	return s, nil
+	return reg, nil
 }
 
-// LoadForRepair reads a registry without validating its profiles, so an owner
-// can remove or replace a profile this release cannot run: a harness Dyna has
-// retired leaves such a profile behind, and Load refuses the whole file. Running
-// anything still needs Load, so a retired profile never reaches execution.
-func LoadForRepair(path string) (*Store, error) {
+// Load admits a registry for execution.
+func Load(path string) (*Store, error) {
+	reg, err := ReadConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range reg.Store.Profiles {
+		if report := reg.Reports[p.Name]; report.Status != StatusOK {
+			return nil, fmt.Errorf("invalid profile %q in %s: %s", p.Name, path, report.Detail)
+		}
+	}
+	return reg.Store, nil
+}
+
+// readStore parses the registry file without validating any profile.
+func readStore(path string) (*Store, error) {
 	s := &Store{Path: path}
 	b, err := os.ReadFile(path)
 	if err != nil {

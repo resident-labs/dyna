@@ -27,7 +27,13 @@ export interface ProfileView {
   compact: Compact | null
   envKeys: string[] | null
   support: HarnessSupport
+  // problem is the typed reason this profile cannot run; empty means launchable.
+  problem?: ProfileProblem
 }
+
+// ProfileProblem is profile.Status, why a saved profile cannot run. The editor
+// shows a designed message per code and still offers repair.
+export type ProfileProblem = 'retired-harness' | 'invalid'
 
 // ProfileUsageStats is subagent.ProfileUsageStats. Null values are unknown,
 // never zero. Cost keeps the same coverage fields as the Usage activity view.

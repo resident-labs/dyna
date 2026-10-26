@@ -28,10 +28,11 @@ func newCheckCommand() *cobra.Command {
 		Short: "Check enabled profiles, installed binaries, output capabilities, and accounts",
 		Long:  "Check enabled profiles, including subagent-only profiles, and report each managed profile's private sign-in state. --live starts each harness and can incur provider charges.",
 		RunE: func(c *cobra.Command, names []string) error {
-			store, err := loadStore()
+			reg, err := loadRegistry()
 			if err != nil {
 				return err
 			}
+			store := reg.Store
 			selected, err := selectCheckProfiles(store, names)
 			if err != nil {
 				return err
@@ -44,6 +45,13 @@ func newCheckCommand() *cobra.Command {
 			docs := accountDoctors(c.Context(), selected)
 			for _, p := range selected {
 				problem := false
+				// A profile the launch admission refuses fails its own check. The
+				// others still get checked, because management now reads them all.
+				if report := reg.Reports[p.Name]; report.Status != profile.StatusOK {
+					fmt.Fprintf(c.OutOrStdout(), "%s\n  cannot run: %s (%s)\n\n", p.Name, string(report.Status), report.Detail)
+					failed++
+					continue
+				}
 				dialect := p.EffectiveDialect()
 				caps := workeroutput.Capabilities(dialect)
 				binary, binaryErr := checkBinary(p)
