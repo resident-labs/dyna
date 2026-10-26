@@ -548,6 +548,15 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				runErr := r.nodeCommandScoped(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
+				// A command that exited 0 is judged by its own marker even when
+				// os/exec reports ErrWaitDelay, which only means a child it left
+				// behind held the output pipe open: an sccache server does that
+				// on every run. The leftover is a cleanup warning, and command()
+				// killed what remained of the group.
+				if errors.Is(runErr, exec.ErrWaitDelay) && markerExitedCleanly(markers) {
+					sr.Warnings = append(sr.Warnings, CleanupLeftoverOutput)
+					runErr = nil
+				}
 				if runErr != nil || len(markers) == 0 {
 					sr.Status, sr.Error = OutcomeError, "check command did not complete"
 					if runErr != nil {
@@ -725,6 +734,16 @@ const commandStartedFile = ".command-started"
 // commandMarker is what the node writes about that sentinel: 1 when the
 // container started the command, 0 when it never got that far.
 var commandMarker = regexp.MustCompile(`(?m)^DYNA_CI_COMMAND_STARTED=([01])$`)
+
+// markerExitedCleanly reports whether the check's own last completion marker
+// says its command exited 0.
+func markerExitedCleanly(markers [][]string) bool {
+	if len(markers) == 0 {
+		return false
+	}
+	code, err := strconv.Atoi(markers[len(markers)-1][1])
+	return err == nil && code == 0
+}
 
 // commandStarted reports what the node's marker proves. A log without the marker
 // proves nothing either way, so it counts as started.

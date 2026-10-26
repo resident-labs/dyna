@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -302,5 +303,28 @@ func TestCommandCancelsTheProcessGroupAndDrainsItsPipes(t *testing.T) {
 	cancel()
 	if err := <-ran; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled command returned %v", err)
+	}
+}
+
+// A command that exits while a child it started keeps the output pipe open is
+// reported as ErrWaitDelay after the wait bound, and the child's process group
+// is killed so nothing outlives the check.
+func TestRunAndReapKillsAChildThatHoldsTheOutputOpen(t *testing.T) {
+	cmd := exec.Command("bash", "-c", "sleep 30 & exit 0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 50 * time.Millisecond
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	var killed []int
+	previous := reapGroup
+	reapGroup = func(pid int) error { killed = append(killed, pid); return nil }
+	t.Cleanup(func() { reapGroup = previous })
+
+	err := runAndReap(cmd)
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("a leftover pipe holder was not reported: %v", err)
+	}
+	if len(killed) != 1 || killed[0] != cmd.Process.Pid {
+		t.Fatalf("reaped groups %v, want the command's own group %d", killed, cmd.Process.Pid)
 	}
 }
