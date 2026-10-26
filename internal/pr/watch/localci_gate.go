@@ -316,6 +316,10 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 				return snap, err
 			}
 		}
+		if plan.bootstrap && hostedFallback {
+			// Hosted CI decides this head. Local CI starts only where nothing else tests it.
+			plan = localCIPlan{baseMissing: true}
+		}
 		if plan.baseMissing {
 			snap.localCIConfig = state.LocalCIConfigNotConfigured
 			snap = withoutLocalHostedCancellations(snap, saved, nil)

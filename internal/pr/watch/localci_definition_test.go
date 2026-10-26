@@ -106,6 +106,38 @@ suites:
 	}
 }
 
+// D-293: with no base definition and no hosted CI, the PR that adds the
+// definition runs it, because nothing else can test that PR.
+func TestHeadThatAddsLocalCIRunsItWhenNoHostedCIExists(t *testing.T) {
+	repo, _ := changeRepo(t)
+	if err := os.Remove(filepath.Join(repo, filepath.FromSlash(localci.DefinitionPath))); err != nil {
+		t.Fatal(err)
+	}
+	base := changeCommit(t, repo, "remove local CI\n")
+	writeTrialDefinition(t, repo, `version: 1
+trial: [test]
+checks:
+  - id: pytest
+    image: python:3.13-slim
+    command: python -m pytest
+suites:
+  - id: test
+    checks: [pytest]
+`)
+	head := changeCommit(t, repo, "add local CI later\n")
+	record := Record{Kind: "github", Head: head, Base: base, Branch: "feature", Repo: "owner/repo", RepoPath: repo}
+	snap := Snapshot{}
+	snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, record.Repo
+	service := &Service{LocalCIRegistry: &requiredCIRegistry{}}
+	got, err := service.withRegisteredCI(t.Context(), record, snap, ChangePolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.localCIConfig == state.LocalCIConfigNotConfigured || got.localCI == nil {
+		t.Fatalf("a PR that adds local CI, with no hosted CI, was left unconfigured: config %q, local %+v", got.localCIConfig, got.localCI)
+	}
+}
+
 // A head whose local CI definition has a field this engine does not know still
 // gets its review recorded, while the same CI gate keeps failing for merges.
 func TestVerdictIsRecordedWhenHeadDefinitionIsInvalid(t *testing.T) {
