@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/admission"
@@ -36,22 +37,10 @@ func admissionObserver(sessions *subagent.Manager, load *sysload.Sampler, dataDi
 				return in.Status == subagent.StatusRunning && in.Role != subagent.RoleRoot && !in.Service
 			})
 		},
-		// Every open session that holds a process is in the agents group's memory,
-		// roots and services included.
-		Agents: func(context.Context) (int, error) {
-			return count(func(in subagent.Info) bool {
-				return in.Status == subagent.StatusRunning || in.Status == subagent.StatusQueued || in.Status == subagent.StatusIdle
-			})
-		},
-		AgentBytes: func(context.Context) uint64 {
-			for _, g := range load.Load().Groups {
-				if g.Name == "agents" {
-					return g.Memory
-				}
-			}
-			return 0
-		},
-		Record: admission.Observed{DataDir: dataDir}.Record,
+		// Memory and count come from one inventory: the sessions whose processes
+		// the load sampler found alive in their cgroup scopes.
+		AgentMemory: func(context.Context) (uint64, int) { return liveAgentMemory(load.Load().Groups) },
+		Record:      admission.Observed{DataDir: dataDir}.Record,
 		Mode: func(context.Context) admission.Mode {
 			v, err := settings.Load(settings.DefaultPath())
 			if err != nil {
@@ -61,4 +50,18 @@ func admissionObserver(sessions *subagent.Manager, load *sysload.Sampler, dataDi
 		},
 		Now: time.Now,
 	}
+}
+
+// liveAgentMemory sums the memory of the agent sessions that have a live cgroup
+// scope and counts them, so the average is over exactly the memory counted. A
+// session with no live process (idle, dormant, or whose children have left) is
+// not in either number.
+func liveAgentMemory(groups []sysload.Group) (bytes uint64, agents int) {
+	for _, g := range groups {
+		if strings.HasPrefix(g.Name, "session:") {
+			bytes += g.Memory
+			agents++
+		}
+	}
+	return bytes, agents
 }

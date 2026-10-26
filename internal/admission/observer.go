@@ -37,12 +37,11 @@ type Observer struct {
 	States StateKeeper
 	// Running counts the running agent turns, roots and services excluded.
 	Running func(ctx context.Context) (int, error)
-	// Agents counts every agent session that holds a process: the running and
-	// idle ones, roots and services included. AgentBytes is the memory all
-	// agent processes use together, so AgentBytes over Agents is the memory of
-	// one agent.
-	Agents     func(ctx context.Context) (int, error)
-	AgentBytes func(ctx context.Context) uint64
+	// AgentMemory returns the memory of the agent sessions that have live
+	// processes and how many they are, both from one inventory, so the average
+	// is exact. Without a reliable count it returns 0 agents and the fallback
+	// stays.
+	AgentMemory func(ctx context.Context) (bytes uint64, agents int)
 	// Record stores one observation.
 	Record func(ctx context.Context, ob Observation) error
 	// Mode reads the owner's setting at each sample.
@@ -83,12 +82,10 @@ func (o *Observer) Sample(ctx context.Context) (err error) {
 		return err
 	}
 	now := o.Now()
-	if o.AgentBytes != nil && o.Agents != nil && now.Sub(st.MeasuredAt) >= time.Minute {
-		if agents, err := o.Agents(bound); err == nil && agents >= 2 {
-			if total := o.AgentBytes(bound); total > 0 {
-				st.TurnBytes = min(max(total/uint64(agents), 128<<20), 16<<30)
-				st.MeasuredAt = now
-			}
+	if o.AgentMemory != nil && now.Sub(st.MeasuredAt) >= time.Minute {
+		if total, agents := o.AgentMemory(bound); agents >= 2 && total > 0 {
+			st.TurnBytes = min(max(total/uint64(agents), 128<<20), 16<<30)
+			st.MeasuredAt = now
 		}
 	}
 	limit, st := Decide(readings, running, st)

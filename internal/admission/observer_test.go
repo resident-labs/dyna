@@ -77,18 +77,25 @@ func TestSampleSkipsWhenTheStateCannotBeKept(t *testing.T) {
 	}
 }
 
-// The agents group's memory is spread over every agent session that holds a
-// process, roots and services included, not only the running turns.
-func TestSampleDividesAgentMemoryByEveryAgent(t *testing.T) {
+// Turn memory is the live agents' memory over the number of live agents, taken
+// together from one inventory.
+func TestSampleAveragesMemoryOverTheLiveAgents(t *testing.T) {
 	states := &memState{}
 	o, _ := observerFor(fixedSource{r: busy}, 2, states)
-	o.Agents = func(context.Context) (int, error) { return 8, nil } // 2 running + idle + roots + services
-	o.AgentBytes = func(context.Context) uint64 { return 16 * gib }
+	o.AgentMemory = func(context.Context) (uint64, int) { return 16 * gib, 8 }
 	if err := o.Sample(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if states.st.TurnBytes != 2*gib {
 		t.Fatalf("turn bytes = %d, want 16 GiB over 8 agents = 2 GiB", states.st.TurnBytes)
+	}
+	// With fewer than two agents there is nothing to average: the fallback stays.
+	states = &memState{}
+	o, _ = observerFor(fixedSource{r: busy}, 2, states)
+	o.AgentMemory = func(context.Context) (uint64, int) { return 16 * gib, 1 }
+	_ = o.Sample(t.Context())
+	if states.st.TurnBytes != 0 {
+		t.Fatalf("turn bytes = %d, want the fallback (0) with one agent", states.st.TurnBytes)
 	}
 }
 
