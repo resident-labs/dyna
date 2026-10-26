@@ -278,7 +278,13 @@ func (s *Service) closeDoneGoalIssues(ctx context.Context, r room.Record, g goal
 		if issue.State != room.IssueStateGoal || issue.GoalID != g.ID {
 			continue
 		}
-		if _, err := s.rooms().CloseIssue(ctx, r.ID, issue.Label(), by, reason, room.CloseOrigin{}); err != nil {
+		_, err := s.rooms().CloseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by, reason, room.CloseOrigin{})
+		// Another goal may take the issue after the read above, and a merged
+		// PR may close it first: both leave this goal nothing to close.
+		if errors.Is(err, room.ErrIssueLeftGoal) || (err != nil && strings.Contains(err.Error(), "is already ")) {
+			continue
+		}
+		if err != nil {
 			failures = append(failures, fmt.Errorf("close %s: %w", issue.Label(), err))
 		}
 	}
