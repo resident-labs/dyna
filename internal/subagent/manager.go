@@ -385,7 +385,13 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	// owner's orchestrator and picks like a subagent session.
 	service := opts.Service || isServiceRole(opts.Role) && opts.Role != RoleRoot
 	var prof *profile.Profile
-	if opts.Profile != "" {
+	if opts.Run != nil && opts.Run.Profile != nil {
+		// The run's own mock profile, which is not in the registry.
+		if opts.Run.Profile.Harness != profile.HarnessMock || opts.Run.Profile.Name != opts.Profile {
+			return Info{}, Turn{}, fmt.Errorf("profile %q: only a mock profile named %q can come with the run", opts.Run.Profile.Name, opts.Profile)
+		}
+		prof = opts.Run.Profile
+	} else if opts.Profile != "" {
 		p, ok := profs.Get(opts.Profile)
 		if !ok {
 			return Info{}, Turn{}, fmt.Errorf("unknown profile %q; run `dyna profiles list` to see registered profiles", opts.Profile)
