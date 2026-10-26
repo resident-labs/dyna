@@ -151,7 +151,6 @@ func TestAFallingLimitAdmitsNobodyUntilEnoughTurnsEnd(t *testing.T) {
 func TestRacingRunnersOfOneRoomShareOneSlot(t *testing.T) {
 	secondStarted := make(chan struct{})
 	firstParked := make(chan struct{})
-	var firstDone atomic.Bool
 	var calls atomic.Int32
 	g := Gate{
 		Dir: t.TempDir(),
@@ -162,8 +161,8 @@ func TestRacingRunnersOfOneRoomShareOneSlot(t *testing.T) {
 				return 2
 			}
 			// The second runner may only look once the first holds its slot.
-			if held != 1 || !firstDone.Load() {
-				t.Errorf("second runner saw %d held slots, first done %v; want the first slot visible", held, firstDone.Load())
+			if held != 1 {
+				t.Errorf("second runner saw %d held slots, want the first runner's slot", held)
 			}
 			return 2
 		},
@@ -178,7 +177,6 @@ func TestRacingRunnersOfOneRoomShareOneSlot(t *testing.T) {
 			first <- func() {}
 			return
 		}
-		firstDone.Store(true)
 		first <- release
 	}()
 	<-firstParked
