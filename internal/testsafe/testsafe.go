@@ -106,11 +106,22 @@ func init() {
 		}
 	}
 	// Session scratch is a disk folder under the owner's cache, not a
-	// temporary-folder variable, so a test must redirect it explicitly.
+	// temporary-folder variable, so a test must redirect it explicitly. Keep
+	// this redirect quiet: hook tests compare a hook's captured log exactly,
+	// and a diagnostic line there would look like hook output.
 	scratchRoot := os.Getenv("DYNA_SCRATCH_ROOT")
 	if scratchRoot == "" || Check(scratchRoot) != nil {
-		os.Setenv("DYNA_SCRATCH_ROOT", temporary("DYNA_SCRATCH_ROOT", scratchRoot))
+		os.Setenv("DYNA_SCRATCH_ROOT", temporaryDir())
 	}
+}
+
+// temporaryDir makes a folder under the test root without logging.
+func temporaryDir() string {
+	dir, err := os.MkdirTemp(tempRoot, fmt.Sprintf("%s%d-", tempPrefix, os.Getpid()))
+	if err != nil {
+		panic(fmt.Errorf("make a temporary folder: %w", err))
+	}
+	return dir
 }
 
 func temporary(key, real string) string {

@@ -106,6 +106,7 @@ var nonStampKeys = map[string]string{
 	"DYNA_COMPUTERS_DAEMON":      "A computer service marker, not a caller stamp.",
 	"DYNA_JOURNAL_IDLE":          "A harness idle-notification setting.",
 	"DYNA_SCRATCH":               "The worker scratch path.",
+	"DYNA_SCRATCH_ROOT":          "The disk folder override for session scratch; a path, not a caller stamp.",
 	"DYNA_STEER_HOOKS":           "Whether harness steering hooks run.",
 	"DYNA_OWNER_ENV":             "The owner environment used to resolve data paths.",
 	"DYNA_":                      "The namespace prefix used to filter environment entries.",
