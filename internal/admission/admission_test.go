@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 )
 
@@ -62,9 +63,7 @@ func TestTurnWaitsForASlotAndNoticesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	first = r1
-	if _, err := g.Acquire(t.Context(), Turns, "b", nil); err != nil {
-		t.Fatal(err)
-	}
+	must(t, g, Turns, "b")
 	holds := 0
 	r3, err := g.Acquire(t.Context(), Turns, "c", func(h Hold) {
 		holds++
@@ -95,9 +94,7 @@ func TestOneRoomCannotTakeMoreThanItsShare(t *testing.T) {
 		t.Fatalf("busy room: %v, hold %+v", err, hold)
 	}
 	// Another room is admitted at once. The script has no step left to wait on.
-	if _, err := g.Acquire(t.Context(), Turns, "other", nil); err != nil {
-		t.Fatal(err)
-	}
+	must(t, g, Turns, "other")
 }
 
 // A parent turn that waits on its leaf sessions holds a slot of the turn pool.
@@ -106,26 +103,18 @@ func TestOneRoomCannotTakeMoreThanItsShare(t *testing.T) {
 func TestParentAndLeavesNeverWaitOnEachOther(t *testing.T) {
 	g := pool(t, 2)
 	for _, room := range []string{"run-room", "other-room"} {
-		if _, err := g.Acquire(t.Context(), Turns, room, nil); err != nil {
-			t.Fatal(err)
-		}
+		must(t, g, Turns, room)
 	}
 	// The turn pool is full now. A third turn would wait; the script has no
 	// step to free a slot, so the leaves below must not touch that pool.
-	if _, err := g.Acquire(t.Context(), Leaves, "run-room", nil); err != nil {
-		t.Fatalf("a leaf waited behind parents: %v", err)
-	}
-	if _, err := g.Acquire(t.Context(), Leaves, "other-room", nil); err != nil {
-		t.Fatalf("another room's leaf waited behind a busy room: %v", err)
-	}
+	must(t, g, Leaves, "run-room")
+	must(t, g, Leaves, "other-room")
 }
 
 func TestOffLimitTakesNoSlot(t *testing.T) {
 	g := pool(t, -1)
 	for i := 0; i < 5; i++ {
-		if _, err := g.Acquire(t.Context(), Turns, "a", nil); err != nil {
-			t.Fatal(err)
-		}
+		must(t, g, Turns, "a")
 	}
 }
 
@@ -144,9 +133,11 @@ func TestAFallingLimitAdmitsNobodyUntilEnoughTurnsEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.Acquire(t.Context(), Turns, "b", nil); err != nil {
+	second, err := g.Acquire(t.Context(), Turns, "b", nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(second) // the release closure owns the slot's file; keep it alive
 	first()
 	limit = 1
 	if _, err := g.Acquire(t.Context(), Turns, "c", nil); err == nil || waited != 1 {
@@ -154,34 +145,62 @@ func TestAFallingLimitAdmitsNobodyUntilEnoughTurnsEnd(t *testing.T) {
 	}
 }
 
-// Two runners of one room race for an empty pool whose room share is one.
-// Exactly one is admitted, every time.
+// Two runners of one room race for an empty pool whose room share is one. The
+// first is parked inside the allocation step until the second has started, so
+// the second can only run its policy check after the first holds its slot.
 func TestRacingRunnersOfOneRoomShareOneSlot(t *testing.T) {
-	for i := 0; i < 50; i++ {
-		g := Gate{
-			Dir:       t.TempDir(),
-			Limit:     func(Pool, int) int { return 2 },
-			RoomShare: RoomShare,
-			Wait:      func(context.Context) error { return context.Canceled },
-		}
-		start := make(chan struct{})
-		results := make(chan error, 2)
-		for j := 0; j < 2; j++ {
-			go func() {
-				<-start
-				_, err := g.Acquire(t.Context(), Turns, "room", nil)
-				results <- err
-			}()
-		}
-		close(start)
-		admitted := 0
-		for j := 0; j < 2; j++ {
-			if err := <-results; err == nil {
-				admitted++
+	secondStarted := make(chan struct{})
+	firstParked := make(chan struct{})
+	var firstDone atomic.Bool
+	var calls atomic.Int32
+	g := Gate{
+		Dir: t.TempDir(),
+		Limit: func(_ Pool, held int) int {
+			if calls.Add(1) == 1 { // the first runner, inside the allocation lock
+				close(firstParked)
+				<-secondStarted
+				return 2
 			}
-		}
-		if admitted != 1 {
-			t.Fatalf("round %d admitted %d runners of one room, want 1", i, admitted)
-		}
+			// The second runner may only look once the first holds its slot.
+			if held != 1 || !firstDone.Load() {
+				t.Errorf("second runner saw %d held slots, first done %v; want the first slot visible", held, firstDone.Load())
+			}
+			return 2
+		},
+		RoomShare: RoomShare,
+		Wait:      func(context.Context) error { return context.Canceled },
 	}
+	first := make(chan func(), 1)
+	go func() {
+		release, err := g.Acquire(t.Context(), Turns, "room", nil)
+		if err != nil {
+			t.Error(err)
+			first <- func() {}
+			return
+		}
+		firstDone.Store(true)
+		first <- release
+	}()
+	<-firstParked
+	second := make(chan error, 1)
+	go func() {
+		close(secondStarted)
+		_, err := g.Acquire(t.Context(), Turns, "room", nil)
+		second <- err
+	}()
+	t.Cleanup(<-first) // the first runner keeps its slot until the test ends
+	if err := <-second; err == nil {
+		t.Fatal("a second runner of one room took the other slot despite a share of one")
+	}
+}
+
+// must takes a slot that lasts until the test ends. The release closure owns
+// the slot's file, so dropping it would let the garbage collector free the lock.
+func must(t *testing.T, g Gate, pool Pool, room string) {
+	t.Helper()
+	release, err := g.Acquire(t.Context(), pool, room, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
 }
