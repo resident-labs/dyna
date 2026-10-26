@@ -3,6 +3,7 @@ package watch
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/localci"
 )
@@ -27,6 +28,26 @@ func TestPullRequestHeadDoesNotWaitForLocalCheckNames(t *testing.T) {
 	obs := s.registeredLocalObservation(r, snap, policy, plan, localci.Result{}, false, false)
 	if obs.Status != VerdictPassed {
 		t.Fatalf("pull request head = %s (%s), want passed from the hosted provider", obs.Status, obs.Reason)
+	}
+}
+
+// A manual local run on a pull request head can miss the checks the plan names:
+// a docs-only change matches no suite, so the plan wants the changes check. No
+// later run completes it, so the head must report absent, not wait for ever.
+func TestPartialManualRunOnPullRequestHeadIsAbsent(t *testing.T) {
+	definition := watchDynaDefinition(t)
+	head := strings.Repeat("d", 40)
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "feature", Watching: true, State: "open", HeadSeen: time.Unix(1, 0)}
+	plan := localCIPlan{execution: definition, required: definition}
+	result := localci.Result{Node: "node", Status: localci.OutcomePassed, Checks: []localci.SuiteResult{{CheckName: "other", Status: localci.OutcomePassed}}}
+	var snap Snapshot
+	snap.Pull.Head.SHA = head
+	s := &Service{}
+	if obs := s.registeredLocalObservation(r, snap, ChangePolicy{}, plan, result, true, false); obs.Status != VerdictPending {
+		t.Fatalf("trial head = %s, want pending", obs.Status)
+	}
+	if obs := s.registeredLocalObservation(r, snap, ChangePolicy{}, plan, result, false, false); obs.Status != VerdictAbsent {
+		t.Fatalf("pull request head = %s, want absent", obs.Status)
 	}
 }
 
