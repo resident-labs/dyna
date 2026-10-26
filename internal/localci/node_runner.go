@@ -1308,24 +1308,26 @@ func nodeSlotScript(base string, slots, index int, active string, deadline time.
 // labelled dyna.run and dyna-ci-* systemd units that are older than six hours
 // and belong to no live run. A run is live while its keeper holds the lock on
 // its .active file. Nothing records such a survivor, so every check start on the
-// node looks for them. It reaches containers the way the checks do: podman when
-// docker is absent, the machine's container socket, and sudo when the plain
-// runtime refuses. A query that fails or an age that cannot be read keeps the
+// node looks for them. It reaches containers the way the checks do, both the plain
+// check containers and the act job containers. A query that fails or an age that cannot be read keeps the
 // thing, and the sweep never fails the check.
 func survivorSweep(base, containerSocket string) string {
 	q := shellquote.Quote
-	socket := ""
-	if containerSocket != "" {
-		socket = "export DOCKER_HOST=" + q(containerSocket) + "; "
+	if containerSocket == "" {
+		containerSocket = machines.DefaultContainerSocket
 	}
 	script := `base=` + q(base) + `; cutoff=$(( $(date +%s) - ` + strconv.Itoa(staleCheckTmpMinutes*60) + ` )); ` +
 		// live_run takes a container's run ID or a unit's name without its dyna-ci- prefix.
 		`live_run() { local d id; for d in "$base"/runs/*/; do [ -e "${d}.active" ] || continue; flock -n "${d}.active" true 2>/dev/null && continue; id=$(basename "$d"); case "$1" in "$id"|"$id"-*) return 0 ;; esac; done; return 1; }; ` +
 		`old_enough() { local at; [ -n "$1" ] && at=$(date -d "$1" +%s 2>/dev/null) && [ "$at" -lt "$cutoff" ]; }; ` +
-		`docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); ` + socket +
-		`if command -v "${docker[0]}" >/dev/null 2>&1; then if ! timeout 10s "${docker[@]}" info >/dev/null 2>&1; then docker=(sudo -n "${docker[@]}"); fi; ` +
+		`sweep_containers() { command -v "${docker[0]}" >/dev/null 2>&1 || return 0; ` +
 		`timeout 15s "${docker[@]}" ps -a --filter label=dyna.run --format '{{.ID}} {{.Label "dyna.run"}}' 2>/dev/null | ` +
-		`while read -r cid rid; do [ -n "$cid" ] && ! live_run "$rid" && old_enough "$(timeout 15s "${docker[@]}" inspect -f '{{.Created}}' "$cid" 2>/dev/null)" && timeout 30s "${docker[@]}" rm -f "$cid" >/dev/null 2>&1; done; fi; ` +
+		`while read -r cid rid; do [ -n "$cid" ] && ! live_run "$rid" && old_enough "$(timeout 15s "${docker[@]}" inspect -f '{{.Created}}' "$cid" 2>/dev/null)" && timeout 30s "${docker[@]}" rm -f "$cid" >/dev/null 2>&1; done; }; ` +
+		// A plain check container uses the node's ambient docker, with sudo when
+		// that refuses. An act job container uses podman when docker is absent and
+		// the machine's socket. Each daemon is swept the way its checks reach it.
+		`( docker=(docker); if command -v docker >/dev/null 2>&1 && ! timeout 10s docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; sweep_containers ); ` +
+		`( docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); export DOCKER_HOST=` + q(containerSocket) + `; sweep_containers ); ` +
 		`if command -v systemctl >/dev/null 2>&1; then timeout 15s systemctl --user list-units --all --plain --no-legend 'dyna-ci-*' 2>/dev/null | ` +
 		`while read -r first second _; do unit=$first; [ "$first" = "●" ] && unit=$second; [ -n "$unit" ] || continue; live_run "${unit#dyna-ci-}" && continue; ` +
 		`when=$(timeout 10s systemctl --user show -p ActiveEnterTimestamp --value "$unit" 2>/dev/null); [ -n "$when" ] || when=$(timeout 10s systemctl --user show -p InactiveEnterTimestamp --value "$unit" 2>/dev/null); ` +
