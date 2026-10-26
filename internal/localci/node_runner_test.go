@@ -2,7 +2,6 @@ package localci
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	"dyna-agent/internal/machines"
@@ -1068,61 +1067,33 @@ func TestEachCheckGetsItsOwnSccacheServerPort(t *testing.T) {
 
 // A check that waits for a busy slot keeps the slot it waits for: with every
 // slot busy the scan ends on the last one, so the waiting path must name the
-// lock it actually takes. Its sccache port follows that slot.
+// lock it actually takes, and its sccache port follows that slot. A fake flock
+// makes both answers immediate, so the test takes no time and starts no waiter.
 func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
 	dir := t.TempDir()
-	const slots, index = 2, 2 // waits for slot 0
-	if err := os.MkdirAll(filepath.Join(dir, "slots"), 0o755); err != nil {
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Hold every slot, so the scan finds none free and the waiting path runs.
-	locks := make([]*os.File, slots)
-	for slot := range locks {
-		file, err := os.OpenFile(filepath.Join(dir, "slots", fmt.Sprintf("%d.lock", slot)), os.O_CREATE|os.O_RDWR, 0o600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			t.Fatal(err)
-		}
-		locks[slot] = file
-		t.Cleanup(func() { _ = file.Close() })
-	}
-	// The inner script names the port the way a check does, from the slot it holds.
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, slots, index, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`))
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
+	// Every non-blocking attempt fails, so the scan finds no free slot, and the
+	// waiting attempt succeeds at once.
+	fake := "#!/bin/sh\ncase \"$1\" in -n) exit 1 ;; -w) exit 0 ;; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	// Wait for the wrapper to say it is waiting, then free the slot it waits
-	// for. The line is the only ordering this test needs, so it takes no time.
-	waiting := make(chan struct{})
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			if strings.Contains(scanner.Text(), "waiting for slot 0") {
-				close(waiting)
-				return
-			}
-		}
-	}()
-	select {
-	case <-waiting:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the wrapper never reported that it was waiting for a slot")
-	}
-	if err := syscall.Flock(int(locks[0].Fd()), syscall.LOCK_UN); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("wrapper: %v", err)
+	// The inner script names the port the way a check does, from its slot.
+	script := nodeSlotScript(dir, 2, 2, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("wrapper: %v: %s", err, errOut.String())
 	}
 	if got := strings.TrimSpace(out.String()); got != "slot=0 port=4226" {
 		t.Fatalf("the check ran with %q, want slot 0 and its own port", got)
+	}
+	if !strings.Contains(errOut.String(), "waiting for slot 0") {
+		t.Fatalf("the check's log does not say why it waited: %s", errOut.String())
 	}
 }
