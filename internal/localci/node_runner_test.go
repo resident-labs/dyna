@@ -191,7 +191,8 @@ func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls [][]string
-			runner := Runner{Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+			node := Node{Name: "local", Slots: 1, Enabled: true}
+			runner := Runner{Node: &node}
 			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				calls = append(calls, append([]string{name}, args...))
 				if name == "systemd-run" && len(args) == 1 && args[0] == "--version" {
@@ -284,7 +285,7 @@ func TestRunPushesACommitWhoseRefAPreviousRunLeft(t *testing.T) {
 	if err := os.WriteFile(ref, []byte(strings.Repeat("1", 40)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{Node: &Node{Name: "local", Slots: 2, Enabled: true}}
 	if err := runner.pushCommitToNode(t.Context(), repo, cache, sha); err != nil {
 		t.Fatalf("a second run of the commit could not push: %v", err)
 	}
@@ -498,7 +499,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 
 func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		fakeNodeGit(dir, out, name, args)
 		return nil
@@ -565,7 +566,7 @@ func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
 	// The deadline has already passed, so the run ends at once and no clock runs.
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -655,7 +656,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 	for _, fullAttempts := range []int32{1, 2} {
 		t.Run(fmt.Sprint(fullAttempts), func(t *testing.T) {
 			var attempts, cleans atomic.Int32
-			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
@@ -715,7 +716,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 // its log stays available. The command cancels the run itself, so no clock runs.
 func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -778,7 +779,7 @@ func writeCheckReports(out io.Writer, files map[string]string) error {
 // execution timing, the structured test failures, the slow tests and the report
 // links. The command's own outcome stays the check's outcome and cause.
 func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
 	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil

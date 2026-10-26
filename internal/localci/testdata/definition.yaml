@@ -1,0 +1,313 @@
+version: 1
+
+# Pull requests select only the trial suites whose file patterns match. Merge
+# trials run every suite in this list. The other suites remain available to
+# `dyna git ci run --suite` for focused manual runs.
+trial: [relay, go, cross, computer-smoke]
+
+caches:
+  - name: go-build
+    target: /cache/build
+    env: GOCACHE
+  - name: go-mod
+    target: /cache/mod
+    env: GOMODCACHE
+  - name: npm
+    target: /cache/npm
+    env: npm_config_cache
+
+checks:
+  - id: relay
+    image: node:22
+    command: bash scripts/ci.sh relay
+    caches: [npm]
+    reports: junit
+
+  - id: frontend-0
+    name: frontend test (0)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env: &frontend-shard-env
+      FRONTEND_SHARD: 1/6
+
+  - id: frontend-1
+    name: frontend test (1)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 2/6
+
+  - id: frontend-2
+    name: frontend test (2)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 3/6
+
+  - id: frontend-3
+    name: frontend test (3)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 4/6
+
+  - id: frontend-4
+    name: frontend test (4)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 5/6
+
+  - id: frontend-5
+    name: frontend test (5)
+    providerGroup: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend test-shard
+    caches: [npm]
+    reports: junit
+    env:
+      <<: *frontend-shard-env
+      FRONTEND_SHARD: 6/6
+
+  - id: frontend-build
+    # A pull request's base still requires a check named frontend, and a local
+    # result can only satisfy that name. The build speaks for the frontend check
+    # that used to hold the build and the tests: the shards keep reporting their
+    # own names, and all of them feed go-test. The hosted frontend job builds and
+    # tests, so the provider name stays frontend too.
+    name: frontend
+    image: node:22
+    command: bash scripts/ci.sh frontend build
+    caches: [npm]
+    reports: none
+
+  - id: frontend-check
+    image: node:22
+    command: bash scripts/ci.sh frontend check
+    caches: [npm]
+    reports: none
+
+  - id: go-static
+    image: golang:1.26.3
+    hostUser: true
+    setup: timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69
+    command: bash scripts/ci.sh go modules && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+
+  # One check per release target. The targets cannot share build objects (the
+  # build id includes GOOS and GOARCH), so one check for four targets built them
+  # one after another and took over two minutes. Split, each is a single
+  # cross-compile in its own slot, and the group keeps the cross-build name that
+  # the base graph requires.
+  - id: cross-build-linux-amd64
+    name: cross-build (linux/amd64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build linux/amd64
+    caches: [go-build, go-mod]
+    env: &cross-build-env
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+    reports: none
+    priority: 1
+
+  - id: cross-build-linux-arm64
+    name: cross-build (linux/arm64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build linux/arm64
+    caches: [go-build, go-mod]
+    env: *cross-build-env
+    reports: none
+    priority: 1
+
+  - id: cross-build-darwin-amd64
+    name: cross-build (darwin/amd64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build darwin/amd64
+    caches: [go-build, go-mod]
+    env: *cross-build-env
+    reports: none
+    priority: 1
+
+  - id: cross-build-darwin-arm64
+    name: cross-build (darwin/arm64)
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh cross-build darwin/arm64
+    caches: [go-build, go-mod]
+    env: *cross-build-env
+    reports: none
+    priority: 1
+
+  - id: computer-smoke
+    host: true
+    command: >-
+      for tool in go labwc Xwayland sqlite3 agent-browser; do command -v "$tool" >/dev/null || { echo "Missing computer-smoke prerequisite: $tool" >&2; exit 69; }; done; go test -count=1 -timeout 5m ./internal/computers
+    caches: [go-build, go-mod]
+    env:
+      GOMAXPROCS: "2"
+      GOFLAGS: -p=2
+      DYNA_COMPUTERS_ENABLED: "0"
+      DYNA_COMPUTERS_REQUIRE_LIVE: "1"
+    reports: none
+
+  - id: go-test-shard-0
+    name: go-test-shard (0)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env: &go-test-env
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 3GiB
+      GOFLAGS: -p=2
+      CI_SHARD: 0/8
+      CI_SLICE: 0/2
+    reports: go
+
+  - id: go-test-shard-1
+    name: go-test-shard (1)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 1/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-2
+    name: go-test-shard (2)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 2/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-3
+    name: go-test-shard (3)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 3/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-4
+    name: go-test-shard (4)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test && touch web/dist/index.html && bash scripts/ci.sh go desktop
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 4/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-5
+    name: go-test-shard (5)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 5/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-6
+    name: go-test-shard (6)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 6/8
+      CI_SLICE: ""
+    reports: go
+
+  - id: go-test-shard-7
+    name: go-test-shard (7)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 7/8
+      CI_SLICE: 1/2
+    reports: go
+
+suites:
+  - id: relay
+    files: ['^\.github/', '^scripts/ci\.sh$', '^relay/']
+    checks: [relay]
+
+  - id: frontend
+    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build]
+
+  - id: frontend-check
+    checks: [frontend-check]
+
+  - id: go-static
+    checks: [go-static]
+
+  - id: cross
+    group: cross-build
+    files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
+    checks: [cross-build-linux-amd64, cross-build-linux-arm64, cross-build-darwin-amd64, cross-build-darwin-arm64]
+
+  - id: computer-smoke
+    files: ['^\.github/', '^internal/(computers|computerweb)/']
+    checks: [computer-smoke]
+
+  - id: go
+    group: go-test
+    files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
+    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7]
