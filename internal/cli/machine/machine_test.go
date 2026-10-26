@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,21 +128,12 @@ func localMachineName(t *testing.T) string {
 	return local.Name
 }
 
-// stubEngine applies a host-check patch to the registry as the engine does, so
-// a test can check what the command writes beside it.
+// stubEngine sends a change through the engine's machine service in process,
+// as the engine does, so a test sees the rules the owner sees.
 func stubEngine(t *testing.T) {
 	t.Helper()
-	stubSaveMachine(t, func(ctx context.Context, id string, patch websvc.MachinePatch) error {
-		if patch.AllowHostChecks == nil {
-			return nil
-		}
-		_, err := (machines.Store{}).UpdateHostChecksGrants(ctx, id, func(m machines.Machine) ([]machines.HostChecksGrant, error) {
-			if !*patch.AllowHostChecks {
-				return nil, nil
-			}
-			return append(m.HostChecksGrants, machines.HostChecksGrant{By: machines.GrantorRoot, Room: "room_dyna"}), nil
-		})
-		return err
+	stubSaveMachine(t, func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return (websvc.MachineAPI{Store: machines.Store{}}).SaveMachine(ctx, ref, patch)
 	})
 }
 
@@ -165,7 +157,7 @@ func TestMachineEditTakesCIRoleAndHostChecksTogether(t *testing.T) {
 	}
 }
 
-func stubSaveMachine(t *testing.T, save func(context.Context, string, websvc.MachinePatch) error) {
+func stubSaveMachine(t *testing.T, save func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error)) {
 	t.Helper()
 	previous := saveMachine
 	saveMachine = save
@@ -174,13 +166,14 @@ func stubSaveMachine(t *testing.T, save func(context.Context, string, websvc.Mac
 
 func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
 	storetest.DataDir(t)
+	stubEngine(t)
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
 		t.Fatal(err)
 	}
 	called := false
-	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) error {
+	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
 		called = true
-		return errors.New("SaveMachine is owner only")
+		return websvc.MachineDetail{}, errors.New("SaveMachine is owner only")
 	})
 	if _, err := run(t, "edit", "hermes", "--allow-host-checks"); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("session host-check edit = %v, want owner denial", err)
@@ -197,10 +190,26 @@ func TestMachineEditHostChecksDeniedByEngine(t *testing.T) {
 	}
 }
 
+// The command sends every change to the engine, the one writer of the
+// registry: a refused write leaves no machine behind and no field committed.
+func TestMachineWriteGoesThroughTheEngine(t *testing.T) {
+	storetest.DataDir(t)
+	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return websvc.MachineDetail{}, errors.New("SaveMachine is owner only")
+	})
+	if _, err := run(t, "add", "build", "--ssh", "ari@build"); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("refused add = %v, want the engine's refusal", err)
+	}
+	if _, err := (machines.Store{}).Get(context.Background(), "build"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a refused add wrote the registry: %v", err)
+	}
+}
+
 // A machine can be limited to chosen suites, and the limit is shown and can be
 // cleared again. An empty list keeps the default of every suite.
 func TestMachineEditLimitsSuites(t *testing.T) {
 	storetest.DataDir(t)
+	stubEngine(t)
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab", "--ci-slots", "2"); err != nil {
 		t.Fatal(err)
 	}
