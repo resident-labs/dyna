@@ -67,3 +67,14 @@ func (a *Accounts) piEntry(ctx context.Context, provider store.Provider, roomID,
 	}
 	return entry, nil
 }
+
+// PiAccessToken returns the access token of the Pi login that may run in repo
+// for a caller in roomID. Unlike PiChatGPTLogin it needs no account ID, so it
+// serves a provider that signs in without one, such as xAI or Kimi Code.
+func (a *Accounts) PiAccessToken(ctx context.Context, provider store.Provider, roomID, repo string) (string, error) {
+	entry, err := a.piEntry(ctx, provider, roomID, repo)
+	if err != nil {
+		return "", err
+	}
+	return native.PiAccessToken(entry)
+}
