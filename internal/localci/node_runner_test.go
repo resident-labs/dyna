@@ -1036,3 +1036,64 @@ func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
 		t.Fatal("the engine-stop cause has no label")
 	}
 }
+
+// A check's task bound follows the CPUs it was given: a fixed bound stopped a
+// large Rust build from starting its linker threads, while a small check keeps
+// exactly the bound it always had.
+func TestCheckScopeTaskLimitFollowsTheCPUs(t *testing.T) {
+	for _, tc := range []struct{ cpus, want int }{{1, 768}, {2, 768}, {3, 768}, {4, 1024}, {16, 4096}} {
+		if got := (checkResources{CPUs: tc.cpus, MemoryMiB: 4096}).scope(true).TasksMax; got != tc.want {
+			t.Fatalf("%d CPUs runs with TasksMax=%d, want %d", tc.cpus, got, tc.want)
+		}
+	}
+}
+
+// Each check starts sccache on its own port, so ending one check cannot stop a
+// server another check still uses; a repository that sets the port keeps it.
+func TestEachCheckGetsItsOwnSccacheServerPort(t *testing.T) {
+	dir := t.TempDir()
+	check := nodeCheck{id: "build", name: "build", host: true, inner: "cargo build", resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
+	script := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "")
+	if !strings.Contains(script, "SCCACHE_SERVER_PORT=$(( 4226 + slot ))") {
+		t.Fatalf("a host check did not get its own sccache port: %s", script)
+	}
+	own := check
+	own.env = map[string]string{"SCCACHE_SERVER_PORT": "5000"}
+	script = nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), strings.Repeat("b", 40), own, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "")
+	if strings.Contains(script, "4226 + slot") || !strings.Contains(script, "SCCACHE_SERVER_PORT=5000") {
+		t.Fatalf("a check that sets the port lost it: %s", script)
+	}
+}
+
+// A check that waits for a busy slot keeps the slot it waits for: with every
+// slot busy the scan ends on the last one, so the waiting path must name the
+// lock it actually takes, and its sccache port follows that slot. A fake flock
+// makes both answers immediate, so the test takes no time and starts no waiter.
+func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Every non-blocking attempt fails, so the scan finds no free slot, and the
+	// waiting attempt succeeds at once.
+	fake := "#!/bin/sh\ncase \"$1\" in -n) exit 1 ;; -w) exit 0 ;; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The inner script names the port the way a check does, from its slot.
+	script := nodeSlotScript(dir, 2, 2, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("wrapper: %v: %s", err, errOut.String())
+	}
+	if got := strings.TrimSpace(out.String()); got != "slot=0 port=4226" {
+		t.Fatalf("the check ran with %q, want slot 0 and its own port", got)
+	}
+	if !strings.Contains(errOut.String(), "waiting for slot 0") {
+		t.Fatalf("the check's log does not say why it waited: %s", errOut.String())
+	}
+}
