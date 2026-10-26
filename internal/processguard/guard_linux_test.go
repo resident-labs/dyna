@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,36 @@ import (
 )
 
 func dumpableForTest() (int, error) { return unix.PrctlRetInt(unix.PR_GET_DUMPABLE, 0, 0, 0, 0) }
+
+// dieWithParent makes the kernel kill this fixture when its parent dies.
+func dieWithParent() { _ = unix.Prctl(unix.PR_SET_PDEATHSIG, uintptr(unix.SIGKILL), 0, 0, 0) }
+
+// A fixture dies with the process that started it, so a killed test leaves no
+// helper behind. The test kills the fixture's parent and waits for the pipe the
+// fixture holds to close, which happens only when the fixture is gone.
+func TestFixtureDiesWithItsParent(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	parent := fixture("parent", t.TempDir())
+	parent.Stdout = w
+	if err := parent.Start(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if _, err := io.ReadFull(r, make([]byte, len("ready\n"))); err != nil {
+		t.Fatal(err)
+	}
+	_ = parent.Process.Kill()
+	_ = parent.Wait()
+	// Only a failure waits for this deadline.
+	_ = r.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if n, err := r.Read(make([]byte, 1)); n != 0 || !errors.Is(err, io.EOF) {
+		t.Fatalf("the idle fixture outlived its parent: read %d bytes, %v", n, err)
+	}
+}
 
 func TestLiveReaperPreservesExitedAnchor(t *testing.T) {
 	anchor := exec.Command("/bin/sleep", "60")

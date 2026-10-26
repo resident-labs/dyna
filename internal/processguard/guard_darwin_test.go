@@ -13,6 +13,7 @@ import (
 // Darwin has no PR_GET_DUMPABLE or systemd journal. The child verifies both
 // RLIMIT_CORE values, and the parent checks wait status and core artifacts.
 func dumpableForTest() (int, error)                                    { return 0, nil }
+func dieWithParent()                                                   {}
 func assertNoCrashEvents(t *testing.T, started time.Time, pids ...int) {}
 
 // awaitLeaderExit waits for the group leader's exit through kqueue, which
