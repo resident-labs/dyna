@@ -27,8 +27,17 @@ conversation, so the transfer resumes that exact session with the new profile's
 model, thinking level and provider account. It keeps the conversation and the
 worktree, waits for no handoff, and runs no fresh conversation. If Pi cannot
 resume that session on the new model, the transfer starts the fresh
-conversation instead. Every other pair starts a fresh conversation as described
-above.
+conversation instead.
+
+A move from Pi to Claude Code converts the Pi conversation into a new Claude
+session file and resumes it, so the same history continues without a handoff.
+Thinking blocks, provider signatures, usage and model attribution do not
+cross; the target model gets the user text, assistant text, tool calls and
+tool results. The writer is pinned to the supported Pi and Claude Code
+versions. A conversion failure, an unsupported version, or a first turn that
+cannot load the converted session falls back to the written handoff and says
+why in the transfer result. Every other pair starts a fresh conversation as
+described above.
 
 The handoff wait is bounded (default 30 seconds). A failed old agent uses the
 transcript immediately. A running old turn holds the ask until that bound ends;

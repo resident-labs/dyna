@@ -105,6 +105,16 @@ compacts the session before a request that no longer fits the new model's
 window, and Dyna runs the target profile's compact command first when its
 threshold is due.
 
+A move from Pi to Claude Code converts the Pi conversation into a new Claude
+session file under the target account's resolved `CLAUDE_CONFIG_DIR` and
+resumes it, so the same history continues without a handoff. Thinking blocks,
+provider signatures, usage and model attribution do not cross; the target
+model gets the user text, assistant text, tool calls and tool results. The
+writer is pinned to the supported Pi and Claude Code versions. A conversion
+failure, an unsupported version, or a first turn that cannot load the
+converted session falls back to the written handoff, and `transfer status`
+says why in its reason.
+
 Repeating a request recovers its saved attempt. Use `--retry` after failure or
 cancellation. Cancel only while waiting for handoff. Late handoffs cannot finish
 another attempt. Dyna stops the old turn before replacement startup. Stored
