@@ -462,6 +462,15 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// A machine with a free slot must exist before the plan does any work, so a
 	// fleet that is only busy keeps the job waiting without a fetch.
 	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
+	if chosen == nil && retriedFrom != "" {
+		// The machine that failed is the only one that can take this work, so it
+		// runs there once more instead of the head waiting with nothing running.
+		// The replacement carries Result.Resumed, which keeps that to one retry.
+		chosen = availableCINodeExcept(enabled, active, job.record.RoomID, "")
+		if chosen != nil {
+			resumed = true
+		}
+	}
 	if chosen == nil {
 		return false, nil
 	}
@@ -496,7 +505,17 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// run. A suite that no machine of that room allows never arrives, so the
 	// caller gets a typed error that names it; a fleet that is only busy or low
 	// on disk keeps waiting.
-	chosen = availableCINodeExcept(localci.NodesForSuites(enabled, plan.suites), active, job.record.RoomID, retriedFrom)
+	suited := localci.NodesForSuites(enabled, plan.suites)
+	chosen = availableCINodeExcept(suited, active, job.record.RoomID, retriedFrom)
+	if chosen == nil && retriedFrom != "" {
+		// The machine that failed is the only one that can take this work, so it
+		// runs there once more instead of the head waiting with nothing running.
+		// The replacement carries Result.Resumed, which keeps that to one retry.
+		chosen = availableCINodeExcept(suited, active, job.record.RoomID, "")
+		if chosen != nil {
+			resumed = true
+		}
+	}
 	if chosen == nil {
 		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
 	}
@@ -532,6 +551,13 @@ const (
 // savedResultActionFor picks what to do with a complete saved result of a head
 // whose local run is the only provider, such as a merge trial.
 func savedResultActionFor(result localci.Result) savedResultAction {
+	if result.Resumed {
+		// This result is already the replacement for a run that proved nothing, so
+		// its retry is spent whatever failure it hit. Settling here keeps admission
+		// and the gate agreeing instead of one refusing to run and the other
+		// waiting for a retry that will never start.
+		return settleSavedResult
+	}
 	if machineFailureRetryFrom(result) != "" {
 		return retryOnAnotherMachine
 	}
