@@ -150,7 +150,7 @@ func TestRejectSymlinkRoots(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				dest := out["GIT_CONFIG_GLOBAL"]
+				dest := publishedConfig(out)
 				if kind == "bridge" {
 					dest = out["DYNA_BIN"]
 				}
@@ -189,7 +189,7 @@ func TestBridgeRestorationAndArguments(t *testing.T) {
 			t.Fatalf("script mode: %v", err)
 		}
 	}
-	info, err := os.Stat(out["GIT_CONFIG_GLOBAL"])
+	info, err := os.Stat(publishedConfig(out))
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("config mode")
 	}
@@ -318,7 +318,7 @@ func TestBridgeRetentionAndNestedPrepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config, err := os.ReadFile(nested["GIT_CONFIG_GLOBAL"])
+	config, err := os.ReadFile(publishedConfig(nested))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,5 +500,43 @@ func TestDynaBridgeExecsTheInstalledDyna(t *testing.T) {
 	}
 	if !strings.Contains(string(script), "exec '"+strings.ReplaceAll(image, "'", `'\''`)+"'") {
 		t.Fatalf("dyna bridge lost the engine path fallback: %s", script)
+	}
+}
+
+// publishedConfig is the immutable Git config of a publication. GIT_CONFIG_GLOBAL
+// names a writable file that includes it.
+func publishedConfig(out map[string]string) string {
+	return filepath.Join(filepath.Dir(filepath.Dir(out["DYNA_BIN"])), "gitconfig")
+}
+
+// D-288: a tool that writes the global Git config (gh auth setup-git, git config
+// --global) must not damage the published set, and its write must survive the
+// next Prepare.
+func TestGlobalGitWriteLeavesPublicationValid(t *testing.T) {
+	scope, _, env := fixture(t)
+	first, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	write := exec.Command(git, "config", "--global", "user.name", "Tool Wrote This")
+	write.Env = merged(env, first)
+	if out, err := write.CombinedOutput(); err != nil {
+		t.Fatalf("git config --global: %s %v", out, err)
+	}
+	second, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatalf("Prepare after a global Git write: %v", err)
+	}
+	if second["DYNA_BIN"] != first["DYNA_BIN"] {
+		t.Fatalf("publication changed: %s, then %s", first["DYNA_BIN"], second["DYNA_BIN"])
+	}
+	get := exec.Command(git, "config", "--global", "--get", "user.name")
+	get.Env = merged(env, second)
+	if out, err := get.Output(); err != nil || strings.TrimSpace(string(out)) != "Tool Wrote This" {
+		t.Fatalf("the tool's write was lost: %q %v", out, err)
 	}
 }

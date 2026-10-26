@@ -72,7 +72,7 @@ func TestGitIncludesIgnoreAttributesAndTilde(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			contents, err := os.ReadFile(next["GIT_CONFIG_GLOBAL"])
+			contents, err := os.ReadFile(publishedConfig(next))
 			if err != nil {
 				t.Fatal(err)
 			}
