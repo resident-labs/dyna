@@ -45,7 +45,7 @@ func TestHeadRefreshStoresClosureTime(t *testing.T) {
 		}
 		for i, want := range []string{"closed", "merged"} {
 			var body []byte
-			if err := db.QueryRow("SELECT body FROM pr_records WHERE key=?", fmt.Sprint(i+1)).Scan(&body); err != nil {
+			if err := db.QueryRow("SELECT body FROM pr_rows WHERE key=?", fmt.Sprint(i+1)).Scan(&body); err != nil {
 				t.Fatal(err)
 			}
 			var saved struct {
