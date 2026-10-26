@@ -111,7 +111,7 @@ checks:
     image: golang:1.26.3
     hostUser: true
     setup: timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69
-    command: bash scripts/ci.sh go modules && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer
+    command: bash scripts/ci.sh go modules && bash scripts/ci.sh go format && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer
     caches: [go-build, go-mod]
     env:
       GOMAXPROCS: "2"

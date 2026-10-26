@@ -218,9 +218,9 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			}
 			keys := map[string][]string{
 				"claude-code": {"CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR"},
-				"opencode": {"OPENCODE_CONFIG_DIR", "OPENCODE_DB"},
-				"muse": {"MUSE_AUTH_PATH"},
-				"grok": {"GROK_HOME"}, "pi": {"PI_CODING_AGENT_DIR"},
+				"opencode":    {"OPENCODE_CONFIG_DIR", "OPENCODE_DB"},
+				"muse":        {"MUSE_AUTH_PATH"},
+				"grok":        {"GROK_HOME"}, "pi": {"PI_CODING_AGENT_DIR"},
 			}
 			for _, key := range keys[h] {
 				path := p.Env[key]

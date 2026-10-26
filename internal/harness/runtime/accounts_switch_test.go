@@ -27,13 +27,13 @@ func signedSharedGrok(t *testing.T, a *Accounts, user, refresh string) NativeAcc
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(map[string]any{grokTestSlot: map[string]any{
-		"auth_mode":     "oidc",
-		"oidc_issuer":   grokTestIssuer,
+		"auth_mode":      "oidc",
+		"oidc_issuer":    grokTestIssuer,
 		"oidc_client_id": grokTestClient,
-		"user_id":       user,
-		"key":           "grok-access-" + user,
-		"refresh_token": refresh,
-		"expires_at":    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		"user_id":        user,
+		"key":            "grok-access-" + user,
+		"refresh_token":  refresh,
+		"expires_at":     time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 	}})
 	if err = os.WriteFile(filepath.Join(n.Home, "auth.json"), raw, 0600); err != nil {
 		t.Fatal(err)

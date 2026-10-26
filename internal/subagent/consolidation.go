@@ -415,6 +415,7 @@ func (m *Manager) CancelConsolidation(ctx context.Context, roomID, id string) (C
 	}
 	return m.consolidation(roomID, id)
 }
+
 // postConsolidationPaused tells root that a consolidation stopped on an error,
 // with the two commands that move it on.
 func (m *Manager) postConsolidationPaused(c ConsolidationState, cause error) {
@@ -918,7 +919,11 @@ func (m *Manager) commitConsolidation(c ConsolidationState) error {
 	if err != nil {
 		return err
 	}
-	return m.updateConsolidation(c.Target, c.ID, func(s *ConsolidationState) error { s.Phase, s.Error = "completed", ""; s.Ended = m.transferNow(); return nil })
+	return m.updateConsolidation(c.Target, c.ID, func(s *ConsolidationState) error {
+		s.Phase, s.Error = "completed", ""
+		s.Ended = m.transferNow()
+		return nil
+	})
 }
 
 // reserveConsolidation repairs a crash between the durable plan write and
