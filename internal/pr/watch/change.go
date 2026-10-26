@@ -269,6 +269,11 @@ func resetReview(r *Record, head string) {
 	rememberReviewAssignment(r)
 	r.Landing = nil
 	retireReviewNotices(r, "head-changed:"+head)
+	if headChanged {
+		for _, id := range r.RequiredReviewers {
+			retireSessionReviewNotices(r, id, "head-changed:"+head)
+		}
+	}
 	r.Head = head
 	if headChanged && changeKind(*r) == "github" {
 		r.CI = "pending"
@@ -281,6 +286,9 @@ func resetReview(r *Record, head string) {
 	r.Reviewer = ""
 	r.ReviewID = 0
 	r.PauseReason = ""
+	if headChanged && r.State == "open" {
+		requiredReviewNotices(r)
+	}
 }
 func (s *Service) refreshLocal(ctx context.Context, key string) error {
 	r, err := s.Store.Get(key)

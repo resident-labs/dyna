@@ -2,8 +2,10 @@ package watch
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
+	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/room"
 )
 
@@ -13,6 +15,22 @@ func staleNotice(st State, r Record, n Notice) string {
 	if n.Kind == "held-comment" {
 		if _, ok := r.HeldComments[n.CommentID]; !ok {
 			return "comment-resolved"
+		}
+		return ""
+	}
+	// A required-review re-assignment is live only while its head is current,
+	// the change is open and the requirement still waits for this reviewer.
+	if n.Kind == "required-review" {
+		if r.State == "closed" || r.State == "merged" || !r.Watching {
+			return "change-ended"
+		}
+		_, rest, hasHead := strings.Cut(n.Text, "\nHead: ")
+		head, _, _ := strings.Cut(rest, "\n\n")
+		if hasHead && head != r.Head {
+			return "head-changed"
+		}
+		if slices.Contains(r.RequiredReviewers, n.Target) && !slices.Contains(facts.MissingRequiredReviewers(r), n.Target) {
+			return "required-review-satisfied"
 		}
 		return ""
 	}
@@ -70,7 +88,7 @@ func staleNotice(st State, r Record, n Notice) string {
 
 // reviewNotice identifies assignments and requests to finish an assigned review.
 func reviewNotice(n Notice) bool {
-	return strings.Contains(n.Text, "Review PR ") || strings.Contains(n.Text, "Assignment input: ") || strings.Contains(n.Text, "You ended your turn without recording a verdict")
+	return n.Kind == "required-review" || strings.Contains(n.Text, "Review PR ") || strings.Contains(n.Text, "Assignment input: ") || strings.Contains(n.Text, "You ended your turn without recording a verdict")
 }
 
 // systemReviewNotice delivers discussion without user-level escalation.

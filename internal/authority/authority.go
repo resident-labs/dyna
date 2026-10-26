@@ -244,6 +244,7 @@ var Rules = []Rule{
 	{Action: "git pr untrack", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr resume", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr require", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
+	{Action: "git pr unrequire", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr hold", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr release", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "SetPRGoal", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
