@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { byUrgency, laneGrid, otherStage, type CellState, type PhaseInput } from './lanes.ts'
+import { byUrgency, cellOf, laneGrid, otherStage, type CellState, type PhaseInput } from './lanes.ts'
 
 const ph = (phase: string, state: CellState = 'ok', extra: Partial<PhaseInput> = {}): PhaseInput => ({ phase, state, done: state === 'running' ? 0 : 1, total: 1, ...extra })
 
@@ -9,13 +9,14 @@ test('lanes and stages come from names, with repeated stages counted in one cell
   assert.ok(grid)
   assert.deepEqual(grid.stages, ['prepare', 'review', 'fix'])
   assert.deepEqual(grid.lanes.map((l) => l.name), ['CH', 'BS'])
-  const bs = grid.lanes[1]!
+  const [ch, bs] = grid.lanes
+  assert.ok(ch && bs)
   assert.equal(bs.cells[1]?.runs, 2)
   assert.deepEqual(bs.cells[1]?.phases, [2, 4])
   assert.equal(bs.cells[1]?.total, 2)
   assert.equal(bs.cells[2]?.runs, 1)
-  assert.equal(grid.lanes[0]!.cells[2], null)
-  assert.equal(grid.lanes[0]!.state, 'running')
+  assert.equal(ch.cells[2], null)
+  assert.equal(ch.state, 'running')
 })
 
 test('phases without shared stages get no grid', () => {
@@ -37,6 +38,13 @@ test('an explicit lane and stage win over the name', () => {
   assert.ok(grid)
   assert.deepEqual(grid.stages, ['build'])
   assert.deepEqual(grid.lanes.map((l) => l.name), ['api', 'web'])
+})
+
+test('cellOf finds the cell that holds a phase group', () => {
+  const grid = laneGrid([ph('A prepare'), ph('B prepare'), ph('B review'), ph('B review')])
+  assert.ok(grid)
+  assert.deepEqual(cellOf(grid, 3), { lane: 'B', col: 1 })
+  assert.equal(cellOf(grid, 9), null)
 })
 
 test('a failed cell makes its lane failed, and urgent lanes sort first', () => {
