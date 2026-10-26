@@ -5,10 +5,44 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGitConfigWithoutAutoMaintenance(t *testing.T) {
+	for _, inherited := range []int{1, 2} {
+		t.Run(strconv.Itoa(inherited)+" inherited entries", func(t *testing.T) {
+			env := []string{
+				"HOME=" + t.TempDir(),
+				"PATH=" + os.Getenv("PATH"),
+				"GIT_CONFIG_COUNT=" + strconv.Itoa(inherited),
+			}
+			want := map[string]string{"gc.auto": "0\n", "maintenance.auto": "false\n", "core.fsync": "none\n"}
+			for i := 0; i < inherited; i++ {
+				key := "test.inherited" + strconv.Itoa(i)
+				value := "value" + strconv.Itoa(i)
+				env = append(env,
+					"GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+key,
+					"GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+value,
+				)
+				want[key] = value + "\n"
+			}
+			env = GitConfigWithoutAutoMaintenance(env)
+			env = appendGitConfig(env, "core.fsync", "none")
+			for key, expected := range want {
+				cmd := exec.Command("git", "config", "--get", key)
+				cmd.Env = env
+				cmd.Dir = t.TempDir()
+				out, err := cmd.CombinedOutput()
+				if err != nil || string(out) != expected {
+					t.Fatalf("git config %s = %q, %v; want %q", key, out, err, expected)
+				}
+			}
+		})
+	}
+}
 
 // A test binary that starts with real data, config, cache and runtime
 // folders, as an agent's go test on the owner's laptop does, runs with
