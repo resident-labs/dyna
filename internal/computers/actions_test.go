@@ -3,6 +3,7 @@ package computers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -186,10 +187,34 @@ func (r *recorder) wait(_ context.Context, d time.Duration) error {
 	return nil
 }
 
+func always() bool { return true }
+
+func TestDragStopsAndReleasesWhenAPersonTakesControl(t *testing.T) {
+	r := &recorder{}
+	moves := 0
+	// The agent keeps control for the first two moves, then a person takes over.
+	agent := func() bool { moves++; return moves <= 3 }
+	err := dragPath(context.Background(), r, []point{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1}}, time.Second, true, r.wait, agent)
+	if !errors.Is(err, errControlLost) {
+		t.Fatalf("err = %v, want the control-lost error", err)
+	}
+	want := "move 1,1|left down|wait 1s|move 2,1|wait 1s|move 3,1|wait 1s|left up"
+	if got := strings.Join(r.log, "|"); got != want {
+		t.Fatalf("events = %s, want %s", got, want)
+	}
+}
+
+func TestDragNeverStartsWhenAPersonHasControl(t *testing.T) {
+	r := &recorder{}
+	if err := dragPath(context.Background(), r, []point{{1, 1}, {2, 1}}, 0, false, r.wait, func() bool { return false }); !errors.Is(err, errControlLost) || len(r.log) != 0 {
+		t.Fatalf("err = %v, events = %v, want no input", err, r.log)
+	}
+}
+
 func TestDragPathEventSequence(t *testing.T) {
 	path := []point{{1, 1}, {2, 1}, {3, 1}}
 	plain := &recorder{}
-	if err := dragPath(context.Background(), plain, path, 10*time.Millisecond, false, plain.wait); err != nil {
+	if err := dragPath(context.Background(), plain, path, 10*time.Millisecond, false, plain.wait, always); err != nil {
 		t.Fatal(err)
 	}
 	want := "move 1,1|left down|move 2,1|wait 10ms|move 3,1|wait 10ms|left up"
@@ -197,7 +222,7 @@ func TestDragPathEventSequence(t *testing.T) {
 		t.Fatalf("default drag = %s, want %s", got, want)
 	}
 	paced := &recorder{}
-	if err := dragPath(context.Background(), paced, path, 120*time.Millisecond, true, paced.wait); err != nil {
+	if err := dragPath(context.Background(), paced, path, 120*time.Millisecond, true, paced.wait, always); err != nil {
 		t.Fatal(err)
 	}
 	want = "move 1,1|left down|wait 120ms|move 2,1|wait 120ms|move 3,1|wait 120ms|left up"

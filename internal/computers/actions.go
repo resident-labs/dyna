@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -111,8 +112,13 @@ func dragStep(a Action) (time.Duration, bool, error) {
 // dragPath presses the left button at the first point, moves through the rest
 // and releases. After each point it waits step. With paced, it also waits after
 // the press, so a frame-driven app sees the button held before the first move.
-// The button is released even when a move or a wait fails.
-func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Duration, paced bool, wait func(context.Context, time.Duration) error) error {
+// The button is released even when a move or a wait fails. agent reports
+// whether the agent still has control; once a person takes over, the drag stops
+// before its next move and releases the button.
+func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Duration, paced bool, wait func(context.Context, time.Duration) error, agent func() bool) error {
+	if !agent() {
+		return errControlLost
+	}
 	if err := p.move(path[0].X, path[0].Y); err != nil {
 		return err
 	}
@@ -126,6 +132,9 @@ func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Dura
 		}
 	}
 	for _, point := range path[1:] {
+		if !agent() {
+			return errControlLost
+		}
 		if err := p.move(point.X, point.Y); err != nil {
 			return err
 		}
@@ -135,6 +144,9 @@ func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Dura
 	}
 	return nil
 }
+
+// errControlLost ends a gesture when a person takes control of the computer.
+var errControlLost = errors.New("a person took control; the gesture stopped and its button was released")
 
 // pointerButtonAction runs pointer_down (move, then press) or pointer_up
 // (optional move, then release). The button stays held between actions of one
