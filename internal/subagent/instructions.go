@@ -29,7 +29,10 @@ func (m *Manager) sessionInstructions(meta Meta, creator string, maxDepth int, c
 	parts := []instructions.Section{
 		{Name: "Session rules", Text: rulesFor(meta)},
 		{Name: "Worker context", Text: workerContext(meta, creator, maxDepth)},
-		m.profileInstructions(meta),
+	}
+	// A leaf session starts no subagents, so it gets no profiles to pick from.
+	if !meta.Leaf {
+		parts = append(parts, m.profileInstructions(meta))
 	}
 	parts = append(parts, m.goalStore().InstructionSections(meta.RoomID)...)
 	parts = append(parts, m.featureIndex(meta), m.skillIndex(meta), m.runningJobs(meta))
@@ -184,6 +187,9 @@ func workerContext(meta Meta, creator string, maxDepth int) string {
 		limit = fmt.Sprintf("You are at depth %d of %d, so start no subagent sessions. Workflows remain open.", meta.Depth, maxDepth)
 	case maxDepth > 0:
 		limit = fmt.Sprintf("You are at depth %d of %d.", meta.Depth, maxDepth)
+	}
+	if meta.Leaf {
+		limit = fmt.Sprintf("You are at depth %d. You are a leaf session and cannot start subagents or runs.", meta.Depth)
 	}
 	if creator == "" {
 		creator = meta.Room

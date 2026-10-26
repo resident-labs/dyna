@@ -248,21 +248,25 @@ type StartOptions struct {
 	Service bool // exclude this managed session from general group posts
 	// ID is the caller's session ID, so a caller whose answer arrives late can
 	// find the session. Empty lets the manager mint one.
-	ID        string
-	Deadline  time.Time // absolute turn deadline; zero keeps ordinary sessions unlimited
-	Role      string    // stored service role; empty for user agents
-	Profile   string    // empty = the default profile
-	Name      string    // optional unique label among open sessions in the room
-	Room      string    // room name or ID; empty inherits or uses global
-	Dir       string    // worker working directory (default: a new worktree from the repository's main, else the parent's or Cwd)
-	Cwd       string    // the caller's working directory, the default Dir for a top-level session
-	Owner     string    // an owner caller's own label, such as claude:<session>; a session's is its session
-	Schema    string    // optional JSON Schema for the first turn's result
-	Goal      string    // required outcome and done condition; the session's goal, or its item's text when delegating
-	Under     string    // explicit parent goal ID to delegate from; empty picks deterministically
-	Fixes     []int     // room issue numbers linked to the session's goal
-	Task      string    // brief: context, owned files, checks and limits
-	MessageID string    // stored input for the first turn, instead of a task brief
+	ID       string
+	Deadline time.Time // absolute turn deadline; zero keeps ordinary sessions unlimited
+	Role     string    // stored service role; empty for user agents
+	Profile  string    // empty = the default profile
+	Name     string    // optional unique label among open sessions in the room
+	Room     string    // room name or ID; empty inherits or uses global
+	Dir      string    // worker working directory (default: a new worktree from the repository's main, else the parent's or Cwd)
+	Cwd      string    // the caller's working directory, the default Dir for a top-level session
+	Owner    string    // an owner caller's own label, such as claude:<session>; a session's is its session
+	Schema   string    // optional JSON Schema for the first turn's result
+	// Leaf starts a leaf session: one that can start neither subagent sessions
+	// nor workflow runs and completes its task itself. Workflow workers are
+	// leaves; no CLI flag sets it.
+	Leaf      bool
+	Goal      string // required outcome and done condition; the session's goal, or its item's text when delegating
+	Under     string // explicit parent goal ID to delegate from; empty picks deterministically
+	Fixes     []int  // room issue numbers linked to the session's goal
+	Task      string // brief: context, owned files, checks and limits
+	MessageID string // stored input for the first turn, instead of a task brief
 	// OwnerDisplay lets this session's own shells use the owner's display.
 	// Only the owner or root grants it, and no session inherits it.
 	OwnerDisplay bool
@@ -271,6 +275,26 @@ type StartOptions struct {
 // ErrNameTaken matches the error Start returns when an open session in the
 // room already holds the requested name.
 var ErrNameTaken = errors.New("session name taken")
+
+// ErrLeafStart is what Start returns for a leaf parent and what a run start
+// returns for a leaf session: a leaf completes its task itself.
+var ErrLeafStart = errors.New("a leaf session cannot start subagents; complete the task yourself")
+
+// RefuseLeafStart returns ErrLeafStart when actor is a leaf session. A run
+// start resolves its calling session from its process stamps
+// (workflowsvc.Execute), so a run refuses a leaf the same way Start refuses a
+// leaf parent. A session whose record cannot be read is not known to be a
+// leaf, so it passes.
+func RefuseLeafStart(actor authority.Actor) error {
+	if actor.Role != authority.Session || actor.Session == "" {
+		return nil
+	}
+	meta, err := DefaultStore().ReadMeta(actor.Session)
+	if err != nil || !meta.Leaf {
+		return nil
+	}
+	return ErrLeafStart
+}
 
 type nameTakenError struct{ room, name string }
 
@@ -427,7 +451,7 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	// A running process keeps its original DYNA_DEPTH. Stored metadata is
 	// authoritative after promotion, including for descendants already running.
 	depth := 1
-	parentService, parentRoot := false, false
+	parentService, parentRoot, parentLeaf := false, false, false
 	if parent != "" {
 		meta, err := store.ReadMeta(parent)
 		if err != nil {
@@ -443,7 +467,7 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 			return Info{}, Turn{}, errors.New("parent session is in another room")
 		}
 		depth = meta.Depth + 1
-		parentService, parentRoot = meta.Service, meta.Role == RoleRoot
+		parentService, parentRoot, parentLeaf = meta.Service, meta.Role == RoleRoot, meta.Leaf
 	}
 	// A service's helpers are services too; the internal root's are not.
 	service = service || parentService && !parentRoot
@@ -463,6 +487,9 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	}
 	if err := review.CheckReviewerHelper(reviewerHierarchy{m.store()}, parent, *prof, profs); err != nil {
 		return Info{}, Turn{}, err
+	}
+	if parentLeaf {
+		return Info{}, Turn{}, ErrLeafStart
 	}
 	if max := m.settings().SubagentMaxDepth; max > 0 && depth > max {
 		return Info{}, Turn{}, fmt.Errorf("subagent depth limit reached: this session would be at depth %d but subagent.maxDepth is %d (raise it with `dyna settings set subagent.maxDepth N`, or do the work in the current session)", depth, max)
@@ -494,7 +521,7 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 		ID: id, Name: name, Role: opts.Role, Service: service || opts.Role == RoleRoot, RoomID: roomRec.ID, Room: roomRec.Name, RoomCursor: roomCursor,
 		Profile: prof.Name, Model: prof.Model, Dir: dir, Depth: depth, ParentSession: parent,
 		Owner: owner, SpawnBrief: task, Created: now, LastActivity: now, Resumable: harness.Resumable(*prof),
-		OwnerDisplay: opts.OwnerDisplay,
+		OwnerDisplay: opts.OwnerDisplay, Leaf: opts.Leaf,
 	}
 	if err := store.writeMeta(meta); err != nil {
 		return Info{}, Turn{}, err
