@@ -22,4 +22,5 @@ has() { printf '%s\n' "$files" | grep -Eq "$1" && echo true || echo false; }
 echo "relay=$(has '^(relay|\.github)/|^scripts/ci\.sh$')"
 echo "go=$(has '(\.go$|^internal/|^go\.(mod|sum)$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)')"
 echo "computers=$(has '^internal/(computers|computerweb)/|^\.github/')"
-echo "web=$(has '^web/|^\.github/|^scripts/ci\.sh$')"
+# Two web tests read these backend files, so a change to either runs the web suites.
+echo "web=$(has '^web/|^internal/filesvc/files\.go$|^internal/voice/realtime/testdata/page-protocol\.json$|^\.github/|^scripts/ci\.sh$')"
