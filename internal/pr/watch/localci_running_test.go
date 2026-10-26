@@ -526,8 +526,11 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 		t.Fatalf("saved evidence = %s/%s, want error/%s", saved.Status, saved.Cause, localci.CauseEngineStop)
 	}
 	job := registeredCIJob{record: record, head: head, trial: true}
-	if s.registeredJobResultComplete(t.Context(), job, saved) {
-		t.Fatal("a run the engine stopped counted as a finished head")
+	if !s.registeredJobResultComplete(t.Context(), job, saved) {
+		t.Fatal("a stopped run must reach the retry decision, not be re-admitted blindly")
+	}
+	if act := savedResultActionFor(saved); act != retryStoppedRun {
+		t.Fatalf("a stopped run action = %v, want retryStoppedRun", act)
 	}
 	// The real reader the trial uses must stay undecided on that evidence.
 	trialJob, err := s.localTrialJob(record, head)

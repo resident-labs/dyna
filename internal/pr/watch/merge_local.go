@@ -131,9 +131,14 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 	case localci.OutcomeFailed:
 		return VerdictFailed, logs, "local CI failed", nil
 	case localci.OutcomeError:
-		// A run the engine's own stop cancelled tested nothing: the same head
-		// runs again instead of failing the batch.
-		if result.Cause == localci.CauseEngineStop {
+		// A run the engine's own stop cancelled tested nothing: the same head runs
+		// again instead of failing the batch. Once that replacement was stopped
+		// too, nothing else will run it, so the trial fails with the cause instead
+		// of waiting for a run that will never come.
+		if stoppedLocalResult(result) {
+			if result.Resumed {
+				return VerdictFailed, logs, localFailureNote(result), nil
+			}
 			return VerdictPending, "", "local CI stopped with the engine; running it again", nil
 		}
 		return VerdictFailed, logs, "local CI failed", nil
