@@ -183,6 +183,16 @@ already had. A container check keeps 1 GiB above its own memory limit in the
 systemd scope, so the docker client fits in the scope. A host check's scope is
 its only memory bound, so it gets exactly the granted memory.
 
+The scope also bounds the tasks a check may start: 768, or 256 for each CPU it
+was given when that is more. A compiler and its linker threads need many tasks
+per CPU, so a large build that asks for more CPUs gets a larger bound.
+
+Each check starts a build daemon of its own. Dyna gives every check a separate
+`SCCACHE_SERVER_PORT`, taken from the slot it holds, and keeps the cache
+directory the repository set. Ending one check therefore stops only its own
+sccache server, not a server another check still uses. A check that sets
+`SCCACHE_SERVER_PORT` itself keeps that value.
+
 A check holds one slot whatever it asks for. A wide check therefore shares the
 machine with the other slots' checks, so keep the machine's slot count and the
 requests in mind together.

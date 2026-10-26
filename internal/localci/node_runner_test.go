@@ -1036,3 +1036,31 @@ func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
 		t.Fatal("the engine-stop cause has no label")
 	}
 }
+
+// A check's task bound follows the CPUs it was given: a fixed bound stopped a
+// large Rust build from starting its linker threads, while a small check keeps
+// exactly the bound it always had.
+func TestCheckScopeTaskLimitFollowsTheCPUs(t *testing.T) {
+	for _, tc := range []struct{ cpus, want int }{{1, 768}, {2, 768}, {3, 768}, {4, 1024}, {16, 4096}} {
+		if got := (checkResources{CPUs: tc.cpus, MemoryMiB: 4096}).scope(true).TasksMax; got != tc.want {
+			t.Fatalf("%d CPUs runs with TasksMax=%d, want %d", tc.cpus, got, tc.want)
+		}
+	}
+}
+
+// Each check starts sccache on its own port, so ending one check cannot stop a
+// server another check still uses; a repository that sets the port keeps it.
+func TestEachCheckGetsItsOwnSccacheServerPort(t *testing.T) {
+	dir := t.TempDir()
+	check := nodeCheck{id: "build", name: "build", host: true, inner: "cargo build", resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
+	script := nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), check, time.Minute, 0, false)
+	if !strings.Contains(script, "SCCACHE_SERVER_PORT=$(( 4226 + slot ))") {
+		t.Fatalf("a host check did not get its own sccache port: %s", script)
+	}
+	own := check
+	own.env = map[string]string{"SCCACHE_SERVER_PORT": "5000"}
+	script = nodeCheckScript(Node{Name: "local", Slots: 2}, dir, filepath.Join(dir, "cache.git"), dir, "run-1", strings.Repeat("a", 40), own, time.Minute, 0, false)
+	if strings.Contains(script, "4226 + slot") || !strings.Contains(script, "SCCACHE_SERVER_PORT=5000") {
+		t.Fatalf("a check that sets the port lost it: %s", script)
+	}
+}
