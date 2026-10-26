@@ -169,8 +169,22 @@ own approval. Existing room review settings and the normal review pool remain.
 Each required session records its verdict with `dyna git pr verdict` and
 `--head <current-head>`. It needs no pool assignment. The merge queue waits
 until every required session has approved that exact head. A new push makes
-earlier approvals stop counting. `dyna git merge status` and the PR page show
+earlier approvals stop counting, and each required session that still owes a
+verdict is re-assigned at the new head, so a dormant reviewer is woken instead
+of silently stalling the PR. `dyna git merge status` and the PR page show
 the missing reviewers. Releasing a draft does not bypass this review gate.
+
+A required reviewer can be removed the same way it was added. Closing a
+reviewer's session releases its requirement on its own; every other case,
+including a dormant reviewer, uses:
+
+```sh
+dyna git pr unrequire 123 thoroughly-idiomatic
+```
+
+An open reviewer resolves by room name. A closed reviewer resolves only by
+the session ID that `dyna git pr show` lists. Removing a session that is not
+required changes nothing.
 
 ## Choose the reviewer
 

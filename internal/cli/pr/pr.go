@@ -275,6 +275,19 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return prWrite(c, s, r.Key(), "RequirePRReviewers", a[1:])
 	}}
 
+	unrequire := &cobra.Command{Use: "unrequire <number|url> <reviewer>...", Short: "Remove required reviewers from a tracked PR", Long: "Remove reviewers whose approval a tracked PR still waits for. The change no longer stalls on a reviewer that is dormant or closed. Open reviewers resolve by room name; a closed reviewer resolves only by the session ID the change view shows. Removing a reviewer that is not required keeps the PR unchanged.", Args: func(_ *cobra.Command, a []string) error {
+		if len(a) < 2 {
+			return fmt.Errorf("name at least one reviewer after the PR")
+		}
+		return nil
+	}, RunE: func(c *cobra.Command, a []string) error {
+		s, r, err := resolve(c, a[0])
+		if err != nil {
+			return err
+		}
+		return prWrite(c, s, r.Key(), "ReleasePRReviewers", a[1:])
+	}}
+
 	reviewer := &cobra.Command{Use: "reviewer", Short: "Show the managed reviewer pool, profiles, attached changes and waiting queue", Long: "Show the managed reviewer pool. Only live turns on needed current heads occupy capacity. Completed or inactive reviewers close. Queued changes wait when the pool is full. Paused rooms dispatch no reviews.", Args: cobra.NoArgs}
 	roomRef := reviewer.Flags().String("room", "", "room name or ID (default: current stamped room)")
 	profileName := reviewer.Flags().String("profile", "", "pin an enabled reviewer profile")
@@ -672,7 +685,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return output(c, out)
 	}}
 	root.AddCommand(admit, dismiss, held)
-	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, transfer, resume, hold, release, require, reviewer, review, verdict, comment, publishing, noise)
+	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, transfer, resume, hold, release, require, unrequire, reviewer, review, verdict, comment, publishing, noise)
 	root.AddCommand(cliexport.NewCommand())
 	return root
 }

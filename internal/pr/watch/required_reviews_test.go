@@ -10,9 +10,68 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 )
+
+// A head move resets required approvals, so each required reviewer must be
+// re-assigned at the new head. Without the notice a dormant named reviewer
+// never learns that its older verdict stopped counting, and the PR stalls
+// until someone wakes the reviewer by hand (D-64).
+func TestNewHeadReNotifiesDormantRequiredReviewers(t *testing.T) {
+	e, r := namedReviewEnv(t)
+	const safety = "ses_20261017-000007-1234abcd"
+	recordtest.Write(t, e.s.sessionStore().Root, safety, subagent.Meta{ID: safety, Name: "safety", RoomID: r.RoomID, Room: e.author.Room})
+	if err := e.s.RequireReviewers(r.Key, r.Author, r.RoomID, []string{safety}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Verdict(t.Context(), r.Key, safety, r.Head, "approve", "Safety reviewed", 0); err != nil {
+		t.Fatal(err)
+	}
+	// A remote push moves the head; the pool stays off, so the required
+	// reviewer is the only session that can unblock the change.
+	e.f.Pull.Head.SHA = strings.Repeat("b", 40)
+	e.tick()
+	newHead := e.record().Head
+	if newHead != e.f.Pull.Head.SHA || facts.MissingRequiredReviewers(e.record())[0] != safety {
+		t.Fatal("setup did not move the head and reset the approval")
+	}
+	var assignment *Notice
+	for i := range e.sent {
+		n := e.sent[i]
+		if n.Target == safety && strings.Contains(n.Text, "Head: "+newHead) {
+			assignment = &e.sent[i]
+		}
+	}
+	if assignment == nil {
+		t.Fatal("head move did not re-notify the required reviewer")
+	}
+	if !assignment.System || assignment.Type != room.PRReviewAssigned || !strings.Contains(assignment.Text, "Review ") || !strings.Contains(assignment.Text, newHead) {
+		t.Fatalf("re-assignment was not a typed waking review notice: %+v", assignment)
+	}
+	// A further push retires the first re-assignment: only the newest head
+	// asks, so the reviewer never acts on a stale head.
+	e.f.Pull.Head.SHA = strings.Repeat("c", 40)
+	e.tick()
+	newest := e.record().Head
+	forHead := map[string]int{}
+	for _, n := range e.sent {
+		if n.Target == safety && strings.Contains(n.Text, "Head: ") {
+			forHead[strings.SplitN(strings.SplitN(n.Text, "Head: ", 2)[1], "\n", 2)[0]]++
+		}
+	}
+	if forHead[newest] != 1 || forHead[newHead] != 1 {
+		t.Fatalf("each head must re-assign the reviewer exactly once: %v", forHead)
+	}
+	// The re-notified reviewer closes the loop at the current head.
+	if err := e.s.Verdict(t.Context(), r.Key, safety, newest, "approve", "Safety reviewed the new head", 0); err != nil {
+		t.Fatal(err)
+	}
+	if missing := facts.MissingRequiredReviewers(e.record()); len(missing) != 0 {
+		t.Fatalf("approval at the re-assigned head still missing: %v", missing)
+	}
+}
 
 func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 	e, r := namedReviewEnv(t)
