@@ -2,17 +2,189 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 )
+
+// A head move resets required approvals, so each required reviewer must be
+// re-assigned at the new head. Without the notice a dormant named reviewer
+// never learns that its older verdict stopped counting, and the PR stalls
+// until someone wakes the reviewer by hand (D-64).
+func TestNewHeadReNotifiesDormantRequiredReviewers(t *testing.T) {
+	e, r := namedReviewEnv(t)
+	const safety = "ses_20261017-000007-1234abcd"
+	recordtest.Write(t, e.s.sessionStore().Root, safety, subagent.Meta{ID: safety, Name: "safety", RoomID: r.RoomID, Room: e.author.Room})
+	if err := e.s.RequireReviewers(r.Key, r.Author, r.RoomID, []string{safety}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Verdict(t.Context(), r.Key, safety, r.Head, "approve", "Safety reviewed", 0); err != nil {
+		t.Fatal(err)
+	}
+	// A remote push moves the head; the pool stays off, so the required
+	// reviewer is the only session that can unblock the change.
+	e.f.Pull.Head.SHA = strings.Repeat("b", 40)
+	e.tick()
+	newHead := e.record().Head
+	if newHead != e.f.Pull.Head.SHA || facts.MissingRequiredReviewers(e.record())[0] != safety {
+		t.Fatal("setup did not move the head and reset the approval")
+	}
+	var assignment *Notice
+	for i := range e.sent {
+		n := e.sent[i]
+		if n.Target == safety && strings.Contains(n.Text, "Head: "+newHead) {
+			assignment = &e.sent[i]
+		}
+	}
+	if assignment == nil {
+		t.Fatal("head move did not re-notify the required reviewer")
+	}
+	if !assignment.System || assignment.Type != room.PRReviewAssigned || !strings.Contains(assignment.Text, "Review ") || !strings.Contains(assignment.Text, newHead) {
+		t.Fatalf("re-assignment was not a typed waking review notice: %+v", assignment)
+	}
+	// A further push retires the first re-assignment: only the newest head
+	// asks, so the reviewer never acts on a stale head.
+	e.f.Pull.Head.SHA = strings.Repeat("c", 40)
+	e.tick()
+	newest := e.record().Head
+	forHead := map[string]int{}
+	for _, n := range e.sent {
+		if n.Target == safety && strings.Contains(n.Text, "Head: ") {
+			forHead[strings.SplitN(strings.SplitN(n.Text, "Head: ", 2)[1], "\n", 2)[0]]++
+		}
+	}
+	if forHead[newest] != 1 || forHead[newHead] != 1 {
+		t.Fatalf("each head must re-assign the reviewer exactly once: %v", forHead)
+	}
+	// The re-notified reviewer closes the loop at the current head.
+	if err := e.s.Verdict(t.Context(), r.Key, safety, newest, "approve", "Safety reviewed the new head", 0); err != nil {
+		t.Fatal(err)
+	}
+	if missing := facts.MissingRequiredReviewers(e.record()); len(missing) != 0 {
+		t.Fatalf("approval at the re-assigned head still missing: %v", missing)
+	}
+}
+
+// A head that leaves and returns must restore its still-undelivered
+// assignment: the head-only notice ID would otherwise stay retired and the
+// reviewer waits for an approval nobody asked for (PR #659 review).
+// A draft holds required-review assignments exactly as it holds the pool,
+// and the release delivers them without another push (PR #659 review).
+func TestDraftHoldsRequiredReviewAssignmentsUntilRelease(t *testing.T) {
+	e, r := namedReviewEnv(t)
+	const safety = "ses_20261017-000007-1234abcd"
+	recordtest.Write(t, e.s.sessionStore().Root, safety, subagent.Meta{ID: safety, Name: "safety", RoomID: r.RoomID, Room: e.author.Room})
+	if err := e.s.RequireReviewers(r.Key, r.Author, r.RoomID, []string{safety}); err != nil {
+		t.Fatal(err)
+	}
+	// A push on a held draft PR assigns nobody.
+	e.f.Draft = true
+	e.f.Pull.Head.SHA = strings.Repeat("b", 40)
+	e.tick()
+	if got := e.record(); !got.IsDraft {
+		t.Fatal("setup did not hold the PR as a draft")
+	}
+	for _, n := range e.sent {
+		if n.Target == safety && n.Kind == "required-review" {
+			t.Fatalf("draft push delivered a required review assignment: %+v", n)
+		}
+	}
+	// The draft releases with no push of its own: the held assignment is
+	// queued and delivered at the current head.
+	e.f.Draft = false
+	e.tick()
+	var released *Notice
+	for i := range e.sent {
+		if e.sent[i].Target == safety && e.sent[i].Kind == "required-review" {
+			copy := e.sent[i]
+			released = &copy
+		}
+	}
+	if released == nil || !strings.Contains(released.Text, "Head: "+e.record().Head) {
+		t.Fatalf("draft release did not deliver the held assignment: %+v", released)
+	}
+	// The reviewer closes the loop at that head.
+	if err := e.s.Verdict(t.Context(), r.Key, safety, e.record().Head, "approve", "Safety reviewed after the release", 0); err != nil {
+		t.Fatal(err)
+	}
+	if missing := facts.MissingRequiredReviewers(e.record()); len(missing) != 0 {
+		t.Fatalf("approval after the release still missing: %v", missing)
+	}
+}
+
+func TestRequiredReviewAssignmentReturnsWhenHeadReturns(t *testing.T) {
+	e, r := namedReviewEnv(t)
+	const safety = "ses_20261017-000007-1234abcd"
+	recordtest.Write(t, e.s.sessionStore().Root, safety, subagent.Meta{ID: safety, Name: "safety", RoomID: r.RoomID, Room: e.author.Room})
+	if err := e.s.RequireReviewers(r.Key, r.Author, r.RoomID, []string{safety}); err != nil {
+		t.Fatal(err)
+	}
+	const headB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	const headC = "cccccccccccccccccccccccccccccccccccccccc"
+	// Delivery fails while the head is B, so B's assignment is still pending
+	// when C moves the head away and retires it.
+	failing := true
+	e.s.Deliver = func(_ context.Context, _ Record, n Notice) (string, error) {
+		if failing {
+			return "", errors.New("room post unavailable")
+		}
+		e.sent = append(e.sent, n)
+		return n.ID, nil
+	}
+	tickIgnoringErrors := func() {
+		e.t.Helper()
+		e.clock = e.clock.Add(time.Minute)
+		e.write()
+		_, _ = e.s.Tick(context.Background())
+	}
+	e.f.Pull.Head.SHA = headB
+	tickIgnoringErrors()
+	if got := e.record(); !slices.ContainsFunc(got.Notices, func(n Notice) bool {
+		return n.Target == safety && n.Kind == "required-review" && !n.Done && n.SupersededBy == ""
+	}) {
+		t.Fatal("setup did not queue B's pending assignment")
+	}
+	failing = false
+	e.f.Pull.Head.SHA = headC
+	e.tick()
+	if got := e.record(); !slices.ContainsFunc(got.Notices, func(n Notice) bool {
+		return n.Target == safety && n.Kind == "required-review" && (n.SupersededBy == "new-head:"+headC || n.SupersededBy == "head-changed:"+headC)
+	}) {
+		t.Fatalf("C's move did not retire B's assignment: %+v", got.Notices)
+	}
+	// The head returns to B: the retired assignment must be revived and
+	// delivered, because the reviewer still owes B's approval.
+	e.f.Pull.Head.SHA = headB
+	e.tick()
+	var revived *Notice
+	for i := range e.record().Notices {
+		n := e.record().Notices[i]
+		if n.Target == safety && n.Kind == "required-review" && strings.Contains(n.Text, "Head: "+headB) {
+			copy := e.record().Notices[i]
+			revived = &copy
+		}
+	}
+	if revived == nil || !revived.Done || revived.SupersededBy != "" || revived.PostID == "" {
+		t.Fatalf("returning head did not revive and deliver B's assignment: %+v", revived)
+	}
+	for _, n := range e.sent {
+		if n.Target == safety && strings.Contains(n.Text, "Head: "+headB) {
+			return
+		}
+	}
+	t.Fatal("the revived B assignment was never delivered")
+}
 
 func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 	e, r := namedReviewEnv(t)

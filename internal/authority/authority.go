@@ -222,8 +222,9 @@ var Rules = []Rule{
 	{Action: "profiles set-default", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	{Action: "profiles enable", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	{Action: "profiles disable", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
-	// Service profiles are global settings, so only the owner pins them.
-	{Action: "SetServiceProfile", Allowed: []Role{Owner}, Instead: "ask the owner to pin a service profile"},
+	// The reviewer profile is a room setting, so the room's own root may pin
+	// it; the owner pins any room's.
+	{Action: "SetServiceProfile", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may pin only its own room's service profile; ask the owner for other rooms"},
 	// The owner's review comments speak for the human owner, so no agent sends them.
 	{Action: "SendDiffComments", Allowed: []Role{Owner}, Instead: "ask the owner to send review comments"},
 	{Action: "SendWorktreeComments", Allowed: []Role{Owner}, Instead: "ask the owner to send review comments"},
@@ -244,6 +245,7 @@ var Rules = []Rule{
 	{Action: "git pr untrack", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr resume", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr require", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
+	{Action: "git pr unrequire", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr hold", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git pr release", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "SetPRGoal", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},

@@ -1066,6 +1066,11 @@ func serviceFailureText(meta subagent.Meta, turn subagent.Turn, role string, man
 	if manage {
 		lines = append(lines, "Inspect: dyna services log "+role+" · restart: dyna services restart "+role)
 	}
+	// The worker's own stderr is evidence, kept out of the failure's cause
+	// text: it may hold harmless warnings on a turn that timed out (D-108).
+	if stderr := strings.TrimSpace(turn.WorkerStderr); stderr != "" {
+		lines = append(lines, "Worker stderr: "+stderr)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -1192,7 +1197,10 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 			Error:   strings.TrimSpace(turn.Error),
 			Profile: profile,
 			Model:   model,
-			Detail:  plan.Post.Text,
+			// The worker's stderr is separate evidence for the card's
+			// disclosure; the cause stays the timeout (D-108).
+			WorkerStderr: strings.TrimSpace(turn.WorkerStderr),
+			Detail:       plan.Post.Text,
 		}
 		return plan, nil
 	}
@@ -1255,6 +1263,7 @@ func (s *Service) turnEvent(meta subagent.Meta, turn subagent.Turn) (room.TurnEv
 	ev := room.TurnEvent{Session: meta.Address(), SessionID: meta.ID, Turn: turn.N, State: state, Summary: summary}
 	if state == room.TurnFailed {
 		ev.Error = strings.TrimSpace(turn.Error)
+		ev.WorkerStderr = strings.TrimSpace(turn.WorkerStderr)
 	}
 	ev.Detail = s.turnReportDetail(meta, turn, state)
 	return ev, nil
@@ -1325,6 +1334,11 @@ func (s *Service) turnReportDetail(meta subagent.Meta, turn subagent.Turn, state
 			line += " / " + model
 		}
 		lines = append(lines, line)
+	}
+	// The worker's own stderr is evidence, kept out of the failure's cause
+	// text: it may hold harmless warnings on a turn that timed out (D-108).
+	if stderr := strings.TrimSpace(turn.WorkerStderr); stderr != "" {
+		lines = append(lines, "Worker stderr: "+stderr)
 	}
 	lines = append(lines,
 		fmt.Sprintf("Inspect: dyna subagent output %s --turn %d --transcript", meta.ID, turn.N))

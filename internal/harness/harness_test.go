@@ -815,6 +815,31 @@ while :; do sleep 0.05; done
 	}
 }
 
+// A startup timeout states the no-harness-event bound as its cause. Harmless
+// worker stderr, such as Pi's custom-model warning, stays separate detail the
+// owner can read, never part of that cause (D-108).
+func TestStartupStallKeepsWorkerStderrOutOfTheCause(t *testing.T) {
+	warning := `Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.`
+	a := attempt{
+		started: true, startupStalled: true,
+		runErr: fmt.Errorf("no harness event within %s of startup", 2*time.Minute),
+		stderr: warning,
+	}
+	err := attemptError(context.Background(), profile.Profile{Name: "pi", Harness: profile.HarnessPi, Model: "muse-wonder-full-1.0"}, nil, a)
+	if err == nil {
+		t.Fatal("a startup stall did not fail")
+	}
+	if !strings.Contains(err.Error(), "no harness event within 2m0s of startup") {
+		t.Fatalf("startup stall lost its timeout cause: %v", err)
+	}
+	if strings.Contains(err.Error(), warning) {
+		t.Fatalf("worker stderr was glued into the cause: %v", err)
+	}
+	if detail := StderrDetail(err); detail != warning {
+		t.Fatalf("worker stderr must survive as separate detail, got %q", detail)
+	}
+}
+
 // The profile editor writes a catalog effort into extraArgs or the model ID,
 // and the compaction threshold into Profile.Compact. Each harness must pass
 // them on every turn.

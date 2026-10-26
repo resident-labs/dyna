@@ -420,6 +420,7 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			}
 			// A ready transition must take a full observation now. Reusing CI
 			// must not preserve the draft's longer safety schedule.
+			draftReleased := r.IsDraft && !probe.IsDraft
 			if r.IsDraft != probe.IsDraft {
 				r.Polling.FullChecked = time.Time{}
 				r.Polling.Next = time.Time{}
@@ -428,6 +429,11 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			r.IsDraft, r.Mergeable, r.DefaultBranch, r.ChecksAt = probe.IsDraft, probe.Mergeable, pull.Base.Repo.DefaultBranch, probe.ChecksAt
 			r.Title = Sanitize(pull.Title)
 			r.HeadStale, r.Error = false, ""
+			// A released draft owes its required reviewers their held assignment
+			// at the current head, with no push of its own to re-ask for it.
+			if draftReleased && pull.State != "closed" {
+				requiredReviewNotices(r)
+			}
 			// A room resume requires one full observation even if an earlier
 			// outage or reserve schedule had postponed the next poll.
 			if resumedAt[r.RoomID].After(r.Polling.FullChecked) {

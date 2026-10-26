@@ -11,6 +11,8 @@ import (
 	"time"
 
 	harnesshealth "dyna-agent/internal/harness/health"
+	harnessruntime "dyna-agent/internal/harness/runtime"
+
 	prfacts "dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
@@ -86,7 +88,22 @@ func (s *Service) profiles() ([]profile.Profile, error) {
 	return ps.Profiles, nil
 }
 
-func (s *Service) chooseProfile(cfg Reviewer) (rolesession.Choice, error) {
+// reviewRepoIdentity names the repository the review's turn runs in, in the
+// same form as an account's saved repo scopes. The turn runs in the checkout
+// reviewerDir picks, and that checkout's origin decides which accounts may
+// run there, so the ranking must read the identity the turn itself will use;
+// a fallback checkout can carry a different origin than the PR's repository.
+// A record without a live checkout answers "", which fails the quota check
+// open; the launch then reports the checkout error.
+func (s *Service) reviewRepoIdentity(ctx context.Context, r Record) string {
+	dir, err := s.reviewerDir(r)
+	if err != nil {
+		return ""
+	}
+	return harnessruntime.RepoIdentity(ctx, dir)
+}
+
+func (s *Service) chooseProfile(cfg Reviewer, repo string) (rolesession.Choice, error) {
 	profiles, err := s.profiles()
 	if err != nil {
 		return rolesession.Choice{}, err
@@ -96,7 +113,7 @@ func (s *Service) chooseProfile(cfg Reviewer) (rolesession.Choice, error) {
 		return rolesession.Choice{}, err
 	}
 	failures := rolesession.MergeFailures(cfg.FailedProfiles, recent)
-	return rolesession.ChooseProfile(profiles, cfg.Profile, s.recoveredNotReady(profiles, failures), s.now(), subagent.RoleReviewer)
+	return rolesession.ChooseProfile(profiles, cfg.Profile, repo, s.recoveredNotReady(profiles, failures), s.now(), subagent.RoleReviewer)
 }
 
 // recoveredNotReady clears a hold that a turn recorded when the runtime did
@@ -232,6 +249,10 @@ func rememberReviewAssignment(r *Record) {
 // closedReviewerWindow is how long ReviewFacts still reads the reviewers of a
 // closed PR, so the pool can release them.
 const closedReviewerWindow = time.Hour
+
+// repoIdentityWait bounds the one git call a status read may spend naming a
+// queued review's repository.
+const repoIdentityWait = 5 * time.Second
 
 func (s *Service) sessionStore() *subagent.Store {
 	if s.Notify != nil {
@@ -462,7 +483,16 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 	if cfg.Profile != "" {
 		out.ProfileSource = "pinned"
 	}
-	choice, err := s.chooseProfile(cfg)
+	// The status names the profile the next queued review would use, so the
+	// quota check sees that review's repository. With no queue there is no
+	// pending launch, so any repository answers.
+	repo := ""
+	if queue := facts.Queue(roomID); len(queue) > 0 {
+		idCtx, cancel := context.WithTimeout(context.Background(), repoIdentityWait)
+		repo = s.reviewRepoIdentity(idCtx, *queue[0])
+		cancel()
+	}
+	choice, err := s.chooseProfile(cfg, repo)
 	out.Profile, out.ProfileReason, out.ProfileCause = choice.Name, choice.Reason, choice.Cause
 	if err != nil && out.LastError == "" {
 		out.LastError = err.Error()
@@ -708,7 +738,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			continue
 		}
 		cfg := st.Reviewers[roomID]
-		choice, e := s.chooseProfile(cfg)
+		choice, e := s.chooseProfile(cfg, s.reviewRepoIdentity(ctx, *candidate))
 		if e != nil {
 			return s.reviewBlocked(roomID, Sanitize(e.Error()))
 		}

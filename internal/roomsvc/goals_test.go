@@ -222,6 +222,74 @@ func TestGoalIssueLinks(t *testing.T) {
 	}
 }
 
+// A goal marked done closes every issue it still links, with the done note
+// as the close reason (D-249). An issue of no goal stays open, and a dropped
+// goal keeps its link, because the work may move to a new goal.
+func TestFinishGoalClosesLinkedIssues(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	lead := e.start(r, "lead", nil)
+	ctx := authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: lead.ID, Room: r.ID})
+	linked, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Stuck in goal state", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlinked, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Backlog stays open", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Taken by a newer goal", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := e.svc.AddGoal(ctx, r.ID, "Fix two issues", nil, []int{linked.Number, moved.Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A newer goal takes one issue before the first goal ends.
+	next, err := e.svc.AddGoal(ctx, r.ID, "", nil, []int{moved.Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.FinishGoal(ctx, r.ID, g.ID, "Shipped the fix", false); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := e.svc.rooms().Issue(r.ID, linked.Label())
+	if err != nil || closed.State != room.IssueStateClosed || closed.Reason != "Shipped the fix" {
+		t.Fatalf("linked issue = %+v, %v; want closed with the done note", closed, err)
+	}
+	open, err := e.svc.rooms().Issue(r.ID, unlinked.Label())
+	if err != nil || open.State != room.IssueStateOpen {
+		t.Fatalf("unlinked issue = %+v, %v; want still open", open, err)
+	}
+	taken, err := e.svc.rooms().Issue(r.ID, moved.Label())
+	if err != nil || taken.State != room.IssueStateGoal || taken.GoalID != next.ID {
+		t.Fatalf("moved issue = %+v, %v; want still linked to %s", taken, err, next.ID)
+	}
+	if _, err := e.svc.FinishGoal(ctx, r.ID, next.ID, "Moved work done", false); err != nil {
+		t.Fatal(err)
+	}
+	closedToo, err := e.svc.rooms().Issue(r.ID, moved.Label())
+	if err != nil || closedToo.State != room.IssueStateClosed || closedToo.Reason != "Moved work done" {
+		t.Fatalf("moved issue after its own goal = %+v, %v; want closed with that goal's note", closedToo, err)
+	}
+	kept, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Dropped work resumes", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.svc.AddGoal(ctx, r.ID, "", nil, []int{kept.Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.FinishGoal(ctx, r.ID, second.ID, "not needed", true); err != nil {
+		t.Fatal(err)
+	}
+	still, err := e.svc.rooms().Issue(r.ID, kept.Label())
+	if err != nil || still.State != room.IssueStateGoal || still.GoalID != second.ID {
+		t.Fatalf("dropped goal's issue = %+v, %v; want still linked", still, err)
+	}
+}
+
 func TestGoalStatusReadsLiveFacts(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")

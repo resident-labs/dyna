@@ -149,6 +149,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		}
 		end := TurnEnd{Turn: n, Status: status, Error: msg, Ended: ended, Model: model, Usage: turnUsage,
 			FailureReason:      failureReason,
+			WorkerStderr:       harness.StderrDetail(runErr),
 			UsageNormalization: turnNormalization, HarnessSession: sid, RawEnd: fileSize(rawPath), NormEnd: fileSize(normPath),
 			InputCutoff: cutoff, CutoffPending: cutoff == nil, FallbackCutoff: &fallback}
 		if result != nil {
@@ -241,6 +242,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		log.Printf("session scratch unavailable: %v", err)
 	}
 	prof.Env[scratch.Env] = scratchPath
+	if err := scratch.SetTemp(prof.Env, id); err != nil {
+		log.Printf("session temporary folder unavailable: %v", err)
+	}
 	stampSession(prof.Env, meta)
 	prof.Env[runstore.SessionEnv] = id
 	if exe := m.executable(); exe != "" {
