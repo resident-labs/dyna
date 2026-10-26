@@ -65,7 +65,7 @@ type Values struct {
 	DoctorCondition string
 	// AdmissionMode is off, observe or enforce. AdmissionMaxTurns is auto or a
 	// number; AdmissionReserve is zero for auto.
-	AdmissionMode         string
+	AdmissionMode         AdmissionMode
 	AdmissionMaxWait      time.Duration
 	AdmissionMaxTurns     string
 	AdmissionReserve      int64

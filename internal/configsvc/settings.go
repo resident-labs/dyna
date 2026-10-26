@@ -98,7 +98,7 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeySessionCheckInInterval, Value: v.SessionCheckInInterval.String(), Source: v.Source(settings.KeySessionCheckInInterval), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
-		{Key: settings.KeyAdmissionMode, Value: v.AdmissionMode, Source: v.Source(settings.KeyAdmissionMode), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: []string{settings.AdmissionOff, settings.AdmissionObserve, settings.AdmissionEnforce}, Display: admissionSummary(v)},
+		{Key: settings.KeyAdmissionMode, Value: v.AdmissionMode, Source: v.Source(settings.KeyAdmissionMode), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: []string{string(settings.AdmissionOff), string(settings.AdmissionObserve), string(settings.AdmissionEnforce)}, Display: admissionSummary(v)},
 		{Key: settings.KeyAdmissionMaxWait, Value: v.AdmissionMaxWait.String(), Source: v.Source(settings.KeyAdmissionMaxWait), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
 		{Key: settings.KeyAdmissionMaxTurns, Value: v.AdmissionMaxTurns, Source: v.Source(settings.KeyAdmissionMaxTurns), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyAdmissionReserve, Value: admissionReserveText(v), Source: v.Source(settings.KeyAdmissionReserve), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
@@ -224,19 +224,20 @@ func admissionReserveText(v settings.Values) string {
 // admissionSummary tells the owner what the turn limit did in the last day, so
 // the choice to enforce rests on a count and not a guess.
 func admissionSummary(v settings.Values) string {
+	mode := string(v.AdmissionMode)
 	if v.AdmissionMode == settings.AdmissionOff {
-		return v.AdmissionMode
+		return mode
 	}
 	sum, err := admission.Observed{DataDir: store.DataDir()}.Summarize(time.Now().Add(-24 * time.Hour))
 	if err != nil {
-		return v.AdmissionMode
+		return mode
 	}
 	verb := "held"
 	if v.AdmissionMode == settings.AdmissionObserve {
 		verb = "would have held"
 	}
-	text := fmt.Sprintf("%s · %s %d turns in the last 24 h", v.AdmissionMode, verb, sum.Turns)
-	if sum.Turns > 0 {
+	text := fmt.Sprintf("%s · %s %d turns in the last 24 h", mode, verb, sum.Turns)
+	if sum.MostOver > 0 {
 		text += fmt.Sprintf(", up to %d over the limit", sum.MostOver)
 	}
 	return text

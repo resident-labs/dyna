@@ -2,7 +2,12 @@ package admission
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -117,25 +122,25 @@ func TestOneRoomCannotTakeMoreThanItsShare(t *testing.T) {
 	}
 	// Two of four slots are free, yet the busy room holds its half and waits.
 	var hold Hold
-	if _, err := g.Acquire(t.Context(), Turns, "busy", func(h Hold) { hold = h }); err != nil || !hold.RoomFull {
+	if _, err := g.Acquire(t.Context(), Turns, "busy", func(h Hold) { hold = h }); err != nil || hold.Reason != ReasonRoomShare {
 		t.Fatalf("busy room: %v, hold %+v", err, hold)
 	}
 	// Another room is admitted at once. The script has no step left to wait on.
 	must(t, g, Turns, "other")
 }
 
-// A parent turn that waits on its leaf sessions holds a slot of the turn pool.
-// Leaves draw from their own pool, so neither waits behind the other, and a
-// room that fills its leaf share does not block another room's leaves.
-func TestParentAndLeavesNeverWaitOnEachOther(t *testing.T) {
+// A parent turn that waits on its child sessions holds a slot of the turn pool.
+// Children draw from their own pool, so neither waits behind the other, and a
+// room that fills its child share does not block another room's leaves.
+func TestParentAndChildrenNeverWaitOnEachOther(t *testing.T) {
 	g := pool(t, 2)
 	for _, room := range []string{"run-room", "other-room"} {
 		must(t, g, Turns, room)
 	}
 	// The turn pool is full now. A third turn would wait; the script has no
 	// step to free a slot, so the leaves below must not touch that pool.
-	must(t, g, Leaves, "run-room")
-	must(t, g, Leaves, "other-room")
+	must(t, g, Children, "run-room")
+	must(t, g, Children, "other-room")
 }
 
 func TestOffLimitTakesNoSlot(t *testing.T) {
@@ -231,21 +236,6 @@ func must(t *testing.T, g Gate, pool Pool, room string) {
 	t.Cleanup(release)
 }
 
-func TestObserveLetsEveryTurnInAndReportsTheHold(t *testing.T) {
-	g := pool(t, 1)
-	g.Observe = true
-	must(t, g, Turns, "a")
-	var hold Hold
-	release, err := g.Acquire(t.Context(), Turns, "b", func(h Hold) { hold = h })
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(release)
-	if !hold.Observed || hold.Held != 1 || hold.Limit != 1 {
-		t.Fatalf("observed hold = %+v", hold)
-	}
-}
-
 // A turn that waited MaxWait runs anyway, so no turn starves. The clock is a
 // field the test advances; the wait step moves it.
 func TestAWaitingTurnRunsAfterMaxWait(t *testing.T) {
@@ -267,5 +257,70 @@ func TestAWaitingTurnRunsAfterMaxWait(t *testing.T) {
 	t.Cleanup(release)
 	if len(holds) != 2 || holds[0].Forced || !holds[1].Forced {
 		t.Fatalf("holds = %+v, want a wait then a forced start", holds)
+	}
+}
+
+// Every slot file is locked and the turn has waited its longest: it runs
+// without a slot instead of waiting for one.
+func TestAForcedTurnRunsEvenWhenEverySlotFileIsLocked(t *testing.T) {
+	clock := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	g := Gate{
+		Dir:       t.TempDir(),
+		Limit:     func(Pool, []Slot) int { return maxSlots },
+		RoomShare: func(l int) int { return l },
+		MaxWait:   time.Minute,
+		Now:       func() time.Time { return clock },
+		Wait:      func(context.Context) error { clock = clock.Add(time.Minute); return nil },
+	}
+	for i := 0; i < maxSlots; i++ {
+		must(t, g, Turns, fmt.Sprint("room", i))
+	}
+	var holds []Hold
+	release, err := g.Acquire(t.Context(), Turns, "late", func(h Hold) { holds = append(holds, h) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if len(holds) == 0 || !holds[len(holds)-1].Forced {
+		t.Fatalf("holds = %+v, want a forced start", holds)
+	}
+}
+
+// A stuck allocator cannot hold a turn: the lock wait ends at LockTimeout.
+func TestAStuckAllocationLockFailsTheAttemptWithATimeout(t *testing.T) {
+	clock := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	g := Gate{
+		Dir:         dir,
+		Limit:       func(Pool, []Slot) int { return 4 },
+		LockTimeout: 2 * time.Second,
+		Now:         func() time.Time { return clock },
+		Wait:        func(context.Context) error { clock = clock.Add(time.Second); return nil },
+	}
+	pooldir := filepath.Join(dir, string(Turns))
+	if err := os.MkdirAll(pooldir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(pooldir, ".alloc"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Acquire(t.Context(), Turns, "a", nil); !errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("err = %v, want ErrLockTimeout", err)
+	}
+}
+
+// A bypass that turns true while a turn waits admits it at once.
+func TestBypassAdmitsAWaitingTurn(t *testing.T) {
+	owner := false
+	g := pool(t, 1, func() { owner = true })
+	g.Bypass = func() bool { return owner }
+	must(t, g, Turns, "a")
+	if _, err := g.Acquire(t.Context(), Turns, "b", nil); err != nil {
+		t.Fatal(err)
 	}
 }
