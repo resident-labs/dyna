@@ -132,6 +132,10 @@ func TestDragPathAcceptsPointArrays(t *testing.T) {
 	for _, bad := range []string{
 		`[{"type":"drag","path":[[80],[900,46]]}]`,
 		`[{"type":"drag","path":[{"x":80},{"x":80,"y":46}]}]`,
+		// A null coordinate must not decode as 0 and start a real drag.
+		`[{"type":"drag","path":[[null,46],[900,46]]}]`,
+		`[{"type":"drag","path":[[80,null],[900,46]]}]`,
+		`[{"type":"drag","path":[{"x":null,"y":46},{"x":900,"y":46}]}]`,
 	} {
 		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
 			t.Fatalf("an incomplete point was accepted: %s", bad)

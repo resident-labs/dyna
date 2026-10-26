@@ -23,14 +23,15 @@ type point struct {
 func (p *point) UnmarshalJSON(body []byte) error {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) > 0 && trimmed[0] == '[' {
-		var pair []int
+		// Pointers, so a null coordinate is refused instead of decoding as 0.
+		var pair []*int
 		if err := json.Unmarshal(trimmed, &pair); err != nil {
 			return err
 		}
-		if len(pair) != 2 {
+		if len(pair) != 2 || pair[0] == nil || pair[1] == nil {
 			return fmt.Errorf("a point array must hold exactly x and y")
 		}
-		p.X, p.Y = pair[0], pair[1]
+		p.X, p.Y = *pair[0], *pair[1]
 		return nil
 	}
 	var named struct {
