@@ -115,7 +115,5 @@ func TestKimiReportsAFailureWithoutTheSecret(t *testing.T) {
 	defer failing.Close()
 	kimi = Kimi{BaseURL: failing.URL, Token: kimiToken("kimi-access", nil)}
 	_, err = kimi.Search(t.Context(), Query{Text: "go"})
-	if err == nil || err.Error() != "kimi answered HTTP 500" {
-		t.Fatalf("err = %v, want the status only", err)
-	}
+	assertRefusal(t, "kimi", http.StatusInternalServerError, "kimi-access", err)
 }

@@ -47,8 +47,8 @@ func TestBraveWithoutAKeyIsNotSignedIn(t *testing.T) {
 	}
 }
 
-// A failing API names its status and never echoes the response body.
-func TestBraveReportsAFailureWithoutTheBody(t *testing.T) {
+// A failing API names its status and the reason, and never the key.
+func TestBraveReportsAFailureWithoutTheKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"bad key brave-key"}`))
@@ -57,7 +57,5 @@ func TestBraveReportsAFailureWithoutTheBody(t *testing.T) {
 
 	brave := Brave{BaseURL: server.URL, Key: func(context.Context) (string, error) { return "brave-key", nil }}
 	_, err := brave.Search(t.Context(), Query{Text: "go"})
-	if err == nil || err.Error() != "brave answered HTTP 401" {
-		t.Fatalf("err = %v, want the status only", err)
-	}
+	assertRefusal(t, "brave", http.StatusUnauthorized, "brave-key", err)
 }

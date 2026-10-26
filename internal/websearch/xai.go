@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -97,8 +98,6 @@ func (x XAI) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		// The body can echo the request, so only the status is reported.
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 		return nil, statusError("xai", response.StatusCode, response.Body, token)
 	}
 	stream, err := readXAIStream(response.Body)
@@ -293,11 +292,7 @@ func (s *xaiStream) results() []Result {
 			continue
 		}
 		seen[cite.URL] = true
-		snippet := xaiCitedText(answer, cite)
-		if snippet == "" {
-			snippet = text(answer)
-		}
-		results = append(results, Result{Title: text(cite.Title), URL: cite.URL, Snippet: snippet})
+		results = append(results, Result{Title: xaiTitle(cite, s.sources), URL: cite.URL, Snippet: xaiCitedText(answer, cite)})
 	}
 	for _, source := range s.sources {
 		if source.URL == "" || seen[source.URL] {
@@ -309,12 +304,69 @@ func (s *xaiStream) results() []Result {
 	return results
 }
 
-// xaiCitedText is the answer span a citation marks, or empty when the span does
-// not fit the answer.
+// xaiCitedText is the answer sentence a citation supports. xAI's offsets mark
+// the citation marker itself, such as "[[1]](https://example.com)", and not the
+// sentence that cites it, so the snippet is the sentence around that marker with
+// the marker removed.
 func xaiCitedText(answer string, cite xaiCitation) string {
 	runes := []rune(answer)
-	if cite.StartIndex < 0 || cite.EndIndex <= cite.StartIndex || cite.EndIndex > len(runes) {
+	if cite.StartIndex < 0 || cite.StartIndex > len(runes) || cite.EndIndex < cite.StartIndex || cite.EndIndex > len(runes) {
 		return ""
 	}
-	return text(string(runes[cite.StartIndex:cite.EndIndex]))
+	sentence := string(runes[xaiSentenceStart(runes, cite.StartIndex):xaiSentenceEnd(runes, cite.EndIndex)])
+	sentence = xaiMarkers.ReplaceAllString(sentence, "")
+	return text(xaiSpacing.ReplaceAllString(sentence, "$1"))
+}
+
+// xaiMarkers are the citation links xAI writes into an answer: the numeric
+// label in brackets, then the source URL in parentheses.
+var xaiMarkers = regexp.MustCompile(`\[\[?\d+\]?\]\([^)]*\)`)
+
+// xaiSpacing is the gap a removed marker leaves before punctuation.
+var xaiSpacing = regexp.MustCompile(`\s+([.,!?;:])`)
+
+// xaiSentenceStart is where the sentence that holds a span begins.
+func xaiSentenceStart(runes []rune, at int) int {
+	for i := at - 1; i >= 0; i-- {
+		if strings.ContainsRune(".!?\n", runes[i]) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// xaiSentenceEnd is where the sentence that holds a span ends, after its own
+// terminator.
+func xaiSentenceEnd(runes []rune, at int) int {
+	for i := at; i < len(runes); i++ {
+		if strings.ContainsRune(".!?\n", runes[i]) {
+			return i + 1
+		}
+	}
+	return len(runes)
+}
+
+// xaiTitle names a citation. xAI titles a citation with its numeric label, so a
+// bare label falls back to the search call's title for that URL and then to the
+// URL itself.
+func xaiTitle(cite xaiCitation, sources []xaiSource) string {
+	if title := text(cite.Title); title != "" && !xaiLabel(title) {
+		return title
+	}
+	for _, source := range sources {
+		if source.URL == cite.URL && strings.TrimSpace(source.Title) != "" {
+			return text(source.Title)
+		}
+	}
+	return cite.URL
+}
+
+// xaiLabel reports a citation title that is only the numeric label.
+func xaiLabel(title string) bool {
+	for _, r := range title {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return title != ""
 }
