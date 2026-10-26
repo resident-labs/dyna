@@ -2,6 +2,7 @@ package visual
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -10,7 +11,11 @@ import (
 // A long TMPDIR, such as a session scratch directory, made Chromium abort at
 // start, because its singleton socket path did not fit in the kernel limit.
 func TestBrowserTempDirFitsChromiumSocket(t *testing.T) {
-	long := "/tmp/" + strings.Repeat("d", 120)
+	// The long base must exist, or MkdirTemp fails before the socket check runs.
+	long := filepath.Join(t.TempDir(), strings.Repeat("d", 120))
+	if err := os.MkdirAll(long, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	dir, err := browserTempDir([]string{long, "/tmp"})
 	if err != nil {
 		t.Fatalf("no usable temporary directory: %v", err)
