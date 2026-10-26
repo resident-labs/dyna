@@ -29,7 +29,7 @@ func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := MergeQueueSnapshot(snapshot)
+	items := MergeQueueSnapshot(snapshot, nil)
 	if len(items) != 1 || items[0].State != "required-reviews" || !reflect.DeepEqual(items[0].MissingRequiredReviewers, []string{safety}) || !strings.Contains(items[0].Reason, safety) {
 		t.Fatalf("queue lost missing review: %+v", items)
 	}
@@ -56,7 +56,7 @@ func TestRequiredReviewersUseExistingUnassignedVerdictPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items = MergeQueueSnapshot(snapshot)
+	items = MergeQueueSnapshot(snapshot, nil)
 	if len(items) != 1 || items[0].State != "ready" || len(items[0].MissingRequiredReviewers) != 0 {
 		t.Fatalf("queue did not count both required approvals: %+v", items)
 	}
@@ -183,7 +183,7 @@ func TestRequiredReviewsBlockLocalAndGitHubQueueEntries(t *testing.T) {
 	for _, kind := range []string{"github", "local"} {
 		r := Record{Key: "pr", Kind: kind, Repo: "owner/repo", Host: "github.com", RoomID: "room", Watching: true, State: "open", Head: "h", RoundHead: "h", Verdict: "approve", CI: "passed", BaseRef: "main", DefaultBranch: "main", Mergeable: &yes, RequiredReviewers: []string{"required"}}
 		st := State{Records: map[string]*Record{r.Key: &r}, RepositoryFacts: map[string]state.RepositoryFacts{defaultRepo(r): {MergeTrialCI: true}}}
-		got := MergeQueueSnapshot(st)
+		got := MergeQueueSnapshot(st, nil)
 		if len(got) != 1 || got[0].State != "required-reviews" || !reflect.DeepEqual(got[0].MissingRequiredReviewers, []string{"required"}) {
 			t.Fatalf("%s queue: %+v", kind, got)
 		}

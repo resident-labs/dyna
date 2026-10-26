@@ -103,7 +103,7 @@ func TestMergeQueueShowsOwnerCommentReason(t *testing.T) {
 		st.RepositoryFacts = map[string]RepositoryFacts{}
 	}
 	st.RepositoryFacts[defaultRepo(r)] = RepositoryFacts{MergeTrialCI: true}
-	rows := MergeQueueSnapshot(st)
+	rows := MergeQueueSnapshot(st, nil)
 	if len(rows) != 1 || rows[0].Reason != "waiting on replies to owner comments" {
 		t.Fatalf("rows: %+v", rows)
 	}
