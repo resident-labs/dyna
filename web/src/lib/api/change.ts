@@ -280,6 +280,13 @@ export interface MergeTrialStatus {
   stacks?: MergeTrialStack[]
 }
 
+// MergeDependency is watch.MergeDependency, the change blocking a queue row.
+export interface MergeDependency {
+  changeId: string
+  number?: number
+  title?: string
+}
+
 // MergeQueueItem is watch.MergeQueueItem, one row of the room's merge status.
 export interface MergeQueueItem {
   goalId?: string
@@ -299,6 +306,7 @@ export interface MergeQueueItem {
   excerpt?: string
   trial?: MergeTrialStatus
   overlaps?: Overlap[]
+  dependency?: MergeDependency
 }
 
 // MergeControlStatus is watch.MergeControlStatus. Local checks are keyed by head SHA.
