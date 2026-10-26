@@ -91,7 +91,7 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		repos, discoveryErr = discover(ctx, opts.Session)
 	}
 	errs := []error{discoveryErr, cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})}
-	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Pressure: opts.Pressure, Lookup: scratchOwner, Logf: opts.Logf})
+	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Pressure: opts.Pressure, Closing: opts.Session != "", Lookup: scratchOwner, Logf: opts.Logf})
 	result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 	for _, kept := range cleaned.Kept {
 		result.Kept["scratch: "+kept.Reason]++
