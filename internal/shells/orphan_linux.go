@@ -41,8 +41,9 @@ func (p pinned) signal(sig unix.Signal) error {
 	return unix.PidfdSendSignal(p.fd, sig, nil, 0)
 }
 
-// stopped waits until the process has stopped (or ended) and still holds its
-// number. A sent SIGSTOP is not yet a stopped process. It reports whether
+// stopped waits until the process is stopped and still holds its number. A
+// sent SIGSTOP is not yet a stopped process, and a zombie is no containment: its
+// parent may reap it at any time and release its group. It reports whether
 // containment is confirmed.
 func (p pinned) stopped() bool {
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); runtime.Gosched() {
@@ -50,7 +51,10 @@ func (p pinned) stopped() bool {
 		if !p.reserved() {
 			return false
 		}
-		if ok && (state == 'T' || state == 't' || state == 'Z' || state == 'X') {
+		if ok && (state == 'Z' || state == 'X') {
+			return false
+		}
+		if ok && (state == 'T' || state == 't') {
 			return true
 		}
 	}
@@ -153,6 +157,11 @@ func processStat(pid int) (state byte, group int, ok bool) {
 // change the processes at that exact point.
 var beforeFreeze func()
 
+// beforeStop and afterContain run just before a process is sent SIGSTOP and
+// after its containment check; a test uses them to change the processes at
+// those exact points.
+var beforeStop, afterContain func(pid int)
+
 // stopOrphans ends the processes of job id. It first stops every process with
 // SIGSTOP, confirms each is stopped, and scans the job's groups again until a
 // scan adds nothing: a stopped process can neither fork nor exit, so no member
@@ -183,8 +192,14 @@ func stopOrphans(id string) (bool, error) {
 			if !frozen[p.pid] {
 				frozen[p.pid] = true
 				added = true
+				if beforeStop != nil {
+					beforeStop(p.pid)
+				}
 				if p.signal(unix.SIGSTOP) != nil || !p.stopped() {
 					uncontained[p.pid] = true
+				}
+				if afterContain != nil {
+					afterContain(p.pid)
 				}
 			}
 		}
