@@ -591,10 +591,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
-		var log tailBuffer
+		var tail tailBuffer
 		script := teardownScript(node, cache, runDir, runID, checks)
-		if e := r.nodeCommand(cleanup, &log, &log, script); e != nil {
-			err = errors.Join(err, fmt.Errorf("cleanup node: %w: %s", e, log.String()))
+		// The checks decided the commit. A cleanup that fails or times out is a
+		// warning on the run, never an error that replaces a passed result.
+		if e := r.nodeCommand(cleanup, &tail, &tail, script); e != nil {
+			log.Printf("local CI %s: cleanup node: %v: %s", node.Name, e, tail.String())
+			result.Warnings = append(result.Warnings, NodeCleanupUnfinished)
 		}
 	}()
 	if req.OnStart != nil {
