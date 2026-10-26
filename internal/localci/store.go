@@ -128,7 +128,9 @@ const warmSchema = `CREATE TABLE IF NOT EXISTS local_ci_warms (
 );`
 
 // attachmentSchema records the checks a run has started on a machine, so an
-// engine that restarts reattaches to them instead of losing them.
+// engine that restarts reattaches to them instead of losing them. The table is
+// created when the first check is recorded, so the schema version stays 5 and
+// an older engine still opens the database after a revert.
 const attachmentSchema = `CREATE TABLE IF NOT EXISTS local_ci_attachments (
  repo TEXT NOT NULL,
  sha TEXT NOT NULL,
@@ -156,7 +158,7 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "localci.schema", 6, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "localci.schema", 5, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
 			// The machines migration drops this table, so it may be gone already.
@@ -184,10 +186,7 @@ func (s Store) open() (*sql.DB, error) {
 		if _, err := conn.ExecContext(context.Background(), cacheCleanSchema); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(context.Background(), warmSchema); err != nil {
-			return err
-		}
-		_, err := conn.ExecContext(context.Background(), attachmentSchema)
+		_, err := conn.ExecContext(context.Background(), warmSchema)
 		return err
 	})
 	return db, err
