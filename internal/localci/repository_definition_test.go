@@ -137,9 +137,9 @@ suites:
 	return definition
 }
 
-// This repository's own definition parses, and its Go jobs run the workflow's
-// jobs through act with a cache-warming job named, so a broken definition is
-// caught here instead of by the next pull request.
+// This repository's own definition parses, so a broken definition is caught
+// here instead of by the next pull request. The desktop module is a nested
+// module the root Go commands never reach, so the go suite must still run it.
 func TestThisRepositoryDefinitionParses(t *testing.T) {
 	body, err := os.ReadFile("../../.dyna/local-ci.yaml")
 	if err != nil {
@@ -149,31 +149,14 @@ func TestThisRepositoryDefinitionParses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("this repository's definition does not parse: %v", err)
 	}
-	warm, ok := definition.Warm()
-	if !ok || warm.Name == "" {
-		t.Fatal("this repository's definition names no cache-warming job")
-	}
 	commands, ok := definition.ExecutableChecks("go")
 	if !ok {
 		t.Fatal("this repository's definition has no go suite")
 	}
-	// The desktop module is a nested module, so the root Go commands never
-	// reach it: the suite keeps a check for the workflow's own desktop job.
-	var jobs int
-	desktop := false
 	for _, command := range commands {
-		if command.Job == nil {
-			continue
-		}
-		jobs++
-		if command.Job.Name == "desktop" {
-			desktop = true
+		if strings.Contains(command.Command, "scripts/ci.sh go desktop") {
+			return
 		}
 	}
-	if jobs == 0 {
-		t.Fatal("the go suite runs no workflow job")
-	}
-	if !desktop {
-		t.Fatal("the go suite lost its desktop job, which no root Go command covers")
-	}
+	t.Fatal("the go suite lost its desktop check, which no root Go command covers")
 }

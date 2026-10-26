@@ -50,7 +50,7 @@ func cancelledAggregateFixture(t *testing.T, e *testEnv) {
 	}
 	e.f.Checks = nil
 	e.f.Pull.Head.Repo.FullName = "owner/repo"
-	for i, job := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "desktop", "go-test"} {
+	for i, job := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
 		check := actionsCheck(Check{ID: int64(i + 1), Name: job, Status: "completed", Conclusion: "success"})
 		check.CheckSuite.ID = 7
 		if job == "go-test-shard (0)" {
