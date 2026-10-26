@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -118,35 +119,55 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 	return err == nil, err
 }
 
-// dropRemovedHarnessRows applies the owner's decision of 2026-10-25: the saved
-// harness-bound accounts of Codex, Muse and OpenCode are dead weight, because
-// those sign-ins now live in Pi provider accounts, and antigravity was removed
-// before the provider model existed. A row of a harness this release does not
-// run goes for the same reason. Each dropped account loses its active marks,
-// repository scope, limit and, through the orphan cleanup, its credential file,
-// so nothing keeps a secret for an account no turn can use. The engine backs up
-// dyna.db before this migration, so the rows stay in that backup.
+// dropRemovedHarnessRows retires the rows of harnesses this release does not run:
+// Codex, Muse and OpenCode, whose providers Pi took over, and any harness that
+// left the catalog. A retired row is dropped only when a Pi account already holds
+// the same provider sign-in, so retiring a harness never discards a saved owner
+// credential that nobody has moved yet. A row with no such replacement stays, and
+// the account views report it as an unknown-harness account the owner can repair
+// or remove; the importer can still read it for that repair. A dropped account
+// loses its active marks, repository scope, limit and, through the orphan cleanup,
+// its credential file. The engine backs up dyna.db before this migration.
 func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
-	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness') FROM accounts")
+	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), json_extract(CAST(metadata AS TEXT), '$.identity') FROM accounts")
 	if err != nil {
 		return err
 	}
-	var ids, harnesses []string
+	// replacements holds the provider sign-ins a Pi account already covers. An
+	// empty key means the account names no identity, so it covers its provider.
+	replacements := map[string]map[string]bool{}
+	type candidate struct{ id, harness, provider, identity string }
+	var candidates []candidate
 	for rows.Next() {
-		var id, harness string
-		if err := rows.Scan(&id, &harness); err != nil {
+		var id, harness, provider, identity sql.NullString
+		if err := rows.Scan(&id, &harness, &provider, &identity); err != nil {
 			rows.Close()
 			return err
 		}
-		if !KnownHarness(harness) || AccountsRetired(harness) {
-			ids = append(ids, id)
-			harnesses = append(harnesses, harness)
+		if KnownHarness(harness.String) && !AccountsRetired(harness.String) {
+			if harness.String == "pi" && provider.String != "" {
+				if replacements[provider.String] == nil {
+					replacements[provider.String] = map[string]bool{}
+				}
+				replacements[provider.String][identity.String] = true
+			}
+			continue
 		}
+		candidates = append(candidates, candidate{id.String, harness.String, provider.String, identity.String})
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return err
+	}
+	var ids []string
+	retiredHarnesses := map[string]bool{"": true}
+	for _, row := range candidates {
+		retiredHarnesses[row.harness] = true
+		if !replacedByPi(replacements[row.provider], row.identity) {
+			continue
+		}
+		ids = append(ids, row.id)
 	}
 	for _, id := range ids {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE id = ?", id); err != nil {
@@ -157,14 +178,30 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	// forgetters clear a selection but keep its row, so a room can override the
-	// global choice with none. A selection of an unknown harness has no such
-	// meaning and goes.
-	for _, harness := range append(harnesses, "") {
+	// global choice with none. A selection of a harness this release does not run
+	// has no such meaning and goes, whether or not its account row was kept.
+	harnesses := make([]string, 0, len(retiredHarnesses))
+	for harness := range retiredHarnesses {
+		harnesses = append(harnesses, harness)
+	}
+	sort.Strings(harnesses)
+	for _, harness := range harnesses {
 		if _, err := conn.ExecContext(ctx, "DELETE FROM account_active WHERE harness = ?", harness); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// replacedByPi reports whether a Pi account covers this provider sign-in: the
+// same provider, and the same identity unless the Pi account names none. An
+// account whose identity is unknown is covered only by an account whose identity
+// is unknown too, so a migration never discards a sign-in it cannot match.
+func replacedByPi(covered map[string]bool, identity string) bool {
+	if len(covered) == 0 {
+		return false
+	}
+	return covered[identity] || covered[""]
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the
