@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupRows, healthyLine, hookRows, readLog, serviceRows } from './servicesCard.ts'
+import { groupRows, healthyLine, hookRows, logKey, readLog, serviceRows, settleReads } from './servicesCard.ts'
 import type { Hook, HookRun, HookSummary } from '../api/settings.ts'
 import type { ServiceView } from '../api/service.ts'
 
@@ -47,4 +47,20 @@ test('a failed global run opens its log, and a failed read shows the reason', as
   const tail = await readLog(async (hook, id) => { seen.push(`${hook}/${id}`); return { tail: 'disk read failed', exitCode: 1 } }, bad.log)
   assert.deepEqual([tail, seen], ['disk read failed', ['maintenance/x']])
   assert.equal(await readLog(async () => { throw new Error('log is gone') }, bad.log), 'log is gone')
+})
+
+test('a newer run of the same hook has its own log key', () => {
+  const [a] = hookRows([summary({ name: 'maintenance' }, run('error', 'old'))])
+  const [b] = hookRows([summary({ name: 'maintenance' }, run('error', 'new'))])
+  if (a?.log?.kind !== 'hook' || b?.log?.kind !== 'hook') return assert.fail('hook rows carry hook logs')
+  assert.notEqual(logKey(a.log), logKey(b.log))
+})
+
+test('a failed room read keeps that room last good list, and a room never read shows as unreadable', () => {
+  const bad = service({ profile: '', reason: 'no profile' })
+  const first = settleReads({}, [{ room: 'one', services: [bad] }, { room: 'two', services: [service({})] }])
+  const again = settleReads(first.kept, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
+  assert.deepEqual(serviceRows(again.byRoom).map((r) => [r.tone, r.state]), [['bad', 'no profile']])
+  const fresh = settleReads({}, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
+  assert.deepEqual(serviceRows(fresh.byRoom).map((r) => [r.id, r.tone, r.state]), [['service:unreadable:one', 'bad', 'Could not be read'], ['service:librarian', 'ok', 'sol']])
 })
