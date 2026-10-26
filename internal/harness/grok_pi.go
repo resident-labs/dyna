@@ -58,6 +58,12 @@ func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv 
 		}
 		return commandSpec{argv: append(base(), "--session", arg), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
 	}
+	// A missing session file fails before any process starts, so a recovery
+	// nudge never targets a session that does not exist.
+	inv.resumeReady = func(sessionID string) error {
+		_, err := harnessruntime.PiSessionPath(sessionID)
+		return err
+	}
 	inv.fork = func(sourcePath, prompt string) commandSpec {
 		// --fork copies the source session into this turn's directory and
 		// starts a new session there without asking. --session-id pins its id,

@@ -23,6 +23,13 @@ const (
 	piAbortGrace     = 10 * time.Second
 )
 
+// piPromptTimeout bounds the turn's main prompt command, which can follow a
+// fresh process start: under load (dozens of sessions, a network flap) pi
+// needs well over 30 s to create a session before it answers (D-221). The
+// startup watchdog still bounds a silent process. A var, so tests can
+// shorten it.
+var piPromptTimeout = 2 * time.Minute
+
 type piResponse struct {
 	Command string          `json:"command"`
 	Success bool            `json:"success"`
@@ -413,7 +420,7 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 	var startBoundary *int64
 	sendPrompt := func() error {
 		startBoundary = normalizedBoundary(normalizer)
-		resp, err := client.command(ctx, map[string]any{"type": "prompt", "message": spec.prompt}, piCommandTimeout)
+		resp, err := client.command(ctx, map[string]any{"type": "prompt", "message": spec.prompt}, piPromptTimeout)
 		if err != nil {
 			return err
 		}
