@@ -472,3 +472,42 @@ func TestReplyRecordsTheHeadPushedSinceTheLastPoll(t *testing.T) {
 		t.Fatalf("reply head = %q, want the pushed head %q (stale was %q)", head, pushed, r.Head)
 	}
 }
+
+// A finding from an earlier round stays repliable after a new head clears the
+// current findings (D-271). The reply is recorded in its round and does not
+// reopen the review the new head passed.
+func TestReplyToAFindingFromAnEarlierRoundIsRecorded(t *testing.T) {
+	e := newEnv(t)
+	r, _ := localChange(t, e)
+	e.tick()
+	r, _ = e.s.Store.Get(r.Key)
+	findings := []Finding{{Severity: "blocking", File: "code.txt", Line: 1, Why: "Missing bounds check", Fix: "Check the index"}}
+	if err := e.s.VerdictWithFindings(context.Background(), r.Key, r.Reviewer, r.Head, "changes", "Fix bounds", 0, findings); err != nil {
+		t.Fatal(err)
+	}
+	reviewed, _ := e.s.Store.Get(r.Key)
+	id := reviewed.Findings[0].ID
+	// A later round approved a new head, so the current findings are empty.
+	if err := e.s.Store.update(func(st *State) error {
+		rec := recordByID(st, r.Key)
+		rec.Findings = []Finding{}
+		rec.Verdict = "approve"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.ReplyFinding(context.Background(), r.Key, r.Author, e.author.ID, id, "fixed", "Fixed in the new head"); err != nil {
+		t.Fatalf("reply to an earlier round's finding = %v, want it recorded", err)
+	}
+	got, _ := e.s.Store.Get(r.Key)
+	replies := got.ReviewRounds[0].Findings[0].Replies
+	if len(replies) != 1 || replies[0].Message != "Fixed in the new head" {
+		t.Fatalf("round replies = %+v, want the reply", replies)
+	}
+	if got.Verdict != "approve" {
+		t.Fatalf("verdict = %q, want the approval kept", got.Verdict)
+	}
+	if err := e.s.ReplyFinding(context.Background(), r.Key, r.Author, e.author.ID, "f99-9", "fixed", "x"); err == nil {
+		t.Fatal("a reply to a finding no round has was accepted")
+	}
+}
