@@ -111,7 +111,9 @@ func (s Snapshot) BotReviews(requiredChecks ...string) []state.BotReview {
 		case b.Findings > 0:
 			b.State = "commented"
 		case b.hasCheck:
-			b.State = "approved"
+			// A successful check is not a pull request review. Do not show an
+			// approval unless GitHub returned an approving review above.
+			continue
 		}
 		b.URL = b.link.URL
 		out = append(out, b.BotReview)
