@@ -21,7 +21,7 @@ func (m *Manager) goalStore() *goals.Store {
 // The caller on ctx is the session that asks for the work, and the address set
 // here is attribution only.
 func (m *Manager) addSpawnGoal(ctx context.Context, meta Meta, under, text, brief string, fixes []int) (goalID, itemID string, err error) {
-	if meta.Service {
+	if meta.Service || meta.RunOwned() {
 		if len(fixes) > 0 {
 			return "", "", fmt.Errorf("--fixes needs a worker goal")
 		}
@@ -201,7 +201,7 @@ func (m *Manager) goalFrame(meta Meta, shown string) string {
 		return ""
 	}
 	// Root and service sessions hold no goals, so nothing asks them to set one.
-	if meta.Service {
+	if meta.Service || meta.RunOwned() {
 		return ""
 	}
 	if shown != "" {

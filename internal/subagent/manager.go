@@ -261,7 +261,11 @@ type StartOptions struct {
 	// Leaf starts a leaf session: one that can start neither subagent sessions
 	// nor workflow runs and completes its task itself. Workflow workers are
 	// leaves; no CLI flag sets it.
-	Leaf      bool
+	Leaf bool
+	// Run starts the session for one agent() call of a workflow run: a leaf
+	// session with no parent, no goal and no place in the room's member lists.
+	// Only the engine's run-agent call sets it.
+	Run       *RunOwner
 	Goal      string // required outcome and done condition; the session's goal, or its item's text when delegating
 	Under     string // explicit parent goal ID to delegate from; empty picks deterministically
 	Fixes     []int  // room issue numbers linked to the session's goal
@@ -348,11 +352,13 @@ func (m *Manager) StartForEngine(opts StartOptions) (Info, Turn, error) {
 // with owner as its owner label.
 func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner string) (info Info, turn Turn, err error) {
 	goal := strings.TrimSpace(opts.Goal)
-	if goal == "" {
+	if goal == "" && opts.Run == nil {
 		return Info{}, Turn{}, errors.New(`--goal is required: pass the outcome and done condition, as in dyna subagent start --goal "<outcome; done when>" "<brief>"`)
 	}
-	if err := goals.CheckText(goal); err != nil {
-		return Info{}, Turn{}, fmt.Errorf("--goal: %w", err)
+	if goal != "" {
+		if err := goals.CheckText(goal); err != nil {
+			return Info{}, Turn{}, fmt.Errorf("--goal: %w", err)
+		}
 	}
 	task := strings.TrimSpace(opts.Task)
 	if task == "" && opts.MessageID == "" {
@@ -521,7 +527,7 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 		ID: id, Name: name, Role: opts.Role, Service: service || opts.Role == RoleRoot, RoomID: roomRec.ID, Room: roomRec.Name, RoomCursor: roomCursor,
 		Profile: prof.Name, Model: prof.Model, Dir: dir, Depth: depth, ParentSession: parent,
 		Owner: owner, SpawnBrief: task, Created: now, LastActivity: now, Resumable: harness.Resumable(*prof),
-		OwnerDisplay: opts.OwnerDisplay, Leaf: opts.Leaf,
+		OwnerDisplay: opts.OwnerDisplay, Leaf: opts.Leaf || opts.Run != nil, Run: opts.Run,
 	}
 	if err := store.writeMeta(meta); err != nil {
 		return Info{}, Turn{}, err

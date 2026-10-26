@@ -676,6 +676,10 @@ func stampSession(env map[string]string, meta Meta) {
 	env[mode.EnvRoomID] = meta.RoomID
 	env[mode.EnvRoom] = meta.Room
 	env[mode.EnvAddress] = meta.Address()
+	if run := meta.Run; run != nil && run.Journal != "" {
+		env[runstore.AgentJournalEnv] = run.Journal
+		env[runstore.AgentJournalRootEnv] = run.JournalRoot
+	}
 	if meta.Role == RoleRoot {
 		env[mode.EnvMode] = mode.Root
 		env[mode.EnvDepth] = ""
