@@ -45,6 +45,13 @@ func newCheckCommand() *cobra.Command {
 			docs := accountDoctors(c.Context(), selected)
 			for _, p := range selected {
 				problem := false
+				// A profile the launch admission refuses fails its own check. The
+				// others still get checked, because management now reads them all.
+				if report := reg.Reports[p.Name]; report.Status != profile.StatusOK {
+					fmt.Fprintf(c.OutOrStdout(), "%s\n  cannot run: %s (%s)\n\n", p.Name, string(report.Status), report.Detail)
+					failed++
+					continue
+				}
 				dialect := p.EffectiveDialect()
 				caps := workeroutput.Capabilities(dialect)
 				binary, binaryErr := checkBinary(p)
