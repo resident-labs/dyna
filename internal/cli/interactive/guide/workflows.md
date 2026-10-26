@@ -47,7 +47,7 @@ Run `dyna profiles check` for installed binaries and output capabilities. Read `
 Scripts use JavaScript with top-level `await` and `return`; the return becomes the JSON result.
 They are not Node.js programs: no TypeScript, `require`, modules, filesystem, networking, or arbitrary environment access. Workers handle filesystem work.
 
-Workflow workers cannot delegate, start runs or sessions, or read any form of `dyna guide`. Dyna disables native delegation: Claude runs without the Agent tool.
+Workflow workers cannot delegate, start runs or sessions. They can read `dyna guide` and use every other dyna command. Dyna disables native delegation: Claude runs without the Agent tool.
 Workers receive `DYNA_MODE=workflow`, `DYNA_WORKER_RUN`, and `DYNA_WORKER_AGENT`. They can read run status and record progress with `dyna journal`.
 Read `dyna guide delegation` for persistent sessions and `dyna guide recovery` after provider failure.
 
