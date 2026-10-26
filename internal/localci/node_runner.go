@@ -477,10 +477,20 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if err != nil {
 		return result, err
 	}
+	// The report folder comes first: a run that fails here has claimed no record.
+	dir := r.resultDir(common, sha)
+	if err := os.MkdirAll(dir, 0700); err != nil { // not-state: report blobs live outside SQLite.
+		return result, err
+	}
+	reportRoot, err := os.MkdirTemp(dir, "run-") // not-state: report blobs live outside SQLite.
+	if err != nil {
+		return result, err
+	}
 	// The run takes over only a record whose run has no live process, so it never
 	// touches the record of a run that another engine or command is executing.
 	resume, err := r.resumeRun(ctx, localStore, attachKey, sha, cache, checks)
 	if err != nil {
+		_ = os.Remove(reportRoot) // not-state: the folder is still empty.
 		return result, err
 	}
 	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
@@ -492,14 +502,6 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// learn that the run died, so a crashed run's directory never stays forever.
 	active := path.Join(runDir, ".active")
 	reports := path.Join(runDir, "reports")
-	dir := r.resultDir(common, sha)
-	if err := os.MkdirAll(dir, 0700); err != nil { // not-state: report blobs live outside SQLite.
-		return result, err
-	}
-	reportRoot, err := os.MkdirTemp(dir, "run-") // not-state: report blobs live outside SQLite.
-	if err != nil {
-		return result, err
-	}
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
 	// A run removes its own directory on the node, whatever ended it: a finished
@@ -1192,19 +1194,34 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 	if node.SSH == "" {
 		script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
 	}
+	q := shellquote.Quote
 	for _, check := range checks {
 		name := "dyna-ci-" + runID + "-" + string(check.id)
-		if check.image != "" {
-			script += `timeout 20s "${docker[@]}" rm -f ` + shellquote.Quote(name) + " >/dev/null 2>&1 || true; "
-			script += `if [ "$(timeout 10s "${docker[@]}" inspect -f '{{.State.Running}}' ` + shellquote.Quote(name) + ` 2>/dev/null)" = true ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
+		// A check known only by its id, such as one outside the current suite
+		// selection, may have started a container or a workflow job, so both are
+		// cleaned.
+		unknown := !check.host && check.job == nil && check.image == ""
+		if check.image != "" || unknown {
+			script += `timeout 20s "${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
+			script += `if [ "$(timeout 10s "${docker[@]}" inspect -f '{{.State.Running}}' ` + q(name) + ` 2>/dev/null)" = true ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
 		}
-		script += "timeout 10s systemctl --user stop " + shellquote.Quote(name+".scope") + " >/dev/null 2>&1 || true; "
+		if check.job != nil || unknown {
+			label := q("label=dyna.run=" + runID)
+			script += `"${docker[@]}" ps -aq --filter ` + label + " --filter " + q("label=dyna.check="+string(check.id)) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `
+			script += `if [ -n "$("${docker[@]}" ps -q --filter ` + label + " --filter " + q("label=dyna.check="+string(check.id)) + ` 2>/dev/null)" ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
+		}
+		// A host check's scope is forced down and must be gone afterwards.
+		scope := q(name + ".scope")
+		script += "timeout 10s systemctl --user stop " + scope + " >/dev/null 2>&1 || true; "
+		script += "systemctl --user kill --signal=KILL " + scope + " >/dev/null 2>&1 || true; "
+		script += "if systemctl --user is-active --quiet " + scope + " 2>/dev/null; then echo 'check scope cleanup failed' >&2; exit 69; fi; "
 		// The check's detached unit goes last: a check that ended on its own has
-		// nothing left to stop, and one that a lost poll left behind dies here.
-		script += "bash -c " + shellquote.Quote(detachedStopScript) + " dyna-ci " + shellquote.Quote(detachedDir(runDir, check.id)) + " " + shellquote.Quote(checkUnit(runID, check.id)) + " || true; "
-		script += "git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
+		// nothing left to stop, and one that a lost poll left behind dies here. A
+		// unit that survives fails the teardown.
+		script += "bash -c " + q(detachedStopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
+		script += "git --git-dir=" + q(cache) + " worktree remove --force " + q(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
 	}
-	return script + "git --git-dir=" + shellquote.Quote(cache) + " worktree prune"
+	return script + "git --git-dir=" + q(cache) + " worktree prune"
 }
 
 // nodeSetupScript prepares one run on its node. The prepare stage repairs a

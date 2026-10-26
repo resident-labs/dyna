@@ -150,3 +150,53 @@ func TestSetupRepeatedAfterAKeeperStartedSucceeds(t *testing.T) {
 		}
 	}
 }
+
+// A daemon that keeps the check's output open cannot hold the wrapper, and once
+// the wrapper has ended the log writer is gone with it, so nothing lands after
+// the completion marker.
+func TestWrapperEndsTheLogWriterWithItsGroup(t *testing.T) {
+	dir := t.TempDir()
+	stubs := nodeStubs(t)
+	detached := filepath.Join(dir, "check", "detached")
+	daemon := filepath.Join(dir, "daemon.pid")
+	script := "sleep 30 & echo $! > " + daemon + "\necho DYNA_CI_CHECK_EXIT=0 >> \"$DYNA_CI_TRAILER\"\nexit 0\n"
+	t.Cleanup(func() {
+		if pid, err := os.ReadFile(daemon); err == nil {
+			_ = exec.Command("kill", strings.TrimSpace(string(pid))).Run()
+		}
+	})
+	if err := startOnShell(t, stubs, detached, script, "DYNA_CI_LOG_CAP=77777", "DYNA_CI_DRAIN_TENTHS=1"); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := os.ReadFile(filepath.Join(detached, "log"))
+	if !strings.HasSuffix(string(log), "DYNA_CI_CHECK_EXIT=0\n") {
+		t.Fatalf("the log does not end with the completion marker: %q", log)
+	}
+	if out, _ := exec.Command("pgrep", "-f", "head -c 77777").Output(); len(out) != 0 {
+		ps, _ := exec.Command("ps", "-o", "pid,ppid,pgid,sid,args", "-p", strings.TrimSpace(string(out))).CombinedOutput()
+		t.Fatalf("the log writer survived the wrapper: %s %s", out, ps)
+	}
+}
+
+// A stop counts only when nothing is left: a unit that stays active fails it.
+func TestStopScriptFailsWhileTheUnitIsStillActive(t *testing.T) {
+	for _, tc := range []struct {
+		active bool
+		fails  bool
+	}{{false, false}, {true, true}} {
+		dir := t.TempDir()
+		answer := "exit 1"
+		if tc.active {
+			answer = "exit 0"
+		}
+		stubs := t.TempDir()
+		if err := os.WriteFile(filepath.Join(stubs, "systemctl"), []byte("#!/bin/sh\ncase \"$2\" in is-active) "+answer+" ;; *) exit 0 ;; esac\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("bash", "-c", detachedStopScript, "dyna-ci", filepath.Join(dir, "d"), "unit.service")
+		cmd.Env = append(os.Environ(), "PATH="+stubs+":"+os.Getenv("PATH"))
+		if err := cmd.Run(); (err != nil) != tc.fails {
+			t.Fatalf("active %v: err = %v, want failure %v", tc.active, err, tc.fails)
+		}
+	}
+}
