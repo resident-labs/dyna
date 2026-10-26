@@ -74,7 +74,27 @@ var processAlive = procident.Alive
 // The host temp folder also holds other users' files, the owner's own folders
 // and a process guard's control folder, so only this name is ever considered.
 func testFolderName(name string) bool {
-	return strings.HasPrefix(name, testFolderPrefix)
+	if strings.HasPrefix(name, testFolderPrefix) {
+		return true
+	}
+	for _, prefix := range leakedTempPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// leakedTempPrefixes names temporary folders that Dyna code and its tests make
+// with no process ID. A killed test run or tool leaves them behind, and the
+// retention rule is the only check they get. A name that a live process guards
+// with a socket (dyna-pg-, dyna-engine-) is not on the list.
+var leakedTempPrefixes = []string{
+	"dyna-go-env-",
+	"dyna-pr-detail-",
+	"dyna-conversation-",
+	"dyna-checkout-template-",
+	"dyna-health-tests-",
 }
 
 // ownedByUser reports whether this user owns the folder. The sweep never removes
