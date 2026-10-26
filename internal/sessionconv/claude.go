@@ -1,12 +1,15 @@
 package sessionconv
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/fsutil"
 )
 
 // claudeEntry is one record of a Claude Code session file. The fields are the
@@ -101,46 +104,19 @@ func WriteClaude(dir, cwd, id, model string, conversation Conversation) (string,
 	if err := os.MkdirAll(projectDir, 0o700); err != nil {
 		return "", err
 	}
-	path := filepath.Join(projectDir, id+".jsonl")
-	temp, err := os.CreateTemp(projectDir, ".transfer-*.jsonl")
-	if err != nil {
-		return "", err
-	}
-	cleanup := func() {
-		_ = temp.Close()
-		_ = os.Remove(temp.Name())
-	}
-	writer := jsonEncoder(temp)
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
 	for _, entry := range entries {
-		if err := writer(entry); err != nil {
-			cleanup()
+		if err := encoder.Encode(entry); err != nil {
 			return "", err
 		}
 	}
-	if err := temp.Sync(); err != nil {
-		cleanup()
-		return "", err
-	}
-	if err := temp.Close(); err != nil {
-		_ = os.Remove(temp.Name())
-		return "", err
-	}
-	if err := os.Chmod(temp.Name(), 0o600); err != nil {
-		_ = os.Remove(temp.Name())
-		return "", err
-	}
-	if err := os.Rename(temp.Name(), path); err != nil {
-		_ = os.Remove(temp.Name())
+	path := filepath.Join(projectDir, id+".jsonl")
+	if err := fsutil.WriteFile(path, buffer.Bytes(), 0o600, true); err != nil {
 		return "", err
 	}
 	return path, nil
-}
-
-// jsonEncoder writes one JSON record per line.
-func jsonEncoder(file *os.File) func(any) error {
-	encoder := json.NewEncoder(file)
-	encoder.SetEscapeHTML(false)
-	return encoder.Encode
 }
 
 // claudeEntries turns the common conversation into chained Claude records.
