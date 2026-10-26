@@ -147,6 +147,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Preview", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Preview},
 		{Name: "MarkRead", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.MarkRead},
 		{Name: "MarkReadMany", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.MarkReadMany},
+		{Name: "MarkRoomRead", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.MarkRoomRead},
 		{Name: "Transcript", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Transcript},
 		{Name: "TranscriptMore", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.TranscriptMore},
 		{Name: "RootSession", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.RootSession},

@@ -382,10 +382,11 @@ func TestTranscriptReadsTurns(t *testing.T) {
 	}
 }
 
-func TestRoomsOrderUnreadFirst(t *testing.T) {
+func TestRoomsOrderIgnoresUnreadAndActivity(t *testing.T) {
 	e := newEnv(t)
 	e.room("quiet")
 	busy := e.room("busy")
+	e.room("alpha")
 	e.start(busy, "lead", nil)
 	if _, err := e.svc.Notify.Rooms.Post(busy.ID, room.PostInput{From: "busy:lead", To: []string{"busy"}, Text: "for you"}); err != nil {
 		t.Fatal(err)
@@ -398,11 +399,45 @@ func TestRoomsOrderUnreadFirst(t *testing.T) {
 	for _, r := range rooms {
 		names = append(names, r.Name)
 	}
-	if strings.Join(names, " ") != "busy quiet" {
-		t.Fatalf("order = %v", names)
+	if strings.Join(names, " ") != "alpha busy quiet" {
+		t.Fatalf("order = %v; want alphabetical, whatever the unread and live state", names)
 	}
-	if rooms[0].Unread == 0 || rooms[0].Members != 1 {
-		t.Fatalf("busy = %+v", rooms[0])
+	if rooms[1].Unread != 1 || rooms[1].Members != 1 {
+		t.Fatalf("busy = %+v", rooms[1])
+	}
+}
+
+func TestMarkRoomReadClearsUnreadNotLoadedInTheFeed(t *testing.T) {
+	e := newEnv(t)
+	rec := largeOwnerLog(t, e)
+	if err := e.svc.MarkRoomRead(rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 0 {
+		t.Fatalf("unread after viewing the room = %d; want 0", got)
+	}
+	e.say(rec, "lead", "A new post after viewing")
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 1 {
+		t.Fatalf("unread after a new post = %d; want 1", got)
+	}
+}
+
+func TestQuietEventsDoNotCountAsUnreadButOwnerAlertsDo(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	quiet, err := e.svc.rooms().PostEvent(rec.ID, room.IssueEvent{Type: room.IssueFiled, Number: 1, Title: "t", State: room.IssueStateOpen, Filer: "x"}, rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countsUnread(quiet, rec.Name) {
+		t.Fatal("a quiet engine event counted as unread")
+	}
+	alert, err := e.svc.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: room.AlertEvent{Source: room.AlertEngine, Summary: "migration failed"}, To: []string{rec.Name}, Producer: room.ProducerEngine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !countsUnread(alert, rec.Name) {
+		t.Fatal("an engine alert to the owner did not count as unread")
 	}
 }
 

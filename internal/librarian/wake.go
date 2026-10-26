@@ -82,10 +82,25 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 
 // WakeSmellsNow runs only the smell pass, without waiting for SmellInterval.
 // Only the owner or a root may ask for it. A session that is not root gets an
-// error that names the rule.
-func (s Service) WakeSmellsNow(ctx context.Context, actor authority.Actor, repoDir string) (Result, error) {
+// error that names the rule. A root may start it only for the repository whose
+// librarian lives in its own room; callerRoom is that room's ID, resolved by the
+// caller. The owner has no such limit.
+func (s Service) WakeSmellsNow(ctx context.Context, actor authority.Actor, callerRoom, repoDir string) (Result, error) {
 	if err := authority.Check("library wake now", actor, nil); err != nil {
 		return Result{}, err
+	}
+	if actor.Role == authority.Root {
+		r, err := repoid.Resolve(ctx, repoDir)
+		if err != nil {
+			return Result{}, err
+		}
+		st, err := (librarianstate.Store{DataDir: s.DataDir}).Get(r.ID)
+		if err != nil {
+			return Result{}, err
+		}
+		if callerRoom != st.RoomID {
+			return Result{}, fmt.Errorf("library wake now: the librarian of %s lives in another room; ask that room's root or the owner", r.Main)
+		}
 	}
 	return s.wakeSmells(ctx, repoDir, true)
 }

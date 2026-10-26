@@ -119,7 +119,15 @@ func (s services) wakeLibrarianSmellsNow(ctx context.Context, repo, roomRef stri
 		}
 		repo = rec.Repo
 	}
-	return s.librarianService().WakeSmellsNow(ctx, as, repo)
+	callerRoom := ""
+	if as.Room != "" {
+		rec, err := s.rooms.Notify.Rooms.Resolve(as.Room)
+		if err != nil {
+			return librarian.Result{}, err
+		}
+		callerRoom = rec.ID
+	}
+	return s.librarianService().WakeSmellsNow(ctx, as, callerRoom, repo)
 }
 
 func (s services) fileLibrarySmell(ctx context.Context, repo string, sm librarian.Smell) (room.Issue, error) {
