@@ -160,7 +160,6 @@ func (m *Manager) CloseEndedRunAgents(ctx context.Context) error {
 // failed, canceled, or a coordinator that died) leaves no agent session open.
 func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) error {
 	ended := map[string]bool{}
-	openRuns := map[string]bool{}
 	var errs []error
 	for _, meta := range sessions {
 		if meta.Run == nil || !meta.Closed.IsZero() {
@@ -177,11 +176,10 @@ func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) erro
 		if _, err := m.closeRunAgent(ctx, meta.ID); err != nil && !errors.Is(err, ErrClosed) {
 			errs = append(errs, err)
 		}
-		openRuns[meta.Run.ID] = true
 	}
 	// Every ended run, however it ended (ok, error, interrupted, canceled, lost
 	// coordinator) and whether or not its agents closed earlier.
-	if err := m.endEndedRuns(openRuns); err != nil {
+	if err := m.endEndedRuns(); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -194,6 +192,10 @@ func runEnded(run string) bool {
 	if err != nil {
 		return false
 	}
+	return runMetaEnded(meta)
+}
+
+func runMetaEnded(meta runstore.Meta) bool {
 	return runstore.IsFinishedStatus(meta.Status) || meta.Status == "running" && !runstore.Alive(meta)
 }
 
@@ -224,31 +226,25 @@ func (m *Manager) closeRunAgent(ctx context.Context, id string) (Info, error) {
 	return info, nil
 }
 
-// processCleanupWindow limits the first pass to runs that ended recently:
-// runs that ended before the mark existed carry none, and ending processes
-// by a stamp that old would only scan /proc for nothing.
-const processCleanupWindow = 24 * time.Hour
-
 // endEndedRuns ends what the workers of each ended run left running, as a
 // cancel does, and marks the run (runstore.Meta.ProcessesEnded). The marks live
 // in the run store, so an engine restart forgets nothing, and a failed cleanup
-// stays unmarked for the next pass. extra holds ended runs the caller found
-// through their open agents; the rest come from the store. It never takes the
+// stays unmarked for the next pass, however long that takes. It never takes the
 // run's own group (leader 0), and the coordinator carries no run stamp, so a
 // coordinator still inside its finish call is not touched. A process that lost
 // DYNA_SESSION keeps DYNA_WORKER_RUN.
-func (m *Manager) endEndedRuns(extra map[string]bool) error {
+func (m *Manager) endEndedRuns() error {
 	runs := map[string]bool{}
-	for run := range extra {
-		runs[run] = true
-	}
 	var errs []error
-	metas, err := runstore.EndedWithoutCleanup(time.Now().Add(-processCleanupWindow))
+	metas, err := runstore.WithoutProcessCleanup()
 	if err != nil {
 		errs = append(errs, err)
 	}
 	for _, meta := range metas {
-		runs[meta.ID] = true
+		// This includes a run whose coordinator died and is still marked running.
+		if runMetaEnded(meta) {
+			runs[meta.ID] = true
+		}
 	}
 	for run := range runs {
 		meta, err := runstore.ReadMeta(run)
@@ -259,7 +255,8 @@ func (m *Manager) endEndedRuns(extra map[string]bool) error {
 			errs = append(errs, fmt.Errorf("run %s: %w", run, err))
 			continue
 		}
-		// A run that still reads running (lost coordinator) takes no mark yet.
+		// A run that still reads running (lost coordinator) takes no mark yet; it
+		// stays listed, so a failed cleanup is tried again until the run is repaired.
 		if err := runstore.MarkProcessesEnded(run); err != nil {
 			errs = append(errs, err)
 		}
