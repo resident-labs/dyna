@@ -94,6 +94,27 @@ func (c *Client) Status(ctx context.Context) (v Status, err error) {
 	err = c.Call(ctx, Request{Op: "status"}, &v)
 	return
 }
+
+// ErrNoDaemon means no computer daemon answers on the control socket.
+var ErrNoDaemon = errors.New("no computer daemon is running")
+
+// ErrUnknownBuild means a daemon runs but does not report its build, as one
+// started before the version call existed.
+var ErrUnknownBuild = errors.New("the computer daemon does not report its build")
+
+// Build returns the build of the running daemon.
+func (c *Client) Build(ctx context.Context) (string, error) {
+	conn, err := c.connect(ctx)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrNoDaemon, err)
+	}
+	defer conn.Close()
+	var build string
+	if err := conn.call(ctx, Request{Op: "version"}, &build); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrUnknownBuild, err)
+	}
+	return build, nil
+}
 func (c *Client) CheckStream(ctx context.Context) error {
 	var reply struct{}
 	return c.Call(ctx, Request{Op: "stream.check"}, &reply)
