@@ -398,8 +398,9 @@ func editCommand() *cobra.Command {
 			}
 			// The engine owns every machine field and its rules: one patch covers
 			// the registry and the host-check permission, so a refused change
-			// writes nothing.
-			saved, err := saveMachine(c.Context(), args[0], patch)
+			// writes nothing. The change names the machine by ID, because a name
+			// can equal another machine's ID and the engine resolves IDs first.
+			saved, err := saveMachine(c.Context(), current.ID, patch)
 			if err != nil {
 				return err
 			}

@@ -69,7 +69,14 @@ func nodeCommand(s localci.Store) *cobra.Command {
 			if ssh != "" {
 				patch.SSH = &ssh
 			}
-			saved, err := saveMachine(c.Context(), args[0], patch)
+			// An update names the stored machine by ID: a name can equal another
+			// machine's ID, and the engine resolves IDs first. Creation keeps the
+			// name the owner typed.
+			ref := args[0]
+			if !create {
+				ref = m.ID
+			}
+			saved, err := saveMachine(c.Context(), ref, patch)
 			if err != nil {
 				return err
 			}
