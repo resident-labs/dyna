@@ -66,7 +66,7 @@ func (s services) webSearchChain(room, repo string) websearch.Chain {
 	return websearch.Chain{
 		websearch.ChatGPT{Credential: piChatGPTCredential{accounts: accounts, room: room, repo: repo}},
 		websearch.Claude{Token: savedClaudeToken{accounts: accounts, room: room, repo: repo}.read},
-		websearch.Muse{Key: piProviderKey{accounts: accounts, provider: store.ProviderMetaMuse, room: room, repo: repo}.read},
+		websearch.Muse{Key: piInferenceKey{accounts: accounts, provider: store.ProviderMetaMuse, room: room, repo: repo}.read},
 		websearch.Kimi{Token: piAccessToken{accounts: accounts, provider: store.ProviderKimiCode, room: room, repo: repo}.read},
 		websearch.Zai{Key: piProviderKey{accounts: accounts, provider: store.ProviderZAI, room: room, repo: repo}.read},
 		websearch.XAI{Token: piAccessToken{accounts: accounts, provider: store.ProviderXAI, room: room, repo: repo}.read},
@@ -138,6 +138,23 @@ type piProviderKey struct {
 
 func (k piProviderKey) read(ctx context.Context) (string, error) {
 	key, err := k.accounts.PiProviderKey(ctx, k.provider, k.room, k.repo)
+	if errors.Is(err, native.ErrNotSignedIn) {
+		return "", websearch.ErrNotSignedIn
+	}
+	return key, err
+}
+
+// piInferenceKey reads the key a Pi sign-in uses to call a provider that
+// accepts either shape, such as Meta Muse: an OAuth sign-in keeps its minted
+// inference key in the entry's access field, and a pasted key keeps it in key.
+type piInferenceKey struct {
+	accounts   *harnessruntime.Accounts
+	provider   store.Provider
+	room, repo string
+}
+
+func (k piInferenceKey) read(ctx context.Context) (string, error) {
+	key, err := k.accounts.PiInferenceKey(ctx, k.provider, k.room, k.repo)
 	if errors.Is(err, native.ErrNotSignedIn) {
 		return "", websearch.ErrNotSignedIn
 	}

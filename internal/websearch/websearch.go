@@ -155,10 +155,20 @@ func capped(provider string, q Query, results []Result) []Result {
 
 // text folds a snippet onto one line of at most maxSnippet characters.
 func text(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
+	return clip(fold(s))
+}
+
+// fold puts text on one line, because a snippet and an error reason are each
+// reported as one line.
+func fold(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// clip keeps at most maxSnippet characters.
+func clip(s string) string {
 	runes := []rune(s)
 	if len(runes) > maxSnippet {
-		s = strings.TrimSpace(string(runes[:maxSnippet])) + "…"
+		return strings.TrimSpace(string(runes[:maxSnippet])) + "…"
 	}
 	return s
 }
@@ -169,17 +179,24 @@ func text(s string) string {
 // folded to one line and cleared of any secret first, and the caller passes each
 // secret the request carried so the body cannot echo one back.
 func statusError(provider string, status int, body io.Reader, secrets ...string) error {
-	reason := errorReason(body)
-	for _, secret := range secrets {
-		if secret != "" {
-			reason = strings.ReplaceAll(reason, secret, redacted)
-		}
-	}
-	reason = redactTokens(reason)
+	// The whole reason is cleared of secrets before it is folded and shortened.
+	// Clearing a shortened reason would leave a fragment of a secret that no
+	// replacement or pattern matches.
+	reason := clip(redact(fold(errorReason(body)), secrets...))
 	if reason == "" {
 		return fmt.Errorf("%s answered HTTP %d", provider, status)
 	}
 	return fmt.Errorf("%s answered HTTP %d: %s", provider, status, reason)
+}
+
+// redact clears every supplied secret and every credential shape from s.
+func redact(s string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			s = strings.ReplaceAll(s, secret, redacted)
+		}
+	}
+	return redactTokens(s)
 }
 
 // redacted replaces a credential in text that may quote one.
@@ -211,8 +228,8 @@ type errorBody struct {
 	} `json:"error"`
 }
 
-// errorReason is what the backend said went wrong, or empty when the body names
-// no cause.
+// errorReason is what the backend said went wrong in full, or empty when the
+// body names no cause. The caller folds, clears and shortens it.
 func errorReason(body io.Reader) string {
 	if body == nil {
 		return ""
@@ -221,13 +238,15 @@ func errorReason(body io.Reader) string {
 	var refusal errorBody
 	if json.Unmarshal(raw, &refusal) == nil {
 		for _, named := range []string{refusal.Detail, refusal.Message} {
-			if text(named) != "" {
-				return text(named)
+			if trimmed := strings.TrimSpace(named); trimmed != "" {
+				return trimmed
 			}
 		}
-		if refusal.Error != nil && text(refusal.Error.Message) != "" {
-			return text(refusal.Error.Message)
+		if refusal.Error != nil {
+			if trimmed := strings.TrimSpace(refusal.Error.Message); trimmed != "" {
+				return trimmed
+			}
 		}
 	}
-	return text(string(raw))
+	return string(raw)
 }

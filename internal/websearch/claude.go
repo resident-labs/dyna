@@ -43,6 +43,10 @@ const (
 	// uses.
 	claudeInstructions = "You run a web search for another Claude model, which is waiting on the result and can search again. " +
 		"Search once, then reply with a brief summary of the results."
+	// claudeIdentity is the first system block of an OAuth request. Claude Code's
+	// own transport puts it first, and the API refuses a request whose system
+	// prompt does not identify the client the OAuth token belongs to.
+	claudeIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
 )
 
 // claudeClient is how long one Claude answer may take.
@@ -112,11 +116,9 @@ func (c Claude) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 		return nil, ErrNotSignedIn
 	}
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 		return nil, statusError("claude", response.StatusCode, response.Body, token)
 	}
 	answer, err := readClaudeStream(response.Body)
@@ -139,7 +141,10 @@ func claudeSearch(model, query string) claudeRequest {
 	return claudeRequest{
 		Model:     model,
 		MaxTokens: claudeMaxTokens,
-		System:    []claudeText{{Type: "text", Text: claudeInstructions}},
+		System: []claudeText{
+			{Type: "text", Text: claudeIdentity},
+			{Type: "text", Text: claudeInstructions},
+		},
 		Messages: []claudeMessage{{
 			Role:    "user",
 			Content: []claudeText{{Type: "text", Text: "Perform a web search for the query: " + query}},

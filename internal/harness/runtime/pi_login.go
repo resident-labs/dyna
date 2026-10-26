@@ -37,6 +37,18 @@ func (a *Accounts) PiProviderKey(ctx context.Context, provider store.Provider, r
 	return native.PiAPIKey(entry)
 }
 
+// PiInferenceKey returns the key a Pi login in repo may call its provider's
+// API with, in whichever shape Pi saved it: the access token of an OAuth
+// sign-in or a pasted API key. It serves a provider that accepts both, such as
+// Meta Muse, whose OAuth sign-in keeps the minted inference key in access.
+func (a *Accounts) PiInferenceKey(ctx context.Context, provider store.Provider, roomID, repo string) (string, error) {
+	entry, err := a.piEntry(ctx, provider, roomID, repo)
+	if err != nil {
+		return "", err
+	}
+	return native.PiOAuthOrAPIKey(entry)
+}
+
 // piEntry reads the login entry of the Pi account that provider uses in roomID
 // and that the repo rules allow in repo. The room's own selection wins over the
 // global one, and an account the owner limited to other repositories is never

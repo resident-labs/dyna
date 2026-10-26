@@ -11,12 +11,13 @@ import (
 	"testing"
 )
 
-const xaiText = "Go is a language and the docs cover it."
+const xaiText = "Go is a language and it has docs [[1]](https://go.dev/doc). The release notes list the changes."
 
-// xaiCite is the citation the answer carries: it marks "the docs".
+// xaiCite is the citation the answer carries in the shape xAI documents: the
+// offsets mark the numeric link, and the title is only its label.
 func xaiCite() xaiCitation {
-	start := strings.Index(xaiText, "the docs")
-	return xaiCitation{Type: "url_citation", URL: "https://go.dev/doc", Title: "Docs", StartIndex: start, EndIndex: start + len("the docs")}
+	start := strings.Index(xaiText, "[[1]]")
+	return xaiCitation{Type: "url_citation", URL: "https://go.dev/doc", Title: "1", StartIndex: start, EndIndex: start + len("[[1]](https://go.dev/doc)")}
 }
 
 // xaiStreamBody is one answer stream: the text, the citation, and the finished
@@ -110,11 +111,11 @@ func TestXAIAsksItsSearchToolAndMapsCitations(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("results = %+v, want the citation and then its source", got)
 	}
-	if got[0].URL != "https://go.dev/doc" || got[0].Title != "Docs" || got[0].Provider != "xai" {
-		t.Fatalf("first result = %+v", got[0])
+	if got[0].URL != "https://go.dev/doc" || got[0].Title != "https://go.dev/doc" || got[0].Provider != "xai" {
+		t.Fatalf("first result = %+v, want the cited source named by its URL: the label \"1\" names nothing", got[0])
 	}
-	if got[0].Snippet != "the docs" {
-		t.Fatalf("snippet = %q, want the cited span", got[0].Snippet)
+	if got[0].Snippet != "Go is a language and it has docs." {
+		t.Fatalf("snippet = %q, want the sentence around the citation with its marker removed", got[0].Snippet)
 	}
 	if got[1].URL != "https://go.dev" || got[1].Title != "Go" {
 		t.Fatalf("second result = %+v, want the search call source", got[1])
@@ -165,9 +166,9 @@ func TestXAIWithoutASignInIsNotSignedIn(t *testing.T) {
 	}
 }
 
-// A refusal names the status and keeps the token and the request out of the
-// message.
-func TestXAIRefusalLeaksNoSecret(t *testing.T) {
+// A refusal names the status and the reason the provider gave, and never the
+// token, which the reason can quote back.
+func TestXAIRefusalLeaksNoToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = fmt.Fprint(w, `{"error":{"message":"invalid token: Bearer sekret-token for go.dev"}}`)
@@ -176,11 +177,11 @@ func TestXAIRefusalLeaksNoSecret(t *testing.T) {
 
 	search := XAI{BaseURL: server.URL, Token: xaiToken("sekret-token")}
 	_, err := search.Search(t.Context(), Query{Text: "go"})
-	if err == nil || !strings.Contains(err.Error(), "HTTP 401") {
-		t.Fatalf("err = %v, want the status", err)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || !strings.Contains(err.Error(), "invalid token") {
+		t.Fatalf("err = %v, want the status and the reason", err)
 	}
-	if strings.Contains(err.Error(), "sekret-token") || strings.Contains(err.Error(), "go.dev") {
-		t.Fatalf("err = %q, want no token and no request body", err)
+	if strings.Contains(err.Error(), "sekret-token") {
+		t.Fatalf("err = %q, want no token", err)
 	}
 }
 

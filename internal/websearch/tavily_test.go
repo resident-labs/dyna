@@ -53,7 +53,8 @@ func TestTavilyWithoutAKeyIsNotSignedIn(t *testing.T) {
 }
 
 // A failing API names its status and never echoes the response body.
-func TestTavilyReportsAFailureWithoutTheBody(t *testing.T) {
+// A failing API names its status and the reason, and never the key.
+func TestTavilyReportsAFailureWithoutTheKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"detail":"bad key tavily-key"}`))
@@ -62,7 +63,5 @@ func TestTavilyReportsAFailureWithoutTheBody(t *testing.T) {
 
 	tavily := Tavily{BaseURL: server.URL, Key: func(context.Context) (string, error) { return "tavily-key", nil }}
 	_, err := tavily.Search(t.Context(), Query{Text: "go"})
-	if err == nil || err.Error() != "tavily answered HTTP 401" {
-		t.Fatalf("err = %v, want the status only", err)
-	}
+	assertRefusal(t, "tavily", http.StatusUnauthorized, "tavily-key", err)
 }

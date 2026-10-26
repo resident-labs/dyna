@@ -122,8 +122,8 @@ func TestClaudeForcesItsSearchToolAndMapsItsHits(t *testing.T) {
 	if body.ToolChoice.Type != "tool" || body.ToolChoice.Name != claudeSearchName {
 		t.Errorf("tool_choice = %+v, want the forced search tool", body.ToolChoice)
 	}
-	if len(body.System) != 1 || body.System[0].Text != claudeInstructions {
-		t.Errorf("system = %+v, want the search instruction", body.System)
+	if len(body.System) != 2 || body.System[0].Text != claudeIdentity || body.System[1].Text != claudeInstructions {
+		t.Errorf("system = %+v, want the client identity first and then the search instruction", body.System)
 	}
 	if len(body.Messages) != 1 || len(body.Messages[0].Content) != 1 || !strings.Contains(body.Messages[0].Content[0].Text, "go language") {
 		t.Errorf("messages = %+v, want one turn that names the query", body.Messages)

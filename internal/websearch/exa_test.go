@@ -52,8 +52,8 @@ func TestExaWithoutAKeyIsNotSignedIn(t *testing.T) {
 	}
 }
 
-// A failing API names its status and never echoes the response body.
-func TestExaReportsAFailureWithoutTheBody(t *testing.T) {
+// A failing API names its status and the reason, and never the key.
+func TestExaReportsAFailureWithoutTheKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"bad key exa-key"}`))
@@ -62,7 +62,5 @@ func TestExaReportsAFailureWithoutTheBody(t *testing.T) {
 
 	exa := Exa{BaseURL: server.URL, Key: func(context.Context) (string, error) { return "exa-key", nil }}
 	_, err := exa.Search(t.Context(), Query{Text: "go"})
-	if err == nil || err.Error() != "exa answered HTTP 401" {
-		t.Fatalf("err = %v, want the status only", err)
-	}
+	assertRefusal(t, "exa", http.StatusUnauthorized, "exa-key", err)
 }

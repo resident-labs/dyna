@@ -73,7 +73,6 @@ func (e Exa) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 		return nil, statusError("exa", response.StatusCode, response.Body, key)
 	}
 	var answer struct {

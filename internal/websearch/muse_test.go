@@ -68,8 +68,8 @@ func TestMuseWithoutAKeyIsNotSignedIn(t *testing.T) {
 	}
 }
 
-// A failing API names its status and never echoes the body, which can hold the
-// key.
+// A failing API names its status and the reason, and never the key, which the
+// body can quote back.
 func TestMuseReportsAFailureWithoutTheKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -79,9 +79,7 @@ func TestMuseReportsAFailureWithoutTheKey(t *testing.T) {
 
 	muse := Muse{BaseURL: server.URL, Key: func(context.Context) (string, error) { return "muse-key", nil }}
 	_, err := muse.Search(t.Context(), Query{Text: "go"})
-	if err == nil || err.Error() != "muse answered HTTP 401" {
-		t.Fatalf("err = %v, want the status only", err)
-	}
+	assertRefusal(t, "muse", http.StatusUnauthorized, "muse-key", err)
 }
 
 // A hit without a URL cannot be shown, and a body of another shape is a
