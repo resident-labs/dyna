@@ -195,3 +195,16 @@ func TestShortTempDirIsShortWhateverTMPDIR(t *testing.T) {
 		t.Fatalf("ShortTempDir = %q, want a short folder under /tmp", dir)
 	}
 }
+
+// A test binary that a test starts (a computer daemon) drops every XDG folder
+// outside the test root, so the short folder must be inside it.
+func TestShortTempIsInsideTheTestRoot(t *testing.T) {
+	dir, err := ShortTemp("dc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if err := Check(dir); err != nil {
+		t.Fatalf("ShortTemp folder is outside the test root: %v", err)
+	}
+}

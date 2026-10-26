@@ -238,13 +238,31 @@ func folderPID(name string) (int, bool) {
 	return pid, err == nil && pid > 0
 }
 
-// ShortTempDir makes a folder with a short path under /tmp and removes it when
-// the test ends. A unix socket path is limited to 108 bytes, and t.TempDir adds
-// the test's name to a TMPDIR that a CI check already points deep into /tmp, so
-// a test that binds a socket (an XDG_RUNTIME_DIR, for one) uses this.
+// shortBase is the longest test root that still leaves room for a unix socket
+// path (108 bytes) under a folder made by ShortTemp.
+const shortBase = 40
+
+// ShortTemp makes a folder with a short path and a name that starts with
+// prefix. It is inside the test root, which is the system temporary folder (a
+// CI check's own folder on a node), so a test binary that a test starts keeps
+// it: testsafe replaces every XDG folder outside the root, and a daemon that
+// lost its runtime folder that way listens where its client does not look.
+// A root too long for a socket path falls back to /tmp.
+func ShortTemp(prefix string) (string, error) {
+	base := tempRoot
+	if len(base) > shortBase {
+		base = "/tmp"
+	}
+	return os.MkdirTemp(base, prefix)
+}
+
+// ShortTempDir is ShortTemp for a test, removed when the test ends. A unix
+// socket path is limited to 108 bytes, and t.TempDir adds the test's name to a
+// TMPDIR that a CI check already points deep into /tmp, so a test that binds a
+// socket (an XDG_RUNTIME_DIR, for one) uses this.
 func ShortTempDir(t testing.TB) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "dt-")
+	dir, err := ShortTemp("dt-")
 	if err != nil {
 		t.Fatal(err)
 	}
