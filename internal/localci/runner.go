@@ -41,6 +41,9 @@ type Runner struct {
 	// Node is the registered CI machine that runs the checks. A run needs one:
 	// there is no other execution pipeline.
 	Node *Node
+	// dialWait pauses between retries of an ssh dial that never reached the
+	// node. Tests replace it, so a retry proves itself without a real sleep.
+	dialWait func(context.Context, time.Duration) error
 }
 type Request struct {
 	// Definition is the validated graph at SHA. A nil definition loads
