@@ -116,7 +116,7 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	}
 	s := shells.DefaultStore()
 	meta, err := s.Create(shells.StartOptions{Run: runID, Keep: true, Cwd: t.TempDir(),
-		Cmd: []string{"sh", "-c", `setsid sh -c "echo up > ` + fifo + `; exec sleep 600" & wait`}})
+		Cmd: []string{"sh", "-c", `setsid sh -c "sleep 600 & echo up > ` + fifo + `; wait" & wait`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 		cancel()
 		<-done
 	})
-	if _, err := os.ReadFile(fifo); err != nil { // returns once the child has forked
+	if _, err := os.ReadFile(fifo); err != nil { // returns once the child is up; it does not exec again, so its environment stays readable
 		t.Fatal(err)
 	}
 	jobPids = runprocs.Stamped(shells.JobEnv + "=" + meta.ID)
