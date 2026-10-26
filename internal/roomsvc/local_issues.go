@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -205,11 +206,14 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 	}
 	ctx, cancel := context.WithTimeout(authority.WithActor(ctx, actor), 30*time.Second)
 	defer cancel()
+	// A close may also end an issue a goal links: root and the owner reach
+	// this path, and a done goal can leave such an issue behind (D-249). An
+	// export keeps refusing a goal issue, because that work belongs to GitHub.
+	if action == "close" {
+		return s.rooms().CloseIssue(ctx, r.ID, id, by, strings.TrimSpace(value), room.CloseOrigin{})
+	}
 	return s.rooms().ChangeIssue(ctx, r.ID, id, by, func(i *room.Issue) error {
 		switch action {
-		case "close":
-			i.State = room.IssueStateClosed
-			i.Reason = strings.TrimSpace(value)
 		case "export":
 			if ghclient.Access(ctx, r) != ghclient.ReadWrite {
 				return fmt.Errorf("room %s has read-only GitHub access", r.Name)
@@ -248,6 +252,37 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 		}
 		return nil
 	})
+}
+
+// closeDoneGoalIssues closes every issue a goal marked done still links. The
+// done note becomes the close reason, so an issue no fixing PR named still
+// ends with its goal (D-249). The close follows the stored goal state, not the
+// finisher's triage right, so the engine acts as the room's root seat; by only
+// credits the address that ended the goal.
+func (s *Service) closeDoneGoalIssues(ctx context.Context, r room.Record, g goals.Goal, note string, author goalAuthor) error {
+	reason := strings.TrimSpace(note)
+	if reason == "" {
+		reason = "goal " + g.ID + " done"
+	}
+	rows, err := s.rooms().Issues(r.ID, true)
+	if err != nil {
+		return fmt.Errorf("read the issues of goal %s: %w", g.ID, err)
+	}
+	ctx = authority.WithActor(ctx, authority.EngineRoomActor(r.ID))
+	by := author.Address
+	if author.ID == "owner" {
+		by = r.Name
+	}
+	var failures []error
+	for _, issue := range rows {
+		if issue.State != room.IssueStateGoal || issue.GoalID != g.ID {
+			continue
+		}
+		if _, err := s.rooms().CloseIssue(ctx, r.ID, issue.Label(), by, reason, room.CloseOrigin{}); err != nil {
+			failures = append(failures, fmt.Errorf("close %s: %w", issue.Label(), err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // issueText is the issue's own body: the note it was filed with, without the
