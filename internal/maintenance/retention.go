@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/protectedpath"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store"
 )
 
@@ -105,6 +106,9 @@ const (
 	rejectedSpoolRetention = 7 * 24 * time.Hour
 	// closedSessionRetention keeps a closed session's folder and record.
 	closedSessionRetention = 30 * 24 * time.Hour
+	// shellJobRetention keeps the row of an ended shell job. The table grew by
+	// about 26,000 rows a day and nothing removed them.
+	shellJobRetention = 3 * 24 * time.Hour
 	// localCIResultRetention keeps a local CI result after it was last saved,
 	// unless its commit is an open PR's head or part of a pending merge trial.
 	localCIResultRetention = 14 * 24 * time.Hour
@@ -358,6 +362,19 @@ func sweepRejectedSpools(ctx context.Context, dir string, now time.Time, dry boo
 		}
 	}
 	return freed, errors.Join(errs...)
+}
+
+// pruneShellJobs deletes ended shell job rows older than shellJobRetention in
+// batches, one short write each, until none are left or ctx ends.
+func pruneShellJobs(ctx context.Context, shs *shells.Store, now time.Time) (int, error) {
+	total := 0
+	for {
+		n, err := shs.PruneEnded(ctx, now.Add(-shellJobRetention), shells.PruneBatch)
+		total += n
+		if err != nil || n < shells.PruneBatch || ctx.Err() != nil {
+			return total, err
+		}
+	}
 }
 
 // liveCommits lists the commits whose local CI result must stay: the heads and

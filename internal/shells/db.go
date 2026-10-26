@@ -448,3 +448,28 @@ func (s *Store) setOutputLines(id string, n int) error {
 	_, err := s.exec(id, `UPDATE shell_jobs SET output_lines=? WHERE id=?`, n, id)
 	return err
 }
+
+// PruneBatch bounds one PruneEnded delete, so no maintenance write holds the
+// writer lock for long.
+const PruneBatch = 500
+
+// PruneEnded deletes up to limit jobs that ended before cutoff and are not
+// kept. Output logs live in files and are not touched. It reports how many
+// rows it removed.
+func (s *Store) PruneEnded(ctx context.Context, cutoff time.Time, limit int) (int, error) {
+	db, err := s.db()
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		res, err := conn.ExecContext(ctx, `DELETE FROM shell_jobs WHERE id IN (
+			SELECT id FROM shell_jobs WHERE ended IS NOT NULL AND ended<? AND keep=0 LIMIT ?)`,
+			cutoff.UTC().Format(time.RFC3339Nano), limit)
+		if err == nil {
+			n, err = res.RowsAffected()
+		}
+		return err
+	})
+	return int(n), err
+}
