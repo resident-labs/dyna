@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -91,6 +92,111 @@ const (
 type pointerDevice interface {
 	move(x, y int) error
 	button(name string, pressed bool) error
+	scroll(x, y int) error
+}
+
+// guardedPointer wraps a pointer for one batch. It records which buttons are
+// held, and a takeover interrupts it: interrupt releases every held button at
+// once, ends the epoch so the action in flight fails on its next event, and
+// cancels the action's context so a wait or paced drag ends now, not at its next
+// check. The supervisor calls interrupt from the control transition itself, so
+// no button stays pressed while a person has control.
+type guardedPointer struct {
+	mu     sync.Mutex
+	dev    pointerDevice
+	held   map[string]bool
+	epoch  uint64 // counts takeovers
+	opens  uint64 // the epoch the current action began in
+	cancel context.CancelFunc
+}
+
+func newGuardedPointer(dev pointerDevice) *guardedPointer {
+	return &guardedPointer{dev: dev, held: map[string]bool{}}
+}
+
+// begin starts an action in the current epoch. cancel ends that action.
+func (g *guardedPointer) begin(cancel context.CancelFunc) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.opens, g.cancel = g.epoch, cancel
+}
+
+// end finishes the action. A takeover during it turns any error into
+// errControlLost.
+func (g *guardedPointer) end(err error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.cancel = nil
+	if err != nil && g.epoch != g.opens {
+		return errControlLost
+	}
+	return err
+}
+
+// interrupt is the takeover: release held buttons, fail the action in flight.
+func (g *guardedPointer) interrupt() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.epoch++
+	holding := len(g.held) > 0
+	g.releaseLocked()
+	if holding && g.cancel != nil {
+		g.cancel()
+	}
+}
+
+func (g *guardedPointer) releaseLocked() {
+	for button := range g.held {
+		_ = g.dev.button(button, false)
+	}
+	g.held = map[string]bool{}
+}
+
+// release lets a batch free its buttons when it ends.
+func (g *guardedPointer) release() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.releaseLocked()
+}
+
+func (g *guardedPointer) move(x, y int) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.epoch != g.opens {
+		return errControlLost
+	}
+	return g.dev.move(x, y)
+}
+
+func (g *guardedPointer) scroll(x, y int) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.epoch != g.opens {
+		return errControlLost
+	}
+	return g.dev.scroll(x, y)
+}
+
+func (g *guardedPointer) button(name string, pressed bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// A release always goes through, so nothing stays held. A press after a
+	// takeover must not happen.
+	if pressed && g.epoch != g.opens {
+		return errControlLost
+	}
+	if !pressed && !g.held[name] {
+		return nil
+	}
+	if err := g.dev.button(name, pressed); err != nil {
+		return err
+	}
+	if pressed {
+		g.held[name] = true
+	} else {
+		delete(g.held, name)
+	}
+	return nil
 }
 
 // dragStep returns the pause after each drag point and whether the batch asked
@@ -112,13 +218,9 @@ func dragStep(a Action) (time.Duration, bool, error) {
 // dragPath presses the left button at the first point, moves through the rest
 // and releases. After each point it waits step. With paced, it also waits after
 // the press, so a frame-driven app sees the button held before the first move.
-// The button is released even when a move or a wait fails. agent reports
-// whether the agent still has control; once a person takes over, the drag stops
-// before its next move and releases the button.
-func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Duration, paced bool, wait func(context.Context, time.Duration) error, agent func() bool) error {
-	if !agent() {
-		return errControlLost
-	}
+// The button is released even when a move or a wait fails. A takeover
+// (guardedPointer.interrupt) releases it at once and ends the drag.
+func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Duration, paced bool, wait func(context.Context, time.Duration) error) error {
 	if err := p.move(path[0].X, path[0].Y); err != nil {
 		return err
 	}
@@ -132,9 +234,6 @@ func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Dura
 		}
 	}
 	for _, point := range path[1:] {
-		if !agent() {
-			return errControlLost
-		}
 		if err := p.move(point.X, point.Y); err != nil {
 			return err
 		}

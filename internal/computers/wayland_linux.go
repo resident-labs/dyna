@@ -179,20 +179,6 @@ type virtualPointer struct {
 	w             *wayland
 	object        uint32
 	width, height int
-	// held lists the buttons pressed and not yet released, so close releases
-	// a pointer_down that its batch never matched with a pointer_up.
-	held map[string]bool
-	// agent reports whether the agent still has control. Nil means it does.
-	agent func() bool
-}
-
-func (p *virtualPointer) agentHasControl() bool { return p.agent == nil || p.agent() }
-
-// releaseHeld releases every button the batch pressed and did not release.
-func (p *virtualPointer) releaseHeld() {
-	for button := range p.held {
-		_ = p.button(button, false)
-	}
 }
 
 func newVirtualPointer(ctx context.Context, display string, width, height int) (*virtualPointer, error) {
@@ -216,10 +202,7 @@ func newVirtualPointer(ctx context.Context, display string, width, height int) (
 	}
 	return &virtualPointer{w: w, object: object, width: width, height: height}, nil
 }
-func (p *virtualPointer) close() {
-	p.releaseHeld()
-	p.w.conn.Close()
-}
+func (p *virtualPointer) close() { p.w.conn.Close() }
 func (p *virtualPointer) send(op uint16, args ...uint32) error {
 	_ = p.w.conn.SetDeadline(time.Now().Add(2 * time.Second))
 	if err := p.w.send(p.object, op, wlWords(args...)); err != nil {
@@ -246,14 +229,6 @@ func (p *virtualPointer) button(button string, pressed bool) error {
 	state := uint32(0)
 	if pressed {
 		state = 1
-	}
-	if p.held == nil {
-		p.held = map[string]bool{}
-	}
-	if pressed {
-		p.held[button] = true
-	} else {
-		delete(p.held, button)
 	}
 	return p.send(2, pointerTime(), code, state)
 }
