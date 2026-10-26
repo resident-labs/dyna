@@ -109,6 +109,23 @@ func OwnerFromEnv() string {
 	return ""
 }
 
+// WorkerRunFromEnv names the workflow run whose worker starts a process
+// (DYNA_WORKER_RUN). It is empty outside workflow workers, and an id without
+// the run id shape is ignored.
+func WorkerRunFromEnv() string {
+	run := strings.TrimSpace(os.Getenv(mode.EnvWorkerRun))
+	if len(run) > 128 {
+		run = run[:128]
+	}
+	if run == "" {
+		return ""
+	}
+	if err := ValidateRunID(run); err != nil {
+		return ""
+	}
+	return run
+}
+
 // ModeEnv names the dyna mode a process runs in: "workflow" for a workflow
 // worker, "subagent" for a subagent session's worker. Unset for humans.
 const ModeEnv = mode.EnvMode
@@ -214,6 +231,10 @@ type Meta struct {
 	// Paused is set while a running run starts no new workers. SetPaused
 	// writes it; the end of the run clears it.
 	Paused bool `json:"paused,omitempty"`
+	// Canceling is set once cancellation has started, before the signal: shell
+	// publication refuses new worker shells for the run behind the cancel
+	// cleanup's snapshot (D-165).
+	Canceling bool `json:"canceling,omitempty"`
 }
 
 // Run is an open, writable run directory.
@@ -1000,6 +1021,15 @@ func ReadResult(id string) (string, bool) {
 
 func pausePath(id string) string { return filepath.Join(RunsDir(), id, "paused") }
 
+// Canceling reports whether run id's cancellation has started: the run is
+// marked canceling, or it already ended as canceled. Shell publication
+// refuses such a run, so a worker cannot launch a shell behind the cancel
+// cleanup's snapshot (D-165).
+func Canceling(id string) bool {
+	m, err := ReadMeta(id)
+	return err == nil && (m.Canceling || m.Status == "canceled")
+}
+
 // SetPaused pauses or resumes a running run in its row: while paused, the
 // runner starts no new workers, and running workers finish. A run that is
 // not running does not change.
@@ -1019,6 +1049,12 @@ func Cancel(id string) error {
 		return fmt.Errorf("run %s is not running (status %s)", id, m.Status)
 	}
 	SetPaused(id, false) // a paused run must be unblocked to observe cancellation
+	// Fence new worker shells before the signal: publication refuses a run
+	// whose cancellation has started, so no supervisor launches behind the
+	// cancel cleanup's snapshot (D-165).
+	if _, err := setCanceling(RunDir(id), id); err != nil {
+		return err
+	}
 	if Alive(m) {
 		return syscall.Kill(m.Pid, syscall.SIGTERM)
 	}
