@@ -72,14 +72,22 @@ const (
 // unknown. Such a service keeps its own refusal window.
 func MarkRestartPending(dir string) error { return MarkRestartPendingFor(dir, time.Time{}) }
 
-// MarkRestartPendingFor marks a deferred restart of the service that started at
-// serviceStarted. It backdates the marker by up to 20 minutes, but never to before
-// that start: an older service ignores a marker older than itself, and would then
-// refuse nothing.
+// startMargin bounds how long after systemd marks a service active the service
+// process records its own start. The older service compares the marker with that
+// later time, so the backdate is only safe for a service that systemd says is
+// older than the backdate plus this margin.
+const startMargin = 5 * time.Minute
+
+// MarkRestartPendingFor marks a deferred restart of the service that systemd says
+// became active at serviceStarted. An older service ignores a marker older than
+// its own start and would then refuse nothing, so the marker is backdated by the
+// full 20 minutes only when the service is old enough that its own start is
+// surely before the backdated marker. Otherwise, and when the start is unknown,
+// the marker is not backdated and the older service keeps its 30-minute window.
 func MarkRestartPendingFor(dir string, serviceStarted time.Time) error {
 	backdate := time.Duration(0)
-	if !serviceStarted.IsZero() {
-		backdate = min(maxMarkerBackdate, max(0, time.Since(serviceStarted)-time.Second))
+	if !serviceStarted.IsZero() && time.Since(serviceStarted) >= maxMarkerBackdate+startMargin {
+		backdate = maxMarkerBackdate
 	}
 	path := filepath.Join(dir, RestartPending)
 	if err := fsutil.WriteFile(path, []byte(strconv.Itoa(int(backdate.Seconds()))+"\n"), 0600, true); err != nil {

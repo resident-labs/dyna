@@ -478,32 +478,38 @@ func legacyRefuses(dir string, started, now time.Time) bool {
 	return err == nil && st.ModTime().After(started) && now.Sub(st.ModTime()) < legacyDrainWindow
 }
 
-// An older service that has run for a while stops refusing after 10 minutes, and
-// one that started recently still refuses (a marker backdated to before its start
-// would be ignored, and nothing would hold new desktops back at all).
+// An older service that has run for a while stops refusing after 10 minutes. A
+// recently started one keeps its 30-minute refusal: a marker backdated to before
+// its start would be ignored, and nothing would hold new desktops back at all.
+// The service process records its own start some time after systemd marks it
+// active, so each case also has the process start late.
 func TestMarkRestartPendingShortensAnOlderServicesRefusalWithoutLosingIt(t *testing.T) {
 	for name, tc := range map[string]struct {
-		upFor      time.Duration
+		activeFor  time.Duration // how long systemd says the service has been active
+		startDelay time.Duration // how long after that the process recorded its start
 		wantRefuse time.Duration // how long after the install the older service still refuses
 	}{
-		"long running":    {2 * time.Hour, 10 * time.Minute},
-		"started 5m ago":  {5 * time.Minute, 25 * time.Minute},
-		"started 1m ago":  {time.Minute, 29 * time.Minute},
-		"started 20m ago": {20 * time.Minute, 10 * time.Minute},
+		"long running":              {2 * time.Hour, 0, 10 * time.Minute},
+		"long running, slow start":  {2 * time.Hour, 4 * time.Minute, 10 * time.Minute},
+		"just old enough":           {25 * time.Minute, 4*time.Minute + 50*time.Second, 10 * time.Minute},
+		"just too young to shorten": {24 * time.Minute, 0, 30 * time.Minute},
+		"started 5m ago":            {5 * time.Minute, 20 * time.Second, 30 * time.Minute},
+		"started 1m ago":            {time.Minute, 30 * time.Second, 30 * time.Minute},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			installed := time.Now()
-			started := installed.Add(-tc.upFor)
-			if err := MarkRestartPendingFor(dir, started); err != nil {
+			active := installed.Add(-tc.activeFor)
+			daemonStarted := active.Add(tc.startDelay)
+			if err := MarkRestartPendingFor(dir, active); err != nil {
 				t.Fatal(err)
 			}
-			if !legacyRefuses(dir, started, installed) {
-				t.Fatalf("an older service started %v before the install ignores the marker", tc.upFor)
+			if !legacyRefuses(dir, daemonStarted, installed) {
+				t.Fatalf("an older service active for %v (process start %v later) ignores the marker", tc.activeFor, tc.startDelay)
 			}
 			// It refuses until the legacy window runs out, and not much longer.
-			if !legacyRefuses(dir, started, installed.Add(tc.wantRefuse-time.Minute)) || legacyRefuses(dir, started, installed.Add(tc.wantRefuse+time.Minute)) {
-				t.Fatalf("an older service started %v before the install should refuse for about %v", tc.upFor, tc.wantRefuse)
+			if !legacyRefuses(dir, daemonStarted, installed.Add(tc.wantRefuse-time.Minute)) || legacyRefuses(dir, daemonStarted, installed.Add(tc.wantRefuse+time.Minute)) {
+				t.Fatalf("an older service active for %v should refuse for about %v", tc.activeFor, tc.wantRefuse)
 			}
 			if at, ok := RestartPendingAt(dir); !ok || at.Sub(installed) > time.Minute || installed.Sub(at) > time.Minute {
 				t.Fatalf("pending at %v, %v: want about the install time", at, ok)
