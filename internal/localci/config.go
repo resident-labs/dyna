@@ -123,6 +123,9 @@ const DefaultActImage = "catthehacker/ubuntu:act-22.04"
 type jobFile struct {
 	Workflow string `yaml:"workflow"`
 	Name     string `yaml:"name"`
+	// Matrix selects one configuration of a matrix job, such as shard:7, so a
+	// workflow shard can be a check of its own.
+	Matrix []string `yaml:"matrix"`
 }
 
 type checkFile struct {
@@ -667,6 +670,7 @@ func (d *Definition) ActImage() string { return d.actImage }
 type JobRef struct {
 	Workflow string
 	Name     string
+	Matrix   []string
 }
 
 // validateJobRef accepts a workflow file inside the repository's
@@ -679,5 +683,11 @@ func validateJobRef(in jobFile) (JobRef, error) {
 	if !jobName.MatchString(in.Name) {
 		return JobRef{}, fmt.Errorf("job name %q must be a job id, such as go-static", in.Name)
 	}
-	return JobRef{Workflow: in.Workflow, Name: in.Name}, nil
+	for _, entry := range in.Matrix {
+		key, value, ok := strings.Cut(entry, ":")
+		if !ok || !jobName.MatchString(key) || strings.TrimSpace(value) == "" || strings.ContainsRune(value, '\x00') {
+			return JobRef{}, fmt.Errorf("matrix entry %q must be key:value, such as shard:7", entry)
+		}
+	}
+	return JobRef{Workflow: in.Workflow, Name: in.Name, Matrix: append([]string(nil), in.Matrix...)}, nil
 }
