@@ -132,3 +132,29 @@ INSERT INTO pr_records VALUES('k','room','acme/widgets',1,0,5,'{"record":{"key":
 		t.Fatalf("migrated record = %+v, %v", got.Records["k"], err)
 	}
 }
+
+// A pre-split binary must not read half a record or write cold fields back
+// into the hot row. It is refused at its version check; one that skipped the
+// check (a process started before the migration) fails at the write.
+func TestAPreSplitBinaryIsRefusedAfterTheSplit(t *testing.T) {
+	root := newRoot(t)
+	st, _ := partsState()
+	if err := Write(root, st); err != nil {
+		t.Fatal(err)
+	}
+	db := mustOpen(t, root)
+	err := database.Migrate(db, "pr.state", 1, func(*sql.Conn, int) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "pr.state") {
+		t.Fatalf("a binary that needs pr.state 1 got %v; want a newer-schema refusal", err)
+	}
+	// What a pre-split writer sends: the whole record in one body.
+	whole := `{"record":{"key":"k","reviewRounds":null,"notifications":[{"id":"n"}]}}`
+	for name, statement := range map[string]string{
+		"insert": `INSERT INTO pr_records(key,room,repo,number,closed,rev,body) VALUES('old','room','r',2,0,9,?)`,
+		"update": `UPDATE pr_records SET body=?`,
+	} {
+		if _, err := db.Exec(statement, whole); err == nil || !strings.Contains(err.Error(), "too old") {
+			t.Fatalf("%s of a whole-body record: %v; want it refused", name, err)
+		}
+	}
+}
