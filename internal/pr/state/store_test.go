@@ -385,8 +385,12 @@ func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
 				t.Fatalf("unknown index fields: %s", body)
 			}
 			var recordField, responseField, bodyField int
-			if err := db.QueryRow(`SELECT json_extract(body,'$.record.futureRecord'),json_extract(body,'$.responses.pull.futureResponse'),json_extract(body,'$.responses.pull.body.futureBody') FROM pr_records WHERE key='p'`).Scan(&recordField, &responseField, &bodyField); err != nil || recordField != 6 || responseField != 8 || bodyField != 9 {
-				t.Fatalf("unknown record fields: %d,%d,%d, %v", recordField, responseField, bodyField, err)
+			if err := db.QueryRow(`SELECT json_extract(body,'$.record.futureRecord') FROM pr_records WHERE key='p'`).Scan(&recordField); err != nil || recordField != 6 {
+				t.Fatalf("unknown record field: %d, %v", recordField, err)
+			}
+			// Saved responses live in their own part row.
+			if err := db.QueryRow(`SELECT json_extract(body,'$.pull.futureResponse'),json_extract(body,'$.pull.body.futureBody') FROM pr_record_parts WHERE key='p' AND part='responses'`).Scan(&responseField, &bodyField); err != nil || responseField != 8 || bodyField != 9 {
+				t.Fatalf("unknown response fields: %d,%d, %v", responseField, bodyField, err)
 			}
 			if version != 1 {
 				var envelope int
