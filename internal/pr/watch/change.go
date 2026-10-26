@@ -460,7 +460,9 @@ func (s *Service) CloseChange(key, author string) error {
 	if err != nil {
 		return err
 	}
-	return s.cleanupEndedRoom(context.Background(), r.RoomID)
+	// Releasing the change's reviewer is the engine's own cleanup, so it acts as
+	// the room's root seat; the engine refuses a close that names no caller.
+	return s.cleanupEndedRoom(authority.WithActor(context.Background(), authority.EngineRoomActor(r.RoomID)), r.RoomID)
 }
 
 // UpdateChangeNotes sets the author notes, category and dependencies it is
