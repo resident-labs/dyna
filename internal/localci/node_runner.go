@@ -1093,8 +1093,14 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		for _, arg := range scopeArgs {
 			scope += " " + q(arg)
 		}
-		release := "systemctl --user kill --signal=KILL --kill-whom=all " + q(name+".scope") + " >/dev/null 2>&1 || true; " +
-			"systemctl --user reset-failed " + q(name+".scope") + " >/dev/null 2>&1 || true; "
+		// stop kills every process in the scope and works on every systemd that
+		// runs a check: `systemctl kill` with --kill-whom needs systemd 250, and
+		// Ubuntu 22.04 has 249, where the option is --kill-who.
+		unit := q(name + ".scope")
+		release := "systemctl --user stop " + unit + " >/dev/null 2>&1 || true; " +
+			"if systemctl --user is-active --quiet " + unit + " 2>/dev/null; then " +
+			"systemctl --user kill --signal=KILL " + unit + " >/dev/null 2>&1 || true; fi; " +
+			"systemctl --user reset-failed " + unit + " >/dev/null 2>&1 || true; "
 		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
 		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
