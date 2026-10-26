@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,33 @@ func TestSocketRejectsFilesAndSymlinkDirectory(t *testing.T) {
 	if listener, err := listenSocket(filepath.Join(link, "engine.sock")); err == nil {
 		listener.Close()
 		t.Fatal("accepted symlink directory")
+	}
+}
+
+// An engine a Dyna session started must not take the owner's live socket. The
+// installed service and an engine the owner starts from a terminal keep the
+// normal runtime folder, including with a custom XDG_DATA_HOME.
+func TestRefuseOwnerSocketForASessionLaunchedEngine(t *testing.T) {
+	login := filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	err := checkPrivateRuntime(true, login)
+	if err == nil {
+		t.Fatal("a session-launched engine took the owner's runtime socket")
+	}
+	if !strings.Contains(err.Error(), "runtime folder of its own") {
+		t.Fatalf("unhelpful refusal: %v", err)
+	}
+	scratch := t.TempDir()
+	for _, ok := range []struct {
+		stamped bool
+		runtime string
+	}{
+		{true, filepath.Join(scratch, "run")},
+		{false, login},
+		{false, filepath.Join(scratch, "run")},
+		{true, ""},
+	} {
+		if err := checkPrivateRuntime(ok.stamped, ok.runtime); err != nil {
+			t.Fatalf("stamped=%t runtime=%q: %v", ok.stamped, ok.runtime, err)
+		}
 	}
 }
