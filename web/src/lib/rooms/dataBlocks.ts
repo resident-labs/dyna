@@ -38,16 +38,20 @@ export function splitPost(text: string): PostSegment[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? ''
     const fence = FENCE.exec(line)
-    if (fence && fence[1]?.toLowerCase() === 'json') {
+    if (fence) {
       const end = lines.findIndex((l, j) => j > i && FENCE.test(l))
       if (end > i) {
-        const value = parseData(lines.slice(i + 1, end).join('\n'))
+        const value = fence[1]?.toLowerCase() === 'json' ? parseData(lines.slice(i + 1, end).join('\n')) : undefined
         if (value) {
           flush()
           out.push({ kind: 'data', value })
-          i = end
-          continue
+        } else {
+          // Any other code block stays whole: JSON inside it is code, and
+          // splitting it would leave its closing fence to open a new block.
+          prose.push(...lines.slice(i, end + 1))
         }
+        i = end
+        continue
       }
     }
     const whole = parseData(line)
