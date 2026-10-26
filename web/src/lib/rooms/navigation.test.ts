@@ -49,7 +49,7 @@ assert.equal(picked.length + routerCode.size, names.length)
 const code = [...picked, ...routerCode.values()].join('\n')
 // The tests add the functions they call by slicing the same declarations.
 function runDeclaration(target: object, name: string): void {
-  const text = appCode(name) ?? routerCode.get(name) ?? loaderCode.get(name) ?? goalsCode.get(name) ?? machinesCode.get(name)
+  const text = appCode(name) ?? routerCode.get(name) ?? loaderCode.get(name) ?? goalsCode().get(name) ?? machinesCode().get(name)
   if (text === undefined) {
     assert.equal(typeof Reflect.get(target, name), 'function', name)
     return
