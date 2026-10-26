@@ -1,6 +1,7 @@
 package engineclient
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -26,4 +27,9 @@ func FakeClock(at *time.Time, waits *[]time.Duration) Option {
 			return done
 		}
 	}
+}
+
+// RoundTrip replaces the client's transport, so a test answers each send itself.
+func RoundTrip(rt http.RoundTripper) Option {
+	return func(c *Client) { c.http = &http.Client{Transport: rt} }
 }
