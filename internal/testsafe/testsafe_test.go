@@ -20,13 +20,16 @@ func TestTestBinaryStartsWithTemporaryFolders(t *testing.T) {
 				t.Fatalf("%s: %v", key, err)
 			}
 		}
+		if dir := os.Getenv("DYNA_DATA_DIR"); dir != "" {
+			t.Fatalf("DYNA_DATA_DIR = %s survived outside the temporary folder", dir)
+		}
 		return
 	}
 	real := filepath.Join(filepath.Dir(tempRoot), "dyna-testsafe-real")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestTestBinaryStartsWithTemporaryFolders$")
 	// The config and cache homes come from HOME, as when XDG leaves them unset.
 	cmd.Env = append(os.Environ(), "TESTSAFE_CHILD=1", "HOME="+real, "XDG_CONFIG_HOME=", "XDG_CACHE_HOME=",
-		"XDG_DATA_HOME="+real+"/share", "XDG_RUNTIME_DIR="+real+"/run")
+		"XDG_DATA_HOME="+real+"/share", "XDG_RUNTIME_DIR="+real+"/run", "DYNA_DATA_DIR="+real+"/dyna")
 	if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "testsafe:") {
 		t.Fatalf("child test binary: %v\n%s", err, out)
 	}
