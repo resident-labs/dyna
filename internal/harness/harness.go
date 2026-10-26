@@ -307,6 +307,11 @@ type ExecutionOptions struct {
 	// It cannot suppress process, protocol, cancellation, or steering errors.
 	AcceptEmptyOutput func() bool
 
+	// AcceptCleanEmptyStop confirms that this invocation owes no report, so a
+	// turn the harness ended cleanly with no final text is finished. It cannot
+	// suppress process, protocol, cancellation, or steering errors.
+	AcceptCleanEmptyStop func() bool
+
 	// ConstrainProfile applies service permissions after private runtime
 	// preparation, so generated configuration cannot widen those permissions.
 	ConstrainProfile func(profile.Profile) (profile.Profile, error)
@@ -890,6 +895,9 @@ func (r *journaledRun) resumeInterrupted(a attempt) (stepAct, Result, error) {
 func (r *journaledRun) attemptFailure(a attempt) error {
 	if a.output == "" && r.exec.AcceptEmptyOutput != nil {
 		a.allowEmptyOutput = r.exec.AcceptEmptyOutput()
+	}
+	if a.output == "" && !a.allowEmptyOutput && r.exec.AcceptCleanEmptyStop != nil {
+		a.allowEmptyOutput = cleanEmptyStop(r.p, a.stdout) && r.exec.AcceptCleanEmptyStop()
 	}
 	return attemptError(r.ctx, r.p, r.spec.argv, a)
 }
@@ -1530,7 +1538,7 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		// A process's own stderr is the only text a turn may name a reason from.
 		return providerfailure.TagStderr(err, a.stderr)
 	}
-	if a.output == "" && !a.allowEmptyOutput && !cleanEmptyStop(p, a.stdout) {
+	if a.output == "" && !a.allowEmptyOutput {
 		return fmt.Errorf("worker %s returned empty output", p.Name)
 	}
 	return nil
