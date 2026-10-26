@@ -57,9 +57,16 @@ type fakeLocalCI struct {
 	bad       bool
 	started   chan struct{}
 	release   chan struct{}
+	// nodes, when set, are the machines this registry offers. A test that leaves
+	// it empty gets one 16-slot machine named hermes that allows every room and
+	// every suite.
+	nodes []localci.Node
 }
 
 func (f *fakeLocalCI) Nodes(context.Context) ([]localci.Node, error) {
+	if len(f.nodes) > 0 {
+		return f.nodes, nil
+	}
 	return []localci.Node{{Name: "hermes", Slots: 16, Enabled: true}}, nil
 }
 func (f *fakeLocalCI) Mode(context.Context, string) (string, error) { return localci.ModeLocal, nil }
@@ -493,6 +500,72 @@ func TestLocalTrialUsesTheRoomTestBudgetAndMachine(t *testing.T) {
 	<-ci.saved
 	if trial, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head); err != nil || trial.Status != "passed" {
 		t.Fatalf("finished = %s %v", trial.Status, err)
+	}
+}
+
+// A suite that no enabled machine allows fails the trial at once and names the
+// suite: the merge would otherwise wait for a machine that can never take it.
+func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
+	e, _, records, ci := localMergeEnvFor(t, false, "good")
+	r := records[0]
+	// This machine runs only the relay suite, and a trial runs every workflow
+	// suite of its base definition.
+	ci.nodes = []localci.Node{{Name: "hermes", Slots: 16, Enabled: true, Suites: []string{string(localci.SuiteRelay)}}}
+	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trial.Status != VerdictFailed || trial.Reason != trial.Logs {
+		t.Fatalf("trial = %s %q, want a failure whose reason is its evidence", trial.Status, trial.Reason)
+	}
+	if !strings.Contains(trial.Reason, string(localci.SuiteGo)) || !strings.Contains(trial.Reason, "--suites") {
+		t.Fatalf("trial reason = %q, want the blocked suite and the fix", trial.Reason)
+	}
+	// The failure is a typed error, so no run was admitted and none waits.
+	if head := runningLocalCIHead(e.s); head != "" {
+		t.Fatalf("a blocked trial admitted the run for %s", head)
+	}
+	// A scheduler tick reports the blocked suite and keeps taking the work it
+	// can take, instead of failing every tick.
+	if err := e.s.Store.update(func(st *State) error {
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Phase: state.MergeTrialPhaseRunning, Branch: "dyna/merge-trial/1", Base: r.Base, Head: r.Head, Changes: []state.MergeTrialChange{{Key: r.Key, Head: r.Head}}, Created: e.clock}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.scheduleRegisteredCI(context.Background(), st); err != nil {
+		t.Fatalf("a blocked suite failed the scheduler: %v", err)
+	}
+	if head := runningLocalCIHead(e.s); head != "" {
+		t.Fatalf("a blocked suite started a run for %s", head)
+	}
+}
+
+// A machine of another room cannot take the run, so its suites do not count.
+// Without that rule a room whose own machines lack a suite would wait for ever
+// on a machine it may never use.
+func TestLocalTrialFailsWhenAnotherRoomOwnsTheSuite(t *testing.T) {
+	e, _, records, ci := localMergeEnvFor(t, false, "good")
+	r := records[0]
+	// This room's machine runs only the go suite. The machine that takes every
+	// suite belongs to another room, so it is not a candidate.
+	ci.nodes = []localci.Node{
+		{Name: "room-ci", Slots: 16, Enabled: true, Suites: []string{string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
+		{Name: "other-room-ci", Slots: 16, Enabled: true, Rooms: []string{"room_other"}},
+	}
+	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trial.Status != VerdictFailed || !strings.Contains(trial.Reason, string(localci.SuiteRelay)) {
+		t.Fatalf("trial = %s %q, want a failure that names the relay suite", trial.Status, trial.Reason)
+	}
+	if head := runningLocalCIHead(e.s); head != "" {
+		t.Fatalf("a blocked trial admitted the run for %s", head)
 	}
 }
 

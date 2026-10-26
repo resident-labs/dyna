@@ -188,6 +188,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	local.Roles = append(local.Roles, RoleCI)
 	local.CISlots = 1
 	local.HostChecksGrants = []HostChecksGrant{{By: GrantorOwner}}
+	local.Rooms, local.Suites = []string{"room_dyna"}, []string{"go"}
 	if _, err := s.Save(ctx, local); err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +198,10 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	local, err = s.GetLocal(ctx)
 	if err != nil || local.HasHostChecksGrants() {
 		t.Fatalf("removing the CI role kept host permission: %#v, %v", local, err)
+	}
+	// The limits only the ci role uses go with it.
+	if len(local.Rooms) != 0 || len(local.Suites) != 0 {
+		t.Fatalf("removing the CI role kept rooms %v and suites %v", local.Rooms, local.Suites)
 	}
 	local.Roles = []Role{RoleAgents}
 	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
@@ -368,6 +373,59 @@ func TestMigrateAddsRoomListToVersionFour(t *testing.T) {
 	// The machine named no room before it could, so it takes every room.
 	if len(m.Rooms) != 0 || !m.AllowsRoom("room_any") {
 		t.Fatalf("migrated machine rooms = %v", m.Rooms)
+	}
+}
+
+// machinesVersionFiveSchema is the registry with a room list but no suite list,
+// so a data folder from that version still migrates.
+const machinesVersionFiveSchema = `CREATE TABLE machines (
+	id             TEXT    PRIMARY KEY,
+	name           TEXT    NOT NULL UNIQUE,
+	roles          TEXT    NOT NULL CHECK(json_valid(roles)),
+	ssh            TEXT    NOT NULL,
+	ci_slots       INTEGER NOT NULL CHECK(ci_slots >= 0),
+	enabled        INTEGER NOT NULL CHECK(enabled IN (0,1)),
+	local          INTEGER NOT NULL CHECK(local IN (0,1)),
+	created_ms     INTEGER NOT NULL,
+	updated_ms     INTEGER NOT NULL,
+	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
+	health         TEXT    NOT NULL DEFAULT 'unknown',
+	health_reason  TEXT    NOT NULL DEFAULT '',
+	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
+	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
+	probe_error    TEXT    NOT NULL DEFAULT '',
+	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
+	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1)),
+	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))
+);
+CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
+INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms,allow_host_checks,rooms) VALUES
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000,1,'["room_dyna"]');
+INSERT INTO meta(key,value) VALUES('machines.version','5');`
+
+// A version 5 registry reaches the version 6 step, which adds only the suite
+// list. A machine that named no suite before it could allows every suite.
+func TestMigrateAddsSuiteListToVersionFive(t *testing.T) {
+	ctx := context.Background()
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := db.Exec(machinesVersionFiveSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := Store{DataDir: dir}.Get(ctx, "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.AllowsRoom("room_dyna") || m.AllowsRoom("room_other") {
+		t.Fatalf("migrated machine rooms = %v", m.Rooms)
+	}
+	if len(m.Suites) != 0 || !m.AllowsSuite("go") {
+		t.Fatalf("migrated machine suites = %v", m.Suites)
 	}
 }
 

@@ -51,6 +51,9 @@ type Node struct {
 	// Rooms limits the machine to those rooms' CI work. An empty list takes
 	// work from every room.
 	Rooms []string `json:"rooms,omitempty"`
+	// Suites limits the machine to those suites' CI work. An empty list takes
+	// every suite.
+	Suites []string `json:"suites,omitempty"`
 }
 
 // AllowsRoom reports whether the machine takes CI work for the room. A machine
@@ -63,6 +66,12 @@ func (n Node) AllowsRoom(roomID string) bool {
 // work of a room.
 func (n Node) HostChecksAllowed(room string) bool {
 	return machines.HostChecksAllowed(n.HostChecksGrants, room)
+}
+
+// AllowsSuite reports whether the machine takes CI work for the suite. A
+// machine that names no suite takes every suite.
+func (n Node) AllowsSuite(suite Suite) bool {
+	return len(n.Suites) == 0 || slices.Contains(n.Suites, string(suite))
 }
 
 type Store struct{ DataDir string }
@@ -168,7 +177,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms}
+		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms, Suites: m.Suites}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
