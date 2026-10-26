@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -304,6 +305,15 @@ func (s *Service) refreshLocal(ctx context.Context, key string) error {
 		return err
 	}
 	head, err := gitRead(ctx, r.RepoPath, "rev-parse", "--verify", "--end-of-options", "refs/heads/"+r.Branch+"^{commit}")
+	// Only a git exit status says the branch is gone. A cancelled or timed-out
+	// read (an engine stop, a busy repository) says nothing about the branch,
+	// so it must not pause the review or send a notice (issue D-258).
+	if err != nil {
+		var exit *exec.ExitError
+		if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() <= 0 {
+			return err
+		}
+	}
 	return s.Store.updateRecords([]string{key}, func(st *State) error {
 		live := st.Records[key]
 		if live == nil || !live.Watching {
