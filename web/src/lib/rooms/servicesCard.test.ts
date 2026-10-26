@@ -64,3 +64,11 @@ test('a failed room read keeps that room last good list, and a room never read s
   const fresh = settleReads({}, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
   assert.deepEqual(serviceRows(fresh.byRoom).map((r) => [r.id, r.tone, r.state]), [['service:unreadable:one', 'bad', 'Could not be read'], ['service:librarian', 'ok', 'sol']])
 })
+
+test('a healthy read followed by a failed refresh keeps the rows and warns', () => {
+  const first = settleReads({}, [{ room: 'one', services: [service({})] }])
+  const again = settleReads(first.kept, [{ room: 'one', services: null }])
+  assert.deepEqual(serviceRows(again.byRoom).map((r) => [r.id, r.tone]), [['service:stale:one', 'bad'], ['service:librarian', 'ok']])
+  const recovered = settleReads(again.kept, [{ room: 'one', services: [service({})] }])
+  assert.deepEqual(serviceRows(recovered.byRoom).map((r) => r.id), ['service:librarian'])
+})
