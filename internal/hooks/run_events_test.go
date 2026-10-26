@@ -173,3 +173,31 @@ func TestHookRunPostsStartAndResultToTheRepoRoom(t *testing.T) {
 		}
 	}
 }
+
+// A scheduled run that passes posts nothing, and one that fails posts only its
+// result, so an every-minute hook does not fill the feed.
+func TestScheduledHookPostsOnlyAFailure(t *testing.T) {
+	s, repo := setup(t)
+	tick := hook("tick", Schedule)
+	tick.EveryMinutes = 1
+	add(t, s, repo, tick)
+	var got []room.HookEvent
+	s.Post = func(_ Event, ev room.HookEvent) error { got = append(got, ev); return nil }
+	var fail error
+	s.Exec = func(ctx context.Context, p processguard.Process) error {
+		if p.Args[0] == "git" {
+			return processguard.Execute(ctx, p)
+		}
+		return fail
+	}
+	if _, err := s.run(t.Context(), Event{Repo: repo}, tick.Name, nil, false); err != nil || len(got) != 0 {
+		t.Fatalf("a passing scheduled run posted %+v, %v", got, err)
+	}
+	fail = context.DeadlineExceeded
+	if _, err := s.run(t.Context(), Event{Repo: repo}, tick.Name, nil, false); err == nil {
+		t.Fatal("the failing run passed")
+	}
+	if len(got) != 1 || got[0].State != room.HookError {
+		t.Fatalf("events after a failure = %+v, want only the result", got)
+	}
+}
