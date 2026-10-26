@@ -25,7 +25,7 @@ func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 	required := []string{
 		"## Public JavaScript API",
 		"### `agent(prompt, opts?)`", "### `parallel(thunks)`",
-		"### `pipeline(items, ...stages)`", "### `post(to, text)`",
+		"### `pipeline(items, ...stages)`", "### `post(to, text, data?)`",
 		"### `workflow(nameOrRef, args?)`",
 		"post('@root',", "### Workflow templates", "dyna templates copy",
 		"dyna run /tmp/my-review.js", "adversarial-review", "judge-panel", "research-design",

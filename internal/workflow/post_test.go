@@ -60,6 +60,62 @@ func TestWorkflowPostUsesPoster(t *testing.T) {
 	}
 }
 
+func TestWorkflowPostDataFormsAppendFencedJSON(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("DYNA_RUN_ID", "wf_engine-post-data")
+	run, err := runstore.Create("post data", "return 1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { run.Finish("ok", "", nil) })
+
+	var texts []string
+	_, err = executeTest(context.Background(), Options{
+		ScriptSrc: `post("@a", "Land it", {unit: "CH", head: "abc"}); post("@a", {text: "Again", data: [1, 2]}); post("@a", {text: "Plain"}); post("@a", "Null", null);`,
+		Store:     postTestStore(), Run: run, WorkDir: t.TempDir(),
+		Poster: func(_ context.Context, _ string, _ []string, text string) (PostResult, error) {
+			texts = append(texts, text)
+			return PostResult{ID: "msg_1"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	want := []string{
+		"Land it\n\n```json\n{\n  \"unit\": \"CH\",\n  \"head\": \"abc\"\n}\n```",
+		"Again\n\n```json\n[\n  1,\n  2\n]\n```",
+		"Plain",
+		"Null",
+	}
+	if !reflect.DeepEqual(texts, want) {
+		t.Fatalf("texts = %q", texts)
+	}
+	posted := false
+	for script, wantErr := range map[string]string{
+		`post("@a", "x", "not an object")`:                      "object or an array",
+		`try { post("@a", {}) } catch (e) { return e.message }`: "",
+		`post("@a", {})`: "non-empty string",
+	} {
+		got, err := executeTest(context.Background(), Options{
+			ScriptSrc: script, Store: postTestStore(), Run: run, WorkDir: t.TempDir(),
+			Poster: func(context.Context, string, []string, string) (PostResult, error) {
+				posted = true
+				return PostResult{ID: "m"}, nil
+			},
+		})
+		if wantErr == "" {
+			if err != nil || !strings.Contains(got, "non-empty string") {
+				t.Fatalf("caught error = %q, %v", got, err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("%s: error = %v", script, err)
+		}
+	}
+	if posted {
+		t.Fatal("a post with bad text or data reached the poster")
+	}
+}
+
 func TestWorkflowPostValidationAndUnavailable(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-post-invalid")
