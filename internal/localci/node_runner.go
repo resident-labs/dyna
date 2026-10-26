@@ -1093,13 +1093,18 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		for _, arg := range scopeArgs {
 			scope += " " + q(arg)
 		}
-		// stop kills every process in the scope and works on every systemd that
-		// runs a check: `systemctl kill` with --kill-whom needs systemd 250, and
-		// Ubuntu 22.04 has 249, where the option is --kill-who.
-		unit := q(name + ".scope")
-		release := "systemctl --user stop " + unit + " >/dev/null 2>&1 || true; " +
-			"if systemctl --user is-active --quiet " + unit + " 2>/dev/null; then " +
-			"systemctl --user kill --signal=KILL " + unit + " >/dev/null 2>&1 || true; fi; " +
+		// A SIGKILL to the scope comes first: a detached child that ignores
+		// SIGTERM must not hold the slot or the transport for the manager's stop
+		// timeout. `systemctl kill` without --kill-who/--kill-whom works on every
+		// systemd that runs a check (the option differs between 249 and 250, and
+		// the default is every process in the unit). The stop is bounded, and a
+		// scope that is still active afterwards is reported in the check's log
+		// rather than hidden.
+		unitName := name + ".scope"
+		unit := q(unitName)
+		release := "systemctl --user kill --signal=KILL " + unit + " >/dev/null 2>&1 || true; " +
+			"timeout 5s systemctl --user stop " + unit + " >/dev/null 2>&1 || true; " +
+			"if systemctl --user is-active --quiet " + unit + " 2>/dev/null; then printf 'local CI: the check scope %s is still active after cleanup\\n' " + q(unitName) + " >&2; fi; " +
 			"systemctl --user reset-failed " + unit + " >/dev/null 2>&1 || true; "
 		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
 		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
