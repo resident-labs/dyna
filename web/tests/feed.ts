@@ -1,5 +1,6 @@
 // Browser fixture only. tests/feed.html?highlight=root&finished=line shows a
-// channel feed with sample posts under those feed choices.
+// channel feed with sample posts under those feed choices. Add workflow=1 for
+// the workflow script posts.
 import '@fontsource/ibm-plex-sans/400.css'
 import '@fontsource/ibm-plex-sans/500.css'
 import '@fontsource/ibm-plex-sans/600.css'
@@ -9,10 +10,11 @@ import '../src/app.css'
 import { mount } from 'svelte'
 import Feed from '../src/lib/rooms/Feed.svelte'
 import { choose } from '../src/lib/rooms/look.svelte.ts'
-import { sampleRoom as room, samplePosts as posts } from '../src/lib/rooms/feedSample.ts'
+import { sampleRoom as room, samplePosts, workflowPosts } from '../src/lib/rooms/feedSample.ts'
 import { need } from '../test/need.ts'
 
 const q = new URLSearchParams(location.search)
+const posts = q.get('workflow') ? [...samplePosts, ...workflowPosts()] : samplePosts
 for (const id of ['highlight', 'finished']) {
   const value = q.get(id)
   if (value) choose(id, value)
