@@ -31,6 +31,7 @@ var computerCodePaths = []string{
 	"internal/procident",
 	"internal/providerfailure",
 	"internal/repoid",
+	"internal/runprocs",
 	"internal/runstore",
 	"internal/sessionlife",
 	"internal/settings",
