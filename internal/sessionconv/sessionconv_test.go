@@ -105,7 +105,7 @@ func TestPiCompactionAndContextEditNarrowTheConvertedHistory(t *testing.T) {
 		`{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-10-25T10:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"old answer"}]}}`,
 		`{"type":"compaction","id":"c1","parentId":"a1","timestamp":"2026-10-25T10:01:00Z","summary":"The task is the decoder.","firstKeptEntryId":"u2"}`,
 		`{"type":"message","id":"u2","parentId":"c1","timestamp":"2026-10-25T10:01:01Z","message":{"role":"user","content":"continue the decoder"}}`,
-		`{"type":"context_edit","id":"e1","parentId":"u2","timestamp":"2026-10-25T10:01:02Z","targetId":"u2","replacement":"continue the decoder, tests only"}`,
+		`{"type":"context_edit","id":"e1","parentId":"u2","timestamp":"2026-10-25T10:01:02Z","targetId":"u2","replacement":{"content":[{"type":"text","text":"continue the decoder, tests only"}]}}`,
 		`{"type":"model_change","id":"m1","parentId":"e1","timestamp":"2026-10-25T10:01:02Z","provider":"openai","modelId":"gpt-4o"}`,
 		`{"type":"message","id":"a2","parentId":"m1","timestamp":"2026-10-25T10:01:03Z","message":{"role":"assistant","content":[{"type":"text","text":"running the tests"}]}}`,
 		`{"type":"message","id":"u3","parentId":"a2","timestamp":"2026-10-25T10:01:04Z","message":{"role":"user","content":"a long tool dump"}}`,
@@ -138,5 +138,58 @@ func TestPiReaderRejectsABrokenChain(t *testing.T) {
 	)
 	if _, err := ReadPi(path); err == nil || !strings.Contains(err.Error(), "missing parent") {
 		t.Fatalf("broken chain error = %v", err)
+	}
+}
+
+// An edit on an abandoned branch never changes the active conversation, even
+// when it targets an entry the active branch also contains.
+func TestPiContextEditsStayOnTheActiveBranch(t *testing.T) {
+	path := piFixture(t,
+		`{"type":"session","version":3,"id":"pi-branch","timestamp":"2026-10-25T10:00:00Z","cwd":"/work"}`,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-10-25T10:00:01Z","message":{"role":"user","content":"keep this question"}}`,
+		`{"type":"context_edit","id":"eb","parentId":"u1","timestamp":"2026-10-25T10:00:02Z","targetId":"u1","replacement":null}`,
+		`{"type":"message","id":"ab","parentId":"eb","timestamp":"2026-10-25T10:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"abandoned answer"}]}}`,
+		`{"type":"message","id":"u2","parentId":"u1","timestamp":"2026-10-25T10:00:04Z","message":{"role":"user","content":"the active follow-up"}}`,
+		`{"type":"message","id":"a2","parentId":"u2","timestamp":"2026-10-25T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"active answer"}]}}`,
+	)
+	conversation, err := ReadPi(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation.Messages) != 3 {
+		t.Fatalf("active messages = %d: %+v", len(conversation.Messages), conversation.Messages)
+	}
+	if got := conversation.Messages[0].Blocks[0].Text; got != "keep this question" {
+		t.Fatalf("an abandoned edit removed an active message: %q", got)
+	}
+	if got := conversation.Messages[2].Blocks[0].Text; got != "active answer" {
+		t.Fatalf("active branch changed: %q", got)
+	}
+}
+
+// Pi puts custom messages and branch summaries in model context. The converter
+// keeps them as labelled user messages instead of dropping them.
+func TestPiKeepsCustomMessagesAndBranchSummaries(t *testing.T) {
+	path := piFixture(t,
+		`{"type":"session","version":3,"id":"pi-custom","timestamp":"2026-10-25T10:00:00Z","cwd":"/work"}`,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-10-25T10:00:01Z","message":{"role":"user","content":"start"}}`,
+		`{"type":"custom_message","id":"cm","parentId":"u1","timestamp":"2026-10-25T10:00:02Z","customType":"hook","content":[{"type":"text","text":"injected context"}],"display":false}`,
+		`{"type":"branch_summary","id":"bs","parentId":"cm","timestamp":"2026-10-25T10:00:03Z","fromId":"old","summary":"explored another approach"}`,
+		`{"type":"message","id":"a1","parentId":"bs","timestamp":"2026-10-25T10:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}`,
+	)
+	conversation, err := ReadPi(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation.Messages) != 4 {
+		t.Fatalf("messages = %d: %+v", len(conversation.Messages), conversation.Messages)
+	}
+	custom := conversation.Messages[1]
+	if len(custom.Blocks) != 2 || custom.Blocks[0].Text != "[Custom message: hook]" || custom.Blocks[1].Text != "injected context" {
+		t.Fatalf("custom message = %+v", custom)
+	}
+	summary := conversation.Messages[2]
+	if len(summary.Blocks) != 1 || !strings.Contains(summary.Blocks[0].Text, "explored another approach") || !strings.Contains(summary.Blocks[0].Text, "summary of a branch") {
+		t.Fatalf("branch summary = %+v", summary)
 	}
 }
