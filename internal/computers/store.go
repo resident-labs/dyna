@@ -153,6 +153,9 @@ func Environment(m Meta, base []string) ([]string, error) {
 		ownerDisplay = envValue(base, "DISPLAY")
 	}
 	env := mergeEnvironment(base, map[string]string{"DYNA_OWNER_WAYLAND_DISPLAY": ownerWayland, "DYNA_OWNER_DISPLAY": ownerDisplay, "WAYLAND_DISPLAY": m.WaylandDisplay, "DISPLAY": m.Display, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "PATH": shim + string(os.PathListSeparator) + envValue(base, "PATH")})
+	// Every launch path that builds an app's environment here (open, run, env,
+	// the browser) points it at the computer's own session bus.
+	env = mergeEnvironment(env, privateBusEnvironment(m.SessionID))
 	return browserEnvironment(m, env)
 }
 
@@ -185,6 +188,22 @@ func envValue(env []string, key string) string {
 	}
 	return ""
 }
+
+// BusSocket is the computer's own D-Bus session bus socket.
+func BusSocket(id string) string { return filepath.Join(RuntimeDir(id), "bus") }
+
+// privateBusEnvironment names the computer's own session bus for an app, so its
+// portal requests, such as file choosers, stay inside the computer. It is empty
+// while the computer has no bus (a stopped computer, or no dbus-daemon): the app
+// keeps the environment it had.
+func privateBusEnvironment(id string) map[string]string {
+	path := BusSocket(id)
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	return map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=" + path}
+}
+
 func mergeEnvironment(base []string, values map[string]string) []string {
 	out := make([]string, 0, len(base)+len(values))
 	for _, s := range base {
