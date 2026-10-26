@@ -47,3 +47,47 @@ func TestGoProbeEnvKeepsTheCallersEnvironment(t *testing.T) {
 		}
 	}
 }
+
+// D-155 review: the isolated probe must still read the settings the owner saved
+// with `go env -w`. Without GOENV, Go reads $XDG_CONFIG_HOME/go/env; replacing
+// the configuration directory would hide a saved GOPATH, GOCACHE or GOFLAGS.
+func TestGoDefaultsKeepsTheOwnersSavedGoSettings(t *testing.T) {
+	path, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no Go toolchain in PATH")
+	}
+	config := t.TempDir()
+	saved := filepath.Join(config, "go", "env")
+	if err := os.MkdirAll(filepath.Dir(saved), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gopath, gocache, gomodcache := filepath.Join(t.TempDir(), "gp"), filepath.Join(t.TempDir(), "gc"), filepath.Join(t.TempDir(), "gm")
+	settings := "GOPATH=" + gopath + "\nGOCACHE=" + gocache + "\nGOMODCACHE=" + gomodcache + "\n"
+	if err := os.WriteFile(saved, []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// No GOENV is exported, so only the saved file in the caller's configuration
+	// directory can carry these paths.
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "XDG_CONFIG_HOME=" + config}
+	got := goDefaults(filepath.Dir(path), env)
+	if len(got) == 0 {
+		t.Skip("the toolchain did not answer go env")
+	}
+	if got["GOPATH"] != gopath || got["GOCACHE"] != gocache || got["GOMODCACHE"] != gomodcache {
+		t.Fatalf("probe ignored the owner's saved settings: %v", got)
+	}
+}
+
+// An exported GOENV keeps its own file.
+func TestGoProbeEnvKeepsAnExportedGoEnv(t *testing.T) {
+	env := goProbeEnv([]string{"HOME=/owner", "GOENV=/custom/env"}, "/probe/config")
+	found := false
+	for _, pair := range env {
+		if pair == "GOENV=/custom/env" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("probe dropped the exported GOENV: %v", env)
+	}
+}

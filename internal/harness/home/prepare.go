@@ -374,6 +374,11 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 // temporary folder, so a late counter write races its removal (D-155).
 // GOTELEMETRY=off alone does not stop the local counters in Go 1.26, so the probe
 // also gets its own configuration directory, which its caller removes afterwards.
+//
+// The owner's saved Go settings still apply: without GOENV, Go reads
+// $XDG_CONFIG_HOME/go/env, so the probe names the caller's file even though it
+// uses its own configuration directory for telemetry. A setting saved with
+// `go env -w` would otherwise silently become the toolchain default.
 func goProbeEnv(env []string, configHome string) []string {
 	// Sorting gives stable, last-value-wins input without reading process env.
 	values := envMap(env)
@@ -382,14 +387,33 @@ func goProbeEnv(env []string, configHome string) []string {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	out := make([]string, 0, len(keys)+5)
+	out := make([]string, 0, len(keys)+6)
 	for _, key := range keys {
-		if key == "XDG_CONFIG_HOME" || key == "GOTELEMETRY" {
+		if key == "XDG_CONFIG_HOME" || key == "GOTELEMETRY" || key == "GOENV" {
 			continue
 		}
 		out = append(out, key+"="+values[key])
 	}
+	if saved := callerGoEnv(values); saved != "" {
+		out = append(out, "GOENV="+saved)
+	}
 	return append(out, "XDG_CONFIG_HOME="+configHome, "GOTELEMETRY=off", "ENV=", "BASH_ENV=", "ZDOTDIR=")
+}
+
+// callerGoEnv names the Go settings file the caller's environment selects: an
+// explicit GOENV, else the toolchain's default under the caller's configuration
+// directory. An empty result leaves the choice to the toolchain.
+func callerGoEnv(values map[string]string) string {
+	if saved := values["GOENV"]; saved != "" {
+		return saved
+	}
+	if dir := values["XDG_CONFIG_HOME"]; dir != "" {
+		return filepath.Join(dir, "go", "env")
+	}
+	if home := values["HOME"]; home != "" {
+		return filepath.Join(home, ".config", "go", "env")
+	}
+	return ""
 }
 
 func goDefaults(path string, env []string) map[string]string {
