@@ -367,3 +367,28 @@ func TestReviewDeltaExcludesRebasedMainChanges(t *testing.T) {
 		}
 	}
 }
+
+// A reply records the head the change has now, not the last one a poll saw. An
+// author who pushes a fix and replies at once names the new commit in the text;
+// a reply stored on the old head let the reviewer judge the wrong revision
+// (D-177).
+func TestReplyRecordsTheHeadPushedSinceTheLastPoll(t *testing.T) {
+	e := newEnv(t)
+	r, dir := localChange(t, e)
+	e.tick()
+	r, _ = e.s.Store.Get(r.Key)
+	findings := []Finding{{Severity: "blocking", File: "code.txt", Line: 1, Why: "Missing bounds check", Fix: "Check the index"}}
+	if err := e.s.VerdictWithFindings(context.Background(), r.Key, r.Reviewer, r.Head, "changes", "Fix bounds", 0, findings); err != nil {
+		t.Fatal(err)
+	}
+	reviewed, _ := e.s.Store.Get(r.Key)
+	pushed := changeCommit(t, dir, "bounds checked\n")
+	// No poll runs between the push and the reply.
+	if err := e.s.ReplyFinding(context.Background(), r.Key, r.Author, e.author.ID, reviewed.Findings[0].ID, "fixed", "Fixed in "+pushed[:9]); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := e.s.Store.Get(r.Key)
+	if head := got.Findings[0].Replies[0].Head; head != pushed {
+		t.Fatalf("reply head = %q, want the pushed head %q (stale was %q)", head, pushed, r.Head)
+	}
+}

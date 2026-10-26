@@ -101,6 +101,11 @@ Each item in `checks` supports these fields:
   details.
 - `providerGroup` groups provider jobs, such as shards of one test job. It
   defaults to the check's display name.
+- `hostedAggregate: true` declares that the provider's job of this check's name
+  only requires other jobs and runs no test. When Dyna cancels a queued hosted
+  run for a local run, it reads a failure of such a job as the cancellation
+  echoed back, not as a test result. A suite `group` is read the same way. A
+  provider name alone never counts, because a job can share a name and run tests.
 - `priority` is a nonnegative integer. Higher values start first. Equal
   priorities keep definition order.
 - `cpus` is the CPU count the check asks for, and `memory` its memory, such as

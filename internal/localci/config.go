@@ -82,8 +82,10 @@ type Definition struct {
 	aliases    map[Suite]Suite
 	groupOf    map[CheckName]Group
 	providerOf map[CheckName]CheckName
-	actImage   string
-	warm       *JobRef
+	// hostedAggregate holds the provider job names a check declared aggregate-only.
+	hostedAggregate map[CheckName]bool
+	actImage        string
+	warm            *JobRef
 }
 
 type definitionSuite struct {
@@ -150,9 +152,12 @@ type checkFile struct {
 	Caches        []string          `yaml:"caches"`
 	Reports       ReportMode        `yaml:"reports"`
 	ProviderGroup CheckName         `yaml:"providerGroup"`
-	Priority      int               `yaml:"priority"`
-	CPUs          int               `yaml:"cpus"`
-	Memory        string            `yaml:"memory"`
+	// HostedAggregate declares that the provider's job of this name only
+	// requires other jobs and runs no test of its own.
+	HostedAggregate bool   `yaml:"hostedAggregate"`
+	Priority        int    `yaml:"priority"`
+	CPUs            int    `yaml:"cpus"`
+	Memory          string `yaml:"memory"`
 }
 
 type suiteFile struct {
@@ -280,11 +285,12 @@ func ParseDefinition(body []byte) (*Definition, error) {
 	}
 
 	definition := &Definition{
-		bySuite:    make(map[Suite]definitionSuite, len(file.Suites)),
-		aliases:    make(map[Suite]Suite),
-		groupOf:    map[CheckName]Group{},
-		providerOf: map[CheckName]CheckName{},
-		actImage:   DefaultActImage,
+		bySuite:         make(map[Suite]definitionSuite, len(file.Suites)),
+		aliases:         make(map[Suite]Suite),
+		groupOf:         map[CheckName]Group{},
+		providerOf:      map[CheckName]CheckName{},
+		hostedAggregate: map[CheckName]bool{},
+		actImage:        DefaultActImage,
 	}
 	if file.Act != nil && file.Act.Image != "" {
 		if strings.TrimSpace(file.Act.Image) != file.Act.Image || len(strings.Fields(file.Act.Image)) != 1 || strings.ContainsRune(file.Act.Image, '\x00') {
@@ -412,6 +418,9 @@ func ParseDefinition(body []byte) (*Definition, error) {
 		}
 		checks[input.ID] = check
 		definition.providerOf[input.Name] = input.ProviderGroup
+		if input.HostedAggregate {
+			definition.hostedAggregate[input.Name] = true
+		}
 	}
 
 	groups := map[Group]bool{}
@@ -614,6 +623,11 @@ func (d *Definition) ProviderGroup(check CheckName) CheckName {
 	}
 	return check
 }
+
+// HostedAggregate reports whether the provider's job of this name was declared
+// aggregate-only: it requires other jobs and runs no test itself. A provider
+// name alone never proves that, since a job may share a name and run tests.
+func (d *Definition) HostedAggregate(check CheckName) bool { return d.hostedAggregate[check] }
 
 // ProviderGroups returns the distinct provider names feeding an aggregate.
 func (d *Definition) ProviderGroups(group Group) []CheckName {
