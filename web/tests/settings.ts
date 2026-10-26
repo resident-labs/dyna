@@ -20,7 +20,7 @@ import type { ProfileList, ProfileUsageStats, ProfileView } from '../src/lib/api
 import type { ProfileSave } from '../src/lib/api/engine.ts'
 import type { ScopeAccount } from '../src/lib/api/account.ts'
 import type { ActivityRollup } from '../src/lib/settings/accounts/activity.ts'
-import type { Device, SettingItem } from '../src/lib/api/settings.ts'
+import type { Device, Hook, HookSummary, SettingItem } from '../src/lib/api/settings.ts'
 
 const query = new URLSearchParams(location.search)
 const pane = query.get('pane') || 'harnesses'
@@ -180,6 +180,16 @@ api.setSetting = (key: string, value: string) => {
   it.source = 'file'
   return later(it)
 }
+
+const hook = (fields: Pick<Hook, 'name' | 'event'> & Partial<Hook>): Hook => ({ label: '', command: '', cwd: 'data', timeout: '5m0s', onFail: 'alert', scope: 'global', addedBy: 'dyna', addedAt: '', ...fields })
+const hookList: Hook[] = [
+  hook({ name: 'self-update', label: 'Update Dyna', event: 'main-updated', builtin: 'self-update' }),
+  hook({ name: 'maintenance', label: 'Maintenance', event: 'schedule', everyMinutes: 60, builtin: 'maintenance' }),
+  hook({ name: 'doctor', label: 'Doctor', event: 'schedule', everyMinutes: 1, builtin: 'doctor' }),
+  hook({ name: 'notify-me', event: 'after-land', command: 'notify-send landed', addedBy: 'user' }),
+]
+api.listGlobalHooks = () => later(hookList)
+api.globalHookSummary = () => later<HookSummary[]>([])
 
 const device = (fields: Pick<Device, 'kind' | 'id' | 'name' | 'device' | 'origin' | 'lastSeen' | 'expires'> & Partial<Device>): Device => ({ current: false, created: '', ...fields })
 const deviceList: Device[] = [

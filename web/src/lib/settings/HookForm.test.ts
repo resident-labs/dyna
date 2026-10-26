@@ -9,7 +9,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
-import { hookForm, hookOf, hookPatch, isBuiltin, newHook, timeoutLabel, type HookFields } from './hooks.ts'
+import { hookForm, hookOf, hookPatch, isBuiltin, listedHooks, newHook, timeoutLabel, type HookFields } from './hooks.ts'
 import { errorText } from '../errorText.ts'
 import type { Hook } from '../api/settings.ts'
 
@@ -101,7 +101,7 @@ interface RemoveContext {
 }
 const removeNames = ['load', 'loadRuns', 'loadLog', 'remove', 'say']
 function removeContext(api: Record<string, unknown>, fields: Pick<RemoveContext, 'repo' | 'hooks' | 'editor' | 'removing'>): RemoveContext {
-  const context: RemoveContext = { api, errorText, isGlobal: () => false, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
+  const context: RemoveContext = { api, errorText, listedHooks, isGlobal: () => false, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
   runFunctions(pane, removeNames, context)
   return context
 }

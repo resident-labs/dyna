@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Hook, HookRun } from '../api/settings.ts'
-import { authorLabel, eventLabel, exitLabel, failLabel, hookEvents, hookForm, hookOf, hookPatch, isBuiltin, newHook, newestFirst, runByHand, runTone, scopeOf, timeoutLabel } from './hooks.ts'
+import { authorLabel, eventLabel, exitLabel, failLabel, hookEvents, hookForm, hookOf, hookPatch, isBuiltin, listedHooks, newHook, newestFirst, runByHand, runTone, scopeOf, timeoutLabel } from './hooks.ts'
 
 // hook fills the fields the engine stores.
 const hook = (fields: Pick<Hook, 'name' | 'event' | 'command' | 'cwd' | 'timeout' | 'onFail'>): Hook => ({ addedBy: 'owner', addedAt: '', ...fields })
@@ -86,4 +86,10 @@ test('built-ins and their author read in words', () => {
   assert.equal(authorLabel('engine'), 'Dyna')
   assert.equal(authorLabel('ses_20261023-1234abcd'), 'a session')
   assert.equal(authorLabel(''), 'someone')
+})
+
+test('the global screen hides a service trigger and a repository lists every hook', () => {
+  const hooks = [{ name: 'doctor' }, { name: 'self-update' }]
+  assert.deepEqual(listedHooks(hooks, 'global').map((h) => h.name), ['self-update'])
+  assert.deepEqual(listedHooks(hooks, 'repository').map((h) => h.name), ['doctor', 'self-update'])
 })

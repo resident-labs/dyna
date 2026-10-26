@@ -2,7 +2,9 @@
   // Hooks: commands that run on repository events, and the built-in automatic
   // passes. The pane serves both screens: Room settings passes the room's
   // repository, and Settings passes scope="global" for the hooks that belong to
-  // the machine. `internal/hooks` does the work, the same code `dyna git hooks`
+  // the machine. Settings holds choices, so the global screen shows no run
+  // history or logs: those live on the Services page and the Home card. It also
+  // hides a hook that triggers a service, whose settings sit with the service. `internal/hooks` does the work, the same code `dyna git hooks`
   // uses. Built-in rows come from the engine's table: the owner changes only
   // their interval, timeout and switch, and `dyna git hooks run <name>
   // --global` runs one by hand.
@@ -17,7 +19,7 @@
   import { BASE, motion } from '../ui/motion.ts'
   import { ago, duration, until } from '../ui/format.ts'
   import HookForm from './HookForm.svelte'
-  import { eventLabel, exitLabel, failLabel, hookForm, hookOf, hookPatch, isBuiltin, authorLabel, newHook, newestFirst, runByHand, runTone, timeoutLabel, type HookFields, type HookInput, type HookScope } from './hooks.ts'
+  import { listedHooks, eventLabel, exitLabel, failLabel, hookForm, hookOf, hookPatch, isBuiltin, authorLabel, newHook, newestFirst, runByHand, runTone, timeoutLabel, type HookFields, type HookInput, type HookScope } from './hooks.ts'
   import type { HookLogTarget } from './hookLog.ts'
   import type { Hook, HookRun, HookRunLog, HookSummary } from '../api/settings.ts'
 
@@ -93,9 +95,9 @@
       openRun = ''
     }
     try {
-      const listed: Hook[] = (await (isGlobal() ? api.listGlobalHooks() : api.listHooks(repo))) ?? []
+      const listed: Hook[] = listedHooks((await (isGlobal() ? api.listGlobalHooks() : api.listHooks(repo))) ?? [], isGlobal() ? 'global' : 'repository')
       hooks = listed
-      await Promise.all(listed.map((h) => loadRuns(h.name)))
+      if (!isGlobal()) await Promise.all(listed.map((h) => loadRuns(h.name)))
       // The next run is a helpful extra: a failed read leaves the rows on
       // screen instead of hiding every hook.
       try {
@@ -121,9 +123,11 @@
       say(`${h.label || h.name} did not pass.`)
     }
     try {
-      await loadRuns(h.name)
-      open = h.name
-      for (const r of (runs[h.name] ?? []).slice(0, shown)) if (!logs[r.id]) loadLog(h.name, r.id)
+      if (!isGlobal()) {
+        await loadRuns(h.name)
+        open = h.name
+        for (const r of (runs[h.name] ?? []).slice(0, shown)) if (!logs[r.id]) loadLog(h.name, r.id)
+      }
     } catch (e) {
       error = errorText(e)
     }
@@ -276,7 +280,9 @@
         {#if next[h.name]}<span>next run <b>{until(next[h.name])}</b></span>{/if}
         <span>{isBuiltin(h) ? 'built in' : 'added by ' + authorLabel(h.addedBy)}{h.addedBy && !isBuiltin(h) && h.addedAt ? ' · ' + ago(h.addedAt) : ''}</span>
       </div>
-      {#if last}
+      {#if isGlobal()}
+        <!-- Settings shows no run history. -->
+      {:else if last}
         <button class="last" aria-expanded={open === h.name} onclick={() => toggleRuns(h.name)}>
           <span class="dot {runTone(last.result)}" aria-hidden="true"></span>
           <span class="res">{last.result}</span>
