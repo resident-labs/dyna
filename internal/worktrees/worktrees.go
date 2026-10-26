@@ -421,6 +421,36 @@ func Inspect(rec Record) (string, error) {
 	return StateModified, nil
 }
 
+// ModifiedSinceRetentionError describes the current differences from a
+// worktree's retention-time fingerprint.
+func ModifiedSinceRetentionError(rec Record) error {
+	detail := "HEAD or working tree status changed"
+	head, status, _, err := Fingerprint(context.Background(), rec.Path, rec.Head)
+	if err == nil {
+		var changes []string
+		if strings.TrimSpace(head) != strings.TrimSpace(rec.Head) {
+			previous := strings.TrimSpace(rec.Head)
+			if previous == "" {
+				previous = "<unrecorded>"
+			}
+			changes = append(changes, fmt.Sprintf("HEAD changed from %s to %s", previous, head))
+		}
+		currentStatus := normalizeStatus([]byte(status))
+		retainedStatus := normalizeStatus([]byte(rec.Status))
+		if currentStatus != retainedStatus {
+			if currentStatus == "" {
+				changes = append(changes, fmt.Sprintf("working tree status changed from %q to clean", retainedStatus))
+			} else {
+				changes = append(changes, fmt.Sprintf("working tree status is now %q", currentStatus))
+			}
+		}
+		if len(changes) > 0 {
+			detail = strings.Join(changes, "; ")
+		}
+	}
+	return fmt.Errorf("worktree %s is modified since retention: %s; use --force to remove it", rec.Path, detail)
+}
+
 // Remove safely removes a registry-backed worktree. Unless force is true, its
 // retention-time HEAD and status must still match exactly.
 func Remove(rec Record, force bool) error {
@@ -436,7 +466,7 @@ func Remove(rec Record, force bool) error {
 		state = StateModified
 	}
 	if state == StateModified && !force {
-		return fmt.Errorf("worktree %s is modified since retention; use --force to remove it", registered.Path)
+		return ModifiedSinceRetentionError(registered)
 	}
 	if strings.TrimSpace(registered.Repo) == "" {
 		return fmt.Errorf("worktree %s has no recorded source repository", registered.Path)

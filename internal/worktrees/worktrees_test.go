@@ -119,7 +119,7 @@ func TestInspectAndRemoveSafety(t *testing.T) {
 	if state, err := Inspect(rec); err != nil || state != StateModified {
 		t.Fatalf("Inspect modified = %q, %v", state, err)
 	}
-	if err := Remove(rec, false); err == nil || !strings.Contains(err.Error(), "modified") {
+	if err := Remove(rec, false); err == nil || !strings.Contains(err.Error(), "modified") || !strings.Contains(err.Error(), "later.txt") {
 		t.Fatalf("Remove(modified, false) = %v", err)
 	}
 	if _, err := os.Stat(wt); err != nil {
