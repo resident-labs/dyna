@@ -687,6 +687,13 @@ func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSign
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
 	workerSet := engineWorkers(ctx, rooms, signals, load, events, hookService, started)
+	if events != nil {
+		ch, _, stop := events.Subscribe()
+		go func() {
+			defer stop()
+			closeAgentsOfEndedRuns(ctx, ch, rooms.Notify.Sessions.CloseEndedRunAgents, report)
+		}()
+	}
 	// Cancellation starts with the engine, so the runs' remote teardown overlaps
 	// the worker ticks that are still ending. The budget for that teardown starts
 	// here too, so the wait below covers the work it waits for.
@@ -718,5 +725,28 @@ func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSign
 	}
 	if !owned {
 		log.Print("workers: another engine owns this store, so this engine runs none")
+	}
+}
+
+// closeAgentsOfEndedRuns closes the leaf sessions of a run as soon as the run's
+// state changes to an end, whoever ended it: the run's coordinator, a cancel,
+// or the engine's own repair of a run that lost its process. The safety sweep
+// of the session pass still catches a run that ended with no state change.
+func closeAgentsOfEndedRuns(ctx context.Context, ch <-chan hub.Event, closeEnded func(context.Context) error, report func(string, error)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			if ev.Topic != "runs" {
+				continue
+			}
+			if err := closeEnded(ctx); err != nil {
+				report("close run agents", err)
+			}
+		}
 	}
 }
