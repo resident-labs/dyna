@@ -146,6 +146,47 @@ func mergeEnv(t *testing.T, numbers ...int) (*testEnv, map[int]*fixture, *[]int)
 	return e, fixtures, merged
 }
 
+func TestApproveFastWaitsForDependency(t *testing.T) {
+	e, _, merged := mergeEnv(t, 1, 2)
+	const key = "github.com/owner/repo#1"
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[key].Verdict = state.VerdictApproveFast
+		st.Records[key].Dependencies = []string{"github.com/owner/repo#2"}
+		st.Records["github.com/owner/repo#2"].Verdict = state.VerdictChanges
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range mergeQueue(st, nil) {
+		if row.ChangeID == key && (row.State != "waiting-dependency" || row.Reason != "waiting for dependency #2") {
+			t.Fatalf("dependent PR queue state = %+v", row)
+		}
+	}
+	if _, err := e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*merged) != 0 {
+		t.Fatalf("approve-fast landed before its dependency: %v", *merged)
+	}
+	if err := e.s.Store.update(func(st *State) error {
+		dependency := st.Records["github.com/owner/repo#2"]
+		dependency.State, dependency.Watching = "merged", false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(*merged, []int{1}) {
+		t.Fatalf("merged dependency did not release approve-fast: %v", *merged)
+	}
+}
+
 func TestRepairMergeRechecksFreshCIAndPolicy(t *testing.T) {
 	for _, which := range []string{"pending", "failed", "policy", "changed-head", "draft", "confirmation-error"} {
 		t.Run(which, func(t *testing.T) {
