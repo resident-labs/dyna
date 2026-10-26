@@ -192,7 +192,7 @@ func artifactRequestProblem(r Record, run Run, stage string, err error) string {
 }
 
 // inspectTestRun isolates optional artifact errors from the main PR lifecycle.
-func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget.Report, bool, []string, error) {
+func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget.Report, bool, []string, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	gh = artifactGitHub(gh)
@@ -204,9 +204,9 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	if err := gh.pages(ctx, refRecord(r), endpoint, &pages); err != nil {
 		problems := []string{artifactRequestProblem(r, run, "artifact listing failed", err)}
 		if permanentTestRequestError(err) && !testInspectionCanceled(ctx, err) {
-			return report, false, problems, nil
+			return report, false, problems, false, nil
 		}
-		return report, false, problems, err
+		return report, false, problems, false, err
 	}
 	var artifacts []testArtifact
 	for _, page := range pages {
@@ -268,7 +268,7 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		if err != nil {
 			problems = append(problems, artifactRequestProblem(r, run, boundedTestName(artifact.Name)+" artifact download failed", err))
 			if testInspectionCanceled(ctx, err) || !permanentTestRequestError(err) {
-				return report, junit, problems, err
+				return report, junit, problems, earlier > 0, err
 			}
 			continue
 		}
@@ -283,12 +283,6 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		report.Tests = append(report.Tests, part.Tests...)
 		report.Failures = append(report.Failures, part.Failures...)
 	}
-	// A rerun of only the failed jobs keeps the reports of the jobs that passed
-	// in the first attempt. They are not read again, but the head does have
-	// JUnit reports, so the author must not be told to upload one.
-	if earlier > 0 {
-		junit = true
-	}
 	if uninspected > 0 {
 		// One line holds any number of skipped artifacts: a list per artifact
 		// would bury every other report problem in the notice. These are the
@@ -301,9 +295,9 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		problems = append(problems, fmt.Sprintf("Test reports: %d %s over the 20 MiB size limit.", oversized, reportNoun(oversized)))
 	}
 	if ctx.Err() != nil {
-		return report, junit, problems, ctx.Err()
+		return report, junit, problems, earlier > 0, ctx.Err()
 	}
-	return report, junit, problems, nil
+	return report, junit, problems, earlier > 0, nil
 }
 
 func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, snap Snapshot, policy ChangePolicy) error {
@@ -368,7 +362,7 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 		if r.CITestHead == snap.Pull.Head.SHA && r.CITestPolicy == policyKey && r.CITestRuns[token] != "" {
 			continue
 		}
-		report, junit, problems, inspectErr := inspectTestRun(ctx, gh, r, run)
+		report, junit, problems, earlierReports, inspectErr := inspectTestRun(ctx, gh, r, run)
 		if inspectErr != nil {
 			// Shutdown cancellation leaves work pending; timeouts consume a retry.
 			canceled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(inspectErr, context.Canceled)
@@ -521,10 +515,13 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 				live.Notices = view.Notices
 			}
 			warnNoJUnit := policy.WarnNoJUnit() && run.Conclusion != "cancelled" && !onlySkippedOrCancelledJobs(snap.Checks)
-			if len(problems) == 0 && (junit || !warnNoJUnit) {
+			if len(problems) == 0 && (junit || earlierReports || !warnNoJUnit) {
 				live.CITestReportNote = ""
 			}
-			if !junit && len(problems) == 0 && warnNoJUnit && !live.CINoJUnitWarned {
+			// A rerun of only the failed jobs keeps the reports of the jobs that passed
+			// in the first attempt. They are not read again, but the head does have
+			// JUnit reports, so the author must not be told to upload one.
+			if !junit && !earlierReports && len(problems) == 0 && warnNoJUnit && !live.CINoJUnitWarned {
 				note := fmt.Sprintf("CI uploaded no JUnit XML test report, so per-test timing (%s budget) is not enforced. Upload a JUnit report as an artifact.", strconv.FormatFloat(max.Seconds(), 'f', -1, 64)+" s")
 				live.CINoJUnitWarned = true
 				live.CITestReportNote = note
