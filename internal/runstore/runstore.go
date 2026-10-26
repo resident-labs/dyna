@@ -196,9 +196,9 @@ type SteeringMessage struct {
 
 // Meta is a run's record. It lives in dyna.db.
 type Meta struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Status  string `json:"status"` // running|ok|error|canceled|interrupted
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"` // running|ok|error|canceled|interrupted
 	// Build is the dyna build that started the run, as `dyna --version` prints
 	// it. It is empty for a run from before the field existed.
 	Build   string `json:"build,omitempty"`

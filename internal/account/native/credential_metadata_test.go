@@ -189,4 +189,3 @@ func TestCredentialRefreshSupportIsSharedAndConservative(t *testing.T) {
 		}
 	}
 }
-

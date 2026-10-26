@@ -26,7 +26,11 @@ type published struct {
 	topics []string
 }
 
-func (p *published) add(ev hub.Event) { p.mu.Lock(); p.topics = append(p.topics, ev.Topic); p.mu.Unlock() }
+func (p *published) add(ev hub.Event) {
+	p.mu.Lock()
+	p.topics = append(p.topics, ev.Topic)
+	p.mu.Unlock()
+}
 func (p *published) list() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()

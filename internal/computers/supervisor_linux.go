@@ -182,6 +182,7 @@ func waitPath(ctx context.Context, path string, p *process) error {
 		}
 	}
 }
+
 // x11Root holds the X11 lock files and the .X11-unix socket directory.
 var x11Root = "/tmp"
 
