@@ -3,6 +3,7 @@ package computer
 import (
 	"bytes"
 	"context"
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -40,7 +41,7 @@ func TestActionRequiresStatusBeforeComputerSetup(t *testing.T) {
 func rootComputerFixture(t *testing.T) func(...string) (string, error) {
 	t.Helper()
 	storetest.Isolate(t)
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	repo := t.TempDir()
 	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s %v", out, err)

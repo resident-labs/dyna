@@ -4,6 +4,7 @@ import (
 	"context"
 	"dyna-agent/internal/computers"
 	"dyna-agent/internal/harness/fakeworker"
+	"dyna-agent/internal/testsafe"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ func TestComputerFailureDoesNotFailHarnessTurn(t *testing.T) {
 	t.Setenv("DYNA_COMPUTERS_TEST_ENABLE", "1")
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "labwc"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)

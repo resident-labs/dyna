@@ -1,6 +1,7 @@
 package computers
 
 import (
+	"dyna-agent/internal/testsafe"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 func TestBrowserAutomationUsesSharedChromiumLauncher(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	env, err := Environment(Meta{SessionID: "shared-wrapper"}, os.Environ())
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@
 package computers
 
 import (
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"image"
 	"image/png"
@@ -14,7 +15,7 @@ import (
 
 func TestComputerSizeSurvivesSupervisorRestart(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	id := testSessionID(t, "saved-size")
 	if err := os.MkdirAll(Dir(id), 0700); err != nil {
 		t.Fatal(err)
@@ -42,7 +43,7 @@ func TestComputerSizeSurvivesSupervisorRestart(t *testing.T) {
 
 func TestComputerSizeRestartDoesNotRelabelCachedFrame(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	bin := t.TempDir()
 	source := filepath.Join(bin, "frame.png")
 	writeFrame := func(width, height int) {
