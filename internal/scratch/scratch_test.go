@@ -64,10 +64,11 @@ func TestSweepKeepsClosedSessionScratchForRetention(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(owner, "note"), []byte("scratch"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			var logs []string
 			result, err := Sweep(context.Background(), Options{
 				Now:    now,
 				Only:   filepath.Base(owner),
-				Logf:   t.Logf,
+				Logf:   func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
 				Lookup: func(string) Owner { return Owner{Known: true, ClosedAt: now.Add(-age)} },
 			})
 			if err != nil {
@@ -77,6 +78,10 @@ func TestSweepKeepsClosedSessionScratchForRetention(t *testing.T) {
 			expired := age > ClosedRetention
 			if expired != errors.Is(statErr, fs.ErrNotExist) {
 				t.Fatalf("closed %v ago: stat error %v, want removed=%t, %+v", age, statErr, expired, result)
+			}
+			want := fmt.Sprintf("scratch: removed %s (owner %s, closed %s)", owner, filepath.Base(owner), now.Add(-age).UTC().Format(time.RFC3339))
+			if expired && (len(logs) != 1 || logs[0] != want) || !expired && len(logs) != 0 {
+				t.Fatalf("logs = %q, want removal logged only when expired: %q", logs, want)
 			}
 		})
 	}
