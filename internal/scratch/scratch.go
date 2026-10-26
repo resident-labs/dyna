@@ -261,6 +261,9 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 			protected(err)
 			continue
 		}
+		if o.Logf != nil {
+			o.Logf("scratch: removed %s (owner %s, closed %s)", path, strings.Split(name, string(os.PathSeparator))[0], owner.ClosedAt.UTC().Format(time.RFC3339))
+		}
 		result.Removed = append(result.Removed, path)
 		result.BytesFreed += bytes
 	}
