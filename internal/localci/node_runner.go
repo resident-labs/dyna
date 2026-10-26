@@ -1052,7 +1052,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		for key, value := range check.env {
 			environment[key] = value
 		}
-		setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
+		// --foreground keeps the check in the wrapper's process group: GNU
+		// timeout otherwise moves it into a new one, and the runner's cleanup of
+		// a leftover pipe holder kills the wrapper's group by its id.
+		setup += fmt.Sprintf("check_entered=1; timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
 		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner)
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
