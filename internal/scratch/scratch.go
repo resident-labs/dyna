@@ -112,6 +112,10 @@ type Options struct {
 	// share its retention date. A nil Lookup treats every owner as unknown.
 	Lookup   func(owner string) Owner
 	Pressure bool
+	// Closing marks the pass that a closing session runs. Its own scratch goes
+	// now, because the closed retention exists to let a parent read a finished
+	// session's files, and a closing session's caller has already read them.
+	Closing bool
 	// Only limits the sweep to a relative owner path and its descendants.
 	Only string
 }
@@ -192,7 +196,7 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 				keep("owner has no close time")
 				continue
 			}
-			if !o.Pressure && now.Before(owner.ClosedAt.Add(ClosedRetention)) {
+			if !o.Closing && !o.Pressure && now.Before(owner.ClosedAt.Add(ClosedRetention)) {
 				keep("closed retention period")
 				continue
 			}

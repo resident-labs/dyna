@@ -7,16 +7,22 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/procident"
 )
 
-// Test binaries leave temporary folders in the host temp folder: a 16 GB tmpfs
-// on many hosts, which fills after a few runs of the suite. A test binary
-// removes the folders of earlier runs (internal/testsafe). This sweep frees the
-// folders that no later run reaches, which older Dyna builds left behind.
+// Test binaries, Go tooling and database fixtures leave temporary folders in the
+// host temp folder: a 16 GB tmpfs on many hosts, which fills after a few runs of
+// the suite and then breaks self-update and later tests. A test binary removes
+// the folders of earlier runs (internal/testsafe). This sweep frees the folders
+// that no later run reaches, including the ones older Dyna builds left behind.
+var testFolderPatterns = []string{"Test", "dyna-test-", "dyna-pg-", "tmp.", "go-build"}
+
+// testFolderPrefix names a test folder that records the ID of its test binary,
+// so the sweep can tell a running test from one that ended.
 const testFolderPrefix = "dyna-test-"
 
 // testFolderRetention is how long a test folder must stand before the sweep
@@ -40,11 +46,11 @@ func sweepTestFolders(now time.Time, root string, alive func(int) bool, dry bool
 	var errs []error
 	for _, entry := range entries {
 		name := entry.Name()
-		if !entry.IsDir() || !strings.HasPrefix(name, testFolderPrefix) {
+		if !entry.IsDir() || !testFolderName(name) {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil || !staleTestFolder(name, info.ModTime(), now, alive) {
+		if err != nil || !staleTestFolder(name, info.ModTime(), now, alive) || !ownedByUser(info) {
 			continue
 		}
 		path := filepath.Join(root, name)
@@ -63,6 +69,25 @@ func sweepTestFolders(now time.Time, root string, alive func(int) bool, dry bool
 // processAlive reports whether a process still exists. The sweep takes it as a
 // parameter so a test can name the running binaries itself.
 var processAlive = procident.Alive
+
+// testFolderName reports whether name is a temporary folder of a test binary or
+// of Go's tooling. The host temp folder also holds other users' files and the
+// owner's own folders, so only these names are ever considered.
+func testFolderName(name string) bool {
+	for _, pattern := range testFolderPatterns {
+		if strings.HasPrefix(name, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// ownedByUser reports whether this user owns the folder. The sweep never removes
+// a folder that belongs to someone else, whatever its name.
+func ownedByUser(info fs.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Getuid()
+}
 
 // staleTestFolder reports whether a test folder outlived its test binary.
 func staleTestFolder(name string, modified, now time.Time, alive func(int) bool) bool {
