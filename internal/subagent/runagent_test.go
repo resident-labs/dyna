@@ -238,3 +238,29 @@ func TestCloseWaitsForAStartInFlightAndRefusesLaterStarts(t *testing.T) {
 		t.Fatal("an agent was started after its run's agents were closed")
 	}
 }
+
+func TestCloseRunAgentsWaitsForAStartInFlight(t *testing.T) {
+	e := newTestEnv(t)
+	const run = "wf_20261026-094500-dddddddd"
+	coordinator := authority.WithActor(e.ctx, authority.Actor{Role: authority.Worker, Run: run})
+	inStart, release := make(chan struct{}), make(chan struct{})
+	e.m.runAgentStartHook = func(string) { close(inStart); <-release }
+	started := make(chan error, 1)
+	go func() {
+		_, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: run, Agent: 1}, Profile: "mock", Task: "RESPOND: x", Dir: t.TempDir(), Room: e.room.ID})
+		started <- err
+	}()
+	<-inStart
+	closed := make(chan error, 1)
+	go func() { closed <- e.m.CloseRunAgents(coordinator, run) }()
+	close(release)
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.m.store().Info(RunAgentID(run, 1)); err != nil || got.Status != StatusClosed {
+		t.Fatalf("the agent a start made while the run closed = %+v, %v; want closed", got.Status, err)
+	}
+}
