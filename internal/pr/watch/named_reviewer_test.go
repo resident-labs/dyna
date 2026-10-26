@@ -177,7 +177,7 @@ func TestNamedReviewerApprovalKeepsDraftHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := MergeQueueSnapshot(st)
+	items := MergeQueueSnapshot(st, nil)
 	if len(items) != 1 || items[0].State != "held" {
 		t.Fatalf("named approval released the draft: %+v", items)
 	}

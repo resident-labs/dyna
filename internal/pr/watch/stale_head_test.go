@@ -197,7 +197,7 @@ func TestMissingLocalBranchStillDeliversWarning(t *testing.T) {
 }
 
 func queueState(st State, changeID string) string {
-	for _, item := range mergeQueue(st) {
+	for _, item := range mergeQueue(st, nil) {
 		if item.ChangeID == changeID {
 			return item.State
 		}

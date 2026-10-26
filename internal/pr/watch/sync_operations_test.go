@@ -377,7 +377,7 @@ func TestReturnedLocalChangeQueueCarriesFailureDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := e.s.Store.Read()
-	rows := mergeQueue(st)
+	rows := mergeQueue(st, nil)
 	for _, row := range rows {
 		if row.ChangeID == records[0].Key {
 			if row.State != "returned" || row.FailedSuite != "go" || !strings.Contains(row.Excerpt, "parser failed") || row.Title == "" || row.Author == "" {
