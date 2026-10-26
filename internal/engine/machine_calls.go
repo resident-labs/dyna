@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/websvc"
@@ -72,11 +73,20 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 
 // rootMayPatch reports whether a room root may apply the patch. A root changes
 // the operating settings of a machine: host checks, the SSH connect timeout and
-// the container runtime socket. The creation, name, roles, slots, switch, route
+// a local container runtime socket. The creation, name, roles, slots, switch, route
 // host, room list and suite list stay the owner's: they decide which machine
 // the engine reaches and which rooms' code runs on it, so a root could send
 // another room's work, or its own SSH credentials, to a host the owner never
 // chose.
 func rootMayPatch(patch websvc.MachinePatch) bool {
-	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil
+	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil && localSocket(patch.ContainerSocket)
+}
+
+// localSocket reports whether a patch leaves the container socket alone, restores
+// the default, or names a Unix socket on the machine itself. A remote endpoint,
+// such as tcp://host:2375, would send workflow containers and repository
+// contents of every room that shares the machine to another host, so only the
+// owner may set one.
+func localSocket(socket *string) bool {
+	return socket == nil || *socket == "" || strings.HasPrefix(*socket, "unix://")
 }
