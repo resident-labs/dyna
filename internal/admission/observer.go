@@ -42,6 +42,9 @@ type Observer struct {
 	// is exact. Without a reliable count it returns 0 agents and the fallback
 	// stays.
 	AgentMemory func(ctx context.Context) (bytes uint64, agents int)
+	// Relieve stops idle agent processes when memory is short. It runs only in
+	// observe mode, after the sample's other work. Nil does nothing.
+	Relieve func(ctx context.Context) int
 	// Record stores one observation.
 	Record func(ctx context.Context, ob Observation) error
 	// Mode reads the owner's setting at each sample.
@@ -91,6 +94,11 @@ func (o *Observer) Sample(ctx context.Context) (err error) {
 	limit, st := Decide(readings, running, st)
 	if err := o.States.Save(bound, Watch, st); err != nil {
 		return err // without the saved state the next sample would forget the overload
+	}
+	if o.Relieve != nil && MemoryShort(readings) {
+		if n := o.Relieve(bound); n > 0 {
+			log.Printf("admission: memory is short; stopped %d idle agent processes", n)
+		}
 	}
 	if running < limit {
 		return nil

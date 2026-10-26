@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/admission"
+	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/sysload"
@@ -40,6 +41,7 @@ func admissionObserver(sessions *subagent.Manager, load *sysload.Sampler, dataDi
 		// Memory and count come from one inventory: the sessions whose processes
 		// the load sampler found alive in their cgroup scopes.
 		AgentMemory: func(context.Context) (uint64, int) { return liveAgentMemory(load.Load().Groups) },
+		Relieve:     idleRelief(sessions).Run,
 		Record:      admission.Observed{DataDir: dataDir}.Record,
 		Mode: func(context.Context) admission.Mode {
 			v, err := settings.Load(settings.DefaultPath())
@@ -64,4 +66,29 @@ func liveAgentMemory(groups []sysload.Group) (bytes uint64, agents int) {
 		}
 	}
 	return bytes, agents
+}
+
+// sessionCallerPrefix starts the caller key of a Dyna session's harness process.
+const sessionCallerPrefix = "session/"
+
+// idleRelief stops idle harness processes of sessions that hold no turn work.
+func idleRelief(sessions *subagent.Manager) admission.Relief[sessionhost.IdleSession] {
+	return admission.Relief[sessionhost.IdleSession]{
+		List: func(ctx context.Context) ([]admission.Idle[sessionhost.IdleSession], error) {
+			hosted, err := sessionhost.IdleSessions(ctx)
+			var out []admission.Idle[sessionhost.IdleSession]
+			for _, h := range hosted {
+				id, ok := strings.CutPrefix(h.Caller, sessionCallerPrefix)
+				if !ok {
+					continue // not a Dyna session: nothing says it is safe to stop
+				}
+				out = append(out, admission.Idle[sessionhost.IdleSession]{Handle: h, Session: id, Idle: h.Idle})
+			}
+			return out, err
+		},
+		Busy: sessions.HoldsTurnWork,
+		Unload: func(ctx context.Context, p admission.Idle[sessionhost.IdleSession], minIdle time.Duration) (bool, error) {
+			return sessionhost.UnloadIdle(ctx, p.Handle, minIdle)
+		},
+	}
 }
