@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -50,6 +51,20 @@ you pass --allow-agent.
 
 func connectStore() (*connect.Store, error) {
 	return connect.OpenStore(filepath.Join(store.DataDir(), "connect"))
+}
+
+// TunnelMain runs the managed tunnel connector until the context ends. The
+// installed dyna-tunnel.service runs it, so the connector stays up while the
+// engine restarts. It returns the exit code.
+func TunnelMain(ctx context.Context) int {
+	st, err := connectStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "connect: %v\n", err)
+		return 1
+	}
+	log.SetPrefix("dyna-tunnel: ")
+	connect.RunTunnel(ctx, st, os.Getenv("DYNA_CLOUDFLARED"), log.Printf)
+	return 0
 }
 
 // connectMain runs "dyna engine connect". It returns the exit code.
