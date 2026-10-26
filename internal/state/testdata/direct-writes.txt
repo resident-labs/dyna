@@ -238,5 +238,6 @@ not-state internal/userservices/engine_restart_legacy.go retireEngineRestart 1 #
 not-state internal/websvc/devicestore/store.go Store.Key 2 # the immutable web signing key and its creation lock stay files
 not-state internal/harness/runtime/signin_pi_provider.go Runtime.piProviderFlow 2 # makes and removes the scratch home of a Pi sign-in, a harness CLI private home
 not-state internal/harness/fakeworker/fakeworker.go InstallClaude 1 # writes the fake CLI executable into a test temp dir; nothing shared is stored
+not-state internal/harness/home/login_path.go loginPathFrom 1 # a temporary file the login shell writes its PATH to, removed at once; not state
 not-state internal/scratch/scratch.go NewRunTemp 1 # makes a throwaway temporary folder for one hook run or check; not shared state
 not-state internal/scratch/scratch.go Sweep 1 # removes a closed session's temporary folder next to its scratch folder
