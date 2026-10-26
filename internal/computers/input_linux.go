@@ -300,6 +300,9 @@ func isShortcut(a Action) bool {
 	return modified && ordinary
 }
 
+// keypressHold spans a few frames at 60 Hz.
+const keypressHold = 50 * time.Millisecond
+
 func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *virtualKeyboard) (err error) {
 	kind := actionType(a)
 	keys, _ := actionValue[[]string](a, "keys")
@@ -388,7 +391,9 @@ func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *v
 		sy, _ := actionValue[int](a, "scroll_y")
 		return p.scroll(sx, sy)
 	case "keypress":
-		return nil
+		// Hold the keys for a moment. An app that samples key state once per
+		// frame misses a press that is released within the same frame.
+		return inputPause(ctx, keypressHold)
 	case "type":
 		text, _ := actionValue[string](a, "text")
 		return keyboard.typeText(ctx, text)
