@@ -74,7 +74,10 @@ suites:
 
 func testDynaDefinition(t *testing.T) *Definition {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(DefinitionPath)))
+	// A fixed definition, not this repository's: the tests model checks with
+	// commands of their own, and the repository's own file is validated by
+	// TestThisRepositoryDefinitionParses.
+	body, err := os.ReadFile(filepath.Join("testdata", "definition.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
