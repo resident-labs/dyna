@@ -220,6 +220,15 @@ func Start(ctx context.Context, cmd *exec.Cmd, l Launch) error {
 	return nil
 }
 
+// Isolate puts cmd in its own agent scope without recording a caller. Use it
+// only for a command that never calls the engine, such as a harness CLI's
+// version check, whose scope keeps a daemon it starts out of the engine's unit.
+// The returned function stops the scope.
+func Isolate(cmd *exec.Cmd, name string) (stop func()) {
+	unit := agentslice.Wrap(cmd, name)
+	return func() { agentslice.Stop(unit) }
+}
+
 // StartTerminal holds an owner terminal's requested shell until its exact
 // process record commits. Only the engine's authenticated terminal path may
 // use it; the shared engine cgroup never receives owner authority.

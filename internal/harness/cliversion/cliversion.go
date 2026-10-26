@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
 )
 
@@ -77,7 +77,7 @@ func Run(parent context.Context, path string, args, env []string, timeout time.D
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// The scope keeps a daemon that the CLI starts (opencode serve) out of the
 	// engine's unit, and killing it ends that daemon with the check.
-	defer agentslice.Stop(agentslice.Wrap(cmd, "version-probe"))
+	defer callerid.Isolate(cmd, "version-probe")()
 	err = cmd.Run()
 	// Retire descendants: the command's group outlives it otherwise.
 	if cmd.Process != nil {
