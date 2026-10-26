@@ -29,18 +29,6 @@ func MCPEnvironmentName(key string) string {
 	}
 	return key
 }
-func dynaMCPExecutable(lookup func(string) (string, bool)) (string, error) {
-	if lookup != nil {
-		if path, ok := lookup("DYNA_BIN"); ok && filepath.IsAbs(path) {
-			return path, nil
-		}
-	}
-	path, err := exec.LookPath("dyna")
-	if err != nil {
-		return "", errors.New("Dyna CLI is required to isolate MCP environment references")
-	}
-	return path, nil
-}
 
 // ReadMCPExecSpec reads one immutable generated server definition.
 func ReadMCPExecSpec(directory, name string) (MCPExecSpec, error) {
