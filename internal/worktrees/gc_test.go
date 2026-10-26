@@ -703,3 +703,19 @@ func TestGCKeepsTreeOfRunWithoutRow(t *testing.T) {
 		t.Fatalf("tree of a run without a row was removed: %v", err)
 	}
 }
+
+// A local-only repository has no remote main to fetch. Creation and cleanup
+// both use the local default branch, so a closed session's tree is removed.
+func TestGCRemovesClosedLocalOnlyTree(t *testing.T) {
+	repo := gcRepo(t)
+	git(t, repo, "remote", "remove", "origin")
+	path := gcTreeAt(t, repo, "dyna/local-only", "HEAD", "closed-owner")
+	ageGCTree(t, path)
+	trees, err := GC(context.Background(), repo, GCOptions{OwnerClosed: func(string) (bool, error) { return true, nil }})
+	if err != nil {
+		t.Fatalf("cleanup of a local-only repository: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("closed local-only tree remains: %v; decisions: %#v", err, trees)
+	}
+}

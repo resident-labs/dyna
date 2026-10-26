@@ -92,26 +92,25 @@ func TestTargetLimitsStampedSessionToItselfAndDescendants(t *testing.T) {
 }
 
 func TestStartDirDefaultsToParentSessionDir(t *testing.T) {
-	m, _, work, metas := actorFixture(t)
+	m, _, _, metas := actorFixture(t)
 	lead := metas["lead"]
 	lead.Dir = t.TempDir()
 	if err := m.Store.writeMeta(lead); err != nil {
 		t.Fatal(err)
 	}
-	got, err := m.startDir(StartOptions{Cwd: t.TempDir()}, work, lead.ID)
+	got, err := m.startDir(StartOptions{Cwd: t.TempDir()}, lead.ID)
 	if err != nil || got != lead.Dir {
 		t.Fatalf("startDir = %q, %v; want parent dir %q", got, err, lead.Dir)
 	}
 }
 
-func TestStartDirOutsideRepoFailsUnlessExplicit(t *testing.T) {
-	m, _, work, _ := actorFixture(t)
-	work.Repo = "owner/repo"
+func TestStartDirAcceptsTheCallerDirectory(t *testing.T) {
+	m, _, _, _ := actorFixture(t)
 	cwd := t.TempDir()
-	if _, err := m.startDir(StartOptions{Cwd: cwd}, work, ""); err == nil || !strings.Contains(err.Error(), "--dir") {
-		t.Fatalf("implicit dir outside a work tree = %v; want an error naming --dir", err)
+	if got, err := m.startDir(StartOptions{Cwd: cwd}, ""); err != nil || got != cwd {
+		t.Fatalf("implicit dir = %q, %v; want %q", got, err, cwd)
 	}
-	if got, err := m.startDir(StartOptions{Dir: cwd}, work, ""); err != nil || got != cwd {
+	if got, err := m.startDir(StartOptions{Dir: cwd}, ""); err != nil || got != cwd {
 		t.Fatalf("explicit dir = %q, %v; want %q", got, err, cwd)
 	}
 }
