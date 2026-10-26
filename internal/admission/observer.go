@@ -2,7 +2,9 @@ package admission
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,33 +24,48 @@ const Watch Pool = "watch"
 const sampleBound = 10 * time.Second
 
 // Observer is the engine's background sampler. Every SampleEvery it reads the
-// machine, counts the running turns, and records when a limit on them would
-// have held new turns. It runs only in the engine and is called by no turn, so
+// machine, counts the agents, and records when a limit on running turns would
+// have held new ones. It runs only in the engine and is called by no turn, so
 // it cannot delay or fail one.
+//
+// A sample runs in its own goroutine, and only one at a time: a tick that
+// finds the last sample still running is skipped, so a blocked read or callback
+// costs one goroutine, never a pile. Run does not wait for a sample, so engine
+// shutdown never waits on one.
 type Observer struct {
 	Source Source
 	States StateKeeper
 	// Running counts the running agent turns, roots and services excluded.
 	Running func(ctx context.Context) (int, error)
-	// AgentBytes is the memory all agent processes use together, or 0 when it is
-	// not known. With two or more running turns it gives the memory of one turn.
-	AgentBytes func() uint64
+	// Agents counts every agent session that holds a process: the running and
+	// idle ones, roots and services included. AgentBytes is the memory all
+	// agent processes use together, so AgentBytes over Agents is the memory of
+	// one agent.
+	Agents     func(ctx context.Context) (int, error)
+	AgentBytes func(ctx context.Context) uint64
 	// Record stores one observation.
 	Record func(ctx context.Context, ob Observation) error
 	// Mode reads the owner's setting at each sample.
-	Mode func() Mode
+	Mode func(ctx context.Context) Mode
 	Now  func() time.Time
+
+	busy atomic.Bool
 }
 
-// Sample takes one sample. It returns an error only to report; nothing depends
-// on it.
-func (o Observer) Sample(ctx context.Context) error {
-	if o.Mode() != ModeObserve || o.Source == nil {
-		return nil
-	}
+// Sample takes one sample and returns an error only to report; nothing depends
+// on it. A panic in a source or callback is recovered and reported as an error.
+func (o *Observer) Sample(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("sample panicked: %v", r)
+		}
+	}()
 	bound, cancel := context.WithTimeout(ctx, sampleBound)
 	defer cancel()
-	readings, err := readBounded(bound, o.Source)
+	if o.Mode(bound) != ModeObserve || o.Source == nil {
+		return nil
+	}
+	readings, err := o.Source.Read(bound)
 	if err != nil {
 		return err
 	}
@@ -63,10 +80,12 @@ func (o Observer) Sample(ctx context.Context) error {
 		return err
 	}
 	now := o.Now()
-	if o.AgentBytes != nil && running >= 2 && now.Sub(st.MeasuredAt) >= time.Minute {
-		if total := o.AgentBytes(); total > 0 {
-			st.TurnBytes = min(max(total/uint64(running), 128<<20), 16<<30)
-			st.MeasuredAt = now
+	if o.AgentBytes != nil && o.Agents != nil && now.Sub(st.MeasuredAt) >= time.Minute {
+		if agents, err := o.Agents(bound); err == nil && agents >= 2 {
+			if total := o.AgentBytes(bound); total > 0 {
+				st.TurnBytes = min(max(total/uint64(agents), 128<<20), 16<<30)
+				st.MeasuredAt = now
+			}
 		}
 	}
 	limit, st := Decide(readings, running, st)
@@ -79,38 +98,24 @@ func (o Observer) Sample(ctx context.Context) error {
 	return o.Record(bound, Observation{At: now, Running: running, Limit: limit})
 }
 
-// Run samples at every tick until ctx ends. The ticks are a parameter so a test
-// drives it without a clock.
-func (o Observer) Run(ctx context.Context, ticks <-chan time.Time) {
+// Run starts a sample at each tick until ctx ends, and returns at once when it
+// does. The ticks are a parameter so a test drives it without a clock.
+func (o *Observer) Run(ctx context.Context, ticks <-chan time.Time) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticks:
-			if err := o.Sample(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("admission: sample: %v", err)
+			if !o.busy.CompareAndSwap(false, true) {
+				log.Printf("admission: the last sample is still running; skipping this tick")
+				continue
 			}
+			go func() {
+				defer o.busy.Store(false)
+				if err := o.Sample(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("admission: sample: %v", err)
+				}
+			}()
 		}
-	}
-}
-
-// readBounded reads a source but gives up when ctx ends, even if the read
-// itself ignores its context. A read that stays stuck is abandoned, and the
-// sampler goes on at the next tick.
-func readBounded(ctx context.Context, src Source) (Readings, error) {
-	type result struct {
-		r   Readings
-		err error
-	}
-	done := make(chan result, 1)
-	go func() {
-		r, err := src.Read(ctx)
-		done <- result{r, err}
-	}()
-	select {
-	case res := <-done:
-		return res.r, res.err
-	case <-ctx.Done():
-		return Readings{}, ctx.Err()
 	}
 }

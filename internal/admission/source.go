@@ -208,15 +208,25 @@ func unescapeMount(s string) string {
 // lies outside what the mount shows.
 func (m mount) cgroupDir(cgPath string) (string, bool) {
 	cgPath, root := strings.TrimRight("/"+strings.TrimLeft(cgPath, "/"), "/"), strings.TrimRight("/"+strings.TrimLeft(m.Root, "/"), "/")
+	var rel string
 	switch {
 	case root == "":
-		return filepath.Join(m.Point, cgPath), true
+		rel = cgPath
 	case cgPath == root:
-		return m.Point, true
+		rel = ""
 	case strings.HasPrefix(cgPath, root+"/"):
-		return filepath.Join(m.Point, strings.TrimPrefix(cgPath, root)), true
+		rel = strings.TrimPrefix(cgPath, root)
+	default:
+		return "", false
 	}
-	return "", false
+	// A path that climbs out of the mount ("/.." under a mount of the whole
+	// hierarchy) names a cgroup the mount does not show.
+	for _, part := range strings.Split(rel, "/") {
+		if part == ".." {
+			return "", false
+		}
+	}
+	return filepath.Join(m.Point, rel), true
 }
 
 // applyCgroup narrows r to the memory limits of the process's cgroup and its
@@ -257,6 +267,11 @@ func (l Linux) applyCgroup(r *Readings) (string, error) {
 			}
 		}
 		if !ok {
+			if len(mounts) > 0 {
+				// The process lives in a cgroup that no mount shows, so its limit is
+				// unknown. The host's memory must not stand in for it.
+				return "", fmt.Errorf("cgroup %s is not visible in any cgroup mount, so its memory limit is unknown", parts[2])
+			}
 			continue
 		}
 		for {
