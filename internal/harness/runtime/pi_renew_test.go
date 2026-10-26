@@ -176,7 +176,7 @@ func savePiLogin(t *testing.T, accounts *Accounts, account NativeAccount, access
 // 429 or a 5xx must stay transient and never ask for a new sign-in.
 func TestPiRenewalFailureClassification(t *testing.T) {
 	for _, tc := range []struct {
-		line    string
+		line     string
 		rejected bool
 	}{
 		{"error 401 unknown", true},

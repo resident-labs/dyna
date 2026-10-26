@@ -233,6 +233,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck >/dev/null
       - name: Verify modules
         run: bash scripts/ci.sh go modules
+      - name: Check formatting
+        run: bash scripts/ci.sh go format
       - name: Vet
         run: bash scripts/ci.sh go vet
       - name: Check installer
