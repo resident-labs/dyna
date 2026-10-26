@@ -12,12 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/subagent"
 )
 
 // ForegroundOptions forwards the worker's CLI presentation and waits for it.
@@ -45,6 +47,13 @@ type LaunchOptions struct {
 // Detached launches return after registration; foreground launches join the worker.
 func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, error) {
 	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// Refuse a leaf session before anything is staged or spawned: a detached
+	// Launch returns before the child's Execute could refuse, and the caller
+	// would hold an ID for a run that never records itself. Of(ctx) is the
+	// engine call's authenticated actor, or the CLI process's own stamps.
+	if err := subagent.RefuseLeafStart(authority.Of(ctx)); err != nil {
 		return "", err
 	}
 	id := runstore.NewID()
