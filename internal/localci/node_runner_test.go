@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -212,6 +213,194 @@ func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 				t.Fatalf("script argument = %q, want it unchanged", last)
 			}
 		})
+	}
+}
+
+// A node command whose ssh dial dies before the node retries: a slow accept
+// path on the node stalls a fresh dial at the banner exchange, while a warm
+// ControlMaster socket hides the same stall from a direct shell and from the
+// machine probes, so only a run sees it (D-162). A dial-phase failure proves
+// nothing ran remotely, so a retry is safe for every node command. A failure
+// after the command started, without ssh's own transport exit, or without a
+// dial error, never retries.
+func TestNodeCommandRetriesSSHDial(t *testing.T) {
+	type attemptCase struct {
+		name      string
+		stdout    string
+		stderr    string
+		exit      int
+		stderr2   string
+		exit2     int
+		failures  int
+		wantCalls int
+		wantErr   bool
+		wantNote  bool
+	}
+	for _, tc := range []attemptCase{
+		{
+			name:      "banner exchange timeout clears",
+			stderr:    "ssh: connect to host node port 22: Operation timed out\r\nConnection timed out during banner exchange\r\nConnection to UNKNOWN port 65535 timed out\n",
+			exit:      255,
+			failures:  2,
+			wantCalls: 3,
+			wantNote:  true,
+		},
+		{
+			name:      "connection refused clears",
+			stderr:    "ssh: connect to host node port 22: Connection refused\n",
+			exit:      255,
+			failures:  1,
+			wantCalls: 2,
+			wantNote:  true,
+		},
+		{
+			name:      "dial error that never clears",
+			stderr:    "ssh: connect to host node port 22: Connection timed out\n",
+			exit:      255,
+			failures:  3,
+			wantCalls: 3,
+			wantErr:   true,
+			wantNote:  true,
+		},
+		{
+			name:      "script ran and echoed dial text",
+			stderr:    "cargo: Connection refused\n",
+			exit:      1,
+			failures:  1,
+			wantCalls: 1,
+			wantErr:   true,
+		},
+		{
+			name:      "command had already started",
+			stdout:    "remote build output\n",
+			stderr:    "Connection timed out during banner exchange\n",
+			exit:      255,
+			failures:  1,
+			wantCalls: 1,
+			wantErr:   true,
+		},
+		{
+			name:      "dial failure then started command drops",
+			stderr:    "ssh: connect to host node port 22: Connection refused\n",
+			exit:      255,
+			stderr2:   "client_loop: send disconnect: Connection reset\n",
+			exit2:     255,
+			failures:  2,
+			wantCalls: 2,
+			wantErr:   true,
+			wantNote:  true,
+		},
+		{
+			name:      "not a dial failure",
+			stderr:    "error: build failed\n",
+			exit:      1,
+			failures:  1,
+			wantCalls: 1,
+			wantErr:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls, waits int
+			runner := Runner{Node: &Node{Name: "node", SSH: "ci@node", Slots: 1, Enabled: true}}
+			runner.dialWait = func(ctx context.Context, d time.Duration) error {
+				waits++
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if d <= 0 {
+					return errors.New("retry wait must be positive")
+				}
+				return nil
+			}
+			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
+				calls++
+				if name == "ssh" {
+					if !slices.Contains(args, "ConnectTimeout=10") {
+						t.Errorf("ssh args %v, want an explicit ConnectTimeout=10 like the machine probe", args)
+					}
+				}
+				diagnostic, exit := tc.stderr, tc.exit
+				if calls >= 2 && tc.stderr2 != "" {
+					diagnostic, exit = tc.stderr2, tc.exit2
+				}
+				if calls <= tc.failures {
+					fmt.Fprint(stderr, diagnostic)
+					fmt.Fprint(out, tc.stdout)
+					return exitStatus(exit)
+				}
+				fmt.Fprint(stderr, tc.stderr)
+				fmt.Fprint(out, tc.stdout)
+				return nil
+			}
+			var out, stderr tailBuffer
+			err := runner.nodeCommand(t.Context(), &out, &stderr, "", "true")
+			if tc.wantErr && err == nil {
+				t.Fatal("nodeCommand succeeded, want it to fail")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("nodeCommand: %v", err)
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("command calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if waits != tc.wantCalls-1 && tc.wantNote {
+				t.Fatalf("waits = %d, want %d", waits, tc.wantCalls-1)
+			}
+			if got := strings.Contains(stderr.String(), "retrying ssh dial"); got != tc.wantNote {
+				t.Fatalf("stderr = %q, retry note %t want %t", stderr.String(), got, tc.wantNote)
+			}
+		})
+	}
+}
+
+// exitStatus returns a real child exit with the given status, so a test
+// classifies the error exactly like the runner classifies a child's exit.
+// Tests in one package run one at a time, so the cache needs no lock.
+var exitStatusCache = map[int]error{}
+
+func exitStatus(code int) error {
+	if err, ok := exitStatusCache[code]; ok {
+		return err
+	}
+	err := exec.Command("sh", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		panic("exit " + strconv.Itoa(code) + " produced no error")
+	}
+	exitStatusCache[code] = err
+	return err
+}
+
+// The retry's output capture must keep os/exec's guarantee for callers that
+// pass one non-thread-safe buffer as both outputs: os/exec serializes its two
+// copy pipes only while it sees the same writer for both, and the counting
+// and tail capture made them distinct. Both pipes now write through one
+// shared lock, and the race detector proves the forced overlap stays safe.
+func TestNodeDialSerializesSharedOutput(t *testing.T) {
+	started := make(chan struct{})
+	var writers sync.WaitGroup
+	runner := Runner{Node: &Node{Name: "node", SSH: "ci@node", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, _ string, _ io.Reader, out, stderr io.Writer, _ string, _ ...string) error {
+		for range 2 {
+			writers.Add(1)
+			go func() {
+				defer writers.Done()
+				<-started
+				for i := 0; i < 200; i++ {
+					fmt.Fprint(out, "output line\n")
+					fmt.Fprint(stderr, "diagnostic line\n")
+				}
+			}()
+		}
+		close(started)
+		writers.Wait()
+		return nil
+	}
+	var shared tailBuffer
+	if err := runner.nodeCommand(t.Context(), &shared, &shared, "", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(shared.String(), "line\n"); n != 800 {
+		t.Fatalf("shared buffer holds %d lines, want 800", n)
 	}
 }
 
@@ -449,7 +638,8 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 					}
 					return nil
 				}
-				sawSSH = sawSSH || strings.Contains(strings.Join(args, " "), "-o BatchMode=yes pip@host")
+				joined := strings.Join(args, " ")
+				sawSSH = sawSSH || name == "ssh" && strings.Contains(joined, "pip@host")
 				script := args[len(args)-1]
 				if strings.Contains(script, "systemd-run") {
 					if entered {
@@ -1097,7 +1287,7 @@ func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
 	if got := strings.TrimSpace(out.String()); got != "slot=0 port=4226" {
 		t.Fatalf("the check ran with %q, want slot 0 and its own port", got)
 	}
-	if !strings.Contains(errOut.String(), "waiting for slot 0") {
+	if !strings.Contains(errOut.String(), "waiting for any free slot") {
 		t.Fatalf("the check's log does not say why it waited: %s", errOut.String())
 	}
 }

@@ -99,6 +99,44 @@ func buildImage(t *testing.T, build string) (string, error) {
 	return StableImage(source)
 }
 
+// An engine that restarted after an update must repoint every link a native
+// scope published at its own image. A session that keeps running execs that
+// link, so it follows the engine onto its current build without a restart;
+// leaving the link on the first build keeps the old CLI against new engine
+// state (D-161).
+func TestRefreshScopeLinksRepublishesEveryScope(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux running image copy")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	first, err := buildImage(t, "first build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []string{"/owner/accounts/one/.runtime.home", "/owner/accounts/two/.runtime.home"}
+	links := make([]string, len(scopes))
+	for i, scope := range scopes {
+		if links[i], err = CurrentLink(scope); err != nil {
+			t.Fatal(err)
+		}
+		if err = SetLink(links[i], first); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RefreshScopeLinks(); err != nil {
+		t.Fatal(err)
+	}
+	current, err := StableExecutable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if target, err := os.Readlink(link); err != nil || target != current {
+			t.Fatalf("scope link still names the first build: %q, %v", target, err)
+		}
+	}
+}
+
 // dyna publishes this path as $DYNA_BIN, in every harness MCP server command
 // and in the tool home it hands to workers. A turn that ends must not take the
 // binary with it, or the next turn starts an MCP server that cannot run and
