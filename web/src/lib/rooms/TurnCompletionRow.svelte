@@ -17,6 +17,10 @@
   // result. Both forms lose the lead-in because the footer already names it.
   let body = $derived(turnText(post.fullResult && post.text ? post.text : payload?.summary ?? ''))
   let error = $derived(payload?.error ?? '')
+  // A failed turn's worker stderr is diagnostic evidence. It stays behind a
+  // closed disclosure, never in the row: the cause the body shows is the
+  // error, and inspection commands live in the agent-facing detail only.
+  let workerStderr = $derived(state === 'failed' ? payload?.workerStderr ?? '' : '')
   let name = $derived(short(payload?.session ?? post.speaker ?? post.from ?? '', room?.name))
   let message = $derived({
     ...post,
@@ -30,11 +34,22 @@
 
 <FeedMessage post={message} room={room ?? { name: '' }} {surface} fullText={surface === 'dm'} turnResult {onaddress}>
   {#snippet footer()}
+    {#if workerStderr}
+      <details class="turn-stderr">
+        <summary>Worker stderr</summary>
+        <pre class="stderr-text">{workerStderr}</pre>
+      </details>
+    {/if}
     <div class="turn-meta {state}">{stateWords[state]} · turn {payload?.turn ?? post.turn ?? '?'}</div>
   {/snippet}
 </FeedMessage>
 
 <style>
+  .turn-stderr { margin-top: var(--s1); }
+  .turn-stderr summary { color: var(--muted); font-size: var(--t-cap); cursor: pointer; list-style: none; }
+  .turn-stderr summary::-webkit-details-marker { display: none; }
+  .turn-stderr summary:hover { text-decoration: underline; }
+  .stderr-text { margin: var(--s1) 0 0; padding: var(--s1); max-height: 200px; overflow: auto; background: var(--main); border-radius: var(--r-sm); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--t-sm)/1.5 var(--mono); }
   .turn-meta { margin-top: var(--s1); color: var(--faint); font-size: var(--t-cap); }
   .turn-meta.failed { color: var(--coral); }
   .turn-meta.stopped { color: var(--gold); }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -120,5 +121,47 @@ func TestServiceCrewReceivesOnlyParentGroupAssignments(t *testing.T) {
 	frame = e.mgr.Store.SelectorContext(reviewer.Meta)
 	if !strings.Contains(frame, first.Address()) || !strings.Contains(frame, second.Address()) {
 		t.Fatalf("crew missing in parent frame: %s", frame)
+	}
+}
+
+// A managed service's failed turn keeps the worker's stderr tail as separate
+// evidence — in the typed service-failure event and in the text its alert
+// delivers — while the cause stays the timeout itself (D-108).
+func TestServiceFailureCarriesWorkerStderr(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	rec := e.room()
+	info, _, err := e.mgr.Start(context.Background(), subagent.StartOptions{
+		Goal: "Keep the library current", Role: subagent.RoleLibrarian, Name: "librarian",
+		Room: rec.Name, Dir: t.TempDir(), Task: "SLEEP:0\nRESPOND: first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info = e.wait(info.ID, 1)
+	warning := `Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.`
+	_, err = e.mgr.Store.UpdateTurn(info.ID, 1, func(turn *subagent.Turn) {
+		turn.Status, turn.Profile, turn.Model = subagent.TurnError, "pi", "muse-wonder-full-1.0"
+		turn.Error = "worker pi (model muse-wonder-full-1.0) failed to start: no harness event within 2m0s of startup"
+		turn.WorkerStderr = warning
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.CompleteSessionTurn(e.ctx, info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := res.Message.ServiceFailed()
+	if !ok || ev.Service != room.ServiceLibrarian {
+		t.Fatalf("service failure event = %+v, %v", ev, ok)
+	}
+	if !strings.Contains(ev.Error, "no harness event within 2m0s of startup") || strings.Contains(ev.Error, warning) {
+		t.Fatalf("service failure cause = %q", ev.Error)
+	}
+	if ev.WorkerStderr != warning {
+		t.Fatalf("service failure lost its typed stderr evidence: %q", ev.WorkerStderr)
+	}
+	if !strings.Contains(ev.Detail, "Worker stderr: "+warning) {
+		t.Fatalf("service failure text lost the worker stderr: %q", ev.Detail)
 	}
 }

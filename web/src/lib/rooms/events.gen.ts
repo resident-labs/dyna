@@ -334,6 +334,7 @@ export interface ServiceFailedEvent {
   error: string
   profile?: string
   model?: string
+  workerStderr?: string
   detail?: string
 }
 
@@ -393,6 +394,7 @@ export interface TurnEvent {
   state: TurnState
   summary?: string
   error?: string
+  workerStderr?: string
   detail?: string
 }
 
@@ -1386,6 +1388,7 @@ export function isServiceFailedEvent(v: unknown): v is ServiceFailedEvent {
     typeof v.error === "string" &&
     (v.profile === undefined || typeof v.profile === "string") &&
     (v.model === undefined || typeof v.model === "string") &&
+    (v.workerStderr === undefined || typeof v.workerStderr === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 
@@ -1445,6 +1448,7 @@ export function isTurnEvent(v: unknown): v is TurnEvent {
     TURN_STATE.has(v.state) &&
     (v.summary === undefined || typeof v.summary === "string") &&
     (v.error === undefined || typeof v.error === "string") &&
+    (v.workerStderr === undefined || typeof v.workerStderr === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 

@@ -1197,6 +1197,9 @@ type ServiceFailedEvent struct {
 	Error   string      `json:"error"`
 	Profile string      `json:"profile,omitempty"`
 	Model   string      `json:"model,omitempty"`
+	// WorkerStderr is the failed worker's standard-error tail, diagnostic
+	// evidence the card discloses on its own, never the cause (D-108).
+	WorkerStderr string `json:"workerStderr,omitempty"`
 	// Detail is the evidence the agent reads: the failure report with the
 	// session and how to inspect the service. The card shows Error.
 	Detail string `json:"detail,omitempty"`
@@ -1499,6 +1502,9 @@ type TurnEvent struct {
 	Summary string `json:"summary,omitempty"`
 	// Error is why the turn failed, when it did.
 	Error string `json:"error,omitempty"`
+	// WorkerStderr is the failed worker's standard-error tail, diagnostic
+	// evidence the card discloses on its own, never the cause (D-108).
+	WorkerStderr string `json:"workerStderr,omitempty"`
 	// Detail is the rest of the line an agent reads: how to inspect the turn
 	// or recover from it.
 	Detail string `json:"detail,omitempty"`
