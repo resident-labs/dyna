@@ -16,7 +16,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schema = `CREATE TABLE shell_jobs (
 	id TEXT PRIMARY KEY,
@@ -51,7 +51,12 @@ const schemaV3 = `ALTER TABLE shell_jobs ADD COLUMN background_at TEXT;
 ALTER TABLE shell_jobs ADD COLUMN stop_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE shell_jobs ADD COLUMN output_lines INTEGER NOT NULL DEFAULT 0;`
 
-const columns = `id, name, cmd, cwd, owner, keep, room_id, room, pid, supervisor, supervisor_start, started, ended, exit_code, exit_signal, exit_error`
+// Version 5 names the workflow run whose worker started a job. Workflow
+// workers inherit their parent session's identity, so the owner alone cannot
+// attribute a job to the run that cancelling must stop (D-165).
+const schemaV5 = `ALTER TABLE shell_jobs ADD COLUMN run TEXT NOT NULL DEFAULT '';`
+
+const columns = `id, name, cmd, cwd, owner, keep, room_id, room, pid, supervisor, supervisor_start, started, ended, exit_code, exit_signal, exit_error, run`
 
 // readColumns are the columns a read returns: columns, then the version 3 ones.
 const readColumns = columns + `, background_at, stop_by, output_lines`
@@ -75,9 +80,6 @@ func (s *Store) db() (*sql.DB, error) {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
 				return err
 			}
-			if err := importLegacy(conn, s.Root); err != nil {
-				return err
-			}
 		}
 		if old == 0 || old == 1 {
 			if _, err := conn.ExecContext(ctx, schemaV2); err != nil {
@@ -86,6 +88,17 @@ func (s *Store) db() (*sql.DB, error) {
 		}
 		if old < 3 {
 			if _, err := conn.ExecContext(ctx, schemaV3); err != nil {
+				return err
+			}
+		}
+		if old < 5 {
+			if _, err := conn.ExecContext(ctx, schemaV5); err != nil {
+				return err
+			}
+		}
+		// The legacy import writes current rows, so it needs every column.
+		if old == 0 {
+			if err := importLegacy(conn, s.Root); err != nil {
 				return err
 			}
 		}
@@ -131,12 +144,12 @@ func upsert(conn *sql.Conn, m Meta, ex *Exit) error {
 	if ex != nil {
 		ended, code, signal, message = ex.Ended.UTC().Format(time.RFC3339Nano), ex.Code, ex.Signal, ex.Error
 	}
-	_, err = conn.ExecContext(context.Background(), `INSERT INTO shell_jobs(`+columns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err = conn.ExecContext(context.Background(), `INSERT INTO shell_jobs(`+columns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name, cmd=excluded.cmd, cwd=excluded.cwd, owner=excluded.owner, keep=excluded.keep,
-	room_id=excluded.room_id, room=excluded.room, pid=excluded.pid, supervisor=excluded.supervisor, supervisor_start=excluded.supervisor_start,
+	run=excluded.run, room_id=excluded.room_id, room=excluded.room, pid=excluded.pid, supervisor=excluded.supervisor, supervisor_start=excluded.supervisor_start,
 	started=excluded.started, ended=excluded.ended, exit_code=excluded.exit_code, exit_signal=excluded.exit_signal, exit_error=excluded.exit_error`,
 		m.ID, m.Name, string(cmd), m.Cwd, m.Owner, m.Keep, m.RoomID, m.Room, m.Pid, m.Supervisor, int64(m.SupervisorStartTime),
-		m.Started.UTC().Format(time.RFC3339Nano), ended, code, signal, message)
+		m.Started.UTC().Format(time.RFC3339Nano), ended, code, signal, message, m.Run)
 	return err
 }
 
@@ -164,7 +177,7 @@ func scanJob(row scanner) (Meta, *Exit, error) {
 	var ended, background sql.NullString
 	var start int64
 	var ex Exit
-	if err := row.Scan(&m.ID, &m.Name, &cmd, &m.Cwd, &m.Owner, &m.Keep, &m.RoomID, &m.Room, &m.Pid, &m.Supervisor, &start, &started, &ended, &ex.Code, &ex.Signal, &ex.Error, &background, &m.StopBy, &m.OutputLines); err != nil {
+	if err := row.Scan(&m.ID, &m.Name, &cmd, &m.Cwd, &m.Owner, &m.Keep, &m.RoomID, &m.Room, &m.Pid, &m.Supervisor, &start, &started, &ended, &ex.Code, &ex.Signal, &ex.Error, &m.Run, &background, &m.StopBy, &m.OutputLines); err != nil {
 		return Meta{}, nil, err
 	}
 	m.SupervisorStartTime = uint64(start)
