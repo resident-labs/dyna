@@ -358,8 +358,10 @@ var ErrServiceUpdating = errors.New("Dyna's computer service is updating to a ne
 
 var (
 	daemonStarted = time.Now()
-	// restartDrainWindow ends the refusal if nothing completes the restart.
-	restartDrainWindow = 30 * time.Minute
+	// restartDrainWindow is the most that a pending restart refuses new
+	// desktops. It lets a busy service shed its desktops for a short time, and
+	// never holds the owner's computers back for hours while a few stay in use.
+	restartDrainWindow = 10 * time.Minute
 	restartPending     = func(now time.Time) bool {
 		return userservices.RestartPendingSince(userservices.Dir(), daemonStarted, now, restartDrainWindow)
 	}

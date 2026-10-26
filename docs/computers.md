@@ -14,6 +14,14 @@ it, or start the installed service when its endpoint is absent. Linux installs
 without a user service manager keep the existing detached-process fallback.
 The supervisor preserves the owner's D-Bus and keyring.
 
+A new build installs without stopping busy computers: the service restarts later.
+For the first 10 minutes after that restart becomes pending, the service refuses
+to start new desktops; after that it starts them again, so a few busy computers
+never hold the rest back. The service restarts at the first moment no computer has
+an app open; a running desktop with no app, however recent its input, does not
+hold it back. `dyna computer list` shows "restart pending since <time>" while one
+waits.
+
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit
 without restarting the transient service. The new definition takes effect after
