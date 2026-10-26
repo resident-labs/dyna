@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/callspec"
 )
 
 type daemon struct {
@@ -129,6 +131,9 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 		d.subs[id] = subscriber{session: r.Session, events: events}
 		d.subMu.Unlock()
 		return Subscription{Events: events, Cancel: func() { d.subMu.Lock(); delete(d.subs, id); d.subMu.Unlock() }}, nil
+	}
+	if r.Op == "version" {
+		return callspec.Build, nil
 	}
 	if r.Op == "list" {
 		d.mu.Lock()
