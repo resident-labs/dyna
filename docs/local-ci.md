@@ -157,6 +157,11 @@ Cache directories remain owned and locked by Dyna under its separate `caches/`
 directory. The runner refuses unsafe symbolic links before mounting them. Every
 cache has age cleanup and a size cap.
 
+A cache folder is shared by every run on the node, including runs of other
+commits at the same time, so it must hold only what can be shared: a check that
+keeps something it mutates there, such as a copied source tree or a work
+directory, has to lock it itself.
+
 ## Suites
 
 Each item in `suites` has:
