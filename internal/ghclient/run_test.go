@@ -326,13 +326,20 @@ func TestRefusedOutsideReadExplainsPublicOnlyRule(t *testing.T) {
 	ctx := WithRoom(context.Background(), records[0].ID)
 	setPublic(t, false)
 	apiErr := Run(ctx, Command(ctx, "/missing/gh", records[0].Repo, "api", "repos/other/private"))
-	if apiErr == nil || !strings.Contains(apiErr.Error(), "reads outside the room work only for public repositories") || !strings.Contains(apiErr.Error(), "other/private is private or missing") {
+	if apiErr == nil || !strings.Contains(apiErr.Error(), "reads outside the room work only for public repositories") || !strings.Contains(apiErr.Error(), "other/private could not be confirmed public") {
 		t.Fatalf("gh api read error = %v", apiErr)
 	}
 	viewErr := Run(ctx, Command(ctx, "/missing/gh", records[0].Repo, "repo", "view", "other/private"))
 	if viewErr == nil || !strings.Contains(viewErr.Error(), "gh api repos/<owner>/<repo>") {
 		t.Fatalf("gh repo view error = %v", viewErr)
 	}
+	// A public repository read in an unsupported form is not called private.
+	setPublic(t, true)
+	formErr := Run(ctx, Command(ctx, "/missing/gh", records[0].Repo, "api", "repos/other/project", "--hostname", "github.com"))
+	if formErr == nil || strings.Contains(formErr.Error(), "private") || !strings.Contains(formErr.Error(), "plain gh api repos/<owner>/<repo> read") {
+		t.Fatalf("unsupported API form error = %v", formErr)
+	}
+	setPublic(t, false)
 	// A write keeps its own refusal.
 	if writeErr := Run(ctx, Command(ctx, "/missing/gh", records[0].Repo, "pr", "merge", "-s", "https://github.com/other/private/pull/4")); writeErr == nil || strings.Contains(writeErr.Error(), "public repositories") {
 		t.Fatalf("write error = %v", writeErr)
