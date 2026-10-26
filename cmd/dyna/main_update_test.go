@@ -20,7 +20,8 @@ func TestRootVersionFlagsAndCommand(t *testing.T) {
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("dyna %v: %v", args, err)
 		}
-		if got := strings.TrimSpace(stdout.String()); got != "dyna v1.2.3" {
+		// "dyna version" adds a line for the computer service build.
+		if got, _, _ := strings.Cut(strings.TrimSpace(stdout.String()), "\n"); got != "dyna v1.2.3" {
 			t.Fatalf("dyna %v output = %q", args, got)
 		}
 	}
