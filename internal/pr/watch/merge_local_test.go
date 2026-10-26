@@ -419,6 +419,8 @@ func TestLocalMergeGuardsAndGitHubLane(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "github-lane":
+				// A repository with no remote uses the lane, so this one has a remote.
+				changeGit(t, dir, "remote", "add", "hosted", "https://github.com/owner/repo.git")
 				v, err := settings.Load("")
 				if err != nil {
 					t.Fatal(err)
@@ -640,7 +642,9 @@ func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
 }
 
 func TestGitHubLaneLocalChangesDoNotWriteRepositoryFacts(t *testing.T) {
-	e, _, records, _ := localMergeEnv(t, false)
+	e, dir, records, _ := localMergeEnv(t, false)
+	// A repository with no remote uses the lane, so this one has a remote.
+	changeGit(t, dir, "remote", "add", "hosted", "https://github.com/owner/repo.git")
 	v, err := settings.Load("")
 	if err != nil {
 		t.Fatal(err)
