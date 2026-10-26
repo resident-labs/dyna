@@ -106,6 +106,65 @@ suites:
 	}
 }
 
+// D-293: with no base definition and no hosted CI, the PR that adds the
+// definition runs it, because nothing else can test that PR.
+func TestHeadThatAddsLocalCIRunsItWhenNoHostedCIExists(t *testing.T) {
+	repo, _ := changeRepo(t)
+	if err := os.Remove(filepath.Join(repo, filepath.FromSlash(localci.DefinitionPath))); err != nil {
+		t.Fatal(err)
+	}
+	base := changeCommit(t, repo, "remove local CI\n")
+	writeTrialDefinition(t, repo, `version: 1
+trial: [test]
+checks:
+  - id: pytest
+    image: python:3.13-slim
+    command: python -m pytest
+suites:
+  - id: test
+    checks: [pytest]
+`)
+	head := changeCommit(t, repo, "add local CI later\n")
+	record := Record{Kind: "github", Head: head, Base: base, Branch: "feature", Repo: "owner/repo", RepoPath: repo}
+	snap := Snapshot{}
+	snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, record.Repo
+	service := &Service{LocalCIRegistry: &requiredCIRegistry{}}
+	got, err := service.withRegisteredCI(t.Context(), record, snap, ChangePolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.localCIConfig == state.LocalCIConfigNotConfigured || got.localCI == nil {
+		t.Fatalf("a PR that adds local CI, with no hosted CI, was left unconfigured: config %q, local %+v", got.localCIConfig, got.localCI)
+	}
+}
+
+// A malformed definition that a PR adds, where the base has none, must not block
+// a repository whose hosted CI runs; without hosted CI the error is reported.
+func TestMalformedAddedLocalCIDefinitionKeepsHostedCI(t *testing.T) {
+	for _, hosted := range []bool{true, false} {
+		repo, _ := changeRepo(t)
+		if err := os.Remove(filepath.Join(repo, filepath.FromSlash(localci.DefinitionPath))); err != nil {
+			t.Fatal(err)
+		}
+		base := changeCommit(t, repo, "remove local CI\n")
+		writeTrialDefinition(t, repo, "version: 1\nnot a definition: [\n")
+		head := changeCommit(t, repo, "add a broken definition\n")
+		record := Record{Kind: "github", Head: head, Base: base, Branch: "feature", Repo: "owner/repo", RepoPath: repo}
+		snap := Snapshot{}
+		if hosted {
+			snap.Checks = []Check{actionsCheck(Check{Name: "hosted", Status: "completed", Conclusion: "success"})}
+		}
+		snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = head, record.Repo
+		got, err := (&Service{LocalCIRegistry: &requiredCIRegistry{}}).withRegisteredCI(t.Context(), record, snap, ChangePolicy{})
+		if hosted && (err != nil || got.localCIConfig != state.LocalCIConfigNotConfigured) {
+			t.Fatalf("hosted CI was blocked by a malformed added definition: config %q, %v", got.localCIConfig, err)
+		}
+		if !hosted && err == nil {
+			t.Fatal("a malformed added definition with no hosted CI was ignored")
+		}
+	}
+}
+
 // A head whose local CI definition has a field this engine does not know still
 // gets its review recorded, while the same CI gate keeps failing for merges.
 func TestVerdictIsRecordedWhenHeadDefinitionIsInvalid(t *testing.T) {
