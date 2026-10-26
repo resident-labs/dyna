@@ -120,7 +120,7 @@ func write(root string, st State) (err error) {
 	writer := appstate.For(db)
 	// Refresh and encode on a read snapshot, before reserving the shared writer.
 	// The PR lock and snapshot lock still serialize PR writers and readers.
-	if err := writer.Read(context.Background(), func(r appstate.Reader) error { return refresh(r, root) }); err != nil {
+	if err := refreshFrom(writer, root); err != nil {
 		return err
 	}
 	before := snapshot.revision
