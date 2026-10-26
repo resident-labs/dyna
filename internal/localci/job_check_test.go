@@ -104,7 +104,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	// keep both instead of letting one overwrite the other.
 	// The flattened names of these two entries would collide, so only an
 	// ordinal per entry keeps both.
-	for _, pkg := range []string{"package_a", "package/a_"} {
+	for _, pkg := range []string{"package_a", "package/a"} {
 		entry, err := zipWriter.Create(pkg + "/go-test.xml")
 		if err != nil {
 			t.Fatal(err)
@@ -204,7 +204,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		}
 		found = append(found, string(body))
 	}
-	for _, want := range []string{"package_a", "package/a_"} {
+	for _, want := range []string{"package_a", "package/a"} {
 		if !strings.Contains(strings.Join(found, "\n"), `name="`+want+`"`) {
 			t.Fatalf("report %q lost the tests of %s", found, want)
 		}
