@@ -90,7 +90,9 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request, rt Route) {
 var ErrReadOnly = errors.New("read-only mode")
 
 type callErrorResponse struct {
-	Error string                 `json:"error"`
+	Error string `json:"error"`
+	// Code names a reply a caller acts on, such as callspec.CodeEngineStopping.
+	Code  string                 `json:"code,omitempty"`
 	Close *sessionclose.Recovery `json:"close,omitempty"`
 }
 
@@ -99,14 +101,25 @@ type closeRefusal interface {
 	CloseRecovery() sessionclose.Recovery
 }
 
-func writeCallError(w http.ResponseWriter, status int, err error) {
+func writeCallError(w http.ResponseWriter, status int, code string, err error) {
 	var refusal closeRefusal
 	if errors.As(err, &refusal) {
 		recovery := refusal.CloseRecovery()
-		jsonReply(w, status, callErrorResponse{Error: err.Error(), Close: &recovery})
+		jsonReply(w, status, callErrorResponse{Error: err.Error(), Code: code, Close: &recovery})
 		return
 	}
-	jsonError(w, status, err.Error())
+	jsonReply(w, status, callErrorResponse{Error: err.Error(), Code: code})
+}
+
+// callFailure is the status and code for a failed method. A call whose request
+// context ended was canceled by the engine, which is stopping, or by the caller.
+// Whatever text its error carries, the same request may be sent again, so it
+// gets 503 with callspec.CodeEngineStopping and never a final 422 (D-269).
+func callFailure(requestErr, err error) (status int, code string) {
+	if requestErr != nil {
+		return http.StatusServiceUnavailable, callspec.CodeEngineStopping
+	}
+	return methodStatus(err), ""
 }
 
 // methodStatus is the HTTP status for a method's error. An error that can
@@ -195,11 +208,11 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, rt Route, p Princi
 	}
 	res, err := c(ctx, args)
 	if err != nil {
-		status := methodStatus(err)
+		status, code := callFailure(r.Context().Err(), err)
 		if status == http.StatusServiceUnavailable && !errors.Is(r.Context().Err(), context.Canceled) {
 			logTransient(name, err)
 		}
-		writeCallError(w, status, err)
+		writeCallError(w, status, code, err)
 		return
 	}
 	if result, ok := res.(PrincipalResult); ok {
