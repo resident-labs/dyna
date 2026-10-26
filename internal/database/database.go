@@ -356,7 +356,7 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 // the old version (0 when absent), and the new version commits with it.
 // Before it changes an existing store, it backs up dyna.db.
 // A newer recorded version means a newer dyna wrote the store: Migrate fails
-// with errNewerSchema and changes nothing. Outside the engine an older
+// with ErrNewerSchema and changes nothing. Outside the engine an older
 // version fails with errNotMigrated, also changing nothing. Each store calls
 // Migrate before its first query; later calls on the same handle return at once.
 func Migrate(db *sql.DB, key string, version int, apply func(conn *sql.Conn, old int) error) error {
@@ -434,10 +434,17 @@ func HasTable(ctx context.Context, conn *sql.Conn, name string) (bool, error) {
 	return n > 0, err
 }
 
-var errNewerSchema = errors.New("dyna.db was written by a newer dyna; update dyna")
+// ErrNewerSchema reports state written by a newer dyna than this binary.
+// A long-lived process that serves such state, like a session's shell MCP
+// server, restarts on the current binary instead of failing every call.
+var ErrNewerSchema = errors.New("dyna.db was written by a newer dyna; update dyna")
+
+// NewerSchema reports whether err says the state this binary must serve was
+// written by a newer dyna.
+func NewerSchema(err error) bool { return errors.Is(err, ErrNewerSchema) }
 
 func newerSchema(key string, have, known int) error {
-	return fmt.Errorf("%w: %s is version %d, this dyna knows up to %d", errNewerSchema, key, have, known)
+	return fmt.Errorf("%w: %s is version %d, this dyna knows up to %d", ErrNewerSchema, key, have, known)
 }
 
 type migrated struct {

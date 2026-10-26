@@ -59,22 +59,27 @@ func TestPrepareKeepsHarnessMCPCommandAcrossTurns(t *testing.T) {
 	}
 }
 
-// A tool home published for one engine build must call the build the engine
-// runs now. Its wrapper names one stable path, so an engine update moves that
-// path for every running session; naming one build's copy instead left sessions
-// on the build they first started with, and the updated engine refused their
-// calls as a version mismatch.
+// A tool home published for one engine build must keep calling a dyna an
+// update keeps current. The wrapper names the dyna the owner installed, so
+// the update that replaces that binary in place moves every running session
+// on its next exec with no engine help; naming one build's copy instead left
+// sessions on the build they first started with, and the updated state
+// refused their calls as a version mismatch (D-161, D-171).
 func TestPrepareBridgeFollowsTheCurrentBuild(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux running image link")
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	install := filepath.Join(t.TempDir(), "bin")
+	write(t, filepath.Join(install, "dyna"), "#!/bin/sh\nprintf 'installed current'\n", 0700)
+	write(t, filepath.Join(install, "git"), "#!/bin/sh\ntrue\n", 0700)
+	env := []string{"PATH=" + install}
 	scope := filepath.Join(t.TempDir(), "scope")
-	before, err := Prepare(scope, buildStub(t, "build one"), os.Environ())
+	before, err := Prepare(scope, buildStub(t, "build one"), env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := Prepare(scope, buildStub(t, "build two, updated"), os.Environ())
+	after, err := Prepare(scope, buildStub(t, "build two, updated"), env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,15 +87,16 @@ func TestPrepareBridgeFollowsTheCurrentBuild(t *testing.T) {
 		t.Fatalf("an engine update republished the Dyna command: %q then %q", before["DYNA_BIN"], after["DYNA_BIN"])
 	}
 	target := strings.TrimSpace(readBridgeTarget(t, after["DYNA_BIN"]))
-	if filepath.Base(target) != "current" {
-		t.Fatalf("published Dyna command names %q, want this scope's current link", target)
+	installed := filepath.Join(install, "dyna")
+	if target != installed {
+		t.Fatalf("published Dyna command names %q, want the installed dyna %q", target, installed)
 	}
 	out, err := exec.Command(after["DYNA_BIN"]).Output()
 	if err != nil {
 		t.Fatalf("published Dyna command does not run after an update: %v", err)
 	}
-	if got := strings.TrimSpace(string(out)); got != "build two, updated" {
-		t.Fatalf("published Dyna command runs %q, want the current build", got)
+	if got := strings.TrimSpace(string(out)); got != "installed current" {
+		t.Fatalf("published Dyna command runs %q, want the installed dyna", got)
 	}
 }
 

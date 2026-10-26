@@ -454,3 +454,47 @@ func TestExistingPrivateWorktreesDirectoryIsKept(t *testing.T) {
 		t.Fatal("existing private worktrees were disturbed")
 	}
 }
+
+// The dyna bridge execs the dyna the owner's PATH installs, not the build
+// this engine runs. An update replaces the installed binary in place, so a
+// session that keeps running across the update still starts every later
+// command, and its shell MCP server, on the current build with no engine
+// help. A bridge that named the engine's image copy kept the session on the
+// build its first turn chose until a schema bump cut its shells off (D-171).
+func TestDynaBridgeExecsTheInstalledDyna(t *testing.T) {
+	scope, owner, env := fixture(t)
+	image := filepath.Join(owner, "engine-image")
+	write(t, image, "#!/bin/sh\nprintf 'engine image'\n", 0700)
+	out, err := Prepare(scope, image, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(out["DYNA_BIN"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := filepath.Join(envMap(env)["PATH"], "dyna")
+	if !strings.Contains(string(script), "exec '"+strings.ReplaceAll(installed, "'", `'\''`)+"'") {
+		t.Fatalf("dyna bridge does not exec the installed dyna %q: %s", installed, script)
+	}
+	if strings.Contains(string(script), "engine-image") {
+		t.Fatalf("dyna bridge pins the engine image: %s", script)
+	}
+	// The engine's own path still wins when the owner PATH names no dyna, so
+	// an engine without an installation keeps working.
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	out, err = Prepare(scope, image, []string{"HOME=" + owner, "PATH=" + filepath.Dir(git)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err = os.ReadFile(out["DYNA_BIN"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), "exec '"+strings.ReplaceAll(image, "'", `'\''`)+"'") {
+		t.Fatalf("dyna bridge lost the engine path fallback: %s", script)
+	}
+}

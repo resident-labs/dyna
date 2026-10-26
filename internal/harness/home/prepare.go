@@ -22,8 +22,9 @@ var toolName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 // Prepare returns environment overrides to merge into inherited. It keeps explicit
 // tool settings, including empty values. Empty startup inputs disable shell hooks.
 // The caller must supply an absolute native scope and the owner's environment.
-// realDyna is a trusted absolute executable path; it need not exist yet.
-// Leave it empty to resolve and validate dyna using inherited PATH.
+// realDyna is a trusted absolute executable path; it need not exist yet. The
+// bridge still prefers a dyna the inherited PATH installs, because that binary
+// is the one an update keeps current (D-171); realDyna is the fallback.
 func Prepare(nativeScope, realDyna string, inherited []string) (map[string]string, error) {
 	if !filepath.IsAbs(nativeScope) {
 		return nil, fmt.Errorf("native scope must be absolute")
@@ -60,11 +61,8 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 		}
 		target := ""
 		var err error
-		if name == "dyna" && realDyna != "" {
-			if !filepath.IsAbs(realDyna) {
-				return nil, fmt.Errorf("realDyna must be absolute")
-			}
-			target = filepath.Clean(realDyna)
+		if name == "dyna" {
+			target, err = dynaBridgeTarget(realDyna, path, bridgeRoot)
 		} else {
 			target, err = resolve(name, path)
 		}
@@ -245,6 +243,61 @@ func resolve(name, path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("executable not found in inherited PATH")
+}
+
+// dynaBridgeTarget picks the path the dyna bridge execs. The dyna the
+// owner's PATH installs wins whenever the PATH names one, because an update
+// replaces that binary in place: every later exec then starts the current
+// build with no engine help, so a session that keeps running across an
+// update does not stay on the build its first turn chose until a schema bump
+// cuts its shells off (D-171). A bridge another tool home published never
+// wins: it follows its own scope's choice of build, not the installation.
+// The engine-supplied path, a scope link to the engine's own image, is the
+// fallback for an engine whose PATH names no dyna; it follows the engine's
+// build instead of the installation.
+func dynaBridgeTarget(realDyna, path, bridgeRoot string) (string, error) {
+	if realDyna != "" {
+		if !filepath.IsAbs(realDyna) {
+			return "", fmt.Errorf("realDyna must be absolute")
+		}
+		check := realDyna
+		if resolved, err := filepath.EvalSymlinks(check); err == nil {
+			check = resolved
+		}
+		if rel, err := filepath.Rel(bridgeRoot, check); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("realDyna %q resolves to a private bridge of %s", realDyna, bridgeRoot)
+		}
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			dir = "."
+		}
+		candidate := filepath.Join(dir, "dyna")
+		if toolHomeBridge(candidate) {
+			continue
+		}
+		if target, err := executable(candidate); err == nil {
+			return target, nil
+		}
+	}
+	if realDyna != "" {
+		return filepath.Clean(realDyna), nil
+	}
+	return "", fmt.Errorf("executable not found in inherited PATH")
+}
+
+// toolHomeBridge reports whether path is a bridge some Dyna tool home
+// published. Such a wrapper lives under .dyna/tool-home and execs the build
+// its own scope chose, so it is not the installed dyna an update keeps
+// current (D-171).
+func toolHomeBridge(path string) bool {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if parts[i] == ".dyna" && parts[i+1] == "tool-home" {
+			return true
+		}
+	}
+	return false
 }
 
 // Launches reports whether a published Dyna command still runs. It follows
