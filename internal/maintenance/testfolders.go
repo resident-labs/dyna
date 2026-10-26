@@ -71,7 +71,9 @@ func sweepTestFolders(now time.Time, root string, alive func(int) bool, dry bool
 // change before the sweep removes it. A live process writes into its folder, and
 // writing a file does not touch the folder's own time, so the sweep looks at
 // every file and folder under it.
-const diskTempRetention = 24 * time.Hour
+// It exceeds the longest hook timeout (48 hours), so a running hook never loses
+// its files to the sweep.
+const diskTempRetention = 72 * time.Hour
 
 // newestChange returns the latest modification time of path and everything
 // under it, starting from top.
