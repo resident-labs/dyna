@@ -1168,9 +1168,14 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 	if err := staleVerdict(r, actor, head, snap.Pull, reviewID, named); err != nil {
 		return err
 	}
-	snap, err = s.withRegisteredCI(ctx, r, snap, policy)
-	if err != nil {
+	withCI, err := s.withRegisteredCI(ctx, r, snap, policy)
+	// A head whose local CI definition this engine cannot parse still gets its
+	// review recorded. Merge gates read the same definition and stay closed.
+	if err != nil && !errors.Is(err, localci.ErrDefinitionInvalid) {
 		return err
+	}
+	if err == nil {
+		snap = withCI
 	}
 
 	err = s.Store.update(func(st *State) error {

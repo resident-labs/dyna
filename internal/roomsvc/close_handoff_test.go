@@ -2,10 +2,11 @@ package roomsvc
 
 import (
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -124,25 +125,9 @@ func TestCloseCancelsWorkflowFromSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	const runID = "wf_close-handoff"
-	dir := filepath.Join(runstore.RunsDir(), runID)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(runstore.Meta{ID: runID, Session: author.ID, ParentSession: author.ID, Status: "running"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	// Import a runner fixture with no live process into the canonical store.
-	if _, err := runstore.ReadMeta(runID); err != nil {
-		t.Fatal(err)
-	}
-	// The workflow reader must not depend on the rollback file.
-	if err := os.Remove(filepath.Join(dir, "meta.json")); err != nil {
-		t.Fatal(err)
-	}
+	// The row is seeded directly: the engine may open the run store before a
+	// legacy meta.json import could run.
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: runID, Session: author.ID, ParentSession: author.ID, Status: "running"})
 	closed, err := e.svc.CloseSession(e.ctx, rec.ID, author.ID)
 	if err != nil || !closed.Closed {
 		t.Fatalf("close = %+v, %v", closed, err)

@@ -348,6 +348,48 @@ func TestOpenChangeOnATrackedPRTakesTheAuthorRule(t *testing.T) {
 	}
 }
 
+// A caller with no session of its own, such as a workflow run coordinator
+// (the Worker role), cannot own new work. Before, it reached the session
+// store with an empty reference and got "session id or address is required"
+// (issue D-247).
+func TestSessionlessWorkerGetsAClearRefusal(t *testing.T) {
+	e, rec, _ := workspaceEnv(t)
+	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Worker, Run: "run_a", Room: rec.ID})
+	const openWant = "this caller has no session, so it cannot opens a change; only sessions, root and the owner can"
+	if _, err := e.svc.PRs.OpenChange(ctx, rec.ID, "", "", "", watch.OpenChangeOptions{}); err == nil || err.Error() != openWant {
+		t.Fatalf("OpenChange as a sessionless worker = %v; want %q", err, openWant)
+	}
+	const trackWant = "this caller has no session, so it cannot tracks a PR; only sessions, root and the owner can"
+	if _, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, "", "7", "", "", nil); err == nil || err.Error() != trackWant {
+		t.Fatalf("TrackPRRef as a sessionless worker = %v; want %q", err, trackWant)
+	}
+}
+
+// A workflow run's agents are run-owned leaf sessions (#616): a leaf acting
+// as itself passes the author check and opens a change (issue D-247).
+func TestRunOwnedLeafSessionOpensAChange(t *testing.T) {
+	e, rec, _ := workspaceEnv(t)
+	prfixture.FakeGH(t)
+	const run = "wf_20261026-110000-00000001"
+	leaf := subagent.RunAgentID(run, 1)
+	recordtest.Write(t, e.svc.PRs.Notify.Sessions.Store.Root, leaf, subagent.Meta{
+		ID: leaf, Name: "run-agent-1", RoomID: rec.ID, Room: rec.Name, Profile: "mock",
+		Leaf: true, Run: &subagent.RunOwner{ID: run, Agent: 1},
+	})
+	const key, url = "github.com/acme/widgets#17", "https://github.com/acme/widgets/pull/17"
+	st, _ := e.svc.PRs.Watcher().Store.Read()
+	st.Records[key] = &watch.Record{Key: key, Kind: "github", Host: "github.com", Repo: "acme/widgets", Number: 17, URL: url, RoomID: rec.ID, State: "open", Watching: true, Head: "head", Author: leaf}
+	prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, st)
+	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: leaf, Room: rec.ID})
+	got, err := e.svc.PRs.OpenChange(ctx, rec.ID, leaf, url, "", watch.OpenChangeOptions{Notes: watch.ChangeNotes{Intent: "Run work"}})
+	if err != nil {
+		t.Fatalf("a run-owned leaf session opening its change: %v", err)
+	}
+	if got.Change.Author != leaf {
+		t.Fatalf("the change's author = %s; want the leaf session %s", got.Change.Author, leaf)
+	}
+}
+
 // transferOnActorRead changes the PR after authorPRInRoom has read its record,
 // when it reads the authenticated actor. No goroutine or timer controls the race.
 type transferOnActorRead struct {

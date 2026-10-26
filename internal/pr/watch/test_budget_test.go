@@ -129,6 +129,34 @@ func TestNoJUnitWarnsOncePerPRAndDoesNotFail(t *testing.T) {
 	}
 }
 
+// A rerun of the failed jobs only uploads little. The reports of the jobs that
+// passed stay on the first attempt, so the notice must not claim there is no
+// JUnit report.
+func TestRerunKeepingFirstAttemptReportsDoesNotWarnNoJUnit(t *testing.T) {
+	e := newEnv(t)
+	testReportFixture(t, e, map[string]string{"report.xml": `<testsuite><testcase name="fast" time="1"/></testsuite>`})
+	e.f.Runs[0].Attempt = 2
+	e.f.Runs[0].Started = e.clock.Add(time.Minute).Format(time.RFC3339)
+	// An allow entry for a test in the earlier report is not stale.
+	p := RoomPolicy(State{}, e.author.RoomID)
+	p.CITimeBudget = "enforce"
+	p.CITestAllow = []string{"fast"}
+	if err := e.s.SetRoomChangePolicy(e.author.RoomID, authority.Actor{Role: authority.Owner}, p); err != nil {
+		t.Fatal(err)
+	}
+	e.track()
+	e.tick()
+	r := e.record()
+	if r.CINoJUnitWarned || r.CITestReportNote != "" {
+		t.Fatalf("rerun with earlier reports warned: %q", r.CITestReportNote)
+	}
+	for _, n := range e.sent {
+		if strings.Contains(n.Text, "no JUnit") {
+			t.Fatalf("notice: %q", n.Text)
+		}
+	}
+}
+
 func TestNoJUnitWarningCanBeDisabled(t *testing.T) {
 	e := newEnv(t)
 	testReportFixture(t, e, nil)

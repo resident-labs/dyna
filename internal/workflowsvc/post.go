@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"dyna-agent/internal/notify"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/workflow"
 )
 
@@ -14,7 +16,12 @@ func ScriptPoster(ctx context.Context, runID string, mentions []string, text str
 	if err != nil {
 		return workflow.PostResult{}, err
 	}
-	res, err := svc.Post(ctx, notify.PostInput{Sender: snd, Mentions: mentions, Text: text})
+	meta, err := runstore.ReadMeta(runID)
+	if err != nil {
+		return workflow.PostResult{}, err
+	}
+	script := &room.ScriptRef{RunID: runID, Workflow: meta.Name}
+	res, err := svc.Post(ctx, notify.PostInput{Sender: snd, Mentions: mentions, Text: text, Script: script})
 	out := workflow.PostResult{ID: res.Message.ID}
 	for _, d := range res.Deliveries {
 		item := map[string]any{"to": d.To, "delivery": d.Delivery}

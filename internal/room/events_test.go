@@ -349,6 +349,14 @@ func TestPostEventRequiresFieldsAndPostsOnce(t *testing.T) {
 	}
 }
 
+func TestGoalEventDedupePreservesLegacyKeyWithoutCloseCount(t *testing.T) {
+	event := GoalEvent{Type: GoalFinished, GoalID: "g1", Title: "Ship the contract", Summary: "Merged"}
+	const legacyKey = "finished\x00Ship the contract\x00Merged\x000"
+	if got := event.eventDedupe(); got != legacyKey {
+		t.Fatalf("eventDedupe() = %q, want legacy key %q", got, legacyKey)
+	}
+}
+
 // A PR event carries its facts in the typed payload: the card and the agent
 // text read it, and the notice holds only the type.
 func TestPREventStoresItsFactsAndText(t *testing.T) {

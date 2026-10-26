@@ -119,10 +119,11 @@ globalThis.agent = function (prompt, opts) {
   return __spawn(String(prompt), applyPlanCtx(opts));
 };
 
-// post(to, text) -> { id, deliveries, skipped?, error? }
-// to is one @mention string or an array of them; the script posts as run:<id>.
-globalThis.post = function (to, text) {
-  return __post(to, text);
+// post(to, text, data?) or post(to, { text, data }) -> { id, deliveries, skipped?, error? }
+// to is one @mention string or an array of them; the script posts as the run.
+// data is an object or array that the feed shows as a key and value view.
+globalThis.post = function (to, text, data) {
+  return arguments.length > 2 ? __post(to, text, data) : __post(to, text);
 };
 
 // worktrees() -> engine-verified snapshots of retained worktrees in this run.
