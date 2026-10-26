@@ -140,10 +140,10 @@ func TestReleasedAnchorDoesNotAdmitUnrelatedGroup(t *testing.T) {
 // cannot be found: the stop must say its cleanup is incomplete.
 func TestStopReportsChildLostToExitBeforeContainment(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
-	id, out, leader := startLostJob(t, s, `trap 'env -i sleep 600 & echo $!; exit 0' USR1; echo ready; read x`, 1)
+	id, out, leader := startLostJob(t, s, `trap 'env -i /bin/sh -c "echo \$\$; exec sleep 600" & exit 0' USR1; echo ready; read x`, 1)
 	beforeFreeze = func() {
 		_ = syscall.Kill(leader.Process.Pid, syscall.SIGUSR1)
-		out.Scan() // the child exists once its PID is printed
+		out.Scan() // the child prints its PID after env -i cleared its environment
 		_ = leader.Wait()
 	}
 	t.Cleanup(func() { beforeFreeze = nil })
@@ -160,13 +160,13 @@ func TestStopReportsChildLostToExitBeforeContainment(t *testing.T) {
 // drops its group.
 func TestStopReportsChildLostToReapingZombie(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
-	id, out, leader := startLostJob(t, s, `trap 'env -i sleep 600 & echo $!; exit 0' USR1; echo ready; read x`, 1)
+	id, out, leader := startLostJob(t, s, `trap 'env -i /bin/sh -c "echo \$\$; exec sleep 600" & exit 0' USR1; echo ready; read x`, 1)
 	beforeStop = func(pid int) {
 		if pid != leader.Process.Pid {
 			return
 		}
 		_ = syscall.Kill(pid, syscall.SIGUSR1)
-		out.Scan() // the child exists once its PID is printed
+		out.Scan() // the child prints its PID after env -i cleared its environment
 		// Wait for the exit without reaping: the process stays a zombie.
 		var info unix.Siginfo
 		if err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOWAIT, nil); err != nil {
