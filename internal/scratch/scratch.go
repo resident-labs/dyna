@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -205,19 +206,43 @@ func IsSessionTempName(name string) bool {
 	return err == nil && strings.ToLower(name) == name
 }
 
-// SharedTempEnv returns TempVars as KEY=value pairs for a process that has no
-// session, such as a hook run or a local CI check. They point at the shared
-// folder itself. It returns nothing when the folder cannot be made.
-func SharedTempEnv() []string {
+// RunTempPrefix starts the name of a run's temporary folder; the process ID of
+// the engine that made it follows, so maintenance can tell a folder of a live
+// process from one a crash left.
+const RunTempPrefix = "r"
+
+// NewRunTemp makes a temporary folder for one process that has no session, such
+// as a hook run or a local CI check, and returns TempVars as KEY=value pairs
+// plus a function that removes the folder when the run ends. The pairs are empty
+// and the function does nothing when the folder cannot be made.
+func NewRunTemp() ([]string, func()) {
 	root := tempRoot()
 	if root == "" || os.MkdirAll(root, 0o700) != nil {
-		return nil
+		return nil, func() {}
+	}
+	dir, err := os.MkdirTemp(root, fmt.Sprintf("%s%d-", RunTempPrefix, os.Getpid()))
+	if err != nil {
+		return nil, func() {}
 	}
 	out := make([]string, 0, len(TempVars))
 	for _, name := range TempVars {
-		out = append(out, name+"="+root)
+		out = append(out, name+"="+dir)
 	}
-	return out
+	return out, func() { _ = os.RemoveAll(dir) }
+}
+
+// RunTempPID reads the process ID in the name of a run's temporary folder.
+func RunTempPID(name string) (int, bool) {
+	rest, ok := strings.CutPrefix(name, RunTempPrefix)
+	if !ok {
+		return 0, false
+	}
+	digits, _, ok := strings.Cut(rest, "-")
+	if !ok {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(digits)
+	return pid, err == nil && pid > 0
 }
 
 // Owner is what a lookup knows about a top-level scratch folder's owner. Open

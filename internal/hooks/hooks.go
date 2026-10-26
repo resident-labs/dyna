@@ -592,7 +592,9 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 			s.emit(e, hookEvent(e, h, ev, room.HookRunning, ""))
 		}
 		env := append(processguard.MetadataEnv(), "DYNA_HOOK_EVENT="+e.Event, "DYNA_HOOK_REPO="+r.ID, "DYNA_HOOK_WORKTREE="+e.Worktree, "DYNA_HOOK_BRANCH="+e.Branch, "DYNA_HOOK_SHA="+e.SHA, "DYNA_HOOK_PR="+e.PR, "DYNA_HOOK_SESSION="+e.Session, "DYNA_HOOK_RUN_ID="+ev.ID, "DYNA_HOOK_LOG="+ev.LogPath)
-		env = append(env, scratch.SharedTempEnv()...)
+		tempEnv, removeTemp := scratch.NewRunTemp()
+		defer removeTemp()
+		env = append(env, tempEnv...)
 		timeout, _ := time.ParseDuration(h.Timeout)
 		runErr := preparationErr
 		if runErr == nil {

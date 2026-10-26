@@ -90,15 +90,28 @@ func TestSweepDiskTempRemovesOldEntriesOfAnyName(t *testing.T) {
 	session := testFolder(t, root, "0a1b2c3d", 2*diskTempRetention, false)
 	ageTree(t, session, 2*diskTempRetention)
 
-	freed, err := sweepDiskTemp(time.Now(), root, false)
+	// A hook that runs for days leaves its folder untouched. Its engine is alive,
+	// so the folder stays; one a crashed engine left goes.
+	live := testFolder(t, root, "r4242-live", 2*diskTempRetention, false)
+	ageTree(t, live, 2*diskTempRetention)
+	crashed := testFolder(t, root, "r999-crashed", 2*diskTempRetention, false)
+	ageTree(t, crashed, 2*diskTempRetention)
+
+	freed, err := sweepDiskTemp(time.Now(), root, func(pid int) bool { return pid == 4242 }, false)
+	if _, statErr := os.Stat(live); statErr != nil {
+		t.Fatalf("the sweep removed the folder of a live run: %v", statErr)
+	}
+	if _, statErr := os.Stat(crashed); !os.IsNotExist(statErr) {
+		t.Fatalf("the folder of a dead run stayed: %v", statErr)
+	}
 	if _, statErr := os.Stat(session); statErr != nil {
 		t.Fatalf("the sweep removed a session's folder: %v", statErr)
 	}
 	if _, statErr := os.Stat(busy); statErr != nil {
 		t.Fatalf("the sweep removed a folder with a recent file: %v", statErr)
 	}
-	if err != nil || freed.Items != 1 {
-		t.Fatalf("sweep = %+v, %v; want the one old entry", freed, err)
+	if err != nil || freed.Items != 2 {
+		t.Fatalf("sweep = %+v, %v; want the old entry and the crashed run", freed, err)
 	}
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Fatalf("an old entry stayed: %v", err)
