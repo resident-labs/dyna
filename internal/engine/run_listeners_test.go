@@ -49,12 +49,17 @@ func TestClaimEngineListenersRefreshesOnlyOwnedStartup(t *testing.T) {
 		t.Fatalf("owned startup kept the first build: %q, %v", target, err)
 	}
 
-	// The second engine dials the live socket and is rejected. It must not
-	// move the link onto its own build before that rejection.
+	// The second engine dials the live socket and is rejected. It runs the same
+	// binary, whose refresh would also name current, so reset the link to the
+	// distinct first image first: a refresh before admission then shows up as a
+	// moved link.
+	if err := fsutil.SetLink(link, image); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := claimEngineListeners(socketPath, t.TempDir(), options, true); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second engine was not rejected: %v", err)
 	}
-	if target, err := os.Readlink(link); err != nil || target != current {
+	if target, err := os.Readlink(link); err != nil || target != image {
 		t.Fatalf("rejected startup moved the scope link: %q, %v", target, err)
 	}
 }
