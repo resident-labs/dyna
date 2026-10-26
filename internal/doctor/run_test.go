@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -122,5 +123,19 @@ func TestPassKeepsExaminingAfterAMachineFails(t *testing.T) {
 	err := Pass{DataDir: dir, Machines: []string{"remote", "laptop"}, Now: t0}.Do(&log)
 	if err == nil || !strings.Contains(err.Error(), "remote") || !strings.Contains(log.String(), "laptop") {
 		t.Fatalf("log %q, err %v", log.String(), err)
+	}
+}
+
+func TestPassClearsAMachineThatLeavesTheCondition(t *testing.T) {
+	dir := t.TempDir()
+	busyMachine(t, Samples{DataDir: dir}, t0)
+	var cleared []string
+	pass := Pass{DataDir: dir, Machines: []string{"laptop"}, If: "load>2", Now: t0, Clear: func(m string) error { cleared = append(cleared, m); return nil }}
+	if err := pass.Do(io.Discard); err != nil || len(cleared) != 0 {
+		t.Fatalf("overloaded machine cleared: %v, %v", cleared, err)
+	}
+	pass.If = "load>50"
+	if err := pass.Do(io.Discard); err != nil || len(cleared) != 1 || cleared[0] != "laptop" {
+		t.Fatalf("cleared = %v, %v", cleared, err)
 	}
 }

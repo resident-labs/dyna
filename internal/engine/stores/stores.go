@@ -14,6 +14,7 @@ import (
 	"dyna-agent/internal/computers"
 	"dyna-agent/internal/devicegrant"
 	"dyna-agent/internal/doctor"
+	"dyna-agent/internal/doctoralert"
 	"dyna-agent/internal/escalate"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/goals"
@@ -64,6 +65,7 @@ var migrations = []func(dataDir string) error{
 	callrequests.Migrate,
 	computers.Migrate,
 	doctor.Migrate,
+	doctoralert.Migrate,
 	escalate.Migrate,
 	goals.Migrate,
 	harnesshealth.Migrate,
