@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -48,7 +49,7 @@ func Inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	dir, err := os.MkdirTemp("", "dyna-visual-")
+	dir, err := browserTempDir(browserTempBases())
 	if err != nil {
 		return Result{}, err
 	}
@@ -65,10 +66,13 @@ func Inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result
 	}
 	defer readParent.Close()
 	defer writeChild.Close()
-	args := []string{"--headless", "--remote-debugging-pipe", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions", "--disable-features=Translate,MediaRouter", "--user-data-dir=" + dir}
+	args := []string{"--headless", "--remote-debugging-pipe", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions", "--disable-features=Translate,MediaRouter", "--user-data-dir=" + filepath.Join(dir, "profile")}
 	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = browserEnv(dir)
 	cmd.ExtraFiles = []*os.File{readChild, writeChild}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stderr := &errorTail{}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return Result{}, err
 	}
@@ -90,7 +94,7 @@ func Inspect(ctx context.Context, doc []byte, csp string, allowNet bool) (Result
 	}()
 	_ = readChild.Close()
 	_ = writeChild.Close()
-	c = &client{input: writeParent, messages: make(chan message, 64), readError: make(chan error, 1), doc: doc, csp: csp, allowNet: allowNet, hosts: map[string]bool{}}
+	c = &client{input: writeParent, messages: make(chan message, 64), readError: make(chan error, 1), doc: doc, csp: csp, allowNet: allowNet, hosts: map[string]bool{}, stderr: stderr}
 	go c.read(ctx, readParent)
 	var target struct{ TargetID string }
 	if err = c.call(ctx, "Target.createTarget", map[string]any{"url": "about:blank"}, &target); err != nil {
