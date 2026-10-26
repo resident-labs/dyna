@@ -80,6 +80,17 @@ func PiOAuthTokens(entry json.RawMessage) (access, account string, err error) {
 	return e.Access, e.AccountID, nil
 }
 
+// PiAccessToken returns the access token of a Pi OAuth login entry. Unlike
+// PiOAuthTokens it needs no account ID, because a provider such as xAI or Kimi
+// Code signs in without one. A caller must never log the token.
+func PiAccessToken(entry json.RawMessage) (string, error) {
+	var e piAuthEntry
+	if json.Unmarshal(entry, &e) != nil || e.Type != "oauth" || e.Access == "" {
+		return "", ErrSchema
+	}
+	return e.Access, nil
+}
+
 // PiAPIKey returns the API key of a Pi API-key login entry. A caller must never
 // log it.
 func PiAPIKey(entry json.RawMessage) (string, error) {
@@ -402,7 +413,6 @@ func piAccountEntry(c store.Credential) (string, piAuthEntry, error) {
 	}
 	return "", piAuthEntry{}, ErrSchema
 }
-
 
 // mustJSON encodes v, or an empty object when it cannot be encoded.
 func mustJSON(v any) []byte {

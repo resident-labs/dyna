@@ -104,8 +104,12 @@ const (
 	ProviderDeepSeek   Provider = "deepseek"
 	ProviderZAI        Provider = "zai"
 	// ProviderBrave is the Brave Search API key the web search tool uses when
-	// ChatGPT cannot answer.
+	// the providers above cannot answer.
 	ProviderBrave Provider = "brave"
+	// ProviderExa is the Exa Search API key the web search tool uses last.
+	ProviderExa Provider = "exa"
+	// ProviderTavily is the Tavily Search API key the web search tool uses last.
+	ProviderTavily Provider = "tavily"
 )
 
 // Kind is how an account signed in: an interactive sign-in or a pasted key.
