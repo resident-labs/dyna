@@ -85,7 +85,15 @@ func TestSweepDiskTempRemovesOldEntriesOfAnyName(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A session's folder name is a hash. A live socket server there changes no
+	// file time, so the sweep leaves it to the scratch sweep.
+	session := testFolder(t, root, "0a1b2c3d", 2*diskTempRetention, false)
+	ageTree(t, session, 2*diskTempRetention)
+
 	freed, err := sweepDiskTemp(time.Now(), root, false)
+	if _, statErr := os.Stat(session); statErr != nil {
+		t.Fatalf("the sweep removed a session's folder: %v", statErr)
+	}
 	if _, statErr := os.Stat(busy); statErr != nil {
 		t.Fatalf("the sweep removed a folder with a recent file: %v", statErr)
 	}
