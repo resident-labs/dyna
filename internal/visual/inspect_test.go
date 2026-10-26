@@ -195,7 +195,10 @@ func inspectPage(t *testing.T, doc []byte, csp string, allowNet bool) Result {
 	t.Helper()
 	renderSlots <- struct{}{}
 	defer func() { <-renderSlots }()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	// Inspect allows itself 15s; the outer deadline stays above it, so a slow
+	// browser on a two-core CI runner reports its own error instead of a bare
+	// context deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	r, err := Inspect(ctx, doc, csp, allowNet)
 	if errors.Is(err, ErrNoBrowser) {
