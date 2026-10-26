@@ -21,7 +21,7 @@ func (s services) webSearchBinding() websvc.Binding {
 }
 
 func (s services) webSearch(ctx context.Context, in callspec.WebSearchRequest) (callspec.WebSearchResponse, error) {
-	room, repo := searchScope(ctx, in.Dir)
+	room, repo := s.searchScope(ctx)
 	results, err := s.webSearchChain(room, repo).Search(ctx, websearch.Query{Text: in.Query, Limit: in.Limit})
 	if err != nil {
 		return callspec.WebSearchResponse{}, err
@@ -29,16 +29,28 @@ func (s services) webSearch(ctx context.Context, in callspec.WebSearchRequest) (
 	return callspec.WebSearchResponse{Results: results}, nil
 }
 
-// searchScope names the room and repository a search comes from. The account
-// readers use them, so a search spends only an account the owner allows for
-// that room and repository; a session in repository B never uses an account
-// the owner limited to repository A.
-func searchScope(ctx context.Context, dir string) (room, repo string) {
-	room = authority.Of(ctx).Room
-	if dir == "" {
-		return room, ""
+// searchScope names the room and repository a search comes from: the calling
+// session's own room, and the repository of the directory that session runs in.
+// Both come from the verified caller and the session's stored record, never
+// from a call argument, so a session that runs in one repository cannot name
+// another and spend an account the owner limited to it. A caller with no stored
+// directory counts as having no repository, which the repo rules refuse for
+// every limited account.
+func (s services) searchScope(ctx context.Context) (room, repo string) {
+	actor := authority.Of(ctx)
+	if actor.Session == "" || s.rooms == nil || s.rooms.Notify.Sessions == nil {
+		return actor.Room, ""
 	}
-	return room, harnessruntime.RepoIdentity(ctx, dir)
+	sessions := s.rooms.Notify.Sessions
+	meta, err := sessions.Store.ReadMeta(actor.Session)
+	if err != nil {
+		return actor.Room, ""
+	}
+	dir, _ := sessions.EffectiveDir(meta)
+	if dir == "" {
+		return actor.Room, ""
+	}
+	return actor.Room, harnessruntime.RepoIdentity(ctx, dir)
 }
 
 // webSearchChain is the provider order for every search: the owner's ChatGPT
