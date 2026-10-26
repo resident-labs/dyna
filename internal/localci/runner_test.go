@@ -87,6 +87,38 @@ func TestGoFailureDetailsSurviveJUnitExport(t *testing.T) {
 	}
 }
 
+// Every finished check now leaves the node's exit record in its report
+// directory (D-169). That record is transport evidence, not a Go event stream:
+// the Go report reader must skip it, or a check that passed with perfect
+// reports fails as reports-unavailable.
+func TestGoReportsSkipTheNodeExitRecord(t *testing.T) {
+	dir := t.TempDir()
+	reports := filepath.Join(dir, "reports", "go-test")
+	if err := os.MkdirAll(reports, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(reports, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("execution.json", `{"durationNanos":1000000}`)
+	write(checkExitFile, `{"exitCode":0}`)
+	write("go-test.xml", `<testsuite><testcase name="TestAlive" classname="pkg" time="0.1"/></testsuite>`)
+	write("go-test.json", "{\"Action\":\"pass\",\"Package\":\"pkg\",\"Test\":\"TestAlive\",\"Elapsed\":0.1}\n"+
+		"{\"Action\":\"pass\",\"Package\":\"pkg\"}\n")
+
+	result := SuiteResult{Suite: "go-test", Status: OutcomePassed}
+	readReports(&result, ReportGo, dir, 10*time.Second, nil)
+	if result.Status != OutcomePassed || result.Cause != "" {
+		t.Fatalf("status=%s cause=%s error=%q, want a passed check with no report problem", result.Status, result.Cause, result.Error)
+	}
+	if len(result.Reports) != 2 {
+		t.Fatalf("reports = %v, want the JUnit and Go stream files only", result.Reports)
+	}
+}
+
 // A test that only ran over the room's per-test time budget did not fail. The
 // check keeps passing here and its cause names the budget: whether that fails
 // the check is the room's ciTimeBudget decision, made by the watcher, so nobody
