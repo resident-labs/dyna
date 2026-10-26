@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"dyna-agent/internal/gitexec"
-	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/settings"
 )
 
@@ -55,41 +54,76 @@ func commonDir(ctx context.Context, path string) (string, error) {
 }
 
 // Enabled compares common Git directories so linked worktrees use the same lane.
+// A repository with no remote also uses the lane: nothing else can land its
+// approved changes, because no PR can be opened and no CI service reads it.
 func Enabled(ctx context.Context, repo string) (bool, error) {
 	v, err := settings.Load("")
 	if err != nil {
 		return false, err
 	}
-	if len(v.LocalLaneRepos) == 0 {
-		return false, nil
-	}
-	common, err := commonDir(ctx, repo)
-	if err != nil {
-		return false, err
-	}
-	for _, path := range v.LocalLaneRepos {
-		candidate, err := commonDir(ctx, path)
+	if len(v.LocalLaneRepos) > 0 {
+		common, err := commonDir(ctx, repo)
 		if err != nil {
 			return false, err
 		}
-		if common == candidate {
-			return true, nil
+		for _, path := range v.LocalLaneRepos {
+			candidate, err := commonDir(ctx, path)
+			if err != nil {
+				return false, err
+			}
+			if common == candidate {
+				return true, nil
+			}
 		}
 	}
-	return false, nil
+	return NoRemote(ctx, repo), nil
+}
+
+// NoRemote reports a repository that has no remote at all.
+func NoRemote(ctx context.Context, repo string) bool {
+	out, err := git(ctx, repo, "remote")
+	return err == nil && out == ""
+}
+
+// baseBranch picks the branch that integration starts from: origin/HEAD, then a
+// local main or master. It never takes a checked-out branch, because that may be
+// the change's own branch, which would put the change in integration before
+// review. Otherwise the caller must supply a base.
+func baseBranch(ctx context.Context, repo string) (string, error) {
+	if remote, err := git(ctx, repo, "symbolic-ref", "--quiet", "--no-recurse", "refs/remotes/origin/HEAD"); err == nil {
+		if name, ok := strings.CutPrefix(remote, "refs/remotes/origin/"); ok && name != "" {
+			return "origin/" + name, nil
+		}
+	}
+	for _, name := range []string{"main", "master"} {
+		if _, err := git(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name+"^{commit}"); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("cannot tell which branch integration starts from; supply --base <ref>")
 }
 
 // Ensure creates integration once. The empty old value prevents concurrent reset.
 func Ensure(ctx context.Context, repo string) (string, error) {
+	return EnsureFrom(ctx, repo, "")
+}
+
+// EnsureFrom is Ensure with the base the author gave. A non-empty base starts
+// integration when it does not exist yet, so a repository whose base cannot be
+// guessed is set up by its first change. An existing integration is kept.
+func EnsureFrom(ctx context.Context, repo, base string) (string, error) {
 	ref := "refs/heads/" + Integration
 	if head, err := git(ctx, repo, "rev-parse", "--verify", ref+"^{commit}"); err == nil {
 		return head, nil
 	}
-	defaultBranch, err := repoid.DefaultBranch(ctx, repo, git)
-	if err != nil {
-		return "", err
+	baseRef := base
+	if baseRef == "" {
+		var err error
+		if baseRef, err = baseBranch(ctx, repo); err != nil {
+			return "", err
+		}
 	}
-	base, err := git(ctx, repo, "rev-parse", "--verify", defaultBranch.Ref+"^{commit}")
+	base, err := git(ctx, repo, "rev-parse", "--verify", "--end-of-options", baseRef+"^{commit}")
 	if err != nil {
 		return "", err
 	}
