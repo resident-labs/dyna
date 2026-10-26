@@ -101,8 +101,8 @@ func TestMigrateRefusesANewerSchema(t *testing.T) {
 		}
 		ran := false
 		err := Migrate(db, "t.schema", 1, func(*sql.Conn, int) error { ran = true; return nil })
-		if !errors.Is(err, errNewerSchema) || ran {
-			t.Fatalf("Migrate to 1 over 2 (new handle %v): err=%v, apply ran=%v; want errNewerSchema and no apply", fresh, err, ran)
+		if !errors.Is(err, ErrNewerSchema) || ran {
+			t.Fatalf("Migrate to 1 over 2 (new handle %v): err=%v, apply ran=%v; want ErrNewerSchema and no apply", fresh, err, ran)
 		}
 		var have string
 		if err := db.QueryRow("SELECT value FROM meta WHERE key='t.schema'").Scan(&have); err != nil || have != "2" {

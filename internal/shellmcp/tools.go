@@ -12,9 +12,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/websearch"
 )
@@ -65,6 +67,13 @@ type Tools struct {
 	// Search runs one web search in the engine, which holds every provider
 	// credential. A session's own process never sees a token or a key.
 	Search func(ctx context.Context, in callspec.WebSearchRequest) (callspec.WebSearchResponse, error)
+	// Restart re-execs this server on the binary its start path now holds. A
+	// call that fails because this binary is older than the state it serves
+	// marks the server outdated; Serve runs Restart after that call's answer
+	// is on the wire, so the model sees one error and the next call runs on
+	// the current build (D-171). Set through SetRestart.
+	Restart  func()
+	outdated *atomic.Bool
 
 	mu      sync.Mutex
 	started []string
@@ -85,7 +94,21 @@ func (t *Tools) forCaller(clientSession string) *Tools {
 	if !ok {
 		return t
 	}
-	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search}
+	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search, Restart: t.Restart, outdated: t.outdated}
+}
+
+// SetRestart enables the outdated restart for this server and every caller
+// copy of it.
+func (t *Tools) SetRestart(restart func()) {
+	t.Restart = restart
+	t.outdated = new(atomic.Bool)
+}
+
+// markOutdated notes that this binary is older than the state it serves.
+func (t *Tools) markOutdated() {
+	if t.outdated != nil {
+		t.outdated.Store(true)
+	}
 }
 
 // capped is d, limited to the longest call may block.
@@ -294,6 +317,11 @@ func (t *Tools) Call(ctx context.Context, name string, raw json.RawMessage, clie
 		err = fmt.Errorf("unknown tool %q", name)
 	}
 	if err != nil {
+		if database.NewerSchema(err) {
+			// This binary is older than the state it serves; Serve restarts
+			// the server once this call's answer is out.
+			t.markOutdated()
+		}
 		// A failed call reports no exit, so its hold must not delay the wake.
 		_ = t.Abort(r)
 		return Result{Text: err.Error(), Failed: true}
