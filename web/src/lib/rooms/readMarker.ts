@@ -46,7 +46,7 @@ export function createReadMarker(api: ReadMarkerApi, hooks: ReadMarkerHooks) {
       const selected = now.room + ':' + now.visit
       if (visit !== selected) { visit = selected; pending.clear(); known.clear() }
       // Viewing the room chat clears its badge, even for posts never loaded.
-      let clear: Promise<unknown> | null = null
+      let clear: Promise<void> | null = null
       if (now.chat && cleared !== selected) {
         cleared = selected
         clear = api.markRoomRead(now.room).then(() => { if (hooks.current().room === now.room) hooks.read() }, () => { if (cleared === selected) cleared = '' })
