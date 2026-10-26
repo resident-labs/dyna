@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/shells"
 )
 
 // RunAgentID is the session ID of agent number agent in run. It is derived, so
@@ -174,6 +177,11 @@ func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) erro
 			errs = append(errs, err)
 		}
 	}
+	// Every ended run, however it ended (ok, error, interrupted, canceled, lost
+	// coordinator) and whether or not its agents closed earlier.
+	if err := m.endEndedRuns(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -184,6 +192,10 @@ func runEnded(run string) bool {
 	if err != nil {
 		return false
 	}
+	return runMetaEnded(meta)
+}
+
+func runMetaEnded(meta runstore.Meta) bool {
 	return runstore.IsFinishedStatus(meta.Status) || meta.Status == "running" && !runstore.Alive(meta)
 }
 
@@ -201,7 +213,66 @@ func (m *Manager) closeRunAgent(ctx context.Context, id string) (Info, error) {
 		return Info{}, fmt.Errorf("session %s is not a run agent", id)
 	}
 	ctx = authority.WithActor(ctx, authority.EngineRoomActor(meta.RoomID))
-	return m.CloseForEngine(ctx, id, "run agent of "+meta.Run.ID, CloseOptions{Force: true})
+	info, err := m.CloseForEngine(ctx, id, "run agent of "+meta.Run.ID, CloseOptions{Force: true})
+	if err != nil || !meta.Closed.IsZero() {
+		return info, err
+	}
+	// The agent is done, so its processes end with it; siblings keep running.
+	// A failed kill never costs the agent its result: it goes to the run's log,
+	// and the run's end cleanup tries again.
+	if err := m.runShells().EndSessionProcesses(id, m.killFunc()); err != nil {
+		_ = runstore.AppendSystemLog(meta.Run.ID, fmt.Sprintf("could not end the processes of agent %d: %v", meta.Run.Agent, err))
+	}
+	return info, nil
+}
+
+// endEndedRuns ends what the workers of each ended run left running, as a
+// cancel does, and marks the run (runstore.Meta.ProcessesEnded). The marks live
+// in the run store, so an engine restart forgets nothing, and a failed cleanup
+// stays unmarked for the next pass, however long that takes. It never takes the
+// run's own group (leader 0), and the coordinator carries no run stamp, so a
+// coordinator still inside its finish call is not touched. A process that lost
+// DYNA_SESSION keeps DYNA_WORKER_RUN.
+func (m *Manager) endEndedRuns() error {
+	runs := map[string]bool{}
+	var errs []error
+	metas, err := runstore.WithoutProcessCleanup()
+	if err != nil {
+		errs = append(errs, err)
+	}
+	for _, meta := range metas {
+		// This includes a run whose coordinator died and is still marked running.
+		if runMetaEnded(meta) {
+			runs[meta.ID] = true
+		}
+	}
+	for run := range runs {
+		meta, err := runstore.ReadMeta(run)
+		if err != nil || meta.ProcessesEnded != nil {
+			continue
+		}
+		if err := m.runShells().EndRunProcesses(run, 0, m.killFunc()); err != nil {
+			errs = append(errs, fmt.Errorf("run %s: %w", run, err))
+			continue
+		}
+		// A run that still reads running (lost coordinator) takes no mark yet; it
+		// stays listed, so a failed cleanup is tried again until the run is repaired.
+		if err := runstore.MarkProcessesEnded(run); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) runShells() *shells.Store {
+	return &shells.Store{Root: filepath.Join(filepath.Dir(m.store().root()), "shells")}
+}
+
+func (m *Manager) killFunc() shells.KillFunc {
+	if m.killProcs != nil {
+		return m.killProcs
+	}
+	return runprocs.KillStamped
 }
 
 // runAgentGateSets holds the gates of each session store, so one store has one

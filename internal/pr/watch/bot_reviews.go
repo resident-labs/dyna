@@ -15,6 +15,7 @@ func (s Snapshot) BotReviews(requiredChecks ...string) []state.BotReview {
 		state.BotReview
 		pending, failed bool
 		hasCheck        bool
+		hasComment      bool
 		review          Comment
 		link            Comment
 	}
@@ -85,6 +86,7 @@ func (s Snapshot) BotReviews(requiredChecks ...string) []state.BotReview {
 			continue
 		}
 		b := get(checkBotKey(c.User.Login))
+		b.hasComment = true
 		if c.Kind == "comments" {
 			b.Findings++
 		}
@@ -110,8 +112,10 @@ func (s Snapshot) BotReviews(requiredChecks ...string) []state.BotReview {
 			b.State = "commented"
 		case b.Findings > 0:
 			b.State = "commented"
-		case b.hasCheck:
-			b.State = "approved"
+		case b.hasCheck && !b.hasComment:
+			// A successful check is not a pull request review. Do not show an
+			// approval unless GitHub returned an approving review above.
+			continue
 		}
 		b.URL = b.link.URL
 		out = append(out, b.BotReview)

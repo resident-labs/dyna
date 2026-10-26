@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -169,5 +170,9 @@ func VersionGap(engine, client string) string {
 // applied the call.
 func IsCutOff(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		// net/http reports a connection that closed before the reply as this
+		// unexported error when its reader sees the close before the request is
+		// registered. It has no exported value to match.
+		err != nil && strings.Contains(err.Error(), "http: server closed idle connection")
 }
