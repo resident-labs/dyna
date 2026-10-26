@@ -236,7 +236,6 @@ type Turn struct {
 	StartCutoff        *int64                          `json:"startCutoff,omitempty"`
 	Deadline           time.Time                       `json:"deadline,omitempty"`
 	RoomHeld           bool                            `json:"roomHeld,omitempty"`
-	Hold               *TurnHold                       `json:"hold,omitempty"`
 	PendingInputIDs    []string                        `json:"pendingInputIds,omitempty"`
 	HeldAccepted       bool                            `json:"heldAccepted,omitempty"`
 	HeldPrompt         string                          `json:"heldPrompt,omitempty"`

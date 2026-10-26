@@ -14,20 +14,16 @@ import (
 const KeepObserved = 7 * 24 * time.Hour
 
 const observedSchema = `CREATE TABLE IF NOT EXISTS admission_observed (
- at INTEGER NOT NULL, pool TEXT NOT NULL, room TEXT NOT NULL,
- reason TEXT NOT NULL, held INTEGER NOT NULL, lim INTEGER NOT NULL
+ at INTEGER NOT NULL, running INTEGER NOT NULL, lim INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS admission_observed_at ON admission_observed(at);`
 
-// Observation is one turn that the gate would have held (observe mode), or
-// held until its wait ended (enforce mode).
+// Observation is one sample in which the turns running were at or over the
+// limit, so a new turn would have been held for the sample's interval.
 type Observation struct {
-	At     time.Time
-	Pool   Pool
-	Room   string
-	Reason Reason
-	Held   int
-	Limit  int
+	At      time.Time
+	Running int
+	Limit   int
 }
 
 // Observed stores observations in the shared dyna.db of DataDir.
@@ -58,8 +54,7 @@ func (o Observed) Record(ctx context.Context, ob Observation) error {
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: "admission"}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, `INSERT INTO admission_observed VALUES (?,?,?,?,?,?)`,
-			ob.At.Unix(), string(ob.Pool), ob.Room, string(ob.Reason), ob.Held, ob.Limit); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO admission_observed VALUES (?,?,?)`, ob.At.Unix(), ob.Running, ob.Limit); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, `DELETE FROM admission_observed WHERE at < ?`, ob.At.Add(-KeepObserved).Unix())
@@ -69,25 +64,23 @@ func (o Observed) Record(ctx context.Context, ob Observation) error {
 
 // Summary is what the Settings row shows.
 type Summary struct {
-	// Turns is how many turns the gate held or would have held since the cutoff.
-	Turns int
-	// OverLimit is how many of them were held because the pool was full, and
-	// MostOver the most turns that ran past the limit when one was held.
-	OverLimit int
-	MostOver  int
+	// Samples is how many samples since the cutoff were at or over the limit;
+	// each stands for SampleEvery of time in which new turns would have waited.
+	Samples int
+	// MostOver is the most turns that ran past the limit in one of them.
+	MostOver int
 }
 
-// Summarize counts the observations since the cutoff. A hold for a room's own
-// share says nothing about the machine's limit, so it adds to Turns only.
+// Held is the time the samples stand for.
+func (s Summary) Held() time.Duration { return time.Duration(s.Samples) * SampleEvery }
+
+// Summarize counts the observations since the cutoff.
 func (o Observed) Summarize(since time.Time) (Summary, error) {
 	db, err := o.open()
 	if err != nil {
 		return Summary{}, err
 	}
 	var s Summary
-	err = db.QueryRow(`SELECT COUNT(*),
- COALESCE(SUM(reason='limit'),0),
- COALESCE(MAX(CASE WHEN reason='limit' THEN MAX(held-lim+1,0) ELSE 0 END),0)
- FROM admission_observed WHERE at >= ?`, since.Unix()).Scan(&s.Turns, &s.OverLimit, &s.MostOver)
+	err = db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(MAX(running-lim,0)),0) FROM admission_observed WHERE at >= ?`, since.Unix()).Scan(&s.Samples, &s.MostOver)
 	return s, err
 }

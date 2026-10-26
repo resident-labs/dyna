@@ -3,10 +3,8 @@ package subagent
 import (
 	"context"
 	"errors"
-	"sync"
 	"time"
 
-	"dyna-agent/internal/admission"
 	"dyna-agent/internal/room"
 )
 
@@ -51,11 +49,6 @@ func (w *runnerWrites) waitSession(ctx context.Context, prompt string) error {
 			return err
 		}
 		if !paused {
-			// A turn that waited gives its machine slot back while held, and
-			// takes one again now.
-			if held && w.resume != nil {
-				return w.resume(ctx)
-			}
 			return nil
 		}
 		if !held {
@@ -63,9 +56,6 @@ func (w *runnerWrites) waitSession(ctx context.Context, prompt string) error {
 				return err
 			}
 			held = true
-			if w.suspend != nil {
-				w.suspend()
-			}
 		}
 		if err = m.transferSleep(ctx, 100*time.Millisecond); err != nil {
 			return err
@@ -109,61 +99,4 @@ func (m *Manager) roomExecutionGate(ctx context.Context, id string, execute func
 		}
 		return execute()
 	})
-}
-
-// turnSlot is the machine slot of one running turn. A turn gives it back while
-// its room is held, so a paused room never keeps another room from running.
-type turnSlot struct {
-	m     *Manager
-	meta  Meta
-	owner func() bool
-	// held tells the session record that the limit holds the turn.
-	held func(admission.Hold)
-	mu   sync.Mutex
-	free func()
-}
-
-// take waits for a slot unless the turn already holds one.
-func (s *turnSlot) take(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.free != nil {
-		return nil
-	}
-	free, err := s.m.admit(ctx, AdmitRequest{Meta: s.meta, Owner: s.owner, OnHold: s.held})
-	if err != nil {
-		return err
-	}
-	s.free = free
-	return nil
-}
-
-// drop gives the slot back; calling it with none held does nothing.
-func (s *turnSlot) drop() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.free != nil {
-		s.free()
-		s.free = nil
-	}
-}
-
-// ownerCaused reports whether the owner's own message caused this turn. It
-// reads the posts the turn would take, so it is true for a post that arrives
-// while the turn waits. The owner's first prompt to a session that no agent
-// started counts too: its Owner is a caller label, not a session ID.
-func (m *Manager) ownerCaused(meta Meta, turn Turn) bool {
-	if turn.N == 1 && meta.ParentSession == "" && meta.Owner != "" && !ValidID(meta.Owner) {
-		return true
-	}
-	posts, _, err := m.drainRoomMessages(meta, turn)
-	if err != nil {
-		return false
-	}
-	for _, p := range posts {
-		if p.From == meta.Room && !p.EngineEvent() || room.OwnerRequest(p, meta.Room) {
-			return true
-		}
-	}
-	return false
 }

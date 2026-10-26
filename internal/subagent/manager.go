@@ -62,9 +62,6 @@ type Manager struct {
 	ResumeRoomLaunch func(*Manager, string, uint64) error
 	Store            *Store
 	Rooms            *room.Store
-	// Admit holds a turn until the machine has room to run it. Only the
-	// detached turn runner sets it; nil admits every turn.
-	Admit Admit
 	// Profiles loads the profile registry (default: the user's profiles.json).
 	Profiles func() (*profile.Store, error)
 	// Skills loads Dyna's skill catalog (default: harness-config.json).
@@ -219,14 +216,6 @@ func (m *Manager) sessionWorktree(ctx context.Context, opts StartOptions, rec ro
 
 // ProfileStore loads the profile registry this manager starts sessions with.
 func (m *Manager) ProfileStore() (*profile.Store, error) { return m.profiles() }
-
-// admit holds the turn until the machine has a free slot for it.
-func (m *Manager) admit(ctx context.Context, req AdmitRequest) (func(), error) {
-	if m.Admit == nil {
-		return func() {}, nil
-	}
-	return m.Admit(ctx, req)
-}
 
 func (m *Manager) profiles() (*profile.Store, error) {
 	if m.Profiles != nil {

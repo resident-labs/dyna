@@ -55,15 +55,15 @@ func TestOldGoalKeeperSettingsStillLoad(t *testing.T) {
 
 func TestAdmissionSettings(t *testing.T) {
 	v, err := Load(filepath.Join(t.TempDir(), "settings.json"))
-	if err != nil || v.AdmissionMaxTurns != AdmissionAuto || v.AdmissionMode != AdmissionObserve || v.AdmissionReserve != 0 {
-		t.Fatalf("defaults = %q %d, %v", v.AdmissionMaxTurns, v.AdmissionReserve, err)
+	if err != nil || v.AdmissionMode != AdmissionObserve {
+		t.Fatalf("defaults = %q, %v", v.AdmissionMode, err)
 	}
-	for _, ok := range [][2]string{{KeyAdmissionMaxTurns, "12"}, {KeyAdmissionMaxTurns, "auto"}, {KeyAdmissionMode, "enforce"}, {KeyAdmissionMode, "off"}, {KeyAdmissionMaxWait, "90s"}, {KeyAdmissionReserve, "4 GiB"}, {KeyAdmissionReserve, "auto"}} {
+	for _, ok := range [][2]string{{KeyAdmissionMode, "observe"}, {KeyAdmissionMode, "off"}} {
 		if err := v.Set(ok[0], ok[1]); err != nil {
 			t.Errorf("%s=%s: %v", ok[0], ok[1], err)
 		}
 	}
-	for _, bad := range [][2]string{{KeyAdmissionMaxTurns, "0"}, {KeyAdmissionMaxTurns, "off"}, {KeyAdmissionMode, "maybe"}, {KeyAdmissionMaxWait, "0s"}, {KeyAdmissionReserve, "-1"}, {KeyAdmissionReserve, "lots"}} {
+	for _, bad := range [][2]string{{KeyAdmissionMode, "maybe"}, {KeyAdmissionMode, "enforce"}} {
 		if err := v.Set(bad[0], bad[1]); err == nil {
 			t.Errorf("%s=%s accepted", bad[0], bad[1])
 		}

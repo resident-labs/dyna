@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -36,16 +35,15 @@ type Source interface {
 	Read(ctx context.Context) (Readings, error)
 }
 
-// Detect returns the source and the turn-memory sampler for this platform, or
-// nil when there is none.
-func Detect() (Source, Sampler) {
+// Detect returns the source for this platform, or nil when there is none.
+func Detect() Source {
 	switch runtime.GOOS {
 	case "linux":
-		return Linux{ProcDir: "/proc"}, ProcSampler{ProcDir: "/proc"}
+		return Linux{ProcDir: "/proc"}
 	case "darwin":
-		return Darwin{Run: runCommand}, PSSampler{Run: runCommand}
+		return Darwin{Run: runCommand}
 	}
-	return nil, nil
+	return nil
 }
 
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -173,8 +171,9 @@ type mount struct {
 	V2          bool
 }
 
-// ParseMountinfo returns the cgroup v2 mount and the cgroup v1 memory mount.
-func ParseMountinfo(data []byte) (v2, v1 *mount) {
+// ParseMountinfo returns the cgroup v2 mounts and the cgroup v1 memory mounts,
+// in file order. A container can show the hierarchy at more than one place.
+func ParseMountinfo(data []byte) (v2, v1 []mount) {
 	for _, line := range strings.Split(string(data), "\n") {
 		before, after, ok := strings.Cut(line, " - ")
 		if !ok {
@@ -188,13 +187,9 @@ func ParseMountinfo(data []byte) (v2, v1 *mount) {
 		switch {
 		case post[0] == "cgroup2":
 			m.V2 = true
-			if v2 == nil {
-				v2 = &m
-			}
+			v2 = append(v2, m)
 		case post[0] == "cgroup" && strings.Contains(","+post[2]+",", ",memory,"):
-			if v1 == nil {
-				v1 = &m
-			}
+			v1 = append(v1, m)
 		}
 	}
 	return v2, v1
@@ -207,12 +202,14 @@ func unescapeMount(s string) string {
 }
 
 // cgroupDir maps a cgroup path of the host's hierarchy to its directory under
-// the mount, which may show only a subtree. It reports false when the path lies
-// outside what the mount shows.
+// the mount, which may show only a subtree. The paths are compared as text, so
+// a namespace root such as "/.." (a mount root outside this process's own
+// cgroup namespace) maps like any other prefix. It reports false when the path
+// lies outside what the mount shows.
 func (m mount) cgroupDir(cgPath string) (string, bool) {
-	cgPath, root := path.Clean("/"+cgPath), path.Clean("/"+m.Root)
+	cgPath, root := strings.TrimRight("/"+strings.TrimLeft(cgPath, "/"), "/"), strings.TrimRight("/"+strings.TrimLeft(m.Root, "/"), "/")
 	switch {
-	case root == "/":
+	case root == "":
 		return filepath.Join(m.Point, cgPath), true
 	case cgPath == root:
 		return m.Point, true
@@ -242,18 +239,23 @@ func (l Linux) applyCgroup(r *Readings) (string, error) {
 		if len(parts) != 3 {
 			continue
 		}
-		var m *mount
+		var mounts []mount
 		limitFile, usageFile, ver := "memory.max", "memory.current", "v2"
 		switch {
 		case parts[0] == "0" && parts[1] == "":
-			m = v2
+			mounts = v2
 		case strings.Contains(","+parts[1]+",", ",memory,"):
-			m, limitFile, usageFile, ver = v1, "memory.limit_in_bytes", "memory.usage_in_bytes", "v1"
+			mounts, limitFile, usageFile, ver = v1, "memory.limit_in_bytes", "memory.usage_in_bytes", "v1"
 		}
-		if m == nil {
-			continue
+		// The first mount that shows this cgroup is the one to read.
+		var m mount
+		dir, ok := "", false
+		for _, candidate := range mounts {
+			if dir, ok = candidate.cgroupDir(parts[2]); ok {
+				m = candidate
+				break
+			}
 		}
-		dir, ok := m.cgroupDir(parts[2])
 		if !ok {
 			continue
 		}

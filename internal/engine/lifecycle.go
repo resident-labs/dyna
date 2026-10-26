@@ -7,11 +7,13 @@ import (
 
 	"dyna-agent/internal/account/service"
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/admission"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
+	storepkg "dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/sysload"
 )
@@ -41,6 +43,17 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		}()
 		loadDone := make(chan struct{})
 		go func() { defer close(loadDone); load.Run(watch) }()
+		// The admission watcher only records; no turn calls it.
+		admissionDone := make(chan struct{})
+		go func() {
+			defer close(admissionDone)
+			if readOnly {
+				return
+			}
+			ticker := time.NewTicker(admission.SampleEvery)
+			defer ticker.Stop()
+			admissionObserver(rooms.Notify.Sessions, load, storepkg.DataDir()).Run(watch, ticker.C)
+		}()
 		usageDone := make(chan struct{})
 		go func() {
 			defer close(usageDone)
@@ -92,6 +105,7 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		<-refreshDone
 		<-usageDone
 		<-loadDone
+		<-admissionDone
 	}()
 	return done
 }
