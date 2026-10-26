@@ -852,25 +852,66 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 	if headSHAPattern.MatchString(base) {
 		args = append(args, base)
 	}
-	cmd := gitexec.Command(ctx, r.RepoPath, args...)
 	g := s.github(r.RoomID)
 	ctx = ghclient.WithRepository(ghclient.WithRoom(ghclient.WithRooms(ctx, g.Rooms), r.RoomID), r.Host, r.Repo)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	var err error
-	if g.run != nil {
-		err = g.run(ctx, cmd)
-	} else {
-		err = ghclient.RunGit(ctx, g.Executable, cmd)
-	}
-	if err != nil {
-		detail := strings.TrimSpace(Sanitize(stderr.String()))
-		if detail != "" {
-			return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w: %s", err, clip(detail, 500))
+	// A trial branch is pushed just before this fetch, so the first attempt can
+	// arrive before GitHub publishes the ref. That failure is a wait, not a
+	// scheduling failure: the same head is fetched again, bounded.
+	for attempt := 0; ; attempt++ {
+		cmd := gitexec.Command(ctx, r.RepoPath, args...)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		var err error
+		if g.run != nil {
+			err = g.run(ctx, cmd)
+		} else {
+			err = ghclient.RunGit(ctx, g.Executable, cmd)
 		}
-		return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w", err)
+		if err == nil {
+			return s.planRegisteredCI(ctx, job)
+		}
+		detail := strings.TrimSpace(Sanitize(stderr.String()))
+		if !missingRemoteRef(detail) || attempt == ciRefFetchAttempts-1 {
+			if detail != "" {
+				return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w: %s", err, clip(detail, 500))
+			}
+			return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w", err)
+		}
+		if waitErr := s.waitForRef(ctx, attempt); waitErr != nil {
+			return localCIPlan{}, fmt.Errorf("fetch local CI head and base: %w: %s", waitErr, clip(detail, 500))
+		}
 	}
-	return s.planRegisteredCI(ctx, job)
+}
+
+// ciRefFetchAttempts bounds how often a head is fetched while a just-pushed ref
+// becomes visible.
+const ciRefFetchAttempts = 3
+
+// ciRefWait grows the wait between those attempts: 2s, then 4s.
+const ciRefWait = 2 * time.Second
+
+// missingRemoteRef reports git saying the ref it was asked for is not published
+// yet. Every other fetch failure is a real scheduling failure.
+func missingRemoteRef(detail string) bool {
+	detail = strings.ToLower(detail)
+	return strings.Contains(detail, "couldn't find remote ref") || strings.Contains(detail, "could not find remote ref")
+}
+
+// waitForRef waits before the next fetch attempt. Service.Wait is the seam a test
+// replaces, so no test sleeps.
+func (s *Service) waitForRef(ctx context.Context, attempt int) error {
+	wait := time.Duration(attempt+1) * ciRefWait
+	if s.Wait != nil {
+		return s.Wait(ctx, wait)
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // Cancellation of a still-current head restores the hosted work we removed.

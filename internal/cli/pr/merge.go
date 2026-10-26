@@ -3,6 +3,7 @@ package pr
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/pr/watch"
@@ -92,6 +93,11 @@ func mergeCommand(resolve func(string) (mergeController, string, error)) *cobra.
 			}
 			if len(args) == 0 {
 				args = nil
+			}
+			if c.Name() == "retry" || c.Name() == "bisect" {
+				// The build runs in this process under a budget. Say so before it
+				// starts, so a slow build reads as progress and not as a hang.
+				fmt.Fprintf(c.OutOrStdout(), "Building the replacement batch (bounded; the engine takes it on its next pass if this times out)...\n")
 			}
 			return s.MergeControl(c.Context(), id, c.Name(), args, without, flaky)
 		}
