@@ -31,6 +31,8 @@ const (
 	opKill     = "kill"
 	opStderr   = "stderr"
 	opShutdown = "shutdown"
+	opIdleList = "idle-list"
+	opUnload   = "unload-idle"
 
 	opBind  = "bind"
 	opOK    = "ok"
@@ -53,6 +55,11 @@ type message struct {
 	// it belong to the old child.
 	Fresh bool   `json:"fresh,omitempty"`
 	Error string `json:"error,omitempty"`
+	// Idle answers opIdleList. MinIdle and Key (the id) ask opUnload; Done
+	// answers it.
+	Idle    []IdleSession `json:"idle,omitempty"`
+	MinIdle time.Duration `json:"minIdle,omitempty"`
+	Done    bool          `json:"done,omitempty"`
 }
 
 // wireLaunch is the part of Launch the host process needs.
