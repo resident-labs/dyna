@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"dyna-agent/internal/authority"
@@ -200,20 +199,46 @@ func isRead(args []string) bool {
 // publicRepo reports whether a repository is public. Tests replace it.
 var publicRepo = fetchPublicRepo
 
-// publicRead reports a read-only command on a public GitHub repository, which
-// needs no room (D-272). The check sends no credentials, so a private
-// repository, or one GitHub cannot show, stays outside every room.
-func publicRead(ctx context.Context, r repository, args []string) bool {
-	return r.name != "" && r.host == "github.com" && isRead(args) && publicRepo(ctx, r)
+// publicAPIRead returns the repository of a REST read, `gh api repos/<o>/<r>/...`
+// with a GET and no body, when that repository is public right now (D-272). The
+// repository comes from the endpoint the command reads, never from the checkout,
+// so the check binds to what the command fetches. GraphQL, other endpoints and
+// every other gh command are not public reads: they need an account.
+func publicAPIRead(ctx context.Context, r repository, args []string) (string, bool) {
+	if r.host != "github.com" || len(args) < 2 || args[0] != "api" || !isRead(args) {
+		return "", false
+	}
+	var endpoint []string
+	valueFlags := map[string]bool{"-X": true, "--method": true, "-q": true, "--jq": true, "-t": true, "--template": true, "-H": true, "--header": true, "--cache": true}
+	for i := 1; i < len(args); i++ {
+		switch {
+		case valueFlags[args[i]]:
+			i++
+		case strings.HasPrefix(args[i], "-"):
+			if args[i] == "--hostname" || strings.HasPrefix(args[i], "--hostname=") {
+				return "", false
+			}
+		default:
+			endpoint = append(endpoint, args[i])
+		}
+	}
+	if len(endpoint) != 1 {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(endpoint[0], "/"), "/")
+	if len(parts) < 3 || parts[0] != "repos" || parts[1] == "" || parts[2] == "" {
+		return "", false
+	}
+	name := parts[1] + "/" + parts[2]
+	if !publicRepo(ctx, repository{r.host, name}) {
+		return "", false
+	}
+	return name, true
 }
 
-var publicRepos sync.Map // "host/name" of a repository seen public
-
+// fetchPublicRepo asks GitHub, without credentials and on every call, whether a
+// repository is public now, so a repository that turns private stops qualifying.
 func fetchPublicRepo(ctx context.Context, r repository) bool {
-	key := r.host + "/" + r.name
-	if _, ok := publicRepos.Load(key); ok {
-		return true
-	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+r.name, nil)
@@ -229,11 +254,7 @@ func fetchPublicRepo(ctx context.Context, r repository) bool {
 	var body struct {
 		Private bool `json:"private"`
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) != nil || body.Private {
-		return false
-	}
-	publicRepos.Store(key, true)
-	return true
+	return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) == nil && !body.Private
 }
 
 func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string) error {
