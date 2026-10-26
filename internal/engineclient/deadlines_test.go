@@ -131,10 +131,10 @@ func TestRefusedSocketFailsAfterTheRestartWait(t *testing.T) {
 	}
 }
 
-// An engine restart closes the connection before it answers. The call goes
-// again once with the request ID it first sent, so the engine can apply the
-// write once.
-func TestCutConnectionRetriesOnceWithTheSameRequestID(t *testing.T) {
+// An engine restart closes the connection before it answers. StartSubagent
+// goes again once with the request ID it first sent, even when the first send
+// used up the restart wait.
+func TestCutStartSubagentRepeatsOnceWithTheSameRequestID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "engine.sock")
 	listener, err := net.Listen("unix", path)
 	if err != nil {
@@ -159,7 +159,7 @@ func TestCutConnectionRetriesOnceWithTheSameRequestID(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 	go func() { _ = server.Serve(listener) }()
 	var reply string
-	if err := engineclient.New(path, engineclient.Notices(nil)).Call(t.Context(), "AddGoal", nil, &reply); err != nil || reply != "done" {
+	if err := engineclient.New(path, engineclient.Notices(nil), engineclient.RestartWait(0)).Call(t.Context(), "StartSubagent", nil, &reply); err != nil || reply != "done" {
 		t.Fatalf("call = %q, %v; want done after one retry", reply, err)
 	}
 	mu.Lock()
