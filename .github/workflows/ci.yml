@@ -98,9 +98,10 @@ jobs:
           go vet ./...
           go test -run '^$' ./... >/dev/null
           # The desktop is its own module, so the root ./... skips it. Warm it
-          # too, or the shard that runs its tests pays a cold compile of the
-          # whole module in the middle of its job.
-          (cd desktop && touch ../web/dist/index.html && go build ./... && go test -run '^$' ./... >/dev/null)
+          # with the same flags its check uses (CGO_ENABLED=0 in scripts/ci.sh),
+          # or the objects have different build ids and the shard still pays a
+          # cold compile of the whole module in the middle of its job.
+          (cd desktop && touch ../web/dist/index.html && CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test -run '^$' ./... >/dev/null)
           go clean -testcache
       - name: Report the cache size
         # A jump here is what makes a restore slow again, so the size is visible
