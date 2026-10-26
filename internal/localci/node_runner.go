@@ -554,7 +554,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					// what is left there before the transport waits on output.
 					checkScope = ""
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage()))
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage()))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1037,7 +1037,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage string) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage string) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1065,10 +1065,13 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		artifacts := path.Join(reportDir, "artifacts")
 		cachePath := path.Join(base, "actcache")
 		label := "dyna.run=" + runID
+		event := path.Join(reportDir, "event.json")
+		eventBody := `{"pull_request":{"base":{"sha":"` + baseCommit + `"},"head":{"sha":"` + sha + `"}}}`
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
+		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds ", seconds) +
 			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
-			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " --rm -P " + q("ubuntu-latest="+actImage) +
+			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
 			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
 		// --rm covers the normal case; a cancelled job can leave containers, so

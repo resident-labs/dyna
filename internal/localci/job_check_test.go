@@ -120,7 +120,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	check := nodeCheck{id: "go-static", name: "go-static", reports: ReportJUnit,
 		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04")
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, script))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
