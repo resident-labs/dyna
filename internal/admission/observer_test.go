@@ -3,6 +3,10 @@ package admission
 import (
 	"context"
 	"errors"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -13,14 +17,6 @@ type fixedSource struct {
 }
 
 func (f fixedSource) Read(context.Context) (Readings, error) { return f.r, f.err }
-
-// stuckSource ignores its context until the test releases it.
-type stuckSource struct{ release chan struct{} }
-
-func (s stuckSource) Read(context.Context) (Readings, error) {
-	<-s.release
-	return Readings{}, nil
-}
 
 type memState struct {
 	st      State
@@ -36,13 +32,13 @@ func (m *memState) Save(_ context.Context, _ Pool, st State) error {
 	return m.saveErr
 }
 
-func observerFor(src Source, running int, states *memState) (Observer, *[]Observation) {
+func observerFor(src Source, running int, states *memState) (*Observer, *[]Observation) {
 	var seen []Observation
-	return Observer{
+	return &Observer{
 		Source: src, States: states,
 		Running: func(context.Context) (int, error) { return running, nil },
 		Record:  func(_ context.Context, ob Observation) error { seen = append(seen, ob); return nil },
-		Mode:    func() Mode { return ModeObserve },
+		Mode:    func(context.Context) Mode { return ModeObserve },
 		Now:     func() time.Time { return time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC) },
 	}, &seen
 }
@@ -63,7 +59,7 @@ func TestSampleRecordsOnlyWhenNewTurnsWouldBeHeld(t *testing.T) {
 
 func TestSampleDoesNothingWhenOff(t *testing.T) {
 	o, seen := observerFor(fixedSource{r: busy}, 6, &memState{})
-	o.Mode = func() Mode { return ModeOff }
+	o.Mode = func(context.Context) Mode { return ModeOff }
 	if err := o.Sample(t.Context()); err != nil || len(*seen) != 0 {
 		t.Fatalf("off recorded %+v, %v", *seen, err)
 	}
@@ -83,40 +79,95 @@ func TestSampleSkipsWhenTheStateCannotBeKept(t *testing.T) {
 	}
 }
 
-func TestSampleMeasuresTurnMemoryFromAgentBytes(t *testing.T) {
+// The agents group's memory is spread over every agent session that holds a
+// process, roots and services included, not only the running turns.
+func TestSampleDividesAgentMemoryByEveryAgent(t *testing.T) {
 	states := &memState{}
-	o, _ := observerFor(fixedSource{r: busy}, 4, states)
-	o.AgentBytes = func() uint64 { return 8 * gib }
+	o, _ := observerFor(fixedSource{r: busy}, 2, states)
+	o.Agents = func(context.Context) (int, error) { return 8, nil } // 2 running + idle + roots + services
+	o.AgentBytes = func(context.Context) uint64 { return 16 * gib }
 	if err := o.Sample(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if states.st.TurnBytes != 2*gib {
-		t.Fatalf("turn bytes = %d, want 2 GiB", states.st.TurnBytes)
+		t.Fatalf("turn bytes = %d, want 16 GiB over 8 agents = 2 GiB", states.st.TurnBytes)
 	}
 }
 
-// A read that ignores its context cannot hold the sampler: the bound ends it.
-func TestAStuckReadIsAbandonedAtTheBound(t *testing.T) {
-	stuck := stuckSource{release: make(chan struct{})}
-	t.Cleanup(func() { close(stuck.release) })
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := readBounded(ctx, stuck); !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want the context's", err)
-	}
-}
-
-func TestRunSamplesAtEachTickAndStopsWithItsContext(t *testing.T) {
+// A panic in a source or a callback is recovered, reported, and skips the
+// sample.
+func TestSampleRecoversFromAPanic(t *testing.T) {
 	o, seen := observerFor(fixedSource{r: busy}, 6, &memState{})
+	o.Running = func(context.Context) (int, error) { panic("boom") }
+	if err := o.Sample(t.Context()); err == nil || !strings.Contains(err.Error(), "panicked") || len(*seen) != 0 {
+		t.Fatalf("err = %v, observations %+v", err, *seen)
+	}
+	o.Source = panicSource{}
+	if err := o.Sample(t.Context()); err == nil {
+		t.Fatal("a panicking source did not report")
+	}
+}
+
+type panicSource struct{}
+
+func (panicSource) Read(context.Context) (Readings, error) { panic("source") }
+
+// blockedRunning blocks every Running call until released, and counts the calls.
+type blockedRunning struct {
+	release chan struct{}
+	started chan struct{}
+	calls   atomic.Int32
+}
+
+func (b *blockedRunning) Running(context.Context) (int, error) {
+	b.calls.Add(1)
+	b.started <- struct{}{}
+	<-b.release
+	return 1, nil
+}
+
+// A sample that never ends costs one goroutine: later ticks are skipped, and
+// Run returns as soon as its context ends, without waiting for the sample.
+func TestARunningSampleSkipsLaterTicksAndNeverBlocksShutdown(t *testing.T) {
+	b := &blockedRunning{release: make(chan struct{}), started: make(chan struct{}, 4)}
+	t.Cleanup(func() { close(b.release) })
+	o, _ := observerFor(fixedSource{r: busy}, 6, &memState{})
+	o.Running = b.Running
 	ticks := make(chan time.Time)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() { o.Run(ctx, ticks); close(done) }()
 	ticks <- time.Time{}
-	ticks <- time.Time{} // the second send returns only after the first sample ended
+	<-b.started // the first sample is blocked inside Running
+	ticks <- time.Time{}
+	ticks <- time.Time{} // both skipped: the receive returns only once Run read the tick
 	cancel()
-	<-done
-	if len(*seen) < 1 {
-		t.Fatalf("observations = %+v, want a sample for each tick", *seen)
+	<-done // Run returned although the sample is still blocked
+	if got := b.calls.Load(); got != 1 {
+		t.Fatalf("Running was called %d times, want 1: ticks must not start a second sample", got)
+	}
+}
+
+func TestRunSamplesAtEachTick(t *testing.T) {
+	o, seen := observerFor(fixedSource{r: busy}, 6, &memState{})
+	var recorded sync.WaitGroup
+	recorded.Add(2)
+	o.Record = func(_ context.Context, ob Observation) error {
+		*seen = append(*seen, ob)
+		recorded.Done()
+		return nil
+	}
+	ticks := make(chan time.Time)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go o.Run(ctx, ticks)
+	ticks <- time.Time{}
+	for o.busy.Load() { // the sample ends before the next tick can start one
+		runtime.Gosched()
+	}
+	ticks <- time.Time{}
+	recorded.Wait()
+	if len(*seen) != 2 {
+		t.Fatalf("observations = %+v, want one per tick", *seen)
 	}
 }

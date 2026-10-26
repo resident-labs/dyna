@@ -230,3 +230,17 @@ func TestLinuxUsesTheMountThatShowsTheProcess(t *testing.T) {
 		t.Fatalf("readings = %+v, %v", r, err)
 	}
 }
+
+// The process sits at /../outer/inner, outside what a mount of the whole
+// hierarchy shows. Its limit is unknown, and the host's memory must not stand in
+// for it: the reading fails.
+func TestLinuxFailsWhenTheCgroupIsOutsideEveryMount(t *testing.T) {
+	proc, cg := t.TempDir(), t.TempDir()
+	put(t, proc, map[string]string{
+		"loadavg": "0.1 0 0 1/1 1\n", "meminfo": meminfo, "self/cgroup": "0::/../outer/inner\n",
+		"self/mountinfo": "30 25 0:26 / " + cg + " rw - cgroup2 cgroup2 rw\n",
+	})
+	if r, err := (Linux{ProcDir: proc}).Read(context.Background()); err == nil {
+		t.Fatalf("read host memory %d for an unresolvable cgroup", r.MemTotal)
+	}
+}
