@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"sync"
 )
 
@@ -85,15 +86,18 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 	var mu sync.Mutex
 	running := map[string]context.CancelFunc{}
 	gate := newRestartGate(tools)
+	defer gate.close()
+	file, _ := in.(*os.File)
 	reader := bufio.NewReaderSize(in, 64*1024)
 	var readErr error
 	for {
-		// A restart waits for a moment with no call in flight and no input
-		// this server has read ahead of its client, so no accepted request is
-		// lost to the exec (D-171).
-		gate.idle(reader.Buffered() == 0)
+		// With nothing read ahead, wait for input without consuming it, so an
+		// outdated server can restart when no call runs and no request is
+		// half read (D-171). Only a file input can be polled.
+		if file != nil && gate.enabled() && reader.Buffered() == 0 {
+			gate.awaitInput(file)
+		}
 		line, err := readLine(reader, 16<<20)
-		gate.idle(false)
 		if err != nil {
 			if err != io.EOF {
 				readErr = err
