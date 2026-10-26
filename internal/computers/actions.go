@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,6 +89,30 @@ const (
 	maxDragStepMS     = 500
 )
 
+// idleRefreshHz is the lowest output refresh rate: an unwatched desktop drops to
+// it. defaultKeypressHold lasts one and a half frames at that rate, so every
+// frame sees the key down.
+const (
+	idleRefreshHz       = 10
+	defaultKeypressHold = time.Second * 3 / (2 * idleRefreshHz)
+	maxKeypressHoldMS   = maxWaitMS
+)
+
+// keypressHold is how long a keypress holds its keys: hold_ms when set.
+func keypressHold(a Action) (time.Duration, error) {
+	if _, ok := a["hold_ms"]; !ok {
+		return defaultKeypressHold, nil
+	}
+	ms, err := actionValue[int](a, "hold_ms")
+	if err != nil {
+		return 0, err
+	}
+	if ms < 0 || ms > maxKeypressHoldMS {
+		return 0, fmt.Errorf("hold_ms must be 0 to %d", maxKeypressHoldMS)
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
 // pointerDevice is the pointer the drag and pointer actions drive.
 type pointerDevice interface {
 	move(x, y int) error
@@ -95,27 +120,48 @@ type pointerDevice interface {
 	scroll(x, y int) error
 }
 
-// guardedPointer wraps a pointer for one batch. It records which buttons are
+// guardedInput wraps a pointer for one batch. It records which buttons are
 // held, and a takeover interrupts it: interrupt releases every held button at
 // once, ends the epoch so the action in flight fails on its next event, and
 // cancels the action's context so a wait or paced drag ends now, not at its next
 // check. The supervisor calls interrupt from the control transition itself, so
 // no button stays pressed while a person has control.
-type guardedPointer struct {
-	mu     sync.Mutex
-	dev    pointerDevice
-	held   map[string]bool
-	epoch  uint64 // counts takeovers
-	opens  uint64 // the epoch the current action began in
-	cancel context.CancelFunc
+type guardedInput struct {
+	mu   sync.Mutex
+	dev  pointerDevice
+	keys keyDevice
+	held map[string]bool
+	// heldKeys lists the keys pressed and not released, in press order.
+	heldKeys []string
+	epoch    uint64 // counts takeovers
+	opens    uint64 // the epoch the current action began in
+	cancel   context.CancelFunc
 }
 
-func newGuardedPointer(dev pointerDevice) *guardedPointer {
-	return &guardedPointer{dev: dev, held: map[string]bool{}}
+// keyDevice is the keyboard the key actions drive.
+type keyDevice interface {
+	key(name string, pressed bool) error
+}
+
+func newGuardedInput(dev pointerDevice) *guardedInput {
+	return &guardedInput{dev: dev, held: map[string]bool{}}
+}
+
+// setPointer and setKeys attach the devices once a batch creates them.
+func (g *guardedInput) setPointer(dev pointerDevice) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.dev = dev
+}
+
+func (g *guardedInput) setKeys(keys keyDevice) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.keys = keys
 }
 
 // begin starts an action in the current epoch. cancel ends that action.
-func (g *guardedPointer) begin(cancel context.CancelFunc) {
+func (g *guardedInput) begin(cancel context.CancelFunc) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.opens, g.cancel = g.epoch, cancel
@@ -123,7 +169,7 @@ func (g *guardedPointer) begin(cancel context.CancelFunc) {
 
 // end finishes the action. A takeover during it turns any error into
 // errControlLost.
-func (g *guardedPointer) end(err error) error {
+func (g *guardedInput) end(err error) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.cancel = nil
@@ -134,32 +180,61 @@ func (g *guardedPointer) end(err error) error {
 }
 
 // interrupt is the takeover: release held buttons, fail the action in flight.
-func (g *guardedPointer) interrupt() {
+func (g *guardedInput) interrupt() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.epoch++
-	holding := len(g.held) > 0
+	holding := len(g.held) > 0 || len(g.heldKeys) > 0
 	g.releaseLocked()
 	if holding && g.cancel != nil {
 		g.cancel()
 	}
 }
 
-func (g *guardedPointer) releaseLocked() {
+func (g *guardedInput) releaseLocked() {
 	for button := range g.held {
 		_ = g.dev.button(button, false)
 	}
 	g.held = map[string]bool{}
+	for i := len(g.heldKeys) - 1; i >= 0; i-- {
+		_ = g.keys.key(g.heldKeys[i], false)
+	}
+	g.heldKeys = nil
+}
+
+// key presses or releases a key. A press after a takeover must not happen; a
+// release always goes through and does nothing for a key that is not held.
+func (g *guardedInput) key(name string, pressed bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if pressed && g.epoch != g.opens {
+		return errControlLost
+	}
+	at := slices.Index(g.heldKeys, name)
+	if !pressed && at < 0 {
+		return nil
+	}
+	if err := g.keys.key(name, pressed); err != nil {
+		return err
+	}
+	if pressed {
+		if at < 0 {
+			g.heldKeys = append(g.heldKeys, name)
+		}
+	} else {
+		g.heldKeys = slices.Delete(g.heldKeys, at, at+1)
+	}
+	return nil
 }
 
 // release lets a batch free its buttons when it ends.
-func (g *guardedPointer) release() {
+func (g *guardedInput) release() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.releaseLocked()
 }
 
-func (g *guardedPointer) move(x, y int) error {
+func (g *guardedInput) move(x, y int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.epoch != g.opens {
@@ -168,7 +243,7 @@ func (g *guardedPointer) move(x, y int) error {
 	return g.dev.move(x, y)
 }
 
-func (g *guardedPointer) scroll(x, y int) error {
+func (g *guardedInput) scroll(x, y int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.epoch != g.opens {
@@ -177,7 +252,7 @@ func (g *guardedPointer) scroll(x, y int) error {
 	return g.dev.scroll(x, y)
 }
 
-func (g *guardedPointer) button(name string, pressed bool) error {
+func (g *guardedInput) button(name string, pressed bool) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	// A release always goes through, so nothing stays held. A press after a
@@ -219,7 +294,7 @@ func dragStep(a Action) (time.Duration, bool, error) {
 // and releases. After each point it waits step. With paced, it also waits after
 // the press, so a frame-driven app sees the button held before the first move.
 // The button is released even when a move or a wait fails. A takeover
-// (guardedPointer.interrupt) releases it at once and ends the drag.
+// (guardedInput.interrupt) releases it at once and ends the drag.
 func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Duration, paced bool, wait func(context.Context, time.Duration) error) error {
 	if err := p.move(path[0].X, path[0].Y); err != nil {
 		return err
@@ -419,7 +494,14 @@ func validateAction(a Action, width, height int, waits, shots, texts *int) error
 			}
 		}
 	}
-	if _, ok := a["keys"]; ok || kind == "keypress" {
+	if kind == "keypress" {
+		if _, ok := a["hold_ms"]; ok {
+			if _, err := keypressHold(a); err != nil {
+				return err
+			}
+		}
+	}
+	if _, ok := a["keys"]; ok || kind == "keypress" || kind == "key_down" || kind == "key_up" {
 		keys, err := actionValue[[]string](a, "keys")
 		if err != nil {
 			return err
@@ -533,7 +615,9 @@ var actionSpecs = map[string]struct {
 	"pointer_down": {"x y [button]", true},
 	"pointer_up":   {"[x y] [button]", true},
 	"scroll":       {"x y scroll_x scroll_y", true},
-	"keypress":     {"keys", true},
+	"keypress":     {"keys [hold_ms]", true},
+	"key_down":     {"keys", true},
+	"key_up":       {"keys", true},
 	"type":         {"text [secret]", true},
 	"wait":         {"[ms]", false},
 	"screenshot":   {"", false},
@@ -570,6 +654,8 @@ Fields:
   text: UTF-8 text, at most %d characters per batch.
   secret: true hides typed text from action events.
   ms: integer from 0 to %d; default %d milliseconds.
+  hold_ms: keypress holds its keys this long, integer from 0 to %d; default %d
+    milliseconds. key_down presses keys and keeps them held until key_up.
   step_ms: pause after each drag point, integer from 0 to %d; default %d
     milliseconds. When set, drag also pauses after the press.
   pointer_down moves to x, y and presses the button (default left). pointer_up
@@ -577,7 +663,7 @@ Fields:
     held move. A button still held at the end of a batch is released.
 
 Batch limits: %d waits and %d screenshots.
-`, maxKeys, maxDragPoints, maxScroll, maxScroll, maxText, maxWaitMS, defaultWaitMS, maxDragStepMS, defaultDragStepMS, maxWaits, maxScreenshots)
+`, maxKeys, maxDragPoints, maxScroll, maxScroll, maxText, maxWaitMS, defaultWaitMS, maxKeypressHoldMS, defaultKeypressHold.Milliseconds(), maxDragStepMS, defaultDragStepMS, maxWaits, maxScreenshots)
 	return strings.TrimSpace(out.String())
 }
 

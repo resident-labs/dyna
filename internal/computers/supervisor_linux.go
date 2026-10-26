@@ -64,7 +64,7 @@ type supervisor struct {
 	privateWayland, privateDisplay string
 	// actPointer is the pointer of the running action batch. A takeover
 	// interrupts it while holding mu.
-	actPointer                         *guardedPointer
+	actPointer                         *guardedInput
 	listeners                          []*net.UnixListener
 	relayConns                         map[*net.UnixConn]bool
 	apps                               map[int]string
