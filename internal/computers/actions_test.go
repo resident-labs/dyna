@@ -366,6 +366,28 @@ func TestHeldKeyIsNotPressedOrReleasedByALaterAction(t *testing.T) {
 	}
 }
 
+// CTRL and CONTROL are one device key: a later action that names the alias
+// neither presses it again nor releases the held one.
+func TestHeldKeyAliasesShareOneIdentity(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	g.setKeys(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	if owned, err := g.press("Control_L"); !owned || err != nil {
+		t.Fatalf("first press = %v, %v", owned, err)
+	}
+	if owned, err := g.press(keyName("CONTROL")); owned || err != nil {
+		t.Fatalf("alias press = %v, %v, want not owned", owned, err)
+	}
+	if got := strings.Join(r.log, "|"); got != "key Control_L down" {
+		t.Fatalf("events = %s, want one device press", got)
+	}
+	if err := g.releaseKey(keyName("CTRL")); err != nil || strings.Join(r.log, "|") != "key Control_L down|key Control_L up" {
+		t.Fatalf("alias key_up = %v, events %v", err, r.log)
+	}
+}
+
 func TestKeyActionsNormalizeShiftedSymbolsTheSameWay(t *testing.T) {
 	for _, kind := range []string{"keypress", "key_down", "key_up"} {
 		got := actionKeys(parseActions(t, `[{"type":"`+kind+`","keys":["SHIFT","1"]}]`)[0])
