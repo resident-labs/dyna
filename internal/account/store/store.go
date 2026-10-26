@@ -103,6 +103,9 @@ const (
 	ProviderOpenCodeGo Provider = "opencode-go"
 	ProviderDeepSeek   Provider = "deepseek"
 	ProviderZAI        Provider = "zai"
+	// ProviderBrave is the Brave Search API key the web search tool uses when
+	// ChatGPT cannot answer.
+	ProviderBrave Provider = "brave"
 )
 
 // Kind is how an account signed in: an interactive sign-in or a pasted key.
