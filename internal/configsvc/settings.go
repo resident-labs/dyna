@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/admission"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/browserconfig"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 )
 
 // Item is one settings key with its effective value and where it came from.
@@ -41,6 +43,7 @@ var help = map[string]string{
 	settings.KeyVoiceURL:               "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
 	settings.KeyComputersEnabled:       "Give agent sessions a lazy Linux computer when labwc is installed. Applies to the next harness turn.",
 	settings.KeySessionCheckInInterval: "Parent check-in interval (default 15m). Zero disables check-ins.",
+	settings.KeyAdmissionMode:          "Watch the machine and record when a limit on concurrent agent turns would have held new turns (observe, the default), or turn the watcher off. Nothing is ever held. The engine samples about every 45 seconds. Applies to the next sample.",
 	settings.KeyDoctorCondition:        "When the doctor hook examines a machine, such as \"load>2/core for 5m or memory>85%\". Empty uses the default. Applies to the next doctor run.",
 	settings.KeyLibraryEnabled:         "JSON list of main checkout paths whose librarian runs. Use dyna library enable and disable, which also add and remove the librarian hooks.",
 	settings.KeyLibraryProfile:         "One profile for all librarian work. Auto ranks enabled service profiles.",
@@ -92,6 +95,7 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeySessionCheckInInterval, Value: v.SessionCheckInInterval.String(), Source: v.Source(settings.KeySessionCheckInInterval), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
+		{Key: settings.KeyAdmissionMode, Value: v.AdmissionMode, Source: v.Source(settings.KeyAdmissionMode), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: []string{string(settings.AdmissionOff), string(settings.AdmissionObserve)}, Display: admissionSummary(v)},
 		{Key: settings.KeyDoctorCondition, Value: v.DoctorCondition, Source: v.Source(settings.KeyDoctorCondition), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyLibraryEnabled, Value: v.LibraryEnabled, Source: v.Source(settings.KeyLibraryEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyLibraryProfile, Value: v.LibraryProfile, Source: v.Source(settings.KeyLibraryProfile), LiveVsRestart: settings.LiveNextOperation, Kind: "select", Options: options, OptionLabels: labels},
@@ -201,4 +205,22 @@ func browserItems(v settings.Values, copyMine bool, profiles []browserconfig.Pro
 		mode, owner,
 		item(settings.KeyBrowserSaveBack, v.BrowserSaveBack, "bool", "Save login state to the shared Dyna profile when a computer stops. The last computer to save wins."),
 	}
+}
+
+// admissionSummary tells the owner what the turn limit did in the last day, so
+// the choice to enforce rests on a count and not a guess.
+func admissionSummary(v settings.Values) string {
+	mode := string(v.AdmissionMode)
+	if v.AdmissionMode == settings.AdmissionOff {
+		return mode
+	}
+	sum, err := admission.Observed{DataDir: store.DataDir()}.Summarize(time.Now().Add(-24 * time.Hour))
+	if err != nil {
+		return mode
+	}
+	text := fmt.Sprintf("%s · a turn limit would have held new turns for about %d min in the last 24 h", mode, int(sum.Held().Minutes()))
+	if sum.MostOver > 0 {
+		text += fmt.Sprintf(", up to %d over the limit", sum.MostOver)
+	}
+	return text
 }

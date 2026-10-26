@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 30 {
+	if err != nil || len(items) != 31 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
@@ -216,7 +216,7 @@ func TestSettingsIgnoreAndPreserveOldAdmissionPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range items {
-		if strings.HasPrefix(item.Key, "admission.") {
+		if item.Key == "admission.maxAgents" {
 			t.Fatalf("removed setting: %+v", item)
 		}
 	}
