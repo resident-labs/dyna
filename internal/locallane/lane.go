@@ -86,9 +86,9 @@ func NoRemote(ctx context.Context, repo string) bool {
 }
 
 // baseBranch picks the branch that integration starts from: origin/HEAD, then a
-// local main or master, then the branch of the repository's primary checkout.
-// It never takes the branch of the worktree that opened the change, because a
-// feature branch there would put the change in integration before review.
+// local main or master. It never takes a checked-out branch, because that may be
+// the change's own branch, which would put the change in integration before
+// review. Otherwise the caller must supply a base.
 func baseBranch(ctx context.Context, repo string) (string, error) {
 	if remote, err := git(ctx, repo, "symbolic-ref", "--quiet", "--no-recurse", "refs/remotes/origin/HEAD"); err == nil {
 		if name, ok := strings.CutPrefix(remote, "refs/remotes/origin/"); ok && name != "" {
@@ -100,16 +100,7 @@ func baseBranch(ctx context.Context, repo string) (string, error) {
 			return name, nil
 		}
 	}
-	listing, err := git(ctx, repo, "worktree", "list", "--porcelain")
-	if err == nil {
-		// The first entry is the primary checkout.
-		if path, _, _ := strings.Cut(strings.TrimPrefix(listing, "worktree "), "\n"); path != "" {
-			if name, err := git(ctx, path, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && name != "" {
-				return name, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("cannot tell which branch integration starts from; create a main branch or supply --base <ref>")
+	return "", fmt.Errorf("cannot tell which branch integration starts from; supply --base <ref>")
 }
 
 // Ensure creates integration once. The empty old value prevents concurrent reset.
