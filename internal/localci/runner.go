@@ -163,6 +163,10 @@ const (
 	// started kept the check's output pipe open. os/exec reports that as
 	// ErrWaitDelay; the runner kills what is left of the command's group.
 	CleanupLeftoverOutput CleanupWarning = "leftover-output"
+	// TransportDiedAfterCompletion means the connection to the node died
+	// after the node had already recorded the check's exit, so the check was
+	// judged from the node's own record that came back with the reports.
+	TransportDiedAfterCompletion CleanupWarning = "transport-died-after-completion"
 )
 
 // Label is the sentence the checks view shows for a cleanup warning.
@@ -170,6 +174,8 @@ func (w CleanupWarning) Label() string {
 	switch w {
 	case CleanupLeftoverOutput:
 		return "a process left by the check held its output open; the runner killed it"
+	case TransportDiedAfterCompletion:
+		return "the connection to the CI machine died after the check completed; its exit came from the machine's own record"
 	}
 	return ""
 }
