@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/worktrees"
 )
@@ -91,7 +92,7 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		repos, discoveryErr = discover(ctx, opts.Session)
 	}
 	errs := []error{discoveryErr, cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})}
-	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Pressure: opts.Pressure, Closing: opts.Session != "", Lookup: scratchOwner, Logf: opts.Logf})
+	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Pressure: opts.Pressure, Lookup: scratchOwner, Logf: opts.Logf})
 	result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 	for _, kept := range cleaned.Kept {
 		result.Kept["scratch: "+kept.Reason]++
@@ -444,24 +445,68 @@ func ownerAlert(n notices.Notice) error {
 
 // scratchOwner reads lifecycle metadata without loading or recovering sessions.
 func scratchOwner(owner string) scratch.Owner {
+	return scratchOwnerWith(owner, ownerReaders{
+		session: func(id string) (time.Time, error) {
+			meta, err := sessionlife.Read(runstore.SessionsDir(), id)
+			if errors.Is(err, sessionlife.ErrRecord) {
+				// A corrupt record proves nothing about the owner: treat it as unknown.
+				err = os.ErrNotExist
+			}
+			return meta.ClosedAt(), err
+		},
+		run: func(id string) (time.Time, error) {
+			if runstore.ValidateRunID(id) != nil {
+				// A folder that is not a run or session name has no owner record.
+				return time.Time{}, os.ErrNotExist
+			}
+			meta, err := runstore.ReadMeta(id)
+			ended := meta.EndedAt
+			if meta.Status == "running" {
+				ended = time.Time{}
+			}
+			return ended, err
+		},
+		liveShell: func(id string) (bool, error) {
+			list, err := shells.DefaultStore().ListOwner(id)
+			for _, in := range list {
+				if in.Status == "running" || in.Status == "starting" {
+					return true, err
+				}
+			}
+			return false, err
+		},
+	})
+}
+
+// ownerReaders are the state reads behind scratchOwner. Each close-time reader
+// returns a zero time for an owner that has not closed.
+type ownerReaders struct {
+	session   func(id string) (time.Time, error)
+	run       func(id string) (time.Time, error)
+	liveShell func(id string) (bool, error)
+}
+
+// scratchOwnerWith keeps a folder when it cannot prove that the owner is gone:
+// a read that fails for any reason other than a missing record, or a shell job
+// that still runs, counts as open. Only a missing record makes an owner unknown.
+func scratchOwnerWith(owner string, read ownerReaders) scratch.Owner {
 	parts := strings.Split(owner, "/")
 	if len(parts) > 2 || parts[0] == "" || parts[0] == "." || parts[0] == ".." || strings.ContainsAny(parts[0], "\\") {
 		return scratch.Owner{}
 	}
+	closed := read.run
 	if runstore.IsSessionDirID(parts[0]) {
-		meta, err := sessionlife.Read(runstore.SessionsDir(), parts[0])
-		if err != nil {
-			return scratch.Owner{}
-		}
-		return scratch.Owner{Known: true, Open: !meta.IsClosed(), ClosedAt: meta.ClosedAt()}
+		closed = read.session
 	}
-	meta, err := runstore.ReadMeta(parts[0])
-	if err != nil {
+	closedAt, err := closed(parts[0])
+	if errors.Is(err, os.ErrNotExist) {
 		return scratch.Owner{}
 	}
-	ended := meta.EndedAt
-	if meta.Status == "running" {
-		ended = time.Time{}
+	if err != nil {
+		return scratch.Owner{Known: true, Open: true}
 	}
-	return scratch.Owner{Known: true, Open: ended.IsZero(), ClosedAt: ended}
+	if live, err := read.liveShell(parts[0]); live || err != nil {
+		return scratch.Owner{Known: true, Open: true}
+	}
+	return scratch.Owner{Known: true, Open: closedAt.IsZero(), ClosedAt: closedAt}
 }

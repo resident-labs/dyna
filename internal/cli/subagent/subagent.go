@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,7 @@ import (
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/workeroutput"
 )
@@ -660,7 +662,7 @@ func closeCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "close <session>",
 		Short: "End the session: stop any running turn and accept no further turns",
-		Long:  "End a session and stop any running turn. A session's own turn that ends with no responsibilities makes it dormant, so a session cannot close itself. Close transfers PR authorship to the nearest open ancestor, or root, and hands held goals to the nearest open agent. Root and the owner hold no goals, so when only they are left above the session, close is refused until each held goal is done, dropped, or transferred to an open agent; the refusal names the commands. If only the owner can unblock the work, root asks the owner first with `dyna ask`, and a forced close does not move the goals to the owner. Reviewer roles return to the pool. Live workflow runs are canceled. A failed handoff keeps the session open; --force closes it anyway with its other unresolved work. Open questions are withdrawn and non-kept shell jobs stop. Children that own nothing close too; the rest move to the nearest open ancestor. --keep-worktrees locks the session's worktrees after its turn stops and before the close commits, so a manual handoff keeps them: cleanup keeps a locked tree until git worktree unlock releases it, and a lock that fails leaves the session open.",
+		Long:  "End a session and stop any running turn. A session's own turn that ends with no responsibilities makes it dormant, so a session cannot close itself. Close transfers PR authorship to the nearest open ancestor, or root, and hands held goals to the nearest open agent. Root and the owner hold no goals, so when only they are left above the session, close is refused until each held goal is done, dropped, or transferred to an open agent; the refusal names the commands. If only the owner can unblock the work, root asks the owner first with `dyna ask`, and a forced close does not move the goals to the owner. Reviewer roles return to the pool. Live workflow runs are canceled. A failed handoff keeps the session open; --force closes it anyway with its other unresolved work. Open questions are withdrawn and non-kept shell jobs stop. The session's scratch folder is kept for 7 days after the close; the command prints its path and the deletion date. Children that own nothing close too; the rest move to the nearest open ancestor. --keep-worktrees locks the session's worktrees after its turn stops and before the close commits, so a manual handoff keeps them: cleanup keeps a locked tree until git worktree unlock releases it, and a lock that fails leaves the session open.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			ctx, stop := waitContext(c)
@@ -678,6 +680,9 @@ func closeCommand(newManager func() *subagent.Manager) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(c.OutOrStdout(), "closed %s (%s)\n", info.Address(), info.ID)
+			if line := scratch.RetainedNotice(info.ID, time.Now()); line != "" {
+				fmt.Fprintln(c.OutOrStdout(), line)
+			}
 			for _, outcome := range result.CloseSummary {
 				fmt.Fprintln(c.OutOrStdout(), outcome.Text())
 			}

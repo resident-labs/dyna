@@ -25,7 +25,9 @@ const Env = "DYNA_SCRATCH"
 // Tests and tools use it; normal runs leave it unset.
 const RootEnv = "DYNA_SCRATCH_ROOT"
 
-const ClosedRetention = 24 * time.Hour
+// ClosedRetention is how long a closed session's scratch stays after the close,
+// so a parent can still read the files the session returned.
+const ClosedRetention = 7 * 24 * time.Hour
 const UnknownRetention = 3 * 24 * time.Hour
 
 // Root is the disk folder that holds one store's scratch: a short namespace
@@ -53,6 +55,21 @@ func Root() string {
 		return ""
 	}
 	return filepath.Join(base, storeNamespace(store.DataDir()))
+}
+
+// RetainedNotice tells the caller of a session close where the session's
+// scratch stays and when a sweep may delete it. It returns "" when the session
+// has no scratch folder.
+func RetainedNotice(sessionID string, closedAt time.Time) string {
+	root := Root()
+	if root == "" || !validOwner(sessionID) {
+		return ""
+	}
+	path := filepath.Join(root, sessionID)
+	if _, err := os.Lstat(path); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("scratch kept at %s until %s", path, closedAt.Add(ClosedRetention).Format("2006-01-02"))
 }
 
 // storeNamespace derives the short, stable namespace of one data folder. A
@@ -129,6 +146,9 @@ func Ensure(owner string) (string, error) {
 	return filepath.Join(root, owner), nil
 }
 
+// Owner is what a lookup knows about a top-level scratch folder's owner. Open
+// also covers an owner that is dormant, one that has a live shell job, and one
+// whose state could not be read: a sweep never removes any of them.
 type Owner struct {
 	Known, Open bool
 	ClosedAt    time.Time
@@ -141,10 +161,6 @@ type Options struct {
 	// share its retention date. A nil Lookup treats every owner as unknown.
 	Lookup   func(owner string) Owner
 	Pressure bool
-	// Closing marks the pass that a closing session runs. Its own scratch goes
-	// now, because the closed retention exists to let a parent read a finished
-	// session's files, and a closing session's caller has already read them.
-	Closing bool
 	// Only limits the sweep to a relative owner path and its descendants.
 	Only string
 }
@@ -225,7 +241,7 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 				keep("owner has no close time")
 				continue
 			}
-			if !o.Closing && !o.Pressure && now.Before(owner.ClosedAt.Add(ClosedRetention)) {
+			if !o.Pressure && now.Before(owner.ClosedAt.Add(ClosedRetention)) {
 				keep("closed retention period")
 				continue
 			}
