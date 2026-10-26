@@ -17,6 +17,7 @@ import (
 // env contract, and never lets worker env leak into the profile store.
 func TestWorkflowWorkersGetModeEnvAndForcedNoDelegation(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_SCRATCH_ROOT", filepath.Join(t.TempDir(), "scratch"))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-mode-env")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
@@ -100,6 +101,7 @@ func TestWorkflowDefaultSkipsSubagentsOnlyProfile(t *testing.T) {
 func TestWorkflowStartsWithScratchUnavailable(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
+	t.Setenv("DYNA_SCRATCH_ROOT", filepath.Join(tmp, "scratch"))
 	t.Setenv("DYNA_SCRATCH", "/stale/parent")
 	root := scratch.Root()
 	if err := os.Mkdir(root, 0700); err != nil {
