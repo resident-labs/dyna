@@ -118,6 +118,10 @@ type Store struct {
 	// pause waits between attempts to record an exit; nil sleeps. A test sets
 	// it so no timer decides the result.
 	pause func(time.Duration)
+	// failWrite, when set, makes a write fail before it reaches the state
+	// store; its argument is "save" or the SQL of the write. A test sets it to
+	// act as a store that times out.
+	failWrite func(op string) error
 	// exitWrite replaces the write of a finished job's exit; nil uses Save. A
 	// test sets it to act as a state store that times out.
 	exitWrite func(m Meta, ex *Exit) error
@@ -228,6 +232,82 @@ func (s *Store) create(opts StartOptions) (Meta, error) {
 	return m, s.Save(m, nil)
 }
 
+// startBusy opens the error of a job that could not begin because the state
+// store did not answer in time (D-220).
+const startBusy = "job did not start: the state store was busy; retry"
+
+// startError says why a job did not start. A state-store timeout gets the
+// plain busy message, never a bare "context deadline exceeded".
+func startError(err error) error {
+	if timedOut(err) {
+		return fmt.Errorf("%s: %w", startBusy, err)
+	}
+	return fmt.Errorf("job did not start: %w", err)
+}
+
+// startSaveTries and startSaveWait bound how long a supervisor keeps trying to
+// record itself before its command starts.
+const (
+	startSaveTries = 3
+	startSaveWait  = 2 * time.Second
+)
+
+// saveStart records the supervisor's identity, trying again while the state
+// store times out. A final failure reads as a job that did not start.
+func (s *Store) saveStart(m Meta) error {
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
+	var err error
+	for i := 0; i < startSaveTries; i++ {
+		if err = s.Save(m, nil); !timedOut(err) {
+			break
+		}
+		if i < startSaveTries-1 {
+			pause(startSaveWait)
+		}
+	}
+	if err != nil {
+		return startError(err)
+	}
+	return nil
+}
+
+// StartJob records a new job, holds its exit for hold, and calls spawn to start
+// its supervisor. If any step fails, the job's record and folder are removed,
+// so no lost job and no command are left behind, and the error says the job did
+// not start (D-220). The returned Meta keeps the job's ID on failure, so a
+// caller can forget it.
+func (s *Store) StartJob(opts StartOptions, hold time.Time, spawn func(Meta) error) (Meta, error) {
+	meta, err := s.Create(opts)
+	if err == nil {
+		err = s.HoldExit(meta.ID, hold)
+	}
+	if err == nil {
+		err = spawn(meta)
+	}
+	if err == nil {
+		return meta, nil
+	}
+	if ValidID(meta.ID) {
+		// A write that timed out may still commit later; this delete queues behind it.
+		_, _ = s.exec(meta.ID, `DELETE FROM shell_jobs WHERE id=?`, meta.ID)
+		if dir, derr := s.dir(meta.ID); derr == nil {
+			_ = os.RemoveAll(dir)
+		}
+	}
+	return meta, startError(err)
+}
+
+// injected returns the error a test made a write fail with, or nil.
+func (s *Store) injected(op string) error {
+	if s.failWrite != nil {
+		return s.failWrite(op)
+	}
+	return nil
+}
+
 // Supervise runs the shell's command to completion (the detached `_run`
 // process). It records the pid, streams output to output.log, and writes
 // exit.json.
@@ -245,7 +325,7 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("record supervisor identity: %w", err)
 	}
-	if err := s.Save(m, nil); err != nil {
+	if err := s.saveStart(m); err != nil {
 		return err
 	}
 	out, err := os.OpenFile(filepath.Join(dir, "output.log"), os.O_APPEND|os.O_WRONLY, 0o600)
