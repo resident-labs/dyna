@@ -128,3 +128,15 @@ func Stamped(assignment string) []int {
 	}
 	return pids
 }
+
+// Groups returns the process groups that hold a live process whose
+// environment holds the exact assignment "NAME=value".
+func Groups(assignment string) []int {
+	var groups []int
+	for _, pid := range Stamped(assignment) {
+		if st, ok := readStat(pid); ok && st.state != 'Z' {
+			groups = append(groups, st.group)
+		}
+	}
+	return groups
+}
