@@ -22,6 +22,11 @@ import (
 func (r *Runtime) removeLegacySkillInstalls() error {
 	if r.Config != nil && r.Config.Path != "" {
 		seeded := filepath.Join(filepath.Dir(r.Config.Path), "skills", "load-dyna-orchestrator")
+		// Retire the catalog entry before its source directory disappears, so an
+		// upgrade never leaves an enabled entry that points at a missing folder.
+		if err := r.Config.RemoveSeededSkill("load-dyna-orchestrator", seeded); err != nil {
+			return err
+		}
 		if err := os.RemoveAll(seeded); err != nil {
 			return err
 		}

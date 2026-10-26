@@ -5,13 +5,13 @@
   import EmptyState from '../../ui/EmptyState.svelte'
   import InlineConfirm from '../../ui/InlineConfirm.svelte'
   import { HARNESS_ORDER, toolEnabledForHarness, toolSummary, type HarnessRow } from './state.ts'
-  import type { HarnessConfig, ManagedMCP, ManagedSkill } from '../../api/harness.ts'
+  import type { HarnessConfig, ManagedMCP } from '../../api/harness.ts'
 
-  // The MCP servers and skills catalog, with one switch per harness. The pane
-  // owns the catalog and the inline confirm, so every change goes back to it.
+  // The MCP server catalog, with one switch per harness. The pane owns the
+  // catalog and the inline confirm, so every change goes back to it. Skills
+  // have their own global pane.
   let {
     mcp = [],
-    skills = [],
     rows = [],
     busy = false,
     addToolHint = $bindable(''),
@@ -21,13 +21,12 @@
     onremovetool,
   }: {
     mcp?: ManagedMCP[]
-    skills?: ManagedSkill[]
     rows?: HarnessRow[]
     busy?: boolean
     addToolHint?: string
     removingTool?: { kind: string; name: string } | null
     onadded: (catalog: HarnessConfig) => void
-    ontoggle: (kind: string, name: string, harnessId: string, enabled: boolean) => void
+    ontoggle: (kind: 'mcp', name: string, harnessId: string, enabled: boolean) => void
     onremovetool: () => void
   } = $props()
 </script>
@@ -35,17 +34,16 @@
 <div id="tools-panel" role="tabpanel" aria-labelledby="harnesses-tools-tab">
   <div class="tools-bar">
     <p class="muted small" style="margin:0;max-width:520px">
-      Choose which harness can use each tool in Dyna’s catalog.
+      Choose which harness can use each MCP server in Dyna’s catalog.
     </p>
     <span class="btn-group">
       <button class="btn" onclick={() => (addToolHint = addToolHint === 'mcp' ? '' : 'mcp')}>Add MCP server</button>
-      <button class="btn" onclick={() => (addToolHint = addToolHint === 'skill' ? '' : 'skill')}>Add skill</button>
     </span>
   </div>
 
   {#if addToolHint}
     {#key addToolHint}
-      <ToolEditor kind={addToolHint} oncancel={() => addToolHint = ''} onsave={onadded} />
+      <ToolEditor oncancel={() => addToolHint = ''} onsave={onadded} />
     {/key}
   {/if}
 
@@ -60,7 +58,7 @@
     <div class="trow">
       <div>
         <div class="name">{entry.name} <span class="tag">MCP</span> {#if removingTool?.kind === 'mcp' && removingTool.name === entry.name}<InlineConfirm {busy} onconfirm={onremovetool} oncancel={() => (removingTool = null)} />{:else}<button class="remove-tool" aria-label={`Remove ${entry.name} MCP server`} disabled={busy} onclick={() => (removingTool = { kind: 'mcp', name: entry.name })}>Remove</button>{/if}</div>
-        <div class="muted small">{toolSummary('mcp', entry)}</div>
+        <div class="muted small">{toolSummary(entry)}</div>
       </div>
       {#each HARNESS_ORDER as h (h.id)}
         {@const on = toolEnabledForHarness(entry, h.id)}
@@ -69,21 +67,8 @@
     </div>
   {/each}
 
-  {#each skills as entry (entry.name)}
-    <div class="trow">
-      <div>
-        <div class="name">{entry.name} <span class="tag">Skill</span> {#if removingTool?.kind === 'skill' && removingTool.name === entry.name}<InlineConfirm {busy} onconfirm={onremovetool} oncancel={() => (removingTool = null)} />{:else}<button class="remove-tool" aria-label={`Remove ${entry.name} skill`} disabled={busy} onclick={() => (removingTool = { kind: 'skill', name: entry.name })}>Remove</button>{/if}</div>
-        <div class="muted small">{toolSummary('skill', entry)}</div>
-      </div>
-      {#each HARNESS_ORDER as h (h.id)}
-        {@const on = toolEnabledForHarness(entry, h.id)}
-        <Switch {on} label={`${entry.name} enabled for ${h.name}`} disabled={busy || !rows.find((r) => r.id === h.id)?.capability?.skills} onchange={(v: boolean) => ontoggle('skill', entry.name, h.id, v)} />
-      {/each}
-    </div>
-  {/each}
-
-  {#if !mcp.length && !skills.length}
-    <EmptyState title="No tools yet">Add an MCP server or skill above, and pick which harnesses can use it.</EmptyState>
+  {#if !mcp.length}
+    <EmptyState title="No MCP servers yet">Add an MCP server above, and pick which harnesses can use it.</EmptyState>
   {/if}
 </div>
 

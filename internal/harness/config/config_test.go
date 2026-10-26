@@ -68,6 +68,25 @@ func TestCatalogIsGlobalForSkills(t *testing.T) {
 	}
 }
 
+func TestRemoveSeededSkillMatchesNameAndSource(t *testing.T) {
+	m := &ConfigManager{Path: filepath.Join(t.TempDir(), "catalog.json")}
+	seeded := "/dyna/config/skills/load-dyna-orchestrator"
+	raw := `{"skills":[{"name":"load-dyna-orchestrator","source":"/dyna/config/skills/load-dyna-orchestrator","enabled":true},{"name":"load-dyna-orchestrator","source":"/owner/skill","enabled":true},{"name":"other","source":"/other","enabled":true}]}`
+	mustEdit(t, os.WriteFile(m.Path, []byte(raw), 0600))
+	mustEdit(t, m.RemoveSeededSkill("load-dyna-orchestrator", seeded))
+	c, err := m.Read()
+	mustEdit(t, err)
+	if len(c.Skills) != 2 || c.Skills[0].Source != "/owner/skill" || c.Skills[1].Name != "other" {
+		t.Fatalf("seeded removal changed other skills: %+v", c.Skills)
+	}
+	// A second run finds no match and leaves the file alone.
+	before := fileBytes(t, m.Path)
+	mustEdit(t, m.RemoveSeededSkill("load-dyna-orchestrator", seeded))
+	if after := fileBytes(t, m.Path); string(after) != string(before) {
+		t.Fatal("a missing seeded entry rewrote the catalog")
+	}
+}
+
 func skillSource(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

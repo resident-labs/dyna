@@ -9,6 +9,7 @@ import (
 
 	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/instructions"
+	dynaskills "dyna-agent/internal/skills"
 )
 
 func skillSourceFixture(t *testing.T, body string) string {
@@ -121,7 +122,7 @@ func TestSkillDescriptionParsing(t *testing.T) {
 		{"headings only", "# Head\n## More\n", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := skillDescription(tc.body); got != tc.want {
+			if got := dynaskills.Description(tc.body); got != tc.want {
 				t.Fatalf("description = %q, want %q", got, tc.want)
 			}
 		})

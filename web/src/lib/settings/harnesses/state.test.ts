@@ -32,9 +32,9 @@ const recommendation = (status: string, version?: string): RecommendedVersion =>
 test('harnessRowState derives ready, partial, not signed in, and switch pending states', () => {
   const snapshot = loose({
     capabilities: [
-      { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
-      { harness: 'pi', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
-      { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, skills: true, sharedPersonalLogin: false },
+      { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, sharedPersonalLogin: false },
+      { harness: 'pi', status: 'partial', reason: 'Reads personal skills from ~/.agents/skills.', installSupported: true, mcp: true, sharedPersonalLogin: false },
+      { harness: 'claude-code', status: 'ready', reason: '', installSupported: true, mcp: true, sharedPersonalLogin: false },
     ],
     bundles: [
       { harness: 'claude-code', version: '2.1.299', executable: '/dyna/claude' },
@@ -78,7 +78,7 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(toolEnabledForHarness({ enabledHarnesses: ['claude'] }, 'pi'), false)
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
-  assert.equal(toolSummary('mcp', { command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
+  assert.equal(toolSummary({ command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
   assert.equal(HARNESS_ORDER.length, 2)
 })
 
