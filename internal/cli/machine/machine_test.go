@@ -205,6 +205,48 @@ func TestMachineWriteGoesThroughTheEngine(t *testing.T) {
 	}
 }
 
+// A machine name can equal another machine's ID. An edit names the machine it
+// read by ID, so a collision cannot retarget the change to the other machine.
+func TestMachineEditNamesTheMachineByID(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "alpha", "--ssh", "pip@alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "add", "beta", "--ssh", "pip@beta", "--ci-slots", "1"); err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := (machines.Store{}).Get(context.Background(), "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A machine may take a name that is another machine's ID.
+	if _, err := run(t, "edit", "beta", "--rename", alpha.ID, "--ci-slots", "2"); err != nil {
+		t.Fatal(err)
+	}
+	// Naming that machine by its new name now edits it, not alpha.
+	if _, err := run(t, "edit", alpha.ID, "--ci-slots", "5"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := (machines.Store{}).Get(context.Background(), "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.CISlots != 1 {
+		t.Fatalf("alpha slots = %d, want 1: the edit retargeted the machine that owns its ID", after.CISlots)
+	}
+	list := listed(t)
+	var renamed machines.Machine
+	for _, m := range list {
+		if m.Name == alpha.ID {
+			renamed = m
+		}
+	}
+	if renamed.CISlots != 5 {
+		t.Fatalf("renamed machine slots = %d, want 5", renamed.CISlots)
+	}
+}
+
 // A machine can be limited to chosen suites, and the limit is shown and can be
 // cleared again. An empty list keeps the default of every suite.
 func TestMachineEditLimitsSuites(t *testing.T) {
