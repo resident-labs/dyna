@@ -367,14 +367,14 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 	b.data = append(b.data, p...)
 	return n, nil
 }
-func goDefaults(path string, env []string) map[string]string {
-	target, err := resolve("go", path)
-	if err != nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, target, "env", "-json", "GOPATH", "GOMODCACHE", "GOCACHE")
+
+// goProbeEnv is the environment of the `go env` probe. The probe must not write
+// into the caller's configuration directory: the toolchain records telemetry
+// counters under XDG_CONFIG_HOME/go/telemetry, and in a test that directory is a
+// temporary folder, so a late counter write races its removal (D-155).
+// GOTELEMETRY=off alone does not stop the local counters in Go 1.26, so the probe
+// also gets its own configuration directory, which its caller removes afterwards.
+func goProbeEnv(env []string, configHome string) []string {
 	// Sorting gives stable, last-value-wins input without reading process env.
 	values := envMap(env)
 	keys := make([]string, 0, len(values))
@@ -382,10 +382,30 @@ func goDefaults(path string, env []string) map[string]string {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	out := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
-		cmd.Env = append(cmd.Env, key+"="+values[key])
+		if key == "XDG_CONFIG_HOME" || key == "GOTELEMETRY" {
+			continue
+		}
+		out = append(out, key+"="+values[key])
 	}
-	cmd.Env = append(cmd.Env, "ENV=", "BASH_ENV=", "ZDOTDIR=")
+	return append(out, "XDG_CONFIG_HOME="+configHome, "GOTELEMETRY=off", "ENV=", "BASH_ENV=", "ZDOTDIR=")
+}
+
+func goDefaults(path string, env []string) map[string]string {
+	target, err := resolve("go", path)
+	if err != nil {
+		return nil
+	}
+	configHome, err := os.MkdirTemp("", "dyna-go-env-")
+	if err != nil {
+		return nil
+	}
+	defer os.RemoveAll(configHome)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, target, "env", "-json", "GOPATH", "GOMODCACHE", "GOCACHE")
+	cmd.Env = goProbeEnv(env, configHome)
 	cmd.WaitDelay = 100 * time.Millisecond
 	var output limitedOutput
 	cmd.Stdout = &output
