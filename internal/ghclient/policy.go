@@ -2,11 +2,16 @@ package ghclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/repoid"
@@ -190,6 +195,45 @@ func isRead(args []string) bool {
 		return (method == "" || method == "GET" || method == "POST") && (strings.HasPrefix(query, "query") || strings.HasPrefix(query, "{")) && !mutation.MatchString(query)
 	}
 	return method == "GET" || method == "HEAD" || (method == "" && !fields)
+}
+
+// publicRepo reports whether a repository is public. Tests replace it.
+var publicRepo = fetchPublicRepo
+
+// publicRead reports a read-only command on a public GitHub repository, which
+// needs no room (D-272). The check sends no credentials, so a private
+// repository, or one GitHub cannot show, stays outside every room.
+func publicRead(ctx context.Context, r repository, args []string) bool {
+	return r.name != "" && r.host == "github.com" && isRead(args) && publicRepo(ctx, r)
+}
+
+var publicRepos sync.Map // "host/name" of a repository seen public
+
+func fetchPublicRepo(ctx context.Context, r repository) bool {
+	key := r.host + "/" + r.name
+	if _, ok := publicRepos.Load(key); ok {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+r.name, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Private bool `json:"private"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) != nil || body.Private {
+		return false
+	}
+	publicRepos.Store(key, true)
+	return true
 }
 
 func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string) error {
