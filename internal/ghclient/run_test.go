@@ -212,6 +212,8 @@ func setupRooms(t *testing.T, repos ...string) []room.Record {
 	t.Helper()
 	t.Setenv(BinaryEnv, "")
 	storetest.Isolate(t)
+	// No test asks GitHub whether a repository is public.
+	setPublic(t, false)
 	records := []room.Record{}
 	for i, repo := range repos {
 		dir := t.TempDir()
@@ -255,5 +257,57 @@ esac
 	}
 	if out.String() != "writer-secret\n" {
 		t.Fatal("read-write room selected an account that cannot write")
+	}
+}
+
+func setPublic(t *testing.T, public bool) {
+	t.Helper()
+	previous := publicRepo
+	publicRepo = func(context.Context, repository) bool { return public }
+	t.Cleanup(func() { publicRepo = previous })
+}
+
+// A read of a public repository outside every room runs (D-272); a write to it,
+// and a read of a repository that is not public, are still refused.
+func TestPublicReadOutsideTheRoomRunsButWritesDoNot(t *testing.T) {
+	records := setupRooms(t, "resident-labs/project")
+	ctx := WithRoom(context.Background(), records[0].ID)
+	exe := filepath.Join(t.TempDir(), "gh")
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", log)
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho \"$@\" >> \"$GH_CALLS\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) error {
+		return Run(ctx, Command(ctx, exe, records[0].Repo, args...))
+	}
+	setPublic(t, true)
+	for _, args := range [][]string{
+		{"api", "repos/ludovic111/horizon/issues/1340"},
+		{"api", "repos/ludovic111/horizon/issues/1340", "-X", "GET"},
+		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
+		{"pr", "view", "7", "--repo", "ludovic111/horizon"},
+		{"repo", "view", "ludovic111/horizon", "--repo", "ludovic111/horizon"},
+	} {
+		if err := run(args...); err != nil {
+			t.Fatalf("public read %q = %v, want it to run", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"api", "repos/ludovic111/horizon/issues", "-X", "POST"},
+		{"issue", "create", "--repo", "ludovic111/horizon"},
+		{"pr", "comment", "1", "--repo", "ludovic111/horizon"},
+	} {
+		if err := run(args...); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
+			t.Fatalf("write %q = %v, want the acting-room refusal", args, err)
+		}
+	}
+	setPublic(t, false)
+	if err := run("api", "repos/ludovic111/horizon/issues/1340"); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
+		t.Fatalf("read of a repository that is not public = %v, want the refusal", err)
+	}
+	calls, _ := os.ReadFile(log)
+	if n := strings.Count(string(calls), "\n"); n != 5 {
+		t.Fatalf("gh ran %d times, want 5 (only the public reads):\n%s", n, calls)
 	}
 }
