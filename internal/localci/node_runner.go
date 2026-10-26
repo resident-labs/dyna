@@ -1298,17 +1298,28 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
+// staleCheckTmpMinutes is how old a check's temporary folder must be before the
+// next check on the node may remove it. No check runs for that long.
+const staleCheckTmpMinutes = 360
+
 // checkTmpFolder makes a host check's own temporary folder and sets isolated to
 // it. The folder is made inside the machine's check-tmp setting, else inside the
 // node's own temporary directory (TMPDIR, else /tmp), never under the run's
 // source folder, which can sit on slow storage. The check's exit trap removes
-// it, so nothing builds up in a node's memory-backed directory.
+// it. A check that was killed outright skips its trap, so the next check first
+// removes folders of this owner under the same parent that are older than six
+// hours and that no process uses (as its working folder, an open file or a
+// TMPDIR or HOME in its environment). Nothing builds up in a node's memory.
 func checkTmpFolder(setting string) string {
 	parent := `"${TMPDIR:-/tmp}"`
 	if setting != "" {
 		parent = shellquote.Quote(setting)
 	}
-	return "tmpparent=" + parent + "; mkdir -p \"$tmpparent\"; isolated=$(mktemp -d -p \"$tmpparent\" dyna-ci.XXXXXX); "
+	sweep := `in_use() { grep -qaF -e "$1/" /proc/[0-9]*/environ 2>/dev/null || ls -l /proc/[0-9]*/cwd /proc/[0-9]*/fd 2>/dev/null | grep -qF -e " -> $1"; }; ` +
+		`mkdir -p "$tmpparent"; ` +
+		`find "$tmpparent" -mindepth 1 -maxdepth 1 -type d -name 'dyna-ci.*' -user "$(id -un)" -mmin +` + strconv.Itoa(staleCheckTmpMinutes) + ` -print 2>/dev/null | ` +
+		`while IFS= read -r old; do in_use "$old" || rm -rf -- "$old"; done || true; `
+	return "tmpparent=" + parent + "; " + sweep + "isolated=$(mktemp -d -p \"$tmpparent\" dyna-ci.XXXXXX); "
 }
 
 func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
