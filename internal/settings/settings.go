@@ -69,15 +69,18 @@ type Values struct {
 	LibraryProfile        string
 	LibrarySmellProfile   string
 	LibraryReadmeMaxLines int
-	LocalCIRemote         string
-	RootProfile           string
-	BrowserPath           string
-	BrowserExtraFlags     string
-	BrowserUseFlagsFile   bool
-	BrowserProfileMode    string
-	BrowserOwnerProfile   string
-	BrowserSaveBack       bool
-	ComputersEnabled      bool
+	// LibrarySmellsPerDay caps automatic smell filing per repository per day;
+	// 0 means no cap.
+	LibrarySmellsPerDay int
+	LocalCIRemote       string
+	RootProfile         string
+	BrowserPath         string
+	BrowserExtraFlags   string
+	BrowserUseFlagsFile bool
+	BrowserProfileMode  string
+	BrowserOwnerProfile string
+	BrowserSaveBack     bool
+	ComputersEnabled    bool
 	// TODO: legacy/shim remove later — the seeded parent check-ins hook imports this interval once; remove the key with that import.
 	SessionCheckInInterval time.Duration
 	MaxCardBytes           int64
@@ -126,6 +129,7 @@ func Defaults() Values {
 		SessionCheckInInterval: 15 * time.Minute,
 		AdmissionMode:          AdmissionObserve,
 		LibraryReadmeMaxLines:  DefaultLibraryReadmeMaxLines,
+		LibrarySmellsPerDay:    DefaultLibrarySmellsPerDay,
 		MaxCardBytes:           DefaultContentBytes,
 		MaxFileBytes:           DefaultContentBytes,
 		AutoCheck:              true,
@@ -446,7 +450,7 @@ func (v *Values) Set(key, value string) error {
 		return v.setDoctor(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
 		return v.setVoice(key, value)
-	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibrarySmellProfile, KeyLibraryReadmeMaxLines:
+	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibrarySmellProfile, KeyLibraryReadmeMaxLines, KeyLibrarySmellsPerDay:
 		return v.setLibrary(key, value)
 	case KeyMaxCardBytes, KeyMaxFileBytes:
 		n, err := parseContentBytes(key, value)

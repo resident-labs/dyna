@@ -6,7 +6,7 @@ import (
 )
 
 func TestSmellTaskReadsCodeWithAChecklist(t *testing.T) {
-	task := SmellTask("/src/app", "/data/smell-tree", "aaa", "bbbbbbbbbbbbbbbb")
+	task := SmellTask("/src/app", "/data/smell-tree", "aaa", "bbbbbbbbbbbbbbbb", 10)
 	for _, want := range []string{
 		"git diff --name-only aaa..bbbbbbbbbbbbbbbb",
 		"Read each full changed file",

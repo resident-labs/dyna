@@ -74,6 +74,7 @@ var handlerCallerChecks = map[string]string{
 	"TestHook":                    "actor(ctx) applies recordedCaller before running the hook.",
 	"UpdateLibraryEntry":          "libraryStore passes mutationActor to library authority checks.",
 	"WakeLibrarian":               "librarianActor applies the recorded-caller policy.",
+	"WakeLibrarianSmellsNow":      "librarianActor and the library wake now rule.",
 	"WithdrawCall":                "callSender resolves the caller; notify checks the stored root.",
 	"WithdrawQuestion":            "questionSender resolves the caller before withdrawing the question.",
 }
