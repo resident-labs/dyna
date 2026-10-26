@@ -84,7 +84,6 @@ func (k Kimi) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 		if response.StatusCode == http.StatusUnauthorized {
 			return nil, fmt.Errorf("kimi sign-in was refused: %w", ErrNotSignedIn)
 		}

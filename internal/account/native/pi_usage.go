@@ -91,6 +91,29 @@ func PiAccessToken(entry json.RawMessage) (string, error) {
 	return e.Access, nil
 }
 
+// PiOAuthOrAPIKey returns the inference credential of a Pi login entry,
+// whichever shape Pi saved it in: the access token of an OAuth sign-in, or a
+// pasted API key. Meta Muse stores its minted inference key in access on an
+// OAuth sign-in, and its search endpoint takes that key. A caller must never
+// log it.
+func PiOAuthOrAPIKey(entry json.RawMessage) (string, error) {
+	var e piAuthEntry
+	if json.Unmarshal(entry, &e) != nil {
+		return "", ErrSchema
+	}
+	switch e.Type {
+	case "oauth":
+		if e.Access != "" {
+			return e.Access, nil
+		}
+	case "api_key":
+		if e.Key != "" {
+			return e.Key, nil
+		}
+	}
+	return "", ErrSchema
+}
+
 // PiAPIKey returns the API key of a Pi API-key login entry. A caller must never
 // log it.
 func PiAPIKey(entry json.RawMessage) (string, error) {

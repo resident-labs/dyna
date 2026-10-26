@@ -51,6 +51,33 @@ func TestPiChatGPTLoginWithoutASignInIsNotSignedIn(t *testing.T) {
 	}
 }
 
+// A Muse OAuth sign-in keeps its minted inference key in access, so the key
+// reader takes it from there instead of refusing a supported sign-in.
+func TestPiInferenceKeyReadsAnOAuthSignIn(t *testing.T) {
+	accounts := testAccounts(t)
+	seedPiLogin(t, accounts, "meta", `{"type":"oauth","access":"minted-key","refresh":"identity-token","expires":1}`, store.KindOAuth)
+	key, err := accounts.PiInferenceKey(t.Context(), store.ProviderMetaMuse, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "minted-key" {
+		t.Fatalf("key = %q, want the minted key of the OAuth sign-in", key)
+	}
+}
+
+// A pasted Muse key still reads as the key.
+func TestPiInferenceKeyReadsAPastedKey(t *testing.T) {
+	accounts := testAccounts(t)
+	seedPiLogin(t, accounts, "meta", `{"type":"api_key","key":"pasted-key"}`, store.KindAPIKey)
+	key, err := accounts.PiInferenceKey(t.Context(), store.ProviderMetaMuse, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != "pasted-key" {
+		t.Fatalf("key = %q, want the pasted key", key)
+	}
+}
+
 // A search from one repository never reads the login of an account the owner
 // limited to another repository, and the room's own selection wins.
 func TestPiChatGPTLoginKeepsTheAccountsRepositoryScope(t *testing.T) {
