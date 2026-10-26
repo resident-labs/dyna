@@ -181,33 +181,6 @@ func TestWorkflowControlsUseService(t *testing.T) {
 	if _, err := e.svc.rooms().Resolve(rec.ID); err == nil {
 		t.Fatal("deleted room still resolves")
 	}
-	if _, err := e.svc.SteerRun(e.ctx, "not-a-run", 1, "text"); err == nil {
-		t.Fatal("unknown run accepted")
-	}
-}
-
-func TestSteerRunPostsToTheAgentsSession(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("workers")
-	t.Setenv("DYNA_RUN_ID", "wf_ops-steering")
-	t.Setenv("DYNA_ROOM_ID", rec.ID)
-	t.Setenv("DYNA_ROOM", rec.Name)
-	run, err := runstore.Create("steering", "return null", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer run.Finish("ok", "null", nil)
-	agent, err := e.mgr.StartRunAgent(e.ctx, subagent.StartOptions{
-		Run: &subagent.RunOwner{ID: run.Meta.ID, Agent: 1}, Profile: "mock", Dir: t.TempDir(), Room: rec.ID, Task: "SLEEP:0\nRESPOND: ready",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.wait(agent.ID, 1)
-	res, err := e.svc.SteerRun(e.ctx, run.Meta.ID, 1, "inspect parser")
-	if err != nil || len(res.Deliveries) != 1 || res.Deliveries[0].Delivery != "session-queued" || res.Deliveries[0].To != agent.Address() {
-		t.Fatalf("steer: %+v %v", res, err)
-	}
 }
 
 func TestSessionQueueServiceAndEvents(t *testing.T) {
@@ -294,5 +267,40 @@ func TestRoomWatchRereadsClosedSessionsOnlyOnFullScans(t *testing.T) {
 		if full := i == MemberFullScanEvery; changed != full {
 			t.Fatalf("scan %d: closed session event = %v, want %v", i, changed, full)
 		}
+	}
+}
+
+// The run page opens an agent by its session ID. A run-owned session stays out
+// of the member list, yet its transcript still loads.
+func TestARunAgentSessionLoadsAlthoughMembersOmitIt(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("workers")
+	t.Setenv("DYNA_RUN_ID", "wf_ops-open")
+	t.Setenv("DYNA_ROOM_ID", rec.ID)
+	t.Setenv("DYNA_ROOM", rec.Name)
+	run, err := runstore.Create("open", "return null", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Finish("ok", "null", nil)
+	agent, err := e.mgr.StartRunAgent(e.ctx, subagent.StartOptions{
+		Run: &subagent.RunOwner{ID: run.Meta.ID, Agent: 1}, Profile: "mock", Dir: t.TempDir(), Room: rec.ID, Task: "SLEEP:0\nRESPOND: ready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(agent.ID, 1)
+	members, err := e.svc.Members(rec.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
+		if m.ID == agent.ID {
+			t.Fatalf("the member list holds run agent %s", agent.ID)
+		}
+	}
+	got, err := e.svc.Transcript(agent.ID)
+	if err != nil || got.Member.ID != agent.ID {
+		t.Fatalf("Transcript(%s) = %+v, %v; want the session", agent.ID, got.Member, err)
 	}
 }
