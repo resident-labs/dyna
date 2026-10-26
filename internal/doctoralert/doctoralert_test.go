@@ -132,3 +132,37 @@ func TestOverloadRecoveryThenSameOverloadAlertsAgain(t *testing.T) {
 		t.Fatalf("stale samples announced recovery: sent %d", len(*sent))
 	}
 }
+
+// After a gap in recording, one fresh overloaded sample does not cover the
+// five-minute load window. That is unknown, not recovery, so the alert stays.
+func TestSampleGapDoesNotAnnounceRecoveryWhileOverloaded(t *testing.T) {
+	n, sent, now := fake(t, []RoomUse{{RoomID: "a", Room: "a", Running: 2}})
+	samples := doctor.Samples{DataDir: n.DataDir}
+	load := func(at time.Time) {
+		l := sysload.Load{At: at, CPUs: 8, Load: [3]float64{24}, Memory: sysload.Memory{Total: 16 << 30}, Groups: []sysload.Group{{Name: "machine", Cores: 24, Memory: 8 << 30}}}
+		if err := samples.Record("laptop", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass := func() {
+		t.Helper()
+		err := doctor.Pass{DataDir: n.DataDir, Machines: []string{"laptop"}, If: "load>2/core for 5m or memory>85% or pressure.memory>20%", Cooldown: doctor.DefaultCooldown, Now: *now, Alert: n.Alert, Clear: n.Recover}.Do(io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i <= 6; i++ {
+		*now = t0.Add(time.Duration(i) * time.Minute)
+		load(*now)
+	}
+	pass()
+	if len(*sent) != 1 || (*sent)[0].Recovered {
+		t.Fatalf("sent %d, want the first alert", len(*sent))
+	}
+	*now = t0.Add(20 * time.Minute) // recording resumed after a 14 minute gap
+	load(*now)
+	pass()
+	if len(*sent) != 1 {
+		t.Fatalf("a sample gap announced recovery or re-alerted: sent %d", len(*sent))
+	}
+}
