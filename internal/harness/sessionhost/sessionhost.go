@@ -19,6 +19,7 @@ package sessionhost
 
 import (
 	"context"
+	"time"
 
 	"dyna-agent/internal/processguard"
 )
@@ -64,6 +65,26 @@ type Launch struct {
 	// A call that attaches a live child never fires it, so it is also the
 	// signal that the child's protocol state is cold.
 	OnStart func(pid int)
+	// IdleClose is how long the child may sit with no turn attached and no
+	// output before the host stops it, so idle sessions hold no memory. The
+	// next turn resumes the same session file in a fresh process. Zero means
+	// DefaultIdleClose; a negative value keeps the child until it exits. It
+	// applies when the launch starts a child, not when it attaches a live one.
+	IdleClose time.Duration
+}
+
+// DefaultIdleClose is the idle time a launch without IdleClose uses.
+const DefaultIdleClose = 10 * time.Minute
+
+// idleAfter is the idle time of a started child; zero means never.
+func (l Launch) idleAfter() time.Duration {
+	switch {
+	case l.IdleClose < 0:
+		return 0
+	case l.IdleClose == 0:
+		return DefaultIdleClose
+	}
+	return l.IdleClose
 }
 
 // Session is one attached harness session process.

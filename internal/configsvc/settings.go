@@ -60,6 +60,7 @@ var help = map[string]string{
 	settings.KeyRootProfile:            "Profile for new internal root sessions (default opus). Existing roots keep their profile. Missing or disabled profiles use the default profile.",
 	settings.KeySubagentMaxDepth:       "How deep sessions may nest. Your own sessions are depth 1.",
 	settings.KeyCIDiskFloorGB:          "Free space a CI machine must keep on the file system that holds its /var/tmp, where Dyna keeps CI work, in GiB (1 GiB = 1,073,741,824 bytes; the key keeps the shorter GB name). A machine below the floor starts no new CI work until space is freed, and a run below it removes Dyna's own caches first. Defaults to 20 GiB; zero turns the floor off.",
+	settings.KeyIdleUnloadMinutes:      "Minutes an idle session's Pi or Claude process stays loaded before Dyna stops it to free memory. The next turn resumes the same session in a new process, which takes a few seconds longer to start. 0 keeps processes loaded. Applies to the next process Dyna starts.",
 	settings.KeySteeringToolWait:       "How long a message to a busy session waits for a running tool before it interrupts the tool.",
 }
 
@@ -113,6 +114,7 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyWorktreesMinFreeBytes, Value: v.WorktreesMinFreeBytes, Source: v.Source(settings.KeyWorktreesMinFreeBytes), LiveVsRestart: settings.LiveNextOperation, Kind: "bytes"},
 		{Key: settings.KeyRootProfile, Value: v.RootProfile, Source: v.Source(settings.KeyRootProfile), LiveVsRestart: settings.LiveNextOpen, Kind: "select", Options: rootOptions, OptionLabels: rootLabels},
 		{Key: settings.KeySubagentMaxDepth, Value: v.SubagentMaxDepth, Source: v.Source(settings.KeySubagentMaxDepth), LiveVsRestart: settings.LiveNextOpen, Kind: "int"},
+		{Key: settings.KeyIdleUnloadMinutes, Value: v.HarnessIdleUnloadMinutes, Source: v.Source(settings.KeyIdleUnloadMinutes), LiveVsRestart: settings.LiveNextOperation, Kind: "int"},
 		{Key: settings.KeySteeringToolWait, Value: v.SteeringMaxToolWait.String(), Source: v.Source(settings.KeySteeringToolWait), LiveVsRestart: settings.LiveNextOpen, Kind: "duration"},
 		{Key: settings.KeyVoiceProvider, Value: v.VoiceProvider, Source: v.Source(settings.KeyVoiceProvider), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: settings.VoiceProviders},
 		{Key: settings.KeyVoiceModel, Value: v.VoiceModel, Source: v.Source(settings.KeyVoiceModel), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},

@@ -30,6 +30,8 @@ var ErrNotRunning = errors.New("Dyna engine is not running; start it with system
 type RemoteError struct {
 	Status  int
 	Message string
+	// Code is the reply's machine-readable name, such as callspec.CodeEngineStopping.
+	Code string
 }
 
 // Final reports whether a retry of the call would get the same answer: the
@@ -145,7 +147,7 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 		}
 		ctx = callspec.WithRequest(ctx, id)
 	}
-	cutOff := false
+	cutOff, lateRepeated := false, false
 	body, err := json.Marshal(args)
 	if err != nil {
 		return err
@@ -161,6 +163,15 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 			giveUp = c.now().Add(c.restartWait)
 			delay = 50 * time.Millisecond
 			continue
+		}
+		if callspec.IsLate(err) && repeatsAfterLate(method) {
+			if !lateRepeated && ctx.Err() == nil {
+				// The engine runs calls with one request ID one at a time, so
+				// this repeat waits for the first and returns its result.
+				lateRepeated = true
+				continue
+			}
+			return fmt.Errorf("%w; the engine may still apply it, so check before you repeat it", err)
 		}
 		if !errors.Is(err, ErrNotRunning) {
 			return err
@@ -221,11 +232,12 @@ func (c *Client) send(ctx context.Context, method string, body []byte, result an
 	if res.StatusCode != http.StatusOK {
 		var reply struct {
 			Error string `json:"error"`
+			Code  string `json:"code"`
 		}
 		if err := json.NewDecoder(res.Body).Decode(&reply); err != nil {
 			return fmt.Errorf("engine: %s", res.Status)
 		}
-		return &RemoteError{Status: res.StatusCode, Message: reply.Error}
+		return &RemoteError{Status: res.StatusCode, Message: reply.Error, Code: reply.Code}
 	}
 	if result == nil {
 		return nil
@@ -256,4 +268,9 @@ func newRequestID() (string, error) {
 // engine cut the connection. StartSubagent carries a session ID the caller
 // chose, and the engine refuses a second session with it. Other writes commit
 // before their receipt is stored, so a repeat could apply them twice.
+// repeatsAfterLate lists the creating calls that go again once, with their
+// request ID, when the engine is slow to answer. The engine applies one ID once,
+// so the repeat returns the created record instead of making a second one.
+func repeatsAfterLate(method string) bool { return method == "AddGoal" || method == "AddGoalItem" }
+
 func repeatsAfterCutOff(method string) bool { return method == "StartSubagent" }

@@ -19,6 +19,8 @@ test('a running run says how long it has run and how many agents work, and faile
   assert.equal(runLine({ ...base, failed: 2 }, Date.now()), 'Running for 48m · 5 working · 33 agents · 2 failed')
   assert.equal(runLine({ ...base, working: 1, agents: 1 }, Date.now()), 'Running for 48m · 1 working · 1 agent')
   assert.equal(runLine({ ...base, agents: 0, working: 0 }, Date.now()), 'Running for 48m', 'a run with no agents yet shows no counts')
+  assert.equal(runLine({ ...base, agents: 4, commands: 2 }, Date.now()), 'Running for 48m · 5 working · 4 agents · 2 commands')
+  assert.equal(runLine({ ...base, agents: 0, commands: 1 }, Date.now()), 'Running for 48m · 5 working · 1 command', 'a run of commands only names no agents')
 })
 
 test('a run that ended says when and how long it took', () => {

@@ -160,7 +160,7 @@ func (s Samples) baseline(machine string, now time.Time) (map[string]Sample, err
 func withOutside(latest []Sample, m Sample) []Sample {
 	var out []Sample
 	outside := m
-	outside.Group.Name = "outside Dyna"
+	outside.Group.Name = OutsideGroup
 	outside.Group.IO = 0
 	for _, x := range latest {
 		if x.Group.Name == "engine" || x.Group.Name == "computers" || x.Group.Name == "agents" {

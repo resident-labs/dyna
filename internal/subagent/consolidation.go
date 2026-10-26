@@ -621,7 +621,7 @@ func (m *Manager) advanceConsolidation(ctx context.Context, c ConsolidationState
 			_ = m.store().DeletePendingSteer(m.rooms(), sid, meta.Transfer.PostID)
 			if m.store().lockHeld(sid) {
 				stopCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-				_, e := m.stopSession(stopCtx, sid, c.ID, "consolidation")
+				_, e := m.stopSession(stopCtx, sid, c.ID, "consolidation", "dyna: consolidation")
 				cancel()
 				if e != nil {
 					return false, e

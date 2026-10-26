@@ -99,10 +99,13 @@ type MachineSummary struct {
 	CISlots         int             `json:"ciSlots"`
 	AllowHostChecks bool            `json:"allowHostChecks"`
 	Rooms           []string        `json:"rooms,omitempty"`
-	CPU             *int            `json:"cpu,omitempty"`
-	Agents          *int            `json:"agents,omitempty"`
-	Computers       *int            `json:"computers,omitempty"`
-	CI              *MachineCISlots `json:"ci,omitempty"`
+	// Suites limits the local CI work the machine takes to those suites; empty
+	// means every suite.
+	Suites    []string        `json:"suites,omitempty"`
+	CPU       *int            `json:"cpu,omitempty"`
+	Agents    *int            `json:"agents,omitempty"`
+	Computers *int            `json:"computers,omitempty"`
+	CI        *MachineCISlots `json:"ci,omitempty"`
 }
 
 // MachineHarness is one agent harness installed on a machine and its version.
@@ -567,6 +570,7 @@ func machineSummary(m machines.Machine) MachineSummary {
 		CISlots:         m.CISlots,
 		AllowHostChecks: m.HasHostChecksGrants(),
 		Rooms:           m.Rooms,
+		Suites:          m.Suites,
 	}
 	if !m.Local && m.Load.CPUPercent != nil {
 		cpu := int(math.Round(*m.Load.CPUPercent))

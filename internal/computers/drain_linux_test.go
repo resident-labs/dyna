@@ -5,6 +5,7 @@ package computers
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -38,5 +39,21 @@ func TestDaemonReportsItsBuild(t *testing.T) {
 	got, err := (&daemon{}).dispatch(context.Background(), Request{Op: "version"})
 	if err != nil || got != "dev+test" {
 		t.Fatalf("version = %v, %v", got, err)
+	}
+}
+
+// A stopped computer whose desktop the service will refuse must make open fail
+// with that reason, and must not launch the app: the app would connect, be
+// closed, and exit with "connection reset by peer" (D-280).
+func TestOpenOfAStoppedComputerSaysWhyItCannotStartAndLaunchesNothing(t *testing.T) {
+	setRestartPending(t, true)
+	marker := t.TempDir() + "/launched"
+	s := &supervisor{ctx: context.Background()}
+	_, err := s.openApp(context.Background(), Request{Op: "open", Status: "Checking a refused open", Command: []string{"sh", "-c", "touch " + marker}, TimeoutMS: 2000})
+	if !errors.Is(err, ErrServiceUpdating) {
+		t.Fatalf("open = %v, want ErrServiceUpdating", err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("the app was launched although its desktop cannot start")
 	}
 }
