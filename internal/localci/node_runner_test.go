@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/shellquote"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -617,6 +618,7 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 		}
 	}
 	check := nodeCheck{id: SuiteFrontend, name: "frontend", inner: "true", image: "node:22"}
+	keepActive(t, dir)
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -914,7 +916,7 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -989,7 +991,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf 'check-end\\n' >> " + events + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	var out bytes.Buffer
@@ -1075,14 +1077,15 @@ func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Every non-blocking attempt fails, so the scan finds no free slot, and the
-	// waiting attempt succeeds at once.
-	fake := "#!/bin/sh\ncase \"$1\" in -n) exit 1 ;; -w) exit 0 ;; esac\nexit 0\n"
+	// Both non-blocking attempts of the scan fail, so it finds no free slot, and
+	// the first attempt of the waiting loop succeeds at once.
+	attempts := filepath.Join(dir, "attempts")
+	fake := "#!/bin/sh\ncount=$(cat " + shellquote.Quote(attempts) + " 2>/dev/null || echo 0)\ncount=$((count + 1))\necho \"$count\" > " + shellquote.Quote(attempts) + "\nif [ \"$1\" = \"-n\" ] && [ \"$count\" -le 2 ]; then exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// The inner script names the port the way a check does, from its slot.
-	script := nodeSlotScript(dir, 2, 2, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
+	script := nodeSlotScript(dir, 2, 2, keepActive(t, dir), time.Hour, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 	var out, errOut bytes.Buffer
@@ -1095,5 +1098,53 @@ func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "waiting for slot 0") {
 		t.Fatalf("the check's log does not say why it waited: %s", errOut.String())
+	}
+}
+
+// keepActive marks a run as live for a slot script, as the run's keeper does.
+func keepActive(t *testing.T, dir string) string {
+	t.Helper()
+	active := filepath.Join(dir, ".active")
+	if err := os.WriteFile(active, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return active
+}
+
+// A queued wrapper whose run is cancelled must not keep waiting for a slot: it
+// ends, so nothing outlives the client on the machine.
+func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
+	dir := t.TempDir()
+	active := keepActive(t, dir)
+	// Hold the only slot, as a check that is running does.
+	holder := exec.Command("flock", filepath.Join(dir, "slots"), "sleep", "30")
+	if err := os.MkdirAll(filepath.Join(dir, "slots"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	slot := filepath.Join(dir, "slots", "0.lock")
+	lock, err := os.OpenFile(slot, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	_ = holder
+	// The run is cancelled while its check waits for the slot.
+	script := nodeSlotScript(dir, 1, 0, active, time.Hour, "printf 'ran\\n'")
+	done := make(chan error, 1)
+	go func() { done <- exec.Command("bash", "-c", script).Run() }()
+	time.Sleep(200 * time.Millisecond)
+	if err := os.Remove(active); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a cancelled run's queued check ran anyway")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a queued check outlived its cancelled run")
 	}
 }
