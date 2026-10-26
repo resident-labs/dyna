@@ -51,6 +51,9 @@ type ProfileView struct {
 	// Support is how much of the harness's output Dyna reads. It is derived
 	// from the profile's output dialect and ignored on save.
 	Support HarnessSupport `json:"support"`
+	// Problem is the typed reason this profile cannot run, so the editor can
+	// offer repair instead of refusing the whole list. Empty means launchable.
+	Problem profile.Status `json:"problem,omitempty"`
 }
 
 // ProfileList is every profile plus the harnesses a profile may use.
@@ -74,13 +77,16 @@ type ProfileEdit struct {
 	EnvRemove []string          `json:"envRemove"`
 }
 
+// loadProfiles admits the registry for execution: every profile must be
+// launchable. Management paths use loadProfilesForRepair, which validates each
+// profile separately.
 func loadProfiles() (*profile.Store, error) { return profile.Load(profile.DefaultPath()) }
 
-// loadProfilesForRepair reads the registry without validating its profiles, so
-// an owner can remove or replace one that names a harness Dyna has retired.
-// Load still refuses such a file, so nothing from it runs.
-func loadProfilesForRepair() (*profile.Store, error) {
-	return profile.LoadForRepair(profile.DefaultPath())
+// loadProfilesForRepair is the one management read: it lists every profile with
+// its typed validation status, so an owner can remove or replace one that names
+// a harness Dyna has retired.
+func loadProfilesForRepair() (profile.Registry, error) {
+	return profile.ReadConfig(profile.DefaultPath())
 }
 
 func view(p profile.Profile) ProfileView {
@@ -103,17 +109,19 @@ func view(p profile.Profile) ProfileView {
 
 // Profiles lists every profile, disabled ones included, in registry order.
 func Profiles() (ProfileList, error) {
-	s, err := loadProfiles()
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return ProfileList{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	out := ProfileList{Profiles: []ProfileView{}, Harnesses: profile.Harnesses, Unready: harnessReadiness(ctx)}
-	for _, p := range s.Profiles {
-		out.Profiles = append(out.Profiles, view(p))
+	for _, p := range reg.Store.Profiles {
+		v := view(p)
+		v.Problem = reg.Reports[p.Name].Status
+		out.Profiles = append(out.Profiles, v)
 	}
-	if d, ok := s.DefaultProfile(); ok {
+	if d, ok := reg.Store.DefaultProfile(); ok {
 		out.Default = d.Name
 	}
 	return out, nil
@@ -149,7 +157,7 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	if err := authority.Check("profiles add", authority.Of(ctx), nil); err != nil {
 		return ProfileView{}, err
 	}
-	reg, err := loadProfiles()
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return ProfileView{}, err
 	}
@@ -157,14 +165,14 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	in.Name = strings.TrimSpace(in.Name)
 	var p profile.Profile
 	if e.Original != "" {
-		old, ok := reg.Get(e.Original)
+		old, ok := reg.Store.Get(e.Original)
 		if !ok {
 			return ProfileView{}, fmt.Errorf("no profile is named %q", e.Original)
 		}
 		p = *old
 	}
 	if in.Name != e.Original {
-		if _, taken := reg.Get(in.Name); taken {
+		if _, taken := reg.Store.Get(in.Name); taken {
 			return ProfileView{}, fmt.Errorf("a profile named %q already exists", in.Name)
 		}
 	}
@@ -209,7 +217,7 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	if len(env) > 0 {
 		p.Env = env
 	}
-	if err := saveProfile(ctx, s.Sessions, reg, p, e.Original); err != nil {
+	if err := saveProfile(ctx, s.Sessions, reg.Store, p, e.Original); err != nil {
 		return ProfileView{}, err
 	}
 	return view(p), nil
@@ -235,10 +243,10 @@ func (s *Service) RemoveProfile(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if !reg.Remove(name) {
+	if !reg.Store.Remove(name) {
 		return fmt.Errorf("no profile is named %q", name)
 	}
-	return saveProfiles(ctx, s.Sessions, reg)
+	return saveProfiles(ctx, s.Sessions, reg.Store)
 }
 
 // SetDefaultProfile makes name the default, like `dyna profiles set-default`.
@@ -272,11 +280,11 @@ func (s *Service) SetProfileDisabled(ctx context.Context, name string, disabled 
 }
 
 func update(ctx context.Context, sessions *subagent.Manager, name string, fn func(*profile.Profile) error) error {
-	s, err := loadProfiles()
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return err
 	}
-	old, ok := s.Get(name)
+	old, ok := reg.Store.Get(name)
 	if !ok {
 		return fmt.Errorf("no profile is named %q", name)
 	}
@@ -284,7 +292,7 @@ func update(ctx context.Context, sessions *subagent.Manager, name string, fn fun
 	if err := fn(&p); err != nil {
 		return err
 	}
-	return saveProfile(ctx, sessions, s, p, "")
+	return saveProfile(ctx, sessions, reg.Store, p, "")
 }
 
 // saveProfile shares validation, rename and persistence for both input shapes.
@@ -323,12 +331,12 @@ func (s *Service) UpsertProfile(ctx context.Context, p profile.Profile) error {
 	if err != nil {
 		return err
 	}
-	if old, ok := reg.Get(p.Name); !ok || old.Harness != p.Harness {
+	if old, ok := reg.Store.Get(p.Name); !ok || old.Harness != p.Harness {
 		if err := RequireHarness(ctx, p); err != nil {
 			return err
 		}
 	}
-	return saveProfile(ctx, s.Sessions, reg, p, "")
+	return saveProfile(ctx, s.Sessions, reg.Store, p, "")
 }
 
 // SetProfileUses changes only the use restrictions and keeps all other fields.
@@ -336,19 +344,19 @@ func (s *Service) SetProfileUses(ctx context.Context, name string, uses []string
 	if err := authority.Check("profiles set", authority.Of(ctx), nil); err != nil {
 		return nil, err
 	}
-	reg, err := loadProfiles()
+	reg, err := loadProfilesForRepair()
 	if err != nil {
 		return nil, err
 	}
-	old, ok := reg.Get(name)
+	old, ok := reg.Store.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("unknown profile %q", name)
 	}
 	p := *old
 	p.Uses = uses
-	if err := saveProfile(ctx, s.Sessions, reg, p, ""); err != nil {
+	if err := saveProfile(ctx, s.Sessions, reg.Store, p, ""); err != nil {
 		return nil, err
 	}
-	saved, _ := reg.Get(name)
+	saved, _ := reg.Store.Get(name)
 	return saved.EffectiveUses(), nil
 }
