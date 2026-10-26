@@ -206,9 +206,16 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 					return result, err
 				}
 				rawPointer, pointer = raw, newGuardedPointer(raw)
-				s.mu.Lock()
-				s.actPointer = pointer
-				s.mu.Unlock()
+			}
+		}
+		// Check control and start the action in one step under the lock a
+		// takeover also takes, so input never starts after a person took
+		// control. If control went away since agentTarget, wait for it back.
+		actCtx, cancel := context.WithCancel(ctx)
+		for kind != "screenshot" && !s.beginAct(pointer, cancel) {
+			if _, _, _, _, _, err := s.agentTarget(waitctx); err != nil {
+				cancel()
+				return result, err
 			}
 		}
 		if kind == "screenshot" {
@@ -220,9 +227,11 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 			index := i
 			result.Frames = append(result.Frames, Frame{Shot: shot, ActionIndex: &index, OffsetMS: time.Since(started).Milliseconds()})
 			result.Shot = shot
-		} else if err := s.runInputAction(ctx, a, pointer, keyboard, display); err != nil {
+		} else if err := runInputAction(actCtx, a, pointer, keyboard, display); err != nil {
+			cancel()
 			return result, fmt.Errorf("action %d: %w", i, err)
 		}
+		cancel()
 		result.ActionsExecuted++
 		redacted := EventAction(a)
 		s.mu.Lock()
@@ -249,16 +258,30 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 	return result, nil
 }
 
-// runInputAction runs one input action under its own cancel, so a takeover
-// during a held gesture ends the action's waits at once.
-func (s *supervisor) runInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtualKeyboard, display string) error {
-	if p == nil {
-		return executeInputAction(ctx, a, nil, k, display)
+// beginAct starts an action only while the agent has control, and registers the
+// pointer so a takeover can interrupt it. The check and the start share one
+// critical section with the takeover, which also holds s.mu.
+func (s *supervisor) beginAct(p *guardedPointer, cancel context.CancelFunc) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.Control != ControlAgent {
+		return false
 	}
-	actCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	p.begin(cancel)
-	return p.end(executeInputAction(actCtx, a, p, k, display))
+	if p != nil {
+		s.actPointer = p
+		p.begin(cancel)
+	}
+	return true
+}
+
+// runInputAction runs one input action whose context a takeover cancels. A
+// takeover during it turns the pointer's error into errControlLost.
+func runInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtualKeyboard, display string) error {
+	err := executeInputAction(ctx, a, p, k, display)
+	if p == nil {
+		return err
+	}
+	return p.end(err)
 }
 
 // A compositor roundtrip acknowledges input, not the application's focus work.
