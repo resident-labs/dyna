@@ -286,6 +286,13 @@ func TestChatGPTGrantDuringTurnReturnsTheRenewedToken(t *testing.T) {
 	}
 	// The managed Pi copy is only named to the renewal, which the runner stands in for.
 	a.PiExecutable = func() (string, error) { return "/fake/pi/bin/pi", nil }
+	// A reader that regressed to the draining refresh would take this gate and
+	// wait behind the lease held below. Failing at once keeps that regression a
+	// fast, deterministic failure instead of a hung test.
+	a.SwitchGate = func(context.Context, string) (func(), error) {
+		t.Error("the live reader took the switch gate that its own turn holds")
+		return nil, errors.New("the switch gate was taken during a live turn")
+	}
 	release, err := a.TurnLease(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
