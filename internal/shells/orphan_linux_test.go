@@ -87,9 +87,14 @@ func TestStopEndsProcessesOfLostJob(t *testing.T) {
 // stop still ends it, even though the stamped leader is long gone by then.
 func TestStopKillsUnstampedGroupMemberThatIgnoresSigterm(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
-	// The child prints its PID, then ignores SIGTERM; the script's first line comes from the leader.
-	id, out, _ := startLostJob(t, s, `env -i /bin/sh -c 'trap "" TERM; echo $$; exec sleep 600' & wait`, 0)
-	requireEnded(t, out, func() { mustStop(t, id) })
+	// The child ignores SIGTERM, then prints its PID. The test reads that line
+	// first, so the stop never races the child's start.
+	id, out, _ := startLostJob(t, s, `env -i /bin/sh -c 'trap "" TERM; echo $$; exec sleep 600' & wait`, 1)
+	pid, err := strconv.Atoi(strings.TrimSpace(out.Text()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireEnded(t, pid, func() { mustStop(t, id) })
 }
 
 // The anchor of a group may end and be reaped after the group is read. Its
@@ -195,23 +200,16 @@ func mustStop(t *testing.T, id string) {
 	}
 }
 
-// requireEnded runs stop, then reads the helper's next line as a PID and checks
-// that the process has ended.
-func requireEnded(t *testing.T, out *bufio.Scanner, stop func()) {
+// requireEnded holds the process pid, runs stop, and checks that the process
+// has ended.
+func requireEnded(t *testing.T, pid int, stop func()) {
 	t.Helper()
-	stop()
-	if !out.Scan() {
-		t.Fatal("helper printed no PID")
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(out.Text()))
-	if err != nil {
-		t.Fatal(err)
-	}
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
-		return // already gone and reaped
+		t.Fatalf("process %d is gone before the stop: %v", pid, err)
 	}
 	defer unix.Close(fd)
+	stop()
 	if n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 0); err != nil || n == 0 {
 		t.Fatalf("process %d still runs: %v", pid, err)
 	}
