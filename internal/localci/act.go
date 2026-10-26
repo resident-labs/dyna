@@ -102,6 +102,11 @@ func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
 	// Text in front of the content cannot do this, because a comment, a
 	// directive or a document marker before the mapping would leave the tag in
 	// a document of its own.
+	// The node comes from text at column 1, and the printer keeps every node's
+	// own column, so the name moves to the column the mapping's keys start at.
+	if len(body.Values) > 0 {
+		tagName.AddColumn(body.Values[0].Key.GetToken().Position.Column - tagName.Key.GetToken().Position.Column)
+	}
 	body.Values = append([]*ast.MappingValueNode{tagName}, body.Values...)
 	return []byte(file.String()), nil
 }
