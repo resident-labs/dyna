@@ -18,7 +18,7 @@ import (
 // command: a group leader stamped with the job. It returns the job ID and the
 // lines the script prints first. The test reaps the command at its end, so
 // the command stays a zombie, holding its group, until then.
-func startLostJob(t *testing.T, s *Store, script string, lines int) (string, *bufio.Scanner) {
+func startLostJob(t *testing.T, s *Store, script string, lines int) (string, *bufio.Scanner, *exec.Cmd) {
 	t.Helper()
 	meta, err := s.Create(StartOptions{Cmd: []string{"sh"}, Cwd: t.TempDir()})
 	if err != nil {
@@ -34,10 +34,18 @@ func startLostJob(t *testing.T, s *Store, script string, lines int) (string, *bu
 	cmd.Env = append(os.Environ(), JobEnv+"="+meta.ID)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = pw
+	// An open stdin lets a script block in read without a child of its own.
+	sr, sw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sw.Close() })
+	cmd.Stdin = sr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	pw.Close()
+	sr.Close()
 	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
 	meta.Pid = cmd.Process.Pid
 	if err := s.Save(meta, nil); err != nil {
@@ -49,14 +57,14 @@ func startLostJob(t *testing.T, s *Store, script string, lines int) (string, *bu
 			t.Fatalf("helper printed %d of %d lines", i, lines)
 		}
 	}
-	return meta.ID, r
+	return meta.ID, r, cmd
 }
 
 // D-190: a job whose supervisor died but whose command runs on reads as lost.
 // Stop must still end the command and the children it started.
 func TestStopEndsProcessesOfLostJob(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
-	id, _ := startLostJob(t, s, "sleep 600 & echo started; wait", 1)
+	id, _, _ := startLostJob(t, s, "sleep 600 & echo started; wait", 1)
 	if in, err := s.Info(id); err != nil || in.Status != "lost" {
 		t.Fatalf("job before stop = %q, %v; want lost", in.Status, err)
 	}
@@ -80,7 +88,7 @@ func TestStopEndsProcessesOfLostJob(t *testing.T) {
 func TestStopKillsUnstampedGroupMemberThatIgnoresSigterm(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
 	// The child prints its PID, then ignores SIGTERM; the script's first line comes from the leader.
-	id, out := startLostJob(t, s, `env -i /bin/sh -c 'trap "" TERM; echo $$; exec sleep 600' & wait`, 0)
+	id, out, _ := startLostJob(t, s, `env -i /bin/sh -c 'trap "" TERM; echo $$; exec sleep 600' & wait`, 0)
 	requireEnded(t, out, func() { mustStop(t, id) })
 }
 
@@ -124,6 +132,26 @@ func TestReleasedAnchorDoesNotAdmitUnrelatedGroup(t *testing.T) {
 	set := jobProcesses("sh_20261026-000000-00000000", map[int]pinned{anchor.Process.Pid: {pid: anchor.Process.Pid, fd: fd}})
 	if _, admitted := set[bystander.Process.Pid]; admitted {
 		t.Fatal("an unrelated process was admitted after its group's anchor was released")
+	}
+}
+
+// A stamped process may start an unstamped child and be reaped after the first
+// scan but before it is stopped. Nothing then keeps the group, so the child
+// cannot be found: the stop must say its cleanup is incomplete.
+func TestStopReportsChildLostToExitBeforeContainment(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	id, out, leader := startLostJob(t, s, `trap 'env -i sleep 600 & echo $!; exit 0' USR1; echo ready; read x`, 1)
+	beforeFreeze = func() {
+		_ = syscall.Kill(leader.Process.Pid, syscall.SIGUSR1)
+		out.Scan() // the child exists once its PID is printed
+		_ = leader.Wait()
+	}
+	t.Cleanup(func() { beforeFreeze = nil })
+	if _, err := stopOrphans(id); err == nil || !strings.Contains(err.Error(), "ended before it was contained") {
+		t.Fatalf("stop error = %v; want an incomplete-cleanup error", err)
+	}
+	if pid, err := strconv.Atoi(strings.TrimSpace(out.Text())); err == nil {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }
 
