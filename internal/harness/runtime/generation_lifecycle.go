@@ -23,6 +23,7 @@ import (
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/shellmcp"
 )
 
 const generationPrefix = "gen-v1-"
@@ -64,7 +65,8 @@ const dynaMCPName = "dyna"
 // every generation. Version 7: harnesses with DynaShell get Dyna's MCP shell
 // server. Version 9: a harness denies its native shell with a plugin hook.
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
-const generationInputsVersion = 10
+// Version 11: Pi's MCP servers carry a request timeout and exposure.
+const generationInputsVersion = 11
 
 type generationInputs struct {
 	NativeFeatures                                           nativeFeaturePolicy
@@ -174,7 +176,7 @@ func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup fu
 		}
 	}
 	if dynaShell {
-		snapshot.MCP = append(snapshot.MCP, harnessmgr.ManagedMCP{Name: dynaMCPName, MCPDefinition: harnessmgr.MCPDefinition{Command: inputs.CLI, Args: []string{"mcp", "shell"}}, EnabledHarnesses: []string{h}})
+		snapshot.MCP = append(snapshot.MCP, harnessmgr.ManagedMCP{Name: dynaMCPName, MCPDefinition: harnessmgr.MCPDefinition{Command: inputs.CLI, Args: []string{"mcp", "shell"}, TimeoutSeconds: int(shellmcp.MaxRequestTimeout.Seconds())}, EnabledHarnesses: []string{h}})
 	}
 	slices.SortFunc(snapshot.MCP, func(a, b harnessmgr.ManagedMCP) int { return strings.Compare(a.Name, b.Name) })
 	inputs.MCP = snapshot.MCP
