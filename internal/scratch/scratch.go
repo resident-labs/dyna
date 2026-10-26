@@ -25,8 +25,9 @@ const Env = "DYNA_SCRATCH"
 // Tests and tools use it; normal runs leave it unset.
 const RootEnv = "DYNA_SCRATCH_ROOT"
 
-const ClosedRetention = 24 * time.Hour
-const UnknownRetention = 3 * 24 * time.Hour
+// ClosedRetention is how long a closed session's scratch stays after the close,
+// so a parent can still read the files the session returned.
+const ClosedRetention = 7 * 24 * time.Hour
 
 // Root is the disk folder that holds one store's scratch: a short namespace
 // derived from the canonical data folder under the owner's cache base. It
@@ -53,6 +54,21 @@ func Root() string {
 		return ""
 	}
 	return filepath.Join(base, storeNamespace(store.DataDir()))
+}
+
+// RetainedNotice tells the caller of a session close where the session's
+// scratch stays and when a sweep may delete it. It returns "" when the session
+// has no scratch folder.
+func RetainedNotice(sessionID string, closedAt time.Time) string {
+	root := Root()
+	if root == "" || !validOwner(sessionID) {
+		return ""
+	}
+	path := filepath.Join(root, sessionID)
+	if _, err := os.Lstat(path); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("scratch kept at %s until %s", path, closedAt.Add(ClosedRetention).Format("2006-01-02"))
 }
 
 // storeNamespace derives the short, stable namespace of one data folder. A
@@ -129,6 +145,9 @@ func Ensure(owner string) (string, error) {
 	return filepath.Join(root, owner), nil
 }
 
+// Owner is what a lookup knows about a top-level scratch folder's owner. Open
+// also covers an owner that is dormant, one that has a live shell job, and one
+// whose state could not be read: a sweep never removes any of them.
 type Owner struct {
 	Known, Open bool
 	ClosedAt    time.Time
@@ -138,13 +157,9 @@ type Options struct {
 	Logf func(string, ...any)
 	Now  time.Time
 	// Lookup receives a top-level session or run ID. All workers of a run
-	// share its retention date. A nil Lookup treats every owner as unknown.
-	Lookup   func(owner string) Owner
-	Pressure bool
-	// Closing marks the pass that a closing session runs. Its own scratch goes
-	// now, because the closed retention exists to let a parent read a finished
-	// session's files, and a closing session's caller has already read them.
-	Closing bool
+	// share its retention date. A nil Lookup treats every owner as unknown, so
+	// nothing is removed.
+	Lookup func(owner string) Owner
 	// Only limits the sweep to a relative owner path and its descendants.
 	Only string
 }
@@ -157,7 +172,7 @@ type Result struct {
 }
 
 // Sweep expires scratch files. Confined operations and WalkDir do not follow
-// links outside Root. An open owner is always kept, even under disk pressure.
+// links outside Root. An open, dormant or unknown owner is always kept.
 func Sweep(ctx context.Context, o Options) (Result, error) {
 	result := Result{Removed: []string{}, Kept: []Kept{}}
 	if o.Only != "" && !validOwner(o.Only) {
@@ -220,17 +235,21 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 			keep("owner is open")
 			continue
 		}
-		if owner.Known {
-			if owner.ClosedAt.IsZero() {
-				keep("owner has no close time")
-				continue
-			}
-			if !o.Closing && !o.Pressure && now.Before(owner.ClosedAt.Add(ClosedRetention)) {
-				keep("closed retention period")
-				continue
-			}
+		// Only a folder whose owner record exists, is closed, and closed more
+		// than ClosedRetention ago is removed. Disk pressure does not change that.
+		if !owner.Known {
+			keep("owner record not found")
+			continue
 		}
-		newest, bytes, err := inspect(ctx, r, name)
+		if owner.ClosedAt.IsZero() {
+			keep("owner has no close time")
+			continue
+		}
+		if !now.After(owner.ClosedAt.Add(ClosedRetention)) {
+			keep("closed retention period")
+			continue
+		}
+		_, bytes, err := inspect(ctx, r, name)
 		if err != nil {
 			if ctx.Err() != nil {
 				return result, ctx.Err()
@@ -238,19 +257,12 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 			protected(err)
 			continue
 		}
-		if !owner.Known {
-			retention := UnknownRetention
-			if o.Pressure {
-				retention = 24 * time.Hour
-			}
-			if now.Before(newest.Add(retention)) {
-				keep("unknown owner has recent changes")
-				continue
-			}
-		}
 		if err := r.RemoveAll(name); err != nil {
 			protected(err)
 			continue
+		}
+		if o.Logf != nil {
+			o.Logf("scratch: removed %s (owner %s, closed %s)", path, strings.Split(name, string(os.PathSeparator))[0], owner.ClosedAt.UTC().Format(time.RFC3339))
 		}
 		result.Removed = append(result.Removed, path)
 		result.BytesFreed += bytes
