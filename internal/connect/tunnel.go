@@ -21,6 +21,16 @@ import (
 // stop soon rather than at the next engine restart.
 var tokenWatchInterval = 2 * time.Second
 
+// runConnector runs one cloudflared attempt. A test replaces it with a fake child.
+var runConnector = runOnce
+
+// tokenTicks is the source of credential checks. A test replaces it with ticks
+// it sends itself, so no test waits for a clock.
+var tokenTicks = func() (<-chan time.Time, func()) {
+	ticker := time.NewTicker(tokenWatchInterval)
+	return ticker.C, ticker.Stop
+}
+
 // RunTunnel runs cloudflared for the managed tunnel until ctx ends, and
 // starts it again with backoff when it exits. The token goes in by file
 // (--token-file), never on the command line, so ps does not show it. A changed
@@ -39,8 +49,10 @@ func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...
 			start := time.Now()
 			runCtx, stop := context.WithCancel(ctx)
 			changed := make(chan struct{}, 1)
-			go watchTunnelToken(runCtx, st.TunnelTokenPath(), token, stop, changed, logf)
-			err := runOnce(runCtx, st, bin)
+			ticks, stopTicks := tokenTicks()
+			go watchTunnelToken(runCtx, st.TunnelTokenPath(), token, ticks, stop, changed, logf)
+			err := runConnector(runCtx, st, bin)
+			stopTicks()
 			stop()
 			if ctx.Err() != nil {
 				return
@@ -68,14 +80,12 @@ func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...
 // watchTunnelToken stops the connector when its credential changes or goes away.
 // A link writes a new token, and an unlink removes it; the child in flight still
 // holds the old tunnel, so it must not keep running.
-func watchTunnelToken(ctx context.Context, path string, seen []byte, stop context.CancelFunc, changed chan<- struct{}, logf func(string, ...any)) {
-	ticker := time.NewTicker(tokenWatchInterval)
-	defer ticker.Stop()
+func watchTunnelToken(ctx context.Context, path string, seen []byte, ticks <-chan time.Time, stop context.CancelFunc, changed chan<- struct{}, logf func(string, ...any)) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 		}
 		now, err := os.ReadFile(path)
 		if err == nil && bytes.Equal(now, seen) {
