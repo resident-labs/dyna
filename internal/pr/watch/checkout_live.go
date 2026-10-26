@@ -12,24 +12,29 @@ import (
 // no such file or directory" for the missing command directory, which names git
 // instead of the folder that is gone (D-131).
 //
-// A reviewer and the local CI machines only need a checkout of the same
-// repository, and the room repository outlives every session, so it is the
-// fallback. A GitHub record takes that fallback only when the room repository is
-// the record's repository.
+// RepoPath is a checkout Dyna resolved and matched against the record's
+// repository before storing it. LookupDir and Dir are only the directories the
+// caller and its session worked in, so a GitHub record proves each of them with
+// matchingCheckout before using it. The room repository outlives every session
+// and is the last fallback, with the same proof.
 func (s *Service) checkoutDir(ctx context.Context, r Record) (string, error) {
-	for _, dir := range []string{r.RepoPath, r.LookupDir, r.Dir} {
-		if isDirectory(dir) {
-			return dir, nil
+	if isDirectory(r.RepoPath) {
+		return r.RepoPath, nil
+	}
+	for _, dir := range []string{r.LookupDir, r.Dir} {
+		if !isDirectory(dir) {
+			continue
 		}
+		if changeKind(r) == "github" && matchingCheckout(ctx, r, dir) == "" {
+			continue
+		}
+		return dir, nil
 	}
 	if s.Notify == nil || s.Notify.Rooms == nil {
 		return "", missingCheckoutError(r)
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
-	if err != nil {
-		return "", missingCheckoutError(r)
-	}
-	if !isDirectory(rec.Repo) {
+	if err != nil || !isDirectory(rec.Repo) {
 		return "", missingCheckoutError(r)
 	}
 	if changeKind(r) == "github" && matchingCheckout(ctx, r, rec.Repo) == "" {
