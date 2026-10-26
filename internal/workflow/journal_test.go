@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"dyna-agent/internal/harness"
-	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
