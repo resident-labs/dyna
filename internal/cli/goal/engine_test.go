@@ -23,8 +23,8 @@ func TestWritesCallEngine(t *testing.T) {
 	}{
 		{"add", "AddGoal", []string{"Ship through engine", "--for", "@child"}, 4},
 		{"edit", "EditGoalSelectors", []string{"edit", "g1", "New text", "--for", "@child"}, 5},
-		{"done", "FinishGoal", []string{"done", "g1", "Shipped"}, 4},
-		{"drop", "FinishGoal", []string{"drop", "g1"}, 4},
+		{"done", "FinishGoal", []string{"done", "g1", "Shipped"}, 5},
+		{"drop", "FinishGoal", []string{"drop", "g1"}, 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
