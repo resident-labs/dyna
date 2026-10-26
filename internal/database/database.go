@@ -168,7 +168,7 @@ func init() { migrates.Store(testing.Testing()) }
 
 // OwnSchema makes this process the one that creates and migrates dyna.db.
 // The engine calls it before it opens any store.
-func OwnSchema() { migrates.Store(true) }
+func OwnSchema() { migrates.Store(true); migrationFailed.Store(false) }
 
 // OwnsSchema reports whether this process creates and migrates dyna.db.
 func OwnsSchema() bool { return migrates.Load() }
@@ -176,9 +176,30 @@ func OwnsSchema() bool { return migrates.Load() }
 // DisownSchema gives up schema ownership, for an engine whose migration
 // failed and that now runs read-only: it must not migrate a store lazily
 // on first open, so it fails like any other process instead.
-func DisownSchema() { migrates.Store(false) }
+func DisownSchema() { migrates.Store(false); migrationFailed.Store(true) }
+
+// migrationFailed marks an engine whose own migration failed: nothing is
+// updating there, so its errors keep the restart advice alone.
+var migrationFailed atomic.Bool
 
 var errNotMigrated = errors.New("only the engine creates and migrates dyna.db; restart it: systemctl --user restart dyna-engine.service")
+
+// olderSchemaError is a store the running engine has not migrated yet: this
+// dyna is newer than the engine, as in the minutes while an update restarts it.
+// It reads as errNotMigrated and says what to do first.
+type olderSchemaError struct {
+	key        string
+	have, need int
+}
+
+func (e olderSchemaError) Error() string {
+	if migrationFailed.Load() {
+		return fmt.Sprintf("%v: %s is version %d, this dyna needs %d", errNotMigrated, e.key, e.have, e.need)
+	}
+	return fmt.Sprintf("Dyna is updating; retry in a minute (%s is version %d, this dyna needs %d). If it stays this way, restart the engine: systemctl --user restart dyna-engine.service", e.key, e.have, e.need)
+}
+
+func (olderSchemaError) Is(target error) bool { return target == errNotMigrated }
 
 func openDatabase(dataDir string) (*sql.DB, error) {
 	path, err := filepath.Abs(filepath.Join(dataDir, "dyna.db"))
@@ -374,7 +395,7 @@ func Migrate(db *sql.DB, key string, version int, apply func(conn *sql.Conn, old
 	case err == nil && have > version:
 		return newerSchema(key, have, version)
 	case !migrates.Load() && err == nil:
-		return fmt.Errorf("%w: %s is version %d, this dyna needs %d", errNotMigrated, key, have, version)
+		return olderSchemaError{key: key, have: have, need: version}
 	case !migrates.Load():
 		return err
 	}
