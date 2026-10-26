@@ -26,10 +26,14 @@ type Engine struct {
 	// Profiles are the registered profiles. Nil reads the profiles file.
 	Profiles *profile.Store
 
-	mu     sync.Mutex
-	agents map[callspec.RunAgentRef]*agent
-	starts []callspec.RunAgentStart
-	closes int
+	mu          sync.Mutex
+	agents      map[callspec.RunAgentRef]*agent
+	starts      []callspec.RunAgentStart
+	closes      int
+	agentCloses []callspec.RunAgentRef
+	held        chan struct{}
+	heldOnce    sync.Once
+	heldStarted sync.Once
 }
 
 type agent struct {
@@ -69,6 +73,9 @@ func (f *Engine) Call(ctx context.Context, method string, args []any, result any
 			return err
 		}
 		return json.Unmarshal(raw, result)
+	case "CloseRunAgent":
+		ref, _ := args[0].(callspec.RunAgentRef)
+		return f.closeAgent(ctx, ref)
 	case "CloseRunAgents":
 		run, _ := args[0].(string)
 		return f.closeRun(ctx, run)
@@ -81,9 +88,30 @@ func (f *Engine) Bindings() []websvc.Binding {
 	return []websvc.Binding{
 		{Name: "StartRunAgent", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: f.start},
 		{Name: "WaitRunAgent", Access: websvc.Read, Scope: websvc.ScopeRead, Local: true, Method: f.wait},
+		{Name: "CloseRunAgent", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: f.closeAgent},
 		{Name: "CloseRunAgents", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: f.closeRun},
 	}
 }
+
+func (f *Engine) closeAgent(_ context.Context, ref callspec.RunAgentRef) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.agentCloses = append(f.agentCloses, ref)
+	if a := f.agents[ref]; a != nil {
+		a.cancel()
+	}
+	return nil
+}
+
+// ClosedAgents lists the CloseRunAgent calls received, in order.
+func (f *Engine) ClosedAgents() []callspec.RunAgentRef {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]callspec.RunAgentRef(nil), f.agentCloses...)
+}
+
+// HoldTask is a task that makes the fake's agent wait until it is closed.
+const HoldTask = "HOLD UNTIL CLOSED"
 
 func (f *Engine) closeRun(_ context.Context, run string) error {
 	f.mu.Lock()
@@ -105,6 +133,14 @@ func (f *Engine) start(_ context.Context, start callspec.RunAgentStart) error {
 	if _, exists := f.agents[ref]; exists {
 		return nil
 	}
+	if start.Inline != nil {
+		// Like the engine, take only a mock profile the run brings itself.
+		if start.Inline.Harness != profile.HarnessMock {
+			return fmt.Errorf("profile %q: only a mock profile can come with the run", start.Profile)
+		}
+		f.launch(start, ref, *start.Inline)
+		return nil
+	}
 	profiles := f.Profiles
 	if profiles == nil {
 		var err error
@@ -116,6 +152,12 @@ func (f *Engine) start(_ context.Context, start callspec.RunAgentStart) error {
 	if !ok {
 		return fmt.Errorf("unknown profile %q", start.Profile)
 	}
+	f.launch(start, ref, *prof)
+	return nil
+}
+
+// launch runs the agent on prof in the background. The caller holds f.mu.
+func (f *Engine) launch(start callspec.RunAgentStart, ref callspec.RunAgentRef, prof profile.Profile) {
 	runCtx, cancel := context.WithDeadline(context.Background(), start.Deadline)
 	a := &agent{cancel: cancel, done: make(chan struct{})}
 	if f.agents == nil {
@@ -125,12 +167,33 @@ func (f *Engine) start(_ context.Context, start callspec.RunAgentStart) error {
 	go func() {
 		defer close(a.done)
 		defer cancel()
-		a.state = run(runCtx, *prof, start)
+		a.state = f.run(runCtx, prof, start)
 	}()
-	return nil
 }
 
-func run(ctx context.Context, prof profile.Profile, start callspec.RunAgentStart) callspec.RunAgentState {
+// AfterHeldTask is a task that makes the fake's agent finish once an agent with
+// HoldTask has started, so a test can order two agents without a timer.
+const AfterHeldTask = "FINISH AFTER A HELD AGENT STARTED"
+
+func (f *Engine) heldChannel() chan struct{} {
+	f.heldOnce.Do(func() { f.held = make(chan struct{}) })
+	return f.held
+}
+
+func (f *Engine) run(ctx context.Context, prof profile.Profile, start callspec.RunAgentStart) callspec.RunAgentState {
+	if start.Task == AfterHeldTask {
+		select {
+		case <-f.heldChannel():
+			return callspec.RunAgentState{Done: true, OK: true, Status: "ok", Result: []byte(`"ok"`)}
+		case <-ctx.Done():
+			return callspec.RunAgentState{Done: true, Status: "stopped", Error: ctx.Err().Error()}
+		}
+	}
+	if start.Task == HoldTask {
+		f.heldStarted.Do(func() { close(f.heldChannel()) })
+		<-ctx.Done()
+		return callspec.RunAgentState{Done: true, Status: "stopped", Error: ctx.Err().Error()}
+	}
 	prompt := start.Task
 	var schema *structuredoutput.Schema
 	if start.Schema != "" {

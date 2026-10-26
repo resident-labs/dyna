@@ -315,6 +315,17 @@ func (e *engine) stopWorkers() {
 	e.closeAgents()
 }
 
+// closeAgent has the engine close and stop one agent's session.
+func (e *engine) closeAgent(id int) {
+	if e.opts.Engine == nil {
+		return
+	}
+	ref := callspec.RunAgentRef{Run: e.runID(), Agent: id}
+	if err := e.opts.Engine.Call(context.WithoutCancel(e.ctx), "CloseRunAgent", []any{ref}, nil); err != nil {
+		e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("could not close agent %d's session: %v", id, err))
+	}
+}
+
 // closeAgents has the engine close the run's agent sessions that are still
 // open: the run joined, failed or was canceled, and no agent outlives it. Only
 // the run's root script does it, and only after it started an agent.
@@ -690,10 +701,23 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		e.shared.mu.Unlock()
 		// The agent is a leaf session the engine runs like any other session.
 		// The coordinator only asks for it and waits for its first turn.
-		state, err := runAgentSession(actx, e.opts.Engine, callspec.RunAgentStart{
+		agentStart := callspec.RunAgentStart{
 			Run: e.runID(), Agent: id, Profile: prof.Name, Dir: cwd, Task: prompt, Schema: schemaJSON,
 			Deadline: start.Add(timeout), Journal: journalPath, JournalRoot: journalRoot,
-		})
+		}
+		// A mock profile can exist only in this run (the demo's), so the engine
+		// gets its definition. A mock harness holds no credentials.
+		if prof.Harness == profile.HarnessMock {
+			inline := prof
+			agentStart.Inline = &inline
+		}
+		state, err := runAgentSession(actx, e.opts.Engine, agentStart)
+		if err != nil {
+			// The call ended without a result (canceled, timed out, or failed):
+			// stop the session before this call gives up its slots, so a script
+			// that ended with the agent still running leaves nothing running.
+			e.closeAgent(id)
+		}
 		var resultAny any
 		rawOut := ""
 		if err == nil {
