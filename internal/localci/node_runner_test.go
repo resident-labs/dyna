@@ -403,6 +403,99 @@ func TestNodeDialSerializesSharedOutput(t *testing.T) {
 	}
 }
 
+// A check whose connection to the node dies can still be decided: the node's
+// wrapper wrote the check's exit record after the command ran, and the report
+// copy brought it back. An exit 0 there passes the check with a warning, while
+// any other exit or a missing record keeps what the transport proved. Trials
+// on a node behind Tailscale SSH kept losing their last checks this way (D-169):
+// the command finished, the machine's session died seconds later, and a passing
+// check was reported as a lost connection.
+func TestNodeJudgesTransportDeathFromNodeRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		streamMarks bool
+		record      string
+		wantStatus  Outcome
+		wantWarning bool
+	}{
+		{
+			name:        "record proves the check passed",
+			record:      `{"exitCode":0}`,
+			wantStatus:  OutcomePassed,
+			wantWarning: true,
+		},
+		{
+			name:        "record proves the check passed despite stream markers",
+			streamMarks: true,
+			record:      `{"exitCode":0}`,
+			wantStatus:  OutcomePassed,
+			wantWarning: true,
+		},
+		{
+			name:       "record proves the check failed",
+			record:     `{"exitCode":1}`,
+			wantStatus: OutcomeError,
+		},
+		{
+			name:       "no record came back",
+			wantStatus: OutcomeError,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
+			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				if fakeSystemdVersion(out, name, args) {
+					return nil
+				}
+				if fakeNodeGit(dir, out, name, args) {
+					return nil
+				}
+				script := args[len(args)-1]
+				if strings.Contains(script, "systemd-run") {
+					if tc.streamMarks {
+						fmt.Fprint(out, "\nDYNA_CI_CHECK_EXIT=0\nDYNA_CI_COMMAND_STARTED=1\n")
+					}
+					return exitStatus(255)
+				}
+				if strings.Contains(script, "tar -C") {
+					tw := tar.NewWriter(out)
+					files := map[string]string{"go-static/execution.json": `{"durationNanos":1000000000}`}
+					if tc.record != "" {
+						files["go-static/"+checkExitFile] = tc.record + "\n"
+					}
+					for file, body := range files {
+						if err := tw.WriteHeader(&tar.Header{Name: file, Mode: 0600, Size: int64(len(body))}); err != nil {
+							return err
+						}
+						if _, err := io.WriteString(tw, body); err != nil {
+							return err
+						}
+					}
+					return tw.Close()
+				}
+				return nil
+			}
+			result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
+			if len(result.Checks) != 1 {
+				t.Fatalf("checks = %d, want 1: %+v", len(result.Checks), result)
+			}
+			check := result.Checks[0]
+			if check.Status != tc.wantStatus {
+				t.Fatalf("check status = %s (%s, %q), want %s", check.Status, check.Cause, check.Error, tc.wantStatus)
+			}
+			if got := slices.Contains(check.Warnings, TransportDiedAfterCompletion); got != tc.wantWarning {
+				t.Fatalf("warnings = %v, transport warning %t want %t", check.Warnings, got, tc.wantWarning)
+			}
+			if tc.wantStatus == OutcomePassed && (err != nil || result.Status != OutcomePassed) {
+				t.Fatalf("run = %s err = %v, want a passed run", result.Status, err)
+			}
+			if tc.wantStatus != OutcomePassed && check.Cause != CauseSSHDrop {
+				t.Fatalf("check cause = %s, want the ssh drop", check.Cause)
+			}
+		})
+	}
+}
+
 func fakeNodeGit(dir string, out io.Writer, name string, args []string) bool {
 	if name != "git" {
 		return false
