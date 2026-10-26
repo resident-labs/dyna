@@ -193,3 +193,29 @@ func TestPiKeepsCustomMessagesAndBranchSummaries(t *testing.T) {
 		t.Fatalf("branch summary = %+v", summary)
 	}
 }
+
+// The newest compaction's retained range can contain an older compaction. Pi
+// suppresses the older one, so its summary must not replace the newest one.
+func TestPiKeepsTheNewestCompactionSummary(t *testing.T) {
+	path := piFixture(t,
+		`{"type":"session","version":3,"id":"pi-twice","timestamp":"2026-10-25T10:00:00Z","cwd":"/work"}`,
+		`{"type":"message","id":"u1","parentId":null,"timestamp":"2026-10-25T10:00:01Z","message":{"role":"user","content":"question one"}}`,
+		`{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-10-25T10:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"answer one"}]}}`,
+		`{"type":"compaction","id":"c1","parentId":"a1","timestamp":"2026-10-25T10:01:00Z","summary":"older summary","firstKeptEntryId":"u1"}`,
+		`{"type":"message","id":"u2","parentId":"c1","timestamp":"2026-10-25T10:01:01Z","message":{"role":"user","content":"question two"}}`,
+		`{"type":"message","id":"a2","parentId":"u2","timestamp":"2026-10-25T10:01:02Z","message":{"role":"assistant","content":[{"type":"text","text":"answer two"}]}}`,
+		`{"type":"compaction","id":"c2","parentId":"a2","timestamp":"2026-10-25T10:02:00Z","summary":"newer summary","firstKeptEntryId":"a1"}`,
+		`{"type":"message","id":"u3","parentId":"c2","timestamp":"2026-10-25T10:02:01Z","message":{"role":"user","content":"question three"}}`,
+		`{"type":"message","id":"a3","parentId":"u3","timestamp":"2026-10-25T10:02:02Z","message":{"role":"assistant","content":[{"type":"text","text":"answer three"}]}}`,
+	)
+	conversation, err := ReadPi(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conversation.Summary != "newer summary" {
+		t.Fatalf("summary = %q, want the newest compaction", conversation.Summary)
+	}
+	if len(conversation.Messages) != 5 || conversation.Messages[0].Blocks[0].Text != "answer one" {
+		t.Fatalf("kept messages = %+v", conversation.Messages)
+	}
+}
