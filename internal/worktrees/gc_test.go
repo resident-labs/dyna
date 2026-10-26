@@ -635,6 +635,20 @@ func TestNewForPinsASuppliedBaseBeforeTheRefreshFetch(t *testing.T) {
 	}
 }
 
+// A remote-tracking base still configures the new branch's upstream, as
+// `git worktree add` always did under git's branch.autoSetupMerge rules.
+func TestNewForKeepsUpstreamTrackingForARemoteBase(t *testing.T) {
+	repo := gcRepo(t)
+	rec, err := NewFor(context.Background(), repo, "tracked", "origin/main", "owner", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := git(t, rec.Path, "rev-parse", "--abbrev-ref", "tracked@{upstream}")
+	if upstream != "origin/main" {
+		t.Fatalf("upstream = %q, want origin/main", upstream)
+	}
+}
+
 // An outside clone whose remote has no main branch keeps its trees, and that
 // is not a cleanup failure. An unreachable remote still fails closed.
 func TestGCKeepsTreesOfARemoteWithoutMainWithoutFailing(t *testing.T) {
