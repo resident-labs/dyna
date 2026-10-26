@@ -96,6 +96,7 @@ func (s *outdatedServer) notRestarted() {
 const (
 	callJobs   = `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shell_jobs","arguments":{}}}` + "\n"
 	callSearch = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"web_search","arguments":{"query":"x"}}}` + "\n"
+	pingWhole  = `{"jsonrpc":"2.0","id":4,"method":"ping"}` + "\n"
 	pingHead   = `{"jsonrpc":"2.0","id":3,"meth`
 	pingTail   = `od":"ping"}` + "\n"
 )
@@ -156,8 +157,12 @@ func TestServeRestartWaitsForAHalfReadRequest(t *testing.T) {
 	if line := s.reply(); !strings.Contains(line, `"id":2`) {
 		t.Fatalf("the outdated call answered %q", line)
 	}
-	// Half of the next request is on the wire when the last call finishes.
-	s.send(pingHead)
+	// A whole request and half of the next one arrive in one write, so the
+	// server has read the half once it answers the whole one.
+	s.send(pingWhole + pingHead)
+	if line := s.reply(); !strings.Contains(line, `"id":4`) {
+		t.Fatalf("the whole request answered %q", line)
+	}
 	close(release)
 	if line := s.reply(); !strings.Contains(line, `"id":1`) {
 		t.Fatalf("the search lost its answer: %q", line)
