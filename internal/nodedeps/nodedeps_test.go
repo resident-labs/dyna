@@ -306,6 +306,9 @@ func newRepo(t *testing.T) (string, string) {
 	git(t, repo, "init", "-q")
 	git(t, repo, "config", "user.name", "Dyna Test")
 	git(t, repo, "config", "user.email", "dyna-test@example.com")
+	// No background gc or maintenance may prune worktrees under a test (D-188).
+	git(t, repo, "config", "gc.auto", "0")
+	git(t, repo, "config", "maintenance.auto", "false")
 	writeFile(t, filepath.Join(repo, ".gitignore"), "node_modules/\n")
 	writeFile(t, filepath.Join(repo, "desktop", "frontend", "package-lock.json"), `{"lockfileVersion": 3}`)
 	writeFile(t, filepath.Join(repo, "desktop", "frontend", "package.json"), `{"name": "frontend"}`)
