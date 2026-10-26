@@ -39,6 +39,9 @@ type Accounts struct {
 	Root string
 	// NativeManager permits offline adapter injection and additional account backends.
 	NativeManager func(string, native.Host) (native.Manager, bool)
+	// PiExecutable resolves Dyna's own copy of Pi, which renews a saved grant.
+	// Nil uses the installed bundle, and a test injects a path or a failure.
+	PiExecutable func() (string, error)
 	// Quiet makes its registry writes publish no account change. See store.Store.
 	Quiet bool
 }
