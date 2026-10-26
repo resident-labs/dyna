@@ -90,6 +90,17 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	if out, err := run(t, "show", "hermes"); err != nil || !strings.Contains(out, "Host checks: true") {
 		t.Fatalf("host-check setting = %q, %v", out, err)
 	}
+	// A machine that cannot run Docker names its own runtime socket, and a
+	// value that is not a unix socket is refused before anything is saved.
+	if _, err := run(t, "edit", "hermes", "--container-socket", "tcp://127.0.0.1:2375"); err == nil || !strings.Contains(err.Error(), "must be a unix:// path") {
+		t.Fatalf("a tcp socket = %v", err)
+	}
+	if _, err := run(t, "edit", "hermes", "--container-socket", "unix:///run/user/1000/podman/podman.sock"); err != nil {
+		t.Fatal(err)
+	}
+	if socketMachine, _ := find(listed(t), "hermes"); socketMachine.ContainerSocket != "unix:///run/user/1000/podman/podman.sock" {
+		t.Fatalf("container socket = %q", socketMachine.ContainerSocket)
+	}
 	if _, err := run(t, "edit", "hermes", "--rename", "hermeslab", "--disable"); err != nil {
 		t.Fatal(err)
 	}
