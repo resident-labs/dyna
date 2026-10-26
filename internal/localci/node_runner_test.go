@@ -1416,3 +1416,57 @@ func TestHostCheckDoesNotStartWithoutItsTempFolder(t *testing.T) {
 		t.Fatal("the check command ran without its temporary folder")
 	}
 }
+
+// A teardown that failed leaves its container and unit with no record. The next
+// check on the node removes the old ones that belong to no live run, and keeps
+// young ones, live runs' and ones whose age it cannot read.
+func TestCheckStartRemovesOldSurvivorsOfNoLiveRun(t *testing.T) {
+	dir := t.TempDir()
+	fakeNodeTools(t, dir)
+	removed := filepath.Join(dir, "removed")
+	old := time.Now().Add(-7 * time.Hour).UTC().Format(time.RFC3339Nano)
+	young := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	docker := `#!/bin/sh
+case "$1" in
+ps) printf 'c-old dead\nc-young dead\nc-live live\nc-bad dead\n' ;;
+inspect) case "$4" in c-old|c-live) echo ` + old + ` ;; c-young) echo ` + young + ` ;; esac ;;
+rm) echo "docker $3" >> ` + removed + ` ;;
+esac
+`
+	systemctl := `#!/bin/sh
+case "$2" in
+list-units) printf 'dyna-ci-dead-a-run.service loaded failed failed x\ndyna-ci-live-a.scope loaded active running x\ndyna-ci-dead-b.scope loaded active running x\n' ;;
+show) case "$6" in dyna-ci-dead-b.scope) date -u -d '-1 hour' '+%a %Y-%m-%d %H:%M:%S UTC' ;; *) date -u -d '-7 hours' '+%a %Y-%m-%d %H:%M:%S UTC' ;; esac ;;
+stop) echo "unit $3" >> ` + removed + ` ;;
+esac
+`
+	for name, body := range map[string]string{"docker": docker, "systemctl": systemctl} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The live run's keeper holds its lock.
+	liveDir := filepath.Join(dir, "runs", "live")
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(liveDir, ".active"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-c", survivorSweep(dir))
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("sweep: %v: %s", err, output)
+	}
+	data, _ := os.ReadFile(removed)
+	got := strings.Fields(strings.ReplaceAll(string(data), "\n", " "))
+	want := []string{"docker", "c-old", "unit", "dyna-ci-dead-a-run.service"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("removed %q, want only the old container and old unit of no live run", got)
+	}
+}
