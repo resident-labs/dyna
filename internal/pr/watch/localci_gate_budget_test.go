@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -45,5 +46,34 @@ func TestPerTestBudgetFollowsTheRoomMode(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A long list of timing warnings from a local run keeps whole warnings and
+// points to the local result for the rest. A local run has nothing on GitHub to
+// read, so the note must not send the reader there.
+func TestLongLocalTimingWarningPointsToTheLocalResult(t *testing.T) {
+	policy := changepolicy.Policy{CITimeBudget: "warn", CITestMax: "2s"}
+	var slow []localci.TestTiming
+	for i := 0; i < 80; i++ {
+		slow = append(slow, localci.TestTiming{Name: fmt.Sprintf("dyna-agent/internal/pkg.TestSlowCaseNumber%02d", i), Duration: 3 * time.Second})
+	}
+	sha := strings.Repeat("c", 40)
+	result := localci.Result{Node: "pve", SHA: sha, Status: localci.OutcomePassed, Checks: []localci.SuiteResult{{
+		Suite: "go-test-shard-0", CheckName: "go-test-shard (0)", Status: localci.OutcomePassed, SlowTests: slow,
+	}}}
+	note := applyLocalBudgets(&result, policy)
+	if strings.Contains(note, "GitHub") || strings.Contains(note, "truncated") {
+		t.Fatalf("local note points to GitHub: %q", note)
+	}
+	if !strings.HasSuffix(note, "more warnings; run dyna git ci show "+sha+" for all of them") {
+		t.Fatalf("note does not name the local result: %q", note[max(0, len(note)-200):])
+	}
+	if strings.Contains(note, "TestSlowCaseNumber79") || len(note) > maxLocalNotes+200 {
+		t.Fatalf("note was not bounded: %d bytes", len(note))
+	}
+	parts := strings.Split(note, "; ")
+	if last := parts[len(parts)-3]; !strings.HasSuffix(last, "the test limit is 2s") {
+		t.Fatalf("a warning was cut mid-way: %q", last)
 	}
 }
