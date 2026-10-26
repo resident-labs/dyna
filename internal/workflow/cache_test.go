@@ -335,7 +335,6 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 	}{
 		{"runtime version", func(p *profile.Profile) { p.RuntimeVersion = "2" }},
 		{"runtime executable", func(p *profile.Profile) { p.RuntimeExecutable = "/other/executable" }},
-		{"runtime skills", func(p *profile.Profile) { p.RuntimeSkillPaths = []string{"/other/skill"} }},
 		{"effective dialect", func(p *profile.Profile) {
 			p.Output = &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON}
 		}},

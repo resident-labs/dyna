@@ -35,7 +35,7 @@ func TestBrowserRuntimeSyncRefusesBeforeConfigAccess(t *testing.T) {
 		}
 		for _, kind := range []string{"mcp", "skill"} {
 			_, err := r.SyncCatalogAccount(authority.WithActor(t.Context(), authority.Actor{Role: role}), kind, "pi", "account")
-			if err == nil || !strings.Contains(err.Error(), kind+" sync is owner or root only") {
+			if err == nil || !strings.Contains(err.Error(), "mcp sync is owner or root only") {
 				t.Errorf("account sync as %q reached config: %v", role, err)
 			}
 		}
@@ -100,29 +100,27 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 	}
 	for _, role := range []authority.Role{authority.Owner, authority.Root} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
-		for _, kind := range []string{"mcp", "skill"} {
-			result, err := r.SyncCatalogAccount(ctx, kind, "pi", selected.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.ID != generation.ID || result.Directory != generation.Directory {
-				t.Fatalf("selected account result = %+v", result)
-			}
-			raw, err := json.Marshal(result)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var fields map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &fields); err != nil {
-				t.Fatal(err)
-			}
-			if len(fields) < 2 || len(fields) > 3 || fields["id"] == nil || fields["directory"] == nil || strings.Contains(string(raw), "materialized-secret-canary") {
-				t.Fatalf("unsafe summary = %s", raw)
-			}
-			for key := range fields {
-				if key != "id" && key != "directory" && key != "partialReasons" {
-					t.Errorf("summary exposes %s", key)
-				}
+		result, err := r.SyncCatalogAccount(ctx, "mcp", "pi", selected.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.ID != generation.ID || result.Directory != generation.Directory {
+			t.Fatalf("selected account result = %+v", result)
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if len(fields) < 2 || len(fields) > 3 || fields["id"] == nil || fields["directory"] == nil || strings.Contains(string(raw), "materialized-secret-canary") {
+			t.Fatalf("unsafe summary = %s", raw)
+		}
+		for key := range fields {
+			if key != "id" && key != "directory" && key != "partialReasons" {
+				t.Errorf("summary exposes %s", key)
 			}
 		}
 	}
@@ -131,11 +129,13 @@ func TestSyncCatalogAccountScopeValidationAndSummary(t *testing.T) {
 	}
 	for _, tc := range []struct{ kind, harness, account, want string }{
 		{"mcp", "claude", selected.ID, "private account belongs to another harness"},
-		{"skill", "unknown-harness", selected.ID, "adapter is not available"},
+		{"mcp", "unknown-harness", selected.ID, "adapter is not available"},
 		{"mcp", "pi", "missing", "does not exist"},
 		{"mcp", "pi", "", "sync requires --account"},
-		{"skill", "", selected.ID, "sync requires --harness"},
+		{"mcp", "", selected.ID, "sync requires --harness"},
 		{"other", "pi", selected.ID, "unsupported config kind"},
+		// The skill catalog is global and never writes a native config.
+		{"skill", "pi", selected.ID, "only MCP config syncs"},
 	} {
 		_, err := r.SyncCatalogAccount(owner, tc.kind, tc.harness, tc.account)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

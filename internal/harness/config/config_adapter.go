@@ -7,11 +7,9 @@ import (
 
 // HarnessConfigCapabilities describes supported catalog generation features.
 type HarnessConfigCapabilities struct {
-	Harness      string `json:"harness"`
-	MCP          bool   `json:"mcp"`
-	Skills       bool   `json:"skills"`
-	MCPReason    string `json:"mcpReason,omitempty"`
-	SkillsReason string `json:"skillsReason,omitempty"`
+	Harness   string `json:"harness"`
+	MCP       bool   `json:"mcp"`
+	MCPReason string `json:"mcpReason,omitempty"`
 }
 
 // ConfigAdapter describes one harness's catalog features.
@@ -52,5 +50,5 @@ func ConfigCapabilities() []HarnessConfigCapabilities {
 type nativeConfigAdapter struct{ harness string }
 
 func (a nativeConfigAdapter) Capabilities() HarnessConfigCapabilities {
-	return HarnessConfigCapabilities{Harness: a.harness, MCP: true, Skills: true}
+	return HarnessConfigCapabilities{Harness: a.harness, MCP: true}
 }

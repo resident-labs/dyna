@@ -58,7 +58,7 @@ func catalogFixture(t *testing.T) (string, []byte) {
 	}
 	baseline := config.HarnessConfig{
 		MCP:    []config.ManagedMCP{{Name: "existing", MCPDefinition: config.MCPDefinition{Command: "node"}, EnabledHarnesses: []string{}}},
-		Skills: []config.ManagedSkill{{Name: "existing", Source: source, EnabledHarnesses: []string{}}},
+		Skills: []config.ManagedSkill{{Name: "existing", Source: source, Enabled: true}},
 	}
 	b, err := json.Marshal(baseline)
 	if err != nil {
@@ -76,7 +76,8 @@ func catalogFixture(t *testing.T) (string, []byte) {
 
 func catalogArgs(kind, verb, source, harness string) []string {
 	args := []string{verb, "existing"}
-	if harness != "" {
+	// The skill catalog is global, so only MCP commands take --harness.
+	if harness != "" && kind == "mcp" {
 		args = append(args, "--harness", harness)
 	}
 	if verb == "add" {
@@ -151,18 +152,23 @@ func TestCatalogTransportPreservesPayloadAndOutput(t *testing.T) {
 			enabled = append(enabled, harness)
 		}
 		for _, kind := range []string{"mcp", "skill"} {
+			// A skill edit ignores the harness: the catalog is global.
+			scope := harness
+			if kind == "skill" {
+				scope = ""
+			}
 			for _, verb := range []string{"add", "rm", "enable", "disable"} {
 				args := catalogArgs(kind, verb, source, harness)
 				method := "SetCatalogEntryEnabled"
-				payload := []any{kind, "existing", harness, verb == "enable"}
+				payload := []any{kind, "existing", scope, verb == "enable"}
 				if verb == "rm" {
-					method, payload = "RemoveCatalogEntry", []any{kind, "existing", harness}
+					method, payload = "RemoveCatalogEntry", []any{kind, "existing", scope}
 				} else if verb == "add" && kind == "mcp" {
 					args = append(args, "--arg", " spaced ", "--arg", "second", "--env-key", "TOOL_ENV")
 					method = "AddCatalogMCP"
 					payload = []any{config.ManagedMCP{Name: "new", MCPDefinition: config.MCPDefinition{Command: "node", Args: []string{" spaced ", "second"}, EnvKeys: []string{"TOOL_ENV"}}, EnabledHarnesses: enabled}, harness}
 				} else if verb == "add" {
-					method, payload = "AddCatalogSkill", []any{config.ManagedSkill{Name: "new", Source: source, EnabledHarnesses: enabled}, harness}
+					method, payload = "AddCatalogSkill", []any{config.ManagedSkill{Name: "new", Source: source, Enabled: true}, ""}
 				}
 				out, err := runCatalog(t.Context(), kind, args)
 				if err != nil || out != "Dyna catalog updated.\n" {

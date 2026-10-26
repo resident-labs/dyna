@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
@@ -27,7 +24,6 @@ type nativeGeneration struct {
 	Env            map[string]string `json:"env"` // native paths/reference syntax only; no values
 	EnvKeys        []string          `json:"envKeys"`
 	PartialReasons []string          `json:"partialReasons"`
-	SkillPaths     []string          `json:"skillPaths"`
 }
 
 type privateGenerationHome struct {
@@ -124,25 +120,6 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 		}
 		servers[entry.Name] = row
 	}
-	skills := filepath.Join(dir, "skills")
-	if err := os.Mkdir(skills, 0700); err != nil {
-		return g, err
-	}
-	paths := []string{}
-	for _, entry := range c.Skills {
-		if !slices.Contains(entry.EnabledHarnesses, h) {
-			continue
-		}
-		source := entry.Source
-		if filepath.Base(entry.Name) != entry.Name || entry.Name == "." || entry.Name == ".." {
-			return g, errors.New("invalid skill name")
-		}
-		target := filepath.Join(skills, entry.Name)
-		if err := copyRuntimeSkill(source, target); err != nil {
-			return g, err
-		}
-		paths = append(paths, filepath.Join(published, "skills", entry.Name, "SKILL.md"))
-	}
 	root := map[string]any{}
 	for name, value := range prefs {
 		putRuntimePreference(root, name, value)
@@ -186,7 +163,7 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 	}
 	if a.ConfigArgs != nil {
 		// Adapters construct paths from the published generation.
-		g.Args = a.ConfigArgs(home, filepath.Join(published, filepath.Base(file)), filepath.Join(published, "skills"))
+		g.Args = a.ConfigArgs(home, filepath.Join(published, filepath.Base(file)))
 	}
 	if h == "pi" {
 		mcpRaw, e := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
@@ -200,9 +177,6 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 	if a.ConfigFile != "" {
 		g.PartialReasons = append(g.PartialReasons, "Native settings use the shared harness home and are not pinned per generation.")
 	}
-	if a.SkillDir != "" && !a.SkillsPinned {
-		g.PartialReasons = append(g.PartialReasons, "Native account-home skills are not pinned per generation.")
-	}
 	slices.Sort(g.EnvKeys)
 	g.EnvKeys = slices.Compact(g.EnvKeys)
 	safeEnv := map[string]string{}
@@ -211,7 +185,7 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 			safeEnv[k] = v
 		}
 	}
-	meta := nativeGeneration{Version: 2, Harness: h, Home: home, CLI: generationCLI(servers), Args: g.Args, Env: safeEnv, EnvKeys: g.EnvKeys, PartialReasons: g.PartialReasons, SkillPaths: paths, EnvReferences: envReferences}
+	meta := nativeGeneration{Version: 2, Harness: h, Home: home, CLI: generationCLI(servers), Args: g.Args, Env: safeEnv, EnvKeys: g.EnvKeys, PartialReasons: g.PartialReasons, EnvReferences: envReferences}
 	if err := writeNativeGeneration(filepath.Join(dir, "native-generation.json"), meta); err != nil {
 		return g, err
 	}
@@ -292,43 +266,6 @@ func readNativeGeneration(h, dir string, lookup func(string) (string, bool)) (ha
 		out.Env[alias] = v
 	}
 	return restoreGenerationHome(h, dir, out)
-}
-func copyRuntimeSkill(source, target string) error {
-	source, err := filepath.EvalSymlinks(source)
-	if err != nil {
-		return errors.New("skill source is unavailable")
-	}
-	root, err := os.OpenRoot(source)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	return fs.WalkDir(root.FS(), ".", func(rel string, e fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return errors.New("skill source could not be read")
-		}
-		dest := filepath.Join(target, filepath.FromSlash(rel))
-		if e.IsDir() {
-			return os.MkdirAll(dest, 0700)
-		}
-		if !e.Type().IsRegular() {
-			return errors.New("skill resources must be regular files")
-		}
-		f, err := root.OpenFile(filepath.FromSlash(rel), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil || !info.Mode().IsRegular() {
-			return errors.New("skill resources must be regular files")
-		}
-		b, err := io.ReadAll(f)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dest, b, 0600|info.Mode().Perm()&0100)
-	})
 }
 func putRuntimePreference(root map[string]any, key string, value any) {
 	parts := strings.Split(key, ".")

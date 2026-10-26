@@ -30,7 +30,7 @@ func TestCatalogWritesUseCallerPower(t *testing.T) {
 		args         []any
 	}{
 		{"AddHarnessMCP", "mcp add", []any{config.ManagedMCP{Name: "new", MCPDefinition: config.MCPDefinition{Command: "node"}, EnabledHarnesses: []string{}}}},
-		{"AddHarnessSkill", "skill add", []any{config.ManagedSkill{Name: "new", Source: source, EnabledHarnesses: []string{}}}},
+		{"AddHarnessSkill", "skill add", []any{config.ManagedSkill{Name: "new", Source: source, Enabled: true}}},
 		{"RemoveHarnessConfig", "mcp rm", []any{"mcp", "existing", ""}},
 		{"RemoveHarnessConfig", "skill rm", []any{"skill", "existing", ""}},
 		{"RemoveHarnessConfig", "mcp rm scoped", []any{"mcp", "existing", "pi"}},
@@ -47,9 +47,11 @@ func TestCatalogWritesUseCallerPower(t *testing.T) {
 					if strings.HasSuffix(op.action, " enable") {
 						enabled = []string{}
 					}
+					// The skill catalog is global: only its one Enabled flag moves.
+					skillEnabled := !strings.HasSuffix(op.action, " enable")
 					baseline, err := json.Marshal(config.HarnessConfig{
 						MCP:    []config.ManagedMCP{{Name: "existing", MCPDefinition: config.MCPDefinition{Command: "node"}, EnabledHarnesses: enabled}},
-						Skills: []config.ManagedSkill{{Name: "existing", Source: source, EnabledHarnesses: enabled}},
+						Skills: []config.ManagedSkill{{Name: "existing", Source: source, Enabled: skillEnabled}},
 					})
 					if err != nil {
 						t.Fatal(err)

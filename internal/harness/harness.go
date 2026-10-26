@@ -517,9 +517,6 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		}
 		defer release()
 		p, accountID = selected, pin.AccountID
-		if len(p.RuntimeSkillPaths) > 0 {
-			prompt += "\n\nDyna-managed skills are available for this turn. Read the matching SKILL.md before using a skill:\n" + strings.Join(p.RuntimeSkillPaths, "\n")
-		}
 		if session.OnRuntime != nil {
 			if err := session.OnRuntime(pin); err != nil {
 				return Result{}, notReady(ctx, p, err)

@@ -88,6 +88,7 @@ func sessionCwd(store *subagent.Store, owner, fallback string) string {
 }
 
 // AddCatalogList exposes only Dyna's catalog. Personal MCP/skill import is retired.
+// The skill catalog is global, so only an MCP list takes --harness.
 func AddCatalogList(parent *cobra.Command, kind string) {
 	var harness string
 	c := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -106,6 +107,8 @@ func AddCatalogList(parent *cobra.Command, kind string) {
 		e.SetIndent("", "  ")
 		return e.Encode(entries)
 	}}
-	c.Flags().StringVar(&harness, "harness", "", "limit to one harness ID")
+	if kind == "mcp" {
+		c.Flags().StringVar(&harness, "harness", "", "limit to one harness ID")
+	}
 	parent.AddCommand(c)
 }

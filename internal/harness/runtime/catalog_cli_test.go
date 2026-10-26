@@ -68,11 +68,11 @@ func TestCatalogCLIRefreshScopeAndSavedError(t *testing.T) {
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
 	source := catalogSkillSource(t)
 	for _, harness := range []string{"pi", ""} {
-		for _, method := range []string{"mcp add", "skill add", "mcp rm", "skill rm", "mcp enable", "skill disable"} {
+		for _, method := range []string{"mcp add", "mcp rm", "mcp enable"} {
 			t.Run(harness+"/"+method, func(t *testing.T) {
 				baseline := config.HarnessConfig{
 					MCP:    []config.ManagedMCP{{Name: "existing", MCPDefinition: config.MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"pi"}}},
-					Skills: []config.ManagedSkill{{Name: "existing", Source: source, EnabledHarnesses: []string{"pi", "claude-code"}}},
+					Skills: []config.ManagedSkill{{Name: "existing", Source: source, Enabled: true}},
 				}
 				canary := catalogRetirementCanary(t, r)
 				b, err := json.Marshal(baseline)
@@ -85,16 +85,10 @@ func TestCatalogCLIRefreshScopeAndSavedError(t *testing.T) {
 				switch method {
 				case "mcp add":
 					err = r.AddCatalogMCP(ctx, config.ManagedMCP{Name: "new", MCPDefinition: config.MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"pi"}}, harness)
-				case "skill add":
-					err = r.AddCatalogSkill(ctx, config.ManagedSkill{Name: "new", Source: source, EnabledHarnesses: []string{"pi"}}, harness)
 				case "mcp rm":
 					err = r.RemoveCatalogEntry(ctx, "mcp", "existing", harness)
-				case "skill rm":
-					err = r.RemoveCatalogEntry(ctx, "skill", "existing", harness)
 				case "mcp enable":
 					err = r.SetCatalogEntryEnabled(ctx, "mcp", "existing", harness, true)
-				case "skill disable":
-					err = r.SetCatalogEntryEnabled(ctx, "skill", "existing", harness, false)
 				}
 				if harness != "" && err != nil {
 					t.Fatalf("scoped refresh reached Claude: %v", err)
@@ -114,29 +108,56 @@ func TestCatalogCLIRefreshScopeAndSavedError(t *testing.T) {
 					if !slices.ContainsFunc(got.MCP, func(p config.ManagedMCP) bool { return p.Name == "new" }) {
 						t.Error("MCP add was not saved")
 					}
-				case "skill add":
-					if !slices.ContainsFunc(got.Skills, func(p config.ManagedSkill) bool { return p.Name == "new" }) {
-						t.Error("skill add was not saved")
-					}
 				case "mcp rm":
 					if harness == "" && len(got.MCP) != 0 || harness != "" && slices.Contains(got.MCP[0].EnabledHarnesses, harness) {
 						t.Error("MCP remove was not saved")
-					}
-				case "skill rm":
-					if harness == "" && len(got.Skills) != 0 || harness != "" && slices.Contains(got.Skills[0].EnabledHarnesses, harness) {
-						t.Error("skill remove was not saved")
 					}
 				case "mcp enable":
 					if harness == "" && !slices.Contains(got.MCP[0].EnabledHarnesses, "claude-code") {
 						t.Error("MCP enable was not saved")
 					}
-				case "skill disable":
-					if harness == "" && len(got.Skills[0].EnabledHarnesses) != 0 || harness != "" && slices.Contains(got.Skills[0].EnabledHarnesses, harness) {
-						t.Error("skill disable was not saved")
-					}
 				}
 			})
 		}
+	}
+}
+
+// A skill edit saves the catalog but never regenerates a native config, so it
+// touches no harness home and cannot fail on a blocked generation root.
+func TestCatalogCLISkillEditsDoNotRegenerate(t *testing.T) {
+	r := catalogScopeRuntime(t)
+	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
+	source := catalogSkillSource(t)
+	baseline := config.HarnessConfig{Skills: []config.ManagedSkill{{Name: "existing", Source: source, Enabled: true}}}
+	b, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(r.Config.Path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.Config.Path, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	canary := catalogRetirementCanary(t, r)
+	if err := r.AddCatalogSkill(ctx, config.ManagedSkill{Name: "new", Source: source, Enabled: true}, "pi"); err != nil {
+		t.Fatalf("skill add regenerated: %v", err)
+	}
+	if err := r.SetCatalogEntryEnabled(ctx, "skill", "existing", "pi", false); err != nil {
+		t.Fatalf("skill disable regenerated: %v", err)
+	}
+	if err := r.RemoveCatalogEntry(ctx, "skill", "new", "pi"); err != nil {
+		t.Fatalf("skill remove regenerated: %v", err)
+	}
+	if _, err := os.Stat(canary); err != nil {
+		t.Fatalf("skill edit regenerated a native config: %v", err)
+	}
+	got, err := r.Config.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skills) != 1 || got.Skills[0].Name != "existing" || got.Skills[0].Enabled {
+		t.Fatalf("skill edits were not saved: %+v", got.Skills)
 	}
 }
 
@@ -171,15 +192,15 @@ func TestCatalogCLIFailuresDoNotRefresh(t *testing.T) {
 	}
 }
 
-func TestBrowserCatalogAddsKeepAllHarnessRefresh(t *testing.T) {
+func TestBrowserCatalogMCPAddKeepsAllHarnessRefresh(t *testing.T) {
 	r := catalogScopeRuntime(t)
 	ctx := authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner})
 	source := catalogSkillSource(t)
 	_, mcpErr := r.AddHarnessMCP(ctx, config.ManagedMCP{Name: "browser-mcp", MCPDefinition: config.MCPDefinition{Command: "node"}, EnabledHarnesses: []string{"pi"}})
-	_, skillErr := r.AddHarnessSkill(ctx, config.ManagedSkill{Name: "browser-skill", Source: source, EnabledHarnesses: []string{"pi"}})
-	for _, err := range []error{mcpErr, skillErr} {
-		if err == nil || !strings.HasPrefix(err.Error(), "generation is pending for claude-code") || strings.Contains(err.Error(), "catalog saved") {
-			t.Fatalf("browser refresh changed: %v", err)
-		}
+	if mcpErr == nil || !strings.HasPrefix(mcpErr.Error(), "generation is pending for claude-code") || strings.Contains(mcpErr.Error(), "catalog saved") {
+		t.Fatalf("browser refresh changed: %v", mcpErr)
+	}
+	if _, err := r.AddHarnessSkill(ctx, config.ManagedSkill{Name: "browser-skill", Source: source, Enabled: true}); err != nil {
+		t.Fatalf("browser skill add regenerated: %v", err)
 	}
 }
