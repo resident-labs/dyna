@@ -46,11 +46,11 @@ func TestEnsurePrivateScratch(t *testing.T) {
 	}
 }
 
-// A closing session's scratch folder goes at once, while the periodic pass keeps
-// a closed session's folder for its retention.
-func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
-	for _, closing := range []bool{false, true} {
-		t.Run(fmt.Sprintf("closing=%t", closing), func(t *testing.T) {
+// A closed session's scratch stays for the whole retention, even for a sweep
+// aimed at that session alone, and goes in the first sweep after it ends.
+func TestSweepKeepsClosedSessionScratchForRetention(t *testing.T) {
+	for _, age := range []time.Duration{time.Minute, ClosedRetention - time.Minute, ClosedRetention + time.Minute} {
+		t.Run(fmt.Sprint(age), func(t *testing.T) {
 			isolateRoot(t)
 			root := Root()
 			if err := os.Mkdir(root, 0700); err != nil {
@@ -64,24 +64,41 @@ func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(owner, "note"), []byte("scratch"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			var logs []string
 			result, err := Sweep(context.Background(), Options{
-				Now:     now,
-				Only:    filepath.Base(owner),
-				Closing: closing,
-				Logf:    t.Logf,
-				Lookup:  func(string) Owner { return Owner{Known: true, ClosedAt: now.Add(-time.Minute)} },
+				Now:    now,
+				Only:   filepath.Base(owner),
+				Logf:   func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+				Lookup: func(string) Owner { return Owner{Known: true, ClosedAt: now.Add(-age)} },
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, statErr := os.Stat(owner)
-			switch {
-			case closing && !errors.Is(statErr, fs.ErrNotExist):
-				t.Fatalf("a closing session kept its scratch: %v, %+v", statErr, result)
-			case !closing && statErr != nil:
-				t.Fatalf("the periodic pass removed a closed session's scratch inside its retention: %v, %+v", statErr, result)
+			expired := age > ClosedRetention
+			if expired != errors.Is(statErr, fs.ErrNotExist) {
+				t.Fatalf("closed %v ago: stat error %v, want removed=%t, %+v", age, statErr, expired, result)
+			}
+			want := fmt.Sprintf("scratch: removed %s (owner %s, closed %s)", owner, filepath.Base(owner), now.Add(-age).UTC().Format(time.RFC3339))
+			if expired && (len(logs) != 1 || logs[0] != want) || !expired && len(logs) != 0 {
+				t.Fatalf("logs = %q, want removal logged only when expired: %q", logs, want)
 			}
 		})
+	}
+}
+
+func TestRetainedNoticeNamesPathAndDeletionDate(t *testing.T) {
+	isolateRoot(t)
+	closedAt := time.Date(2026, 10, 26, 8, 16, 0, 0, time.UTC)
+	if got := RetainedNotice("ses_none", closedAt); got != "" {
+		t.Fatalf("notice for a session with no scratch: %q", got)
+	}
+	path, err := Ensure("ses_kept")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := RetainedNotice("ses_kept", closedAt), "scratch kept at "+path+" until 2026-11-02"; got != want {
+		t.Fatalf("notice = %q, want %q", got, want)
 	}
 }
 
@@ -98,8 +115,8 @@ func TestSweepRetentionAndSymlinks(t *testing.T) {
 	}
 	now := time.Now()
 	old := now.Add(-4 * 24 * time.Hour)
-	owners := map[string]time.Time{"closed-old": now.Add(-25 * time.Hour), "closed-recent": now.Add(-12 * time.Hour), "active": {}, "closed-link": now.Add(-25 * time.Hour)}
-	for _, name := range []string{"closed-old", "closed-recent", "active", "unknown-old", "unknown-recent", "unknown-child-recent"} {
+	owners := map[string]time.Time{"closed-old": now.Add(-ClosedRetention - time.Hour), "closed-recent": now.Add(-ClosedRetention + time.Hour), "active": {}, "closed-link": now.Add(-ClosedRetention - time.Hour)}
+	for _, name := range []string{"closed-old", "closed-recent", "active", "unknown-old", "unknown-recent", "unknown-child-recent", "no-close-time"} {
 		dir := filepath.Join(root, name)
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -132,21 +149,26 @@ func TestSweepRetentionAndSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := Sweep(context.Background(), Options{Now: now, Lookup: func(id string) Owner {
+		if id == "no-close-time" {
+			// A record that exists but has no stored close time.
+			return Owner{Known: true}
+		}
 		closed, ok := owners[id]
 		return Owner{Known: ok, Open: ok && closed.IsZero(), ClosedAt: closed}
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Removed) != 3 {
+	if len(result.Removed) != 2 {
 		t.Fatalf("removed: %#v", result)
 	}
-	for _, name := range []string{"closed-old", "unknown-old", "closed-link"} {
+	for _, name := range []string{"closed-old", "closed-link"} {
 		if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
 			t.Fatalf("kept %s: %v", name, err)
 		}
 	}
-	for _, name := range []string{"closed-recent", "active", "unknown-recent", "unknown-child-recent", "unknown-link"} {
+	// A folder with no owner record or no stored close time is kept, however old.
+	for _, name := range []string{"closed-recent", "active", "unknown-old", "unknown-recent", "unknown-child-recent", "unknown-link", "no-close-time"} {
 		if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
 			t.Fatalf("removed %s: %v", name, err)
 		}
@@ -200,7 +222,7 @@ func TestRejectSharedScratchRoot(t *testing.T) {
 	}
 }
 
-func TestSweepPressureOnlyAndBytes(t *testing.T) {
+func TestSweepCountsBytesFreed(t *testing.T) {
 	isolateRoot(t)
 	now := time.Now()
 	for _, owner := range []string{"closed", "open", "unknown-old", "unknown-recent", "another"} {
@@ -222,37 +244,29 @@ func TestSweepPressureOnlyAndBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	var closedAge time.Duration
 	lookup := func(owner string) Owner {
 		switch owner {
 		case "closed":
-			return Owner{Known: true, ClosedAt: now}
+			return Owner{Known: true, ClosedAt: now.Add(-closedAge)}
 		case "open":
 			return Owner{Known: true, Open: true}
 		}
 		return Owner{}
 	}
+	closedAge = time.Hour
 	first, err := Sweep(context.Background(), Options{Now: now, Lookup: lookup, Only: "closed"})
 	if err != nil || len(first.Removed) != 0 || len(first.Kept) != 1 {
 		t.Fatalf("grace: %+v %v", first, err)
 	}
-	result, err := Sweep(context.Background(), Options{Now: now, Lookup: lookup, Only: "closed", Pressure: true})
+	closedAge = ClosedRetention + time.Hour
+	result, err := Sweep(context.Background(), Options{Now: now, Lookup: lookup, Only: "closed"})
 	if err != nil || len(result.Removed) != 1 || result.BytesFreed != 5 {
-		t.Fatalf("pressure only: %+v %v", result, err)
+		t.Fatalf("expired: %+v %v", result, err)
 	}
-	if _, err := os.Stat(filepath.Join(Root(), "another")); err != nil {
-		t.Fatal(err)
-	}
-	result, err = Sweep(context.Background(), Options{Now: now, Lookup: lookup, Pressure: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, owner := range []string{"open", "unknown-recent"} {
-		if _, err := os.Stat(filepath.Join(Root(), owner)); err != nil {
-			t.Fatalf("removed %s", owner)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(Root(), "unknown-old")); !os.IsNotExist(err) {
-		t.Fatal("kept old unknown under pressure")
+	result, err = Sweep(context.Background(), Options{Now: now, Lookup: lookup})
+	if err != nil || len(result.Removed) != 0 {
+		t.Fatalf("full sweep removed a folder that is open or has no owner record: %+v %v", result, err)
 	}
 }
 
@@ -338,7 +352,9 @@ func TestSweepIsIsolatedByStore(t *testing.T) {
 	first := makeOld("open-session")
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	second := makeOld("old-session")
-	result, err := Sweep(context.Background(), Options{Now: now})
+	result, err := Sweep(context.Background(), Options{Now: now, Lookup: func(string) Owner {
+		return Owner{Known: true, ClosedAt: now.Add(-ClosedRetention - time.Hour)}
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
