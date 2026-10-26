@@ -1322,3 +1322,27 @@ BEGIN SELECT RAISE(ABORT, 'reject the terminal turn'); END;`, meta.ID)
 		}
 	}
 }
+
+// A post with a wake intent to an idle session whose last turn ended OK must
+// start its next turn from the engine's tick, not wait for a new post.
+func TestWakeFromAStoredPostStartsAnIdleSessionsTurn(t *testing.T) {
+	e := newTestEnv(t)
+	info := completedFixtureSession(t, e)
+	// The post arrives the way a posting process leaves it: in the room log with
+	// a wake intent for this session's address.
+	msg, err := e.m.rooms().Post(e.room.ID, room.PostInput{Wake: true, From: e.room.Name, To: []string{info.Address()}, Text: "wake up", SessionIDs: map[string]string{info.Address(): info.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The engine turns that stored post into a session target, then ticks it.
+	if err := e.m.TickSessionTargets(t.Context(), []string{info.ID}); err != nil {
+		t.Fatal(err)
+	}
+	got, turn := e.wait(info.ID, 2)
+	if turn.N != 2 || turn.Status != TurnOK {
+		t.Fatalf("turn 2 = %d/%s, want a turn for the stored post %s", turn.N, turn.Status, msg.ID)
+	}
+	if got.Turns != 2 {
+		t.Fatalf("turns = %d, want 2", got.Turns)
+	}
+}

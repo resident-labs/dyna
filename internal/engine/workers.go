@@ -346,7 +346,7 @@ type workers struct {
 	stopLocalCI func(context.Context) []string
 }
 
-func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
+func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms
@@ -360,6 +360,8 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 	}
 	syncer := lanesync.New()
 	spool := hookService
+	// globalSchedule lets one global hook pass run at a time. It outlives the
+	// pass that schedules it, so the closure below needs the engine context.
 	var globalSchedule sync.Mutex
 	return workers{
 		prs:         prs.Tick,
@@ -416,14 +418,11 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 			// A built-in pass can take minutes, so the global schedule runs on
 			// its own goroutine instead of holding this worker. The next tick
 			// claims nothing until the interval is due again.
-			if globalSchedule.TryLock() {
-				go func() {
-					defer globalSchedule.Unlock()
-					if err := hookService.TickGlobal(ctx, time.Now()); err != nil && ctx.Err() == nil {
-						log.Print(watch.Sanitize("global hooks: " + err.Error()))
-					}
-				}()
-			}
+			// The engine's own context, not this pass's: the pass deadline must
+			// not cancel a hook that the schedule just started.
+			scheduleGlobalHooks(engineCtx, &globalSchedule, func(hookCtx context.Context) error {
+				return hookService.TickGlobal(hookCtx, time.Now())
+			})
 			return time.Now().Add(time.Minute), errors.Join(errs...)
 		},
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
@@ -492,9 +491,43 @@ func fireTurnEnds(ctx context.Context, sessions *subagent.Store, h hooks.Service
 	return errors.Join(errs...)
 }
 
+// A worker pass runs with its own deadline. A pass that hangs would stop that
+// worker and every signal it should handle, so a post to an idle session would
+// queue with nothing in the log to say why. The tick gets the deadline, so work
+// that reads stores or sockets ends at it.
+var (
+	workerPassTimeout = 2 * time.Minute
+	// workerPassWarn is when a pass that finishes is worth a warning.
+	workerPassWarn = 15 * time.Second
+	// workerNow and workerPassContext let a test drive the pass clock and its
+	// deadline without waiting for either.
+	workerNow         = time.Now
+	workerPassContext = func(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(parent, d)
+	}
+)
+
+// scheduleGlobalHooks starts one global hook pass on the engine's own lifetime,
+// not on the pass that scheduled it. A built-in hook pass can take minutes, and
+// the worker's pass deadline belongs to the synchronous work only: cancelling it
+// here would stop a scheduled hook before it ran.
+func scheduleGlobalHooks(engineCtx context.Context, lock *sync.Mutex, tick func(context.Context) error) {
+	if !lock.TryLock() {
+		return
+	}
+	go func() {
+		defer lock.Unlock()
+		if err := tick(engineCtx); err != nil && engineCtx.Err() == nil {
+			log.Print(watch.Sanitize("global hooks: " + err.Error()))
+		}
+	}()
+}
+
 // runWorker keeps one worker serial with itself. Other workers never wait for
-// this tick, including when a check-in pass is delivering a post.
-func runWorker(ctx context.Context, signal <-chan struct{}, tick func(context.Context) error, report func(error)) {
+// this tick, including when a check-in pass is delivering a post. Each pass is
+// timed: one that ends at its deadline, or runs past the warning threshold, is
+// reported once, so a slow pass is visible instead of silent.
+func runWorker(ctx context.Context, name string, signal <-chan struct{}, tick func(context.Context) error, report func(error)) {
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -503,8 +536,21 @@ func runWorker(ctx context.Context, signal <-chan struct{}, tick func(context.Co
 			if ctx.Err() != nil {
 				return
 			}
-			if err := tick(ctx); err != nil && ctx.Err() == nil {
+			started := workerNow()
+			passCtx, cancelPass := workerPassContext(ctx, workerPassTimeout)
+			err := tick(passCtx)
+			cancelPass()
+			elapsed := workerNow().Sub(started)
+			if ctx.Err() != nil {
+				return
+			}
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				report(fmt.Errorf("%s pass ended at its %s deadline; the next signal runs it again", name, workerPassTimeout))
+			case err != nil:
 				report(err)
+			case elapsed > workerPassWarn:
+				report(fmt.Errorf("%s pass took %s; a slow pass delays every post it delivers", name, elapsed.Round(time.Millisecond)))
 			}
 		}
 	}
@@ -532,7 +578,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 		running.Add(1)
 		go func() {
 			defer running.Done()
-			runWorker(ctx, signal, tick, func(err error) { report(name, err) })
+			runWorker(ctx, name, signal, tick, func(err error) { report(name, err) })
 		}()
 	}
 	// timed starts a worker that returns its next due time, and wakes it
@@ -640,7 +686,7 @@ func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSign
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	workerSet := engineWorkers(rooms, signals, load, events, hookService, started)
+	workerSet := engineWorkers(ctx, rooms, signals, load, events, hookService, started)
 	// Cancellation starts with the engine, so the runs' remote teardown overlaps
 	// the worker ticks that are still ending. The budget for that teardown starts
 	// here too, so the wait below covers the work it waits for.
