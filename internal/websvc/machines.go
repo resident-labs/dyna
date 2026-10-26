@@ -197,6 +197,9 @@ type MachinePatch struct {
 	// SSHConnectTimeoutSeconds is how long an ssh to this machine waits for the
 	// connection; zero restores the default.
 	SSHConnectTimeoutSeconds *int `json:"sshConnectTimeoutSeconds,omitempty"`
+	// CheckTmp is the folder that holds each host check's temporary folder on
+	// this machine; an empty value means the node's temporary directory.
+	CheckTmp *string `json:"checkTmp,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -347,6 +350,9 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.ContainerSocket != nil {
 		m.ContainerSocket = strings.TrimSpace(*patch.ContainerSocket)
+	}
+	if patch.CheckTmp != nil {
+		m.CheckTmp = strings.TrimSpace(*patch.CheckTmp)
 	}
 	if patch.SSHConnectTimeoutSeconds != nil {
 		m.SSHConnectTimeout = time.Duration(*patch.SSHConnectTimeoutSeconds) * time.Second
