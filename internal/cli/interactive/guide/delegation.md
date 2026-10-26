@@ -2,7 +2,7 @@
 
 Use a workflow for independent tasks with a join; read `dyna guide workflows` before writing one.
 Use a subagent for work that needs memory across turns. Delegate only through Dyna, never through harness subagents or workflows.
-Workflow workers are leaves: they cannot delegate, start runs, control subagents, or read guides. Read-only inspection commands remain available.
+Workflow workers are leaves: they cannot delegate, start runs or sessions. They can read guides and use every other dyna command.
 Keep small or tightly coupled changes yourself. Run read-only scouts in parallel. Give each set of files one writer.
 
 ## Choosing a profile
