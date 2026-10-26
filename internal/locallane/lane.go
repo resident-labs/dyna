@@ -105,15 +105,25 @@ func baseBranch(ctx context.Context, repo string) (string, error) {
 
 // Ensure creates integration once. The empty old value prevents concurrent reset.
 func Ensure(ctx context.Context, repo string) (string, error) {
+	return EnsureFrom(ctx, repo, "")
+}
+
+// EnsureFrom is Ensure with the base the author gave. A non-empty base starts
+// integration when it does not exist yet, so a repository whose base cannot be
+// guessed is set up by its first change. An existing integration is kept.
+func EnsureFrom(ctx context.Context, repo, base string) (string, error) {
 	ref := "refs/heads/" + Integration
 	if head, err := git(ctx, repo, "rev-parse", "--verify", ref+"^{commit}"); err == nil {
 		return head, nil
 	}
-	baseRef, err := baseBranch(ctx, repo)
-	if err != nil {
-		return "", err
+	baseRef := base
+	if baseRef == "" {
+		var err error
+		if baseRef, err = baseBranch(ctx, repo); err != nil {
+			return "", err
+		}
 	}
-	base, err := git(ctx, repo, "rev-parse", "--verify", baseRef+"^{commit}")
+	base, err := git(ctx, repo, "rev-parse", "--verify", "--end-of-options", baseRef+"^{commit}")
 	if err != nil {
 		return "", err
 	}
