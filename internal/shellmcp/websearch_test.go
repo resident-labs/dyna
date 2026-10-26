@@ -15,20 +15,19 @@ import (
 // The shell tools keep their positions: harness clients call them by index.
 func TestToolListKeepsTheShellToolsFirst(t *testing.T) {
 	list := newTools(t, 0).tools()
-	if len(list) != 5 || list[0]["name"] != "shell" || list[1]["name"] != "shell_output" {
+	if len(list) != 5 || list[0].Name != "shell" || list[1].Name != "shell_output" {
 		t.Fatalf("tools = %v, want shell and shell_output first", names(list))
 	}
 	search := list[4]
-	schema, ok := search["inputSchema"].(map[string]any)
-	if !ok || search["name"] != "web_search" {
+	if search.Name != "web_search" {
 		t.Fatalf("last tool = %v, want web_search", search)
 	}
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok || properties["query"] == nil || properties["limit"] == nil {
-		t.Fatalf("web_search schema = %v, want a query and a limit", schema)
+	properties := search.InputSchema.Properties
+	if properties["query"].Type == "" || properties["limit"].Type == "" {
+		t.Fatalf("web_search schema = %v, want a query and a limit", search.InputSchema)
 	}
-	if required, _ := schema["required"].([]string); len(required) != 1 || required[0] != "query" {
-		t.Fatalf("web_search requires %v, want only the query", schema["required"])
+	if len(search.InputSchema.Required) != 1 || search.InputSchema.Required[0] != "query" {
+		t.Fatalf("web_search requires %v, want only the query", search.InputSchema.Required)
 	}
 }
 
@@ -93,10 +92,10 @@ func TestWebSearchSurvivesThePerSessionTools(t *testing.T) {
 	}
 }
 
-func names(list []map[string]any) []string {
+func names(list []toolDefinition) []string {
 	out := make([]string, len(list))
 	for i, tool := range list {
-		out[i], _ = tool["name"].(string)
+		out[i] = tool.Name
 	}
 	return out
 }
