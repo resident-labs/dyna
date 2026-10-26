@@ -105,8 +105,12 @@ type Message struct {
 	TS         int64             `json:"ts"`
 	RoomID     string            `json:"roomId"`
 	From       string            `json:"from"`
-	Kind       string            `json:"kind,omitempty"`
-	Notice     EventNotice       `json:"notice,omitzero"`
+	// SenderRoomID is the room of the session that wrote the post, captured
+	// from its stored session. Wake policy compares rooms by this identity,
+	// never by the sender's display address.
+	SenderRoomID string      `json:"senderRoomId,omitempty"`
+	Kind         string      `json:"kind,omitempty"`
+	Notice       EventNotice `json:"notice,omitzero"`
 	// Payload is the typed JSON of a sealed system event. Only PostEvent
 	// builds one; read it with the event accessor, such as Worktree().
 	Payload EventPayload `json:"payload,omitzero"`
@@ -834,6 +838,9 @@ func (s *Store) Touch(roomID string) error {
 type PostInput struct {
 	Wake       bool
 	SessionIDs map[string]string
+	// SenderRoomID is the room of the sending session, from its stored
+	// session. Empty for the owner, the engine, a shell or a workflow run.
+	SenderRoomID string
 	// ID is an optional stable msg ID for retrying integrations. Reusing it
 	// requires the same sender, recipients and content. Ordinary posts leave it empty.
 	ID   string
@@ -921,7 +928,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 // so it only counts when the retry names one itself: a retry of a post stored
 // before the field existed names none and matches the home it resolves to.
 func postConflicts(m Message, in PostInput, supplied Conversation) bool {
-	if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+	if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.SenderRoomID != in.SenderRoomID || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
 		return true
 	}
 	return supplied != "" && m.Conversation.Home() != supplied.Home()
@@ -1041,7 +1048,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		}
 		now := s.now()
 		out = Message{
-			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs,
+			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs, SenderRoomID: in.SenderRoomID,
 			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}

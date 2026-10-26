@@ -429,6 +429,11 @@ func TestGroupPostStoredOnceDeliveredToEach(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].ID != res.Message.ID || !reflect.DeepEqual(msgs[0].Via, []string{"@children"}) {
 		t.Fatalf("stored = %#v", msgs)
 	}
+	// The post records the sender's room, so root's wake decision reads an
+	// identity rather than the room part of a display address.
+	if msgs[0].SenderRoomID != f.lead.RoomID {
+		t.Fatalf("stored sender room = %q, want %q", msgs[0].SenderRoomID, f.lead.RoomID)
+	}
 	if len(res.Deliveries) != 2 {
 		t.Fatalf("deliveries = %#v", res.Deliveries)
 	}
