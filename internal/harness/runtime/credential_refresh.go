@@ -79,6 +79,21 @@ func (a *Accounts) CredentialStatus(ctx context.Context, id, executable string) 
 // The switch gate drains native turns before the store and account locks are
 // taken. A rotated grant reaches its durable snapshot before any native write.
 func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string) (result CredentialRefreshResult, err error) {
+	return a.refreshCredentials(ctx, id, executable, true)
+}
+
+// RefreshCredentialsDuringTurn renews a private login for a caller that holds a
+// harness turn lease, such as a turn asking for a web search. It does not take
+// the switch gate, because that gate waits for every turn of the harness to
+// end, including the caller's own, so a caller inside a turn would wait for
+// itself. Selection does not change, and the account lock and the harness's own
+// credential lock still order every write against a refresh or a delete.
+func (a *Accounts) RefreshCredentialsDuringTurn(ctx context.Context, id, executable string) (result CredentialRefreshResult, err error) {
+	return a.refreshCredentials(ctx, id, executable, false)
+}
+
+// refreshCredentials is one renewal, with or without the switch gate.
+func (a *Accounts) refreshCredentials(ctx context.Context, id, executable string, drain bool) (result CredentialRefreshResult, err error) {
 	if err = ctx.Err(); err != nil {
 		return result, err
 	}
@@ -98,7 +113,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 	}
 	// A pinned account refreshes under Claude Code's own locks in its folder;
 	// it never writes the shared home that running turns read.
-	if !pinsCredentials(n.Harness) {
+	if !pinsCredentials(n.Harness) && drain {
 		release, err := a.switchGate(ctx, n.Harness)
 		if err != nil {
 			return result, err
