@@ -79,3 +79,23 @@ func TestPrintLocalResultJSON(t *testing.T) {
 		t.Fatalf("JSON=%s", &output)
 	}
 }
+
+// The timing warning in a PR notice is bounded and says to run dyna git ci show
+// for the rest, so show must print every slow test of a check.
+func TestPrintLocalResultListsSlowTests(t *testing.T) {
+	cmd := NewCommand()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	result := localci.Result{SHA: "abc", Status: "passed", Duration: time.Second, Checks: []localci.SuiteResult{{
+		CheckName: "go-test-shard (0)", Node: "pve", Status: "passed",
+		SlowTests: []localci.TestTiming{{Name: "pkg.TestSlowOne", Duration: 3 * time.Second}, {Name: "pkg.TestSlowTwo", Duration: 4500 * time.Millisecond}},
+	}}}
+	if err := printResult(cmd, result, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"slow tests:", "pkg.TestSlowOne ran for 3s", "pkg.TestSlowTwo ran for 4.5s"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output lacks %q:\n%s", want, &output)
+		}
+	}
+}
