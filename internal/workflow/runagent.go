@@ -20,9 +20,10 @@ type EngineCaller interface {
 }
 
 // Retry pacing for engine calls that a restart cuts off. The first retry waits
-// retryFirst, each next one twice as long up to retryMax, and a call gives up
-// once it has waited recoveryBudget in all. An engine restart takes seconds,
-// so the budget leaves room for a slow one.
+// retryFirst and each next one twice as long, up to retryMax. A call that keeps
+// failing gives up once recoveryBudget has passed since its first failure,
+// counting the time the failed calls themselves took (the engine client waits
+// up to a minute for a missing socket).
 const (
 	retryFirst     = 250 * time.Millisecond
 	retryMax       = 5 * time.Second
@@ -41,19 +42,30 @@ var retryWait = func(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// retryNow is the clock of the recovery budget. Tests replace it.
+var retryNow = time.Now
+
 // retryEngine runs call, and runs it again after a pause while it fails for a
-// reason an engine restart explains and the recovery budget lasts.
-func retryEngine(ctx context.Context, call func() error) error {
-	delay, waited := retryFirst, time.Duration(0)
+// reason an engine restart explains. With a budget it gives up once that much
+// time has passed since the first failure; with none (0) it keeps asking until
+// the call works or fails for another reason, for work that must be confirmed.
+func retryEngine(ctx context.Context, budget time.Duration, call func() error) error {
+	delay := retryFirst
+	var firstFailure time.Time
 	for {
 		err := call()
-		if err == nil || !transient(ctx, err) || waited >= recoveryBudget {
+		if err == nil || !transient(ctx, err) {
+			return err
+		}
+		if firstFailure.IsZero() {
+			firstFailure = retryNow()
+		}
+		if budget > 0 && retryNow().Sub(firstFailure) >= budget {
 			return err
 		}
 		if retryWait(ctx, delay) != nil {
 			return err
 		}
-		waited += delay
 		delay = min(2*delay, retryMax)
 	}
 }
@@ -80,13 +92,13 @@ func transient(ctx context.Context, err error) bool {
 // the session from the run and agent and returns the one it started), and so
 // is waiting twice.
 func runAgentSession(ctx context.Context, engine EngineCaller, start callspec.RunAgentStart) (callspec.RunAgentState, error) {
-	if err := retryEngine(ctx, func() error { return engine.Call(ctx, "StartRunAgent", []any{start}, nil) }); err != nil {
+	if err := retryEngine(ctx, recoveryBudget, func() error { return engine.Call(ctx, "StartRunAgent", []any{start}, nil) }); err != nil {
 		return callspec.RunAgentState{}, err
 	}
 	ref := callspec.RunAgentRef{Run: start.Run, Agent: start.Agent}
 	for {
 		var state callspec.RunAgentState
-		if err := retryEngine(ctx, func() error { return engine.Call(ctx, "WaitRunAgent", []any{ref}, &state) }); err != nil {
+		if err := retryEngine(ctx, recoveryBudget, func() error { return engine.Call(ctx, "WaitRunAgent", []any{ref}, &state) }); err != nil {
 			return callspec.RunAgentState{}, err
 		}
 		if state.Done {

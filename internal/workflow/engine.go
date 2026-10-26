@@ -322,9 +322,11 @@ func (e *engine) closeAgent(id int) {
 	}
 	ref := callspec.RunAgentRef{Run: e.runID(), Agent: id}
 	// The caller keeps its slots and worktree until the stop is confirmed, so a
-	// call cut off by an engine restart is asked again (closing twice is safe).
+	// call cut off by an engine restart is asked again with no time limit
+	// (closing twice is safe). Only a refusal ends it, and then the engine's
+	// own cleanup of an ended run's sessions is what remains.
 	ctx := context.WithoutCancel(e.ctx)
-	err := retryEngine(ctx, func() error { return e.opts.Engine.Call(ctx, "CloseRunAgent", []any{ref}, nil) })
+	err := retryEngine(ctx, 0, func() error { return e.opts.Engine.Call(ctx, "CloseRunAgent", []any{ref}, nil) })
 	if err != nil {
 		e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("could not close agent %d's session: %v", id, err))
 	}
