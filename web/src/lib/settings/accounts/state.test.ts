@@ -96,8 +96,9 @@ test('short window labels name the model group and the period only', () => {
   for (const [label, short] of Object.entries(cases)) assert.equal(shortLabel(label), short, label)
 })
 
-test('window allowance shows the provider reason without inventing a percent', () => {
-  assert.equal(allowanceLabel({ unavailableReason: 'Grok does not report remaining allowance.' }), 'Grok does not report remaining allowance.')
+test('window allowance shows no percent when the provider reports none', () => {
+  // The window's typed reason drives the designed copy; the label stays numeric.
+  assert.equal(allowanceLabel({ reason: 'not-reported' }), '')
 })
 
 test('idle window explains a passed reset without a new model call', () => {
