@@ -256,6 +256,12 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 			_, _ = out.WriteString("\n[dyna: shell stopped before start because its owner is closed or missing]\n")
 			return s.Save(m, &Exit{Code: -1, Error: "owner is closed or missing", Ended: time.Now()})
 		}
+		// A supervisor delayed past the point where its job reads as lost must
+		// not launch its worker's command behind a cancelled run (D-165).
+		if m.Run != "" && runstore.Canceling(m.Run) {
+			_, _ = out.WriteString("\n[dyna: shell stopped before start because its run is canceled]\n")
+			return s.Save(m, &Exit{Code: -1, Error: "run is canceled", Ended: time.Now()})
+		}
 	}
 	// A stop that arrived while the supervisor waited for dyna.db wins: the
 	// command never starts, so a caller that saw the job stop cannot run it twice.
