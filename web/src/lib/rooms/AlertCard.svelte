@@ -13,7 +13,7 @@
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
-  const sourceNames: Record<AlertSource, string> = { doctor: 'Doctor report', engine: 'Engine alert' }
+  const sourceNames: Record<AlertSource, string> = { doctor: 'Doctor report', engine: 'Engine alert', consolidation: 'Consolidation paused' }
 
   let payload = $derived(alertEvent(post))
   let title = $derived.by(() => {

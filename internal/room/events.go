@@ -1097,10 +1097,12 @@ const (
 	AlertDoctor AlertSource = "doctor"
 	// AlertEngine is the engine itself, as when it stays read-only.
 	AlertEngine AlertSource = "engine"
+	// AlertConsolidation is a session consolidation that paused with an error.
+	AlertConsolidation AlertSource = "consolidation"
 )
 
 // alertSources lists every alert source the web needs as a union type.
-var alertSources = []AlertSource{AlertDoctor, AlertEngine}
+var alertSources = []AlertSource{AlertDoctor, AlertEngine, AlertConsolidation}
 
 // AlertSeverity is how urgent one finding of an alert is. A doctor ranks its
 // causes, so its first finding is the one to act on now.
@@ -2112,6 +2114,16 @@ var eventSpecs = []EventSpec{
 		Wake:      WakeRoot,
 		Once:      true,
 		Text:      "The engine has been read-only for more than 2 minutes because migration failed:",
+		Producers: []EventProducer{ProducerEngine},
+	},
+	{
+		Family:    FamilyAlert,
+		Type:      EventType(AlertConsolidation),
+		Renderer:  "AlertCard",
+		Payload:   reflect.TypeOf(AlertEvent{}),
+		Wake:      WakeRoot,
+		Once:      true,
+		Text:      "A session consolidation paused with an error:",
 		Producers: []EventProducer{ProducerEngine},
 	},
 	// A failed service turn needs the root seat, once per turn.

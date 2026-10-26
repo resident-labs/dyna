@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 )
 
 // ConsolidationState stays with the kept session. Source transcripts and task
@@ -372,7 +374,9 @@ func (m *Manager) CancelConsolidation(ctx context.Context, roomID, id string) (C
 		if s.Phase == "cancelled" {
 			return nil
 		}
-		if s.Phase != "waiting" && s.Phase != "failed" {
+		// A paused consolidation (one with a saved error) can always be
+		// cancelled; its sources still hold their reservations.
+		if s.Phase != "waiting" && s.Phase != "failed" && s.Error == "" {
 			return errors.New("startup has begun; resume consolidation to finish safely")
 		}
 		s.Phase = "cancelled"
@@ -409,6 +413,25 @@ func (m *Manager) CancelConsolidation(ctx context.Context, roomID, id string) (C
 	}
 	return m.consolidation(roomID, id)
 }
+// postConsolidationPaused tells root that a consolidation stopped on an error,
+// with the two commands that move it on.
+func (m *Manager) postConsolidationPaused(c ConsolidationState, cause error) {
+	meta, err := m.store().ReadMeta(c.Target)
+	if err != nil {
+		log.Printf("consolidation alert: %v", err)
+		return
+	}
+	event := room.AlertEvent{
+		Source:  room.AlertConsolidation,
+		Summary: fmt.Sprintf("Consolidation %s paused in phase %s: %v", c.ID, c.Phase, cause),
+		Remedy:  "dyna subagent consolidate resume " + c.ID,
+		Detail:  fmt.Sprintf("Consolidation %s into %s paused in phase %s: %v. Resume it with `dyna subagent consolidate resume %s`, or stop it with `dyna subagent consolidate cancel %s`.", c.ID, c.Target, c.Phase, cause, c.ID, c.ID),
+	}
+	if _, err := m.rooms().PostEventInput(room.PostEventInput{RoomID: meta.RoomID, Event: event, Producer: room.ProducerEngine, NeedsRoot: true, To: []string{meta.Room + ":" + RoleRoot}}); err != nil {
+		log.Printf("consolidation alert: %v", err)
+	}
+}
+
 func (m *Manager) consolidationWorkerLock(target string) (func(), error) {
 	dir, err := m.store().Dir(target)
 	if err != nil {
@@ -476,6 +499,7 @@ func (m *Manager) runConsolidation(ctx context.Context, target, id string) error
 				c.Error = "Paused: " + err.Error() + ". Resume to continue."
 				return nil
 			})
+			m.postConsolidationPaused(*before, err)
 			return err
 		}
 		if done {
@@ -801,7 +825,9 @@ func (m *Manager) commitConsolidation(c ConsolidationState) error {
 			return err
 		}
 		if !g.Open() {
-			return fmt.Errorf("cannot fold goals into %s: goal %s is not open", c.Target, toGoal)
+			// A finished or dropped goal takes no folded items. The absorbed
+			// goals stay as they are; the rest of the commit continues.
+			toGoal = ""
 		}
 	}
 	if err = m.consolidationHierarchy(c); err != nil {
