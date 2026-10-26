@@ -148,7 +148,7 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	if saved.HasHostChecksGrants() {
 		t.Fatal("host checks were allowed by default")
 	}
-	saved.Name, saved.Enabled = "hermeslab", false
+	saved.Name, saved.Enabled = "buildhost", false
 	renamed, err := s.Save(ctx, saved)
 	if err != nil {
 		t.Fatal(err)
@@ -165,17 +165,17 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	if _, err := s.Get(ctx, "hermes"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("old name remains: %v", err)
 	}
-	stored, err := s.Get(ctx, "hermeslab")
+	stored, err := s.Get(ctx, "buildhost")
 	if err != nil || stored.Enabled || stored.CISlots != 2 || !stored.HostChecksAllowed("") {
 		t.Fatalf("stored machine = %#v, %v", stored, err)
 	}
-	if _, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
+	if _, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("a new machine took a stored name: %v", err)
 	}
-	if err := s.RemoveRole(ctx, "hermeslab", RoleCI); err != nil {
+	if err := s.RemoveRole(ctx, "buildhost", RoleCI); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(ctx, "hermeslab"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := s.Get(ctx, "buildhost"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("machine with no roles remains: %v", err)
 	}
 	local, err := s.GetLocal(ctx)

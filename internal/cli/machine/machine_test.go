@@ -101,7 +101,7 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	if socketMachine, _ := find(listed(t), "hermes"); socketMachine.ContainerSocket != "unix:///run/user/1000/podman/podman.sock" {
 		t.Fatalf("container socket = %q", socketMachine.ContainerSocket)
 	}
-	if _, err := run(t, "edit", "hermes", "--rename", "hermeslab", "--disable"); err != nil {
+	if _, err := run(t, "edit", "hermes", "--rename", "buildhost", "--disable"); err != nil {
 		t.Fatal(err)
 	}
 	list = listed(t)
@@ -111,7 +111,7 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	if build, _ := find(list, "build"); build.HasRole(machines.RoleAgents) || build.CISlots != 1 {
 		t.Fatalf("replaced roles = %#v", build)
 	}
-	renamed, ok := find(list, "hermeslab")
+	renamed, ok := find(list, "buildhost")
 	if !ok || renamed.ID != hermes.ID || renamed.Enabled || renamed.CISlots != 2 {
 		t.Fatalf("renamed machine = %#v", renamed)
 	}

@@ -46,7 +46,7 @@ func prints(out string) Command {
 func TestLowDiskDegradesAndAlertsOnce(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	hermes, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
+	hermes, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestLowDiskDegradesAndAlertsOnce(t *testing.T) {
 	if stored.Capabilities.Disk.Free != 3221225472 || stored.LastSeen.IsZero() {
 		t.Fatalf("degraded probe = %#v", stored)
 	}
-	if len(alerts.got) != 1 || alerts.got[0] != "hermeslab 3221225472 21474836480" {
+	if len(alerts.got) != 1 || alerts.got[0] != "buildhost 3221225472 21474836480" {
 		t.Fatalf("alerts = %v", alerts.got)
 	}
 
@@ -147,7 +147,7 @@ func TestLowDiskDegradesAndAlertsOnce(t *testing.T) {
 func TestDisableDuringProbeWins(t *testing.T) {
 	ctx := context.Background()
 	s := fixture(t)
-	hermes, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
+	hermes, err := s.Save(ctx, Machine{Name: "buildhost", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}

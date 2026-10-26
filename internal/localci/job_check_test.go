@@ -225,8 +225,17 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if len(reports) != 2 {
 		t.Fatalf("reports = %v, want one XML report per uploaded package", reports)
 	}
+	// The act event is an input of the run, kept beside the report directory:
+	// the Go report reader takes every *.json in it for an event stream and
+	// rejects the event body.
+	if _, err := os.Stat(filepath.Join(reportDir, "event.json")); err == nil {
+		t.Fatal("event.json sits in the report directory, where the Go reader would take it for a test stream")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go-static", "event.json")); err != nil {
+		t.Fatalf("the event was not written beside the work copy: %v", err)
+	}
 	// Unpacked entries carry the archive and entry ordinals; the run's own
-	// event.json and execution.json do not.
+	// execution.json does not.
 	if raw, err := filepath.Glob(filepath.Join(reportDir, "*-*.json")); err != nil || len(raw) != 1 {
 		t.Fatalf("raw events = %v, %v, want the uploaded JSON events too", raw, err)
 	}
