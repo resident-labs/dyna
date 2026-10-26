@@ -23,6 +23,7 @@ func TestEmptyFinalAfterPostedReport(t *testing.T) {
 		{name: "silent protocol error", silent: true, protocolFails: true},
 		{name: "silent process error", silent: true, workerFails: true},
 		{name: "silent schema requires output", silent: true, schema: true},
+		{name: "silent clean stop", silent: true, wantOK: true},
 		{name: "parent", recipient: "parent", wantOK: true},
 		{name: "root", recipient: "root", wantOK: true},
 		{name: "internal root", recipient: "internal root", wantOK: true},
