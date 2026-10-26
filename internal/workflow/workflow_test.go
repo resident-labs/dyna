@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -409,5 +410,46 @@ func TestProfilesGlobalOmitsAdmissionCost(t *testing.T) {
 		if key == "admissionCost" {
 			t.Fatalf("profiles global keys = %v, want admissionCost omitted", got.Keys)
 		}
+	}
+}
+
+func TestPhaseLaneAndStageReachPhaseAndAgentEvents(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv(runstore.AgentJournalRootEnv, "")
+	dir := t.TempDir()
+	script := `
+phase("Review api", {lane: "api", stage: "review"});
+await agent('SLEEP:0\nRESPOND: {"ok":true}', {profile: "mock", schema: {type: "object"}});
+await agent('SLEEP:0\nRESPOND: {"ok":true}', {profile: "mock", schema: {type: "object"}, lane: "web", stage: "fix"});
+phase("Plain");
+return await agent('SLEEP:0\nRESPOND: {"ok":true}', {profile: "mock", schema: {type: "object"}});`
+	t.Setenv("DYNA_RUN_ID", "wf_lane-stage")
+	run, err := runstore.Create("lane stage", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := executeWorkflowTest(t, script, Options{Store: mockWorkflowStore(0, 0), Run: run, WorkDir: dir})
+	run.Finish("ok", result, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := runstore.ReadEvents(run.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type spot struct{ lane, stage string }
+	var phases, agents []spot
+	for _, event := range events {
+		switch event.T {
+		case "phase":
+			phases = append(phases, spot{event.Lane, event.Stage})
+		case "agent_start":
+			agents = append(agents, spot{event.Lane, event.Stage})
+		}
+	}
+	wantPhases := []spot{{"api", "review"}, {"", ""}}
+	wantAgents := []spot{{"api", "review"}, {"web", "fix"}, {"", ""}}
+	if fmt.Sprint(phases) != fmt.Sprint(wantPhases) || fmt.Sprint(agents) != fmt.Sprint(wantAgents) {
+		t.Fatalf("phase spots = %v, agent spots = %v; want %v and %v", phases, agents, wantPhases, wantAgents)
 	}
 }

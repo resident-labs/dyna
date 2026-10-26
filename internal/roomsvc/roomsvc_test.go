@@ -564,3 +564,13 @@ func TestRoomFixtureRemovesScratch(t *testing.T) {
 		t.Fatalf("fixture left scratch root %s: %v", root, err)
 	}
 }
+
+func TestFoldRunAgentKeepsLaneAndStage(t *testing.T) {
+	agents, _, _, _ := foldAll([]runstore.Event{
+		{T: "agent_start", ID: 1, Label: "a", Phase: "Review api", Lane: "api", Stage: "review"},
+		{T: "agent_start", ID: 2, Label: "b", Phase: "Plain"},
+	}, true)
+	if len(agents) != 2 || agents[0].Lane != "api" || agents[0].Stage != "review" || agents[1].Lane != "" || agents[1].Stage != "" {
+		t.Fatalf("agents = %#v; want lane api and stage review on the first only", agents)
+	}
+}

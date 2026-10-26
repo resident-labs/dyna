@@ -65,6 +65,9 @@ type RunAgent struct {
 	Label   string `json:"label"`
 	Profile string `json:"profile,omitempty"`
 	Phase   string `json:"phase,omitempty"`
+	// Lane and Stage are what the script gave its phase; both are empty when it gave none.
+	Lane  string `json:"lane,omitempty"`
+	Stage string `json:"stage,omitempty"`
 	// Status is running, ok, error, or the end status the engine wrote.
 	// "unknown" means the run ended without an end event for this agent.
 	Status  string `json:"status"`
@@ -356,6 +359,7 @@ func foldAll(events []runstore.Event, live bool) (agents []RunAgent, total int, 
 		case "agent_start":
 			a := get(e)
 			a.Label, a.Profile, a.Phase, a.Started = e.Label, e.Profile, e.Phase, e.TS
+			a.Lane, a.Stage = e.Lane, e.Stage
 		case "agent_end":
 			a := get(e)
 			if a.Label == "" {
