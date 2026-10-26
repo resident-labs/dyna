@@ -20,26 +20,6 @@ func probeChatGPTUsage(ctx context.Context, client claudeHTTPClient, now time.Ti
 	return chatgptUsageObservation(body, now)
 }
 
-// ChatGPTTokens returns the access token and ChatGPT account ID of a saved Pi
-// account that signed in to OpenAI. Callers must never log or store the values.
-func ChatGPTTokens(c store.Credential) (access, account string, err error) {
-	if c.Schema != piNativeFilesSchema {
-		return "", "", ErrSchema
-	}
-	var files, auth map[string]json.RawMessage
-	if json.Unmarshal(c.Payload, &files) != nil || json.Unmarshal(files["auth.json"], &auth) != nil || len(auth) != 1 {
-		return "", "", ErrSchema
-	}
-	for _, entry := range auth {
-		var value piAuthEntry
-		if json.Unmarshal(entry, &value) != nil || value.Access == "" || value.AccountID == "" {
-			return "", "", ErrSchema
-		}
-		return value.Access, value.AccountID, nil
-	}
-	return "", "", ErrSchema
-}
-
 type chatgptUsageWindow struct {
 	UsedPercent *float64 `json:"used_percent"`
 	Duration    int64    `json:"limit_window_seconds"`
