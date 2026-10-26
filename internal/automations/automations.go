@@ -79,6 +79,13 @@ func Hooks(n *notify.Service, accounts *accountservice.Service) []hooks.BuiltinS
 			Timeout:      "2m",
 			Run:          accountUsagePass(accounts),
 		},
+		{
+			Builtin:      BuiltinDoctor,
+			Label:        "Doctor load watchdog",
+			EveryMinutes: 1,
+			Timeout:      "1m",
+			Run:          doctorPass,
+		},
 	}
 }
 
