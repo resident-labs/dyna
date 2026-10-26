@@ -215,10 +215,15 @@ func (r Runner) pushCommitToNode(ctx context.Context, repo, cache, sha string) e
 		return fmt.Errorf("clear commit ref on node: %w: %s", err, &output)
 	}
 	dest := cache
+	var args []string
 	if r.Node.SSH != "" {
 		dest = r.Node.SSH + ":" + cache
+		// The push dials like every other node command, so it waits as long as
+		// the machine's connect timeout allows, for this one command only.
+		args = []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o " + machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout)}
 	}
-	if err := r.run(ctx, repo, &output, "git", "push", dest, sha+":refs/dyna/ci/"+sha); err != nil {
+	args = append(args, "push", dest, sha+":refs/dyna/ci/"+sha)
+	if err := r.run(ctx, repo, &output, "git", args...); err != nil {
 		return fmt.Errorf("push commit to node: %w: %s", err, &output)
 	}
 	return nil
