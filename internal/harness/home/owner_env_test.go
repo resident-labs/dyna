@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
@@ -179,5 +180,26 @@ func TestPrepareGivesTheHarnessTheLoginPath(t *testing.T) {
 	}
 	if !slices.Contains(filepath.SplitList(out["PATH"]), cargo) {
 		t.Fatalf("harness PATH %q lacks the login PATH entry %q", out["PATH"], cargo)
+	}
+}
+
+// A background process that shell startup leaves holding stdout must not stall
+// the PATH lookup past its timeout.
+func TestLoginPathDoesNotWaitForABackgroundProcess(t *testing.T) {
+	old := loginPathTimeout
+	loginPathTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { loginPathTimeout = old })
+	shell := filepath.Join(t.TempDir(), "login-shell")
+	script := "#!/bin/sh\nsleep 3 &\nprintf '\\n%s' /opt/tools/bin\n"
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	got := loginPathFrom(shell, nil)
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("lookup took %v, held by the background process", elapsed)
+	}
+	if got != "/opt/tools/bin" {
+		t.Fatalf("PATH = %q", got)
 	}
 }
