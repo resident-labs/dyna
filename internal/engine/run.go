@@ -639,6 +639,10 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if err != nil {
 		return err
 	}
+	_, stamped := mode.StampFromEnv()
+	if err := checkPrivateRuntime(stamped, os.Getenv("XDG_RUNTIME_DIR")); err != nil {
+		return err
+	}
 	socketLn, err := listenSocket(socketPath)
 	if err != nil {
 		return err

@@ -115,3 +115,49 @@ func (w *firstWrite) Write(p []byte) (int, error) {
 	w.once.Do(func() { close(w.seen) })
 	return len(p), nil
 }
+
+// hangGuard only stops a broken run from blocking the suite; a passing run never
+// reaches it.
+const hangGuard = 10 * time.Second
+
+// An open event stream must not hold the engine: a restart has to finish in
+// seconds, not wait out the whole shutdown budget while every dyna command fails.
+func TestStopEngineClosesOpenStreams(t *testing.T) {
+	previous := streamShutdownDeadline
+	streamShutdownDeadline = func() time.Duration { return 20 * time.Millisecond }
+	t.Cleanup(func() { streamShutdownDeadline = previous })
+	entered := make(chan struct{}, 1)
+	blocked := make(chan struct{})
+	server := &http.Server{Handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		entered <- struct{}{}
+		<-blocked
+	})}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = server.Serve(listener) }()
+	// One client holds a request open, as a page's event stream does.
+	stream, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if _, err := fmt.Fprintf(stream, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	t.Cleanup(func() { close(blocked) })
+
+	started := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- stopEngine(func() {}, nil, []*http.Server{server}) }()
+	select {
+	case <-done:
+		if elapsed := time.Since(started); elapsed > time.Second {
+			t.Fatalf("the engine took %s to stop with one open stream", elapsed)
+		}
+	case <-time.After(hangGuard):
+		t.Fatal("the engine did not stop while a stream stayed open")
+	}
+}
