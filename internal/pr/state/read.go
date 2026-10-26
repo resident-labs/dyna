@@ -176,6 +176,46 @@ func ReadSnapshot(root string) (Snapshot, error) {
 	return readSnapshot(root)
 }
 
+// OpenRecordsInRoom reads only the unclosed records of one room from one
+// read transaction. It never loads the whole snapshot, so a caller that needs
+// a few records does not decode every stored PR (about 17 MB).
+func OpenRecordsInRoom(root, roomID string) ([]Record, error) {
+	db, err := open(root)
+	if err != nil {
+		return nil, err
+	}
+	var bodies [][]byte
+	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
+		rows, err := r.QueryContext(context.Background(), "SELECT body FROM pr_records WHERE room=? AND closed=0", roomID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var body []byte
+			if err := rows.Scan(&body); err != nil {
+				return err
+			}
+			bodies = append(bodies, body)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	var records []Record
+	for _, body := range bodies {
+		var record diskRecord
+		if err := json.Unmarshal(body, &record); err != nil {
+			return nil, fmt.Errorf("invalid PR record: %w", err)
+		}
+		if record.Record != nil {
+			records = append(records, *record.Record)
+		}
+	}
+	return records, nil
+}
+
 // ReadLocked reads while the caller owns the store's exclusive lock, before
 // it writes. Every PR write commits under that lock, so a read transaction
 // sees each committed one without taking the writer.
