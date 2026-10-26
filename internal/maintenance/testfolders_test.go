@@ -69,10 +69,26 @@ func TestSweepRemovesOldLeakedToolFolders(t *testing.T) {
 // and a young one stays.
 func TestSweepDiskTempRemovesOldEntriesOfAnyName(t *testing.T) {
 	root := t.TempDir()
-	old := testFolder(t, root, "TestSomething123456", 2*testFolderRetention, false)
+	old := testFolder(t, root, "TestSomething123456", 2*diskTempRetention, false)
+	ageTree(t, old, 2*diskTempRetention)
 	young := testFolder(t, root, "TestSomething654321", 0, false)
 
+	// A long-running hook writes inside its folder, which leaves the folder's
+	// own time old. The sweep must keep it.
+	busy := testFolder(t, root, "busy", 2*diskTempRetention, false)
+	ageTree(t, busy, 2*diskTempRetention)
+	if err := os.WriteFile(filepath.Join(busy, "work.log"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old0 := time.Now().Add(-2 * diskTempRetention)
+	if err := os.Chtimes(busy, old0, old0); err != nil {
+		t.Fatal(err)
+	}
+
 	freed, err := sweepDiskTemp(time.Now(), root, false)
+	if _, statErr := os.Stat(busy); statErr != nil {
+		t.Fatalf("the sweep removed a folder with a recent file: %v", statErr)
+	}
 	if err != nil || freed.Items != 1 {
 		t.Fatalf("sweep = %+v, %v; want the one old entry", freed, err)
 	}
@@ -144,4 +160,20 @@ func testFolder(t *testing.T, root, name string, age time.Duration, readOnly boo
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// ageTree sets the modification time of everything under dir, so a folder reads
+// as old to a sweep that looks at its content.
+func ageTree(t *testing.T, dir string, age time.Duration) {
+	t.Helper()
+	old := time.Now().Add(-age)
+	err := filepath.WalkDir(dir, func(path string, _ os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, old, old)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
