@@ -300,8 +300,13 @@ func isShortcut(a Action) bool {
 	return modified && ordinary
 }
 
-// keypressHold spans a few frames at 60 Hz.
-const keypressHold = 50 * time.Millisecond
+// idleRefreshHz is the lowest output refresh rate: an unwatched desktop drops to
+// it. keypressHold lasts one and a half frames at that rate, so every frame
+// sees the key down.
+const (
+	idleRefreshHz = 10
+	keypressHold  = time.Second * 3 / (2 * idleRefreshHz)
+)
 
 func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *virtualKeyboard) (err error) {
 	kind := actionType(a)

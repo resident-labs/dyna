@@ -83,6 +83,12 @@ func TestKeyboardMapExtrasKeepStandardUSKeys(t *testing.T) {
 	}
 }
 
+func TestKeypressHoldCoversIdleFrame(t *testing.T) {
+	if frame := time.Second / idleRefreshHz; keypressHold <= frame {
+		t.Fatalf("hold %v does not outlast one idle frame (%v)", keypressHold, frame)
+	}
+}
+
 func TestKeyboardMapExhaustionIsAtomic(t *testing.T) {
 	_, codes, err := keyboardMap(nil, nil)
 	if err != nil {
