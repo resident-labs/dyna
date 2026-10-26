@@ -17,17 +17,24 @@ func (a *Runtime) AddHarnessMCP(ctx context.Context, entry config.ManagedMCP) (c
 	}
 	return a.regenerateHarnessCatalog("")
 }
+
+// AddHarnessSkill saves a skill. The skill catalog is global, so a skill edit
+// never regenerates a native config; enabled skills reach sessions through
+// their standing instructions.
 func (a *Runtime) AddHarnessSkill(ctx context.Context, entry config.ManagedSkill) (config.ConfigSnapshot, error) {
 	m := a.Config
 	if err := m.AddSkill(ctx, entry); err != nil {
 		return config.ConfigSnapshot{}, err
 	}
-	return a.regenerateHarnessCatalog("")
+	return m.Catalog("")
 }
 func (a *Runtime) RemoveHarnessConfig(ctx context.Context, kind, name, harness string) (config.ConfigSnapshot, error) {
 	m := a.Config
 	if err := m.Remove(ctx, kind, name, harness); err != nil {
 		return config.ConfigSnapshot{}, err
+	}
+	if kind != "mcp" {
+		return m.Catalog("")
 	}
 	return a.regenerateHarnessCatalog(harness)
 }

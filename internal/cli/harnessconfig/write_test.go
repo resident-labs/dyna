@@ -66,9 +66,43 @@ func TestSkillWriteCommands(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	for _, args := range [][]string{{"add", "review", "--source", source, "--harness", "claude"}, {"disable", "review", "--harness", "claude"}, {"enable", "review", "--harness", "claude"}, {"rm", "review", "--harness", "claude"}, {"rm", "review"}} {
-		if _, e := executeWrite("skill", args...); e != nil {
-			t.Fatal(e)
+	read := func() harnessmgr.HarnessConfig {
+		t.Helper()
+		c, err := harnessmgr.NewConfigManager().Read()
+		if err != nil {
+			t.Fatal(err)
 		}
+		return c
+	}
+	if _, e := executeWrite("skill", "add", "review", "--source", source); e != nil {
+		t.Fatal(e)
+	}
+	if c := read(); len(c.Skills) != 1 || !c.Skills[0].Enabled {
+		t.Fatalf("add did not default to enabled: %+v", c.Skills)
+	}
+	if _, e := executeWrite("skill", "disable", "review"); e != nil {
+		t.Fatal(e)
+	}
+	if c := read(); len(c.Skills) != 1 || c.Skills[0].Enabled {
+		t.Fatalf("disable was not saved: %+v", c.Skills)
+	}
+	if _, e := executeWrite("skill", "enable", "review"); e != nil {
+		t.Fatal(e)
+	}
+	if c := read(); len(c.Skills) != 1 || !c.Skills[0].Enabled {
+		t.Fatalf("enable was not saved: %+v", c.Skills)
+	}
+	if _, e := executeWrite("skill", "rm", "review"); e != nil {
+		t.Fatal(e)
+	}
+	if c := read(); len(c.Skills) != 0 {
+		t.Fatalf("rm was not saved: %+v", c.Skills)
+	}
+	// The skill catalog is global: no harness flag and no sync verb.
+	if _, e := executeWrite("skill", "add", "other", "--source", source, "--harness", "claude"); e == nil || !strings.Contains(e.Error(), "unknown flag: --harness") {
+		t.Fatalf("skill add accepted --harness: %v", e)
+	}
+	if _, e := executeWrite("skill", "sync", "--harness", "pi", "--account", "selected"); e == nil || !strings.Contains(e.Error(), "unknown command") {
+		t.Fatalf("skill sync exists: %v", e)
 	}
 }

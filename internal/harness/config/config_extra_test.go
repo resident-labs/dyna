@@ -8,7 +8,7 @@ func TestCatalogCapabilities(t *testing.T) {
 		got[capability.Harness] = capability
 	}
 	for _, harness := range ConfigHarnesses {
-		if capability, ok := got[harness]; !ok || !capability.MCP || !capability.Skills {
+		if capability, ok := got[harness]; !ok || !capability.MCP {
 			t.Errorf("missing capabilities for %s", harness)
 		}
 	}

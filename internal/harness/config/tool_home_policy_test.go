@@ -51,7 +51,7 @@ func TestToolHomePolicyPersistsAcrossConfigUpdates(t *testing.T) {
 	if err := os.WriteFile(m.Path, []byte(`{"toolHomeBridges":["claude","gcloud"],"mcp":[],"skills":[]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "default", Source: skillSource(t), EnabledHarnesses: []string{"claude"}}); err != nil {
+	if err := m.AddSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), ManagedSkill{Name: "default", Source: skillSource(t), Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	config, err := m.Read()

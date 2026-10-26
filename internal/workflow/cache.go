@@ -79,7 +79,6 @@ func executionConfigDigest(p profile.Profile, timeout time.Duration) string {
 		RetiredAccount    string `json:"RuntimeAccount"`
 		RuntimeVersion    string
 		RuntimeExecutable string
-		RuntimeSkillPaths []string `json:",omitempty"`
 		Dialect           string
 		SafeMode          bool
 		Timeout           time.Duration
@@ -90,7 +89,6 @@ func executionConfigDigest(p profile.Profile, timeout time.Duration) string {
 		Env:               p.Env,
 		RuntimeVersion:    p.RuntimeVersion,
 		RuntimeExecutable: p.RuntimeExecutable,
-		RuntimeSkillPaths: p.RuntimeSkillPaths,
 		Dialect:           p.EffectiveDialect(),
 		SafeMode:          p.SafeMode,
 		Timeout:           timeout,

@@ -57,7 +57,7 @@ func testSyncEnginePower(t *testing.T, role authority.Role) {
 	}
 	canary := filepath.Join(store.ConfigDir(), "skills", "load-dyna-orchestrator", "SKILL.md")
 	allowed := role == authority.Owner || role == authority.Root
-	for _, kind := range []string{"mcp", "skill"} {
+	{
 		if err := os.MkdirAll(filepath.Dir(canary), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -71,7 +71,9 @@ func testSyncEnginePower(t *testing.T, role authority.Role) {
 			ctx = authority.WithActor(ctx, authority.Actor{Role: authority.Owner})
 		}
 		// The session case has cleared stamps and no actor in the CLI context.
-		out, err := runCatalog(ctx, kind, []string{"sync", "--harness", "pi", "--account", account.ID})
+		// Only MCP config has a sync verb: skills reach sessions through their
+		// standing instructions instead.
+		out, err := runCatalog(ctx, "mcp", []string{"sync", "--harness", "pi", "--account", account.ID})
 		if allowed {
 			var result harnessruntime.ConfigSyncResult
 			if err != nil {
@@ -87,7 +89,7 @@ func testSyncEnginePower(t *testing.T, role authority.Role) {
 				t.Fatal(err)
 			}
 		} else {
-			if err == nil || !strings.Contains(err.Error(), kind+" sync is owner or root only") || out != "" {
+			if err == nil || !strings.Contains(err.Error(), "mcp sync is owner or root only") || out != "" {
 				t.Errorf("refused sync = %v, output = %q", err, out)
 			}
 			if _, err := os.Stat(canary); err != nil {
@@ -95,8 +97,8 @@ func testSyncEnginePower(t *testing.T, role authority.Role) {
 			}
 		}
 	}
-	if called.Load() != 2 {
-		t.Errorf("engine calls = %d, want 2", called.Load())
+	if called.Load() != 1 {
+		t.Errorf("engine calls = %d, want 1", called.Load())
 	}
 }
 
@@ -115,11 +117,14 @@ func TestSyncEngineFailureHasNoLocalFallback(t *testing.T) {
 	if err := os.WriteFile(canary, []byte("no fallback"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"mcp", "skill"} {
+	for _, kind := range []string{"mcp"} {
 		out, err := runCatalog(t.Context(), kind, []string{"sync", "--harness", "pi", "--account", "selected"})
 		if !errors.Is(err, engineclient.ErrNotRunning) || out != "" {
 			t.Errorf("sync engine cause = %v, output = %q", err, out)
 		}
+	}
+	if _, err := runCatalog(t.Context(), "skill", []string{"sync", "--harness", "pi", "--account", "selected"}); err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Errorf("skill sync = %v, want an unknown command", err)
 	}
 	if called.Load() != 0 {
 		t.Errorf("unexpected engine calls = %d", called.Load())
@@ -135,13 +140,11 @@ func TestSyncPayloadOutputAndRequiredFlags(t *testing.T) {
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "SyncCatalogAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true,
 		Method: func(kind, harness, account string) (map[string]any, error) {
 			called.Add(1)
-			if harness != "claude" || account != "explicit-account" || (kind != "mcp" && kind != "skill") {
+			if harness != "claude" || account != "explicit-account" || kind != "mcp" {
 				t.Errorf("sync payload = %q, %q, %q", kind, harness, account)
 			}
 			out := map[string]any{"id": "gen-fixture", "directory": "/private/generation", "Env": map[string]string{"TOKEN": "secret-canary"}, "Args": []string{"secret-canary"}}
-			if kind == "mcp" {
-				out["partialReasons"] = []string{"partial"}
-			}
+			out["partialReasons"] = []string{"partial"}
 			return out, nil
 		},
 	}})
@@ -149,37 +152,30 @@ func TestSyncPayloadOutputAndRequiredFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	enginetest.Serve(t, store.DataDir(), calls)
-	for _, kind := range []string{"mcp", "skill"} {
-		for _, tc := range []struct {
-			args []string
-			want string
-		}{
-			{[]string{"sync", "--harness", "claude"}, "sync requires --account with an explicit private account ID"},
-			{[]string{"sync", "--account", "explicit-account"}, "sync requires --harness and a private account scope"},
-		} {
-			_, err := runCatalog(t.Context(), kind, tc.args)
-			if err == nil || err.Error() != tc.want {
-				t.Errorf("required flags = %v", err)
-			}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"sync", "--harness", "claude"}, "sync requires --account with an explicit private account ID"},
+		{[]string{"sync", "--account", "explicit-account"}, "sync requires --harness and a private account scope"},
+	} {
+		_, err := runCatalog(t.Context(), "mcp", tc.args)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("required flags = %v", err)
 		}
 	}
 	if called.Load() != 0 {
 		t.Fatal("invalid flags reached engine")
 	}
-	for _, kind := range []string{"mcp", "skill"} {
-		out, err := runCatalog(t.Context(), kind, []string{"sync", "--harness", "claude", "--account", "explicit-account"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := "{\"id\":\"gen-fixture\",\"directory\":\"/private/generation\"}\n"
-		if kind == "mcp" {
-			want = "{\"id\":\"gen-fixture\",\"directory\":\"/private/generation\",\"partialReasons\":[\"partial\"]}\n"
-		}
-		if out != want || strings.Contains(out, "secret-canary") {
-			t.Errorf("sync output = %q, want %q", out, want)
-		}
+	out, err := runCatalog(t.Context(), "mcp", []string{"sync", "--harness", "claude", "--account", "explicit-account"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if called.Load() != 2 {
-		t.Errorf("engine calls = %d, want 2", called.Load())
+	want := "{\"id\":\"gen-fixture\",\"directory\":\"/private/generation\",\"partialReasons\":[\"partial\"]}\n"
+	if out != want || strings.Contains(out, "secret-canary") {
+		t.Errorf("sync output = %q, want %q", out, want)
+	}
+	if called.Load() != 1 {
+		t.Errorf("engine calls = %d, want 1", called.Load())
 	}
 }

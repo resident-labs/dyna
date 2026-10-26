@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/harness"
+	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
@@ -55,6 +56,8 @@ type Manager struct {
 	Rooms            *room.Store
 	// Profiles loads the profile registry (default: the user's profiles.json).
 	Profiles func() (*profile.Store, error)
+	// Skills loads Dyna's skill catalog (default: harness-config.json).
+	Skills func() ([]harnessconfig.ManagedSkill, error)
 	// Settings loads user settings (default: settings.json).
 	Settings func() settings.Values
 	Spawner  Spawner

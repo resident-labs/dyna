@@ -23,7 +23,7 @@ func TestConfigSyncRefusalComesFromEngine(t *testing.T) {
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "SyncCatalogAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true,
 		Method: func(_ context.Context, kind, harness, account string) error {
 			called.Add(1)
-			if (kind != "mcp" && kind != "skill") || harness != "pi" || account != "engine-selected" {
+			if kind != "mcp" || harness != "pi" || account != "engine-selected" {
 				t.Errorf("sync arguments = %q, %q, %q", kind, harness, account)
 			}
 			return errors.New("verified engine caller refused sync")
@@ -40,11 +40,8 @@ func TestConfigSyncRefusalComesFromEngine(t *testing.T) {
 	if err := os.WriteFile(canary, []byte("no local regeneration"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"mcp", "skill"} {
+	for _, kind := range []string{"mcp"} {
 		cmd := mcpCmd()
-		if kind == "skill" {
-			cmd = skillCmd()
-		}
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)
@@ -54,8 +51,17 @@ func TestConfigSyncRefusalComesFromEngine(t *testing.T) {
 			t.Errorf("%s sync = %v", kind, err)
 		}
 	}
-	if called.Load() != 2 {
-		t.Errorf("engine calls = %d, want 2", called.Load())
+	// The skill catalog has no sync verb: it never writes a native config.
+	skill := skillCmd()
+	var out bytes.Buffer
+	skill.SetOut(&out)
+	skill.SetErr(&out)
+	skill.SetArgs([]string{"sync", "--harness", "pi", "--account", "engine-selected"})
+	if err := skill.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("skill sync = %v, want an unknown command or flag", err)
+	}
+	if called.Load() != 1 {
+		t.Errorf("engine calls = %d, want 1", called.Load())
 	}
 	if b, err := os.ReadFile(canary); err != nil || string(b) != "no local regeneration" {
 		t.Errorf("CLI regenerated locally: %v", err)
