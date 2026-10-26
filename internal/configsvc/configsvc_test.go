@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 29 {
+	if err != nil || len(items) != 30 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
@@ -439,5 +439,15 @@ func TestSaveProfileUsesRoundTrip(t *testing.T) {
 	edit.Profile.Uses = []string{}
 	if _, err := (&Service{}).SaveProfile(t.Context(), edit); err == nil || !strings.Contains(err.Error(), "at least one use") {
 		t.Fatalf("no uses err = %v", err)
+	}
+}
+
+func TestSetDoctorConditionChecksTheGrammar(t *testing.T) {
+	isolate(t)
+	if _, err := Set(t.Context(), settings.KeyDoctorCondition, "load>2/core for 5m or memory>85%"); err != nil {
+		t.Fatalf("valid condition: %v", err)
+	}
+	if _, err := Set(t.Context(), settings.KeyDoctorCondition, "banana"); err == nil {
+		t.Fatal("an invalid condition was saved")
 	}
 }

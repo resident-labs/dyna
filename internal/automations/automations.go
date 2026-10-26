@@ -8,15 +8,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	accountservice "dyna-agent/internal/account/service"
+	"dyna-agent/internal/doctor"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 )
 
 // The automatic hooks of this release.
@@ -29,6 +32,9 @@ const (
 	BuiltinHarnessVersions hooks.Builtin = "harness-versions"
 	// BuiltinAccountUsage refreshes the saved usage readings of the accounts.
 	BuiltinAccountUsage hooks.Builtin = "account-usage"
+	// BuiltinDoctor examines the machine and saves a report while the owner's
+	// load condition holds.
+	BuiltinDoctor hooks.Builtin = "doctor"
 )
 
 // defaultCheckInMinutes is a parent's first check-in spacing until the owner
@@ -72,6 +78,13 @@ func Hooks(n *notify.Service, accounts *accountservice.Service) []hooks.BuiltinS
 			EveryMinutes: usageCheckMinutes,
 			Timeout:      "2m",
 			Run:          accountUsagePass(accounts),
+		},
+		{
+			Builtin:      BuiltinDoctor,
+			Label:        "Doctor load watchdog",
+			EveryMinutes: 1,
+			Timeout:      "1m",
+			Run:          doctorPass,
 		},
 	}
 }
@@ -132,6 +145,24 @@ func accountUsagePass(accounts *accountservice.Service) func(context.Context, in
 		_, err := fmt.Fprintf(log, "refreshed account usage; next probe at %s\n", next.UTC().Format(time.RFC3339))
 		return err
 	}
+}
+
+// doctorPass examines this machine under the doctor.condition setting, or the
+// recipe's default condition. A healthy pass writes nothing to the run log.
+func doctorPass(_ context.Context, _ int, log io.Writer) error {
+	host, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	cfg, err := settings.Load("")
+	if err != nil {
+		return err
+	}
+	cond := cfg.DoctorCondition
+	if cond == "" {
+		cond = hooks.DoctorCondition
+	}
+	return doctor.Pass{DataDir: store.DataDir(), Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now()}.Do(log)
 }
 
 // logger writes a pass's log lines to the hook run log, one line each.

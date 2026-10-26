@@ -114,14 +114,8 @@ func TestLifecycleCLI(t *testing.T) {
 		t.Fatal("unknown recipe accepted")
 	}
 
-	if _, err := run("add", "--recipe", "doctor"); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run("list"); err != nil || !strings.Contains(out, `"event":"schedule"`) || !strings.Contains(out, `"everyMinutes":1`) || !strings.Contains(out, "doctor examine machine --if") {
-		t.Fatalf("doctor recipe: %s %v", out, err)
-	}
-	if _, err := run("add", "--recipe", "doctor", "--every-minutes", "5"); err == nil {
-		t.Fatal("--recipe combined with --every-minutes was accepted")
+	if _, err := run("add", "--recipe", "doctor"); err == nil || !strings.Contains(err.Error(), "installed by default") {
+		t.Fatalf("a repository doctor recipe was accepted: %v", err)
 	}
 
 }
