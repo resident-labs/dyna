@@ -23,6 +23,13 @@ type Pass struct {
 	Now      time.Time
 	// Post sends a new unhealthy report. A nil Post only saves it.
 	Post func(Report) error
+	// Alert runs on every pass that finds the machine unhealthy, even when the
+	// report repeats an earlier one, so a caller can keep its own state per
+	// audience. A nil Alert does nothing.
+	Alert func(Report) error
+	// Clear runs only when fresh samples confirm the machine is healthy. An
+	// error or a missing sample never clears. A nil Clear does nothing.
+	Clear func(machine string) error
 }
 
 // Do examines every machine and writes one line to log for each report that is
@@ -34,6 +41,16 @@ func (p Pass) Do(log io.Writer) error {
 		res, err := Run{DataDir: p.DataDir, Machine: machine, Target: "machine", Trigger: "hook schedule", If: p.If, Cooldown: p.Cooldown, Now: p.Now, Post: p.Post}.Do()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", machine, err))
+		}
+		if err == nil && res.Ran && !res.Report.Healthy && p.Alert != nil {
+			if aerr := p.Alert(res.Report); aerr != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", machine, aerr))
+			}
+		}
+		if err == nil && res.Healthy && p.Clear != nil {
+			if cerr := p.Clear(machine); cerr != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", machine, cerr))
+			}
 		}
 		if res.Ran && !res.Repeat {
 			if _, werr := fmt.Fprintln(log, res.Report.Text()); werr != nil {

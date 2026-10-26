@@ -24,6 +24,10 @@ type Result struct {
 	Report Report
 	Ran    bool
 	Repeat bool
+	// Healthy is true only when fresh samples confirm the machine is not under
+	// the condition, or the examination found it healthy. An error, a missing
+	// sample or a stale one leaves it false, because none of them proves health.
+	Healthy bool
 }
 
 // Do checks the condition, then examines, saves and posts. A false
@@ -40,9 +44,13 @@ func (r Run) Do() (Result, error) {
 			return Result{}, err
 		}
 		read := func(group string, since time.Time) ([]Sample, error) { return samples.Window(r.Machine, group, since) }
-		ok, reading, err := cond.Holds(read, r.Now)
-		if err != nil || !ok {
+		verdict, reading, err := cond.Evaluate(read, r.Now)
+		if err != nil {
 			return Result{}, err
+		}
+		if verdict != Met {
+			// Only a verdict of Clear confirms health; Unknown leaves any alert as it is.
+			return Result{Healthy: verdict == Clear}, nil
 		}
 		met = reading
 	}
@@ -67,7 +75,7 @@ func (r Run) Do() (Result, error) {
 	if rep.ID, err = reports.Save(rep); err != nil {
 		return Result{}, err
 	}
-	return r.deliver(reports, Result{Report: rep, Ran: true})
+	return r.deliver(reports, Result{Report: rep, Ran: true, Healthy: rep.Healthy})
 }
 
 func (r Run) deliver(reports Reports, res Result) (Result, error) {
