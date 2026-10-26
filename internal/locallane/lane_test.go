@@ -95,3 +95,25 @@ func TestEnsureStartsIntegrationAtTheBaseBranchNotTheFeatureWorktree(t *testing.
 		t.Fatalf("integration starts at %q, %v; want the base branch head %q", got, err, base)
 	}
 }
+
+// With no origin/HEAD, main or master, the base cannot be told apart from the
+// change's own branch, so integration is not created and the caller must give
+// a base. The feature branch is checked out in the primary checkout here.
+func TestEnsureRefusesToGuessTheBaseFromACheckedOutBranch(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("/usr/bin/git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+	}
+	run("init", "-q", "-b", "trunk")
+	run("commit", "-q", "--allow-empty", "-m", "base")
+	run("checkout", "-q", "-b", "feature")
+	run("commit", "-q", "--allow-empty", "-m", "the change")
+	if head, err := Ensure(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "--base") {
+		t.Fatalf("integration = %q, %v; want a request for --base", head, err)
+	}
+}
