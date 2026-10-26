@@ -36,7 +36,7 @@ func changedRows(t *testing.T, root string) int {
 		t.Fatal(err)
 	}
 	var n int
-	if err := mustOpen(t, root).QueryRow("SELECT count(*) FROM pr_records WHERE rev=?", revision).Scan(&n); err != nil {
+	if err := mustOpen(t, root).QueryRow("SELECT count(*) FROM pr_rows WHERE rev=?", revision).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -152,11 +152,11 @@ func TestReadSeesAnotherProcessWrite(t *testing.T) {
 	db := mustOpen(t, root)
 	key := "github.com/acme/widgets#2"
 	var body string
-	if err := db.QueryRow("SELECT body FROM pr_records WHERE key=?", key).Scan(&body); err != nil {
+	if err := db.QueryRow("SELECT body FROM pr_rows WHERE key=?", key).Scan(&body); err != nil {
 		t.Fatal(err)
 	}
 	body = strings.Replace(body, `"title":""`, `"title":"from elsewhere"`, 1)
-	if _, err := db.Exec("UPDATE pr_records SET body=?, rev=10 WHERE key=?", body, key); err != nil {
+	if _, err := db.Exec("UPDATE pr_rows SET body=?, rev=10 WHERE key=?", body, key); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec("UPDATE pr_state SET revision=10"); err != nil {
@@ -249,7 +249,7 @@ func TestImportSmallJSONStore(t *testing.T) {
 	}
 	var closed, rooms int
 	db := mustOpen(t, root)
-	if err := db.QueryRow("SELECT sum(closed), count(distinct room) FROM pr_records").Scan(&closed, &rooms); err != nil || closed != 1 || rooms != 2 {
+	if err := db.QueryRow("SELECT sum(closed), count(distinct room) FROM pr_rows").Scan(&closed, &rooms); err != nil || closed != 1 || rooms != 2 {
 		t.Fatalf("columns: closed=%d rooms=%d %v", closed, rooms, err)
 	}
 	// The import runs once; a later JSON change is not read again.
@@ -385,7 +385,7 @@ func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
 				t.Fatalf("unknown index fields: %s", body)
 			}
 			var recordField, responseField, bodyField int
-			if err := db.QueryRow(`SELECT json_extract(body,'$.record.futureRecord') FROM pr_records WHERE key='p'`).Scan(&recordField); err != nil || recordField != 6 {
+			if err := db.QueryRow(`SELECT json_extract(body,'$.record.futureRecord') FROM pr_rows WHERE key='p'`).Scan(&recordField); err != nil || recordField != 6 {
 				t.Fatalf("unknown record field: %d, %v", recordField, err)
 			}
 			// Saved responses live in their own part row.
@@ -394,7 +394,7 @@ func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
 			}
 			if version != 1 {
 				var envelope int
-				if err := db.QueryRow(`SELECT json_extract(body,'$.futureEnvelope') FROM pr_records WHERE key='p'`).Scan(&envelope); err != nil || envelope != 7 {
+				if err := db.QueryRow(`SELECT json_extract(body,'$.futureEnvelope') FROM pr_rows WHERE key='p'`).Scan(&envelope); err != nil || envelope != 7 {
 					t.Fatalf("unknown envelope: %d, %v", envelope, err)
 				}
 			}
@@ -405,7 +405,7 @@ func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
 			}
 		})
 	}
-	for _, table := range []string{"pr_state", "pr_records"} {
+	for _, table := range []string{"pr_state", "pr_rows"} {
 		t.Run(table, func(t *testing.T) {
 			root := newRoot(t)
 			db, err := database.Open(filepath.Dir(root))
@@ -444,7 +444,7 @@ func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
 			}
 			var revision, future int
 			column := "revision"
-			if table == "pr_records" {
+			if table == "pr_rows" {
 				column = "rev"
 			}
 			if err := db.QueryRow("SELECT "+column+",json_extract(body,'$.future') FROM "+table).Scan(&revision, &future); err != nil || revision != 17 || future != 42 {

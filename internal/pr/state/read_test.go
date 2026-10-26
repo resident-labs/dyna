@@ -81,7 +81,7 @@ func TestReadLeavesOutARowWithoutARecord(t *testing.T) {
 	if err := Write(root, bigState(2)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mustOpen(t, root).Exec(`UPDATE pr_records SET body='{"record":null}' WHERE key=?`, "github.com/acme/widgets#1"); err != nil {
+	if _, err := mustOpen(t, root).Exec(`UPDATE pr_rows SET body='{"record":null}' WHERE key=?`, "github.com/acme/widgets#1"); err != nil {
 		t.Fatal(err)
 	}
 	forgetSnapshot()

@@ -7,10 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 )
 
-// A stored PR record is the hot row in pr_records plus cold parts in
+// A stored PR record is the hot row in pr_rows plus cold parts in
 // pr_record_parts. A watcher poll changes the hot fields (checks, polling,
 // state) every few seconds; the notices, the review history and the saved
 // HTTP responses change on events. Parts keep a poll write near 3 KB instead
@@ -135,28 +134,6 @@ func partWrites(before, next storedParts) (upsert storedParts, remove []partName
 	return upsert, remove
 }
 
-// hotOnlyTriggers refuse a row that carries a cold field. Every record written
-// by a pre-split binary has one (reviewRounds has no omitempty), so a writer
-// that skipped the version check fails loudly instead of putting cold fields
-// back into the hot row, where stale part rows would hide them.
-func hotOnlyTriggers() string {
-	cold := []string{"json_type(NEW.body,'$.responses') IS NOT NULL"}
-	for _, fields := range partFields {
-		for _, field := range fields {
-			cold = append(cold, "json_type(NEW.body,'$.record."+field+"') IS NOT NULL")
-		}
-	}
-	slices.Sort(cold)
-	when := strings.Join(cold, " OR ")
-	const message = "pr_records holds hot fields only; this dyna is too old to write PR records"
-	// A delete from a process that cached the old version removes the hot row
-	// only. The trigger removes its parts too, so a record created again under
-	// the same key cannot inherit stale notices or responses.
-	return `CREATE TRIGGER IF NOT EXISTS pr_records_delete_parts AFTER DELETE ON pr_records BEGIN DELETE FROM pr_record_parts WHERE key=OLD.key; END;
-CREATE TRIGGER IF NOT EXISTS pr_records_hot_insert BEFORE INSERT ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;
-CREATE TRIGGER IF NOT EXISTS pr_records_hot_update BEFORE UPDATE OF body ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;`
-}
-
 // migrateRecordParts moves the cold fields of every stored record into
 // pr_record_parts, once. The old whole-body shape is not read afterwards.
 func migrateRecordParts(conn *sql.Conn, _ int) error {
@@ -203,6 +180,9 @@ func migrateRecordParts(conn *sql.Conn, _ int) error {
 			}
 		}
 	}
-	_, err = conn.ExecContext(ctx, hotOnlyTriggers())
+	// Renaming the table is the fence for processes that already passed the
+	// version check: their next read or write of pr_records fails with "no such
+	// table" instead of returning half a record or writing cold fields back.
+	_, err = conn.ExecContext(ctx, "ALTER TABLE pr_records RENAME TO pr_rows")
 	return err
 }

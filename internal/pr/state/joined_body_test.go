@@ -12,7 +12,7 @@ import (
 func joinedBody(t *testing.T, db *sql.DB, key string) string {
 	t.Helper()
 	var hot []byte
-	if err := db.QueryRow("SELECT body FROM pr_records WHERE key=?", key).Scan(&hot); err != nil {
+	if err := db.QueryRow("SELECT body FROM pr_rows WHERE key=?", key).Scan(&hot); err != nil {
 		t.Fatal(err)
 	}
 	var doc map[string]json.RawMessage

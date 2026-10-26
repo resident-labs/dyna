@@ -17,7 +17,7 @@ func TestOpenRecordsInRoomReadsOnlyThatRoomsUnclosedRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Rows outside the request would fail a full decode.
-	if _, err := mustOpen(t, root).Exec(`UPDATE pr_records SET body='[]' WHERE room<>'room' OR closed=1`); err != nil {
+	if _, err := mustOpen(t, root).Exec(`UPDATE pr_rows SET body='[]' WHERE room<>'room' OR closed=1`); err != nil {
 		t.Fatal(err)
 	}
 	records, err := OpenRecordsInRoom(root, "room")
@@ -47,7 +47,7 @@ func TestReadForSessionsDecodesOnlyTheSessionsRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Rows that do not match would fail a decode.
-	if _, err := mustOpen(t, root).Exec(`UPDATE pr_records SET body='[]' WHERE number IN (3,4)`); err != nil {
+	if _, err := mustOpen(t, root).Exec(`UPDATE pr_rows SET body='[]' WHERE number IN (3,4)`); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadForSessions(root, "room", "ann")

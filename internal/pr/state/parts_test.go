@@ -66,7 +66,7 @@ func TestPollWriteRewritesOnlyTheHotRow(t *testing.T) {
 		}
 	}
 	var hot int
-	if err := mustOpen(t, root).QueryRow("SELECT length(body) FROM pr_records WHERE key=?", key).Scan(&hot); err != nil || hot == 0 {
+	if err := mustOpen(t, root).QueryRow("SELECT length(body) FROM pr_rows WHERE key=?", key).Scan(&hot); err != nil || hot == 0 {
 		t.Fatalf("hot row: %d, %v", hot, err)
 	}
 }
@@ -121,7 +121,7 @@ INSERT INTO pr_records VALUES('k','room','acme/widgets',1,0,5,'{"record":{"key":
 		t.Fatal(err)
 	}
 	var hot string
-	if err := db.QueryRow("SELECT body FROM pr_records WHERE key='k'").Scan(&hot); err != nil {
+	if err := db.QueryRow("SELECT body FROM pr_rows WHERE key='k'").Scan(&hot); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(hot, "notifications") || strings.Contains(hot, "responses") || !strings.Contains(hot, `"futureRecord":6`) || !strings.Contains(hot, `"futureEnvelope":7`) {
@@ -134,11 +134,12 @@ INSERT INTO pr_records VALUES('k','room','acme/widgets',1,0,5,'{"record":{"key":
 }
 
 // A pre-split binary must not read half a record or write cold fields back
-// into the hot row. It is refused at its version check; one that skipped the
-// check (a process started before the migration) fails at the write.
+// into the hot row. A fresh one is refused at its version check. One that
+// cached the old version (a process started before the migration) still runs
+// its SQL, and that SQL fails because the table it names no longer exists.
 func TestAPreSplitBinaryIsRefusedAfterTheSplit(t *testing.T) {
 	root := newRoot(t)
-	st, _ := partsState()
+	st, key := partsState()
 	if err := Write(root, st); err != nil {
 		t.Fatal(err)
 	}
@@ -147,31 +148,32 @@ func TestAPreSplitBinaryIsRefusedAfterTheSplit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "pr.state") {
 		t.Fatalf("a binary that needs pr.state 1 got %v; want a newer-schema refusal", err)
 	}
-	// What a pre-split writer sends: the whole record in one body.
-	whole := `{"record":{"key":"k","reviewRounds":null,"notifications":[{"id":"n"}]}}`
 	for name, statement := range map[string]string{
-		"insert": `INSERT INTO pr_records(key,room,repo,number,closed,rev,body) VALUES('old','room','r',2,0,9,?)`,
-		"update": `UPDATE pr_records SET body=?`,
+		"read":   `SELECT key, rev, body FROM pr_records`,
+		"insert": `INSERT INTO pr_records(key,room,repo,number,closed,rev,body) VALUES('old','room','r',2,0,9,'{}')`,
+		"update": `UPDATE pr_records SET body='{}'`,
+		"delete": `DELETE FROM pr_records WHERE key='` + key + `'`,
 	} {
-		if _, err := db.Exec(statement, whole); err == nil || !strings.Contains(err.Error(), "too old") {
-			t.Fatalf("%s of a whole-body record: %v; want it refused", name, err)
+		if _, err := db.Exec(statement); err == nil || !strings.Contains(err.Error(), "no such table: pr_records") {
+			t.Fatalf("old-format %s: %v; want it to fail on the missing table", name, err)
 		}
 	}
 }
 
-// A process that cached the old version can still delete a row. Its parts must
-// go with it, or a record created again under the same key would get the old
-// notices and responses back.
-func TestDeletingARowRemovesItsParts(t *testing.T) {
+// Removing a record removes its parts, so a record created again under the
+// same key does not inherit old notices or responses.
+func TestRemovingARecordRemovesItsParts(t *testing.T) {
 	root := newRoot(t)
 	st, key := partsState()
 	if err := Write(root, st); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mustOpen(t, root).Exec("DELETE FROM pr_records WHERE key=?", key); err != nil {
+	delete(st.Records, key)
+	delete(st.Responses, key)
+	if err := Write(root, st); err != nil {
 		t.Fatal(err)
 	}
 	if got := partRows(t, root); len(got) != 0 {
-		t.Fatalf("parts left after the row was deleted: %v", got)
+		t.Fatalf("parts left after the record was removed: %v", got)
 	}
 }
