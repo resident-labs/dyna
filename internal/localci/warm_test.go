@@ -111,7 +111,7 @@ func TestDefinitionNamesTheWarmJob(t *testing.T) {
 func TestWarmRunSendsTheDefaultBranchPush(t *testing.T) {
 	dir := t.TempDir()
 	check := nodeCheck{id: "cache-warm", name: "cache-warm", event: "push", branch: "main", job: &JobRef{Workflow: ".github/workflows/ci.yml", Name: "cache-warm"}, resources: checkResources{CPUs: 2, MemoryMiB: 4096}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-warm", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, "")
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-warm", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, "", "")
 	if !strings.Contains(script, "act push -W") && !strings.Contains(script, " push -W ") {
 		t.Fatalf("the warm run does not send a push event: %s", script)
 	}
