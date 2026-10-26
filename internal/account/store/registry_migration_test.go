@@ -12,18 +12,28 @@ import (
 	"dyna-agent/internal/database"
 )
 
-// saveFixtureCredential writes a saved credential file the migration can
-// validate, so a fixture Pi account is signed in rather than a bare row.
-func saveFixtureCredential(t *testing.T, dataDir, id, schema string) {
+// saveCredential writes one saved credential file, so a fixture account is
+// signed in rather than a bare row.
+func saveCredential(t *testing.T, dataDir, id string, c Credential) {
 	t.Helper()
 	dir := filepath.Join(dataDir, "accounts", "credentials")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"schema":"` + schema + `","payload":{"token":"` + id + `-sign-in"}}`
-	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(payload), 0o600); err != nil {
+	raw, err := json.Marshal(c)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// savePiCredential writes the real Pi credential envelope for one provider
+// sign-in, so the migration validates the shape Pi itself reads.
+func savePiCredential(t *testing.T, dataDir, id, piProvider, entry string) {
+	t.Helper()
+	saveCredential(t, dataDir, id, Credential{Schema: SchemaPiNativeFiles, Payload: json.RawMessage(`{"auth.json":{"` + piProvider + `":` + entry + `}}`)})
 }
 
 // A saved account names a harness this release runs, unless it names the
@@ -68,18 +78,23 @@ CREATE TABLE accounts_registry (
 			if err != nil {
 				return err
 			}
-			// Only a signed-in Pi account can have taken over a sign-in, and its
-			// saved credential is what proves the sign-in exists.
+			// A Pi row is signed in only when its saved credential holds the
+			// provider sign-in, so the fixtures write real Pi envelopes below.
 			schema := ""
 			if row.harness == "pi" {
-				schema = "claude-oauth"
+				schema = SchemaPiNativeFiles
 			}
 			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES(?, 0, ?, ?)", row.id, metadata, schema); err != nil {
 				return err
 			}
-			if schema != "" {
-				saveFixtureCredential(t, dataDir, row.id, schema)
-			}
+		}
+		// The owner's manual move left one signed-in Pi account per provider.
+		for _, pi := range []struct{ id, provider, entry string }{
+			{"pi-chatgpt", "openai-codex", `{"type":"oauth","access":"access-token","accountId":"acct-1"}`},
+			{"pi-muse", "meta-muse", `{"type":"oauth","refresh":"identity-token"}`},
+			{"pi-opencode", "opencode-go", `{"type":"api_key","key":"opencode-key"}`},
+		} {
+			savePiCredential(t, dataDir, pi.id, pi.provider, pi.entry)
 		}
 		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
 			return err
@@ -241,17 +256,21 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 		}
 		schema := ""
 		if row.harness == "pi" {
-			schema = "claude-oauth"
+			schema = SchemaPiNativeFiles
 		}
 		if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES(?, 0, ?, ?)", row.id, metadata, schema); err != nil {
 			t.Fatal(err)
 		}
-		if schema != "" {
-			saveFixtureCredential(t, dataDir, row.id, schema)
-		}
 		if _, err := db.ExecContext(ctx, "INSERT INTO account_active(provider, harness, scope, account) VALUES(?,?,?,?)", row.provider, row.harness, "", row.id); err != nil {
 			t.Fatal(err)
 		}
+	}
+	for _, pi := range []struct{ id, provider, entry string }{
+		{"pi-chatgpt", "openai-codex", `{"type":"oauth","access":"access-token","accountId":"acct-1"}`},
+		{"pi-muse", "meta-muse", `{"type":"oauth","refresh":"identity-token"}`},
+		{"pi-opencode", "opencode-go", `{"type":"api_key","key":"opencode-key"}`},
+	} {
+		savePiCredential(t, dataDir, pi.id, pi.provider, pi.entry)
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO account_repo_scopes(account_id, repo) VALUES('muse', 'resident-labs/dyna')"); err != nil {
 		t.Fatal(err)
@@ -549,7 +568,7 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES('pi-chatgpt', 0, ?, 'claude-oauth')", pi); err != nil {
+	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES('pi-chatgpt', 0, ?, ?)", pi, SchemaPiNativeFiles); err != nil {
 		t.Fatal(err)
 	}
 	codex, err := json.Marshal(Metadata{ID: "codex", Harness: "codex", Provider: ProviderChatGPT, Kind: KindOAuth, Identity: "owner@example.test"})
@@ -559,7 +578,7 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES('codex', 1, ?)", codex); err != nil {
 		t.Fatal(err)
 	}
-	saveFixtureCredential(t, dataDir, "codex", "fixture-v1")
+	saveCredential(t, dataDir, "codex", Credential{Schema: "fixture-v1", Payload: json.RawMessage(`{"token":"owner-sign-in"}`)})
 	if _, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO meta(key, value) VALUES('account.registry', '8')"); err != nil {
 		t.Fatal(err)
 	}
@@ -582,5 +601,76 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 	}
 	if _, err := os.Stat(s.credentialPath("codex")); err != nil {
 		t.Fatalf("a Pi row without a credential discarded the saved sign-in: %v", err)
+	}
+}
+
+// D-125 review: a Pi envelope Dyna can read but Pi cannot use is not a
+// replacement. `payload: null` parses as a credential, yet Pi finds no provider
+// entry in it, so the source sign-in must survive.
+func TestRegistryMigrationKeepsASignInWhenThePiCredentialHasNoProviderEntry(t *testing.T) {
+	for _, payload := range []string{"null", `{"auth.json":null}`, `{"auth.json":{}}`, `{"auth.json":{"openai-codex":null}}`} {
+		t.Run(payload, func(t *testing.T) {
+			s := registryStore(t)
+			dataDir := filepath.Dir(s.Root)
+			ctx := context.Background()
+			db, err := database.Open(dataDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `CREATE TABLE accounts (
+ id TEXT PRIMARY KEY,
+ ord INTEGER NOT NULL,
+ metadata BLOB NOT NULL CHECK(json_valid(metadata)),
+ credential_schema TEXT NOT NULL DEFAULT ''
+);`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, activeSchema); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `CREATE TABLE account_repo_scopes (account_id TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY (account_id, repo));
+CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`); err != nil {
+				t.Fatal(err)
+			}
+			pi, err := json.Marshal(Metadata{ID: "pi-chatgpt", Harness: "pi", Provider: ProviderChatGPT, Kind: KindOAuth})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES('pi-chatgpt', 0, ?, ?)", pi, SchemaPiNativeFiles); err != nil {
+				t.Fatal(err)
+			}
+			saveCredential(t, dataDir, "pi-chatgpt", Credential{Schema: SchemaPiNativeFiles, Payload: json.RawMessage(payload)})
+			codex, err := json.Marshal(Metadata{ID: "codex", Harness: "codex", Provider: ProviderChatGPT, Kind: KindOAuth})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES('codex', 1, ?)", codex); err != nil {
+				t.Fatal(err)
+			}
+			saveCredential(t, dataDir, "codex", Credential{Schema: "fixture-v1", Payload: json.RawMessage(`{"token":"owner-sign-in"}`)})
+			if _, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO meta(key, value) VALUES('account.registry', '8')"); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(dataDir); err != nil {
+				t.Fatal(err)
+			}
+			state, err := s.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			kept := map[string]bool{}
+			for _, entry := range state.Entries {
+				kept[entry.ID] = true
+			}
+			if !kept["codex"] {
+				t.Fatalf("migration kept %v, want the Codex sign-in whose Pi credential has no provider entry", kept)
+			}
+			if err := s.Update(func(*State) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(s.credentialPath("codex")); err != nil {
+				t.Fatalf("a Pi credential without a provider entry discarded the saved sign-in: %v", err)
+			}
+		})
 	}
 }

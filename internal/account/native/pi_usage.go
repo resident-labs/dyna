@@ -15,7 +15,7 @@ import (
 
 // piNativeFilesSchema is the credential schema of a captured Pi account. The
 // payload holds the files of the account's own Pi home, including auth.json.
-const piNativeFilesSchema = "pi/native-files@1"
+const piNativeFilesSchema = store.SchemaPiNativeFiles
 
 // UsageUnavailableError is a typed usage result. Reason classifies why the
 // reading is unavailable; Detail is one sentence that names the provider. It
