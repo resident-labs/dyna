@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"reflect"
@@ -21,8 +20,11 @@ type signalContext struct {
 }
 
 func (c *signalContext) Err() error {
+	// Read the answer before signalling, so the check that signals gets the
+	// answer that was true before the test could cancel.
+	err := c.Context.Err()
 	c.once.Do(func() { close(c.asked) })
-	return c.Context.Err()
+	return err
 }
 
 // A refresh that waits behind another one and expires queued asks no provider
@@ -39,8 +41,7 @@ func TestQueuedRefreshCancelsWithoutAskingAProvider(t *testing.T) {
 		switch r.URL.Host {
 		case "platform.claude.com":
 			refreshes++
-			raw, _ := json.Marshal(map[string]any{"access_token": "renewed-access", "refresh_token": "renewed-grant", "expires_in": 3600})
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"access_token":"renewed-access","refresh_token":"renewed-grant","expires_in":3600}`)), Header: make(http.Header)}, nil
 		case "api.anthropic.com":
 			probes++
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"five_hour":{"utilization":12,"resets_at":"2030-03-17T17:46:40Z"}}`)), Header: make(http.Header)}, nil
