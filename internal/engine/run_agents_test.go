@@ -30,6 +30,7 @@ func TestRunAgentCallsAdmitOnlyTheRunsCoordinator(t *testing.T) {
 		for method, args := range map[string][]any{
 			"StartRunAgent":  {callspec.RunAgentStart{Run: "wf_1", Agent: 1}},
 			"WaitRunAgent":   {callspec.RunAgentRef{Run: "wf_1", Agent: 1}},
+			"CloseRunAgent":  {callspec.RunAgentRef{Run: "wf_1", Agent: 1}},
 			"CloseRunAgents": {"wf_1"},
 		} {
 			err := client.Call(t.Context(), method, args, nil)
