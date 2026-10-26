@@ -40,7 +40,7 @@ func RoomCmd() *cobra.Command {
 			"Every member and the owner can read every post. Mentions decide who wakes, not who can read. " +
 			"Work started without --room goes to the current repo's room; outside a repo, pass --room.",
 	}
-	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), editCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
+	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), editCmd(), repoCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
 	return cmd
 }
 
@@ -109,6 +109,63 @@ func editCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&rootProfile, "root-profile", "", "root profile name (empty uses the global default)")
 	_ = cmd.MarkFlagRequired("root-profile")
+	return cmd
+}
+
+// repoCmd is `dyna room repo`: the repositories a room accepts for local changes.
+func repoCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "repo",
+		Short: "Choose the repositories a room accepts for local changes",
+		Long: "A room accepts local changes from checkouts of its own repository. " +
+			"Register another repository, such as a private sidecar, so dyna git change open accepts its checkouts. " +
+			"Only the owner and the room's root may add or remove one. A registered repository that left the disk is listed as missing.",
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
+	}
+	add := &cobra.Command{
+		Use:   "add <room> <path>",
+		Short: "Accept checkouts of another repository",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := filepath.Abs(args[1])
+			if err != nil {
+				return err
+			}
+			if err := engineClient().Call(cmd.Context(), "AddRoomRepo", []any{args[0], path}, nil); err != nil {
+				return fmt.Errorf("the room was not updated: %w", err)
+			}
+			return nil
+		},
+	}
+	remove := &cobra.Command{
+		Use:   "remove <room> <path>",
+		Short: "Stop accepting a registered repository",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := filepath.Abs(args[1])
+			if err != nil {
+				return err
+			}
+			if err := engineClient().Call(cmd.Context(), "RemoveRoomRepo", []any{args[0], path}, nil); err != nil {
+				return fmt.Errorf("the room was not updated: %w", err)
+			}
+			return nil
+		},
+	}
+	list := &cobra.Command{
+		Use:   "list <room>",
+		Short: "List the repositories a room accepts",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rec, err := store().Resolve(args[0])
+			if err != nil {
+				return err
+			}
+			return printJSON(cmd.OutOrStdout(), rec.Repos())
+		},
+	}
+	cmd.AddCommand(add, remove, list)
 	return cmd
 }
 

@@ -59,17 +59,20 @@ type Record struct {
 	RootProfile      string       `json:"rootProfile,omitempty"`
 	SessionPause     SessionPause `json:"sessionPause,omitempty"`
 	// Seat is the row's seat column, which only writeSeat writes.
-	Seat          Seat      `json:"-"`
-	DisplayName   string    `json:"displayName,omitempty"`
-	ManualArchive bool      `json:"manualArchive,omitempty"`
-	Pinned        bool      `json:"pinned,omitempty"`
-	PinOrder      int       `json:"pinOrder,omitempty"`
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Repo          string    `json:"repo,omitempty"`
-	CreatedBy     string    `json:"createdBy,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
-	LastActivity  time.Time `json:"lastActivity"`
+	Seat          Seat   `json:"-"`
+	DisplayName   string `json:"displayName,omitempty"`
+	ManualArchive bool   `json:"manualArchive,omitempty"`
+	Pinned        bool   `json:"pinned,omitempty"`
+	PinOrder      int    `json:"pinOrder,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Repo          string `json:"repo,omitempty"`
+	// ExtraRepos lists more repositories, as main worktree paths, whose
+	// checkouts the room accepts for local changes (see AddRepo).
+	ExtraRepos   []string  `json:"extraRepos,omitempty"`
+	CreatedBy    string    `json:"createdBy,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	LastActivity time.Time `json:"lastActivity"`
 }
 
 // Archived reports whether this room is dormant at now. Live work keeps a
