@@ -107,27 +107,30 @@ func TestSocketRejectsFilesAndSymlinkDirectory(t *testing.T) {
 	}
 }
 
-// A scratch engine must not take the owner's live socket: when its data folder
-// is its own but its runtime folder is the login one, it refuses to start.
-func TestRefuseOwnerSocketForAForeignDataFolder(t *testing.T) {
-	owner := store.OwnerDataDir()
-	if owner == "" {
-		t.Skip("this host has no owner home to compare against")
-	}
+// An engine a Dyna session started must not take the owner's live socket. The
+// installed service and an engine the owner starts from a terminal keep the
+// normal runtime folder, including with a custom XDG_DATA_HOME.
+func TestRefuseOwnerSocketForASessionLaunchedEngine(t *testing.T) {
 	login := filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
-	scratch := t.TempDir()
-	err := checkPrivateRuntime(scratch, login)
+	err := checkPrivateRuntime(true, login)
 	if err == nil {
-		t.Fatal("a scratch data folder took the owner's runtime socket")
+		t.Fatal("a session-launched engine took the owner's runtime socket")
 	}
 	if !strings.Contains(err.Error(), "runtime folder of its own") {
 		t.Fatalf("unhelpful refusal: %v", err)
 	}
-	// The owner's own data folder with the login runtime folder is the normal
-	// service case, and a scratch engine with its own runtime folder is fine.
-	for _, ok := range [][2]string{{owner, login}, {scratch, filepath.Join(scratch, "run")}, {scratch, ""}} {
-		if err := checkPrivateRuntime(ok[0], ok[1]); err != nil {
-			t.Fatalf("data=%q runtime=%q: %v", ok[0], ok[1], err)
+	scratch := t.TempDir()
+	for _, ok := range []struct {
+		stamped bool
+		runtime string
+	}{
+		{true, filepath.Join(scratch, "run")},
+		{false, login},
+		{false, filepath.Join(scratch, "run")},
+		{true, ""},
+	} {
+		if err := checkPrivateRuntime(ok.stamped, ok.runtime); err != nil {
+			t.Fatalf("stamped=%t runtime=%q: %v", ok.stamped, ok.runtime, err)
 		}
 	}
 }
