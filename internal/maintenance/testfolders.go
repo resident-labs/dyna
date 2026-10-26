@@ -94,7 +94,7 @@ func newestChange(path string, top time.Time) time.Time {
 // retention. Root is a folder Dyna owns on disk (the shared temporary folder of
 // hook runs and local checks, and the test run folder), so any name in it is
 // ours. It never follows a link out of root.
-func sweepDiskTemp(now time.Time, root string, dry bool) (Pruned, error) {
+func sweepDiskTemp(now time.Time, root string, alive func(int) bool, dry bool) (Pruned, error) {
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return Pruned{}, nil
@@ -107,6 +107,11 @@ func sweepDiskTemp(now time.Time, root string, dry bool) (Pruned, error) {
 	for _, entry := range entries {
 		if scratch.IsSessionTempName(entry.Name()) {
 			// A session's folder goes with its scratch folder, not by age.
+			continue
+		}
+		if pid, ok := scratch.RunTempPID(entry.Name()); ok && alive(pid) {
+			// The engine that made this run's folder still runs, and removes the
+			// folder when the run ends.
 			continue
 		}
 		info, err := entry.Info()
