@@ -774,11 +774,10 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	var copyErr error
 	stopped := control.Err()
 	if stopped == nil {
-		copyErr = r.fetchReports(control, reportRoot, reports)
+		copyErr = r.fetchReportsRetrying(control, reportRoot, reports)
 		// The deadline can end the copy itself, and then the reports are gone.
 		stopped = control.Err()
 	}
-	copyCause := reportCopyCause(node, control, copyErr)
 	result.Status = OutcomePassed
 	for i := range result.Suites {
 		sr := &result.Suites[i]
@@ -791,8 +790,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				sr.Status, sr.Error, sr.Cause = OutcomeError, "check stopped before its reports were read", runCause(node, control, stopped)
 			}
 		case copyErr != nil:
+			// The command exited 0, but the gate needs its reports, so this is
+			// not a pass. It is not a machine failure either: the command's own
+			// result reached the engine, and only the reports are missing.
 			if sr.Status == OutcomePassed {
-				sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), copyCause
+				sr.Status, sr.Error, sr.Cause = OutcomeError, "reports unavailable: copy reports: "+copyErr.Error(), CauseReports
 			}
 		default:
 			// The reports say what the exit status cannot: the execution timing,
@@ -829,24 +831,53 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, stopped
 	}
 	if copyErr != nil {
-		result.Cause = copyCause
+		// A machine that lost the connection during its checks keeps that cause
+		// on the run, so the scheduler still retries it on another machine. A run
+		// whose checks proved their own results only lost its reports.
+		result.Cause = CauseReports
+		if reportCopyCause(node, control, copyErr) == CauseSSHDrop && slices.ContainsFunc(result.Suites, func(sr SuiteResult) bool { return sr.Cause == CauseSSHDrop }) {
+			result.Cause = CauseSSHDrop
+		}
 		return result, fmt.Errorf("copy reports: %w", copyErr)
 	}
 	return result, nil
 }
 
-// reportCopyCause names why the report copy failed. A copy whose SSH client
-// lost the connection is a machine cause, the same one a check gets, so the
-// scheduler retries the run on another machine; any other copy failure leaves
-// the reports unavailable (D-170).
+// reportCopyAttempts bounds how often the report copy runs. Every check's
+// reports come back in one copy right after the checks end, and a node that
+// drops a new connection under a burst of logins accepts it again a moment
+// later (D-192).
+const reportCopyAttempts = 3
+
+// reportCopyCause names a failed copy as an SSH drop when its client lost the
+// connection, and as unavailable reports otherwise (D-170).
 func reportCopyCause(node Node, ctx context.Context, err error) FailureCause {
-	if err == nil {
-		return CauseReports
-	}
-	if cause := runCause(node, ctx, err); cause == CauseSSHDrop {
-		return cause
+	if runCause(node, ctx, err) == CauseSSHDrop {
+		return CauseSSHDrop
 	}
 	return CauseReports
+}
+
+var reportCopyWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
+
+// fetchReportsRetrying repeats a failed report copy a few times with a growing
+// wait. The copy only reads the node and each attempt starts a new archive, so
+// a repeat is safe. A stopped run ends the loop at once.
+func (r Runner) fetchReportsRetrying(ctx context.Context, reportRoot, reports string) error {
+	wait := r.dialWait
+	if wait == nil {
+		wait = sleepContext
+	}
+	var err error
+	for attempt := 0; attempt < reportCopyAttempts; attempt++ {
+		if err = r.fetchReports(ctx, reportRoot, reports); err == nil || ctx.Err() != nil || attempt == reportCopyAttempts-1 {
+			return err
+		}
+		if waitErr := wait(ctx, reportCopyWaits[min(attempt, len(reportCopyWaits)-1)]); waitErr != nil {
+			return errors.Join(err, waitErr)
+		}
+	}
+	return err
 }
 
 // rejudgeTransportDeath decides a check whose connection to the node died.
