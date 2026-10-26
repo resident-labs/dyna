@@ -34,6 +34,9 @@ export interface RunAgent {
   label: string
   profile?: string
   phase?: string
+  // lane and stage are what the script gave its phase; both are absent when it gave none.
+  lane?: string
+  stage?: string
   status: string
   started?: number
   durMs?: number

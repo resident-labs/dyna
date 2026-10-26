@@ -42,6 +42,8 @@ type Event struct {
 	Label          string `json:"label,omitempty"`
 	Profile        string `json:"profile,omitempty"`
 	Phase          string `json:"phase,omitempty"`
+	Lane           string `json:"lane,omitempty"`  // optional grouping a script gives with its phase; the run page draws a row per lane
+	Stage          string `json:"stage,omitempty"` // optional step name a script gives with its phase; the run page draws a column per stage
 	Msg            string `json:"msg,omitempty"`
 	Provenance     string `json:"provenance,omitempty"` // workflow|system; t=log only
 	Kind           string `json:"kind,omitempty"`
