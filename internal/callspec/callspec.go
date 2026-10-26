@@ -58,7 +58,11 @@ var LongCalls = map[string]time.Duration{
 	// repositories and removes worktrees. Keep their existing synchronous CLI
 	// behavior while item 8 moves slow work into jobs.
 	"NewWorktree": 10 * time.Minute,
-	"GCWorktrees": 2 * time.Minute, "RemoveWorktrees": 2 * time.Minute,
+	// Starting a session creates its worktree and restores dependencies, the
+	// same work as NewWorktree, before it answers. The caller reports the
+	// session if the answer still arrives late.
+	"StartSubagent": 10 * time.Minute,
+	"GCWorktrees":   2 * time.Minute, "RemoveWorktrees": 2 * time.Minute,
 	"PruneWorktrees": 2 * time.Minute, "ApplyRunWorktreeDisposition": 2 * time.Minute,
 	// A machine probe waits for one SSH connection: the prober allows 20 s in
 	// all, with a 10 s connect limit, and then stores what it read. With the
@@ -100,7 +104,7 @@ var LongCalls = map[string]time.Duration{
 	"FinishPrivateRuntimeLogin": 10 * time.Minute, "RestartPrivateRuntimeLogin": 10 * time.Minute, "FindPersonalLogin": 10 * time.Minute,
 	"UsePersonalLogin": 10 * time.Minute, "ImportPrivateConfig": 10 * time.Minute,
 	"GCPrivateRuntime": 10 * time.Minute,
-	"AccountsUse": 10 * time.Minute, "AccountsRemove": 10 * time.Minute,
+	"AccountsUse":      10 * time.Minute, "AccountsRemove": 10 * time.Minute,
 	"AddHarnessMCP": 10 * time.Minute, "AddHarnessSkill": 10 * time.Minute,
 	// CLI catalog edits generate private harness files synchronously, like the
 	// browser add calls above. Item 8 will move generation to a background job.
@@ -118,11 +122,26 @@ func Deadline(method string) time.Duration {
 	return callTimeout
 }
 
+// lateError is a call that ran past its deadline.
+type lateError struct {
+	method string
+	d      time.Duration
+}
+
+func (e lateError) Error() string {
+	return fmt.Sprintf("engine did not answer %s in %g s", e.method, e.d.Seconds())
+}
+
 // Late is the error of a call that ran past its deadline d. The engine and
 // the client both return it, so an agent sees one line whichever side stops
 // first.
-func Late(method string, d time.Duration) error {
-	return fmt.Errorf("engine did not answer %s in %g s", method, d.Seconds())
+func Late(method string, d time.Duration) error { return lateError{method, d} }
+
+// IsLate reports a call that ran past its deadline, so a caller can ask
+// whether the engine applied it before giving up.
+func IsLate(err error) bool {
+	var late lateError
+	return errors.As(err, &late)
 }
 
 // VersionHeader carries the build of the sender, both ways on every call.
