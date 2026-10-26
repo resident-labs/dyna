@@ -370,6 +370,11 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 		if err := shells.DefaultStore().Sweep(); err != nil {
 			log.Printf("shell owner sweep: %v", err)
 		}
+		// Republish every scope link at this build: sessions that keep running
+		// across the restart follow the engine onto its current CLI (D-161).
+		if err := fsutil.RefreshScopeLinks(); err != nil {
+			log.Printf("scope link refresh: %v", err)
+		}
 	}
 	appPort, err := websvc.LoopbackPort(f.Addr)
 	if err != nil {
