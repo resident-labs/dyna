@@ -1171,7 +1171,9 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// The workflow uploads its JUnit as an artifact, and an upload is stored as
 		// <artifact>/<artifact>.zip; the existing reader reads the check's report
 		// directory, so the archives are unpacked into it first.
-		setup += "find " + q(artifacts) + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
+		// A job uploads its JUnit as XML and, for a Go job, the raw test events
+		// as JSON, which the Go reader needs for failure detail.
+		setup += "find " + q(artifacts) + " \\( -name '*.xml' -o -name '*.json' \\) -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
 		// Each archive is unpacked into a directory of its own and every entry
 		// keeps the archive's name and its path inside it, so two uploads that
 		// both hold junit.xml land as two reports instead of overwriting one.
@@ -1184,8 +1186,8 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			`if command -v unzip >/dev/null 2>&1; then unzip -qq -o "$archive" -d "$dest" >/dev/null 2>&1 || true; ` +
 			`elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e "$archive" "$dest" >/dev/null 2>&1 || true; fi; ` +
 			`entryOrdinal=0; while IFS= read -r entry; do entryOrdinal=$((entryOrdinal + 1)); ` +
-			`cp "$entry" ` + q(reportDir) + `/"$archiveOrdinal-$entryOrdinal.xml" || true; ` +
-			`done < <(find "$dest" -name '*.xml' -type f 2>/dev/null); ` +
+			`cp "$entry" ` + q(reportDir) + `/"$archiveOrdinal-$entryOrdinal.${entry##*.}" || true; ` +
+			`done < <(find "$dest" \( -name '*.xml' -o -name '*.json' \) -type f 2>/dev/null); ` +
 			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
 			"rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"
