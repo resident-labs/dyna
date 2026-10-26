@@ -143,6 +143,12 @@ var updateStore = state.Update
 
 func (s *Store) Read() (State, error) { return readStore(s.Root) }
 
+// OpenRecordsInRoom reads the unclosed PRs of one room without loading the
+// whole PR snapshot.
+func (s *Store) OpenRecordsInRoom(roomID string) ([]Record, error) {
+	return state.OpenRecordsInRoom(s.Root, roomID)
+}
+
 // readRecords reads metadata and selected records from one committed revision.
 // An empty selection keeps the full-read contract for callers that need all PRs.
 func (s *Store) readRecords(keys ...string) (State, error) {

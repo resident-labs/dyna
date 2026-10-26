@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -182,6 +183,103 @@ func ReadSnapshot(root string) (Snapshot, error) {
 		defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	}
 	return readSnapshot(root)
+}
+
+// OpenRecordsInRoom reads only the unclosed records of one room from one
+// read transaction. It never loads the whole snapshot, so a caller that needs
+// a few records does not decode every stored PR (about 17 MB).
+func OpenRecordsInRoom(root, roomID string) ([]Record, error) {
+	db, err := open(root)
+	if err != nil {
+		return nil, err
+	}
+	var bodies [][]byte
+	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
+		rows, err := r.QueryContext(context.Background(), "SELECT body FROM pr_records WHERE room=? AND closed=0", roomID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var body []byte
+			if err := rows.Scan(&body); err != nil {
+				return err
+			}
+			bodies = append(bodies, body)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	var records []Record
+	for _, body := range bodies {
+		var record diskRecord
+		if err := json.Unmarshal(body, &record); err != nil {
+			return nil, fmt.Errorf("invalid PR record: %w", err)
+		}
+		if record.Record != nil {
+			records = append(records, *record.Record)
+		}
+	}
+	return records, nil
+}
+
+// ReadForSessions returns a State that holds only the room's PRs that any of
+// sessions authors or reviews, closed ones included. SQLite filters the rows,
+// so Go decodes a few records instead of every stored PR. The State has no
+// metadata and no saved responses.
+func ReadForSessions(root, roomID string, sessions ...string) (State, error) {
+	st := newState()
+	st.Records = map[string]*Record{}
+	if len(sessions) == 0 {
+		return st, nil
+	}
+	db, err := open(root)
+	if err != nil {
+		return State{}, err
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(sessions)), ",")
+	args := []any{roomID}
+	for range 3 {
+		for _, session := range sessions {
+			args = append(args, session)
+		}
+	}
+	type stored struct {
+		key  string
+		body []byte
+	}
+	var found []stored
+	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
+		rows, err := r.QueryContext(context.Background(), `SELECT key, body FROM pr_records WHERE room=? AND (
+json_extract(body,'$.record.authorSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerSession') IN (`+marks+`) OR json_extract(body,'$.record.reviewerOverride') IN (`+marks+`))`, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row stored
+			if err := rows.Scan(&row.key, &row.body); err != nil {
+				return err
+			}
+			found = append(found, row)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return State{}, err
+	}
+	for _, row := range found {
+		var record diskRecord
+		if err := json.Unmarshal(row.body, &record); err != nil {
+			return State{}, fmt.Errorf("invalid PR record: %w", err)
+		}
+		if record.Record != nil {
+			st.Records[row.key] = record.Record
+		}
+	}
+	return st, nil
 }
 
 // ReadLocked reads while the caller owns the store's exclusive lock, before

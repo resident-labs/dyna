@@ -177,6 +177,9 @@ func (s *Service) loadWorktreeOwners(ctx context.Context, st State) worktreeOwne
 		if !ok {
 			continue
 		}
+		if info, ok = sessionUsingWorktree(info, path, live); !ok {
+			continue
+		}
 		roomRepo, known := roomRepos[info.RoomID]
 		if !known {
 			paused, err := s.RoomPaused(info.RoomID)
@@ -212,6 +215,30 @@ func (s *Service) loadWorktreeOwners(ctx context.Context, st State) worktreeOwne
 		owners[key] = worktreeOwner{author: info, path: path}
 	}
 	return owners
+}
+
+// sessionUsingWorktree prefers the active session working in a tree over the
+// session that created it. Multiple active users make attribution ambiguous.
+func sessionUsingWorktree(registered subagent.Info, path string, live map[string]subagent.Info) (subagent.Info, bool) {
+	var found subagent.Info
+	for _, candidate := range live {
+		if candidate.RoomID != registered.RoomID || candidate.Dir == "" {
+			continue
+		}
+		rel, err := filepath.Rel(path, filepath.Clean(candidate.Dir))
+		inside := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		if !inside {
+			continue
+		}
+		if found.ID != "" && found.ID != candidate.ID {
+			return subagent.Info{}, false
+		}
+		found = candidate
+	}
+	if found.ID != "" {
+		return found, true
+	}
+	return registered, true
 }
 
 func (s *Service) worktreeAuthor(owners worktreeOwners, main, roomID, branch string) (subagent.Info, string) {

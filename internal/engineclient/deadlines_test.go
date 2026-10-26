@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,5 +129,75 @@ func TestRefusedSocketFailsAfterTheRestartWait(t *testing.T) {
 	}
 	if got := waiting.String(); strings.Count(got, "\n") != 1 {
 		t.Fatalf("waiting output = %q, want one line", got)
+	}
+}
+
+// An engine restart closes the connection before it answers. StartSubagent
+// goes again once with the request ID it first sent, even when the first send
+// used up the restart wait.
+func TestCutStartSubagentRepeatsOnceWithTheSameRequestID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var ids []string
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		ids = append(ids, r.Header.Get("X-Dyna-Request"))
+		first := len(ids) == 1
+		mu.Unlock()
+		if first {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		_, _ = w.Write([]byte(`"done"`))
+	})}
+	t.Cleanup(func() { _ = server.Close() })
+	go func() { _ = server.Serve(listener) }()
+	var reply string
+	if err := engineclient.New(path, engineclient.Notices(nil), engineclient.RestartWait(0)).Call(t.Context(), "StartSubagent", nil, &reply); err != nil || reply != "done" {
+		t.Fatalf("call = %q, %v; want done after one retry", reply, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ids) != 2 || ids[0] == "" || ids[0] != ids[1] {
+		t.Fatalf("request IDs = %q; want two sends with one non-empty ID", ids)
+	}
+}
+
+// After the cut, a refused socket waits with a growing delay and says so once,
+// instead of dialing in a tight loop. The clock is fake.
+func TestCutThenRefusedSocketWaitsWithBackoff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		conn, err := listener.Accept()
+		_ = listener.Close() // removes the socket, so later dials are refused
+		if err == nil {
+			_ = conn.Close()
+		}
+	}()
+	at := time.Unix(0, 0)
+	var waits []time.Duration
+	var notices bytes.Buffer
+	client := engineclient.New(path, engineclient.Notices(&notices), engineclient.RestartWait(time.Second), engineclient.FakeClock(&at, &waits))
+	err = client.Call(t.Context(), "StartSubagent", nil, nil)
+	if !errors.Is(err, engineclient.ErrNotRunning) {
+		t.Fatalf("err = %v; want engine not running", err)
+	}
+	want := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 300 * time.Millisecond}
+	if !slices.Equal(waits, want) {
+		t.Fatalf("waits = %v; want %v", waits, want)
+	}
+	if strings.Count(notices.String(), "waiting for the engine") != 1 {
+		t.Fatalf("notices = %q; want one waiting line", notices.String())
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -135,8 +136,15 @@ func TestLateStartReportsTheCreatedSession(t *testing.T) {
 	if !ok || info.ID != id || info.Address() != work.Name+":kid" {
 		t.Fatalf("late start = %+v, %v; want the created session", info, ok)
 	}
-	if !strings.Contains(stderr.String(), "answered StartSubagent late") {
+	if !strings.Contains(stderr.String(), "StartSubagent got no answer") {
 		t.Fatalf("notice = %q", stderr.String())
+	}
+	// A cut connection, or the engine refusing a repeat of the same start, also
+	// means the session may exist.
+	for _, cut := range []error{io.EOF, errors.New("session " + id + " already exists")} {
+		if _, ok := lateStart(m, id, cut, &stderr); !ok {
+			t.Fatalf("%v was not reported as a created start", cut)
+		}
 	}
 	// Any other failure is not a late answer.
 	if _, ok := lateStart(m, id, errors.New("socket closed"), &stderr); ok {
