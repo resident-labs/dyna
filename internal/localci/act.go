@@ -51,3 +51,13 @@ func actContainerOptions(check nodeCheck, runID string) string {
 		" --memory " + strconv.FormatInt(check.resources.MemoryMiB, 10) + "m" +
 		" --label dyna.run=" + runID
 }
+
+// matrixFlags selects one configuration of a matrix job, so a workflow shard is
+// its own check.
+func matrixFlags(entries []string) string {
+	out := ""
+	for _, entry := range entries {
+		out += " --matrix " + shellquote.Quote(entry)
+	}
+	return out
+}

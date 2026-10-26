@@ -1068,7 +1068,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
 		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds ", seconds) +
 			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
-			" -j " + q(check.job.Name) + " --rm -P " + q("ubuntu-latest="+actImage) +
+			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
 			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
 		// --rm covers the normal case; a cancelled job can leave containers, so
