@@ -65,6 +65,62 @@ func TestSweepRemovesOldLeakedToolFolders(t *testing.T) {
 	}
 }
 
+// The disk temp folders are Dyna's own, so an old entry goes whatever its name,
+// and a young one stays.
+func TestSweepDiskTempRemovesOldEntriesOfAnyName(t *testing.T) {
+	root := t.TempDir()
+	old := testFolder(t, root, "TestSomething123456", 2*diskTempRetention, false)
+	ageTree(t, old, 2*diskTempRetention)
+	young := testFolder(t, root, "TestSomething654321", 0, false)
+
+	// A long-running hook writes inside its folder, which leaves the folder's
+	// own time old. The sweep must keep it.
+	busy := testFolder(t, root, "busy", 2*diskTempRetention, false)
+	ageTree(t, busy, 2*diskTempRetention)
+	if err := os.WriteFile(filepath.Join(busy, "work.log"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old0 := time.Now().Add(-2 * diskTempRetention)
+	if err := os.Chtimes(busy, old0, old0); err != nil {
+		t.Fatal(err)
+	}
+
+	// A session's folder name is a hash. A live socket server there changes no
+	// file time, so the sweep leaves it to the scratch sweep.
+	session := testFolder(t, root, "0a1b2c3d", 2*diskTempRetention, false)
+	ageTree(t, session, 2*diskTempRetention)
+
+	// A hook that runs for days leaves its folder untouched. Its engine is alive,
+	// so the folder stays; one a crashed engine left goes.
+	live := testFolder(t, root, "r4242-live", 2*diskTempRetention, false)
+	ageTree(t, live, 2*diskTempRetention)
+	crashed := testFolder(t, root, "r999-crashed", 2*diskTempRetention, false)
+	ageTree(t, crashed, 2*diskTempRetention)
+
+	freed, err := sweepDiskTemp(time.Now(), root, func(pid int) bool { return pid == 4242 }, false)
+	if _, statErr := os.Stat(live); statErr != nil {
+		t.Fatalf("the sweep removed the folder of a live run: %v", statErr)
+	}
+	if _, statErr := os.Stat(crashed); !os.IsNotExist(statErr) {
+		t.Fatalf("the folder of a dead run stayed: %v", statErr)
+	}
+	if _, statErr := os.Stat(session); statErr != nil {
+		t.Fatalf("the sweep removed a session's folder: %v", statErr)
+	}
+	if _, statErr := os.Stat(busy); statErr != nil {
+		t.Fatalf("the sweep removed a folder with a recent file: %v", statErr)
+	}
+	if err != nil || freed.Items != 2 {
+		t.Fatalf("sweep = %+v, %v; want the old entry and the crashed run", freed, err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("an old entry stayed: %v", err)
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Fatalf("a young entry was removed: %v", err)
+	}
+}
+
 // The sweep removes only the folders this package makes. An unrelated program's
 // old workspace, a Go tool folder and a process guard's control folder all stay,
 // even when they are older than the retention.
@@ -125,4 +181,20 @@ func testFolder(t *testing.T, root, name string, age time.Duration, readOnly boo
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// ageTree sets the modification time of everything under dir, so a folder reads
+// as old to a sweep that looks at its content.
+func ageTree(t *testing.T, dir string, age time.Duration) {
+	t.Helper()
+	old := time.Now().Add(-age)
+	err := filepath.WalkDir(dir, func(path string, _ os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, old, old)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

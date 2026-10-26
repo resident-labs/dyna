@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -145,6 +146,105 @@ func Ensure(owner string) (string, error) {
 	return filepath.Join(root, owner), nil
 }
 
+// TempVars names the variables that tools read for their temporary folder:
+// TMPDIR for POSIX tools, TMP and TEMP for Windows-style tools, and GOTMPDIR for
+// the Go toolchain, which otherwise reads its own setting.
+var TempVars = []string{"TMPDIR", "TMP", "TEMP", "GOTMPDIR"}
+
+// SharedTempName is the folder under the owner's Dyna cache that holds every
+// worker's temporary folder. Maintenance removes the ones left unused.
+const SharedTempName = "tmp"
+
+// tempRoot is the disk folder for temporary files, or "" when the owner's home
+// is unknown. Like Root, it never follows $HOME. The path is short on purpose:
+// tools bind unix sockets under TMPDIR, and a socket path may hold at most 108
+// bytes.
+func tempRoot() string {
+	owner, err := user.Current()
+	if err != nil || owner.HomeDir == "" {
+		return ""
+	}
+	return filepath.Join(owner.HomeDir, ".cache", "dyna", SharedTempName)
+}
+
+// SetTemp points each variable in TempVars that env does not set yet at a disk
+// folder private to owner, so a worker's temporary files never fill /tmp, a RAM
+// disk on many hosts. A value the profile sets stays. The folder name is short
+// (eight hex characters of the owner's hash).
+func SetTemp(env map[string]string, owner string) error {
+	root := tempRoot()
+	if root == "" || !validOwner(owner) {
+		return nil
+	}
+	dir := filepath.Join(root, tempName(owner))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, name := range TempVars {
+		if _, set := env[name]; !set {
+			env[name] = dir
+		}
+	}
+	return nil
+}
+
+// tempName is the short folder name of an owner's temporary folder.
+func tempName(owner string) string {
+	sum := sha256.Sum256([]byte(owner))
+	return hex.EncodeToString(sum[:4])
+}
+
+// IsSessionTempName reports whether name is the folder SetTemp made for a
+// session. The scratch sweep removes it with the session's scratch, because
+// the age of its files does not show whether a live process still uses it: a
+// socket server can run for days without changing a file time.
+func IsSessionTempName(name string) bool {
+	if len(name) != 8 {
+		return false
+	}
+	_, err := hex.DecodeString(name)
+	return err == nil && strings.ToLower(name) == name
+}
+
+// RunTempPrefix starts the name of a run's temporary folder; the process ID of
+// the engine that made it follows, so maintenance can tell a folder of a live
+// process from one a crash left.
+const RunTempPrefix = "r"
+
+// NewRunTemp makes a temporary folder for one process that has no session, such
+// as a hook run or a local CI check, and returns TempVars as KEY=value pairs
+// plus a function that removes the folder when the run ends. The pairs are empty
+// and the function does nothing when the folder cannot be made.
+func NewRunTemp() ([]string, func()) {
+	root := tempRoot()
+	if root == "" || os.MkdirAll(root, 0o700) != nil {
+		return nil, func() {}
+	}
+	dir, err := os.MkdirTemp(root, fmt.Sprintf("%s%d-", RunTempPrefix, os.Getpid()))
+	if err != nil {
+		return nil, func() {}
+	}
+	out := make([]string, 0, len(TempVars))
+	for _, name := range TempVars {
+		out = append(out, name+"="+dir)
+	}
+	return out, func() { _ = os.RemoveAll(dir) }
+}
+
+// RunTempPID reads the process ID in the name of a run's temporary folder.
+func RunTempPID(name string) (int, bool) {
+	rest, ok := strings.CutPrefix(name, RunTempPrefix)
+	if !ok {
+		return 0, false
+	}
+	digits, _, ok := strings.Cut(rest, "-")
+	if !ok {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(digits)
+	return pid, err == nil && pid > 0
+}
+
 // Owner is what a lookup knows about a top-level scratch folder's owner. Open
 // also covers an owner that is dormant, one that has a live shell job, and one
 // whose state could not be read: a sweep never removes any of them.
@@ -266,6 +366,9 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 		}
 		result.Removed = append(result.Removed, path)
 		result.BytesFreed += bytes
+		if root := tempRoot(); root != "" {
+			_ = os.RemoveAll(filepath.Join(root, tempName(strings.Split(name, string(os.PathSeparator))[0])))
+		}
 	}
 	return result, nil
 }
