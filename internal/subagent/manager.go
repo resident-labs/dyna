@@ -27,6 +27,7 @@ import (
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lockrank"
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/nodedeps"
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/review"
 	"dyna-agent/internal/pr/state"
@@ -38,6 +39,7 @@ import (
 	storepkg "dyna-agent/internal/store"
 	"dyna-agent/internal/structuredoutput"
 	"dyna-agent/internal/workeroutput"
+	"dyna-agent/internal/worktrees"
 )
 
 // Spawner launches the runner of one turn. The runner inherits the held turn
@@ -151,7 +153,7 @@ func (m *Manager) resolveStartRoom(requested string) (room.Record, error) {
 // parent's shell happens to be in; other callers use their Cwd. An implicit
 // directory outside a git work tree fails when the room has a repository, so
 // a child never lands in the wrong place silently.
-func (m *Manager) startDir(opts StartOptions, rec room.Record, parent string) (string, error) {
+func (m *Manager) startDir(opts StartOptions, parent string) (string, error) {
 	dir := opts.Dir
 	if dir == "" && parent != "" {
 		if meta, err := m.store().ReadMeta(parent); err == nil {
@@ -171,12 +173,39 @@ func (m *Manager) startDir(opts StartOptions, rec room.Record, parent string) (s
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("working directory %q is not a directory", dir)
 	}
-	if opts.Dir == "" && rec.Repo != "" {
-		if _, err := room.RepoRoot(dir); err != nil {
-			return "", fmt.Errorf("working directory %q is not in a git work tree, but room %s has repository %s; pass --dir <path> explicitly", dir, rec.Name, rec.Repo)
-		}
-	}
 	return dir, nil
+}
+
+// sessionWorktree gives a new session its own branch worktree from the
+// repository's main. An explicit Dir is a caller-chosen tree and stays. A room
+// without a repository, and a start outside any repository, keep the resolved
+// directory.
+func (m *Manager) sessionWorktree(ctx context.Context, opts StartOptions, rec room.Record, id, dir string) (string, *worktrees.Record, error) {
+	if opts.Dir != "" {
+		return dir, nil, nil
+	}
+	repo := rec.Repo
+	if repo == "" {
+		root, err := room.RepoRoot(dir)
+		if err != nil {
+			return dir, nil, nil
+		}
+		repo = root
+	}
+	if !worktrees.HasCommit(ctx, repo) {
+		// An empty repository has no main branch to copy. The session keeps
+		// the caller's directory until the repository has a commit.
+		return dir, nil, nil
+	}
+	tree, err := worktrees.NewFor(ctx, repo, "dyna/"+id, "", id, "")
+	if err != nil {
+		return "", nil, fmt.Errorf("could not create this session's worktree from %s: %w; pass --dir <path> to start in an existing tree", repo, err)
+	}
+	// Match dyna git worktrees new: restore a matching node_modules when the
+	// repository has an npm package. A failure is not a reason to refuse the
+	// session; the worker can install what it needs.
+	_, _ = nodedeps.Prepare(ctx, tree.Path)
+	return tree.Path, &tree, nil
 }
 
 // ProfileStore loads the profile registry this manager starts sessions with.
@@ -222,7 +251,7 @@ type StartOptions struct {
 	Profile   string    // empty = the default profile
 	Name      string    // optional unique label among open sessions in the room
 	Room      string    // room name or ID; empty inherits or uses global
-	Dir       string    // worker working directory (default: the parent's, else Cwd)
+	Dir       string    // worker working directory (default: a new worktree from the repository's main, else the parent's or Cwd)
 	Cwd       string    // the caller's working directory, the default Dir for a top-level session
 	Owner     string    // an owner caller's own label, such as claude:<session>; a session's is its session
 	Schema    string    // optional JSON Schema for the first turn's result
@@ -290,7 +319,7 @@ func (m *Manager) StartForEngine(opts StartOptions) (Info, Turn, error) {
 
 // start creates the session under parent, which is "" for a top-level one,
 // with owner as its owner label.
-func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner string) (Info, Turn, error) {
+func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner string) (info Info, turn Turn, err error) {
 	goal := strings.TrimSpace(opts.Goal)
 	if goal == "" {
 		return Info{}, Turn{}, errors.New(`--goal is required: pass the outcome and done condition, as in dyna subagent start --goal "<outcome; done when>" "<brief>"`)
@@ -342,20 +371,46 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	if authority.Of(ctx).Role == "" {
 		ctx = authority.WithActor(ctx, authority.EngineRoomActor(roomRec.ID))
 	}
-	dir, err := m.startDir(opts, roomRec, parent)
+	dir, err := m.startDir(opts, parent)
 	if err != nil {
 		return Info{}, Turn{}, err
 	}
-
 	store := m.store()
 	if err := os.MkdirAll(store.root(), 0o755); err != nil {
 		return Info{}, Turn{}, err
 	}
+	// The worktree fetch and dependency restore must not hold the global
+	// names lock: a slow npm install would block every session start, rename,
+	// close and promotion in every room. Check the name first so a duplicate
+	// fails without Git work, create the tree outside the lock, then recheck
+	// the name under it before the session is written.
+	id := NewID()
+	name, err := checkAvailableName(store, roomRec, opts.Name, id)
+	if err != nil {
+		return Info{}, Turn{}, err
+	}
+	var created *worktrees.Record
+	dir, created, err = m.sessionWorktree(ctx, opts, roomRec, id, dir)
+	if err != nil {
+		return Info{}, Turn{}, err
+	}
+	defer func() {
+		if err == nil || created == nil {
+			return
+		}
+		if removeErr := worktrees.Remove(*created, true); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove unused worktree %s: %w", created.Path, removeErr))
+		}
+	}()
+
 	unlock, err := lockNames(store)
 	if err != nil {
 		return Info{}, Turn{}, err
 	}
 	defer unlock()
+	if name, err = availableName(store, roomRec, opts.Name, id); err != nil {
+		return Info{}, Turn{}, err
+	}
 	// A running process keeps its original DYNA_DEPTH. Stored metadata is
 	// authoritative after promotion, including for descendants already running.
 	depth := 1
@@ -399,29 +454,9 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	if max := m.settings().SubagentMaxDepth; max > 0 && depth > max {
 		return Info{}, Turn{}, fmt.Errorf("subagent depth limit reached: this session would be at depth %d but subagent.maxDepth is %d (raise it with `dyna settings set subagent.maxDepth N`, or do the work in the current session)", depth, max)
 	}
-	id := NewID()
-	name := opts.Name
-	if name == "" {
-		base := "agent-" + id[len(id)-8:]
-		name = base
-		for suffix := 2; ; suffix++ {
-			taken, err := store.nameTaken(roomRec.ID, name)
-			if err != nil {
-				return Info{}, Turn{}, err
-			}
-			if !taken {
-				break
-			}
-			name = fmt.Sprintf("%s-%d", base, suffix)
-		}
-	} else {
-		taken, err := store.nameTaken(roomRec.ID, name)
-		if err != nil {
-			return Info{}, Turn{}, err
-		}
-		if taken {
-			return Info{}, Turn{}, nameTakenError{room: roomRec.Name, name: name}
-		}
+	name, err = availableName(store, roomRec, opts.Name, id)
+	if err != nil {
+		return Info{}, Turn{}, err
 	}
 	sdir, _ := store.Dir(id)
 	for _, sub := range []string{"turns", filepath.Join("agents", "1")} {
@@ -467,16 +502,58 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	}
 	_ = m.rooms().Touch(roomRec.ID)
 	store.appendJournal(id, SessionStartJournal{Profile: prof.Name, Depth: depth, Parent: parent, Owner: meta.Owner, Name: name, Room: roomRec.Name, Address: meta.Address(), Dir: dir, Cwd: opts.Cwd})
-	turn, _, err := m.beginTurnConfigured(id, task, opts.Schema, []string{store.ReportTarget(meta)}, opts.MessageID, "", false, opts.Deadline)
+	// The session and its goal exist now. A later turn-start failure leaves
+	// the worktree owned by the session, so close cleans it up normally.
+	created = nil
+	turn, _, err = m.beginTurnConfigured(id, task, opts.Schema, []string{store.ReportTarget(meta)}, opts.MessageID, "", false, opts.Deadline)
 	if err != nil {
 		return Info{}, Turn{}, err
 	}
-	info, _ := store.Info(id)
+	info, _ = store.Info(id)
 	return info, turn, nil
 }
 
 func lockNames(store *Store) (func(), error) {
 	return lockNamesContext(context.Background(), store)
+}
+
+// checkAvailableName reads the name under the names lock without reserving it.
+// The worktree is built outside the lock, so start rechecks before it writes.
+func checkAvailableName(store *Store, rec room.Record, requested, id string) (string, error) {
+	unlock, err := lockNames(store)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	return availableName(store, rec, requested, id)
+}
+
+// availableName returns the requested name, or the first free generated name,
+// and fails when the caller asked for a name another open session holds. The
+// caller must hold the names lock.
+func availableName(store *Store, rec room.Record, requested, id string) (string, error) {
+	if requested != "" {
+		taken, err := store.nameTaken(rec.ID, requested)
+		if err != nil {
+			return "", err
+		}
+		if taken {
+			return "", nameTakenError{room: rec.Name, name: requested}
+		}
+		return requested, nil
+	}
+	base := "agent-" + id[len(id)-8:]
+	name := base
+	for suffix := 2; ; suffix++ {
+		taken, err := store.nameTaken(rec.ID, name)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return name, nil
+		}
+		name = fmt.Sprintf("%s-%d", base, suffix)
+	}
 }
 
 func lockNamesContext(ctx context.Context, store *Store) (func(), error) {

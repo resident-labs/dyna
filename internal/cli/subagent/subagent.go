@@ -183,7 +183,7 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start --goal <outcome; done when> --profile <name> [--name <label>] [--room <room>] [--dir <path>] [--schema <file>] [--under <goal>] [--owner-display] <brief text | @file>",
 		Short: "Start a subagent session; prints its address and runs the first turn in the background",
-		Long:  "Start a subagent with a goal and brief. --goal accepts new outcome text or an existing goal ID such as g12. Use --under gN to delegate an item on a goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. With no eligible goal, the child holds a new standalone goal. --fixes links room issues to the new or existing goal. --owner-display lets the new session's own shells use your display; only the owner or root grants it, and no session inherits it.",
+		Long:  "Start a subagent with a goal and brief. Without --dir, a start in a git repository creates its own branch worktree from the repository's main. --goal accepts new outcome text or an existing goal ID such as g12. Use --under gN to delegate an item on a goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. With no eligible goal, the child holds a new standalone goal. --fixes links room issues to the new or existing goal. --owner-display lets the new session's own shells use your display; only the owner or root grants it, and no session inherits it.",
 		// Start explains a missing brief better than cobra's argument count.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -247,7 +247,7 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd.Flags().StringVar(&profileName, "profile", "", "worker profile (default: the default profile)")
 	cmd.Flags().StringVar(&name, "name", "", "label for this session, unique among open sessions in its room")
 	cmd.Flags().StringVar(&roomRef, "room", "", "room name or ID (default: inherited room, else the current repo's room)")
-	cmd.Flags().StringVar(&dir, "dir", "", "working directory (default: the parent session's directory when run from a session, else cwd)")
+	cmd.Flags().StringVar(&dir, "dir", "", "working directory (default: a new worktree from the repository's main, else the parent's directory or cwd)")
 	cmd.Flags().StringVar(&schemaPath, "schema", "", "JSON Schema file: the first turn returns validated JSON")
 	cmd.Flags().BoolVar(&ownerDisplay, "owner-display", false, "let this session's own shells use your display; owner or root only")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")

@@ -30,7 +30,7 @@ dyna subagent reopen <address|session-id>
 ```
 
 Run a command with `--help` for flags. Start requires a goal and non-empty brief.
-It prints the address and starts a detached turn. Inside a session, `--dir` defaults to the parent session's directory; elsewhere it defaults to cwd. Without `--dir`, a start outside a git work tree fails when the room has a repository.
+It prints the address and starts a detached turn. Without `--dir`, a start in a git repository creates its own branch worktree from the repository's main; `--dir` keeps the parent or current directory. A start outside a git repository keeps the current directory.
 The goal states the outcome and completion test; the brief states how.
 When the work fixes a room issue (D-N) or a GitHub issue (#N), name that issue in
 the brief and tell the builder to pass `--fixes D-5,#207` when it opens or tracks
