@@ -52,11 +52,11 @@ type Policy struct {
 // State is what the gate remembers between decisions, so a machine that flaps
 // around a threshold does not flap the limit.
 type State struct {
-	Overloaded bool `json:"overloaded"`
-	Calm       int  `json:"calm"`
+	Overloaded bool
+	Calm       int
 	// TurnBytes is the measured memory of one turn, and MeasuredAt when.
-	TurnBytes  uint64    `json:"turnBytes,omitempty"`
-	MeasuredAt time.Time `json:"measuredAt,omitempty"`
+	TurnBytes  uint64
+	MeasuredAt time.Time
 }
 
 // over reports whether r is past the thresholds, scaled by factor: 1 for

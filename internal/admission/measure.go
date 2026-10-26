@@ -1,6 +1,9 @@
 package admission
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,4 +79,66 @@ func processTable(procDir string, pageSize uint64) (map[int][]int, map[int]uint6
 		}
 	}
 	return children, rss
+}
+
+// Sampler measures the memory one running turn uses, from the runner processes
+// that hold slots.
+type Sampler interface {
+	// Measure returns the average resident bytes of the runners' process trees,
+	// or 0 when it measured nothing.
+	Measure(ctx context.Context, pids []int) uint64
+}
+
+// ProcSampler measures through /proc (Linux).
+type ProcSampler struct{ ProcDir string }
+
+// Measure implements Sampler.
+func (p ProcSampler) Measure(_ context.Context, pids []int) uint64 {
+	return MeasureTurns(p.ProcDir, pids, uint64(os.Getpagesize()))
+}
+
+// PSSampler measures through `ps` (macOS and other Unix systems with no /proc).
+type PSSampler struct {
+	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
+}
+
+// Measure implements Sampler.
+func (p PSSampler) Measure(ctx context.Context, pids []int) uint64 {
+	out, err := p.Run(ctx, "ps", "-axo", "pid=,ppid=,rss=")
+	if err != nil {
+		return 0
+	}
+	return MeasurePS(out, pids)
+}
+
+// MeasurePS averages the process-tree resident bytes of pids from `ps` output
+// with one "pid ppid rss-in-KiB" line per process.
+func MeasurePS(out []byte, pids []int) uint64 {
+	children, rss := map[int][]int{}, map[int]uint64{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		f := strings.Fields(scanner.Text())
+		if len(f) != 3 {
+			continue
+		}
+		pid, e1 := strconv.Atoi(f[0])
+		ppid, e2 := strconv.Atoi(f[1])
+		kb, e3 := strconv.ParseUint(f[2], 10, 64)
+		if e1 != nil || e2 != nil || e3 != nil {
+			continue
+		}
+		children[ppid] = append(children[ppid], pid)
+		rss[pid] = kb << 10
+	}
+	var total, counted uint64
+	for _, pid := range pids {
+		if _, ok := rss[pid]; ok {
+			total += treeRSS(pid, children, rss)
+			counted++
+		}
+	}
+	if counted == 0 {
+		return 0
+	}
+	return total / counted
 }

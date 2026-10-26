@@ -66,6 +66,7 @@ var migrations = []func(dataDir string) error{
 	callrequests.Migrate,
 	computers.Migrate,
 	admission.MigrateObserved,
+	admission.MigrateState,
 	doctor.Migrate,
 	doctoralert.Migrate,
 	escalate.Migrate,

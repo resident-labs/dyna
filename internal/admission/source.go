@@ -36,24 +36,26 @@ type Source interface {
 	Read(ctx context.Context) (Readings, error)
 }
 
-// Detect returns the source for this platform, or nil when there is none.
-func Detect() Source {
+// Detect returns the source and the turn-memory sampler for this platform, or
+// nil when there is none.
+func Detect() (Source, Sampler) {
 	switch runtime.GOOS {
 	case "linux":
-		return Linux{ProcDir: "/proc", CgroupDir: "/sys/fs/cgroup"}
+		return Linux{ProcDir: "/proc"}, ProcSampler{ProcDir: "/proc"}
 	case "darwin":
-		return Darwin{Run: runCommand}
+		return Darwin{Run: runCommand}, PSSampler{Run: runCommand}
 	}
-	return nil
+	return nil, nil
 }
 
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
-// Linux reads /proc, PSI and the cgroup limits of the process's own cgroup. The
-// directories are fields so a test can point them at fixture files.
-type Linux struct{ ProcDir, CgroupDir string }
+// Linux reads /proc, PSI and the cgroup limits of the process's own cgroup,
+// found through /proc/self/mountinfo. The directory is a field so a test can
+// point it at fixture files.
+type Linux struct{ ProcDir string }
 
 // Read implements Source.
 func (l Linux) Read(context.Context) (Readings, error) {
@@ -80,10 +82,12 @@ func (l Linux) Read(context.Context) (Readings, error) {
 		r.PressureMem = v
 		r.Source += " + PSI"
 	}
-	if cg, err := os.ReadFile(filepath.Join(l.ProcDir, "self", "cgroup")); err == nil {
-		if version := l.applyCgroup(&r, string(cg)); version != "" {
-			r.Source += " + cgroup " + version
-		}
+	version, err := l.applyCgroup(&r)
+	if err != nil {
+		return Readings{}, err
+	}
+	if version != "" {
+		r.Source += " + cgroup " + version
 	}
 	return r, nil
 }
@@ -93,6 +97,7 @@ func (l Linux) Read(context.Context) (Readings, error) {
 func ParseMeminfo(data []byte) (total, avail uint64, err error) {
 	var free, buffers, cached uint64
 	haveAvail := false
+	have := map[string]bool{}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		key, rest, ok := strings.Cut(scanner.Text(), ":")
@@ -104,6 +109,7 @@ func ParseMeminfo(data []byte) (total, avail uint64, err error) {
 		if perr != nil {
 			continue
 		}
+		have[key] = true
 		switch key {
 		case "MemTotal":
 			total = kb << 10
@@ -121,6 +127,12 @@ func ParseMeminfo(data []byte) (total, avail uint64, err error) {
 		return 0, 0, fmt.Errorf("no MemTotal in meminfo")
 	}
 	if !haveAvail {
+		// An old kernel has no MemAvailable; free plus buffers plus cache stands
+		// in, but only if all three are there. Zero available memory is never a
+		// guess.
+		if !have["MemFree"] || !have["Buffers"] || !have["Cached"] {
+			return 0, 0, fmt.Errorf("meminfo has no MemAvailable and not all of MemFree, Buffers and Cached")
+		}
 		avail = free + buffers + cached
 	}
 	return total, min(avail, total), scanner.Err()
@@ -154,43 +166,113 @@ func readPressure(file string) (float64, bool) {
 // reports a page-rounded 2^63 and v2 writes "max".
 const unlimited = 1 << 60
 
+// mount is one cgroup mount from /proc/self/mountinfo: what part of the host's
+// hierarchy it shows (Root), where it is (Point), and for v1 its controllers.
+type mount struct {
+	Root, Point string
+	V2          bool
+}
+
+// ParseMountinfo returns the cgroup v2 mount and the cgroup v1 memory mount.
+func ParseMountinfo(data []byte) (v2, v1 *mount) {
+	for _, line := range strings.Split(string(data), "\n") {
+		before, after, ok := strings.Cut(line, " - ")
+		if !ok {
+			continue
+		}
+		pre, post := strings.Fields(before), strings.Fields(after)
+		if len(pre) < 5 || len(post) < 3 {
+			continue
+		}
+		m := mount{Root: unescapeMount(pre[3]), Point: unescapeMount(pre[4])}
+		switch {
+		case post[0] == "cgroup2":
+			m.V2 = true
+			if v2 == nil {
+				v2 = &m
+			}
+		case post[0] == "cgroup" && strings.Contains(","+post[2]+",", ",memory,"):
+			if v1 == nil {
+				v1 = &m
+			}
+		}
+	}
+	return v2, v1
+}
+
+// unescapeMount decodes the octal escapes mountinfo uses for spaces.
+func unescapeMount(s string) string {
+	r := strings.NewReplacer("\\040", " ", "\\011", "\t", "\\012", "\n", "\\134", "\\")
+	return r.Replace(s)
+}
+
+// cgroupDir maps a cgroup path of the host's hierarchy to its directory under
+// the mount, which may show only a subtree. It reports false when the path lies
+// outside what the mount shows.
+func (m mount) cgroupDir(cgPath string) (string, bool) {
+	cgPath, root := path.Clean("/"+cgPath), path.Clean("/"+m.Root)
+	switch {
+	case root == "/":
+		return filepath.Join(m.Point, cgPath), true
+	case cgPath == root:
+		return m.Point, true
+	case strings.HasPrefix(cgPath, root+"/"):
+		return filepath.Join(m.Point, strings.TrimPrefix(cgPath, root)), true
+	}
+	return "", false
+}
+
 // applyCgroup narrows r to the memory limits of the process's cgroup and its
-// parents, and returns the cgroup version it used, or "" if it found none.
-func (l Linux) applyCgroup(r *Readings, selfCgroup string) string {
+// parents, and returns the cgroup version it used, or "" if none limits it. A
+// limit whose usage cannot be read is an error, because presenting the whole
+// limit as free would overstate what is left.
+func (l Linux) applyCgroup(r *Readings) (string, error) {
+	mounts, err := os.ReadFile(filepath.Join(l.ProcDir, "self", "mountinfo"))
+	if err != nil {
+		return "", nil // no mountinfo: the host's memory stands
+	}
+	self, err := os.ReadFile(filepath.Join(l.ProcDir, "self", "cgroup"))
+	if err != nil {
+		return "", nil
+	}
+	v2, v1 := ParseMountinfo(mounts)
 	version := ""
-	for _, line := range strings.Split(selfCgroup, "\n") {
+	for _, line := range strings.Split(string(self), "\n") {
 		parts := strings.SplitN(line, ":", 3)
 		if len(parts) != 3 {
 			continue
 		}
+		var m *mount
+		limitFile, usageFile, ver := "memory.max", "memory.current", "v2"
 		switch {
 		case parts[0] == "0" && parts[1] == "":
-			for dir := path.Clean(parts[2]); ; dir = path.Dir(dir) {
-				base := filepath.Join(l.CgroupDir, dir)
-				if limit, ok := readNumber(filepath.Join(base, "memory.max")); ok && limit < unlimited {
-					used, _ := readNumber(filepath.Join(base, "memory.current"))
-					narrow(r, limit, used)
-					version = "v2"
-				}
-				if dir == "/" || dir == "." {
-					break
-				}
-			}
+			m = v2
 		case strings.Contains(","+parts[1]+",", ",memory,"):
-			for dir := path.Clean(parts[2]); ; dir = path.Dir(dir) {
-				base := filepath.Join(l.CgroupDir, "memory", dir)
-				if limit, ok := readNumber(filepath.Join(base, "memory.limit_in_bytes")); ok && limit < unlimited {
-					used, _ := readNumber(filepath.Join(base, "memory.usage_in_bytes"))
-					narrow(r, limit, used)
-					version = "v1"
+			m, limitFile, usageFile, ver = v1, "memory.limit_in_bytes", "memory.usage_in_bytes", "v1"
+		}
+		if m == nil {
+			continue
+		}
+		dir, ok := m.cgroupDir(parts[2])
+		if !ok {
+			continue
+		}
+		for {
+			if limit, ok := readNumber(filepath.Join(dir, limitFile)); ok && limit < unlimited {
+				used, ok := readNumber(filepath.Join(dir, usageFile))
+				if !ok {
+					return "", fmt.Errorf("cgroup %s has a memory limit but no readable usage", dir)
 				}
-				if dir == "/" || dir == "." {
-					break
-				}
+				narrow(r, limit, used)
+				version = ver
 			}
+			if dir == m.Point || dir == "/" || dir == "." {
+				break
+			}
+			dir = filepath.Dir(dir)
 		}
 	}
-	return version
+	return version, nil
 }
 
 // narrow lowers the machine's memory to a cgroup's limit and what it has left.
@@ -255,6 +337,7 @@ func (d Darwin) Read(ctx context.Context) (Readings, error) {
 func ParseVMStat(data []byte) (uint64, error) {
 	page := uint64(0)
 	var pages uint64
+	seen := map[string]bool{}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -274,13 +357,18 @@ func ParseVMStat(data []byte) (uint64, error) {
 		switch key {
 		case "Pages free", "Pages inactive", "Pages speculative", "Pages purgeable":
 			n, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimSpace(rest), "."), 10, 64)
-			if err == nil {
-				pages += n
+			if err != nil {
+				return 0, fmt.Errorf("vm_stat: %q is not a page count", line)
 			}
+			pages += n
+			seen[key] = true
 		}
 	}
 	if page == 0 {
 		return 0, fmt.Errorf("vm_stat gave no page size")
+	}
+	if !seen["Pages free"] || !seen["Pages inactive"] {
+		return 0, fmt.Errorf("vm_stat gave no free or inactive page count")
 	}
 	return pages * page, scanner.Err()
 }
