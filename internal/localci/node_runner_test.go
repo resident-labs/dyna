@@ -1279,8 +1279,13 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 		_ = gate.Close()
 	})
 	pidFile := filepath.Join(dir, "daemon.pid")
+	// The wrapper kills every process left in its own group when the check ends,
+	// and the daemon only leaves that group once its setsid call has run. The
+	// check therefore waits on a fifo the daemon writes after it detached; a
+	// check that exits at once would race the kill against the daemon's start.
+	ready := filepath.Join(dir, "daemon.ready")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
-		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
+		inner: "mkfifo " + ready + "; setsid sh -c 'echo > " + ready + "; read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; read ready < " + ready + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
