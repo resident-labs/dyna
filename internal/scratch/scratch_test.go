@@ -8,12 +8,24 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
+// isolateRoot points scratch at a private test base instead of the owner's
+// real cache.
+func isolateRoot(t *testing.T) {
+	t.Helper()
+	base := filepath.Join(t.TempDir(), "scratch")
+	if err := os.MkdirAll(base, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(RootEnv, base)
+}
+
 func TestEnsurePrivateScratch(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	isolateRoot(t)
 	for _, worker := range []string{"", "agent-1", "agent-2"} {
 		path, err := Ensure(filepath.Join("owner", worker))
 		if err != nil {
@@ -39,7 +51,7 @@ func TestEnsurePrivateScratch(t *testing.T) {
 func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
 	for _, closing := range []bool{false, true} {
 		t.Run(fmt.Sprintf("closing=%t", closing), func(t *testing.T) {
-			t.Setenv("TMPDIR", t.TempDir())
+			isolateRoot(t)
 			root := Root()
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
@@ -74,7 +86,7 @@ func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
 }
 
 func TestSweepRetentionAndSymlinks(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	isolateRoot(t)
 	root := Root()
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
@@ -145,8 +157,7 @@ func TestSweepRetentionAndSymlinks(t *testing.T) {
 }
 
 func TestRejectSymlinkScratchRootAndOwner(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
+	isolateRoot(t)
 	outside := t.TempDir()
 	root := Root()
 	if err := os.Symlink(outside, root); err != nil {
@@ -173,8 +184,7 @@ func TestRejectSymlinkScratchRootAndOwner(t *testing.T) {
 }
 
 func TestRejectSharedScratchRoot(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
+	isolateRoot(t)
 	root := Root()
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
@@ -191,7 +201,7 @@ func TestRejectSharedScratchRoot(t *testing.T) {
 }
 
 func TestSweepPressureOnlyAndBytes(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	isolateRoot(t)
 	now := time.Now()
 	for _, owner := range []string{"closed", "open", "unknown-old", "unknown-recent", "another"} {
 		path, err := Ensure(owner)
@@ -247,7 +257,7 @@ func TestSweepPressureOnlyAndBytes(t *testing.T) {
 }
 
 func TestSweepCancellationAndInvalidOnly(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	isolateRoot(t)
 	path, err := Ensure("owner")
 	if err != nil {
 		t.Fatal(err)
@@ -265,9 +275,46 @@ func TestSweepCancellationAndInvalidOnly(t *testing.T) {
 	}
 }
 
-func TestSweepIsolatedByDataFolder(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-	firstData, secondData := t.TempDir(), t.TempDir()
+// Scratch lives on one disk base under the owner's cache. Each store gets a
+// short namespace from its data folder, so a sweep in one store cannot reach
+// another store's open sessions. TMPDIR, the harness HOME and the cache folder
+// never move it.
+func TestScratchRootUsesTheOwnerDiskBaseAndStoreNamespace(t *testing.T) {
+	owner, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(owner.HomeDir, ".cache", "dyna", "scratch")
+	tmp := t.TempDir()
+	t.Setenv(RootEnv, "")
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := Root()
+	if filepath.Dir(root) != base {
+		t.Fatalf("scratch root = %q, want a namespace under %q", root, base)
+	}
+	if strings.HasPrefix(root, tmp) {
+		t.Fatalf("scratch root is on TMPDIR: %q", root)
+	}
+	first := root
+	for _, home := range []string{t.TempDir(), owner.HomeDir} {
+		t.Setenv("HOME", home)
+		if got := Root(); got != first {
+			t.Fatalf("HOME %q moved the scratch root to %q", home, got)
+		}
+	}
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	other := Root()
+	if other == first || filepath.Dir(other) != base {
+		t.Fatalf("another data folder did not get its own namespace under %q: %q", base, other)
+	}
+}
+
+// A sweep in one store never reaches another store's scratch, even for a
+// session the current store's lifecycle records do not know.
+func TestSweepIsIsolatedByStore(t *testing.T) {
+	isolateRoot(t)
 	now := time.Now()
 	old := now.Add(-4 * 24 * time.Hour)
 	makeOld := func(owner string) string {
@@ -287,80 +334,21 @@ func TestSweepIsolatedByDataFolder(t *testing.T) {
 		}
 		return dir
 	}
-	t.Setenv("XDG_DATA_HOME", firstData)
-	first := makeOld("first-session")
-	t.Setenv("XDG_DATA_HOME", secondData)
-	second := makeOld("second-session")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	first := makeOld("open-session")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	second := makeOld("old-session")
 	result, err := Sweep(context.Background(), Options{Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(first, "note")); err != nil || string(data) != "keep" {
-		t.Fatalf("second data folder swept first scratch: %q %v", data, err)
+	if _, err := os.Stat(filepath.Join(first, "note")); err != nil {
+		t.Fatalf("a sweep removed another store's scratch: %v", err)
+	}
+	if _, err := os.Stat(second); !os.IsNotExist(err) {
+		t.Fatalf("the current store's expired scratch remains: %v", err)
 	}
 	if len(result.Removed) != 1 || result.Removed[0] != second {
-		t.Fatalf("second folder sweep: %+v", result)
-	}
-	t.Setenv("XDG_DATA_HOME", firstData)
-	if got := Root(); got != filepath.Dir(first) {
-		t.Fatalf("first root changed: %s", got)
-	}
-}
-
-func TestDefaultDataFolderUsesIsolatedScratchRoot(t *testing.T) {
-	owner, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
-	t.Setenv("HOME", owner.HomeDir)
-	old := filepath.Join(tmp, "dyna", "old-session")
-	if err := os.MkdirAll(old, 0700); err != nil {
-		t.Fatal(err)
-	}
-	note := filepath.Join(old, "note")
-	if err := os.WriteFile(note, []byte("keep old work"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var first string
-	for _, data := range []string{"", filepath.Join(owner.HomeDir, ".local", "share")} {
-		t.Setenv("XDG_DATA_HOME", data)
-		root := Root()
-		if root == "" || root == filepath.Join(tmp, "dyna") {
-			t.Fatalf("default data still uses the unkeyed scratch root: %q", root)
-		}
-		if first == "" {
-			first = root
-		}
-		if root != first {
-			t.Fatalf("same data folder selected different roots: %q and %q", first, root)
-		}
-		dir, err := Ensure("new-session")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if filepath.Dir(dir) != root {
-			t.Fatalf("new session uses %q instead of current root %q", dir, root)
-		}
-	}
-	if data, err := os.ReadFile(note); err != nil || string(data) != "keep old work" {
-		t.Fatalf("old scratch changed: %q, %v", data, err)
-	}
-}
-
-func TestScratchRootIgnoresHarnessHomeForSameDataFolder(t *testing.T) {
-	owner, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TMPDIR", t.TempDir())
-	t.Setenv("XDG_DATA_HOME", filepath.Join(owner.HomeDir, ".local", "share"))
-	first := Root()
-	for _, home := range []string{owner.HomeDir, t.TempDir()} {
-		t.Setenv("HOME", home)
-		if got := Root(); got != first {
-			t.Errorf("HOME %q changed shared data scratch: %q, want %q", home, got, first)
-		}
+		t.Fatalf("sweep removed %+v", result.Removed)
 	}
 }

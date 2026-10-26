@@ -4,10 +4,12 @@ package scratch
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -18,23 +20,50 @@ import (
 )
 
 const Env = "DYNA_SCRATCH"
+
+// RootEnv overrides the disk base that holds a store's scratch namespace.
+// Tests and tools use it; normal runs leave it unset.
+const RootEnv = "DYNA_SCRATCH_ROOT"
+
 const ClosedRetention = 24 * time.Hour
 const UnknownRetention = 3 * 24 * time.Hour
 
-// Root honors TMPDIR and isolates scratch by the absolute data folder path.
-// An empty result means one of those paths could not be resolved.
+// Root is the disk folder that holds one store's scratch: a short namespace
+// derived from the canonical data folder under the owner's cache base. It
+// never follows TMPDIR or a harness home: /tmp is a RAM disk with a per-user
+// quota, and a worker's HOME/XDG_CACHE_HOME is a private harness home. The
+// owner home comes from the account database, so the engine, a runner and a
+// nested dyna all resolve the same base. The store namespace keeps a sweep in
+// one data folder away from another store's open sessions. The path stays
+// short so sockets under a session's scratch remain below the 108-byte unix
+// socket limit.
 func Root() string {
-	data, err := filepath.Abs(store.DataDir())
+	base := strings.TrimSpace(os.Getenv(RootEnv))
+	if base == "" {
+		owner, err := user.Current()
+		if err != nil || owner.HomeDir == "" {
+			// Never fall back to $HOME: a harness home would split scratch per
+			// account instead of using the one owner folder.
+			return ""
+		}
+		base = filepath.Join(owner.HomeDir, ".cache", "dyna", "scratch")
+	}
+	base, err := filepath.Abs(base)
 	if err != nil {
 		return ""
 	}
-	key := sha256.Sum256([]byte(data))
-	name := fmt.Sprintf("dyna-%x", key)
-	root, err := filepath.Abs(filepath.Join(os.TempDir(), name))
+	return filepath.Join(base, storeNamespace(store.DataDir()))
+}
+
+// storeNamespace derives the short, stable namespace of one data folder. A
+// few stores share the disk base, so eight hex characters are ample.
+func storeNamespace(dataDir string) string {
+	canonical, err := filepath.Abs(dataDir)
 	if err != nil {
-		return ""
+		canonical = dataDir
 	}
-	return root
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:4])
 }
 
 // validateRoot rejects shared or foreign-owned roots. Workers receive a normal

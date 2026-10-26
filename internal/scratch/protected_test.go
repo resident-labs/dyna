@@ -15,7 +15,7 @@ func TestSweepSkipsProtectedPathsAndLogsOnce(t *testing.T) {
 	}
 	for _, mode := range []os.FileMode{0500, 0000} {
 		t.Run(fmt.Sprintf("%04o", mode), func(t *testing.T) {
-			t.Setenv("TMPDIR", t.TempDir())
+			isolateRoot(t)
 			blocked, err := Ensure("a-protected")
 			if err != nil {
 				t.Fatal(err)
