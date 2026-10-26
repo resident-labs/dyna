@@ -305,6 +305,10 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     events.push({ kind: 'turn', key: `turn:${t.n}`, ts: t.started, turn: t })
     if (done.includes(t.status ?? '') && t.ended) events.push({ kind: 'turnEnd', key: `turn-end:${t.n}`, ts: t.ended, turn: t })
     if (t.omitted) events.push({ kind: 'note', key: `omitted:${t.n}`, ts: t.started, text: 'Earlier events of this turn were left out.' })
+    // Items arrive in the order they happened. Their times can run backward (a
+    // folded thought keeps its latest time), and the sort below must not
+    // reorder them, so no item is earlier than the one before it.
+    let floor: Time = 0
     for (const [i, it] of (t.items || []).entries()) {
       // A wrap-up prompt is engine plumbing, not the owner's writing. The
       // typed turn divider names the check without showing that prompt.
@@ -314,7 +318,9 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       const input = ['prompt', 'steering'].includes(it.kind)
       const author = input ? (it.from || room.name).replace(/\s*\(human\)$/, '') : address
       // The time an item shows: its own, or its turn's start when it has none.
-      const at = it.ts && time(it.ts) ? it.ts : t.started
+      let at: Time = it.ts && time(it.ts) ? it.ts : t.started
+      if (time(at) < time(floor)) at = floor
+      floor = at
       // Match the stored post ID; transcript text can be framed or clipped.
       const receipt = it.postId ? receipts.get(it.postId) : undefined
       const post = it.postId ? posts.get(it.postId) : undefined
@@ -452,14 +458,20 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   events.sort((a, b) => time(a.ts) - time(b.ts) || (order[a.kind] || 0) - (order[b.kind] || 0))
   const rows: DmRow[] = []
   const shells = new Map<string, ShellStep>()
+  // The open timeline of each turn. A row of another kind (a thought, a reply,
+  // an error) closes it, so the next step starts a new one and the turn reads
+  // in the order it happened. Only a run of steps shares a timeline.
   const timelines = new Map<number, TimelineRow>()
+  const segments = new Map<number, TimelineRow[]>()
   const turns = session?.turns || []
   let current: DmTurn | undefined
   const timeline = (n: number | undefined, at?: Time): TimelineRow => {
     const id = n ?? current?.n ?? 0
     let row = timelines.get(id)
-    if (!row) {
-      row = { kind: 'timeline', author: address, key: `timeline:${id}`, ts: at, turn: turns.find((t) => t.n === id), steps: [] }
+    if (!row || rows.at(-1) !== row) {
+      const made = segments.get(id) ?? []
+      row = { kind: 'timeline', author: address, key: made.length ? `timeline:${id}:${made.length}` : `timeline:${id}`, ts: at, turn: turns.find((t) => t.n === id), steps: [] }
+      segments.set(id, [...made, row])
       timelines.set(id, row)
       rows.push(row)
     }
@@ -478,7 +490,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   }
   const childStep = (child: TimelineChild, at?: Time, n?: number): ChildStep => {
     const row = timeline(n, at)
-    const found = row.steps.find((s): s is ChildStep => s.kind === 'child' && s.member.address === child.address)
+    const found = (segments.get(row.turn?.n ?? 0) ?? []).flatMap((r) => r.steps).find((s): s is ChildStep => s.kind === 'child' && s.member.address === child.address)
     if (found) return found
     const step: ChildStep = { kind: 'child', key: `child:${row.turn?.n ?? 0}:${child.id ?? child.address}`, ts: at, member: child, thread: threadFor(child.address), posts: [] }
     row.steps.push(step)
