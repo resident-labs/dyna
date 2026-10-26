@@ -1,6 +1,7 @@
 package agentslice
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,11 +34,11 @@ func fakeManager(t *testing.T) (config string, calls *[]string) {
 	var got []string
 	oldLook, oldRun, oldOutput := lookPath, runCommand, runCommandOutput
 	lookPath = func(string) (string, error) { return "/usr/bin/systemd-run", nil }
-	runCommand = func(name string, args ...string) error {
+	runCommand = func(_ context.Context, name string, args ...string) error {
 		got = append(got, name+" "+strings.Join(args, " "))
 		return nil
 	}
-	runCommandOutput = func(string, ...string) ([]byte, error) {
+	runCommandOutput = func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("systemd 262 (262-1-arch)\n"), nil
 	}
 	sliceOnce, noExpandOnce, noExpand = sync.Once{}, sync.Once{}, ""
@@ -62,7 +63,7 @@ func TestWrapSuitsTheSystemdThatRunsIt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeManager(t)
-			runCommandOutput = func(string, ...string) ([]byte, error) { return []byte(tc.version), nil }
+			runCommandOutput = func(context.Context, string, ...string) ([]byte, error) { return []byte(tc.version), nil }
 			noExpandOnce = sync.Once{}
 			cmd := exec.Command("/bin/dyna", "subagent", "_turn", "ses_1", "2")
 			Wrap(cmd, "ses_1/2")
@@ -206,7 +207,7 @@ func TestAgentSliceHasLowIOWeight(t *testing.T) {
 func TestStopKillsTheScope(t *testing.T) {
 	var got []string
 	old := runCommand
-	runCommand = func(name string, args ...string) error {
+	runCommand = func(_ context.Context, name string, args ...string) error {
 		got = append(got, name+" "+strings.Join(args, " "))
 		return nil
 	}
@@ -215,5 +216,22 @@ func TestStopKillsTheScope(t *testing.T) {
 	Stop("dyna-version-probe-1.scope")
 	if len(got) != 1 || got[0] != "systemctl --user kill --signal=SIGKILL dyna-version-probe-1.scope" {
 		t.Fatalf("commands = %q; want one kill of the scope", got)
+	}
+}
+
+// Every systemd command has a deadline, so a stalled user manager cannot hold
+// the caller.
+func TestSystemdCommandsAreBounded(t *testing.T) {
+	var deadlines []bool
+	old := runCommand
+	runCommand = func(ctx context.Context, _ string, _ ...string) error {
+		_, ok := ctx.Deadline()
+		deadlines = append(deadlines, ok && ctx.Err() == nil)
+		return nil
+	}
+	t.Cleanup(func() { runCommand = old })
+	Stop("dyna-version-probe-1.scope")
+	if len(deadlines) != 1 || !deadlines[0] {
+		t.Fatalf("kill context had a live deadline: %v; want one", deadlines)
 	}
 }
