@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"dyna-agent/internal/authority"
@@ -40,6 +41,20 @@ func (m *Manager) StartRunAgent(ctx context.Context, opts StartOptions) (Info, e
 		return Info{}, errors.New("a run agent needs its working directory")
 	}
 	opts.ID = RunAgentID(opts.Run.ID, opts.Run.Agent)
+	// A close of this agent (or its run) that came first wins: the start may
+	// have outlived its caller's request, and a session must not appear after
+	// the close that was meant to stop it.
+	release, err := m.gates().acquire(ctx, opts.ID)
+	if err != nil {
+		return Info{}, err
+	}
+	defer release()
+	if m.gates().closed(opts.ID, opts.Run.ID) || runEnded(opts.Run.ID) {
+		return Info{}, fmt.Errorf("run agent %d of %s is closed", opts.Run.Agent, opts.Run.ID)
+	}
+	if m.runAgentStartHook != nil {
+		m.runAgentStartHook(opts.ID)
+	}
 	if meta, err := m.store().ReadMeta(opts.ID); err == nil {
 		if meta.Run == nil || meta.Run.ID != opts.Run.ID || meta.Run.Agent != opts.Run.Agent {
 			return Info{}, fmt.Errorf("session %s belongs to another run agent", opts.ID)
@@ -87,8 +102,19 @@ func (m *Manager) WaitRunAgent(ctx context.Context, run string, agent int, bound
 // CloseRunAgent closes the session of one agent call of run, and stops its turn
 // if one is running. A nested script that ends with an agent still running
 // uses it before its concurrency slots are released.
+//
+// It waits for a start of the same agent that is still running, then closes
+// what that start made. When no session exists yet, it records the close so a
+// later start of the agent is refused.
 func (m *Manager) CloseRunAgent(ctx context.Context, run string, agent int) error {
-	if _, err := m.closeRunAgent(ctx, RunAgentID(run, agent)); err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ErrNotFound) {
+	id := RunAgentID(run, agent)
+	release, err := m.gates().acquire(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer release()
+	m.gates().markClosed(id)
+	if _, err := m.closeRunAgent(ctx, id); err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ErrNotFound) {
 		return err
 	}
 	return nil
@@ -96,6 +122,7 @@ func (m *Manager) CloseRunAgent(ctx context.Context, run string, agent int) erro
 
 // CloseRunAgents closes every open session that serves an agent call of run.
 func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
+	m.gates().markRunClosed(run)
 	infos, err := m.store().ListSnapshot(false)
 	if err != nil {
 		return err
@@ -105,7 +132,15 @@ func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 		if info.Run == nil || info.Run.ID != run || info.Status == StatusClosed {
 			continue
 		}
-		if _, err := m.closeRunAgent(ctx, info.ID); err != nil && !errors.Is(err, ErrClosed) {
+		// An agent whose start is still running closes after that start ends.
+		release, err := m.gates().acquire(ctx, info.ID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_, err = m.closeRunAgent(ctx, info.ID)
+		release()
+		if err != nil && !errors.Is(err, ErrClosed) {
 			errs = append(errs, err)
 		}
 	}
@@ -172,4 +207,66 @@ func (m *Manager) closeRunAgent(ctx context.Context, id string) (Info, error) {
 	}
 	ctx = authority.WithActor(ctx, authority.EngineRoomActor(meta.RoomID))
 	return m.CloseForEngine(ctx, id, "run agent of "+meta.Run.ID, CloseOptions{Force: true})
+}
+
+// runAgentGateSets holds the gates of each session store, so one store has one
+// set of gates however its Manager is built.
+var runAgentGateSets sync.Map
+
+func (m *Manager) gates() *runAgentGates {
+	set, _ := runAgentGateSets.LoadOrStore(m.store().root(), &runAgentGates{})
+	return set.(*runAgentGates)
+}
+
+// runAgentGates serializes the start and the close of each run agent, and
+// remembers a close that found no session, so the two cannot cross.
+type runAgentGates struct {
+	mu         sync.Mutex
+	slots      map[string]chan struct{}
+	closedID   map[string]bool
+	closedRuns map[string]bool
+}
+
+// acquire waits for id's gate. It gives up when ctx ends.
+func (g *runAgentGates) acquire(ctx context.Context, id string) (func(), error) {
+	g.mu.Lock()
+	if g.slots == nil {
+		g.slots = map[string]chan struct{}{}
+	}
+	slot := g.slots[id]
+	if slot == nil {
+		slot = make(chan struct{}, 1)
+		g.slots[id] = slot
+	}
+	g.mu.Unlock()
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (g *runAgentGates) markClosed(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closedID == nil {
+		g.closedID = map[string]bool{}
+	}
+	g.closedID[id] = true
+}
+
+func (g *runAgentGates) markRunClosed(run string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closedRuns == nil {
+		g.closedRuns = map[string]bool{}
+	}
+	g.closedRuns[run] = true
+}
+
+func (g *runAgentGates) closed(id, run string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.closedID[id] || g.closedRuns[run]
 }

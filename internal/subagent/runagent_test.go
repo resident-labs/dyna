@@ -131,6 +131,14 @@ func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
 	if got, err := e.m.WaitRunAgent(coordinator, run, 1, time.Minute); err != nil || !got.Done || got.Turn.Result != "done" {
 		t.Fatalf("wait as the coordinator = %+v, %v; want the result", got, err)
 	}
+	single := start(4, "mock", "RESPOND: y")
+	// One agent of a run closes alone, for a nested script that ends early.
+	if err := e.m.CloseRunAgent(coordinator, run, 4); err != nil {
+		t.Fatalf("close one agent as the coordinator: %v", err)
+	}
+	if got, err := e.m.store().Info(single.ID); err != nil || got.Status != StatusClosed {
+		t.Fatalf("agent 4 = %+v, %v; want closed", got.Status, err)
+	}
 	running := start(2, "hold", "wait for stop")
 	<-started
 	if err := e.m.CloseRunAgents(coordinator, run); err != nil {
@@ -149,19 +157,15 @@ func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
 			t.Fatalf("session %s = %+v, %v; want closed", id, got.Status, err)
 		}
 	}
-	// One agent of a run closes alone, for a nested script that ends early.
-	single := start(4, "mock", "RESPOND: y")
-	if err := e.m.CloseRunAgent(coordinator, run, 4); err != nil {
-		t.Fatalf("close one agent as the coordinator: %v", err)
-	}
-	if got, err := e.m.store().Info(single.ID); err != nil || got.Status != StatusClosed {
-		t.Fatalf("agent 4 = %+v, %v; want closed", got.Status, err)
-	}
 	// The engine has no caller: its own cleanup closes a run's agents too.
 	restore := authority.InEngine()
 	defer restore()
 	e.m.ProcessRunner = nil
-	late := start(3, "mock", "RESPOND: x")
+	// (A different run: this one's agents are closed for good.)
+	late, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: "wf_20261026-094500-cccccccc", Agent: 1}, Profile: "mock", Task: "RESPOND: x", Dir: t.TempDir(), Room: e.room.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.m.closeRunAgent(context.Background(), late.ID); err != nil {
 		t.Fatalf("engine close without a caller: %v", err)
 	}
@@ -185,5 +189,52 @@ func TestRunAgentRunsOnTheRunsOwnMockProfileOnly(t *testing.T) {
 	}
 	if err := start(3, nil); err == nil {
 		t.Fatal("an unregistered profile was accepted without the run's own definition")
+	}
+}
+
+func TestCloseWaitsForAStartInFlightAndRefusesLaterStarts(t *testing.T) {
+	e := newTestEnv(t)
+	const run = "wf_20261026-094500-bbbbbbbb"
+	coordinator := authority.WithActor(e.ctx, authority.Actor{Role: authority.Worker, Run: run})
+	opts := func(agent int) StartOptions {
+		return StartOptions{Run: &RunOwner{ID: run, Agent: agent}, Profile: "mock", Task: "RESPOND: x", Dir: t.TempDir(), Room: e.room.ID}
+	}
+	// A start whose request was canceled keeps running in the engine. The
+	// close of that agent must wait for it, then close what it made.
+	inStart, release := make(chan struct{}), make(chan struct{})
+	e.m.runAgentStartHook = func(string) { close(inStart); <-release }
+	started := make(chan error, 1)
+	go func() {
+		canceled, cancel := context.WithCancel(coordinator)
+		cancel()
+		_, err := e.m.StartRunAgent(context.WithoutCancel(canceled), opts(1))
+		started <- err
+	}()
+	<-inStart
+	closed := make(chan error, 1)
+	go func() { closed <- e.m.CloseRunAgent(coordinator, run, 1) }()
+	close(release)
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.m.store().Info(RunAgentID(run, 1)); err != nil || got.Status != StatusClosed {
+		t.Fatalf("agent 1 = %+v, %v; want the session the start made, closed", got.Status, err)
+	}
+	// A close that found no session also stops a start that comes after it.
+	e.m.runAgentStartHook = nil
+	if err := e.m.CloseRunAgent(coordinator, run, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.StartRunAgent(coordinator, opts(2)); err == nil {
+		t.Fatal("an agent was started after its close")
+	}
+	if err := e.m.CloseRunAgents(coordinator, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.StartRunAgent(coordinator, opts(3)); err == nil {
+		t.Fatal("an agent was started after its run's agents were closed")
 	}
 }

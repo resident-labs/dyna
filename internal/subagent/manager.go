@@ -50,6 +50,8 @@ type Spawner interface {
 
 // Manager is the subagent API used by the CLI and the desktop app.
 type Manager struct {
+	// runAgentStartHook lets a test hold a run agent start inside its gate.
+	runAgentStartHook func(id string)
 	// TurnReporter schedules the normal report, or uses the supplied terminal
 	// context for an earlier engine that cannot own completion yet.
 	TurnReporter     func(context.Context, *Manager, string, int) error
