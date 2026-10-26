@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"dyna-agent/internal/gitexec"
-	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/settings"
 )
 
@@ -86,17 +85,44 @@ func NoRemote(ctx context.Context, repo string) bool {
 	return err == nil && out == ""
 }
 
+// baseBranch picks the branch that integration starts from: origin/HEAD, then a
+// local main or master, then the branch of the repository's primary checkout.
+// It never takes the branch of the worktree that opened the change, because a
+// feature branch there would put the change in integration before review.
+func baseBranch(ctx context.Context, repo string) (string, error) {
+	if remote, err := git(ctx, repo, "symbolic-ref", "--quiet", "--no-recurse", "refs/remotes/origin/HEAD"); err == nil {
+		if name, ok := strings.CutPrefix(remote, "refs/remotes/origin/"); ok && name != "" {
+			return "origin/" + name, nil
+		}
+	}
+	for _, name := range []string{"main", "master"} {
+		if _, err := git(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+name+"^{commit}"); err == nil {
+			return name, nil
+		}
+	}
+	listing, err := git(ctx, repo, "worktree", "list", "--porcelain")
+	if err == nil {
+		// The first entry is the primary checkout.
+		if path, _, _ := strings.Cut(strings.TrimPrefix(listing, "worktree "), "\n"); path != "" {
+			if name, err := git(ctx, path, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && name != "" {
+				return name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("cannot tell which branch integration starts from; create a main branch or supply --base <ref>")
+}
+
 // Ensure creates integration once. The empty old value prevents concurrent reset.
 func Ensure(ctx context.Context, repo string) (string, error) {
 	ref := "refs/heads/" + Integration
 	if head, err := git(ctx, repo, "rev-parse", "--verify", ref+"^{commit}"); err == nil {
 		return head, nil
 	}
-	defaultBranch, err := repoid.DefaultBranch(ctx, repo, git)
+	baseRef, err := baseBranch(ctx, repo)
 	if err != nil {
 		return "", err
 	}
-	base, err := git(ctx, repo, "rev-parse", "--verify", defaultBranch.Ref+"^{commit}")
+	base, err := git(ctx, repo, "rev-parse", "--verify", baseRef+"^{commit}")
 	if err != nil {
 		return "", err
 	}
