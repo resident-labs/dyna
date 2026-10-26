@@ -699,7 +699,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 		if m.store().lockHeld(id) {
 			stopCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
-			if _, err := m.stopSession(stopCtx, id, meta.Consolidating, "transfer"); err != nil {
+			if _, err := m.stopSession(stopCtx, id, meta.Consolidating, "transfer", "dyna: transfer"); err != nil {
 				return true, m.failTransfer(id, token, err)
 			}
 		}
@@ -880,7 +880,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if m.store().lockHeld(id) {
 				stopCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 				defer cancel()
-				if _, err := m.stopSession(stopCtx, id, meta.Consolidating, transferStartupTimeout); err != nil {
+				if _, err := m.stopSession(stopCtx, id, meta.Consolidating, transferStartupTimeout, "dyna: transfer"); err != nil {
 					return true, err
 				}
 			}
