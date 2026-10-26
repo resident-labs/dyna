@@ -222,6 +222,9 @@ type invocation struct {
 	cleanup   func()
 	sessionID func(string) string
 	resume    func(string, string) commandSpec
+	// resumeReady reports whether the exact session id can be resumed right
+	// now, before any process starts. nil means the harness cannot check.
+	resumeReady func(id string) error
 	// fork starts a new session from an existing session file in the turn's
 	// directory. It is nil for harnesses without an exact-session fork.
 	fork func(string, string) commandSpec
@@ -780,6 +783,14 @@ func (r *journaledRun) compactBeforeTurn() error {
 	if r.session.ResumeID == "" {
 		return nil
 	}
+	if r.inv.resumeReady != nil {
+		if err := r.inv.resumeReady(r.session.ResumeID); err != nil {
+			// Resuming a session whose file is gone would only push a prompt
+			// into a process that exits on the missing session. Fail clearly,
+			// so the caller can restart or move the work elsewhere.
+			return fmt.Errorf("worker %s cannot resume harness session %s: %w", r.p.Name, r.session.ResumeID, err)
+		}
+	}
 	if r.inv.compact != nil && profile.CompactDue(r.p, r.session.ContextTokens) {
 		completed, err := runCompaction(r.ctx, r.p, r.cwd, r.inv.compact(r.session.ResumeID), r.steering, r.exec, r.admitNativeAttempt)
 		if isNativeAdmissionError(err) {
@@ -1132,6 +1143,20 @@ func (r *journaledRun) recoverSameSession(a attempt, attemptErr error) (stepAct,
 	sessionID := r.tracker.idValue()
 	if sessionID == "" {
 		return r.finish(r.lastOutput, attemptErr)
+	}
+	if r.inv.resumeReady != nil {
+		if err := r.inv.resumeReady(sessionID); err != nil {
+			// The session file does not exist, so the nudge has no target: a
+			// real pi exits on the missing session instead of answering. With
+			// no real progress to continue from, start the turn's session
+			// fresh with the original prompt; otherwise keep the failure.
+			if r.state.hasRealProgress() {
+				return r.finish(r.lastOutput, attemptErr)
+			}
+			r.recovered = true
+			r.spec = r.inv.initial
+			return actContinue, Result{}, nil
+		}
 	}
 	if err := waitForSessionNudge(r.ctx, r.nudgeDelay); err != nil {
 		return actReturn, r.result(r.lastOutput),
