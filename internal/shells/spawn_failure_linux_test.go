@@ -101,4 +101,18 @@ func TestSuperviseDoesNotPassTheLaunchGateMarkerToTheCommand(t *testing.T) {
 	}
 }
 
+// A supervisor that ended before it read the go-ahead is not a launch failure:
+// its error is kept in the job folder.
+func TestSendGoAheadIgnoresAGateWhoseReaderEnded(t *testing.T) {
+	gateRead, gateWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateWrite.Close()
+	gateRead.Close()
+	if err := sendGoAhead(gateWrite); err != nil {
+		t.Fatalf("sendGoAhead = %v; want nil for a closed gate", err)
+	}
+}
+
 func itoa(n int) string { return strconv.Itoa(n) }
