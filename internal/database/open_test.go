@@ -137,6 +137,9 @@ func TestOnlyTheEngineMigrates(t *testing.T) {
 	if !errors.Is(err, errNotMigrated) || ran {
 		t.Fatalf("Migrate to 2 outside the engine: err=%v, apply ran=%v; want errNotMigrated and no apply", err, ran)
 	}
+	if !strings.HasPrefix(err.Error(), "Dyna is updating; retry in a minute") {
+		t.Fatalf("older schema error = %q; want it to start with the updating notice", err)
+	}
 	if !strings.Contains(err.Error(), "t.schema is version 1, this dyna needs 2") {
 		t.Fatalf("error %q does not name the store and both versions", err)
 	}
