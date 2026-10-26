@@ -1195,6 +1195,11 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 	if err != nil {
 		return nil, err
 	}
+	// A run-owned session reports to its run: the coordinator reads the turn's
+	// result, so nothing posts to the room and no parent or owner wakes.
+	if meta.RunOwned() {
+		return nil, nil
+	}
 	if contract := meta.ServiceContract(); contract.Active() && kind != "failed" {
 		if kind == "completed" && contract.Helper() {
 			return s.helperCompletion(meta, turn)

@@ -88,7 +88,7 @@ func rulesFor(meta Meta) string {
 	if meta.Role == RoleRoot {
 		return rootRules()
 	}
-	return sessionRules(!meta.Service, meta.Item != "")
+	return sessionRules(!meta.Service && !meta.RunOwned(), meta.Item != "")
 }
 
 // guideTriggers lists every guide topic a session may read, one per line.
