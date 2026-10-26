@@ -54,8 +54,12 @@ type TransferState struct {
 	// conversion. It is saved before the file is written, so a restarted
 	// coordinator writes the same session again instead of a second one.
 	ConvertedSession string `json:"convertedSession,omitempty"`
-	Reason           string `json:"reason,omitempty"`
-	Error            string `json:"error,omitempty"`
+	// CompactionExtended records that the startup deadline was extended once
+	// because the resumed Pi session reported compaction progress. The next
+	// deadline is final: a resume that still produces no output falls back.
+	CompactionExtended bool   `json:"compactionExtended,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+	Error              string `json:"error,omitempty"`
 	// Notice is the one session DM that explains an automatic fallback after
 	// a usage limit. Limit says why the turn left the previous profile.
 	Notice       string `json:"notice,omitempty"`
@@ -762,7 +766,14 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if !meta.Closed.IsZero() {
 				return ErrClosed
 			}
-			t.Phase, t.Turn, t.StartupDeadline = "starting", meta.Turns+1, now.Add(60*time.Second)
+			startup := now.Add(60 * time.Second)
+			if profile.CompactDue(chosen, meta.ContextTokens) {
+				// Dyna's own compact command runs before the first request on the
+				// resumed session. Give it a second window so a large history is
+				// not mistaken for a stalled model.
+				startup = now.Add(2 * 60 * time.Second)
+			}
+			t.Phase, t.Turn, t.StartupDeadline = "starting", meta.Turns+1, startup
 			t.OldTurns = meta.Turns
 			meta.Profile, meta.Model, meta.Dir = t.Profile, t.Model, dir
 			switch {
@@ -844,6 +855,17 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error { t.Phase, t.Ended = "completed", now; return nil })
 			return true, err
 		}
+		if (t.Source == sourceNative || t.Source == sourceConverted) && !t.CompactionExtended && m.transferCompactionSeen(id, turn) {
+			// Pi compacts a large kept history before its first request. The
+			// compaction is startup progress, not a stalled model, so give the
+			// request a fresh window after it. One extension is the bound.
+			err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
+				t.CompactionExtended = true
+				t.StartupDeadline = now.Add(60 * time.Second)
+				return nil
+			})
+			return false, err
+		}
 		if !now.Before(t.StartupDeadline) {
 			if m.store().lockHeld(id) {
 				stopCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -851,6 +873,16 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				if _, err := m.stopSession(stopCtx, id, meta.Consolidating, transferStartupTimeout); err != nil {
 					return true, err
 				}
+			}
+			if t.Source == sourceNative || t.Source == sourceConverted {
+				// The resumed conversation still produced nothing. Use the
+				// bounded written handoff instead of failing the whole move.
+				return false, m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
+					t.Phase, t.Turn, t.StartupDeadline = "stopping", 0, time.Time{}
+					t.Source = "transcript"
+					t.Reason = "the resumed session produced no model output; using a written handoff"
+					return nil
+				})
 			}
 			return true, m.failTransfer(id, token, errors.New(transferStartupTimeout))
 		}

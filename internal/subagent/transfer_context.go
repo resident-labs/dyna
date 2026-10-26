@@ -219,6 +219,21 @@ func (m *Manager) transferHasOutput(id string, t Turn) bool {
 	return found
 }
 
+// transferCompactionSeen reports whether the replacement turn has reported
+// compaction progress. A large Pi history is compacted before the first model
+// request, and that work is progress even though no model text exists yet.
+func (m *Manager) transferCompactionSeen(id string, t Turn) bool {
+	path, _ := m.store().NormalizedPath(id)
+	found := false
+	scanTail(path, t.NormStart, func(line []byte) {
+		var e workeroutput.Event
+		if json.Unmarshal(line, &e) == nil && e.Kind == "status" && e.Name == "compaction" {
+			found = true
+		}
+	})
+	return found
+}
+
 func validTaskDir(dir string) bool { st, err := os.Stat(dir); return err == nil && st.IsDir() }
 
 // sourceReview is the shared session summary and review pointer. Full evidence
