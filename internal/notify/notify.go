@@ -490,19 +490,23 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 			sessionIDs[recipient.addr] = recipient.session.ID
 		}
 	}
+	// The sender's stored room travels with the post, so root's wake decision
+	// reads an identity rather than the room part of a display address.
+	senderRoomID := ""
 	if in.Sender.Kind == SenderSession {
 		if sessionIDs == nil {
 			sessionIDs = map[string]string{}
 		}
 		sessionIDs[res.from] = in.Sender.Session.ID
+		senderRoomID = in.Sender.Session.RoomID
 	}
 	var msg room.Message
 	if in.Event != nil {
 		// A notice without a stable ID is a fresh post, as Store.Post makes it.
 		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: res.rec.ID, Event: in.Event, ID: in.ID, FreshID: in.ID == "", To: res.addrs(), Via: res.via,
-			NeedsRoot: in.NeedsRoot, RoomService: in.Sender.Kind == SenderOwner && !in.Sender.Human, SessionIDs: sessionIDs, NoWake: !wake})
+			NeedsRoot: in.NeedsRoot, RoomService: in.Sender.Kind == SenderOwner && !in.Sender.Human, SessionIDs: sessionIDs, SenderRoomID: senderRoomID, NoWake: !wake})
 	} else {
-		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs,
+		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs, SenderRoomID: senderRoomID,
 			ID: in.ID, NeedsRoot: in.NeedsRoot, Conversation: in.Conversation,
 			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
 			Attachments: atts, References: in.References,
@@ -799,7 +803,7 @@ func (s *Service) prepareCompletion(roomID, from string, targets []string, kind,
 		return nil, err
 	}
 	return &subagent.ReportPlan{RoomID: rec.ID, Post: room.PostInput{
-		Wake: true, SessionIDs: plan.sessionIDs, From: from, Kind: kind, To: plan.addrs, Via: plan.via, Turn: turn, OwnerReport: plan.ownerReport, Text: text,
+		Wake: true, SessionIDs: plan.sessionIDs, SenderRoomID: roomID, From: from, Kind: kind, To: plan.addrs, Via: plan.via, Turn: turn, OwnerReport: plan.ownerReport, Text: text,
 	}}, nil
 }
 
@@ -820,7 +824,7 @@ func (s *Service) prepareEventCompletion(roomID string, ev room.Event, targets [
 		return nil, err
 	}
 	return &subagent.ReportPlan{RoomID: rec.ID, Payload: payload, Post: room.PostInput{
-		Wake: true, SessionIDs: plan.sessionIDs, Kind: desc.Kind, Notice: room.EventNotice{Kind: string(desc.Type)}, To: plan.addrs, Via: plan.via, Turn: turn, OwnerReport: plan.ownerReport, Text: desc.Text,
+		Wake: true, SessionIDs: plan.sessionIDs, SenderRoomID: roomID, Kind: desc.Kind, Notice: room.EventNotice{Kind: string(desc.Type)}, To: plan.addrs, Via: plan.via, Turn: turn, OwnerReport: plan.ownerReport, Text: desc.Text,
 	}}, nil
 }
 

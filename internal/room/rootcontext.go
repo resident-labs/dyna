@@ -111,10 +111,11 @@ func rootWakes(msg Message, roomName string) bool {
 	}
 	// A post from a session of another room asks this seat to act. The sender
 	// named this room's root because its own root does not read this room's
-	// work, so a quiet copy would wait for a wake that never comes. A session
-	// address is <room>:<agent>, and notify binds the sender's own address to
-	// its session when it stores the post. The engine, a shell and a workflow
-	// run bind no sender, so their posts keep the kind rules below.
+	// work, so a quiet copy would wait for a wake that never comes. The post
+	// records the sender's own room when notify stores it, so a rename or a
+	// display address cannot change the decision. The engine, a shell and a
+	// workflow run record no sender room, so their posts keep the kind rules
+	// below.
 	if senderFromAnotherRoom(msg, roomName) {
 		return msg.Wake
 	}
@@ -145,9 +146,17 @@ func rootWakes(msg Message, roomName string) bool {
 }
 
 // senderFromAnotherRoom reports a post whose sender is a session of a room
-// other than roomName: a bound sender names its own session, and its room is
-// the part of its address before the agent name.
+// other than this one. The post records the sender's room when it is stored,
+// so the decision reads that identity instead of the display address. A post
+// stored before the field existed falls back to its address, whose room part
+// was current when the post was written.
 func senderFromAnotherRoom(msg Message, roomName string) bool {
+	if msg.SenderRoomID != "" {
+		return msg.SenderRoomID != msg.RoomID
+	}
+	// TODO: legacy/shim remove later — a session post stored before
+	// senderRoomId falls back to the room part of its address. Remove when
+	// retained history ages out.
 	if msg.SessionIDs[msg.From] == "" {
 		return false
 	}

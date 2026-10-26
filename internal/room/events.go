@@ -2374,6 +2374,9 @@ type PostEventInput struct {
 	Producer EventProducer
 	// SessionId binds participant addresses to exact sessions.
 	SessionIDs map[string]string
+	// SenderRoomID is the room of the sending session, from its stored
+	// session. Empty for the engine and the room's own service.
+	SenderRoomID string
 	// Conversation names the conversation the post belongs to, when the poster
 	// writes in a DM rather than in the room.
 	Conversation string
@@ -2463,6 +2466,7 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 	msg, err := s.post(in.RoomID, PostInput{
 		ID:           id,
 		From:         from,
+		SenderRoomID: in.SenderRoomID,
 		Kind:         string(spec.Family),
 		Notice:       EventNotice{Kind: string(spec.Type), Producer: in.Producer},
 		payload:      EventPayload{raw: payload},
