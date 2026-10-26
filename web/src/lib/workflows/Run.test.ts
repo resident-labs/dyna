@@ -160,7 +160,7 @@ test('commands place in lane cells, which mark them, and failures draw attention
   assert.match(body, /aria-label="CH prepare: 2 of 2 done, 1 command"/)
   assert.match(body, /aria-label="BS prepare: 1 of 1 done, 1 command"/)
   assert.match(body, /title="run\(\) commands">\$1<\/span>/)
-  assert.match(body, /Commands<\/dt><dd[^>]*>2<\/dd>/)
+  assert.match(body, /class="runline[^"]*"[^>]*>[^<]*2 agents · 2 commands/, 'the one line counts the commands beside the agents')
   assert.match(body, /up failed in BS prepare/)
   assert.doesNotMatch(body, /class="agent /, 'cells stay folded until picked')
 })
@@ -206,6 +206,18 @@ test('a run of commands only still counts them as working and failed', async (t)
   }
   const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
   assert.match(body, /aria-label="1 done, 1 running, 1 failed of 3 steps"/)
-  assert.match(body, /Working<\/dt><dd[^>]*>1<\/dd>/)
-  assert.match(body, /Failed<\/dt><dd[^>]*>1<\/dd>/)
+  assert.match(body, /class="runline[^"]*"[^>]*>[^<]*1 working · 3 commands · 1 failed</, 'commands count as working and failed in the one line')
+})
+
+test('the run header is one line with the exact start time in its tooltip, and no stat tiles', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const detail = {
+    run: { id: 'wf_a', name: 'build', status: 'running', startedAt: new Date(Date.now() - 48 * 60000).toISOString() },
+    agents: [], agentTotal: 33, agentRunning: 5, agentFailed: 0, logs: [], phases: [],
+  }
+  const html = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(html, /<p class="runline[^"]*" title="Started [^"]+">Running for 48m · 5 working · 33 agents<\/p>/)
+  assert.doesNotMatch(html, /<dl|<dt>/, 'the stat tiles are gone')
 })
