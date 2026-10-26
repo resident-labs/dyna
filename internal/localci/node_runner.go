@@ -43,6 +43,7 @@ type nodeCheck struct {
 	name     CheckName
 	group    Group
 	inner    string
+	job      *JobRef
 	image    string
 	host     bool
 	hostUser bool
@@ -228,7 +229,7 @@ func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeC
 			seen[check.ID] = len(checks)
 			checks = append(checks, nodeCheck{
 				id: check.ID, name: check.Name, group: check.Group,
-				inner: command.Command, image: command.Image,
+				inner: command.Command, job: command.Job, image: command.Image,
 				host: command.Host, hostUser: command.HostUser, setup: command.Setup,
 				env: cloneStrings(command.Env), caches: append([]CacheDefinition(nil), command.Caches...),
 				reports: command.Reports, priority: command.Priority,
@@ -553,7 +554,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					// what is left there before the transport waits on output.
 					checkScope = ""
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control)))
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage()))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1036,7 +1037,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int, noExpand bool) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage string) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1056,6 +1057,28 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
+	}
+	if check.job != nil {
+		// act starts the job in containers of its own; the wrapper is a host
+		// process, so the slot lock, the deadline and the cleanup stay exactly
+		// what they are for every other check.
+		artifacts := path.Join(reportDir, "artifacts")
+		cachePath := path.Join(base, "actcache")
+		label := "dyna.run=" + runID
+		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
+		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds ", seconds) +
+			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
+			" -j " + q(check.job.Name) + " --rm -P " + q("ubuntu-latest="+actImage) +
+			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
+			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
+		// --rm covers the normal case; a cancelled job can leave containers, so
+		// the label removes exactly this run's.
+		setup += `"${docker[@]}" ps -aq --filter ` + q("label="+label) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `
+		// The workflow uploads its JUnit as an artifact; the existing reader reads
+		// the check's report directory.
+		setup += "find " + q(artifacts) + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
+		setup += "( exit $check_status )"
+		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if check.host {
 		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
