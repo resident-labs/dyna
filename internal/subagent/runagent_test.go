@@ -3,10 +3,13 @@ package subagent
 import (
 	"context"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/profile"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"dyna-agent/internal/runstore"
@@ -240,36 +243,46 @@ func TestCloseWaitsForAStartInFlightAndRefusesLaterStarts(t *testing.T) {
 }
 
 func TestCloseRunAgentsWaitsForAStartInFlight(t *testing.T) {
-	e := newTestEnv(t)
 	const run = "wf_20261026-094500-dddddddd"
-	coordinator := authority.WithActor(e.ctx, authority.Actor{Role: authority.Worker, Run: run})
-	inStart, release := make(chan struct{}), make(chan struct{})
-	e.m.runAgentStartHook = func(string) { close(inStart); <-release }
-	started := make(chan error, 1)
-	go func() {
-		_, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: run, Agent: 1}, Profile: "mock", Task: "RESPOND: x", Dir: t.TempDir(), Room: e.room.ID})
-		started <- err
-	}()
-	<-inStart
-	// Keep the start held until the close has refused new starts and begun to
-	// wait for it; a close that returns without waiting shows up as an early return.
-	draining := make(chan struct{})
-	e.m.runAgentDrainHook = func() { close(draining) }
-	closed := make(chan error, 1)
-	go func() { closed <- e.m.CloseRunAgents(coordinator, run) }()
-	select {
-	case <-draining:
-	case err := <-closed:
-		t.Fatalf("CloseRunAgents returned (%v) without waiting for the start in flight", err)
-	}
-	close(release)
-	if err := <-started; err != nil {
-		t.Fatal(err)
-	}
-	if err := <-closed; err != nil {
-		t.Fatal(err)
-	}
-	if got, err := e.m.store().Info(RunAgentID(run, 1)); err != nil || got.Status != StatusClosed {
-		t.Fatalf("the agent a start made while the run closed = %+v, %v; want closed", got.Status, err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		e := newTestEnv(t)
+		// The bubble's contexts come from inside it: a channel made outside the
+		// bubble is never a durable block for synctest.Wait.
+		coordinator := authority.WithActor(context.Background(), authority.Actor{Role: authority.Worker, Run: run})
+		inStart, release := make(chan struct{}), make(chan struct{})
+		e.m.runAgentStartHook = func(string) { close(inStart); <-release }
+		started := make(chan error, 1)
+		go func() {
+			_, err := e.m.StartRunAgent(coordinator, StartOptions{Run: &RunOwner{ID: run, Agent: 1}, Profile: "mock", Task: "RESPOND: x", Dir: t.TempDir(), Room: e.room.ID})
+			started <- err
+		}()
+		<-inStart
+		closed := make(chan error, 1)
+		go func() { closed <- e.m.CloseRunAgents(coordinator, run) }()
+		// Run every goroutine until each one is blocked for good: the start on
+		// its hold, and the close on whatever it waits for. A close that does
+		// not wait for the start has returned by now.
+		synctest.Wait()
+		select {
+		case err := <-closed:
+			t.Fatalf("CloseRunAgents returned (%v) while a start of its run was in flight", err)
+		default:
+		}
+		close(release)
+		if err := <-started; err != nil {
+			t.Fatal(err)
+		}
+		if err := <-closed; err != nil {
+			t.Fatal(err)
+		}
+		if got, err := e.m.store().Info(RunAgentID(run, 1)); err != nil || got.Status != StatusClosed {
+			t.Fatalf("the agent a start made while the run closed = %+v, %v; want closed", got.Status, err)
+		}
+		// Every goroutine of the bubble must end before the bubble does.
+		e.stop()
+		synctest.Wait()
+		if err := database.Close(filepath.Dir(e.m.store().root())); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
