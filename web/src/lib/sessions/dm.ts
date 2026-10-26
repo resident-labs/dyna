@@ -489,9 +489,10 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     step.finished = { at: post.ts ?? 0, turn: wake?.n, woke: !!wake?.woke }
   }
   const childStep = (child: TimelineChild, at?: Time, n?: number): ChildStep => {
-    const row = timeline(n, at)
-    const found = (segments.get(row.turn?.n ?? 0) ?? []).flatMap((r) => r.steps).find((s): s is ChildStep => s.kind === 'child' && s.member.address === child.address)
+    const id = n ?? current?.n ?? 0
+    const found = (segments.get(id) ?? []).flatMap((r) => r.steps).find((s): s is ChildStep => s.kind === 'child' && s.member.address === child.address)
     if (found) return found
+    const row = timeline(n, at)
     const step: ChildStep = { kind: 'child', key: `child:${row.turn?.n ?? 0}:${child.id ?? child.address}`, ts: at, member: child, thread: threadFor(child.address), posts: [] }
     row.steps.push(step)
     return step
