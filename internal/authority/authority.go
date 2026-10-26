@@ -227,7 +227,6 @@ var Rules = []Rule{
 	{Action: "settings set", Allowed: []Role{Owner, Root}, Instead: "ask root to change global settings"},
 	{Action: "ConfigCheckProfile", Allowed: []Role{Owner, Root}, Instead: "ask root to run a live profile check"},
 	{Action: "mcp sync", Allowed: []Role{Owner, Root}, Instead: "ask root to generate private runtime config"},
-	{Action: "skill sync", Allowed: []Role{Owner, Root}, Instead: "ask root to generate private runtime config"},
 	{Action: "SyncPrivateRuntime", Allowed: []Role{Owner, Root}, Instead: "ask root to generate private runtime config"},
 	{Action: "mcp add", Allowed: []Role{Owner, Root}, Instead: "ask root to change the harness catalog"},
 	{Action: "mcp rm", Allowed: []Role{Owner, Root}, Instead: "ask root to change the harness catalog"},

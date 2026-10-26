@@ -24,7 +24,8 @@ func TestDesktopCatalogAddStartsDisabledAndRemoveDeletesOnlyCatalogEntry(t *test
 	if len(snapshot.MCP) != 1 || len(snapshot.MCP[0].EnabledHarnesses) != 0 {
 		t.Fatal("new MCP was enabled without a toggle", snapshot.MCP)
 	}
-	snapshot, err = app.AddHarnessSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), config.ManagedSkill{Name: "fixture-skill", Source: source, EnabledHarnesses: []string{}})
+	// A skill add defaults to enabled and is global: no harness scopes it.
+	snapshot, err = app.AddHarnessSkill(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), config.ManagedSkill{Name: "fixture-skill", Source: source, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,8 +33,8 @@ func TestDesktopCatalogAddStartsDisabledAndRemoveDeletesOnlyCatalogEntry(t *test
 	for _, skill := range snapshot.Skills {
 		if skill.Name == "fixture-skill" {
 			found = true
-			if len(skill.EnabledHarnesses) != 0 {
-				t.Fatal("new skill enabled")
+			if !skill.Enabled {
+				t.Fatal("new skill is disabled")
 			}
 		}
 	}
