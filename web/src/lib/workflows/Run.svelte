@@ -3,7 +3,8 @@
   // agents grouped by phase, the log, and the result. Bounds come from
   // roomsvc.RunDetail. A running run can be paused, resumed or canceled;
   // onpause(run) toggles the pause and resolves when the engine has it.
-  import { ago, duration, elapsed, isLongCall } from '../ui/format.ts'
+  import { elapsed, isLongCall } from '../ui/format.ts'
+  import { runLine, startedTitle } from './runHeader.ts'
   import { api, copyText } from '../../api.ts'
   import { createResultLoader, createWorkerResults, type LoadedResult, type WorkerRows } from './runResult.ts'
   import { errorText } from '../errorText.ts'
@@ -238,13 +239,7 @@
       {:else}
         <div class="bar"><span class="fill {run.status}" style="width:{run.status === 'running' ? pct : 100}%"></span></div>
       {/if}
-      <dl>
-        <div><dt>Started</dt><dd>{ago(run.startedAt)}</dd></div>
-        <div><dt>Duration</dt><dd>{duration(run.startedAt, run.status === 'running' ? null : run.endedAt)}</dd></div>
-        <div><dt>Agents</dt><dd>{counts.total}</dd></div>
-        <div><dt>Working</dt><dd class:gold={counts.running}>{counts.running}</dd></div>
-        <div><dt>Failed</dt><dd class:bad={counts.error}>{counts.error}</dd></div>
-      </dl>
+      <p class="runline" title={startedTitle(run.startedAt)}>{runLine({ status: run.status, startedAt: run.startedAt, endedAt: run.endedAt, working: counts.running, failed: counts.error, agents: counts.total }, now)}</p>
       {#if pauseError}
         <p class="runerr" role="alert">{pauseError}</p>
       {/if}
@@ -322,8 +317,6 @@
   .run { flex: 1; overflow-y: auto; padding: 20px 20px 32px; min-height: 0; min-width: 0; }
   .quiet { color: var(--faint); font-size: 13.5px; }
   .err { color: var(--coral); }
-  .gold { color: var(--gold); }
-  .bad { color: var(--coral); }
   .hero { background: var(--side); border: 1px solid var(--line-soft); border-radius: 14px; padding: 18px 20px 16px; }
   .hero.running { border-color: color-mix(in srgb, var(--gold) 28%, var(--line-soft)); }
   .hero.error, .hero.interrupted { border-color: color-mix(in srgb, var(--coral) 28%, var(--line-soft)); }
@@ -368,9 +361,7 @@
   .fill.running { background: linear-gradient(90deg, #b59654, var(--gold)); }
   .fill.ok { background: linear-gradient(90deg, #6fa66d, var(--sage)); }
   .fill.error, .fill.interrupted { background: linear-gradient(90deg, #b8574d, var(--coral)); }
-  dl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
-  dt { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
-  dd { margin: 3px 0 0; font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .runline { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .runnote { color: var(--muted); margin: 14px 0 0; font-size: 14px; background: var(--raise); border-radius: 8px; padding: 10px 12px; }
   .runerr { color: var(--coral); margin: 14px 0 0; font-size: 14px; background: rgba(239, 138, 128, 0.08); border-radius: 8px; padding: 10px 12px; }
   h2 { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 24px 0 8px; }
@@ -410,7 +401,6 @@
     .run { padding: 12px 10px 24px; }
     .title { flex-wrap: wrap; }
     .cancel, .pause { min-height: 44px; width: 100%; order: 5; }
-    dl { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; }
     .session { min-height: 44px; padding: 0 14px; }
     .time { white-space: nowrap; }
     .line.live { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
