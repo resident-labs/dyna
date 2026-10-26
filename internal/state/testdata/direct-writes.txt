@@ -59,6 +59,7 @@ violation internal/connect/store.go Store.ResetKey 1
 violation internal/connect/store.go Store.locked 1
 violation internal/connect/store.go Store.write 1
 violation internal/connect/tunnel.go runOnce 1
+not-state internal/computers/supervisor_linux.go removeBusSocket 1 # deletes a computer's private D-Bus socket file in its runtime directory; not Dyna state
 not-state internal/database/backup.go copyDatabase 2 # dyna.db backup files made by VACUUM INTO, copies of state, not state
 not-state internal/database/backup.go prune 1 # removes old dyna.db backup files
 not-state internal/database/database.go Migrate 1 # the schema and meta bootstrap primitive under internal/state; only the engine migrates (item 41)
@@ -85,7 +86,6 @@ not-state internal/harness/config/config_edit.go ConfigManager.generateWithPrefe
 not-state internal/harness/config/mcp_exec.go RunGeneratedMCP 1 # a harness CLI's own config files
 not-state internal/harness/fakeruntime/fakeruntime.go installClaude 4 # test fixture runtime
 not-state internal/harness/home/home.go atomicFile 2 # a harness CLI's private home
-not-state internal/harness/home/prepare.go goDefaults 1 # removes the temporary configuration directory of one `go env` probe
 not-state internal/harness/home/prepare.go removeWorktreesLink 1 # a harness CLI's private home
 not-state internal/harness/home/publication.go publish 2 # a harness CLI's private home
 not-state internal/harness/inprocess.go runInProcess 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)

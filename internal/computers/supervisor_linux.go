@@ -45,6 +45,10 @@ type desktopStart struct {
 type desktop struct {
 	process                    *process
 	wayland, display, renderer string
+	// bus is the computer's own session bus, and busAddress its address. Both
+	// are empty when dbus-daemon is missing or failed; apps then use the host bus.
+	bus        *process
+	busAddress string
 }
 type supervisor struct {
 	mu                             sync.Mutex
@@ -61,6 +65,8 @@ type supervisor struct {
 	ctx                            context.Context
 	cancel                         context.CancelFunc
 	compositor, stream             *process
+	bus                            *process // the computer's own D-Bus session bus
+	busAddress                     string
 	privateWayland, privateDisplay string
 	// actPointer is the pointer of the running action batch. A takeover
 	// interrupts it while holding mu.
@@ -349,7 +355,14 @@ func (s *supervisor) trackPeer(conn *net.UnixConn) error {
 	return nil
 }
 func (s *supervisor) desktopEnv() []string {
-	return mergeEnvironment(os.Environ(), map[string]string{"WAYLAND_DISPLAY": s.privateWayland, "DISPLAY": s.privateDisplay, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "DYNA_COMPUTER_PROCESS": s.meta.SessionID})
+	values := map[string]string{"WAYLAND_DISPLAY": s.privateWayland, "DISPLAY": s.privateDisplay, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "DYNA_COMPUTER_PROCESS": s.meta.SessionID}
+	// An app in the computer talks to the computer's own session bus, so its
+	// portal requests (file choosers) reach a portal that draws on the private
+	// display, not the host's.
+	if s.busAddress != "" {
+		values["DBUS_SESSION_BUS_ADDRESS"] = s.busAddress
+	}
+	return mergeEnvironment(os.Environ(), values)
 }
 
 // ErrServiceUpdating refuses a new desktop while the service waits for a quiet
@@ -366,6 +379,18 @@ var (
 		return userservices.RestartPendingSince(userservices.Dir(), daemonStarted, now, restartDrainWindow)
 	}
 )
+
+// refusedDesktop returns the error start would give a stopped computer that the
+// service will not start a desktop for now, and nil for a running or starting
+// computer, or one that may start.
+func (s *supervisor) refusedDesktop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.starting != nil || s.compositor.alive() || !restartPending(time.Now()) {
+		return nil
+	}
+	return ErrServiceUpdating
+}
 
 // start shares one startup attempt among this computer's first connections.
 // No caller holds mu while waiting for labwc or an existing attempt.
@@ -421,6 +446,8 @@ func (s *supervisor) start() error {
 			keyboard.close()
 		}
 		if desktop != nil {
+			desktop.bus.stop()
+			removeBusSocket(s.meta.SessionID)
 			desktop.process.stop()
 		}
 		s.mu.Lock()
@@ -431,6 +458,7 @@ func (s *supervisor) start() error {
 		}
 	} else {
 		s.compositor = desktop.process
+		s.bus, s.busAddress = desktop.bus, desktop.busAddress
 		s.keyboard = keyboard
 		s.privateWayland, s.privateDisplay = desktop.wayland, desktop.display
 		s.state.Renderer = desktop.renderer
@@ -520,9 +548,47 @@ func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desk
 			p.stop()
 			return nil, err
 		}
+		s.startBus(ctx, d, env)
 		return d, nil
 	}
 	return nil, fmt.Errorf("labwc failed with GPU and software rendering; inspect %s", filepath.Join(Dir(s.meta.SessionID), "labwc.log"))
+}
+
+// startBus gives the computer its own D-Bus session bus. Without one, an app's
+// request to the desktop portal goes over the host's session bus, and the host's
+// portal backend draws the file chooser on the host display. The portal and its
+// backend start on this bus by activation, from the bus's environment, which
+// names the private display. A failure leaves the computer working as before.
+func (s *supervisor) startBus(ctx context.Context, d *desktop, env []string) {
+	path := BusSocket(s.meta.SessionID)
+	removeBusSocket(s.meta.SessionID)
+	address := "unix:path=" + path
+	p, err := startProcess(busEnvironment(env, address), filepath.Join(Dir(s.meta.SessionID), "dbus.log"), busCommand(address)...)
+	if err != nil {
+		return
+	}
+	s.attachCgroup(p.cmd.Process.Pid)
+	if err := waitPath(ctx, path, p); err != nil {
+		p.stop()
+		return
+	}
+	d.bus, d.busAddress = p, address
+}
+
+// removeBusSocket deletes a computer's bus socket, left behind when its bus
+// stops, so a stopped computer's apps do not get a dead address.
+func removeBusSocket(id string) { _ = os.Remove(BusSocket(id)) }
+
+// busCommand is the private session bus: a session bus on a socket in the
+// computer's runtime directory, in the foreground so the computer owns it.
+func busCommand(address string) []string {
+	return []string{"dbus-daemon", "--session", "--nofork", "--nopidfile", "--address=" + address}
+}
+
+// busEnvironment is what the bus and every service it activates inherit: the
+// private display, so a portal backend opens its windows inside the computer.
+func busEnvironment(env []string, address string) []string {
+	return mergeEnvironment(env, map[string]string{"DBUS_SESSION_BUS_ADDRESS": address, "XDG_CURRENT_DESKTOP": "labwc", "XDG_SESSION_TYPE": "wayland"})
 }
 
 // recordIntent requires the caller to hold mu, like record.
@@ -633,8 +699,15 @@ func (s *supervisor) stop() error {
 		s.state.Reason += "; browser save-back: " + saveErr.Error()
 	}
 	saveCancel()
+	s.bus.stop()
+	// A stopped computer has no bus; apps launched meanwhile keep their own.
+	removeBusSocket(s.meta.SessionID)
+	s.bus, s.busAddress = nil, ""
 	s.compositor.stop()
 	s.compositor = nil
+	// A stopped computer has no desktop: forget its display names, so nothing
+	// dials a socket the next desktop will not reuse.
+	s.privateWayland, s.privateDisplay = "", ""
 	s.apps = map[int]string{}
 	s.tracked = nil
 	s.state.Apps = []App{}

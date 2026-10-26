@@ -23,6 +23,13 @@ func (s *supervisor) openApp(ctx context.Context, r Request) (Opened, error) {
 	if r.TimeoutMS <= 0 {
 		return Opened{}, fmt.Errorf("timeout must be positive")
 	}
+	// A stopped computer starts its desktop when the app connects. If the service
+	// will refuse that start, say so now: otherwise the app launches, its
+	// connection is closed, and it exits with "connection reset by peer"
+	// (D-280) while the computer still reads idle-stopped.
+	if err := s.refusedDesktop(); err != nil {
+		return Opened{}, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(r.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	select {

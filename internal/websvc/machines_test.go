@@ -295,3 +295,12 @@ func probeCallLeft(t *testing.T, connect, min time.Duration) {
 		t.Fatalf("page after the bound probe = %+v", page)
 	}
 }
+
+// A machine's summary carries its room and suite limits, so the Machine page
+// can show them.
+func TestMachineSummaryCarriesRoomsAndSuites(t *testing.T) {
+	got := machineSummary(machines.Machine{ID: "m_1", Name: "ci-box", Roles: []machines.Role{machines.RoleCI}, Rooms: []string{"room_a"}, Suites: []string{"unit", "web"}})
+	if len(got.Rooms) != 1 || got.Rooms[0] != "room_a" || len(got.Suites) != 2 || got.Suites[1] != "web" {
+		t.Fatalf("summary = %+v, want the rooms and suites", got)
+	}
+}
