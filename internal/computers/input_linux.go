@@ -194,7 +194,7 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 
 		}
 		switch kind {
-		case "click", "double_click", "move", "drag", "scroll":
+		case "click", "double_click", "move", "drag", "scroll", "pointer_down", "pointer_up":
 			if pointer == nil {
 				pointer, err = newVirtualPointer(ctx, display, width, height)
 				if err != nil {
@@ -371,23 +371,13 @@ func executeAction(ctx context.Context, a Action, p *virtualPointer, keyboard *v
 		}
 	case "drag":
 		path, _ := actionValue[[]point](a, "path")
-		if err := p.move(path[0].X, path[0].Y); err != nil {
+		step, paced, err := dragStep(a)
+		if err != nil {
 			return err
 		}
-		if err := p.button("left", true); err != nil {
-			return err
-		}
-		defer p.button("left", false)
-		for _, point := range path[1:] {
-			if err := p.move(point.X, point.Y); err != nil {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
+		return dragPath(ctx, p, path, step, paced, inputPause)
+	case "pointer_down", "pointer_up":
+		return pointerButtonAction(p, a)
 	case "scroll":
 		if err := p.move(x, y); err != nil {
 			return err
