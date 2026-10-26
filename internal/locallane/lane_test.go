@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/settings"
@@ -38,5 +40,80 @@ func TestEnabledReadsCommonDirsOncePerContext(t *testing.T) {
 	}
 	if _, err := Enabled(context.Background(), repo); err == nil {
 		t.Fatal("a context without the cache must read Git again")
+	}
+}
+
+// D-286: nothing else can land an approved change in a repository with no
+// remote, so it uses the lane without a setting. A repository with a remote
+// keeps the setting as its only switch.
+func TestRepositoryWithNoRemoteUsesTheLane(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	local, hosted := t.TempDir(), t.TempDir()
+	for _, repo := range []string{local, hosted} {
+		if out, err := exec.Command("/usr/bin/git", "init", "-q", repo).CombinedOutput(); err != nil {
+			t.Fatalf("%s %v", out, err)
+		}
+	}
+	if out, err := exec.Command("/usr/bin/git", "-C", hosted, "remote", "add", "origin", "https://github.com/o/r.git").CombinedOutput(); err != nil {
+		t.Fatalf("%s %v", out, err)
+	}
+	if enabled, err := Enabled(context.Background(), local); err != nil || !enabled {
+		t.Fatalf("repository with no remote = %v, %v; want the lane", enabled, err)
+	}
+	if enabled, err := Enabled(context.Background(), hosted); err != nil || enabled {
+		t.Fatalf("repository with a remote and no setting = %v, %v; want no lane", enabled, err)
+	}
+}
+
+// A change opened from a feature worktree of a repository with no remote must
+// not start integration at the feature head: the diff would be empty and the
+// commits would land before review.
+func TestEnsureStartsIntegrationAtTheBaseBranchNotTheFeatureWorktree(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	repo := filepath.Join(t.TempDir(), "repo")
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("/usr/bin/git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run(repo, "init", "-q", "-b", "main")
+	run(repo, "commit", "-q", "--allow-empty", "-m", "base")
+	base := run(repo, "rev-parse", "HEAD")
+	feature := filepath.Join(t.TempDir(), "feature")
+	run(repo, "worktree", "add", "-q", "-b", "feature", feature)
+	run(feature, "commit", "-q", "--allow-empty", "-m", "the change")
+	got, err := Ensure(context.Background(), feature)
+	if err != nil || got != base {
+		t.Fatalf("integration starts at %q, %v; want the base branch head %q", got, err, base)
+	}
+}
+
+// With no origin/HEAD, main or master, the base cannot be told apart from the
+// change's own branch, so integration is not created and the caller must give
+// a base. The feature branch is checked out in the primary checkout here.
+func TestEnsureRefusesToGuessTheBaseFromACheckedOutBranch(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("/usr/bin/git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+	}
+	run("init", "-q", "-b", "trunk")
+	run("commit", "-q", "--allow-empty", "-m", "base")
+	run("checkout", "-q", "-b", "feature")
+	run("commit", "-q", "--allow-empty", "-m", "the change")
+	if head, err := Ensure(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "--base") {
+		t.Fatalf("integration = %q, %v; want a request for --base", head, err)
 	}
 }
