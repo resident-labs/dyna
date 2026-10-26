@@ -33,6 +33,17 @@ test('a running run offers Pause, and a paused one says so and offers Resume', a
   assert.doesNotMatch(html({}, {}), /class="pause/, 'no control without a handler')
 })
 
+test('an interrupted run is labeled Interrupted and shows its error', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const run: Partial<RunSummary> = { id: 'wf_a', name: 'build', status: 'interrupted', startedAt: new Date().toISOString(), error: 'interrupted by update from v1 to v2' }
+  const detail = { run, agents: [], agentTotal: 0, agentRunning: 0, agentFailed: 0, logs: [], phases: [] }
+  const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, />Interrupted<\/span>/)
+  assert.match(body, /interrupted by update from v1 to v2/)
+})
+
 // The component's own declarations for one selector.
 function ruleOf(css: string, selector: string) {
   const plain = css.replace(/\/\*[\s\S]*?\*\//g, '')
