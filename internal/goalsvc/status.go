@@ -25,11 +25,11 @@ func (s *Service) GoalStatus(roomID, id string) (goals.Status, error) {
 	return goals.ComputeStatus(g, items, f, s.now()), nil
 }
 
-func (s *Service) prState() (state.State, error) {
+func (s *Service) prState(roomID string, holders []string) (state.State, error) {
 	if s.PRState != nil {
 		return s.PRState()
 	}
-	return s.readPRState()
+	return s.readPRState(roomID, holders)
 }
 
 // goalFacts aggregates one goal's holder facts. A running turn anywhere is
@@ -37,7 +37,7 @@ func (s *Service) prState() (state.State, error) {
 // since the goal began.
 func (s *Service) goalFacts(roomID string, g goals.Goal) (goals.Facts, error) {
 	var f goals.Facts
-	prs, err := s.prState()
+	prs, err := s.prState(roomID, g.Holders)
 	if err != nil {
 		return f, err
 	}
