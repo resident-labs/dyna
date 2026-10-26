@@ -7,8 +7,13 @@ import (
 	"time"
 
 	"dyna-agent/internal/computers"
+	"dyna-agent/internal/userservices"
 	"github.com/spf13/cobra"
 )
+
+// restartPendingSince is when the service's deferred restart became pending. A
+// test replaces it.
+var restartPendingSince = func() (time.Time, bool) { return userservices.RestartPendingAt(userservices.Dir()) }
 
 func printComputerList(c *cobra.Command, values []computers.Status, all, asJSON bool) error {
 	rows := make([]computers.Status, 0, len(values))
@@ -47,5 +52,11 @@ func printComputerList(c *cobra.Command, values []computers.Status, all, asJSON 
 		}
 		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", row.SessionID, row.Room, row.State, apps, (time.Duration(row.IdleSeconds) * time.Second).String())
 	}
-	return out.Flush()
+	if err := out.Flush(); err != nil {
+		return err
+	}
+	if at, ok := restartPendingSince(); ok {
+		fmt.Fprintf(c.OutOrStdout(), "restart pending since %s: the computer service restarts once no computer has an app open\n", at.Local().Format("2006-01-02 15:04"))
+	}
+	return nil
 }
