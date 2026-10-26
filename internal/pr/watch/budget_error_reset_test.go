@@ -36,7 +36,7 @@ func TestBudgetWriteErrorPreservesFailureStateWhileReconcilingPassedCI(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TRIGGER refuse_second_budget_reset BEFORE INSERT ON pr_records
+	_, err = db.Exec(`CREATE TRIGGER refuse_second_budget_reset BEFORE INSERT ON pr_rows
 WHEN json_extract(NEW.body, '$.record.ciBudgetRuns."82/1"') = 'within budget'
 BEGIN SELECT RAISE(ABORT, 'second budget reset refused'); END`)
 	if err != nil {

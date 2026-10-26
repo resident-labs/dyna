@@ -57,7 +57,7 @@ func TestMigrationPersistsClosedTimeWithoutLosingEvidence(t *testing.T) {
 	for _, c := range cases {
 		var body string
 		var rev int64
-		if err := db.QueryRow("SELECT rev FROM pr_records WHERE key=?", c.key).Scan(&rev); err != nil {
+		if err := db.QueryRow("SELECT rev FROM pr_rows WHERE key=?", c.key).Scan(&rev); err != nil {
 			t.Fatal(err)
 		}
 		body = joinedBody(t, db, c.key)
@@ -101,7 +101,7 @@ func TestMigrationPersistsClosedTimeWithoutLosingEvidence(t *testing.T) {
 	db = mustOpen(t, root)
 	for _, c := range cases {
 		var rev int64
-		err := db.QueryRow("SELECT rev FROM pr_records WHERE key=?", c.key).Scan(&rev)
+		err := db.QueryRow("SELECT rev FROM pr_rows WHERE key=?", c.key).Scan(&rev)
 		if body := joinedBody(t, db, c.key); err != nil || body != bodies[c.key] || rev != revisions[c.key] {
 			t.Fatalf("%s changed on repeat: rev=%d, err=%v", c.key, rev, err)
 		}

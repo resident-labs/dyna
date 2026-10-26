@@ -234,7 +234,7 @@ func prepareRows(old State, oldIndex []byte, st State) (preparedRows, error) {
 func (rows preparedRows) apply(conn *sql.Conn, revision int64) error {
 	ctx := context.Background()
 	for _, r := range rows.upserts {
-		if _, err := conn.ExecContext(ctx, `INSERT INTO pr_records(key,room,repo,number,closed,rev,body) VALUES(?,?,?,?,?,?,?)
+		if _, err := conn.ExecContext(ctx, `INSERT INTO pr_rows(key,room,repo,number,closed,rev,body) VALUES(?,?,?,?,?,?,?)
 ON CONFLICT(key) DO UPDATE SET room=excluded.room, repo=excluded.repo, number=excluded.number, closed=excluded.closed, rev=excluded.rev, body=excluded.body`,
 			r.key, r.room, r.repo, r.number, r.closed, revision, r.body); err != nil {
 			return err
@@ -252,7 +252,7 @@ ON CONFLICT(key,part) DO UPDATE SET body=excluded.body`, r.key, string(name), bo
 		}
 	}
 	for _, key := range rows.deletes {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM pr_records WHERE key=?", key); err != nil {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM pr_rows WHERE key=?", key); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM pr_record_parts WHERE key=?", key); err != nil {
