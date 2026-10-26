@@ -180,6 +180,26 @@ func PiOutput(stdout string) string {
 	return strings.TrimSpace(output)
 }
 
+// PiCleanStop reports whether the run ended on an assistant message with stop
+// reason "stop" and did not abort. Such a run finished on purpose, even when
+// its final message has no text.
+func PiCleanStop(stdout string) bool {
+	clean := false
+	for _, line := range strings.Split(stdout, "\n") {
+		p, ok := parseRecord[piRecord]([]byte(line))
+		if !ok {
+			continue
+		}
+		if p.Type == "message_end" && p.Message.Role == "assistant" {
+			clean = p.Message.StopReason == "stop"
+		}
+		if p.Type == "agent_settled" && p.Aborted {
+			clean = false
+		}
+	}
+	return clean
+}
+
 func PiResultError(stdout string) error {
 	var failure error
 	for _, line := range strings.Split(stdout, "\n") {

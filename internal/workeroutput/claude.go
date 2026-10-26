@@ -293,6 +293,19 @@ func ClaudeReplayTexts(line string) ([]string, bool) {
 
 // ClaudeResultError preserves protocol failure even if retirement succeeds or a
 // later harness-background generation emits success before the process exits.
+// ClaudeCleanStop reports whether the stream ended with a successful result
+// record. Such a run finished on purpose, even when its result text is empty.
+func ClaudeCleanStop(stdout string) bool {
+	clean := false
+	for _, line := range strings.Split(stdout, "\n") {
+		r, ok := parseRecord[claudeRecord]([]byte(line))
+		if ok && r.Type == "result" {
+			clean = !r.IsError && r.Subtype == "success"
+		}
+	}
+	return clean
+}
+
 func ClaudeResultError(line string) error {
 	r, ok := parseRecord[claudeRecord]([]byte(line))
 	if !ok || r.Type != "result" || (!r.IsError && !strings.HasPrefix(r.Subtype, "error")) {
