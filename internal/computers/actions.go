@@ -2,6 +2,7 @@ package computers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -77,6 +78,82 @@ const (
 
 const defaultWaitMS = 1000
 const maxWaitMS = 10000
+
+// defaultDragStepMS is the pause after each drag point when step_ms is absent.
+// maxDragStepMS bounds step_ms, so a 200-point path stays under two minutes.
+const (
+	defaultDragStepMS = 10
+	maxDragStepMS     = 500
+)
+
+// pointerDevice is the pointer the drag and pointer actions drive.
+type pointerDevice interface {
+	move(x, y int) error
+	button(name string, pressed bool) error
+}
+
+// dragStep returns the pause after each drag point and whether the batch asked
+// for it. An absent step_ms keeps the original drag timing.
+func dragStep(a Action) (time.Duration, bool, error) {
+	if _, ok := a["step_ms"]; !ok {
+		return defaultDragStepMS * time.Millisecond, false, nil
+	}
+	ms, err := actionValue[int](a, "step_ms")
+	if err != nil {
+		return 0, false, err
+	}
+	if ms < 0 || ms > maxDragStepMS {
+		return 0, false, fmt.Errorf("step_ms must be 0 to %d", maxDragStepMS)
+	}
+	return time.Duration(ms) * time.Millisecond, true, nil
+}
+
+// dragPath presses the left button at the first point, moves through the rest
+// and releases. After each point it waits step. With paced, it also waits after
+// the press, so a frame-driven app sees the button held before the first move.
+// The button is released even when a move or a wait fails.
+func dragPath(ctx context.Context, p pointerDevice, path []point, step time.Duration, paced bool, wait func(context.Context, time.Duration) error) error {
+	if err := p.move(path[0].X, path[0].Y); err != nil {
+		return err
+	}
+	if err := p.button("left", true); err != nil {
+		return err
+	}
+	defer p.button("left", false)
+	if paced {
+		if err := wait(ctx, step); err != nil {
+			return err
+		}
+	}
+	for _, point := range path[1:] {
+		if err := p.move(point.X, point.Y); err != nil {
+			return err
+		}
+		if err := wait(ctx, step); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pointerButtonAction runs pointer_down (move, then press) or pointer_up
+// (optional move, then release). The button stays held between actions of one
+// batch, so a move action in between is a real held move.
+func pointerButtonAction(p pointerDevice, a Action) error {
+	button := "left"
+	if _, ok := a["button"]; ok {
+		button, _ = actionValue[string](a, "button")
+	}
+	_, hasX := a["x"]
+	if hasX {
+		x, _ := actionValue[int](a, "x")
+		y, _ := actionValue[int](a, "y")
+		if err := p.move(x, y); err != nil {
+			return err
+		}
+	}
+	return p.button(button, actionType(a) == "pointer_down")
+}
 
 // EventAction copies an action for the event feed and log. A type action
 // keeps its text cut to EventTextMax characters. With "secret": true it keeps
@@ -166,9 +243,32 @@ func validateAction(a Action, width, height int, waits, shots, texts *int) error
 		}
 	}
 	switch kind {
-	case "click", "double_click", "move", "scroll":
+	case "click", "double_click", "move", "scroll", "pointer_down":
 		if err := coord(a, width, height); err != nil {
 			return err
+		}
+	case "pointer_up":
+		// Both coordinates or neither: the release can move first.
+		_, hasX := a["x"]
+		_, hasY := a["y"]
+		if hasX != hasY {
+			return fmt.Errorf("pointer_up needs both x and y, or neither")
+		}
+		if hasX {
+			if err := coord(a, width, height); err != nil {
+				return err
+			}
+		}
+	}
+	if kind == "pointer_down" || kind == "pointer_up" {
+		if _, ok := a["button"]; ok {
+			button, err := actionValue[string](a, "button")
+			if err != nil {
+				return err
+			}
+			if button != "left" && button != "right" && button != "middle" {
+				return fmt.Errorf("button must be left, middle or right")
+			}
 		}
 	}
 	if kind == "click" {
@@ -192,6 +292,9 @@ func validateAction(a Action, width, height int, waits, shots, texts *int) error
 			if p.X < 0 || p.X >= width || p.Y < 0 || p.Y >= height {
 				return fmt.Errorf("drag points must be inside the %dx%d computer", width, height)
 			}
+		}
+		if _, _, err := dragStep(a); err != nil {
+			return err
 		}
 	}
 	if kind == "scroll" {
@@ -315,7 +418,9 @@ var actionSpecs = map[string]struct {
 	"click":        {"x y button [keys]", true},
 	"double_click": {"x y [keys]", true},
 	"move":         {"x y", true},
-	"drag":         {"path [keys]", true},
+	"drag":         {"path [step_ms] [keys]", true},
+	"pointer_down": {"x y [button]", true},
+	"pointer_up":   {"[x y] [button]", true},
 	"scroll":       {"x y scroll_x scroll_y", true},
 	"keypress":     {"keys", true},
 	"type":         {"text [secret]", true},
@@ -354,9 +459,14 @@ Fields:
   text: UTF-8 text, at most %d characters per batch.
   secret: true hides typed text from action events.
   ms: integer from 0 to %d; default %d milliseconds.
+  step_ms: pause after each drag point, integer from 0 to %d; default %d
+    milliseconds. When set, drag also pauses after the press.
+  pointer_down moves to x, y and presses the button (default left). pointer_up
+    optionally moves to x, y, then releases it. A move action between them is a
+    held move. A button still held at the end of a batch is released.
 
 Batch limits: %d waits and %d screenshots.
-`, maxKeys, maxDragPoints, maxScroll, maxScroll, maxText, maxWaitMS, defaultWaitMS, maxWaits, maxScreenshots)
+`, maxKeys, maxDragPoints, maxScroll, maxScroll, maxText, maxWaitMS, defaultWaitMS, maxDragStepMS, defaultDragStepMS, maxWaits, maxScreenshots)
 	return strings.TrimSpace(out.String())
 }
 

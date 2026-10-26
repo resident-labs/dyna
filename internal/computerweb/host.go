@@ -390,6 +390,8 @@ func Summarize(a computers.Action) string {
 		return strings.ReplaceAll(typ, "_", " ") + at()
 	case "drag":
 		return "drag"
+	case "pointer_down", "pointer_up":
+		return strings.ReplaceAll(typ, "_", " ") + at()
 	case "scroll":
 		// The direction follows the wheel: a positive scroll_y goes down.
 		dir := ""

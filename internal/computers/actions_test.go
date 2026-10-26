@@ -1,9 +1,12 @@
 package computers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func parseActions(t *testing.T, s string) []Action {
@@ -140,5 +143,78 @@ func TestDragPathAcceptsPointArrays(t *testing.T) {
 		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
 			t.Fatalf("an incomplete point was accepted: %s", bad)
 		}
+	}
+}
+
+func TestPointerActionValidation(t *testing.T) {
+	good := `[{"type":"pointer_down","x":5,"y":6},{"type":"move","x":9,"y":6},{"type":"pointer_up"},{"type":"pointer_up","x":9,"y":6,"button":"right"},{"type":"drag","step_ms":120,"path":[{"x":0,"y":0},{"x":1,"y":1}]}]`
+	if err := ValidateActions(parseActions(t, good), 1280, 800); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`[{"type":"pointer_down"}]`,
+		`[{"type":"pointer_down","x":1280,"y":0}]`,
+		`[{"type":"pointer_down","x":1,"y":1,"button":"fourth"}]`,
+		`[{"type":"pointer_up","x":1}]`,
+		`[{"type":"drag","step_ms":501,"path":[{"x":0,"y":0},{"x":1,"y":1}]}]`,
+		`[{"type":"drag","step_ms":-1,"path":[{"x":0,"y":0},{"x":1,"y":1}]}]`,
+		`[{"type":"drag","step_ms":"slow","path":[{"x":0,"y":0},{"x":1,"y":1}]}]`,
+	} {
+		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+// recorder logs pointer events and waits in order.
+type recorder struct{ log []string }
+
+func (r *recorder) move(x, y int) error {
+	r.log = append(r.log, fmt.Sprintf("move %d,%d", x, y))
+	return nil
+}
+func (r *recorder) button(name string, pressed bool) error {
+	state := "up"
+	if pressed {
+		state = "down"
+	}
+	r.log = append(r.log, name+" "+state)
+	return nil
+}
+func (r *recorder) wait(_ context.Context, d time.Duration) error {
+	r.log = append(r.log, "wait "+d.String())
+	return nil
+}
+
+func TestDragPathEventSequence(t *testing.T) {
+	path := []point{{1, 1}, {2, 1}, {3, 1}}
+	plain := &recorder{}
+	if err := dragPath(context.Background(), plain, path, 10*time.Millisecond, false, plain.wait); err != nil {
+		t.Fatal(err)
+	}
+	want := "move 1,1|left down|move 2,1|wait 10ms|move 3,1|wait 10ms|left up"
+	if got := strings.Join(plain.log, "|"); got != want {
+		t.Fatalf("default drag = %s, want %s", got, want)
+	}
+	paced := &recorder{}
+	if err := dragPath(context.Background(), paced, path, 120*time.Millisecond, true, paced.wait); err != nil {
+		t.Fatal(err)
+	}
+	want = "move 1,1|left down|wait 120ms|move 2,1|wait 120ms|move 3,1|wait 120ms|left up"
+	if got := strings.Join(paced.log, "|"); got != want {
+		t.Fatalf("paced drag = %s, want %s", got, want)
+	}
+}
+
+func TestPointerDownAndUpAreSeparateEvents(t *testing.T) {
+	r := &recorder{}
+	for _, a := range parseActions(t, `[{"type":"pointer_down","x":5,"y":6},{"type":"pointer_up","x":9,"y":6,"button":"right"},{"type":"pointer_up"}]`) {
+		if err := pointerButtonAction(r, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "move 5,6|left down|move 9,6|right up|left up"
+	if got := strings.Join(r.log, "|"); got != want {
+		t.Fatalf("events = %s, want %s", got, want)
 	}
 }
