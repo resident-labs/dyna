@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -229,6 +230,21 @@ func piOptionValue(argv []string, option string) string {
 	return ""
 }
 
+// piSessionIdentity reduces a selector to the session id. A resume by file
+// path names the same session as the id in its file name; keeping the id makes
+// a fresh turn and a resume share one RPC process. Pi stores a session as
+// <time>_<id>.jsonl; a path that does not follow that shape stays as it is.
+func piSessionIdentity(selector string) string {
+	if !strings.HasSuffix(selector, ".jsonl") {
+		return selector
+	}
+	name := strings.TrimSuffix(filepath.Base(selector), ".jsonl")
+	if index := strings.Index(name, "_"); index >= 0 && index+1 < len(name) {
+		return name[index+1:]
+	}
+	return selector
+}
+
 // piSessionKey keys the registry by session id and the home that stores it:
 // --session-dir (or the agent dir) differs per account, so the same id in
 // two homes is two sessions.
@@ -240,7 +256,7 @@ func piSessionKey(argv, env []string) string {
 	if home == "" {
 		home = environmentValue(env, "PI_CODING_AGENT_DIR")
 	}
-	return piSessionArg(argv) + "\x00" + home
+	return piSessionIdentity(piSessionArg(argv)) + "\x00" + home
 }
 
 // piLaunchFingerprint identifies a process's launch identity: executable,

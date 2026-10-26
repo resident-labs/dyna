@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/workeroutput"
 )
@@ -45,14 +46,33 @@ func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv 
 	inv.initial = commandSpec{argv: append(base(), "--session-id", id), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
 	// The id is preassigned on the command line; no stdout record is needed.
 	inv.sessionID = func(string) string { return id }
-	inv.resume = func(id, prompt string) commandSpec {
+	inv.resume = func(sessionID, prompt string) commandSpec {
 		// --session opens an existing session or fails. --session-id would
 		// silently create a fresh conversation if the original disappeared.
-		return commandSpec{argv: append(base(), "--session", id), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
+		// The absolute file path skips Pi's project lookup: opening by id from
+		// another directory makes Pi ask whether to fork on stdin, which no
+		// headless turn can answer.
+		arg := sessionID
+		if path, err := harnessruntime.PiSessionPath(sessionID); err == nil {
+			arg = path
+		}
+		return commandSpec{argv: append(base(), "--session", arg), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
 	}
-	// Compaction runs on the session's rpc process, not a second pi.
-	inv.compact = func(id string) commandSpec {
-		return commandSpec{argv: append(base(), "--session", id), rpc: true}
+	inv.fork = func(sourcePath, prompt string) commandSpec {
+		// --fork copies the source session into this turn's directory and
+		// starts a new session there without asking. --session-id pins its id,
+		// so the next turn resumes the fork instead of forking again.
+		return commandSpec{argv: append(base(), "--fork", sourcePath, "--session-id", id), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
+	}
+	// Compaction runs on the session's rpc process, not a second pi. It opens
+	// the session by file path for the same reason a resume does, so Pi never
+	// asks whether to fork on stdin.
+	inv.compact = func(sessionID string) commandSpec {
+		arg := sessionID
+		if path, err := harnessruntime.PiSessionPath(sessionID); err == nil {
+			arg = path
+		}
+		return commandSpec{argv: append(base(), "--session", arg), rpc: true}
 	}
 	return inv, nil
 }
