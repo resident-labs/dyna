@@ -53,32 +53,15 @@ func Cancel(ctx context.Context, id string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	stopGrace()
-	// Non-keep shells stop through their supervisors, which record the exit;
-	// a kept job outlives the run, so its groups are exempt from the kill.
-	store := shells.DefaultStore()
-	var errs []error
-	if err := store.StopRun(id); err != nil {
-		errs = append(errs, fmt.Errorf("stopping its shell jobs: %w", err))
-	}
-	keep := map[int]bool{}
-	var keepJobs []string
-	if list, err := store.List(false); err == nil {
-		for _, in := range list {
-			if in.Run == id && in.Keep {
-				keep[in.Pid], keep[in.Supervisor] = true, true
-				// A child that left the job's group still carries its identity.
-				keepJobs = append(keepJobs, shells.JobEnv+"="+in.ID)
-			}
-		}
-	} else {
-		errs = append(errs, fmt.Errorf("listing its shell jobs: %w", err))
-	}
 	leader := 0 // a recorded pid is the run's group only while that process lives
 	if runstore.Alive(m) {
 		leader = m.Pid
 	}
-	if err := runprocs.Kill(id, leader, keep, keepJobs); err != nil {
-		errs = append(errs, fmt.Errorf("ending its processes: %w", err))
+	// The same cleanup the engine runs for any ended run: non-keep shells stop,
+	// kept jobs survive, every other stamped group is killed.
+	var errs []error
+	if err := shells.DefaultStore().EndRunProcesses(id, leader, runprocs.KillStamped); err != nil {
+		errs = append(errs, err)
 	}
 	// A coordinator killed before it could finish leaves the run running.
 	// A run that already finished keeps its result.

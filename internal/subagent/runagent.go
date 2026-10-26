@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/shells"
 )
 
 // RunAgentID is the session ID of agent number agent in run. It is derived, so
@@ -139,6 +142,10 @@ func (m *Manager) CloseRunAgents(ctx context.Context, run string) error {
 			errs = append(errs, err)
 		}
 	}
+	// The run is over: anything its workers left running ends too.
+	if err := m.endRunProcesses(run); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -157,6 +164,7 @@ func (m *Manager) CloseEndedRunAgents(ctx context.Context) error {
 // failed, canceled, or a coordinator that died) leaves no agent session open.
 func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) error {
 	ended := map[string]bool{}
+	cleaned := map[string]bool{}
 	var errs []error
 	for _, meta := range sessions {
 		if meta.Run == nil || !meta.Closed.IsZero() {
@@ -171,6 +179,14 @@ func (m *Manager) closeEndedRunAgents(ctx context.Context, sessions []Meta) erro
 			continue
 		}
 		if _, err := m.closeRunAgent(ctx, meta.ID); err != nil && !errors.Is(err, ErrClosed) {
+			errs = append(errs, err)
+		}
+		cleaned[meta.Run.ID] = true
+	}
+	// Once per run that still had open agents: the run ended however it ended
+	// (ok, error, interrupted, canceled, lost coordinator), so its processes end.
+	for run := range cleaned {
+		if err := m.endRunProcesses(run); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -201,7 +217,31 @@ func (m *Manager) closeRunAgent(ctx context.Context, id string) (Info, error) {
 		return Info{}, fmt.Errorf("session %s is not a run agent", id)
 	}
 	ctx = authority.WithActor(ctx, authority.EngineRoomActor(meta.RoomID))
-	return m.CloseForEngine(ctx, id, "run agent of "+meta.Run.ID, CloseOptions{Force: true})
+	info, err := m.CloseForEngine(ctx, id, "run agent of "+meta.Run.ID, CloseOptions{Force: true})
+	if err != nil || !meta.Closed.IsZero() {
+		return info, err
+	}
+	// The agent is done, so its processes end with it; siblings keep running.
+	return info, m.runShells().EndSessionProcesses(id, m.killFunc())
+}
+
+// endRunProcesses ends what the workers of an ended run left running, as a
+// cancel does. It never takes the run's own group (leader 0), and the
+// coordinator carries no run stamp, so a coordinator still inside its finish
+// call is not touched.
+func (m *Manager) endRunProcesses(run string) error {
+	return m.runShells().EndRunProcesses(run, 0, m.killFunc())
+}
+
+func (m *Manager) runShells() *shells.Store {
+	return &shells.Store{Root: filepath.Join(filepath.Dir(m.store().root()), "shells")}
+}
+
+func (m *Manager) killFunc() shells.KillFunc {
+	if m.killProcs != nil {
+		return m.killProcs
+	}
+	return runprocs.KillStamped
 }
 
 // runAgentGateSets holds the gates of each session store, so one store has one
