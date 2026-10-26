@@ -15,6 +15,7 @@ import (
 	cliaccounts "dyna-agent/internal/cli/accounts"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/store"
 )
 
@@ -157,5 +158,27 @@ func TestEngineRefusesAnotherDataFoldersSocket(t *testing.T) {
 	// A socket with no owner record is not refused; the running check decides.
 	if err := checkSocketOwner(filepath.Join(dir, "fresh.sock"), other); err != nil {
 		t.Fatalf("a socket without an owner record was refused: %v", err)
+	}
+}
+
+// The launch stamp is read before the engine clears its environment: a session
+// launched engine must still refuse the login socket, even though nothing is
+// recorded beside the socket yet and the owner's listener is down.
+func TestLaunchStampSurvivesTheEnvironmentReset(t *testing.T) {
+	t.Setenv(mode.EnvRoomID, "room_test")
+	t.Setenv(mode.EnvRoom, "test")
+	launchedBySession.Store(false)
+	dropDynaEnv()
+	if _, stamped := mode.StampFromEnv(); stamped {
+		t.Skip("this build keeps the stamp in the environment, so the ordering is trivially safe")
+	}
+	if !launchedBySession.Load() {
+		t.Fatal("clearing the environment lost the launch stamp")
+	}
+	// The recorded value is what the bind check uses, and it refuses a launched
+	// engine on the login runtime folder with no owner record present.
+	login := filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
+	if err := checkPrivateRuntime(launchedBySession.Load(), login); err == nil {
+		t.Fatal("a launched engine took the login socket when no owner record existed")
 	}
 }
