@@ -348,6 +348,9 @@ func (s *Service) ReplyFinding(ctx context.Context, key, author, by, findingID, 
 	if message == "" || len(message) > 4000 {
 		return fmt.Errorf("reply message must contain 1 to 4000 bytes")
 	}
+	// The poll may not have seen a push made just before this reply, so the
+	// reply reads the head now (D-177). A read that fails keeps the stored head.
+	live := s.liveHead(ctx, key)
 	err := s.Store.update(func(st *State) error {
 		r := recordByID(st, key)
 		if r == nil {
@@ -359,7 +362,11 @@ func (s *Service) ReplyFinding(ctx context.Context, key, author, by, findingID, 
 		if err := sameAuthor(r, author); err != nil {
 			return err
 		}
-		reply := state.FindingReply{Disposition: disposition, Message: message, Head: r.Head, Author: by, At: s.now()}
+		head := r.Head
+		if live != "" {
+			head = live
+		}
+		reply := state.FindingReply{Disposition: disposition, Message: message, Head: head, Author: by, At: s.now()}
 		found := false
 		for i := range r.Findings {
 			if r.Findings[i].ID == findingID {
@@ -392,6 +399,30 @@ func (s *Service) ReplyFinding(ctx context.Context, key, author, by, findingID, 
 		return nil
 	})
 	return err
+}
+
+// liveHead reads the commit a change points at now: the local branch for a
+// local change, GitHub's pull request head otherwise. It returns "" when the
+// head cannot be read, and the caller keeps the head its last poll stored.
+func (s *Service) liveHead(ctx context.Context, key string) string {
+	r, err := s.Store.Get(key)
+	if err != nil {
+		return ""
+	}
+	if changeKind(r) == "local" {
+		head, err := gitRead(ctx, r.RepoPath, "rev-parse", "--verify", "--end-of-options", "refs/heads/"+r.Branch+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return head
+	}
+	gh := s.github(r.RoomID)
+	gh.requests = &requestCache{used: map[string]cachedResponse{}, now: s.now}
+	pull, err := gh.Pull(ctx, refRecord(r))
+	if err != nil {
+		return ""
+	}
+	return pull.Head.SHA
 }
 
 // CloseChange stops watching a change. Its caller checks who may close it
