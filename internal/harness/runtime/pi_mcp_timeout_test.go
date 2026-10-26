@@ -14,6 +14,18 @@ import (
 	"dyna-agent/internal/shellmcp"
 )
 
+// piServerDoc is one entry of Pi's mcp.json in the shape these tests read.
+type piServerDoc struct {
+	Command  string   `json:"command,omitempty"`
+	Args     []string `json:"args,omitempty"`
+	Exposure string   `json:"exposure,omitempty"`
+	Timeout  int      `json:"timeout,omitempty"`
+}
+
+type piMCPDoc struct {
+	MCP map[string]piServerDoc `json:"mcpServers"`
+}
+
 // Pi reads a per-server request timeout and exposure from mcp.json. Dyna's
 // shell server waits up to ten minutes for a job, so its timeout must outlast
 // that wait, and a catalog entry must set both fields itself.
@@ -31,12 +43,7 @@ func TestPiMCPTimeoutAndExposure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var root struct {
-		MCP map[string]struct {
-			Timeout  int    `json:"timeout"`
-			Exposure string `json:"exposure"`
-		} `json:"mcpServers"`
-	}
+	var root piMCPDoc
 	if err := json.Unmarshal(raw, &root); err != nil {
 		t.Fatal(err)
 	}
@@ -69,13 +76,13 @@ func TestOldPiPinIsRebuiltWithTheShellTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc struct {
-		MCP map[string]map[string]any `json:"mcpServers"`
-	}
+	var doc piMCPDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	delete(doc.MCP[dynaMCPName], "timeout")
+	shell := doc.MCP[dynaMCPName]
+	shell.Timeout = 0
+	doc.MCP[dynaMCPName] = shell
 	if raw, err = json.MarshalIndent(doc, "", "  "); err != nil {
 		t.Fatal(err)
 	}
@@ -119,9 +126,9 @@ func TestOldPiPinIsRebuiltWithTheShellTimeout(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	want := float64(shellmcp.MaxRequestTimeout.Seconds())
-	if got := doc.MCP[dynaMCPName]["timeout"]; got != want {
-		t.Fatalf("resumed shell server timeout = %v, want %v in %s", got, want, raw)
+	want := int(shellmcp.MaxRequestTimeout.Seconds())
+	if got := doc.MCP[dynaMCPName].Timeout; got != want {
+		t.Fatalf("resumed shell server timeout = %d, want %d in %s", got, want, raw)
 	}
 }
 
