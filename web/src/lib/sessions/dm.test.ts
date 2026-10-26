@@ -466,6 +466,14 @@ test('a shell completion outside the page remains an expandable shell step', () 
   assert.deepEqual(steps.filter((s) => s.kind === 'shell').map((s) => s.jobId), [id])
 })
 
+test('a child post after a reply joins the child step and adds no empty timeline', () => {
+  const child = { id: 'child-1', name: 'helper', address: 'room:helper', parent: 'lead-1', created: ts(1), state: 'live', status: 'running' }
+  const items = [{ kind: 'reply', text: 'Started a helper.', ts: ts(2) }]
+  const session = { address, turns: [{ n: 1, started: ts(0), status: 'running', items }], posts: [post('c1', 'room:helper', [address], 3)] }
+  const timelines = dmView(session, room, {}, [], [child]).rows.filter(isKind('timeline'))
+  assert.deepEqual(timelines.map((r) => r.steps.map((s) => s.kind)), [['child']])
+  assert.deepEqual(timelines[0]?.steps.flatMap((s) => (s.kind === 'child' ? s.posts.map((p) => p.id) : [])), ['c1'])
+})
 test('a run of steps shares one timeline with tools, shell output and child sessions', () => {
   const job: ShellJob = { id: 'sh_1', command: ['bash', '-c', 'npm test'], cwd: '/', state: 'exited', code: 1, started: ts(2), ended: ts(8) }
   const child = { id: 'child-1', name: 'test-helper', address: 'room:test-helper', parent: 'lead-1', created: ts(4), state: 'live', status: 'running' }
