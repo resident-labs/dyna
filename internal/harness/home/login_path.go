@@ -2,6 +2,7 @@ package home
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +14,10 @@ import (
 	"dyna-agent/internal/childenv"
 )
 
-// loginPathTimeout bounds the login shell that reports the owner's PATH.
-const loginPathTimeout = 5 * time.Second
+// loginPathTimeout bounds the login shell that reports the owner's PATH, and
+// the wait for its output pipe: a background process that shell startup leaves
+// holding stdout must not stall the caller.
+var loginPathTimeout = 5 * time.Second
 
 // ownerLoginPath asks the owner's login shell for its PATH once per process. The
 // engine often starts from a service manager whose PATH lacks the owner's tool
@@ -38,8 +41,9 @@ func loginPathFrom(shell string, env []string) string {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, "-lc", `printf '\n%s' "$PATH"`)
 	cmd.Env = env
+	cmd.WaitDelay = loginPathTimeout
 	out, err := childenv.Clean(cmd).Output()
-	if err != nil {
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return ""
 	}
 	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
