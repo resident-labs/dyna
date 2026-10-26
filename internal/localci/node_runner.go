@@ -807,6 +807,22 @@ func commandStarted(logTail string) bool {
 // SIGKILL, which is not a timeout: a container that was killed ran out of
 // resources, and any other process was killed from outside.
 func checkCause(node Node, ctx context.Context, err error, markers [][]string, container bool) FailureCause {
+	cause := endCause(node, ctx, err, markers, container)
+	// An engine stop ends every check it owns, whatever wrapper reported first:
+	// the run context, a TERM to the check's timeout, or a container removed by
+	// the cleanup. None of those proves anything about the commit, so they all
+	// carry the engine-stop cause and the run is repeated.
+	switch cause {
+	case CauseCancelled, CauseContainerFailure, CauseUnclassified:
+		if EngineStopping() {
+			return CauseEngineStop
+		}
+	}
+	return cause
+}
+
+// endCause names why one check ended, from its own evidence.
+func endCause(node Node, ctx context.Context, err error, markers [][]string, container bool) FailureCause {
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return CauseTimeout
