@@ -869,34 +869,44 @@ func TestNodePassesACheckWhoseCommandLeftAChildHoldingOutput(t *testing.T) {
 	}
 }
 
-// A host check must stay in the wrapper's process group. GNU timeout moves the
-// command it starts into a new group unless it gets --foreground, and the
-// runner cleans up a leftover pipe holder by killing the wrapper's group by its
-// id, so a check in its own group would survive that kill together with the
-// slot lock it still holds.
-func TestHostCheckScriptKeepsTheCheckInTheWrapperProcessGroup(t *testing.T) {
-	checks, _, err := nodeChecks(testDynaDefinition(t), nil, true)
-	if err != nil {
+// A host check whose deadline expires must end there. GNU timeout with
+// --foreground signals the check's shell but not its children, so a child can
+// keep the output pipe open; the wrapper kills the check's whole group as soon
+// as timeout returns, instead of waiting for the caller's much longer context
+// deadline.
+func TestHostCheckEndsAtItsDeadlineWithAChildHoldingOutput(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"docker", "git"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	for _, check := range checks {
-		if !check.host {
-			continue
-		}
-		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
-		if !strings.Contains(script, "timeout --foreground") {
-			t.Fatalf("%s starts its command outside the wrapper's process group", check.id)
-		}
-		return
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: "sleep 2 & sleep 2"}
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, 200*time.Millisecond, 0)
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, script))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	output, err := cmd.CombinedOutput()
+	// The wrapper exits with the check's status, so an expired deadline is 124.
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 124 {
+		t.Fatalf("timed out check: %v: %s", err, output)
 	}
-	t.Fatal("the definition has no host check")
+	if !strings.Contains(string(output), "DYNA_CI_CHECK_EXIT=124") {
+		t.Fatalf("expired deadline lost its status: %s", output)
+	}
 }
 
 // The slot lock belongs to the wrapper. A check can start a daemon that leaves
 // the session and outlives it, as sccache does, and such a daemon must not
 // inherit fd 9: otherwise it keeps the slot for good and later checks wait for
-// a lock nobody will release.
+// a lock nobody will release. The daemon blocks on a pipe the test owns, and
+// the cleanup that closes it is registered before anything can fail, so no
+// child outlives a failing run.
 func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"docker", "git"} {
@@ -907,11 +917,21 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	gate, gateWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = gateWriter.Close()
+		_ = gate.Close()
+	})
 	pidFile := filepath.Join(dir, "daemon.pid")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
-		inner: "setsid sleep 30 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
+		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.ExtraFiles = []*os.File{gate}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("check: %v: %s", err, output)
@@ -924,13 +944,11 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	if convErr != nil {
 		t.Fatal(convErr)
 	}
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	// The daemon is still running, and the slot must already be free.
+	// The daemon is still running and the slot must already be free.
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatalf("daemon %d did not survive its check: %v", pid, err)
 	}
-	lock := filepath.Join(dir, "slots", "0.lock")
-	if output, err := exec.Command("flock", "-n", lock, "true").CombinedOutput(); err != nil {
+	if output, err := exec.Command("flock", "-n", filepath.Join(dir, "slots", "0.lock"), "true").CombinedOutput(); err != nil {
 		t.Fatalf("the daemon kept the slot lock: %v: %s", err, output)
 	}
 }
