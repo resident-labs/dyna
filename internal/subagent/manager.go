@@ -221,11 +221,11 @@ func (m *Manager) sessionWorktree(ctx context.Context, opts StartOptions, rec ro
 func (m *Manager) ProfileStore() (*profile.Store, error) { return m.profiles() }
 
 // admit holds the turn until the machine has a free slot for it.
-func (m *Manager) admit(ctx context.Context, meta Meta) (func(), error) {
+func (m *Manager) admit(ctx context.Context, req AdmitRequest) (func(), error) {
 	if m.Admit == nil {
 		return func() {}, nil
 	}
-	return m.Admit(ctx, meta)
+	return m.Admit(ctx, req)
 }
 
 func (m *Manager) profiles() (*profile.Store, error) {

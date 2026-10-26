@@ -194,6 +194,7 @@ not-state internal/runstore/runstore.go create 1 # script.js, a blob written onc
 not-state internal/sessionconv/claude.go WriteClaude 1 # creates the target harness's project folder; the session transcript inside is that harness's append-only conversation log, not shared Dyna state
 not-state internal/sessionlife/lifecycle.go WithPublication 1 # a non-blocking flock that serializes one session's publication; a crash frees it, a row could not
 not-state internal/settings/settings.go writeAtomic 1 # settings.json is hand-edited config, item 20
+not-state internal/subagent/admit.go writeState 2 # the turn gate's hysteresis memory (overload flag and measured turn size) in its own lock directory; rebuilt from the next reading if lost, so not shared state
 not-state internal/shells/events.go Store.Notify 3 # a change nudge file for the room watch (#1399), created and removed at once; goes when the bus carries shell events (item 16)
 not-state internal/shells/shells.go StartSupervisor 3 # the supervisor's own error log, and supervisor.pid, a process-liveness file like turn.lock; until item 2 moves the shell supervisor's writes into engine calls, with liveness from the recorded process and a pidfd watch
 not-state internal/shells/shells.go Store.Supervise 3 # the job's append-only output.log (rule r10), and the empty exited wake marker for Wait, written after the exit is saved in dyna.db

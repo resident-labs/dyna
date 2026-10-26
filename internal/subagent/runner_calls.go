@@ -172,6 +172,8 @@ type TurnNote struct {
 	PendingPrompt string `json:"pendingPrompt,omitempty"`
 	// RoomHeld records that the runner is waiting for its room to resume.
 	RoomHeld bool `json:"roomHeld,omitempty"`
+	// Hold records that the machine's turn limit holds this turn.
+	Hold *TurnHold `json:"hold,omitempty"`
 	// Dispatched is a live post handed to the harness.
 	Dispatched *DrainedPost `json:"dispatched,omitempty"`
 	// Delivered is a dispatched post the harness read, matched by post ID.
@@ -208,6 +210,8 @@ func (n TurnNote) apply(t *Turn) bool {
 		t.HeldPrompt = n.PendingPrompt
 	case n.RoomHeld:
 		t.RoomHeld = true
+	case n.Hold != nil:
+		t.Hold = n.Hold
 	case n.Profile != nil:
 		t.Profile, t.Model, t.Harness, t.OutputDialect = n.Profile.Profile, n.Profile.Model, n.Profile.Harness, n.Profile.Dialect
 	case n.Accepted:
@@ -274,7 +278,7 @@ func (n TurnNote) journal() JournalPayload {
 // facts counts the facts n sets. A note carries exactly one.
 func (n TurnNote) facts() int {
 	count := 0
-	for _, set := range []bool{n.Profile != nil, n.Accepted, n.PendingPrompt != "", n.RoomHeld, n.Dispatched != nil, n.Delivered != nil, n.Delivery != nil,
+	for _, set := range []bool{n.Profile != nil, n.Accepted, n.PendingPrompt != "", n.RoomHeld, n.Hold != nil, n.Dispatched != nil, n.Delivered != nil, n.Delivery != nil,
 		n.Fallback != nil, n.HarnessSession != "", n.AccountSwitch != nil, n.CompactError != "", n.Repinned != "", n.Empty} {
 		if set {
 			count++
@@ -810,4 +814,18 @@ func (w *runnerWrites) close(ctx context.Context) {
 		w.terminalCancel()
 	}
 	w.terminalMu.Unlock()
+}
+
+// TurnHold says why the machine's turn limit holds a turn, for the session
+// view. The turn stays queued while it waits.
+type TurnHold struct {
+	// Pool is the group of turns the limit counts: turns, or leaf sessions.
+	Pool string `json:"pool"`
+	// Limit is how many turns of the pool may run, and Running how many do.
+	Limit   int `json:"limit"`
+	Running int `json:"running"`
+	// RoomFull is true when the turn's own room holds its whole share.
+	RoomFull bool `json:"roomFull,omitempty"`
+	// Since is when the turn began to wait.
+	Since time.Time `json:"since"`
 }
