@@ -102,6 +102,34 @@ func (s services) wakeLibrarian(ctx context.Context, repo string) (librarian.Res
 	return s.librarianService().Wake(ctx, repo)
 }
 
+// wakeLibrarianSmellsNow starts the smell pass at once for a repository, or for
+// the repository of the named room. The librarian service checks the caller.
+func (s services) wakeLibrarianSmellsNow(ctx context.Context, repo, roomRef string) (librarian.Result, error) {
+	as, _, err := librarianActor(ctx)
+	if err != nil {
+		return librarian.Result{}, err
+	}
+	if roomRef != "" {
+		rec, err := s.rooms.Notify.Rooms.Resolve(roomRef)
+		if err != nil {
+			return librarian.Result{}, err
+		}
+		if rec.Repo == "" {
+			return librarian.Result{}, fmt.Errorf("room %q has no repository", rec.Name)
+		}
+		repo = rec.Repo
+	}
+	callerRoom := ""
+	if as.Room != "" {
+		rec, err := s.rooms.Notify.Rooms.Resolve(as.Room)
+		if err != nil {
+			return librarian.Result{}, err
+		}
+		callerRoom = rec.ID
+	}
+	return s.librarianService().WakeSmellsNow(ctx, as, callerRoom, repo)
+}
+
 func (s services) fileLibrarySmell(ctx context.Context, repo string, sm librarian.Smell) (room.Issue, error) {
 	as, by, err := librarianActor(ctx)
 	if err != nil {

@@ -15,10 +15,6 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// SmellsPerDay caps the smells the librarian files for one repository in a
-// UTC day.
-const SmellsPerDay = 10
-
 // Issues is the room issue board that smells use.
 type Issues interface {
 	Issues(roomID string, all bool) ([]room.Issue, error)
@@ -85,9 +81,15 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 	if err != nil {
 		return room.Issue{}, err
 	}
+	v, err := s.settings()
+	if err != nil {
+		return room.Issue{}, err
+	}
+	// library.smellsPerDay caps automatic passes; 0 means no cap. A pass the
+	// owner or root started with --now files without the cap.
 	day := s.now().UTC().Format("2006-01-02")
-	if st.SmellDay == day && st.Smells >= SmellsPerDay {
-		return room.Issue{}, fmt.Errorf("the daily cap of %d smells for this repository is reached", SmellsPerDay)
+	if limit := v.LibrarySmellsPerDay; limit > 0 && !st.SmellUncapped && st.SmellDay == day && st.Smells >= limit {
+		return room.Issue{}, fmt.Errorf("the daily cap of %d smells for this repository is reached (library.smellsPerDay)", limit)
 	}
 	open, err := s.Issues.Issues(st.RoomID, false)
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schema = `CREATE TABLE librarian_repos (
 	repo TEXT PRIMARY KEY,
@@ -34,7 +34,8 @@ const schema = `CREATE TABLE librarian_repos (
 	smell_pending TEXT NOT NULL DEFAULT '',
 	smell_pending_turn INTEGER NOT NULL DEFAULT 0,
 	smell_last_run TEXT NOT NULL DEFAULT '',
-	smell_failed_profiles TEXT NOT NULL DEFAULT '{}'
+	smell_failed_profiles TEXT NOT NULL DEFAULT '{}',
+	smell_uncapped INTEGER NOT NULL DEFAULT 0
 );`
 
 const smellPassSchema = `ALTER TABLE librarian_repos ADD COLUMN smell_session TEXT NOT NULL DEFAULT '';
@@ -43,6 +44,8 @@ ALTER TABLE librarian_repos ADD COLUMN smell_pending TEXT NOT NULL DEFAULT '';
 ALTER TABLE librarian_repos ADD COLUMN smell_pending_turn INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE librarian_repos ADD COLUMN smell_last_run TEXT NOT NULL DEFAULT '';
 ALTER TABLE librarian_repos ADD COLUMN smell_failed_profiles TEXT NOT NULL DEFAULT '{}';`
+
+const smellUncappedSchema = `ALTER TABLE librarian_repos ADD COLUMN smell_uncapped INTEGER NOT NULL DEFAULT 0;`
 
 // State is one repository's librarian scheduling state.
 type State struct {
@@ -66,6 +69,9 @@ type State struct {
 	SmellPendingTurn    int                  `json:"smellPendingTurn,omitempty"`
 	SmellLastRun        time.Time            `json:"smellLastRun,omitempty"`
 	SmellFailedProfiles map[string]time.Time `json:"smellFailedProfiles,omitempty"`
+	// SmellUncapped is true while the pass the owner or root started with
+	// --now is pending: it files smells without the daily cap.
+	SmellUncapped bool `json:"smellUncapped,omitempty"`
 }
 
 // Store keeps librarian state in dyna.db.
@@ -89,7 +95,12 @@ func (s Store) db() (*sql.DB, error) {
 			return err
 		}
 		if old < 2 {
-			_, err := conn.ExecContext(context.Background(), smellPassSchema)
+			if _, err := conn.ExecContext(context.Background(), smellPassSchema); err != nil {
+				return err
+			}
+		}
+		if old < 3 {
+			_, err := conn.ExecContext(context.Background(), smellUncappedSchema)
 			return err
 		}
 		return nil
@@ -107,8 +118,8 @@ type rowQuerier interface {
 func get(q rowQuerier, repo string) (State, error) {
 	st := State{Repo: repo}
 	var lastRun, failed, smellLastRun, smellFailed string
-	err := q.QueryRowContext(context.Background(), `SELECT main, room_id, session, head, pending, pending_turn, last_run, failed_profiles, smell_day, smells, smell_session, smell_head, smell_pending, smell_pending_turn, smell_last_run, smell_failed_profiles FROM librarian_repos WHERE repo=?`, repo).
-		Scan(&st.Main, &st.RoomID, &st.Session, &st.Head, &st.Pending, &st.PendingTurn, &lastRun, &failed, &st.SmellDay, &st.Smells, &st.SmellSession, &st.SmellHead, &st.SmellPending, &st.SmellPendingTurn, &smellLastRun, &smellFailed)
+	err := q.QueryRowContext(context.Background(), `SELECT main, room_id, session, head, pending, pending_turn, last_run, failed_profiles, smell_day, smells, smell_session, smell_head, smell_pending, smell_pending_turn, smell_last_run, smell_failed_profiles, smell_uncapped FROM librarian_repos WHERE repo=?`, repo).
+		Scan(&st.Main, &st.RoomID, &st.Session, &st.Head, &st.Pending, &st.PendingTurn, &lastRun, &failed, &st.SmellDay, &st.Smells, &st.SmellSession, &st.SmellHead, &st.SmellPending, &st.SmellPendingTurn, &smellLastRun, &smellFailed, &st.SmellUncapped)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, fmt.Errorf("the librarian is not enabled for this repository: %w", os.ErrNotExist)
 	}
@@ -171,8 +182,8 @@ func (s Store) Update(repo string, create bool, fn func(*State) error) (State, e
 			}
 			return value.UTC().Format(time.RFC3339Nano)
 		}
-		_, err = conn.ExecContext(context.Background(), `INSERT OR REPLACE INTO librarian_repos(repo, main, room_id, session, head, pending, pending_turn, last_run, failed_profiles, smell_day, smells, smell_session, smell_head, smell_pending, smell_pending_turn, smell_last_run, smell_failed_profiles) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			repo, st.Main, st.RoomID, st.Session, st.Head, st.Pending, st.PendingTurn, formatTime(st.LastRun), string(failed), st.SmellDay, st.Smells, st.SmellSession, st.SmellHead, st.SmellPending, st.SmellPendingTurn, formatTime(st.SmellLastRun), string(smellFailed))
+		_, err = conn.ExecContext(context.Background(), `INSERT OR REPLACE INTO librarian_repos(repo, main, room_id, session, head, pending, pending_turn, last_run, failed_profiles, smell_day, smells, smell_session, smell_head, smell_pending, smell_pending_turn, smell_last_run, smell_failed_profiles, smell_uncapped) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			repo, st.Main, st.RoomID, st.Session, st.Head, st.Pending, st.PendingTurn, formatTime(st.LastRun), string(failed), st.SmellDay, st.Smells, st.SmellSession, st.SmellHead, st.SmellPending, st.SmellPendingTurn, formatTime(st.SmellLastRun), string(smellFailed), st.SmellUncapped)
 		out = st
 		return err
 	})

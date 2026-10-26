@@ -20,6 +20,12 @@ const (
 	KeyLibrarySmellProfile = "library.smellProfile"
 	// KeyLibraryReadmeMaxLines is the longest README the librarian may leave.
 	KeyLibraryReadmeMaxLines = "library.readmeMaxLines"
+	// KeyLibrarySmellsPerDay caps the smells automatic passes file for one
+	// repository in a UTC day. 0 means no cap. A pass the owner or root starts
+	// with dyna library wake --smells --now has no cap.
+	KeyLibrarySmellsPerDay = "library.smellsPerDay"
+	// DefaultLibrarySmellsPerDay is the daily smell cap until the owner sets one.
+	DefaultLibrarySmellsPerDay = 10
 	// DefaultLibraryReadmeMaxLines is the README limit until the owner sets one.
 	DefaultLibraryReadmeMaxLines = 300
 )
@@ -52,6 +58,11 @@ func (v *Values) loadLibrary(raw map[string]any) error {
 			return err
 		}
 	}
+	if value, ok := values["smellsPerDay"]; ok {
+		if err := v.setLibrary(KeyLibrarySmellsPerDay, numberText(value)); err != nil {
+			return err
+		}
+	}
 	if value, ok := values["readmeMaxLines"]; ok {
 		return v.setLibrary(KeyLibraryReadmeMaxLines, numberText(value))
 	}
@@ -64,6 +75,12 @@ func (v *Values) setLibrary(key, value string) error {
 		v.LibraryProfile = strings.TrimSpace(value)
 	case KeyLibrarySmellProfile:
 		v.LibrarySmellProfile = strings.TrimSpace(value)
+	case KeyLibrarySmellsPerDay:
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 {
+			return fmt.Errorf("library.smellsPerDay must be a number of smells, or 0 for no cap")
+		}
+		v.LibrarySmellsPerDay = n
 	case KeyLibraryReadmeMaxLines:
 		n, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || n < 1 {
@@ -89,7 +106,7 @@ func (v *Values) setLibrary(key, value string) error {
 
 func (v Values) saveLibrary(raw map[string]any) {
 	values := nested(raw, "library")
-	values["enabled"], values["profile"], values["smellProfile"], values["readmeMaxLines"] = v.LibraryEnabled, v.LibraryProfile, v.LibrarySmellProfile, v.LibraryReadmeMaxLines
+	values["enabled"], values["profile"], values["smellProfile"], values["smellsPerDay"], values["readmeMaxLines"] = v.LibraryEnabled, v.LibraryProfile, v.LibrarySmellProfile, v.LibrarySmellsPerDay, v.LibraryReadmeMaxLines
 	raw["library"] = values
 }
 

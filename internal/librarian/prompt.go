@@ -54,7 +54,13 @@ func SmellGoal(main string) string {
 }
 
 // SmellTask assigns one code-reading pass over a merge batch.
-func SmellTask(main, tree, base, target string) string {
+//
+// limit is library.smellsPerDay for this run; 0 means the run has no cap.
+func SmellTask(main, tree, base, target string, limit int) string {
+	cap := "Dyna refuses references to missing files and duplicate open issues."
+	if limit > 0 {
+		cap = fmt.Sprintf("Dyna refuses references to missing files, duplicate open issues, and more than %d smells a day.", limit)
+	}
 	return fmt.Sprintf(`[LIBRARIAN SMELL RUN %s]
 You are the code-reading librarian for %s. Work only in %s. Do not edit files, update the feature map, or open a pull request.
 
@@ -71,9 +77,9 @@ Check for these maintainability problems:
 
 File each confirmed architectural smell as a room issue:
   dyna library smell "<title>" --at <file[:line]> [--at ...] --symbols <names> --cost "<maintenance cost>" --direction "<direction, not a patch>"
-Cite the code you read. Dyna refuses references to missing files, duplicate open issues, and more than %d smells a day. A refusal is final; do not reword to get past it. Do not file style preferences, speculative problems, or implementation patches.
+Cite the code you read. %s A refusal is final; do not reword to get past it. Do not file style preferences, speculative problems, or implementation patches.
 
-Never merge anything. Do not start subagents or workflows. End with a short summary of files and related code read, smells filed, and useful checks that found nothing.`, short(target), main, tree, base, target, SmellsPerDay)
+Never merge anything. Do not start subagents or workflows. End with a short summary of files and related code read, smells filed, and useful checks that found nothing.`, short(target), main, tree, base, target, cap)
 }
 
 func short(sha string) string {

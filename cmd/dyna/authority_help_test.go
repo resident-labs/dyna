@@ -33,6 +33,9 @@ var serviceAuthorityActions = map[string]bool{
 	// owner display grant is the `--owner-display` flag of `dyna subagent
 	// start`, so it has no command path of its own.
 	"owner display grant": true,
+	// library wake now is the --smells --now flags of `dyna library wake`, whose
+	// plain form any caller may run, so it has no command path of its own.
+	"library wake now": true,
 }
 
 func TestAuthorityRulesResolveToCommands(t *testing.T) {
