@@ -3,6 +3,7 @@
 package computers
 
 import (
+	"dyna-agent/internal/testsafe"
 	"io"
 	"net"
 	"os"
@@ -26,7 +27,7 @@ func TestAbstractSocketRejectsOtherUnixUser(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("changing client UID needs root; the container CI runs this test")
 	}
-	dir, err := os.MkdirTemp("/tmp", "dcp-")
+	dir, err := testsafe.ShortTemp("dcp-")
 	if err != nil {
 		t.Fatal(err)
 	}

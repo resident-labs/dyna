@@ -41,6 +41,12 @@ func TestParseIssueRefsAndFixLines(t *testing.T) {
 		t.Errorf("ParseFixLines = %s, want %s", FixesLabel(got), want)
 	}
 
+	// D-281: a negated sentence after the closing reference links nothing.
+	negated := "Closes D-220 on merge. This does not close D-91 or D-92.\nFixes D-1 and D-2. Not D-3.\nFixes #4 but not D-5"
+	if got, want := FixesLabel(ParseFixLines(negated)), "D-220, D-1, D-2, #4"; got != want {
+		t.Errorf("ParseFixLines on negated prose = %s, want %s", got, want)
+	}
+
 	// One change may not close an unbounded list.
 	var many []string
 	for i := 1; i <= MaxFixes+1; i++ {

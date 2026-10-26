@@ -185,7 +185,7 @@ func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *su
 		var links []string
 		for _, pr := range prs.Records {
 			if pr.Author == child.ID && pr.ClosedAt.IsZero() && pr.State != "closed" && pr.State != "merged" {
-				links = append(links, fmt.Sprintf("open PR #%d: %s", pr.Number, pr.State))
+				links = append(links, openChangeLink(*pr))
 			}
 		}
 		sort.Strings(links)
@@ -216,6 +216,19 @@ func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *su
 		reports = append(reports, childReport{name: child.Name, state: state, work: strings.Join(work, ", "), prs: strings.Join(links, ", "), since: since})
 	}
 	return stalestFirst(reports, now), nil
+}
+
+// openChangeLink names an open change for the check-in. A local change has no
+// PR number, so it shows its title and change ID.
+func openChangeLink(pr prstate.Record) string {
+	if pr.Kind == "local" {
+		id := pr.ChangeID
+		if id == "" {
+			id = pr.Key
+		}
+		return fmt.Sprintf("open local change %q (%s): %s", pr.Title, id, pr.State)
+	}
+	return fmt.Sprintf("open PR #%d: %s", pr.Number, pr.State)
 }
 
 // checkinState maps a session state to the state the card names.

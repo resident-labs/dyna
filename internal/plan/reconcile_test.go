@@ -153,3 +153,41 @@ func stringsContains(s, sub string) bool {
 		return false
 	})()))
 }
+
+// A run() command's exec events share the event stream with agent events and
+// their IDs count commands, so a command 1 can sit beside an agent 1. Neither
+// may reach the roster: the plan holds agent nodes only.
+func TestReconcileIgnoresExecEvents(t *testing.T) {
+	p := Extract(`
+await agent('a', { label: 'planned' })
+return 1
+`, Options{})
+	var node string
+	for _, n := range p.Nodes {
+		if n.Kind == KindAgent {
+			node = n.PlanNodeID
+		}
+	}
+	if node == "" {
+		t.Fatalf("missing nodes: %#v", p.Nodes)
+	}
+	events := []EventView{
+		{T: "exec_start", ID: 1, Label: "make", PlanNodeID: node},
+		{T: "exec_run", ID: 1, Label: "make"},
+		{T: "exec_end", ID: 1, Status: "ok"},
+		{T: "agent_start", ID: 1, PlanNodeID: node, Label: "planned"},
+		{T: "agent_end", ID: 1, Status: "ok"},
+	}
+	rec := Reconcile(p, events, true)
+	if len(rec.Entries) != 1 {
+		t.Fatalf("entries = %#v; want the one planned agent only", rec.Entries)
+	}
+	e := rec.Entries[0]
+	if e.RuntimeID != 1 || e.State != StateOK {
+		t.Fatalf("entry = %#v; want the agent event applied, not the exec ones", e)
+	}
+	observed := Reconcile(nil, events, true)
+	if len(observed.Entries) != 1 || observed.Entries[0].RuntimeID != 1 {
+		t.Fatalf("observed-only entries = %#v; want the agent alone", observed.Entries)
+	}
+}

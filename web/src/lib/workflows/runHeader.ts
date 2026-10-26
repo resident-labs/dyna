@@ -9,6 +9,8 @@ export interface RunHeaderInput {
   working: number
   failed: number
   agents: number
+  // commands counts the run's run() commands, which work beside its agents.
+  commands?: number
 }
 
 // spanText words a length of time at the size a glance needs: 45s, 48m, 2h 05m.
@@ -31,7 +33,8 @@ export function runLine(run: RunHeaderInput, now: number): string {
   const start = new Date(run.startedAt).getTime()
   const failed = run.failed > 0 ? [`${run.failed} failed`] : []
   if (run.status === 'running') {
-    const counts = run.agents > 0 ? [`${run.working} working`, plural(run.agents, 'agent')] : []
+    const commands = run.commands ?? 0
+    const counts = run.agents + commands > 0 ? [`${run.working} working`, ...(run.agents > 0 ? [plural(run.agents, 'agent')] : []), ...(commands > 0 ? [plural(commands, 'command')] : [])] : []
     return [`Running for ${spanText(now - start)}`, ...counts, ...failed].join(' · ')
   }
   const end = run.endedAt ? new Date(run.endedAt).getTime() : 0
