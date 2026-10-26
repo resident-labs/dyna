@@ -129,3 +129,30 @@ func TestFailedAgentKillKeepsTheResultAndTheRunCleanupRetries(t *testing.T) {
 		t.Fatalf("run kills = %d; want 2 (one failed, one retry) and none after", n)
 	}
 }
+
+func TestRestartedEngineCleansAnEndedRunOnceAndMarksIt(t *testing.T) {
+	e := newTestEnv(t)
+	t.Setenv("DYNA_RUN_ID", "wf_restart")
+	r, err := runstore.Create("restart", "return null", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := r.Meta.ID
+	// The run ended while no engine was watching: no open agent, no mark.
+	if err := runstore.ForceStatus(run, "ok", "ended"); err != nil {
+		t.Fatal(err)
+	}
+	rec := &killRecorder{}
+	fresh := &Manager{Store: e.m.Store, killProcs: rec.kill} // a Manager with no memory of the run
+	for range 2 {
+		if err := fresh.CloseEndedRunAgents(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := rec.count("DYNA_WORKER_RUN=" + run); n != 1 {
+		t.Fatalf("run kills = %d; want exactly one", n)
+	}
+	if meta, err := runstore.ReadMeta(run); err != nil || meta.ProcessesEnded == nil {
+		t.Fatalf("run meta = %+v, %v; want ProcessesEnded set", meta, err)
+	}
+}
