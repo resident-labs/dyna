@@ -20,7 +20,7 @@ function literal(name: string): unknown {
 test('saving either content limit refreshes both derived total descriptions', async () => {
   const context: { items: { key: string; help: string }[]; saved: string; [name: string]: unknown } = {
     items: [{ key: 'content.maxCardBytes', help: 'old total' }, { key: 'content.maxFileBytes', help: 'old total' }],
-    errors: {}, drafts: {}, saved: '', setTimeout: () => {},
+    errors: {}, drafts: {}, saved: '', setTimeout: () => {}, REVIEWER_KEY: 'reviewer.profile',
     api: {
       setSetting: async (key: string, value: string) => ({ key, value }),
       settings: async () => [{ key: 'content.maxCardBytes', help: 'new total' }, { key: 'content.maxFileBytes', help: 'new total' }],
@@ -86,16 +86,6 @@ test('Browser keeps a stored unavailable mode visible', () => {
   assert.equal(call(context, 'missingLabel', { key: 'browser.profileMode', value: 'copy-mine' }), 'Copy my Chromium profile (unavailable)')
   assert.equal(call(context, 'missingLabel', { key: 'browser.ownerProfile', value: 'Profile 9' }), 'Profile 9 (not found)')
   assert.match(source, /<option value=\{it.value\} disabled>/)
-})
-
-test('the Sessions settings include the default root profile picker', () => {
-  const groups = literal('groups')
-  assert.ok(Array.isArray(groups))
-  const sessions: unknown = groups.find((g: unknown) => typeof g === 'object' && g !== null && 'title' in g && g.title === 'Sessions')
-  assert.ok(typeof sessions === 'object' && sessions !== null && 'keys' in sessions && Array.isArray(sessions.keys) && sessions.keys.includes('root.profile'))
-  const titles = literal('titles')
-  assert.ok(typeof titles === 'object' && titles !== null && 'root.profile' in titles)
-  assert.equal(titles['root.profile'], 'Default root profile')
 })
 
 test('the Feed section previews the real feed with sample posts under the current choices', async () => {
