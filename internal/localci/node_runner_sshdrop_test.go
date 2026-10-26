@@ -60,4 +60,3 @@ func TestCheckCauseNamesAnSSHDropAfterTheCheckWroteItsMarker(t *testing.T) {
 		t.Fatalf("cause on a local node = %q, want %q", cause, CauseUnclassified)
 	}
 }
-
