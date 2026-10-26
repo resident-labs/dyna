@@ -571,27 +571,37 @@ func TestWatchSocketStopsHostWhenSocketIsGone(t *testing.T) {
 	if err := os.WriteFile(socket, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ticks := make(chan time.Time)
-	stopped := make(chan struct{})
-	finished := make(chan struct{})
-	go func() {
-		watchSocket(ticks, socket, func() { close(stopped) }, make(chan struct{}))
-		close(finished)
-	}()
-	ticks <- time.Time{}
-	select {
-	case <-stopped:
-		t.Fatal("the host stopped while its socket existed")
-	default:
+	// run feeds one tick to a watcher and returns whether it stopped the host.
+	// The tick channel is buffered and done is closed after the tick, so the
+	// watcher always returns; the deadline only bounds a broken one.
+	run := func() bool {
+		ticks := make(chan time.Time, 1)
+		ticks <- time.Time{}
+		done := make(chan struct{})
+		stopped := false
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			watchSocket(ticks, socket, func() { stopped = true }, done)
+		}()
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			close(done)
+			<-finished
+		}
+		return stopped
+	}
+	if gone := socketGone(socket); gone {
+		t.Fatal("a socket that exists reads as gone")
 	}
 	if err := os.Remove(socket); err != nil {
 		t.Fatal(err)
 	}
-	ticks <- time.Time{}
-	<-finished
-	select {
-	case <-stopped:
-	default:
+	if !socketGone(socket) {
+		t.Fatal("a removed socket does not read as gone")
+	}
+	if !run() {
 		t.Fatal("the host kept running after its socket was removed")
 	}
 }
