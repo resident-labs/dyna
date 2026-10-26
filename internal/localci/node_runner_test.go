@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -598,18 +597,26 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for name, body := range map[string]string{
+		"systemd-run": "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n",
+		"systemctl":   "#!/bin/sh\nexit 0\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	checks, _, err := nodeChecks(testDynaDefinition(t), nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, check := range checks {
-		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
+		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0, false)
 		if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
 			t.Fatalf("%s syntax: %v: %s", check.name, err, output)
 		}
 	}
 	check := nodeCheck{id: SuiteFrontend, name: "frontend", inner: "true", image: "node:22"}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0, false)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	output, err := cmd.CombinedOutput()
@@ -870,98 +877,6 @@ func TestNodePassesACheckWhoseCommandLeftAChildHoldingOutput(t *testing.T) {
 	}
 }
 
-// A check can leave a descendant that starts its own session, as the sccache
-// daemon does. Such a child leaves the wrapper's process group but stays in the
-// check's scope, and it can hold the check's output open, which keeps an SSH
-// transport up. The runner kills what is left in the scope once the check's
-// command returns, so nothing outlives the check even when its deadline
-// expired. The detached child is pipe-controlled and the pipe is closed from a
-// cleanup registered first, so a failing run leaves nothing behind.
-func TestCheckKillsADetachedChildInItsScopeWhenTheCommandEnds(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{"docker", "git"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "go-static", "work"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	gate, gateWriter, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = gateWriter.Close()
-		_ = gate.Close()
-	})
-	var mu sync.Mutex
-	var cleaned []string
-	var holder *exec.Cmd
-	node := Node{Name: "local", Slots: 1, Enabled: true}
-	runner := Runner{DataDir: t.TempDir(), Node: &node}
-	runner.Command = func(_ context.Context, gitDir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
-		if fakeSystemdVersion(out, name, args) {
-			return nil
-		}
-		if fakeNodeGit(gitDir, out, name, args) {
-			return nil
-		}
-		script := args[len(args)-1]
-		switch {
-		case strings.Contains(script, "df -Pk"):
-			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
-			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
-			return nil
-		case strings.Contains(script, "systemctl --user kill"):
-			mu.Lock()
-			cleaned = append(cleaned, script)
-			process := holder
-			mu.Unlock()
-			if process != nil {
-				_ = process.Process.Kill()
-			}
-			return nil
-		case strings.Contains(script, "tar -C"):
-			return nil
-		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
-			// A child in its own session, holding the check's output open.
-			cmd := exec.Command("sh", "-c", "read line")
-			cmd.Stdin = gate
-			cmd.Stdout = out
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-			if startErr := cmd.Start(); startErr != nil {
-				t.Errorf("start detached child: %v", startErr)
-				return nil
-			}
-			mu.Lock()
-			holder = cmd
-			mu.Unlock()
-			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=124")
-			fmt.Fprintln(out, "DYNA_CI_COMMAND_STARTED=1")
-			return exitError(t, 124)
-		}
-		return nil
-	}
-	_, err = runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	mu.Lock()
-	calls, process := append([]string(nil), cleaned...), holder
-	mu.Unlock()
-	if len(calls) != 1 || !strings.Contains(calls[0], "dyna-ci-") || !strings.Contains(calls[0], "-go-static.scope") {
-		t.Fatalf("scope cleanup ran %v, want the check's own scope", calls)
-	}
-	if process == nil {
-		t.Fatal("the detached child never started")
-	}
-	// Reap the child: a kill that worked leaves a non-zero wait status.
-	if waitErr := process.Wait(); waitErr == nil {
-		t.Fatalf("detached child %d outlived its check", process.Process.Pid)
-	}
-}
-
 // The slot lock belongs to the wrapper. A check can start a daemon that leaves
 // the session and outlives it, as sccache does, and such a daemon must not
 // inherit fd 9: otherwise it keeps the slot for good and later checks wait for
@@ -972,6 +887,14 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"docker", "git"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, body := range map[string]string{
+		"systemd-run": "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n",
+		"systemctl":   "#!/bin/sh\nexit 0\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -989,7 +912,7 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	pidFile := filepath.Join(dir, "daemon.pid")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
-	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0, false)
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
@@ -1011,5 +934,63 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	}
 	if output, err := exec.Command("flock", "-n", filepath.Join(dir, "slots", "0.lock"), "true").CombinedOutput(); err != nil {
 		t.Fatalf("the daemon kept the slot lock: %v: %s", err, output)
+	}
+}
+
+// A detached descendant can hold the check's output open, which is what keeps an
+// SSH channel, or any transport that waits for the pipe, up after the wrapper
+// exits. The node-side cleanup must kill the check's scope before that wait
+// starts. The holder here blocks on a pipe the test owns, and the command runs
+// with a short WaitDelay: a cleanup that runs too late shows up as
+// exec.ErrWaitDelay, exactly as a transport that waits for output would.
+func TestHostCheckCleanupEndsTheOutputHolderBeforeTheTransportWaits(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"docker", "git"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pidFile := filepath.Join(dir, "holder.pid")
+	fakes := map[string]string{
+		"systemd-run": "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n",
+		// The scope kill, which reaches the detached holder through its cgroup.
+		"systemctl": "#!/bin/sh\n[ -s " + pidFile + " ] && kill -KILL \"$(cat " + pidFile + ")\" 2>/dev/null\n" + "exit 0\n",
+	}
+	for name, body := range fakes {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gate, gateWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = gateWriter.Close()
+		_ = gate.Close()
+		if data, readErr := os.ReadFile(pidFile); readErr == nil {
+			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: "setsid sh -c 'read line < /dev/fd/3' 3<&3 & echo $! > " + pidFile + "; exit 0"}
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0, false)
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.ExtraFiles = []*os.File{gate}
+	cmd.WaitDelay = 50 * time.Millisecond
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("the holder outlived the cleanup: %v: %s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "DYNA_CI_CHECK_EXIT=0") {
+		t.Fatalf("check lost its marker: %s", out.String())
 	}
 }
