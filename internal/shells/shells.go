@@ -611,6 +611,17 @@ func (s *Store) Stop(id, by string) (Info, error) {
 		in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
 		return in, err
 	}
+	if in.Status == "lost" {
+		// The supervisor died, but the command and its children may run on.
+		// Only processes stamped with this job's ID are ours to end (D-190).
+		logErr := s.logStop(id, "supervisor is gone; sending SIGTERM to the job's processes")
+		if !stopOrphans(id, 5*time.Second) {
+			return in, logErr
+		}
+		in.Exit = &Exit{Code: -1, Signal: "terminated", Error: "supervisor lost; processes stopped", Ended: time.Now()}
+		in.Status = "exited"
+		return in, errors.Join(logErr, s.markStopped(id, by), s.Save(in.Meta, in.Exit))
+	}
 	if in.Status != "running" || in.Pid <= 0 {
 		return in, nil
 	}
