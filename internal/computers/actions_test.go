@@ -323,7 +323,7 @@ func TestHeldKeysReleaseInReverseAtTheTakeoverAndKeyUpIsIdempotent(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	g.begin(cancel)
 	for _, k := range []string{"Shift_L", "e"} {
-		if err := g.key(k, true); err != nil {
+		if _, err := g.press(k); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -334,12 +334,47 @@ func TestHeldKeysReleaseInReverseAtTheTakeoverAndKeyUpIsIdempotent(t *testing.T)
 	if got := strings.Join(r.log, "|"); got != "key Shift_L down|key e down|key e up|key Shift_L up" {
 		t.Fatalf("events = %s", got)
 	}
-	if err := g.key("e", true); !errors.Is(err, errControlLost) {
+	if _, err := g.press("e"); !errors.Is(err, errControlLost) {
 		t.Fatalf("press after the takeover = %v, want the control-lost error", err)
 	}
 	n := len(r.log)
-	if err := g.key("e", false); err != nil || len(r.log) != n {
+	if err := g.releaseKey("e"); err != nil || len(r.log) != n {
 		t.Fatalf("key_up of a released key = %v, events %v, want nothing", err, r.log[n:])
+	}
+}
+
+// A key held by key_down belongs to key_down: a later temporary press of the
+// same key neither presses it again nor releases it.
+func TestHeldKeyIsNotPressedOrReleasedByALaterAction(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	g.setKeys(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	if owned, err := g.press("Shift_L"); !owned || err != nil {
+		t.Fatalf("key_down press = %v, %v", owned, err)
+	}
+	if owned, err := g.press("Shift_L"); owned || err != nil {
+		t.Fatalf("repeated press = %v, %v, want not owned", owned, err)
+	}
+	if got := strings.Join(r.log, "|"); got != "key Shift_L down" {
+		t.Fatalf("events = %s, want one device press", got)
+	}
+	// The later action did not own the key, so it releases nothing; key_up does.
+	if err := g.releaseKey("Shift_L"); err != nil || strings.Join(r.log, "|") != "key Shift_L down|key Shift_L up" {
+		t.Fatalf("key_up = %v, events %v", err, r.log)
+	}
+}
+
+func TestKeyActionsNormalizeShiftedSymbolsTheSameWay(t *testing.T) {
+	for _, kind := range []string{"keypress", "key_down", "key_up"} {
+		got := actionKeys(parseActions(t, `[{"type":"`+kind+`","keys":["SHIFT","1"]}]`)[0])
+		if len(got) != 2 || got[1] != "!" {
+			t.Errorf("%s keys = %v, want the shifted symbol", kind, got)
+		}
+	}
+	if got := actionKeys(parseActions(t, `[{"type":"click","x":1,"y":1,"button":"left","keys":["SHIFT","1"]}]`)[0]); got[1] != "1" {
+		t.Errorf("click keys = %v, want them unchanged", got)
 	}
 }
 
