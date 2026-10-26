@@ -266,3 +266,20 @@ func TestLinuxReadsTheAgentSlicesBudgetBesideTheEngine(t *testing.T) {
 		t.Fatalf("readings = %+v, %v", r, err)
 	}
 }
+
+// A mount of only the engine's service subtree cannot show dyna.slice beside
+// it. The agents' budget is then unknown, so the reading fails instead of
+// reporting the host's memory.
+func TestLinuxFailsWhenASubtreeMountHidesTheAgentSlice(t *testing.T) {
+	proc, cg := t.TempDir(), t.TempDir()
+	user := "/user.slice/user-1000.slice/user@1000.service"
+	put(t, proc, map[string]string{
+		"loadavg": "0.1 0 0 1/1 1\n", "meminfo": meminfo,
+		"self/cgroup":    "0::" + user + "/app.slice/dyna-engine.service\n",
+		"self/mountinfo": "30 25 0:26 " + user + "/app.slice/dyna-engine.service " + cg + " rw - cgroup2 cgroup2 rw\n",
+	})
+	put(t, cg, map[string]string{"memory.max": "max\n"})
+	if r, err := (Linux{ProcDir: proc}).Read(context.Background()); err == nil {
+		t.Fatalf("read host memory %d with the agents' slice invisible", r.MemTotal)
+	}
+}

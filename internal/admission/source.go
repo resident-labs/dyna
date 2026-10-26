@@ -264,7 +264,7 @@ func (l Linux) applyCgroup(r *Readings) (string, error) {
 		if agents := agentSlice(parts[2]); agents != "" {
 			paths = append(paths, agents)
 		}
-		for i, cgPath := range paths {
+		for _, cgPath := range paths {
 			// The first mount that shows this cgroup is the one to read.
 			var m mount
 			dir, ok := "", false
@@ -275,9 +275,10 @@ func (l Linux) applyCgroup(r *Readings) (string, error) {
 				}
 			}
 			if !ok {
-				if i == 0 && len(mounts) > 0 {
-					// The process lives in a cgroup that no mount shows, so its limit is
-					// unknown. The host's memory must not stand in for it.
+				if len(mounts) > 0 {
+					// The process, or the agents' slice beside it, lives in a cgroup that
+					// no mount shows, so its limit is unknown. The host's memory must not
+					// stand in for it.
 					return "", fmt.Errorf("cgroup %s is not visible in any cgroup mount, so its memory limit is unknown", cgPath)
 				}
 				continue
