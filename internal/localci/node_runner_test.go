@@ -1190,3 +1190,43 @@ func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 		t.Fatal("a cancelled run's queued check started its work")
 	}
 }
+
+// Every check the engine's own stop ends carries the engine-stop cause, whatever
+// ended it first: the run context, a TERM forwarded by the check's timeout, or a
+// container the cleanup removed. A real test failure keeps its own cause.
+func TestEngineStopCoversEveryWayACheckEnds(t *testing.T) {
+	previous := EngineStopping()
+	MarkEngineStopping()
+	t.Cleanup(func() { engineStopping.Store(previous) })
+	node := Node{Name: "local", Slots: 1, Enabled: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	marker := func(code string) [][]string { return [][]string{{"DYNA_CI_CHECK_EXIT", code}} }
+	for _, tc := range []struct {
+		name      string
+		ctx       context.Context
+		err       error
+		markers   [][]string
+		container bool
+	}{
+		{"run context", ctx, context.Canceled, nil, false},
+		{"timeout forwarded a TERM", context.Background(), nil, marker("143"), true},
+		{"cleanup removed the container", context.Background(), nil, marker("137"), true},
+		{"killed outside a container", context.Background(), nil, marker("137"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := checkCause(node, tc.ctx, tc.err, tc.markers, tc.container); got != CauseEngineStop {
+				t.Fatalf("cause = %s, want %s", got, CauseEngineStop)
+			}
+		})
+	}
+	// A test that failed is still a test failure.
+	if got := checkCause(node, context.Background(), nil, marker("1"), true); got != CauseTestFailure {
+		t.Fatalf("a failing test reported %s, want %s", got, CauseTestFailure)
+	}
+	// And a cancellation without the stop mark stays an ordinary cancellation.
+	ClearEngineStopping()
+	if got := checkCause(node, ctx, context.Canceled, nil, false); got != CauseCancelled {
+		t.Fatalf("a plain cancellation reported %s, want %s", got, CauseCancelled)
+	}
+}
