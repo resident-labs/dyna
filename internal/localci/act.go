@@ -1,7 +1,6 @@
 package localci
 
 import (
-	"bytes"
 	"fmt"
 	"path"
 	"strconv"
@@ -69,8 +68,7 @@ func actContainerOptions(check nodeCheck, runID string) string {
 // quoted key gains a duplicate name, a block scalar keeps its content behind
 // the replaced line, and a value on the line after its key never matches a
 // same-line pattern at all. Everything outside the name value keeps its
-// structure. A document without a name key provably cannot gain a duplicate,
-// so the tag is prepended to it, behind a document marker if there is one.
+// structure. A document without a name key gains one in the parsed mapping.
 func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
 	file, err := parser.ParseBytes(content, 0)
 	if err != nil {
@@ -100,10 +98,12 @@ func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
 		}
 		return []byte(file.String()), nil
 	}
-	if bytes.HasPrefix(content, []byte("---\n")) {
-		return append([]byte("---\nname: "+tag+"\n"), content[4:]...), nil
-	}
-	return append([]byte("name: "+tag+"\n"), content...), nil
+	// No name key: the name joins the parsed mapping, ahead of the other keys.
+	// Text in front of the content cannot do this, because a comment, a
+	// directive or a document marker before the mapping would leave the tag in
+	// a document of its own.
+	body.Values = append([]*ast.MappingValueNode{tagName}, body.Values...)
+	return []byte(file.String()), nil
 }
 
 // actArtifactPortBase is the first port the artifact server of a node's slot
