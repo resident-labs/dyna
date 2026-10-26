@@ -18,6 +18,10 @@ type localCIPlan struct {
 	suites      []localci.Suite
 	baseMissing bool
 	headMissing bool
+	// bootstrap marks a head that adds local CI where the base has none. The head
+	// definition is then both required and executed: the base required nothing,
+	// and the trial runs the approved PR code anyway.
+	bootstrap bool
 }
 
 func (p localCIPlan) runnable() bool {
@@ -66,8 +70,17 @@ func (s *Service) planRegisteredCI(ctx context.Context, job registeredCIJob) (lo
 	}
 	required, err := localci.LoadDefinition(ctx, job.record.RepoPath, base)
 	if errors.Is(err, localci.ErrDefinitionNotFound) {
-		plan.baseMissing = true
-		return plan, nil
+		head, headErr := localci.LoadDefinition(ctx, job.record.RepoPath, job.head)
+		if errors.Is(headErr, localci.ErrDefinitionNotFound) {
+			plan.baseMissing = true
+			return plan, nil
+		}
+		if headErr != nil {
+			return plan, headErr
+		}
+		plan.required, plan.execution, plan.bootstrap = head, head, true
+		required = head
+		err = nil
 	}
 	if err != nil {
 		return plan, err
