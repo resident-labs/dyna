@@ -249,7 +249,7 @@ func connectUnlink(ctx context.Context, st *connect.Store, local bool, out io.Wr
 		return err
 	}
 	st.Audit("unlink", l.Machine)
-	fmt.Fprintf(out, "Unlinked %s. Every Connect session ended. Restart dyna engine run to stop the tunnel.\n", l.Name)
+	fmt.Fprintf(out, "Unlinked %s. Every Connect session ended. The tunnel connector stops now: dyna-tunnel.service restarts it, and a running engine stops its own.\n", l.Name)
 	return nil
 }
 

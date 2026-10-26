@@ -242,6 +242,91 @@ func TestWriteInstallsTheTunnelUnit(t *testing.T) {
 	}
 }
 
+// An engine that opted out of the tunnel gets no connector: no unit file, no
+// enable link, and an earlier connector is stopped.
+func TestInstallHonoursTheTunnelOptOut(t *testing.T) {
+	dir := t.TempDir()
+	before := Options{Binary: "/test/bin/dyna", Dir: dir}
+	if err := Write(before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, Tunnel)); err != nil {
+		t.Fatalf("fixture has no tunnel unit: %v", err)
+	}
+	var calls []string
+	run := func(_ context.Context, args ...string) (string, error) {
+		command := strings.Join(args, " ")
+		calls = append(calls, command)
+		if strings.Contains(command, " show ") {
+			return "Transient=no\nActiveState=active\nLoadState=loaded\n", nil
+		}
+		return "", nil
+	}
+	if err := Install(context.Background(), Options{Binary: "/test/bin/dyna", Dir: dir, NoTunnel: true, Run: run}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, Tunnel)); !os.IsNotExist(err) {
+		t.Fatalf("the tunnel unit stayed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "default.target.wants", Tunnel)); !os.IsNotExist(err) {
+		t.Fatalf("the tunnel unit stayed enabled: %v", err)
+	}
+	all := strings.Join(calls, "\n")
+	if strings.Contains(all, "start "+Tunnel) {
+		t.Fatalf("an opted-out install started a connector: %s", all)
+	}
+	if !strings.Contains(all, "disable --now "+Tunnel) {
+		t.Fatalf("an opted-out install did not stop an earlier connector: %s", all)
+	}
+	engine, err := os.ReadFile(filepath.Join(dir, Engine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(engine), `ExecStart="/test/bin/dyna" engine run --allow-agent --no-tunnel`) {
+		t.Fatalf("the opt-out is not in the engine unit:\n%s", engine)
+	}
+	// A later install keeps the choice the engine unit records.
+	var again []string
+	keep := func(_ context.Context, args ...string) (string, error) {
+		command := strings.Join(args, " ")
+		again = append(again, command)
+		if strings.Contains(command, " show ") {
+			return "Transient=no\nActiveState=active\nLoadState=loaded\n", nil
+		}
+		return "", nil
+	}
+	if err := Install(context.Background(), Options{Binary: "/test/bin/dyna", Dir: dir, Run: keep}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(again, "\n"), "start "+Tunnel) {
+		t.Fatalf("a second install lost the owner's opt-out: %v", again)
+	}
+}
+
+// A written unit is not a running connector: the write-only install leaves the
+// service inactive, so the engine keeps its own connector.
+func TestWrittenTunnelUnitIsNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(Options{Binary: "/test/bin/dyna", Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, Tunnel)); err != nil {
+		t.Fatalf("fixture has no tunnel unit: %v", err)
+	}
+	inactive := func(context.Context, ...string) (string, error) { return "ActiveState=inactive\n", nil }
+	if tunnelActive(context.Background(), inactive) {
+		t.Fatal("a written but inactive unit counts as a running connector")
+	}
+	failed := func(context.Context, ...string) (string, error) { return "", errors.New("no user manager") }
+	if tunnelActive(context.Background(), failed) {
+		t.Fatal("a failed query counts as a running connector")
+	}
+	active := func(context.Context, ...string) (string, error) { return "ActiveState=active\n", nil }
+	if !tunnelActive(context.Background(), active) {
+		t.Fatal("a running connector was not seen")
+	}
+}
+
 func TestInstallChecksEngineHealthAfterTheRestart(t *testing.T) {
 	run := func(_ context.Context, args ...string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), "show "+Computers) {
