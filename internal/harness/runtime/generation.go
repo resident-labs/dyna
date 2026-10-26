@@ -72,9 +72,19 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 		row := map[string]any{}
 		// Pi keeps MCP tools from the model unless they are exposed directly
 		// (shipped docs/mcp.md: codemode is the default exposure), so the shell
-		// tools must be declared like built-in tools.
-		if h == "pi" && entry.Name == dynaMCPName {
-			row["exposure"] = "direct"
+		// tools must be declared like built-in tools. A catalog entry names its
+		// own exposure for its own tools.
+		if h == "pi" {
+			exposure := definition.Exposure
+			if entry.Name == dynaMCPName {
+				exposure = harnessmgr.MCPExposureDirect
+			}
+			if exposure != "" {
+				row["exposure"] = string(exposure)
+			}
+			if definition.TimeoutSeconds > 0 {
+				row["timeout"] = definition.TimeoutSeconds
+			}
 		}
 		if definition.URL != "" {
 			row["url"] = definition.URL

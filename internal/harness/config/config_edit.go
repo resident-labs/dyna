@@ -21,6 +21,10 @@ import (
 var configName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 var configEnvKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// maxMCPTimeoutSeconds bounds one catalog server's request timeout, so a hung
+// call still ends within an hour.
+const maxMCPTimeoutSeconds = 3600
+
 func validateConfigName(name string) error {
 	if !configName.MatchString(name) {
 		return errors.New("invalid config name; use letters, numbers, dots, underscores, or hyphens")
@@ -74,6 +78,12 @@ func validateMCPDefinition(d MCPDefinition) error {
 		if !configEnvKey.MatchString(key) || reservedRuntimeEnvKey(key) {
 			return errors.New("invalid environment key; values must not be stored in the catalog")
 		}
+	}
+	if d.TimeoutSeconds < 0 || d.TimeoutSeconds > maxMCPTimeoutSeconds {
+		return fmt.Errorf("MCP timeout must be between 1 and %d seconds", maxMCPTimeoutSeconds)
+	}
+	if !d.Exposure.Valid() {
+		return errors.New("MCP exposure must be codemode, codemode-deferred, deferred, direct or hidden")
 	}
 	return nil
 }

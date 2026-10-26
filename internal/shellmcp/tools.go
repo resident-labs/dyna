@@ -28,6 +28,11 @@ const (
 	defaultWait = 30 * time.Second
 )
 
+// MaxRequestTimeout is the longest MCP request this server serves: the longest
+// wait for a job plus a minute for the call around it. A harness config uses it
+// as the server's request timeout, so a wait is not cut off at the transport.
+const MaxRequestTimeout = maxWait + time.Minute
+
 // holdGrace is how long a hold outlives its waiter's deadline, or a seen
 // exit that is not yet delivered, in case the waiter's process dies first.
 var holdGrace = 5 * time.Second
