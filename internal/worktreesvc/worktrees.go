@@ -127,7 +127,7 @@ func Remove(ctx context.Context, names []string, force bool) (RemoveResult, erro
 		}
 		if state == worktrees.StateModified && !force {
 			result.Lines = append(result.Lines, fmt.Sprintf("retained %s (modified since retention; use --force)", rec.Path))
-			errs = append(errs, fmt.Errorf("worktree %s is modified since retention", rec.Path))
+			errs = append(errs, worktrees.ModifiedSinceRetentionError(rec))
 			continue
 		}
 		if err := worktrees.Remove(rec, force); err != nil {
