@@ -7,7 +7,7 @@ export type PRType = "opened" | "ready" | "approved" | "changes" | "ci-failed" |
 export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested"
 
 // IssueChange is a named string type of an event payload.
-export type IssueChange = "filed" | "updated" | "closed"
+export type IssueChange = "filed" | "updated" | "closed" | "noted"
 
 // IssueState is a named string type of an event payload.
 export type IssueState = "open" | "goal" | "exported" | "closed"
@@ -141,7 +141,7 @@ export interface HookEvent {
   detail?: string
 }
 
-// IssueEvent is the payload of the issue/filed and issue/updated and issue/closed events.
+// IssueEvent is the payload of the issue/filed and issue/updated and issue/closed and issue/noted events.
 export interface IssueEvent {
   type: IssueChange
   issueId?: string
@@ -402,7 +402,7 @@ export interface TurnEvent {
 export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -480,6 +480,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "{actor} closed issue D-{number}: {reason}",
+  },
+  {
+    family: "issue",
+    type: "noted",
+    renderer: "IssueCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    audience: "room",
+    text: "{actor} added a note to issue D-{number}: {title}",
   },
   {
     family: "goal",
@@ -1085,7 +1095,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
 
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
 const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision", "fix-requested"])
-const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed"])
+const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed", "noted"])
 const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "closed"])
 const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "amended", "items_done", "finished", "dropped"])
 const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
@@ -1459,6 +1469,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "issue" && type === "filed") return isIssueEvent(v)
   if (family === "issue" && type === "updated") return isIssueEvent(v)
   if (family === "issue" && type === "closed") return isIssueEvent(v)
+  if (family === "issue" && type === "noted") return isIssueEvent(v)
   if (family === "goal" && type === "added") return isGoalEvent(v)
   if (family === "goal" && type === "edited") return isGoalEvent(v)
   if (family === "goal" && type === "amended") return isGoalEvent(v)

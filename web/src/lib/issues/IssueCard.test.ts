@@ -91,6 +91,15 @@ test('the card shows the D-N number, the title, the files and who filed it', () 
   target.remove()
 })
 
+test('a note shows its author and its evidence and offers no actions', () => {
+  const { target, mounted } = render({ ...filed, type: 'noted', issueId: 'msg_0123456789abcdef', actor: 'fl-rea:merge-captain', detail: 'CI failed again on the second head.' })
+  assert.match(textOf(target), /note by fl-rea:merge-captain/)
+  assert.match(textOf(target), /CI failed again on the second head\./)
+  assert.equal(target.querySelectorAll('button.btn').length, 0)
+  web.unmount(mounted)
+  target.remove()
+})
+
 test('Assign gives the issue to a goal through the engine', async () => {
   const calls: Call[] = []
   stubFetch(calls)

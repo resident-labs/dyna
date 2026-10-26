@@ -161,7 +161,8 @@ function foldKey(post: FeedInput): string {
   // One card per issue: filed, changed and closed fold together. A filing has
   // no issue ID yet, so it folds on its own post ID, which is the issue's ID.
   const issue = issueEvent(post)
-  if (issue) return `issue:${issue.issueId || post.id}`
+  // A note carries its own evidence, so each note keeps its own card.
+  if (issue) return issue.type === 'noted' ? '' : `issue:${issue.issueId || post.id}`
   // TODO: legacy/shim remove later — a PR post stored before the typed events
   // names its change in text only; remove when that history ages out.
   if (post.kind === 'pr' && post.notice?.kind !== 'held-comment') {
