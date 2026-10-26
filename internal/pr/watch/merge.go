@@ -140,7 +140,7 @@ func mergeQueue(st State) []MergeQueueItem {
 			item.State, item.Reason = "conflict", "conflicts with "+observation.DefaultBranch+"; rebase"
 		case observation.DefaultBranch != "" && observation.Base != observation.DefaultBranch:
 			item.State, item.Reason = "waiting-base", "waiting for the base PR to merge and retarget"
-		case facts.Ready(*r, observation):
+		case facts.Ready(*r, observation) || facts.ReadyWithoutHeadCI(*r, observation):
 			item.State, item.Reason = "ready", ""
 			if f := st.RepositoryFacts[defaultRepo(*r)]; f.CheckedAt.IsZero() {
 				item.State, item.Reason = "waiting-repository", "waiting for repository facts"
@@ -475,7 +475,8 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 		return Record{}, false, nil
 	}
 	policy = EffectivePolicy(st, *current)
-	if !facts.Ready(*current, snap.GitHubFacts(*current, policy.RequiredChecks...)) {
+	fresh := snap.GitHubFacts(*current, policy.RequiredChecks...)
+	if !facts.Ready(*current, fresh) && !facts.ReadyWithoutHeadCI(*current, fresh) {
 		return Record{}, false, nil
 	}
 	if paused, err := s.RoomPaused(current.RoomID); err != nil {
