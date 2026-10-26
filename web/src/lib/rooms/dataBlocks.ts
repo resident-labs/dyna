@@ -8,7 +8,21 @@ export type PostSegment = { kind: 'text'; text: string } | { kind: 'data'; value
 
 type Data = Extract<PostSegment, { kind: 'data' }>['value']
 
-const FENCE = /^\s*```(\w*)\s*$/
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/
+
+// fenceEnd finds the line that closes the Markdown fence opened at line i: the
+// same character, at least as long, with nothing after it. An unclosed fence
+// runs to the end of the text, as Markdown reads it. It returns -1 when line i
+// opens no fence; the info string is the opener's text after the marker.
+function fenceEnd(lines: string[], i: number): { end: number; info: string; closed: boolean } {
+  const open = FENCE_OPEN.exec(lines[i] ?? '')
+  const marker = open?.[1]
+  const info = (open?.[2] ?? '').trim()
+  if (!marker || (marker.startsWith('`') && info.includes('`'))) return { end: -1, info: '', closed: false }
+  const closer = new RegExp(`^ {0,3}${marker[0] === '`' ? '`' : '~'}{${marker.length},}[ \\t]*$`)
+  const end = lines.findIndex((l, j) => j > i && closer.test(l))
+  return end < 0 ? { end: lines.length - 1, info, closed: false } : { end, info, closed: true }
+}
 // A label, then JSON on the same line: "LANDING REQUEST after review: {…}".
 const LABELLED = /^(.*?:\s+)([{[].*)$/
 
@@ -37,22 +51,19 @@ export function splitPost(text: string): PostSegment[] {
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? ''
-    const fence = FENCE.exec(line)
-    if (fence) {
-      const end = lines.findIndex((l, j) => j > i && FENCE.test(l))
-      if (end > i) {
-        const value = fence[1]?.toLowerCase() === 'json' ? parseData(lines.slice(i + 1, end).join('\n')) : undefined
-        if (value) {
-          flush()
-          out.push({ kind: 'data', value })
-        } else {
-          // Any other code block stays whole: JSON inside it is code, and
-          // splitting it would leave its closing fence to open a new block.
-          prose.push(...lines.slice(i, end + 1))
-        }
-        i = end
-        continue
+    const { end, info, closed } = fenceEnd(lines, i)
+    if (end >= i) {
+      const value = closed && info.toLowerCase() === 'json' ? parseData(lines.slice(i + 1, end).join('\n')) : undefined
+      if (value) {
+        flush()
+        out.push({ kind: 'data', value })
+      } else {
+        // Any other code block stays whole: JSON inside it is code, and
+        // splitting it would leave its closing fence to open a new block.
+        prose.push(...lines.slice(i, end + 1))
       }
+      i = end
+      continue
     }
     const whole = parseData(line)
     if (whole) {
