@@ -1128,3 +1128,55 @@ func (m *Manager) beginTurn(id, prompt, schema string, owe []string) (Turn, erro
 func (m *Manager) beginTurnForPost(id, prompt, schema string, owe []string, messageID string) (Turn, bool, error) {
 	return m.beginTurnConfigured(id, prompt, schema, owe, messageID, "", false, time.Time{})
 }
+
+// A turn that an engine restart killed never read the posts queued while it ran,
+// so repairing it must keep that input fresh: the repair takes its input boundary
+// from the turn's start, not from the room's size at repair time.
+func TestRepairedTurnKeepsInputQueuedWhileItRan(t *testing.T) {
+	e := newTestEnv(t)
+	info, _ := e.start("SLEEP:2 RESPOND: ok")
+	// Wait for the running mark, which records the turn's start boundary.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tr, err := e.m.Store.ReadTurn(info.ID, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tr.Status == TurnRunning {
+			if tr.StartCutoff == nil {
+				t.Fatal("a running turn recorded no start cutoff")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("turn 1 never started: %#v", tr)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	before, err := e.m.Store.ReadTurn(info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A post queued while the turn runs lands after its start boundary.
+	if _, err := e.m.rooms().Post(info.RoomID, room.PostInput{From: info.RoomID, To: []string{info.Address()}, Text: "queued during the turn", Wake: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(info.ID, 1)
+	// Simulate the runner dying with the engine: a running record, no lock holder.
+	if _, err := e.m.Store.UpdateTurn(info.ID, 1, func(tr *Turn) { tr.Status = TurnRunning; tr.Ended = time.Time{} }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Store.Info(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := e.m.Store.ReadTurn(info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Status != TurnError || !strings.Contains(repaired.Error, "runner exited") {
+		t.Fatalf("turn was not repaired: %s %q", repaired.Status, repaired.Error)
+	}
+	if repaired.InputCutoff == nil || *repaired.InputCutoff != *before.StartCutoff {
+		t.Fatalf("repair cutoff %v, want the turn's start cutoff %v", repaired.InputCutoff, before.StartCutoff)
+	}
+}

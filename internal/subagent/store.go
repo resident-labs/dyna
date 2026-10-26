@@ -214,7 +214,12 @@ type Delivery struct {
 type Turn struct {
 	// InputCutoff bounds posts present when a turn ended, to prevent automatic
 	// retries of failed turns. A fresh post beyond it can start another turn.
-	InputCutoff        *int64                          `json:"inputCutoff,omitempty"`
+	InputCutoff *int64 `json:"inputCutoff,omitempty"`
+	// StartCutoff is the input boundary when the turn started: posts before it
+	// were read, and a post after it wakes the session again. A repaired turn
+	// uses it as its input cutoff, so input queued while that turn ran is not
+	// mistaken for input it already read.
+	StartCutoff        *int64                          `json:"startCutoff,omitempty"`
 	Deadline           time.Time                       `json:"deadline,omitempty"`
 	RoomHeld           bool                            `json:"roomHeld,omitempty"`
 	PendingInputIDs    []string                        `json:"pendingInputIds,omitempty"`
@@ -860,10 +865,16 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		rooms := &room.Store{Root: filepath.Join(filepath.Dir(s.root()), "rooms")}
-		cutoff, err := terminalCutoff(rooms, meta.RoomID)
-		if err != nil {
-			return err
+		// The turn measured its input boundary when it started, so input queued
+		// while it ran is still fresh: a dead turn never read that input. Only a
+		// record from before that measurement falls back to the size now.
+		cutoff := t.StartCutoff
+		if cutoff == nil {
+			rooms := &room.Store{Root: filepath.Join(filepath.Dir(s.root()), "rooms")}
+			cutoff, err = terminalCutoff(rooms, meta.RoomID)
+			if err != nil {
+				return err
+			}
 		}
 		t.InputCutoff = cutoff
 		readRevision, _ := s.turnVersion(id, n)
