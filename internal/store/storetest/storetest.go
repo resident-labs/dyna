@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/store"
 )
 
 // Isolate gives a fixture private data, config, scratch and runtime homes,
@@ -33,12 +34,14 @@ func ClearStamp(t testing.TB) {
 	}
 }
 
-// DataDir points XDG_DATA_HOME at a temporary folder for the rest of the
+// DataDir points XDG_DATA_HOME (and clears DYNA_DATA_DIR) at a temporary folder for the rest of the
 // test and returns the Dyna data folder inside it. A test then never writes
 // to the owner's store, or to a harness runtime home's.
 func DataDir(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", root)
+	// DYNA_DATA_DIR wins over XDG_DATA_HOME, so an inherited one must not stay.
+	t.Setenv(store.DataDirEnv, "")
 	return filepath.Join(root, "dyna")
 }
