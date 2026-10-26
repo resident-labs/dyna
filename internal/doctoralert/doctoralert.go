@@ -28,6 +28,9 @@ type RoomUse struct {
 	Room    string
 	Running int
 	Idle    int
+	// Queued counts the sessions whose turn waits, which includes turns the
+	// machine's turn limit holds. They are also counted in Running.
+	Queued int
 }
 
 // Sessions is the room's open session count.
@@ -41,10 +44,12 @@ func Count(infos []subagent.Info) []RoomUse {
 		if in.RoomID == "" {
 			continue
 		}
-		var running bool
+		var running, queued bool
 		switch in.Status {
-		case subagent.StatusRunning, subagent.StatusQueued:
+		case subagent.StatusRunning:
 			running = true
+		case subagent.StatusQueued:
+			running, queued = true, true
 		case subagent.StatusIdle:
 		default:
 			continue
@@ -53,6 +58,9 @@ func Count(infos []subagent.Info) []RoomUse {
 		if u == nil {
 			u = &RoomUse{RoomID: in.RoomID, Room: in.Room}
 			byRoom[in.RoomID] = u
+		}
+		if queued {
+			u.Queued++
 		}
 		if running {
 			u.Running++
@@ -85,6 +93,9 @@ func (n Note) Advice() string {
 		return fmt.Sprintf("%s is healthy again. No action is needed.", n.Machine)
 	}
 	share := fmt.Sprintf("this room runs %d of %d agent sessions on %s", n.Room.Sessions(), n.Total, n.Machine)
+	if n.Room.Queued > 0 {
+		share += fmt.Sprintf(", and %d of its turns wait for a free slot, so stop starting new agents", n.Room.Queued)
+	}
 	if n.Room.Idle > 0 {
 		return fmt.Sprintf("Close the %d idle sessions that have finished; %s.", n.Room.Idle, share)
 	}

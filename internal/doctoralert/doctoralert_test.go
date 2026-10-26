@@ -166,3 +166,19 @@ func TestSampleGapDoesNotAnnounceRecoveryWhileOverloaded(t *testing.T) {
 		t.Fatalf("a sample gap announced recovery or re-alerted: sent %d", len(*sent))
 	}
 }
+
+func TestAdviceNamesTheTurnsThatWaitForASlot(t *testing.T) {
+	infos := []subagent.Info{
+		{Meta: subagent.Meta{RoomID: "a", Room: "a"}, Status: subagent.StatusQueued},
+		{Meta: subagent.Meta{RoomID: "a", Room: "a"}, Status: subagent.StatusRunning},
+		{Meta: subagent.Meta{RoomID: "a", Room: "a"}, Status: subagent.StatusIdle},
+	}
+	use := Count(infos)
+	if len(use) != 1 || use[0].Queued != 1 || use[0].Running != 2 {
+		t.Fatalf("count = %+v", use)
+	}
+	advice := Note{Room: use[0], Machine: "laptop", Total: 9}.Advice()
+	if !strings.Contains(advice, "1 of its turns wait for a free slot, so stop starting new agents") {
+		t.Fatalf("advice = %q", advice)
+	}
+}
