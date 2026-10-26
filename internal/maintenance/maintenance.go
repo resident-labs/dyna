@@ -135,6 +135,11 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		} else {
 			result.add("closed PR records", Pruned{Items: n})
 		}
+		if n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now); err != nil {
+			errs = append(errs, fmt.Errorf("delivered PR notices: %w", err))
+		} else {
+			result.add("delivered PR notices", Pruned{Items: n})
+		}
 		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); err != nil {
 			errs = append(errs, fmt.Errorf("CI health rows: %w", err))
 		} else {
