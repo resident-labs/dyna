@@ -364,7 +364,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		execution.ProcessRunner = m.ProcessRunner
 		if turn.Schema == "" {
 			execution.AcceptEmptyOutput = func() bool { return m.turnAcceptsEmptyOutput(id, n) }
-			execution.AcceptCleanEmptyStop = func() bool { return m.turnOwesNoReport(id, n) }
+			execution.AcceptCleanEmptyStop = true
 		}
 		sessionOpts := harness.SessionOptions{
 			RecoveryDelay: m.RecoveryDelay,
