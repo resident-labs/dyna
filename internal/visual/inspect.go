@@ -140,7 +140,9 @@ func (b *browser) inspect(ctx context.Context, doc []byte, csp string, allowNet 
 	defer func() {
 		if ctx.Err() == nil {
 			c.session = ""
-			_ = c.call(ctx, "Target.closeTarget", map[string]any{"targetId": target.TargetID}, nil)
+			_ = c.call(ctx, "Target.closeTarget", struct {
+				TargetID string `json:"targetId"`
+			}{target.TargetID}, nil)
 		}
 	}()
 	var attached struct{ SessionID string }
