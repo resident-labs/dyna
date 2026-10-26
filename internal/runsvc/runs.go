@@ -65,6 +65,10 @@ func Cancel(ctx context.Context, id string) error {
 		for _, in := range list {
 			if in.Run == id && in.Keep {
 				keep[in.Pid], keep[in.Supervisor] = true, true
+				// A child that left the job's group still carries its identity.
+				for _, g := range runprocs.Groups(shells.JobEnv + "=" + in.ID) {
+					keep[g] = true
+				}
 			}
 		}
 	} else {
