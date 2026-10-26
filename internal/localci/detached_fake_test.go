@@ -159,6 +159,15 @@ func (m *fakeMachine) vanishAll() {
 	}
 }
 
+// vanish makes one unit disappear without an exit record.
+func (m *fakeMachine) vanish(dir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if proc := m.procs[dir]; proc != nil {
+		proc.vanished = true
+	}
+}
+
 func (m *fakeMachine) stopCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -187,7 +196,7 @@ func (m *fakeMachine) poll(out io.Writer, pos []string) error {
 		}
 		proc := m.procs[dir]
 		if proc == nil {
-			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=gone code= size=0 bytes=0\n\n", dir)
+			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=missing code= size=0 bytes=0\n\n", dir)
 			continue
 		}
 		state, code := "running", ""

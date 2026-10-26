@@ -312,7 +312,7 @@ func (r Runner) nodeExec(ctx context.Context, in io.Reader, out, stderr io.Write
 // ends, so a retry never repeats half a reply.
 func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, script string) error {
 	var stdout, diagnostics bytes.Buffer
-	err := r.retry(ctx, func() error {
+	err := r.retry(ctx, longCallTimeout, func(ctx context.Context) error {
 		stdout.Reset()
 		diagnostics.Reset()
 		return r.nodeExec(ctx, nil, &stdout, &diagnostics, script)
@@ -338,7 +338,7 @@ func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	for _, arg := range args {
 		remote += " " + shellquote.Quote(arg)
 	}
-	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none"}, r.Node.SSH, remote)
+	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}, r.Node.SSH, remote)
 }
 
 // sleepContext waits for d or until the context ends, so a cancelled run
@@ -477,9 +477,16 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if err != nil {
 		return result, err
 	}
-	resume, err := r.resumeRun(ctx, localStore, attachKey, sha, checks)
-	if err != nil {
-		return result, err
+	// Only the first run of a commit on this machine follows the attachment; a
+	// second, concurrent run leaves it, and the live run it belongs to, alone.
+	releaseRun, owner := claimRun(attachKey + "|" + sha + "|" + node.Name)
+	defer releaseRun()
+	var resume *attachment
+	if owner {
+		resume, err = r.resumeRun(ctx, localStore, attachKey, sha, checks)
+		if err != nil {
+			return result, err
+		}
 	}
 	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
 	if resume != nil {
@@ -527,7 +534,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		attached = *resume
 	}
 	defer func() {
-		if EngineStopping() {
+		if EngineStopping() || !owner {
 			return
 		}
 		if e := localStore.deleteAttachment(context.WithoutCancel(ctx), attachKey, sha, node.Name); e != nil {
@@ -645,6 +652,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	defer stopPoller()
 	var attachedMu sync.Mutex
 	poller.started = func(spec detachSpec) {
+		if !owner {
+			return
+		}
 		attachedMu.Lock()
 		defer attachedMu.Unlock()
 		attached.Checks = append(attached.Checks, spec.ID)
@@ -839,7 +849,7 @@ func reportCopyCause(node Node, ctx context.Context, err error) FailureCause {
 // starts a new archive.
 func (r Runner) fetchReports(ctx context.Context, reportRoot, reports string) error {
 	script := "cd " + shellquote.Quote(reports) + " && find . -mindepth 2 -maxdepth 2 -type f \\( -name '*.xml' -o -name '*.json' -o -name 'ci-diagnostics.jsonl' \\) -print0 | tar -C " + shellquote.Quote(reports) + " --null -T - -cf -"
-	return r.retry(ctx, func() error {
+	return r.retry(ctx, longCallTimeout, func(ctx context.Context) error {
 		archive, err := os.CreateTemp(reportRoot, "reports-*.tar") // not-state: temporary report transport.
 		if err != nil {
 			return &permanentError{err}
@@ -1202,19 +1212,25 @@ func combinedStatus(a, b Outcome) Outcome {
 // therefore never mounts or trims a cache that Dyna does not own.
 func nodeSetupScript(base, cache, reports, active string, cacheNames []string) string {
 	q := shellquote.Quote
+	// A setup that already started this run's keeper but lost the answer is
+	// repeated: the keeper holds the run's lock and a share of the cache lock, so
+	// the repeat skips the locking and only completes what is left.
+	keeper := q(keeperPID(active))
 	return "set -e; umask 077; " + baseLinkGuard(base) +
 		"mkdir -p " + q(base) + " " + q(reports) + "; " +
-		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) +
+		"if [ -s " + keeper + " ] && kill -0 \"$(cat " + keeper + ")\" 2>/dev/null; then :; else " +
+		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) + "fi; " +
 		"flock " + q(path.Join(base, "init.lock")) + " bash -c " + q("if [ ! -d "+q(cache)+" ]; then git init --bare "+q(cache)+"; fi")
 }
 
 // Slots belong to checks, across repositories and runner processes. A waiter
 // tries every slot before blocking on one slot without polling.
 // killGroupLeftovers kills every process in the wrapper's group except the
-// wrapper itself. A check that leaves a child behind, such as a compiler daemon
+// wrapper itself and its parent. The parent is the detached wrapper that writes
+// the check's exit record after the check returns, and it shares the group. A check that leaves a child behind, such as a compiler daemon
 // or a shell that outlived its deadline, must not hold the check's output pipe
 // or the next check's slot.
-const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
+const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || [ "$p" = "$PPID" ] || kill -KILL "$p" 2>/dev/null || true; done`
 
 // nodeSlotScript runs inner while holding one of the node's slots. A wrapper
 // that waits for a slot installs its deadline and its signal trap first, and
@@ -1267,7 +1283,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// is a file because the check's own output can be longer than the tail a run
 	// keeps.
 	startedMarker := `if [ -e ` + q(path.Join(reportDir, commandStartedFile)) + ` ]; then printf 'DYNA_CI_COMMAND_STARTED=1\n'; else printf 'DYNA_CI_COMMAND_STARTED=0\n'; fi; `
-	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `fi; `
+	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then { printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; ` + startedMarker + `} | emit; fi; `
 	if !check.host {
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
@@ -1282,7 +1298,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	} else {
 		cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
 	}
-	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
+	// The exit markers go straight to the log the detached wrapper keeps, past the
+	// limit it puts on the check's output. Without that log they go to the output.
+	emit := `emit() { if [ -n "${DYNA_CI_LOG:-}" ]; then cat >> "$DYNA_CI_LOG"; else cat; fi; }; `
+	setup := emit + noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
 	if check.job != nil {
 		// The checkout is a branch, not a detached commit: act copies the
 		// workspace into the job container file by file, so an empty refs tree
