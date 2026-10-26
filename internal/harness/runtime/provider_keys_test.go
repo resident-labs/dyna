@@ -44,7 +44,10 @@ func providerKeysRuntime(t *testing.T) *Runtime {
 		}
 		return nil
 	}
-	return &Runtime{Bundles: m, Accounts: testAccounts(t)}
+	// A private-runtime snapshot resolves the harness versions it lists. That
+	// resolver reads vendor metadata over the network, which a test must not do:
+	// the first fetch waits two seconds before it gives up.
+	return &Runtime{Bundles: m, Accounts: testAccounts(t), privateRecommendations: func(context.Context) []RecommendedVersion { return []RecommendedVersion{} }}
 }
 
 func fileExists(path string) bool { _, err := os.Stat(path); return err == nil }
