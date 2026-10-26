@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -680,8 +679,12 @@ func closeCommand(newManager func() *subagent.Manager) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(c.OutOrStdout(), "closed %s (%s)\n", info.Address(), info.ID)
-			if line := scratch.RetainedNotice(info.ID, time.Now()); line != "" {
-				fmt.Fprintln(c.OutOrStdout(), line)
+			// The stored close time sets the deadline, so closing an already closed
+			// session again reports the date the sweep will use.
+			if closed, err := newManager().Store.ResolveSnapshot(info.ID); err == nil && !closed.Closed.IsZero() {
+				if line := scratch.RetainedNotice(info.ID, closed.Closed); line != "" {
+					fmt.Fprintln(c.OutOrStdout(), line)
+				}
 			}
 			for _, outcome := range result.CloseSummary {
 				fmt.Fprintln(c.OutOrStdout(), outcome.Text())
