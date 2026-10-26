@@ -198,7 +198,10 @@ type SteeringMessage struct {
 type Meta struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
-	Status  string `json:"status"` // running|ok|error|canceled
+	Status  string `json:"status"` // running|ok|error|canceled|interrupted
+	// Build is the dyna build that started the run, as `dyna --version` prints
+	// it. It is empty for a run from before the field existed.
+	Build   string `json:"build,omitempty"`
 	Session string `json:"session,omitempty"`
 	// ParentSession is the subagent session that started this run (set when
 	// the run is launched from inside a subagent session).
@@ -335,7 +338,7 @@ func create(name, scriptSrc string, args any) (*Run, error) {
 	if err := validateRunID(id); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
-	r := &Run{Meta: Meta{ID: id, Name: name, Status: "running", Pid: os.Getpid(), Args: args, StartedAt: time.Now()}}
+	r := &Run{Meta: Meta{ID: id, Name: name, Status: "running", Build: callspec.Build, Pid: os.Getpid(), Args: args, StartedAt: time.Now()}}
 	// A run reports and ends itself, so its own start time lets a later check
 	// tell it from a process that reuses the PID. A system without /proc keeps
 	// zero and the plain PID probe.
