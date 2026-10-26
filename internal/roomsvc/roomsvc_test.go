@@ -601,11 +601,64 @@ func TestRoomFixtureRemovesScratch(t *testing.T) {
 }
 
 func TestFoldRunAgentKeepsLaneAndStage(t *testing.T) {
-	agents, _, _, _ := foldAll([]runstore.Event{
+	f := foldAll([]runstore.Event{
 		{T: "agent_start", ID: 1, Label: "a", Phase: "Review api", Lane: "api", Stage: "review"},
 		{T: "agent_start", ID: 2, Label: "b", Phase: "Plain"},
 	}, true)
-	if len(agents) != 2 || agents[0].Lane != "api" || agents[0].Stage != "review" || agents[1].Lane != "" || agents[1].Stage != "" {
-		t.Fatalf("agents = %#v; want lane api and stage review on the first only", agents)
+	if len(f.agents) != 2 || f.agents[0].Lane != "api" || f.agents[0].Stage != "review" || f.agents[1].Lane != "" || f.agents[1].Stage != "" {
+		t.Fatalf("agents = %#v; want lane api and stage review on the first only", f.agents)
+	}
+}
+
+func TestFoldRunCommands(t *testing.T) {
+	exit := func(n int) *int { return &n }
+	f := foldAll([]runstore.Event{
+		{T: "phase", Title: "Build"},
+		// A command 1 and an agent 1 exist at once; their IDs never mix.
+		{T: "agent_start", ID: 1, Label: "rev", Phase: "Build"},
+		{T: "agent_end", ID: 1, Status: "ok"},
+		{T: "exec_start", ID: 1, TS: 500, Label: "make", Phase: "Build", Lane: "api", Stage: "build", Command: "make test"},
+		{T: "exec_run", ID: 1, Shell: "sh_1"},
+		{T: "exec_end", ID: 1, Status: "ok", DurMs: 1200, Shell: "sh_1", ExitCode: exit(0), Tail: "ok\n"},
+		{T: "exec_start", ID: 2, TS: 900, Label: "up", Phase: "Build"},
+		{T: "exec_end", ID: 2, Status: "error", Error: "exit 3", ExitCode: exit(3)},
+		{T: "exec_start", ID: 3, TS: 950, Label: "live", Phase: "Build"},
+	}, true)
+	if f.agentTotal != 1 || f.commandTotal != 3 {
+		t.Fatalf("totals = %d agents, %d commands; want 1 and 3", f.agentTotal, f.commandTotal)
+	}
+	c := f.commands[0]
+	if c.Label != "make" || c.Phase != "Build" || c.Lane != "api" || c.Stage != "build" || c.Command != "make test" || c.Started != 500 {
+		t.Fatalf("first command = %#v; want its label, phase, lane, stage, command and start", c)
+	}
+	if c.Status != "ok" || c.DurMs != 1200 || c.Shell != "sh_1" || c.ExitCode == nil || *c.ExitCode != 0 || c.Tail != "ok\n" {
+		t.Fatalf("first command = %#v; want ok, its duration, shell, exit code and tail", c)
+	}
+	if f.commands[1].Status != "error" || f.commands[1].Error != "exit 3" || f.commands[2].Status != "running" {
+		t.Fatalf("commands = %#v; want an error and a running one", f.commands[1:])
+	}
+	if running, failed := countCommands(nil, true); running != 0 || failed != 0 {
+		t.Fatalf("countCommands(nil) = %d running, %d failed; want zeros", running, failed)
+	}
+	all := []runstore.Event{{T: "exec_start", ID: 1}, {T: "exec_start", ID: 2}, {T: "exec_end", ID: 1, Status: "error"}}
+	if running, failed := countCommands(all, true); running != 1 || failed != 1 {
+		t.Fatalf("countCommands = %d running, %d failed; want 1 and 1", running, failed)
+	}
+	// A command that never ended reads unknown once the run is over.
+	done := foldAll([]runstore.Event{{T: "exec_start", ID: 1, Label: "x"}}, false)
+	if len(done.commands) != 1 || done.commands[0].Status != "unknown" {
+		t.Fatalf("commands = %#v; want one unknown command after the run ended", done.commands)
+	}
+	// The capped fold keeps the last MaxRunCommands.
+	many := make([]runstore.Event, MaxRunCommands+40)
+	for i := range many {
+		many[i] = runstore.Event{T: "exec_start", ID: i + 1, Label: fmt.Sprintf("c%d", i+1)}
+	}
+	capped := foldRun(many, true)
+	if len(capped.commands) != MaxRunCommands || capped.commandTotal != MaxRunCommands+40 {
+		t.Fatalf("foldRun kept %d of %d commands; want the last %d", len(capped.commands), capped.commandTotal, MaxRunCommands)
+	}
+	if last := capped.commands[MaxRunCommands-1]; last.Label != fmt.Sprintf("c%d", MaxRunCommands+40) {
+		t.Fatalf("foldRun kept the wrong end: %#v", last)
 	}
 }
