@@ -20,6 +20,7 @@ import (
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/modelcooldown"
 	"dyna-agent/internal/harness/preferences"
+	"dyna-agent/internal/harness/runtime/genstate"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/lanesync"
@@ -77,6 +78,9 @@ var migrations = []func(dataDir string) error{
 	// ghclient keeps the proved GitHub account of each room, so turn startup
 	// makes no GitHub API call after an engine restart.
 	ghclient.Migrate,
+	// genstate keeps the generation leases and publication views the harness
+	// runtime queries at cleanup.
+	genstate.Migrate,
 	lanesync.Migrate,
 	librarianstate.Migrate,
 	library.Migrate,
