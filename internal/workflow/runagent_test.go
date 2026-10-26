@@ -106,7 +106,36 @@ func TestAgentCallAsksTheEngineForOneLeafSessionAndTheRunEndClosesIt(t *testing.
 	}
 }
 
+// fastRetries replaces the retry pause with a recorder, so a test waits for nothing.
+func fastRetries(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var waits []time.Duration
+	previous := retryWait
+	retryWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	t.Cleanup(func() { retryWait = previous })
+	return &waits
+}
+
+func TestRunAgentSessionPacesRetriesAndGivesUpAfterTheRecoveryBudget(t *testing.T) {
+	waits := fastRetries(t)
+	engine := &fakeEngine{}
+	for range 200 {
+		engine.startErrs = append(engine.startErrs, &engineclient.RemoteError{Status: 503, Message: "engine is stopping"})
+	}
+	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}); err == nil {
+		t.Fatal("a start that never recovered succeeded")
+	}
+	var total time.Duration
+	for _, d := range *waits {
+		total += d
+	}
+	if (*waits)[0] != retryFirst || (*waits)[1] != 2*retryFirst || (*waits)[len(*waits)-1] != retryMax || total < recoveryBudget {
+		t.Fatalf("waits = %v (total %v); want a doubling pause up to %v, spent until the %v budget", *waits, total, retryMax, recoveryBudget)
+	}
+}
+
 func TestRunAgentSessionRetriesCallsAnEngineRestartCutsOff(t *testing.T) {
+	fastRetries(t)
 	engine := &fakeEngine{
 		startErrs: []error{&engineclient.RemoteError{Status: 503, Message: "engine is stopping"}},
 		states:    []callspec.RunAgentState{{}, {Done: true, OK: true, Result: json.RawMessage(`"fine"`)}},
@@ -129,6 +158,26 @@ func TestRunAgentSessionKeepsARefusalTerminal(t *testing.T) {
 	}
 	if len(engine.calls) != 1 {
 		t.Fatalf("calls = %v; a refusal must not be retried", engine.calls)
+	}
+}
+
+func TestNestedWorkflowAsksAgainWhenTheStopCallIsCutOff(t *testing.T) {
+	fastRetries(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	dir := t.TempDir()
+	writeWorkflowScript(t, dir, "child.js", `agent("`+enginefake.HoldTask+`", {label: "left running"}); await agent("`+enginefake.AfterHeldTask+`"); return "child done";`)
+	run, err := runstore.Create("nested", `return await workflow("child");`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { run.Finish("ok", "", nil) })
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0), CloseErrs: []error{&engineclient.RemoteError{Status: 503, Message: "engine is stopping"}}}
+	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
+	if err != nil || got != `"child done"` {
+		t.Fatalf("result = %s, %v", got, err)
+	}
+	if closed := engine.ClosedAgents(); len(closed) < 2 {
+		t.Fatalf("close calls = %+v; the cut-off stop must be asked again before the call lets go of its slots", closed)
 	}
 }
 

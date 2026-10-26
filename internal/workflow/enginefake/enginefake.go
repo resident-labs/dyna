@@ -25,6 +25,8 @@ import (
 type Engine struct {
 	// Profiles are the registered profiles. Nil reads the profiles file.
 	Profiles *profile.Store
+	// CloseErrs are returned, one per CloseRunAgent call, before it succeeds.
+	CloseErrs []error
 
 	mu          sync.Mutex
 	agents      map[callspec.RunAgentRef]*agent
@@ -97,6 +99,11 @@ func (f *Engine) closeAgent(_ context.Context, ref callspec.RunAgentRef) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.agentCloses = append(f.agentCloses, ref)
+	if len(f.CloseErrs) > 0 {
+		err := f.CloseErrs[0]
+		f.CloseErrs = f.CloseErrs[1:]
+		return err
+	}
 	if a := f.agents[ref]; a != nil {
 		a.cancel()
 	}
