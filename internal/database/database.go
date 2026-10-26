@@ -251,7 +251,7 @@ var openAttempt = func(context.Context) {}
 // journal_mode, so the WAL switch of a new database already uses it: a test
 // database then pays no disk flush even for that first commit.
 func connectionPragmas(inTest bool) []string {
-	return []string{fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()), syncPragma(inTest), "journal_mode(WAL)", "foreign_keys(ON)"}
+	return []string{fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()), syncPragma(inTest), "journal_mode(WAL)", fmt.Sprintf("wal_autocheckpoint(%d)", backstopPages), fmt.Sprintf("journal_size_limit(%d)", walSizeLimit), "foreign_keys(ON)"}
 }
 
 // syncPragma keeps production on WAL with synchronous=NORMAL: a process crash
