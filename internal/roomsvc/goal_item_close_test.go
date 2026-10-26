@@ -83,10 +83,10 @@ func TestAChildsLastItemLeavesTheGoalOpen(t *testing.T) {
 	if stored, err := store.Get(r.ID, g.ID); err != nil || !stored.Open() || stored.ItemsClosed != 2 {
 		t.Fatalf("the goal left its items closed: %+v, %v", stored, err)
 	}
-	if _, err := e.svc.FinishGoal(as(child.ID), r.ID, g.ID, "Reviewed", false); err == nil {
+	if _, err := e.svc.FinishGoal(as(child.ID), r.ID, g.ID, "Reviewed", false, nil); err == nil {
 		t.Fatal("a child ended the goal of its holder")
 	}
-	if g, err := e.svc.FinishGoal(as(lead.ID), r.ID, g.ID, "Shipped", false); err != nil || g.Open() {
+	if g, err := e.svc.FinishGoal(as(lead.ID), r.ID, g.ID, "Shipped", false, nil); err != nil || g.Open() {
 		t.Fatalf("the holder could not end its goal: %+v, %v", g, err)
 	}
 }

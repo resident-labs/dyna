@@ -3,6 +3,7 @@ package goal
 
 import (
 	"context"
+	"dyna-agent/internal/roomsvc"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -269,6 +270,7 @@ func Command(o Options) *cobra.Command {
 		return printGoal(c, g)
 	}
 	finish := func(drop bool) *cobra.Command {
+		var closes []string
 		use, short := "done <id> <summary>", "Mark a goal done"
 		long := "Ends a goal its holder owns. A session that holds one item of a goal finishes the item with dyna goal item done and leaves the goal open; its holder, root or the owner ends the goal."
 		args := cobra.ExactArgs(2)
@@ -281,13 +283,26 @@ func Command(o Options) *cobra.Command {
 			if len(a) == 2 {
 				summary = a[1]
 			}
-			var g goals.Goal
-			err := o.Client.Call(c.Context(), "FinishGoal", []any{MutationRoom(roomRef), a[0], summary, drop}, &g)
+			var g roomsvc.FinishedGoal
+			err := o.Client.Call(c.Context(), "FinishGoal", []any{MutationRoom(roomRef), a[0], summary, drop, closes}, &g)
 			if err != nil {
 				return err
 			}
-			return printGoal(c, g)
+			if asJSON, _ := c.Flags().GetBool("json"); asJSON {
+				return json.NewEncoder(c.OutOrStdout()).Encode(g)
+			}
+			if err := printGoal(c, g.Goal); err != nil {
+				return err
+			}
+			if len(g.LeftOpen) > 0 {
+				_, err = fmt.Fprintf(c.OutOrStdout(), "left open: %s (close one with dyna goal done --close D-N)\n", strings.Join(g.LeftOpen, ", "))
+				return err
+			}
+			return nil
 		}}
+		if !drop {
+			cmd.Flags().StringSliceVar(&closes, "close", nil, "close this linked issue, such as D-5; repeat for each. A merged PR closes the issues it fixes, and the rest stay open")
+		}
 		return cmd
 	}
 	expedite := &cobra.Command{Use: "expedite [id]", Short: "Owner or root: put one goal first in the room's review and merge queues", Long: "Marks the goal's agents and changes for earlier review and merge. Each room has at most one expedited goal. It lasts until the goal is done or dropped, until --off, or for 24 hours. Use --replace to switch from another goal.", Args: cobra.MaximumNArgs(1)}
