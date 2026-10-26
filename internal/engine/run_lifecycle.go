@@ -172,9 +172,11 @@ func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFini
 	if err != nil || meta.Build == engineBuild {
 		return in, err
 	}
+	// Events that cannot be read must not block the run's end: keep the
+	// status the coordinator reported.
 	events, err := runstore.ReadEvents(in.Run)
 	if err != nil {
-		return in, err
+		return in, nil
 	}
 	for _, e := range events {
 		if e.T == "agent_end" && e.Status == "error" && !e.Cached {
