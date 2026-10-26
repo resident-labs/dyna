@@ -200,3 +200,20 @@ func TestAgentSliceHasLowIOWeight(t *testing.T) {
 		t.Fatalf("agent I/O weight missing: %s", SliceUnit)
 	}
 }
+
+// Stop kills what is left in a scope, so a daemon that left the command's
+// process group does not stay in the engine's unit.
+func TestStopKillsTheScope(t *testing.T) {
+	var got []string
+	old := runCommand
+	runCommand = func(name string, args ...string) error {
+		got = append(got, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	t.Cleanup(func() { runCommand = old })
+	Stop("")
+	Stop("dyna-version-probe-1.scope")
+	if len(got) != 1 || got[0] != "systemctl --user kill --signal=SIGKILL dyna-version-probe-1.scope" {
+		t.Fatalf("commands = %q; want one kill of the scope", got)
+	}
+}
