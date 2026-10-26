@@ -48,7 +48,7 @@ func TestRestoreOwnerUndoesPrivateRoots(t *testing.T) {
 		if value, ok := os.LookupEnv(key); ok {
 			t.Errorf("%s = %q; want unset", key, value)
 		}
-	}	// Shell jobs stand in for the harness's own shell, so they keep the
+	} // Shell jobs stand in for the harness's own shell, so they keep the
 	// environment the process started with.
 	if got, want := envMap(LaunchEnv()), envMap(launch); got["HOME"] != want["HOME"] || got["PATH"] != want["PATH"] || got[OwnerEnvKey] == "" {
 		t.Errorf("LaunchEnv HOME=%q PATH=%q owner=%v; want the private launch", got["HOME"], got["PATH"], got[OwnerEnvKey] != "")
