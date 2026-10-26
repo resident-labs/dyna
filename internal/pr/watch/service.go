@@ -53,6 +53,9 @@ type Service struct {
 	GH             GitHub
 	Notify         *notify.Service
 	Now            func() time.Time
+	// Wait pauses before a retry that depends on time passing, such as a fetch of
+	// a ref GitHub has not published yet. A test replaces it, so no test sleeps.
+	Wait func(context.Context, time.Duration) error
 	Deliver        func(context.Context, Record, Notice) (string, error)
 	noticeTimeout  time.Duration
 	recordTimeout  time.Duration
