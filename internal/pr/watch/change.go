@@ -85,6 +85,17 @@ func changeLabel(r Record) string {
 func cleanNotes(notes ChangeNotes) ChangeNotes {
 	return ChangeNotes{Intent: Sanitize(notes.Intent), Testing: Sanitize(notes.Testing), Risks: Sanitize(notes.Risks), Questions: Sanitize(notes.Questions)}
 }
+
+// mergeNotes keeps each stored note that the update leaves empty.
+func mergeNotes(old, given ChangeNotes) ChangeNotes {
+	keep := func(old, given string) string {
+		if given == "" {
+			return old
+		}
+		return given
+	}
+	return ChangeNotes{Intent: keep(old.Intent, given.Intent), Testing: keep(old.Testing, given.Testing), Risks: keep(old.Risks, given.Risks), Questions: keep(old.Questions, given.Questions)}
+}
 func validateNotes(notes ChangeNotes) error {
 	data, _ := json.Marshal(notes)
 	if len(data) > 12000 {
@@ -215,8 +226,9 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 			if old.State != "open" {
 				return fmt.Errorf("this change is closed; open a new branch")
 			}
-			if opts.Notes == (ChangeNotes{}) {
-				record.Notes = old.Notes
+			record.Notes = mergeNotes(old.Notes, record.Notes)
+			if err := validateNotes(record.Notes); err != nil {
+				return err
 			}
 			if opts.Title == "" {
 				record.Title = old.Title
@@ -451,7 +463,8 @@ func (s *Service) CloseChange(key, author string) error {
 	return s.cleanupEndedRoom(context.Background(), r.RoomID)
 }
 
-// UpdateChangeNotes replaces a change's author notes. Its caller checks who may
+// UpdateChangeNotes sets the author notes, category and dependencies it is
+// given and keeps the stored ones it is not. Its caller checks who may
 // change them against author, the change's author it saw.
 func (s *Service) UpdateChangeNotes(key, author string, notes ChangeNotes, category string, deps []string) error {
 	if err := validateNotes(notes); err != nil {
@@ -468,7 +481,17 @@ func (s *Service) UpdateChangeNotes(key, author string, notes ChangeNotes, categ
 		if err := sameAuthor(r, author); err != nil {
 			return err
 		}
-		r.Notes, r.Category, r.Dependencies = cleanNotes(notes), category, append([]string{}, deps...)
+		merged := mergeNotes(r.Notes, cleanNotes(notes))
+		if err := validateNotes(merged); err != nil {
+			return err
+		}
+		r.Notes = merged
+		if category != "" {
+			r.Category = category
+		}
+		if deps != nil {
+			r.Dependencies = append([]string{}, deps...)
+		}
 		return nil
 	})
 }

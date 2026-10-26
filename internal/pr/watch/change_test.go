@@ -325,6 +325,57 @@ func TestAuthorWritesRefuseAChangedAuthor(t *testing.T) {
 	}
 }
 
+func TestUpdatingOneNoteKeepsTheOthers(t *testing.T) {
+	e := newEnv(t)
+	r := e.track()
+	full := ChangeNotes{Intent: "why", Testing: "old", Risks: "risk", Questions: "ask"}
+	if err := e.s.UpdateChangeNotes(r.Key, r.Author, full, "fix", []string{"dep"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.UpdateChangeNotes(r.Key, r.Author, ChangeNotes{Testing: "new"}, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	want := full
+	want.Testing = "new"
+	got := e.record()
+	if got.Notes != want || got.Category != "fix" || len(got.Dependencies) != 1 {
+		t.Fatalf("update with only testing = %+v, %q, %v; want notes %+v and category and dependencies kept", got.Notes, got.Category, got.Dependencies, want)
+	}
+}
+
+func TestUpdatedNotesThatTogetherExceedTheLimitAreRefused(t *testing.T) {
+	e := newEnv(t)
+	r := e.track()
+	first := ChangeNotes{Intent: strings.Repeat("a", 8000)}
+	if err := e.s.UpdateChangeNotes(r.Key, r.Author, first, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	err := e.s.UpdateChangeNotes(r.Key, r.Author, ChangeNotes{Testing: strings.Repeat("b", 8000)}, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "exceed") {
+		t.Fatalf("update past the limit = %v; want a refusal", err)
+	}
+	if got := e.record().Notes; got != first {
+		t.Fatalf("a refused update changed the notes: %d bytes of testing", len(got.Testing))
+	}
+}
+
+func TestReopenedLocalChangeRefusesNotesPastTheLimit(t *testing.T) {
+	e := newEnv(t)
+	r, dir := localChange(t, e)
+	actor := authority.Actor{Role: authority.Owner}
+	if _, _, err := e.s.OpenChange(context.Background(), actor, e.author, OpenChangeOptions{Dir: dir, Notes: ChangeNotes{Risks: strings.Repeat("a", 8000)}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := e.s.OpenChange(context.Background(), actor, e.author, OpenChangeOptions{Dir: dir, Notes: ChangeNotes{Questions: strings.Repeat("b", 8000)}})
+	if err == nil || !strings.Contains(err.Error(), "exceed") {
+		t.Fatalf("reopen past the limit = %v; want a refusal", err)
+	}
+	got, _ := e.s.Store.Get(r.Key)
+	if got.Notes.Questions != "" || got.Notes.Risks == "" {
+		t.Fatalf("a refused reopen changed the notes: %+v", got.Notes)
+	}
+}
+
 func TestReviewDeltaExcludesRebasedMainChanges(t *testing.T) {
 	e := newEnv(t)
 	r, dir := localChange(t, e)
