@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -57,6 +58,22 @@ func Access(_ context.Context, rec room.Record) string {
 	return ReadOnly
 }
 
+// errNotInRoom is the refusal for a repository that is not the acting room's.
+var errNotInRoom = errors.New("GitHub repository does not belong to the acting room")
+
+// outsideReadError explains a refused read of a repository outside the room. Only
+// a REST read of a public repository outside every room is allowed (D-272), so
+// the message says what that rule needs. Any other error stays as it is.
+func outsideReadError(r repository, args []string, err error) error {
+	if !errors.Is(err, errNotInRoom) || !isRead(args) {
+		return err
+	}
+	if len(args) >= 2 && args[0] == "api" && r.name != "" {
+		return fmt.Errorf("%w: reads outside the room work only for public repositories, and %s is private or missing", err, r.name)
+	}
+	return fmt.Errorf("%w: reads outside the room work only for public repositories, through gh api repos/<owner>/<repo>", err)
+}
+
 // roomFor checks local room metadata only. It never discovers GitHub repositories.
 func roomFor(ctx context.Context, cmdDir string, r repository) (room.Record, error) {
 	if cmdDir == "" {
@@ -86,7 +103,7 @@ func roomFor(ctx context.Context, cmdDir string, r repository) (room.Record, err
 		if err := ctx.Err(); err != nil {
 			return room.Record{}, err
 		}
-		return room.Record{}, errors.New("GitHub repository does not belong to the acting room")
+		return room.Record{}, errNotInRoom
 	}
 	var matches []room.Record
 	for _, rec := range records {

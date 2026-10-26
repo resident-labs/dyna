@@ -45,7 +45,7 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		if _, ok := publicAPIRead(ctx, r, cmd.Args[1:]); ok {
 			return runAnonymously(cmd)
 		}
-		return err
+		return outsideReadError(r, cmd.Args[1:], err)
 	}
 	token, login := "", ""
 	if r.name != "" {
