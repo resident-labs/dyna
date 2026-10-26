@@ -482,8 +482,8 @@ func addCommit(t *testing.T, repo, name string) string {
 }
 
 // A run the engine's own stop cancelled leaves durable evidence: the saved
-// result carries the engine-stop cause, the head is not finished, and the trial
-// decides nothing, so the same commit runs again after the restart.
+// result carries the engine-stop cause, the head is not finished, and the local
+// trial reader treats it as unfinished, so the same commit runs again.
 func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	e, record, dir, ci := localCIEnv(t)
 	s := e.s
@@ -492,6 +492,7 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
 		return work.work(ctx)
 	}
+	ci.saved = make(chan struct{}, 1)
 	// The engine marks itself before it cancels, as stopEngine does.
 	localci.MarkEngineStopping()
 	t.Cleanup(localci.ClearEngineStopping)
@@ -504,6 +505,12 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	s.CancelLocalCI()
 	close(work.teardown)
 	<-work.finished
+	// Wait for the recovery to persist before the result is read.
+	select {
+	case <-ci.saved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the engine-stop result was never saved")
+	}
 	if err := <-done; err != nil {
 		t.Fatalf("the cancelled trial reported %v", err)
 	}
@@ -522,7 +529,16 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	if s.registeredJobResultComplete(t.Context(), job, saved) {
 		t.Fatal("a run the engine stopped counted as a finished head")
 	}
-	if verdict, _, _ := registeredResultStatus(saved); verdict != VerdictPending {
-		t.Fatalf("the trial decided %s on an engine stop, want pending", verdict)
+	// The real reader the trial uses must stay undecided on that evidence.
+	trialJob, err := s.localTrialJob(record, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.savedTrialCI(t.Context(), trialJob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Status != VerdictPending {
+		t.Fatalf("the trial reader decided %s on an engine stop, want pending", read.Status)
 	}
 }

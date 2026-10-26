@@ -128,7 +128,14 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 			return VerdictPending, "", "waiting for complete local CI", nil
 		}
 		return VerdictPassed, "", "", nil
-	case localci.OutcomeFailed, localci.OutcomeError:
+	case localci.OutcomeFailed:
+		return VerdictFailed, logs, "local CI failed", nil
+	case localci.OutcomeError:
+		// A run the engine's own stop cancelled tested nothing: the same head
+		// runs again instead of failing the batch.
+		if result.Cause == localci.CauseEngineStop {
+			return VerdictPending, "", "local CI stopped with the engine; running it again", nil
+		}
 		return VerdictFailed, logs, "local CI failed", nil
 	default:
 		return VerdictPending, "", "waiting for local CI", nil
@@ -228,7 +235,7 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	if saved {
 		// The budget of the room judges the saved run exactly as the gate does.
 		applyLocalBudgets(&result, EffectivePolicy(st, job.record))
-		if result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError {
+		if result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError && result.Cause != localci.CauseEngineStop {
 			// A saved failure stays readable without the commits that produced it.
 			status, logs, reason, statusErr := localCIStatus(result, repo, job.head, nil, nil)
 			return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
