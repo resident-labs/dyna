@@ -545,9 +545,26 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				} else {
 					writer = io.MultiWriter(&output, blob)
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
+				scopeName := "dyna-ci-" + runID + "-" + string(check.id)
+				checkScope := scopeName
+				if check.host {
+					// A host check runs its command in its own scope from inside
+					// the wrapper, so the wrapper stays outside it and can kill
+					// what is left there before the transport waits on output.
+					checkScope = ""
+				}
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control)))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
+				// A command that exited 0 is judged by its own marker even when
+				// os/exec reports ErrWaitDelay, which only means a child it left
+				// behind held the output pipe open: an sccache server does that
+				// on every run. The leftover is a cleanup warning, and command()
+				// killed what remained of the group.
+				if errors.Is(runErr, exec.ErrWaitDelay) && markerExitedCleanly(markers) {
+					sr.Warnings = append(sr.Warnings, CleanupLeftoverOutput)
+					runErr = nil
+				}
 				if runErr != nil || len(markers) == 0 {
 					sr.Status, sr.Error = OutcomeError, "check command did not complete"
 					if runErr != nil {
@@ -725,6 +742,16 @@ const commandStartedFile = ".command-started"
 // commandMarker is what the node writes about that sentinel: 1 when the
 // container started the command, 0 when it never got that far.
 var commandMarker = regexp.MustCompile(`(?m)^DYNA_CI_COMMAND_STARTED=([01])$`)
+
+// markerExitedCleanly reports whether the check's own last completion marker
+// says its command exited 0.
+func markerExitedCleanly(markers [][]string) bool {
+	if len(markers) == 0 {
+		return false
+	}
+	code, err := strconv.Atoi(markers[len(markers)-1][1])
+	return err == nil && code == 0
+}
 
 // commandStarted reports what the node's marker proves. A log without the marker
 // proves nothing either way, so it counts as started.
@@ -982,6 +1009,12 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 
 // Slots belong to checks, across repositories and runner processes. A waiter
 // tries every slot before blocking on one slot without polling.
+// killGroupLeftovers kills every process in the wrapper's group except the
+// wrapper itself. A check that leaves a child behind, such as a compiler daemon
+// or a shell that outlived its deadline, must not hold the check's output pipe
+// or the next check's slot.
+const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
+
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
@@ -997,7 +1030,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int, noExpand bool) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1033,8 +1066,48 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		for key, value := range check.env {
 			environment[key] = value
 		}
-		setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
-		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner)
+		// --foreground keeps the check in the wrapper's process group, so what
+		// the check leaves behind is in the wrapper's group too: timeout still
+		// enforces the deadline on the check itself, and after it returns the
+		// wrapper kills every other member of the group. A child that held the
+		// output pipe open is gone before the caller waits on the pipe, so the
+		// ErrWaitDelay path is a fallback rather than the way out.
+		// The check and everything it starts also gets no slot lock: the wrapper
+		// holds fd 9, and a daemon that leaves even the group (sccache does)
+		// would otherwise keep the slot for good.
+		// The wrapper stays outside the check's scope: it starts the command
+		// inside it, and once the command returns it kills what is left in the
+		// scope, so a descendant that started its own session cannot hold the
+		// output pipe and keep the transport up.
+		scopeArgs := []string{"--user", "--scope", "--quiet"}
+		if noExpand {
+			scopeArgs = append(scopeArgs, systemdver.NoExpandFlag)
+		}
+		limits := check.resources.scope(true)
+		scopeArgs = append(scopeArgs, "--unit", name,
+			"-p", "CPUQuota="+strconv.Itoa(limits.CPUs*100)+"%",
+			"-p", "MemoryMax="+systemdMemory(limits.MemoryMiB),
+			"-p", "TasksMax="+strconv.Itoa(limits.TasksMax),
+			"--", "nice", "-n", "10")
+		scope := "systemd-run"
+		for _, arg := range scopeArgs {
+			scope += " " + q(arg)
+		}
+		// A SIGKILL to the scope comes first: a detached child that ignores
+		// SIGTERM must not hold the slot or the transport for the manager's stop
+		// timeout. `systemctl kill` without --kill-who/--kill-whom works on every
+		// systemd that runs a check (the option differs between 249 and 250, and
+		// the default is every process in the unit). The stop is bounded, and a
+		// scope that is still active afterwards is reported in the check's log
+		// rather than hidden.
+		unitName := name + ".scope"
+		unit := q(unitName)
+		release := "systemctl --user kill --signal=KILL " + unit + " >/dev/null 2>&1 || true; " +
+			"timeout 5s systemctl --user stop " + unit + " >/dev/null 2>&1 || true; " +
+			"if systemctl --user is-active --quiet " + unit + " 2>/dev/null; then printf 'local CI: the check scope %s is still active after cleanup\\n' " + q(unitName) + " >&2; fi; " +
+			"systemctl --user reset-failed " + unit + " >/dev/null 2>&1 || true; "
+		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
+		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if node.SSH == "" {
@@ -1073,7 +1146,8 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	}
 	args += dockerEnvironment(environment) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) " + q(check.image)
 	// Both host and container deadlines survive a disconnected SSH client.
-	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
+	// The container's command gets no slot lock either, for the same reason.
+	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner) + " 9>&-"
 	return nodeSlotScript(base, node.Slots, index, setup)
 }
 
