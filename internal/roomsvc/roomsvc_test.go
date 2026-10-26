@@ -422,14 +422,22 @@ func TestMarkRoomReadClearsUnreadNotLoadedInTheFeed(t *testing.T) {
 	}
 }
 
-func TestQuietEngineNoticesDoNotCountAsUnread(t *testing.T) {
-	m := room.Message{From: room.EngineSender, To: []string{"r"}, Text: "CI passed"}
-	if countsUnread(m, "r") {
-		t.Fatal("an engine notice counted as unread")
+func TestQuietEventsDoNotCountAsUnreadButOwnerAlertsDo(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	quiet, err := e.svc.rooms().PostEvent(rec.ID, room.IssueEvent{Type: room.IssueFiled, Number: 1, Title: "t", State: room.IssueStateOpen, Filer: "x"}, rec.Name)
+	if err != nil {
+		t.Fatal(err)
 	}
-	m.From = "r:lead"
-	if !countsUnread(m, "r") {
-		t.Fatal("a session post to the owner did not count as unread")
+	if countsUnread(quiet, rec.Name) {
+		t.Fatal("a quiet engine event counted as unread")
+	}
+	alert, err := e.svc.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: room.AlertEvent{Source: room.AlertEngine, Summary: "migration failed"}, To: []string{rec.Name}, Producer: room.ProducerEngine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !countsUnread(alert, rec.Name) {
+		t.Fatal("an engine alert to the owner did not count as unread")
 	}
 }
 
