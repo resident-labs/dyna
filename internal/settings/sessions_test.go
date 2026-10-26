@@ -52,3 +52,20 @@ func TestOldGoalKeeperSettingsStillLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmissionSettings(t *testing.T) {
+	v, err := Load(filepath.Join(t.TempDir(), "settings.json"))
+	if err != nil || v.AdmissionMaxTurns != AdmissionAuto || v.AdmissionReserve != 0 {
+		t.Fatalf("defaults = %q %d, %v", v.AdmissionMaxTurns, v.AdmissionReserve, err)
+	}
+	for _, ok := range [][2]string{{KeyAdmissionMaxTurns, "12"}, {KeyAdmissionMaxTurns, "off"}, {KeyAdmissionReserve, "4 GiB"}, {KeyAdmissionReserve, "auto"}} {
+		if err := v.Set(ok[0], ok[1]); err != nil {
+			t.Errorf("%s=%s: %v", ok[0], ok[1], err)
+		}
+	}
+	for _, bad := range [][2]string{{KeyAdmissionMaxTurns, "0"}, {KeyAdmissionMaxTurns, "many"}, {KeyAdmissionReserve, "-1"}, {KeyAdmissionReserve, "lots"}} {
+		if err := v.Set(bad[0], bad[1]); err == nil {
+			t.Errorf("%s=%s accepted", bad[0], bad[1])
+		}
+	}
+}
