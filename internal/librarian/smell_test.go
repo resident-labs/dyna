@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
 )
 
 type fakeIssues struct {
@@ -131,5 +133,45 @@ func TestConcurrentSmellsTakeOneSlot(t *testing.T) {
 	}
 	if n := race([]string{"Global clock", "Hidden env reads", "Mixed IO policy", "Retry loop twice"}); n != 1 {
 		t.Fatalf("the last daily slot was taken %d times", n)
+	}
+}
+
+// A pass started with --now, or a repository whose library.smellsPerDay is 0,
+// files past the default daily cap of 10.
+func TestSmellCapIsASettingAndNowRunsHaveNone(t *testing.T) {
+	h := setup(t)
+	h.svc.Issues = &fakeIssues{}
+	ctx := context.Background()
+	file := func(i int) error {
+		sm := Smell{Title: fmt.Sprintf("smell %d", i), At: []string{"agents/run.go"}, Symbols: []string{"Run"}, Cost: "c", Direction: "d"}
+		_, err := h.svc.FileSmell(ctx, authority.Current(), h.repo, "room:librarian", sm)
+		return err
+	}
+	states := librarianstate.Store{DataDir: h.svc.DataDir}
+	if _, err := states.Update(h.id, false, func(st *librarianstate.State) error {
+		st.SmellDay, st.Smells = h.clock.UTC().Format("2006-01-02"), 10
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := file(1); err == nil || !strings.Contains(err.Error(), "daily cap of 10") {
+		t.Fatalf("an automatic pass past the default cap = %v, want a daily cap refusal", err)
+	}
+	if _, err := states.Update(h.id, false, func(st *librarianstate.State) error { st.SmellUncapped = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := file(2); err != nil {
+		t.Fatalf("a --now pass past the cap = %v, want it filed", err)
+	}
+	if _, err := states.Update(h.id, false, func(st *librarianstate.State) error { st.SmellUncapped = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.Settings = func() (settings.Values, error) {
+		v, err := settings.Load(filepath.Join(t.TempDir(), "absent.json"))
+		v.LibrarySmellsPerDay = 0
+		return v, err
+	}
+	if err := file(3); err != nil {
+		t.Fatalf("smellsPerDay 0 past ten smells = %v, want no cap", err)
 	}
 }

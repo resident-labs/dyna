@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"dyna-agent/internal/authority"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/librarianstate"
@@ -69,7 +70,7 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 	if err != nil || mapped.Action == "off" {
 		return mapped, err
 	}
-	smelled, err := s.wakeSmells(ctx, repoDir)
+	smelled, err := s.wakeSmells(ctx, repoDir, false)
 	if err != nil {
 		return Result{}, err
 	}
@@ -77,6 +78,16 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 		return smelled, nil
 	}
 	return mapped, nil
+}
+
+// WakeSmellsNow runs only the smell pass, without waiting for SmellInterval.
+// Only the owner or a root may ask for it. A session that is not root gets an
+// error that names the rule.
+func (s Service) WakeSmellsNow(ctx context.Context, actor authority.Actor, repoDir string) (Result, error) {
+	if err := authority.Check("library wake now", actor, nil); err != nil {
+		return Result{}, err
+	}
+	return s.wakeSmells(ctx, repoDir, true)
 }
 
 func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
@@ -201,7 +212,11 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 
 // wakeSmells runs the independent code-reading pass. Its checkout, session,
 // checkpoint and profile failures are separate from the feature map pass.
-func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error) {
+//
+// now skips SmellInterval and the daily smell cap for this pass. The busy
+// check and the lock still apply, and a duplicate or missing-file smell is
+// still refused.
+func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Result, error) {
 	r, err := repoid.Resolve(ctx, repoDir)
 	if err != nil {
 		return Result{}, err
@@ -233,6 +248,7 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 		}
 		ok := turnErr == nil && turn.Status == subagent.TurnOK
 		if st, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
+			st.SmellUncapped = false
 			if ok {
 				st.SmellHead = st.SmellPending
 			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn) {
@@ -256,7 +272,7 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 	if target == st.SmellHead {
 		return Result{Action: "current", Head: target}, nil
 	}
-	if next := st.SmellLastRun.Add(SmellInterval); s.now().Before(next) {
+	if next := st.SmellLastRun.Add(SmellInterval); !now && s.now().Before(next) {
 		return Result{Action: "batched", Reason: "next smell run after " + next.Format(time.RFC3339), Head: st.SmellHead}, nil
 	}
 	lookup := rolesession.Lookup(st.SmellSession, st.RoomID, subagent.RoleLibrarian, s.Sessions.Inspect, func() (subagent.Info, error) { return s.Sessions.Named(st.RoomID, true) })
@@ -283,7 +299,11 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 	if err := syncTree(ctx, r.Main, tree, target); err != nil {
 		return Result{}, err
 	}
-	task := SmellTask(r.Main, tree, st.SmellHead, target)
+	limit := v.LibrarySmellsPerDay
+	if now {
+		limit = 0
+	}
+	task := SmellTask(r.Main, tree, st.SmellHead, target, limit)
 	action, n := "assigned", 0
 	if usable && info.Profile == name && !rolesession.NeedsRecreation(info, turn) {
 		n, err = s.Sessions.Assign(ctx, info.ID, task)
@@ -300,7 +320,7 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 		return Result{}, err
 	}
 	_, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
-		st.SmellSession, st.SmellPending, st.SmellPendingTurn, st.SmellLastRun, st.SmellFailedProfiles = info.ID, target, n, s.now(), failed
+		st.SmellSession, st.SmellPending, st.SmellPendingTurn, st.SmellLastRun, st.SmellFailedProfiles, st.SmellUncapped = info.ID, target, n, s.now(), failed, now
 		return nil
 	})
 	return Result{Action: action, Reason: "code-reading smell pass", Head: target}, err

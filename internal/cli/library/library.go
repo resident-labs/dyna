@@ -4,6 +4,7 @@ package library
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -286,13 +287,33 @@ func Command(o Options) *cobra.Command {
 		fmt.Fprintf(c.OutOrStdout(), "librarian off for %s\n", r.Main)
 		return nil
 	}}
-	wake := &cobra.Command{Use: "wake", Short: "Give the librarian a turn if the gate passes; the librarian hooks run this", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		r, err := repoid.Resolve(c.Context(), repoDir)
-		if err != nil {
-			return err
+	var wakeSmells, wakeNow bool
+	var wakeRoom string
+	wake := &cobra.Command{Use: "wake", Short: "Give the librarian a turn if the gate passes; the librarian hooks run this", Long: "Give the librarian a turn if the gate passes. With --smells --now, start the code-reading smell pass at once and skip its 6-hour wait. The busy check, the lock and the daily smell cap still apply, and only the owner or a room's root may use --now. --room picks the repository of a room.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		if wakeNow && !wakeSmells {
+			return errors.New("--now needs --smells")
+		}
+		if wakeSmells && !wakeNow {
+			return errors.New("--smells needs --now; the hooks already run the smell pass on its schedule")
+		}
+		if wakeRoom != "" && !wakeNow {
+			return errors.New("--room needs --smells --now")
+		}
+		var repoRoot string
+		if wakeRoom == "" {
+			r, err := repoid.Resolve(c.Context(), repoDir)
+			if err != nil {
+				return err
+			}
+			repoRoot = r.Root
 		}
 		var res librarian.Result
-		err = engineclient.New("").Call(c.Context(), "WakeLibrarian", []any{r.Root}, &res)
+		var err error
+		if wakeNow {
+			err = engineclient.New("").Call(c.Context(), "WakeLibrarianSmellsNow", []any{repoRoot, wakeRoom}, &res)
+		} else {
+			err = engineclient.New("").Call(c.Context(), "WakeLibrarian", []any{repoRoot}, &res)
+		}
 		if err != nil {
 			return err
 		}
@@ -302,6 +323,10 @@ func Command(o Options) *cobra.Command {
 		fmt.Fprintf(c.OutOrStdout(), "librarian %s %s\n", res.Action, res.Reason)
 		return nil
 	}}
+
+	wake.Flags().BoolVar(&wakeSmells, "smells", false, "run the code-reading smell pass (needs --now)")
+	wake.Flags().BoolVar(&wakeNow, "now", false, "skip the smell interval; owner or root only (needs --smells)")
+	wake.Flags().StringVar(&wakeRoom, "room", "", "use the repository of this room instead of --repo")
 
 	var sm librarian.Smell
 	smell := &cobra.Command{Use: "smell <title>", Short: "File an architectural smell on the room issue board", Long: "File a smell as a room issue. It needs file references that exist, the symbols involved, the maintenance cost and a direction. Dyna refuses a smell that matches an open issue or passes the daily cap.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
