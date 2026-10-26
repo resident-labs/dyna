@@ -77,9 +77,9 @@ func (c *Cache) addExecs(entries []runstore.JournalEntry) {
 		}
 		switch e.State {
 		case "done":
-			c.execs[e.Key] = execRecord{Shell: e.Shell, Done: true, Result: e.Result}
+			c.execs[e.Key] = execRecord{Shell: e.Shell, Stderr: e.Stderr, Done: true, Result: e.Result}
 		case "running":
-			c.execs[e.Key] = execRecord{Shell: e.Shell}
+			c.execs[e.Key] = execRecord{Shell: e.Shell, Stderr: e.Stderr}
 		}
 	}
 }
