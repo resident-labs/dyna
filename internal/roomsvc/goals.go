@@ -259,40 +259,56 @@ func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holder
 	return g, err
 }
 
+// FinishedGoal is a goal that ended, with the issues its end left open.
+type FinishedGoal struct {
+	goals.Goal
+	// LeftOpen holds the labels of linked issues that stay open, such as D-5.
+	LeftOpen []string `json:"leftOpen,omitempty"`
+}
+
 // FinishGoal marks a goal done or dropped. Only the goal's holders end it:
 // a session that holds one item of a goal finishes that item and leaves the
 // goal to its holder. Root and the owner act for the room, and any member
 // ends a goal the whole room holds.
-func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, drop bool) (goals.Goal, error) {
+//
+// A done goal closes only the issues named in closes, such as D-5. A merged PR
+// of the goal closes the issues it fixes on its own, and the rest stay open and
+// come back in LeftOpen.
+func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, drop bool, closes []string) (FinishedGoal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
-		return goals.Goal{}, err
+		return FinishedGoal{}, err
 	}
 	service := s.goalService()
 	before, err := service.Store.Get(r.ID, id)
 	if err != nil {
-		return goals.Goal{}, err
+		return FinishedGoal{}, err
 	}
 	if err := checkGoalEnder(authority.Of(ctx), author, before); err != nil {
-		return goals.Goal{}, err
+		return FinishedGoal{}, err
+	}
+	if drop && len(closes) > 0 {
+		return FinishedGoal{}, fmt.Errorf("--close applies to a done goal, not a dropped one")
+	}
+	if err := s.checkNamedGoalIssues(r.ID, before, closes); err != nil {
+		return FinishedGoal{}, err
 	}
 	g, err := service.Store.Finish(r.ID, id, author.ID, summary, drop)
 	if err != nil {
-		return g, err
+		return FinishedGoal{Goal: g}, err
 	}
-	// A done goal closes the issues it still links, so an issue no fixing PR
-	// named still ends with its goal (D-249). A dropped goal keeps its links:
-	// the work may move to a new goal.
+	out := FinishedGoal{Goal: g}
+	// A dropped goal keeps its links: the work may move to a new goal.
 	if !drop {
-		if err := s.closeDoneGoalIssues(ctx, r, g, summary, author); err != nil {
-			return g, err
+		if out.LeftOpen, err = s.closeNamedGoalIssues(ctx, r, g, closes, summary, author); err != nil {
+			return out, err
 		}
 	}
 	verb := "finished"
 	if drop {
 		verb = "dropped"
 	}
-	return g, service.Milestone(g, author.ID, verb)
+	return out, service.Milestone(g, author.ID, verb)
 }
 
 // checkGoalEnder refuses a session that does not hold the goal. A session

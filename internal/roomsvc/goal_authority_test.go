@@ -24,7 +24,8 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	if err != nil || g.Edits[len(g.Edits)-1].By != id {
 		t.Fatalf("edit = %+v, %v", g, err)
 	}
-	g, err = e.svc.FinishGoal(ctx, r.ID, g.ID, "Shipped", false)
+	finished, err := e.svc.FinishGoal(ctx, r.ID, g.ID, "Shipped", false, nil)
+	g = finished.Goal
 	if err != nil || g.Done == nil || g.Done.By != id {
 		t.Fatalf("finish = %+v, %v", g, err)
 	}
@@ -58,7 +59,7 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 			return err
 		},
 		func(ctx context.Context, room string) error {
-			_, err := e.svc.FinishGoal(ctx, room, g.ID, "Wrong caller", true)
+			_, err := e.svc.FinishGoal(ctx, room, g.ID, "Wrong caller", true, nil)
 			return err
 		},
 		func(ctx context.Context, room string) error {

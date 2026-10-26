@@ -254,31 +254,59 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 	})
 }
 
-// closeDoneGoalIssues closes every issue a goal marked done still links. The
-// done note becomes the close reason, so an issue no fixing PR named still
-// ends with its goal (D-249). The close follows the stored goal state, not the
-// finisher's triage right, so the engine acts as the room's root seat; by only
-// credits the address that ended the goal.
-func (s *Service) closeDoneGoalIssues(ctx context.Context, r room.Record, g goals.Goal, note string, author goalAuthor) error {
+// goalIssues lists the open issues that goal id still links.
+func (s *Service) goalIssues(roomID, goal string) ([]room.Issue, error) {
+	rows, err := s.rooms().Issues(roomID, true)
+	if err != nil {
+		return nil, fmt.Errorf("read the issues of goal %s: %w", goal, err)
+	}
+	var linked []room.Issue
+	for _, issue := range rows {
+		if issue.State == room.IssueStateGoal && issue.GoalID == goal {
+			linked = append(linked, issue)
+		}
+	}
+	return linked, nil
+}
+
+// closeNamedGoalIssues closes the issues that the finisher named with --close
+// and returns the labels of the linked issues it left open. A merged PR of the
+// goal closes the issues it fixes on its own, so a done goal never closes an
+// issue by itself: its done note may say the issue is not fixed (D-285). The
+// close follows the stored goal state, not the finisher's triage right, so the
+// engine acts as the room's root seat; by credits the address that ended the goal.
+func (s *Service) closeNamedGoalIssues(ctx context.Context, r room.Record, g goals.Goal, closes []string, note string, author goalAuthor) ([]string, error) {
 	reason := strings.TrimSpace(note)
 	if reason == "" {
 		reason = "goal " + g.ID + " done"
 	}
-	rows, err := s.rooms().Issues(r.ID, true)
+	linked, err := s.goalIssues(r.ID, g.ID)
 	if err != nil {
-		return fmt.Errorf("read the issues of goal %s: %w", g.ID, err)
+		return nil, err
 	}
 	ctx = authority.WithActor(ctx, authority.EngineRoomActor(r.ID))
 	by := author.Address
 	if author.ID == "owner" {
 		by = r.Name
 	}
+	named := map[string]bool{}
+	for _, ref := range closes {
+		named[strings.ToUpper(strings.TrimSpace(ref))] = true
+	}
 	var failures []error
-	for _, issue := range rows {
-		if issue.State != room.IssueStateGoal || issue.GoalID != g.ID {
-			continue
+	var left []string
+	for _, issue := range linked {
+		var err error
+		if named[issue.Label()] {
+			_, err = s.rooms().CloseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by, reason, room.CloseOrigin{})
+		} else {
+			// The ended goal must not keep the issue in its goal state, or no
+			// other goal could take it.
+			_, err = s.rooms().ReleaseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by)
+			if err == nil {
+				left = append(left, issue.Label())
+			}
 		}
-		_, err := s.rooms().CloseIssueGoal(ctx, r.ID, issue.Label(), g.ID, by, reason, room.CloseOrigin{})
 		// Another goal may take the issue after the read above, and a merged
 		// PR may close it first: both leave this goal nothing to close.
 		if errors.Is(err, room.ErrIssueLeftGoal) || (err != nil && strings.Contains(err.Error(), "is already ")) {
@@ -288,7 +316,29 @@ func (s *Service) closeDoneGoalIssues(ctx context.Context, r room.Record, g goal
 			failures = append(failures, fmt.Errorf("close %s: %w", issue.Label(), err))
 		}
 	}
-	return errors.Join(failures...)
+	return left, errors.Join(failures...)
+}
+
+// checkNamedGoalIssues refuses a --close reference that goal g does not link, so
+// a typo cannot pass silently after the goal has ended.
+func (s *Service) checkNamedGoalIssues(roomID string, g goals.Goal, closes []string) error {
+	if len(closes) == 0 {
+		return nil
+	}
+	linked, err := s.goalIssues(roomID, g.ID)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, issue := range linked {
+		have[issue.Label()] = true
+	}
+	for _, ref := range closes {
+		if label := strings.ToUpper(strings.TrimSpace(ref)); !have[label] {
+			return fmt.Errorf("--close %s: goal %s does not link that issue", ref, g.ID)
+		}
+	}
+	return nil
 }
 
 // issueText is the issue's own body: the note it was filed with, without the
