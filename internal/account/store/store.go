@@ -24,19 +24,53 @@ type Plan struct {
 	Label string `json:"label"`
 }
 type Window struct {
-	UnavailableReason string   `json:"unavailableReason,omitempty"`
-	Period            string   `json:"period,omitempty"`
-	PeriodStart       string   `json:"periodStart,omitempty"`
-	ID                string   `json:"id"`
-	Label             string   `json:"label"`
-	UsedPercent       *float64 `json:"usedPercent,omitempty"`
-	Used              *float64 `json:"used,omitempty"`
-	Limit             *float64 `json:"limit,omitempty"`
+	Reason      WindowReason `json:"reason,omitempty"`
+	Period      string       `json:"period,omitempty"`
+	PeriodStart string       `json:"periodStart,omitempty"`
+	ID          string       `json:"id"`
+	Label       string       `json:"label"`
+	UsedPercent *float64     `json:"usedPercent,omitempty"`
+	Used        *float64     `json:"used,omitempty"`
+	Limit       *float64     `json:"limit,omitempty"`
 	// Balance is the remaining money when a provider reports a balance
 	// instead of a quota window. Unit names its currency.
 	Balance  *float64 `json:"balance,omitempty"`
 	Unit     string   `json:"unit,omitempty"`
 	ResetsAt string   `json:"resetsAt,omitempty"`
+}
+
+// WindowReason is the classified reason a window carries no usage reading. It
+// is typed so the CLI and the web app show designed copy instead of the reader's
+// sentence, because reading the sentence to decide presentation made reader
+// wording a hidden protocol.
+type WindowReason string
+
+const (
+	// WindowReasonNotReported means the reader found the window but no allowance
+	// figure for it.
+	WindowReasonNotReported WindowReason = "not-reported"
+	// WindowReasonProbableReset means the window's reset time has passed since
+	// the reading, so its figure stays unknown until the next read.
+	WindowReasonProbableReset WindowReason = "probable-reset"
+)
+
+// UnmarshalJSON reads a window saved before reasons were typed. Its
+// unavailableReason text was always the not-reported case.
+// TODO: legacy/shim remove later — accounts saved before window reasons were typed.
+func (w *Window) UnmarshalJSON(data []byte) error {
+	type window Window
+	var raw struct {
+		*window
+		UnavailableReason string `json:"unavailableReason"`
+	}
+	raw.window = (*window)(w)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.UnavailableReason != "" && w.Reason == "" {
+		w.Reason = WindowReasonNotReported
+	}
+	return nil
 }
 
 // UsageReason is the classified reason an account has no current usage reading.

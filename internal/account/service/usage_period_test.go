@@ -12,7 +12,7 @@ func TestUsageSummaryPreservesPeriodWithoutAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary := WindowsSummary(account)
-	for _, want := range []string{"Weekly period", "resets", "Grok does not report remaining allowance."} {
+	for _, want := range []string{"Weekly period", "resets", "Remaining allowance not reported."} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary hid period or reason: %q", summary)
 		}

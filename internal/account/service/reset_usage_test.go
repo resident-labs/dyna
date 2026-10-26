@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	accountstore "dyna-agent/internal/account/store"
 )
 
 func TestUsageAfterResetShowsUncertaintyInsteadOfNumbers(t *testing.T) {
@@ -20,7 +22,7 @@ func TestUsageAfterResetShowsUncertaintyInsteadOfNumbers(t *testing.T) {
 				t.Fatalf("%s summary=%q, want %q", harness, got, want)
 			}
 			resetWindows(&a, now)
-			if a.Windows[0].UsedPercent != nil || a.Windows[0].Used != nil || a.Windows[0].UnavailableReason != "probably reset" {
+			if a.Windows[0].UsedPercent != nil || a.Windows[0].Used != nil || a.Windows[0].Reason != accountstore.WindowReasonProbableReset {
 				t.Fatal("reset projection still has a numeric reading")
 			}
 			if _, ok := WindowPercent(a.Windows[0]); ok {
