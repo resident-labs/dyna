@@ -51,9 +51,16 @@ func failureKey(profileName string, turn subagent.Turn) string {
 // profile itself, not of one model.
 func notReadyKey(profileName string) string { return profileName + " (not ready)" }
 
+// quotaKey is the account-quota key: RankProfiles excludes the profile while
+// this key is in the future. An account failover recorded the limit after a
+// real quota rejection, so the hold lasts until the account's own reset, not
+// the shorter backoff a failed turn records.
+func quotaKey(profileName string) string { return profileName + " (quota)" }
+
 // RankProfiles excludes disabled profiles, profiles that carry a failure of the
-// whole profile, and profiles that are unavailable until a later time.
-// Multi-model profiles remain available while any model is healthy, unless the
+// whole profile, and profiles that are unavailable until a later time. The
+// failure map may carry the account-quota key of AccountQuotaHolds. Multi-model
+// profiles remain available while any model is healthy, unless the
 // whole-profile key excludes them. A single-model profile stays out while that
 // model cools down. role orders the result; see rankBefore.
 func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now time.Time, role string) []profile.Profile {
@@ -90,6 +97,7 @@ const (
 	CauseDisabled       Cause = "disabled"
 	CauseNotForServices Cause = "not-for-services"
 	CauseNotReady       Cause = "not-ready"
+	CauseQuotaBlocked   Cause = "quota-blocked"
 	CauseProviderFailed Cause = "provider-failed"
 	CauseModelCooling   Cause = "model-cooling-down"
 	CauseHarnessBusy    Cause = "harness-busy"
@@ -106,6 +114,11 @@ func blockReason(p profile.Profile, failures map[string]time.Time, now time.Time
 		// fix: a runtime that did not start, a rejected sign-in, and exhausted
 		// capacity. Health names the runtime cause when it has one.
 		return CauseNotReady, fmt.Sprintf("its last turn failed in a way that another model of the profile cannot fix, so it is held out until %s", at.Format(time.RFC3339))
+	}
+	if at := failures[quotaKey(p.Name)]; now.Before(at) {
+		// Every account that may run the profile is out of quota until the
+		// account's own reset, so another model of the profile cannot help.
+		return CauseQuotaBlocked, fmt.Sprintf("every account that may run it is out of quota until %s", at.Format(time.RFC3339))
 	}
 	models := p.EffectiveModels()
 	if len(models) > 1 {
@@ -159,8 +172,13 @@ type Choice struct {
 }
 
 // ChooseProfile honors an available pin, then uses the shared ranking for role.
-// role orders the result and names the profile kind in the error message.
+// role orders the result and names the profile kind in the error message. A
+// profile whose every usable account is out of quota is unavailable until the
+// account's own reset, whatever the turn records say.
 func ChooseProfile(profiles []profile.Profile, pinned string, failures map[string]time.Time, now time.Time, role string) (Choice, error) {
+	// Account quota holds come from the account store, not the turn records,
+	// so an exhausted account keeps its profile out until its own reset.
+	failures = MergeFailures(failures, AccountQuotaHolds(profiles, now))
 	// Services never run subagents-only profiles. Keep the full list to explain
 	// a pinned profile that this filter removed.
 	usable := slices.DeleteFunc(slices.Clone(profiles), func(p profile.Profile) bool { return !p.ForServices() })
@@ -312,4 +330,56 @@ var failureCaches sync.Map
 func RecentProfileFailures(store *subagent.Store, now time.Time) (map[string]time.Time, error) {
 	value, _ := failureCaches.LoadOrStore(store.Root, &FailureCache{})
 	return value.(*FailureCache).Recent(now, func() ([]subagent.Info, error) { return store.ListSnapshot(true) }, store.ReadTurn)
+}
+
+// quotaAnswer is the cached answer for one harness and provider: whether every
+// usable account is out of quota, and when the first one recovers.
+type quotaAnswer struct {
+	until time.Time
+	held  bool
+}
+
+// quotaCache scans at most once per minute. The saved account limits change
+// only when a turn fails over, so a minute-old view cannot hold a healthy
+// profile out for long, and a hold whose reset passed frees the profile at
+// once because the answer carries the reset time.
+type quotaCache struct {
+	mu      sync.Mutex
+	checked time.Time
+	answers map[string]quotaAnswer
+}
+
+var quotaCaches sync.Map
+
+// AccountQuotaHolds names each profile whose every usable account is out of
+// quota, keyed under quotaKey for MergeFailures. It shares one account read
+// per data directory per minute and never fails a caller: an unreadable
+// account store answers nothing, so quota state alone never hides a profile.
+func AccountQuotaHolds(profiles []profile.Profile, now time.Time) map[string]time.Time {
+	accounts := runtime.NewAccounts()
+	value, _ := quotaCaches.LoadOrStore(accounts.Root, &quotaCache{})
+	c := value.(*quotaCache)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.answers == nil || now.Before(c.checked) || !now.Before(c.checked.Add(time.Minute)) {
+		c.checked, c.answers = now, map[string]quotaAnswer{}
+	}
+	holds := map[string]time.Time{}
+	for _, p := range profiles {
+		adapter, err := runtime.Adapter(p.Harness)
+		if err != nil {
+			continue
+		}
+		provider := runtime.ProviderForModel(p.Harness, p.Model)
+		key := adapter.Harness + "\x00" + string(provider)
+		answer, known := c.answers[key]
+		if !known {
+			answer.until, answer.held = accounts.QuotaHeldOut(p.Harness, provider, now)
+			c.answers[key] = answer
+		}
+		if answer.held {
+			holds[quotaKey(p.Name)] = answer.until
+		}
+	}
+	return holds
 }

@@ -2,8 +2,10 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/database"
 	harnesshealth "dyna-agent/internal/harness/health"
+	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
@@ -12,6 +14,7 @@ import (
 	"dyna-agent/internal/subagent"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -162,6 +165,55 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 	choice, err = e.s.chooseProfile(Reviewer{})
 	if err != nil || choice.Name != "judge" {
 		t.Fatalf("newer healthy turn: %s %v", choice.Name, err)
+	}
+}
+
+// D-110: the account store already knows an account is out of quota, because
+// a failover recorded the limit after a real 429. Auto ranking must skip its
+// profile without first spending a turn on the same rejection, name the typed
+// cause while a room pin points at it, and take it back after the reset.
+func TestProfileChoiceSkipsExhaustedAccountQuota(t *testing.T) {
+	e := newEnv(t)
+	accounts := runtime.NewAccounts()
+	n, err := accounts.Create("claude-code", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{
+		".credentials.json": `{"claudeAiOauth":{"accessToken":"main-access","refreshToken":"main-refresh","expiresAt":1999999999999,"scopes":["user:inference"]}}`,
+		".claude.json":      `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-000000000001","emailAddress":"main@example.test"}}`,
+	} {
+		if err = os.WriteFile(filepath.Join(n.Home, name), []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err = accounts.Capture(context.Background(), n.ID, "/fake/native"); err != nil || n.Status != "ready" {
+		t.Fatalf("account capture: %v %v", n, err)
+	}
+	scopes, err := reposcope.Open(filepath.Dir(accounts.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := e.clock.Add(5 * time.Hour)
+	if err = scopes.MarkLimited(n.ID, reset); err != nil {
+		t.Fatal(err)
+	}
+	top := profile.Profile{Name: "top", Harness: "claude-code", Model: "claude-sonnet-4.5", Diagnostics: 10, Cost: 10}
+	spare := profile.Profile{Name: "spare", Harness: profile.HarnessMock, Diagnostics: 6, Cost: 6}
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{top, spare}, nil }
+	choice, err := e.s.chooseProfile(Reviewer{})
+	if err != nil || choice.Name != "spare" {
+		t.Fatalf("auto chose %q %v, want the profile whose account has quota", choice.Name, err)
+	}
+	choice, err = e.s.chooseProfile(Reviewer{Profile: "top"})
+	if err != nil || choice.Name != "spare" || choice.Cause != rolesession.CauseQuotaBlocked || !strings.Contains(choice.Reason, "out of quota") {
+		t.Fatalf("pinned exhausted profile: %+v %v", choice, err)
+	}
+	// Past the reset, and past the quota cache's minute, auto takes it back.
+	e.clock = reset.Add(time.Minute)
+	choice, err = e.s.chooseProfile(Reviewer{})
+	if err != nil || choice.Name != "top" {
+		t.Fatalf("auto chose %q %v after the reset, want the top profile", choice.Name, err)
 	}
 }
 

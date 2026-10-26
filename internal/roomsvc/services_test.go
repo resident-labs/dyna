@@ -127,21 +127,27 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 	}
 }
 
-// Service profiles are global settings, so only the owner pins them; even
-// the room's own root is refused. Before, any session could pin them over
-// the engine socket.
-func TestServiceProfileIsTheOwnersOnly(t *testing.T) {
+// D-110: the reviewer profile is a room setting, so the room's own root may
+// pin it. Root of another room and plain sessions stay out, and the owner
+// keeps pinning any room's service.
+func TestServiceProfileAllowsOnlyTheRoomsOwnRoot(t *testing.T) {
 	e := newEnv(t)
-	rec := e.room("svc-owner")
-	for _, role := range []string{"reviewer"} {
-		for who, actor := range map[string]authority.Actor{
-			"the room's root": {Role: authority.Root, Session: "ses_20261020-000000-0000abcd", Room: rec.ID},
-			"a session":       {Role: authority.Session, Session: "ses_20261020-000000-0000ffff", Room: rec.ID},
-		} {
-			ctx := authority.WithActor(context.Background(), actor)
-			if err := e.svc.SetServiceProfile(ctx, rec.Name, role, ""); err == nil || !strings.Contains(err.Error(), " only;") {
-				t.Errorf("%s pinned the %s profile: %v", who, role, err)
-			}
+	rec := e.room("svc-roles")
+	foreign := e.room("svc-other")
+	root := authority.WithActor(context.Background(), authority.Actor{Role: authority.Root, Session: "ses_20261020-000000-0000abcd", Room: rec.ID})
+	if err := e.svc.SetServiceProfile(root, rec.Name, "reviewer", "mock"); err != nil {
+		t.Fatalf("the room's own root could not pin: %v", err)
+	}
+	if err := e.svc.SetServiceProfile(root, rec.Name, "reviewer", ""); err != nil {
+		t.Fatalf("the room's own root could not unpin: %v", err)
+	}
+	for who, actor := range map[string]authority.Actor{
+		"a root of another room": {Role: authority.Root, Session: "ses_20261020-000000-0000ffff", Room: foreign.ID},
+		"a session":              {Role: authority.Session, Session: "ses_20261020-000000-0000eeee", Room: rec.ID},
+	} {
+		ctx := authority.WithActor(context.Background(), actor)
+		if err := e.svc.SetServiceProfile(ctx, rec.Name, "reviewer", ""); err == nil || !strings.Contains(err.Error(), " only;") {
+			t.Errorf("%s pinned the reviewer profile: %v", who, err)
 		}
 	}
 }

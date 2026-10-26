@@ -278,6 +278,27 @@ func TestQuotaResetKeepsProfileOut(t *testing.T) {
 	}
 }
 
+// D-110: an account whose saved quota limit outlasts the turn's own failure
+// backoff keeps its profile out of automatic ranking, and a room that pinned
+// it sees the typed cause while the hold lasts.
+func TestQuotaHoldKeepsProfileOut(t *testing.T) {
+	storetest.Isolate(t)
+	now := time.Date(2026, 10, 25, 19, 45, 0, 0, time.UTC)
+	kimi := profile.Profile{Name: "kimi-max", Taste: 6, Diagnostics: 8, Cost: 10}
+	sol := profile.Profile{Name: "sol", Taste: 7, Diagnostics: 10, Cost: 8}
+	failures := map[string]time.Time{quotaKey("kimi-max"): now.Add(time.Hour)}
+	if got := RankProfiles([]profile.Profile{kimi, sol}, failures, now, subagent.RoleReviewer); len(got) != 1 || got[0].Name != "sol" {
+		t.Fatalf("quota-blocked profile stayed ranked: %+v", got)
+	}
+	choice, err := ChooseProfile([]profile.Profile{kimi, sol}, "kimi-max", failures, now, subagent.RoleReviewer)
+	if err != nil || choice.Name != "sol" || choice.Cause != CauseQuotaBlocked || !strings.Contains(choice.Reason, "out of quota") {
+		t.Fatalf("pinned quota-blocked profile: %+v %v", choice, err)
+	}
+	if got := RankProfiles([]profile.Profile{kimi}, failures, now.Add(time.Hour), ""); len(got) != 1 {
+		t.Fatal("quota hold did not expire at its reset")
+	}
+}
+
 func TestConcurrentAccountRemainsSelectable(t *testing.T) {
 	storetest.Isolate(t)
 	lease, err := runtime.NewAccounts().TurnLeaseManaged(context.Background(), "pi")
