@@ -21,6 +21,11 @@ const quietAfter = 7 * 24 * time.Hour
 // slowTestGap separates two breach episodes, as the watcher's crossing rule does.
 const slowTestGap = time.Hour
 
+// runWindow is how old a stored run may be and still show in the graph and the
+// job ranking. A workflow that stopped, such as one that used paid runners,
+// would otherwise keep its rows on screen until the 90-day retention ends.
+const runWindow = 14 * 24 * time.Hour
+
 // CIHealth is the room's CI graph and its slow-test list: what the tab shows
 // before any drill-down.
 type CIHealth struct {
@@ -150,6 +155,7 @@ func (s *Service) CIHealth(roomRef string, runs int) (CIHealth, error) {
 	}
 	entries := s.libraryEntries(ctx, rec.Repo)
 	now := time.Now()
+	rows = recentRuns(rows, now)
 	out := CIHealth{Room: rec.Name, LimitMs: limit.Milliseconds(), WarnMs: warn.Milliseconds(), FailMs: fail.Milliseconds(), Runs: make([]CIHealthRun, 0, len(rows))}
 	tokens := make([]string, 0, len(rows))
 	for _, run := range rows {
@@ -169,6 +175,18 @@ func (s *Service) CIHealth(roomRef string, runs int) (CIHealth, error) {
 	}
 	sortSlowTests(out.Tests)
 	return out, nil
+}
+
+// recentRuns drops the runs that started before the window, keeping the order.
+func recentRuns(rows []cihealth.Run, now time.Time) []cihealth.Run {
+	cutoff := now.Add(-runWindow)
+	kept := rows[:0:0]
+	for _, run := range rows {
+		if !run.Started.Before(cutoff) {
+			kept = append(kept, run)
+		}
+	}
+	return kept
 }
 
 // CIHealthRun opens one run: its jobs, their steps, and the tests that ran slow.
