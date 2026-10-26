@@ -185,7 +185,8 @@ func TestPrepareGivesTheHarnessTheLoginPath(t *testing.T) {
 
 // A background process that shell startup leaves holding stdout must not stall
 // the PATH lookup. The process blocks reading a FIFO that the test holds open,
-// so no clock decides the result; closing the FIFO at cleanup ends the process.
+// so no clock decides the result; closing the FIFO at cleanup ends the process
+// by end-of-file.
 func TestLoginPathDoesNotWaitForABackgroundProcess(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "hold")
@@ -199,7 +200,9 @@ func TestLoginPathDoesNotWaitForABackgroundProcess(t *testing.T) {
 	}
 	t.Cleanup(func() { hold.Close() })
 	shell := filepath.Join(dir, "login-shell")
-	script := "#!/bin/sh\ncat \"$FIFO\" &\nprintf '%s' /opt/tools/bin >\"$3\"\n"
+	// The shell opens the FIFO itself before it starts the reader, so the reader
+	// exists with its end open when the shell returns, and ends when hold closes.
+	script := "#!/bin/sh\nexec 7<\"$FIFO\"\ncat <&7 7<&- &\nprintf '%s' /opt/tools/bin >\"$3\"\n"
 	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
