@@ -251,8 +251,17 @@ func TestCloseRunAgentsWaitsForAStartInFlight(t *testing.T) {
 		started <- err
 	}()
 	<-inStart
+	// Keep the start held until the close has refused new starts and begun to
+	// wait for it; a close that returns without waiting shows up as an early return.
+	draining := make(chan struct{})
+	e.m.runAgentDrainHook = func() { close(draining) }
 	closed := make(chan error, 1)
 	go func() { closed <- e.m.CloseRunAgents(coordinator, run) }()
+	select {
+	case <-draining:
+	case err := <-closed:
+		t.Fatalf("CloseRunAgents returned (%v) without waiting for the start in flight", err)
+	}
 	close(release)
 	if err := <-started; err != nil {
 		t.Fatal(err)
