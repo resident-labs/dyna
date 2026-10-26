@@ -1055,10 +1055,30 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 // or the next check's slot.
 const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
 
-func nodeSlotScript(base string, slots, index int, inner string) string {
-	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
+// nodeSlotScript runs inner while holding one of the node's slots. A wrapper
+// that waits for a slot installs its deadline and its signal trap first, and
+// watches its own run while it waits: a run that is cancelled or removed leaves
+// no queued wrapper holding a slot on the machine.
+func nodeSlotScript(base string, slots, index int, active string, deadline time.Duration, inner string) string {
+	q := shellquote.Quote
+	seconds := int64((deadline + time.Second - 1) / time.Second)
+	return "set -euo pipefail; trap 'exit 143' HUP INT TERM; " +
+		"mkdir -p " + q(path.Join(base, "slots")) + "; " +
+		fmt.Sprintf("deadline=$(( $(date +%%s) + %d )); ", int(seconds)) +
+		"acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; printf 'local CI: every slot is busy, waiting for slot %d\\n' >&2; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
+		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; printf 'local CI: every slot is busy, waiting for slot %d\\n' %d >&2; exec 9>%s; ", index%slots, index%slots, index%slots, q(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots)))) +
+		"while ! flock -n 9; do " +
+		// The run's keeper holds this file, and it goes when the run is cancelled
+		// or removed: a queued check then has nothing left to wait for.
+		"[ -e " + q(active) + " ] || exit 75; " +
+		"[ \"$(date +%s)\" -lt \"$deadline\" ] || exit 75; " +
+		"sleep ${DYNA_CI_SLOT_POLL:-1}; " +
+		"done; fi; " +
+		// A slot that came free after the run was removed must not start the
+		// check: the run is checked once more right before its work begins.
+		"[ -e " + q(active) + " ] || exit 75; " +
+		"[ \"$(date +%s)\" -lt \"$deadline\" ] || exit 75; " + inner
 }
 
 // noteScript writes at the start of a check's log what Dyna changed about its
@@ -1151,7 +1171,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
 			"rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"
-		return nodeSlotScript(base, node.Slots, index, setup)
+		return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 	}
 	if check.host {
 		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
@@ -1214,7 +1234,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			serverPort = " SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
 		}
 		setup += hostEnvironment(environment) + serverPort + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
-		return nodeSlotScript(base, node.Slots, index, setup)
+		return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 	}
 	if node.SSH == "" {
 		setup += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
@@ -1260,7 +1280,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// Both host and container deadlines survive a disconnected SSH client.
 	// The container's command gets no slot lock either, for the same reason.
 	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner) + " 9>&-"
-	return nodeSlotScript(base, node.Slots, index, setup)
+	return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 }
 
 func dockerEnvironment(environment map[string]string) string {
