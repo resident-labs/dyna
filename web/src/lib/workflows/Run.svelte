@@ -83,13 +83,21 @@
   // replaces `detail` every 2 seconds keeps the open cell.
   let runId = $derived(detail?.run.id ?? '')
   // Without a grid, each phase row opens on its own.
-  let openPhases = $state<number[]>([])
+  // A phase is open while any agent id it holds is listed, so the open row stays
+  // put when the agent window trims some of its agents or a running phase adds more.
+  let openAgentIds = $state<number[]>([])
   $effect(() => {
     void runId
     picked = null
-    openPhases = []
+    openAgentIds = []
   })
-  const togglePhase = (key: number) => (openPhases = openPhases.includes(key) ? openPhases.filter((n) => n !== key) : [...openPhases, key])
+  const isOpenGroup = (g: Group) => g.agents.some((a) => openAgentIds.includes(a.id))
+  function togglePhase(key: number) {
+    const g = groups.find((x) => x.agents[0]?.id === key)
+    if (!g) return
+    const ids = g.agents.map((a) => a.id)
+    openAgentIds = isOpenGroup(g) ? openAgentIds.filter((id) => !ids.includes(id)) : [...openAgentIds, ...ids]
+  }
   let shownGroups = $derived.by(() => {
     if (!grid) return groups.length > 1 ? [] : groups
     const cell = picked ? grid.lanes.find((l) => l.name === picked?.lane)?.cells[picked.col] : null
@@ -246,7 +254,7 @@
       <RunGrid {grid} {picked} onpick={(ref) => (picked = ref)} />
       {#if !picked}<p class="quiet">Tap a cell to see its agents.</p>{/if}
     {:else if groups.length > 1}
-      <PhaseList rows={groups.map((g) => ({ key: g.agents[0]?.id ?? 0, phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))} open={openPhases} ontoggle={togglePhase}>
+      <PhaseList rows={groups.map((g) => ({ key: g.agents[0]?.id ?? 0, open: isOpenGroup(g), phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))} ontoggle={togglePhase}>
         {#snippet agents(key)}{@const g = groups.find((x) => x.agents[0]?.id === key)}{#if g}{@render agentRows(g)}{/if}{/snippet}
       </PhaseList>
     {/if}
