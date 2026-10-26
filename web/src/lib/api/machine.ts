@@ -142,9 +142,14 @@ export interface MachineLoad {
 
 // MachinePatch is a change to one machine. An absent field keeps its value.
 export interface MachinePatch {
+  name?: string
   enabled?: boolean
   roles?: MachineRole[]
   ciSlots?: number
   allowHostChecks?: boolean
+  rooms?: string[]
+  suites?: string[]
   ssh?: string
+  // create adds the machine that the reference names when none exists.
+  create?: boolean
 }

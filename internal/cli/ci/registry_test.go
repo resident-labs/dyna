@@ -10,11 +10,25 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
+	"dyna-agent/internal/websvc"
 )
+
+// stubMachineEngine sends this alias's changes through the engine's machine
+// service in process, over the same data directory as the test store.
+func stubMachineEngine(t *testing.T, dir string) {
+	t.Helper()
+	previous := saveMachine
+	saveMachine = func(ctx context.Context, ref string, patch websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return (websvc.MachineAPI{Store: machines.Store{DataDir: dir}}).SaveMachine(ctx, ref, patch)
+	}
+	t.Cleanup(func() { saveMachine = previous })
+}
 
 func TestNodeCommandValidatesAndSavesNode(t *testing.T) {
 	s := localci.Store{DataDir: t.TempDir()}
 	t.Cleanup(func() { database.Close(s.DataDir) })
+	stubMachineEngine(t, s.DataDir)
 	run := func(args ...string) (string, error) {
 		cmd := nodeCommand(s)
 		var out bytes.Buffer
