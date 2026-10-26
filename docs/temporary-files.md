@@ -21,7 +21,7 @@ to `~/.cache/dyna/tmp` itself.
 A session's folder is removed with the session's scratch folder, seven days
 after the session closes. The hourly maintenance pass removes the other entries
 under `~/.cache/dyna/tmp` (hook and check files) when nothing in them has
-changed for 24 hours. Host checks of local CI run with their own folder there;
+changed for 72 hours, longer than any hook may run. Host checks of local CI run with their own folder there;
 container checks keep their in-memory `/tmp`, which ends with the container. Only the engine's sockets and runtime
 files stay in `XDG_RUNTIME_DIR`.
 
