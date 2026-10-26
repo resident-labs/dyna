@@ -18,33 +18,35 @@ func (r attachedRegistry) AttachedNode(context.Context, string, string) (string,
 }
 
 // After an engine restart a run goes to the machine that still runs its checks,
-// not to the machine with the most free slots, which would start them again.
-func TestRunGoesToTheMachineThatHoldsItsChecks(t *testing.T) {
+// even when the scheduler counts that machine full, and waits when the machine is
+// only low on disk. Any other machine would start the checks again.
+func TestRunIsPinnedToTheMachineThatHoldsItsChecks(t *testing.T) {
 	nodes := []localci.Node{
 		{Name: "hermeslab", Slots: 8, Enabled: true},
 		{Name: "pve", Slots: 2, Enabled: true},
 	}
-	active := map[string]int{}
-	roomy := availableCINodeExcept(nodes, active, "room", "")
-	if roomy.Name != "hermeslab" {
-		t.Fatalf("fixture: the roomy machine is %s", roomy.Name)
+	pin := func(registry localCIRegistry, skip string, nodes []localci.Node) (string, bool) {
+		node, wait := pinnedCINode(t.Context(), registry, "/repo", "abc", nodes, "room", skip)
+		if node == nil {
+			return "", wait
+		}
+		return node.Name, wait
 	}
-	pick := func(registry localCIRegistry, skip string, active map[string]int) string {
-		chosen := preferAttachedCINode(t.Context(), registry, "/repo", "abc", nodes, active, "room", skip, roomy)
-		return chosen.Name
+	if got, wait := pin(attachedRegistry{node: "pve"}, "", nodes); got != "pve" || wait {
+		t.Fatalf("pinned %q wait %v, want pve", got, wait)
 	}
-	if got := pick(attachedRegistry{node: "pve"}, "", active); got != "pve" {
-		t.Fatalf("placed on %s, want the machine that holds the checks", got)
+	if got, wait := pin(attachedRegistry{}, "", nodes); got != "" || wait {
+		t.Fatalf("without a record pinned %q wait %v", got, wait)
 	}
-	// No record, a machine with no free slot, or a machine the run just failed on
-	// keeps the normal choice.
-	if got := pick(attachedRegistry{}, "", active); got != "hermeslab" {
-		t.Fatalf("without a record placed on %s", got)
+	if got, wait := pin(attachedRegistry{node: "pve"}, "pve", nodes); got != "" || wait {
+		t.Fatalf("after a failure there pinned %q wait %v", got, wait)
 	}
-	if got := pick(attachedRegistry{node: "pve"}, "", map[string]int{"pve": 2}); got != "hermeslab" {
-		t.Fatalf("with a full machine placed on %s", got)
+	low := []localci.Node{nodes[0], {Name: "pve", Slots: 2, Enabled: true, LowDisk: true}}
+	if got, wait := pin(attachedRegistry{node: "pve"}, "", low); got != "" || !wait {
+		t.Fatalf("on a low disk pinned %q wait %v, want to wait", got, wait)
 	}
-	if got := pick(attachedRegistry{node: "pve"}, "pve", active); got != "hermeslab" {
-		t.Fatalf("after a failure there, placed on %s", got)
+	gone := []localci.Node{nodes[0]}
+	if got, wait := pin(attachedRegistry{node: "pve"}, "", gone); got != "" || wait {
+		t.Fatalf("with the machine removed pinned %q wait %v, want the normal choice", got, wait)
 	}
 }

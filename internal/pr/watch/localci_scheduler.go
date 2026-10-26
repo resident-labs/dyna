@@ -464,7 +464,12 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	}
 	// A machine with a free slot must exist before the plan does any work, so a
 	// fleet that is only busy keeps the job waiting without a fetch.
-	chosen := preferAttachedCINode(ctx, registry, repo, job.head, enabled, active, job.record.RoomID, retriedFrom, availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom))
+	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
+	if pinned, wait := pinnedCINode(ctx, registry, repo, job.head, enabled, job.record.RoomID, retriedFrom); wait {
+		return false, nil
+	} else if pinned != nil {
+		chosen = pinned
+	}
 	if chosen == nil && retriedFrom != "" {
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
@@ -513,7 +518,12 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// caller gets a typed error that names it; a fleet that is only busy or low
 	// on disk keeps waiting.
 	suited := localci.NodesForSuites(enabled, plan.suites)
-	chosen = preferAttachedCINode(ctx, registry, repo, job.head, suited, active, job.record.RoomID, retriedFrom, availableCINodeExcept(suited, active, job.record.RoomID, retriedFrom))
+	chosen = availableCINodeExcept(suited, active, job.record.RoomID, retriedFrom)
+	if pinned, wait := pinnedCINode(ctx, registry, repo, job.head, suited, job.record.RoomID, retriedFrom); wait {
+		return false, nil
+	} else if pinned != nil {
+		chosen = pinned
+	}
 	if chosen == nil && retriedFrom != "" {
 		// The machine that failed is the only one that can take this work, so it
 		// runs there once more instead of the head waiting with nothing running.
@@ -527,7 +537,9 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
+	// A run pinned to a machine whose scheduler count is full still holds one slot
+	// there.
+	slots := max(1, min(registeredCIRunSlots, chosen.Slots-active[chosen.Name]))
 	run := &registeredCIRun{
 		node: chosen.Name, slots: slots, cancel: cancel, stopped: make(chan struct{}),
 		repo: job.record.Repo, number: job.record.Number, kind: job.kind(), branch: job.branch,
@@ -718,26 +730,34 @@ type attachedCINodes interface {
 	AttachedNode(ctx context.Context, repo, sha string) (string, error)
 }
 
-// preferAttachedCINode places a run on the machine that still runs its checks
-// from before an engine restart, when that machine can take the work. Any other
-// machine would start the checks again and leave the first ones unattended. It
-// returns the normal choice otherwise.
-func preferAttachedCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, active map[string]int, roomID, skip string, chosen *localci.Node) *localci.Node {
+// pinnedCINode pins a run to the machine that still runs its checks from before
+// an engine restart. Those checks already hold the machine's slots, so the
+// machine takes the run even when the scheduler's own count shows it full; any
+// other machine would start the checks again and abandon the first ones. When
+// the machine cannot take work for now, such as a low disk, the run waits for it
+// instead. It returns no pin when there is no record, when the run just failed
+// there, or when the machine is no longer registered, enabled or allowed for
+// the room.
+func pinnedCINode(ctx context.Context, registry localCIRegistry, repo, head string, nodes []localci.Node, roomID, skip string) (pinned *localci.Node, wait bool) {
 	finder, ok := registry.(attachedCINodes)
 	if !ok {
-		return chosen
+		return nil, false
 	}
 	name, err := finder.AttachedNode(ctx, repo, head)
 	if err != nil || name == "" || name == skip {
-		return chosen
+		return nil, false
 	}
 	for i := range nodes {
 		node := &nodes[i]
-		if node.Name == name && node.Enabled && !node.LowDisk && node.AllowsRoom(roomID) && node.Slots-active[node.Name] > 0 {
-			return node
+		if node.Name != name || !node.Enabled || !node.AllowsRoom(roomID) {
+			continue
 		}
+		if node.LowDisk {
+			return nil, true
+		}
+		return node, false
 	}
-	return chosen
+	return nil, false
 }
 
 func availableCINodeExcept(nodes []localci.Node, active map[string]int, roomID, skip string) *localci.Node {

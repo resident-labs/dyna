@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func remoteRunner(t *testing.T, legacy Command) (Runner, *fakeMachine) {
@@ -248,5 +249,55 @@ func TestStopDuringLaunchKeepsTheCheckOnlyForAnEngineStop(t *testing.T) {
 				t.Fatalf("stop calls = %d, want %d", stops, want)
 			}
 		})
+	}
+}
+
+// The node counts as lost after the bound in all. Attempts that stall for their
+// whole timeout use up the window, and later attempts and waits only get what is
+// left of it.
+func TestLostNodeBoundCountsFailedAttemptTime(t *testing.T) {
+	runner := Runner{Node: &Node{Name: "pve", SSH: "pip@pve"}}
+	now := time.Unix(1_000_000, 0)
+	runner.clock = func() time.Time { return now }
+	runner.wait = func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil }
+	var spent time.Duration
+	attempts := 0
+	err := runner.retry(t.Context(), callTimeout, func(ctx context.Context) error {
+		attempts++
+		deadline, _ := ctx.Deadline()
+		// The attempt stalls until its deadline.
+		stall := time.Until(deadline).Round(time.Second)
+		now = now.Add(stall)
+		spent += stall
+		return errors.New("stalled")
+	})
+	var lost *nodeLostError
+	if !errors.As(err, &lost) {
+		t.Fatalf("err = %v, want a lost node", err)
+	}
+	if elapsed := now.Sub(time.Unix(1_000_000, 0)); elapsed > nodeLostBound+retryWait {
+		t.Fatalf("gave up after %s, want about %s", elapsed, nodeLostBound)
+	}
+	if attempts < 2 || attempts > 3 {
+		t.Fatalf("attempts = %d, want two or three stalled attempts in the window", attempts)
+	}
+}
+
+// A check whose folder was removed after it launched can never finish, so the
+// poll reports it lost instead of waiting for the run's deadline.
+func TestDetachedCheckIsLostWhenItsFolderIsRemoved(t *testing.T) {
+	var machine *fakeMachine
+	runner, machine := remoteRunner(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
+		fmt.Fprintln(out, "partial")
+		machine.remove(testSpec("a").Dir)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	poller, stop := runner.newPoller(t.Context())
+	defer stop()
+	err := poller.Run(t.Context(), testSpec("a"), io.Discard)
+	var lost *nodeLostError
+	if !errors.As(err, &lost) || !lost.gone {
+		t.Fatalf("err = %v, want a lost check", err)
 	}
 }

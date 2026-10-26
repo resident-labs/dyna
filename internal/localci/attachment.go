@@ -11,11 +11,10 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"dyna-agent/internal/hub"
-	"dyna-agent/internal/shellquote"
+	"dyna-agent/internal/procident"
 	"dyna-agent/internal/state"
 )
 
@@ -34,7 +33,39 @@ type attachment struct {
 
 func (a attachment) has(id Suite) bool { return slices.Contains(a.Checks, id) }
 
-// saveAttachment records the started checks of a run on a machine.
+// attachmentOwner names the process that executes a run: its id and start time,
+// so a reused process id is not taken for it. Tests replace it.
+var attachmentOwner = func() (pid int, start uint64) {
+	pid = os.Getpid()
+	start, _ = procident.StartTime(pid)
+	return pid, start
+}
+
+// ownerAlive reports whether the process that owned a run still runs. Tests
+// replace it.
+var ownerAlive = func(pid int, start uint64) bool {
+	if pid <= 0 || !procident.Alive(pid) {
+		return false
+	}
+	got, err := procident.StartTime(pid)
+	return err != nil || got == start
+}
+
+// attachmentRow is one stored run record and its owner.
+type attachmentRow struct {
+	attachment
+	Repo, SHA, Node string
+	ownerPID        int
+	ownerStart      uint64
+	saved           time.Time
+}
+
+func (r attachmentRow) orphaned() bool {
+	return !ownerAlive(r.ownerPID, r.ownerStart) && resultClock().Sub(r.saved) <= attachmentTTL
+}
+
+// saveAttachment records the started checks of a run on a machine, owned by this
+// process.
 func (s Store) saveAttachment(ctx context.Context, repo, sha, node string, att attachment) error {
 	raw, err := json.Marshal(att)
 	if err != nil {
@@ -44,38 +75,40 @@ func (s Store) saveAttachment(ctx context.Context, repo, sha, node string, att a
 	if err != nil {
 		return err
 	}
+	pid, start := attachmentOwner()
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(ctx, attachmentSchema); err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_attachments(repo,sha,node,payload,saved_at) VALUES(?,?,?,?,?)
-ON CONFLICT(repo,sha,node) DO UPDATE SET payload=excluded.payload, saved_at=excluded.saved_at`, repo, sha, node, raw, resultClock().Unix())
+		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_attachments(repo,sha,node,run_id,payload,owner_pid,owner_start,saved_at) VALUES(?,?,?,?,?,?,?,?)
+ON CONFLICT(repo,sha,node,run_id) DO UPDATE SET payload=excluded.payload, owner_pid=excluded.owner_pid, owner_start=excluded.owner_start, saved_at=excluded.saved_at`, repo, sha, node, att.RunID, raw, pid, start, resultClock().Unix())
 		return err
 	})
 }
 
-// loadAttachment reads the checks a run left running on a machine. It returns
-// os.ErrNotExist when there is none, or when the record is older than the
-// machine keeps the run.
-func (s Store) loadAttachment(ctx context.Context, repo, sha, node string) (attachment, error) {
-	var att attachment
+// releaseAttachment hands a run's record over: the checks stay on the machine
+// and the next run of the commit may take the record.
+func (s Store) releaseAttachment(ctx context.Context, repo, sha, node, runID string) error {
+	return s.updateAttachments(ctx, sha, "UPDATE local_ci_attachments SET owner_pid=0, owner_start=0 WHERE repo=? AND sha=? AND node=? AND run_id=?", repo, sha, node, runID)
+}
+
+// deleteAttachment forgets a run's checks once the run ended for good.
+func (s Store) deleteAttachment(ctx context.Context, repo, sha, node, runID string) error {
+	return s.updateAttachments(ctx, sha, "DELETE FROM local_ci_attachments WHERE repo=? AND sha=? AND node=? AND run_id=?", repo, sha, node, runID)
+}
+
+func (s Store) updateAttachments(ctx context.Context, sha, query string, args ...any) error {
 	db, err := s.open()
 	if err != nil {
-		return att, err
+		return err
 	}
-	var raw []byte
-	var saved int64
-	err = db.QueryRowContext(ctx, "SELECT payload, saved_at FROM local_ci_attachments WHERE repo=? AND sha=? AND node=?", repo, sha, node).Scan(&raw, &saved)
-	if errors.Is(err, sql.ErrNoRows) || isMissingAttachmentTable(err) {
-		return att, os.ErrNotExist
-	}
-	if err != nil {
-		return att, err
-	}
-	if resultClock().Sub(time.Unix(saved, 0)) > attachmentTTL {
-		return att, os.ErrNotExist
-	}
-	return att, json.Unmarshal(raw, &att)
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, query, args...)
+		if isMissingAttachmentTable(err) {
+			return nil
+		}
+		return err
+	})
 }
 
 // isMissingAttachmentTable reports the error of a database that has not
@@ -84,67 +117,117 @@ func isMissingAttachmentTable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "no such table: local_ci_attachments")
 }
 
-// deleteAttachment forgets a run's checks once the run ended for good.
-func (s Store) deleteAttachment(ctx context.Context, repo, sha, node string) error {
+// attachmentRows lists the records of a commit, newest first.
+func (s Store) attachmentRows(ctx context.Context, repo, sha string) ([]attachmentRow, error) {
 	db, err := s.open()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, "DELETE FROM local_ci_attachments WHERE repo=? AND sha=? AND node=?", repo, sha, node)
-		if isMissingAttachmentTable(err) {
-			return nil
+	rows, err := db.QueryContext(ctx, "SELECT node, payload, owner_pid, owner_start, saved_at FROM local_ci_attachments WHERE repo=? AND sha=? ORDER BY saved_at DESC", repo, sha)
+	if isMissingAttachmentTable(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []attachmentRow
+	for rows.Next() {
+		row := attachmentRow{Repo: repo, SHA: sha}
+		var raw []byte
+		var saved int64
+		if err := rows.Scan(&row.Node, &raw, &row.ownerPID, &row.ownerStart, &saved); err != nil {
+			rows.Close()
+			return nil, err
 		}
-		return err
-	})
+		row.saved = time.Unix(saved, 0)
+		if err := json.Unmarshal(raw, &row.attachment); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
 }
 
-// liveRuns holds the runs this engine is executing now, so a second run of the
-// same commit on the same machine leaves the first one's attachment alone.
-var liveRuns sync.Map
-
-// claimRun marks a run as live. It returns false when another run of this engine
-// already holds the key. The attachment of a run that is not live belongs to an
-// earlier engine, and the next run may take it over.
-func claimRun(key string) (release func(), claimed bool) {
-	if _, held := liveRuns.LoadOrStore(key, struct{}{}); held {
-		return func() {}, false
+// claimAttachment takes over the newest record of a commit on a machine whose run
+// has no live process, and returns it. It returns os.ErrNotExist when there is
+// none. A record of a run that another engine or command is executing is not
+// taken. The take-over is one conditional write, so two processes never both
+// win.
+func (s Store) claimAttachment(ctx context.Context, repo, sha, node string) (attachment, error) {
+	rows, err := s.attachmentRows(ctx, repo, sha)
+	if err != nil {
+		return attachment{}, err
 	}
-	return func() { liveRuns.Delete(key) }, true
+	db, err := s.open()
+	if err != nil {
+		return attachment{}, err
+	}
+	pid, start := attachmentOwner()
+	for _, row := range rows {
+		if row.Node != node || !row.orphaned() {
+			continue
+		}
+		taken := false
+		err := state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
+			res, err := conn.ExecContext(ctx, "UPDATE local_ci_attachments SET owner_pid=?, owner_start=?, saved_at=? WHERE repo=? AND sha=? AND node=? AND run_id=? AND owner_pid=? AND owner_start=?",
+				pid, start, resultClock().Unix(), repo, sha, node, row.RunID, row.ownerPID, row.ownerStart)
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			taken = n == 1
+			return nil
+		})
+		if err != nil {
+			return attachment{}, err
+		}
+		if taken {
+			return row.attachment, nil
+		}
+	}
+	return attachment{}, os.ErrNotExist
 }
 
 // AttachedNode names the machine that still holds checks of an earlier engine for
 // this commit, so the scheduler places the run there. It returns an empty name
-// when there is none.
+// when there is none. A record whose run another process executes is not a
+// candidate.
 func (s Store) AttachedNode(ctx context.Context, repo, sha string) (string, error) {
-	db, err := s.open()
+	rows, err := s.attachmentRows(ctx, repo, sha)
 	if err != nil {
 		return "", err
 	}
-	var node string
-	err = db.QueryRowContext(ctx, "SELECT node FROM local_ci_attachments WHERE repo=? AND sha=? AND saved_at>=? ORDER BY saved_at DESC LIMIT 1", repo, sha, resultClock().Add(-attachmentTTL).Unix()).Scan(&node)
-	if errors.Is(err, sql.ErrNoRows) || isMissingAttachmentTable(err) {
-		return "", nil
+	for _, row := range rows {
+		if row.orphaned() {
+			return row.Node, nil
+		}
 	}
-	return node, err
+	return "", nil
 }
 
 // resumeRun finds the checks an earlier engine left on this machine for the same
-// commit. It asks the machine once. A check that was recorded but never
-// launched has no folder and starts afresh in the resumed run. When every
-// launched check still has a unit or an exit record, the run reattaches to them.
-// When one is gone, such as after a reboot, the run cannot be followed: every
-// recorded unit is stopped, the folder is removed, the record is forgotten, and
-// the run starts afresh. A machine that does not answer fails the run with the
-// ssh-drop cause, and the record stays for the next try.
-func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha string, checks []nodeCheck) (*attachment, error) {
-	att, err := store.loadAttachment(ctx, repo, sha, r.Node.Name)
+// commit and takes the record over. It asks the machine once. A check that was
+// recorded but never launched has no folder and starts afresh in the resumed
+// run. When every launched check still has a unit or an exit record, the run
+// reattaches to them. When one is gone, such as after a reboot, the run cannot be
+// followed: everything it left on the machine is torn down first, and only when
+// that succeeds are the folder and the record removed and the run started afresh.
+// A machine that does not answer fails the run with the ssh-drop cause, and the
+// record stays for the next try.
+func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache string, checks []nodeCheck) (*attachment, error) {
+	att, err := store.claimAttachment(ctx, repo, sha, r.Node.Name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		log.Printf("local CI %s: read started checks: %v", r.Node.Name, err)
 		return nil, nil
+	}
+	giveBack := func() {
+		if e := store.releaseAttachment(context.WithoutCancel(ctx), repo, sha, r.Node.Name, att.RunID); e != nil {
+			log.Printf("local CI %s: hand back started checks: %v", r.Node.Name, e)
+		}
 	}
 	base := cacheBase(r.Node.Name)
 	runDir := path.Join(base, "runs", att.RunID)
@@ -159,6 +242,7 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha string, ch
 	if !stale {
 		frames, err := r.pollNode(ctx, batch)
 		if err != nil {
+			giveBack()
 			return nil, fmt.Errorf("reattach to the run of %s on %s: %w", sha[:12], r.Node.Name, err)
 		}
 		launched := attachment{RunID: att.RunID}
@@ -178,17 +262,29 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha string, ch
 	if !stale {
 		return &att, nil
 	}
-	// Stop every recorded unit before the folder goes: a sibling that still runs
-	// must not lose its workspace and its cache protection underneath it. The
-	// run's keeper removes the folder when its own lifetime ends; the removal here
-	// only speeds that up.
-	var script string
+	// Tear down everything the old run left, containers and host scopes included,
+	// and remove the folder only after that worked: a sibling that still runs must
+	// not lose its workspace and its cache protection underneath it. The run's
+	// keeper removes the folder when its own lifetime ends; the removal here only
+	// speeds that up.
+	var recorded []nodeCheck
 	for _, w := range batch {
-		script += "bash -c " + shellquote.Quote(detachedStopScript) + " dyna-ci " + shellquote.Quote(w.spec.Dir) + " " + shellquote.Quote(w.spec.Unit) + " || true; "
+		if i := slices.IndexFunc(checks, func(c nodeCheck) bool { return c.id == w.spec.ID }); i >= 0 {
+			recorded = append(recorded, checks[i])
+		} else {
+			recorded = append(recorded, nodeCheck{id: w.spec.ID})
+		}
 	}
 	var out tailBuffer
-	_ = r.nodeCommand(ctx, &out, &out, script+removeRunDir(base, path.Join(runDir, ".active")))
-	if err := store.deleteAttachment(ctx, repo, sha, r.Node.Name); err != nil {
+	if e := r.nodeCommand(ctx, &out, &out, teardownScript(*r.Node, cache, runDir, att.RunID, recorded)); e != nil {
+		giveBack()
+		return nil, fmt.Errorf("stop the checks of the old run on %s: %w: %s", r.Node.Name, e, out.String())
+	}
+	if e := r.nodeCommand(ctx, &out, &out, removeRunDir(base, path.Join(runDir, ".active"))); e != nil {
+		giveBack()
+		return nil, fmt.Errorf("remove the old run on %s: %w: %s", r.Node.Name, e, out.String())
+	}
+	if err := store.deleteAttachment(ctx, repo, sha, r.Node.Name, att.RunID); err != nil {
 		log.Printf("local CI %s: forget started checks: %v", r.Node.Name, err)
 	}
 	return nil, nil

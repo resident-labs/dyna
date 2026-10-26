@@ -2,8 +2,10 @@ package localci
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -141,9 +143,12 @@ func TestConcurrentRunOfTheSameCommitLeavesTheLiveRunAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	att, err := store.loadAttachment(t.Context(), key, strings.Repeat("a", 40), "pve")
-	if err != nil || len(att.Checks) != 1 {
-		t.Fatalf("the live run's record = %+v, %v", att, err)
+	rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40))
+	if err != nil || len(rows) != 2 || len(rows[0].Checks) != 1 || len(rows[1].Checks) != 1 {
+		t.Fatalf("records = %+v, %v, want one untouched record for each live run", rows, err)
+	}
+	if rows[0].RunID == rows[1].RunID || rows[0].orphaned() || rows[1].orphaned() {
+		t.Fatalf("the runs share a record or lost their owner: %+v", rows)
 	}
 	if got := f.machine.stopCount(); got != 0 {
 		t.Fatalf("the second run stopped %d checks of the first", got)
@@ -164,11 +169,11 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	if err != nil || len(checks) < 2 {
 		t.Fatalf("checks = %d, %v", len(checks), err)
 	}
-	var removed []string
+	var scripts []string
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 2, Enabled: true}}
 	machine := newFakeMachine(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
-		if script, _, ok := decodeNodeScript(name, args); ok && strings.Contains(script, "rm -rf --one-file-system") {
-			removed = append(removed, script)
+		if script, _, ok := decodeNodeScript(name, args); ok && (strings.Contains(script, "worktree prune") || strings.Contains(script, "rm -rf --one-file-system")) {
+			scripts = append(scripts, script)
 		}
 		return nil
 	})
@@ -183,25 +188,37 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{first, second}}); err != nil {
 		t.Fatal(err)
 	}
+	// The run's own process is alive, so no other run may take its record.
+	if att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); err != nil || att != nil {
+		t.Fatalf("a live run's record was taken: %+v, %v", att, err)
+	}
+	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
+		t.Fatal(err)
+	}
 	// Only the second check was launched.
 	if err := runner.startDetached(t.Context(), spec(second)); err != nil {
 		t.Fatal(err)
 	}
-	att, err := runner.resumeRun(t.Context(), store, repo, sha, checks)
+	att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks)
 	if err != nil || att == nil || len(att.Checks) != 1 || att.Checks[0] != second {
 		t.Fatalf("resume = %+v, %v, want only the launched check", att, err)
 	}
-	// Now the launched check vanishes, as after a reboot.
+	// The first resumed run ends without finishing, and the launched check
+	// vanishes, as after a reboot.
+	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
+		t.Fatal(err)
+	}
 	machine.vanish(spec(second).Dir)
-	att, err = runner.resumeRun(t.Context(), store, repo, sha, checks)
+	att, err = runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks)
 	if err != nil || att != nil {
 		t.Fatalf("resume = %+v, %v, want a fresh run", att, err)
 	}
-	if len(removed) != 1 || !strings.Contains(removed[0], spec(first).Dir) || !strings.Contains(removed[0], spec(second).Dir) || strings.Index(removed[0], detachedStopScript) > strings.Index(removed[0], "rm -rf --one-file-system") {
-		t.Fatalf("cleanup = %q, want every recorded unit stopped before the folder goes", removed)
+	// Teardown of every recorded check comes first, then the folder goes.
+	if len(scripts) != 2 || !strings.Contains(scripts[0], spec(first).Dir) || !strings.Contains(scripts[0], spec(second).Dir) || !strings.Contains(scripts[0], ".scope") || !strings.Contains(scripts[1], "rm -rf --one-file-system") {
+		t.Fatalf("cleanup = %q, want every recorded unit and scope stopped before the folder goes", scripts)
 	}
-	if _, err := store.loadAttachment(t.Context(), repo, sha, "pve"); err == nil {
-		t.Fatal("the unusable record was kept")
+	if rows, _ := store.attachmentRows(t.Context(), repo, sha); len(rows) != 0 {
+		t.Fatalf("the unusable record was kept: %+v", rows)
 	}
 }
 
@@ -215,7 +232,86 @@ func TestAttachedNodeNamesTheMachineThatHoldsTheChecks(t *testing.T) {
 	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{SuiteGoStatic}}); err != nil {
 		t.Fatal(err)
 	}
+	// A record whose run is alive is not a candidate: that run is executing.
+	if node, err := store.AttachedNode(t.Context(), repo, sha); err != nil || node != "" {
+		t.Fatalf("with a live run: %q %v", node, err)
+	}
+	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
+		t.Fatal(err)
+	}
 	if node, err := store.AttachedNode(t.Context(), repo, sha); err != nil || node != "pve" {
-		t.Fatalf("with a record: %q %v", node, err)
+		t.Fatalf("with an orphaned record: %q %v", node, err)
+	}
+}
+
+// Another process, such as a dyna git ci run command, may share the database with
+// the engine. A record is taken over only when the process that owns it is gone,
+// and only one process wins it.
+func TestAttachmentIsTakenOnlyFromADeadOwner(t *testing.T) {
+	previousOwner, previousAlive := attachmentOwner, ownerAlive
+	t.Cleanup(func() { attachmentOwner, ownerAlive = previousOwner, previousAlive })
+	live := map[int]bool{11: true, 22: true}
+	ownerAlive = func(pid int, _ uint64) bool { return live[pid] }
+	store := Store{DataDir: t.TempDir()}
+	repo, sha := "/repo", strings.Repeat("a", 40)
+	attachmentOwner = func() (int, uint64) { return 11, 1 }
+	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{SuiteGoStatic}}); err != nil {
+		t.Fatal(err)
+	}
+	attachmentOwner = func() (int, uint64) { return 22, 1 }
+	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a command took the record of a live engine: %v", err)
+	}
+	live[11] = false
+	att, err := store.claimAttachment(t.Context(), repo, sha, "pve")
+	if err != nil || att.RunID != "r1" {
+		t.Fatalf("claim after the engine died: %+v, %v", att, err)
+	}
+	// A third process finds the record owned by a live one.
+	attachmentOwner = func() (int, uint64) { return 33, 1 }
+	live[33] = true
+	if _, err := store.claimAttachment(t.Context(), repo, sha, "pve"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a record was taken twice: %v", err)
+	}
+}
+
+// A teardown that fails leaves the folder and the record in place, so the
+// survivors of the old run are not orphaned.
+func TestResumeRunKeepsTheRecordWhenTeardownFails(t *testing.T) {
+	checks, _, err := nodeChecks(testDynaDefinition(t), []Suite{SuiteGoStatic}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var removals int
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 1, Enabled: true}}
+	machine := newFakeMachine(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
+		script, _, _ := decodeNodeScript(name, args)
+		switch {
+		case strings.Contains(script, "worktree prune"):
+			return exitError(t, 69)
+		case strings.Contains(script, "rm -rf --one-file-system"):
+			removals++
+		}
+		return nil
+	})
+	machine.attach(&runner)
+	store := Store{DataDir: runner.DataDir}
+	repo, sha := "/repo", strings.Repeat("a", 40)
+	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{checks[0].id}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
+		t.Fatal(err)
+	}
+	// The recorded check has no unit on the machine, so the run is unusable.
+	machine.vanish("none")
+	if _, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); err == nil {
+		t.Fatal("a failed teardown was not reported")
+	}
+	if removals != 0 {
+		t.Fatal("the folder was removed although the teardown failed")
+	}
+	if node, _ := store.AttachedNode(t.Context(), repo, sha); node != "pve" {
+		t.Fatal("the record was dropped although the teardown failed")
 	}
 }

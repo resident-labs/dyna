@@ -477,16 +477,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if err != nil {
 		return result, err
 	}
-	// Only the first run of a commit on this machine follows the attachment; a
-	// second, concurrent run leaves it, and the live run it belongs to, alone.
-	releaseRun, owner := claimRun(attachKey + "|" + sha + "|" + node.Name)
-	defer releaseRun()
-	var resume *attachment
-	if owner {
-		resume, err = r.resumeRun(ctx, localStore, attachKey, sha, checks)
-		if err != nil {
-			return result, err
-		}
+	// The run takes over only a record whose run has no live process, so it never
+	// touches the record of a run that another engine or command is executing.
+	resume, err := r.resumeRun(ctx, localStore, attachKey, sha, cache, checks)
+	if err != nil {
+		return result, err
 	}
 	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
 	if resume != nil {
@@ -534,10 +529,16 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		attached = *resume
 	}
 	defer func() {
-		if EngineStopping() || !owner {
+		background := context.WithoutCancel(ctx)
+		if EngineStopping() {
+			// The checks stay on the machine, and the record passes to whoever runs
+			// the commit next.
+			if e := localStore.releaseAttachment(background, attachKey, sha, node.Name, runID); e != nil {
+				log.Printf("local CI %s: hand over started checks: %v", node.Name, e)
+			}
 			return
 		}
-		if e := localStore.deleteAttachment(context.WithoutCancel(ctx), attachKey, sha, node.Name); e != nil {
+		if e := localStore.deleteAttachment(background, attachKey, sha, node.Name, runID); e != nil {
 			log.Printf("local CI %s: forget started checks: %v", node.Name, e)
 		}
 	}()
@@ -589,30 +590,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
 		var log tailBuffer
-		// Stop daemon-owned containers before scopes, so a scope keeps its slot
-		// until its container has stopped, including after a lost SSH client.
-		script := "set -e; docker=(docker); "
-		if node.SSH == "" {
-			script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
-		}
-		for _, check := range checks {
-			name := "dyna-ci-" + runID + "-" + string(check.id)
-			if check.image != "" {
-				script += `timeout 20s "${docker[@]}" rm -f ` + shellquote.Quote(name) + " >/dev/null 2>&1 || true; "
-			}
-			if check.image != "" {
-				script += `if [ "$(timeout 10s "${docker[@]}" inspect -f '{{.State.Running}}' ` + shellquote.Quote(name) + ` 2>/dev/null)" = true ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
-			}
-			script += "timeout 10s systemctl --user stop " + shellquote.Quote(name+".scope") + " >/dev/null 2>&1 || true; "
-			// The check's detached unit goes last: a check that ended on its own has
-			// nothing left to stop, and one that a lost poll left behind dies here.
-			script += "bash -c " + shellquote.Quote(detachedStopScript) + " dyna-ci " + shellquote.Quote(detachedDir(runDir, check.id)) + " " + shellquote.Quote(checkUnit(runID, check.id)) + " || true; "
-			script += "git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
-		}
-		// The run directory itself is left to the removal defer, which stops the
-		// run's keeper first: deleting the directory here would take the keeper's
-		// process ID away before anything could stop it.
-		script += "git --git-dir=" + shellquote.Quote(cache) + " worktree prune"
+		script := teardownScript(node, cache, runDir, runID, checks)
 		if e := r.nodeCommand(cleanup, &log, &log, script); e != nil {
 			err = errors.Join(err, fmt.Errorf("cleanup node: %w: %s", e, log.String()))
 		}
@@ -652,9 +630,6 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	defer stopPoller()
 	var attachedMu sync.Mutex
 	poller.started = func(spec detachSpec) {
-		if !owner {
-			return
-		}
 		attachedMu.Lock()
 		defer attachedMu.Unlock()
 		attached.Checks = append(attached.Checks, spec.ID)
@@ -1206,6 +1181,32 @@ func combinedStatus(a, b Outcome) Outcome {
 	return OutcomePassed
 }
 
+// teardownScript stops what a run's checks left on the machine, without removing
+// the run folder: the containers first, so a scope keeps its slot until its
+// container has stopped, then each check's scope and detached unit, then the
+// worktrees. It fails when a container is still running afterwards. The run
+// folder is left to the removal that stops the run's keeper first: deleting it
+// here would take the keeper's process ID away before anything could stop it.
+func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) string {
+	script := "set -e; docker=(docker); "
+	if node.SSH == "" {
+		script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
+	}
+	for _, check := range checks {
+		name := "dyna-ci-" + runID + "-" + string(check.id)
+		if check.image != "" {
+			script += `timeout 20s "${docker[@]}" rm -f ` + shellquote.Quote(name) + " >/dev/null 2>&1 || true; "
+			script += `if [ "$(timeout 10s "${docker[@]}" inspect -f '{{.State.Running}}' ` + shellquote.Quote(name) + ` 2>/dev/null)" = true ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
+		}
+		script += "timeout 10s systemctl --user stop " + shellquote.Quote(name+".scope") + " >/dev/null 2>&1 || true; "
+		// The check's detached unit goes last: a check that ended on its own has
+		// nothing left to stop, and one that a lost poll left behind dies here.
+		script += "bash -c " + shellquote.Quote(detachedStopScript) + " dyna-ci " + shellquote.Quote(detachedDir(runDir, check.id)) + " " + shellquote.Quote(checkUnit(runID, check.id)) + " || true; "
+		script += "git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
+	}
+	return script + "git --git-dir=" + shellquote.Quote(cache) + " worktree prune"
+}
+
 // nodeSetupScript prepares one run on its node. The prepare stage repairs a
 // linked go-build or go-mod path under the exclusive cache lock, before the run
 // takes its ordinary shared lock, and refuses any remaining unsafe link. A run
@@ -1298,9 +1299,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	} else {
 		cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
 	}
-	// The exit markers go straight to the log the detached wrapper keeps, past the
-	// limit it puts on the check's output. Without that log they go to the output.
-	emit := `emit() { if [ -n "${DYNA_CI_LOG:-}" ]; then cat >> "$DYNA_CI_LOG"; else cat; fi; }; `
+	// The exit markers go to the trailer file the detached wrapper appends to the
+	// log after the output has drained, past the limit it puts on the output.
+	// Without that file they go to the output.
+	emit := `emit() { if [ -n "${DYNA_CI_TRAILER:-}" ]; then cat >> "$DYNA_CI_TRAILER"; else cat; fi; }; `
 	setup := emit + noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
 	if check.job != nil {
 		// The checkout is a branch, not a detached commit: act copies the

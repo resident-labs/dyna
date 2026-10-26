@@ -116,12 +116,16 @@ func TestNodeLogIsBounded(t *testing.T) {
 	dir := t.TempDir()
 	stubs := nodeStubs(t)
 	detached := filepath.Join(dir, "check", "detached")
-	if err := startOnShell(t, stubs, detached, "head -c 100000 /dev/zero | tr '\\0' x; echo; exit 0\n", "DYNA_CI_LOG_CAP=100"); err != nil {
+	if err := startOnShell(t, stubs, detached, "head -c 100000 /dev/zero | tr '\\0' x; echo; echo DYNA_CI_CHECK_EXIT=0 >> \"$DYNA_CI_TRAILER\"; exit 0\n", "DYNA_CI_LOG_CAP=100"); err != nil {
 		t.Fatal(err)
 	}
 	log, _ := os.ReadFile(filepath.Join(detached, "log"))
 	if len(log) > 300 || !strings.Contains(string(log), "discarded on the node") {
 		t.Fatalf("log = %d bytes, want a short log that names the discarded output: %q", len(log), log)
+	}
+	// The completion marker is the end of the log, whatever the output did.
+	if !strings.HasSuffix(string(log), "DYNA_CI_CHECK_EXIT=0\n") {
+		t.Fatalf("the log does not end with the completion marker: %q", log)
 	}
 	if record, err := os.ReadFile(filepath.Join(detached, "exit.json")); err != nil || !strings.Contains(string(record), `"exitCode":0`) {
 		t.Fatalf("exit record = %q %v", record, err)
