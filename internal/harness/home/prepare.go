@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -130,6 +131,9 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	// session keeps its settings, and a tool's write is never lost to a rewrite.
 	writable := filepath.Join(Home(nativeScope), ".dyna-gitconfig-"+filepath.Base(publication))
 	if err := createWritableGitConfig(writable, filepath.Join(publication, "gitconfig")); err != nil {
+		return nil, err
+	}
+	if err := syncToolSettings(writable); err != nil {
 		return nil, err
 	}
 	out["GIT_CONFIG_GLOBAL"] = writable
@@ -406,34 +410,75 @@ func gitConfigHeader(published string) string {
 	return "[include]\n\tpath = " + gitQuote(published) + "\n"
 }
 
-// earlierToolSettings returns what tools wrote to the newest other writable
-// config in dir: its text after the include lines that Prepare put first.
-func earlierToolSettings(dir, self string) string {
+// syncToolSettings adds to the writable config at self each setting that a tool
+// wrote to the config of another publication, oldest config first so the newest
+// value stays last. Settings are copied, not included: includes nest at most ten
+// deep, and a running session's include must not change. Git's own lock covers
+// the write, so a tool writing at the same time is not lost. Writers on two
+// publications at once see each other's setting from their next launch.
+func syncToolSettings(self string) error {
+	dir := filepath.Dir(self)
 	matches, _ := filepath.Glob(filepath.Join(dir, ".dyna-gitconfig-*"))
-	newest, newestTime := "", time.Time{}
+	type other struct {
+		path string
+		at   time.Time
+	}
+	var others []other
 	for _, match := range matches {
 		info, err := os.Lstat(match)
 		if match == self || err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		if newest == "" || info.ModTime().After(newestTime) {
-			newest, newestTime = match, info.ModTime()
+		others = append(others, other{match, info.ModTime()})
+	}
+	sort.Slice(others, func(i, j int) bool { return others[i].at.Before(others[j].at) })
+	have, err := fileSettings(self)
+	if err != nil {
+		return err
+	}
+	for _, o := range others {
+		settings, err := fileSettings(o.path)
+		if err != nil {
+			return err
+		}
+		for _, entry := range settings {
+			if slices.Contains(have, entry) {
+				continue
+			}
+			key, value, _ := strings.Cut(entry, "\n")
+			if out, err := gitFile(self, "--add", key, value); err != nil {
+				return fmt.Errorf("copy Git setting %s: %w: %s", key, err, out)
+			}
+			have = append(have, entry)
 		}
 	}
-	if newest == "" {
-		return ""
-	}
-	data, err := os.ReadFile(newest)
+	return nil
+}
+
+// fileSettings lists the settings written directly in a config file as
+// "key\nvalue" entries, without the include lines Prepare put there.
+func fileSettings(path string) ([]string, error) {
+	out, err := gitFile(path, "--null", "--list")
 	if err != nil {
-		return ""
+		return nil, fmt.Errorf("read Git settings of %s: %w", path, err)
 	}
-	text := string(data)
-	if !strings.HasPrefix(text, "[include]\n\tpath = ") {
-		return text
+	var entries []string
+	for _, record := range strings.Split(out, "\x00") {
+		key, _, _ := strings.Cut(record, "\n")
+		if record == "" || strings.EqualFold(key, "include.path") {
+			continue
+		}
+		entries = append(entries, record)
 	}
-	_, rest, _ := strings.Cut(text, "\n")
-	_, rest, _ = strings.Cut(rest, "\n")
-	return rest
+	return entries, nil
+}
+
+// gitFile runs git config on one file with a clean environment.
+func gitFile(path string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"config", "--file", path}, args...)...)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "HOME=" + os.DevNull}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 // createWritableGitConfig creates path as a Git config that includes the
@@ -455,10 +500,7 @@ func createWritableGitConfig(path, published string) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	// A tool's earlier writes carry over from the most recently written config of
-	// another publication, so a changed PATH does not drop `gh auth setup-git`.
-	// They are copied, not included: includes nest at most ten deep.
-	_, err = tmp.WriteString(gitConfigHeader(published) + earlierToolSettings(dir, path))
+	_, err = tmp.WriteString(gitConfigHeader(published))
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
