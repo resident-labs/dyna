@@ -5,12 +5,12 @@ import "dyna-agent/internal/pr/state"
 // IssueFixes maps a room issue number to the open PR that closes it on merge.
 // A closed or merged PR no longer fixes an issue, so only open changes count.
 func (s *Service) IssueFixes(roomID string) (map[int]int, error) {
-	st, err := s.Watcher().Store.Read()
+	records, err := s.Watcher().Store.OpenRecordsInRoom(roomID)
 	if err != nil {
 		return nil, err
 	}
 	out := map[int]int{}
-	for _, r := range st.Records {
+	for _, r := range records {
 		if r.RoomID != roomID || r.State != "open" || r.Number == 0 {
 			continue
 		}
