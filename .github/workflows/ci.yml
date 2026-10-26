@@ -80,8 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -108,12 +108,12 @@ jobs:
       - name: Report the cache size
         # A jump here is what makes a restore slow again, so the size is visible
         # in the run that saved it.
-        run: du -sh /root/.cache/go-build /go/pkg/mod
+        run: du -sh /home/runner/.cache/go-build /home/runner/go/pkg/mod
       - uses: actions/cache/save@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
 
   # Go tests run in parallel shards balanced by measured package time (see
@@ -132,8 +132,8 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
       CI_SHARD: ${{ matrix.shard }}/8
       # The slowest package, internal/pr/watch, is split across shards 0 and 7.
       CI_SLICE: ${{ matrix.shard == 0 && '0/2' || matrix.shard == 7 && '1/2' || '' }}
@@ -152,8 +152,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
       # go test pipes its results through the checker.
@@ -199,8 +199,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -216,8 +216,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
       - name: Install shellcheck
@@ -248,8 +248,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -265,8 +265,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
       - name: Build CI checker
