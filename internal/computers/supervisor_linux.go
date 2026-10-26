@@ -433,6 +433,7 @@ func (s *supervisor) start() error {
 		}
 		if desktop != nil {
 			desktop.bus.stop()
+			removeBusSocket(s.meta.SessionID)
 			desktop.process.stop()
 		}
 		s.mu.Lock()
@@ -545,8 +546,8 @@ func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desk
 // backend start on this bus by activation, from the bus's environment, which
 // names the private display. A failure leaves the computer working as before.
 func (s *supervisor) startBus(ctx context.Context, d *desktop, env []string) {
-	path := filepath.Join(RuntimeDir(s.meta.SessionID), "bus")
-	_ = os.Remove(path)
+	path := BusSocket(s.meta.SessionID)
+	removeBusSocket(s.meta.SessionID)
 	address := "unix:path=" + path
 	p, err := startProcess(busEnvironment(env, address), filepath.Join(Dir(s.meta.SessionID), "dbus.log"), busCommand(address)...)
 	if err != nil {
@@ -559,6 +560,10 @@ func (s *supervisor) startBus(ctx context.Context, d *desktop, env []string) {
 	}
 	d.bus, d.busAddress = p, address
 }
+
+// removeBusSocket deletes a computer's bus socket, left behind when its bus
+// stops, so a stopped computer's apps do not get a dead address.
+func removeBusSocket(id string) { _ = os.Remove(BusSocket(id)) }
 
 // busCommand is the private session bus: a session bus on a socket in the
 // computer's runtime directory, in the foreground so the computer owns it.
@@ -681,6 +686,8 @@ func (s *supervisor) stop() error {
 	}
 	saveCancel()
 	s.bus.stop()
+	// A stopped computer has no bus; apps launched meanwhile keep their own.
+	removeBusSocket(s.meta.SessionID)
 	s.bus, s.busAddress = nil, ""
 	s.compositor.stop()
 	s.compositor = nil
