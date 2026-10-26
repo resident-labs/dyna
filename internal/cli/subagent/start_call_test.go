@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/roomsvc"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
@@ -74,6 +77,9 @@ func TestStartCallsTheEngine(t *testing.T) {
 			}
 		}
 	}
+	if !runstore.IsSessionDirID(got.ID) {
+		t.Fatalf("StartSubagent got session ID %q, want the caller's ID for a late answer", got.ID)
+	}
 	if room != work.ID || got.Task != "Do the task." || got.Goal != "Finish the test task" || got.Profile != "mock" || got.Name != "kid" || got.Cwd != cwd || got.Dir != "" || len(got.Fixes) != 2 || got.Fixes[0] != 35 || got.Fixes[1] != 40 {
 		t.Fatalf("StartSubagent got room %q and %+v; want room %s, the brief text and cwd %s", room, got, work.ID, cwd)
 	}
@@ -113,5 +119,27 @@ func TestStartPreservesEngineDuplicateNameError(t *testing.T) {
 	}
 	if sessions, err := m.Store.ListSnapshot(true); err != nil || len(sessions) != 1 || sessions[0].ID != existing.ID {
 		t.Fatalf("rejected start changed sessions: %+v, %v", sessions, err)
+	}
+}
+
+// A StartSubagent answer that arrives late still reports the session the
+// engine created, so a caller does not start a duplicate.
+func TestLateStartReportsTheCreatedSession(t *testing.T) {
+	storetest.Isolate(t)
+	m := subagent.NewManager()
+	work := workRoom(t, m)
+	id := subagent.NewID()
+	recordtest.Write(t, m.Store.Root, id, subagent.Meta{ID: id, Name: "kid", Room: work.Name, RoomID: work.ID, Goal: "g8", Created: time.Now()})
+	var stderr bytes.Buffer
+	info, ok := lateStart(m, id, callspec.Late("StartSubagent", 5*time.Second), &stderr)
+	if !ok || info.ID != id || info.Address() != work.Name+":kid" {
+		t.Fatalf("late start = %+v, %v; want the created session", info, ok)
+	}
+	if !strings.Contains(stderr.String(), "answered StartSubagent late") {
+		t.Fatalf("notice = %q", stderr.String())
+	}
+	// Any other failure is not a late answer.
+	if _, ok := lateStart(m, id, errors.New("socket closed"), &stderr); ok {
+		t.Fatal("a plain failure was reported as a late start")
 	}
 }
