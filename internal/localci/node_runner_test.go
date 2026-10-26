@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -890,4 +891,46 @@ func TestHostCheckScriptKeepsTheCheckInTheWrapperProcessGroup(t *testing.T) {
 		return
 	}
 	t.Fatal("the definition has no host check")
+}
+
+// The slot lock belongs to the wrapper. A check can start a daemon that leaves
+// the session and outlives it, as sccache does, and such a daemon must not
+// inherit fd 9: otherwise it keeps the slot for good and later checks wait for
+// a lock nobody will release.
+func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"docker", "git"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(dir, "daemon.pid")
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: "setsid sleep 30 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; exit 0"}
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, inner))
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("check: %v: %s", err, output)
+	}
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("daemon not started: %v", err)
+	}
+	pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+	if convErr != nil {
+		t.Fatal(convErr)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	// The daemon is still running, and the slot must already be free.
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("daemon %d did not survive its check: %v", pid, err)
+	}
+	lock := filepath.Join(dir, "slots", "0.lock")
+	if output, err := exec.Command("flock", "-n", lock, "true").CombinedOutput(); err != nil {
+		t.Fatalf("the daemon kept the slot lock: %v: %s", err, output)
+	}
 }

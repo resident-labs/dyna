@@ -1056,7 +1056,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		// timeout otherwise moves it into a new one, and the runner's cleanup of
 		// a leftover pipe holder kills the wrapper's group by its id.
 		setup += fmt.Sprintf("check_entered=1; timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
-		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner)
+		// The check and everything it starts get no slot lock: the wrapper holds
+		// fd 9, and a daemon the check leaves behind (sccache daemonises into its
+		// own session) would otherwise keep the slot for good.
+		setup += hostEnvironment(environment) + " bash -o pipefail -c " + q(check.inner) + " 9>&-"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if node.SSH == "" {
@@ -1095,7 +1098,8 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	}
 	args += dockerEnvironment(environment) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) " + q(check.image)
 	// Both host and container deadlines survive a disconnected SSH client.
-	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
+	// The container's command gets no slot lock either, for the same reason.
+	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner) + " 9>&-"
 	return nodeSlotScript(base, node.Slots, index, setup)
 }
 
