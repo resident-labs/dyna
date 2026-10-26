@@ -436,7 +436,7 @@ func (s *Store) status(in Info) Info {
 	switch {
 	case in.Exit != nil:
 		in.Status = "exited"
-	case in.SupervisorAlive():
+	case in.SupervisorAlive() && s.sameSupervisor(in):
 		in.Status = "running"
 	case in.Supervisor == 0 && (time.Since(in.Started) < 10*time.Second || s.launchedSupervisor(in.ID) > 0):
 		// A live supervisor that has not recorded itself yet may be waiting
@@ -452,6 +452,17 @@ func (s *Store) status(in Info) Info {
 		}
 	}
 	return in
+}
+
+// sameSupervisor reports whether the process at the recorded supervisor PID
+// is the supervisor, not another process that reused the number (D-201). A
+// record or system without a start time keeps the plain PID probe.
+func (s *Store) sameSupervisor(in Info) bool {
+	if in.SupervisorStartTime == 0 {
+		return true
+	}
+	now, err := s.processStartTime(in.Supervisor)
+	return err != nil || now == 0 || now == in.SupervisorStartTime
 }
 
 // SupervisorAlive reports whether the job's recorded supervisor still runs.
@@ -657,6 +668,21 @@ func (s *Store) Stop(id, by string) (Info, error) {
 		}
 		in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
 		return in, err
+	}
+	if in.Status == "lost" {
+		// The supervisor died, but the command and its children may run on.
+		// Only processes stamped with this job's ID are ours to end (D-190).
+		logErr := s.logStop(id, "supervisor is gone; sending SIGKILL to the job's processes")
+		found, err := stopOrphans(id)
+		if err != nil {
+			return in, errors.Join(logErr, err)
+		}
+		if !found {
+			return in, logErr
+		}
+		in.Exit = &Exit{Code: -1, Signal: "terminated", Error: "supervisor lost; processes stopped", Ended: time.Now()}
+		in.Status = "exited"
+		return in, errors.Join(logErr, s.markStopped(id, by), s.Save(in.Meta, in.Exit))
 	}
 	if in.Status != "running" || in.Pid <= 0 {
 		return in, nil
