@@ -60,6 +60,10 @@ export interface MachineSummary {
   // allowHostChecks is an explicit opt-in by the owner, or by the root of a
   // room for that room, to repository commands outside containers.
   allowHostChecks: boolean
+  // rooms are the IDs of the rooms whose local CI this machine takes; absent
+  // means every room. suites limits the CI suites the same way.
+  rooms?: string[]
+  suites?: string[]
   // cpu is the machine's share of its cores in percent: live for this engine's
   // machine, and the last probe reading for a remote one.
   cpu?: number
