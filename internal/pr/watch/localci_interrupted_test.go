@@ -288,3 +288,52 @@ func TestMachineFailureRerunsOnTheSameMachineWhenNoOtherCanTakeIt(t *testing.T) 
 		t.Fatalf("the same-machine replacement = %+v, want hermeslab marked resumed", saved)
 	}
 }
+
+// An engine stop is replaced once. If that replacement then loses its SSH
+// connection, its retry is spent: with one eligible machine and no hosted
+// fallback the trial must fail with the cause, not wait for a retry that
+// admission will never start.
+func TestResumedReplacementThatLosesSSHFailsTheTrial(t *testing.T) {
+	resumed := stoppedRun()
+	resumed.Cause = localci.CauseSSHDrop
+	for i := range resumed.Checks {
+		resumed.Checks[i].Cause = localci.CauseSSHDrop
+	}
+	resumed.Resumed = true
+	if act := savedResultActionFor(resumed); act != settleSavedResult {
+		t.Fatalf("a resumed machine failure action = %v, want settleSavedResult", act)
+	}
+
+	definition := watchDynaDefinition(t)
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo",
+		Head: strings.Repeat("a", 40), Branch: "dyna/merge-trial/1", Watching: true, State: "open"}
+	plan := localCIPlan{execution: definition, required: definition, suites: definition.WorkflowSuites()}
+	obs := (&Service{}).registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, resumed, true, false)
+	if obs.Status != VerdictFailed {
+		t.Fatalf("resumed machine failure = %s (%s), want failed with the cause", obs.Status, obs.Reason)
+	}
+
+	// Admission agrees: one eligible machine, which is the one that failed, and
+	// nothing starts because the retry is spent.
+	e, record, dir, ci := localCIEnv(t)
+	repo, err := localci.CanonicalRepo(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := record.Head
+	saved := stoppedRun()
+	saved.Repo, saved.SHA, saved.Node, saved.Cause, saved.Resumed = repo, head, "hermeslab", localci.CauseSSHDrop, true
+	for i := range saved.Checks {
+		saved.Checks[i].Cause = localci.CauseSSHDrop
+	}
+	ci.results[head] = saved
+	ci.nodes = []localci.Node{{Name: "hermeslab", Slots: 4, Enabled: true}}
+	ci.started = make(chan struct{}, 1)
+	started, err := e.s.startRegisteredCI(t.Context(), registeredCIJob{record: record, head: head, branch: record.Branch, trial: true, wholeSuite: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started {
+		t.Fatal("a spent retry started another run")
+	}
+}
