@@ -78,6 +78,16 @@ func RestartPendingSince(dir string, started, now time.Time, window time.Duratio
 	return st.ModTime().After(started) && now.Sub(st.ModTime()) < window
 }
 
+// RestartPendingAt is when the install left the restart marker, which is when
+// the restart became pending.
+func RestartPendingAt(dir string) (time.Time, bool) {
+	st, err := os.Stat(filepath.Join(dir, RestartPending))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return st.ModTime(), true
+}
+
 func ClearRestartPending(dir string) error {
 	if err := os.Remove(filepath.Join(dir, RestartPending)); err != nil && !os.IsNotExist(err) {
 		return err
