@@ -62,7 +62,9 @@ type Values struct {
 	PRTrustedBots  []string
 	LocalLaneRepos []string
 	// DoctorCondition holds the thresholds of the doctor hook; empty uses the default.
-	DoctorCondition       string
+	DoctorCondition string
+	// AdmissionMode is off or observe.
+	AdmissionMode         AdmissionMode
 	LibraryEnabled        []string
 	LibraryProfile        string
 	LibrarySmellProfile   string
@@ -122,6 +124,7 @@ func Defaults() Values {
 		BrowserSaveBack:        true,
 		ComputersEnabled:       true,
 		SessionCheckInInterval: 15 * time.Minute,
+		AdmissionMode:          AdmissionObserve,
 		LibraryReadmeMaxLines:  DefaultLibraryReadmeMaxLines,
 		MaxCardBytes:           DefaultContentBytes,
 		MaxFileBytes:           DefaultContentBytes,
@@ -238,6 +241,9 @@ func Load(path string) (Values, error) {
 		return Values{}, err
 	}
 	if err := v.loadVoice(raw); err != nil {
+		return Values{}, err
+	}
+	if err := v.loadAdmission(raw); err != nil {
 		return Values{}, err
 	}
 	if err := v.loadDoctor(raw); err != nil {
@@ -434,6 +440,8 @@ func (v *Values) Set(key, value string) error {
 		v.fromFile[key] = true
 	case KeySessionCheckInInterval:
 		return v.setSession(key, value)
+	case KeyAdmissionMode:
+		return v.setAdmission(key, value)
 	case KeyDoctorCondition:
 		return v.setDoctor(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
@@ -544,6 +552,7 @@ func (v Values) Save() error {
 	v.saveBrowser(raw)
 	v.saveSessions(raw)
 	v.saveVoice(raw)
+	v.saveAdmission(raw)
 	v.saveDoctor(raw)
 	v.saveLibrary(raw)
 	content := nested(raw, "content")
