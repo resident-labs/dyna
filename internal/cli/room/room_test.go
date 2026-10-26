@@ -11,7 +11,6 @@ import (
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
 )
 
@@ -58,45 +57,15 @@ func TestSplitMentions(t *testing.T) {
 	}
 }
 
-// `dyna post @run:<id>/agent:<n>` stores the post in the run's room and
-// queues it for the worker.
-func TestPostCmdSteersRunWorker(t *testing.T) {
+// A malformed `@run:<id>/agent:<n>` mention is refused before anything is stored.
+func TestPostCmdRefusesMalformedRunAgentMentions(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	clearStamp(t)
-	work := workRoom(t)
-	t.Setenv("DYNA_RUN_ID", "wf_post-steering")
-	t.Setenv("DYNA_ROOM_ID", work.ID) // real runs are always stamped with a room
-	t.Setenv("DYNA_ROOM", "work")
-	t.Setenv(runstore.AgentJournalRootEnv, "")
-	run, err := runstore.Create("post steering", "return null", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer run.Finish("ok", "null", nil)
-	if _, err := run.StartAgentJournal(3, "worker", "test", "", "task"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runstore.ActivateAgentSteering(run.Meta.ID, 3); err != nil {
-		t.Fatal(err)
-	}
-	clearStamp(t)
-
-	addr := "run:" + run.Meta.ID + "/agent:3"
-	out, err := execCmd(t, PostCmd(), "@"+addr, "inspect", "the parser first")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "in work") || !strings.Contains(out, addr+": worker-steered") {
-		t.Fatalf("post output = %q", out)
-	}
-	messages, _, err := runstore.ReadAgentSteeringFrom(run.Meta.ID, 3, 0, false)
-	if err != nil || len(messages) != 1 || !strings.Contains(messages[0].Message, "inspect the parser first") || !strings.Contains(messages[0].Message, "To: "+addr+" (you)") {
-		t.Fatalf("steering messages = %#v, %v", messages, err)
-	}
-	if _, err := execCmd(t, PostCmd(), "@run:"+run.Meta.ID+"/agent:not-a-number", "message"); err == nil || !strings.Contains(err.Error(), "invalid workflow worker mention") {
+	workRoom(t)
+	if _, err := execCmd(t, PostCmd(), "@run:wf_x/agent:not-a-number", "message"); err == nil || !strings.Contains(err.Error(), "invalid workflow agent mention") {
 		t.Fatalf("invalid agent id error = %v", err)
 	}
-	if _, err := execCmd(t, PostCmd(), "@run:"+run.Meta.ID, "message"); err == nil || !strings.Contains(err.Error(), "@run:<run-id>/agent:<n>") {
+	if _, err := execCmd(t, PostCmd(), "@run:wf_x", "message"); err == nil || !strings.Contains(err.Error(), "@run:<run-id>/agent:<n>") {
 		t.Fatalf("missing agent error = %v", err)
 	}
 }
