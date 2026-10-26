@@ -168,7 +168,7 @@ but a runtime error can leave earlier actions applied.
 | `scroll` | `x`, `y`, `scroll_x`, `scroll_y`: integers from -3000 to 3000. |
 | `keypress` | `keys`: 1–12 key names. Pressed together and released in reverse order. Optional `hold_ms` (0–10000) sets how long they stay down; the default is 150 ms. |
 | `key_down` | `keys`: 1–12 key names. Presses them and keeps them held until `key_up`, a takeover, or the end of the batch. |
-| `key_up` | `keys`: the keys to release, in reverse order. Releasing a key that is not held does nothing. |
+| `key_up` | `keys`: the keys to release, in reverse order. List the same keys as the `key_down`, including `SHIFT`, because Shift changes the key names. Releasing a key that is not held does nothing. |
 | `type` | `text`: valid Unicode text. Maximum 10,000 characters across a batch. Optional `secret`: `true` keeps the text out of the event feed and log. |
 | `wait` | Waits one second. Maximum five per batch. |
 | `screenshot` | Captures at this point. Maximum ten per batch. |

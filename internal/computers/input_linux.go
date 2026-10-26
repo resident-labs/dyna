@@ -342,10 +342,7 @@ func isShortcut(a Action) bool {
 
 func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *virtualKeyboard) (err error) {
 	kind := actionType(a)
-	keys, _ := actionValue[[]string](a, "keys")
-	if kind == "keypress" || kind == "key_down" || kind == "key_up" {
-		keys = shiftedKeys(keys)
-	}
+	keys := actionKeys(a)
 	if kind == "keypress" || kind == "key_down" || kind == "key_up" || kind == "type" || len(keys) > 0 {
 		if err := keyboard.activate(); err != nil {
 			return err
@@ -358,7 +355,7 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 	var pressed []string
 	defer func() {
 		for i := len(pressed) - 1; i >= 0; i-- {
-			if releaseErr := p.key(pressed[i], false); err == nil {
+			if releaseErr := p.releaseKey(pressed[i]); err == nil {
 				err = releaseErr
 			}
 		}
@@ -369,10 +366,13 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 		press = nil
 	}
 	for _, key := range press {
-		if err := p.key(key, true); err != nil {
+		owned, err := p.press(key)
+		if err != nil {
 			return err
 		}
-		pressed = append(pressed, key)
+		if owned {
+			pressed = append(pressed, key)
+		}
 	}
 	if kind != "keypress" && len(press) > 0 {
 		if err := inputPause(ctx, 50*time.Millisecond); err != nil {
@@ -434,14 +434,14 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 		// The keys stay held, tracked by the guard, until key_up, a takeover or
 		// the end of the batch.
 		for _, key := range keys {
-			if err := p.key(key, true); err != nil {
+			if _, err := p.press(key); err != nil {
 				return err
 			}
 		}
 		return nil
 	case "key_up":
 		for i := len(keys) - 1; i >= 0; i-- {
-			if err := p.key(keys[i], false); err != nil {
+			if err := p.releaseKey(keys[i]); err != nil {
 				return err
 			}
 		}

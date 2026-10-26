@@ -202,29 +202,51 @@ func (g *guardedInput) releaseLocked() {
 	g.heldKeys = nil
 }
 
-// key presses or releases a key. A press after a takeover must not happen; a
-// release always goes through and does nothing for a key that is not held.
-func (g *guardedInput) key(name string, pressed bool) error {
+// press presses a key and reports whether this call pressed it. A key already
+// held, by key_down or an earlier action, is not pressed again, so the caller
+// does not own it and must not release it. A press after a takeover must not
+// happen.
+func (g *guardedInput) press(name string) (bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if pressed && g.epoch != g.opens {
-		return errControlLost
+	if g.epoch != g.opens {
+		return false, errControlLost
 	}
+	if slices.Contains(g.heldKeys, name) {
+		return false, nil
+	}
+	if err := g.keys.key(name, true); err != nil {
+		return false, err
+	}
+	g.heldKeys = append(g.heldKeys, name)
+	return true, nil
+}
+
+// release releases a key. It always goes through, and does nothing for a key
+// that is not held.
+func (g *guardedInput) releaseKey(name string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	at := slices.Index(g.heldKeys, name)
-	if !pressed && at < 0 {
+	if at < 0 {
 		return nil
 	}
-	if err := g.keys.key(name, pressed); err != nil {
+	if err := g.keys.key(name, false); err != nil {
 		return err
 	}
-	if pressed {
-		if at < 0 {
-			g.heldKeys = append(g.heldKeys, name)
-		}
-	} else {
-		g.heldKeys = slices.Delete(g.heldKeys, at, at+1)
-	}
+	g.heldKeys = slices.Delete(g.heldKeys, at, at+1)
 	return nil
+}
+
+// actionKeys returns the key names an action presses. Shift rewrites symbols,
+// so the map, the press and the release all use this one normalization.
+func actionKeys(a Action) []string {
+	keys, _ := actionValue[[]string](a, "keys")
+	switch actionType(a) {
+	case "keypress", "key_down", "key_up":
+		return shiftedKeys(keys)
+	}
+	return keys
 }
 
 // release lets a batch free its buttons when it ends.

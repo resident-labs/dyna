@@ -102,11 +102,7 @@ func keyboardMap(actions []Action, previous map[string]uint32) (string, map[stri
 		full = true
 	}
 	for _, a := range actions {
-		keys, _ := actionValue[[]string](a, "keys")
-		if actionType(a) == "keypress" {
-			keys = shiftedKeys(keys)
-		}
-		for _, key := range keys {
+		for _, key := range actionKeys(a) {
 			if keyboardModifier(key) == 0 {
 				add(keyName(key))
 			}
