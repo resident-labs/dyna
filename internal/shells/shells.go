@@ -168,6 +168,9 @@ type StartOptions struct {
 	Run    string
 	RoomID string
 	Room   string
+	// Hold, when set, is stored with the new job in the same write: a foreground
+	// caller waits for the job until then, so its exit does not also wake the owner.
+	Hold time.Time
 }
 
 // Create records a new shell (not started yet) and returns its id.
@@ -229,7 +232,7 @@ func (s *Store) create(opts StartOptions) (Meta, error) {
 		return Meta{}, err
 	}
 	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, Run: strings.TrimSpace(opts.Run), RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
-	return m, s.Save(m, nil)
+	return m, s.saveNew(m, opts.Hold)
 }
 
 // startBusy opens the error of a job that could not begin because the state
@@ -274,16 +277,15 @@ func (s *Store) saveStart(m Meta) error {
 	return nil
 }
 
-// StartJob records a new job, holds its exit for hold, and calls spawn to start
-// its supervisor. If any step fails, the job's record and folder are removed,
-// so no lost job and no command are left behind, and the error says the job did
-// not start (D-220). The returned Meta keeps the job's ID on failure, so a
-// caller can forget it.
+// StartJob records a new job together with its exit hold, and calls spawn to
+// start its supervisor. If a step fails, the job is removed so that no lost job
+// and no command are left behind, and the error says the job did not start
+// (D-220). The row is deleted first, with the same retries a supervisor makes,
+// and the folder stays until that delete has succeeded. The returned Meta keeps
+// the job's ID on failure, so a caller can forget it.
 func (s *Store) StartJob(opts StartOptions, hold time.Time, spawn func(Meta) error) (Meta, error) {
+	opts.Hold = hold
 	meta, err := s.Create(opts)
-	if err == nil {
-		err = s.HoldExit(meta.ID, hold)
-	}
 	if err == nil {
 		err = spawn(meta)
 	}
@@ -291,13 +293,39 @@ func (s *Store) StartJob(opts StartOptions, hold time.Time, spawn func(Meta) err
 		return meta, nil
 	}
 	if ValidID(meta.ID) {
-		// A write that timed out may still commit later; this delete queues behind it.
-		_, _ = s.exec(meta.ID, `DELETE FROM shell_jobs WHERE id=?`, meta.ID)
-		if dir, derr := s.dir(meta.ID); derr == nil {
-			_ = os.RemoveAll(dir)
+		if derr := s.discardStart(meta.ID); derr != nil {
+			// The row may stay, so keep its folder and say so.
+			return meta, errors.Join(startError(err), fmt.Errorf("the job %s could not be removed: %w", meta.ID, derr))
 		}
 	}
 	return meta, startError(err)
+}
+
+// discardStart deletes a job that did not start, then its folder. A write that
+// timed out earlier may still commit, so the delete queues behind it and is
+// tried again while the store times out.
+func (s *Store) discardStart(id string) error {
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
+	var err error
+	for i := 0; i < startSaveTries; i++ {
+		if _, err = s.exec(id, `DELETE FROM shell_jobs WHERE id=?`, id); !timedOut(err) {
+			break
+		}
+		if i < startSaveTries-1 {
+			pause(startSaveWait)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	dir, err := s.dir(id)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
 }
 
 // injected returns the error a test made a write fail with, or nil.
@@ -866,6 +894,10 @@ func StartSupervisor(exe, id string) error {
 	started, _ := procident.StartTime(cmd.Process.Pid)
 	launched := fmt.Sprintf("%d %d\n", cmd.Process.Pid, started)
 	if err := os.WriteFile(filepath.Join(dir, supervisorPID), []byte(launched), 0o600); err != nil {
+		// Nothing can find this supervisor now, so it must not keep running: it
+		// stops itself, and its command with it, on SIGTERM.
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_, _ = cmd.Process.Wait()
 		return err
 	}
 	return cmd.Process.Release()
