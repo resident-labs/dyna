@@ -44,8 +44,9 @@ func chatGPTServer(t *testing.T, stream string) *httptest.Server {
 }
 
 type chatGPTBody struct {
-	Model string `json:"model"`
-	Input []struct {
+	Model        string `json:"model"`
+	Instructions string `json:"instructions"`
+	Input        []struct {
 		Role    string `json:"role"`
 		Content []struct {
 			Type string `json:"type"`
@@ -76,6 +77,10 @@ func TestChatGPTAsksItsSearchToolAndMapsCitations(t *testing.T) {
 		}
 		if body.Model != ChatGPTModel || len(body.Tools) != 1 || body.Tools[0].Type != "web_search" || !body.Tools[0].ExternalWebAccess || body.Store || !body.Stream {
 			t.Errorf("body = %+v, want the live web search tool, no store, and a stream", body)
+		}
+		// The backend refuses a search request that carries no instructions.
+		if strings.TrimSpace(body.Instructions) == "" {
+			t.Errorf("instructions = %q, want the system prompt the backend requires", body.Instructions)
 		}
 		if len(body.Input) != 1 || len(body.Input[0].Content) != 1 || !strings.Contains(body.Input[0].Content[0].Text, "go language") {
 			t.Errorf("input = %+v, want one turn that names the query", body.Input)
