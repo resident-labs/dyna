@@ -19,6 +19,7 @@
   import Chip from '../ui/Chip.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import NoticeCard from './NoticeCard.svelte'
+  import ServicesCard from './ServicesCard.svelte'
   import { accountRows, allClear, updateRows, rootQuestions } from './home.ts'
   // update: the dyna update notice ({current, latest}) or null.
   // The machine list owns the load card now: Home shows what needs the owner.
@@ -208,6 +209,8 @@
       {/each}
     </Card>
   {/if}
+
+  <ServicesCard {rooms} {onroom} />
 
   {#if updates.length}
     <Card title="Updates" count={updates.length}>
