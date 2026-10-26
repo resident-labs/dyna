@@ -181,7 +181,9 @@ type preparedRecord struct {
 	key, room, repo string
 	number          int
 	closed          bool
-	body            []byte
+	body            []byte // the hot body
+	parts           storedParts
+	removeParts     []partName
 }
 
 // marshalStored is the persistent JSON encoder. Tests can hold preparation.
@@ -200,11 +202,18 @@ func prepareRows(old State, oldIndex []byte, st State) (preparedRows, error) {
 		if old.Records[key] != nil && sameStored(old.Records[key], r) && reflect.DeepEqual(old.Responses[key], st.Responses[key]) {
 			continue
 		}
-		body, err := marshalStored(diskRecord{r, st.Responses[key]})
+		body, parts, err := splitStored(diskRecord{r, st.Responses[key]})
 		if err != nil {
 			return rows, err
 		}
-		row := preparedRecord{key: key, body: body}
+		var before storedParts
+		if old.Records[key] != nil {
+			if _, before, err = splitStored(diskRecord{old.Records[key], old.Responses[key]}); err != nil {
+				return rows, err
+			}
+		}
+		upsert, remove := partWrites(before, parts)
+		row := preparedRecord{key: key, body: body, parts: upsert, removeParts: remove}
 		if r != nil {
 			row.room, row.repo, row.number = r.RoomID, r.Repo, r.Number
 			row.closed = r.State == "closed" || r.State == "merged"
@@ -225,14 +234,28 @@ func prepareRows(old State, oldIndex []byte, st State) (preparedRows, error) {
 func (rows preparedRows) apply(conn *sql.Conn, revision int64) error {
 	ctx := context.Background()
 	for _, r := range rows.upserts {
-		if _, err := conn.ExecContext(ctx, `INSERT INTO pr_records(key,room,repo,number,closed,rev,body) VALUES(?,?,?,?,?,?,?)
+		if _, err := conn.ExecContext(ctx, `INSERT INTO pr_rows(key,room,repo,number,closed,rev,body) VALUES(?,?,?,?,?,?,?)
 ON CONFLICT(key) DO UPDATE SET room=excluded.room, repo=excluded.repo, number=excluded.number, closed=excluded.closed, rev=excluded.rev, body=excluded.body`,
 			r.key, r.room, r.repo, r.number, r.closed, revision, r.body); err != nil {
 			return err
 		}
+		for name, body := range r.parts {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO pr_record_parts(key,part,body) VALUES(?,?,?)
+ON CONFLICT(key,part) DO UPDATE SET body=excluded.body`, r.key, string(name), body); err != nil {
+				return err
+			}
+		}
+		for _, name := range r.removeParts {
+			if _, err := conn.ExecContext(ctx, "DELETE FROM pr_record_parts WHERE key=? AND part=?", r.key, string(name)); err != nil {
+				return err
+			}
+		}
 	}
 	for _, key := range rows.deletes {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM pr_records WHERE key=?", key); err != nil {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM pr_rows WHERE key=?", key); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM pr_record_parts WHERE key=?", key); err != nil {
 			return err
 		}
 	}

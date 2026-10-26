@@ -441,8 +441,13 @@ including quiet PRs. The engine also ticks at startup to catch stored writes
 made while it was down. CLI commands write the stores directly and start no
 background process. Run `dyna engine run` through the installed service.
 
-The PR store lives in `dyna.db`: one `pr_records` row per PR and one
-`pr_state` row for shared state. A change writes only its changed PR rows.
+The PR store lives in `dyna.db`: one `pr_rows` row per PR and one
+`pr_state` row for shared state. A PR row holds the fields that change on every
+poll. Its notices, review history and detail, and cached responses live in
+`pr_record_parts` rows (`notices`, `detail`, `responses`), so a poll writes
+only the small row. A change writes only its changed rows and parts. Older
+dyna versions name the table `pr_records`; the rename makes them fail instead
+of reading a partial record.
 The first open imports an old JSON store (`index.json`, `records/`, `closed/`
 or `state.json`) and leaves those files unchanged.
 Closed and merged records expire 14 days after closure; active records remain.

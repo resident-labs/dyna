@@ -1396,6 +1396,9 @@ func (s *Service) flush(ctx context.Context, key string) error {
 					r.Notices[i].Text = n.Text
 					r.Notices[i].PostID = postID
 					r.Notices[i].Done = savedErr == nil
+					if r.Notices[i].Done && r.Notices[i].DoneAt.IsZero() {
+						r.Notices[i].DoneAt = s.now()
+					}
 					r.Notices[i].Error = ""
 					if savedErr != nil {
 						r.Notices[i].Error = Sanitize(savedErr.Error())

@@ -507,7 +507,7 @@ type recordChanges struct {
 // nil, meaning every row, for the first scan or after a reset.
 //
 // A row must depend only on its PR record, the room's settings and policy,
-// and review facts. A fact kept outside pr_records, for example a cache
+// and review facts. A fact kept outside pr_rows, for example a cache
 // written elsewhere, must bump the PR state revision or mark its records
 // written, or its rows go stale without notice.
 // Tests count calls to the actual changed-key query.
