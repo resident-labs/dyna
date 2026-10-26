@@ -5,8 +5,11 @@ package websearch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -160,7 +163,71 @@ func text(s string) string {
 	return s
 }
 
-// statusError is the failure of a provider request that answered.
-func statusError(provider string, status int) error {
-	return fmt.Errorf("%s answered HTTP %d", provider, status)
+// statusError is the failure of a provider request that answered. The body is
+// the backend's own explanation of why it refused, and the only way to see a
+// cause such as a model the account cannot use, so the error keeps it. It is
+// folded to one line and cleared of any secret first, and the caller passes each
+// secret the request carried so the body cannot echo one back.
+func statusError(provider string, status int, body io.Reader, secrets ...string) error {
+	reason := errorReason(body)
+	for _, secret := range secrets {
+		if secret != "" {
+			reason = strings.ReplaceAll(reason, secret, redacted)
+		}
+	}
+	reason = redactTokens(reason)
+	if reason == "" {
+		return fmt.Errorf("%s answered HTTP %d", provider, status)
+	}
+	return fmt.Errorf("%s answered HTTP %d: %s", provider, status, reason)
+}
+
+// redacted replaces a credential in text that may quote one.
+const redacted = "[redacted]"
+
+// redactedPatterns are the credential shapes a provider's error body may quote
+// back: a bearer header, an API key, and a signed token.
+var redactedPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{8,}`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9._\-]{8,}`),
+	regexp.MustCompile(`\beyJ[A-Za-z0-9._\-]{16,}`),
+}
+
+// redactTokens masks every credential shape in s.
+func redactTokens(s string) string {
+	for _, pattern := range redactedPatterns {
+		s = pattern.ReplaceAllString(s, redacted)
+	}
+	return s
+}
+
+// errorBody is the shape of a refusal: OpenAI and most providers name the cause
+// in error.message, and a few use detail or message at the top level.
+type errorBody struct {
+	Detail  string `json:"detail"`
+	Message string `json:"message"`
+	Error   *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// errorReason is what the backend said went wrong, or empty when the body names
+// no cause.
+func errorReason(body io.Reader) string {
+	if body == nil {
+		return ""
+	}
+	raw, _ := io.ReadAll(io.LimitReader(body, 64<<10))
+	var refusal errorBody
+	if json.Unmarshal(raw, &refusal) == nil {
+		for _, named := range []string{refusal.Detail, refusal.Message} {
+			if text(named) != "" {
+				return text(named)
+			}
+		}
+		if refusal.Error != nil && text(refusal.Error.Message) != "" {
+			return text(refusal.Error.Message)
+		}
+	}
+	return text(string(raw))
 }

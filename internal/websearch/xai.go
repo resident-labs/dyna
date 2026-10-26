@@ -99,7 +99,7 @@ func (x XAI) Search(ctx context.Context, q Query) ([]Result, error) {
 	if response.StatusCode != http.StatusOK {
 		// The body can echo the request, so only the status is reported.
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
-		return nil, statusError("xai", response.StatusCode)
+		return nil, statusError("xai", response.StatusCode, response.Body, token)
 	}
 	stream, err := readXAIStream(response.Body)
 	if err != nil {

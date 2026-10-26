@@ -88,7 +88,7 @@ func (k Kimi) Search(ctx context.Context, q Query) ([]Result, error) {
 		if response.StatusCode == http.StatusUnauthorized {
 			return nil, fmt.Errorf("kimi sign-in was refused: %w", ErrNotSignedIn)
 		}
-		return nil, statusError("kimi", response.StatusCode)
+		return nil, statusError("kimi", response.StatusCode, response.Body, token)
 	}
 	var answer kimiAnswer
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&answer); err != nil {

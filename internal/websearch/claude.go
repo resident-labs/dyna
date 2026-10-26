@@ -117,7 +117,7 @@ func (c Claude) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
-		return nil, statusError("claude", response.StatusCode)
+		return nil, statusError("claude", response.StatusCode, response.Body, token)
 	}
 	answer, err := readClaudeStream(response.Body)
 	if err != nil {

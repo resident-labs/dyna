@@ -132,9 +132,9 @@ func TestZaiWithoutAKeyIsNotSignedIn(t *testing.T) {
 	}
 }
 
-// A failing MCP call names its status and never echoes the body, which can
-// repeat the key.
-func TestZaiReportsAFailureWithoutTheBody(t *testing.T) {
+// A failing MCP call names its status and the body's reason, and never the key
+// that body can repeat.
+func TestZaiReportsAFailureWithoutTheKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = io.WriteString(w, `{"error":"invalid API key zai-key"}`)
@@ -143,8 +143,11 @@ func TestZaiReportsAFailureWithoutTheBody(t *testing.T) {
 
 	zai := Zai{BaseURL: server.URL, Key: func(context.Context) (string, error) { return "zai-key", nil }}
 	_, err := zai.Search(t.Context(), Query{Text: "go"})
-	if err == nil || err.Error() != "zai answered HTTP 503" {
-		t.Fatalf("err = %v, want the status only", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "zai answered HTTP 503: ") {
+		t.Fatalf("err = %v, want the status and the body's reason", err)
+	}
+	if strings.Contains(err.Error(), "zai-key") {
+		t.Fatalf("err = %v, want the key redacted", err)
 	}
 }
 
