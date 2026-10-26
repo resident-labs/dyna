@@ -168,3 +168,29 @@ func TestCutStartSubagentRepeatsOnceWithTheSameRequestID(t *testing.T) {
 		t.Fatalf("request IDs = %q; want two sends with one non-empty ID", ids)
 	}
 }
+
+// After the cut, a refused socket waits with a growing delay and says so once,
+// instead of dialing in a tight loop.
+func TestCutThenRefusedSocketWaitsWithBackoff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+		_ = listener.Close() // the socket file stays: later dials are refused
+	}()
+	var notices bytes.Buffer
+	err = engineclient.New(path, engineclient.Notices(&notices), engineclient.RestartWait(250*time.Millisecond)).Call(t.Context(), "StartSubagent", nil, nil)
+	if !errors.Is(err, engineclient.ErrNotRunning) {
+		t.Fatalf("err = %v; want engine not running", err)
+	}
+	if strings.Count(notices.String(), "waiting for the engine") != 1 {
+		t.Fatalf("notices = %q; want one waiting line", notices.String())
+	}
+}
