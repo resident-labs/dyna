@@ -220,6 +220,7 @@ not-state internal/userservices/install.go Install 3 # systemd unit files and th
 not-state internal/userservices/install.go MarkRestartPending 1 # the restart-pending marker beside the systemd units is one transient control file read at the next boot, not a queried Dyna record
 not-state internal/userservices/install.go Write 2 # systemd unit files, including removing the connector unit an engine opted out of
 not-state internal/visual/inspect.go Inspect 1 # removes the fresh temporary Chromium profile after one render
+not-state internal/visual/launch.go browserTempDir 1 # removes a temporary Chromium profile directory whose socket path is too long for the kernel
 not-state internal/webpush/webpush.go writeFile0600 1 # immutable VAPID signing-key blob, created once for the application identity
 not-state internal/workeroutput/projection/pack.go Pack.Abort 1 # removes unpublished immutable blobs and temporary mapping spools; durable projection state belongs in SQLite
 not-state internal/workeroutput/projection/pack.go Pack.open 1 # unlinks the temporary mapping spool while its file descriptor remains open

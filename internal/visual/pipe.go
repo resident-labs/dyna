@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 )
 
 type message struct {
@@ -22,6 +23,7 @@ type client struct {
 	input          *os.File
 	messages       chan message
 	readError      chan error
+	stderr         *errorTail
 	id             int
 	session        string
 	doc            []byte
@@ -39,12 +41,12 @@ func (c *client) read(ctx context.Context, input *os.File) {
 	for {
 		b, err := r.ReadBytes(0)
 		if err != nil {
-			c.readError <- err
+			c.readError <- c.startError(err)
 			return
 		}
 		var m message
 		if err = json.Unmarshal(b[:len(b)-1], &m); err != nil {
-			c.readError <- err
+			c.readError <- c.startError(err)
 			return
 		}
 		select {
@@ -63,6 +65,49 @@ func (c *client) send(method string, params any) (int, error) {
 	_, err = c.input.Write(append(b, 0))
 	return c.id, err
 }
+
+// startError adds the last line Chromium wrote to stderr, so a browser that
+// exits at start names its own cause instead of only reporting EOF.
+func (c *client) startError(err error) error {
+	if tail := c.stderr.last(); tail != "" {
+		return fmt.Errorf("%w: %s", err, tail)
+	}
+	return err
+}
+
+// errorTail keeps the end of what Chromium wrote to stderr.
+type errorTail struct {
+	mu   sync.Mutex
+	text string
+}
+
+// Write keeps the last 8 KiB, so a chatty browser cannot grow the buffer.
+func (t *errorTail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.text += string(p)
+	if len(t.text) > 8<<10 {
+		t.text = t.text[len(t.text)-(8<<10):]
+	}
+	return len(p), nil
+}
+
+// last returns the last non-empty line written.
+func (t *errorTail) last() string {
+	if t == nil {
+		return ""
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	lines := strings.Split(t.text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func (c *client) next(ctx context.Context) (message, error) {
 	select {
 	case m := <-c.messages:
