@@ -119,7 +119,7 @@ func TestUninspectedReportArtifactsCollapseToOneLine(t *testing.T) {
 	for _, sent := range e.sent {
 		text.WriteString(sent.Text)
 	}
-	const want = "Test reports: 2 artifacts not inspected (over the 3 artifact, 20 MiB limit)."
+	const want = "Other CI artifacts: 2 of 5 not inspected (the limit is 3 files and 20 MiB per run)."
 	if strings.Count(text.String(), want) != 1 {
 		t.Fatalf("missing collapsed report limit line %q:\n%s", want, text.String())
 	}
@@ -128,6 +128,49 @@ func TestUninspectedReportArtifactsCollapseToOneLine(t *testing.T) {
 	}
 	if strings.Contains(text.String(), "go-test-raw-") {
 		t.Fatalf("per-artifact detail remained:\n%s", text.String())
+	}
+}
+
+// The fallback pool takes three files, so raw test output must win a slot ahead
+// of a built bundle. The line names the artifacts it skipped, so no reader
+// believes a test report was dropped.
+func TestAuxiliaryArtifactsPreferRawTestOutput(t *testing.T) {
+	e := newEnv(t)
+	testReportFixture(t, e, nil)
+	unrelated := testReportZip(t, map[string]string{"notes.xml": "<settings/>"})
+	bundle := testReportZip(t, map[string]string{"index.html": strings.Repeat("x", 4096)})
+	e.f.Blobs["repos/owner/repo/actions/artifacts/200/zip"] = bundle
+	listed := []string{fmt.Sprintf(`{"id":200,"name":"frontend-dist","size_in_bytes":%d,"created_at":%q}`, len(bundle), e.clock.Format(time.RFC3339))}
+	rawIDs := []int64{201, 202, 203}
+	for i, id := range rawIDs {
+		listed = append(listed, fmt.Sprintf(`{"id":%d,"name":"go-test-raw-%d","size_in_bytes":1024,"created_at":%q}`, id, i, e.clock.Format(time.RFC3339)))
+		e.f.Blobs[fmt.Sprintf("repos/owner/repo/actions/artifacts/%d/zip", id)] = unrelated
+	}
+	e.f.Raw["repos/owner/repo/actions/runs/81/artifacts?per_page=100"] = `HTTP/2.0 200 OK` + "\r\n\r\n" + `{"artifacts":[` + strings.Join(listed, ",") + `]}`
+	e.track()
+	e.tick()
+	var text strings.Builder
+	for _, sent := range e.sent {
+		text.WriteString(sent.Text)
+	}
+	const want = "Other CI artifacts: 1 of 4 not inspected (the limit is 3 files and 20 MiB per run)."
+	if strings.Count(text.String(), want) != 1 {
+		t.Fatalf("missing auxiliary limit line %q:\n%s", want, text.String())
+	}
+	if strings.Contains(text.String(), "Test reports: 1") {
+		t.Fatalf("a skipped bundle was called a test report:\n%s", text.String())
+	}
+	calls, err := os.ReadFile(e.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "artifacts/200/zip") {
+		t.Fatalf("the bundle took a fallback slot from raw test output:\n%s", calls)
+	}
+	for _, id := range rawIDs {
+		if !strings.Contains(string(calls), fmt.Sprintf("artifacts/%d/zip", id)) {
+			t.Fatalf("raw test output %d was not inspected:\n%s", id, calls)
+		}
 	}
 }
 

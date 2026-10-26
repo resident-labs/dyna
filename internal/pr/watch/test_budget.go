@@ -101,6 +101,26 @@ func likelyTestArtifact(name string) bool {
 	return strings.Contains(name, "junit") || strings.Contains(name, "test-report") || strings.Contains(name, "test-results")
 }
 
+// likelyRawTestOutput reports an artifact that may hold raw test output. A shard
+// that exports no JUnit report leaves this file as its only evidence.
+func likelyRawTestOutput(name string) bool {
+	name = strings.ToLower(name)
+	return strings.Contains(name, "test-raw") || strings.Contains(name, "test-log") || strings.Contains(name, "test-output")
+}
+
+// artifactRank orders artifacts so the most useful are inspected first: a JUnit
+// report, then raw test output, then anything else. The fallback pool holds
+// three files, so a bundle must not take a slot from raw test output.
+func artifactRank(name string) int {
+	switch {
+	case likelyTestArtifact(name):
+		return 0
+	case likelyRawTestOutput(name):
+		return 1
+	}
+	return 2
+}
+
 type testArtifactHTTPError struct {
 	status int
 	retry  bool
@@ -192,21 +212,28 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	for _, page := range pages {
 		artifacts = append(artifacts, page.Artifacts...)
 	}
-	// Prefer report names, but retain bounded discovery for custom artifact names.
+	// Prefer report names, then raw test output, but retain bounded discovery
+	// for custom artifact names.
 	sort.SliceStable(artifacts, func(i, j int) bool {
-		return likelyTestArtifact(artifacts[i].Name) && !likelyTestArtifact(artifacts[j].Name)
+		return artifactRank(artifacts[i].Name) < artifactRank(artifacts[j].Name)
 	})
 	remaining := int64(maxTestArtifact)
 	fallbackBytes, fallbackCount := int64(maxTestArtifact), 3
 	junit := false
 	var problems []string
-	uninspected, oversized := 0, 0
+	uninspected, oversized, auxiliary := 0, 0, 0
 	for _, artifact := range artifacts {
 		if artifact.Expired || artifact.ID <= 0 {
 			continue
 		}
+		apart := !likelyTestArtifact(artifact.Name)
+		if apart {
+			auxiliary++
+		}
 		if artifact.Size < 0 || artifact.Size > maxTestArtifact {
-			if likelyTestArtifact(artifact.Name) {
+			if apart {
+				uninspected++
+			} else {
 				oversized++
 			}
 			continue
@@ -252,8 +279,11 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	}
 	if uninspected > 0 {
 		// One line holds any number of skipped artifacts: a list per artifact
-		// would bury every other report problem in the notice.
-		problems = append(problems, fmt.Sprintf("Test reports: %d %s not inspected (over the 3 artifact, 20 MiB limit).", uninspected, reportNoun(uninspected)))
+		// would bury every other report problem in the notice. These are the
+		// artifacts that only looked like evidence, not a test report, so the
+		// line names them as such: a reader must not think test reports were
+		// skipped.
+		problems = append(problems, fmt.Sprintf("Other CI artifacts: %d of %d not inspected (the limit is 3 files and 20 MiB per run).", uninspected, auxiliary))
 	}
 	if oversized > 0 {
 		problems = append(problems, fmt.Sprintf("Test reports: %d %s over the 20 MiB size limit.", oversized, reportNoun(oversized)))
