@@ -69,7 +69,7 @@ func startRunAgent(ctx context.Context, m *subagent.Manager, in callspec.RunAgen
 		return err
 	}
 	_, err = m.StartRunAgent(ctx, subagent.StartOptions{
-		Run:     &subagent.RunOwner{ID: in.Run, Agent: in.Agent, Journal: in.Journal, JournalRoot: in.JournalRoot},
+		Run:     &subagent.RunOwner{ID: in.Run, Agent: in.Agent, Journal: in.Journal, JournalRoot: in.JournalRoot, Profile: in.Inline},
 		Profile: in.Profile, Dir: in.Dir, Task: in.Task, Schema: in.Schema, Deadline: in.Deadline, Room: meta.RoomID,
 	})
 	return err

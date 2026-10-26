@@ -158,3 +158,24 @@ func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
 		t.Fatalf("engine close without a caller: %v", err)
 	}
 }
+
+func TestRunAgentRunsOnTheRunsOwnMockProfileOnly(t *testing.T) {
+	e := newTestEnv(t)
+	own := &profile.Profile{Name: "mock-demo", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 10}
+	start := func(agent int, p *profile.Profile) error {
+		_, err := e.m.StartRunAgent(e.ctx, StartOptions{Run: &RunOwner{ID: "wf_demo", Agent: agent, Profile: p}, Profile: "mock-demo", Task: "RESPOND: demo", Dir: t.TempDir(), Room: e.room.ID})
+		return err
+	}
+	if err := start(1, own); err != nil {
+		t.Fatalf("a run's own mock profile was refused: %v", err)
+	}
+	if got, err := e.m.WaitRunAgent(e.ctx, "wf_demo", 1, time.Minute); err != nil || !got.Done || got.Turn.Result != "demo" {
+		t.Fatalf("wait = %+v, %v; want the demo agent's result", got, err)
+	}
+	if err := start(2, &profile.Profile{Name: "mock-demo", Harness: profile.HarnessClaudeCode}); err == nil {
+		t.Fatal("a run brought a real harness profile")
+	}
+	if err := start(3, nil); err == nil {
+		t.Fatal("an unregistered profile was accepted without the run's own definition")
+	}
+}

@@ -1,6 +1,10 @@
 package subagent
 
-import "fmt"
+import (
+	"fmt"
+
+	"dyna-agent/internal/profile"
+)
 
 // RoleRoot marks a room's internal root session. It holds the room's root
 // seat while no external orchestrator is attached, runs in root mode and acts
@@ -52,6 +56,10 @@ type RunOwner struct {
 	Agent       int    `json:"agent"`
 	Journal     string `json:"journal,omitempty"`
 	JournalRoot string `json:"journalRoot,omitempty"`
+	// Profile is a mock-harness profile the run defined for itself, such as the
+	// profiles of `dyna demo`, which are never saved to the registry. Any other
+	// harness must be a registered profile.
+	Profile *profile.Profile `json:"profile,omitempty"`
 }
 
 // RunOwned reports a session that a workflow run started for one agent() call.

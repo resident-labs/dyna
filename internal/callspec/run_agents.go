@@ -3,6 +3,8 @@ package callspec
 import (
 	"encoding/json"
 	"time"
+
+	"dyna-agent/internal/profile"
 )
 
 // RunAgentWaitBound is how long one WaitRunAgent call waits for an agent's
@@ -27,6 +29,9 @@ type RunAgentStart struct {
 	// Journal and JournalRoot are the run-owned journal `dyna journal` writes.
 	Journal     string `json:"journal,omitempty"`
 	JournalRoot string `json:"journalRoot,omitempty"`
+	// Inline is a mock-harness profile that only this run defines (the demo's).
+	// The engine refuses any other harness here.
+	Inline *profile.Profile `json:"inline,omitempty"`
 }
 
 // RunAgentRef names one agent call of a run.

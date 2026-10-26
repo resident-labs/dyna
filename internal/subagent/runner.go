@@ -215,6 +215,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		return fail(err)
 	}
 	p, ok := profs.Get(meta.Profile)
+	if meta.Run != nil && meta.Run.Profile != nil {
+		p, ok = meta.Run.Profile, true
+	}
 	if !ok {
 		return fail(fmt.Errorf("profile %q is no longer registered", meta.Profile))
 	}
