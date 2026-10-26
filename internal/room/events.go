@@ -161,10 +161,12 @@ const (
 	IssueFiled   IssueChange = "filed"
 	IssueUpdated IssueChange = "updated"
 	IssueClosed  IssueChange = "closed"
+	// IssueNoted adds evidence to an issue without changing its state.
+	IssueNoted IssueChange = "noted"
 )
 
 // issueChanges lists every issue change the web needs as a union type.
-var issueChanges = []IssueChange{IssueFiled, IssueUpdated, IssueClosed}
+var issueChanges = []IssueChange{IssueFiled, IssueUpdated, IssueClosed, IssueNoted}
 
 // IssueState is where an issue stands after the event. It is the state the
 // room store records, so the card and the Issues panel cannot disagree.
@@ -242,8 +244,9 @@ type IssueEvent struct {
 	Assignee string       `json:"assignee,omitempty"`
 	ClosedBy *CloseOrigin `json:"closedBy,omitempty"`
 	Reason   string       `json:"reason,omitempty"`
-	// Detail is the note body an agent reads: the filed note. A close reason is
-	// one line, and the close text already carries it.
+	// Detail is the note body an agent reads: the filed note, or the evidence a
+	// later note added. A close reason is one line, and the close text already
+	// carries it.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -1197,6 +1200,9 @@ type ServiceFailedEvent struct {
 	Error   string      `json:"error"`
 	Profile string      `json:"profile,omitempty"`
 	Model   string      `json:"model,omitempty"`
+	// WorkerStderr is the failed worker's standard-error tail, diagnostic
+	// evidence the card discloses on its own, never the cause (D-108).
+	WorkerStderr string `json:"workerStderr,omitempty"`
 	// Detail is the evidence the agent reads: the failure report with the
 	// session and how to inspect the service. The card shows Error.
 	Detail string `json:"detail,omitempty"`
@@ -1499,6 +1505,9 @@ type TurnEvent struct {
 	Summary string `json:"summary,omitempty"`
 	// Error is why the turn failed, when it did.
 	Error string `json:"error,omitempty"`
+	// WorkerStderr is the failed worker's standard-error tail, diagnostic
+	// evidence the card discloses on its own, never the cause (D-108).
+	WorkerStderr string `json:"workerStderr,omitempty"`
 	// Detail is the rest of the line an agent reads: how to inspect the turn
 	// or recover from it.
 	Detail string `json:"detail,omitempty"`
@@ -1628,6 +1637,17 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeNever,
 		Once:     true,
 		Text:     "{actor} closed issue D-{number}: {reason}",
+	},
+	// A note is evidence added to an open or closed issue. Each note is its own
+	// post, so it has no Once key, and it reaches the room's root quietly.
+	{
+		Family:   FamilyIssue,
+		Type:     EventType(IssueNoted),
+		Renderer: "IssueCard",
+		Payload:  reflect.TypeOf(IssueEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "{actor} added a note to issue D-{number}: {title}",
 	},
 	// A goal change reaches the owner feed only, so it wakes nobody.
 	{

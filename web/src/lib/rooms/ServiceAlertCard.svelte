@@ -29,6 +29,10 @@
   {#snippet icon()}!{/snippet}
   {#snippet detail()}
     {#if payload?.error}<pre class="detail">{payload.error}</pre>{/if}
+    {#if payload?.workerStderr}
+      <p class="who">Worker stderr</p>
+      <pre class="detail">{payload.workerStderr}</pre>
+    {/if}
     {#if payload?.session}<p class="who">{payload.session}</p>{/if}
     {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   {/snippet}

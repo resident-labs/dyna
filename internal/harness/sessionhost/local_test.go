@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -561,4 +562,35 @@ func TestLocalSessionHaltStopsChild(t *testing.T) {
 		t.Fatal("write after halt succeeded, want no child")
 	}
 	s.Detach(DetachIdle)
+}
+
+// A host whose socket file is gone is unreachable, so it ends. A host whose
+// socket still exists keeps running.
+func TestWatchSocketStopsHostWhenSocketIsGone(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "host.sock")
+	if err := os.WriteFile(socket, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// watch runs the watcher on the calling goroutine over three ticks and then
+	// a closed tick channel, so it always returns, and counts the stops.
+	watch := func() int {
+		ticks := make(chan time.Time, 3)
+		for range 3 {
+			ticks <- time.Time{}
+		}
+		close(ticks)
+		stops := 0
+		watchSocket(ticks, socket, func() { stops++ }, make(chan struct{}))
+		return stops
+	}
+	if stops := watch(); stops != 0 {
+		t.Fatalf("the host stopped %d times while its socket existed", stops)
+	}
+	if err := os.Remove(socket); err != nil {
+		t.Fatal(err)
+	}
+	// The watcher must stop the host once and return, not keep checking.
+	if stops := watch(); stops != 1 {
+		t.Fatalf("the host stopped %d times after its socket was removed; want 1", stops)
+	}
 }

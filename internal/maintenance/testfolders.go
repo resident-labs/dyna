@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/procident"
+	"dyna-agent/internal/scratch"
 )
 
 // Test binaries leave temporary folders in the host temp folder: a 16 GB tmpfs
@@ -54,6 +55,70 @@ func sweepTestFolders(now time.Time, root string, alive func(int) bool, dry bool
 			continue
 		}
 		path := filepath.Join(root, name)
+		freed.Items++
+		freed.Bytes += folderBytes(path)
+		if dry {
+			continue
+		}
+		if err := fsutil.RemoveTree(path); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return freed, errors.Join(errs...)
+}
+
+// diskTempRetention is how long nothing under a worker's temporary folder may
+// change before the sweep removes it. A live process writes into its folder, and
+// writing a file does not touch the folder's own time, so the sweep looks at
+// every file and folder under it.
+// It exceeds the longest hook timeout (48 hours), so a running hook never loses
+// its files to the sweep.
+const diskTempRetention = 72 * time.Hour
+
+// newestChange returns the latest modification time of path and everything
+// under it, starting from top.
+func newestChange(path string, top time.Time) time.Time {
+	_ = filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info, err := entry.Info(); err == nil && info.ModTime().After(top) {
+			top = info.ModTime()
+		}
+		return nil
+	})
+	return top
+}
+
+// sweepDiskTemp removes every entry in root that has stood unchanged for the
+// retention. Root is a folder Dyna owns on disk (the shared temporary folder of
+// hook runs and local checks, and the test run folder), so any name in it is
+// ours. It never follows a link out of root.
+func sweepDiskTemp(now time.Time, root string, alive func(int) bool, dry bool) (Pruned, error) {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return Pruned{}, nil
+	}
+	if err != nil {
+		return Pruned{}, err
+	}
+	var freed Pruned
+	var errs []error
+	for _, entry := range entries {
+		if scratch.IsSessionTempName(entry.Name()) {
+			// A session's folder goes with its scratch folder, not by age.
+			continue
+		}
+		if pid, ok := scratch.RunTempPID(entry.Name()); ok && alive(pid) {
+			// The engine that made this run's folder still runs, and removes the
+			// folder when the run ends.
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || now.Sub(newestChange(filepath.Join(root, entry.Name()), info.ModTime())) <= diskTempRetention || !ownedByUser(info) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
 		freed.Items++
 		freed.Bytes += folderBytes(path)
 		if dry {

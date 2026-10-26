@@ -122,6 +122,19 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 		return Record{}, false, err
 	}
 	if old := st.Records[ref.Key()]; old != nil {
+		// A run-owned caller of the same controller first takes over the PR its
+		// earlier run author left (issue D-252), so this existing-record path
+		// returns a change the caller may act on.
+		if moved, err := s.takeoverRunChange(ctx, author, lookupDir, func(r Record) bool { return r.Key == ref.Key() }); err != nil {
+			return Record{}, false, err
+		} else if moved {
+			if st, err = s.Store.Read(); err != nil {
+				return Record{}, false, err
+			}
+			if old = st.Records[ref.Key()]; old == nil {
+				return Record{}, false, fmt.Errorf("PR is no longer tracked")
+			}
+		}
 		if path := matchingCheckout(ctx, *old, lookupDir); path != "" {
 			if err := s.Store.update(func(live *State) error {
 				current := live.Records[ref.Key()]
@@ -153,7 +166,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	if err != nil {
 		return Record{}, false, err
 	}
-	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, Parent: author.ParentSession, RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: "open", Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
+	rec := Record{PolicyOverride: override, Key: ref.Key(), Host: ref.Host, Repo: ref.Repo, Number: ref.Number, URL: ref.URL(), Author: author.ID, Parent: author.ParentSession, Controller: s.changeController(author), RoomID: author.RoomID, Dir: author.Dir, LookupDir: lookupDir, Head: snap.Pull.Head.SHA, State: "open", Watching: true, Created: s.now(), HeadSeen: s.now(), HeadVerifiedAt: s.now(), Seen: map[string]string{}}
 	rec.Kind = "github"
 	rec.ChangeID = rec.Key
 	rec.RepoPath = matchingCheckout(ctx, rec, lookupDir)
@@ -175,6 +188,19 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 		endRecord(&rec, snap.Pull.Merged, s.now())
 		rec.Watching = false
 		rec.PauseReason = "PR is " + rec.State
+	}
+	// A run-owned caller of the same controller first takes over the local
+	// change its earlier run author left on this branch (issue D-252), so the
+	// attach checks below read state that already names it as the author.
+	if moved, err := s.takeoverRunChange(ctx, author, lookupDir, func(old Record) bool {
+		return old.Kind == "local" && old.State == "open" && old.Branch == rec.Branch &&
+			(old.RepoPath == rec.RepoPath || matchingCheckout(ctx, rec, old.Dir) != "")
+	}); err != nil {
+		return Record{}, false, err
+	} else if moved {
+		if st, err = s.Store.Read(); err != nil {
+			return Record{}, false, err
+		}
 	}
 	// Git probes use the read snapshot, before taking the publication guard.
 	// Validate the complete candidate set again under that guard below.
@@ -630,6 +656,11 @@ func applyHead(r *Record, snap Snapshot, previousPullHead string, n *pollNotices
 	if changedHead {
 		rememberReviewAssignment(r)
 		retireReviewNotices(r, "new-head:"+snap.Pull.Head.SHA)
+		// A stale required-review assignment must not wake its reviewer for
+		// this head; the fresh assignment below replaces it.
+		for _, id := range r.RequiredReviewers {
+			retireSessionReviewNotices(r, id, "new-head:"+snap.Pull.Head.SHA)
+		}
 		r.Head = snap.Pull.Head.SHA
 		r.Landing = nil
 		r.CIKey = ""
@@ -643,6 +674,9 @@ func applyHead(r *Record, snap Snapshot, previousPullHead string, n *pollNotices
 		r.ReviewID = 0
 		if !r.CIPaused {
 			r.PauseReason = ""
+		}
+		if snap.Pull.State != "closed" {
+			requiredReviewNotices(r)
 		}
 	}
 	if changedHead || refreshedHead {

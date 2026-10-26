@@ -4,6 +4,7 @@ package issue
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
+	"dyna-agent/internal/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -157,6 +159,50 @@ func Command(o Options) *cobra.Command {
 	root.AddCommand(&cobra.Command{Use: "show <issue>", Short: "Show one issue by D-N or message ID", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
 		return show(c, a[0])
 	}})
+	var attach []string
+	noteCmd := &cobra.Command{Use: "note <issue> [text]", Short: "Add evidence to an existing issue (any session or the owner)", Long: "Add evidence to an existing issue by D-N or message ID, in any room, without filing a duplicate. The note joins the issue's history and reaches the room's root quietly: it wakes nobody. --attach saves a file with the note and may repeat. The text may be empty with --attach.", Args: cobra.RangeArgs(1, 2), RunE: func(c *cobra.Command, a []string) error {
+		text := ""
+		if len(a) == 2 {
+			text = a[1]
+		}
+		if strings.TrimSpace(text) == "" && len(attach) == 0 {
+			return fmt.Errorf("a note needs text or --attach")
+		}
+		if len(attach) > room.MaxPostAttachments {
+			return fmt.Errorf("a note can carry at most %d attachments", room.MaxPostAttachments)
+		}
+		limits, err := settings.Content()
+		if err != nil {
+			return err
+		}
+		s, r, by, err := caller(true)
+		if err != nil {
+			return err
+		}
+		var atts []room.Attachment
+		for _, path := range attach {
+			data, err := settings.ReadContentFile(path, limits.FileBytes)
+			if err != nil {
+				return err
+			}
+			att, err := s.Attach(r.ID, filepath.Base(path), data)
+			if err != nil {
+				return err
+			}
+			atts = append(atts, att)
+		}
+		i, err := s.Notify.Rooms.NoteIssue(r.ID, a[0], by, text, atts)
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			return json.NewEncoder(c.OutOrStdout()).Encode(i)
+		}
+		_, err = fmt.Fprintf(c.OutOrStdout(), "noted %s : %s\n", i.Label(), i.Title)
+		return err
+	}}
+	noteCmd.Flags().StringArrayVar(&attach, "attach", nil, "attach a file (repeatable)")
+	root.AddCommand(noteCmd)
 	var all bool
 	list := &cobra.Command{Use: "list", Short: "List unhandled room issues", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		s, r, _, err := caller(false)

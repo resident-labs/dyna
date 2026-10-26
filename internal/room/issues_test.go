@@ -2,6 +2,7 @@ package room
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,35 @@ import (
 	"testing"
 	"time"
 )
+
+// A goal's conditional close checks the link inside the locked write, so an
+// issue another goal took after the caller read it keeps that new link, and
+// only the goal that still holds the issue closes it (D-249).
+func TestCloseIssueGoalKeepsAMovedLink(t *testing.T) {
+	s, rec, _ := pinFixture(t)
+	i, err := s.FileIssue(rec.ID, IssueInput{Title: "Relinked while closing", Filer: rec.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.LinkIssueGoal(ownerCtx(), rec.ID, i.ID, "g1", rec.Name, IssueStateOpen); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.LinkIssueGoal(ownerCtx(), rec.ID, i.ID, "g2", rec.Name, IssueStateGoal); err != nil {
+		t.Fatal(err)
+	}
+	// g1's close arrives after g2 took the issue.
+	if _, err = s.CloseIssueGoal(ownerCtx(), rec.ID, i.ID, "g1", rec.Name, "done", CloseOrigin{}); !errors.Is(err, ErrIssueLeftGoal) {
+		t.Fatalf("close of a moved issue = %v; want ErrIssueLeftGoal", err)
+	}
+	got, err := s.Issue(rec.ID, i.ID)
+	if err != nil || got.State != IssueStateGoal || got.GoalID != "g2" {
+		t.Fatalf("issue = %+v, %v; want still linked to g2", got, err)
+	}
+	closed, err := s.CloseIssueGoal(ownerCtx(), rec.ID, i.ID, "g2", rec.Name, "done", CloseOrigin{})
+	if err != nil || closed.State != IssueStateClosed || closed.Reason != "done" || closed.GoalID != "g2" {
+		t.Fatalf("close = %+v, %v", closed, err)
+	}
+}
 
 func TestIssuesRoundTripAndTriage(t *testing.T) {
 	s, rec, _ := pinFixture(t)
