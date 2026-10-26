@@ -255,6 +255,12 @@ const fixtures: Record<string, EventPayload> = {
     remedy: 'systemctl --user restart dyna-engine.service',
     detail: 'only the engine creates and migrates dyna.db',
   },
+  'alert/consolidation': {
+    source: 'consolidation',
+    summary: 'Consolidation c1 paused in phase committing: goal g1 is not open',
+    remedy: 'dyna subagent consolidate resume c1',
+    detail: 'Consolidation c1 into dyna:kept paused in phase committing.',
+  },
   'service/failed': {
     service: 'librarian', session: 'dyna:librarian', turn: 4,
     error: 'turn failed: harness exited with status 1', profile: 'deepseek', model: 'deepseek-flash',
