@@ -28,6 +28,9 @@
   let { onmodal = () => {}, accountId = '', roomId = '', oncreateprofile = () => {}, onprofile = () => {} }: Props = $props()
   let snapshot = $state<AccountsSnapshot | null>(null)
   let loading = $state(false)
+  // refreshing says the providers were asked, so the page can name that wait
+  // without claiming it for a plain read of the saved readings (D-148).
+  let refreshing = $state(false)
   let error = $state('')
   let notice = $state('')
   let tab = $state('accounts')
@@ -58,6 +61,7 @@
     const wanted = scope
     const ticket = gate.next()
     loading = true; error = ''
+    if (refresh) refreshing = true
     try {
       const next = refresh ? await api.accountsList(wanted, true) : await api.accountsView(wanted)
       if (!mounted || !gate.current(ticket)) return
@@ -68,7 +72,7 @@
         if (account) open(account)
       }
     } catch (e) { if (mounted && gate.current(ticket)) error = errorText(e) || 'Could not read the accounts.' }
-    finally { if (mounted && gate.current(ticket)) loading = false }
+    finally { if (mounted && gate.current(ticket)) { loading = false; refreshing = false } }
   }
 
   // One Refresh button: it reloads whichever tab is showing.
@@ -164,7 +168,7 @@
   <TabHeader flush title="Accounts" blurb="Provider sign-ins, their usage, and the account each provider uses.">
     {#snippet action()}
       <span class="head-actions">
-        <button class="btn quiet" onclick={refresh} disabled={tab === 'accounts' && loading}>{tab === 'accounts' && loading ? 'Refreshing…' : 'Refresh'}</button>
+        <button class="btn quiet" onclick={refresh} disabled={tab === 'accounts' && loading}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
         <button class="btn pri" onclick={() => (adding = true)}>Add account</button>
       </span>
     {/snippet}
@@ -177,6 +181,7 @@
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if notice}<p class="notice" role="status">{notice}</p>{/if}
+  {#if refreshing}<p class="notice" role="status">Asking each provider for current usage. The saved readings stay until they answer.</p>{/if}
   {#if snapshot?.message}<p class="error" role="alert">{snapshot.message}</p>{/if}
 
   <div id="accounts-accounts" role="tabpanel" aria-labelledby="accounts-accounts-tab" hidden={tab !== 'accounts'}>

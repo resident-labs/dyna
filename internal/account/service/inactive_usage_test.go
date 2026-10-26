@@ -27,13 +27,13 @@ func TestInactiveUsageProbeDeadlines(t *testing.T) {
 		want time.Time
 	}{
 		{"never checked", nil, time.Time{}},
-		{"interval", &store.Observation{ObservedAt: now}, now.Add(30 * time.Minute)},
-		{"attempted", &store.Observation{ObservedAt: now.Add(-time.Hour), LastAttemptAt: now}, now.Add(30 * time.Minute)},
+		{"interval", &store.Observation{ObservedAt: now}, now.Add(inactiveUsageWindow)},
+		{"attempted", &store.Observation{ObservedAt: now.Add(-time.Hour), LastAttemptAt: now}, now.Add(inactiveUsageWindow)},
 		{"reset", &store.Observation{ObservedAt: now, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset},
-		{"reset already checked", &store.Observation{ObservedAt: now.Add(-time.Hour), LastAttemptAt: reset, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset.Add(30 * time.Minute)},
-		{"fresh after reset", &store.Observation{ObservedAt: reset, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset.Add(30 * time.Minute)},
+		{"reset already checked", &store.Observation{ObservedAt: now.Add(-time.Hour), LastAttemptAt: reset, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset.Add(inactiveUsageWindow)},
+		{"fresh after reset", &store.Observation{ObservedAt: reset, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, reset.Add(inactiveUsageWindow)},
 		{"provider backoff", &store.Observation{ObservedAt: now, RateLimitedUntil: &backoff, Windows: []Window{{ResetsAt: reset.Format(time.RFC3339)}}}, backoff},
-		{"invalid reset", &store.Observation{ObservedAt: now, Windows: []Window{{ResetsAt: "invalid"}}}, now.Add(30 * time.Minute)},
+		{"invalid reset", &store.Observation{ObservedAt: now, Windows: []Window{{ResetsAt: "invalid"}}}, now.Add(inactiveUsageWindow)},
 		{"reading saved before typed reasons", &store.Observation{ObservedAt: now, LastAttemptAt: now, UsageError: "old generic result"}, time.Time{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,6 +41,21 @@ func TestInactiveUsageProbeDeadlines(t *testing.T) {
 				t.Fatalf("usageProbeAt = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// D-148: an inactive reading is shown stale once it reaches the display window,
+// so the timer must probe it again by then. A longer probe interval made an
+// inactive account look stale for most of every cycle.
+func TestInactiveProbeIsDueWhenTheReadingShowsStale(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	for _, age := range []time.Duration{inactiveUsageWindow, inactiveUsageWindow + time.Minute, 25 * time.Minute} {
+		if due := usageProbeAt(&store.Observation{ObservedAt: now.Add(-age)}, false); due.After(now) {
+			t.Fatalf("a reading %s old is shown stale but is not due until %s", age, due.Sub(now))
+		}
+	}
+	if got := savedTTL("claude-code"); got != inactiveUsageWindow {
+		t.Fatalf("savedTTL = %s, want the inactive window %s", got, inactiveUsageWindow)
 	}
 }
 
@@ -93,7 +108,7 @@ func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
 		t.Fatalf("before reset: next=%v calls=%d", next, calls)
 	}
 	now = reset
-	if next := s.RefreshInactiveUsage(t.Context(), now); !next.Equal(now.Add(30*time.Minute)) || calls != 1 {
+	if next := s.RefreshInactiveUsage(t.Context(), now); !next.Equal(now.Add(inactiveUsageWindow)) || calls != 1 {
 		t.Fatalf("at reset: next=%v calls=%d", next, calls)
 	}
 	for _, row := range s.AccountUsageCached().Accounts {
@@ -102,11 +117,11 @@ func TestInactiveUsageProbesSavedGrantAtIntervalAndReset(t *testing.T) {
 		}
 	}
 	// A new service must honor the persisted attempt time after a restart.
-	now = now.Add(29 * time.Minute)
+	now = now.Add(inactiveUsageWindow - time.Minute)
 	s = New(Options{Store: st, Now: func() time.Time { return now }})
 	s.RefreshInactiveUsage(t.Context(), now)
 	if calls != 1 {
-		t.Fatal("inactive account probed before the 30 minute interval")
+		t.Fatal("inactive account probed before the inactive usage window")
 	}
 	now = now.Add(time.Minute)
 	s.RefreshInactiveUsage(t.Context(), now)
@@ -157,7 +172,7 @@ func TestActivePiAccountProbesItsProviderUsageWhileIdle(t *testing.T) {
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
 	s := New(Options{Store: st, Now: func() time.Time { return now }})
-	if next := s.RefreshInactiveUsage(t.Context(), now); next.Before(now.Add(30 * time.Minute)) {
+	if next := s.RefreshInactiveUsage(t.Context(), now); next.Before(now.Add(inactiveUsageWindow)) {
 		t.Fatalf("next probe = %v", next)
 	}
 	if calls != 1 {
@@ -275,7 +290,7 @@ func TestRefreshInactiveUsageRepollsTheActiveAccountDuringTurns(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = old })
 	s := New(Options{Store: st, Now: func() time.Time { return now }})
 	// An idle harness keeps its reading: no probe before any turn runs.
-	if next := s.RefreshInactiveUsage(t.Context(), now); !next.Equal(now.Add(inactiveUsageTTL)) || calls != 0 {
+	if next := s.RefreshInactiveUsage(t.Context(), now); !next.Equal(now.Add(inactiveUsageWindow)) || calls != 0 {
 		t.Fatalf("idle: next=%v calls=%d, want no active probe", next, calls)
 	}
 	release, err := accounts.TurnLease(t.Context(), "claude-code")
