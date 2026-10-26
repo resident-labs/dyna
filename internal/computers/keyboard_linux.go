@@ -32,6 +32,18 @@ type virtualKeyboard struct {
 // Chromium's ui/events/keycodes/dom/dom_code_data.inc (152.0.7977.82).
 var keyboardCodes = []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 96, 97, 98, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 131, 132, 133, 134, 135, 136, 137, 138, 140, 142, 143, 144, 150, 152, 155, 156, 158, 159, 161, 163, 164, 165, 166, 167, 168, 169, 171, 172, 173, 174, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 201, 204, 206, 207, 208, 209, 210, 217, 224, 225, 227, 228, 229, 230, 231, 232, 233, 234, 235, 244, 248, 358, 362, 370, 372, 374, 392, 397, 405, 410, 411, 418, 419, 421, 423, 429, 431, 432, 433, 464, 579, 580, 581, 582, 583, 584, 585, 586, 589, 590, 591, 592, 593, 633}
 
+// reservedKeyboardCode reports a position that holds a key of the standard US
+// layout (main block, keypad, function and navigation keys, modifiers). Extra
+// symbols must not rebind these: an app that reads physical keys, such as
+// Ctrl or a keypad key, would see the extra symbol instead.
+func reservedKeyboardCode(code uint32) bool {
+	switch {
+	case code >= 1 && code <= 83, code == 87, code == 88, code >= 96 && code <= 111, code == 119, code >= 125 && code <= 127:
+		return true
+	}
+	return false
+}
+
 var baseKeyboardCodes, baseKeyboardShift = func() (map[string]uint32, map[string]bool) {
 	codes := map[string]uint32{}
 	shifted := map[string]bool{}
@@ -81,7 +93,7 @@ func keyboardMap(actions []Action, previous map[string]uint32) (string, map[stri
 			return
 		}
 		for _, code := range keyboardCodes {
-			if !used[code] {
+			if !used[code] && !reservedKeyboardCode(code) {
 				codes[name] = code
 				used[code] = true
 				return
