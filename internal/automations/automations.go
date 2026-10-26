@@ -167,12 +167,26 @@ func doctorPass(_ context.Context, _ int, log io.Writer) error {
 	}
 	dataDir := store.DataDir()
 	sessions := subagent.DefaultStore()
+	manager := subagent.NewManager()
 	rooms := room.DefaultStore()
 	notifier := doctoralert.Notifier{
 		DataDir: dataDir,
 		Use: func() ([]doctoralert.RoomUse, error) {
 			infos, err := sessions.ListSnapshot(false)
-			return doctoralert.Count(infos), err
+			if err != nil {
+				return nil, err
+			}
+			// A store that cannot be read could hide a session's work, so the pass
+			// fails and the next one tries again, rather than call it finished.
+			counts, countErr := manager.ResponsibilityCounts(context.Background(), infos)
+			if countErr != nil {
+				return nil, countErr
+			}
+			return doctoralert.Count(infos, doctoralert.Holds(counts)), nil
+		},
+		Outside: func() []doctoralert.Outside {
+			infos, _ := sessions.ListSnapshot(false)
+			return doctoralert.Locate(doctor.TopOutside("/proc", time.Second, time.Sleep, 3), infos)
 		},
 		Send: func(n doctoralert.Note) error { return doctoralert.PostNote(rooms, n) },
 	}

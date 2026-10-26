@@ -52,3 +52,14 @@ test('a failed cell makes its lane failed, and urgent lanes sort first', () => {
   assert.ok(grid)
   assert.deepEqual(byUrgency(grid.lanes).map((l) => l.name), ['C', 'B', 'A'])
 })
+
+test('commands count into their lane cell beside the agents', () => {
+  const grid = laneGrid([ph('CH prepare', 'ok', { commands: 1 }), ph('BS prepare'), ph('CH prepare', 'running', { commands: 2 }), ph('CH review')])
+  assert.ok(grid)
+  const [ch, bs] = grid.lanes
+  assert.ok(ch && bs)
+  assert.equal(ch.cells[0]?.commands, 3, 'commands sum over rounds')
+  assert.equal(ch.cells[0]?.total, 2, 'agents still count in total')
+  assert.equal(ch.cells[0]?.runs, 2)
+  assert.equal(bs.cells[0]?.commands, 0)
+})

@@ -14,6 +14,14 @@ it, or start the installed service when its endpoint is absent. Linux installs
 without a user service manager keep the existing detached-process fallback.
 The supervisor preserves the owner's D-Bus and keyring.
 
+Each running computer also gets its own D-Bus session bus, a `bus` socket in its
+runtime directory. An app started with `dyna computer open` or `dyna computer run`
+uses it, so a desktop portal request, such as a file chooser, starts a portal on
+that bus, with the computer's private display. Without it, the request reached the
+owner's portal and the chooser opened on the owner's display. If `dbus-daemon` is
+missing, the computer works as before. Shells keep the missing-socket address
+described below.
+
 A new build installs without stopping busy computers: the service restarts later.
 For the first 10 minutes after that restart becomes pending, the service refuses
 to start new desktops; after that it starts them again, so a few busy computers
