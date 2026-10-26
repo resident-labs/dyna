@@ -40,18 +40,20 @@ export function hookRows(summaries: readonly HookSummary[]): ServiceCardRow[] {
 }
 
 // RoomRead is one room's service list, or null when the read failed and no
-// earlier read of that room exists.
-export interface RoomRead { room: string; services: readonly ServiceView[] | null }
+// earlier read of that room exists. stale marks a list kept from an earlier
+// read because the newest read failed.
+export interface RoomRead { room: string; services: readonly ServiceView[] | null; stale?: boolean }
 
 // settleReads keeps a room's last good list when a new read of it fails, so a
 // failed read neither drops that room's failing service nor lets another room
-// report it healthy. A room with no good read yet stays null.
+// report it healthy. The kept list is marked stale, so the card still warns
+// that it could not refresh. A room with no good read yet stays null.
 export function settleReads(kept: Readonly<Record<string, readonly ServiceView[]>>, reads: readonly RoomRead[]): { byRoom: RoomRead[]; kept: Record<string, readonly ServiceView[]> } {
   const next: Record<string, readonly ServiceView[]> = {}
   const byRoom = reads.map(({ room, services }): RoomRead => {
     const settled = services ?? kept[room] ?? null
     if (settled) next[room] = settled
-    return { room, services: settled }
+    return { room, services: settled, stale: services === null && settled !== null }
   })
   return { byRoom, kept: next }
 }
@@ -59,10 +61,11 @@ export function settleReads(kept: Readonly<Record<string, readonly ServiceView[]
 // serviceRows turns each room's service list into one row per service. A
 // service the engine cannot run (no usable profile) is failing in any room; the
 // log opens the first room that has the problem, else the first room. A room
-// that could not be read is its own failing row.
+// that could not be read, or only shows its last read, is its own failing row.
 export function serviceRows(byRoom: readonly RoomRead[]): ServiceCardRow[] {
   const rows = new Map<string, ServiceCardRow>()
-  for (const { room, services } of byRoom) {
+  for (const { room, services, stale } of byRoom) {
+    if (stale) rows.set(`stale:${room}`, { id: `service:stale:${room}`, name: 'Services', tone: 'bad', state: 'Could not refresh; showing the last read', at: '', log: { kind: 'room', room } })
     if (!services) {
       rows.set(`unreadable:${room}`, { id: `service:unreadable:${room}`, name: 'Services', tone: 'bad', state: 'Could not be read', at: '', log: { kind: 'room', room } })
       continue
