@@ -39,6 +39,11 @@ func Run(ctx context.Context, cmd *exec.Cmd) error {
 func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) error) error {
 	r := repositoryFor(ctx, cmd)
 	if err := checkPolicy(ctx, cmd.Dir, r, cmd.Args[1:]); err != nil {
+		// A read of a public repository outside every room needs no room, and no
+		// room account: it runs as gh is signed in. Writes never take this path.
+		if publicRead(ctx, r, cmd.Args[1:]) {
+			return runWithToken(cmd, "")
+		}
 		return err
 	}
 	token, login := "", ""
