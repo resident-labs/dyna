@@ -302,6 +302,11 @@ func TestRunAgentInstructionsKeepTheJournalAndOfferNoDelegation(t *testing.T) {
 			t.Errorf("run agent instructions offer %q", unwanted)
 		}
 	}
+	// A standalone leaf session still verifies its own changes.
+	standalone := Meta{ID: NewID(), Name: "leaf", Room: e.room.Name, RoomID: e.room.ID, Depth: 2, Leaf: true}
+	if strings.Contains(e.m.sessionInstructions(standalone, "owner", 3, "").Text(), "Do not build, compile or run tests") {
+		t.Error("a standalone leaf session is told not to build or test")
+	}
 	meta.Run.Journal = ""
 	if strings.Contains(e.m.sessionInstructions(meta, "owner", 3, "").Text(), "DYNA WORK JOURNAL") {
 		t.Error("a run agent without a journal still gets the journal rules")
