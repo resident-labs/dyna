@@ -41,7 +41,13 @@ func startOnShell(t *testing.T, stubs, detached, script string, env ...string) e
 	// The host check kills the rest of its process group, so the script runs in a
 	// group of its own and never reaches the test binary.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(append(os.Environ(), "PATH="+stubs+":"+os.Getenv("PATH")), env...)
+	// The start script asks the login shell for a PATH. This one answers with the
+	// PATH it was given, so the host's own profiles never change the stubs.
+	shell := filepath.Join(stubs, "login-shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf '%s\\n' \"$PATH\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Env = append(append(os.Environ(), "PATH="+stubs+":"+os.Getenv("PATH"), "SHELL="+shell), env...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
@@ -248,5 +254,42 @@ func TestStopScriptNeedsAConfirmedStop(t *testing.T) {
 				t.Fatalf("stop err = %v, want success %v", err, tc.wantOK)
 			}
 		})
+	}
+}
+
+// The systemd user manager has a PATH of its own, without the tools an owner
+// installs for a login shell. A detached check must see the PATH a login shell
+// of the node gives, as it did when it ran in an SSH login shell.
+func TestDetachedCheckGetsTheLoginShellPath(t *testing.T) {
+	dir := t.TempDir()
+	stubs := nodeStubs(t)
+	loginBin := filepath.Join(dir, "login-bin")
+	if err := os.MkdirAll(loginBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loginBin, "owner-tool"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A login shell that prints a banner before it prints its PATH. It ignores
+	// its arguments, so the host's profiles never change the PATH it reports.
+	shell := filepath.Join(dir, "login-shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\necho 'Welcome to the node'\nprintf '%s\\n' \""+loginBin+":$PATH\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// This systemd-run starts the unit with only the PATH the options give, as a
+	// user manager does, and not the PATH of the session that called it.
+	managerPath := "/usr/bin:/bin"
+	runner := "#!/bin/sh\nunit_path=" + managerPath + "\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --setenv=PATH=*) unit_path=${1#--setenv=PATH=} ;;\n    --) shift; break ;;\n  esac\n  shift\ndone\nPATH=$unit_path exec setsid -w \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(stubs, "systemd-run"), []byte(runner), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	detached := filepath.Join(dir, "check", "detached")
+	if err := startOnShell(t, stubs, detached, "command -v owner-tool\n", "SHELL="+shell); err != nil {
+		t.Fatal(err)
+	}
+	record, err := os.ReadFile(filepath.Join(detached, "exit.json"))
+	if err != nil || !strings.Contains(string(record), `"exitCode":0`) {
+		log, _ := os.ReadFile(filepath.Join(detached, "log"))
+		t.Fatalf("the check did not find a login-shell tool: %q %v\nlog: %s", record, err, log)
 	}
 }

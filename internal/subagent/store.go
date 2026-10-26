@@ -257,6 +257,7 @@ type Turn struct {
 	Ended              time.Time                       `json:"ended,omitempty"`
 	Result             any                             `json:"result,omitempty"`
 	Error              string                          `json:"error,omitempty"`
+	WorkerStderr       string                          `json:"workerStderr,omitempty"`  // the failed worker's stderr tail; detail for the owner, never cause text
 	FailureReason      providerfailure.Reason          `json:"failureReason,omitempty"` // the provider failure a trusted boundary named; Error is display text
 	HarnessSession     string                          `json:"harnessSession,omitempty"`
 	Steering           []Steer                         `json:"steering,omitempty"`

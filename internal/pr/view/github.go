@@ -611,6 +611,12 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 	// Changing a tracked PR's notes or policy takes the author rule.
 	checkedAuthor := info.ID
 	if _, err := p.Store.Get(ref.Key()); err == nil {
+		// A run-owned caller of the same controller first takes over the PR its
+		// earlier run author left (issue D-252), before the author rule reads
+		// the record; an ineligible caller keeps the refusal below.
+		if _, err := p.TakeoverRunChange(ghCtx, ref.Key(), info, dir); err != nil {
+			return OpenedChange{}, err
+		}
 		_, checked, err := s.authorPRInRoom(ctx, "UpdateChangeNotes", rec.ID, ref.Key())
 		if err != nil {
 			return OpenedChange{}, err

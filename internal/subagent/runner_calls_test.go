@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,32 @@ func TestTurnStartResentAfterACrashWritesOnce(t *testing.T) {
 	// The first run of turn 1 also logged a turn_start.
 	if lines[JournalRoomDrained] != 1 || lines[JournalTurnStart] != 2 {
 		t.Fatalf("event lines %v; want one room_drained and one more turn_start", lines)
+	}
+}
+
+// A failed turn keeps the worker's stderr tail on its record as detail,
+// apart from the error text the failure card shows as its cause (D-108).
+func TestFailedTurnKeepsWorkerStderrAsDetail(t *testing.T) {
+	e := newTestEnv(t)
+	info, _ := e.start("RESPOND: done")
+	e.wait(info.ID, 1)
+	warning := `Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.`
+	cursor := int64(1)
+	end := TurnEnd{Turn: 1, Status: TurnError,
+		Error:        "worker pi (model muse-wonder-full-1.0) failed to start: no harness event within 2m0s of startup",
+		WorkerStderr: warning, Ended: time.Now(), FallbackCutoff: &cursor}
+	if err := e.m.endTurn(context.Background(), info.ID, end); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := e.m.Store.ReadTurn(info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Status != TurnError || strings.Contains(turn.Error, warning) {
+		t.Fatalf("failed turn glued stderr into its cause: %q", turn.Error)
+	}
+	if turn.WorkerStderr != warning {
+		t.Fatalf("failed turn lost its worker stderr detail: %q", turn.WorkerStderr)
 	}
 }
 

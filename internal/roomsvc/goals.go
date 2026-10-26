@@ -280,6 +280,14 @@ func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, d
 	if err != nil {
 		return g, err
 	}
+	// A done goal closes the issues it still links, so an issue no fixing PR
+	// named still ends with its goal (D-249). A dropped goal keeps its links:
+	// the work may move to a new goal.
+	if !drop {
+		if err := s.closeDoneGoalIssues(ctx, r, g, summary, author); err != nil {
+			return g, err
+		}
+	}
 	verb := "finished"
 	if drop {
 		verb = "dropped"

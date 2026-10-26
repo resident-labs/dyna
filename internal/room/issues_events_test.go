@@ -205,3 +205,43 @@ func TestGoalAndCheckinWakeRules(t *testing.T) {
 		}
 	}
 }
+
+// A note adds evidence to an issue in any state: it posts one quiet event per
+// note, leaves the issue as it was, and wakes nobody.
+func TestNoteIssuePostsQuietEvidence(t *testing.T) {
+	s, rec, _ := pinFixture(t)
+	issue, err := s.FileIssue(rec.ID, filingInput("alpha:librarian"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"CI evidence from head 1", "CI evidence from head 2"} {
+		if _, err := s.NoteIssue(rec.ID, "D-1", "alpha:agent", text, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.NoteIssue(rec.ID, "D-1", "alpha:agent", " ", nil); err == nil {
+		t.Fatal("an empty note was accepted")
+	}
+	if _, err := s.NoteIssue(rec.ID, "D-9", "alpha:agent", "text", nil); err == nil {
+		t.Fatal("a note on a missing issue was accepted")
+	}
+	msgs, err := s.Messages(rec.ID)
+	if err != nil || len(msgs) != 3 {
+		t.Fatalf("posts after two notes = %d, %v", len(msgs), err)
+	}
+	for i, msg := range msgs[1:] {
+		ev, ok := msg.Issue()
+		if !ok || ev.Type != IssueNoted || ev.IssueID != issue.ID || ev.Number != 1 || ev.Actor != "alpha:agent" || ev.State != IssueStateOpen {
+			t.Fatalf("note %d payload = %+v", i, ev)
+		}
+		if msg.Wake || msg.Deliverable() || rootWakes(msg, rec.Name) {
+			t.Fatalf("note %d wakes: %+v", i, msg)
+		}
+	}
+	if got, _ := msgs[2].Issue(); got.Detail != "CI evidence from head 2" {
+		t.Fatalf("second note kept %q", got.Detail)
+	}
+	if after, err := s.Issue(rec.ID, issue.ID); err != nil || after.State != IssueStateOpen {
+		t.Fatalf("issue after notes = %+v, %v", after, err)
+	}
+}

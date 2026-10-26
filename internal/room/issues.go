@@ -90,6 +90,30 @@ func (s *Store) CloseIssue(ctx context.Context, roomID, id, by, reason string, o
 	})
 }
 
+// ErrIssueLeftGoal reports that an issue no longer names the goal a
+// conditional close was given, because another goal took the issue after the
+// caller read it. Callers take it as "nothing left to close", not a failure.
+var ErrIssueLeftGoal = errors.New("issue no longer links that goal")
+
+// CloseIssueGoal closes an issue only while it still names goalID, keeping
+// the goal ID as the closed issue's history. The link check and the write
+// share one locked step, so a goal that takes the issue after the caller read
+// it keeps its link: the close returns ErrIssueLeftGoal and changes nothing.
+// The caller on ctx decides whether the close is allowed; by only credits it.
+func (s *Store) CloseIssueGoal(ctx context.Context, roomID, id, goalID, by, reason string, origin CloseOrigin) (Issue, error) {
+	if strings.TrimSpace(goalID) == "" {
+		return Issue{}, errors.New("a goal close needs the goal ID")
+	}
+	return s.changeIssueFrom(ctx, roomID, id, by, origin, true, "ChangeIssue", func(i *Issue) error {
+		if i.State != IssueStateGoal || i.GoalID != goalID {
+			return ErrIssueLeftGoal
+		}
+		i.State = IssueStateClosed
+		i.Reason = reason
+		return nil
+	})
+}
+
 // checkIssueState rejects a stored state the issue protocol does not define,
 // so a typo cannot pass from storage to a view as a finite state.
 func checkIssueState(i Issue) error {
@@ -612,6 +636,38 @@ func (s *Store) changeIssueFrom(ctx context.Context, roomID, id, by string, orig
 		return fmt.Errorf("issue %q not found", id)
 	})
 	return out, err
+}
+
+// NoteIssue adds evidence to an existing issue, in any state, and keeps the
+// issue as it is. The note is one quiet post of the issue's own event family, so
+// the issue history shows it and the room's root reads it without waking. Like
+// filing, any session or the owner may note, also from another room (D-111), so
+// it checks no triage right; by is the address that credits the note.
+func (s *Store) NoteIssue(roomID, id, by, text string, atts []Attachment) (Issue, error) {
+	text, by = strings.TrimSpace(text), strings.TrimSpace(by)
+	if by == "" || (text == "" && len(atts) == 0) {
+		return Issue{}, errors.New("a note needs an author and text or an attachment")
+	}
+	rec, err := s.Resolve(roomID)
+	if err != nil {
+		return Issue{}, err
+	}
+	if by != rec.Name && !strings.HasPrefix(by, rec.Name+":") && !s.filerNamesRoom(by) {
+		return Issue{}, errors.New("a note must come from a session or the owner")
+	}
+	i, err := s.Issue(rec.ID, id)
+	if err != nil {
+		return Issue{}, err
+	}
+	ev := IssueEvent{
+		Type: IssueNoted, IssueID: i.ID, Number: i.Number, Title: i.Title, State: i.State,
+		Filer: i.Filer, Actor: IssueActor(by), Assignee: i.Assignee, Detail: text,
+	}
+	if i.File != "" {
+		ev.Files = []IssueFile{{Path: i.File, Line: i.Line}}
+	}
+	_, err = s.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}, FreshID: true, Attachments: atts})
+	return i, err
 }
 
 // postIssueChange posts the typed event of one issue change. It is quiet: the

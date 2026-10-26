@@ -205,3 +205,25 @@ func TestIssueCloseAcceptsPositionalReason(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueNoteAppendsEvidenceWithoutFilingAnother(t *testing.T) {
+	f := newIssueFixture(t)
+	i := f.file(t)
+	if _, err := f.run("note", i.Label(), "second head still fails"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.run("note", i.Label()); err == nil {
+		t.Fatal("an empty note was accepted")
+	}
+	rows, err := f.rooms.Issues(f.rec.ID, true)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("issues after a note = %+v, %v", rows, err)
+	}
+	msgs, err := f.rooms.Messages(f.rec.ID)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("posts after a note = %d, %v", len(msgs), err)
+	}
+	if ev, ok := msgs[1].Issue(); !ok || ev.Type != room.IssueNoted || ev.Detail != "second head still fails" || ev.Actor != room.IssueActor(f.rec.Name) {
+		t.Fatalf("note event = %+v", ev)
+	}
+}
