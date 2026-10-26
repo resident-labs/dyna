@@ -26,7 +26,10 @@ func nativePiTransferStarting(t *testing.T, configure ...func(*profile.Profile))
 	e.m.TransferNow = func() time.Time { return now }
 	e.m.TransferLaunch = func(*Manager, string, string) error { return nil }
 	info, _ := e.start("RESPOND: first turn", func(so *StartOptions) { so.Profile = "pi-old" })
-	info, _ = e.wait(info.ID, 1)
+	info, first := e.wait(info.ID, 1)
+	if first.HarnessSession != "" {
+		persistFakePiSession(t, first.HarnessSession)
+	}
 	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "pi-next", WaitSeconds: 30})
 	if err != nil {
 		t.Fatal(err)
