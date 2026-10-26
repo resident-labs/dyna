@@ -10,10 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 )
 
 // Read dimensions from the frame itself. Desktop dimensions can change while
@@ -464,37 +461,6 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 		return fmt.Errorf("unsupported action %q", kind)
 	}
 	return nil
-}
-
-// Resolve Shift explicitly for submitted symbols, including custom one-level
-// bindings, while retaining the modifier mask for shortcut handling.
-func shiftedKeys(keys []string) []string {
-	shift := false
-	for _, key := range keys {
-		if name := keyName(key); name == "Shift_L" || name == "Shift_R" {
-			shift = true
-		}
-	}
-	if !shift {
-		return keys
-	}
-	out := append([]string(nil), keys...)
-	named := map[string]string{"minus": "underscore", "equal": "plus", "bracketleft": "braceleft", "bracketright": "braceright", "backslash": "bar", "semicolon": "colon", "apostrophe": "quotedbl", "comma": "less", "period": "greater", "slash": "question", "grave": "asciitilde"}
-	plain := "1234567890-=[]\\;',./`"
-	upper := "!@#$%^&*()_+{}|:\"<>?~"
-	for i, key := range out {
-		if utf8.RuneCountInString(key) == 1 {
-			r := []rune(key)[0]
-			if n := strings.IndexRune(plain, r); n >= 0 {
-				out[i] = string(upper[n])
-			} else {
-				out[i] = string(unicode.ToUpper(r))
-			}
-		} else if mapped, ok := named[key]; ok {
-			out[i] = mapped
-		}
-	}
-	return out
 }
 
 // interruptActLocked is the takeover: the running batch's held buttons are
