@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -307,24 +306,30 @@ func TestCommandCancelsTheProcessGroupAndDrainsItsPipes(t *testing.T) {
 }
 
 // A command that exits while a child it started keeps the output pipe open is
-// reported as ErrWaitDelay after the wait bound, and the child's process group
-// is killed so nothing outlives the check.
-func TestRunAndReapKillsAChildThatHoldsTheOutputOpen(t *testing.T) {
-	cmd := exec.Command("bash", "-c", "sleep 30 & exit 0")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = 50 * time.Millisecond
-	var out bytes.Buffer
-	cmd.Stdout = &out
+// reported as ErrWaitDelay after the wait bound, and the command's process
+// group is killed rather than left behind. The run and the reaper are given,
+// so the decision is proven without a real wait or a real child.
+func TestRunAndReapKillsTheGroupOfALeftoverChild(t *testing.T) {
+	cmd := exec.Command("true")
+	cmd.Process = &os.Process{Pid: 4242}
 	var killed []int
-	previous := reapGroup
-	reapGroup = func(pid int) error { killed = append(killed, pid); return nil }
-	t.Cleanup(func() { reapGroup = previous })
-
-	err := runAndReap(cmd)
+	err := runAndReapWith(func() error { return exec.ErrWaitDelay }, cmd, func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	})
 	if !errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("a leftover pipe holder was not reported: %v", err)
 	}
-	if len(killed) != 1 || killed[0] != cmd.Process.Pid {
-		t.Fatalf("reaped groups %v, want the command's own group %d", killed, cmd.Process.Pid)
+	if len(killed) != 1 || killed[0] != 4242 {
+		t.Fatalf("reaped groups %v, want 4242", killed)
+	}
+	// A command that failed for another reason is not reaped, so a real failure
+	// keeps its exit status.
+	killed = nil
+	if err := runAndReapWith(func() error { return errors.New("exit status 1") }, cmd, func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	}); err == nil || len(killed) != 0 {
+		t.Fatalf("a failed command reaped groups %v", killed)
 	}
 }
