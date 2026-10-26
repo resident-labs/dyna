@@ -541,4 +541,31 @@ func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
 	if read.Status != VerdictPending {
 		t.Fatalf("the trial reader decided %s on an engine stop, want pending", read.Status)
 	}
+	// The restart forgets the runs in flight, and the same observation must then
+	// admit another run for that head: a sync head has no other scheduler entry,
+	// so pending alone would wait forever.
+	second := newFakeNodeWork()
+	restarted := *s
+	restarted.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{}}
+	restarted.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		return second.work(ctx)
+	}
+	again := make(chan trialCI, 1)
+	go func() {
+		read, err := restarted.savedTrialCI(context.Background(), trialJob)
+		if err != nil {
+			again <- trialCI{Status: VerdictFailed, Reason: err.Error()}
+			return
+		}
+		again <- read
+	}()
+	select {
+	case <-second.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reader did not admit another run after the engine stop")
+	}
+	close(second.teardown)
+	if read := <-again; read.Status != VerdictPending {
+		t.Fatalf("the retried run reported %s, want pending", read.Status)
+	}
 }
