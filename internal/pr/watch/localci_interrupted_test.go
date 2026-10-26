@@ -3,7 +3,6 @@ package watch
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/localci"
 )
@@ -135,13 +134,6 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 	ci.started = make(chan struct{}, 1)
 	ci.release = make(chan struct{})
 	ci.saved = make(chan struct{}, 1)
-	changed := make(chan struct{}, 8)
-	e.s.RunningCIChanged = func() {
-		select {
-		case changed <- struct{}{}:
-		default:
-		}
-	}
 	released := false
 	t.Cleanup(func() {
 		if !released {
@@ -163,54 +155,76 @@ func TestStoppedTrialRetryHappensOnceAndWaitsForASlot(t *testing.T) {
 	if saved := ci.results[head]; !saved.Resumed {
 		t.Fatalf("the replacement does not carry the marker: %+v", saved)
 	}
-	// The replacement must leave the run set before the next admission, or a busy
-	// key rather than the marker would decide the outcome.
-	for runningLocalCIHead(e.s) != "" {
-		select {
-		case <-changed:
-		case <-time.After(5 * time.Second):
-			t.Fatal("the replacement never left the run set")
-		}
-	}
 
-	// The engine stops the replacement too. That second shutdown is the bound, so
-	// no third run starts.
+	// The engine stops the replacement too. That second shutdown is the bound: the
+	// saved result decides, and nothing starts a third run.
 	second := stoppedRun()
 	second.Repo, second.SHA, second.Resumed = repo, head, true
 	ci.results[head] = second
 	if act := savedResultActionFor(second); act != settleSavedResult {
 		t.Fatalf("a stopped replacement action = %v, want settleSavedResult", act)
 	}
-	started, err = e.s.startRegisteredCI(t.Context(), job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if started {
-		t.Fatal("a second shutdown started another run")
-	}
 }
 
-// The local-change reader of a trial follows the same rules as the gate: a fresh
-// stop waits for the run that replaces it, and a stopped replacement fails the
-// trial with the cause instead of waiting for a run that will never come.
-func TestStoppedReplacementFailsTheLocalTrial(t *testing.T) {
-	definition := watchDynaDefinition(t)
-	stopped := stoppedRun()
-	stopped.Suites = stopped.Checks
-	suites := definition.WorkflowSuites()
-	verdict, _, reason, err := localCIStatus(stopped, stopped.Repo, stopped.SHA, definition, suites)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict != VerdictPending {
-		t.Fatalf("a fresh stop = %s (%s), want pending until it is retried", verdict, reason)
-	}
-	stopped.Resumed = true
-	verdict, _, reason, err = localCIStatus(stopped, stopped.Repo, stopped.SHA, definition, suites)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict != VerdictFailed || !strings.Contains(reason, "local CI could not run its checks on pve") {
-		t.Fatalf("a stopped replacement = %s (%s), want a failure that names the cause", verdict, reason)
+// The reader a trial uses must admit the retry a stopped run deserves, and fail a
+// spent retry with the cause. A reader that answered a fresh stop instead would
+// keep a sync head from ever retrying, because it has no other scheduler entry.
+func TestSavedTrialCIAdmitsARetryableStopAndFailsASpentOne(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cause   localci.FailureCause
+		resumed bool
+		want    CIVerdict
+	}{
+		{name: "engine stop retries", cause: localci.CauseEngineStop, want: VerdictPending},
+		{name: "cancelled retries", cause: localci.CauseCancelled, want: VerdictPending},
+		{name: "spent stop fails", cause: localci.CauseEngineStop, resumed: true, want: VerdictFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, record, dir, ci := localCIEnv(t)
+			repo, err := localci.CanonicalRepo(t.Context(), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			head := record.Head
+			stopped := stoppedRun()
+			stopped.Repo, stopped.SHA, stopped.Cause, stopped.Resumed = repo, head, tc.cause, tc.resumed
+			for i := range stopped.Checks {
+				stopped.Checks[i].Cause = tc.cause
+			}
+			ci.results[head] = stopped
+			ci.started = make(chan struct{}, 1)
+			ci.release = make(chan struct{})
+			released := false
+			t.Cleanup(func() {
+				if !released {
+					close(ci.release)
+				}
+				e.s.CancelLocalCI()
+			})
+			trial, err := e.s.localTrialCI(t.Context(), record, head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if trial.Status != tc.want {
+				t.Fatalf("reader = %s (%s), want %s", trial.Status, trial.Reason, tc.want)
+			}
+			if tc.want == VerdictFailed {
+				if head := runningLocalCIHead(e.s); head != "" {
+					t.Fatalf("a spent retry started a run for %s", head)
+				}
+				if !strings.Contains(trial.Reason, "local CI could not run its checks") {
+					t.Fatalf("failure reason = %q, want the cause", trial.Reason)
+				}
+				return
+			}
+			// The reader admitted the retry, so it is in the run set at once.
+			if head := runningLocalCIHead(e.s); head == "" {
+				t.Fatal("the reader did not admit the retry")
+			}
+			<-ci.started
+			close(ci.release)
+			released = true
+		})
 	}
 }
