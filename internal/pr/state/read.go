@@ -62,7 +62,11 @@ func open(root string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "pr.state", 1, func(conn *sql.Conn, _ int) error {
+	// Version 2 marks the split of cold fields into pr_record_parts (the
+	// "pr.record_parts" step below). A binary that needs version 1 refuses a
+	// database at version 2, so it cannot read half a record or write the
+	// cold fields back into the hot row.
+	err = database.Migrate(db, "pr.state", 2, func(conn *sql.Conn, _ int) error {
 		if _, err := conn.ExecContext(context.Background(), schema); err != nil {
 			return err
 		}

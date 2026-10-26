@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // A stored PR record is the hot row in pr_records plus cold parts in
@@ -134,6 +135,24 @@ func partWrites(before, next storedParts) (upsert storedParts, remove []partName
 	return upsert, remove
 }
 
+// hotOnlyTriggers refuse a row that carries a cold field. Every record written
+// by a pre-split binary has one (reviewRounds has no omitempty), so a writer
+// that skipped the version check fails loudly instead of putting cold fields
+// back into the hot row, where stale part rows would hide them.
+func hotOnlyTriggers() string {
+	cold := []string{"json_type(NEW.body,'$.responses') IS NOT NULL"}
+	for _, fields := range partFields {
+		for _, field := range fields {
+			cold = append(cold, "json_type(NEW.body,'$.record."+field+"') IS NOT NULL")
+		}
+	}
+	slices.Sort(cold)
+	when := strings.Join(cold, " OR ")
+	const message = "pr_records holds hot fields only; this dyna is too old to write PR records"
+	return `CREATE TRIGGER IF NOT EXISTS pr_records_hot_insert BEFORE INSERT ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;
+CREATE TRIGGER IF NOT EXISTS pr_records_hot_update BEFORE UPDATE OF body ON pr_records WHEN ` + when + ` BEGIN SELECT RAISE(ABORT, '` + message + `'); END;`
+}
+
 // migrateRecordParts moves the cold fields of every stored record into
 // pr_record_parts, once. The old whole-body shape is not read afterwards.
 func migrateRecordParts(conn *sql.Conn, _ int) error {
@@ -180,5 +199,6 @@ func migrateRecordParts(conn *sql.Conn, _ int) error {
 			}
 		}
 	}
-	return nil
+	_, err = conn.ExecContext(ctx, hotOnlyTriggers())
+	return err
 }
