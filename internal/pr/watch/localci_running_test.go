@@ -480,3 +480,49 @@ func addCommit(t *testing.T, repo, name string) string {
 	changeGit(t, repo, "commit", "--quiet", "-m", name)
 	return changeGit(t, repo, "rev-parse", "HEAD")
 }
+
+// A run the engine's own stop cancelled leaves durable evidence: the saved
+// result carries the engine-stop cause, the head is not finished, and the trial
+// decides nothing, so the same commit runs again after the restart.
+func TestEngineStopLeavesDurableRestartEvidence(t *testing.T) {
+	e, record, dir, ci := localCIEnv(t)
+	s := e.s
+	head := addCommit(t, dir, "engine-stop.txt")
+	work := newFakeNodeWork()
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		return work.work(ctx)
+	}
+	// The engine marks itself before it cancels, as stopEngine does.
+	localci.MarkEngineStopping()
+	t.Cleanup(localci.ClearEngineStopping)
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.localTrialCI(context.Background(), record, head)
+		done <- err
+	}()
+	<-work.started
+	s.CancelLocalCI()
+	close(work.teardown)
+	<-work.finished
+	if err := <-done; err != nil {
+		t.Fatalf("the cancelled trial reported %v", err)
+	}
+	repo, err := localci.CanonicalRepo(t.Context(), record.RepoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := ci.LoadResult(t.Context(), repo, head)
+	if err != nil {
+		t.Fatalf("the engine-stop run saved no evidence: %v", err)
+	}
+	if saved.Cause != localci.CauseEngineStop || saved.Status != localci.OutcomeError {
+		t.Fatalf("saved evidence = %s/%s, want error/%s", saved.Status, saved.Cause, localci.CauseEngineStop)
+	}
+	job := registeredCIJob{record: record, head: head, trial: true}
+	if s.registeredJobResultComplete(t.Context(), job, saved) {
+		t.Fatal("a run the engine stopped counted as a finished head")
+	}
+	if verdict, _, _ := registeredResultStatus(saved); verdict != VerdictPending {
+		t.Fatalf("the trial decided %s on an engine stop, want pending", verdict)
+	}
+}
