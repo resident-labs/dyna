@@ -121,6 +121,40 @@ func SetLink(link, target string) error {
 	return os.Rename(staged, link)
 }
 
+// RefreshScopeLinks repoints every link a native scope published at the image
+// this process runs. Bridges, harness MCP commands and $DYNA_BIN exec the
+// link, so a session that keeps running across an engine update follows the
+// restarted engine onto its current build without a restart: the link, not
+// one build's image, is the pinned path. An engine that skips this leaves
+// such sessions on the build their first turn published (D-161).
+func RefreshScopeLinks() error {
+	image, err := StableExecutable()
+	if err != nil {
+		return err
+	}
+	root, err := linkRoot()
+	if err != nil {
+		return err
+	}
+	scopes, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var firstErr error
+	for _, scope := range scopes {
+		if !scope.IsDir() {
+			continue
+		}
+		if err := SetLink(filepath.Join(root, scope.Name(), currentImageLink), image); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // linkRoot is the directory that holds one link directory per native scope.
 func linkRoot() (string, error) {
 	service, err := cacheRoot()

@@ -310,10 +310,16 @@ func (r Runner) nodeCommandScoped(ctx context.Context, out, stderr io.Writer, sc
 		name, args = "systemd-run", bounded
 	}
 	name, args = r.nodeProgram(name, args)
-	return fn(ctx, "", nil, out, stderr, name, args...)
+	if r.Node.SSH == "" {
+		return fn(ctx, "", nil, out, stderr, name, args...)
+	}
+	return r.nodeDial(ctx, fn, out, stderr, name, args...)
 }
 
-// nodeProgram wraps a program in ssh when the node is another machine.
+// nodeProgram wraps a program in ssh when the node is another machine. The
+// dial deadline matches the machine probe, so a node that does not answer
+// costs a run the same bounded wait everywhere instead of whatever an
+// ambient ssh config happens to set.
 func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	if r.Node.SSH == "" {
 		return name, args
@@ -322,7 +328,102 @@ func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	for _, arg := range args {
 		remote += " " + shellquote.Quote(arg)
 	}
-	return "ssh", append([]string{"-o", "BatchMode=yes"}, r.Node.SSH, remote)
+	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10"}, r.Node.SSH, remote)
+}
+
+// dialFailureNote matches what the ssh client prints when a connection died
+// before the node saw it: the dial or the banner exchange failed, so nothing
+// ran remotely. A node whose accept path stalls under load holds fresh
+// connections tens of seconds before its banner, while every connection that
+// reuses a warm ControlMaster socket passes instantly, so a run fails where a
+// direct shell and a machine probe still succeed (D-162).
+var dialFailureNote = regexp.MustCompile(`(?i)banner exchange|kex_exchange_identification|connection refused|connection timed out|no route to host|network is unreachable|could not resolve hostname`)
+
+// sshDialAttempts bounds how often a node command retries a dial that never
+// reached the node. Two retries with a growing wait outlast a stall of about
+// half a minute, while each dial still fails within its ConnectTimeout, so an
+// unreachable node costs a bounded wait and not a hang.
+const sshDialAttempts = 3
+
+var sshDialWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
+
+// nodeDial runs one node command over ssh and retries a dial that failed
+// before the node saw it. Such a failure proves nothing ran remotely: ssh
+// exited 255 with a dial error and the command wrote no output, so a retry
+// re-runs nothing. Any other failure, or one after the command started,
+// returns as is.
+func (r Runner) nodeDial(ctx context.Context, fn Command, out, stderr io.Writer, name string, args ...string) error {
+	wait := r.dialWait
+	if wait == nil {
+		wait = sleepContext
+	}
+	// Callers often pass one buffer as both outputs. os/exec serializes the
+	// two copy pipes only while it sees the same writer for both, so the
+	// retry's counting and tail capture keep one shared lock instead of two
+	// distinct MultiWriters, and the pipes never write concurrently to a
+	// buffer that is not safe for that.
+	var forward sync.Mutex
+	var wrote countingWriter
+	for attempt := 0; ; attempt++ {
+		// One fresh diagnostic tail per attempt, behind the shared lock: a kept
+		// tail would let an earlier dial error answer for a later attempt that
+		// reached the node and then lost it, and re-run a command that ran.
+		var dialErr tailBuffer
+		stdout := lockedWriter{mu: &forward, dst: io.MultiWriter(out, &wrote)}
+		diagnostics := lockedWriter{mu: &forward, dst: io.MultiWriter(stderr, &dialErr)}
+		err := fn(ctx, "", nil, &stdout, &diagnostics, name, args...)
+		if err == nil || attempt == sshDialAttempts-1 || wrote.n > 0 || !sshDialExit(err, &dialErr) {
+			return err
+		}
+		fmt.Fprintf(stderr, "retrying ssh dial (attempt %d of %d)\n", attempt+2, sshDialAttempts)
+		if waitErr := wait(ctx, sshDialWaits[min(attempt, len(sshDialWaits)-1)]); waitErr != nil {
+			return errors.Join(err, waitErr)
+		}
+	}
+}
+
+// sshDialExit reports whether err is ssh's own transport exit, 255, with a
+// diagnostic the ssh client prints when its connection died before the node
+// saw it. A script the node ran cannot produce that pair: it may echo the
+// text, but then ssh relays its own exit status and the dial never retries.
+func sshDialExit(err error, tail *tailBuffer) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 255 && dialFailureNote.MatchString(tail.String())
+}
+
+// lockedWriter serializes one command output behind a lock that a sibling
+// writer shares, so os/exec's two copy goroutines write one buffer at a time.
+type lockedWriter struct {
+	mu  *sync.Mutex
+	dst io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.dst.Write(p)
+}
+
+// countingWriter counts the bytes that reached a command's output, so a
+// retry never re-runs a command that had already started.
+type countingWriter struct{ n int64 }
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	return len(p), nil
+}
+
+// sleepContext waits for d or until the context ends, so a cancelled run
+// stops waiting between ssh dial retries.
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // systemdNeedsNoExpandFlag reports whether the node's systemd-run must be told
@@ -1094,8 +1195,12 @@ func nodeSlotScript(base string, slots, index int, active string, deadline time.
 		fmt.Sprintf("deadline=$(( $(date +%%s) + %d )); ", int(seconds)) +
 		"acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; printf 'local CI: every slot is busy, waiting for slot %d\\n' %d >&2; exec 9>%s; ", index%slots, index%slots, index%slots, q(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots)))) +
-		"while ! flock -n 9; do " +
+		"if [ \"$acquired\" = 0 ]; then printf 'local CI: every slot is busy, waiting for any free slot\\n' >&2; " +
+		"while [ \"$acquired\" = 0 ]; do " +
+		// Every poll tries every slot, so a waiting check takes the first one that
+		// frees up instead of queueing behind one named slot.
+		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
+		"[ \"$acquired\" = 0 ] || break; " +
 		// The run's keeper holds this file, and it goes when the run is cancelled
 		// or removed: a queued check then has nothing left to wait for.
 		"[ -e " + q(active) + " ] || exit 75; " +
