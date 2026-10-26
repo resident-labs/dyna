@@ -96,3 +96,70 @@ func TestContainerThatStartedKeepsItsTestFailure(t *testing.T) {
 		t.Fatalf("checks = %+v, want a test failure", result.Checks)
 	}
 }
+
+// The checks decide the commit. A cleanup on the node that times out after every
+// check passed is a warning on the run and never turns the result into an error.
+func TestSlowNodeCleanupDoesNotChangeAPassedRun(t *testing.T) {
+	result := runWithCleanup(t, func(attempt int) error { return context.DeadlineExceeded })
+	if result.Status != OutcomePassed {
+		t.Fatalf("run status = %q, want %q", result.Status, OutcomePassed)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != NodeCleanupUnfinished {
+		t.Fatalf("warnings = %v, want the unfinished cleanup", result.Warnings)
+	}
+	// Nothing retries a failed cleanup yet, so the label must not promise it.
+	if label := result.Warnings[0].Label(); !strings.Contains(label, "removing by hand") || strings.Contains(label, "next check") {
+		t.Fatalf("label = %q, want it to say the leftovers may need removing by hand", label)
+	}
+}
+
+// A cleanup that fails once is tried again before the run's directory and record
+// are removed, so a node that was only busy leaves no survivor and no warning.
+func TestNodeCleanupIsTriedAgainBeforeWarning(t *testing.T) {
+	result := runWithCleanup(t, func(attempt int) error {
+		if attempt == 1 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	})
+	if result.Status != OutcomePassed || len(result.Warnings) != 0 {
+		t.Fatalf("status = %q, warnings = %v, want a passed run with no warning", result.Status, result.Warnings)
+	}
+}
+
+// runWithCleanup runs one passing check on a fake node whose cleanup answers
+// with the given function, called with 1 for the first attempt.
+func runWithCleanup(t *testing.T, cleanup func(attempt int) error) Result {
+	t.Helper()
+	attempts := 0
+	definition := parseRepositoryDefinition(t, false)
+	checks, _, err := nodeChecks(definition, []Suite{"test"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", Slots: 1, Enabled: true}}
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "no_container()"):
+			attempts++
+			return cleanup(attempts)
+		case strings.Contains(script, "tar -C"):
+			return fakeNodeReports(out, checks, false)
+		case strings.Contains(script, "run --rm --init"):
+			fmt.Fprintln(out, "")
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
+			fmt.Fprintln(out, "DYNA_CI_COMMAND_STARTED=1")
+		}
+		return nil
+	}
+	newFakeMachine(t, legacy).attach(&runner)
+	result, err := runner.Run(t.Context(), Request{Definition: definition, Repo: t.TempDir(), Suites: []Suite{"test"}, MaxTest: time.Second, DeferSave: true})
+	if err != nil {
+		t.Fatalf("a slow cleanup failed the run: %v", err)
+	}
+	return result
+}
