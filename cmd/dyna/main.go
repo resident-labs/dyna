@@ -242,14 +242,17 @@ func newEngineCommand() *cobra.Command {
 	services.Flags().BoolVar(&writeOnly, "write-only", false, "write unit files without enabling services or contacting systemd")
 	services.Flags().BoolVar(&restartComputers, "restart-computers", false, "restart the computer service when its runtime changed")
 	cmd.AddCommand(services)
-	cmd.AddCommand(&cobra.Command{Use: "tunnel", Short: "Run the cloudflared connector for the managed tunnel", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	var cloudflared string
+	tunnel := &cobra.Command{Use: "tunnel", Short: "Run the cloudflared connector for the managed tunnel", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		if code := engine.TunnelMain(ctx); code != 0 {
+		if code := engine.TunnelMain(ctx, cloudflared); code != 0 {
 			return fmt.Errorf("tunnel exited with code %d", code)
 		}
 		return nil
-	}})
+	}}
+	tunnel.Flags().StringVar(&cloudflared, "cloudflared", "", "the cloudflared binary (default: cloudflared on PATH)")
+	cmd.AddCommand(tunnel)
 	cmd.AddCommand(&cobra.Command{Use: "connect", Short: "Manage Resident Labs Connect", DisableFlagParsing: true, RunE: func(cmd *cobra.Command, args []string) error {
 		if code := engine.ConnectMain(args); code != 0 {
 			return fmt.Errorf("engine connect exited with code %d", code)
