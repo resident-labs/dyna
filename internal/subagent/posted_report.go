@@ -7,13 +7,6 @@ import (
 // An explicit post can supply the result for a harness that owes no final text.
 // Read the current obligation, including live steering, before empty-output
 // recovery.
-// turnOwesNoReport reports a turn with no saved report obligation, so an empty
-// final response after a clean stop is the quiet end it was told to give.
-func (m *Manager) turnOwesNoReport(id string, n int) bool {
-	turn, err := m.store().ReadTurn(id, n)
-	return err == nil && turn.Schema == "" && len(turn.ReportTo) == 0
-}
-
 func (m *Manager) turnAcceptsEmptyOutput(id string, n int) bool {
 	store := m.store()
 	turn, err := store.ReadTurn(id, n)
