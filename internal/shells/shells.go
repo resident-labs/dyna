@@ -75,7 +75,11 @@ type Meta struct {
 	Keep   bool     `json:"keep,omitempty"`
 	RoomID string   `json:"roomId,omitempty"`
 	Room   string   `json:"room,omitempty"`
-	Pid    int      `json:"pid,omitempty"` // the command (process group leader)
+	// Run names the workflow run whose worker started this job. Workflow
+	// workers inherit their parent session's identity, so Owner alone cannot
+	// attribute the job to the run a cancel must stop (D-165).
+	Run   string   `json:"run,omitempty"`
+	Pid   int      `json:"pid,omitempty"` // the command (process group leader)
 	// Supervisor is the detached `dyna shell _run` process.
 	Supervisor int `json:"supervisor,omitempty"`
 	// SupervisorStartTime is Linux /proc/<pid>/stat field 22 (clock ticks).
@@ -149,6 +153,9 @@ type StartOptions struct {
 	Cwd  string
 	// Owner overrides the owning agent session (default runstore.OwnerFromEnv).
 	Owner  string
+	// Run names the workflow run whose worker starts the job, so a cancel of
+	// that run stops it (default runstore.WorkerRunFromEnv).
+	Run    string
 	RoomID string
 	Room   string
 }
@@ -162,6 +169,9 @@ func (s *Store) Create(opts StartOptions) (out Meta, err error) {
 		}
 		if e := sessionlife.Activate(filepath.Join(filepath.Dir(s.Root), "sessions"), owner); e != nil {
 			return e
+		}
+		if strings.TrimSpace(opts.Run) == "" {
+			opts.Run = runstore.WorkerRunFromEnv()
 		}
 		out, err = s.create(opts)
 		return err
@@ -202,7 +212,7 @@ func (s *Store) create(opts StartOptions) (Meta, error) {
 	if err := os.WriteFile(filepath.Join(dir, "output.log"), nil, 0o600); err != nil {
 		return Meta{}, err
 	}
-	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
+	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, Run: strings.TrimSpace(opts.Run), RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
 	return m, s.Save(m, nil)
 }
 
@@ -739,6 +749,33 @@ func (s *Store) StopOwner(owner string) error {
 			continue
 		}
 		if err := s.logStop(in.ID, "owner "+owner+" is closed or missing; stopping shell"); err != nil {
+			errs = append(errs, err)
+		}
+		if _, err := s.Stop(in.ID, "cleanup"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// StopRun stops the non-keep shells that workers of runID started. A
+// cancelled run ends its workers, so their jobs stop the way a closed
+// session's do (D-165). Stop also waits for supervisors that have not yet
+// published their process ID.
+func (s *Store) StopRun(runID string) error {
+	if runID == "" {
+		return nil
+	}
+	list, err := s.List(false)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, in := range list {
+		if in.Run != runID || in.Keep {
+			continue
+		}
+		if err := s.logStop(in.ID, "run "+runID+" is canceled; stopping shell"); err != nil {
 			errs = append(errs, err)
 		}
 		if _, err := s.Stop(in.ID, "cleanup"); err != nil {

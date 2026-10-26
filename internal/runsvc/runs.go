@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/worktrees"
 	"dyna-agent/internal/worktreesvc"
 )
@@ -27,12 +28,19 @@ func Pause(ctx context.Context, id string, paused bool) error {
 	return runstore.SetPaused(id, paused)
 }
 
-// Cancel stops a run only in the caller's room.
+// Cancel stops a run only in the caller's room. A stopped run's workers are
+// gone, so their managed shell jobs stop the way a closed session's do (D-165).
 func Cancel(ctx context.Context, id string) error {
 	if _, err := runForCaller(ctx, id); err != nil {
 		return err
 	}
-	return runstore.Cancel(id)
+	if err := runstore.Cancel(id); err != nil {
+		return err
+	}
+	if err := shells.DefaultStore().StopRun(id); err != nil {
+		return fmt.Errorf("run %s is canceled, but stopping its shell jobs failed: %w", id, err)
+	}
+	return nil
 }
 
 // callerRoom returns an empty filter only for the owner. Other callers need
