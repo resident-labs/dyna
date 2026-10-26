@@ -78,12 +78,4 @@ func TestCallCLI(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &req); err != nil || req.ID != "c2" {
 		t.Fatalf("request JSON: %s, %v", out, err)
 	}
-	t.Setenv(mode.EnvMode, mode.Workflow)
-	t.Setenv(mode.EnvWorkerRun, "unknown-run")
-	t.Setenv(mode.EnvWorkerAgent, "1")
-	for _, args := range [][]string{{"list"}} {
-		if _, err := run(args...); err == nil || !strings.Contains(err.Error(), "root only") {
-			t.Fatalf("worker %v: %v", args, err)
-		}
-	}
 }

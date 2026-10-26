@@ -235,7 +235,6 @@ func TestAskRejectsNonRootSendersBeforeSaving(t *testing.T) {
 	child := e.start(rec, "child", nil)
 	for _, snd := range []Sender{
 		{Kind: SenderSession, Room: rec.Name, Session: child},
-		{Kind: SenderWorker, Room: rec.Name, RunID: "run-fixture", Agent: 1},
 		{Kind: SenderScript, Room: rec.Name, RunID: "run-fixture"},
 	} {
 		q, err := e.svc.Ask(e.ctx, snd, "", "", "Can I continue?", "inspect code", nil, nil)

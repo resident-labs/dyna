@@ -2,6 +2,8 @@ package runstore
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,24 +32,12 @@ func AgentJournalPath(runID string, agentID int) (string, error) {
 
 // AgentOutputPath returns the append-only live harness stdout for one agent.
 func AgentOutputPath(runID string, agentID int) (string, error) {
-	if err := validateRunID(runID); err != nil {
-		return "", err
-	}
-	if err := validateAgentID(agentID); err != nil {
-		return "", err
-	}
-	return filepath.Abs(filepath.Join(RunDir(runID), "agents", strconv.Itoa(agentID), "stdout.log"))
+	return agentArtifactPath(runID, agentID, "stdout.log")
 }
 
 // AgentNormalizedOutputPath returns the schema-v1 normalized output stream.
 func AgentNormalizedOutputPath(runID string, agentID int) (string, error) {
-	if err := validateRunID(runID); err != nil {
-		return "", err
-	}
-	if err := validateAgentID(agentID); err != nil {
-		return "", err
-	}
-	return filepath.Abs(filepath.Join(RunDir(runID), "agents", strconv.Itoa(agentID), "output.jsonl"))
+	return agentArtifactPath(runID, agentID, "output.jsonl")
 }
 
 // AgentNormalizedOutputKey identifies output across run archive moves.
@@ -64,13 +54,44 @@ func AgentNormalizedOutputKey(runID string, agentID int) (string, error) {
 // AgentOutputConfigPath returns the selected profile/model declaration frozen
 // immediately before one worker invocation starts.
 func AgentOutputConfigPath(runID string, agentID int) (string, error) {
+	return agentArtifactPath(runID, agentID, "output-config.json")
+}
+
+// AgentSessionID is the ID of the leaf session that serves agent agentID of
+// run runID. It is derived, so a coordinator that restarts finds the session
+// an earlier call started. The date and time are the run's own (a run ID is
+// wf_<date>-<time>-<hex>), so the agents of a run sort with it; the suffix is
+// 16 hex digits of a hash of the run and agent.
+func AgentSessionID(runID string, agentID int) string {
+	stamp := "20000101-000000"
+	if rest, ok := strings.CutPrefix(runID, "wf_"); ok && len(rest) >= len(stamp) {
+		if _, err := time.Parse("20060102-150405", rest[:len(stamp)]); err == nil {
+			stamp = rest[:len(stamp)]
+		}
+	}
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s/agent:%d", runID, agentID))
+	return SessionDirPrefix + stamp + "-" + hex.EncodeToString(sum[:8])
+}
+
+// agentArtifactPath is where one agent's output artifact lives. A run that
+// kept the artifact in its own directory (runs before agents became sessions)
+// still reads it there; otherwise the agent's session holds it, in the first
+// and only turn's output files.
+func agentArtifactPath(runID string, agentID int, name string) (string, error) {
 	if err := validateRunID(runID); err != nil {
 		return "", err
 	}
 	if err := validateAgentID(agentID); err != nil {
 		return "", err
 	}
-	return filepath.Abs(filepath.Join(RunDir(runID), "agents", strconv.Itoa(agentID), "output-config.json"))
+	own := filepath.Join(RunDir(runID), "agents", strconv.Itoa(agentID), name)
+	if _, err := os.Lstat(own); err != nil {
+		session := filepath.Join(SessionsDir(), AgentSessionID(runID, agentID), "agents", "1", name)
+		if _, serr := os.Lstat(session); serr == nil {
+			return filepath.Abs(session)
+		}
+	}
+	return filepath.Abs(own)
 }
 
 func (r *Run) agentJournalPath(agentID int) (string, error) {

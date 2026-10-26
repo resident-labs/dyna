@@ -19,7 +19,7 @@ func TestMergeRoomAuthority(t *testing.T) {
 }
 
 func TestCurrentRejectsIncompleteStamps(t *testing.T) {
-	for _, key := range []string{"DYNA_SESSION", "DYNA_WORKER_RUN", "DYNA_WORKER_AGENT"} {
+	for _, key := range []string{"DYNA_SESSION", "DYNA_WORKER_RUN"} {
 		t.Run(key, func(t *testing.T) {
 			storetest.ClearStamp(t)
 			t.Setenv(key, "bare-stamp")

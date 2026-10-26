@@ -183,7 +183,7 @@ func TestCallsActForTheirCaller(t *testing.T) {
 		t.Fatal("enforcing served a closed session")
 	}
 	// A device's call carries the owner, whatever the engine process is.
-	t.Setenv(mode.EnvMode, mode.Workflow)
+	t.Setenv(mode.EnvMode, mode.Subagent)
 	calls := map[string]websvc.Call{"Who": func(ctx context.Context, _ []json.RawMessage) (any, error) { return authority.Of(ctx), nil }}
 	callers.actForCallers(calls)
 	if got, err := calls["Who"](context.Background(), nil); err != nil || got != (authority.Actor{Role: authority.Owner}) {

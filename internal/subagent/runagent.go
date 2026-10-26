@@ -2,8 +2,6 @@ package subagent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,19 +14,8 @@ import (
 
 // RunAgentID is the session ID of agent number agent in run. It is derived, so
 // a coordinator that restarts finds the session its earlier call started
-// instead of starting a second one. The date and time are the run's own (a run
-// ID is wf_<date>-<time>-<hex>), so the agents of a run sort with it; the
-// suffix is 16 hex digits of a hash of the run and agent.
-func RunAgentID(run string, agent int) string {
-	stamp := "20000101-000000"
-	if rest, ok := strings.CutPrefix(run, "wf_"); ok && len(rest) >= len(stamp) {
-		if _, err := time.Parse("20060102-150405", rest[:len(stamp)]); err == nil {
-			stamp = rest[:len(stamp)]
-		}
-	}
-	sum := sha256.Sum256(fmt.Appendf(nil, "%s/agent:%d", run, agent))
-	return runstore.SessionDirPrefix + stamp + "-" + hex.EncodeToString(sum[:8])
-}
+// instead of starting a second one.
+func RunAgentID(run string, agent int) string { return runstore.AgentSessionID(run, agent) }
 
 // StartRunAgent starts the leaf session that serves one agent() call of
 // opts.Run, or returns the session an earlier call already started. It starts

@@ -19,35 +19,6 @@ import (
 	"dyna-agent/internal/runstore"
 )
 
-func TestWorkerRestrictionUsesScratch(t *testing.T) {
-	if !strings.Contains(workflowRestriction, "Put throwaway files (screenshots, cards, scripts, notes) in $DYNA_SCRATCH, never in a repository.") {
-		t.Fatal("missing scratch instruction")
-	}
-}
-
-func TestJournalWorkerPromptContract(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "wf_prompt-contract", "agents", "7", "journal.jsonl")
-	task := "Inspect the repository without changing it, then report findings."
-	for _, required := range []string{
-		"dyna journal",
-		"read-only exploration tasks",
-		"never restricts the file edits",
-		"does not modify the target workspace",
-		"one or two sentences plus an optional next step",
-		"Keep working after every entry",
-		"still return the final response",
-		"separate from any final-response JSON schema",
-	} {
-		if !strings.Contains(journalBoundary, required) {
-			t.Errorf("journal instructions do not contain %q", required)
-		}
-	}
-	prompt := workerTaskPrompt(task, path)
-	if !strings.HasPrefix(prompt, "[ORIGINAL TASK]\n"+task+"\n\n[DYNA WORKER CONTEXT]\n") || !strings.HasSuffix(prompt, path+"\n[/DYNA WORKER CONTEXT]") {
-		t.Fatalf("the task must come verbatim, then the journal path in trailing worker context:\n%s", prompt)
-	}
-}
-
 func TestExecuteKeepsCallerPromptAndWritesCompleteAgentJournal(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-journal-test")
@@ -81,7 +52,7 @@ return result;
 	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
 	defer cancel()
 
-	resultJSON, err := Execute(ctx, Options{
+	resultJSON, err := executeTest(ctx, Options{
 		ScriptSrc: script,
 		Store:     store,
 		Run:       run,
@@ -115,10 +86,6 @@ return result;
 	if root.Key != wantKey {
 		t.Fatalf("call key = %q, want caller-prompt key %q", root.Key, wantKey)
 	}
-	wrappedKey := profileCallKey(store.Profiles[0], workerTaskPrompt(callerPrompt, "journal-path"), schemaJSON, run.Dir, "journaled worker")
-	if root.Key == wrappedKey {
-		t.Fatal("call key was derived from the journal instruction envelope")
-	}
 
 	agentEntries, _, err := runstore.ReadAgentJournalFrom(run.Meta.ID, 1, 0)
 	if err != nil {
@@ -135,55 +102,6 @@ return result;
 	}
 	if complete := agentEntries[2]; complete.Kind != "complete" || complete.Source != "system" || complete.Message == "" {
 		t.Fatalf("completion entry = %#v", complete)
-	}
-}
-
-func TestWorkerPromptKeepsSchemaLast(t *testing.T) {
-	base := workerTaskPrompt("Complete the caller task.", "") + "\n\n---\nOUTPUT FORMAT: schema"
-	if strings.Index(base, "Complete the caller task.") > strings.Index(base, "OUTPUT FORMAT") {
-		t.Fatalf("schema wrapper did not remain last:\n%s", base)
-	}
-}
-
-// A workflow worker uses every dyna command and tool a session uses, so its
-// standing instructions must not fence it behind journal-only access.
-func TestWorkerInstructionsGrantSessionTools(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	e := &engine{opts: Options{}, Skills: func() ([]harnessconfig.ManagedSkill, error) { return nil, nil }}
-	text := e.workerInstructions(true).Text()
-	if strings.Contains(text, "The only dyna commands you may use") {
-		t.Fatal("worker instructions still allow only journal and read-only inspection")
-	}
-	if !strings.Contains(text, "Every other dyna command and tool a session uses is available") {
-		t.Fatal("worker instructions do not grant every session tool")
-	}
-	if !strings.Contains(text, "dyna post reaches @root and workers of your own run") {
-		t.Fatal("worker instructions do not state the worker post scope")
-	}
-}
-
-func TestWorkflowRestrictionPromptReachesEveryWorker(t *testing.T) {
-	capture := filepath.Join(t.TempDir(), "prompt.txt")
-	worker := fakeworker.InstallClaude(t, `printf '%s\n%s' "$DYNA_FAKE_PROMPT" "$DYNA_FAKE_INSTRUCTIONS" > "$CAPTURE"; printf done`)
-	worker.Name, worker.Default = "custom", true
-	worker.Env = mergedEnv(worker.Env, map[string]string{"CAPTURE": capture})
-	store := &profile.Store{Profiles: []profile.Profile{worker}}
-	result, err := Execute(context.Background(), Options{
-		ScriptSrc: `return await agent("caller task", {profile: "custom"});`,
-		Store:     store, WorkDir: t.TempDir(),
-	})
-	if err != nil || result != `"done"` {
-		t.Fatalf("Execute() = %s, %v", result, err)
-	}
-	prompt, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Workflow workers always run as leaves, so the restriction is always
-	// present; there is no profile setting that turns it off.
-	hasRestriction := strings.Contains(string(prompt), "DYNA WORKFLOW RESTRICTION")
-	if !hasRestriction || !strings.Contains(string(prompt), "[ORIGINAL TASK]\ncaller task") {
-		t.Fatalf("captured prompt = %q", prompt)
 	}
 }
 
@@ -241,7 +159,7 @@ return "workflow done";
 	// event-driven, including on a busy race-enabled CI runner.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	resultJSON, err := Execute(ctx, Options{
+	resultJSON, err := executeTest(ctx, Options{
 		ScriptSrc: script, Store: store, Run: run, WorkDir: dir,
 		Poster: func(_ context.Context, _ string, _ []string, _ string) (PostResult, error) {
 			select {
@@ -285,15 +203,5 @@ return "workflow done";
 	}
 	if len(entries) < 2 || entries[0].Kind != "start" || entries[len(entries)-1].Kind != "error" || entries[len(entries)-1].Source != "system" {
 		t.Fatalf("dangling worker journal = %#v, want terminal system error", entries)
-	}
-}
-
-func TestJournalWorkersSharePrefixThroughIdenticalTask(t *testing.T) {
-	const task = "Inspect the same repository and report findings.\nPreserve this exact task."
-	first := workerTaskPrompt(task, "/runs/first/agents/1/journal.jsonl")
-	second := workerTaskPrompt(task, "/runs/second/agents/9/journal.jsonl")
-	a, b := strings.LastIndex(first, "\n\n[DYNA WORKER CONTEXT]\n"), strings.LastIndex(second, "\n\n[DYNA WORKER CONTEXT]\n")
-	if a < 0 || b < 0 || first[:a] != second[:b] || !strings.HasSuffix(first[:a], task) || first == second {
-		t.Fatalf("worker identity changed the shared task prefix:\n%s\n%s", first, second)
 	}
 }

@@ -11,7 +11,7 @@ func TestChangePolicyAPIRoundTripAndRoomBoundary(t *testing.T) {
 	e := newEnv(t)
 	alpha, beta := e.room("policy-alpha"), e.room("policy-beta")
 	// Web mutations act as the owner, independent of the engine's stamp.
-	t.Setenv(mode.EnvMode, mode.Workflow)
+	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, "ses_engine_worker")
 	t.Setenv(mode.EnvRoomID, beta.ID)
 	p, err := e.svc.PRs.RoomChangePolicy(alpha.ID)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/workeroutput"
@@ -216,5 +217,39 @@ func TestSnapshotOutputProfilesIsCreateOnce(t *testing.T) {
 	}
 	if len(snapshot.Profiles) != 1 || snapshot.Profiles[0].Output == nil || snapshot.Profiles[0].Output.Dialect != workeroutput.DialectPiJSON {
 		t.Fatalf("create-once snapshot was overwritten: %#v", snapshot)
+	}
+}
+
+func TestAgentOutputReadsFromTheAgentsSessionWhenTheRunKeepsNone(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	const run = "wf_session-output"
+	session := AgentSessionID(run, 2)
+	for name, want := range map[string]string{"stdout.log": "raw", "output.jsonl": "{}\n", "output-config.json": "{}"} {
+		path := filepath.Join(SessionsDir(), session, "agents", "1", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, get := range map[string]func(string, int) (string, error){
+		"stdout.log": AgentOutputPath, "output.jsonl": AgentNormalizedOutputPath, "output-config.json": AgentOutputConfigPath,
+	} {
+		got, err := get(run, 2)
+		if want := filepath.Join(SessionsDir(), session, "agents", "1", name); err != nil || got != want {
+			t.Fatalf("%s path = %q, %v; want the session's %q", name, got, err, want)
+		}
+	}
+	// A run that kept its own artifact (a run from before agents were sessions) still reads it.
+	own := filepath.Join(RunDir(run), "agents", "2", "stdout.log")
+	if err := os.MkdirAll(filepath.Dir(own), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(own, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := AgentOutputPath(run, 2); err != nil || got != own {
+		t.Fatalf("path with the run's own artifact = %q, %v; want %q", got, err, own)
 	}
 }

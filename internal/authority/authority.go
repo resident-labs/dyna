@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -53,19 +52,6 @@ func WorkerActor(run string, agent int) (Actor, error) {
 		return Actor{}, fmt.Errorf("workflow worker agent %d is below 0", agent)
 	}
 	return Actor{Role: Worker, Run: run, Agent: agent}, nil
-}
-
-// stampedWorker is the worker that this process's stamp names.
-func stampedWorker() (Actor, error) {
-	agent := 0
-	if stamp := strings.TrimSpace(os.Getenv(mode.EnvWorkerAgent)); stamp != "" {
-		n, err := strconv.Atoi(stamp)
-		if err != nil || n < 1 {
-			return Actor{}, fmt.Errorf("workflow worker agent %q is not a number from 1", stamp)
-		}
-		agent = n
-	}
-	return WorkerActor(os.Getenv(mode.EnvWorkerRun), agent)
 }
 
 type actorKey struct{}
@@ -140,16 +126,10 @@ func Current() Actor {
 		if _, ok := mode.CurrentSession(); ok {
 			actor.Role = Session
 		}
-	case mode.Workflow:
-		// A worker without a valid run and agent stamp has no role, so
-		// every check refuses it, as the engine refuses such a caller.
-		if worker, err := stampedWorker(); err == nil {
-			actor.Role, actor.Run, actor.Agent = Worker, worker.Run, worker.Agent
-		}
 	default:
 		// A room stamp selects an owner's room. Session and worker stamps need
 		// their corresponding mode before they can identify a caller.
-		if mode.Current() == "" && os.Getenv(mode.EnvSession) == "" && os.Getenv(mode.EnvWorkerRun) == "" && os.Getenv(mode.EnvWorkerAgent) == "" {
+		if mode.Current() == "" && os.Getenv(mode.EnvSession) == "" && os.Getenv(mode.EnvWorkerRun) == "" {
 			actor.Role = Owner
 		}
 	}
