@@ -100,12 +100,16 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		t.Fatal(err)
 	}
 	zipWriter := zip.NewWriter(archive)
-	entry, err := zipWriter.Create("go-test.xml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := entry.Write([]byte(`<testsuite><testcase name="fast" time="0.1"/></testsuite>`)); err != nil {
-		t.Fatal(err)
+	// Two packages upload a report with the same file name, so the check must
+	// keep both instead of letting one overwrite the other.
+	for _, pkg := range []string{"package-a", "package-b"} {
+		entry, err := zipWriter.Create(pkg + "/go-test.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(`<testsuite><testcase name="` + pkg + `" time="0.1"/></testsuite>`)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := zipWriter.Close(); err != nil {
 		t.Fatal(err)
@@ -180,8 +184,28 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if !strings.Contains(string(seen), "PATH=/usr/local/sbin:") {
 		t.Fatalf("act did not get the fixed PATH: %s", seen)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "reports", "go-static", "go-test.xml")); err != nil {
-		t.Fatalf("the uploaded JUnit did not reach the check's report directory: %v", err)
+	// Both uploaded reports reach the check's report directory, each under its
+	// own name, and the reader sees both.
+	reportDir := filepath.Join(dir, "reports", "go-static")
+	reports, err := filepath.Glob(filepath.Join(reportDir, "*.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("reports = %v, want one per uploaded package", reports)
+	}
+	var found []string
+	for _, report := range reports {
+		body, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found = append(found, string(body))
+	}
+	for _, want := range []string{"package-a", "package-b"} {
+		if !strings.Contains(strings.Join(found, "\n"), `name="`+want+`"`) {
+			t.Fatalf("report %q lost the tests of %s", found, want)
+		}
 	}
 	data, err := os.ReadFile(removed)
 	if err != nil {
