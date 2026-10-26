@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, problemText, providerName, remainingPercent, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
+import { allowanceLabel, accountLabel, accountsOf, accountStatus, money, needsSignIn, observation, percent, PI_KEY_PROVIDERS, PI_OAUTH_PROVIDERS, problemText, providerName, remainingPercent, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
 import { account } from '../../../../test/account-fixtures.ts'
 import type { UsageWindow } from '../../api/account.ts'
 
@@ -131,6 +131,14 @@ test('an account without readable usage says why in words, never raw engine text
   assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'meta-muse', usageReason: 'not-readable' }), 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse through Pi to read it.')
   assert.equal(usageUnavailableText({ kind: 'api_key', provider: 'zai', usageReason: 'not-readable' }), 'This provider does not publish usage that Dyna can read.')
   assert.equal(observation({ usageError: 'provider said 403', rateLimitedUntil: '2000-01-01T00:00:00Z' }), '')
+})
+
+test('Pi offers an Anthropic key but never an Anthropic OAuth sign-in', () => {
+  assert.ok(!PI_OAUTH_PROVIDERS.includes('anthropic'))
+  assert.ok(PI_KEY_PROVIDERS.includes('anthropic'))
+  for (const provider of ['chatgpt', 'kimi-code', 'xai'] as const) {
+    assert.ok(PI_KEY_PROVIDERS.includes(provider), `${provider} needs a Pi API-key path`)
+  }
 })
 
 test('a balance is money, not a percent', () => {

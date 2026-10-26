@@ -279,7 +279,7 @@ export interface Engine {
   RemovePrivateRuntime(harness: string, version: string, confirmed: boolean): Promise<HarnessSnapshot>
   UninstallPrivateRuntime(harness: string, confirmed: boolean): Promise<HarnessSnapshot>
   InstallPrivateRuntime(harness: string, version: string): Promise<HarnessSnapshot>
-  BeginPrivateRuntimeLogin(harness: string, version: string, label: string, confirmed: boolean): Promise<PrivateLogin>
+  BeginPrivateRuntimeLogin(harness: string, version: string, label: string, provider: string, confirmed: boolean): Promise<PrivateLogin>
   FindPersonalLogin(harness: string, version: string): Promise<PersonalLogin | null>
   UsePersonalLogin(harness: string): Promise<HarnessSnapshot>
   PrivateRuntimeLogins(): Promise<PrivateLogin[] | null>
