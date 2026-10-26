@@ -221,10 +221,15 @@ func piConversation(path []*piEntry) (Conversation, error) {
 		}
 	}
 	conversation := Conversation{}
-	for _, entry := range context {
+	for i, entry := range context {
 		switch entry.Type {
 		case "compaction":
-			conversation.Summary = entry.Summary
+			// The leading compaction is the newest one. A retained range can
+			// contain an older compaction; Pi suppresses it from model context,
+			// so it must not overwrite the newest summary either.
+			if i == 0 {
+				conversation.Summary = entry.Summary
+			}
 		case "message", "custom_message", "branch_summary":
 			replacement, edited := edits[entry.ID]
 			if edited && isNullJSON(replacement) {
