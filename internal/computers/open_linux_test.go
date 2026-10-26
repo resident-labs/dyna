@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/syswait"
 )
 
 func TestOpenAppReportsExitAndLogWithoutAWindow(t *testing.T) {
@@ -220,7 +222,7 @@ func assertOpenTimeoutKillsChild(t *testing.T, launcher *process, pid int, logPa
 		t.Fatalf("timeout: %v", err)
 	}
 	polls := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-	if n, err := unix.Poll(polls, 500); err != nil || n == 0 {
+	if n, err := syswait.Poll(polls, 500); err != nil || n == 0 {
 		t.Fatalf("launcher child %d survived timeout: %v", pid, err)
 	}
 }

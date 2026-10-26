@@ -19,6 +19,8 @@ import (
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/syswait"
 )
 
 // The live agent-browser checks are two tests, so a loaded host stays under
@@ -164,7 +166,7 @@ func (l *agentBrowserLaunch) profile(t *testing.T) string {
 		if remaining <= 0 {
 			break
 		}
-		if n, err := unix.Poll([]unix.PollFd{{Fd: int32(watch), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1); err != nil || n == 0 {
+		if n, err := syswait.Poll([]unix.PollFd{{Fd: int32(watch), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1); err != nil || n == 0 {
 			break
 		}
 		if _, err := unix.Read(watch, make([]byte, 4096)); err != nil {
@@ -262,7 +264,7 @@ func waitProcessGone(t *testing.T, pid int, message string) {
 		t.Fatalf("%s: pidfd %d: %v", message, pid, err)
 	}
 	defer unix.Close(fd)
-	if n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 3000); err != nil || n == 0 {
+	if n, err := syswait.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 3000); err != nil || n == 0 {
 		t.Fatalf("%s: %d %v", message, n, err)
 	}
 }

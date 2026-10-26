@@ -8,6 +8,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/syswait"
 )
 
 // SO_PEERPIDFD is Linux 6.5's socket peer handle, not yet named by x/sys.
@@ -111,20 +113,14 @@ func (p *Peer) killAndWait(ctx context.Context) error {
 		unix.Close(cancelFD)
 	}()
 	fds := []unix.PollFd{{Fd: int32(p.fd), Events: unix.POLLIN}, {Fd: int32(cancelFD), Events: unix.POLLIN}}
-	for {
-		_, err := unix.Poll(fds, -1)
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if fds[0].Revents&unix.POLLIN != 0 {
-			return nil
-		}
-		if fds[1].Revents != 0 {
-			return ctx.Err()
-		}
-		return errors.New("private peer exit could not be proved")
+	if _, err := syswait.Poll(fds, -1); err != nil {
+		return err
 	}
+	if fds[0].Revents&unix.POLLIN != 0 {
+		return nil
+	}
+	if fds[1].Revents != 0 {
+		return ctx.Err()
+	}
+	return errors.New("private peer exit could not be proved")
 }

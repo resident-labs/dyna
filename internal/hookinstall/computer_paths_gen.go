@@ -40,6 +40,7 @@ var computerCodePaths = []string{
 	"internal/store",
 	"internal/sysload",
 	"internal/systemdver",
+	"internal/syswait",
 	"internal/testsafe",
 	"internal/textutil",
 	"internal/turnlock",
