@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -869,35 +870,95 @@ func TestNodePassesACheckWhoseCommandLeftAChildHoldingOutput(t *testing.T) {
 	}
 }
 
-// A host check whose deadline expires must end there. GNU timeout with
-// --foreground signals the check's shell but not its children, so a child can
-// keep the output pipe open; the wrapper kills the check's whole group as soon
-// as timeout returns, instead of waiting for the caller's much longer context
-// deadline.
-func TestHostCheckEndsAtItsDeadlineWithAChildHoldingOutput(t *testing.T) {
+// A check can leave a descendant that starts its own session, as the sccache
+// daemon does. Such a child leaves the wrapper's process group but stays in the
+// check's scope, and it can hold the check's output open, which keeps an SSH
+// transport up. The runner kills what is left in the scope once the check's
+// command returns, so nothing outlives the check even when its deadline
+// expired. The detached child is pipe-controlled and the pipe is closed from a
+// cleanup registered first, so a failing run leaves nothing behind.
+func TestCheckKillsADetachedChildInItsScopeWhenTheCommandEnds(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"docker", "git"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "go-static", "work"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
-		inner: "sleep 2 & sleep 2"}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, 200*time.Millisecond, 0)
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, script))
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
-	output, err := cmd.CombinedOutput()
-	// The wrapper exits with the check's status, so an expired deadline is 124.
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 124 {
-		t.Fatalf("timed out check: %v: %s", err, output)
+	gate, gateWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(output), "DYNA_CI_CHECK_EXIT=124") {
-		t.Fatalf("expired deadline lost its status: %s", output)
+	t.Cleanup(func() {
+		_ = gateWriter.Close()
+		_ = gate.Close()
+	})
+	var mu sync.Mutex
+	var cleaned []string
+	var holder *exec.Cmd
+	node := Node{Name: "local", Slots: 1, Enabled: true}
+	runner := Runner{DataDir: t.TempDir(), Node: &node}
+	runner.Command = func(_ context.Context, gitDir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
+		if fakeNodeGit(gitDir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+			return nil
+		case strings.Contains(script, "systemctl --user kill"):
+			mu.Lock()
+			cleaned = append(cleaned, script)
+			process := holder
+			mu.Unlock()
+			if process != nil {
+				_ = process.Process.Kill()
+			}
+			return nil
+		case strings.Contains(script, "tar -C"):
+			return nil
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			// A child in its own session, holding the check's output open.
+			cmd := exec.Command("sh", "-c", "read line")
+			cmd.Stdin = gate
+			cmd.Stdout = out
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			if startErr := cmd.Start(); startErr != nil {
+				t.Errorf("start detached child: %v", startErr)
+				return nil
+			}
+			mu.Lock()
+			holder = cmd
+			mu.Unlock()
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=124")
+			fmt.Fprintln(out, "DYNA_CI_COMMAND_STARTED=1")
+			return exitError(t, 124)
+		}
+		return nil
+	}
+	_, err = runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	mu.Lock()
+	calls, process := append([]string(nil), cleaned...), holder
+	mu.Unlock()
+	if len(calls) != 1 || !strings.Contains(calls[0], "dyna-ci-") || !strings.Contains(calls[0], "-go-static.scope") {
+		t.Fatalf("scope cleanup ran %v, want the check's own scope", calls)
+	}
+	if process == nil {
+		t.Fatal("the detached child never started")
+	}
+	// Reap the child: a kill that worked leaves a non-zero wait status.
+	if waitErr := process.Wait(); waitErr == nil {
+		t.Fatalf("detached child %d outlived its check", process.Process.Pid)
 	}
 }
 

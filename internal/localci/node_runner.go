@@ -545,7 +545,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				} else {
 					writer = io.MultiWriter(&output, blob)
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
+				scopeName := "dyna-ci-" + runID + "-" + string(check.id)
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, scopeName, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
+				// The wrapper cleans its own process group, but a descendant that
+				// calls setsid leaves it, and such a daemon can hold the check's
+				// output open and keep an SSH transport up. The scope is the one
+				// boundary that follows every descendant, so the node kills what is
+				// left in it once the check's command has returned.
+				r.releaseScope(control, node, scopeName)
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1006,6 +1013,21 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 // or a shell that outlived its deadline, must not hold the check's output pipe
 // or the next check's slot.
 const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || kill -KILL "$p" 2>/dev/null || true; done`
+
+// releaseScope kills whatever a check left behind in its systemd scope on the
+// node: the scope is the only boundary that follows a descendant which starts
+// its own session or process group. It runs after the check's command returns,
+// so only leftovers can be hit. A node without user systemd answers nothing,
+// and a failed cleanup never changes the check's result.
+func (r Runner) releaseScope(ctx context.Context, node Node, scope string) {
+	if scope == "" {
+		return
+	}
+	script := "systemctl --user kill --signal=KILL --kill-whom=all " + shellquote.Quote(scope+".scope") + " >/dev/null 2>&1 || true"
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	_ = r.nodeCommandScoped(cleanupCtx, io.Discard, io.Discard, "", defaultScopeLimits, script)
+}
 
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
