@@ -831,7 +831,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, stopped
 	}
 	if copyErr != nil {
+		// A machine that lost the connection during its checks keeps that cause
+		// on the run, so the scheduler still retries it on another machine. A run
+		// whose checks proved their own results only lost its reports.
 		result.Cause = CauseReports
+		if reportCopyCause(node, control, copyErr) == CauseSSHDrop && slices.ContainsFunc(result.Suites, func(sr SuiteResult) bool { return sr.Cause == CauseSSHDrop }) {
+			result.Cause = CauseSSHDrop
+		}
 		return result, fmt.Errorf("copy reports: %w", copyErr)
 	}
 	return result, nil
@@ -842,6 +848,15 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 // drops a new connection under a burst of logins accepts it again a moment
 // later (D-192).
 const reportCopyAttempts = 3
+
+// reportCopyCause names a failed copy as an SSH drop when its client lost the
+// connection, and as unavailable reports otherwise (D-170).
+func reportCopyCause(node Node, ctx context.Context, err error) FailureCause {
+	if runCause(node, ctx, err) == CauseSSHDrop {
+		return CauseSSHDrop
+	}
+	return CauseReports
+}
 
 var reportCopyWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
 

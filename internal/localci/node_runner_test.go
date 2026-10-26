@@ -176,6 +176,37 @@ func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
 	}
 }
 
+// A machine that drops during the check and again during the report copy proved
+// no result, so the run keeps the ssh-drop cause and moves to another machine.
+func TestNodeKeepsSSHDropWhenCheckAndCopyBothLoseSSH(t *testing.T) {
+	node := Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}
+	runner := Runner{DataDir: t.TempDir(), Node: &node}
+	runner.dialWait = func(context.Context, time.Duration) error { return nil }
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		case strings.Contains(script, "tar -C"):
+			return sshDropError(t)
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			return sshDropError(t)
+		}
+		return nil
+	}
+	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
+	if err == nil {
+		t.Fatal("a run without reports must report the copy failure")
+	}
+	if result.Cause != CauseSSHDrop || result.Checks[0].Cause != CauseSSHDrop {
+		t.Fatalf("run cause = %s, check = %+v, want %s on both", result.Cause, result.Checks[0], CauseSSHDrop)
+	}
+}
+
 // loggedExit reads the typed exit record a check log ends with.
 func loggedExit(t *testing.T, check SuiteResult) checkExit {
 	t.Helper()
@@ -771,6 +802,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 		t.Run(fmt.Sprint(entered), func(t *testing.T) {
 			var sawSSH, sawPush, sawCleanup, sawRemove, reportsCopied bool
 			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
+			runner.dialWait = func(context.Context, time.Duration) error { return nil }
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
