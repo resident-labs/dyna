@@ -38,7 +38,7 @@ func TestLandingMigrationArchivesOpaqueEvidenceOnce(t *testing.T) {
 		t.Helper()
 		var got string
 		var r int64
-		if err := db.QueryRow(`SELECT json_extract(body,'$.record'),rev FROM pr_records WHERE key=?`, key).Scan(&got, &r); err != nil {
+		if err := db.QueryRow(`SELECT json_extract(?,'$.record'),rev FROM pr_records WHERE key=?`, joinedBody(t, db, key), key).Scan(&got, &r); err != nil {
 			t.Fatal(err)
 		}
 		if got != want || r != rev {

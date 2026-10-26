@@ -111,6 +111,10 @@ func open(root string) (*sql.DB, error) {
 		return db, err
 	}
 	err = database.Migrate(db, "pr.quota_scopes", 1, migrateQuota)
+	if err != nil {
+		return db, err
+	}
+	err = database.Migrate(db, "pr.record_parts", 1, migrateRecordParts)
 	return db, err
 }
 
@@ -233,9 +237,10 @@ type querier interface {
 
 // storedRow is a pr_records row copied out of the read transaction.
 type storedRow struct {
-	key  string
-	rev  int64
-	body []byte // nil when the cached record is current
+	key   string
+	rev   int64
+	body  []byte // nil when the cached record is current
+	parts storedParts
 }
 
 // fetched is what one read transaction returned.
@@ -294,7 +299,52 @@ func fetch(q querier, root string) (fetched, error) {
 		}
 		f.rows = append(f.rows, row)
 	}
-	return f, rows.Err()
+	if err := rows.Err(); err != nil {
+		return fetched{}, err
+	}
+	return f, fetchParts(ctx, q, &f)
+}
+
+// fetchParts copies the cold parts of the rows that carry a body. The lowest
+// revision among those rows bounds the query, so a refresh reads only the
+// parts of changed records.
+func fetchParts(ctx context.Context, q querier, f *fetched) error {
+	byKey := map[string]*storedRow{}
+	var lowest int64
+	for i := range f.rows {
+		row := &f.rows[i]
+		if row.body == nil {
+			continue
+		}
+		byKey[row.key] = row
+		if len(byKey) == 1 || row.rev < lowest {
+			lowest = row.rev
+		}
+	}
+	if len(byKey) == 0 {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, "SELECT key, part, body FROM pr_record_parts WHERE key IN (SELECT key FROM pr_records WHERE rev >= ?)", lowest)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, part string
+		var body sql.RawBytes
+		if err := rows.Scan(&key, &part, &body); err != nil {
+			return err
+		}
+		row := byKey[key]
+		if row == nil {
+			continue
+		}
+		if row.parts == nil {
+			row.parts = storedParts{}
+		}
+		row.parts[partName(part)] = append([]byte{}, body...)
+	}
+	return rows.Err()
 }
 
 // install brings the cached snapshot up to the fetched revision. The caller holds snapshot.
@@ -327,8 +377,8 @@ func (f fetched) install() error {
 			}
 			continue
 		}
-		var record diskRecord
-		if err := unmarshalRecord(row.body, &record); err != nil {
+		record, err := joinStored(row.body, row.parts)
+		if err != nil {
 			return fmt.Errorf("invalid PR record %s: %w", key, err)
 		}
 		st.Records[key] = record.Record
