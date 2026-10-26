@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1127,4 +1128,197 @@ func (m *Manager) beginTurn(id, prompt, schema string, owe []string) (Turn, erro
 
 func (m *Manager) beginTurnForPost(id, prompt, schema string, owe []string, messageID string) (Turn, bool, error) {
 	return m.beginTurnConfigured(id, prompt, schema, owe, messageID, "", false, time.Time{})
+}
+
+// A repaired turn wakes input it never handed to its harness, and leaves input it
+// did hand over alone: without a delivery receipt, the harness may already have
+// run that request, so automatic recovery must not repeat it.
+func TestRepairedTurnWakesOnlyUndispatchedInput(t *testing.T) {
+	rooms := &room.Store{Root: t.TempDir()}
+	rec, err := rooms.Create(room.CreateInput{Name: "repair"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &Store{Root: t.TempDir()}
+	meta := Meta{ID: NewID(), Name: "target", Room: rec.Name, RoomID: rec.ID, Resumable: true, Turns: 1}
+	dir, err := sessions.Dir(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "turns"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessions.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "turns", "1.json"), []byte(`{"n":1,"status":"queued"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Store: sessions, Rooms: rooms}
+	// Turn 1 starts, which records the input boundary of the running turn.
+	if err := m.startTurn(context.Background(), meta.ID, TurnStart{Turn: 1, Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(text string) room.Message {
+		t.Helper()
+		msg, err := rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{meta.Address()}, Text: text, Wake: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	// One post is handed to the harness with no receipt yet, one is only queued.
+	dispatched := post("dispatched to the harness")
+	queued := post("queued while the turn ran")
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) {
+		tr.Steering = append(tr.Steering, Steer{ID: dispatched.ID, Message: dispatched.Text})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The engine and the runner die: a running record with no lock holder.
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) { tr.Status = TurnRunning; tr.Ended = time.Time{} }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Info(meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := sessions.ReadTurn(meta.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Status != TurnError || !strings.Contains(repaired.Error, "runner exited") {
+		t.Fatalf("turn was not repaired: %s %q", repaired.Status, repaired.Error)
+	}
+	if repaired.InputCutoff == nil || repaired.StartCutoff == nil || *repaired.InputCutoff != *repaired.StartCutoff {
+		t.Fatalf("repair cutoff %v, want the turn's start cutoff %v", repaired.InputCutoff, repaired.StartCutoff)
+	}
+	current, err := sessions.ReadMeta(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := m.pendingWakePosts(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(selected))
+	for _, msg := range selected {
+		ids = append(ids, msg.ID)
+	}
+	if !slices.Contains(ids, queued.ID) {
+		t.Fatalf("a repaired turn did not wake input queued while it ran: %v", ids)
+	}
+	if slices.Contains(ids, dispatched.ID) {
+		t.Fatalf("a repaired turn would repeat input its harness may have run: %v", ids)
+	}
+	// The follow-up turn admits input at one boundary, so the uncertain post must
+	// stay out of its prompt as well, not only out of the wake trigger.
+	admitted, _, err := m.drainRoomMessages(current, Turn{N: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admits := make([]string, 0, len(admitted))
+	for _, msg := range admitted {
+		admits = append(admits, msg.ID)
+	}
+	if !slices.Contains(admits, queued.ID) {
+		t.Fatalf("the next turn did not admit the queued post: %v", admits)
+	}
+	if slices.Contains(admits, dispatched.ID) {
+		t.Fatalf("the next turn admitted input its harness may have run: %v", admits)
+	}
+}
+
+// A repair that cannot finish its terminal write must still leave the quarantine
+// stored, so a later repair cannot let the uncertain input into another turn.
+func TestInterruptedRepairKeepsTheQuarantine(t *testing.T) {
+	rooms := &room.Store{Root: t.TempDir()}
+	rec, err := rooms.Create(room.CreateInput{Name: "interrupted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &Store{Root: t.TempDir()}
+	meta := Meta{ID: NewID(), Name: "target", Room: rec.Name, RoomID: rec.ID, Resumable: true, Turns: 1}
+	dir, err := sessions.Dir(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "turns"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessions.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "turns", "1.json"), []byte(`{"n":1,"status":"queued"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Store: sessions, Rooms: rooms}
+	if err := m.startTurn(context.Background(), meta.ID, TurnStart{Turn: 1, Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	dispatched, err := rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{meta.Address()}, Text: "dispatched", Wake: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) {
+		tr.Steering = append(tr.Steering, Steer{ID: dispatched.ID, Message: dispatched.Text})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The engine and the runner die with the input handed over and no receipt.
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) { tr.Status = TurnRunning; tr.Ended = time.Time{} }); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(filepath.Dir(sessions.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close(filepath.Dir(sessions.Root)) })
+	trigger := fmt.Sprintf(`CREATE TRIGGER reject_turn_end BEFORE UPDATE ON session_turns
+WHEN NEW.session = %q AND NEW.n = 1 AND json_extract(CAST(NEW.turn AS TEXT), '$.status') = 'error'
+BEGIN SELECT RAISE(ABORT, 'reject the terminal turn'); END;`, meta.ID)
+	if _, err := db.Exec(trigger); err != nil {
+		t.Fatal(err)
+	}
+	// The terminal write fails, and the repair reports it.
+	if repaired, err := sessions.RepairTurn(meta.ID, 1, "turn runner exited without recording a result"); err == nil || repaired {
+		t.Fatalf("the repair finished although its terminal write was rejected: %v, %v", repaired, err)
+	}
+	unfinished, err := sessions.ReadTurn(meta.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unfinished.Status != TurnRunning {
+		t.Fatalf("the rejected repair changed the turn: %s", unfinished.Status)
+	}
+	stored, err := sessions.ReadMeta(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(stored.UncertainInputIDs, dispatched.ID) {
+		t.Fatalf("the quarantine was not stored before the terminal write: %v", stored.UncertainInputIDs)
+	}
+	// With the fault gone, the repair finishes and the later turn keeps the
+	// uncertain input out.
+	if _, err := db.Exec("DROP TRIGGER reject_turn_end"); err != nil {
+		t.Fatal(err)
+	}
+	if repaired, err := sessions.RepairTurn(meta.ID, 1, "turn runner exited without recording a result"); err != nil || !repaired {
+		t.Fatalf("the retried repair failed: %v, %v", repaired, err)
+	}
+	current, err := sessions.ReadMeta(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(current.UncertainInputIDs, dispatched.ID) {
+		t.Fatalf("the retried repair lost the quarantine: %v", current.UncertainInputIDs)
+	}
+	admitted, _, err := m.drainRoomMessages(current, Turn{N: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range admitted {
+		if msg.ID == dispatched.ID {
+			t.Fatal("a later turn admitted input the harness may have run")
+		}
+	}
 }

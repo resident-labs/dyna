@@ -119,6 +119,17 @@ type DrainedPost struct {
 // follow the commit, so a resend that writes nothing appends none.
 func (m *Manager) startTurn(ctx context.Context, id string, s TurnStart) error {
 	store := m.store()
+	// Measure the input boundary as the turn starts. A post after it is input
+	// the turn has not read, and a repair uses this boundary so input queued
+	// while the turn ran stays fresh.
+	var startCutoff *int64
+	if s.Running {
+		if meta, err := store.ReadMeta(id); err == nil {
+			if cutoff, err := m.measureCutoff(ctx, meta.RoomID); err == nil {
+				startCutoff = cutoff
+			}
+		}
+	}
 	if _, err := store.updateTurnContext(ctx, id, s.Turn, func(t *Turn) {
 		for _, d := range s.Drained {
 			t.Steering = append(t.Steering, d.Steer)
@@ -131,6 +142,9 @@ func (m *Manager) startTurn(ctx context.Context, id string, s TurnStart) error {
 		}
 		if s.Running {
 			t.Status, t.Started = TurnRunning, time.Now()
+			if startCutoff != nil {
+				t.StartCutoff = startCutoff
+			}
 		}
 	}); err != nil {
 		return err
