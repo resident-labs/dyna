@@ -128,9 +128,17 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if err := archive.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// The fake act runs in the work copy, so it records the workflow file it
+	// was given and the checkout's own copy before the wrapper's cleanup
+	// removes them.
+	workflowSeen := filepath.Join(dir, "workflow.seen")
+	checkoutSeen := filepath.Join(dir, "checkout.seen")
 	argsFile := filepath.Join(dir, "act.args")
 	envFile := filepath.Join(dir, "act.env.seen")
 	fakeAct := "#!/bin/sh\n" +
+		"prev=\n" +
+		"for a in \"$@\"; do if [ \"$prev\" = \"-W\" ]; then cp \"$a\" " + workflowSeen + "; fi; prev=$a; done\n" +
+		"cp .github/workflows/ci.yml " + checkoutSeen + " 2>/dev/null || true\n" +
 		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
 		"env > " + envFile + "\n" +
 		"out=\n" +
@@ -154,13 +162,25 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "go-static", "work"), 0o755); err != nil {
+	workflow := "name: CI\non: [pull_request]\njobs:\n  go-static: {runs-on: ubuntu-latest, steps: [{run: echo hi}]}\n"
+	workflowFile := filepath.Join(dir, "go-static", "work", ".github", "workflows", "ci.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(workflowFile, []byte(workflow), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The engine tags the workflow from the commit's bytes and hands the script
+	// the result; the script only writes it next to the checkout.
+	taggedBody, err := tagWorkflowBody([]byte(workflow), "CI-dyna-run-7-go-static")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowTagged := string(taggedBody)
 	check := nodeCheck{id: "go-static", name: "go-static", reports: ReportJUnit,
 		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock")
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock", workflowTagged)
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, script))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A host-only variable stands in for a session token or an account key.
@@ -174,7 +194,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if err != nil {
 		t.Fatalf("act did not run: %v", err)
 	}
-	for _, want := range []string{"pull_request", "-W", ".github/workflows/ci.yml", "-j", "go-shard", "--matrix", "shard:7", "--rm",
+	for _, want := range []string{"pull_request", "-W", filepath.Join(dir, "go-static", "workflow.yml"), "-j", "go-shard", "--matrix", "shard:7", "--rm",
 		"-P", "ubuntu-latest=catthehacker/ubuntu:act-22.04", "--cache-server-path", "--artifact-server-path",
 		"--artifact-server-port", "--container-daemon-socket", "-",
 		"--container-options", "--cpus 4", "--memory 8192m", "--label dyna.run=run-7", "--label dyna.check=go-static"} {
@@ -222,6 +242,18 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		if !strings.Contains(strings.Join(found, "\n"), `name="`+want+`"`) {
 			t.Fatalf("report %q lost the tests of %s", found, want)
 		}
+	}
+	// The check tagged its copy of the workflow with this run and check, so a
+	// parallel job check of the same run — or the same check of another run —
+	// names its containers alone and never fights over one name.
+	if body, err := os.ReadFile(workflowSeen); err != nil || !strings.HasPrefix(string(body), "name: CI-dyna-run-7-go-static\n") {
+		t.Fatalf("the tagged workflow names the run and check: %q, %v", body, err)
+	}
+	// The tagged copy lives outside the checkout, because act runs a job in
+	// the workspace directly: an edit inside the checkout is what the job's
+	// own git commands would see. The checkout keeps the commit's bytes.
+	if body, err := os.ReadFile(checkoutSeen); err != nil || string(body) != workflow {
+		t.Fatalf("the checkout's workflow changed: %q, %v", body, err)
 	}
 	data, err := os.ReadFile(removed)
 	if err != nil {
