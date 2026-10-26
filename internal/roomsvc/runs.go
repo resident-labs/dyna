@@ -19,12 +19,14 @@ import (
 // Bounds on what one run read returns. A run can hold a thousand agent
 // calls and megabytes of logs; a view needs the recent part.
 const (
-	MaxRunsListed = 50
-	MaxRunAgents  = 200
-	MaxRunLogs    = 100
-	MaxRunPhases  = 50
-	MaxRunPreview = 300
-	MaxRunJournal = 200
+	MaxRunsListed  = 50
+	MaxRunAgents   = 200
+	MaxRunCommands = 200
+	MaxRunLogs     = 100
+	MaxRunPhases   = 50
+	MaxRunPreview  = 300
+	MaxRunTail     = 4000
+	MaxRunJournal  = 200
 )
 
 // RunSummary is one workflow run in a room's list.
@@ -84,6 +86,33 @@ type RunAgent struct {
 	Cached  bool   `json:"cached,omitempty"`
 }
 
+// RunCommand is one run() command call in a run, folded from its events.
+// Its ID counts commands, not agents, so a run can hold both an agent 1 and
+// a command 1.
+type RunCommand struct {
+	ID    int    `json:"id"`
+	Label string `json:"label"`
+	Phase string `json:"phase,omitempty"`
+	// Lane and Stage are what the script gave its phase; both are empty when it gave none.
+	Lane  string `json:"lane,omitempty"`
+	Stage string `json:"stage,omitempty"`
+	// Status is running, ok, error, or unknown when the run ended without
+	// an end event for this command.
+	Status  string `json:"status"`
+	Started int64  `json:"started,omitempty"` // unix millis; 0 when the start event was not read
+	// Command is the command line the script asked run() to execute.
+	Command string `json:"command,omitempty"`
+	// Shell is the managed shell that ran it.
+	Shell    string `json:"shell,omitempty"`
+	DurMs    int64  `json:"durMs,omitempty"`
+	ExitCode *int   `json:"exitCode,omitempty"` // nil until the command ended
+	Cached   bool   `json:"cached,omitempty"`   // satisfied from a resumed run's journal
+	Preview  string `json:"preview,omitempty"`
+	// Tail is the last lines of the command's output.
+	Tail  string `json:"tail,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
 // RunLog is one workflow log line.
 type RunLog struct {
 	TS  int64  `json:"ts"`
@@ -92,15 +121,21 @@ type RunLog struct {
 
 // RunDetail is one run's read-only view.
 type RunDetail struct {
-	Run    RunSummary `json:"run"`
-	Agents []RunAgent `json:"agents"`
+	Run      RunSummary   `json:"run"`
+	Agents   []RunAgent   `json:"agents"`
+	Commands []RunCommand `json:"commands"`
 	// AgentTotal, AgentRunning and AgentFailed count every agent call;
 	// Agents holds the last MaxRunAgents.
-	AgentTotal   int      `json:"agentTotal"`
-	AgentRunning int      `json:"agentRunning"`
-	AgentFailed  int      `json:"agentFailed"`
-	Phases       []string `json:"phases,omitempty"`
-	Logs         []RunLog `json:"logs"`
+	AgentTotal   int `json:"agentTotal"`
+	AgentRunning int `json:"agentRunning"`
+	AgentFailed  int `json:"agentFailed"`
+	// CommandTotal, CommandRunning and CommandFailed count every run()
+	// command the same way; Commands holds the last MaxRunCommands.
+	CommandTotal   int      `json:"commandTotal"`
+	CommandRunning int      `json:"commandRunning"`
+	CommandFailed  int      `json:"commandFailed"`
+	Phases         []string `json:"phases,omitempty"`
+	Logs           []RunLog `json:"logs"`
 	// ResultSummary is one line from the run result and ResultBytes its
 	// size; RunResult loads the result itself.
 	ResultSummary string `json:"resultSummary,omitempty"`
@@ -261,12 +296,15 @@ func (s *Service) RunDetail(id string) (RunDetail, error) {
 	if err != nil {
 		return RunDetail{}, err
 	}
-	out := RunDetail{Run: s.summary(runEntry{meta: m, room: s.runRoom(m)}), Agents: []RunAgent{}, Logs: []RunLog{}}
+	out := RunDetail{Run: s.summary(runEntry{meta: m, room: s.runRoom(m)}), Agents: []RunAgent{}, Commands: []RunCommand{}, Logs: []RunLog{}}
 	// An unreadable events file degrades to an empty agent list; the meta
 	// and the result still show.
 	events, _, _ := runstore.ReadEventsFrom(id, 0)
-	out.Agents, out.AgentTotal, out.Phases, out.Logs = foldRun(events, m.Status == "running")
+	f := foldRun(events, m.Status == "running")
+	out.Agents, out.AgentTotal, out.Phases, out.Logs = f.agents, f.agentTotal, f.phases, f.logs
+	out.Commands, out.CommandTotal = f.commands, f.commandTotal
 	out.AgentRunning, out.AgentFailed = countAgents(events, m.Status == "running")
+	out.CommandRunning, out.CommandFailed = countCommands(events, m.Status == "running")
 	for i, a := range out.Agents {
 		session := runstore.AgentSessionID(id, a.ID)
 		if _, err := os.Lstat(filepath.Join(runstore.SessionsDir(), session)); err == nil {
@@ -321,47 +359,73 @@ func (s *Service) RunResult(id string, agent int) (out RunResultView, err error)
 	return out, nil
 }
 
-// foldRun turns run events into agents, phases and logs. An agent whose
-// start event is missing keeps an empty start, not an error; one with no
-// end event is running while the run runs, else unknown.
-func foldRun(events []runstore.Event, live bool) (agents []RunAgent, total int, phases []string, logs []RunLog) {
-	agents, total, phases, logs = foldAll(events, live)
-	if len(agents) > MaxRunAgents {
-		agents = agents[len(agents)-MaxRunAgents:]
+// runFold is a run's whole read model folded from its events: its agents,
+// its run() commands, its phases and its workflow logs.
+type runFold struct {
+	agents       []RunAgent
+	commands     []RunCommand
+	phases       []string
+	logs         []RunLog
+	agentTotal   int
+	commandTotal int
+}
+
+// foldRun turns run events into agents, commands, phases and logs, each
+// capped to its bound. An agent or command whose start event is missing
+// keeps an empty start, not an error; one with no end event is running
+// while the run runs, else unknown.
+func foldRun(events []runstore.Event, live bool) runFold {
+	f := foldAll(events, live)
+	if len(f.agents) > MaxRunAgents {
+		f.agents = f.agents[len(f.agents)-MaxRunAgents:]
 	}
-	if len(phases) > MaxRunPhases {
-		phases = phases[len(phases)-MaxRunPhases:]
+	if len(f.commands) > MaxRunCommands {
+		f.commands = f.commands[len(f.commands)-MaxRunCommands:]
 	}
-	if len(logs) > MaxRunLogs {
-		logs = logs[len(logs)-MaxRunLogs:]
+	if len(f.phases) > MaxRunPhases {
+		f.phases = f.phases[len(f.phases)-MaxRunPhases:]
 	}
-	return agents, total, phases, logs
+	if len(f.logs) > MaxRunLogs {
+		f.logs = f.logs[len(f.logs)-MaxRunLogs:]
+	}
+	return f
 }
 
 // foldAll folds every event with no caps.
-func foldAll(events []runstore.Event, live bool) (agents []RunAgent, total int, phases []string, logs []RunLog) {
-	byID := map[int]int{}
-	get := func(e runstore.Event) *RunAgent {
-		i, ok := byID[e.ID]
+func foldAll(events []runstore.Event, live bool) runFold {
+	f := runFold{}
+	byAgent := map[int]int{}
+	agent := func(e runstore.Event) *RunAgent {
+		i, ok := byAgent[e.ID]
 		if !ok {
-			i = len(agents)
-			byID[e.ID] = i
-			agents = append(agents, RunAgent{ID: e.ID, Status: "running"})
+			i = len(f.agents)
+			byAgent[e.ID] = i
+			f.agents = append(f.agents, RunAgent{ID: e.ID, Status: "running"})
 		}
-		return &agents[i]
+		return &f.agents[i]
+	}
+	byCommand := map[int]int{}
+	command := func(e runstore.Event) *RunCommand {
+		i, ok := byCommand[e.ID]
+		if !ok {
+			i = len(f.commands)
+			byCommand[e.ID] = i
+			f.commands = append(f.commands, RunCommand{ID: e.ID, Status: "running"})
+		}
+		return &f.commands[i]
 	}
 	for _, e := range events {
 		switch e.T {
 		case "phase":
 			if e.Title != "" {
-				phases = append(phases, e.Title)
+				f.phases = append(f.phases, e.Title)
 			}
 		case "agent_start":
-			a := get(e)
+			a := agent(e)
 			a.Label, a.Profile, a.Phase, a.Started = e.Label, e.Profile, e.Phase, e.TS
 			a.Lane, a.Stage = e.Lane, e.Stage
 		case "agent_end":
-			a := get(e)
+			a := agent(e)
 			if a.Label == "" {
 				a.Label = e.Label
 			}
@@ -371,25 +435,57 @@ func foldAll(events []runstore.Event, live bool) (agents []RunAgent, total int, 
 			}
 			a.DurMs, a.Cached = e.DurMs, e.Cached
 			a.Preview, a.Error = textutil.Clip(e.Preview, MaxRunPreview), textutil.Clip(e.Error, MaxRunPreview)
+		case "exec_start":
+			c := command(e)
+			c.Label, c.Phase, c.Started, c.Command = e.Label, e.Phase, e.TS, e.Command
+			c.Lane, c.Stage = e.Lane, e.Stage
+		case "exec_run":
+			c := command(e)
+			if c.Label == "" {
+				c.Label = e.Label
+			}
+			c.Shell = e.Shell
+		case "exec_end":
+			c := command(e)
+			if c.Label == "" {
+				c.Label = e.Label
+			}
+			c.Status = e.Status
+			if c.Status == "" {
+				c.Status = "ok"
+			}
+			c.DurMs, c.Cached, c.Shell = e.DurMs, e.Cached, e.Shell
+			c.ExitCode = e.ExitCode
+			c.Preview, c.Tail, c.Error = textutil.Clip(e.Preview, MaxRunPreview), clipTail(e.Tail, MaxRunTail), textutil.Clip(e.Error, MaxRunPreview)
 		case "log":
 			if e.Provenance != "system" && e.Msg != "" {
-				logs = append(logs, RunLog{TS: e.TS, Msg: textutil.Clip(e.Msg, MaxRunPreview)})
+				f.logs = append(f.logs, RunLog{TS: e.TS, Msg: textutil.Clip(e.Msg, MaxRunPreview)})
 			}
 		}
 	}
-	for i := range agents {
-		if agents[i].Status == "running" && !live {
-			agents[i].Status = "unknown"
+	finish := func(status string) string {
+		if status == "running" && !live {
+			return "unknown"
 		}
+		return status
 	}
-	total = len(agents)
-	if agents == nil {
-		agents = []RunAgent{}
+	for i := range f.agents {
+		f.agents[i].Status = finish(f.agents[i].Status)
 	}
-	if logs == nil {
-		logs = []RunLog{}
+	for i := range f.commands {
+		f.commands[i].Status = finish(f.commands[i].Status)
 	}
-	return agents, total, phases, logs
+	f.agentTotal, f.commandTotal = len(f.agents), len(f.commands)
+	if f.agents == nil {
+		f.agents = []RunAgent{}
+	}
+	if f.commands == nil {
+		f.commands = []RunCommand{}
+	}
+	if f.logs == nil {
+		f.logs = []RunLog{}
+	}
+	return f
 }
 
 // runSigs returns one signature per room over its runs' ids, statuses and
@@ -405,9 +501,23 @@ func (s *Service) runSigs() map[string]string {
 // countAgents counts running and failed agents over the whole run, so the
 // header stays true when the list shows only the last MaxRunAgents.
 func countAgents(events []runstore.Event, live bool) (running, failed int) {
-	all, _, _, _ := foldAll(events, live)
-	for _, a := range all {
+	all := foldAll(events, live)
+	for _, a := range all.agents {
 		switch a.Status {
+		case "running":
+			running++
+		case "error", "failed":
+			failed++
+		}
+	}
+	return running, failed
+}
+
+// countCommands counts running and failed run() commands the same way.
+func countCommands(events []runstore.Event, live bool) (running, failed int) {
+	all := foldAll(events, live)
+	for _, c := range all.commands {
+		switch c.Status {
 		case "running":
 			running++
 		case "error", "failed":
@@ -430,9 +540,9 @@ func (s *Service) counts(id string, live bool) agentCounts {
 		return c
 	}
 	events, _, _ := runstore.ReadEventsFrom(id, 0)
-	all, _, _, _ := foldAll(events, live)
-	c = agentCounts{size: fi.Size(), live: live, total: len(all)}
-	for _, a := range all {
+	all := foldAll(events, live)
+	c = agentCounts{size: fi.Size(), live: live, total: len(all.agents)}
+	for _, a := range all.agents {
 		switch a.Status {
 		case "ok":
 			c.done++
@@ -469,4 +579,14 @@ func workerJournal(id string, agent int) []RunJournalEntry {
 		out = append(out, RunJournalEntry{TS: e.TS, Kind: e.Kind, Message: e.Message, Next: e.Next})
 	}
 	return out
+}
+
+// clipTail keeps the last n runes of s, where a command's latest output is,
+// marking a cut with an ellipsis at the start.
+func clipTail(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return textutil.Ellipsis + string(r[len(r)-n:])
 }

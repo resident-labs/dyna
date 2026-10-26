@@ -37,9 +37,10 @@
           {#each lane.cells as cell, col}
             <td>
               {#if cell}
-                <button class="cell {cell.state}" class:picked={isPicked(lane.name, col)} aria-pressed={isPicked(lane.name, col)} aria-label="{lane.name} {stageName(grid.stages[col] ?? '')}: {cell.done} of {cell.total} done{cell.runs > 1 ? `, ${cell.runs} rounds` : ''}" onclick={() => onpick?.(isPicked(lane.name, col) ? null : { lane: lane.name, col })}>
+                <button class="cell {cell.state}" class:picked={isPicked(lane.name, col)} aria-pressed={isPicked(lane.name, col)} aria-label="{lane.name} {stageName(grid.stages[col] ?? '')}: {cell.done} of {cell.total} done{cell.runs > 1 ? `, ${cell.runs} rounds` : ''}{cell.commands ? `, ${cell.commands} command${cell.commands === 1 ? '' : 's'}` : ''}" onclick={() => onpick?.(isPicked(lane.name, col) ? null : { lane: lane.name, col })}>
                   <RunIcon status={cell.state} size={13} />
                   <span class="n">{cell.done}/{cell.total}</span>
+                  {#if cell.commands}<span class="x" title="run() commands">${cell.commands}</span>{/if}
                   {#if cell.runs > 1}<span class="x">×{cell.runs}</span>{/if}
                 </button>
               {:else}

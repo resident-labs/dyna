@@ -7,7 +7,7 @@
   import { api, copyText } from '../../api.ts'
   import { createResultLoader, createWorkerResults, type LoadedResult, type WorkerRows } from './runResult.ts'
   import { errorText } from '../errorText.ts'
-  import type { RunAgent, RunDetail, RunSummary } from '../api/workflow.ts'
+  import type { RunAgent, RunCommand, RunDetail, RunSummary } from '../api/workflow.ts'
   import JsonView from '../ui/JsonView.svelte'
   import WorkerDetail from './WorkerDetail.svelte'
   import { previewLine } from './runPreview.ts'
@@ -24,11 +24,14 @@
     onpause?: ((run: RunSummary) => Promise<void>) | null
     onopen?: ((run: RunSummary, agent: RunAgent) => void) | null
   }
+  // One step of a phase group: an agent call or a run() command. Their ids
+  // count separately, so a row is keyed by kind and id together.
+  type Row = { kind: 'agent'; agent: RunAgent } | { kind: 'command'; command: RunCommand }
   interface Group {
     phase: string
     lane?: string
     stage?: string
-    agents: RunAgent[]
+    rows: Row[]
     state: CellState
     done: number
   }
@@ -42,6 +45,13 @@
   let { detail = null, error = '', oncancel = null, onpause = null, onopen = null }: Props = $props()
 
   const label: Record<string, string> = { running: 'Running', ok: 'Done', error: 'Failed', canceled: 'Canceled', interrupted: 'Interrupted', unknown: 'No end recorded' }
+  const phaseOf = (r: Row): string | undefined => (r.kind === 'agent' ? r.agent.phase : r.command.phase)
+  const laneOf = (r: Row): string | undefined => (r.kind === 'agent' ? r.agent.lane : r.command.lane)
+  const stageOf = (r: Row): string | undefined => (r.kind === 'agent' ? r.agent.stage : r.command.stage)
+  const statusOf = (r: Row): string => (r.kind === 'agent' ? r.agent.status : r.command.status)
+  const startedOf = (r: Row): number | undefined => (r.kind === 'agent' ? r.agent.started : r.command.started)
+  const nameOf = (r: Row): string => (r.kind === 'agent' ? r.agent.label || `agent ${r.agent.id}` : r.command.label || `command ${r.command.id}`)
+  const rowKey = (r: Row): string => (r.kind === 'agent' ? `a${r.agent.id}` : `c${r.command.id}`)
 
   let pausing = $state(false)
   let pauseError = $state('')
@@ -58,17 +68,23 @@
       pausing = false
     }
   }
-  // Agents keep run order; a group starts where the phase changes.
+  // Steps keep run order; a group starts where the phase changes. Agents and
+  // commands each arrive in event order, so the merge sorts by start time.
+  let rows = $derived.by(() => {
+    const out: Row[] = (detail?.agents ?? []).map((agent): Row => ({ kind: 'agent', agent }))
+    for (const command of detail?.commands ?? []) out.push({ kind: 'command', command })
+    return out.sort((a, b) => (startedOf(a) ?? 0) - (startedOf(b) ?? 0))
+  })
   let groups = $derived.by(() => {
-    const phases: { phase: string; lane?: string; stage?: string; agents: RunAgent[] }[] = []
-    for (const a of detail?.agents ?? []) {
-      const phase = a.phase || 'Agents'
+    const phases: { phase: string; lane?: string; stage?: string; rows: Row[] }[] = []
+    for (const r of rows) {
+      const phase = phaseOf(r) || 'Agents'
       const last = phases[phases.length - 1]
-      if (last?.phase === phase && last.lane === a.lane && last.stage === a.stage) last.agents.push(a)
-      else phases.push({ phase, lane: a.lane, stage: a.stage, agents: [a] })
+      if (last?.phase === phase && last.lane === laneOf(r) && last.stage === stageOf(r)) last.rows.push(r)
+      else phases.push({ phase, lane: laneOf(r), stage: stageOf(r), rows: [r] })
     }
     return phases.map((g): Group => {
-      const st = g.agents.map((a) => a.status)
+      const st = g.rows.map(statusOf)
       return {
         ...g,
         state: st.includes('running') ? 'running' : st.some((s) => s === 'error' || s === 'failed') ? 'error' : 'ok',
@@ -76,32 +92,40 @@
       }
     })
   })
-  // Phases that share stages show as a lanes grid; the chosen cell opens its agents.
-  let grid = $derived(laneGrid(groups.map((g) => ({ phase: g.phase, lane: g.lane, stage: g.stage, state: g.state, done: g.done, total: g.agents.length }))))
+  const countLine = (g: Group): string => {
+    const c = g.rows.filter((r) => r.kind === 'command').length
+    const a = g.rows.length - c
+    const parts: string[] = []
+    if (a) parts.push(`${a} agent${a === 1 ? '' : 's'}`)
+    if (c) parts.push(`${c} command${c === 1 ? '' : 's'}`)
+    return parts.join(' · ')
+  }
+  // Phases that share stages show as a lanes grid; the chosen cell opens its steps.
+  let grid = $derived(laneGrid(groups.map((g) => ({ phase: g.phase, lane: g.lane, stage: g.stage, state: g.state, done: g.done, total: g.rows.length, commands: g.rows.filter((r) => r.kind === 'command').length }))))
   let picked = $state<CellRef | null>(null)
   // A new run starts with no cell open. Only the id is read, so the refresh that
   // replaces `detail` every 2 seconds keeps the open cell.
   let runId = $derived(detail?.run.id ?? '')
   // Without a grid, each phase row opens on its own.
-  // A phase is open while any agent id it holds is listed, so the open row stays
-  // put when the agent window trims some of its agents or a running phase adds more.
-  let openAgentIds = $state<number[]>([])
+  // A phase is open while any row key it holds is listed, so the open row stays
+  // put when the window trims some of its steps or a running phase adds more.
+  let openRowIds = $state<string[]>([])
   $effect(() => {
     void runId
     picked = null
-    openAgentIds = []
+    openRowIds = []
   })
-  const isOpenGroup = (g: Group) => g.agents.some((a) => openAgentIds.includes(a.id))
-  // An open phase takes in the agents it gains, so trimming the old ones later keeps it open.
+  const isOpenGroup = (g: Group) => g.rows.some((r) => openRowIds.includes(rowKey(r)))
+  // An open phase takes in the steps it gains, so trimming the old ones later keeps it open.
   $effect(() => {
-    const gained = groups.filter(isOpenGroup).flatMap((g) => g.agents.map((a) => a.id)).filter((id) => !openAgentIds.includes(id))
-    if (gained.length) openAgentIds = [...openAgentIds, ...gained]
+    const gained = groups.filter(isOpenGroup).flatMap((g) => g.rows.map(rowKey)).filter((id) => !openRowIds.includes(id))
+    if (gained.length) openRowIds = [...openRowIds, ...gained]
   })
-  function togglePhase(key: number) {
-    const g = groups.find((x) => x.agents[0]?.id === key)
+  function togglePhase(key: string) {
+    const g = groups.find((x) => x.rows[0] !== undefined && rowKey(x.rows[0]) === key)
     if (!g) return
-    const ids = g.agents.map((a) => a.id)
-    openAgentIds = isOpenGroup(g) ? openAgentIds.filter((id) => !ids.includes(id)) : [...openAgentIds, ...ids]
+    const ids = g.rows.map(rowKey)
+    openRowIds = isOpenGroup(g) ? openRowIds.filter((id) => !ids.includes(id)) : [...openRowIds, ...ids]
   }
   let shownGroups = $derived.by(() => {
     if (!grid) return groups.length > 1 ? [] : groups
@@ -112,19 +136,21 @@
   let attention = $derived.by(() => {
     const out: Attention[] = []
     groups.forEach((g, group) => {
-      for (const a of g.agents) if (a.status === 'error' || a.status === 'failed') out.push({ key: `f${a.id}`, text: `${a.label || `agent ${a.id}`} failed in ${g.phase}`, failed: true, group })
+      for (const r of g.rows) if (statusOf(r) === 'error' || statusOf(r) === 'failed') out.push({ key: `${r.kind === 'agent' ? 'f' : 'x'}${rowKey(r)}`, text: `${nameOf(r)} failed in ${g.phase}`, failed: true, group })
     })
     const items = out.slice(0, maxAttention)
-    const running = groups.flatMap((g, group) => g.agents.filter((a) => a.status === 'running' && a.started).map((a) => ({ a, group, since: a.started ?? now })))
+    const running = groups.flatMap((g, group) => g.rows.filter((r) => statusOf(r) === 'running' && startedOf(r)).map((r) => ({ r, group, since: startedOf(r) ?? now })))
     const slow = running.reduce<(typeof running)[number] | null>((best, r) => (!best || r.since < best.since ? r : best), null)
-    if (slow) items.push({ key: `r${slow.a.id}`, text: `${slow.a.label || `agent ${slow.a.id}`} has run ${elapsed(now - slow.since)} in ${groups[slow.group]?.phase}`, failed: false, group: slow.group })
+    if (slow) items.push({ key: `r${rowKey(slow.r)}`, text: `${nameOf(slow.r)} has run ${elapsed(now - slow.since)} in ${groups[slow.group]?.phase}`, failed: false, group: slow.group })
     return { items, more: Math.max(0, out.length - maxAttention) }
   })
   function pickGroup(group: number) {
     if (grid) picked = cellOf(grid, group)
   }
-  // Counts come from Go over every agent, not just the shown ones.
-  let counts = $derived({ running: detail?.agentRunning ?? 0, error: detail?.agentFailed ?? 0, total: detail?.agentTotal ?? 0 })
+  // Counts come from Go over every agent and command, not just the shown ones.
+  let commandCounts = $derived({ running: detail?.commandRunning ?? 0, error: detail?.commandFailed ?? 0, total: detail?.commandTotal ?? 0 })
+  // The bar and the Working and Failed cells count every step, agent or command.
+  let counts = $derived({ running: (detail?.agentRunning ?? 0) + commandCounts.running, error: (detail?.agentFailed ?? 0) + commandCounts.error, total: (detail?.agentTotal ?? 0) + commandCounts.total })
   let pct = $derived(counts.total ? Math.round(((counts.total - counts.running) / counts.total) * 100) : 0)
   // The result loads on its own, in full; run details carry only its size.
   let full = $state<LoadedResult>(null)
@@ -167,50 +193,73 @@
     <p class="quiet">Loading run…</p>
   {:else}
     {@const run = detail.run}
-    {#snippet agentRows(g: Group)}
+    {#snippet steps(g: Group)}
       <div class="agents">
-        {#each g.agents as a (a.id)}
-          {@const row = workerRows[a.id]}
-          {@const expandable = a.status === 'ok' || a.status === 'running'}
-          {@const name = a.label || `agent ${a.id}`}
-          <div class="agent {a.status}" class:expanded={row?.open}>
-            <!-- The whole header opens and folds the card; a failed or stopped agent has no result to open. -->
-            {#snippet head()}
-              <RunIcon status={a.status} size={18} />
-              <span class="who">
-                <span class="label">{name}</span>
-                {#if a.profile}<span class="pill">{a.profile}</span>{/if}
-                {#if a.cached}<span class="pill">cached</span>{/if}
-              </span>
-              <span class="time">
-                {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
-                {#if expandable}<span class="open" aria-hidden="true">›</span>{/if}
-              </span>
-            {/snippet}
-            {#if expandable}
-              <button type="button" class="head action" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {name}" onclick={() => workers.toggle(run.id, a.id, a.status)}>{@render head()}</button>
-            {:else}
-              <div class="head">{@render head()}</div>
-            {/if}
-            {#if a.error}
-              <p class="line bad">{a.error}</p>
-            {:else if a.status === 'running'}
-              {@const ms = a.doing?.since ? now - a.doing.since : 0}
-              <p class="line live" class:long={isLongCall(ms)}>{a.doing?.text || 'Starting'}{#if ms}{' · ' + elapsed(ms)}{/if}</p>
-            {:else if a.preview}
-              {@const line = previewLine(a.preview)}
-              {#if line}<p class="line">{line}</p>{/if}
-            {/if}
-            {#if !expandable && a.session && onopen}<p class="line"><button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Open session</button></p>{/if}
-            {#if row?.open}
-              <div class="full">
-                {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Open session</button>{/if}
-                {#if row.value}<WorkerDetail value={row.value} />{/if}
-                {#if row.loading}<p class="quiet" role="status">{row.value ? 'Refreshing the result…' : 'Loading the result…'}</p>{/if}
-                {#if row.error}<div class="retry-row"><p class="err">Could not load the result: {row.error}</p><button class="retry" aria-label="Retry result for {a.label || ('agent ' + a.id)}" onclick={() => workers.retry(run.id, a.id, a.status)}>Retry</button></div>{/if}
+        {#each g.rows as r (rowKey(r))}
+          {#if r.kind === 'command'}
+            {@const c = r.command}
+            <div class="agent {c.status} command">
+              <div class="head">
+                <RunIcon status={c.status} size={18} />
+                <span class="who">
+                  <span class="label">{c.label || `command ${c.id}`}</span>
+                  <span class="pill">$</span>
+                  {#if c.cached}<span class="pill">cached</span>{/if}
+                  {#if c.exitCode !== undefined}<span class="pill" class:bad={c.status === 'error'}>exit {c.exitCode}</span>{/if}
+                </span>
+                <span class="time">
+                  {c.durMs ? secs(c.durMs) : c.status === 'running' ? (c.started ? secs(now - c.started) : 'running…') : '—'}
+                </span>
               </div>
-            {/if}
-          </div>
+              {#if c.command}<p class="line mono cmdline">$ {c.command}</p>{/if}
+              {#if c.error}<p class="line bad">{c.error}</p>{/if}
+              {#if !c.error && !c.tail && c.preview}<p class="line">{previewLine(c.preview)}</p>{/if}
+              {#if c.tail}<pre class="tail mono">{c.tail}</pre>{/if}
+            </div>
+          {:else}
+            {@const a = r.agent}
+            {@const row = workerRows[a.id]}
+            {@const expandable = a.status === 'ok' || a.status === 'running'}
+            {@const name = a.label || `agent ${a.id}`}
+            <div class="agent {a.status}" class:expanded={row?.open}>
+              <!-- The whole header opens and folds the card; a failed or stopped agent has no result to open. -->
+              {#snippet head()}
+                <RunIcon status={a.status} size={18} />
+                <span class="who">
+                  <span class="label">{name}</span>
+                  {#if a.profile}<span class="pill">{a.profile}</span>{/if}
+                  {#if a.cached}<span class="pill">cached</span>{/if}
+                </span>
+                <span class="time">
+                  {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
+                  {#if expandable}<span class="open" aria-hidden="true">›</span>{/if}
+                </span>
+              {/snippet}
+              {#if expandable}
+                <button type="button" class="head action" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {name}" onclick={() => workers.toggle(run.id, a.id, a.status)}>{@render head()}</button>
+              {:else}
+                <div class="head">{@render head()}</div>
+              {/if}
+              {#if a.error}
+                <p class="line bad">{a.error}</p>
+              {:else if a.status === 'running'}
+                {@const ms = a.doing?.since ? now - a.doing.since : 0}
+                <p class="line live" class:long={isLongCall(ms)}>{a.doing?.text || 'Starting'}{#if ms}{' · ' + elapsed(ms)}{/if}</p>
+              {:else if a.preview}
+                {@const line = previewLine(a.preview)}
+                {#if line}<p class="line">{line}</p>{/if}
+              {/if}
+              {#if !expandable && a.session && onopen}<p class="line"><button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Open session</button></p>{/if}
+              {#if row?.open}
+                <div class="full">
+                  {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Open session</button>{/if}
+                  {#if row.value}<WorkerDetail value={row.value} />{/if}
+                  {#if row.loading}<p class="quiet" role="status">{row.value ? 'Refreshing the result…' : 'Loading the result…'}</p>{/if}
+                  {#if row.error}<div class="retry-row"><p class="err">Could not load the result: {row.error}</p><button class="retry" aria-label="Retry result for {a.label || ('agent ' + a.id)}" onclick={() => workers.retry(run.id, a.id, a.status)}>Retry</button></div>{/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
         {/each}
       </div>
     {/snippet}
@@ -230,7 +279,7 @@
         {/if}
       </div>
       {#if counts.total}
-        <div class="bar stacked" role="img" aria-label="{counts.total - counts.running - counts.error} done, {counts.running} running, {counts.error} failed of {counts.total} agents">
+        <div class="bar stacked" role="img" aria-label="{counts.total - counts.running - counts.error} done, {counts.running} running, {counts.error} failed of {counts.total} {commandCounts.total ? 'steps' : 'agents'}">
           <span class="seg ok" style="width:{((counts.total - counts.running - counts.error) / counts.total) * 100}%"></span>
           <span class="seg error" style="width:{(counts.error / counts.total) * 100}%"></span>
           <span class="seg running" style="width:{(counts.running / counts.total) * 100}%"></span>
@@ -238,10 +287,11 @@
       {:else}
         <div class="bar"><span class="fill {run.status}" style="width:{run.status === 'running' ? pct : 100}%"></span></div>
       {/if}
-      <dl>
+      <dl class:wide={commandCounts.total > 0}>
         <div><dt>Started</dt><dd>{ago(run.startedAt)}</dd></div>
         <div><dt>Duration</dt><dd>{duration(run.startedAt, run.status === 'running' ? null : run.endedAt)}</dd></div>
-        <div><dt>Agents</dt><dd>{counts.total}</dd></div>
+        <div><dt>Agents</dt><dd>{detail.agentTotal}</dd></div>
+        {#if commandCounts.total}<div><dt>Commands</dt><dd>{commandCounts.total}</dd></div>{/if}
         <div><dt>Working</dt><dd class:gold={counts.running}>{counts.running}</dd></div>
         <div><dt>Failed</dt><dd class:bad={counts.error}>{counts.error}</dd></div>
       </dl>
@@ -268,22 +318,22 @@
         </div>
       {/if}
       <RunGrid {grid} {picked} onpick={(ref) => (picked = ref)} />
-      {#if !picked}<p class="quiet">Tap a cell to see its agents.</p>{/if}
+      {#if !picked}<p class="quiet">Tap a cell to see its steps.</p>{/if}
     {:else if groups.length > 1}
-      <PhaseList rows={groups.map((g) => ({ key: g.agents[0]?.id ?? 0, open: isOpenGroup(g), phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))} ontoggle={togglePhase}>
-        {#snippet agents(key)}{@const g = groups.find((x) => x.agents[0]?.id === key)}{#if g}{@render agentRows(g)}{/if}{/snippet}
+      <PhaseList rows={groups.map((g) => ({ key: g.rows[0] !== undefined ? rowKey(g.rows[0]) : '', open: isOpenGroup(g), phase: g.phase, state: g.state, done: g.done, total: g.rows.length }))} ontoggle={togglePhase}>
+        {#snippet agents(key: string)}{@const g = groups.find((x) => x.rows[0] !== undefined && rowKey(x.rows[0]) === key)}{#if g}{@render steps(g)}{/if}{/snippet}
       </PhaseList>
     {/if}
 
-    {#if !detail.agents.length}
-      <p class="quiet">{run.status === 'running' ? 'No agent has started yet.' : 'No agents ran in this workflow.'}</p>
+    {#if !rows.length}
+      <p class="quiet">{run.status === 'running' ? 'No step has started yet.' : 'No agents or commands ran in this workflow.'}</p>
     {/if}
-    {#if detail.agentTotal > detail.agents.length}
-      <p class="quiet">Showing the last {detail.agents.length} of {detail.agentTotal} agents.</p>
+    {#if detail.agentTotal > detail.agents.length || commandCounts.total > (detail.commands?.length ?? 0)}
+      <p class="quiet">Showing the last {detail.agents.length} of {detail.agentTotal} agents{commandCounts.total > (detail.commands?.length ?? 0) ? ` and the last ${detail.commands?.length ?? 0} of ${commandCounts.total} commands` : ''}.</p>
     {/if}
     {#each shownGroups as g}
-      <h2>{g.phase}<span>{g.agents.length} agent{g.agents.length === 1 ? '' : 's'}</span></h2>
-      {@render agentRows(g)}
+      <h2>{g.phase}<span>{countLine(g)}</span></h2>
+      {@render steps(g)}
     {/each}
 
     {#if detail.logs.length}
@@ -369,6 +419,7 @@
   .fill.ok { background: linear-gradient(90deg, #6fa66d, var(--sage)); }
   .fill.error, .fill.interrupted { background: linear-gradient(90deg, #b8574d, var(--coral)); }
   dl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  dl.wide { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   dt { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
   dd { margin: 3px 0 0; font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
   .runnote { color: var(--muted); margin: 14px 0 0; font-size: 14px; background: var(--raise); border-radius: 8px; padding: 10px 12px; }
@@ -390,6 +441,9 @@
   .who { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .label { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pill { font-size: 11.5px; color: var(--muted); background: var(--raise); border-radius: 10px; padding: 1px 8px; }
+  .pill.bad { color: var(--coral); }
+  .cmdline { font-size: 12.5px; color: var(--ink-2); }
+  .tail { grid-column: 2 / 4; margin: 4px 0 0; background: #19181b; border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--ink-2); max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .time { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; align-items: center; }
   .agent.running .time { color: var(--gold); }
   @media (hover: hover) {
