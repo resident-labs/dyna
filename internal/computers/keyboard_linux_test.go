@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -51,6 +53,39 @@ func TestKeyboardMapPreservesBindings(t *testing.T) {
 	repeated, _, err := keyboardMap(actions, next)
 	if err != nil || repeated != updated {
 		t.Fatalf("identical symbols changed the map: %v", err)
+	}
+}
+
+func TestKeyboardMapExtrasKeepStandardUSKeys(t *testing.T) {
+	// Enough new symbols to walk past every low position.
+	text := make([]rune, 60)
+	for i := range text {
+		text[i] = rune(0x4e00 + i)
+	}
+	encoded, _ := json.Marshal(string(text))
+	keymap, codes, err := keyboardMap(parseActions(t, `[{"type":"type","text":`+string(encoded)+`}]`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range text {
+		if code := codes[textKey(r)]; reservedKeyboardCode(code) {
+			t.Fatalf("%q was bound to standard US key position %d", r, code)
+		}
+	}
+	if codes[textKey('q')] != 16 {
+		t.Fatalf("q moved to %d", codes[textKey('q')])
+	}
+	for _, line := range strings.Split(keymap, "\n") {
+		var code uint32
+		if _, err := fmt.Sscanf(line, "<K%d>=", &code); err == nil && reservedKeyboardCode(code) {
+			t.Fatalf("keymap redefines standard key %d: %s", code, line)
+		}
+	}
+}
+
+func TestKeypressHoldCoversIdleFrame(t *testing.T) {
+	if frame := time.Second / idleRefreshHz; keypressHold <= frame {
+		t.Fatalf("hold %v does not outlast one idle frame (%v)", keypressHold, frame)
 	}
 }
 
