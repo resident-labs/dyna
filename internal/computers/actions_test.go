@@ -1,9 +1,13 @@
 package computers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func parseActions(t *testing.T, s string) []Action {
@@ -140,5 +144,267 @@ func TestDragPathAcceptsPointArrays(t *testing.T) {
 		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
 			t.Fatalf("an incomplete point was accepted: %s", bad)
 		}
+	}
+}
+
+func TestPointerActionValidation(t *testing.T) {
+	good := `[{"type":"pointer_down","x":5,"y":6},{"type":"move","x":9,"y":6},{"type":"pointer_up"},{"type":"pointer_up","x":9,"y":6,"button":"right"},{"type":"drag","step_ms":120,"path":[{"x":0,"y":0},{"x":1,"y":1}]}]`
+	if err := ValidateActions(parseActions(t, good), 1280, 800); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`[{"type":"pointer_down"}]`,
+		`[{"type":"pointer_down","x":1280,"y":0}]`,
+		`[{"type":"pointer_down","x":1,"y":1,"button":"fourth"}]`,
+		`[{"type":"pointer_up","x":1}]`,
+		`[{"type":"drag","step_ms":501,"path":[{"x":0,"y":0},{"x":1,"y":1}]}]`,
+		`[{"type":"drag","step_ms":-1,"path":[{"x":0,"y":0},{"x":1,"y":1}]}]`,
+		`[{"type":"drag","step_ms":"slow","path":[{"x":0,"y":0},{"x":1,"y":1}]}]`,
+	} {
+		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+// recorder logs pointer events and waits in order.
+type recorder struct{ log []string }
+
+func (r *recorder) move(x, y int) error {
+	r.log = append(r.log, fmt.Sprintf("move %d,%d", x, y))
+	return nil
+}
+func (r *recorder) button(name string, pressed bool) error {
+	state := "up"
+	if pressed {
+		state = "down"
+	}
+	r.log = append(r.log, name+" "+state)
+	return nil
+}
+func (r *recorder) scroll(x, y int) error {
+	r.log = append(r.log, fmt.Sprintf("scroll %d,%d", x, y))
+	return nil
+}
+func (r *recorder) key(name string, pressed bool) error {
+	state := "up"
+	if pressed {
+		state = "down"
+	}
+	r.log = append(r.log, "key "+name+" "+state)
+	return nil
+}
+func (r *recorder) wait(_ context.Context, d time.Duration) error {
+	r.log = append(r.log, "wait "+d.String())
+	return nil
+}
+
+func TestTakeoverDuringAHeldWaitReleasesAtOnce(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	downCtx, cancelDown := context.WithCancel(context.Background())
+	g.begin(cancelDown)
+	for _, a := range parseActions(t, `[{"type":"pointer_down","x":5,"y":6}]`) {
+		if err := pointerButtonAction(g, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.end(nil); err != nil {
+		t.Fatal(err)
+	}
+	// The next action is a long wait. The takeover lands during it.
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	g.begin(cancelWait)
+	g.interrupt()
+	if waitCtx.Err() == nil {
+		t.Fatal("the held wait was not cancelled by the takeover")
+	}
+	if got := strings.Join(r.log, "|"); got != "move 5,6|left down|left up" {
+		t.Fatalf("events = %s, want the button released at the takeover", got)
+	}
+	if err := g.end(waitCtx.Err()); !errors.Is(err, errControlLost) {
+		t.Fatalf("wait error = %v, want the control-lost error", err)
+	}
+	_ = downCtx
+}
+
+func TestTakeoverAtTheHandoffBoundaryPressesNothing(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	// A person takes control after the action began and before its press.
+	g.interrupt()
+	err := pointerButtonAction(g, parseActions(t, `[{"type":"pointer_down","x":5,"y":6}]`)[0])
+	if !errors.Is(err, errControlLost) || len(r.log) != 0 {
+		t.Fatalf("err = %v, events = %v, want no input after the takeover", err, r.log)
+	}
+}
+
+func TestDragStopsAndReleasesAtTheTakeover(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	waits := 0
+	wait := func(ctx context.Context, d time.Duration) error {
+		waits++
+		if waits == 2 {
+			g.interrupt()
+		}
+		return r.wait(ctx, d)
+	}
+	err := g.end(dragPath(context.Background(), g, []point{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1}}, time.Second, true, wait))
+	if !errors.Is(err, errControlLost) {
+		t.Fatalf("err = %v, want the control-lost error", err)
+	}
+	want := "move 1,1|left down|wait 1s|move 2,1|left up|wait 1s"
+	if got := strings.Join(r.log, "|"); got != want {
+		t.Fatalf("events = %s, want %s", got, want)
+	}
+}
+
+func TestDragPathEventSequence(t *testing.T) {
+	path := []point{{1, 1}, {2, 1}, {3, 1}}
+	plain := &recorder{}
+	if err := dragPath(context.Background(), plain, path, 10*time.Millisecond, false, plain.wait); err != nil {
+		t.Fatal(err)
+	}
+	want := "move 1,1|left down|move 2,1|wait 10ms|move 3,1|wait 10ms|left up"
+	if got := strings.Join(plain.log, "|"); got != want {
+		t.Fatalf("default drag = %s, want %s", got, want)
+	}
+	paced := &recorder{}
+	if err := dragPath(context.Background(), paced, path, 120*time.Millisecond, true, paced.wait); err != nil {
+		t.Fatal(err)
+	}
+	want = "move 1,1|left down|wait 120ms|move 2,1|wait 120ms|move 3,1|wait 120ms|left up"
+	if got := strings.Join(paced.log, "|"); got != want {
+		t.Fatalf("paced drag = %s, want %s", got, want)
+	}
+}
+
+func TestPointerDownAndUpAreSeparateEvents(t *testing.T) {
+	r := &recorder{}
+	for _, a := range parseActions(t, `[{"type":"pointer_down","x":5,"y":6},{"type":"pointer_up","x":9,"y":6,"button":"right"},{"type":"pointer_up"}]`) {
+		if err := pointerButtonAction(r, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "move 5,6|left down|move 9,6|right up|left up"
+	if got := strings.Join(r.log, "|"); got != want {
+		t.Fatalf("events = %s, want %s", got, want)
+	}
+}
+
+func TestKeyActionValidation(t *testing.T) {
+	good := `[{"type":"key_down","keys":["SHIFT","a"]},{"type":"key_up","keys":["SHIFT","a"]},{"type":"keypress","keys":["e"],"hold_ms":600}]`
+	if err := ValidateActions(parseActions(t, good), 1280, 800); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`[{"type":"key_down"}]`,
+		`[{"type":"key_down","keys":["not_a_keysym"]}]`,
+		`[{"type":"key_up","keys":[]}]`,
+		`[{"type":"key_down","keys":["a"],"hold_ms":5}]`,
+		`[{"type":"keypress","keys":["a"],"hold_ms":10001}]`,
+		`[{"type":"keypress","keys":["a"],"hold_ms":-1}]`,
+	} {
+		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+func TestHeldKeysReleaseInReverseAtTheTakeoverAndKeyUpIsIdempotent(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	g.setKeys(r)
+	ctx, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	for _, k := range []string{"Shift_L", "e"} {
+		if _, err := g.press(k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.interrupt()
+	if ctx.Err() == nil {
+		t.Fatal("the takeover did not cancel the held key action")
+	}
+	if got := strings.Join(r.log, "|"); got != "key Shift_L down|key e down|key e up|key Shift_L up" {
+		t.Fatalf("events = %s", got)
+	}
+	if _, err := g.press("e"); !errors.Is(err, errControlLost) {
+		t.Fatalf("press after the takeover = %v, want the control-lost error", err)
+	}
+	n := len(r.log)
+	if err := g.releaseKey("e"); err != nil || len(r.log) != n {
+		t.Fatalf("key_up of a released key = %v, events %v, want nothing", err, r.log[n:])
+	}
+}
+
+// A key held by key_down belongs to key_down: a later temporary press of the
+// same key neither presses it again nor releases it.
+func TestHeldKeyIsNotPressedOrReleasedByALaterAction(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	g.setKeys(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	if owned, err := g.press("Shift_L"); !owned || err != nil {
+		t.Fatalf("key_down press = %v, %v", owned, err)
+	}
+	if owned, err := g.press("Shift_L"); owned || err != nil {
+		t.Fatalf("repeated press = %v, %v, want not owned", owned, err)
+	}
+	if got := strings.Join(r.log, "|"); got != "key Shift_L down" {
+		t.Fatalf("events = %s, want one device press", got)
+	}
+	// The later action did not own the key, so it releases nothing; key_up does.
+	if err := g.releaseKey("Shift_L"); err != nil || strings.Join(r.log, "|") != "key Shift_L down|key Shift_L up" {
+		t.Fatalf("key_up = %v, events %v", err, r.log)
+	}
+}
+
+// CTRL and CONTROL are one device key: a later action that names the alias
+// neither presses it again nor releases the held one.
+func TestHeldKeyAliasesShareOneIdentity(t *testing.T) {
+	r := &recorder{}
+	g := newGuardedInput(r)
+	g.setKeys(r)
+	_, cancel := context.WithCancel(context.Background())
+	g.begin(cancel)
+	if owned, err := g.press("Control_L"); !owned || err != nil {
+		t.Fatalf("first press = %v, %v", owned, err)
+	}
+	if owned, err := g.press(keyName("CONTROL")); owned || err != nil {
+		t.Fatalf("alias press = %v, %v, want not owned", owned, err)
+	}
+	if got := strings.Join(r.log, "|"); got != "key Control_L down" {
+		t.Fatalf("events = %s, want one device press", got)
+	}
+	if err := g.releaseKey(keyName("CTRL")); err != nil || strings.Join(r.log, "|") != "key Control_L down|key Control_L up" {
+		t.Fatalf("alias key_up = %v, events %v", err, r.log)
+	}
+}
+
+func TestKeyActionsNormalizeShiftedSymbolsTheSameWay(t *testing.T) {
+	for _, kind := range []string{"keypress", "key_down", "key_up"} {
+		got := actionKeys(parseActions(t, `[{"type":"`+kind+`","keys":["SHIFT","1"]}]`)[0])
+		if len(got) != 2 || got[1] != "!" {
+			t.Errorf("%s keys = %v, want the shifted symbol", kind, got)
+		}
+	}
+	if got := actionKeys(parseActions(t, `[{"type":"click","x":1,"y":1,"button":"left","keys":["SHIFT","1"]}]`)[0]); got[1] != "1" {
+		t.Errorf("click keys = %v, want them unchanged", got)
+	}
+}
+
+func TestKeypressHoldDefaultsAndSetting(t *testing.T) {
+	if d, err := keypressHold(parseActions(t, `[{"type":"keypress","keys":["e"]}]`)[0]); err != nil || d != defaultKeypressHold {
+		t.Fatalf("default hold = %v, %v", d, err)
+	}
+	if d, err := keypressHold(parseActions(t, `[{"type":"keypress","keys":["e"],"hold_ms":600}]`)[0]); err != nil || d != 600*time.Millisecond {
+		t.Fatalf("hold_ms 600 = %v, %v", d, err)
 	}
 }

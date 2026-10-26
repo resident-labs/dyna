@@ -390,6 +390,8 @@ func Summarize(a computers.Action) string {
 		return strings.ReplaceAll(typ, "_", " ") + at()
 	case "drag":
 		return "drag"
+	case "pointer_down", "pointer_up":
+		return strings.ReplaceAll(typ, "_", " ") + at()
 	case "scroll":
 		// The direction follows the wheel: a positive scroll_y goes down.
 		dir := ""
@@ -402,10 +404,10 @@ func Summarize(a computers.Action) string {
 			return "scroll · " + dir + at()
 		}
 		return "scroll" + at()
-	case "keypress":
+	case "keypress", "key_down", "key_up":
 		var keys []string
 		_ = json.Unmarshal(a["keys"], &keys)
-		return "keypress · " + strings.Join(keys, "+")
+		return strings.ReplaceAll(typ, "_", " ") + " · " + strings.Join(keys, "+")
 	case "type":
 		var secret bool
 		_ = json.Unmarshal(a["secret"], &secret)
