@@ -292,9 +292,9 @@ type detachedPoller struct {
 	// record it for a restarted engine.
 	started func(detachSpec)
 	mu      sync.Mutex
-	active map[string]*watch
-	kick   chan struct{}
-	exited chan struct{}
+	active  map[string]*watch
+	kick    chan struct{}
+	exited  chan struct{}
 }
 
 // newPoller starts the poller of a run. The returned function stops it and waits
