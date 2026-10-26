@@ -221,6 +221,14 @@ func (c *hostConn) loop() {
 			c.reply(c.sv.host.closeKey(m.Key), message{})
 			continue
 		}
+		if m.Op == opIdleList {
+			c.reply(nil, message{Idle: c.sv.host.idleSessions()})
+			continue
+		}
+		if m.Op == opUnload {
+			c.reply(nil, message{Done: c.sv.host.unloadIdle(m.Key, m.MinIdle)})
+			continue
+		}
 		if m.Op == opShutdown {
 			c.sv.shutdown()
 			c.reply(nil, message{})

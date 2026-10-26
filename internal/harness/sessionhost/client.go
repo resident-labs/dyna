@@ -540,3 +540,59 @@ func (h *socketHost) closeKey(ctx context.Context, key string) error {
 	}
 	return errors.Join(failures...)
 }
+
+// IdleSessions lists every retained child without an attached turn, in every
+// host of this user. It starts no host and attaches nothing.
+func IdleSessions(ctx context.Context) ([]IdleSession, error) { return defaultHost.idleSessions(ctx) }
+
+func (h *socketHost) idleSessions(ctx context.Context) ([]IdleSession, error) {
+	sockets, err := h.sockets()
+	if err != nil {
+		return nil, err
+	}
+	var out []IdleSession
+	var failures []error
+	for _, socket := range sockets {
+		reply, err := h.ask(ctx, socket, message{Op: opIdleList})
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		for _, s := range reply.Idle {
+			s.Socket = socket
+			out = append(out, s)
+		}
+	}
+	return out, errors.Join(failures...)
+}
+
+// UnloadIdle stops the child s names when it is still without a turn and has
+// been idle for at least minIdle. The host decides, so a turn that attached
+// since IdleSessions listed it keeps its child.
+func UnloadIdle(ctx context.Context, s IdleSession, minIdle time.Duration) (bool, error) {
+	reply, err := defaultHost.ask(ctx, s.Socket, message{Op: opUnload, Key: s.ID, MinIdle: minIdle})
+	return reply.Done, err
+}
+
+// sockets lists the host sockets of this user.
+func (h *socketHost) sockets() ([]string, error) {
+	dir, err := h.privateDir()
+	if err != nil {
+		return nil, err
+	}
+	return filepath.Glob(filepath.Join(dir, "*.sock"))
+}
+
+// ask sends one control op to a running host. A host that is gone answers
+// nothing and is not an error: it holds no child.
+func (h *socketHost) ask(ctx context.Context, socket string, m message) (message, error) {
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+		return message{}, nil
+	}
+	if err != nil {
+		return message{}, err
+	}
+	defer conn.Close()
+	return newRemote(conn).call(ctx, m, stopWait, nil)
+}
