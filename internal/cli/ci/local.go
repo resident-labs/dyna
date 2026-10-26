@@ -87,6 +87,11 @@ func localCommands() []*cobra.Command {
 		runner.OnCacheRepair = svc.CacheRepairReporter(rec.ID)
 		result, runErr := runner.Run(c.Context(), localci.Request{Definition: definition, Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed, RoomID: rec.ID})
 		if result.SHA != "" {
+			// A manual result is the only local evidence a pull request head gets,
+			// so the watcher must read it at its next tick.
+			if err := svc.RefreshSavedLocalResult(result); err != nil {
+				return err
+			}
 			if err := printResult(c, result, asJSON); err != nil {
 				return err
 			}

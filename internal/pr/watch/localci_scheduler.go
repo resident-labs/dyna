@@ -195,7 +195,9 @@ func shortHead(head string) string {
 	return head
 }
 
-// Trials use the same node slots as PR heads and enter the queue first.
+// A merge trial uses the same node slots as an integration sync, and it is the
+// only work these machines schedule: a pull request head is checked by GitHub's
+// hosted CI, so nothing here queues one.
 func registeredCIJobs(st State) []registeredCIJob {
 	var jobs []registeredCIJob
 	for _, b := range st.MergeTrials {
@@ -237,15 +239,7 @@ func registeredCIJobs(st State) []registeredCIJob {
 			}
 		}
 	}
-	for _, r := range st.Records {
-		if changeKind(*r) == "github" && r.Watching && r.State == "open" && !r.IsDraft && headVerified(*r) && r.Head != "" && strings.EqualFold(r.HeadRepo, r.Repo) {
-			jobs = append(jobs, registeredCIJob{record: *r, head: r.Head, branch: r.Branch, created: r.Created})
-		}
-	}
 	sort.Slice(jobs, func(i, j int) bool {
-		if jobs[i].trial != jobs[j].trial {
-			return jobs[i].trial
-		}
 		if !jobs[i].created.Equal(jobs[j].created) {
 			return jobs[i].created.Before(jobs[j].created)
 		}
@@ -341,6 +335,14 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 		another, err := s.admitRegisteredCI(ctx, registry, st, job, enabled, active, runs)
 		if err != nil {
+			// A suite that no machine allows fails the trial that asked for it,
+			// and that trial reports the failure on its own read. The tick keeps
+			// taking the work the fleet can hold.
+			var blocked localci.SuiteBlockedError
+			if errors.As(err, &blocked) {
+				log.Printf("local CI: %v", blocked)
+				continue
+			}
 			return err
 		}
 		started = started || another
@@ -437,11 +439,6 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 					}
 				}
 			}
-			// A result the PR has not read yet, such as one a manual rerun wrote,
-			// must refresh it even when GitHub did not change.
-			if err := s.refreshSavedLocalResult(job, result); err != nil {
-				return false, err
-			}
 			return false, nil
 		}
 	}
@@ -451,6 +448,8 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if runs.runs[key] != nil {
 		return false, nil
 	}
+	// A machine with a free slot must exist before the plan does any work, so a
+	// fleet that is only busy keeps the job waiting without a fetch.
 	chosen := availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
 	if chosen == nil {
 		return false, nil
@@ -481,10 +480,14 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		if settled {
 			return false, nil
 		}
-		chosen = availableCINodeExcept(enabled, active, job.record.RoomID, retriedFrom)
-		if chosen == nil {
-			return false, nil
-		}
+	}
+	// Only a machine that allows the run's room and every suite of it takes the
+	// run. A suite that no machine of that room allows never arrives, so the
+	// caller gets a typed error that names it; a fleet that is only busy or low
+	// on disk keeps waiting.
+	chosen = availableCINodeExcept(localci.NodesForSuites(enabled, plan.suites), active, job.record.RoomID, retriedFrom)
+	if chosen == nil {
+		return false, localci.BlockedSuite(localci.NodesForRoom(enabled, job.record.RoomID), plan.suites)
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
@@ -555,23 +558,39 @@ func savedLocalResultKey(result localci.Result) string {
 	return digest(string(body))
 }
 
-// refreshSavedLocalResult forces the next full poll of a PR whose saved local
-// result it has not read yet. A manual `dyna git ci run` writes only Dyna's
-// records, and a quiet settled PR would otherwise keep its old verdict until the
-// safety poll. Nothing here changes GitHub state.
-func (s *Service) refreshSavedLocalResult(job registeredCIJob, result localci.Result) error {
+// RefreshSavedLocalResult marks every tracked change whose stored local result
+// the watcher has not read yet, so its next tick takes a full poll and the new
+// evidence decides. `dyna git ci run` is the one writer of a pull request
+// head's local result, because no local CI runs for that head any more, and a
+// quiet pull request would otherwise keep its old verdict.
+func (s *Service) RefreshSavedLocalResult(result localci.Result) error {
 	key := savedLocalResultKey(result)
-	if key == "" || s.Store == nil {
+	if key == "" || result.SHA == "" || s.Store == nil {
 		return nil
 	}
-	return s.Store.updateRecords([]string{job.record.Key}, func(st *State) error {
-		r := st.Records[job.record.Key]
-		if r == nil || r.Head != job.head || r.Polling.LocalCI == key {
-			return nil
+	st, err := s.Store.Read()
+	if err != nil {
+		return err
+	}
+	var keys []string
+	for recordKey, r := range st.Records {
+		if r.Head == result.SHA && r.Polling.LocalCI != key {
+			keys = append(keys, recordKey)
 		}
-		r.Polling.LocalCI = key
-		r.Polling.Next = time.Time{}
-		r.Polling.FullChecked = time.Time{}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return s.Store.updateRecords(keys, func(st *State) error {
+		for _, recordKey := range keys {
+			r := st.Records[recordKey]
+			if r == nil || r.Head != result.SHA || r.Polling.LocalCI == key {
+				continue
+			}
+			r.Polling.LocalCI = key
+			r.Polling.Next = time.Time{}
+			r.Polling.FullChecked = time.Time{}
+		}
 		return nil
 	})
 }
@@ -583,7 +602,9 @@ const registeredCIRunSlots = 6
 
 // Prefer the node with the most unreserved check slots. A machine that is low
 // on disk takes no new run, so its work waits for a node that has space. A
-// machine that names rooms takes only those rooms' work.
+// machine that names rooms takes only those rooms' work, and one that names
+// suites takes only runs whose every suite it allows, so callers pass the
+// machines that allow the run's suites.
 func availableCINode(nodes []localci.Node, active map[string]int, roomID string) *localci.Node {
 	return availableCINodeExcept(nodes, active, roomID, "")
 }
@@ -698,10 +719,22 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 			}
 		}
 	}
-	// A local completion must force a full snapshot even if GitHub did not change.
-	if err := s.refreshSavedLocalResult(job, result); err != nil {
+	// A completed trial or sync must force a full snapshot even if GitHub did
+	// not change, so its reader sees the new evidence.
+	if err := s.forceFullPoll(job.record.Key, job.head); err != nil {
 		log.Printf("refresh local CI: %v", err)
 	}
+}
+
+// forceFullPoll makes the next tick take a full poll of the change at this head.
+func (s *Service) forceFullPoll(recordKey, head string) error {
+	return s.Store.updateRecords([]string{recordKey}, func(st *State) error {
+		if r := st.Records[recordKey]; r != nil && r.Head == head {
+			r.Polling.Next = time.Time{}
+			r.Polling.FullChecked = time.Time{}
+		}
+		return nil
+	})
 }
 
 func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) (localCIPlan, error) {
