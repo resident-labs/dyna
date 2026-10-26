@@ -61,3 +61,23 @@ func TestConnectTimeoutDefaultsAndLimits(t *testing.T) {
 		t.Fatal("a connect timeout above the limit was accepted")
 	}
 }
+
+// A machine stores the folder that holds its host checks' temporary folders,
+// and refuses one that is not a clean absolute path.
+func TestMachineStoresCheckTmp(t *testing.T) {
+	ctx := context.Background()
+	s := fixture(t)
+	if _, err := s.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, SSH: "pip@pve", CISlots: 2, Enabled: true, CheckTmp: "/dev/shm"}); err != nil {
+		t.Fatal(err)
+	}
+	read, err := s.Get(ctx, "pve")
+	if err != nil || read.CheckTmp != "/dev/shm" {
+		t.Fatalf("stored check tmp = %q, %v; want /dev/shm", read.CheckTmp, err)
+	}
+	for _, bad := range []string{"relative/dir", "/", "/a/../b", "/a//b"} {
+		m := Machine{Name: "pve", Roles: []Role{RoleAgents}, SSH: "pip@pve", CheckTmp: bad}
+		if err := m.Validate(); err == nil {
+			t.Fatalf("check tmp %q was accepted", bad)
+		}
+	}
+}
