@@ -1458,7 +1458,7 @@ esac
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", survivorSweep(dir))
+	cmd := exec.Command("bash", "-c", survivorSweep(dir, ""))
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("sweep: %v: %s", err, output)

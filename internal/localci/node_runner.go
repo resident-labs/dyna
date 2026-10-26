@@ -1308,16 +1308,24 @@ func nodeSlotScript(base string, slots, index int, active string, deadline time.
 // labelled dyna.run and dyna-ci-* systemd units that are older than six hours
 // and belong to no live run. A run is live while its keeper holds the lock on
 // its .active file. Nothing records such a survivor, so every check start on the
-// node looks for them. A query that fails or an age that cannot be read keeps the
+// node looks for them. It reaches containers the way the checks do: podman when
+// docker is absent, the machine's container socket, and sudo when the plain
+// runtime refuses. A query that fails or an age that cannot be read keeps the
 // thing, and the sweep never fails the check.
-func survivorSweep(base string) string {
+func survivorSweep(base, containerSocket string) string {
 	q := shellquote.Quote
+	socket := ""
+	if containerSocket != "" {
+		socket = "export DOCKER_HOST=" + q(containerSocket) + "; "
+	}
 	script := `base=` + q(base) + `; cutoff=$(( $(date +%s) - ` + strconv.Itoa(staleCheckTmpMinutes*60) + ` )); ` +
 		// live_run takes a container's run ID or a unit's name without its dyna-ci- prefix.
 		`live_run() { local d id; for d in "$base"/runs/*/; do [ -e "${d}.active" ] || continue; flock -n "${d}.active" true 2>/dev/null && continue; id=$(basename "$d"); case "$1" in "$id"|"$id"-*) return 0 ;; esac; done; return 1; }; ` +
 		`old_enough() { local at; [ -n "$1" ] && at=$(date -d "$1" +%s 2>/dev/null) && [ "$at" -lt "$cutoff" ]; }; ` +
-		`if command -v docker >/dev/null 2>&1; then timeout 15s docker ps -a --filter label=dyna.run --format '{{.ID}} {{.Label "dyna.run"}}' 2>/dev/null | ` +
-		`while read -r cid rid; do [ -n "$cid" ] && ! live_run "$rid" && old_enough "$(timeout 15s docker inspect -f '{{.Created}}' "$cid" 2>/dev/null)" && timeout 30s docker rm -f "$cid" >/dev/null 2>&1; done; fi; ` +
+		`docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); ` + socket +
+		`if command -v "${docker[0]}" >/dev/null 2>&1; then if ! timeout 10s "${docker[@]}" info >/dev/null 2>&1; then docker=(sudo -n "${docker[@]}"); fi; ` +
+		`timeout 15s "${docker[@]}" ps -a --filter label=dyna.run --format '{{.ID}} {{.Label "dyna.run"}}' 2>/dev/null | ` +
+		`while read -r cid rid; do [ -n "$cid" ] && ! live_run "$rid" && old_enough "$(timeout 15s "${docker[@]}" inspect -f '{{.Created}}' "$cid" 2>/dev/null)" && timeout 30s "${docker[@]}" rm -f "$cid" >/dev/null 2>&1; done; fi; ` +
 		`if command -v systemctl >/dev/null 2>&1; then timeout 15s systemctl --user list-units --all --plain --no-legend 'dyna-ci-*' 2>/dev/null | ` +
 		`while read -r first second _; do unit=$first; [ "$first" = "●" ] && unit=$second; [ -n "$unit" ] || continue; live_run "${unit#dyna-ci-}" && continue; ` +
 		`when=$(timeout 10s systemctl --user show -p ActiveEnterTimestamp --value "$unit" 2>/dev/null); [ -n "$when" ] || when=$(timeout 10s systemctl --user show -p InactiveEnterTimestamp --value "$unit" 2>/dev/null); ` +
@@ -1397,7 +1405,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// log after the output has drained, past the limit it puts on the output.
 	// Without that file they go to the output.
 	emit := `emit() { if [ -n "${DYNA_CI_TRAILER:-}" ]; then cat >> "$DYNA_CI_TRAILER"; else cat; fi; }; `
-	setup := emit + survivorSweep(base) + noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
+	setup := emit + survivorSweep(base, containerSocket) + noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
 	if check.job != nil {
 		// The checkout is a branch, not a detached commit: act copies the
 		// workspace into the job container file by file, so an empty refs tree
@@ -1578,7 +1586,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// check keeps a separate host worktree and report directory.
 	args := `"${docker[@]}" run --rm --init --cpus=` + strconv.Itoa(check.resources.CPUs) +
 		" --memory=" + dockerMemory(check.resources.MemoryMiB) + " --memory-swap=" + dockerMemory(check.resources.MemoryMiB) +
-		` --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --name ` + q(name) + user +
+		` --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --label dyna.run=` + q(runID) + ` --name ` + q(name) + user +
 		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
 	environment := map[string]string{
 		"HOME": "/tmp/home", "XDG_DATA_HOME": "/tmp/data", "XDG_CONFIG_HOME": "/tmp/config", "XDG_CACHE_HOME": "/tmp/cache",
