@@ -60,7 +60,7 @@ test('a failed room read keeps that room last good list, and a room never read s
   const bad = service({ profile: '', reason: 'no profile' })
   const first = settleReads({}, [{ room: 'one', services: [bad] }, { room: 'two', services: [service({})] }])
   const again = settleReads(first.kept, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
-  assert.deepEqual(serviceRows(again.byRoom).map((r) => [r.tone, r.state]), [['bad', 'no profile']])
+  assert.deepEqual(serviceRows(again.byRoom).map((r) => r.state), ['Could not refresh; showing the last read', 'no profile'])
   const fresh = settleReads({}, [{ room: 'one', services: null }, { room: 'two', services: [service({})] }])
   assert.deepEqual(serviceRows(fresh.byRoom).map((r) => [r.id, r.tone, r.state]), [['service:unreadable:one', 'bad', 'Could not be read'], ['service:librarian', 'ok', 'sol']])
 })
