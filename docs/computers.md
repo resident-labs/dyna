@@ -22,12 +22,11 @@ an app open; a running desktop with no app, however recent its input, does not
 hold it back. `dyna computer list` shows "restart pending since <time>" while one
 waits.
 
-A service built before the 10-minute window still refuses for 30 minutes from the
-marker's mtime, and ignores a marker older than its own start. When systemd says that
-service has been active for at least 25 minutes, the install stamps the marker 20
-minutes old, so the service stops refusing after 10 minutes too. A younger service,
-or one whose start is unknown, keeps its 30-minute refusal, because it would otherwise
-ignore the marker. No restart is needed either way.
+The 10-minute limit runs inside the computer service, so a service built before it
+keeps refusing for 30 minutes until it restarts onto this build. That happens once,
+on the upgrade that brings this change: the old service cannot be told the new
+limit, and a marker backdated to shorten its window would be ignored by a service
+that started recently, which would refuse nothing at all.
 
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit
