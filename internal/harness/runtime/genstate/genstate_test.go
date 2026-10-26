@@ -29,9 +29,8 @@ type legacyViewFixture struct {
 	Generations []string
 }
 
-// supersedeLegacyView records the file revision a complete publication
-// replaced, as the runtime does after it records the view.
-func supersedeLegacyView(t *testing.T, store genstate.Store, path, harness, home string) {
+// legacyRevision reads the revision of one legacy view file.
+func legacyRevision(t *testing.T, path string) genstate.LegacyRevision {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -42,8 +41,19 @@ func supersedeLegacyView(t *testing.T, store genstate.Store, path, harness, home
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
-	revision := genstate.LegacyRevision{Path: path, Digest: hex.EncodeToString(sum[:]), ModifiedNS: info.ModTime().UnixNano()}
-	if err := store.SupersedeLegacyViews(context.Background(), harness, home, []genstate.LegacyRevision{revision}); err != nil {
+	return genstate.LegacyRevision{Path: path, Digest: hex.EncodeToString(sum[:]), ModifiedNS: info.ModTime().UnixNano()}
+}
+
+// completePublication records a complete publication of generation and the
+// legacy files it replaced, as the runtime does.
+func completePublication(t *testing.T, store genstate.Store, harness, home, generation string, legacyPaths ...string) {
+	t.Helper()
+	var revisions []genstate.LegacyRevision
+	for _, path := range legacyPaths {
+		revisions = append(revisions, legacyRevision(t, path))
+	}
+	view := genstate.View{Harness: harness, Home: home, Generations: []string{generation}}
+	if err := store.RecordPublication(context.Background(), view, revisions); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -162,10 +172,7 @@ func TestLegacyIndexesImportAndLeasesRoundTrip(t *testing.T) {
 	if len(views) != 1 || len(views[0].Generations) != 2 {
 		t.Fatalf("pending views = %+v", views)
 	}
-	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{next}}, false); err != nil {
-		t.Fatal(err)
-	}
-	supersedeLegacyView(t, store, filepath.Join(viewsDir, "0123abcd.json"), "pi", "/home/pi")
+	completePublication(t, store, "pi", "/home/pi", next, filepath.Join(viewsDir, "0123abcd.json"))
 	views, err = store.Views(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -250,10 +257,7 @@ func TestLegacyViewRewriteOfIdenticalJSONWins(t *testing.T) {
 	if err := store.ImportLegacy(ctx, root); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{second}}, false); err != nil {
-		t.Fatal(err)
-	}
-	supersedeLegacyView(t, store, path, "pi", "/home/pi")
+	completePublication(t, store, "pi", "/home/pi", second, path)
 	// The same bytes written again in the same millisecond are a new
 	// publication.
 	if err := os.WriteFile(path, body, 0600); err != nil {
@@ -341,10 +345,7 @@ func TestLegacyImportKeepsAPendingTargetAfterANewerLegacyPublication(t *testing.
 	store := genstate.Store{DataDir: dir}
 	ctx := context.Background()
 	// This build published a complete set and replaced the file as it stood.
-	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{complete}}, false); err != nil {
-		t.Fatal(err)
-	}
-	supersedeLegacyView(t, store, path, "pi", "/home/pi")
+	completePublication(t, store, "pi", "/home/pi", complete, path)
 	// An earlier build publishes its set again, and a new publication of this
 	// build is in flight.
 	if err := os.WriteFile(path, body, 0600); err != nil {
@@ -370,5 +371,86 @@ func TestLegacyImportKeepsAPendingTargetAfterANewerLegacyPublication(t *testing.
 	got := views[0].Generations
 	if len(got) != 2 || !slices.Contains(got, legacy) || !slices.Contains(got, pending) {
 		t.Fatalf("views = %v, want the legacy set and the pending target", got)
+	}
+}
+
+// A pending claim on a generation this build already published survives a
+// legacy publication that replaces the complete set: the home may read it
+// again when the new publication finishes.
+func TestPendingClaimSurvivesALegacyPublicationOfTheSameGeneration(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "harnesses", "generations")
+	viewsDir := filepath.Join(root, ".views")
+	if err := os.MkdirAll(viewsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(root, "gen-v1-0123456789abcdef")
+	target := filepath.Join(root, "gen-v1-fedcba9876543210")
+	body, err := json.Marshal(legacyViewFixture{Harness: "pi", Home: "/home/pi", Generations: []string{legacy}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(viewsDir, "pi.json")
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := genstate.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	store := genstate.Store{DataDir: dir}
+	ctx := context.Background()
+	completePublication(t, store, "pi", "/home/pi", target, path)
+	// An earlier build publishes its set again.
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	newer := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+	// The build begins publishing the same generation it already published.
+	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{target}}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	views, err := store.Views(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("views = %+v", views)
+	}
+	got := views[0].Generations
+	if len(got) != 2 || !slices.Contains(got, legacy) || !slices.Contains(got, target) {
+		t.Fatalf("views = %v, want the legacy set and the pending target", got)
+	}
+}
+
+// A publication whose supersession fails leaves the previous complete view,
+// so cleanup cannot lose the protection of a generation the home reads.
+func TestCompletePublicationRollsBackWithoutItsSupersessions(t *testing.T) {
+	dir := t.TempDir()
+	if err := genstate.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	store := genstate.Store{DataDir: dir}
+	ctx := context.Background()
+	first := filepath.Join(dir, "harnesses", "generations", "gen-v1-0123456789abcdef")
+	next := filepath.Join(dir, "harnesses", "generations", "gen-v1-fedcba9876543210")
+	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{first}}, false); err != nil {
+		t.Fatal(err)
+	}
+	err := store.RecordPublication(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{next}}, []genstate.LegacyRevision{{Path: "", Digest: ""}})
+	if err == nil {
+		t.Fatal("a publication with an unreadable revision was stored")
+	}
+	views, err := store.Views(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || len(views[0].Generations) != 1 || views[0].Generations[0] != first {
+		t.Fatalf("views after a failed publication = %+v, want the first generation", views)
 	}
 }
