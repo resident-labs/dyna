@@ -61,14 +61,13 @@ func Cancel(ctx context.Context, id string) error {
 		errs = append(errs, fmt.Errorf("stopping its shell jobs: %w", err))
 	}
 	keep := map[int]bool{}
+	var keepJobs []string
 	if list, err := store.List(false); err == nil {
 		for _, in := range list {
 			if in.Run == id && in.Keep {
 				keep[in.Pid], keep[in.Supervisor] = true, true
 				// A child that left the job's group still carries its identity.
-				for _, g := range runprocs.Groups(shells.JobEnv + "=" + in.ID) {
-					keep[g] = true
-				}
+				keepJobs = append(keepJobs, shells.JobEnv+"="+in.ID)
 			}
 		}
 	} else {
@@ -78,7 +77,7 @@ func Cancel(ctx context.Context, id string) error {
 	if runstore.Alive(m) {
 		leader = m.Pid
 	}
-	if err := runprocs.Kill(id, leader, keep); err != nil {
+	if err := runprocs.Kill(id, leader, keep, keepJobs); err != nil {
 		errs = append(errs, fmt.Errorf("ending its processes: %w", err))
 	}
 	// A coordinator killed before it could finish leaves the run running.
