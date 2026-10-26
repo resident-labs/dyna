@@ -13,6 +13,7 @@ const fixture = (phases: [string, string, string]) => `<script>
  let detail = $state(make('wf_a'))
  export function refresh(run) { detail = make(run) }
  export function dropFirst() { detail = { ...detail, agents: detail.agents.slice(2) } }
+ export function addAgent(id, phase) { detail = { ...detail, agents: [...detail.agents.slice(0, 2), agent(id, phase), ...detail.agents.slice(2)] } }
  export function dropAgent(id) { detail = { ...detail, agents: detail.agents.filter((a) => a.id !== id) } }
 </script>
 <Run {detail} />`
@@ -102,6 +103,26 @@ test('an open phase row stays open when the window trims only some of its agents
     assert.deepEqual(labels(), ['T1', 'T4'])
     ui.flushSync(() => app.dropAgent(1))
     assert.deepEqual(labels(), ['T4'], 'the Plan row stays open on its remaining agent')
+  } finally {
+    await ui.unmount(app); dom.window.close()
+    for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('an open phase row stays open when it gains an agent and the window then trims the old ones', async () => {
+  const dom = installDom()
+  const ui = await importBundle(plain.contents, 'RunFixture')
+  const app = ui.mount(ui.default, { target: document.getElementById('app') })
+  const labels = () => [...document.querySelectorAll('.agent .label')].map((n) => n.textContent)
+  try {
+    ui.flushSync()
+    document.querySelectorAll<HTMLElement>('.phases button.row')[0]?.click()
+    ui.flushSync()
+    ui.flushSync(() => app.addAgent(5, 'Plan'))
+    assert.deepEqual(labels(), ['T1', 'T4', 'T5'])
+    ui.flushSync(() => app.dropAgent(1)); ui.flushSync(() => app.dropAgent(4))
+    assert.deepEqual(labels(), ['T5'], 'the Plan row stays open on the agent it gained')
   } finally {
     await ui.unmount(app); dom.window.close()
     for (const name of domNames) Reflect.deleteProperty(globalThis, name)
