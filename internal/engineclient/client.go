@@ -145,7 +145,7 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 		}
 		ctx = callspec.WithRequest(ctx, id)
 	}
-	cutOff := false
+	cutOff, lateRepeated := false, false
 	body, err := json.Marshal(args)
 	if err != nil {
 		return err
@@ -161,6 +161,15 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 			giveUp = c.now().Add(c.restartWait)
 			delay = 50 * time.Millisecond
 			continue
+		}
+		if callspec.IsLate(err) && repeatsAfterLate(method) {
+			if !lateRepeated && ctx.Err() == nil {
+				// The engine runs calls with one request ID one at a time, so
+				// this repeat waits for the first and returns its result.
+				lateRepeated = true
+				continue
+			}
+			return fmt.Errorf("%w; the engine may still apply it, so check before you repeat it", err)
 		}
 		if !errors.Is(err, ErrNotRunning) {
 			return err
@@ -256,4 +265,9 @@ func newRequestID() (string, error) {
 // engine cut the connection. StartSubagent carries a session ID the caller
 // chose, and the engine refuses a second session with it. Other writes commit
 // before their receipt is stored, so a repeat could apply them twice.
+// repeatsAfterLate lists the creating calls that go again once, with their
+// request ID, when the engine is slow to answer. The engine applies one ID once,
+// so the repeat returns the created record instead of making a second one.
+func repeatsAfterLate(method string) bool { return method == "AddGoal" || method == "AddGoalItem" }
+
 func repeatsAfterCutOff(method string) bool { return method == "StartSubagent" }

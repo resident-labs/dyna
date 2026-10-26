@@ -201,3 +201,41 @@ func TestCutThenRefusedSocketWaitsWithBackoff(t *testing.T) {
 		t.Fatalf("notices = %q; want one waiting line", notices.String())
 	}
 }
+
+// D-275: AddGoal timed out but the engine created the goal. The client goes
+// again once with the same request ID, and the engine answers with the goal.
+func TestLateAddGoalRepeatsOnceWithTheSameRequestID(t *testing.T) {
+	engineclient.SetDeadlines(t, time.Second, 50*time.Millisecond)
+	var calls atomic.Int32
+	bound, err := websvc.Bind([]websvc.Binding{{Name: "AddGoal", Access: websvc.Read, Scope: websvc.ScopeRead,
+		Method: func(ctx context.Context) (string, error) {
+			if calls.Add(1) == 1 {
+				<-ctx.Done()
+				return "", ctx.Err()
+			}
+			return "g1", nil
+		}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enginetest.Serve(t, t.TempDir(), bound)
+	var reply string
+	if err := engineclient.New("").Call(t.Context(), "AddGoal", nil, &reply); err != nil || reply != "g1" {
+		t.Fatalf("call = %q, %v; want g1 after one repeat", reply, err)
+	}
+}
+
+// A creating call that is late twice says the engine may still apply it.
+func TestLateAddGoalTwiceSaysTheEngineMayStillApplyIt(t *testing.T) {
+	engineclient.SetDeadlines(t, time.Second, 50*time.Millisecond)
+	bound, err := websvc.Bind([]websvc.Binding{{Name: "AddGoal", Access: websvc.Read, Scope: websvc.ScopeRead,
+		Method: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enginetest.Serve(t, t.TempDir(), bound)
+	err = engineclient.New("").Call(t.Context(), "AddGoal", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "engine did not answer AddGoal") || !strings.Contains(err.Error(), "may still apply it") {
+		t.Fatalf("err = %v", err)
+	}
+}
