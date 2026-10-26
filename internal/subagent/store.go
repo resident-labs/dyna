@@ -285,6 +285,21 @@ type Turn struct {
 // the turn's prompt and the post was carried input, or a steering record
 // proves the post reached it. Claiming a post alone is not proof: a repaired
 // turn never accepted and its post must stay retryable.
+// DispatchedWithoutReceipt reports a steer this turn handed to its harness with
+// no delivery receipt yet. The engine and the runner can die between the two, so
+// automatic recovery must not run that input again: only the owner can decide.
+func (t Turn) DispatchedWithoutReceipt(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, steer := range t.Steering {
+		if steer.ID == id {
+			return !steer.Delivered
+		}
+	}
+	return false
+}
+
 func (t Turn) DeliveredPost(id string) bool {
 	if id == "" {
 		return false

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1129,54 +1130,84 @@ func (m *Manager) beginTurnForPost(id, prompt, schema string, owe []string, mess
 	return m.beginTurnConfigured(id, prompt, schema, owe, messageID, "", false, time.Time{})
 }
 
-// A turn that an engine restart killed never read the posts queued while it ran,
-// so repairing it must keep that input fresh: the repair takes its input boundary
-// from the turn's start, not from the room's size at repair time.
-func TestRepairedTurnKeepsInputQueuedWhileItRan(t *testing.T) {
-	e := newTestEnv(t)
-	info, _ := e.start("SLEEP:2 RESPOND: ok")
-	// Wait for the running mark, which records the turn's start boundary.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		tr, err := e.m.Store.ReadTurn(info.ID, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if tr.Status == TurnRunning {
-			if tr.StartCutoff == nil {
-				t.Fatal("a running turn recorded no start cutoff")
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("turn 1 never started: %#v", tr)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	before, err := e.m.Store.ReadTurn(info.ID, 1)
+// A repaired turn wakes input it never handed to its harness, and leaves input it
+// did hand over alone: without a delivery receipt, the harness may already have
+// run that request, so automatic recovery must not repeat it.
+func TestRepairedTurnWakesOnlyUndispatchedInput(t *testing.T) {
+	rooms := &room.Store{Root: t.TempDir()}
+	rec, err := rooms.Create(room.CreateInput{Name: "repair"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A post queued while the turn runs lands after its start boundary.
-	if _, err := e.m.rooms().Post(info.RoomID, room.PostInput{From: info.RoomID, To: []string{info.Address()}, Text: "queued during the turn", Wake: true}); err != nil {
+	sessions := &Store{Root: t.TempDir()}
+	meta := Meta{ID: NewID(), Name: "target", Room: rec.Name, RoomID: rec.ID, Resumable: true, Turns: 1}
+	dir, err := sessions.Dir(meta.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	e.wait(info.ID, 1)
-	// Simulate the runner dying with the engine: a running record, no lock holder.
-	if _, err := e.m.Store.UpdateTurn(info.ID, 1, func(tr *Turn) { tr.Status = TurnRunning; tr.Ended = time.Time{} }); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "turns"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.Store.Info(info.ID); err != nil {
+	if err := sessions.writeMeta(meta); err != nil {
 		t.Fatal(err)
 	}
-	repaired, err := e.m.Store.ReadTurn(info.ID, 1)
+	if err := os.WriteFile(filepath.Join(dir, "turns", "1.json"), []byte(`{"n":1,"status":"queued"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Store: sessions, Rooms: rooms}
+	// Turn 1 starts, which records the input boundary of the running turn.
+	if err := m.startTurn(context.Background(), meta.ID, TurnStart{Turn: 1, Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(text string) room.Message {
+		t.Helper()
+		msg, err := rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{meta.Address()}, Text: text, Wake: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	// One post is handed to the harness with no receipt yet, one is only queued.
+	dispatched := post("dispatched to the harness")
+	queued := post("queued while the turn ran")
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) {
+		tr.Steering = append(tr.Steering, Steer{ID: dispatched.ID, Message: dispatched.Text})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The engine and the runner die: a running record with no lock holder.
+	if _, err := sessions.UpdateTurn(meta.ID, 1, func(tr *Turn) { tr.Status = TurnRunning; tr.Ended = time.Time{} }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Info(meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := sessions.ReadTurn(meta.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repaired.Status != TurnError || !strings.Contains(repaired.Error, "runner exited") {
 		t.Fatalf("turn was not repaired: %s %q", repaired.Status, repaired.Error)
 	}
-	if repaired.InputCutoff == nil || *repaired.InputCutoff != *before.StartCutoff {
-		t.Fatalf("repair cutoff %v, want the turn's start cutoff %v", repaired.InputCutoff, before.StartCutoff)
+	if repaired.InputCutoff == nil || repaired.StartCutoff == nil || *repaired.InputCutoff != *repaired.StartCutoff {
+		t.Fatalf("repair cutoff %v, want the turn's start cutoff %v", repaired.InputCutoff, repaired.StartCutoff)
+	}
+	current, err := sessions.ReadMeta(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := m.pendingWakePosts(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(selected))
+	for _, msg := range selected {
+		ids = append(ids, msg.ID)
+	}
+	if !slices.Contains(ids, queued.ID) {
+		t.Fatalf("a repaired turn did not wake input queued while it ran: %v", ids)
+	}
+	if slices.Contains(ids, dispatched.ID) {
+		t.Fatalf("a repaired turn would repeat input its harness may have run: %v", ids)
 	}
 }
