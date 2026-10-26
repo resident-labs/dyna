@@ -86,11 +86,12 @@ const streamStallLimit = 30 * time.Second
 // about every 10 seconds, so this is about 60 seconds.
 const emptyStepLimit = 6
 
-// startupLimit bounds how long a turn may produce no harness event at all
-// before dyna fails it instead of hanging. Any thinking, tool, usage or text
+// StartupLimit bounds how long a turn may produce no harness event at all
+// before dyna fails it instead of hanging. It is the same for every model and
+// profile, and transfer startup uses it too. Any thinking, tool, usage or text
 // event counts as startup progress, so silent-thinking models are safe. A
 // worker that emits nothing is hung, as grok 1.0.62 was when its init stalled.
-const startupLimit = 120 * time.Second
+const StartupLimit = 5 * time.Minute
 
 // quietFor reports how long stdout has been silent.
 func (s *streamInput) quietFor() time.Duration {

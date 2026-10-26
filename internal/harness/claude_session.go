@@ -237,7 +237,7 @@ func runClaudeTurn(ctx context.Context, p profile.Profile, cwd string, spec comm
 		journal.markNudged(true, spec.journalReminderReason)
 	}
 
-	startupWait := startupLimit
+	startupWait := StartupLimit
 	if execution.startupLimit > 0 {
 		startupWait = execution.startupLimit
 	}

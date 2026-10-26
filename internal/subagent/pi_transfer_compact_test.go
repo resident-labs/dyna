@@ -67,7 +67,7 @@ func TestPiTransferCountsCompactionAsStartupProgress(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	*now = now.Add(61 * time.Second)
+	*now = now.Add(startupLimit + time.Second)
 	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestPiTransferStartupTimeoutUsesTheHandoff(t *testing.T) {
 	e, now, info, state, held, runner := nativePiTransferStarting(t)
 	held.lock.Close()
 	e.m.Spawner = runner
-	*now = now.Add(61 * time.Second)
+	*now = now.Add(startupLimit + time.Second)
 	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestPiTransferStartupTimeoutUsesTheHandoff(t *testing.T) {
 	}
 }
 
-// A due pre-turn compact gives the transfer a 120-second window. A compaction
+// A due pre-turn compact gives the transfer a double startup window. A compaction
 // event a few seconds after launch must add to that window, not replace it
 // with a shorter one.
 func TestPiTransferCompactionExtendsADueDeadline(t *testing.T) {
@@ -121,7 +121,7 @@ func TestPiTransferCompactionExtendsADueDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := current.StartupDeadline
-	if initial.Sub(*now) < 2*time.Minute {
+	if initial.Sub(*now) < 2*startupLimit {
 		t.Fatalf("a due pre-turn compact did not get a longer startup window: %v", initial.Sub(*now))
 	}
 	normalized, err := e.m.Store.NormalizedPath(info.ID)
@@ -150,8 +150,8 @@ func TestPiTransferCompactionExtendsADueDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.CompactionExtended || !got.StartupDeadline.Equal(initial.Add(60*time.Second)) {
-		t.Fatalf("compaction deadline = %v, want the initial %v plus 60s: %+v", got.StartupDeadline, initial, got)
+	if !got.CompactionExtended || !got.StartupDeadline.Equal(initial.Add(startupLimit)) {
+		t.Fatalf("compaction deadline = %v, want the initial %v plus %v: %+v", got.StartupDeadline, initial, startupLimit, got)
 	}
 	held.lock.Close()
 	e.m.Spawner = runner

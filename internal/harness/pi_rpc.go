@@ -556,7 +556,7 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 		tick = ticker.C
 	}
 
-	startupWait := startupLimit
+	startupWait := StartupLimit
 	if execution.startupLimit > 0 {
 		startupWait = execution.startupLimit
 	}
