@@ -1,7 +1,13 @@
 import vm from 'node:vm'
+import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { parse } from 'svelte/compiler'
-import ts from 'typescript'
+
+// The TypeScript compiler can slice a plain module, and loading it costs a
+// quarter of a second. Tests that run a component never need it, so it is read
+// on the first module slice rather than on import.
+const require = createRequire(import.meta.url)
+const typescript = (): typeof import('typescript') => require('typescript') as typeof import('typescript')
 
 // Tests run slices of component source in a vm context, and vm runs JavaScript only.
 // esbuild strips the types of a lang="ts" slice; plain JavaScript passes through unchanged.
@@ -38,6 +44,7 @@ export function topLevelFunctions(source: string, names?: readonly string[]): Ma
 export function moduleFunctions(source: string, names?: readonly string[]): Map<string, string> {
   const found = new Map<string, string>()
   const wanted = names === undefined ? undefined : new Set(names)
+  const ts = typescript()
   const file = ts.createSourceFile('module.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   for (const node of file.statements) {
     if (!ts.isFunctionDeclaration(node) || !node.name) continue

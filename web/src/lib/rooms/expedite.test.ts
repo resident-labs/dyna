@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { expediteScope, heldGoals, expediteAction, isExpedited, none, prExpedited, goalExpedited } from './expedite.ts'
+import { runFunctions, call } from '../../../test/svelte-source.ts'
 
 const now = Date.parse('2026-10-22T12:00:00Z')
 const goal = (id: string, holders: string[], extra: { expediteUntil?: string } = {}) => ({ id, state: 'active', holders, ...extra })
@@ -67,8 +69,6 @@ test('the button stops its own goal and replaces another', () => {
 })
 
 test('linking an untracked PR first creates its owner record; tracked changes keep their key', async () => {
-  const { readFileSync } = await import('node:fs')
-  const { runFunctions, call } = await import('../../../test/svelte-source.ts')
   const calls: unknown[][] = []
   const c = {
     roomId: 'r',
@@ -86,8 +86,6 @@ test('linking an untracked PR first creates its owner record; tracked changes ke
 
 
 test('link and expedite preserves current priority while the separate stop action still toggles it', async () => {
-  const { readFileSync } = await import('node:fs')
-  const { runFunctions, call } = await import('../../../test/svelte-source.ts')
   const g = goal('g1', ['a'], { expediteUntil: '2026-10-23T12:00:00Z' })
   let links = 0
   const c = {
