@@ -639,8 +639,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if err != nil {
 		return err
 	}
-	_, stamped := mode.StampFromEnv()
-	if err := checkPrivateRuntime(stamped, os.Getenv("XDG_RUNTIME_DIR")); err != nil {
+	if err := checkPrivateRuntime(launchedBySession.Load(), os.Getenv("XDG_RUNTIME_DIR")); err != nil {
 		return err
 	}
 	if err := checkSocketOwner(socketPath, dataDir); err != nil {
@@ -825,6 +824,11 @@ func pushKind(p roomsvc.Post, roomName string) string {
 // dropDynaEnv makes this process the human room owner: a Dyna stamp
 // inherited from a launching session must not change who posts.
 func dropDynaEnv() {
+	// Remember the launch stamp before it is gone. A later bind check must know
+	// whether a Dyna session started this engine, because such an engine must not
+	// take the owner's socket.
+	_, stamped := mode.StampFromEnv()
+	launchedBySession.Store(stamped)
 	for _, kv := range os.Environ() {
 		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "DYNA_") {
 			os.Unsetenv(k)
