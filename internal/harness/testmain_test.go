@@ -35,6 +35,12 @@ func TestMain(m *testing.M) {
 		fakePiMain()
 		os.Exit(0)
 	}
+	// The cancellation fixture runs as a real process group, so a test can
+	// prove that a cancel reaches every member without relying on shell traps.
+	if mode := os.Getenv(envCancelHelper); mode != "" {
+		cancelHelperMain(mode)
+		os.Exit(0)
+	}
 	// Normal tests set their own Dyna identity, journal paths and options.
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
