@@ -276,12 +276,11 @@ type hostedSuiteClass struct {
 	cancelledOnlyAggregates map[localci.CheckName]bool
 }
 
-// hostedAggregateRows names every check the repository definition itself
-// declares an aggregate row: the group a suite's checks feed, and the provider
-// group its shards report under. Such a job only repeats the outcome of the
-// checks feeding it. The definition declares nothing else, so any other
-// failure — a standalone job the definition gives no group, or a job it does
-// not name at all — is a job that ran, whatever its name.
+// hostedAggregateRows names every hosted job the repository definition
+// declares aggregate-only: the group a suite's checks feed, and each check
+// marked hostedAggregate. Such a job only repeats the outcome of the jobs it
+// requires. A provider name alone proves nothing, so any other failure is a
+// job that ran, whatever its name.
 func hostedAggregateRows(definition *localci.Definition) map[localci.CheckName]bool {
 	rows := map[localci.CheckName]bool{}
 	for _, id := range definition.Suites() {
@@ -290,8 +289,8 @@ func hostedAggregateRows(definition *localci.Definition) map[localci.CheckName]b
 			if check.Group != "" {
 				rows[check.Group.Name()] = true
 			}
-			if provider := definition.ProviderGroup(check.Name); provider != check.Name {
-				rows[provider] = true
+			if definition.HostedAggregate(check.Name) {
+				rows[check.Name] = true
 			}
 		}
 	}
