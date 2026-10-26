@@ -106,9 +106,12 @@
       }
       const it = await api.setSetting(key, String(value))
       // Both content controls show a derived total, so refresh them together.
-      items = key.startsWith('content.')
-        ? ((await api.settings()) ?? [])
-        : items.map((x) => (x.key === key ? it : x))
+      if (key.startsWith('content.')) {
+        items = (await api.settings()) ?? []
+        await loadReviewer()
+      } else {
+        items = items.map((x) => (x.key === key ? it : x))
+      }
       drafts = { ...drafts, [key]: undefined }
       saved = key
       setTimeout(() => { if (saved === key) saved = '' }, 1500)

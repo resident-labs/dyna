@@ -21,6 +21,8 @@ test('saving either content limit refreshes both derived total descriptions', as
   const context: { items: { key: string; help: string }[]; saved: string; [name: string]: unknown } = {
     items: [{ key: 'content.maxCardBytes', help: 'old total' }, { key: 'content.maxFileBytes', help: 'old total' }],
     errors: {}, drafts: {}, saved: '', setTimeout: () => {}, REVIEWER_KEY: 'reviewer.profile',
+    // The reviewer row comes from the room's service list, not api.settings().
+    loadReviewer: async () => { context.items = [...context.items, { key: 'reviewer.profile', help: '' }] },
     api: {
       setSetting: async (key: string, value: string) => ({ key, value }),
       settings: async () => [{ key: 'content.maxCardBytes', help: 'new total' }, { key: 'content.maxFileBytes', help: 'new total' }],
@@ -31,6 +33,7 @@ test('saving either content limit refreshes both derived total descriptions', as
     await call(context, 'set', key, 55)
     assert.equal(need(context.items[0]).help, 'new total'); assert.equal(need(context.items[1]).help, 'new total')
     assert.equal(context.saved, key)
+    assert.ok(context.items.some((x) => x.key === 'reviewer.profile'), 'the reviewer row survives the refresh')
   }
 })
 
