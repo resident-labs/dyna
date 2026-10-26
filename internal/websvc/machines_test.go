@@ -240,8 +240,22 @@ func TestProbeMachineStoresWhatItRead(t *testing.T) {
 // deadline, a slow SSH connection was cancelled before the probe could store
 // that the machine is offline, so the page kept its old health.
 func TestProbeMachineCallHasRoomForSSH(t *testing.T) {
+	probeCallLeft(t, 0, 19*time.Second)
+}
+
+// A machine with a 60 s connect timeout gets a probe budget longer than 60 s
+// through the bound call, so a healthy but slow connection is not cancelled
+// (D-195, D-197).
+func TestProbeMachineCallHonorsConnectTimeout(t *testing.T) {
+	probeCallLeft(t, 60*time.Second, 69*time.Second)
+}
+
+// probeCallLeft probes a machine through the bound call and checks that the
+// probe command ran with at least min left of its deadline.
+func probeCallLeft(t *testing.T, connect, min time.Duration) {
+	t.Helper()
 	api := machineAPI(t)
-	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 4, Enabled: true})
+	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 4, Enabled: true, SSHConnectTimeout: connect})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,11 +281,11 @@ func TestProbeMachineCallHasRoomForSSH(t *testing.T) {
 	// The probe takes its 20 s budget from the call's deadline, so a shorter
 	// call deadline clamps it. That is what made a slow SSH connection reach
 	// the request deadline and store nothing.
-	if left < 19*time.Second {
-		t.Fatalf("the probe ran with %v left, so the call deadline clamped its 20 s budget", left)
+	if left < min {
+		t.Fatalf("the probe ran with %v left, so the call deadline clamped its budget below %v", left, min)
 	}
-	if d := callspec.Deadline("ProbeMachine"); d < 25*time.Second {
-		t.Fatalf("ProbeMachine has a %v deadline, which cannot cover a 20 s probe and its store", d)
+	if d := callspec.Deadline("ProbeMachine"); d < machines.MaxSSHConnectTimeout+30*time.Second {
+		t.Fatalf("ProbeMachine has a %v deadline, which cannot cover the longest probe and its store", d)
 	}
 	page, err := api.Machine(t.Context(), remote.ID)
 	if err != nil {
