@@ -75,8 +75,10 @@ func inheritedRoot() bool {
 // uses the user's own folders, such as the owner's live dyna.db or the CI
 // user's.
 func Check(dir string) error {
-	if rel, err := filepath.Rel(shortRoot, dir); err == nil && filepath.IsLocal(rel) && strings.HasPrefix(rel, shortPrefix) {
-		return nil
+	if rel, err := filepath.Rel(shortRoot, dir); err == nil && filepath.IsLocal(rel) && strings.HasPrefix(rel, shortPrefix) && !strings.Contains(rel, "/") {
+		if owner, err := os.ReadFile(filepath.Join(shortRoot, rel, shortMarker)); err == nil && string(owner) == tempRoot {
+			return nil
+		}
 	}
 	if rel, err := filepath.Rel(tempRoot, dir); err != nil || !filepath.IsLocal(rel) {
 		return fmt.Errorf("a test's dyna folder %s is outside the temporary folder %s; give the test a temporary one (storetest.DataDir)", dir, tempRoot)
@@ -256,8 +258,22 @@ const shortPrefix = "dt-"
 // refuses, and a daemon that lost its runtime folder that way listens where its
 // client does not look.
 func ShortTemp(prefix string) (string, error) {
-	return os.MkdirTemp(shortRoot, shortPrefix+prefix)
+	dir, err := os.MkdirTemp(shortRoot, shortPrefix+prefix)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, shortMarker), []byte(tempRoot), 0o600); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
 }
+
+// shortMarker is the file ShortTemp leaves in its folder. It holds the test
+// root of the run that made the folder, which a started test binary inherits, so
+// Check accepts a folder of this run and refuses any other folder under /tmp,
+// such as an existing Dyna data folder that happens to be named dt-*.
+const shortMarker = ".dyna-testsafe-short"
 
 // ShortTempDir is ShortTemp for a test, removed when the test ends. A unix
 // socket path is limited to 108 bytes, and t.TempDir adds the test's name to a

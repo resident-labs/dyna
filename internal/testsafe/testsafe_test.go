@@ -213,3 +213,27 @@ func TestShortTempIsInsideTheTestRoot(t *testing.T) {
 		t.Fatalf("ShortTemp folder is outside the test root: %v", err)
 	}
 }
+
+// Only a folder ShortTemp made in this run passes: a Dyna data folder that is
+// named like one, or a folder of another run, must not.
+func TestCheckRefusesAShortLookingFolderThatShortTempDidNotMake(t *testing.T) {
+	foreign, err := os.MkdirTemp(shortRoot, shortPrefix+"data-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(foreign)
+	if err := Check(foreign); err == nil {
+		t.Fatal("Check accepted a folder with no marker")
+	}
+	other, err := ShortTemp("other-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(other)
+	if err := os.WriteFile(filepath.Join(other, shortMarker), []byte("/another/root"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(other); err == nil {
+		t.Fatal("Check accepted a folder made for another test root")
+	}
+}
