@@ -144,6 +144,12 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 				})
 				mu.Unlock()
 				stop()
+				if tools.Restart != nil && tools.outdated != nil && tools.outdated.Load() {
+					// The answer above is on the wire, so the model sees the
+					// error once; the restart puts the next request on the
+					// current binary with stdio inherited (D-171).
+					tools.Restart()
+				}
 			}()
 		case "notifications/cancelled":
 			var p struct {

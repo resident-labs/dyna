@@ -15,6 +15,7 @@ import (
 // turn has no Dyna tools.
 func TestPrepareRebuildsPinWhoseDynaCommandIsGone(t *testing.T) {
 	r, p := runtimeFixture(t, "pi")
+	noInstalledDyna(t)
 	gone := filepath.Join(t.TempDir(), "gone")
 	dead := filepath.Join(t.TempDir(), "dyna")
 	if err := os.WriteFile(dead, []byte("#!/bin/sh\nexec '"+gone+"' \"$@\"\n"), 0700); err != nil {
