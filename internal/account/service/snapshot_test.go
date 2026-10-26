@@ -56,7 +56,7 @@ func TestAccountUsageCachedShowsPrivateObservationsAndResets(t *testing.T) {
 		t.Fatalf("exhaustion not displayed: %+v", rows[0])
 	}
 	now = reset
-	if row := s.AccountUsageCached().Accounts[0]; row.Windows[0].UsedPercent != nil || row.Windows[0].UnavailableReason != "probably reset" || !row.Stale || row.QuotaBlocked {
+	if row := s.AccountUsageCached().Accounts[0]; row.Windows[0].UsedPercent != nil || row.Windows[0].Reason != accountstore.WindowReasonProbableReset || !row.Stale || row.QuotaBlocked {
 		t.Fatalf("past quota must show uncertainty without blocking: %+v", row)
 	}
 }

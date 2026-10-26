@@ -43,7 +43,7 @@ func applySavedObservation(a *Account, e accountstore.Entry, now time.Time) {
 	resetWindows(a, now)
 }
 
-const probablyResetReason = "probably reset"
+const probablyResetText = "probably reset"
 
 func resetWindows(a *Account, now time.Time) {
 	a.Windows = append([]Window{}, a.Windows...)
@@ -52,7 +52,7 @@ func resetWindows(a *Account, now time.Time) {
 		if err == nil && !now.Before(reset) && a.ObservedAt.Before(reset) {
 			a.Windows[i].UsedPercent = nil
 			a.Windows[i].Used = nil
-			a.Windows[i].UnavailableReason = probablyResetReason
+			a.Windows[i].Reason = accountstore.WindowReasonProbableReset
 		}
 	}
 }

@@ -19,9 +19,13 @@ export interface Plan {
 // The app chooses a designed message for each reason.
 export type UsageReason = 'not-readable' | 'expired' | 'secret' | 'provider-error' | 'rate-limited' | 'no-windows'
 
+// WindowReason is store.WindowReason, why a window carries no reading. The app
+// chooses a designed message for each reason, so reader prose never reaches it.
+export type WindowReason = 'not-reported' | 'probable-reset'
+
 // UsageWindow is store.Window, one quota window of an account.
 export interface UsageWindow {
-  unavailableReason?: string
+  reason?: WindowReason
   period?: string
   periodStart?: string
   id: string

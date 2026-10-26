@@ -59,7 +59,7 @@ func museUsageObservation(body []byte, now time.Time, expectedIdentity string) (
 		}
 		window := store.Window{ID: id, Label: label, Period: period, UsedPercent: percent, Unit: "percent", ResetsAt: time.Unix(*reset, 0).UTC().Format(time.RFC3339)}
 		if percent == nil {
-			window.UnavailableReason = "Muse reports the reset time without a usage percentage."
+			window.Reason = store.WindowReasonNotReported
 		}
 		o.Windows = append(o.Windows, window)
 		return nil
