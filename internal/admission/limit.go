@@ -56,6 +56,16 @@ func over(r Readings, factor float64) bool {
 	return r.Cores > 0 && r.Load1/float64(r.Cores) > EnterLoad*factor
 }
 
+// MemoryShort reports whether free memory is below the reserve Decide keeps, or
+// the kernel reports memory stalls. Only a machine short of memory gains from
+// stopping idle agent processes.
+func MemoryShort(r Readings) bool {
+	if r.PressureMem >= EnterMemPressure {
+		return true
+	}
+	return r.MemTotal > 0 && r.MemAvail < max(r.MemTotal/reserveDivisor, MinReserve)
+}
+
 // Decide returns the most turns that could run, given the turns that run now,
 // and the state to keep. The limit adds the turns the free memory can still
 // take to the turns that run; it adds none while the machine is overloaded, and

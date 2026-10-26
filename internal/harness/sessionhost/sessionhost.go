@@ -73,6 +73,16 @@ type Launch struct {
 	IdleClose time.Duration
 }
 
+// IdleSession is a retained child that no turn is attached to.
+type IdleSession struct {
+	// ID names the child in its host. Socket is the host that holds it.
+	ID, Socket string
+	// Caller is the key its caller gave, such as "session/ses_1".
+	Caller string
+	// Idle is the time since the child last wrote output or lost its turn.
+	Idle time.Duration
+}
+
 // DefaultIdleClose is the idle time a launch without IdleClose uses.
 const DefaultIdleClose = 10 * time.Minute
 
