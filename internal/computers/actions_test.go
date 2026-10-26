@@ -107,3 +107,38 @@ func TestWaitAcceptsBoundedMilliseconds(t *testing.T) {
 		}
 	}
 }
+
+// The guide and the action schema show points as objects, and the array form a
+// reader may copy from an older example must run too.
+func TestDragPathAcceptsPointArrays(t *testing.T) {
+	actions := parseActions(t, `[{"type":"drag","path":[[80,46],[900,46]]},{"type":"drag","path":[{"x":10,"y":20},{"x":30,"y":40}]}]`)
+	if err := ValidateActions(actions, 1280, 800); err != nil {
+		t.Fatalf("a point array was refused: %v", err)
+	}
+	path, err := actionValue[[]point](actions[0], "path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path) != 2 || path[0].X != 80 || path[0].Y != 46 || path[1].X != 900 || path[1].Y != 46 {
+		t.Fatalf("array points decoded as %#v", path)
+	}
+	named, err := actionValue[[]point](actions[1], "path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if named[0].X != 10 || named[0].Y != 20 || named[1].X != 30 {
+		t.Fatalf("object points decoded as %#v", named)
+	}
+	for _, bad := range []string{
+		`[{"type":"drag","path":[[80],[900,46]]}]`,
+		`[{"type":"drag","path":[{"x":80},{"x":80,"y":46}]}]`,
+		// A null coordinate must not decode as 0 and start a real drag.
+		`[{"type":"drag","path":[[null,46],[900,46]]}]`,
+		`[{"type":"drag","path":[[80,null],[900,46]]}]`,
+		`[{"type":"drag","path":[{"x":null,"y":46},{"x":900,"y":46}]}]`,
+	} {
+		if err := ValidateActions(parseActions(t, bad), 1280, 800); err == nil {
+			t.Fatalf("an incomplete point was accepted: %s", bad)
+		}
+	}
+}
