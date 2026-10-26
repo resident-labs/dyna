@@ -108,7 +108,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	track := &cobra.Command{Use: "track <number|url>", Short: "Link a PR to this session, or to root with no Dyna stamp", Args: cobra.ExactArgs(1)}
 	trackRepo := track.Flags().String("repo", "", "matching repository checkout path")
 	trackGoal := track.Flags().String("goal", "", "link the PR to this open room goal, such as g12 (default: your goal when unambiguous; never replaces a link unless given)")
-	trackFixes := track.Flags().String("fixes", "", "issues the PR closes on merge, such as D-5,#207; replaces the list when given")
+	trackFixes := track.Flags().String("fixes", "", "issues the PR closes on merge, such as D-5,#207; replaces the list when given; an empty value clears it")
 	track.RunE = func(c *cobra.Command, a []string) error {
 		s := o.Service()
 		info, err := subagent.Actor(s.Notify.Rooms, o.Session, "")
@@ -117,12 +117,8 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		var fixes []prstate.IssueRef
 		if c.Flags().Changed("fixes") {
-			fixes, err = prstate.ParseIssueRefs(*trackFixes)
-			if err != nil {
+			if fixes, err = trackFixList(*trackFixes); err != nil {
 				return err
-			}
-			if len(fixes) == 0 {
-				return fmt.Errorf("--fixes needs at least one issue such as D-5 or #207")
 			}
 		}
 		dir, err := os.Getwd()
@@ -710,4 +706,17 @@ func publicationRoom(s *watch.Service, ref watch.Ref) (string, error) {
 		return rec.RoomID, nil
 	}
 	return mergeRoomFor(s, "")
+}
+
+// trackFixList reads --fixes. An empty value gives an empty, non-nil list, which
+// the engine takes as "clear the links"; a nil list would keep them.
+func trackFixList(text string) ([]prstate.IssueRef, error) {
+	fixes, err := prstate.ParseIssueRefs(text)
+	if err != nil {
+		return nil, err
+	}
+	if fixes == nil {
+		fixes = []prstate.IssueRef{}
+	}
+	return fixes, nil
 }
