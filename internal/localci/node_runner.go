@@ -310,10 +310,16 @@ func (r Runner) nodeCommandScoped(ctx context.Context, out, stderr io.Writer, sc
 		name, args = "systemd-run", bounded
 	}
 	name, args = r.nodeProgram(name, args)
-	return fn(ctx, "", nil, out, stderr, name, args...)
+	if r.Node.SSH == "" {
+		return fn(ctx, "", nil, out, stderr, name, args...)
+	}
+	return r.nodeDial(ctx, fn, out, stderr, name, args...)
 }
 
-// nodeProgram wraps a program in ssh when the node is another machine.
+// nodeProgram wraps a program in ssh when the node is another machine. The
+// dial deadline matches the machine probe, so a node that does not answer
+// costs a run the same bounded wait everywhere instead of whatever an
+// ambient ssh config happens to set.
 func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	if r.Node.SSH == "" {
 		return name, args
@@ -322,7 +328,68 @@ func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	for _, arg := range args {
 		remote += " " + shellquote.Quote(arg)
 	}
-	return "ssh", append([]string{"-o", "BatchMode=yes"}, r.Node.SSH, remote)
+	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10"}, r.Node.SSH, remote)
+}
+
+// dialFailureNote matches what the ssh client prints when a connection died
+// before the node saw it: the dial or the banner exchange failed, so nothing
+// ran remotely. A node whose accept path stalls under load holds fresh
+// connections tens of seconds before its banner, while every connection that
+// reuses a warm ControlMaster socket passes instantly, so a run fails where a
+// direct shell and a machine probe still succeed (D-162).
+var dialFailureNote = regexp.MustCompile(`(?i)banner exchange|kex_exchange_identification|connection refused|connection timed out|no route to host|network is unreachable|could not resolve hostname`)
+
+// sshDialAttempts bounds how often a node command retries a dial that never
+// reached the node. Two retries with a growing wait outlast a stall of about
+// half a minute, while each dial still fails within its ConnectTimeout, so an
+// unreachable node costs a bounded wait and not a hang.
+const sshDialAttempts = 3
+
+var sshDialWaits = [...]time.Duration{2 * time.Second, 5 * time.Second}
+
+// nodeDial runs one node command over ssh and retries a dial that failed
+// before the node saw it. Such a failure proves nothing ran remotely: ssh
+// reported a dial error and the command wrote no output, so a retry re-runs
+// nothing. Any other failure, or one after the command started, returns as is.
+func (r Runner) nodeDial(ctx context.Context, fn Command, out, stderr io.Writer, name string, args ...string) error {
+	wait := r.dialWait
+	if wait == nil {
+		wait = sleepContext
+	}
+	var wrote countingWriter
+	for attempt := 0; ; attempt++ {
+		var dialErr tailBuffer
+		err := fn(ctx, "", nil, io.MultiWriter(out, &wrote), io.MultiWriter(stderr, &dialErr), name, args...)
+		if err == nil || attempt == sshDialAttempts-1 || wrote.n > 0 || !dialFailureNote.MatchString(dialErr.String()) {
+			return err
+		}
+		fmt.Fprintf(stderr, "retrying ssh dial (attempt %d of %d)\n", attempt+2, sshDialAttempts)
+		if waitErr := wait(ctx, sshDialWaits[min(attempt, len(sshDialWaits)-1)]); waitErr != nil {
+			return errors.Join(err, waitErr)
+		}
+	}
+}
+
+// countingWriter counts the bytes that reached a command's output, so a
+// retry never re-runs a command that had already started.
+type countingWriter struct{ n int64 }
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	return len(p), nil
+}
+
+// sleepContext waits for d or until the context ends, so a cancelled run
+// stops waiting between ssh dial retries.
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // systemdNeedsNoExpandFlag reports whether the node's systemd-run must be told
