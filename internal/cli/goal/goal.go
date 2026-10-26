@@ -2,6 +2,7 @@
 package goal
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -21,14 +22,45 @@ type Options struct {
 }
 
 func NewCommand() *cobra.Command { return Command(Options{}) }
-func Command(o Options) *cobra.Command {
+
+func (o Options) withDefaults() Options {
 	if o.Service == nil {
 		o.Service = goalsvc.New
 	}
-
 	if o.Client == nil {
 		o.Client = engineclient.New("")
 	}
+	return o
+}
+
+// Note appends text to a goal's journal through the engine.
+func Note(ctx context.Context, o Options, roomRef, id, text string) (goals.Event, error) {
+	var e goals.Event
+	err := o.withDefaults().Client.Call(ctx, "NoteGoal", []any{MutationRoom(roomRef), id, text}, &e)
+	return e, err
+}
+
+// OpenHeldGoals returns the IDs of the open goals the calling session holds.
+func OpenHeldGoals(o Options) ([]string, error) {
+	s, rec, by, err := Caller(o.withDefaults().Service(), "")
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.Store.List(rec.ID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, g := range records {
+		if g.Open() && g.HeldBy(by) {
+			ids = append(ids, g.ID)
+		}
+	}
+	return ids, nil
+}
+
+func Command(o Options) *cobra.Command {
+	o = o.withDefaults()
 	var roomRef, fixesText string
 	var all, asJSON bool
 	var selectors []string
@@ -283,8 +315,7 @@ func Command(o Options) *cobra.Command {
 		return err
 	}
 	note := &cobra.Command{Use: "note <id> <text>", Short: "Append a progress note to a goal's journal", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
-		var e goals.Event
-		err := o.Client.Call(c.Context(), "NoteGoal", []any{MutationRoom(roomRef), a[0], a[1]}, &e)
+		e, err := Note(c.Context(), o, roomRef, a[0], a[1])
 		if err != nil {
 			return err
 		}

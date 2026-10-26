@@ -2,6 +2,7 @@ package journal
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -55,6 +56,45 @@ func TestJournalCmdAppendsQuietlyWithDefaults(t *testing.T) {
 	}
 	if len(entries) != 2 || entries[1].Kind != "update" || entries[1].Message != "Mapped the storage contract" || entries[1].Next != "Run the tests" || entries[1].Source != "agent" {
 		t.Fatalf("journal entries = %#v", entries)
+	}
+}
+
+func sessionGoals(ids []string, notes *[]string) Goals {
+	return Goals{
+		InSession: func() bool { return true },
+		OpenHeld:  func() ([]string, error) { return ids, nil },
+		Note: func(_ context.Context, id, text string) error {
+			*notes = append(*notes, id+"|"+text)
+			return nil
+		},
+	}
+}
+
+func TestJournalSessionWithOneGoalNotesIt(t *testing.T) {
+	t.Setenv(runstore.AgentJournalEnv, "")
+	var notes []string
+	cmd := Command(sessionGoals([]string{"g7"}, &notes))
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	cmd.SetArgs([]string{"Found the cause", "--kind", "finding", "--next", "Write the fix"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if want := "g7|finding: Found the cause\nNext: Write the fix"; len(notes) != 1 || notes[0] != want {
+		t.Fatalf("notes = %q; want %q", notes, want)
+	}
+}
+
+func TestJournalSessionWithoutOneGoalNamesGoalNote(t *testing.T) {
+	t.Setenv(runstore.AgentJournalEnv, "")
+	for _, ids := range [][]string{nil, {"g1", "g2"}} {
+		var notes []string
+		cmd := Command(sessionGoals(ids, &notes))
+		cmd.SilenceErrors, cmd.SilenceUsage = true, true
+		cmd.SetArgs([]string{"Progress"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), `dyna goal note <goal> "<text>"`) || len(notes) != 0 {
+			t.Fatalf("%d goals: error = %v, notes = %q", len(ids), err, notes)
+		}
 	}
 }
 
