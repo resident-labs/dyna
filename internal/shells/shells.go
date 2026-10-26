@@ -127,9 +127,6 @@ type Store struct {
 	// exitWrite replaces the write of a finished job's exit; nil uses Save. A
 	// test sets it to act as a state store that times out.
 	exitWrite func(m Meta, ex *Exit) error
-
-	// afterStop waits for a stopped job's output to drain; nil uses time.After.
-
 	// afterStop waits for a finished command's output to drain; nil uses time.After.
 	// A test sets it to a channel that is already ready.
 	afterStop func(time.Duration) <-chan time.Time
