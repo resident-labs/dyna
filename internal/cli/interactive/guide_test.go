@@ -37,12 +37,12 @@ func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 		"Parallel writers need disjoint scopes or worktrees",
 		"A child must not call `workflow()`", "share parent concurrency and lifetime limits",
 		"regular agent session that cannot start subagents or runs",
-		"maxCallsPerRun", "--max-concurrent", "--max-agents",
+		"maxCallsPerRun", "--max-concurrent", "--max-agents", "### `run(command, opts?)`", "--max-commands", "reattaches to a shell still running",
 		"`phase(title)`", "`log(message)`", "`sleep(ms)`", "`args`", "`process`", "`profiles`", "`worktrees()`",
 		`provenance: "workflow"`, `provenance: "system"`,
 	}
-	if words := len(strings.Fields(guideMD)); words > 1450 {
-		t.Fatalf("workflow guide is %d words; want at most 1450", words)
+	if words := len(strings.Fields(guideMD)); words > 1700 {
+		t.Fatalf("workflow guide is %d words; want at most 1700", words)
 	}
 	for _, contract := range required {
 		if !strings.Contains(guideMD, contract) {
