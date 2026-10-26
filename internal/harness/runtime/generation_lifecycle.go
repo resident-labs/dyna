@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/goals"
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
+	"dyna-agent/internal/harness/runtime/genstate"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shellmcp"
 )
@@ -509,47 +510,30 @@ func validateOwnedGeneration(dir string) (generationOwnership, error) {
 // active. Return an error when liveness is unknown; GC then preserves the lease.
 type GenerationProcessProbe func(json.RawMessage) (bool, error)
 
-type generationUse struct {
-	Version    int             `json:"version"`
-	Generation string          `json:"generation"`
-	OwnerPID   int             `json:"ownerPid"`
-	Released   bool            `json:"released,omitempty"`
-	Native     json.RawMessage `json:"native,omitempty"`
-}
-
 // GenerationLease is runner-owned. No descriptors are passed to native children.
 // Bind replaces the reference only after the preceding attempt has drained.
 type GenerationLease struct {
 	service *ResourceLease
 	runtime *Runtime
-	path    string
-	use     generationUse
+	id      string
+	use     genstate.Lease
 	mu      sync.Mutex
 	closed  bool
+}
+
+func (r *Runtime) generationState() genstate.Store {
+	return genstate.Store{DataDir: runtimeDataDir()}
 }
 
 func (r *Runtime) leaseGenerationLocked(dir string) (*GenerationLease, error) {
 	if !inside(r.Generations, dir) || filepath.Dir(dir) != r.Generations {
 		return nil, lifecycleError("lease names a path outside the generation root", dir)
 	}
-	root := filepath.Join(r.Generations, ".uses")
-	if err := checkedDir(root, true); err != nil {
+	lease := genstate.Lease{ID: genstate.NewID(), Generation: dir, OwnerPID: os.Getpid()}
+	if err := r.generationState().Create(context.Background(), lease); err != nil {
 		return nil, err
 	}
-	f, err := os.CreateTemp(root, "use-*.json")
-	if err != nil {
-		return nil, err
-	}
-	path := f.Name()
-	if err = f.Close(); err != nil {
-		return nil, err
-	}
-	lease := &GenerationLease{runtime: r, path: path, use: generationUse{Version: 1, Generation: dir, OwnerPID: os.Getpid()}}
-	if err = writePrivateAccountJSON(path, lease.use); err != nil {
-		os.Remove(path)
-		return nil, err
-	}
-	return lease, nil
+	return &GenerationLease{runtime: r, id: lease.ID, use: lease}, nil
 }
 func (l *GenerationLease) Bind(ref json.RawMessage) error {
 	if l == nil {
@@ -558,7 +542,7 @@ func (l *GenerationLease) Bind(ref json.RawMessage) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed || len(ref) == 0 || string(ref) == "null" || !json.Valid(ref) {
-		return lifecycleError("lease process reference is invalid", l.path)
+		return lifecycleError("lease process reference is invalid", l.id)
 	}
 	unlock, err := l.runtime.generationLock(context.Background())
 	if err != nil {
@@ -566,8 +550,8 @@ func (l *GenerationLease) Bind(ref json.RawMessage) error {
 	}
 	defer unlock()
 	next := l.use
-	next.Native = append(json.RawMessage(nil), ref...)
-	if err = writePrivateAccountJSON(l.path, next); err != nil {
+	next.Native = append([]byte(nil), ref...)
+	if err = l.runtime.generationState().Bind(context.Background(), l.id, next.Native); err != nil {
 		return err
 	}
 	l.use = next
@@ -597,13 +581,12 @@ func (l *GenerationLease) Close() error {
 	defer unlock()
 	next := l.use
 	next.Released = true
+	// A lease with no process reference cannot protect anything: the native
+	// conversation never started, so nothing can still read the generation.
 	if len(next.Native) == 0 {
-		err = os.Remove(l.path)
-		if os.IsNotExist(err) {
-			err = nil
-		}
+		err = l.runtime.generationState().Delete(context.Background(), l.id)
 	} else {
-		err = writePrivateAccountJSON(l.path, next)
+		err = l.runtime.generationState().Release(context.Background(), l.id)
 	}
 	if err == nil {
 		l.closed = true
@@ -625,6 +608,12 @@ func (r *Runtime) GCGenerationsWithProbe(ctx context.Context, probe GenerationPr
 		return err
 	}
 	defer unlock()
+	// A detached runner of an earlier build can still write the legacy JSON
+	// indexes. Copy them under this lock, before any deletion decision, so a
+	// lease that runner creates or rebinds keeps its generation.
+	if err := r.generationState().ImportLegacy(ctx, r.Generations); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(r.Generations)
 	if err != nil {
 		return err
@@ -664,8 +653,8 @@ func (r *Runtime) GCGenerationsWithProbe(ctx context.Context, probe GenerationPr
 			}
 		}
 	}
-	for _, path := range stale {
-		if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
+	for _, id := range stale {
+		if err = r.generationState().Delete(ctx, id); err != nil {
 			return err
 		}
 	}
@@ -713,29 +702,14 @@ func (r *Runtime) keepGenerationPath(keep map[string]bool, path string) error {
 	return nil
 }
 func (r *Runtime) generationUsePins(keep map[string]bool, probe GenerationProcessProbe) ([]string, error) {
-	root := filepath.Join(r.Generations, ".uses")
-	if safeAccountPath(root) != nil {
-		return nil, lifecycleError("generation uses directory is unsafe", root)
-	}
-	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	leases, err := r.generationState().Leases(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	stale := []string{}
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), "use-") {
-			continue
-		}
-		path := filepath.Join(root, entry.Name())
-		var use generationUse
-		if err = readGenerationJSON(path, &use); err != nil {
-			return nil, err
-		}
-		if use.Version != 1 || use.OwnerPID <= 0 {
-			return nil, lifecycleError("generation use record is invalid", path)
+	for _, use := range leases {
+		if use.ID == "" || use.OwnerPID <= 0 || use.Generation == "" {
+			return nil, lifecycleError("generation use record is invalid", use.ID)
 		}
 		if err = r.keepGenerationPath(map[string]bool{}, use.Generation); err != nil {
 			return nil, err
@@ -754,7 +728,7 @@ func (r *Runtime) generationUsePins(keep map[string]bool, probe GenerationProces
 				return nil, err
 			}
 		} else {
-			stale = append(stale, path)
+			stale = append(stale, use.ID)
 		}
 	}
 	return stale, nil
@@ -762,71 +736,90 @@ func (r *Runtime) generationUsePins(keep map[string]bool, probe GenerationProces
 
 // Shared config can contain generation paths even when a view update fails.
 // Keep its latest complete target independently of the view.
-type generationView struct {
-	Harness, Home string
-	Generations   []string
-}
-
 func (r *Runtime) recordGenerationView(h, home, dir string, pending bool) error {
-	root := filepath.Join(r.Generations, ".views")
-	if err := checkedDir(root, true); err != nil {
+	if h == "" || home == "" || dir == "" {
+		return lifecycleError("generation view needs a harness, a home and a generation", dir)
+	}
+	if err := r.keepGenerationPath(map[string]bool{}, dir); err != nil {
 		return err
 	}
-	sum := sha256.Sum256([]byte(h + "\x00" + home))
-	path := filepath.Join(root, hex.EncodeToString(sum[:])+".json")
-	view := generationView{Harness: h, Home: home, Generations: []string{dir}}
+	state := r.generationState()
+	ctx := context.Background()
+	view := genstate.View{Harness: h, Home: home, Generations: []string{dir}}
 	if pending {
-		var old generationView
-		if err := readGenerationJSON(path, &old); err == nil {
-			if old.Harness != h || old.Home != home {
-				return lifecycleError("generation view record names another account home", path)
-			}
-			for _, previous := range old.Generations {
-				if err := r.keepGenerationPath(map[string]bool{}, previous); err != nil {
-					return err
-				}
-				if !slices.Contains(view.Generations, previous) {
-					view.Generations = append(view.Generations, previous)
-				}
-			}
-		} else if !os.IsNotExist(err) {
-			return err
-		}
+		return state.RecordView(ctx, view, true)
 	}
-	return writePrivateAccountJSON(path, view)
-}
-func (r *Runtime) currentGenerationPins(keep map[string]bool) error {
-	root := filepath.Join(r.Generations, ".views")
-	if safeAccountPath(root) != nil {
-		return lifecycleError("generation views directory is unsafe", root)
-	}
-	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return nil
-	}
+	// A complete publication replaces whatever the legacy view file of this
+	// home names. Read those revisions first, so a read failure never leaves
+	// a complete view without the supersession that protects it.
+	revisions, err := r.legacyViewRevisions(h, home)
 	if err != nil {
 		return err
 	}
+	return state.RecordPublication(ctx, view, revisions)
+}
+
+// legacyViewRevisions reads the legacy view files that name this harness and
+// home, so a complete publication marks exactly the files it replaced.
+//
+// TODO: legacy/shim remove later — remove with the .views files of earlier
+// builds, once no runner of such a build can be alive.
+func (r *Runtime) legacyViewRevisions(h, home string) ([]genstate.LegacyRevision, error) {
+	dir := filepath.Join(r.Generations, ".views")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := []genstate.LegacyRevision{}
 	for _, entry := range entries {
-		var view generationView
-		if err = readGenerationJSON(filepath.Join(root, entry.Name()), &view); err != nil {
-			return err
+		if entry.IsDir() {
+			continue
 		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		var view struct {
+			Harness, Home string
+			Generations   []string
+		}
+		if json.Unmarshal(raw, &view) != nil || view.Harness != h || view.Home != home {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(raw)
+		out = append(out, genstate.LegacyRevision{Path: path, Digest: hex.EncodeToString(sum[:]), ModifiedNS: info.ModTime().UnixNano()})
+	}
+	return out, nil
+}
+func (r *Runtime) currentGenerationPins(keep map[string]bool) error {
+	views, err := r.generationState().Views(context.Background())
+	if err != nil {
+		return err
+	}
+	for _, view := range views {
 		if _, err = Adapter(view.Harness); err != nil {
 			// A view of a harness this release no longer runs cannot protect
 			// anything, and leaving it would stop cleanup for every harness. Drop
 			// it; its generations are collected as unsupported below.
-			if err = os.Remove(filepath.Join(root, entry.Name())); err != nil && !os.IsNotExist(err) {
+			if err = r.generationState().DeleteView(context.Background(), view.Harness, view.Home); err != nil {
 				return err
 			}
 			continue
 		}
 		home, e := r.Accounts.HarnessHome(view.Harness)
 		if e != nil || view.Home != home && !equivalentAccountHome(r.Accounts.Root, view.Harness, ".runtime", view.Home) {
-			return lifecycleError("generation view names another account home", filepath.Join(root, entry.Name()))
+			return lifecycleError("generation view names another account home", view.Harness+"/"+view.Home)
 		}
 		if len(view.Generations) == 0 {
-			return lifecycleError("generation view lists no generations", filepath.Join(root, entry.Name()))
+			return lifecycleError("generation view lists no generations", view.Harness+"/"+view.Home)
 		}
 		for _, dir := range view.Generations {
 			if err = r.keepGenerationPath(keep, dir); err != nil {
