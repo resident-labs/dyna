@@ -233,6 +233,9 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			enabled = enabled || node.Enabled && node.Slots > 0
 		}
 	}
+	// A room in local mode whose head has no hosted CI has no provider to fall
+	// back to, so a trial decides on its own local result alone.
+	localOnly := mode == localci.ModeLocal && !snap.hasRealCI(policy.RequiredChecks...)
 	dir, dirErr := s.checkoutDir(ctx, r)
 	if dirErr != nil {
 		if !enabled {
@@ -327,7 +330,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		// hosted fallback untouched.
 		if mode == localci.ModeLocal || mode == localci.ModeBoth {
 			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(plan, local, policy) {
-				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local, job.trial)
+				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local, job.trial, localOnly)
 				return snap, nil
 			}
 		}
@@ -341,7 +344,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		snap.localCI = &registeredCIObservation{Status: verdictFromHosted(ci), Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
-	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result, job.trial)
+	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result, job.trial, localOnly)
 	return snap, nil
 }
 
@@ -349,8 +352,9 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 // hosted read. Either provider's failure vetoes a pass, a local pass needs its
 // whole suite and the required checks, and a pending provider does not block a
 // conclusive pass. trial reports a head of a merge trial, the only work local CI
-// runs for now.
-func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result, trial bool) *registeredCIObservation {
+// runs for now, and localOnly reports a room with no hosted provider to fall back
+// to.
+func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result, trial, localOnly bool) *registeredCIObservation {
 	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	budgetNote := applyLocalBudgets(&result, policy)
 	localState, localJobs, logs := registeredResultStatus(result)
@@ -362,6 +366,15 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	}
 	if result.Status == localci.OutcomePassed && (!plan.runnable() || !plan.required.CoversSuites(result, plan.suites)) {
 		localState = VerdictPending
+	}
+	// A room with no hosted provider has nothing to fall back to, and no retry is
+	// coming for this run, so waiting here would never end. The trial fails and
+	// names the cause instead. A run Dyna stopped is retried first, and its
+	// replacement is the one that decides.
+	localFailure := ""
+	if trial && localOnly && localInfrastructureError(result) && savedResultActionFor(result) == settleSavedResult {
+		localState, localJobs, logs = VerdictFailed, localFailedChecks(result), localFailureNote(result)
+		localFailure = localFailureNote(result)
 	}
 	// A hosted failure that only cancellations caused never tested the head, so
 	// it can neither fail nor pass it: the head waits for the local result, which
@@ -376,15 +389,20 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		if localState == VerdictAbsent {
 			observation.Reason = "waiting for CI"
 		}
-		if localInfrastructureError(result) {
+		runs := s.nodeRuns()
+		runs.Lock()
+		live := runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]
+		runs.Unlock()
+		switch {
+		case live != nil:
+			observation.Reason = "running local CI on " + live.node
+		case localInfrastructureError(result):
+			// No hosted provider is coming in a local-only room: name the retry
+			// that really is, instead of a fallback that never arrives.
 			observation.Reason = hostedFallbackReason(snap)
-		} else {
-			runs := s.nodeRuns()
-			runs.Lock()
-			if run := runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]; run != nil {
-				observation.Reason = "running local CI on " + run.node
+			if localOnly {
+				observation.Reason = "retrying local CI"
 			}
-			runs.Unlock()
 		}
 	}
 	if observation.Status == VerdictPassed || observation.Status == VerdictPending && result.Status == localci.OutcomePassed {
@@ -409,6 +427,9 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	}
 	observation.Checks = registeredCheckSummaries(result)
 	observation.BudgetNote = budgetNote
+	if localFailure != "" {
+		observation.Reason = localFailure
+	}
 	return observation
 }
 
@@ -487,10 +508,10 @@ func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, ho
 }
 
 func (s *Service) registeredJobResultComplete(ctx context.Context, job registeredCIJob, result localci.Result) bool {
-	if result.Status == localci.OutcomeError && result.Node != "" && result.Cause == localci.CauseEngineStop {
-		// Dyna stopped this run itself, so it tested nothing: the same head is
-		// admitted again instead of waiting for evidence that will never come.
-		return false
+	if result.Status == localci.OutcomeError && result.Node != "" && stoppedLocalResult(result) {
+		// Dyna stopped this run itself, so it tested nothing. savedResultActionFor
+		// admits the head again, and Result.Resumed bounds that to one retry.
+		return true
 	}
 	if result.Status == localci.OutcomeError && result.Node != "" {
 		return true
@@ -584,6 +605,46 @@ func missingRequiredCIChecks(required []string, result localci.Result, hosted Sn
 		}
 	}
 	return missing
+}
+
+// localFailedChecks names the checks a local run could not complete, so a failure
+// report says which work did not happen.
+func localFailedChecks(result localci.Result) []string {
+	var names []string
+	for _, check := range result.Checks {
+		if check.Aggregate || check.Status == localci.OutcomePassed {
+			continue
+		}
+		names = append(names, string(check.Name()))
+	}
+	return names
+}
+
+// localFailureNote words a local run that could not test the commit, with the
+// typed cause that says why. A room with no hosted CI shows this instead of a
+// wait that never ends.
+func localFailureNote(result localci.Result) string {
+	cause := result.Cause
+	if cause == "" {
+		for _, check := range result.Checks {
+			if !check.Aggregate && check.Cause != "" {
+				cause = check.Cause
+				break
+			}
+		}
+	}
+	node := result.Node
+	if node == "" {
+		node = "the CI machine"
+	}
+	note := "local CI could not run its checks on " + node
+	if label := cause.Label(); label != "" {
+		return note + ": " + label
+	}
+	if result.Error != "" {
+		return note + ": " + result.Error
+	}
+	return note
 }
 
 func hostedFallbackReason(snap Snapshot) string {
