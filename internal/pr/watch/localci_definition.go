@@ -22,6 +22,10 @@ type localCIPlan struct {
 	// definition is then both required and executed: the base required nothing,
 	// and the trial runs the approved PR code anyway.
 	bootstrap bool
+	// bootstrapErr is why a head that adds local CI could not be read. The base
+	// has no definition, so hosted CI, where it exists, stays in control; the
+	// gate reports the error only when nothing else tests the head.
+	bootstrapErr error
 }
 
 func (p localCIPlan) runnable() bool {
@@ -76,7 +80,8 @@ func (s *Service) planRegisteredCI(ctx context.Context, job registeredCIJob) (lo
 			return plan, nil
 		}
 		if headErr != nil {
-			return plan, headErr
+			plan.baseMissing, plan.bootstrapErr = true, headErr
+			return plan, nil
 		}
 		plan.required, plan.execution, plan.bootstrap = head, head, true
 		required = head
