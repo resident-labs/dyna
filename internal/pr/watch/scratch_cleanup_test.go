@@ -62,7 +62,11 @@ func TestMergedPRCleanupSkipsProtectedScratch(t *testing.T) {
 	}
 	var logs []string
 	service := &Service{Store: store, CleanupMerged: func(ctx context.Context, _ Record, _ string) error {
-		_, err := maintenance.Run(ctx, maintenance.Options{Repos: []string{}, Logf: func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }})
+		_, err := maintenance.Run(ctx, maintenance.Options{Repos: []string{}, Logf: func(format string, args ...any) {
+			if strings.HasPrefix(format, "protected") {
+				logs = append(logs, fmt.Sprintf(format, args...))
+			}
+		}})
 		return err
 	}}
 	snap := Snapshot{}
