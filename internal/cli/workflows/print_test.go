@@ -15,9 +15,9 @@ func TestPrintEventCommandSteps(t *testing.T) {
 	var b bytes.Buffer
 	for _, e := range []runstore.Event{
 		{T: "exec_start", ID: 1, Label: "make", Command: "make test"},
-		{T: "exec_run", ID: 1, Label: "make"},
+		{T: "exec_run", ID: 1, Label: "make", Command: "make test"},
 		{T: "exec_end", ID: 1, Label: "make", Status: "ok", DurMs: 1600, ExitCode: &exit},
-		{T: "exec_end", ID: 2, Label: "up", Status: "error", Error: "exit status 2"},
+		{T: "exec_end", ID: 2, Label: "up", Status: "error", DurMs: 4000, ExitCode: &exit, Error: "exit status 2"},
 	} {
 		printEvent(&b, e)
 	}
@@ -31,7 +31,10 @@ func TestPrintEventCommandSteps(t *testing.T) {
 			t.Fatalf("progress lines lack %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(lines[1], "make") {
-		t.Fatalf("the exec_run line does not name the command: %q", lines[1])
+	if !strings.Contains(lines[1], "$ make test") {
+		t.Fatalf("the exec_run line does not show the command: %q", lines[1])
+	}
+	if !strings.Contains(lines[3], "4s") || !strings.Contains(lines[3], "exit 2") {
+		t.Fatalf("the failed line lacks the duration or exit code: %q", lines[3])
 	}
 }
