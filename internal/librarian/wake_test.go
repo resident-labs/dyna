@@ -285,6 +285,32 @@ func TestSmellWakeUsesItsOwnCheckpointAndProfile(t *testing.T) {
 	}
 }
 
+func TestSmellWakeNowSkipsTheIntervalForOwnerAndRootOnly(t *testing.T) {
+	h := setup(t)
+	baseline := git(t, h.repo, "rev-parse", "HEAD")
+	if _, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Update(h.id, false, func(st *librarianstate.State) error {
+		st.SmellHead, st.SmellLastRun = baseline, h.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, h.repo, "agents/now.go", "package agents\n")
+	h.clock = h.clock.Add(time.Minute)
+	ctx := context.Background()
+	if res, err := h.svc.wakeSmells(ctx, h.repo, false); err != nil || res.Action != "batched" {
+		t.Fatalf("scheduled smell wake inside the interval = %+v %v, want batched", res, err)
+	}
+	if _, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Session}, h.repo); err == nil || !strings.Contains(err.Error(), "owner or root only") {
+		t.Fatalf("session wake now = %v, want an owner or root error", err)
+	}
+	if res, err := h.svc.WakeSmellsNow(ctx, authority.Actor{Role: authority.Root}, h.repo); err != nil || (res.Action != "started" && res.Action != "assigned") {
+		t.Fatalf("root wake now inside the interval = %+v %v, want a started pass", res, err)
+	}
+	if st, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Get(h.id); err != nil || !st.SmellUncapped {
+		t.Fatalf("state after wake now = %+v %v, want the pass marked uncapped", st, err)
+	}
+}
+
 func TestWakeIsOffUntilEnabled(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init", "-q", "-b", "main")

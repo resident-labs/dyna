@@ -62,7 +62,13 @@ a shell.
 
 `dyna library smell` files a smell on the room issue board. Dyna refuses a smell
 without regular files in the repository, a smell that matches an open issue,
-and more than 3 smells a day for one repository.
+and more than `library.smellsPerDay` smells a day for one repository (default 10; 0 means no cap).
+
+The owner or a room's root can start the smell pass at once with
+`dyna library wake --smells --now [--repo path | --room name]`. It skips the
+6-hour smell interval and has no daily cap, but it still holds the lock, waits
+for a busy smell session, and refuses duplicate or missing-file smells. Any other
+caller gets an error.
 
 ## Docs
 
@@ -79,4 +85,5 @@ the pull request.
 - `library.profile`: one profile for all librarian work. Empty ranks service profiles.
   Change it with `dyna services profile library <profile|auto>`, never as part of a bulk
   move of sessions: the librarian is a service, not a worker.
+- `library.smellsPerDay`: the most smells automatic passes file for one repository in a UTC day (default 10, 0 for no cap).
 - `library.readmeMaxLines`: the longest README the librarian may leave (default 300).
