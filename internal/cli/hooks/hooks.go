@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -38,8 +39,8 @@ func NewCommand() *cobra.Command {
 	list.Flags().BoolVar(&listGlobal, "global", false, "list the hooks that belong to the machine, including built-ins")
 	var h hooks.Hook
 	var timeout time.Duration
-	var recipe string
-	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe doctor for a schedule hook that examines the machine every minute while load or memory is high, or --recipe self-update for the Dyna-only Update Dyna recipe. --global saves a hook that belongs to the machine and needs an absolute working directory. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
+	var recipe, cwd string
+	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe doctor for a schedule hook that examines the machine every minute while load or memory is high, or --recipe self-update for the Dyna-only Update Dyna recipe. --global saves a hook that belongs to the machine. A custom global hook needs an absolute --cwd; the doctor recipe runs in the Dyna data folder unless --cwd names another. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
 		if len(a) == 0 && recipe == "" {
 			return fmt.Errorf("hook name is required")
 		}
@@ -52,21 +53,35 @@ func NewCommand() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("unknown hook recipe %q; built-in recipes are %s", recipe, hooks.RecipeHelp())
 			}
-			for _, flag := range []string{"event", "command", "cwd", "timeout", "on-fail", "every-minutes"} {
+			for _, flag := range []string{"event", "command", "timeout", "on-fail", "every-minutes"} {
 				if c.Flags().Changed(flag) {
 					return fmt.Errorf("--recipe cannot be combined with --%s", flag)
 				}
+			}
+			if addGlobal && !r.Global {
+				return fmt.Errorf("recipe %q needs a repository, so it cannot be global", recipe)
 			}
 			exe, err := os.Executable()
 			if err != nil {
 				return err
 			}
-			h, err = r.Build(c.Context(), repo, exe, name)
+			buildRepo := repo
+			if addGlobal {
+				buildRepo = ""
+			}
+			h, err = r.Build(c.Context(), buildRepo, exe, name)
 			if err != nil {
 				return err
 			}
+			if c.Flags().Changed("cwd") {
+				h.Cwd = cwd
+			}
+			if addGlobal {
+				h = hooks.GlobalCwd(h, store.DataDir())
+			}
 		} else {
 			h.Name = name
+			h.Cwd = cwd
 			h.Timeout = timeout.String()
 		}
 		if addGlobal {
@@ -78,7 +93,7 @@ func NewCommand() *cobra.Command {
 	add.Flags().StringVar(&recipe, "recipe", "", "built-in recipe: "+hooks.RecipeHelp())
 	add.Flags().StringVar(&h.Event, "event", "", "lifecycle event")
 	add.Flags().StringVar(&h.Command, "command", "", "trusted shell command")
-	add.Flags().StringVar(&h.Cwd, "cwd", "worktree", "worktree, main, or an absolute path")
+	add.Flags().StringVar(&cwd, "cwd", "worktree", "worktree, main, or an absolute path")
 	add.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "command timeout")
 	add.Flags().StringVar(&h.OnFail, "on-fail", "alert", "alert, or block for before-land")
 	add.Flags().IntVar(&h.EveryMinutes, "every-minutes", 0, "schedule interval in minutes")

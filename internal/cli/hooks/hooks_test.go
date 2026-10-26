@@ -123,6 +123,35 @@ func TestLifecycleCLI(t *testing.T) {
 	if _, err := run("add", "--recipe", "doctor", "--every-minutes", "5"); err == nil {
 		t.Fatal("--recipe combined with --every-minutes was accepted")
 	}
+	if _, err := run("add", "--recipe", "self-update", "--global"); err == nil {
+		t.Fatal("a recipe that needs a repository was added as global")
+	}
+	if _, err := run("add", "--recipe", "doctor", "--global"); err != nil {
+		t.Fatalf("global doctor recipe: %v", err)
+	}
+	out, err := run("list", "--global")
+	var global []hooks.Hook
+	if err != nil || json.Unmarshal([]byte(out), &global) != nil {
+		t.Fatalf("list --global: %s %v", out, err)
+	}
+	found := false
+	for _, g := range global {
+		if g.Name == "doctor" {
+			found = true
+			if g.Scope != hooks.ScopeGlobal || g.Cwd != store.DataDir() {
+				t.Errorf("global doctor scope %q cwd %q, want global in %q", g.Scope, g.Cwd, store.DataDir())
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("global doctor hook missing: %s", out)
+	}
+	if _, err := run("rm", "doctor", "--global"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("add", "again", "--recipe", "doctor", "--global", "--cwd", t.TempDir()); err != nil {
+		t.Fatalf("recipe with --cwd: %v", err)
+	}
 
 }
 
@@ -174,6 +203,14 @@ func serveHooks(t *testing.T) {
 			return s.Edit(ctx, repo, name, "owner", p)
 		}},
 		{Name: "RemoveHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.Remove},
+		{Name: "ListGlobalHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.ListGlobal},
+		{Name: "AddGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, h hooks.Hook) error {
+			h.AddedBy = "owner"
+			return s.AddGlobal(ctx, h)
+		}},
+		{Name: "RemoveGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
+			return s.Remove(ctx, "", name)
+		}},
 		{Name: "RunHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, repo, name string) (hooks.Run, error) {
 			return s.Run(ctx, hooks.Event{Repo: repo, Session: "owner"}, name)
 		}},

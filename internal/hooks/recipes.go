@@ -13,7 +13,19 @@ import (
 // Build only makes configuration; the owner decides to install it.
 type Recipe struct {
 	Label string
-	Build func(ctx context.Context, repo, exe, name string) (Hook, error)
+	// Global marks a recipe that needs no repository, so it can be added with
+	// --global. Build then receives an empty repo.
+	Global bool
+	Build  func(ctx context.Context, repo, exe, name string) (Hook, error)
+}
+
+// GlobalCwd returns the directory a global recipe hook runs in when the owner
+// names none: it has no checkout, so it uses the Dyna data folder.
+func GlobalCwd(h Hook, dataDir string) Hook {
+	if h.Cwd == "main" || h.Cwd == "worktree" {
+		h.Cwd = dataDir
+	}
+	return h
 }
 
 // doctorLabel is the hook label and help text for the doctor recipe.
@@ -22,7 +34,7 @@ const doctorLabel = "Doctor load watchdog"
 // Recipes is the single list of built-in recipes. The CLI and its help text
 // read it, so a new recipe needs no second switch.
 var Recipes = map[string]Recipe{
-	"doctor":      {Label: doctorLabel, Build: DoctorRecipe},
+	"doctor":      {Label: doctorLabel, Global: true, Build: DoctorRecipe},
 	"self-update": {Label: "Update Dyna", Build: SelfUpdateRecipe},
 }
 
@@ -32,8 +44,11 @@ const DoctorCondition = "load>2/core for 5m or memory>85% or pressure.memory>20%
 // DoctorRecipe examines the machine every minute, and only reports while the
 // condition holds. It needs no source tree: dyna doctor ships in the binary.
 func DoctorRecipe(ctx context.Context, repo, exe, name string) (Hook, error) {
-	if _, err := repoid.Resolve(ctx, repo); err != nil {
-		return Hook{}, err
+	// A global hook passes no repository and gets its directory from GlobalCwd.
+	if repo != "" {
+		if _, err := repoid.Resolve(ctx, repo); err != nil {
+			return Hook{}, err
+		}
 	}
 	h := Hook{
 		Name:         name,
