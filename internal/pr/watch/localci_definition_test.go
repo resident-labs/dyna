@@ -58,12 +58,12 @@ suites:
 			result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: localci.OutcomePassed})
 		}
 	}
-	observation := (&Service{}).registeredLocalObservation(record, Snapshot{}, ChangePolicy{}, plan, result)
+	observation := (&Service{}).registeredLocalObservation(record, Snapshot{}, ChangePolicy{}, plan, result, true)
 	if observation.Status != VerdictPending || !slices.Contains(observation.Jobs, "lint") {
 		t.Fatalf("head removed a base check and passed: %+v", observation)
 	}
 	result.Checks = append(result.Checks, localci.SuiteResult{CheckName: "lint", Status: localci.OutcomePassed})
-	observation = (&Service{}).registeredLocalObservation(record, Snapshot{}, ChangePolicy{}, plan, result)
+	observation = (&Service{}).registeredLocalObservation(record, Snapshot{}, ChangePolicy{}, plan, result, true)
 	if observation.Status != VerdictPassed {
 		t.Fatalf("complete base-defined result did not pass: %+v", observation)
 	}

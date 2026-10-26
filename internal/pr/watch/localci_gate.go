@@ -322,7 +322,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		// hosted fallback untouched.
 		if mode == localci.ModeLocal || mode == localci.ModeBoth {
 			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(plan, local, policy) {
-				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local)
+				snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, local, job.trial)
 				return snap, nil
 			}
 		}
@@ -336,18 +336,25 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		snap.localCI = &registeredCIObservation{Status: verdictFromHosted(ci), Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
-	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result)
+	snap.localCI = s.registeredLocalObservation(r, snap, policy, plan, result, job.trial)
 	return snap, nil
 }
 
 // registeredLocalObservation judges a saved local result together with the
 // hosted read. Either provider's failure vetoes a pass, a local pass needs its
 // whole suite and the required checks, and a pending provider does not block a
-// conclusive pass.
-func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result) *registeredCIObservation {
+// conclusive pass. trial reports a head of a merge trial, the only work local CI
+// runs for now.
+func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy ChangePolicy, plan localCIPlan, result localci.Result, trial bool) *registeredCIObservation {
 	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	budgetNote := applyLocalBudgets(&result, policy)
 	localState, localJobs, logs := registeredResultStatus(result)
+	// Local CI runs merge trials only, so a pull request head has no run of its
+	// own: without a saved result the local provider has no evidence to wait
+	// for, and waiting would never end.
+	if !trial && result.Node == "" {
+		localState, localJobs, logs = VerdictAbsent, nil, ""
+	}
 	if result.Status == localci.OutcomePassed && (!plan.runnable() || !plan.required.CoversSuites(result, plan.suites)) {
 		localState = VerdictPending
 	}
@@ -361,6 +368,9 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
 	if observation.Status == VerdictPending {
 		observation.Reason = "waiting for local CI"
+		if localState == VerdictAbsent {
+			observation.Reason = "waiting for CI"
+		}
 		if localInfrastructureError(result) {
 			observation.Reason = hostedFallbackReason(snap)
 		} else {
@@ -374,7 +384,10 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	}
 	if observation.Status == VerdictPassed || observation.Status == VerdictPending && result.Status == localci.OutcomePassed {
 		required := append([]string(nil), policy.RequiredChecks...)
-		if plan.required != nil {
+		// Local CI runs merge trials only, so a pull request head has no local
+		// run to supply the names the base definition requires. Only a trial head
+		// must cover them; the hosted provider decides a pull request head.
+		if trial && plan.required != nil {
 			for _, name := range plan.required.RequiredChecks(plan.suites) {
 				if !slices.Contains(required, string(name)) {
 					required = append(required, string(name))
