@@ -9,6 +9,7 @@ import (
 
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/testsafe"
 )
 
 // The engine has no turn-specific Git helper, and the desktop keyring may
@@ -59,6 +60,7 @@ done
 	t.Setenv("GH_TOKEN", "session-secret")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GIT_CONFIG_COUNT", "0")
+	testsafe.DisableGitAutoMaintenance()
 	t.Setenv("MANAGED_HEAD", git(t, repo, "rev-parse", "HEAD"))
 	ctx := ghclient.WithRoom(context.Background(), rec.ID)
 	tree, err := NewFor(ctx, repo, "authenticated-fetch", "origin/main", "", "")
