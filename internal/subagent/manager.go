@@ -61,6 +61,9 @@ type Manager struct {
 	// RecoveryDelay overrides the harness recovery wait for tests and embedding.
 	// Nil keeps the normal delay.
 	RecoveryDelay *time.Duration
+	// InstalledVersion returns the installed version of a harness for the
+	// session converter. Tests replace it; nil reads the private bundle.
+	InstalledVersion func(harness string) (string, error)
 	// ProcessRunner replaces harness process launch for tests and embedding.
 	ProcessRunner harness.ProcessRunner
 	// Executable is the dyna binary workers and runners use (default: this one).
