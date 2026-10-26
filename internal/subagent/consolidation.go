@@ -661,7 +661,7 @@ func (m *Manager) advanceConsolidation(ctx context.Context, c ConsolidationState
 			t.Profile, t.Model = c.Profile, c.Model
 			t.Turn = meta.Turns + 1
 			t.OldTurns = meta.Turns
-			t.StartupDeadline = m.transferNow().Add(60 * time.Second)
+			t.StartupDeadline = m.transferNow().Add(startupLimit)
 			// The charter itself refreshes into the instructions on this turn.
 			t.Handoff = "[DYNA SESSION CONSOLIDATION] Your combined task charter is in your Dyna instructions. Continue it now."
 			t.Dir = targetDir

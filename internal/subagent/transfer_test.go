@@ -356,7 +356,7 @@ func TestTransferWorkerRecoveryAndStartupTimeout(t *testing.T) {
 	held := &heldTurnSpawner{}
 	e.m.Spawner = held
 	advance(t, e, state, 3)
-	*now = now.Add(61 * time.Second)
+	*now = now.Add(startupLimit + time.Second)
 	held.lock.Close()
 	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err == nil || !strings.Contains(err.Error(), "no model output") {
 		t.Fatalf("startup timeout: %v", err)
