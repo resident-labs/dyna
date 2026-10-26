@@ -50,6 +50,9 @@ type Observer struct {
 	Now  func() time.Time
 
 	busy atomic.Bool
+	// sampled, when set, runs after a sample ended and the next tick may start
+	// one. A test uses it to wait for exactly one sample.
+	sampled func()
 }
 
 // Sample takes one sample and returns an error only to report; nothing depends
@@ -111,9 +114,12 @@ func (o *Observer) Run(ctx context.Context, ticks <-chan time.Time) {
 				continue
 			}
 			go func() {
-				defer o.busy.Store(false)
 				if err := o.Sample(ctx); err != nil && ctx.Err() == nil {
 					log.Printf("admission: sample: %v", err)
+				}
+				o.busy.Store(false)
+				if o.sampled != nil {
+					o.sampled()
 				}
 			}()
 		}
