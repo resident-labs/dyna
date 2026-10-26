@@ -10,7 +10,7 @@ import (
 )
 
 func TestWorkerAuthorityRefusesBeforeBackend(t *testing.T) {
-	t.Setenv(mode.EnvMode, mode.Workflow)
+	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, "")
 	ctx := context.Background()
 	// A nil manager makes any backend access fail immediately.

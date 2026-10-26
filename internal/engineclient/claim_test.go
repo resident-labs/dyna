@@ -17,7 +17,7 @@ func (f claimTransport) RoundTrip(r *http.Request) (*http.Response, error) { ret
 
 func TestEveryCallCarriesTheProcessGuardClaim(t *testing.T) {
 	for _, tc := range []struct{ name, mode, session string }{
-		{"session", mode.Subagent, "ses_claimed"}, {"root", mode.Root, ""}, {"worker", mode.Workflow, ""}, {"owner", "", ""},
+		{"session", mode.Subagent, "ses_claimed"}, {"root", mode.Root, ""}, {"owner", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(mode.EnvMode, tc.mode)

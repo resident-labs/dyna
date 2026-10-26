@@ -33,12 +33,11 @@ Bare mentions use `DYNA_ROOM`. An unstamped external shell must qualify every me
 | Owner | open top-level sessions | error | error | error |
 | Session | error | stored parent, or owner at top level | same parent | open children |
 | Script `post()` | error | run's parent, or owner | error | error |
-| Workflow worker | error | only when owner | error | error |
 
 Groups include running, queued, and idle members. The sender is removed from groups; duplicate recipients get one delivery.
-Workflow workers can post only to `@root` and workers of their own run; the script reaches sessions with `post()`.
+`@run:<id>/agent:<n>` reaches the open leaf session of that workflow agent. A closed or unknown agent rejects the post.
+Posts to `@root`, including depth-1 `@parent`, wake root.
 A desktop draft with no mention goes to `@root`, the root orchestrator. Human and Voice requests wake root.
-Worker posts to `@root`, including depth-1 `@parent`, wake root.
 `--alert` and failed reports still wake root. A post to a real parent below depth 1 still wakes that parent.
 The desktop also reads mentions within text, except inside backticks or escaped as `\@name`.
 CLI and script mentions must lead the text.
@@ -50,7 +49,7 @@ Records without `roomId` fail closed.
 
 `dyna post --json` returns `{message, deliveries, skipped?}`.
 Each delivery is `{to, delivery, turn?, pointer?, error?}`.
-Delivery values include `room`, `session-queued`, `worker-steered`, and `failed`.
+Delivery values include `room`, `session-queued`, and `failed`.
 `session-queued` means the post and its wake intent are saved. The engine starts or steers the session after the store event.
 If the engine is down, messages wait until it starts. The receipt does not include a turn number.
 Session delivery no longer returns `session-steered` or `session-followup` from the posting process.

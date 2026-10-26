@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -107,8 +106,6 @@ const (
 	SenderSession
 	// SenderScript is a workflow script calling post().
 	SenderScript
-	// SenderWorker is a workflow worker's shell.
-	SenderWorker
 	// SenderVoice is Voice, the owner's voice call. It has no session; its
 	// posts come from <room>:voice-call and carry room.SourceVoice.
 	SenderVoice
@@ -152,12 +149,6 @@ func (s *Service) SelfSender() (Sender, error) {
 		}
 		return Sender{Kind: SenderSession, Room: info.Room, Session: info}, nil
 	}
-	if mode.InWorkflow() {
-		// A missing or bad agent stamp parses as 0, which workerSender refuses.
-		agent, _ := strconv.Atoi(strings.TrimSpace(os.Getenv(mode.EnvWorkerAgent)))
-		stamp, _ := mode.StampFromEnv()
-		return workerSender(strings.TrimSpace(os.Getenv(mode.EnvWorkerRun)), agent, stamp.Room)
-	}
 	snd := Sender{Kind: SenderOwner}
 	if stamp, ok := mode.StampFromEnv(); ok {
 		snd.Room = stamp.Room
@@ -168,22 +159,6 @@ func (s *Service) SelfSender() (Sender, error) {
 			}
 			snd.Room = rec.Name
 		}
-	}
-	return snd, nil
-}
-
-// workerSender is agent of workflow run runID. Its room is the run's room,
-// or room when the run's record cannot be read.
-func workerSender(runID string, agent int, room string) (Sender, error) {
-	if runID == "" || agent < 1 {
-		return Sender{}, errors.New("this workflow worker has no run or agent stamp")
-	}
-	snd := Sender{Kind: SenderWorker, RunID: runID, Agent: agent, Room: room}
-	if meta, err := runstore.ReadMeta(runID); err == nil {
-		snd.Room = meta.Room
-	}
-	if snd.Room == "" {
-		return Sender{}, errNoRoom
 	}
 	return snd, nil
 }
@@ -236,8 +211,8 @@ type PostInput struct {
 	Files []File
 }
 
-// Claim is who a posting process says it is: a session, a workflow worker
-// (Run and Agent), or the owner when neither is set. The engine checks it
+// Claim is who a posting process says it is: a session, a run's coordinator
+// (Run, Agent 0), or the owner when neither is set. The engine checks it
 // against the caller it resolved (requirements item 3) before it trusts it.
 type Claim struct {
 	Session string
@@ -251,8 +226,6 @@ func ClaimOf(snd Sender) Claim {
 	switch snd.Kind {
 	case SenderSession:
 		return Claim{Session: snd.Session.ID, Room: snd.Room}
-	case SenderWorker:
-		return Claim{Run: snd.RunID, Agent: snd.Agent, Room: snd.Room}
 	}
 	return Claim{Room: snd.Room}
 }
@@ -261,7 +234,7 @@ func ClaimOf(snd Sender) Claim {
 // test standing in for them, may trust a claim.
 func (s *Service) SenderOf(c Claim) (Sender, error) {
 	if c.Run != "" {
-		return workerSender(c.Run, c.Agent, c.Room)
+		return Sender{}, errors.New("a workflow run's coordinator posts only through its script's post()")
 	}
 	if c.Session == "" {
 		return Sender{Kind: SenderOwner, Room: c.Room}, nil
@@ -349,7 +322,6 @@ type recipientKind int
 const (
 	toOwner recipientKind = iota
 	toSession
-	toWorker
 	// toVoice is Voice, the owner's voice call. A live call speaks the post.
 	// The post does not create a call request, and no session wakes.
 	toVoice
@@ -579,13 +551,6 @@ func (s *Service) deliver(msg room.Message, r recipient) Delivery {
 		// The engine observes the stored post and starts or steers its target.
 		// The receipt means storage succeeded, even while the engine is down.
 		d.Delivery = "session-queued"
-	case toWorker:
-		steer, pointer := msg.SteeringFrame(opts, runstore.MaxSteeringMessageBytes)
-		if err := runstore.SubmitAgentSteering(r.runID, r.agent, steer); err != nil {
-			d.Delivery, d.Error = "failed", err.Error()
-			return d
-		}
-		d.Delivery, d.Pointer = "worker-steered", pointer
 	}
 	return d
 }

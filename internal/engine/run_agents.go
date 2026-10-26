@@ -92,7 +92,7 @@ func waitRunAgent(ctx context.Context, m *subagent.Manager, ref callspec.RunAgen
 	if err != nil || !got.Done {
 		return callspec.RunAgentState{}, err
 	}
-	state := callspec.RunAgentState{Done: true, Status: got.Turn.Status, Error: got.Turn.Error}
+	state := callspec.RunAgentState{Done: true, OK: got.Turn.Status == subagent.TurnOK, Status: got.Turn.Status, Error: got.Turn.Error}
 	if got.Turn.Result != nil {
 		if state.Result, err = json.Marshal(got.Turn.Result); err != nil {
 			return callspec.RunAgentState{}, err

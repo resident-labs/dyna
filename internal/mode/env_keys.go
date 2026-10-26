@@ -19,7 +19,6 @@ var stampKeys = [...]stampKey{
 	{name: EnvWorkerRun, marksAgent: true},
 	{name: EnvAddress, marksAgent: true},
 	{name: EnvMode},
-	{name: EnvWorkerAgent},
 	{name: EnvDepth},
 	{name: EnvRoomID},
 	{name: EnvRoom},

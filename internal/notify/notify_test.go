@@ -248,14 +248,11 @@ func TestResolveSenderClassTable(t *testing.T) {
 	a, b := f.a.Name, f.b.Name
 	withParent := f.newRun("wf_with-parent", f.a, &f.lead)
 	topRun := f.newRun("wf_top-level", f.a, nil)
-	otherRun := f.newRun("wf_other-run", f.a, nil)
 
 	owner := Sender{Kind: SenderOwner}
 	human := Sender{Kind: SenderOwner, Room: a}
 	script := Sender{Kind: SenderScript, Room: a, RunID: withParent.Meta.ID}
 	topScript := Sender{Kind: SenderScript, Room: a, RunID: topRun.Meta.ID}
-	worker := Sender{Kind: SenderWorker, Room: a, RunID: withParent.Meta.ID, Agent: 1}
-	topWorker := Sender{Kind: SenderWorker, Room: a, RunID: topRun.Meta.ID, Agent: 1}
 
 	cases := []struct {
 		name     string
@@ -305,16 +302,7 @@ func TestResolveSenderClassTable(t *testing.T) {
 		{"script top parent is owner", topScript, []string{"@parent"}, "run:" + topRun.Meta.ID, []string{a}, ""},
 		{"script member", script, []string{"@crc"}, "run:" + withParent.Meta.ID, []string{a + ":crc"}, ""},
 		{"script siblings", script, []string{"@siblings"}, "", nil, "@siblings"},
-		{"script worker", script, []string{"@run:" + withParent.Meta.ID + "/agent:2"}, "run:" + withParent.Meta.ID, []string{"run:" + withParent.Meta.ID + "/agent:2"}, ""},
 		// A workflow worker's shell never reaches a session.
-		{"worker owner", worker, []string{"@root"}, "run:" + withParent.Meta.ID + "/agent:1", []string{a}, ""},
-		{"worker parent session", worker, []string{"@parent"}, "", nil, "workflow"},
-		{"worker top parent is owner", topWorker, []string{"@parent"}, "run:" + topRun.Meta.ID + "/agent:1", []string{a}, ""},
-		{"worker member", worker, []string{"@lead"}, "", nil, "workflow"},
-		{"worker qualified member", worker, []string{"@" + a + ":lead"}, "", nil, "workflow"},
-		{"worker own run worker", worker, []string{"@run:" + withParent.Meta.ID + "/agent:2"}, "run:" + withParent.Meta.ID + "/agent:1", []string{"run:" + withParent.Meta.ID + "/agent:2"}, ""},
-		{"worker other run", worker, []string{"@run:" + otherRun.Meta.ID + "/agent:1"}, "", nil, "own run"},
-		{"worker self", worker, []string{"@run:" + withParent.Meta.ID + "/agent:1"}, "", nil, "is you"},
 		// Grammar.
 		{"no mention", f.session(f.lead), nil, "", nil, "@mention"},
 		{"not a mention", f.session(f.lead), []string{"lead"}, "", nil, "start with @"},
@@ -452,57 +440,6 @@ func TestGroupPostStoredOnceDeliveredToEach(t *testing.T) {
 		if !strings.Contains(turn.Prompt, "[dyna message "+res.Message.ID+" from "+f.a.Name+":lead]") || !strings.Contains(turn.Prompt, want) || !strings.Contains(turn.Prompt, info.Address()+" (you)") || !strings.Contains(turn.Prompt, "Reply: dyna post @"+f.a.Name+":lead") {
 			t.Fatalf("%s prompt = %q", info.Name, turn.Prompt)
 		}
-	}
-}
-
-// After the post is stored, delivery is best effort: a failed recipient is
-// reported and the error wraps ErrDelivery.
-func TestPostReportsDeliveryFailureAfterStoring(t *testing.T) {
-	f := newFixture(t)
-	run := f.newRun("wf_finished", f.a, nil)
-	run.Finish("ok", "null", nil)
-	res, err := f.svc.Post(f.ctx, PostInput{
-		Sender: Sender{Kind: SenderOwner, Room: f.a.Name}, Mentions: []string{"@root", "@run:" + run.Meta.ID + "/agent:1"}, Text: "late",
-	})
-	if !errors.Is(err, ErrDelivery) {
-		t.Fatalf("err = %v", err)
-	}
-	if res.Message.ID == "" || len(res.Deliveries) != 2 || res.Deliveries[0].Delivery != "room" || res.Deliveries[1].Delivery != "failed" || res.Deliveries[1].Error == "" {
-		t.Fatalf("result = %#v", res)
-	}
-	if msgs, _ := f.svc.Rooms.Messages(f.a.ID); len(msgs) != 1 {
-		t.Fatalf("stored = %#v", msgs)
-	}
-}
-
-func TestWorkerSteeringUsesBoundedPointerFrame(t *testing.T) {
-	f := newTestEnv(t)
-	rec := f.room()
-	run := f.newRun("wf_steer", rec, nil)
-	if _, err := run.StartAgentJournal(3, "worker", "test", "", "task"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runstore.ActivateAgentSteering(run.Meta.ID, 3); err != nil {
-		t.Fatal(err)
-	}
-	text := strings.Repeat("long steering text ", 400)
-	res, err := f.svc.Post(f.ctx, PostInput{Sender: Sender{Kind: SenderOwner}, Mentions: []string{"@run:" + run.Meta.ID + "/agent:3"}, Text: text})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d := res.Deliveries[0]; d.Delivery != "worker-steered" || !d.Pointer {
-		t.Fatalf("delivery = %#v", d)
-	}
-	steered, _, err := runstore.ReadAgentSteeringFrom(run.Meta.ID, 3, 0, false)
-	if err != nil || len(steered) != 1 {
-		t.Fatalf("steering = %#v, %v", steered, err)
-	}
-	got := steered[0].Message
-	if len(got) > runstore.MaxSteeringMessageBytes || !strings.Contains(got, "Full text: dyna room read "+rec.Name+" "+res.Message.ID+"]") {
-		t.Fatalf("frame (%d bytes) = %q", len(got), got)
-	}
-	if res.Message.Text != strings.TrimSpace(text) {
-		t.Fatal("the stored post lost its full text")
 	}
 }
 
