@@ -3,18 +3,20 @@ package shells
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// D-220: when the state store is too busy to take the hold, the job must not be
-// left behind as a record that later reads as lost, and nothing may start.
+// D-220: when the state store is too busy to record the job and its hold, the
+// job must not be left behind as a record that later reads as lost, and
+// nothing may start.
 func TestStartJobLeavesNothingWhenStateStoreIsBusy(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
 	s.failWrite = func(op string) error {
-		if strings.Contains(op, "waiter_until") {
+		if op == "save" {
 			return context.DeadlineExceeded
 		}
 		return nil
@@ -31,6 +33,25 @@ func TestStartJobLeavesNothingWhenStateStoreIsBusy(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(s.Root, idPrefix+"*")); len(left) != 0 {
 		t.Fatalf("job folders left behind: %v", left)
+	}
+}
+
+// If the cleanup delete times out too, the row may stay, so its folder stays and
+// the error says the job could not be removed.
+func TestStartJobKeepsFolderWhenItsRowCannotBeDeleted(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells"), pause: func(time.Duration) {}}
+	s.failWrite = func(op string) error {
+		if strings.Contains(op, "DELETE") {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
+	meta, err := s.StartJob(StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir()}, time.Now(), func(Meta) error { return errors.New("no supervisor") })
+	if err == nil || !strings.Contains(err.Error(), "could not be removed") || !strings.Contains(err.Error(), "job did not start") {
+		t.Fatalf("error = %v; want did not start and could not be removed", err)
+	}
+	if _, serr := os.Stat(filepath.Join(s.Root, meta.ID)); serr != nil {
+		t.Fatalf("the folder of a job whose row stays must stay: %v", serr)
 	}
 }
 

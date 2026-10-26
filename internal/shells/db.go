@@ -110,6 +110,37 @@ func (s *Store) db() (*sql.DB, error) {
 	return db, nil
 }
 
+// saveNew writes a new job's metadata and, when hold is set, its exit hold in
+// the same transaction.
+func (s *Store) saveNew(m Meta, hold time.Time) error {
+	if hold.IsZero() {
+		return s.Save(m, nil)
+	}
+	if !ValidID(m.ID) {
+		return fmt.Errorf("invalid shell id %q", m.ID)
+	}
+	if err := s.injected("save"); err != nil {
+		return err
+	}
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
+	defer cancel()
+	if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if err := upsert(conn, m, nil); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, `UPDATE shell_jobs SET waiter_until=? WHERE id=?`, hold.UnixMilli(), m.ID)
+		return err
+	}); err != nil {
+		return err
+	}
+	s.Notify(m.ID)
+	return nil
+}
+
 // Save writes a job's metadata and, once it has ended, its exit.
 func (s *Store) Save(m Meta, ex *Exit) error {
 	if !ValidID(m.ID) {
