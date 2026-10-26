@@ -324,7 +324,11 @@ func (g GoalEvent) eventSubject() string { return g.GoalID }
 // position and a closed checklist adds its close number: two posts with the
 // same words are two different posts.
 func (g GoalEvent) eventDedupe() string {
-	return strings.Join([]string{string(g.Type), g.Title, g.Summary, strconv.Itoa(g.Amendment), strconv.Itoa(g.ItemsClosed)}, "\x00")
+	key := strings.Join([]string{string(g.Type), g.Title, g.Summary, strconv.Itoa(g.Amendment)}, "\x00")
+	if g.ItemsClosed > 0 {
+		key += "\x00" + strconv.Itoa(g.ItemsClosed)
+	}
+	return key
 }
 
 // CheckinState is a child's activity when the check-in was written.
