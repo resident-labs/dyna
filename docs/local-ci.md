@@ -288,27 +288,35 @@ caches:
 
 checks:
   - id: rust
+    host: true
     command: |
-      set -eu
-      # Install the pinned toolchain once per node. Later runs skip the install.
+      set -u
+      # Host checks get a temporary HOME, so name a persistent toolchain home.
+      # The machine owner creates /srv/ci/rustup and makes it writable.
+      export RUSTUP_HOME=/srv/ci/rustup
       toolchain=1.85.0
+      # Install the pinned toolchain once per node. Later runs skip the install.
       (
         flock 200
         rustup toolchain list | grep -q "^$toolchain" ||
           rustup toolchain install "$toolchain" --profile minimal -c clippy
-      ) 200>/tmp/rust-toolchain.lock
+      ) 200>/srv/ci/rustup.lock || exit 1
       export RUSTC_WRAPPER=sccache
       export CARGO_TARGET_DIR="$PWD/target"
-      cargo +"$toolchain" clippy --all-targets -- -D warnings
-      cargo +"$toolchain" nextest run --profile ci
+      cargo +"$toolchain" clippy --all-targets -- -D warnings || exit 1
+      status=0
+      cargo +"$toolchain" nextest run --profile ci || status=$?
+      # Copy the report even when tests fail, so Dyna sees each failed test.
       cp target/nextest/ci/junit.xml "$JUNIT_REPORT_PATH"
+      exit "$status"
     reports: junit
     caches: [cargo-registry, sccache]
 ```
 
-The lock file must live in a folder that all runs on the node share. The
-per-run temporary directory would give each run its own lock, so the example
-uses a fixed path. Enable JUnit output for the `ci` profile in
+The toolchain home and the lock file must live in folders that all runs on the
+node share. The per-run home and temporary directories would give each run its
+own toolchain and its own lock, so the example uses fixed paths. Host checks
+also need the machine owner's permission; see [Host checks](#host-checks). Enable JUnit output for the `ci` profile in
 `.config/nextest.toml`; the last step copies the file to `JUNIT_REPORT_PATH`. The
 same shape works for other languages: replace the toolchain step, the cache
 declarations, and the test command (for example `npm ci` with the npm cache, or
