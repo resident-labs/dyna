@@ -1530,10 +1530,23 @@ func attemptError(ctx context.Context, p profile.Profile, argv []string, a attem
 		// A process's own stderr is the only text a turn may name a reason from.
 		return providerfailure.TagStderr(err, a.stderr)
 	}
-	if a.output == "" && !a.allowEmptyOutput {
+	if a.output == "" && !a.allowEmptyOutput && !cleanEmptyStop(p, a.stdout) {
 		return fmt.Errorf("worker %s returned empty output", p.Name)
 	}
 	return nil
+}
+
+// cleanEmptyStop reports a turn the harness itself ended cleanly with no final
+// text. An agent is told to answer nothing when it owes no report, so this is
+// a finished turn, not a transient failure to recover from.
+func cleanEmptyStop(p profile.Profile, stdout string) bool {
+	switch p.Harness {
+	case profile.HarnessPi:
+		return workeroutput.PiCleanStop(stdout)
+	case profile.HarnessClaudeCode:
+		return workeroutput.ClaudeCleanStop(stdout)
+	}
+	return false
 }
 
 // commandName names the launched program; an ACP attempt runs no process.
