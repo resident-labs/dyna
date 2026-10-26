@@ -350,10 +350,14 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, de
 // the CI gate uses, so a hosted run Dyna cancelled for local CI supplies no
 // failure log excerpt and no artifact inspection.
 func (s *Service) hostedWithoutLocalCancellations(ctx context.Context, r Record, snap Snapshot) (Snapshot, error) {
-	if r.RepoPath == "" {
+	dir, dirErr := s.checkoutDir(ctx, r)
+	if dirErr != nil {
+		// No repository means no saved cancellation to find. The CI gate
+		// reports the same condition on its own path.
 		return snap, nil
 	}
-	repo, err := localci.CanonicalRepo(ctx, r.RepoPath)
+	r.RepoPath = dir
+	repo, err := localci.CanonicalRepo(ctx, dir)
 	if err != nil {
 		// No repository means no saved cancellation to find. The CI gate
 		// reports the same condition on its own path.
