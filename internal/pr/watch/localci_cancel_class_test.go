@@ -16,8 +16,12 @@ func TestHostedCancellationClassification(t *testing.T) {
 		status          string
 		conclusion      string
 		dependency      string
+		rowFailure      bool
 		wantRealFailure bool
 		wantAggregate   bool
+		// ownCancellation says the direct classification runs in the mode a
+		// saved Dyna cancellation enables for a run that ended cancelled.
+		ownCancellation bool
 		// wantSaved and wantGeneral say whether each filter keeps the run. They
 		// differ only where a saved cancellation proves the run is ours.
 		wantSaved   bool
@@ -29,15 +33,17 @@ func TestHostedCancellationClassification(t *testing.T) {
 			conclusion:      "cancelled",
 			dependency:      "failure",
 			wantRealFailure: true,
+			ownCancellation: true,
 			wantSaved:       true,
 			wantGeneral:     true,
 		},
 		{
-			name:          "cancelled-only aggregate",
-			status:        "completed",
-			conclusion:    "cancelled",
-			dependency:    "cancelled",
-			wantAggregate: true,
+			name:            "cancelled-only aggregate",
+			status:          "completed",
+			conclusion:      "cancelled",
+			dependency:      "cancelled",
+			wantAggregate:   true,
+			ownCancellation: true,
 		},
 		{
 			name:          "active aggregate with saved cancellation",
@@ -54,6 +60,19 @@ func TestHostedCancellationClassification(t *testing.T) {
 			wantAggregate: true,
 			wantGeneral:   true,
 		},
+		{
+			// D-168: a run Dyna itself cancelled while queued holds no test
+			// result. Its row job and its suite aggregate fail only by echoing
+			// the cancellation, so under a saved cancellation neither is
+			// evidence; without one the same failures stay real.
+			name:            "own cancellation drops row echoes",
+			status:          "completed",
+			conclusion:      "cancelled",
+			dependency:      "cancelled",
+			rowFailure:      true,
+			ownCancellation: true,
+			wantGeneral:     true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			run := Run{ID: 10, Attempt: 1, CheckSuiteID: 20, Path: ".github/workflows/ci.yml", Status: tc.status, Conclusion: tc.conclusion}
@@ -64,12 +83,12 @@ func TestHostedCancellationClassification(t *testing.T) {
 				if i == 0 {
 					check.Conclusion = tc.dependency
 				}
-				if name == "go-test" {
+				if name == "go-test" || (name == "frontend" && tc.rowFailure) {
 					check.Conclusion = "failure"
 				}
 				snap.Checks = append(snap.Checks, check)
 			}
-			class := classifyHostedSuite(watchDynaDefinition(t), snap.currentSuiteChecks(), run.CheckSuiteID, replaceableHostedWorkflow(run))
+			class := classifyHostedSuite(watchDynaDefinition(t), snap.currentSuiteChecks(), run.CheckSuiteID, replaceableHostedWorkflow(run), tc.ownCancellation)
 			if class.realFailure != tc.wantRealFailure || (len(class.cancelledOnlyAggregates) > 0) != tc.wantAggregate {
 				t.Fatalf("classification = %+v, want real failure %t and aggregate %t", class, tc.wantRealFailure, tc.wantAggregate)
 			}
