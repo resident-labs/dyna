@@ -44,6 +44,7 @@ var ownerCalls = []string{
 	"CallRequestShown",
 	"MarkRead",
 	"MarkReadMany",
+	"MarkRoomRead",
 	"UpdateNotice",
 	"DismissNotice",
 	// A probe reads a machine over SSH and stores what it found; the owner
