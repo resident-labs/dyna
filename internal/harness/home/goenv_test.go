@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,8 +30,8 @@ func TestGoDefaultsKeepsTheToolchainOutOfTheCallersConfig(t *testing.T) {
 // The probe keeps every other variable the caller passed, so the toolchain still
 // answers with the owner's configured paths.
 func TestGoProbeEnvKeepsTheCallersEnvironment(t *testing.T) {
-	env := goProbeEnv([]string{"HOME=/owner", "PATH=/bin", "XDG_CONFIG_HOME=/tests/tree", "GOTELEMETRY=on"}, "/probe/config")
-	for _, want := range []string{"HOME=/owner", "PATH=/bin", "XDG_CONFIG_HOME=/probe/config", "GOTELEMETRY=off"} {
+	env := goProbeEnv([]string{"HOME=/owner", "PATH=/bin", "XDG_CONFIG_HOME=/tests/tree", "GOTELEMETRY=on"})
+	for _, want := range []string{"HOME=/owner", "PATH=/bin", "XDG_CONFIG_HOME=" + goProbeConfigHome, "GOTELEMETRY=off"} {
 		found := false
 		for _, pair := range env {
 			if pair == want {
@@ -80,7 +81,7 @@ func TestGoDefaultsKeepsTheOwnersSavedGoSettings(t *testing.T) {
 
 // An exported GOENV keeps its own file.
 func TestGoProbeEnvKeepsAnExportedGoEnv(t *testing.T) {
-	env := goProbeEnv([]string{"HOME=/owner", "GOENV=/custom/env"}, "/probe/config")
+	env := goProbeEnv([]string{"HOME=/owner", "GOENV=/custom/env"})
 	found := false
 	for _, pair := range env {
 		if pair == "GOENV=/custom/env" {
@@ -90,4 +91,18 @@ func TestGoProbeEnvKeepsAnExportedGoEnv(t *testing.T) {
 	if !found {
 		t.Fatalf("probe dropped the exported GOENV: %v", env)
 	}
+}
+
+// The probe's configuration directory must not be one the toolchain can write
+// telemetry counters into, or a late write leaves a folder behind (D-155).
+func TestGoProbeEnvConfigHomeCannotHoldFolders(t *testing.T) {
+	for _, pair := range goProbeEnv([]string{"HOME=/owner"}) {
+		if dir, ok := strings.CutPrefix(pair, "XDG_CONFIG_HOME="); ok {
+			if err := os.MkdirAll(filepath.Join(dir, "go", "telemetry"), 0o755); err == nil {
+				t.Fatalf("the toolchain can create folders under the probe's configuration directory %s", dir)
+			}
+			return
+		}
+	}
+	t.Fatal("the probe has no XDG_CONFIG_HOME")
 }
