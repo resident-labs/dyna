@@ -78,9 +78,14 @@ Each item in `checks` supports these fields:
 - `id` is required. It is the stable result identity, with lowercase letters,
   numbers, and hyphens.
 - `name` is the provider and display name. It defaults to `id`.
-- `command` is required. Dyna runs it with Bash from `/workspace` in a
-  container, or from the check worktree for a host check.
-- `image` is the container image. It is required unless `host: true` is set.
+- `command` is required unless `job` is set. Dyna runs it with Bash from
+  `/workspace` in a container, or from the check worktree for a host check.
+- `image` is the container image. It is required unless `host: true` or `job`
+  is set.
+- `job` names a GitHub Actions job instead of a command, so one definition runs
+  the same work as the provider. Dyna runs the job with a pinned `act` inside
+  the usual slot, deadline and report handling. See
+  [Workflow job checks](#workflow-job-checks).
 - `host: true` runs outside a container. The machine owner must allow this;
   see [Host checks](#host-checks).
 - `hostUser: true` starts a container as root, creates the host UID and GID,
@@ -106,6 +111,48 @@ Dyna supplies isolated home and temporary directories, report paths, a safe Git
 directory setting, and `JUNIT_REPORT_PATH`. The runner always writes
 `execution.json` from the check's admitted execution time. A `junit` or `go`
 command writes its XML under the same report directory.
+
+## Workflow job checks
+
+A check with `job` runs a job from a workflow file, in containers `act` starts,
+instead of running `command` itself:
+
+```yaml
+checks:
+  - id: go-static
+    job:
+      workflow: .github/workflows/ci.yml
+      name: go-static
+  - id: go-test-7
+    job:
+      workflow: .github/workflows/ci.yml
+      name: go-shard
+      matrix: ['shard:7']
+```
+
+- `workflow` is one file under `.github/workflows` of the same revision.
+- `name` is the job id in that file, not its display name.
+- `matrix` selects one configuration of a matrix job, as `key:value`. Each
+  configuration is its own check.
+
+The job runs as a `pull_request` event for the revision, with the pull
+request's base commit in the event payload. Dyna's own environment does not
+reach the job containers: `act` runs with a fixed `PATH`, its own home and an
+empty environment file, and jobs cannot use the machine's container socket.
+
+A workflow job needs the machine's host-check grant, because the workflow
+chooses the containers and their options. See [Host checks](#host-checks).
+
+Set `reports: junit` to read the JUnit the workflow uploaded as an artifact.
+An upload is stored as an archive, so Dyna unpacks it into the check's report
+directory before reading it.
+
+The machine's container runtime socket is a machine setting, for a host that
+runs rootless Podman instead of Docker:
+
+```sh
+dyna machine edit build-machine --container-socket unix:///run/user/1000/podman/podman.sock
+```
 
 ## Resource limits
 
