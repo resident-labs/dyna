@@ -17,19 +17,18 @@ func TestQuiet(t *testing.T) {
 	for name, tc := range map[string]struct {
 		list  []computers.Status
 		quiet bool
-		retry time.Duration
 	}{
-		"none":            {nil, true, 0},
-		"stopped":         {[]computers.Status{{State: computers.StateIdleStopped, Apps: app, IdleSeconds: 1}}, true, 0},
-		"app open":        {[]computers.Status{{State: computers.StateRunning, Apps: app, IdleSeconds: 9999}}, false, 0},
-		"recent input":    {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 600}}, false, 5 * time.Minute},
-		"idle long":       {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 900}}, true, 0},
-		"latest deadline": {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 800}, {State: computers.StateStarting, IdleSeconds: 0}}, false, 15 * time.Minute},
+		"none":                        {nil, true},
+		"stopped":                     {[]computers.Status{{State: computers.StateIdleStopped, Apps: app, IdleSeconds: 1}}, true},
+		"app open":                    {[]computers.Status{{State: computers.StateRunning, Apps: app, IdleSeconds: 9999}}, false},
+		"starting with an app":        {[]computers.Status{{State: computers.StateStarting, Apps: app}}, false},
+		"recent input and no app":     {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 5}}, true},
+		"only idle computers":         {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 60}, {State: computers.StateStarting, IdleSeconds: 0}}, true},
+		"one app among idle desktops": {[]computers.Status{{State: computers.StateRunning, IdleSeconds: 60}, {State: computers.StateRunning, Apps: app}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			reason, retry := Quiet(tc.list)
-			if (reason == "") != tc.quiet || retry != tc.retry {
-				t.Fatalf("Quiet = %q, %v; want quiet=%v retry=%v", reason, retry, tc.quiet, tc.retry)
+			if reason := Quiet(tc.list); (reason == "") != tc.quiet {
+				t.Fatalf("Quiet = %q; want quiet=%v", reason, tc.quiet)
 			}
 		})
 	}

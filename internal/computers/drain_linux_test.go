@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/userservices"
 )
 
 func setRestartPending(t *testing.T, pending bool) {
@@ -38,5 +39,25 @@ func TestDaemonReportsItsBuild(t *testing.T) {
 	got, err := (&daemon{}).dispatch(context.Background(), Request{Op: "version"})
 	if err != nil || got != "dev+test" {
 		t.Fatalf("version = %v, %v", got, err)
+	}
+}
+
+// A pending restart refuses new desktops for at most 10 minutes (the window the
+// service uses), then lets them start again, so a few busy computers cannot keep
+// every other computer stopped for hours.
+func TestPendingRestartRefusesNewDesktopsForTenMinutesOnly(t *testing.T) {
+	dir := t.TempDir()
+	if err := userservices.MarkRestartPending(dir); err != nil {
+		t.Fatal(err)
+	}
+	marked, ok := userservices.RestartPendingAt(dir)
+	if !ok {
+		t.Fatal("no marker")
+	}
+	started := marked.Add(-time.Hour)
+	for after, want := range map[time.Duration]bool{time.Minute: true, 9 * time.Minute: true, 11 * time.Minute: false, 3 * time.Hour: false} {
+		if got := userservices.RestartPendingSince(dir, started, marked.Add(after), restartDrainWindow); got != want {
+			t.Errorf("%v after the restart became pending: refused = %v, want %v", after, got, want)
+		}
 	}
 }
