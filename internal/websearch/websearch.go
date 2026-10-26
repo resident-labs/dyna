@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrNotSignedIn says one provider has no saved credential, so the chain skips
@@ -22,6 +23,9 @@ const (
 	MaxLimit = 10
 	// maxSnippet is the longest snippet a result carries.
 	maxSnippet = 300
+	// minAttempt is the least time one provider gets when the caller set a
+	// deadline, so a slow provider cannot spend the whole budget.
+	minAttempt = 5 * time.Second
 )
 
 // Result is one search result.
@@ -66,6 +70,10 @@ type Provider interface {
 type Chain []Provider
 
 // Search answers q from the first provider that can.
+//
+// Each provider may use only part of the caller's time, so a provider that
+// stalls still leaves the providers after it enough time to answer. Without a
+// caller deadline a provider is bounded by its own client timeout.
 func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
 	if strings.TrimSpace(q.Text) == "" {
 		return nil, errors.New("a search query is required")
@@ -78,9 +86,16 @@ func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		results, err := provider.Search(ctx, q)
+		try, cancel := attemptContext(ctx)
+		results, err := provider.Search(try, q)
+		cancel()
 		if err == nil {
 			return results, nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// The caller's own deadline is gone, so no provider after this one
+			// can answer either.
+			return nil, ctxErr
 		}
 		if errors.Is(err, ErrNotSignedIn) {
 			reasons = append(reasons, provider.Name()+" is not signed in")
@@ -89,6 +104,33 @@ func (c Chain) Search(ctx context.Context, q Query) ([]Result, error) {
 		reasons = append(reasons, provider.Name()+" failed: "+oneLine(err))
 	}
 	return nil, errors.New("web search found no provider: " + strings.Join(reasons, "; "))
+}
+
+// attemptContext bounds one provider's attempt to attemptBudget of the time the
+// caller left. Without a caller deadline a provider is bounded by its own
+// client timeout.
+func attemptContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return ctx, func() {}
+	}
+	left := time.Until(deadline)
+	if left <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, attemptBudget(left))
+}
+
+// attemptBudget is how long one provider may run when the caller has left this
+// much time: half of it, so the providers after it keep the other half. Half
+// would cut a short budget off before a provider starts, so it also never gives
+// less than minAttempt.
+func attemptBudget(left time.Duration) time.Duration {
+	attempt := left / 2
+	if attempt < minAttempt {
+		attempt = min(minAttempt, left)
+	}
+	return attempt
 }
 
 // oneLine keeps a provider's reason on the one line the tool reports.

@@ -478,7 +478,7 @@ func (t *Tools) webSearch(ctx context.Context, query string, limit int) (string,
 	if t.Search == nil {
 		return "", errors.New("web search is not available in this session")
 	}
-	answer, err := t.Search(ctx, callspec.WebSearchRequest{Query: query, Limit: limit})
+	answer, err := t.Search(ctx, callspec.WebSearchRequest{Query: query, Limit: limit, Dir: t.Cwd})
 	if err != nil {
 		return "", err
 	}

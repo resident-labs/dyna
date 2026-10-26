@@ -35,7 +35,7 @@ func seedPiLogin(t *testing.T, accounts *Accounts, piID, entry string, kind stor
 func TestPiChatGPTLoginReadsTheActiveSignIn(t *testing.T) {
 	accounts := testAccounts(t)
 	seedPiLogin(t, accounts, "openai-codex", `{"type":"oauth","access":"access-token","refresh":"refresh-token","expires":1,"accountId":"workspace"}`, store.KindOAuth)
-	access, account, err := accounts.PiChatGPTLogin(t.Context())
+	access, account, err := accounts.PiChatGPTLogin(t.Context(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +46,51 @@ func TestPiChatGPTLoginReadsTheActiveSignIn(t *testing.T) {
 
 func TestPiChatGPTLoginWithoutASignInIsNotSignedIn(t *testing.T) {
 	accounts := testAccounts(t)
-	if _, _, err := accounts.PiChatGPTLogin(t.Context()); !errors.Is(err, native.ErrNotSignedIn) {
+	if _, _, err := accounts.PiChatGPTLogin(t.Context(), "", ""); !errors.Is(err, native.ErrNotSignedIn) {
 		t.Fatalf("err = %v, want ErrNotSignedIn", err)
+	}
+}
+
+// A search from one repository never reads the login of an account the owner
+// limited to another repository, and the room's own selection wins.
+func TestPiChatGPTLoginKeepsTheAccountsRepositoryScope(t *testing.T) {
+	accounts := testAccounts(t)
+	limited := seedPiLogin(t, accounts, "openai-codex", `{"type":"oauth","access":"work-token","refresh":"refresh-token","expires":1,"accountId":"work"}`, store.KindOAuth)
+	if err := accounts.SetRepos(limited.ID, []string{"github.com/acme/work"}); err != nil {
+		t.Fatal(err)
+	}
+	access, _, err := accounts.PiChatGPTLogin(t.Context(), "", "github.com/acme/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access != "work-token" {
+		t.Fatalf("access = %q, want the account the repository allows", access)
+	}
+	// The same account must not answer for another repository.
+	if access, _, err = accounts.PiChatGPTLogin(t.Context(), "", "github.com/acme/personal"); err == nil {
+		t.Fatalf("another repository read %q, want the scope refused", access)
+	}
+	// A room may select another account of the same provider, and that account's
+	// own scope decides, while the global account keeps refusing that repository.
+	room := seedPiLogin(t, accounts, "openai-codex", `{"type":"oauth","access":"personal-token","refresh":"refresh-token","expires":1,"accountId":"personal"}`, store.KindOAuth)
+	if err := accounts.SetRepos(room.ID, []string{"github.com/acme/personal"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.setActiveAccount(limited); err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.SelectInScope(room, "room-1"); err != nil {
+		t.Fatal(err)
+	}
+	access, _, err = accounts.PiChatGPTLogin(t.Context(), "room-1", "github.com/acme/personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access != "personal-token" {
+		t.Fatalf("room selection read %q, want the account the room selected", access)
+	}
+	if access, _, err = accounts.PiChatGPTLogin(t.Context(), "", "github.com/acme/personal"); err == nil {
+		t.Fatalf("the global account read %q, want its scope to refuse the repository", access)
 	}
 }
 
@@ -56,14 +99,14 @@ func TestPiProviderKeyReadsTheSavedKey(t *testing.T) {
 	if _, err := r.AddProviderKey(t.Context(), "pi", store.ProviderBrave, "", "brave-key"); err != nil {
 		t.Fatal(err)
 	}
-	key, err := r.Accounts.PiProviderKey(t.Context(), store.ProviderBrave)
+	key, err := r.Accounts.PiProviderKey(t.Context(), store.ProviderBrave, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if key != "brave-key" {
 		t.Fatalf("key = %q, want the saved Brave key", key)
 	}
-	if _, err := r.Accounts.PiProviderKey(t.Context(), store.ProviderZAI); !errors.Is(err, native.ErrNotSignedIn) {
+	if _, err := r.Accounts.PiProviderKey(t.Context(), store.ProviderZAI, "", ""); !errors.Is(err, native.ErrNotSignedIn) {
 		t.Fatalf("another provider: err = %v, want ErrNotSignedIn", err)
 	}
 }

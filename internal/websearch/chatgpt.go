@@ -18,6 +18,10 @@ const (
 	// ChatGPTModel is the model that runs the search. The engine passes its own
 	// choice in ChatGPT.Model.
 	ChatGPTModel = "gpt-5-codex"
+	// chatGPTInstructions is the system prompt the Codex backend requires. The
+	// installed Pi Codex client always sends one, and a request without it is
+	// refused, so it is a constant rather than an option.
+	chatGPTInstructions = "You are Dyna's web search tool. Run one web search for the request and answer in a few sentences from the sources it returns."
 	// chatGPTSource is the header value OpenAI expects from a Codex sign-in.
 	chatGPTSource = "codex_cli_rs"
 	// chatGPTMaxStream caps one answer stream.
@@ -113,8 +117,9 @@ func chatGPTSearch(model, query string) chatGPTRequest {
 	prompt := "Search the web for: " + query +
 		"\n\nUse the web search tool. Answer in at most six sentences and cite every source you use."
 	return chatGPTRequest{
-		Model: model,
-		Input: []chatGPTTurn{{Role: "user", Content: []chatGPTPart{{Type: "input_text", Text: prompt}}}},
+		Model:        model,
+		Instructions: chatGPTInstructions,
+		Input:        []chatGPTTurn{{Role: "user", Content: []chatGPTPart{{Type: "input_text", Text: prompt}}}},
 		Tools: []chatGPTTool{{
 			Type: "web_search",
 			// The ChatGPT backend searches its index by default. A search tool
@@ -127,11 +132,14 @@ func chatGPTSearch(model, query string) chatGPTRequest {
 }
 
 type chatGPTRequest struct {
-	Model  string        `json:"model"`
-	Input  []chatGPTTurn `json:"input"`
-	Tools  []chatGPTTool `json:"tools"`
-	Store  bool          `json:"store"`
-	Stream bool          `json:"stream"`
+	Model string `json:"model"`
+	// Instructions is the system prompt; the backend refuses a request without
+	// one.
+	Instructions string        `json:"instructions"`
+	Input        []chatGPTTurn `json:"input"`
+	Tools        []chatGPTTool `json:"tools"`
+	Store        bool          `json:"store"`
+	Stream       bool          `json:"stream"`
 }
 
 type chatGPTTurn struct {

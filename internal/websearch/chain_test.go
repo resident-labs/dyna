@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeProvider answers as its errors say: a not-signed-in provider is skipped.
@@ -72,6 +73,51 @@ func TestChainNamesEveryProviderWhenAllFail(t *testing.T) {
 	}
 	if strings.Contains(message, "\n") {
 		t.Fatalf("error spans more than one line: %q", message)
+	}
+}
+
+// A provider that runs past its own attempt is cut short, and the next provider
+// still answers: the attempt deadline is earlier than the caller's, so a stalled
+// provider never spends the fallback's time.
+func TestChainGivesAFallbackItsOwnTime(t *testing.T) {
+	deadline := time.Now().Add(time.Minute)
+	ctx, cancel := context.WithDeadline(t.Context(), deadline)
+	defer cancel()
+	asked := 0
+	stalled := Chain{
+		fakeProvider{name: "chatgpt", err: context.DeadlineExceeded, calls: &asked},
+		fakeProvider{name: "brave", results: []Result{{Title: "Go", URL: "https://go.dev"}}, calls: &asked},
+	}
+	got, err := stalled.Search(ctx, Query{Text: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].URL != "https://go.dev" || asked != 2 {
+		t.Fatalf("results = %+v after %d providers, want brave's answer after both", got, asked)
+	}
+	// Each attempt carries its own deadline, earlier than the caller's.
+	try, release := attemptContext(ctx)
+	defer release()
+	attempt, ok := try.Deadline()
+	if !ok || !attempt.Before(deadline) {
+		t.Fatalf("attempt deadline = %v, want one before the caller's %v", attempt, deadline)
+	}
+	if budget := attemptBudget(time.Minute); budget != 30*time.Second {
+		t.Fatalf("budget of one minute = %v, want half of it", budget)
+	}
+	if budget := attemptBudget(4 * time.Second); budget != 4*time.Second {
+		t.Fatalf("budget of four seconds = %v, want the whole of it", budget)
+	}
+}
+
+// A caller deadline that is already gone stops the chain instead of asking a
+// provider a question it cannot finish.
+func TestChainStopsWhenTheCallersDeadlineIsGone(t *testing.T) {
+	asked := 0
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := (Chain{fakeProvider{name: "brave", results: []Result{{URL: "https://go.dev"}}, calls: &asked}}).Search(ctx, Query{Text: "go"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the caller's deadline; providers asked %d", err, asked)
 	}
 }
 
