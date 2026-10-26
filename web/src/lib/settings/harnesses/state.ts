@@ -162,19 +162,10 @@ export function rowLine(row: Pick<HarnessRow, 'id' | 'installing' | 'needsInstal
   return `${who} · ${row.version}`
 }
 
+// toolEnabledForHarness says whether an MCP server is on for one harness. A
+// skill has one global switch, so it has no per-harness list.
 export function toolEnabledForHarness(entry: { enabledHarnesses?: string[] } | null | undefined, harnessId: string): boolean {
   return (entry?.enabledHarnesses ?? []).includes(harnessId)
-}
-
-// HarnessTab is one of the two views of the harness settings pane.
-export type HarnessTab = 'harnesses' | 'tools'
-
-// nextTab is the view that a tablist key moves to, or null for any other key.
-export function nextTab(current: string, key: string): HarnessTab | null {
-  if (key === 'Home') return 'harnesses'
-  if (key === 'End') return 'tools'
-  if (key !== 'ArrowLeft' && key !== 'ArrowRight') return null
-  return current === 'harnesses' ? 'tools' : 'harnesses'
 }
 
 // toolSummary is an MCP server's line under its name: its URL, or the command

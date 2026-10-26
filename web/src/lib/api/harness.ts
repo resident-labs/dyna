@@ -39,6 +39,8 @@ export interface Doctor {
 }
 
 // Capability is runtime.Capability, what Dyna supports for a harness.
+// Skills are not a harness capability: Dyna owns one catalog and every
+// session reads it, so there is no per-harness skill support to report.
 export interface Capability {
   harness: string
   status: string
@@ -144,6 +146,8 @@ export interface ManagedMCP {
   exposure?: 'codemode' | 'codemode-deferred' | 'deferred' | 'direct' | 'hidden'
   enabledHarnesses: string[]
 }
+// Every session reads each enabled skill, so a skill has one global switch
+// and no per-harness enablement.
 export interface ManagedSkill {
   name: string
   source: string
