@@ -154,6 +154,9 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "ID:       %s\n", m.ID)
 			fmt.Fprintf(out, "Roles:    %s\n", m.RoleNames())
 			fmt.Fprintf(out, "SSH:      %s\n", ssh)
+			if !m.Local {
+				fmt.Fprintf(out, "SSH connect timeout: %s\n", m.ConnectTimeout())
+			}
 			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
 			if m.HasRole(machines.RoleCI) {
 				fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
@@ -340,6 +343,7 @@ func editCommand() *cobra.Command {
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
 	var containerSocket string
+	var connectTimeout time.Duration
 	var suites []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
@@ -397,6 +401,13 @@ func editCommand() *cobra.Command {
 				}
 				patch.ContainerSocket, changed = &containerSocket, true
 			}
+			if c.Flags().Changed("ssh-connect-timeout") {
+				seconds, err := connectTimeoutSeconds(connectTimeout)
+				if err != nil {
+					return err
+				}
+				patch.SSHConnectTimeoutSeconds, changed = &seconds, true
+			}
 			if allowHostChecks || disallowHostChecks {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
@@ -422,9 +433,19 @@ func editCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
 	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
 	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
+	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the machine, such as 60s (0 restores the default of 10s)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
+}
+
+// connectTimeoutSeconds turns the flag into whole seconds, the unit ssh reads.
+// Zero restores the default.
+func connectTimeoutSeconds(timeout time.Duration) (int, error) {
+	if timeout < 0 || timeout%time.Second != 0 || timeout > machines.MaxSSHConnectTimeout {
+		return 0, fmt.Errorf("ssh connect timeout must be whole seconds, such as 60s, up to %s", machines.MaxSSHConnectTimeout)
+	}
+	return int(timeout / time.Second), nil
 }
 
 func removeCommand() *cobra.Command {

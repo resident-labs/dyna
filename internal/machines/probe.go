@@ -310,12 +310,20 @@ func (p Prober) health(m Machine, caps Capabilities) (Health, HealthReason) {
 	return HealthOnline, ReasonNone
 }
 
+// probeBudgetFor is the longest one probe of this machine may take: the time
+// ssh may spend connecting, plus the time the script needs. A machine with the
+// default connect timeout gets probeBudget.
+func probeBudgetFor(m Machine) time.Duration {
+	return probeBudget - DefaultSSHConnectTimeout + m.ConnectTimeout()
+}
+
 // Probe runs the probe script on one machine and parses what it printed. A
 // machine that cannot be reached comes back as the message to show the owner,
 // not as an error. An error means the caller stopped the probe, so there is no
 // result to store.
 func (p Prober) Probe(ctx context.Context, m Machine) (Capabilities, Load, string, error) {
-	budget, cancel := context.WithTimeout(ctx, probeBudget)
+	total := probeBudgetFor(m)
+	budget, cancel := context.WithTimeout(ctx, total)
 	defer cancel()
 	var out, stderr bytes.Buffer
 	err := p.run(budget, m, &out, &stderr)
@@ -324,11 +332,11 @@ func (p Prober) Probe(ctx context.Context, m Machine) (Capabilities, Load, strin
 		return Capabilities{}, Load{}, "", ctx.Err()
 	}
 	if err != nil {
-		return Capabilities{}, Load{}, probeFailure(ctx, err, stderr.String()), nil
+		return Capabilities{}, Load{}, probeFailure(budget, total, err, stderr.String()), nil
 	}
 	caps, load, err := parseProbe(out.String())
 	if err != nil {
-		return Capabilities{}, Load{}, probeFailure(ctx, err, stderr.String()), nil
+		return Capabilities{}, Load{}, probeFailure(budget, total, err, stderr.String()), nil
 	}
 	if m.Local {
 		p.localLoad(&load)
@@ -373,7 +381,7 @@ func (p Prober) run(ctx context.Context, m Machine, out, stderr io.Writer) error
 		return command(ctx, "", in, out, stderr, "sh", "-s")
 	}
 	return command(ctx, "", in, out, stderr, "ssh",
-		"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", m.SSH, "sh", "-s")
+		"-o", "BatchMode=yes", "-o", SSHConnectTimeoutOption(m.SSHConnectTimeout), m.SSH, "sh", "-s")
 }
 
 // execCommand runs a real command. WaitDelay bounds a child that keeps the
@@ -387,9 +395,9 @@ func execCommand(ctx context.Context, dir string, in io.Reader, out, stderr io.W
 }
 
 // probeFailure builds the message to show the owner for a failed probe.
-func probeFailure(ctx context.Context, err error, stderr string) string {
+func probeFailure(ctx context.Context, total time.Duration, err error, stderr string) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("probe timed out after %s", probeBudget)
+		return fmt.Sprintf("probe timed out after %s", total)
 	}
 	message := strings.TrimSpace(err.Error())
 	if detail := strings.TrimSpace(stderr); detail != "" && !strings.Contains(message, detail) {

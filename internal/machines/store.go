@@ -15,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,6 +77,10 @@ type Machine struct {
 	// this machine, as a DOCKER_HOST value. It is empty for Docker's socket, so
 	// a rootless Podman machine can name its own without changing anything else.
 	ContainerSocket string `json:"containerSocket,omitempty"`
+	// SSHConnectTimeout is how long an ssh to this machine waits for the
+	// connection. Zero means DefaultSSHConnectTimeout. A machine reached through
+	// a slow jump host needs a longer wait than a fixed one allows.
+	SSHConnectTimeout time.Duration `json:"sshConnectTimeoutNs,omitempty"`
 	// Enabled turns the machine's work off. A disabled machine takes no new CI
 	// runs. On the local row it stops that work, not the engine, which keeps
 	// running.
@@ -120,6 +125,34 @@ type HostChecksGrant struct {
 // DefaultContainerSocket is the Docker socket a machine uses when it names no
 // container runtime of its own.
 const DefaultContainerSocket = "unix:///var/run/docker.sock"
+
+// DefaultSSHConnectTimeout is the ssh connect wait of a machine that names no
+// timeout of its own.
+const DefaultSSHConnectTimeout = 10 * time.Second
+
+// MaxSSHConnectTimeout bounds a stored connect timeout, so a typo cannot hold a
+// CI slot for hours.
+const MaxSSHConnectTimeout = 10 * time.Minute
+
+// ConnectTimeout is how long an ssh to this machine waits for the connection.
+func (m Machine) ConnectTimeout() time.Duration {
+	return ConnectTimeout(m.SSHConnectTimeout)
+}
+
+// ConnectTimeout reads a stored connect timeout: zero means the default.
+func ConnectTimeout(stored time.Duration) time.Duration {
+	if stored <= 0 {
+		return DefaultSSHConnectTimeout
+	}
+	return stored
+}
+
+// SSHConnectTimeoutOption is the ssh -o value for a connect timeout. ssh reads
+// whole seconds, so a shorter wait rounds up to one second.
+func SSHConnectTimeoutOption(timeout time.Duration) string {
+	seconds := int((ConnectTimeout(timeout) + time.Second - 1) / time.Second)
+	return "ConnectTimeout=" + strconv.Itoa(seconds)
+}
 
 // DockerHost is the DOCKER_HOST value this machine's workflow jobs use.
 func (m Machine) DockerHost() string {
@@ -248,6 +281,9 @@ func (m Machine) Validate() error {
 			return err
 		}
 	}
+	if m.SSHConnectTimeout < 0 || m.SSHConnectTimeout > MaxSSHConnectTimeout {
+		return fmt.Errorf("SSH connect timeout must not be negative or longer than %s", MaxSSHConnectTimeout)
+	}
 	if m.HasRole(RoleCI) && m.CISlots < 1 {
 		return errors.New("a machine with the ci role needs at least one CI slot")
 	}
@@ -305,7 +341,7 @@ func validateSuiteList(suites []string) error {
 	return nil
 }
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -327,7 +363,8 @@ const schema = `CREATE TABLE machines (
 	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms)),
 	suites         TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(suites)),
-	container_socket TEXT  NOT NULL DEFAULT ''
+	container_socket TEXT  NOT NULL DEFAULT '',
+	ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0)
 );
 
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
@@ -364,7 +401,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -452,6 +489,13 @@ func prepare(conn *sql.Conn, old int) error {
 		// A machine without its own runtime socket uses Docker's, which is what
 		// every machine allowed before it could name one.
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN container_socket TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if old < 9 {
+		// A machine with no stored timeout waits the default, which is what every
+		// machine waited before it could name one.
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN ssh_connect_timeout_ms INTEGER NOT NULL DEFAULT 0 CHECK(ssh_connect_timeout_ms >= 0)`); err != nil {
 			return err
 		}
 	}
@@ -726,11 +770,12 @@ type scanner interface{ Scan(...any) error }
 func scan(row scanner) (Machine, error) {
 	var m Machine
 	var roles, capabilities, health, reason, load, probeError, grants, rooms, suites string
-	var created, updated, probed, seen int64
+	var created, updated, probed, seen, connectMs int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms, &suites, &m.ContainerSocket, &connectMs); err != nil {
 		return Machine{}, err
 	}
+	m.SSHConnectTimeout = time.Duration(connectMs) * time.Millisecond
 	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
 		return Machine{}, fmt.Errorf("machine %s host-check grants: %w", m.Name, err)
 	}
@@ -928,8 +973,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 			if !m.HasRole(RoleCI) {
 				grants = "host_checks_grants='[]'"
 			}
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=?, suites=?, container_socket=?, ssh_connect_timeout_ms=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds(), m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -939,9 +984,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms,suites,container_socket,ssh_connect_timeout_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms, suites, m.ContainerSocket, m.SSHConnectTimeout.Milliseconds())
 		return err
 	})
 	if err != nil {

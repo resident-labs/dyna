@@ -75,5 +75,5 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 // creation of a machine decide where the engine sends work, which is the
 // owner's to set.
 func onlyHostChecks(patch websvc.MachinePatch) bool {
-	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil && patch.ContainerSocket == nil
+	return !patch.Create && !patch.Remove && patch.Name == nil && patch.Suites == nil && patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil && patch.ContainerSocket == nil && patch.SSHConnectTimeoutSeconds == nil
 }
