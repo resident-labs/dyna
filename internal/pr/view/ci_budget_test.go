@@ -10,7 +10,7 @@ func TestSetRoomCIBudgetResolvesRoomAndScopesChanges(t *testing.T) {
 	e := newEnv(t)
 	alpha, beta := e.room("budget-alpha"), e.room("budget-beta")
 	// Web mutations act as the owner, independent of the engine's stamp.
-	t.Setenv(mode.EnvMode, mode.Workflow)
+	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, "ses_engine_worker")
 	t.Setenv(mode.EnvRoomID, beta.ID)
 	p := prview.CIBudgetSettings{CITimeBudget: "warn", CIWarnAfter: "4m", CIFailAfter: "5m", CITestMax: "20s", CITestAllow: []string{"pkg/slow"}, CITestAllowNotes: map[string]string{"pkg/slow": "12 seconds: setup"}}

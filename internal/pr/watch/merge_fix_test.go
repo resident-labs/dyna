@@ -279,11 +279,9 @@ func TestMergeFixAuditWakeFollowsActor(t *testing.T) {
 func TestMergeFixRefusesStampedProcessesBeforeStore(t *testing.T) {
 	for _, stamp := range []struct{ key, value string }{
 		{"DYNA_MODE", "subagent"},
-		{"DYNA_MODE", "workflow"},
 		{"DYNA_MODE", "unknown"},
 		{"DYNA_SESSION", "bare-session"},
 		{"DYNA_WORKER_RUN", "bare-run"},
-		{"DYNA_WORKER_AGENT", "bare-worker"},
 	} {
 		t.Run(stamp.key+"/"+stamp.value, func(t *testing.T) {
 			storetest.ClearStamp(t)

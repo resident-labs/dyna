@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/subagent"
@@ -114,21 +113,10 @@ func (r *resolver) senderAddress(rec room.Record) string {
 		return r.snd.Session.Address()
 	case SenderScript:
 		return "run:" + r.snd.RunID
-	case SenderWorker:
-		return fmt.Sprintf("run:%s/agent:%d", r.snd.RunID, r.snd.Agent)
 	case SenderVoice:
 		return rec.Name + ":" + room.VoiceAgent
 	}
 	return rec.Name
-}
-
-// sessionAllowed applies the workflow-worker rule: a worker's shell may not
-// reach a Dyna session; the script's post() is the controlled surface.
-func (r *resolver) sessionAllowed(tok string) error {
-	if r.snd.Kind == SenderWorker || mode.InWorkflow() && r.snd.Kind != SenderScript {
-		return fmt.Errorf("%s: a workflow worker may post to @root or to workers of its own run; its script reaches sessions with post()", tok)
-	}
-	return nil
 }
 
 // usable reports why a session cannot take a post, or "". Recovery paths
@@ -330,9 +318,6 @@ func (r *resolver) self(info subagent.Info) bool {
 
 // named checks an explicitly named session. Any problem rejects the post.
 func (r *resolver) named(tok string, info subagent.Info) (recipient, error) {
-	if err := r.sessionAllowed(tok); err != nil {
-		return recipient{}, err
-	}
 	if r.self(info) && !r.allowSelf {
 		return recipient{}, fmt.Errorf("%s is you; a post cannot mention its sender", tok)
 	}
@@ -369,7 +354,7 @@ func (r *resolver) parent(tok string, rec room.Record) (recipient, error) {
 	switch r.snd.Kind {
 	case SenderSession:
 		parentID = r.snd.Session.ParentSession
-	case SenderScript, SenderWorker:
+	case SenderScript:
 		meta, err := runstore.ReadMeta(r.snd.RunID)
 		if err != nil {
 			return recipient{}, err
@@ -391,9 +376,6 @@ func (r *resolver) parent(tok string, rec room.Record) (recipient, error) {
 	}
 	if r.snd.Kind != SenderSession && parent.Status == subagent.StatusClosed {
 		return owner, nil
-	}
-	if err := r.sessionAllowed(tok); err != nil {
-		return recipient{}, err
 	}
 	// A parent that is the room's root is the seat itself: @parent names the
 	// room's own address, exactly as @root does, whether the internal root or an
@@ -435,9 +417,6 @@ func (r *resolver) group(tok, sel string, rec room.Record) ([]recipient, []Skip,
 	default:
 		return nil, nil, fmt.Errorf("%s: only a session can use @siblings or @children", tok)
 	}
-	if err := r.sessionAllowed(tok); err != nil {
-		return nil, nil, err
-	}
 	sessions, err := r.open()
 	if err != nil {
 		return nil, nil, err
@@ -465,32 +444,20 @@ func (r *resolver) group(tok, sel string, rec room.Record) ([]recipient, []Skip,
 	return out, skipped, nil
 }
 
-// worker resolves @run:<id>/agent:<n>.
+// worker resolves @run:<id>/agent:<n> to the leaf session that serves that
+// agent call, which takes the post as any session does.
 func (r *resolver) worker(tok, body string) (recipient, error) {
 	parts := strings.Split(strings.TrimPrefix(body, "run:"), "/agent:")
 	if len(parts) != 2 {
-		return recipient{}, fmt.Errorf("workflow worker mention must be @run:<run-id>/agent:<n>, got %q", tok)
+		return recipient{}, fmt.Errorf("workflow agent mention must be @run:<run-id>/agent:<n>, got %q", tok)
 	}
 	agent, err := strconv.Atoi(parts[1])
 	if err != nil || agent < 1 {
-		return recipient{}, fmt.Errorf("invalid workflow worker mention %q", tok)
+		return recipient{}, fmt.Errorf("invalid workflow agent mention %q", tok)
 	}
-	if r.snd.Kind == SenderWorker && parts[0] != r.snd.RunID {
-		return recipient{}, fmt.Errorf("%s: a workflow worker may only post to workers of its own run", tok)
+	info, err := r.s.sessionStore().Inspect(subagent.RunAgentID(parts[0], agent))
+	if err != nil || info.Status == subagent.StatusClosed {
+		return recipient{}, fmt.Errorf("%s: agent %d of run %s is not running", tok, agent, parts[0])
 	}
-	if r.snd.Kind == SenderWorker && agent == r.snd.Agent {
-		return recipient{}, fmt.Errorf("%s is you; a post cannot mention its sender", tok)
-	}
-	meta, err := runstore.ReadMeta(parts[0])
-	if err != nil {
-		return recipient{}, err
-	}
-	if meta.RoomID == "" {
-		return recipient{}, errNoRoom
-	}
-	rec, err := r.room(meta.RoomID)
-	if err != nil {
-		return recipient{}, err
-	}
-	return recipient{kind: toWorker, addr: fmt.Sprintf("run:%s/agent:%d", parts[0], agent), rec: rec, runID: parts[0], agent: agent}, nil
+	return r.sessionRecipient(info)
 }

@@ -29,7 +29,7 @@ func TestCallRootAuthority(t *testing.T) {
 	}
 	// A caller-supplied root role must not override the stored ordinary session.
 	forged := Sender{Kind: SenderSession, Room: rec.Name, Session: subagent.Info{Meta: subagent.Meta{ID: meta.ID, Role: subagent.RoleRoot}}}
-	for _, snd := range []Sender{{Kind: SenderOwner, Human: true}, {Kind: SenderWorker}, {Kind: SenderScript}, {Kind: SenderVoice}, forged} {
+	for _, snd := range []Sender{{Kind: SenderOwner, Human: true}, {Kind: SenderScript}, {Kind: SenderVoice}, forged} {
 		if _, err := s.RequestCall(snd, "", "Urgent decision"); err == nil || !strings.Contains(err.Error(), "root only") {
 			t.Fatalf("request sender %v: %v", snd.Kind, err)
 		}

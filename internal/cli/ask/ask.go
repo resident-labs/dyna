@@ -134,9 +134,6 @@ func list(c *cobra.Command, s *notify.Service, snd notify.Sender, ref string, op
 	if snd.Kind == notify.SenderSession {
 		asker = snd.Session.ID
 	}
-	if snd.Kind == notify.SenderWorker {
-		asker = fmt.Sprintf("run:%s/agent:%d", snd.RunID, snd.Agent)
-	}
 	out := qs[:0]
 	for _, q := range qs {
 		if open && q.State != "open" {

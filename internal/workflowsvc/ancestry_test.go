@@ -20,7 +20,7 @@ import (
 func refuseAncestry(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	for _, key := range []string{mode.EnvMode, mode.EnvSession, mode.EnvWorkerRun, mode.EnvWorkerAgent, mode.EnvRoom, mode.EnvRoomID, "DYNA_RUN_ID", "DYNA_AGENT_JOURNAL_ROOT"} {
+	for _, key := range []string{mode.EnvMode, mode.EnvSession, mode.EnvWorkerRun, mode.EnvRoom, mode.EnvRoomID, "DYNA_RUN_ID", "DYNA_AGENT_JOURNAL_ROOT"} {
 		t.Setenv(key, "")
 	}
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "StampPlanAncestry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(context.Context, string, string) (string, error) {

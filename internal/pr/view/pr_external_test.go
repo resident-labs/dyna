@@ -79,7 +79,7 @@ func TestChangesIncludeLocalRowsAndEnforceReplyRoom(t *testing.T) {
 	e := newEnv(t)
 	alpha, beta := e.room("changes-alpha"), e.room("changes-beta")
 	// Web mutations act as the owner, independent of the engine's stamp.
-	t.Setenv(mode.EnvMode, mode.Workflow)
+	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, "ses_engine_worker")
 	t.Setenv(mode.EnvRoomID, beta.ID)
 	st := watch.State{Version: 1, Records: map[string]*watch.Record{

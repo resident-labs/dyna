@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
@@ -28,7 +27,7 @@ func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Re
 	if err != nil {
 		return Delivery{To: addr, Delivery: "failed", Error: err.Error()}, true
 	}
-	if !ok || !seat.RootInput() || mode.InWorkflow() {
+	if !ok || !seat.RootInput() {
 		return Delivery{}, false
 	}
 	cur, err := s.Rooms.Resolve(rec.ID)

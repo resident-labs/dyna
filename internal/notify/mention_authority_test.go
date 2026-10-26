@@ -47,7 +47,6 @@ func TestVoiceCallSenderAuthority(t *testing.T) {
 		{"root session", Sender{Kind: SenderSession, Room: rec.Name, Session: root}, true},
 		{"session", Sender{Kind: SenderSession, Room: rec.Name, Session: session}, false},
 		{"script", Sender{Kind: SenderScript, Room: rec.Name}, false},
-		{"worker", Sender{Kind: SenderWorker, Room: rec.Name}, false},
 		{"voice", Sender{Kind: SenderVoice, Room: rec.Name}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

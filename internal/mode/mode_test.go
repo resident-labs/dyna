@@ -11,7 +11,6 @@ func TestRootModeActsAsOwner(t *testing.T) {
 	t.Setenv(EnvRoom, "amber-otter-42")
 	t.Setenv(EnvAddress, "")
 	t.Setenv(EnvWorkerRun, "")
-	t.Setenv(EnvWorkerAgent, "")
 
 	if s, ok := CurrentSession(); ok {
 		t.Fatalf("CurrentSession() = %#v, want root", s)
@@ -25,7 +24,7 @@ func TestRootModeActsAsOwner(t *testing.T) {
 }
 
 func TestOwnerProcessRejectsDynaStamps(t *testing.T) {
-	for _, env := range [][2]string{{EnvMode, Subagent}, {EnvMode, Workflow}, {EnvSession, "ses_x"}, {EnvRoomID, "room_x"}, {EnvWorkerRun, "run_x"}, {EnvWorkerAgent, "1"}} {
+	for _, env := range [][2]string{{EnvMode, Subagent}, {EnvSession, "ses_x"}, {EnvRoomID, "room_x"}, {EnvWorkerRun, "run_x"}} {
 		t.Run(env[0]+"="+env[1], func(t *testing.T) {
 			for _, k := range StampKeys() {
 				t.Setenv(k, "")

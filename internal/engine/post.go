@@ -35,13 +35,15 @@ func postSender(caller websvc.Caller, local bool, actor authority.Actor, claim n
 		return notify.Sender{}, errors.New("the engine could not verify who is posting")
 	}
 	as.Room = claim.Room
+	// A run's coordinator posts only through its script's post().
+	if as.Run != "" {
+		return notify.Sender{}, errors.New("a workflow run's coordinator posts only through its script's post()")
+	}
 	return senderOf(as)
 }
 
 // verified is the claim that the resolved caller proves, if it proves one.
-// A workflow agent proves its own agent number: its harness process is
-// recorded for it. A dyna command in the first moment after a harness starts
-// resolves to agent 0 of the right run.
+// A run's coordinator proves its run, with agent 0.
 func verified(caller websvc.Caller, local bool, actor authority.Actor) (notify.Claim, bool) {
 	switch {
 	case !local || caller.Kind == websvc.Owner:

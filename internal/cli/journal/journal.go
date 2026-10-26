@@ -43,7 +43,7 @@ func Command(g Goals) *cobra.Command {
 		Short: "Append a progress entry to this worker's journal, or to your goal's journal",
 		Long: `Append a progress entry to this worker's journal.
 
-A workflow worker writes to its own journal. A persistent session has no worker
+A workflow agent writes to its run-owned journal. A persistent session has no run
 journal. If it holds exactly one open goal, the entry goes to that goal's journal,
 like "dyna goal note <goal> <text>"; the kind and next step become part of the
 note text. With no open goal or with several, use "dyna goal note <goal> "<text>"".`,

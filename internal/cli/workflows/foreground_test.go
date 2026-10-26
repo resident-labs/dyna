@@ -31,6 +31,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/websvc"
+	"dyna-agent/internal/workflow/enginefake"
 	"dyna-agent/internal/workflowsvc"
 )
 
@@ -259,6 +260,7 @@ func serveProductionWorkflowEngine(t *testing.T) {
 	for name, call := range lifecycle {
 		calls[name] = call
 	}
+	addAgentCalls(t, calls)
 	actForVerifiedCallers(calls)
 	enginetest.ServeCallers(t, store.DataDir, verifiedCallers(t, store.DataDir), calls)
 }
@@ -489,7 +491,21 @@ func serveWorkflowEngine(t *testing.T) {
 	for name, call := range lifecycle {
 		calls[name] = call
 	}
+	addAgentCalls(t, calls)
 	enginetest.Serve(t, store.DataDir, calls)
+}
+
+// addAgentCalls serves the run-agent calls with the fake engine, which runs
+// each agent on its profile's harness in the test process.
+func addAgentCalls(t *testing.T, calls map[string]websvc.Call) {
+	t.Helper()
+	agents, err := websvc.Bind((&enginefake.Engine{}).Bindings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, call := range agents {
+		calls[name] = call
+	}
 }
 
 func workflowLifecycleCalls(t *testing.T) map[string]websvc.Call {

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/store/storetest"
 )
 
@@ -60,7 +59,7 @@ func TestCurrent(t *testing.T) {
 	for _, tc := range []struct {
 		mode string
 		role Role
-	}{{"", Owner}, {"root", Root}, {"subagent", Session}, {"workflow", Worker}} {
+	}{{"", Owner}, {"root", Root}, {"subagent", Session}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			t.Setenv("DYNA_MODE", tc.mode)
 			session, room := "ses-test", "room-test"
@@ -68,12 +67,7 @@ func TestCurrent(t *testing.T) {
 				session, room = "", ""
 			}
 			t.Setenv("DYNA_SESSION", session)
-			run, agent := "", ""
-			if tc.role == Worker {
-				run, agent = "run_a", "1"
-			}
-			t.Setenv("DYNA_WORKER_RUN", run)
-			t.Setenv("DYNA_WORKER_AGENT", agent)
+			t.Setenv("DYNA_WORKER_RUN", "")
 			t.Setenv("DYNA_ROOM_ID", room)
 			t.Setenv("DYNA_ROOM", "")
 			if actor := Current(); actor.Role != tc.role || actor.Session != session || actor.Room != room {
@@ -153,23 +147,9 @@ func TestEngineRefusesAContextWithoutAnActor(t *testing.T) {
 	}
 }
 
-// A workflow worker's actor names its run and agent, so checks and logs can
-// say which run acted.
-func TestWorkerActorNamesItsRunAndAgent(t *testing.T) {
-	t.Setenv(mode.EnvMode, mode.Workflow)
-	t.Setenv(mode.EnvSession, "")
-	t.Setenv(mode.EnvWorkerRun, "run_a")
-	t.Setenv(mode.EnvWorkerAgent, "3")
-	if got := Current(); got.Role != Worker || got.Run != "run_a" || got.Agent != 3 {
-		t.Fatalf("Current() = %+v, want worker 3 of run_a", got)
-	}
-	for _, env := range [][2]string{{"", "3"}, {"run_a", "x"}} {
-		t.Setenv(mode.EnvWorkerRun, env[0])
-		t.Setenv(mode.EnvWorkerAgent, env[1])
-		if got := Current(); got.Role != "" {
-			t.Errorf("a worker stamped run %q agent %q is %+v, want no role", env[0], env[1], got)
-		}
-	}
+// A run coordinator's actor names its run, so checks and logs can say which
+// run acted.
+func TestWorkerActorNamesItsRun(t *testing.T) {
 	if got, err := WorkerActor("run_a", 0); err != nil || got != (Actor{Role: Worker, Run: "run_a"}) {
 		t.Fatalf("the run itself = %+v, %v", got, err)
 	}

@@ -7,7 +7,7 @@ import (
 
 // Retired profile review APIs must not expose the removed store.
 func TestProfileReviewAPIsAreAbsent(t *testing.T) {
-	result, err := Execute(context.Background(), Options{
+	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `return {
    rateProfile: typeof rateProfile,
    summary: typeof __profileReviewSummary,

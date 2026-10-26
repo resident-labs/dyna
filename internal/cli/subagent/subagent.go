@@ -52,7 +52,7 @@ Dyna workflows and other Dyna subagents. Post to it with ` + "`dyna post @<addre
 it works to steer it (delivered at its next tool boundary), or after its turn ends
 to start a follow-up turn in the same conversation.
 
-Workers inside a dyna workflow (workflow mode) can never start subagents.
+Leaf sessions, such as the agents of a dyna workflow, can never start subagents.
 Run ` + "`dyna guide`" + ` for when to use a subagent instead of a workflow.`,
 	}
 	cmd.AddCommand(

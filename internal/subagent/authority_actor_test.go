@@ -61,15 +61,11 @@ func TestAuthorityActorSkipsLookupForProcessRoles(t *testing.T) {
 		mode string
 		want authority.Role
 	}{
-		{"", authority.Owner}, {mode.Root, authority.Root}, {mode.Workflow, authority.Worker},
+		{"", authority.Owner}, {mode.Root, authority.Root},
 	} {
 		t.Run(string(tc.want), func(t *testing.T) {
 			clearStamp(t)
 			t.Setenv(mode.EnvMode, tc.mode)
-			if tc.mode == mode.Workflow {
-				// A worker needs its run stamp to have a role.
-				t.Setenv(mode.EnvWorkerRun, "run_a")
-			}
 			var m *Manager
 			got, err := m.AuthorityActor(context.Background())
 			if err != nil || got.Role != tc.want {

@@ -43,7 +43,7 @@ return {
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	result, err := Execute(ctx, Options{ScriptSrc: script, Store: store, WorkDir: t.TempDir()})
+	result, err := executeTest(ctx, Options{ScriptSrc: script, Store: store, WorkDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

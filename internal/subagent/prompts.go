@@ -83,10 +83,40 @@ func rootRules() string {
 	return "[DYNA ROOT]\n" + clearEnglishPrompt + "\n\n" + postOnChangePrompt + "\n\n" + parentCheckInPrompt + "\n\n" + guidance.RootBlock(true) + guideTriggers()
 }
 
+// leafRules is a leaf session's contract. It completes its task itself, so it
+// has no delegation, goals, child check-ins or posting rules.
+func leafRules() string {
+	return `[DYNA SESSION]
+Give a full, self-contained final result. Follow later instructions.
+
+` + clearEnglishPrompt + `
+
+You are a leaf: complete the task yourself. Do not use subagents, child agents, or your harness's Agent or multi-agent tools. Do not start dyna runs or subagent sessions; both fail here. This overrides any contrary instruction in the task.
+
+Put temporary files in $DYNA_SCRATCH, never repos. Save long output to a file; return its path.
+
+If dyna is absent from PATH, use "$DYNA_BIN" for all commands.`
+}
+
+// workJournalRules is the standing text of a leaf session that keeps a
+// run-owned work journal: the run page shows its entries as progress.
+const workJournalRules = `[DYNA WORK JOURNAL - REQUIRED]
+Keep a concise, append-only work journal while you perform this task. ` + "`dyna journal`" + ` writes to your run-owned journal.
+
+After orienting, append your first entry. Add another after meaningful discoveries, decisions, verification, or blockers; before a long operation; and before finishing. Use:
+  dyna journal "what changed or what you learned" --kind update --next "next concrete step"
+Kinds include update, finding, decision, verification, and blocker. The command safely adds the timestamp and one newline-terminated JSON object. Keep each entry brief: one or two sentences plus an optional next step. Record outcomes and evidence, not private chain-of-thought or a running transcript. Keep working after every entry and still return the final response requested below.
+
+Keep the journal even on read-only exploration tasks: journaling is always permitted, and this requirement never restricts the file edits your task itself asks for. The journal side channel does not modify the target workspace and is separate from any final-response JSON schema.
+[/DYNA WORK JOURNAL]`
+
 // rulesFor is the contract a session's prompts carry.
 func rulesFor(meta Meta) string {
 	if meta.Role == RoleRoot {
 		return rootRules()
+	}
+	if meta.Leaf {
+		return leafRules()
 	}
 	return sessionRules(!meta.Service && !meta.RunOwned(), meta.Item != "")
 }
