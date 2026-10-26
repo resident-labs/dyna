@@ -57,6 +57,14 @@ func TestRoomRootGrantsHostChecks(t *testing.T) {
 	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"name":"renamed"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
 		t.Fatalf("a root renaming a machine = %v, want an owner-only refusal", err)
 	}
+	// The container runtime socket changes where every room's workflow jobs run,
+	// so a host-check grant cannot carry it through.
+	if _, err := calls["SaveMachine"](ctx, saveMachineArgs(`{"allowHostChecks":true,"containerSocket":"unix:///tmp/missing.sock"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root changing the container socket = %v, want an owner-only refusal", err)
+	}
+	if len(*patches) != 1 {
+		t.Fatalf("saved patches = %+v, want the refused patch to write nothing", *patches)
+	}
 }
 
 // A session cannot allow host checks, and the refusal names the owner's command.
