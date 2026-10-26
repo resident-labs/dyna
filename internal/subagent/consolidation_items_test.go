@@ -119,6 +119,30 @@ func TestConsolidationCommitsWhenKeptGoalIsDone(t *testing.T) {
 	}
 }
 
+// A resumed commit that completes drops the pause text it saved earlier.
+func TestConsolidationCompletionClearsPausedError(t *testing.T) {
+	e, _ := consolidationEnv(t)
+	a, _ := e.start("RESPOND: a")
+	a, _ = e.wait(a.ID, 1)
+	b, _ := e.start("RESPOND: b")
+	b, _ = e.wait(b.ID, 1)
+	c := consolidatePair(t, e, a, b)
+	if err := e.m.updateConsolidation(c.Target, c.ID, func(s *ConsolidationState) error {
+		s.Error = "Paused: goal g1 is not open. Resume to continue."
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = e.m.consolidation(c.RoomID, c.ID)
+	if err := e.m.commitConsolidation(c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.m.consolidation(c.RoomID, c.ID)
+	if err != nil || got.Phase != "completed" || got.Error != "" {
+		t.Fatalf("state = %+v, err %v", got, err)
+	}
+}
+
 // A saved error in the committing phase never allows cancellation: the commit
 // may have closed sources already, so the run can only resume.
 func TestConsolidationCommittingWithErrorCannotCancel(t *testing.T) {
