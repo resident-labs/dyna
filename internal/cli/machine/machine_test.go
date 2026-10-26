@@ -247,6 +247,55 @@ func TestMachineEditNamesTheMachineByID(t *testing.T) {
 	}
 }
 
+// Removing a machine goes through the engine too: a refused write leaves the
+// machine stored, and the CI alias's remove shares that path.
+func TestMachineRemoveGoesThroughTheEngine(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab"); err != nil {
+		t.Fatal(err)
+	}
+	stubSaveMachine(t, func(context.Context, string, websvc.MachinePatch) (websvc.MachineDetail, error) {
+		return websvc.MachineDetail{}, errors.New("SaveMachine is owner only")
+	})
+	if _, err := run(t, "rm", "hermes"); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("refused remove = %v, want the engine's refusal", err)
+	}
+	if _, err := (machines.Store{}).Get(context.Background(), "hermes"); err != nil {
+		t.Fatalf("a refused remove deleted the machine: %v", err)
+	}
+}
+
+// A remove names the machine it read by ID: a name that equals another
+// machine's ID must not delete that other machine.
+func TestMachineRemoveNamesTheMachineByID(t *testing.T) {
+	storetest.DataDir(t)
+	stubEngine(t)
+	if _, err := run(t, "add", "alpha", "--ssh", "pip@alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "add", "beta", "--ssh", "pip@beta"); err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := (machines.Store{}).Get(context.Background(), "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "edit", "beta", "--rename", alpha.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Removing the machine named for alpha's ID removes the renamed machine.
+	if _, err := run(t, "rm", alpha.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (machines.Store{}).Get(context.Background(), "alpha"); err != nil {
+		t.Fatalf("the remove deleted the machine that owns the name as its ID: %v", err)
+	}
+	if _, err := (machines.Store{}).Get(context.Background(), alpha.ID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the renamed machine remains: %v", err)
+	}
+}
+
 // A machine can be limited to chosen suites, and the limit is shown and can be
 // cleared again. An empty list keeps the default of every suite.
 func TestMachineEditLimitsSuites(t *testing.T) {

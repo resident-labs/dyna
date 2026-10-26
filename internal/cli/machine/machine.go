@@ -429,10 +429,17 @@ func removeCommand() *cobra.Command {
 		Short: "Remove a machine; this machine cannot be removed",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			if err := store().Remove(c.Context(), args[0]); err != nil {
+			// The engine removes the machine, as it owns every other change to one.
+			// The command names the machine it read by ID, because a name can equal
+			// another machine's ID and the engine resolves IDs first.
+			m, err := store().Get(c.Context(), args[0])
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Removed machine %s.\n", args[0])
+			if _, err := saveMachine(c.Context(), m.ID, websvc.MachinePatch{Remove: true}); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Removed machine %s.\n", m.Name)
 			return nil
 		},
 	}

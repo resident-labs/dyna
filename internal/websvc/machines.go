@@ -186,6 +186,8 @@ type MachinePatch struct {
 	Suites          *[]string        `json:"suites"`
 	SSH             *string          `json:"ssh"`
 	Create          bool             `json:"create,omitempty"`
+	// Remove deletes the machine that the reference names.
+	Remove bool `json:"remove,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -262,6 +264,16 @@ func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePa
 	m, found, err := a.resolve(ctx, ref)
 	if err != nil {
 		return MachineDetail{}, err
+	}
+	if patch.Remove {
+		if !found {
+			return MachineDetail{}, fmt.Errorf("machine %q: %w", ref, os.ErrNotExist)
+		}
+		removed := a.machine(ctx, m, a.ciRuns())
+		if err := a.Store.Remove(ctx, m.Name); err != nil {
+			return MachineDetail{}, err
+		}
+		return removed, nil
 	}
 	if found && patch.Create {
 		return MachineDetail{}, fmt.Errorf("machine %s exists; use dyna machine edit", m.Name)
