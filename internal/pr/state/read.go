@@ -111,6 +111,10 @@ func open(root string) (*sql.DB, error) {
 		return db, err
 	}
 	err = database.Migrate(db, "pr.quota_scopes", 1, migrateQuota)
+	if err != nil {
+		return db, err
+	}
+	err = database.Migrate(db, "pr.record_parts", 1, migrateRecordParts)
 	return db, err
 }
 
@@ -201,8 +205,7 @@ func readSnapshot(root string) (Snapshot, error) {
 	}
 	snapshot.Lock()
 	defer snapshot.Unlock()
-	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error { return refresh(r, root) })
-	if err != nil {
+	if err = refreshFrom(appstate.For(db), root); err != nil {
 		return Snapshot{}, err
 	}
 	revision := "missing"
@@ -212,59 +215,158 @@ func readSnapshot(root string) (Snapshot, error) {
 	return Snapshot{state: snapshot.state, revision: revision}, nil
 }
 
+// refreshFrom copies the changed rows in one short read transaction, then
+// decodes them after it ends. A long read would hold back WAL checkpoints
+// and grow the WAL. The caller holds snapshot.
+func refreshFrom(w *appstate.Writer, root string) error {
+	var f fetched
+	err := w.Read(context.Background(), func(r appstate.Reader) error {
+		var err error
+		f, err = fetch(r, root)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return f.install()
+}
+
 type querier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-// refresh brings the cached snapshot up to the store's revision. The caller holds snapshot.
-func refresh(q querier, root string) error {
+// storedRow is a pr_records row copied out of the read transaction.
+type storedRow struct {
+	key   string
+	rev   int64
+	body  []byte // nil when the cached record is current
+	parts storedParts
+}
+
+// fetched is what one read transaction returned.
+type fetched struct {
+	missing, unchanged bool
+	revision           int64
+	index              []byte
+	rows               []storedRow
+}
+
+// unmarshalRecord is replaced by tests.
+var unmarshalRecord = func(data []byte, record *diskRecord) error { return json.Unmarshal(data, record) }
+
+// fetch copies the store's revision, its index and the rows newer than the
+// cached snapshot. It decodes nothing. The caller holds snapshot.
+func fetch(q querier, root string) (fetched, error) {
 	ctx := context.Background()
 	if snapshot.root != root {
 		snapshot.root, snapshot.revision, snapshot.index, snapshot.state = root, 0, nil, newState()
 	}
 	rows, err := q.QueryContext(ctx, "SELECT revision, body FROM pr_state WHERE id=1")
 	if err != nil {
-		return err
+		return fetched{}, err
 	}
-	var revision int64
-	var index []byte
+	var f fetched
 	found := false
 	for rows.Next() {
 		found = true
-		if err = rows.Scan(&revision, &index); err != nil {
+		if err = rows.Scan(&f.revision, &f.index); err != nil {
 			rows.Close()
-			return err
+			return fetched{}, err
 		}
 	}
 	if err = rows.Close(); err != nil {
-		return err
+		return fetched{}, err
 	}
 	if !found {
-		snapshot.revision, snapshot.index, snapshot.state = 0, nil, newState()
-		return nil
+		return fetched{missing: true}, nil
 	}
-	if snapshot.index != nil && revision == snapshot.revision {
-		return nil
+	if snapshot.index != nil && f.revision == snapshot.revision {
+		return fetched{unchanged: true}, nil
 	}
-	st := newState()
-	if err = json.Unmarshal(index, &st); err != nil {
-		return fmt.Errorf("invalid PR state: %w", err)
-	}
-	st.Records, st.Responses = map[string]*Record{}, map[string]map[string]CachedResponse{}
-	reused := map[string]*Record{}
 	rows, err = q.QueryContext(ctx, "SELECT key, rev, body FROM pr_records")
+	if err != nil {
+		return fetched{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row storedRow
+		var body sql.RawBytes
+		if err = rows.Scan(&row.key, &row.rev, &body); err != nil {
+			return fetched{}, err
+		}
+		if cached := snapshot.state.Records[row.key]; cached == nil || row.rev > snapshot.revision {
+			row.body = append([]byte{}, body...)
+		}
+		f.rows = append(f.rows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return fetched{}, err
+	}
+	return f, fetchParts(ctx, q, &f)
+}
+
+// fetchParts copies the cold parts of the rows that carry a body. The lowest
+// revision among those rows bounds the query, so a refresh reads only the
+// parts of changed records.
+func fetchParts(ctx context.Context, q querier, f *fetched) error {
+	byKey := map[string]*storedRow{}
+	var lowest int64
+	for i := range f.rows {
+		row := &f.rows[i]
+		if row.body == nil {
+			continue
+		}
+		byKey[row.key] = row
+		if len(byKey) == 1 || row.rev < lowest {
+			lowest = row.rev
+		}
+	}
+	if len(byKey) == 0 {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, "SELECT key, part, body FROM pr_record_parts WHERE key IN (SELECT key FROM pr_records WHERE rev >= ?)", lowest)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var key string
-		var rev int64
-		var body []byte
-		if err = rows.Scan(&key, &rev, &body); err != nil {
+		var key, part string
+		var body sql.RawBytes
+		if err := rows.Scan(&key, &part, &body); err != nil {
 			return err
 		}
-		if cached := snapshot.state.Records[key]; cached != nil && rev <= snapshot.revision {
+		row := byKey[key]
+		if row == nil {
+			continue
+		}
+		if row.parts == nil {
+			row.parts = storedParts{}
+		}
+		row.parts[partName(part)] = append([]byte{}, body...)
+	}
+	return rows.Err()
+}
+
+// install brings the cached snapshot up to the fetched revision. The caller holds snapshot.
+func (f fetched) install() error {
+	if f.missing {
+		snapshot.revision, snapshot.index, snapshot.state = 0, nil, newState()
+		return nil
+	}
+	if f.unchanged {
+		return nil
+	}
+	revision, index := f.revision, f.index
+	st := newState()
+	if err := json.Unmarshal(index, &st); err != nil {
+		return fmt.Errorf("invalid PR state: %w", err)
+	}
+	st.Records, st.Responses = map[string]*Record{}, map[string]map[string]CachedResponse{}
+	reused := map[string]*Record{}
+	for _, row := range f.rows {
+		key := row.key
+		if row.body == nil {
+			cached := snapshot.state.Records[key]
 			// Normalization updates derived quota fields. Keep the
 			// record in an already retained snapshot unchanged.
 			copy := *cached
@@ -275,17 +377,14 @@ func refresh(q querier, root string) error {
 			}
 			continue
 		}
-		var record diskRecord
-		if err = json.Unmarshal(body, &record); err != nil {
+		record, err := joinStored(row.body, row.parts)
+		if err != nil {
 			return fmt.Errorf("invalid PR record %s: %w", key, err)
 		}
 		st.Records[key] = record.Record
 		if record.Responses != nil {
 			st.Responses[key] = record.Responses
 		}
-	}
-	if err = rows.Err(); err != nil {
-		return err
 	}
 	normalizeState(&st)
 	// Keep stable identities for rows whose stored and derived fields did not
