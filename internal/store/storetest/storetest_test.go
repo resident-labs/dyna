@@ -75,3 +75,14 @@ func TestIsolateOwnsHomesAndRestoresEnvironment(t *testing.T) {
 		}
 	}
 }
+
+// An inherited DYNA_DATA_DIR wins over XDG_DATA_HOME in the store, so the
+// fixture must not leave it pointing at a live folder.
+func TestIsolateIgnoresAnInheritedDataDir(t *testing.T) {
+	live := t.TempDir()
+	t.Setenv(store.DataDirEnv, live)
+	root := Isolate(t)
+	if got := store.DataDir(); got != root || strings.HasPrefix(got, live) {
+		t.Fatalf("data folder = %s; want the fixture's %s, not %s", got, root, live)
+	}
+}

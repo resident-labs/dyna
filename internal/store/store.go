@@ -196,7 +196,15 @@ func CheckDataDir() error {
 	return nil
 }
 
+// DataDirEnv names the data folder directly. A dyna client command started
+// with its own XDG roots gets it, so it still finds the owner's engine (see
+// home.RestoreOwner). It wins over XDG_DATA_HOME and HOME.
+const DataDirEnv = "DYNA_DATA_DIR"
+
 func dataDir() string {
+	if dir := os.Getenv(DataDirEnv); filepath.IsAbs(dir) {
+		return dir
+	}
 	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
 		return filepath.Join(x, "dyna")
 	}
