@@ -119,7 +119,12 @@ func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
 	if got, err := e.m.WaitRunAgent(coordinator, "wf_20261026-094500-aaaaaaaa", 1, time.Minute); err != nil || !got.Done || got.Turn.Result != "done" {
 		t.Fatalf("wait as the coordinator = %+v, %v; want the result", got, err)
 	}
-	running := start(2, "SLEEP:60\nRESPOND: late")
+	// The mock turn sleeps for ten minutes, so it is still active when the
+	// close arrives, and only a stop ends it.
+	running := start(2, "SLEEP:600000\nRESPOND: late")
+	if got, err := e.m.store().Info(running.ID); err != nil || (got.Status != StatusRunning && got.Status != StatusQueued) {
+		t.Fatalf("agent 2 = %+v, %v; want an active turn", got.Status, err)
+	}
 	if err := e.m.CloseRunAgents(coordinator, "wf_20261026-094500-aaaaaaaa"); err != nil {
 		t.Fatalf("close as the coordinator: %v", err)
 	}
