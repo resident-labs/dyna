@@ -151,8 +151,10 @@ func TestApproveFastWaitsForDependency(t *testing.T) {
 	const key = "github.com/owner/repo#1"
 	if err := e.s.Store.update(func(st *State) error {
 		st.Records[key].Verdict = state.VerdictApproveFast
-		st.Records[key].Dependencies = []string{"github.com/owner/repo#2"}
+		st.Records[key].Dependencies = []string{"dependency-change"}
+		st.Records["github.com/owner/repo#2"].ChangeID = "dependency-change"
 		st.Records["github.com/owner/repo#2"].Verdict = state.VerdictChanges
+		st.Records["github.com/owner/repo#2"].Title = "Prepare the base"
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -161,8 +163,9 @@ func TestApproveFastWaitsForDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantDependency := &MergeDependency{ChangeID: "dependency-change", Number: 2, Title: "Prepare the base"}
 	for _, row := range mergeQueue(st, nil) {
-		if row.ChangeID == key && (row.State != "waiting-dependency" || row.Reason != "waiting for dependency #2") {
+		if row.ChangeID == key && (row.State != "waiting-dependency" || row.Reason != "" || !reflect.DeepEqual(row.Dependency, wantDependency)) {
 			t.Fatalf("dependent PR queue state = %+v", row)
 		}
 	}
