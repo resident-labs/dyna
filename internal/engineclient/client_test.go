@@ -35,6 +35,8 @@ func TestEngineDown(t *testing.T) {
 func TestSocketPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", root)
+	// The socket follows the runtime folder, so the CLI and the engine meet on
+	// the same path whatever data folder each of them names.
 	if got, err := SocketPath(); err != nil || got != filepath.Join(root, "dyna", "engine.sock") {
 		t.Fatalf("path = %q, %v", got, err)
 	}

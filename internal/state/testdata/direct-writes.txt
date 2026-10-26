@@ -67,6 +67,7 @@ not-state internal/database/outside.go appendLine 1 # outside-writes.jsonl, the 
 not-state internal/database/slow.go Read 1 # a read-only transaction (state.Read's snapshot); it writes nothing
 violation internal/devicegrant/grant.go Store.Delete 1
 violation internal/devicegrant/grant.go Store.Put 1
+not-state internal/engine/socket.go writeSocketOwner 1 # a record beside the engine socket that names the data folder it serves; it is not Dyna state and is read only by the bind check
 not-state internal/engine/runner_spool.go reserve 1 # reserves an empty frozen spool or rejected-artifact name with O_EXCL before the rename fills it; the spool is a transport log, not state
 not-state internal/engine/runner_spool.go runnerSpool.apply 1 # removes a taken runner spool file once every line went through the runner calls; the spool is a transport log, not state
 not-state internal/engine/runner_spool.go runnerSpool.reject 2 # renames a taken spool file to its rejected artifact and removes its own empty reservation when that rename fails; the spool is a transport log, not state
