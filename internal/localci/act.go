@@ -1,12 +1,14 @@
 package localci
 
 import (
+	"encoding/json"
 	"fmt"
 	"path"
 	"strconv"
 
 	"dyna-agent/internal/shellquote"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 )
@@ -98,7 +100,15 @@ func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
 		// decoder rejects. Each alias becomes a copy of the original value
 		// first, so every other field keeps the value it had.
 		if anchor, ok := entry.Value.(*ast.AnchorNode); ok {
-			if err := inlineAlias(file.Docs[0], anchor); err != nil {
+			// The decoder resolves the value the way act will read it, block
+			// scalar headers and folding included.
+			var named struct {
+				Name *string `yaml:"name"`
+			}
+			if err := yaml.Unmarshal(content, &named); err != nil {
+				return nil, fmt.Errorf("read the workflow name: %w", err)
+			}
+			if err := inlineAlias(file.Docs[0], anchor, named.Name); err != nil {
 				return nil, err
 			}
 		}
@@ -121,11 +131,20 @@ func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
 }
 
 // inlineAlias replaces every alias of anchor in the document with a copy of the
-// anchored value. The value is read back from its text, so each copy is a node
-// of its own.
-func inlineAlias(root ast.Node, anchor *ast.AnchorNode) error {
+// anchored value. A string value is written as a double-quoted scalar of its
+// resolved text, because a block scalar's content is printed from its original
+// position and would land outside the mapping that holds the copy. Each copy is
+// parsed from that text, so it is a node of its own.
+func inlineAlias(root ast.Node, anchor *ast.AnchorNode, resolved *string) error {
 	name := anchor.Name.String()
 	text := anchor.Value.String()
+	if resolved != nil {
+		quoted, err := json.Marshal(*resolved)
+		if err != nil {
+			return fmt.Errorf("quote the anchored value: %w", err)
+		}
+		text = string(quoted)
+	}
 	var failed error
 	copyOf := func(at ast.Node) ast.Node {
 		doc, err := parser.ParseBytes([]byte("k: "+text), 0)
