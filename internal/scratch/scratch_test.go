@@ -46,11 +46,11 @@ func TestEnsurePrivateScratch(t *testing.T) {
 	}
 }
 
-// A closing session's scratch folder goes at once, while the periodic pass keeps
-// a closed session's folder for its retention.
-func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
-	for _, closing := range []bool{false, true} {
-		t.Run(fmt.Sprintf("closing=%t", closing), func(t *testing.T) {
+// A closed session's scratch stays for the whole retention, even for a sweep
+// aimed at that session alone, and goes in the first sweep after it ends.
+func TestSweepKeepsClosedSessionScratchForRetention(t *testing.T) {
+	for _, age := range []time.Duration{time.Minute, ClosedRetention - time.Minute, ClosedRetention + time.Minute} {
+		t.Run(fmt.Sprint(age), func(t *testing.T) {
 			isolateRoot(t)
 			root := Root()
 			if err := os.Mkdir(root, 0700); err != nil {
@@ -65,23 +65,35 @@ func TestSweepClosingSessionRemovesItsScratch(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := Sweep(context.Background(), Options{
-				Now:     now,
-				Only:    filepath.Base(owner),
-				Closing: closing,
-				Logf:    t.Logf,
-				Lookup:  func(string) Owner { return Owner{Known: true, ClosedAt: now.Add(-time.Minute)} },
+				Now:    now,
+				Only:   filepath.Base(owner),
+				Logf:   t.Logf,
+				Lookup: func(string) Owner { return Owner{Known: true, ClosedAt: now.Add(-age)} },
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, statErr := os.Stat(owner)
-			switch {
-			case closing && !errors.Is(statErr, fs.ErrNotExist):
-				t.Fatalf("a closing session kept its scratch: %v, %+v", statErr, result)
-			case !closing && statErr != nil:
-				t.Fatalf("the periodic pass removed a closed session's scratch inside its retention: %v, %+v", statErr, result)
+			expired := age > ClosedRetention
+			if expired != errors.Is(statErr, fs.ErrNotExist) {
+				t.Fatalf("closed %v ago: stat error %v, want removed=%t, %+v", age, statErr, expired, result)
 			}
 		})
+	}
+}
+
+func TestRetainedNoticeNamesPathAndDeletionDate(t *testing.T) {
+	isolateRoot(t)
+	closedAt := time.Date(2026, 10, 26, 8, 16, 0, 0, time.UTC)
+	if got := RetainedNotice("ses_none", closedAt); got != "" {
+		t.Fatalf("notice for a session with no scratch: %q", got)
+	}
+	path, err := Ensure("ses_kept")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := RetainedNotice("ses_kept", closedAt), "scratch kept at "+path+" until 2026-11-02"; got != want {
+		t.Fatalf("notice = %q, want %q", got, want)
 	}
 }
 
@@ -98,7 +110,7 @@ func TestSweepRetentionAndSymlinks(t *testing.T) {
 	}
 	now := time.Now()
 	old := now.Add(-4 * 24 * time.Hour)
-	owners := map[string]time.Time{"closed-old": now.Add(-25 * time.Hour), "closed-recent": now.Add(-12 * time.Hour), "active": {}, "closed-link": now.Add(-25 * time.Hour)}
+	owners := map[string]time.Time{"closed-old": now.Add(-ClosedRetention - time.Hour), "closed-recent": now.Add(-ClosedRetention + time.Hour), "active": {}, "closed-link": now.Add(-ClosedRetention - time.Hour)}
 	for _, name := range []string{"closed-old", "closed-recent", "active", "unknown-old", "unknown-recent", "unknown-child-recent"} {
 		dir := filepath.Join(root, name)
 		if err := os.Mkdir(dir, 0700); err != nil {
