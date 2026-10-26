@@ -995,6 +995,7 @@ func reviewTask(r Record) string {
 	if len(r.ReviewRounds) > 0 {
 		base += "This is an incremental review. Confirm earlier findings and replies against the delta.\n"
 	}
+	base += "Your working directory is the author's checkout: never write files there. Write review files under your scratch folder, using the real path from echo \"$DYNA_SCRATCH\" because file tools do not expand variables.\n"
 	input, _ := json.Marshal(assignment(r))
 	base += "Assignment input: " + string(input) + "\n"
 	base += "You may start at most 3 live helper sessions, one level deep, using your own profile or a cheaper profile (higher cost-efficiency). Helpers report findings to you. Only you may record this assignment's verdict. Keep this reviewer session open between reviews.\n"
@@ -1212,6 +1213,16 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 		snap = withCI
 	}
 
+	// A local change in a repository with no local lane has no merge queue.
+	noQueue := false
+	if changeKind(r) == "local" {
+		on, err := recordLocalLane(ctx, r)
+		if err != nil {
+			return err
+		}
+		noQueue = !on
+	}
+
 	err = s.Store.update(func(st *State) error {
 		r := st.Records[key]
 		if r == nil {
@@ -1300,6 +1311,10 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 			status := "Dyna merges automatically when approved and green."
 			if changeKind(*r) == "github" && (r.CI == "pending" || r.CI == "failed") {
 				status = "CI has not passed on this head yet. Dyna reports ready when it passes."
+			}
+			if noQueue {
+				target = r.Author
+				status = noQueueStatus(*r)
 			}
 			detail = clip(keepLines(summary), 1500) + "\n\n" + status
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -199,5 +200,61 @@ func TestCutThenRefusedSocketWaitsWithBackoff(t *testing.T) {
 	}
 	if strings.Count(notices.String(), "waiting for the engine") != 1 {
 		t.Fatalf("notices = %q; want one waiting line", notices.String())
+	}
+}
+
+// lateEngine is a fake engine for AddGoal. A zero call deadline is already past,
+// so a send that waits on its context ends late with no real wait. The engine
+// creates a goal once per request ID, like its apply-once wrapper. It holds the
+// first send, or every send when holdEvery is set, until its context ends.
+type lateEngine struct {
+	mu      sync.Mutex
+	seen    []string
+	made    map[string]bool
+	holdAll bool
+}
+
+func (e *lateEngine) RoundTrip(r *http.Request) (*http.Response, error) {
+	id := r.Header.Get("X-Dyna-Request")
+	e.mu.Lock()
+	e.seen = append(e.seen, id)
+	first := len(e.seen) == 1
+	e.made[id] = true
+	e.mu.Unlock()
+	if first || e.holdAll {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	}
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`"g1"`)), Request: r}, nil
+}
+
+func newLateEngine(t *testing.T, holdAll bool) *lateEngine {
+	engineclient.SetDeadlines(t, time.Second, 0)
+	return &lateEngine{made: map[string]bool{}, holdAll: holdAll}
+}
+
+// D-275: AddGoal was late but the engine created the goal. The client goes again
+// once with the same request ID, so the engine creates one goal and answers.
+func TestLateAddGoalRepeatsOnceWithTheSameRequestID(t *testing.T) {
+	engine := newLateEngine(t, false)
+	var reply string
+	if err := engineclient.New("", engineclient.Notices(nil), engineclient.RoundTrip(engine)).Call(t.Context(), "AddGoal", nil, &reply); err != nil || reply != "g1" {
+		t.Fatalf("call = %q, %v; want g1 after one repeat", reply, err)
+	}
+	if got := engine.seen; len(got) != 2 || got[0] == "" || got[0] != got[1] || len(engine.made) != 1 {
+		t.Fatalf("request IDs %q, goals created %d; want two sends of one ID and one goal", got, len(engine.made))
+	}
+}
+
+// A creating call that is late twice stops after one repeat and says the engine
+// may still apply it.
+func TestLateAddGoalTwiceSaysTheEngineMayStillApplyIt(t *testing.T) {
+	engine := newLateEngine(t, true)
+	err := engineclient.New("", engineclient.Notices(nil), engineclient.RoundTrip(engine)).Call(t.Context(), "AddGoal", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "engine did not answer AddGoal") || !strings.Contains(err.Error(), "may still apply it") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(engine.seen) != 2 {
+		t.Fatalf("sends = %d, want 2", len(engine.seen))
 	}
 }
