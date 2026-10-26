@@ -84,8 +84,8 @@ func TestKeyboardMapExtrasKeepStandardUSKeys(t *testing.T) {
 }
 
 func TestKeypressHoldCoversIdleFrame(t *testing.T) {
-	if frame := time.Second / idleRefreshHz; keypressHold <= frame {
-		t.Fatalf("hold %v does not outlast one idle frame (%v)", keypressHold, frame)
+	if frame := time.Second / idleRefreshHz; defaultKeypressHold <= frame {
+		t.Fatalf("hold %v does not outlast one idle frame (%v)", defaultKeypressHold, frame)
 	}
 }
 
@@ -214,5 +214,19 @@ func TestShortcutWaitFailsOpen(t *testing.T) {
 	cancel()
 	if err := shortcutSettle(ctx, errors.New("no screencopy")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation was lost: %v", err)
+	}
+}
+
+// key_down with SHIFT and a non-ASCII letter presses its uppercase form, so the
+// map must hold that form, as it does for keypress.
+func TestKeyboardMapCoversShiftedKeysOfKeyDown(t *testing.T) {
+	for _, kind := range []string{"keypress", "key_down", "key_up"} {
+		_, codes, err := keyboardMap(parseActions(t, `[{"type":"`+kind+`","keys":["SHIFT","ä"]}]`), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := codes[keyName("Ä")]; !ok {
+			t.Errorf("%s: the map lacks the shifted key", kind)
+		}
 	}
 }

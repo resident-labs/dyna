@@ -162,9 +162,13 @@ but a runtime error can leave earlier actions applied.
 | `click` | `x`, `y`, `button`: `left`, `middle`, or `right`; optional `keys`. |
 | `double_click` | `x`, `y`; optional `keys`. Uses the left button. |
 | `move` | `x`, `y`. |
-| `drag` | `path`: 2–200 objects with exactly `x` and `y`, such as `{"x":80,"y":46}`. A point written as `[80, 46]` is accepted too. Optional `keys`. |
+| `drag` | `path`: 2–200 objects with exactly `x` and `y`, such as `{"x":80,"y":46}`. A point written as `[80, 46]` is accepted too. Optional `keys`. Optional `step_ms` (0–500, default 10) sets the pause after each point; when set, drag also pauses after the press. |
+| `pointer_down` | `x`, `y`, optional `button` (default `left`). Moves, then presses and holds the button. |
+| `pointer_up` | Optional `x` and `y` together, optional `button` (default `left`). Moves, then releases the button. |
 | `scroll` | `x`, `y`, `scroll_x`, `scroll_y`: integers from -3000 to 3000. |
-| `keypress` | `keys`: 1–12 key names. Pressed together and released in reverse order. |
+| `keypress` | `keys`: 1–12 key names. Pressed together and released in reverse order. Optional `hold_ms` (0–10000) sets how long they stay down; the default is 150 ms. |
+| `key_down` | `keys`: 1–12 key names. Presses them and keeps them held until `key_up`, a takeover, or the end of the batch. |
+| `key_up` | `keys`: the keys to release, in reverse order. List the same keys as the `key_down`, including `SHIFT`, because Shift changes the key names. Releasing a key that is not held does nothing. |
 | `type` | `text`: valid Unicode text. Maximum 10,000 characters across a batch. Optional `secret`: `true` keeps the text out of the event feed and log. |
 | `wait` | Waits one second. Maximum five per batch. |
 | `screenshot` | Captures at this point. Maximum ten per batch. |
