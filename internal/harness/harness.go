@@ -222,6 +222,9 @@ type invocation struct {
 	cleanup   func()
 	sessionID func(string) string
 	resume    func(string, string) commandSpec
+	// fork starts a new session from an existing session file in the turn's
+	// directory. It is nil for harnesses without an exact-session fork.
+	fork func(string, string) commandSpec
 	// compact runs the harness's compact command on a session, for harnesses
 	// whose compaction rule is Trigger. finished reads its stdout.
 	compact func(string) commandSpec
@@ -365,6 +368,12 @@ type SessionOptions struct {
 	// one. Resuming a harness that cannot resume is an error, never a silent
 	// fresh start.
 	ResumeID string
+	// ForkFrom forks the given session file into this turn's directory and
+	// starts a new session instead of opening it in place. The fork's id is the
+	// invocation's new session id, reported through OnSession. It is used when
+	// the source session's own directory no longer exists, because Pi would
+	// otherwise ask whether to fork on stdin.
+	ForkFrom string
 	// UsageBaseline must belong to the immediately preceding completed Dyna turn.
 	UsageBaseline *workeroutput.UsageBaseline
 	// OnSession is called once with the exact harness session id as soon as it
@@ -482,7 +491,7 @@ func runJournaled(ctx context.Context, p profile.Profile, prompt, cwd string, al
 	return withAccountFailover(ctx, p, cwd, exec, func(e ExecutionOptions, resume string) (Result, error) {
 		sess, task := session, prompt
 		if resume != "" {
-			sess.ResumeID, task = resume, accountFailoverPrompt
+			sess.ResumeID, sess.ForkFrom, task = resume, "", accountFailoverPrompt
 		}
 		return runJournaledOnce(ctx, p, task, cwd, allowRecovery, nudgeDelay, journal, steeringOpts, sess, e)
 	})
@@ -722,6 +731,14 @@ func (r *journaledRun) prepareInvocation() error {
 func (r *journaledRun) startTracking() error {
 	r.tracker = newSessionTracker(r.inv.sessionID)
 	r.state.tracker = r.tracker
+	if r.session.ForkFrom != "" {
+		if r.session.ResumeID != "" {
+			return errors.New("a turn cannot both fork a session and resume another")
+		}
+		if r.inv.fork == nil {
+			return fmt.Errorf("worker %s cannot fork a session: its harness has no exact-session fork", r.p.Name)
+		}
+	}
 	if r.session.ResumeID != "" {
 		if r.inv.resume == nil {
 			return fmt.Errorf("worker %s cannot resume harness session %s: its harness has no exact-session resume", r.p.Name, r.session.ResumeID)
@@ -751,6 +768,12 @@ func (r *journaledRun) startSteering() (stop func(), err error) {
 // compactBeforeTurn runs the optional pre-turn compaction and picks the first
 // command: a fresh start or a resume of the given session.
 func (r *journaledRun) compactBeforeTurn() error {
+	if r.session.ForkFrom != "" {
+		// A fork starts the target session with the whole source history; Pi
+		// compacts it when the first request needs more room.
+		r.spec = r.inv.fork(r.session.ForkFrom, r.prompt)
+		return nil
+	}
 	r.spec = r.inv.initial
 	if r.session.ResumeID == "" {
 		return nil

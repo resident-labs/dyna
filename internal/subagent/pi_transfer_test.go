@@ -51,6 +51,9 @@ if os.environ.get("FAKE_PI_FAIL_FIRST") == "1" and launch == 0:
 if os.environ.get("FAKE_PI_FAIL_RESUME") == "1" and resume:
     sys.stderr.write("fake pi: context_length_exceeded while resuming\n")
     sys.exit(2)
+if os.environ.get("FAKE_PI_FAIL_CROSS_PROJECT") == "1" and "--session" in args and "--fork" not in args:
+    sys.stderr.write("fake pi: Session found in different project. Fork this session into current directory? [y/N] Aborted.\n")
+    sys.exit(2)
 
 def emit(record):
     print(json.dumps(record), flush=True)

@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -65,6 +67,35 @@ func ClaudeHistoryDir(ctx context.Context, p profile.Profile) (string, error) {
 		return dir, nil
 	}
 	return home, nil
+}
+
+// PiSessionCwd returns the working directory recorded in the session header.
+// A resume from any other directory makes Pi ask whether to fork on stdin, so
+// the caller needs this to decide between opening in place and forking.
+func PiSessionCwd(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4*1024), 1024*1024)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", err
+		}
+		return "", errors.New("pi session file is empty")
+	}
+	var header struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(scanner.Bytes(), &header); err != nil {
+		return "", fmt.Errorf("read pi session header: %w", err)
+	}
+	if header.Cwd == "" {
+		return "", errors.New("pi session header has no cwd")
+	}
+	return header.Cwd, nil
 }
 
 // InstalledVersion returns the version of the installed harness bundle. The
