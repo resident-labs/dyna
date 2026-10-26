@@ -981,7 +981,7 @@ func (m *Manager) Stop(ctx context.Context, ref string) (Turn, error) {
 			reason = "recipient"
 		}
 	}
-	return m.stopSession(ctx, ref, "", reason)
+	return m.stopSession(ctx, ref, "", reason, m.stopper(ctx))
 }
 
 // receivesReport reports whether session stopper receives the reports of
@@ -1008,7 +1008,7 @@ func (m *Manager) stopper(ctx context.Context) string {
 }
 
 // stopSession permits only the owning coordinator to stop a reserved session.
-func (m *Manager) stopSession(ctx context.Context, ref, reservation, reason string) (Turn, error) {
+func (m *Manager) stopSession(ctx context.Context, ref, reservation, reason, by string) (Turn, error) {
 	if err := authority.Check("subagent stop", authority.Of(ctx), nil); err != nil {
 		return Turn{}, err
 	}
@@ -1043,7 +1043,7 @@ func (m *Manager) stopSession(ctx context.Context, ref, reservation, reason stri
 		if turn, e := store.readTurnForUpdate(info.ID, n); e == nil {
 			turn.StopAsked = true
 			turn.StopReason = reason
-			turn.StopBy = m.stopper(ctx)
+			turn.StopBy = by
 			intentErr = store.writeTurn(info.ID, turn)
 		} else {
 			intentErr = e
@@ -1185,7 +1185,11 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		// The turn can finish after the status check. Only that typed
 		// stop result permits close to continue; other errors still fail.
 		var noRunningTurn *NoRunningTurnError
-		if _, err := m.stopSession(ctx, info.ID, "", "close"); err != nil && !errors.As(err, &noRunningTurn) {
+		by := opts.by
+		if by == "" {
+			by = m.stopper(ctx)
+		}
+		if _, err := m.stopSession(ctx, info.ID, "", "close", by); err != nil && !errors.As(err, &noRunningTurn) {
 			return info, err
 		}
 	}
