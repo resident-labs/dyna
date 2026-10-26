@@ -25,6 +25,11 @@ import (
 const Engine = agentslice.EngineUnit
 const Computers = "dyna-computers.service"
 
+// Tunnel runs the managed cloudflared connector. It is its own unit, so an
+// engine restart does not drop the tunnel and the remote app stays reachable
+// while the new engine starts.
+const Tunnel = "dyna-tunnel.service"
+
 type Options struct {
 	Binary           string
 	Dir              string
@@ -114,6 +119,16 @@ func Dir() string {
 	return filepath.Join(home, ".config", "systemd", "user")
 }
 
+// TunnelInstalled reports whether the tunnel unit is installed. The engine then
+// leaves the connector to that unit, which outlives an engine restart.
+func TunnelInstalled(dir string) bool {
+	if dir == "" {
+		dir = Dir()
+	}
+	_, err := os.Stat(filepath.Join(dir, Tunnel))
+	return err == nil
+}
+
 func quote(value string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`, "%", "%%").Replace(value) + `"`
 }
@@ -132,7 +147,7 @@ func engineStopTimeout() time.Duration { return localci.TeardownBudget + engineS
 func engineUnit(binary string) string {
 	return `[Unit]
 Description=Dyna engine
-After=network-online.target dyna-computers.service
+After=network-online.target dyna-computers.service dyna-tunnel.service
 Wants=network-online.target dyna-computers.service
 
 [Service]
@@ -145,6 +160,23 @@ TimeoutStopSec=` + strconv.Itoa(int(engineStopTimeout()/time.Second)) + `
 Slice=` + agentslice.ForegroundSlice + `
 CPUWeight=` + agentslice.EngineWeight + `
 IOWeight=` + agentslice.EngineWeight + `
+
+[Install]
+WantedBy=default.target
+`
+}
+
+func tunnelUnit(binary string) string {
+	return `[Unit]
+Description=Dyna tunnel connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=` + quote(binary) + ` engine tunnel
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=default.target
@@ -225,7 +257,7 @@ func Write(o Options) error {
 	if _, err := agentslice.WriteSlice(o.Dir); err != nil {
 		return err
 	}
-	for name, text := range map[string]string{Engine: engineUnit(o.Binary), Computers: computersUnit(o.Binary)} {
+	for name, text := range map[string]string{Engine: engineUnit(o.Binary), Computers: computersUnit(o.Binary), Tunnel: tunnelUnit(o.Binary)} {
 		if err := fsutil.WriteFile(filepath.Join(o.Dir, name), []byte(text), 0644, true); err != nil {
 			return err
 		}
@@ -282,7 +314,7 @@ func Install(ctx context.Context, o Options) error {
 	if err := os.MkdirAll(wants, 0755); err != nil {
 		return err
 	}
-	for _, name := range []string{Engine, Computers} {
+	for _, name := range []string{Engine, Computers, Tunnel} {
 		path := filepath.Join(wants, name)
 		if target, err := os.Readlink(path); err == nil && target == "../"+name {
 			continue
@@ -316,6 +348,12 @@ func Install(ctx context.Context, o Options) error {
 		return err
 	}
 	if _, err := run("daemon-reload"); err != nil {
+		return err
+	}
+	// The connector now runs as its own unit. Start it before the engine restarts,
+	// so remote access never waits for the new engine, and the old engine's own
+	// connector leaves with that restart.
+	if _, err := run("start", Tunnel); err != nil {
 		return err
 	}
 	if transient {

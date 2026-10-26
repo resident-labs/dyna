@@ -63,7 +63,9 @@ dyna engine run
 
 When the computer is linked, `dyna engine run` starts `cloudflared` for the managed
 tunnel (from `PATH`, or `--cloudflared`), reports its routes to the relay,
-and prints the app address.
+and prints the app address. With the installed services the connector runs as
+its own unit instead, so an engine restart does not drop it; see
+[Run the engine as a service](#run-the-engine-as-a-service).
 
 ### 4. Open it on a phone
 
@@ -102,6 +104,13 @@ Then run `systemctl --user enable --now dyna-engine`, and
 in. After you install a new build, run `systemctl --user restart
 dyna-engine`. Logs: `journalctl --user -u dyna-engine`.
 
+`dyna engine install-services` writes and enables this managed setup for you,
+together with `dyna-computers.service` and `dyna-tunnel.service`. The tunnel
+unit runs `dyna engine tunnel`, so the connector has a life of its own: an engine
+restart leaves it up, an open page reconnects to the new engine by itself, and
+the engine skips its own connector when that unit is installed. Logs:
+`journalctl --user -u dyna-tunnel`.
+
 ## Commands
 
 | Command | What it does |
@@ -113,6 +122,7 @@ dyna-engine`. Logs: `journalctl --user -u dyna-engine`.
 | `dyna engine connect unlink [--local]` | Unlink. The relay deletes the tunnel and names; every session ends; the machine key is replaced. `--local` forgets the link here when the relay cannot be reached; then unlink the machine on the relay page too. |
 | `dyna engine run --devices` | Paired devices and Connect sessions, with a TYPE column. |
 | `dyna engine run --revoke ID\|all` | Also takes Connect session and device IDs. |
+| `dyna engine tunnel` | Run the managed tunnel connector. `dyna-tunnel.service` runs it, so it outlives an engine restart. |
 
 `dyna engine run` flags for Connect:
 
