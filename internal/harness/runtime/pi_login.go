@@ -40,6 +40,18 @@ const renewWindow = 5 * time.Minute
 // owner limited to other repositories is never read. A caller must never log the
 // grant.
 func (a *Accounts) ChatGPTGrant(ctx context.Context, roomID, repo string) (ChatGPTGrant, error) {
+	return a.chatGPTGrant(ctx, roomID, repo, false)
+}
+
+// ChatGPTGrantDuringTurn is ChatGPTGrant for a caller that holds a harness turn
+// lease, such as a turn asking the engine for a search. It renews without
+// waiting for the switch gate, which waits for the caller's own turn to end.
+func (a *Accounts) ChatGPTGrantDuringTurn(ctx context.Context, roomID, repo string) (ChatGPTGrant, error) {
+	return a.chatGPTGrant(ctx, roomID, repo, true)
+}
+
+// chatGPTGrant reads the grant, renewing it first when it is due.
+func (a *Accounts) chatGPTGrant(ctx context.Context, roomID, repo string, duringTurn bool) (ChatGPTGrant, error) {
 	id, entry, err := a.piLogin(ctx, store.ProviderChatGPT, roomID, repo)
 	if err != nil {
 		return ChatGPTGrant{}, err
@@ -53,7 +65,11 @@ func (a *Accounts) ChatGPTGrant(ctx context.Context, roomID, repo string) (ChatG
 		if err != nil {
 			return ChatGPTGrant{}, fmt.Errorf("%w: %w", ErrGrantExpired, err)
 		}
-		if _, err := a.RefreshCredentials(ctx, id, executable); err != nil {
+		renew := a.RefreshCredentials
+		if duringTurn {
+			renew = a.RefreshCredentialsDuringTurn
+		}
+		if _, err := renew(ctx, id, executable); err != nil {
 			return ChatGPTGrant{}, fmt.Errorf("%w: %w", ErrGrantExpired, err)
 		}
 		if _, entry, err = a.piLogin(ctx, store.ProviderChatGPT, roomID, repo); err != nil {

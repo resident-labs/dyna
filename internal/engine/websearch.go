@@ -87,7 +87,7 @@ type piChatGPTCredential struct {
 // Token is the access token and account ID of the ChatGPT sign-in, renewed when
 // it is due.
 func (c piChatGPTCredential) Token(ctx context.Context) (access, account string, err error) {
-	grant, err := c.accounts.ChatGPTGrant(ctx, c.room, c.repo)
+	grant, err := c.accounts.ChatGPTGrantDuringTurn(ctx, c.room, c.repo)
 	if errors.Is(err, native.ErrNotSignedIn) {
 		return "", "", websearch.ErrNotSignedIn
 	}
