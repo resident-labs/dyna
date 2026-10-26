@@ -2,7 +2,12 @@ package engine
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"maps"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +30,13 @@ const streamShutdownTimeout = 3 * time.Second
 // regression test does not wait the production three seconds.
 var streamShutdownDeadline = func() time.Duration { return streamShutdownTimeout }
 
+// stopSlowAfter is how long a stop runs before it names what it still waits
+// for, so a stop that takes minutes says why in the engine log. A test shortens it.
+var stopSlowAfter = func() time.Duration { return 10 * time.Second }
+
+// stopLogf writes the slow-stop line; a test replaces it.
+var stopLogf = log.Printf
+
 // stopEngine cancels every engine service before joining cleanup. HTTP, workers
 // and foreground process cleanup share one deadline, including error exits.
 func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*http.Server, cleanup ...func()) error {
@@ -40,12 +52,21 @@ func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*h
 		}
 	}()
 	var pending sync.WaitGroup
-	start := func(fn func()) {
+	var waitingMu sync.Mutex
+	waiting := map[string]struct{}{} // part names that have not finished
+	start := func(name string, fn func()) {
 		pending.Add(1)
-		go func() { defer pending.Done(); fn() }()
+		waitingMu.Lock()
+		waiting[name] = struct{}{}
+		waitingMu.Unlock()
+		go func() {
+			defer pending.Done()
+			defer func() { waitingMu.Lock(); delete(waiting, name); waitingMu.Unlock() }()
+			fn()
+		}()
 	}
-	for _, server := range servers {
-		start(func() {
+	for i, server := range servers {
+		start(fmt.Sprintf("http server %d", i+1), func() {
 			// A graceful stop ends a request that finishes, and then this deadline
 			// closes what is left, such as an open event stream.
 			streamCtx, cancelStream := context.WithTimeout(context.Background(), streamShutdownDeadline())
@@ -55,11 +76,18 @@ func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*h
 		})
 	}
 	if workers != nil {
-		start(func() { <-workers })
+		start("workers", func() { <-workers })
 	}
-	for _, closeService := range cleanup {
-		start(closeService)
+	for i, closeService := range cleanup {
+		start(fmt.Sprintf("cleanup %d", i+1), closeService)
 	}
+	slow := time.AfterFunc(stopSlowAfter(), func() {
+		waitingMu.Lock()
+		names := slices.Sorted(maps.Keys(waiting))
+		waitingMu.Unlock()
+		stopLogf("engine stop still waits for: %s", strings.Join(names, ", "))
+	})
+	defer slow.Stop()
 	done := make(chan struct{})
 	go func() { pending.Wait(); close(done) }()
 	select {
