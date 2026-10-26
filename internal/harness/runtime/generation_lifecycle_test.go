@@ -287,6 +287,41 @@ func TestGenerationGCAdoptsALegacyLeaseWrittenAfterMigration(t *testing.T) {
 	assertGenerationExists(t, g.Directory, false)
 }
 
+// A legacy view that a complete publication superseded stops pinning its old
+// generation: cleanup imports the unchanged file, does not restore the
+// generation, and collects it.
+func TestGenerationGCClearsALegacyViewItSuperseded(t *testing.T) {
+	r, home, id := generationFixture(t, "pi")
+	superseded := buildGeneration(t, r, "pi", home, id)
+	views := filepath.Join(r.Generations, ".views")
+	if err := os.MkdirAll(views, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := struct {
+		Harness     string
+		Home        string
+		Generations []string
+	}{Harness: "pi", Home: home, Generations: []string{superseded.Directory}}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(views, "pi-view.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A complete publication replaces the view, as the new build records it.
+	addGenerationMCP(t, r, "pi", "later")
+	current := buildGeneration(t, r, "pi", home, id)
+	if err := r.recordGenerationView("pi", home, current.Directory, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.GCGenerations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertGenerationExists(t, superseded.Directory, false)
+	assertGenerationExists(t, current.Directory, true)
+}
+
 func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 	for _, failure := range []string{"session", "lease", "candidate-link", "root-link"} {
 		t.Run(failure, func(t *testing.T) {

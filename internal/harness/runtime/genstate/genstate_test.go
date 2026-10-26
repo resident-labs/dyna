@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/harness/runtime/genstate"
 )
@@ -97,15 +98,6 @@ func TestLegacyIndexesImportAndLeasesRoundTrip(t *testing.T) {
 		t.Fatalf("rebound legacy lease = %+v", leases)
 	}
 
-	// An unreadable protection record fails the import, so cleanup deletes
-	// nothing.
-	if err := os.WriteFile(filepath.Join(usesDir, "use-broken.json"), []byte("{"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ImportLegacy(ctx, root); err == nil {
-		t.Fatal("a corrupt legacy lease was imported")
-	}
-
 	// A lease records its process, binds a reference, releases, and is deleted.
 	lease := genstate.Lease{ID: genstate.NewID(), Generation: generation, OwnerPID: os.Getpid()}
 	if err := store.Create(ctx, lease); err != nil {
@@ -158,10 +150,47 @@ func TestLegacyIndexesImportAndLeasesRoundTrip(t *testing.T) {
 	if len(views) != 1 || len(views[0].Generations) != 1 || views[0].Generations[0] != next {
 		t.Fatalf("complete views = %+v", views)
 	}
+	// The legacy file still names the first generation, but it was imported
+	// before the publication, so it must not bring that generation back.
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if views, err = store.Views(ctx); err != nil || len(views) != 1 || len(views[0].Generations) != 1 || views[0].Generations[0] != next {
+		t.Fatalf("views after an unchanged legacy import = %+v, %v", views, err)
+	}
+	// A changed file is a new publication by an earlier build, written after
+	// the one this build recorded.
+	changed, err := json.Marshal(legacyViewFixture{Harness: "pi", Home: "/home/pi", Generations: []string{generation, next}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedPath := filepath.Join(viewsDir, "0123abcd.json")
+	if err := os.WriteFile(changedPath, changed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	newer := time.Now().Add(time.Second)
+	if err := os.Chtimes(changedPath, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if views, err = store.Views(ctx); err != nil || len(views) != 1 || len(views[0].Generations) != 2 {
+		t.Fatalf("views after a changed legacy file = %+v, %v", views, err)
+	}
 	if err := store.DeleteView(ctx, "pi", "/home/pi"); err != nil {
 		t.Fatal(err)
 	}
 	if views, err = store.Views(ctx); err != nil || len(views) != 0 {
 		t.Fatalf("views after delete = %+v, %v", views, err)
+	}
+
+	// An unreadable protection record fails the import, so cleanup deletes
+	// nothing.
+	if err := os.WriteFile(filepath.Join(usesDir, "use-broken.json"), []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ImportLegacy(ctx, root); err == nil {
+		t.Fatal("a corrupt legacy lease was imported")
 	}
 }
