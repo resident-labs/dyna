@@ -252,7 +252,10 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	if !plan.runnable() {
 		return trialCI{Status: VerdictPending, Reason: "local CI is not configured at the trial head and its base"}, nil
 	}
-	if saved && completeLocalCI(result, plan.required, plan.suites) {
+	// A run the engine's own stop cancelled is complete in form only: it tested
+	// nothing, so it must not answer here. It falls through to admit the same
+	// head again, which a sync head has no other scheduler entry for.
+	if saved && result.Cause != localci.CauseEngineStop && completeLocalCI(result, plan.required, plan.suites) {
 		status, logs, reason, statusErr := localCIStatus(result, repo, job.head, plan.required, plan.suites)
 		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
 	}
