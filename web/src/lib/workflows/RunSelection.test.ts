@@ -5,13 +5,14 @@ import { build } from 'esbuild'
 import { compileSvelte, svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { importBundle, installDom, domNames } from '../prs/prDetailHarness.ts'
 
-const fixture = (phases: [string, string]) => `<script>
+const fixture = (phases: [string, string, string]) => `<script>
  import Run from './Run.svelte'
  const agent = (id, phase) => ({ id, label: 'T' + id, phase, status: 'ok' })
  const make = (run) => ({ run: { id: run, name: 'continuous', status: 'running', startedAt: new Date().toISOString() },
-  agents: [agent(1, '${phases[0]}'), agent(2, '${phases[1]}')], agentTotal: 2, agentRunning: 0, agentFailed: 0, logs: [], phases: [] })
+  agents: [agent(1, '${phases[0]}'), agent(2, '${phases[1]}'), agent(3, '${phases[2]}')], agentTotal: 3, agentRunning: 0, agentFailed: 0, logs: [], phases: [] })
  let detail = $state(make('wf_a'))
  export function refresh(run) { detail = make(run) }
+ export function dropFirst() { detail = { ...detail, agents: detail.agents.slice(1) } }
 </script>
 <Run {detail} />`
 const bundle = async (source: string) => {
@@ -23,8 +24,8 @@ const bundle = async (source: string) => {
   assert.ok(output, 'the run fixture built')
   return output
 }
-const output = await bundle(fixture(['CH prepare', 'BS prepare']))
-const plain = await bundle(fixture(['Plan', 'Build']))
+const output = await bundle(fixture(['CH prepare', 'BS prepare', 'CH review']))
+const plain = await bundle(fixture(['Plan', 'Build', 'Ship']))
 
 test('an open cell stays open when the same run refreshes, and closes for another run', async () => {
   const dom = installDom()
@@ -62,6 +63,25 @@ test('a phase row opens its agents and folds them again', async () => {
     document.querySelector<HTMLElement>('.phases button.row')?.click()
     ui.flushSync()
     assert.equal(rows(), 0)
+  } finally {
+    await ui.unmount(app); dom.window.close()
+    for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
+test('an open phase row stays on its own group when an earlier group leaves the agent window', async () => {
+  const dom = installDom()
+  const ui = await importBundle(plain.contents, 'RunFixture')
+  const app = ui.mount(ui.default, { target: document.getElementById('app') })
+  const labels = () => [...document.querySelectorAll('.agent .label')].map((n) => n.textContent)
+  try {
+    ui.flushSync()
+    document.querySelectorAll<HTMLElement>('.phases button.row')[1]?.click()
+    ui.flushSync()
+    assert.deepEqual(labels(), ['T2'])
+    ui.flushSync(() => app.dropFirst())
+    assert.deepEqual(labels(), ['T2'], 'the Build row stays open after the Plan group leaves')
   } finally {
     await ui.unmount(app); dom.window.close()
     for (const name of domNames) Reflect.deleteProperty(globalThis, name)

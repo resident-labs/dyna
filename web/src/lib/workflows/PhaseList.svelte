@@ -6,6 +6,8 @@
   import type { CellState } from './lanes.ts'
 
   export interface PhaseRow {
+    // key is the id of the phase group's first agent: it stays put when earlier groups leave the window.
+    key: number
     phase: string
     state: CellState
     done: number
@@ -14,24 +16,24 @@
   interface Props {
     rows: PhaseRow[]
     open: number[]
-    ontoggle: (index: number) => void
+    ontoggle: (key: number) => void
     agents: Snippet<[number]>
   }
   let { rows, open, ontoggle, agents }: Props = $props()
 </script>
 
 <ol class="phases" aria-label="Phases">
-  {#each rows as row, i}
-    {@const isOpen = open.includes(i)}
+  {#each rows as row (row.key)}
+    {@const isOpen = open.includes(row.key)}
     <li class={row.state}>
-      <button class="row" aria-expanded={isOpen} onclick={() => ontoggle(i)}>
+      <button class="row" aria-expanded={isOpen} onclick={() => ontoggle(row.key)}>
         <RunIcon status={row.state} size={16} />
         <span class="name">{row.phase}</span>
         <span class="bar" aria-hidden="true"><span class="fill {row.state}" style="width:{row.total ? (row.done / row.total) * 100 : 0}%"></span></span>
         <span class="count">{row.done}/{row.total}</span>
         <span class="chev" aria-hidden="true">›</span>
       </button>
-      {#if isOpen}<div class="body">{@render agents(i)}</div>{/if}
+      {#if isOpen}<div class="body">{@render agents(row.key)}</div>{/if}
     </li>
   {/each}
 </ol>
