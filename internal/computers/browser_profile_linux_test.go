@@ -5,6 +5,7 @@ package computers
 import (
 	"bufio"
 	"context"
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"io"
 	"os"
@@ -24,7 +25,7 @@ func browserTestEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("WSL_INTEROP", "")
 	t.Setenv("WSL_DISTRO_NAME", "")
 	t.Setenv("container", "")

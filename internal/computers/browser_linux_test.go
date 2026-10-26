@@ -5,6 +5,7 @@ package computers
 import (
 	"bytes"
 	"context"
+	"dyna-agent/internal/testsafe"
 	"errors"
 	"flag"
 	"os"
@@ -356,7 +357,7 @@ func TestPlaywrightStaysOnSessionComputer(t *testing.T) {
 }
 
 func TestOfflineDestroyStopsOnlyPrivateBrowserDaemon(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	id := testSessionID(t, "offline-browser")
 	root := browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), id)
@@ -413,7 +414,7 @@ func TestOfflineDestroyStopsOnlyPrivateBrowserDaemon(t *testing.T) {
 }
 
 func TestStopBrowserDaemonsSignalsBeforeKill(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	id := testSessionID(t, "daemon-signal")
 	root := browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), id)

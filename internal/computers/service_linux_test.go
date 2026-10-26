@@ -4,6 +4,7 @@ package computers
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ func TestMissingComputerUnitNamesInstaller(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			t.Setenv("XDG_DATA_HOME", t.TempDir())
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-			t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+			t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 			t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/temporary/fake-session-bus")
 			t.Setenv("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=/temporary/fake-system-bus")
 			bin := t.TempDir()

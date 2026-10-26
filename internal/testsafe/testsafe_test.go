@@ -185,3 +185,13 @@ func TestTestBinaryIgnoresSessionTemporaryFolder(t *testing.T) {
 		t.Fatalf("child test binary: %v\n%s", err, out)
 	}
 }
+
+// A unix socket path is limited to 108 bytes, so the folder a test binds under
+// must stay short even when TMPDIR is deep.
+func TestShortTempDirIsShortWhateverTMPDIR(t *testing.T) {
+	t.Setenv("TMPDIR", strings.Repeat("/deep", 20))
+	dir := ShortTempDir(t)
+	if !strings.HasPrefix(dir, "/tmp/") || len(dir) > 20 {
+		t.Fatalf("ShortTempDir = %q, want a short folder under /tmp", dir)
+	}
+}

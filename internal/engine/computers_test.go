@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"dyna-agent/internal/testsafe"
 	"testing"
 
 	"dyna-agent/internal/computers"
@@ -11,7 +12,7 @@ import (
 // The Computer tab lists root's computer, the one the CLI uses with no stamp.
 func TestComputerHostListsRootComputer(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	rooms := roomsvc.New(nil)
 	rec, err := rooms.Notify.Rooms.Create(room.CreateInput{Name: "work"})
 	if err != nil {

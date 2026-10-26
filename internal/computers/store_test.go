@@ -2,6 +2,7 @@ package computers
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"fmt"
 	"net"
 	"os"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestEnvironmentPreservesOwnerServices(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	base := []string{"PATH=/usr/bin:/bin", "WAYLAND_DISPLAY=wayland-owner", "DISPLAY=:0", "DBUS_SESSION_BUS_ADDRESS=unix:path=/owner/bus", "XDG_RUNTIME_DIR=/owner/runtime", "HYPRLAND_INSTANCE_SIGNATURE=owner-hypr"}
 	m := Meta{SessionID: "session", WaylandDisplay: "dyna-public", Display: ":234"}

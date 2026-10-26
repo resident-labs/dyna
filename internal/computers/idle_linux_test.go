@@ -3,6 +3,7 @@
 package computers
 
 import (
+	"dyna-agent/internal/testsafe"
 	"fmt"
 	"net"
 	"os"
@@ -23,7 +24,7 @@ import (
 // does, and a lock left with a departed runner does not.
 func TestIdleStopIgnoresOpenAppsButWaitsForTheSessionTurn(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
 	id := testSessionID(t, "idle")
 	if err := os.MkdirAll(Dir(id), 0o700); err != nil {
 		t.Fatal(err)

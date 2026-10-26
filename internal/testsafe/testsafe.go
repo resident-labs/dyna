@@ -237,3 +237,17 @@ func folderPID(name string) (int, bool) {
 	pid, err := strconv.Atoi(digits)
 	return pid, err == nil && pid > 0
 }
+
+// ShortTempDir makes a folder with a short path under /tmp and removes it when
+// the test ends. A unix socket path is limited to 108 bytes, and t.TempDir adds
+// the test's name to a TMPDIR that a CI check already points deep into /tmp, so
+// a test that binds a socket (an XDG_RUNTIME_DIR, for one) uses this.
+func ShortTempDir(t testing.TB) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "dt-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}

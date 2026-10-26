@@ -1341,7 +1341,7 @@ func checkTmpFolder(setting string) string {
 		`while IFS= read -r old; do [ -f "$old/` + checkTmpMarker + `" ] && ! in_use "$old" && rm -rf -- "$old"; done || true; `
 	// The check does not start without its own folder: it would run with the
 	// node's real temporary and home folders instead.
-	make := `isolated=$(mktemp -d -p "$tmpparent" dyna-ci.XXXXXX) && : > "$isolated/` + checkTmpMarker + `" && mkdir "$isolated/tmp" || { echo "local CI: cannot make the check's temporary folder in $tmpparent" >&2; exit 70; }; `
+	make := `isolated=$(mktemp -d -p "$tmpparent" dyna-ci.XXXXXX) && : > "$isolated/` + checkTmpMarker + `" || { echo "local CI: cannot make the check's temporary folder in $tmpparent" >&2; exit 70; }; `
 	return "tmpparent=" + parent + "; " + sweep + make
 }
 
@@ -1532,7 +1532,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			"timeout 5s systemctl --user stop " + unit + " >/dev/null 2>&1 || true; " +
 			"if systemctl --user is-active --quiet " + unit + " 2>/dev/null; then printf 'local CI: the check scope %s is still active after cleanup\\n' " + q(unitName) + " >&2; fi; " +
 			"systemctl --user reset-failed " + unit + " >/dev/null 2>&1 || true; "
-		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" TMPDIR=\"$isolated/tmp\" TMP=\"$isolated/tmp\" TEMP=\"$isolated/tmp\" GOTMPDIR=\"$isolated/tmp\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
+		setup += "check_entered=1; check_status=0; " + scope + fmt.Sprintf(" timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" TMPDIR=\"$isolated\" TMP=\"$isolated\" TEMP=\"$isolated\" GOTMPDIR=\"$isolated\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\"", seconds)
 		serverPort := ""
 		if _, set := environment["SCCACHE_SERVER_PORT"]; !set {
 			serverPort = " SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
