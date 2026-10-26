@@ -43,6 +43,9 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	if !present {
 		path = "/usr/local/bin:/usr/bin:/bin"
 	}
+	// The harness and every tool bridge get the owner's login PATH too (D-265).
+	path = withLoginPath(path, loginPathSource())
+	owner["PATH"] = path
 	bridgeRoot := filepath.Join(Home(nativeScope), ".dyna")
 	names := []string{"dyna", "git"}
 	if extra := owner["DYNA_HOME_TOOLS"]; extra != "" {

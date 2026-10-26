@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -144,5 +145,39 @@ func TestRestoreOwnerAfterToolBridge(t *testing.T) {
 	}
 	if _, err := Prepare(scope, os.Getenv("DYNA_BIN"), os.Environ()); err != nil {
 		t.Fatalf("nested Prepare: %v", err)
+	}
+}
+
+// The engine may start with a PATH that lacks the owner's tool directories; the
+// login shell's PATH adds them after the existing entries (D-265).
+func TestLoginPathAddsOwnerToolDirectories(t *testing.T) {
+	cargo := filepath.Join(t.TempDir(), ".cargo", "bin")
+	shell := filepath.Join(t.TempDir(), "login-shell")
+	script := "#!/bin/sh\necho banner\nprintf '\\n%s' '/usr/bin:" + cargo + ":relative/bin'\n"
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	login := loginPathFrom(shell, nil)
+	got := withLoginPath("/usr/local/bin:/usr/bin", login)
+	if want := "/usr/local/bin:/usr/bin:" + cargo; got != want {
+		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+	if loginPathFrom(filepath.Join(t.TempDir(), "missing"), nil) != "" {
+		t.Fatal("a missing login shell gave a PATH")
+	}
+}
+
+func TestPrepareGivesTheHarnessTheLoginPath(t *testing.T) {
+	scope, _, env := fixture(t)
+	cargo := filepath.Join(t.TempDir(), ".cargo", "bin")
+	old := loginPathSource
+	loginPathSource = func() string { return cargo }
+	t.Cleanup(func() { loginPathSource = old })
+	out, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(filepath.SplitList(out["PATH"]), cargo) {
+		t.Fatalf("harness PATH %q lacks the login PATH entry %q", out["PATH"], cargo)
 	}
 }
