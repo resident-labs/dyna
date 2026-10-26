@@ -1069,8 +1069,16 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		eventBody := `{"pull_request":{"base":{"sha":"` + baseCommit + `"},"head":{"sha":"` + sha + `"}}}`
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
-		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds ", seconds) +
+		// act sees no host environment: a session token, an account key or a
+		// harness variable on this machine must never reach a job container. The
+		// allow-list is the act.env file next to the event, which is empty unless
+		// a repository needs one.
+		actHome := path.Join(reportDir, "home")
+		allowList := path.Join(reportDir, "act.env")
+		setup += "mkdir -p " + q(actHome) + "; : > " + q(allowList) + "; "
+		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="+q(actHome)+" ", seconds) +
 			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
+			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
 			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
