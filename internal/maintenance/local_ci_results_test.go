@@ -51,3 +51,39 @@ func TestPassKeepsLocalCIResultOfAnOpenPRHead(t *testing.T) {
 		t.Fatal("the stale result stayed")
 	}
 }
+
+// A paused merge trial resumes from the result saved for the commit it tested,
+// which is the trial's head, not a source change's head.
+func TestPassKeepsLocalCIResultOfAnUnpublishedTrialHead(t *testing.T) {
+	dataDir := storetest.Isolate(t)
+	t.Cleanup(func() { database.Close(dataDir) })
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	ctx := context.Background()
+	store := localci.Store{DataDir: dataDir}
+	const repo = "github.com/acme/widgets"
+	trialHead, stackHead := strings.Repeat("c", 40), strings.Repeat("d", 40)
+	for _, sha := range []string{trialHead, stackHead} {
+		if err := store.SaveResult(ctx, localci.Result{Repo: repo, SHA: sha, Status: localci.OutcomePassed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE local_ci_results SET recorded_at=1"); err != nil {
+		t.Fatal(err)
+	}
+	trial := &state.MergeTrial{Head: trialHead, Stacks: []state.MergeTrialStack{{Head: stackHead}}, Phase: state.MergeTrialPhaseAwaitingRoot}
+	if err := state.Write(state.Root(dataDir), state.State{Version: 1, MergeTrials: map[string]*state.MergeTrial{repo: trial}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := maintenance.Pass(ctx, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, sha := range []string{trialHead, stackHead} {
+		if _, err := store.LoadResult(ctx, repo, sha); err != nil {
+			t.Fatalf("result of the unpublished trial's commit %s… was removed: %v", sha[:1], err)
+		}
+	}
+}
