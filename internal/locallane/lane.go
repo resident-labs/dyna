@@ -55,28 +55,35 @@ func commonDir(ctx context.Context, path string) (string, error) {
 }
 
 // Enabled compares common Git directories so linked worktrees use the same lane.
+// A repository with no remote also uses the lane: nothing else can land its
+// approved changes, because no PR can be opened and no CI service reads it.
 func Enabled(ctx context.Context, repo string) (bool, error) {
 	v, err := settings.Load("")
 	if err != nil {
 		return false, err
 	}
-	if len(v.LocalLaneRepos) == 0 {
-		return false, nil
-	}
-	common, err := commonDir(ctx, repo)
-	if err != nil {
-		return false, err
-	}
-	for _, path := range v.LocalLaneRepos {
-		candidate, err := commonDir(ctx, path)
+	if len(v.LocalLaneRepos) > 0 {
+		common, err := commonDir(ctx, repo)
 		if err != nil {
 			return false, err
 		}
-		if common == candidate {
-			return true, nil
+		for _, path := range v.LocalLaneRepos {
+			candidate, err := commonDir(ctx, path)
+			if err != nil {
+				return false, err
+			}
+			if common == candidate {
+				return true, nil
+			}
 		}
 	}
-	return false, nil
+	return NoRemote(ctx, repo), nil
+}
+
+// NoRemote reports a repository that has no remote at all.
+func NoRemote(ctx context.Context, repo string) bool {
+	out, err := git(ctx, repo, "remote")
+	return err == nil && out == ""
 }
 
 // Ensure creates integration once. The empty old value prevents concurrent reset.
