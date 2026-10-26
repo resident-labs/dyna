@@ -8,7 +8,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
@@ -155,7 +154,7 @@ func TestRestoreOwnerAfterToolBridge(t *testing.T) {
 func TestLoginPathAddsOwnerToolDirectories(t *testing.T) {
 	cargo := filepath.Join(t.TempDir(), ".cargo", "bin")
 	shell := filepath.Join(t.TempDir(), "login-shell")
-	script := "#!/bin/sh\necho banner\nprintf '\\n%s' '/usr/bin:" + cargo + ":relative/bin'\n"
+	script := "#!/bin/sh\necho banner\nprintf '%s' '/usr/bin:" + cargo + ":relative/bin' >\"$3\"\n"
 	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -185,25 +184,22 @@ func TestPrepareGivesTheHarnessTheLoginPath(t *testing.T) {
 }
 
 // A background process that shell startup leaves holding stdout must not stall
-// the PATH lookup past its timeout. The process blocks on a FIFO until cleanup,
-// so the test waits on no clock but WaitDelay itself.
+// the PATH lookup. The process blocks reading a FIFO that the test holds open,
+// so no clock decides the result; closing the FIFO at cleanup ends the process.
 func TestLoginPathDoesNotWaitForABackgroundProcess(t *testing.T) {
-	old := loginPathTimeout
-	loginPathTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { loginPathTimeout = old })
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "hold")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		// Opening for write waits for the background reader, then closing it ends the reader.
-		if w, err := os.OpenFile(fifo, os.O_WRONLY, 0); err == nil {
-			w.Close()
-		}
-	})
+	// A read-write open never blocks, and the background reader finds a writer.
+	hold, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { hold.Close() })
 	shell := filepath.Join(dir, "login-shell")
-	script := "#!/bin/sh\ncat \"$FIFO\" >/dev/null &\nprintf '\\n%s' /opt/tools/bin\n"
+	script := "#!/bin/sh\ncat \"$FIFO\" &\nprintf '%s' /opt/tools/bin >\"$3\"\n"
 	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
