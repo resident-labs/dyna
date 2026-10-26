@@ -12,9 +12,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/database"
@@ -57,8 +57,9 @@ type View struct {
 // Store reads and writes the runtime state in the data folder's dyna.db.
 type Store struct{ DataDir string }
 
-// Migrate creates the tables and imports the records that earlier builds kept
-// as JSON files. Only the engine runs it, at start.
+// Migrate creates the tables. Only the engine runs it, at start. The records
+// that earlier builds kept as JSON files arrive through ImportLegacy, under
+// the generation lifecycle lock that the writers of those files take.
 func Migrate(dataDir string) error {
 	_, err := open(dataDir)
 	return err
@@ -77,10 +78,8 @@ func open(dataDir string) (*sql.DB, error) {
 	}
 	err = database.Migrate(db, "harness.generations", 1, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
-		if _, err := conn.ExecContext(ctx, schema); err != nil {
-			return err
-		}
-		return importLegacyState(ctx, conn, filepath.Join(dataDir, "harnesses", "generations"))
+		_, err := conn.ExecContext(ctx, schema)
+		return err
 	})
 	return db, err
 }
@@ -272,7 +271,7 @@ func changed(result sql.Result, id string) error {
 }
 
 // legacyLease and legacyView are the JSON records earlier builds wrote. They
-// are read only by the one-time import below.
+// are read only by ImportLegacy below.
 type legacyLease struct {
 	Version    int             `json:"version"`
 	Generation string          `json:"generation"`
@@ -286,78 +285,88 @@ type legacyView struct {
 	Generations   []string
 }
 
-// TODO: legacy/shim remove later — import the .uses and .views JSON indexes of
-// earlier builds once, when the engine migrates. Remove with the files.
-func importLegacyState(ctx context.Context, conn *sql.Conn, root string) error {
-	importLeases := func() error {
-		dir := filepath.Join(root, ".uses")
-		entries, err := os.ReadDir(dir)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+// ImportLegacy copies the JSON indexes of earlier builds into the tables. A
+// detached runner of an earlier build can still write them, so the runtime
+// calls this under the generation lifecycle lock on every cleanup, and a
+// written record replaces an earlier copy. An unreadable record fails the
+// import: cleanup then deletes nothing, as it did when it read those files.
+//
+// TODO: legacy/shim remove later — remove with the .uses and .views files of
+// earlier builds, once no runner of such a build can be alive.
+func (s Store) ImportLegacy(ctx context.Context, generationsRoot string) error {
+	db, err := open(s.DataDir)
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if err := importLegacyLeases(ctx, conn, filepath.Join(generationsRoot, ".uses")); err != nil {
+			return fmt.Errorf("import generation leases: %w", err)
 		}
+		return importLegacyViews(ctx, conn, filepath.Join(generationsRoot, ".views"))
+	})
+}
+
+func importLegacyLeases(ctx context.Context, conn *sql.Conn, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "use-") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || len(entry.Name()) <= len("use-.json") {
-				continue
-			}
-			path := filepath.Join(dir, entry.Name())
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			var use legacyLease
-			if json.Unmarshal(raw, &use) != nil || use.Version != 1 || use.OwnerPID <= 0 || use.Generation == "" {
-				log.Printf("generation state: skipped unreadable lease %s", path)
-				continue
-			}
-			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_leases(id,generation,owner_pid,native,released) VALUES(?,?,?,?,?)`,
-				entry.Name(), use.Generation, use.OwnerPID, string(use.Native), flag(use.Released)); err != nil {
-				return err
-			}
+		var use legacyLease
+		if json.Unmarshal(raw, &use) != nil || use.Version != 1 || use.OwnerPID <= 0 || use.Generation == "" {
+			return fmt.Errorf("generation use record is invalid: %s", path)
 		}
+		// The file is authoritative while an earlier build can still rewrite
+		// it, so a bound reference or a release replaces the stored row.
+		if _, err := conn.ExecContext(ctx, `INSERT INTO generation_leases(id,generation,owner_pid,native,released) VALUES(?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET generation=excluded.generation, owner_pid=excluded.owner_pid, native=excluded.native, released=excluded.released`,
+			entry.Name(), use.Generation, use.OwnerPID, string(use.Native), flag(use.Released)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func importLegacyViews(ctx context.Context, conn *sql.Conn, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	importViews := func() error {
-		dir := filepath.Join(root, ".views")
-		entries, err := os.ReadDir(dir)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
+		path := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
+		var view legacyView
+		if json.Unmarshal(raw, &view) != nil || view.Harness == "" || view.Home == "" || len(view.Generations) == 0 {
+			return fmt.Errorf("generation view record is invalid: %s", path)
+		}
+		for _, generation := range view.Generations {
+			if generation == "" {
+				return fmt.Errorf("generation view record is invalid: %s", path)
 			}
-			path := filepath.Join(dir, entry.Name())
-			raw, err := os.ReadFile(path)
-			if err != nil {
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation) VALUES(?,?,?)`, view.Harness, view.Home, generation); err != nil {
 				return err
 			}
-			var view legacyView
-			if json.Unmarshal(raw, &view) != nil || view.Harness == "" || view.Home == "" || len(view.Generations) == 0 {
-				log.Printf("generation state: skipped unreadable view %s", path)
-				continue
-			}
-			for _, dir := range view.Generations {
-				if dir == "" {
-					continue
-				}
-				if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation) VALUES(?,?,?)`, view.Harness, view.Home, dir); err != nil {
-					return err
-				}
-			}
 		}
-		return nil
-	}
-	if err := importLeases(); err != nil {
-		return fmt.Errorf("import generation leases: %w", err)
-	}
-	if err := importViews(); err != nil {
-		return fmt.Errorf("import generation views: %w", err)
 	}
 	return nil
 }

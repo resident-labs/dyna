@@ -10,41 +10,65 @@ import (
 	"dyna-agent/internal/harness/runtime/genstate"
 )
 
-// The one-time import reads the JSON indexes of earlier builds, and the store
-// then owns the same records through their whole lifecycle.
+// The JSON records earlier builds wrote. The import reads exactly these.
+type legacyLeaseFixture struct {
+	Version    int             `json:"version"`
+	Generation string          `json:"generation"`
+	OwnerPID   int             `json:"ownerPid"`
+	Released   bool            `json:"released,omitempty"`
+	Native     json.RawMessage `json:"native,omitempty"`
+}
+
+type legacyViewFixture struct {
+	Harness     string
+	Home        string
+	Generations []string
+}
+
+func writeLegacyLease(t *testing.T, dir, name string, lease legacyLeaseFixture) {
+	t.Helper()
+	raw, err := json.Marshal(lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The import copies the JSON indexes of earlier builds, a later write of an
+// old runner replaces its row, and an unreadable record fails the import.
 func TestLegacyIndexesImportAndLeasesRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "harnesses", "generations")
 	generation := filepath.Join(root, "gen-v1-0123456789abcdef")
-	for _, sub := range []string{".uses", ".views"} {
-		if err := os.MkdirAll(filepath.Join(root, sub), 0700); err != nil {
+	usesDir, viewsDir := filepath.Join(root, ".uses"), filepath.Join(root, ".views")
+	for _, sub := range []string{usesDir, viewsDir} {
+		if err := os.MkdirAll(sub, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	legacyLease, err := json.Marshal(map[string]any{"version": 1, "generation": generation, "ownerPid": 42, "native": json.RawMessage(`{"pid":42}`)})
+	writeLegacyLease(t, usesDir, "use-abc.json", legacyLeaseFixture{Version: 1, Generation: generation, OwnerPID: 42, Native: json.RawMessage(`{"pid":42}`)})
+	legacyView, err := json.Marshal(legacyViewFixture{Harness: "pi", Home: "/home/pi", Generations: []string{generation}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".uses", "use-abc.json"), legacyLease, 0600); err != nil {
-		t.Fatal(err)
-	}
-	legacyView, err := json.Marshal(map[string]any{"Harness": "pi", "Home": "/home/pi", "Generations": []string{generation}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".views", "0123abcd.json"), legacyView, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(viewsDir, "0123abcd.json"), legacyView, 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := genstate.Migrate(dir); err != nil {
 		t.Fatal(err)
 	}
-	// A second migration keeps the imported rows as they are.
-	if err := genstate.Migrate(dir); err != nil {
-		t.Fatal(err)
-	}
 	store := genstate.Store{DataDir: dir}
 	ctx := context.Background()
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	// A second import keeps the rows as they are.
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
 	leases, err := store.Leases(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +82,28 @@ func TestLegacyIndexesImportAndLeasesRoundTrip(t *testing.T) {
 	}
 	if len(views) != 1 || views[0].Harness != "pi" || views[0].Home != "/home/pi" || len(views[0].Generations) != 1 || views[0].Generations[0] != generation {
 		t.Fatalf("imported views = %+v", views)
+	}
+
+	// An old runner bound the lease after the first import: the file wins.
+	writeLegacyLease(t, usesDir, "use-abc.json", legacyLeaseFixture{Version: 1, Generation: generation, OwnerPID: 42, Released: true, Native: json.RawMessage(`{"pid":9}`)})
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	leases, err = store.Leases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leases) != 1 || !leases[0].Released || string(leases[0].Native) != `{"pid":9}` {
+		t.Fatalf("rebound legacy lease = %+v", leases)
+	}
+
+	// An unreadable protection record fails the import, so cleanup deletes
+	// nothing.
+	if err := os.WriteFile(filepath.Join(usesDir, "use-broken.json"), []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ImportLegacy(ctx, root); err == nil {
+		t.Fatal("a corrupt legacy lease was imported")
 	}
 
 	// A lease records its process, binds a reference, releases, and is deleted.
