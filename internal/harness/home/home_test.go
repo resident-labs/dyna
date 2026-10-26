@@ -565,3 +565,34 @@ func TestWritableGitConfigIsPerPublication(t *testing.T) {
 		t.Fatalf("the first launch's config changed: %q, %v", after, err)
 	}
 }
+
+// A tool's Git write survives a change of publication: a new launch with another
+// PATH or tool list starts from the settings the last one's tools wrote.
+func TestGitWriteCarriesToANewPublication(t *testing.T) {
+	scope, _, env := fixture(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+	first, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := exec.Command(git, "config", "--global", "credential.helper", "gh-helper")
+	write.Env = merged(env, first)
+	if out, err := write.CombinedOutput(); err != nil {
+		t.Fatalf("git config --global: %s %v", out, err)
+	}
+	second, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second["GIT_CONFIG_GLOBAL"] == first["GIT_CONFIG_GLOBAL"] {
+		t.Fatal("the publication did not change")
+	}
+	get := exec.Command(git, "config", "--global", "--includes", "--get", "credential.helper")
+	get.Env = merged(env, second)
+	if out, err := get.Output(); err != nil || strings.TrimSpace(string(out)) != "gh-helper" {
+		t.Fatalf("the earlier write is missing from the new launch: %q %v", out, err)
+	}
+}
