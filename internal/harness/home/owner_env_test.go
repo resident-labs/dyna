@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -184,22 +185,29 @@ func TestPrepareGivesTheHarnessTheLoginPath(t *testing.T) {
 }
 
 // A background process that shell startup leaves holding stdout must not stall
-// the PATH lookup past its timeout.
+// the PATH lookup past its timeout. The process blocks on a FIFO until cleanup,
+// so the test waits on no clock but WaitDelay itself.
 func TestLoginPathDoesNotWaitForABackgroundProcess(t *testing.T) {
 	old := loginPathTimeout
-	loginPathTimeout = 100 * time.Millisecond
+	loginPathTimeout = 10 * time.Millisecond
 	t.Cleanup(func() { loginPathTimeout = old })
-	shell := filepath.Join(t.TempDir(), "login-shell")
-	script := "#!/bin/sh\nsleep 3 &\nprintf '\\n%s' /opt/tools/bin\n"
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hold")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// Opening for write waits for the background reader, then closing it ends the reader.
+		if w, err := os.OpenFile(fifo, os.O_WRONLY, 0); err == nil {
+			w.Close()
+		}
+	})
+	shell := filepath.Join(dir, "login-shell")
+	script := "#!/bin/sh\ncat \"$FIFO\" >/dev/null &\nprintf '\\n%s' /opt/tools/bin\n"
 	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
-	got := loginPathFrom(shell, nil)
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("lookup took %v, held by the background process", elapsed)
-	}
-	if got != "/opt/tools/bin" {
+	if got := loginPathFrom(shell, []string{"FIFO=" + fifo, "PATH=" + os.Getenv("PATH")}); got != "/opt/tools/bin" {
 		t.Fatalf("PATH = %q", got)
 	}
 }
