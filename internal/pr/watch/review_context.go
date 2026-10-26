@@ -131,10 +131,12 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 	var err error
 	// A rebase moves the base under a record whose stored base is older, so the
 	// input takes the base and the CI evidence as GitHub has them for this head.
-	base, checks := r.Base, r.Checks
+	// The record copy carries the resolved base, so the returned task's
+	// assignment and the context file name the same base.
+	checks := r.Checks
 	if r.Kind == "github" {
 		if current, e := s.reviewBase(ctx, r); e == nil {
-			base = current
+			r.Base = current
 		}
 		if fresh, e := s.reviewChecks(ctx, r); e == nil {
 			checks = fresh
@@ -142,9 +144,7 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 			checks = nil
 		}
 	}
-	assigned := assignment(r)
-	assigned.Base = base
-	input := ReviewContext{GitHubChecks: checks, Assignment: assigned, Findings: cloneFindings(r.Findings), Rules: map[string]string{}}
+	input := ReviewContext{GitHubChecks: checks, Assignment: assignment(r), Findings: cloneFindings(r.Findings), Rules: map[string]string{}}
 	if len(r.ReviewRounds) > 0 {
 		prior := r.ReviewRounds[len(r.ReviewRounds)-1]
 		input.Previous = &prior
@@ -154,11 +154,11 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		return "", err
 	}
 	name := fmt.Sprintf("%s-%d", digest(r.Head)[:16], r.Round)
-	if r.RepoPath != "" && base != "" {
+	if r.RepoPath != "" && r.Base != "" {
 		input.DiffPath = filepath.Join(dir, name+".patch")
-		diffBase, e := gitRead(ctx, r.RepoPath, "merge-base", base, r.Head)
+		diffBase, e := gitRead(ctx, r.RepoPath, "merge-base", r.Base, r.Head)
 		if e != nil {
-			diffBase = base
+			diffBase = r.Base
 		}
 		input.DiffTruncated, err = writeTreeDiff(ctx, r.RepoPath, diffBase, r.Head, input.DiffPath)
 		if err != nil {
@@ -168,7 +168,7 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		input.DiffStat, _ = gitRead(ctx, r.RepoPath, "diff", "--no-ext-diff", "--no-textconv", "--stat", diffBase+".."+r.Head, "--")
 		if from := deltaBase(input.Previous, seen); from != "" && from != r.Head {
 			input.DeltaPath = filepath.Join(dir, name+"-delta.patch")
-			truncated, e := writeReviewDelta(ctx, r.RepoPath, base, from, r.Head, input.DeltaPath)
+			truncated, e := writeReviewDelta(ctx, r.RepoPath, r.Base, from, r.Head, input.DeltaPath)
 			input.DiffTruncated = input.DiffTruncated || truncated
 			if e != nil {
 				input.DeltaPath = ""

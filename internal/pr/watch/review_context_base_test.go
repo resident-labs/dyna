@@ -63,8 +63,14 @@ func TestReviewInputUsesCurrentBaseAndAssignedHeadChecks(t *testing.T) {
 	e.f.Checks, e.f.Runs = []Check{actionsCheck(Check{ID: 2, Name: "ci / test", Status: "queued"})}, nil
 	e.write()
 
-	if _, err := e.s.prepareReviewTask(context.Background(), r, ""); err != nil {
+	task, err := e.s.prepareReviewTask(context.Background(), r, "")
+	if err != nil {
 		t.Fatal(err)
+	}
+	// The task line the reviewer reads first must name the same base as the
+	// context file, so an assignment started from it cannot diff from the old one.
+	if !strings.Contains(task, `"base":"`+newBase+`"`) || strings.Contains(task, `"base":"`+oldBase+`"`) {
+		t.Fatalf("task assignment does not name the current base %s:\n%s", newBase, task)
 	}
 	paths, err := filepath.Glob(filepath.Join(e.s.Store.Root, "review-inputs", "*", "*.json"))
 	if err != nil || len(paths) != 1 {
