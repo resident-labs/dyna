@@ -116,9 +116,16 @@ func (w *firstWrite) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// hangGuard only stops a broken run from blocking the suite; a passing run never
+// reaches it.
+const hangGuard = 10 * time.Second
+
 // An open event stream must not hold the engine: a restart has to finish in
 // seconds, not wait out the whole shutdown budget while every dyna command fails.
 func TestStopEngineClosesOpenStreams(t *testing.T) {
+	previous := streamShutdownDeadline
+	streamShutdownDeadline = func() time.Duration { return 20 * time.Millisecond }
+	t.Cleanup(func() { streamShutdownDeadline = previous })
 	entered := make(chan struct{}, 1)
 	blocked := make(chan struct{})
 	server := &http.Server{Handler: http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -147,10 +154,10 @@ func TestStopEngineClosesOpenStreams(t *testing.T) {
 	go func() { done <- stopEngine(func() {}, nil, []*http.Server{server}) }()
 	select {
 	case <-done:
-		if elapsed := time.Since(started); elapsed > 10*time.Second {
+		if elapsed := time.Since(started); elapsed > time.Second {
 			t.Fatalf("the engine took %s to stop with one open stream", elapsed)
 		}
-	case <-time.After(20 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("the engine did not stop while a stream stayed open")
 	}
 }

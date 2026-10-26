@@ -20,6 +20,10 @@ const shutdownTimeout = localCIStop + time.Second
 // command failed. After this bound the connections are closed instead.
 const streamShutdownTimeout = 3 * time.Second
 
+// streamShutdownDeadline is the bound a stop uses. A test shortens it, so a
+// regression test does not wait the production three seconds.
+var streamShutdownDeadline = func() time.Duration { return streamShutdownTimeout }
+
 // stopEngine cancels every engine service before joining cleanup. HTTP, workers
 // and foreground process cleanup share one deadline, including error exits.
 func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*http.Server, cleanup ...func()) error {
@@ -40,7 +44,7 @@ func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*h
 		start(func() {
 			// A graceful stop ends a request that finishes, and then this deadline
 			// closes what is left, such as an open event stream.
-			streamCtx, cancelStream := context.WithTimeout(context.Background(), streamShutdownTimeout)
+			streamCtx, cancelStream := context.WithTimeout(context.Background(), streamShutdownDeadline())
 			defer cancelStream()
 			_ = server.Shutdown(streamCtx)
 			_ = server.Close()

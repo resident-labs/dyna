@@ -8,24 +8,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
-
-	"dyna-agent/internal/store"
 )
 
-// checkPrivateRuntime refuses to start when this engine's data folder is not the
-// owner's but its runtime folder is the owner's login runtime folder. The socket
-// would then be the owner's live socket, so a scratch or test engine would hold
-// it and the real engine could not start while it runs.
-func checkPrivateRuntime(dataDir, runtimeDir string) error {
-	owner := store.OwnerDataDir()
-	if owner == "" || dataDir == "" || dataDir == owner {
+// checkPrivateRuntime refuses to start an engine that a Dyna session launched on
+// the owner's login runtime folder. Such a process inherits a room stamp, and
+// the login runtime folder holds the owner's live socket: a scratch engine would
+// take it, and the owner's engine could not start while that one runs. The
+// installed service and an engine the owner starts from a terminal carry no
+// stamp, so both keep the normal runtime folder, including a custom
+// XDG_DATA_HOME.
+func checkPrivateRuntime(stamped bool, runtimeDir string) error {
+	if !stamped {
 		return nil
 	}
 	login := filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
 	if filepath.Clean(runtimeDir) != login {
 		return nil
 	}
-	return fmt.Errorf("engine data folder %s is not the owner's %s, but XDG_RUNTIME_DIR is the login runtime folder %s: give this engine a runtime folder of its own, so it cannot take the owner's socket", dataDir, owner, login)
+	return fmt.Errorf("this engine was started by a Dyna session and XDG_RUNTIME_DIR is the login runtime folder %s, which holds the owner's engine socket: give it a runtime folder of its own", login)
 }
 
 // listenSocket never replaces an active listener or a non-socket file.
