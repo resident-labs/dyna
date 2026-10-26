@@ -66,6 +66,18 @@ func RestartIsPending(dir string) bool {
 	return err == nil
 }
 
+// RestartPendingSince reports a deferred restart that the service started at
+// started has not applied: the marker is newer than started and younger than
+// window at now. The window keeps a marker that nothing clears from holding the
+// service back for good.
+func RestartPendingSince(dir string, started, now time.Time, window time.Duration) bool {
+	st, err := os.Stat(filepath.Join(dir, RestartPending))
+	if err != nil {
+		return false
+	}
+	return st.ModTime().After(started) && now.Sub(st.ModTime()) < window
+}
+
 func ClearRestartPending(dir string) error {
 	if err := os.Remove(filepath.Join(dir, RestartPending)); err != nil && !os.IsNotExist(err) {
 		return err
