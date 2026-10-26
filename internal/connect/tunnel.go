@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,23 +16,40 @@ import (
 	"dyna-agent/internal/childenv"
 )
 
+// tokenWatchInterval is how often the connector checks its credential. A new
+// link or an unlink takes effect without an engine restart, so the child must
+// stop soon rather than at the next engine restart.
+var tokenWatchInterval = 2 * time.Second
+
 // RunTunnel runs cloudflared for the managed tunnel until ctx ends, and
 // starts it again with backoff when it exits. The token goes in by file
-// (--token-file), never on the command line, so ps does not show it.
-// cloudflared's own output goes to <connect dir>/cloudflared.log.
+// (--token-file), never on the command line, so ps does not show it. A changed
+// or removed token stops the child, so the next attempt uses the new link or
+// waits for one. cloudflared's own output goes to <connect dir>/cloudflared.log.
 func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...any)) {
 	if bin == "" {
 		bin = "cloudflared"
 	}
 	wait := 5 * time.Second
 	for ctx.Err() == nil {
-		if _, err := os.Stat(st.TunnelTokenPath()); err != nil {
+		token, err := os.ReadFile(st.TunnelTokenPath())
+		if err != nil {
 			logf("connect: no tunnel token yet; the tunnel waits for the relay")
 		} else {
 			start := time.Now()
-			err := runOnce(ctx, st, bin)
+			runCtx, stop := context.WithCancel(ctx)
+			changed := make(chan struct{}, 1)
+			go watchTunnelToken(runCtx, st.TunnelTokenPath(), token, stop, changed, logf)
+			err := runOnce(runCtx, st, bin)
+			stop()
 			if ctx.Err() != nil {
 				return
+			}
+			// A new credential starts the connector at once; a crash backs off.
+			select {
+			case <-changed:
+				continue
+			default:
 			}
 			if time.Since(start) > 2*time.Minute {
 				wait = 5 * time.Second
@@ -44,6 +62,36 @@ func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...
 		case <-time.After(wait):
 		}
 		wait = min(wait*2, time.Minute)
+	}
+}
+
+// watchTunnelToken stops the connector when its credential changes or goes away.
+// A link writes a new token, and an unlink removes it; the child in flight still
+// holds the old tunnel, so it must not keep running.
+func watchTunnelToken(ctx context.Context, path string, seen []byte, stop context.CancelFunc, changed chan<- struct{}, logf func(string, ...any)) {
+	ticker := time.NewTicker(tokenWatchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		now, err := os.ReadFile(path)
+		if err == nil && bytes.Equal(now, seen) {
+			continue
+		}
+		if err != nil {
+			logf("connect: the tunnel token is gone; stopping cloudflared")
+		} else {
+			logf("connect: the tunnel token changed; restarting cloudflared")
+		}
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+		stop()
+		return
 	}
 }
 

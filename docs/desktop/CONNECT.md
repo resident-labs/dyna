@@ -108,8 +108,10 @@ dyna-engine`. Logs: `journalctl --user -u dyna-engine`.
 together with `dyna-computers.service` and `dyna-tunnel.service`. The tunnel
 unit runs `dyna engine tunnel`, so the connector has a life of its own: an engine
 restart leaves it up, an open page reconnects to the new engine by itself, and
-the engine skips its own connector when that unit is installed. Logs:
-`journalctl --user -u dyna-tunnel`.
+the engine skips its own connector once the service is active. A new link or
+`connect unlink` restarts the connector by itself, without an engine restart.
+`install-services --no-tunnel` installs no connector and stops one already
+running. Logs: `journalctl --user -u dyna-tunnel`.
 
 ## Commands
 
