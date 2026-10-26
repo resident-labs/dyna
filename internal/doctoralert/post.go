@@ -2,7 +2,9 @@ package doctoralert
 
 import (
 	"fmt"
+	"strings"
 
+	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/room"
 )
 
@@ -25,7 +27,15 @@ func PostNote(rooms *room.Store, n Note) error {
 			if i == 0 {
 				severity = room.AlertCritical
 			}
-			event.Findings = append(event.Findings, room.AlertFinding{Severity: severity, Title: f.Cause, Cause: f.Evidence})
+			cause := f.Evidence
+			if strings.HasPrefix(f.Cause, doctor.OutsideGroup+" ") && len(n.Outside) > 0 {
+				lines := make([]string, len(n.Outside))
+				for j, o := range n.Outside {
+					lines[j] = o.Text()
+				}
+				cause += ". The biggest programs outside Dyna: " + strings.Join(lines, "; ")
+			}
+			event.Findings = append(event.Findings, room.AlertFinding{Severity: severity, Title: f.Cause, Cause: cause})
 			if event.NextCommand == "" {
 				event.NextCommand = f.Command
 			}
