@@ -20,7 +20,11 @@ import (
 
 // TransferState is durable state for a fresh model conversation in the same
 // Dyna session. The session's address, children and PR links never move.
-const transferStartupTimeout = "replacement startup produced no model output within 60 seconds"
+var transferStartupTimeout = fmt.Sprintf("replacement startup produced no model output within %d minutes", int(startupLimit/time.Minute))
+
+// startupLimit is how long a replacement turn may run before it must produce
+// its first model output. It is the one harness limit for every new turn.
+const startupLimit = harness.StartupLimit
 
 type TransferState struct {
 	// RootSeat collects a handoff for an external root without a replacement turn.
@@ -770,12 +774,12 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			if !meta.Closed.IsZero() {
 				return ErrClosed
 			}
-			startup := now.Add(60 * time.Second)
+			startup := now.Add(startupLimit)
 			if profile.CompactDue(chosen, meta.ContextTokens) {
 				// Dyna's own compact command runs before the first request on the
 				// resumed session. Give it a second window so a large history is
 				// not mistaken for a stalled model.
-				startup = now.Add(2 * 60 * time.Second)
+				startup = now.Add(2 * startupLimit)
 			}
 			t.Phase, t.Turn, t.StartupDeadline = "starting", meta.Turns+1, startup
 			t.OldTurns = meta.Turns
@@ -867,7 +871,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			// compact already has a longer window that must not shrink.
 			err := m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
 				t.CompactionExtended = true
-				t.StartupDeadline = t.StartupDeadline.Add(60 * time.Second)
+				t.StartupDeadline = t.StartupDeadline.Add(startupLimit)
 				return nil
 			})
 			return false, err
