@@ -471,7 +471,15 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 			werr = <-waitErr
 		}
 	}
-	if ctx.Err() != nil {
+	// Stop signals the command's group and marks the job; a signal to the
+	// supervisor cancels ctx. Either way the job was asked to end.
+	stopped := ctx.Err() != nil
+	if !stopped {
+		if cur, err := s.ReadMeta(id); err == nil && cur.StopBy != "" {
+			stopped = true
+		}
+	}
+	if stopped {
 		// A stopped job must end. A child that outlived it (an ssh connection
 		// master, for example) can hold the output open for as long as it runs,
 		// so the copier gets a short time to drain, then loses its input.
