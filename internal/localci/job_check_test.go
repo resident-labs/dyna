@@ -104,6 +104,15 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	// keep both instead of letting one overwrite the other.
 	// The flattened names of these two entries would collide, so only an
 	// ordinal per entry keeps both.
+	// The raw Go test events travel as JSON next to the JUnit XML, and the Go
+	// reader needs them for failure detail.
+	jsonEntry, err := zipWriter.Create("package_a/go-test.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jsonEntry.Write([]byte(`{"Action":"pass","Package":"dyna-agent/internal/x"}`)); err != nil {
+		t.Fatal(err)
+	}
 	for _, pkg := range []string{"package_a", "package/a"} {
 		entry, err := zipWriter.Create(pkg + "/go-test.xml")
 		if err != nil {
@@ -194,7 +203,12 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(reports) != 2 {
-		t.Fatalf("reports = %v, want one per uploaded package", reports)
+		t.Fatalf("reports = %v, want one XML report per uploaded package", reports)
+	}
+	// Unpacked entries carry the archive and entry ordinals; the run's own
+	// event.json and execution.json do not.
+	if raw, err := filepath.Glob(filepath.Join(reportDir, "*-*.json")); err != nil || len(raw) != 1 {
+		t.Fatalf("raw events = %v, %v, want the uploaded JSON events too", raw, err)
 	}
 	var found []string
 	for _, report := range reports {

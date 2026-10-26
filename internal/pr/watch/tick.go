@@ -125,6 +125,7 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if e := s.scheduleRegisteredCI(ctx, st); e != nil {
 		headErr = errors.Join(headErr, e)
 	}
+	s.scheduleCacheWarm(ctx, st)
 	// Local branch reads also precede reconciliation, so a moved local head cannot retain a reviewer.
 	for _, key := range tickKeys(st) {
 		r := st.Records[key]

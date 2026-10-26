@@ -83,6 +83,7 @@ type Definition struct {
 	groupOf    map[CheckName]Group
 	providerOf map[CheckName]CheckName
 	actImage   string
+	warm       *JobRef
 }
 
 type definitionSuite struct {
@@ -97,8 +98,16 @@ type definitionFile struct {
 	Trial   []Suite     `yaml:"trial"`
 	Caches  []cacheFile `yaml:"caches"`
 	Act     *actFile    `yaml:"act"`
+	Warm    *warmFile   `yaml:"warm"`
 	Checks  []checkFile `yaml:"checks"`
 	Suites  []suiteFile `yaml:"suites"`
+}
+
+// warmFile names the provider job that fills the act cache the job checks
+// restore from. Dyna runs it on a machine after the default branch moves.
+type warmFile struct {
+	Workflow string `yaml:"workflow"`
+	Name     string `yaml:"name"`
 }
 
 type cacheFile struct {
@@ -282,6 +291,13 @@ func ParseDefinition(body []byte) (*Definition, error) {
 			return nil, fmt.Errorf("act image %q must be one container image", file.Act.Image)
 		}
 		definition.actImage = file.Act.Image
+	}
+	if file.Warm != nil {
+		warm, err := validateJobRef(jobFile{Workflow: file.Warm.Workflow, Name: file.Warm.Name})
+		if err != nil {
+			return nil, fmt.Errorf("warm: %w", err)
+		}
+		definition.warm = &warm
 	}
 	checks := make(map[Suite]ExecutableCheck, len(file.Checks))
 	checkNames := map[CheckName]Suite{}
@@ -664,6 +680,15 @@ func (d *Definition) CoversSuites(result Result, suites []Suite) bool {
 // ActImage is the platform image a workflow's runs-on: ubuntu-latest maps to on
 // this repository's nodes.
 func (d *Definition) ActImage() string { return d.actImage }
+
+// Warm names the job that fills this repository's act cache, and reports false
+// when the repository declares none.
+func (d *Definition) Warm() (JobRef, bool) {
+	if d.warm == nil {
+		return JobRef{}, false
+	}
+	return *d.warm, true
+}
 
 // JobRef names one job of a GitHub Actions workflow that a check runs through
 // act instead of a command of its own.
