@@ -308,3 +308,32 @@ func TestCommandCancelsTheProcessGroupAndDrainsItsPipes(t *testing.T) {
 		t.Fatalf("cancelled command returned %v", err)
 	}
 }
+
+// A command that exits while a child it started keeps the output pipe open is
+// reported as ErrWaitDelay after the wait bound, and the command's process
+// group is killed rather than left behind. The run and the reaper are given,
+// so the decision is proven without a real wait or a real child.
+func TestRunAndReapKillsTheGroupOfALeftoverChild(t *testing.T) {
+	cmd := exec.Command("true")
+	cmd.Process = &os.Process{Pid: 4242}
+	var killed []int
+	err := runAndReapWith(func() error { return exec.ErrWaitDelay }, cmd, func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	})
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("a leftover pipe holder was not reported: %v", err)
+	}
+	if len(killed) != 1 || killed[0] != 4242 {
+		t.Fatalf("reaped groups %v, want 4242", killed)
+	}
+	// A command that failed for another reason is not reaped, so a real failure
+	// keeps its exit status.
+	killed = nil
+	if err := runAndReapWith(func() error { return errors.New("exit status 1") }, cmd, func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	}); err == nil || len(killed) != 0 {
+		t.Fatalf("a failed command reaped groups %v", killed)
+	}
+}
