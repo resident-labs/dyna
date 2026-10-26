@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
@@ -324,6 +325,21 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	// A session can remove its own worktree. Its saved directory then no longer
 	// exists, so the turn runs in the room's repo checkout and the prompt says so.
 	runDir, dirNote := m.EffectiveDir(meta)
+	// A Pi session opened from another directory asks whether to fork on stdin,
+	// which a headless turn cannot answer. If the session's own directory still
+	// exists, the resume opens the session file and Pi keeps that directory. If
+	// it is gone, fork the session into this turn's directory with a new id.
+	forkFrom := ""
+	forkPending := false
+	if prof.Harness == profile.HarnessPi && sessionID != "" {
+		if path, err := runtime.PiSessionPath(sessionID); err == nil {
+			if cwd, err := runtime.PiSessionCwd(path); err == nil {
+				if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
+					forkFrom, forkPending = path, true
+				}
+			}
+		}
+	}
 	maps.Copy(prof.Env, worktrees.PortEnvForDir(ctx, runDir))
 	runOne := func(ask string) (harness.Result, error) {
 		if !writes.resumeActive() {
@@ -342,13 +358,14 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		}
 		mu.Lock()
 		resumeID, lastContext := sessionID, contextTokens
+		forking := forkPending && forkFrom != ""
 		mu.Unlock()
 		execution := writes.nativeExecution(meta.Role)
 		execution.ProcessRunner = m.ProcessRunner
 		if turn.Schema == "" {
 			execution.AcceptEmptyOutput = func() bool { return m.turnAcceptsEmptyOutput(id, n) }
 		}
-		r, err := harness.RunWithOptions(ctx, prof, ask, runDir, true, outputOpts, steeringOpts, harness.SessionOptions{
+		sessionOpts := harness.SessionOptions{
 			RecoveryDelay: m.RecoveryDelay,
 			ResumeID:      resumeID,
 			RuntimePin:    meta.RuntimePin,
@@ -370,11 +387,17 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			OnSession: func(sid string) {
 				mu.Lock()
 				sessionID = sid
+				forkPending = false
 				mu.Unlock()
 				writes.harnessSession(sid)
 				writes.note(TurnNote{HarnessSession: sid})
 			},
-		}, execution)
+		}
+		if forking {
+			sessionOpts.ResumeID = ""
+			sessionOpts.ForkFrom = forkFrom
+		}
+		r, err := harness.RunWithOptions(ctx, prof, ask, runDir, true, outputOpts, steeringOpts, sessionOpts, execution)
 		if r.CompactError != "" {
 			writes.note(TurnNote{CompactError: r.CompactError})
 		}
