@@ -49,7 +49,7 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 	}
 	cases := []syncCall{
 		{"SyncCatalogAccount", cliArgs(t, "mcp", "pi", account.ID), "invalid character"},
-		{"SyncPrivateRuntime", cliArgs(t, "pi"), "generation is pending for pi"},
+		{"SyncPrivateRuntime", cliArgs(t, "pi"), "invalid character"},
 	}
 	check := func(ctx context.Context, allowed bool) {
 		t.Helper()
@@ -86,7 +86,7 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 	check(claimed, false)
 	// Browser owner calls still work remotely; the new account call stays local.
 	paired := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	if _, err := calls["SyncPrivateRuntime"](paired, cliArgs(t, "pi")); err == nil || !strings.Contains(err.Error(), "generation is pending for pi") {
+	if _, err := calls["SyncPrivateRuntime"](paired, cliArgs(t, "pi")); err == nil || !strings.Contains(err.Error(), "invalid character") {
 		t.Errorf("browser locality changed: %v", err)
 	}
 	if _, err := calls["SyncCatalogAccount"](paired, cliArgs(t, "mcp", "pi", account.ID)); err == nil || !strings.Contains(err.Error(), "only through the local engine socket") {

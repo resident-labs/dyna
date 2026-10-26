@@ -224,3 +224,24 @@ func (m *ConfigManager) Catalog(harness string) (ConfigSnapshot, error) {
 	out.Skills = append(out.Skills, c.Skills...)
 	return out, nil
 }
+
+// RemoveSeededSkill removes the one catalog entry that an older Dyna version
+// seeded. It matches both the name and the source path, so an owner-added skill
+// with the same name stays. It writes nothing when no entry matches.
+// TODO: legacy/shim remove later — drops the orchestrator skill older versions seeded into the catalog; remove once supported catalogs no longer hold it
+func (m *ConfigManager) RemoveSeededSkill(name, source string) error {
+	c, err := m.Read()
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(c.Skills, func(s ManagedSkill) bool { return s.Name == name && s.Source == source }) {
+		return nil
+	}
+	return m.update(func(c *HarnessConfig) error {
+		c.Skills = slices.DeleteFunc(c.Skills, func(s ManagedSkill) bool { return s.Name == name && s.Source == source })
+		return nil
+	})
+}
