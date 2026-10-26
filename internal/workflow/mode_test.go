@@ -104,7 +104,7 @@ func TestWorkflowStartsWithScratchUnavailable(t *testing.T) {
 	t.Setenv("DYNA_SCRATCH_ROOT", filepath.Join(tmp, "scratch"))
 	t.Setenv("DYNA_SCRATCH", "/stale/parent")
 	root := scratch.Root()
-	if err := os.Mkdir(root, 0700); err != nil {
+	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(root, 0777); err != nil {

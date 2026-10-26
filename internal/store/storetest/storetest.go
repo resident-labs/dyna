@@ -18,8 +18,8 @@ func Isolate(t testing.TB) string {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-	// Session scratch is a disk folder under the owner's cache now, not under
-	// TMPDIR or the data folder, so a test must redirect it explicitly.
+	// Session scratch uses a disk base with a namespace per store, so a test
+	// must redirect the base explicitly.
 	t.Setenv("DYNA_SCRATCH_ROOT", filepath.Join(t.TempDir(), "scratch"))
 	ClearStamp(t)
 	return root
