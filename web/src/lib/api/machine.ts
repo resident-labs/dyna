@@ -88,6 +88,9 @@ export interface MachineHarness {
 // "" for this engine's own machine.
 export interface MachineDetail extends MachineSummary {
   ssh: string
+  // sshConnectTimeoutSeconds is how long an ssh to the machine waits for the
+  // connection. The engine reports the default when none is set.
+  sshConnectTimeoutSeconds?: number
   dynaVersion?: string
   // hostChecksAllowedBy names who allows host checks, when someone does: the
   // owner, or the root of a room. The engine words it.
@@ -150,6 +153,8 @@ export interface MachinePatch {
   rooms?: string[]
   suites?: string[]
   ssh?: string
+  // sshConnectTimeoutSeconds sets the ssh connect wait; 0 restores the default.
+  sshConnectTimeoutSeconds?: number
   // create adds the machine that the reference names when none exists.
   create?: boolean
 }
