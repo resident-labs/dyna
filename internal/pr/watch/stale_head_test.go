@@ -196,6 +196,23 @@ func TestMissingLocalBranchStillDeliversWarning(t *testing.T) {
 	}
 }
 
+func TestCancelledLocalBranchReadKeepsReview(t *testing.T) {
+	e := newEnv(t)
+	r, _ := localChange(t, e)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := e.s.refreshLocal(ctx, r.Key); err == nil {
+		t.Fatal("a cancelled read reported success")
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live := st.Records[r.Key]; live.Error != "" || live.PauseReason != "" || len(live.Notices) != 0 {
+		t.Fatalf("a cancelled read marked the branch unavailable: %+v", live)
+	}
+}
+
 func queueState(st State, changeID string) string {
 	for _, item := range mergeQueue(st, nil) {
 		if item.ChangeID == changeID {
