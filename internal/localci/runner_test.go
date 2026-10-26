@@ -88,8 +88,9 @@ func TestGoFailureDetailsSurviveJUnitExport(t *testing.T) {
 }
 
 // A test that only ran over the room's per-test time budget did not fail. The
-// check fails all the same, but its cause names the budget: nobody then hunts a
-// bug in a test that passed.
+// check keeps passing here and its cause names the budget: whether that fails
+// the check is the room's ciTimeBudget decision, made by the watcher, so nobody
+// hunts a bug in a test that passed.
 func TestOverBudgetTestIsNotATestFailure(t *testing.T) {
 	dir := t.TempDir()
 	reports := filepath.Join(dir, "reports", "frontend")
@@ -109,8 +110,11 @@ func TestOverBudgetTestIsNotATestFailure(t *testing.T) {
 	write(`<testsuite><testcase name="slow" classname="rooms" time="2.5"/><testcase name="fast" classname="rooms" time="0.1"/></testsuite>`)
 	result := SuiteResult{Suite: "frontend", Status: OutcomePassed}
 	readReports(&result, ReportJUnit, dir, 2*time.Second, nil)
-	if result.Status != OutcomeFailed || result.Cause != CauseOverBudget {
-		t.Fatalf("status=%s cause=%s, want failed with cause %s", result.Status, result.Cause, CauseOverBudget)
+	if result.Status != OutcomePassed || result.Cause != CauseOverBudget {
+		t.Fatalf("status=%s cause=%s, want passed with cause %s", result.Status, result.Cause, CauseOverBudget)
+	}
+	if len(result.Failures) != 0 {
+		t.Fatalf("an over-budget test was listed as a failure: %v", result.Failures)
 	}
 	if label := result.Cause.Label(); label != "over the time budget" {
 		t.Fatalf("label=%q, want the time budget", label)
