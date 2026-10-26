@@ -484,8 +484,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 		}
 	}
 	// VoiceResume can dial a provider, like VoiceStart.
-	if n := len(callspec.LongCalls); n != 95 {
-		t.Fatalf("LongCalls has %d calls, want 95; a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 96 {
+		t.Fatalf("LongCalls has %d calls, want 96; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 
