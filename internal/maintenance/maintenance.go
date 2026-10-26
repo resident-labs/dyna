@@ -135,6 +135,11 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		} else {
 			result.add("closed PR records", Pruned{Items: n})
 		}
+		if n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now); err != nil {
+			errs = append(errs, fmt.Errorf("shell job rows: %w", err))
+		} else {
+			result.add("shell job rows", Pruned{Items: n})
+		}
 		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); err != nil {
 			errs = append(errs, fmt.Errorf("CI health rows: %w", err))
 		} else {
