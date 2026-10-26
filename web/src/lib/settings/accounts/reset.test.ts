@@ -10,7 +10,7 @@ test('passed resets hide old readings and state when they were checked', () => {
   assert.match(notice, /^probably reset · last checked /)
   assert.doesNotMatch(notice, /%/)
   assert.equal(resetNotice({ resetsAt: '2026-10-20T12:00:00Z' }, observedAt, now).startsWith('probably reset'), true)
-  assert.match(resetNotice({ unavailableReason: 'probably reset' }, observedAt, now), /^probably reset · last checked /)
+  assert.match(resetNotice({ reason: 'probable-reset' }, observedAt, now), /^probably reset · last checked /)
   assert.equal(resetNotice({ resetsAt: '2026-10-20T12:00:00Z' }, '', now), 'probably reset · last checked unknown')
 })
 

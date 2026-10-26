@@ -46,7 +46,7 @@ func usageOutputLeaks(o store.Observation, c native.Captured) bool {
 		fields = append(fields, o.Plan.ID, o.Plan.Label)
 	}
 	for _, w := range o.Windows {
-		fields = append(fields, w.ID, w.Label, w.Period, w.PeriodStart, w.Unit, w.ResetsAt, w.UnavailableReason)
+		fields = append(fields, w.ID, w.Label, w.Period, w.PeriodStart, w.Unit, w.ResetsAt, string(w.Reason))
 	}
 	for _, field := range fields {
 		if textContainsSecret(field, c) {

@@ -153,7 +153,7 @@ export function requestGate() {
 
 export function allowanceLabel(window?: Partial<UsageWindow> | null): string {
   if (window?.amountLabel) return window.amountLabel
-  if (!finite(window?.used) || !finite(window?.limit)) return window?.unavailableReason || ''
+  if (!finite(window?.used) || !finite(window?.limit)) return ''
   const currency = ['USD', 'usd'].includes(window.unit ?? '')
   const format = new Intl.NumberFormat(undefined, currency ? { style: 'currency', currency: 'USD', maximumFractionDigits: 2 } : { maximumFractionDigits: 3 })
   return `${format.format(window.used)} of ${format.format(window.limit)}${currency || !window.unit ? '' : ' ' + window.unit} used`
