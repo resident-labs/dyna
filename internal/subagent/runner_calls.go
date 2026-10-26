@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -710,7 +711,7 @@ func (w *runnerWrites) waitInput(ctx context.Context, input InputClaim) (bool, e
 			return false, callspec.Late("RunnerWaitInput", runnerInputRestartWait)
 		}
 		var remote *engineclient.RemoteError
-		if errors.As(err, &remote) && remote.Final() {
+		if errors.As(err, &remote) && remote.Final() && !remoteCanceled(remote) {
 			return false, err
 		}
 		// This is an idempotent read, outside mutation order. A transient
@@ -724,6 +725,14 @@ func (w *runnerWrites) waitInput(ctx context.Context, input InputClaim) (bool, e
 		case <-w.waitRetryAfter(delay):
 		}
 	}
+}
+
+// remoteCanceled reports an engine reply that its own call was canceled, as when
+// the engine stops or restarts under a running wait. The reply says nothing about
+// this runner's turn, which stays current: the wait must retry, not fail the
+// turn with a steering error (D-267). A revoked turn still fails as a 403.
+func remoteCanceled(remote *engineclient.RemoteError) bool {
+	return strings.Contains(remote.Message, context.Canceled.Error()) || strings.Contains(remote.Message, context.DeadlineExceeded.Error())
 }
 
 func (w *runnerWrites) claimInput(ctx context.Context, input InputClaim) (ClaimedInput, error) {
