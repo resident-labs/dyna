@@ -17,7 +17,7 @@ type savedArtifact struct {
 
 func saveArtifacts(t *testing.T, out map[string]string, tools ...string) []savedArtifact {
 	t.Helper()
-	paths := []string{out["GIT_CONFIG_GLOBAL"], out["DYNA_BIN"], filepath.Join(filepath.Dir(out["DYNA_BIN"]), "git")}
+	paths := []string{publishedConfig(out), out["DYNA_BIN"], filepath.Join(filepath.Dir(out["DYNA_BIN"]), "git")}
 	for _, name := range tools {
 		paths = append(paths, filepath.Join(filepath.Dir(out["DYNA_BIN"]), name))
 	}
@@ -124,7 +124,7 @@ func TestOwnerEnvironmentSelectsImmutablePublication(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if next["DYNA_BIN"] == first["DYNA_BIN"] || next["GIT_CONFIG_GLOBAL"] == first["GIT_CONFIG_GLOBAL"] {
+		if next["DYNA_BIN"] == first["DYNA_BIN"] || publishedConfig(next) == publishedConfig(first) {
 			t.Fatalf("owner input reused prior set: %s", change)
 		}
 	}
@@ -133,7 +133,7 @@ func TestOwnerEnvironmentSelectsImmutablePublication(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if next["DYNA_BIN"] != first["DYNA_BIN"] || next["GIT_CONFIG_GLOBAL"] != first["GIT_CONFIG_GLOBAL"] {
+		if next["DYNA_BIN"] != first["DYNA_BIN"] || publishedConfig(next) != publishedConfig(first) {
 			t.Fatalf("unrelated owner input created another set: %s", change)
 		}
 	}
@@ -170,7 +170,7 @@ func TestDamagedPublicationFailsWithoutRepair(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "immutable") {
 		t.Fatalf("damaged publication reused: %v", err)
 	}
-	publication := filepath.Dir(out["GIT_CONFIG_GLOBAL"])
+	publication := filepath.Dir(publishedConfig(out))
 	recovery := fmt.Sprintf("remove the entire publication directory %q", publication)
 	if !strings.Contains(err.Error(), recovery) {
 		t.Fatalf("error must identify the whole publication for recovery: %v", err)
