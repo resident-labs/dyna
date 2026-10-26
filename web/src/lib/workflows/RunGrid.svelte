@@ -76,11 +76,12 @@
   .x { color: var(--faint); font-size: 11.5px; }
   .none { color: var(--line); padding: 0 12px; }
   .fold { padding: 6px 12px 10px; }
-  .fold button { font-size: 12.5px; font-weight: 600; color: var(--muted); min-height: 32px; }
+  .fold button { font-size: 12.5px; font-weight: 600; color: var(--muted); min-height: 32px; transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .cell:hover { background: var(--raise-hover); }
     .fold button:hover { color: var(--ink); }
   }
+  .cell:active { background: var(--select); }
   @media (max-width: 760px) {
     .cell { min-height: 44px; }
     .fold button { min-height: 44px; }
