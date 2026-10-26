@@ -139,3 +139,52 @@ func TestFetchWaitsForAJustPushedTrialRef(t *testing.T) {
 		t.Fatalf("fetch attempts = %d, want %d", calls, ciRefFetchAttempts)
 	}
 }
+
+// A preparation failure must keep the retry marker, or a fetch that keeps failing
+// retries for ever: admission would see an unmarked result, try again, and save
+// another unmarked one. Two attempts are enough, and the third admits nothing.
+func TestPreparationFailureSpendsItsRetry(t *testing.T) {
+	e, local, dir, ci := localCIEnv(t)
+	head := local.Head
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo",
+		Head: head, Base: local.Base, Branch: "dyna/merge-trial/1", RepoPath: dir, RoomID: local.RoomID,
+		Watching: true, State: "open"}
+	if r.Base == "" {
+		r.Base = local.Head
+	}
+	// Every fetch fails the way a wrong account does, so preparation fails at once.
+	e.s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		fmt.Fprintln(cmd.Stderr, "fatal: Authentication failed for 'https://github.com/owner/repo.git/'")
+		return fmt.Errorf("exit status 128")
+	}
+	job := registeredCIJob{record: r, head: head, base: r.Base, branch: r.Branch, trial: true, wholeSuite: true}
+
+	for attempt, wantResumed := range []bool{false, true} {
+		started, err := e.s.startRegisteredCI(t.Context(), job)
+		if err != nil {
+			t.Fatalf("attempt %d: %v", attempt+1, err)
+		}
+		if started {
+			t.Fatalf("attempt %d started a run although preparation failed", attempt+1)
+		}
+		saved := ci.results[head]
+		if saved.Cause != localci.CauseScheduling || saved.Resumed != wantResumed {
+			t.Fatalf("attempt %d saved cause=%q resumed=%t, want scheduling resumed=%t", attempt+1, saved.Cause, saved.Resumed, wantResumed)
+		}
+	}
+	// The retry is spent, so the third admission starts nothing more.
+	started, err := e.s.startRegisteredCI(t.Context(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started {
+		t.Fatal("a spent preparation retry still started something")
+	}
+	// The gate now reports the scheduling error instead of waiting for a retry.
+	definition := watchDynaDefinition(t)
+	plan := localCIPlan{execution: definition, required: definition, suites: definition.WorkflowSuites()}
+	obs := (&Service{}).registeredLocalObservation(r, Snapshot{}, ChangePolicy{}, plan, ci.results[head], true, false)
+	if obs.Status != VerdictFailed || !strings.Contains(obs.Reason, "could not start") {
+		t.Fatalf("gate = %s (%s), want a scheduling failure", obs.Status, obs.Reason)
+	}
+}
