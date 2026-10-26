@@ -286,7 +286,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	t.Cleanup(authority.InEngine())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, services.hooks, time.Now())
+	w := engineWorkers(t.Context(), services.rooms, newWorkerSignals(nil), nil, nil, services.hooks, time.Now())
 	drain := w.hooks
 	ticks := make(chan struct{}, 4)
 	w.hooks = func(ctx context.Context) (time.Time, error) {
@@ -645,7 +645,7 @@ func TestWorkersSettleFromTheEngineStart(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { settleHookRuns = settleFromStart })
-	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, services.hooks, started)
+	w := engineWorkers(t.Context(), services.rooms, newWorkerSignals(nil), nil, nil, services.hooks, started)
 	if err := w.settle(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -667,22 +667,40 @@ func TestResumedRoomRunsACheckInPass(t *testing.T) {
 	}
 }
 
-// A pass that blocks ends at its deadline and the worker takes the next signal,
-// and a pass that runs past the warning threshold is reported once.
+// A pass that reaches its deadline ends and the worker takes the next signal, a
+// pass that finishes past the warning threshold is reported once, and a global
+// hook that a pass schedules outlives that pass and stops with the engine.
 func TestWorkerPassIsBoundedAndReported(t *testing.T) {
 	previousTimeout, previousWarn := workerPassTimeout, workerPassWarn
-	workerPassTimeout, workerPassWarn = 80*time.Millisecond, 20*time.Millisecond
-	t.Cleanup(func() { workerPassTimeout, workerPassWarn = previousTimeout, previousWarn })
+	previousNow, previousContext := workerNow, workerPassContext
+	t.Cleanup(func() {
+		workerPassTimeout, workerPassWarn = previousTimeout, previousWarn
+		workerNow, workerPassContext = previousNow, previousContext
+	})
+
+	// The pass clock is the test's: a finish time is a value the test sets.
+	var clock atomic.Int64
+	workerNow = func() time.Time { return time.Unix(0, clock.Load()) }
+	passEnded := make(chan struct{})
+	workerPassContext = func(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		return ctx, func() { cancel() }
+	}
+	workerPassWarn = time.Second
 
 	signal := make(chan struct{}, 1)
-	blocked := make(chan struct{}, 1)
+	started := make(chan int, 4)
 	reports := make(chan error, 4)
 	var passes atomic.Int32
-	tick := func(ctx context.Context) error {
-		if passes.Add(1) == 1 {
-			blocked <- struct{}{}
-			<-ctx.Done() // the pass hangs until its deadline ends it
-			return ctx.Err()
+	tick := func(context.Context) error {
+		n := int(passes.Add(1))
+		if n == 3 {
+			clock.Add(int64(2 * time.Second)) // this pass takes longer than the warning
+		}
+		started <- n
+		if n == 1 {
+			<-passEnded // the first pass hangs until the test ends its deadline
+			return context.DeadlineExceeded
 		}
 		return nil
 	}
@@ -695,22 +713,57 @@ func TestWorkerPassIsBoundedAndReported(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done })
 
 	signal <- struct{}{}
-	<-blocked
-	select {
-	case err := <-reports:
-		if !strings.Contains(err.Error(), "sessions pass ended at its") {
-			t.Fatalf("report = %v, want the bounded pass", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("a blocked pass was not bounded")
+	if n := <-started; n != 1 {
+		t.Fatalf("first pass = %d", n)
 	}
-	// Delivery goes on: the next signal runs another pass.
+	close(passEnded)
+	if err := <-reports; !strings.Contains(err.Error(), "sessions pass ended at its") {
+		t.Fatalf("report = %v, want the bounded pass", err)
+	}
 	signal <- struct{}{}
-	deadline := time.Now().Add(5 * time.Second)
-	for passes.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	if n := <-started; n != 2 {
+		t.Fatalf("second pass = %d, want 2", n)
 	}
-	if passes.Load() < 2 {
-		t.Fatalf("passes = %d, want a second pass after the bounded one", passes.Load())
+	// A pass that finishes past the threshold is reported once with its timing.
+	signal <- struct{}{}
+	if n := <-started; n != 3 {
+		t.Fatalf("third pass = %d, want 3", n)
+	}
+	if err := <-reports; !strings.Contains(err.Error(), "sessions pass took") {
+		t.Fatalf("report = %v, want the slow pass", err)
+	}
+}
+
+// A global hook pass that a scheduling pass starts must outlive that pass and
+// stop with the engine.
+func TestScheduledGlobalHookOutlivesItsPass(t *testing.T) {
+	var lock sync.Mutex
+	engineCtx, stopEngine := context.WithCancel(context.Background())
+	defer stopEngine()
+	_, endPass := context.WithCancel(context.Background())
+	hookStarted := make(chan struct{})
+	hookEnded := make(chan struct{})
+	scheduleGlobalHooks(engineCtx, &lock, func(ctx context.Context) error {
+		close(hookStarted)
+		defer close(hookEnded)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	<-hookStarted
+	endPass() // the pass that scheduled it ends
+	select {
+	case <-hookEnded:
+		t.Fatal("the pass deadline cancelled a scheduled global hook")
+	default:
+	}
+	stopEngine()
+	<-hookEnded
+	// A second schedule is refused while the first still holds the lock.
+	blocked := make(chan struct{}, 1)
+	scheduleGlobalHooks(engineCtx, &lock, func(context.Context) error { blocked <- struct{}{}; return nil })
+	select {
+	case <-blocked:
+		t.Fatal("a second global pass started beside the running one")
+	default:
 	}
 }
