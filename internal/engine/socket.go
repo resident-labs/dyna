@@ -8,8 +8,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 )
+
+// launchedBySession records whether a Dyna session started this engine. dropDynaEnv
+// sets it from the room stamp before it removes the stamp, so the bind check can
+// still refuse the owner's socket long after the environment is clean.
+var launchedBySession atomic.Bool
 
 // checkPrivateRuntime refuses to start an engine that a Dyna session launched on
 // the owner's login runtime folder. Such a process inherits a room stamp, and
