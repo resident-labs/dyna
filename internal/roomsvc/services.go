@@ -76,8 +76,17 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 }
 
 // SetServiceProfile pins a service to an enabled profile; "" means Auto.
+// The reviewer profile is a room setting, so the room's own root may pin it;
+// the owner pins any room's.
 func (s *Service) SetServiceProfile(ctx context.Context, roomRef, role, profile string) error {
-	if err := authority.Check("SetServiceProfile", authority.Of(ctx), nil); err != nil {
+	rec, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return err
+	}
+	actor := authority.Of(ctx)
+	if err := authority.Check("SetServiceProfile", actor, func(relation authority.Relation) bool {
+		return relation == authority.RootRoom && (actor.Room == rec.ID || actor.Room == rec.Name)
+	}); err != nil {
 		return err
 	}
 	switch role {
