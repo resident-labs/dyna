@@ -470,7 +470,21 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}()
 	base := cacheBase(node.Name)
 	cache := path.Join(base, repoKey(common)+".git")
+	// A restarted engine follows the checks an earlier engine left running on this
+	// machine; it starts a new run only when there are none.
+	localStore := Store{DataDir: r.root()}
+	attachKey, err := canonicalKey(common)
+	if err != nil {
+		return result, err
+	}
+	resume, err := r.resumeRun(ctx, localStore, attachKey, sha, checks)
+	if err != nil {
+		return result, err
+	}
 	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
+	if resume != nil {
+		runID = resume.RunID
+	}
 	runDir := path.Join(base, "runs", runID)
 	// A run holds a lock on this file while it runs. A cleanup takes the lock to
 	// learn that the run died, so a crashed run's directory never stays forever.
@@ -506,24 +520,40 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 	}()
 	output.Reset()
-	// A machine that is close to a full disk cleans Dyna's own caches first, so
-	// the checks do not die on a full disk halfway through.
-	if e := r.cleanBeforeRun(control, node); e != nil {
-		log.Printf("local CI %s: free space check: %v", node.Name, e)
+	// The record of started checks lasts until the run ends for good. An engine
+	// stop keeps it, so the next engine reattaches.
+	attached := attachment{RunID: runID}
+	if resume != nil {
+		attached = *resume
 	}
-	setup := nodeSetupScript(base, cache, reports, active, nodeCacheNames(checks))
-	setupErr := r.nodeCommand(control, &output, &output, setup)
-	// A repair is a fact whether or not the run then succeeded, so report it
-	// before the setup error returns.
-	if kinds := parseCacheRepairs(output.String()); len(kinds) > 0 && r.OnCacheRepair != nil {
-		r.OnCacheRepair(control, CacheRepair{Node: node.Name, Kinds: kinds})
-	}
-	if setupErr != nil {
-		return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
-	}
-	output.Reset()
-	if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
-		return result, err
+	defer func() {
+		if EngineStopping() {
+			return
+		}
+		if e := localStore.deleteAttachment(context.WithoutCancel(ctx), attachKey, sha, node.Name); e != nil {
+			log.Printf("local CI %s: forget started checks: %v", node.Name, e)
+		}
+	}()
+	if resume == nil {
+		// A machine that is close to a full disk cleans Dyna's own caches first, so
+		// the checks do not die on a full disk halfway through.
+		if e := r.cleanBeforeRun(control, node); e != nil {
+			log.Printf("local CI %s: free space check: %v", node.Name, e)
+		}
+		setup := nodeSetupScript(base, cache, reports, active, nodeCacheNames(checks))
+		setupErr := r.nodeCommand(control, &output, &output, setup)
+		// A repair is a fact whether or not the run then succeeded, so report it
+		// before the setup error returns.
+		if kinds := parseCacheRepairs(output.String()); len(kinds) > 0 && r.OnCacheRepair != nil {
+			r.OnCacheRepair(control, CacheRepair{Node: node.Name, Kinds: kinds})
+		}
+		if setupErr != nil {
+			return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
+		}
+		output.Reset()
+		if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
+			return result, err
+		}
 	}
 	// Job checks each run act on a copy of the workflow whose name carries the
 	// run and the check, so parallel checks never share one container name.
@@ -613,14 +643,31 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// One poller follows every check of this run with one call at a time.
 	poller, stopPoller := r.newPoller(control)
 	defer stopPoller()
+	var attachedMu sync.Mutex
+	poller.started = func(spec detachSpec) {
+		attachedMu.Lock()
+		defer attachedMu.Unlock()
+		attached.Checks = append(attached.Checks, spec.ID)
+		if e := localStore.saveAttachment(control, attachKey, sha, node.Name, attached); e != nil {
+			log.Printf("local CI %s: record started check: %v", node.Name, e)
+		}
+	}
+	resumed := func(id Suite) bool { return resume != nil && resume.has(id) }
 	noExpand := r.systemdNeedsNoExpandFlag(control)
 	jobs := make(chan int, len(checks))
 	order := make([]int, len(checks))
 	for i := range checks {
 		order[i] = i
 	}
-	// Higher-priority checks start first; equal priorities keep definition order.
-	sort.SliceStable(order, func(i, j int) bool { return checks[order[i]].priority > checks[order[j]].priority })
+	// Checks that are already running come first, and they hold no slot to wait
+	// for. Higher-priority checks start first; equal priorities keep definition
+	// order.
+	sort.SliceStable(order, func(i, j int) bool {
+		if a, b := resumed(checks[order[i]].id), resumed(checks[order[j]].id); a != b {
+			return a
+		}
+		return checks[order[i]].priority > checks[order[j]].priority
+	})
 	for _, index := range order {
 		jobs <- index
 	}
@@ -650,9 +697,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					writer = io.MultiWriter(&output, blob)
 				}
 				spec := detachSpec{
+					ID:     check.id,
 					Dir:    detachedDir(runDir, check.id),
 					Unit:   checkUnit(runID, check.id),
-					Script: nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, noExpand, req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)]),
+					Attach: resumed(check.id),
+				}
+				if !spec.Attach {
+					spec.Script = nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, noExpand, req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)])
 				}
 				if !check.host {
 					// A host check runs its command in its own scope from inside the
