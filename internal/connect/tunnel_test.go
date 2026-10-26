@@ -2,18 +2,15 @@ package connect
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
 // A new link or an unlink takes effect without an engine restart: a changed
-// token restarts the connector, and a removed one leaves none running.
+// token cancels the running child, a removed one settles with no child, and an
+// unchanged token leaves the child alone. Ticks and the child are fakes, so the
+// test has no clock and no process.
 func TestTunnelFollowsItsCredential(t *testing.T) {
 	st, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -22,65 +19,84 @@ func TestTunnelFollowsItsCredential(t *testing.T) {
 	if err := st.SaveTunnelToken("first"); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	mark := filepath.Join(dir, "starts")
-	bin := filepath.Join(dir, "cloudflared")
-	script := "#!/bin/sh\necho start >> " + mark + "\nexec sleep 30\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	ticks := make(chan time.Time)
+	previousTicks := tokenTicks
+	tokenTicks = func() (<-chan time.Time, func()) { return ticks, func() {} }
+	t.Cleanup(func() { tokenTicks = previousTicks })
+
+	events := make(chan string, 8)
+	previousRun := runConnector
+	runConnector = func(ctx context.Context, _ *Store, _ string) error {
+		events <- "start"
+		<-ctx.Done()
+		events <- "stop"
+		return ctx.Err()
 	}
-	previous := tokenWatchInterval
-	tokenWatchInterval = 20 * time.Millisecond
-	t.Cleanup(func() { tokenWatchInterval = previous })
+	t.Cleanup(func() { runConnector = previousRun })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go RunTunnel(ctx, st, bin, t.Logf)
-	if err := waitForStarts(mark, 1); err != nil {
-		t.Fatal(err)
+	done := make(chan struct{})
+	go func() {
+		RunTunnel(ctx, st, "unused", t.Logf)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	tick := func() {
+		t.Helper()
+		select {
+		case ticks <- time.Now():
+		case <-time.After(time.Second):
+			t.Fatal("the connector never checked its token")
+		}
+	}
+	next := func() string {
+		t.Helper()
+		select {
+		case event := <-events:
+			return event
+		case <-time.After(5 * time.Second):
+			t.Fatal("the connector loop stopped responding")
+			return ""
+		}
+	}
+	if first := next(); first != "start" {
+		t.Fatalf("first event = %q, want start", first)
+	}
+	// The same token on a tick changes nothing: nothing stops within a bound that
+	// only guards against a hang.
+	tick()
+	select {
+	case event := <-events:
+		t.Fatalf("an unchanged token changed the connector: %q", event)
+	case <-time.After(100 * time.Millisecond):
 	}
 	// A new link writes a new token, so the child holding the old tunnel stops
-	// and a second one starts with the new credential.
+	// and a second child starts with the new credential.
 	if err := st.SaveTunnelToken("second"); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForStarts(mark, 2); err != nil {
-		t.Fatalf("the connector did not follow a new token: %v", err)
+	tick()
+	if replaced := next(); replaced != "stop" {
+		t.Fatalf("a new token did not cancel the running child: %q", replaced)
 	}
-	// An unlink removes the token, and no further connector starts.
+	if restarted := next(); restarted != "start" {
+		t.Fatalf("a new token did not start a child with the new credential: %q", restarted)
+	}
+	// An unlink removes the token: the child stops and none replaces it.
 	if err := os.Remove(st.TunnelTokenPath()); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
-	if starts, err := countStarts(mark); err != nil || starts != 2 {
-		t.Fatalf("starts after unlink = %d, %v; want 2", starts, err)
+	tick()
+	if stopped := next(); stopped != "stop" {
+		t.Fatalf("an unlink did not cancel the running child: %q", stopped)
 	}
-}
-
-// waitForStarts waits until the fake connector has started that many times.
-func waitForStarts(mark string, want int) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if starts, err := countStarts(mark); err == nil && starts >= want {
-			return nil
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case event := <-events:
+		t.Fatalf("a connector started after the unlink: %q", event)
+	default:
 	}
-	return fmt.Errorf("the connector started %d times, want %d", count(mark), want)
-}
-
-func count(mark string) int {
-	starts, _ := countStarts(mark)
-	return starts
-}
-
-func countStarts(mark string) (int, error) {
-	body, err := os.ReadFile(mark)
-	if errors.Is(err, fs.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return strings.Count(string(body), "start"), nil
 }
