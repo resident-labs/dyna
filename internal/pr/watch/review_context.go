@@ -92,12 +92,59 @@ func writeDiff(ctx context.Context, repo, path string, args ...string) (bool, er
 	return limit.truncated, file.Close()
 }
 
+// reviewBase is the PR's base commit as GitHub reports it now: the same
+// verified base SHA the watcher uses for heads. A stored base can lag a rebase,
+// and a diff from it includes the base commits that landed since.
+func (s *Service) reviewBase(ctx context.Context, r Record) (string, error) {
+	heads, _, err := s.github(r.RoomID).readHeads(ctx, []*Record{&r})
+	probe := heads[r.Key]
+	if probe.Err != nil {
+		return "", probe.Err
+	}
+	if err != nil {
+		return "", err
+	}
+	if probe.Pull.Base.SHA == "" {
+		return "", fmt.Errorf("GitHub returned no base commit")
+	}
+	return probe.Pull.Base.SHA, nil
+}
+
+// reviewChecks is the CI evidence for the assigned head. A stored summary
+// belongs to the head of the last full poll, so a review of another head reads
+// the head's own checks instead of showing an earlier head's result.
+func (s *Service) reviewChecks(ctx context.Context, r Record) ([]CheckSummary, error) {
+	if r.Polling.PullHead == r.Head && len(r.Checks) > 0 {
+		return r.Checks, nil
+	}
+	var snap Snapshot
+	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), r.Head, &snap); err != nil {
+		return nil, err
+	}
+	return snap.CheckSummaries(refRecord(r)), nil
+}
+
 // prepareReviewTask writes the assignment context. seen is the head this
 // reviewer last saw without a verdict; the delta starts there, otherwise at
 // the previous reviewed head.
 func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) (string, error) {
 	var err error
-	input := ReviewContext{GitHubChecks: r.Checks, Assignment: assignment(r), Findings: cloneFindings(r.Findings), Rules: map[string]string{}}
+	// A rebase moves the base under a record whose stored base is older, so the
+	// input takes the base and the CI evidence as GitHub has them for this head.
+	// The record copy carries the resolved base, so the returned task's
+	// assignment and the context file name the same base.
+	checks := r.Checks
+	if r.Kind == "github" {
+		if current, e := s.reviewBase(ctx, r); e == nil {
+			r.Base = current
+		}
+		if fresh, e := s.reviewChecks(ctx, r); e == nil {
+			checks = fresh
+		} else if r.Polling.PullHead != r.Head {
+			checks = nil
+		}
+	}
+	input := ReviewContext{GitHubChecks: checks, Assignment: assignment(r), Findings: cloneFindings(r.Findings), Rules: map[string]string{}}
 	if len(r.ReviewRounds) > 0 {
 		prior := r.ReviewRounds[len(r.ReviewRounds)-1]
 		input.Previous = &prior
