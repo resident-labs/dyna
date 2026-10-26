@@ -31,6 +31,28 @@ func TestSessionTurnScratchEnv(t *testing.T) {
 	}
 }
 
+// A session's temporary files go to its disk scratch folder, never to the host
+// temporary folder, which is a RAM disk on many hosts. Shell jobs, tests and Go
+// builds the session starts inherit these variables.
+func TestSessionTurnTemporaryFolderIsOnDisk(t *testing.T) {
+	capture := filepath.Join(t.TempDir(), "temp")
+	p := fakeworker.InstallClaude(t, `printf '%s|%s|%s|%s' "$TMPDIR" "$TMP" "$TEMP" "$GOTMPDIR" > "$CAPTURE"; printf done`)
+	p.Name, p.Default = "mock", true
+	p.Env = mergedEnv(p.Env, map[string]string{"CAPTURE": capture, "TMPDIR": "/tmp"})
+	e := newTestEnv(t, p)
+	e.joinRunners()
+	info, turn := e.start("check temporary folder")
+	_, done := e.wait(info.ID, turn.N)
+	if done.Error != "" {
+		t.Fatal(done.Error)
+	}
+	dir := filepath.Join(scratch.Root(), info.ID, scratch.TempDirName)
+	got, err := os.ReadFile(capture)
+	if want := dir + "|" + dir + "|" + dir + "|" + dir; err != nil || string(got) != want {
+		t.Fatalf("temporary folder env %q, %v; want %q", got, err, want)
+	}
+}
+
 func TestSessionTurnStartsWithScratchUnavailable(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DYNA_SCRATCH", "/stale/parent")

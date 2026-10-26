@@ -145,6 +145,56 @@ func Ensure(owner string) (string, error) {
 	return filepath.Join(root, owner), nil
 }
 
+// TempDirName is the folder inside a scratch folder that holds a process's
+// temporary files. The scratch sweep removes it with its owner.
+const TempDirName = "tmp"
+
+// TempVars names the variables that tools read for their temporary folder:
+// TMPDIR for POSIX tools, TMP and TEMP for Windows-style tools, and GOTMPDIR for
+// the Go toolchain, which otherwise reads its own setting.
+var TempVars = []string{"TMPDIR", "TMP", "TEMP", "GOTMPDIR"}
+
+// SetTemp points every variable in TempVars at a disk folder inside the scratch
+// folder, so a worker's temporary files never fill /tmp, a RAM disk on many
+// hosts. An empty scratch path (setup failed) leaves env unchanged.
+func SetTemp(env map[string]string, scratchPath string) error {
+	if scratchPath == "" {
+		return nil
+	}
+	dir := filepath.Join(scratchPath, TempDirName)
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	for _, name := range TempVars {
+		env[name] = dir
+	}
+	return nil
+}
+
+// SharedTempEnv returns TempVars as KEY=value pairs for a process that has no
+// session, such as a hook run or a local CI check. They point at one disk
+// folder under the owner's cache, which maintenance empties of old entries.
+// It returns nothing when the folder cannot be made.
+func SharedTempEnv() []string {
+	owner, err := user.Current()
+	if err != nil || owner.HomeDir == "" {
+		return nil
+	}
+	dir := filepath.Join(owner.HomeDir, ".cache", "dyna", SharedTempName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(TempVars))
+	for _, name := range TempVars {
+		out = append(out, name+"="+dir)
+	}
+	return out
+}
+
+// SharedTempName is the folder under the owner's Dyna cache that SharedTempEnv
+// uses.
+const SharedTempName = "tmp"
+
 // Owner is what a lookup knows about a top-level scratch folder's owner. Open
 // also covers an owner that is dormant, one that has a live shell job, and one
 // whose state could not be read: a sweep never removes any of them.

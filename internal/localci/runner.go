@@ -23,6 +23,7 @@ import (
 
 	"dyna-agent/internal/cibudget"
 	"dyna-agent/internal/processguard"
+	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/store"
 )
 
@@ -266,7 +267,7 @@ func (c FailureCause) Label() string {
 func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
 	c := processguard.Command(ctx, name, args...)
 	c.Dir = dir
-	c.Env = processguard.MetadataEnv()
+	c.Env = append(processguard.MetadataEnv(), scratch.SharedTempEnv()...)
 	c.Stdin = in
 	c.Stdout = out
 	c.Stderr = stderr

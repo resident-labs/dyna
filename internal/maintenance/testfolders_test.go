@@ -65,6 +65,25 @@ func TestSweepRemovesOldLeakedToolFolders(t *testing.T) {
 	}
 }
 
+// The disk temp folders are Dyna's own, so an old entry goes whatever its name,
+// and a young one stays.
+func TestSweepDiskTempRemovesOldEntriesOfAnyName(t *testing.T) {
+	root := t.TempDir()
+	old := testFolder(t, root, "TestSomething123456", 2*testFolderRetention, false)
+	young := testFolder(t, root, "TestSomething654321", 0, false)
+
+	freed, err := sweepDiskTemp(time.Now(), root, false)
+	if err != nil || freed.Items != 1 {
+		t.Fatalf("sweep = %+v, %v; want the one old entry", freed, err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("an old entry stayed: %v", err)
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Fatalf("a young entry was removed: %v", err)
+	}
+}
+
 // The sweep removes only the folders this package makes. An unrelated program's
 // old workspace, a Go tool folder and a process guard's control folder all stay,
 // even when they are older than the retention.
