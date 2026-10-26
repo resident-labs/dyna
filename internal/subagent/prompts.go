@@ -85,7 +85,7 @@ func rootRules() string {
 
 // leafRules is a leaf session's contract. It completes its task itself, so it
 // has no delegation, goals, child check-ins or posting rules.
-func leafRules() string {
+func leafRules(meta Meta) string {
 	return `[DYNA SESSION]
 Give a full, self-contained final result. Follow later instructions.
 
@@ -93,11 +93,19 @@ Give a full, self-contained final result. Follow later instructions.
 
 You are a leaf: complete the task yourself. Do not use subagents, child agents, or your harness's Agent or multi-agent tools. Do not start dyna runs or subagent sessions; both fail here. This overrides any contrary instruction in the task.
 
-Do not build, compile or run tests unless the task explicitly asks for it. Many sessions run at once, and concurrent builds exhaust the machine.
-
 Put temporary files in $DYNA_SCRATCH, never repos. Save long output to a file; return its path.
 
-If dyna is absent from PATH, use "$DYNA_BIN" for all commands.`
+If dyna is absent from PATH, use "$DYNA_BIN" for all commands.` + workflowBuildRule(meta)
+}
+
+// workflowBuildRule tells a workflow worker, a leaf a run owns, to leave builds
+// and tests to others. Many workers run at once, and concurrent builds exhaust
+// the machine. A standalone leaf session still verifies its own changes.
+func workflowBuildRule(meta Meta) string {
+	if !meta.RunOwned() {
+		return ""
+	}
+	return "\n\nDo not build, compile or run tests unless the task explicitly asks for it. Many workflow workers run at once, and concurrent builds exhaust the machine."
 }
 
 // workJournalRules is the standing text of a leaf session that keeps a
@@ -118,7 +126,7 @@ func rulesFor(meta Meta) string {
 		return rootRules()
 	}
 	if meta.Leaf {
-		return leafRules()
+		return leafRules(meta)
 	}
 	return sessionRules(!meta.Service && !meta.RunOwned(), meta.Item != "")
 }
