@@ -10,11 +10,28 @@ function deferred() {
   return { promise, resolve, reject }
 }
 const post = (id: string) => ({ id, roomId: 'a', unread: true })
+const noRoomRead = async () => {}
+
+test('viewing the room chat clears the whole room once per visit, and other views do not', async () => {
+  const cleared: string[] = []
+  let value = { room: 'a', visit: 1, visible: true, chat: true }, updates = 0
+  const marker = createReadMarker({ markReadMany: async () => {}, markRoomRead: async (room) => { cleared.push(room) } }, { current: () => value, read: () => updates++ })
+  await marker.mark([])
+  await marker.mark([])
+  assert.deepEqual(cleared, ['a'])
+  assert.equal(updates, 1)
+  value = { room: 'b', visit: 2, visible: true, chat: false }
+  await marker.mark([])
+  assert.deepEqual(cleared, ['a'])
+  value = { room: 'b', visit: 3, visible: true, chat: true }
+  await marker.mark([])
+  assert.deepEqual(cleared, ['a', 'b'])
+})
 
 test('read markers deduplicate seen IDs and collect new IDs into one trailing batch', async () => {
   const waits = [deferred(), deferred()], calls: { room: string; ids: string[] }[] = []
   const marker = createReadMarker({
-    markReadMany: (room, ids) => { calls.push({ room, ids }); return need(waits[calls.length - 1]).promise },
+    markReadMany: (room, ids) => { calls.push({ room, ids }); return need(waits[calls.length - 1]).promise }, markRoomRead: noRoomRead,
   }, { current: () => ({ room: 'a', visit: 1, visible: true }), read() {} })
   const first = post('one'), second = post('two'), third = post('three')
   const requests = [marker.mark([first])]
@@ -35,7 +52,7 @@ test('read markers deduplicate seen IDs and collect new IDs into one trailing ba
 test('read markers drop closed views and can retry a failed visible write', async () => {
   const wait = deferred()
   let value = { room: 'a', visit: 1, visible: true }, calls = 0, updates = 0
-  const marker = createReadMarker({ markReadMany: () => { calls++; return calls === 1 ? wait.promise : Promise.resolve() } }, {
+  const marker = createReadMarker({ markReadMany: () => { calls++; return calls === 1 ? wait.promise : Promise.resolve() }, markRoomRead: noRoomRead }, {
     current: () => value, read: () => updates++,
   })
   const first = post('one'), second = post('two')
@@ -53,7 +70,7 @@ test('read markers drop closed views and can retry a failed visible write', asyn
 })
 test('failed read writes leave IDs available for a later refresh', async () => {
   let calls = 0
-  const marker = createReadMarker({ markReadMany: async () => { if (++calls === 1) throw new Error('offline') } }, {
+  const marker = createReadMarker({ markReadMany: async () => { if (++calls === 1) throw new Error('offline') }, markRoomRead: noRoomRead }, {
     current: () => ({ room: 'a', visit: 1, visible: true }), read() {},
   })
   const first = post('one')
@@ -66,7 +83,7 @@ test('failed read writes leave IDs available for a later refresh', async () => {
 test('an unread batch dropped while hidden is eligible when the same channel reopens', async () => {
   const wait = deferred(), calls: string[][] = []
   let visible = true
-  const marker = createReadMarker({ markReadMany: (room, ids) => { calls.push(ids); return calls.length === 1 ? wait.promise : Promise.resolve() } }, {
+  const marker = createReadMarker({ markReadMany: (room, ids) => { calls.push(ids); return calls.length === 1 ? wait.promise : Promise.resolve() }, markRoomRead: noRoomRead }, {
     current: () => ({ room: 'a', visit: 1, visible }), read() {},
   })
   const first = post('one'), second = post('two')
