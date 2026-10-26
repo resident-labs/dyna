@@ -162,6 +162,7 @@ export interface TransferState {
   dir?: string
   branch?: string
   source?: string
+  convertedSession?: string
   reason?: string
   error?: string
 }
