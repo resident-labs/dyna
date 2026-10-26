@@ -105,11 +105,30 @@ func MergeQueueSnapshot(st State, where LocalTrialRooms) []MergeQueueItem {
 	return mergeQueue(st, where)
 }
 
-// trialCIReady reports whether a merge trial can be evaluated for this change: a
-// repository with confirmed hosted push CI, or a room that evaluates the trial
-// on local CI.
-func trialCIReady(f RepositoryFacts, where LocalTrialRooms, roomID string) bool {
-	return f.MergeTrialCI || where != nil && where(roomID)
+// trialCIReady reports whether a merge trial can be evaluated for this change. A
+// repository with confirmed hosted push CI can always evaluate one. Otherwise
+// only a local run can, so the room must run local trials and the scheduler must
+// be willing to take the change: it never runs a fork, and a fork has no hosted
+// trial CI to fall back on, so a fork must not start a trial neither provider can
+// finish.
+func trialCIReady(r Record, facts RepositoryFacts, where LocalTrialRooms) bool {
+	if facts.MergeTrialCI {
+		return true
+	}
+	return where != nil && where(r.RoomID) && schedulerTakesTrial(r)
+}
+
+// schedulerTakesTrial reports a change the local CI scheduler takes for a trial:
+// a local change, or a pull request from the repository itself, never a fork.
+// It is the same rule registeredCIJobs applies to a trial batch.
+func schedulerTakesTrial(r Record) bool {
+	switch changeKind(r) {
+	case "local":
+		return true
+	case "github":
+		return r.Repo != "" && strings.EqualFold(r.HeadRepo, r.Repo)
+	}
+	return false
 }
 
 func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
@@ -156,7 +175,7 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 			item.State, item.Reason = "ready", ""
 			if f := st.RepositoryFacts[defaultRepo(*r)]; f.CheckedAt.IsZero() {
 				item.State, item.Reason = "waiting-repository", "waiting for repository facts"
-			} else if !trialCIReady(f, where, r.RoomID) {
+			} else if !trialCIReady(*r, f, where) {
 				item.State, item.Reason = "trial-unavailable", "requires confirmed push CI for dyna/merge-trial/**"
 			}
 		case !facts.HeadVerified(*r):

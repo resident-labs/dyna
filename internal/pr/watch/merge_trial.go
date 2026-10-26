@@ -138,7 +138,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		} else if why != "" {
 			continue
 		}
-		if !trialCIReady(st.RepositoryFacts[repo], where, r.RoomID) {
+		if !trialCIReady(r, st.RepositoryFacts[repo], where) {
 			continue
 		}
 		current, ready, err := s.mergeReady(ctx, r)
@@ -205,11 +205,11 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				limit = settings.MaxParallel
 			}
 		}
-		// The batch belongs to the room of its changes, which is the room whose CI
+		// The batch belongs to its first change, which names the room whose CI
 		// decides whether the trial can be evaluated at all.
-		batchRoom := ""
+		var batchRecord Record
 		if changes := groups[repo]; len(changes) > 0 {
-			batchRoom = changes[0].RoomID
+			batchRecord = changes[0]
 		}
 		var batch state.MergeTrial
 		if err := s.Store.update(func(st *State) error {
@@ -220,7 +220,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				return errors.New("another trial already owns this repository")
 			}
 			base := st.RepositoryFacts[repo]
-			if base.Head == "" || base.DefaultBranch == "" || !trialCIReady(base, where, batchRoom) {
+			if base.Head == "" || base.DefaultBranch == "" || !trialCIReady(batchRecord, base, where) {
 				return errors.New("merge-trial push CI or default branch could not be confirmed")
 			}
 			st.NextMergeTrial++
