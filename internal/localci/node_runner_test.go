@@ -1428,8 +1428,8 @@ func TestCheckStartRemovesOldSurvivorsOfNoLiveRun(t *testing.T) {
 	young := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
 	docker := `#!/bin/sh
 case "$1" in
-ps) printf 'c-old dead\nc-young dead\nc-live live\nc-bad dead\n' ;;
-inspect) case "$4" in c-old|c-live) echo ` + old + ` ;; c-young) echo ` + young + ` ;; esac ;;
+ps) if [ -n "$DOCKER_HOST" ]; then printf 'c-act dead\n'; else printf 'c-old dead\nc-young dead\nc-live live\nc-bad dead\n'; fi ;;
+inspect) case "$4" in c-old|c-live|c-act) echo ` + old + ` ;; c-young) echo ` + young + ` ;; esac ;;
 rm) echo "docker $3" >> ` + removed + ` ;;
 esac
 `
@@ -1459,14 +1459,47 @@ esac
 		t.Fatal(err)
 	}
 	cmd := exec.Command("bash", "-c", survivorSweep(dir, ""))
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "DOCKER_HOST=")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("sweep: %v: %s", err, output)
 	}
 	data, _ := os.ReadFile(removed)
 	got := strings.Fields(strings.ReplaceAll(string(data), "\n", " "))
-	want := []string{"docker", "c-old", "unit", "dyna-ci-dead-a-run.service"}
+	want := []string{"docker", "c-old", "docker", "c-act", "unit", "dyna-ci-dead-a-run.service"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("removed %q, want only the old container and old unit of no live run", got)
+		t.Fatalf("removed %q, want the old containers of both daemons and the old unit of no live run", got)
+	}
+}
+
+// A node whose plain docker refuses the user reaches its daemon through sudo,
+// as its plain checks do, and the sweep follows.
+func TestSurvivorSweepUsesSudoWhenDockerRefuses(t *testing.T) {
+	dir := t.TempDir()
+	fakeNodeTools(t, dir)
+	removed := filepath.Join(dir, "removed")
+	old := time.Now().Add(-7 * time.Hour).UTC().Format(time.RFC3339Nano)
+	docker := `#!/bin/sh
+case "$1" in
+info) [ -n "$SUDOED" ] && exit 0; exit 1 ;;
+ps) [ -n "$SUDOED" ] && [ -z "$DOCKER_HOST" ] && echo 'c-root dead' ;;
+inspect) echo ` + old + ` ;;
+rm) echo "docker $3" >> ` + removed + ` ;;
+esac
+exit 0
+`
+	sudo := "#!/bin/sh\nshift\nSUDOED=1 exec \"$@\"\n"
+	for name, body := range map[string]string{"docker": docker, "sudo": sudo} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("bash", "-c", survivorSweep(dir, ""))
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "DOCKER_HOST=")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("sweep: %v: %s", err, output)
+	}
+	data, _ := os.ReadFile(removed)
+	if got := strings.TrimSpace(string(data)); got != "docker c-root" {
+		t.Fatalf("removed %q, want the container only sudo docker lists", got)
 	}
 }
