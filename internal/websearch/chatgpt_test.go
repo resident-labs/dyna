@@ -152,6 +152,26 @@ func TestChatGPTReportsAStreamError(t *testing.T) {
 	}
 }
 
+// The backend's own reason reaches the error, so a stale model id can be seen,
+// and it never carries the access token back.
+func TestChatGPTReportsTheRefusalReasonWithoutTheToken(t *testing.T) {
+	const token = "access-token-value"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, `{"detail":"The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account.","echo":"%s"}`, token)
+	}))
+	defer server.Close()
+
+	chat := ChatGPT{BaseURL: server.URL, Credential: staticCredential{access: token, account: "account-id"}}
+	_, err := chat.Search(t.Context(), Query{Text: "go"})
+	if err == nil || !strings.Contains(err.Error(), "model is not supported") {
+		t.Fatalf("err = %v, want the refusal reason", err)
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("err = %v, want the token redacted", err)
+	}
+}
+
 // staticCredential is one ChatGPT sign-in for a test.
 type staticCredential struct {
 	access, account string
