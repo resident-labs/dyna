@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store/storetest"
 )
@@ -157,6 +159,133 @@ func TestStopOwnerOnlyStopsItsNonKeepShells(t *testing.T) {
 		if err != nil || in.Status != want {
 			t.Fatalf("shell %s: status=%s, want %s, error=%v", meta.ID, in.Status, want, err)
 		}
+	}
+}
+
+// D-165: cancelling a workflow must stop the managed shell jobs its
+// workers left behind, the way closing a session stops that session's shells.
+func TestStopRunStopsItsNonKeepShells(t *testing.T) {
+	storetest.ClearStamp(t)
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	owner := "ses_20261017-120004-abcdef01"
+	ownerRecord(t, s, owner, false)
+	start := func(opts StartOptions) Meta {
+		t.Helper()
+		meta, err := s.Create(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		started := make(chan int, 1)
+		s.OnStarted = func(pid int) { started <- pid }
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- s.Supervise(ctx, meta.ID) }()
+		t.Cleanup(func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Errorf("supervisor: %v", err)
+			}
+		})
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Fatal("shell did not start")
+		}
+		in, err := s.Info(meta.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if in.Status != "running" || in.Pid == 0 {
+			t.Fatalf("started shell = %s, pid %d", in.Status, in.Pid)
+		}
+		return in.Meta
+	}
+	run := "wf_20261026-010101-abcdef01"
+	sleep := StartOptions{Owner: owner, Cmd: []string{"sleep", "600"}, Cwd: t.TempDir()}
+	normal := start(StartOptions{Owner: owner, Run: run, Keep: false, Cmd: []string{"sleep", "600"}, Cwd: t.TempDir()})
+	kept := start(StartOptions{Owner: owner, Run: run, Keep: true, Cmd: []string{"sleep", "600"}, Cwd: t.TempDir()})
+	sameOwner := start(sleep)
+	otherRun := start(StartOptions{Owner: owner, Run: "wf_20261026-020202-abcdef02", Cmd: []string{"sleep", "600"}, Cwd: t.TempDir()})
+	if err := s.StopRun(run); err != nil {
+		t.Fatal(err)
+	}
+	for _, meta := range []Meta{normal, kept, sameOwner, otherRun} {
+		in, err := s.Info(meta.ID)
+		want := "running"
+		if meta.ID == normal.ID {
+			want = "exited"
+		}
+		if err != nil || in.Status != want {
+			t.Fatalf("shell %s: status=%s, want %s, error=%v", meta.ID, in.Status, want, err)
+		}
+	}
+	output, err := s.Tail(normal.ID, 100)
+	if err != nil || !strings.Contains(output, "run "+run+" is canceled; stopping shell") {
+		t.Fatalf("missing stop log: %q, %v", output, err)
+	}
+}
+
+// D-165: a supervisor delayed until its published job reads as lost must
+// refuse to launch its worker's command behind a cancelled run, and must
+// record the exit, so the job does not linger as open work.
+func TestSuperviseRefusesALostShellAfterItsRunCancels(t *testing.T) {
+	dataDir := storetest.Isolate(t)
+	s := &Store{Root: filepath.Join(dataDir, "shells")}
+	owner := "ses_20261017-120005-abcdef01"
+	ownerRecord(t, s, owner, false) // open owner: only run cancellation refuses this job
+	runID := "wf_20261026-010101-abcdef01"
+	meta, err := s.Create(StartOptions{Owner: owner, Run: runID, Cmd: []string{"sleep", "600"}, Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Age the published row past the starting window, so a job whose supervisor
+	// has not recorded itself reads as lost and the cancel snapshot skips it.
+	meta.Started = time.Now().Add(-11 * time.Second)
+	if err := s.Save(meta, nil); err != nil {
+		t.Fatal(err)
+	}
+	in, err := s.Info(meta.ID)
+	if err != nil || in.Status != "lost" {
+		t.Fatalf("aged job = %s, %v; want lost", in.Status, err)
+	}
+	if list, err := s.List(false); err != nil || len(list) != 0 {
+		t.Fatalf("cancel snapshot = %#v, %v; the lost job must be skipped", list, err)
+	}
+	runstoretest.Write(t, dataDir, runstore.Meta{ID: runID, Name: "late-supervisor", Status: "running", StartedAt: time.Now()})
+	if err := runstore.Cancel(runID); err != nil {
+		t.Fatal(err)
+	}
+	// The delayed supervisor finally runs.
+	started := make(chan int, 1)
+	s.OnStarted = func(pid int) { started <- pid }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Supervise(ctx, meta.ID) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("supervisor: %v", err)
+			}
+		default:
+		}
+	})
+	select {
+	case pid := <-started:
+		t.Fatalf("the canceled run's command started as pid %d", pid)
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	in, err = s.Info(meta.ID)
+	if err != nil || in.Status != "exited" || in.Exit == nil || in.Exit.Error != "run is canceled" {
+		t.Fatalf("job after the late supervisor = %#v, %v; want a run-canceled exit", in, err)
+	}
+	output, err := s.Tail(meta.ID, 100)
+	if err != nil || !strings.Contains(output, "run is canceled") {
+		t.Fatalf("missing refusal log: %q, %v", output, err)
 	}
 }
 

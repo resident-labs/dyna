@@ -75,7 +75,11 @@ type Meta struct {
 	Keep   bool     `json:"keep,omitempty"`
 	RoomID string   `json:"roomId,omitempty"`
 	Room   string   `json:"room,omitempty"`
-	Pid    int      `json:"pid,omitempty"` // the command (process group leader)
+	// Run names the workflow run whose worker started this job. Workflow
+	// workers inherit their parent session's identity, so Owner alone cannot
+	// attribute the job to the run a cancel must stop (D-165).
+	Run string `json:"run,omitempty"`
+	Pid int    `json:"pid,omitempty"` // the command (process group leader)
 	// Supervisor is the detached `dyna shell _run` process.
 	Supervisor int `json:"supervisor,omitempty"`
 	// SupervisorStartTime is Linux /proc/<pid>/stat field 22 (clock ticks).
@@ -148,7 +152,10 @@ type StartOptions struct {
 	Cmd  []string
 	Cwd  string
 	// Owner overrides the owning agent session (default runstore.OwnerFromEnv).
-	Owner  string
+	Owner string
+	// Run names the workflow run whose worker starts the job, so a cancel of
+	// that run stops it (default runstore.WorkerRunFromEnv).
+	Run    string
 	RoomID string
 	Room   string
 }
@@ -162,6 +169,15 @@ func (s *Store) Create(opts StartOptions) (out Meta, err error) {
 		}
 		if e := sessionlife.Activate(filepath.Join(filepath.Dir(s.Root), "sessions"), owner); e != nil {
 			return e
+		}
+		if strings.TrimSpace(opts.Run) == "" {
+			opts.Run = runstore.WorkerRunFromEnv()
+		}
+		// The publication lock serializes this check with StopRun's snapshot:
+		// a run marked canceling refuses new shells first, and a shell that
+		// published first is already in that snapshot (D-165).
+		if opts.Run != "" && runstore.Canceling(opts.Run) {
+			return fmt.Errorf("run %s is canceled; not starting a new shell", opts.Run)
 		}
 		out, err = s.create(opts)
 		return err
@@ -202,7 +218,7 @@ func (s *Store) create(opts StartOptions) (Meta, error) {
 	if err := os.WriteFile(filepath.Join(dir, "output.log"), nil, 0o600); err != nil {
 		return Meta{}, err
 	}
-	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
+	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, Run: strings.TrimSpace(opts.Run), RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
 	return m, s.Save(m, nil)
 }
 
@@ -239,6 +255,12 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 		if closed {
 			_, _ = out.WriteString("\n[dyna: shell stopped before start because its owner is closed or missing]\n")
 			return s.Save(m, &Exit{Code: -1, Error: "owner is closed or missing", Ended: time.Now()})
+		}
+		// A supervisor delayed past the point where its job reads as lost must
+		// not launch its worker's command behind a cancelled run (D-165).
+		if m.Run != "" && runstore.Canceling(m.Run) {
+			_, _ = out.WriteString("\n[dyna: shell stopped before start because its run is canceled]\n")
+			return s.Save(m, &Exit{Code: -1, Error: "run is canceled", Ended: time.Now()})
 		}
 	}
 	// A stop that arrived while the supervisor waited for dyna.db wins: the
@@ -739,6 +761,38 @@ func (s *Store) StopOwner(owner string) error {
 			continue
 		}
 		if err := s.logStop(in.ID, "owner "+owner+" is closed or missing; stopping shell"); err != nil {
+			errs = append(errs, err)
+		}
+		if _, err := s.Stop(in.ID, "cleanup"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// StopRun stops the non-keep shells that workers of runID started. A
+// cancelled run ends its workers, so their jobs stop the way a closed
+// session's do (D-165). The snapshot shares Create's publication lock, and
+// cancellation is marked before this runs, so a worker either published
+// before the snapshot or is refused afterwards. Stops wait outside the lock.
+func (s *Store) StopRun(runID string) error {
+	if runID == "" {
+		return nil
+	}
+	var list []Info
+	if err := sessionlife.WithPublication(context.Background(), s.Root, "publication.lock", func() error {
+		var err error
+		list, err = s.List(false)
+		return err
+	}); err != nil {
+		return err
+	}
+	var errs []error
+	for _, in := range list {
+		if in.Run != runID || in.Keep {
+			continue
+		}
+		if err := s.logStop(in.ID, "run "+runID+" is canceled; stopping shell"); err != nil {
 			errs = append(errs, err)
 		}
 		if _, err := s.Stop(in.ID, "cleanup"); err != nil {
