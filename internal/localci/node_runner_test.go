@@ -867,3 +867,27 @@ func TestNodePassesACheckWhoseCommandLeftAChildHoldingOutput(t *testing.T) {
 		t.Fatalf("the leftover pipe holder was not recorded as a cleanup warning: %+v", got)
 	}
 }
+
+// A host check must stay in the wrapper's process group. GNU timeout moves the
+// command it starts into a new group unless it gets --foreground, and the
+// runner cleans up a leftover pipe holder by killing the wrapper's group by its
+// id, so a check in its own group would survive that kill together with the
+// slot lock it still holds.
+func TestHostCheckScriptKeepsTheCheckInTheWrapperProcessGroup(t *testing.T) {
+	checks, _, err := nodeChecks(testDynaDefinition(t), nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, check := range checks {
+		if !check.host {
+			continue
+		}
+		script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
+		if !strings.Contains(script, "timeout --foreground") {
+			t.Fatalf("%s starts its command outside the wrapper's process group", check.id)
+		}
+		return
+	}
+	t.Fatal("the definition has no host check")
+}

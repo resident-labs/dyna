@@ -246,9 +246,15 @@ func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Write
 // once cmd.WaitDelay passes. The command's group id is its own pid, so what is
 // left of the group is killed here instead of outliving the check.
 func runAndReap(c *exec.Cmd) error {
-	err := c.Run()
+	return runAndReapWith(c.Run, c, reapGroup)
+}
+
+// runAndReapWith is runAndReap with the run and the reaper given, so a test can
+// prove the decision without a real wait deadline or a real child.
+func runAndReapWith(run func() error, c *exec.Cmd, reap func(int) error) error {
+	err := run()
 	if errors.Is(err, exec.ErrWaitDelay) && c.Process != nil {
-		_ = reapGroup(c.Process.Pid)
+		_ = reap(c.Process.Pid)
 	}
 	return err
 }
