@@ -36,7 +36,7 @@ func TestGuideDocumentsRuntimeContractAndRunnableExamples(t *testing.T) {
 		"engine-verified path from `worktrees()`", "never trust worker-reported paths",
 		"Parallel writers need disjoint scopes or worktrees",
 		"A child must not call `workflow()`", "share parent concurrency and lifetime limits",
-		"cannot delegate, start runs or sessions, or read any form of `dyna guide`",
+		"cannot delegate, start runs or sessions", "They can read `dyna guide` and use every other dyna command",
 		"maxCallsPerRun", "--max-concurrent", "--max-agents",
 		"`phase(title)`", "`log(message)`", "`sleep(ms)`", "`args`", "`process`", "`profiles`", "`worktrees()`",
 		`provenance: "workflow"`, `provenance: "system"`,
@@ -263,27 +263,24 @@ func TestGuideLinksAndSharedContracts(t *testing.T) {
 	}
 }
 
-func TestGuideRefusesEveryFormInsideWorkflowWorker(t *testing.T) {
-	t.Setenv("DYNA_MODE", "workflow")
+func TestGuideServesWorkflowWorkerWithoutRootIndex(t *testing.T) {
+	t.Setenv("DYNA_MODE", mode.Workflow)
 	t.Setenv("DYNA_SESSION", "ses_parent")
-	forms := [][]string{{}, {"--plain"}, {"--help"}, {"unknown"}, {"--invalid"}, {"a", "b"}}
-	for _, topic := range guidance.Topics {
-		forms = append(forms, []string{topic.Name}, []string{topic.Name, "--plain"}, []string{topic.Name, "--help"})
+	out, err := guideOutput(t, "computers")
+	if err != nil {
+		t.Fatalf("dyna guide computers in workflow mode: %v", err)
 	}
-	for _, args := range forms {
-		cmd := NewGuideCommand()
-		var out strings.Builder
-		cmd.SetOut(&out)
-		cmd.SetErr(&out)
-		cmd.SetArgs(args)
-		err := cmd.Execute()
-		const want = "dyna guide is not available inside a workflow worker; complete the task yourself"
-		if err == nil || err.Error() != want {
-			t.Fatalf("guide %v: %v", args, err)
-		}
-		if out.String() != "Error: "+want+"\n" {
-			t.Fatalf("guide %v leaked output: %s", args, out.String())
-		}
+	if !strings.Contains(out, "dyna computer") {
+		t.Fatal("workflow worker cannot read the computers guide")
+	}
+	index, err := guideOutput(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A workflow worker reads the same index as a subagent session: no root
+	// block and no root-only topic.
+	if strings.HasPrefix(index, guidance.RootBlock(false)) || strings.Contains(index, guidance.RootTopic+": ") {
+		t.Fatalf("workflow worker reads the root index:\n%s", index)
 	}
 }
 
