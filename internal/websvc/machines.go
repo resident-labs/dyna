@@ -118,6 +118,9 @@ type MachineDetail struct {
 	MachineSummary
 	SSH         string `json:"ssh"`
 	DynaVersion string `json:"dynaVersion,omitempty"`
+	// SSHConnectTimeoutSeconds is how long an ssh to the machine waits for the
+	// connection: the stored value, or the default when none is stored.
+	SSHConnectTimeoutSeconds int `json:"sshConnectTimeoutSeconds,omitempty"`
 	// HostChecksAllowedBy words who allows host checks, when someone does:
 	// "the owner", or "root of room <name>".
 	HostChecksAllowedBy []string `json:"hostChecksAllowedBy,omitempty"`
@@ -191,6 +194,9 @@ type MachinePatch struct {
 	// ContainerSocket is the container runtime socket a workflow job uses on
 	// this machine, as a DOCKER_HOST value; an empty value means Docker's.
 	ContainerSocket *string `json:"containerSocket"`
+	// SSHConnectTimeoutSeconds is how long an ssh to this machine waits for the
+	// connection; zero restores the default.
+	SSHConnectTimeoutSeconds *int `json:"sshConnectTimeoutSeconds,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -342,6 +348,9 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	if patch.ContainerSocket != nil {
 		m.ContainerSocket = strings.TrimSpace(*patch.ContainerSocket)
 	}
+	if patch.SSHConnectTimeoutSeconds != nil {
+		m.SSHConnectTimeout = time.Duration(*patch.SSHConnectTimeoutSeconds) * time.Second
+	}
 	if m.HasRole(machines.RoleCI) && m.CISlots < 1 && patch.CISlots == nil {
 		m.CISlots = 1
 	}
@@ -453,7 +462,7 @@ func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, erro
 // machine, so only the local row reads them. The CI runs belong to whichever
 // machine holds their slots, so a CI machine reports them wherever it runs.
 func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[string][]MachineCIRun) MachineDetail {
-	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH, HostChecksAllowedBy: a.hostChecksAllowedBy(m)}
+	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH, SSHConnectTimeoutSeconds: int(m.ConnectTimeout() / time.Second), HostChecksAllowedBy: a.hostChecksAllowedBy(m)}
 	// The probe fills these for every machine, this one included.
 	if !m.LastProbe.IsZero() {
 		probed := m.LastProbe

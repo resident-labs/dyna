@@ -215,10 +215,15 @@ func (r Runner) pushCommitToNode(ctx context.Context, repo, cache, sha string) e
 		return fmt.Errorf("clear commit ref on node: %w: %s", err, &output)
 	}
 	dest := cache
+	var args []string
 	if r.Node.SSH != "" {
 		dest = r.Node.SSH + ":" + cache
+		// The push dials like every other node command, so it waits as long as
+		// the machine's connect timeout allows, for this one command only.
+		args = []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o " + machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout)}
 	}
-	if err := r.run(ctx, repo, &output, "git", "push", dest, sha+":refs/dyna/ci/"+sha); err != nil {
+	args = append(args, "push", dest, sha+":refs/dyna/ci/"+sha)
+	if err := r.run(ctx, repo, &output, "git", args...); err != nil {
 		return fmt.Errorf("push commit to node: %w: %s", err, &output)
 	}
 	return nil
@@ -318,9 +323,9 @@ func (r Runner) nodeCommandScoped(ctx context.Context, out, stderr io.Writer, sc
 }
 
 // nodeProgram wraps a program in ssh when the node is another machine. The
-// dial deadline matches the machine probe, so a node that does not answer
-// costs a run the same bounded wait everywhere instead of whatever an
-// ambient ssh config happens to set. Local CI also never shares a multiplexed
+// dial deadline is the machine's own connect timeout, the same one its probe
+// uses, so a node that does not answer costs a run the same bounded wait
+// everywhere instead of whatever an ambient ssh config happens to set. Local CI also never shares a multiplexed
 // connection: an alias with ControlMaster can hand a command a stream the
 // shared master truncated after the remote exit status arrived, which ssh
 // reports as success. Each command owns its end-to-end connection, so a
@@ -333,7 +338,7 @@ func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 	for _, arg := range args {
 		remote += " " + shellquote.Quote(arg)
 	}
-	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ControlMaster=no", "-o", "ControlPath=none"}, r.Node.SSH, remote)
+	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none"}, r.Node.SSH, remote)
 }
 
 // dialFailureNote matches what the ssh client prints when a connection died
