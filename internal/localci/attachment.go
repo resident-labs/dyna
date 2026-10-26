@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/hub"
@@ -42,6 +43,9 @@ func (s Store) saveAttachment(ctx context.Context, repo, sha, node string, att a
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(ctx, attachmentSchema); err != nil {
+			return err
+		}
 		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_attachments(repo,sha,node,payload,saved_at) VALUES(?,?,?,?,?)
 ON CONFLICT(repo,sha,node) DO UPDATE SET payload=excluded.payload, saved_at=excluded.saved_at`, repo, sha, node, raw, resultClock().Unix())
 		return err
@@ -60,7 +64,7 @@ func (s Store) loadAttachment(ctx context.Context, repo, sha, node string) (atta
 	var raw []byte
 	var saved int64
 	err = db.QueryRowContext(ctx, "SELECT payload, saved_at FROM local_ci_attachments WHERE repo=? AND sha=? AND node=?", repo, sha, node).Scan(&raw, &saved)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || isMissingAttachmentTable(err) {
 		return att, os.ErrNotExist
 	}
 	if err != nil {
@@ -72,6 +76,12 @@ func (s Store) loadAttachment(ctx context.Context, repo, sha, node string) (atta
 	return att, json.Unmarshal(raw, &att)
 }
 
+// isMissingAttachmentTable reports the error of a database that has not
+// recorded a check yet.
+func isMissingAttachmentTable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no such table: local_ci_attachments")
+}
+
 // deleteAttachment forgets a run's checks once the run ended for good.
 func (s Store) deleteAttachment(ctx context.Context, repo, sha, node string) error {
 	db, err := s.open()
@@ -80,6 +90,9 @@ func (s Store) deleteAttachment(ctx context.Context, repo, sha, node string) err
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, "DELETE FROM local_ci_attachments WHERE repo=? AND sha=? AND node=?", repo, sha, node)
+		if isMissingAttachmentTable(err) {
+			return nil
+		}
 		return err
 	})
 }
