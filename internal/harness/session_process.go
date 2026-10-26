@@ -58,7 +58,7 @@ func nativeSessionLaunch(p profile.Profile, cwd string, spec commandSpec, execut
 		Harness:     p.Harness,
 		Key:         key + "\x00" + environmentValue(env, "HOME"),
 		Fingerprint: sessionLaunchFingerprint(cmd.Path, env, argv) + "\x00" + cmd.Dir,
-		Argv:        argv, Env: env, Dir: cmd.Dir, OnStart: execution.Started,
+		Argv:        argv, Env: env, Dir: cmd.Dir, OnStart: execution.Started, IdleClose: execution.IdleUnload,
 		BindLease: nativeSessionBindLease(p),
 	}, nil
 }
