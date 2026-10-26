@@ -23,8 +23,12 @@ type Pass struct {
 	Now      time.Time
 	// Post sends a new unhealthy report. A nil Post only saves it.
 	Post func(Report) error
-	// Clear runs for a machine that is not under the condition, so a caller
-	// can end what Post began. A nil Clear does nothing.
+	// Alert runs on every pass that finds the machine unhealthy, even when the
+	// report repeats an earlier one, so a caller can keep its own state per
+	// audience. A nil Alert does nothing.
+	Alert func(Report) error
+	// Clear runs only when fresh samples confirm the machine is healthy. An
+	// error or a missing sample never clears. A nil Clear does nothing.
 	Clear func(machine string) error
 }
 
@@ -38,7 +42,12 @@ func (p Pass) Do(log io.Writer) error {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", machine, err))
 		}
-		if (!res.Ran || res.Report.Healthy) && p.Clear != nil {
+		if err == nil && res.Ran && !res.Report.Healthy && p.Alert != nil {
+			if aerr := p.Alert(res.Report); aerr != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", machine, aerr))
+			}
+		}
+		if err == nil && res.Healthy && p.Clear != nil {
 			if cerr := p.Clear(machine); cerr != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", machine, cerr))
 			}

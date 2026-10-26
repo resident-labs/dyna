@@ -134,8 +134,40 @@ func TestPassClearsAMachineThatLeavesTheCondition(t *testing.T) {
 	if err := pass.Do(io.Discard); err != nil || len(cleared) != 0 {
 		t.Fatalf("overloaded machine cleared: %v, %v", cleared, err)
 	}
+	// Stale samples, an unparsable condition and an unknown machine prove nothing.
+	pass.Now = t0.Add(time.Hour)
+	pass.If = "load>50"
+	if err := pass.Do(io.Discard); err != nil || len(cleared) != 0 {
+		t.Fatalf("stale samples cleared: %v, %v", cleared, err)
+	}
+	pass.Now, pass.If = t0, "banana"
+	if err := pass.Do(io.Discard); err == nil || len(cleared) != 0 {
+		t.Fatalf("a failed evaluation cleared: %v, %v", cleared, err)
+	}
+	pass.If, pass.Machines = "load>50", []string{"unknown"}
+	if err := pass.Do(io.Discard); err != nil || len(cleared) != 0 {
+		t.Fatalf("a machine with no samples cleared: %v, %v", cleared, err)
+	}
+	pass.Machines = []string{"laptop"}
+	pass.If = "load>2"
 	pass.If = "load>50"
 	if err := pass.Do(io.Discard); err != nil || len(cleared) != 1 || cleared[0] != "laptop" {
 		t.Fatalf("cleared = %v, %v", cleared, err)
+	}
+}
+
+func TestPassAlertsOnEveryUnhealthyPassEvenWhenTheReportRepeats(t *testing.T) {
+	dir := t.TempDir()
+	busyMachine(t, Samples{DataDir: dir}, t0)
+	alerts := 0
+	pass := Pass{DataDir: dir, Machines: []string{"laptop"}, If: "load>2", Cooldown: DefaultCooldown, Now: t0, Alert: func(Report) error { alerts++; return nil }}
+	for i := 0; i < 3; i++ {
+		pass.Now = t0.Add(time.Duration(i) * time.Minute)
+		if err := pass.Do(io.Discard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if alerts != 3 {
+		t.Fatalf("alerts = %d, want one per unhealthy pass so room state is judged each time", alerts)
 	}
 }

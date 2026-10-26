@@ -1,6 +1,8 @@
 package doctoralert
 
 import (
+	"dyna-agent/internal/sysload"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -89,5 +91,44 @@ func TestPostNoteWakesRootForAnOverloadButNotForRecovery(t *testing.T) {
 	}
 	if posts[1].Wake {
 		t.Fatalf("recovery woke the root: %+v", posts[1])
+	}
+}
+
+// An overload that returns inside the report cooldown must alert again, and a
+// pass with no fresh samples must not announce recovery.
+func TestOverloadRecoveryThenSameOverloadAlertsAgain(t *testing.T) {
+	n, sent, now := fake(t, []RoomUse{{RoomID: "a", Room: "a", Running: 2}})
+	samples := doctor.Samples{DataDir: n.DataDir}
+	load := func(at time.Time, perCore float64) {
+		l := sysload.Load{At: at, CPUs: 8, Load: [3]float64{perCore * 8}, Memory: sysload.Memory{Total: 16 << 30}, Groups: []sysload.Group{{Name: "machine", Cores: perCore * 8, Memory: 8 << 30}}}
+		if err := samples.Record("laptop", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass := func() {
+		t.Helper()
+		err := doctor.Pass{DataDir: n.DataDir, Machines: []string{"laptop"}, If: "load>2", Cooldown: doctor.DefaultCooldown, Now: *now, Alert: n.Alert, Clear: n.Recover}.Do(io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	load(*now, 3)
+	pass() // overload: alert
+	*now = now.Add(time.Minute)
+	load(*now, 0.5)
+	pass() // fresh and healthy: recovery
+	if len(*sent) != 2 || !(*sent)[1].Recovered {
+		t.Fatalf("sent %d after recovery, want alert then recovery", len(*sent))
+	}
+	*now = now.Add(time.Minute)
+	load(*now, 3)
+	pass() // the same overload, inside the report cooldown, alerts again
+	if len(*sent) != 3 || (*sent)[2].Recovered {
+		t.Fatalf("sent %d after the overload returned, want a new alert", len(*sent))
+	}
+	*now = now.Add(time.Hour) // the samples are stale now
+	pass()
+	if len(*sent) != 3 {
+		t.Fatalf("stale samples announced recovery: sent %d", len(*sent))
 	}
 }
