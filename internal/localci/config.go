@@ -82,6 +82,7 @@ type Definition struct {
 	aliases    map[Suite]Suite
 	groupOf    map[CheckName]Group
 	providerOf map[CheckName]CheckName
+	actImage   string
 }
 
 type definitionSuite struct {
@@ -95,6 +96,7 @@ type definitionFile struct {
 	Version int         `yaml:"version"`
 	Trial   []Suite     `yaml:"trial"`
 	Caches  []cacheFile `yaml:"caches"`
+	Act     *actFile    `yaml:"act"`
 	Checks  []checkFile `yaml:"checks"`
 	Suites  []suiteFile `yaml:"suites"`
 }
@@ -104,6 +106,17 @@ type cacheFile struct {
 	Target string `yaml:"target"`
 	Env    string `yaml:"env"`
 }
+
+// actFile holds how this repository's workflow jobs run on a node.
+type actFile struct {
+	// Image is the platform image a workflow's runs-on: ubuntu-latest maps to.
+	// A machine uses it for every job, so a repository that needs another
+	// runner image names it once here.
+	Image string `yaml:"image"`
+}
+
+// DefaultActImage is the act runner image used when a definition names none.
+const DefaultActImage = "catthehacker/ubuntu:act-22.04"
 
 // jobFile names one job of a GitHub Actions workflow that a check runs through
 // act instead of a command of its own.
@@ -259,6 +272,13 @@ func ParseDefinition(body []byte) (*Definition, error) {
 		aliases:    make(map[Suite]Suite),
 		groupOf:    map[CheckName]Group{},
 		providerOf: map[CheckName]CheckName{},
+		actImage:   DefaultActImage,
+	}
+	if file.Act != nil && file.Act.Image != "" {
+		if strings.TrimSpace(file.Act.Image) != file.Act.Image || len(strings.Fields(file.Act.Image)) != 1 || strings.ContainsRune(file.Act.Image, '\x00') {
+			return nil, fmt.Errorf("act image %q must be one container image", file.Act.Image)
+		}
+		definition.actImage = file.Act.Image
 	}
 	checks := make(map[Suite]ExecutableCheck, len(file.Checks))
 	checkNames := map[CheckName]Suite{}
@@ -637,6 +657,10 @@ func (d *Definition) CoversSuites(result Result, suites []Suite) bool {
 	}
 	return true
 }
+
+// ActImage is the platform image a workflow's runs-on: ubuntu-latest maps to on
+// this repository's nodes.
+func (d *Definition) ActImage() string { return d.actImage }
 
 // JobRef names one job of a GitHub Actions workflow that a check runs through
 // act instead of a command of its own.
