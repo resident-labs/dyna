@@ -2,15 +2,38 @@ package connect
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
-// A new link or an unlink takes effect without an engine restart: a changed
-// token cancels the running child, a removed one settles with no child, and an
-// unchanged token leaves the child alone. Ticks and the child are fakes, so the
-// test has no clock and no process.
+// The connector follows its credential: a new link restarts the child, an
+// unlink stops it, and the same token leaves it alone. The decision is pure, and
+// the loop test uses fake ticks and a fake child, so neither has a clock, a
+// process or a timeout.
+func TestCredentialDiffersOnlyOnChange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		now   string
+		err   error
+		seen  string
+		wants bool
+	}{
+		{"same token", "first", nil, "first", false},
+		{"new token", "second", nil, "first", true},
+		{"token removed", "", fs.ErrNotExist, "first", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := credentialDiffers([]byte(tc.now), tc.err, []byte(tc.seen)); got != tc.wants {
+				t.Fatalf("credentialDiffers(%q, %v, %q) = %t, want %t", tc.now, tc.err, tc.seen, got, tc.wants)
+			}
+		})
+	}
+}
+
 func TestTunnelFollowsItsCredential(t *testing.T) {
 	st, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -19,9 +42,14 @@ func TestTunnelFollowsItsCredential(t *testing.T) {
 	if err := st.SaveTunnelToken("first"); err != nil {
 		t.Fatal(err)
 	}
-	ticks := make(chan time.Time)
+
+	attempts := make(chan chan time.Time, 8)
 	previousTicks := tokenTicks
-	tokenTicks = func() (<-chan time.Time, func()) { return ticks, func() {} }
+	tokenTicks = func() (<-chan time.Time, func()) {
+		ticks := make(chan time.Time)
+		attempts <- ticks
+		return ticks, func() {}
+	}
 	t.Cleanup(func() { tokenTicks = previousTicks })
 
 	events := make(chan string, 8)
@@ -34,10 +62,11 @@ func TestTunnelFollowsItsCredential(t *testing.T) {
 	}
 	t.Cleanup(func() { runConnector = previousRun })
 
+	logs := make(chan string, 16)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		RunTunnel(ctx, st, "unused", t.Logf)
+		RunTunnel(ctx, st, "unused", func(format string, args ...any) { logs <- fmt.Sprintf(format, args...) })
 		close(done)
 	}()
 	t.Cleanup(func() {
@@ -45,58 +74,35 @@ func TestTunnelFollowsItsCredential(t *testing.T) {
 		<-done
 	})
 
-	tick := func() {
-		t.Helper()
-		select {
-		case ticks <- time.Now():
-		case <-time.After(time.Second):
-			t.Fatal("the connector never checked its token")
-		}
+	first := <-attempts
+	if event := <-events; event != "start" {
+		t.Fatalf("first event = %q, want start", event)
 	}
-	next := func() string {
-		t.Helper()
-		select {
-		case event := <-events:
-			return event
-		case <-time.After(5 * time.Second):
-			t.Fatal("the connector loop stopped responding")
-			return ""
-		}
-	}
-	if first := next(); first != "start" {
-		t.Fatalf("first event = %q, want start", first)
-	}
-	// The same token on a tick changes nothing: nothing stops within a bound that
-	// only guards against a hang.
-	tick()
-	select {
-	case event := <-events:
-		t.Fatalf("an unchanged token changed the connector: %q", event)
-	case <-time.After(100 * time.Millisecond):
-	}
-	// A new link writes a new token, so the child holding the old tunnel stops
-	// and a second child starts with the new credential.
+	// A new link writes a new token: the child holding the old tunnel stops, and
+	// the restarted loop starts one with the new credential.
 	if err := st.SaveTunnelToken("second"); err != nil {
 		t.Fatal(err)
 	}
-	tick()
-	if replaced := next(); replaced != "stop" {
-		t.Fatalf("a new token did not cancel the running child: %q", replaced)
+	first <- time.Now()
+	if event := <-events; event != "stop" {
+		t.Fatalf("a new token did not cancel the running child: %q", event)
 	}
-	if restarted := next(); restarted != "start" {
-		t.Fatalf("a new token did not start a child with the new credential: %q", restarted)
+	second := <-attempts
+	if event := <-events; event != "start" {
+		t.Fatalf("a new token did not start a child with the new credential: %q", event)
 	}
-	// An unlink removes the token: the child stops and none replaces it.
+	// An unlink removes the token: the child stops, and the loop reports that it
+	// waits for a link instead of starting another connector.
 	if err := os.Remove(st.TunnelTokenPath()); err != nil {
 		t.Fatal(err)
 	}
-	tick()
-	if stopped := next(); stopped != "stop" {
-		t.Fatalf("an unlink did not cancel the running child: %q", stopped)
+	second <- time.Now()
+	if event := <-events; event != "stop" {
+		t.Fatalf("an unlink did not cancel the running child: %q", event)
 	}
-	select {
-	case event := <-events:
-		t.Fatalf("a connector started after the unlink: %q", event)
-	default:
+	for {
+		if message := <-logs; strings.Contains(message, "no tunnel token yet") {
+			return
+		}
 	}
 }
