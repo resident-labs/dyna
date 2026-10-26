@@ -127,6 +127,10 @@ type Store struct {
 	// exitWrite replaces the write of a finished job's exit; nil uses Save. A
 	// test sets it to act as a state store that times out.
 	exitWrite func(m Meta, ex *Exit) error
+
+	// afterStop waits for a stopped job's output to drain; nil uses time.After.
+	// A test sets it to a channel that is already ready.
+	afterStop func(time.Duration) <-chan time.Time
 	// CommandEnv prepares the environment of a new command. The shell CLI sets
 	// it to the display policy of managed shells; nil keeps the supervisor's
 	// launch environment, which is the owner display.
@@ -405,10 +409,18 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	// Without a terminal, a pager or color codes only get in the way.
 	cmd.Env = append(env, "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	pr, pw := io.Pipe()
+	// A file, not an io.Pipe: Wait then returns when the command ends, even
+	// if a child it left behind still holds the output open.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer pr.Close()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	cmd.Stdin = nil
-	if err := childenv.Clean(cmd).Start(); err != nil {
+	err = childenv.Clean(cmd).Start()
+	pw.Close() // the command holds its own copies
+	if err != nil {
 		_ = s.Save(m, &Exit{Code: -1, Error: err.Error(), Ended: time.Now()})
 		return err
 	}
@@ -459,7 +471,21 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 			werr = <-waitErr
 		}
 	}
-	pw.Close()
+	if ctx.Err() != nil {
+		// A stopped job must end. A child that outlived it (an ssh connection
+		// master, for example) can hold the output open for as long as it runs,
+		// so the copier gets a short time to drain, then loses its input.
+		after := s.afterStop
+		if after == nil {
+			after = time.After
+		}
+		select {
+		case <-copied:
+		case <-after(stopOutputWait):
+			_ = pr.Close()
+			<-copied
+		}
+	}
 	<-copied
 	grew.stop()
 	ex := Exit{Ended: time.Now()}
@@ -523,6 +549,10 @@ func (s *Store) writeExit(m Meta, ex *Exit) error {
 func timedOut(err error) bool {
 	return err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), context.DeadlineExceeded.Error()))
 }
+
+// stopOutputWait is how long a stopped job's supervisor lets its output drain
+// after the command ended, before it stops reading (D-190, D-210).
+const stopOutputWait = 3 * time.Second
 
 // ReadMeta loads a job's launch record.
 func (s *Store) ReadMeta(id string) (Meta, error) {
