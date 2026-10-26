@@ -58,6 +58,10 @@ type nodeCheck struct {
 	cpus      int
 	memoryMiB int64
 	resources checkResources
+	// event is the GitHub event a job check runs, and branch the ref a push
+	// event names. A cache-warming job is scoped to the default branch.
+	event  string
+	branch string
 }
 
 // A check's default resources. The slot pool hands every check two CPUs and the
@@ -363,6 +367,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	prepareChecks := func() error {
 		var prepareErr error
 		checks, aggregate, prepareErr = nodeChecks(req.Definition, req.Suites, node.HostChecksAllowed(req.RoomID))
+		if req.Event == "push" {
+			// A warm run sends a push event, so the workflow's cache-warming job
+			// sees the default branch it is scoped to.
+			for i := range checks {
+				checks[i].event, checks[i].branch = "push", req.Branch
+			}
+		}
 		if errors.Is(prepareErr, ErrHostChecksDisabled) {
 			return fmt.Errorf("CI node %q: %w", node.Name, prepareErr)
 		}
@@ -1120,6 +1131,13 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		label := "dyna.run=" + runID
 		event := path.Join(reportDir, "event.json")
 		eventBody := `{"pull_request":{"base":{"sha":"` + baseCommit + `"},"head":{"sha":"` + sha + `"}}}`
+		actEvent := "pull_request"
+		if check.event == "push" {
+			// A cache-warming job runs only on the default branch, so the run
+			// sends the push event that names that ref.
+			eventBody = `{"ref":"refs/heads/` + check.branch + `","after":"` + sha + `","before":"` + baseCommit + `"}`
+			actEvent = "push"
+		}
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
@@ -1136,7 +1154,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		}
 		setup += "docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); export DOCKER_HOST=" + q(containerSocket) + "; "
 		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="+q(actHome)+" DOCKER_HOST="+q(containerSocket)+" ", seconds) +
-			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
+			q(actBinaryPath(base)) + " " + actEvent + " -W " + q(work) + "/" + q(check.job.Workflow) +
 			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
@@ -1153,7 +1171,9 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// The workflow uploads its JUnit as an artifact, and an upload is stored as
 		// <artifact>/<artifact>.zip; the existing reader reads the check's report
 		// directory, so the archives are unpacked into it first.
-		setup += "find " + q(artifacts) + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
+		// A job uploads its JUnit as XML and, for a Go job, the raw test events
+		// as JSON, which the Go reader needs for failure detail.
+		setup += "find " + q(artifacts) + " \\( -name '*.xml' -o -name '*.json' \\) -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
 		// Each archive is unpacked into a directory of its own and every entry
 		// keeps the archive's name and its path inside it, so two uploads that
 		// both hold junit.xml land as two reports instead of overwriting one.
@@ -1166,8 +1186,8 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			`if command -v unzip >/dev/null 2>&1; then unzip -qq -o "$archive" -d "$dest" >/dev/null 2>&1 || true; ` +
 			`elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e "$archive" "$dest" >/dev/null 2>&1 || true; fi; ` +
 			`entryOrdinal=0; while IFS= read -r entry; do entryOrdinal=$((entryOrdinal + 1)); ` +
-			`cp "$entry" ` + q(reportDir) + `/"$archiveOrdinal-$entryOrdinal.xml" || true; ` +
-			`done < <(find "$dest" -name '*.xml' -type f 2>/dev/null); ` +
+			`cp "$entry" ` + q(reportDir) + `/"$archiveOrdinal-$entryOrdinal.${entry##*.}" || true; ` +
+			`done < <(find "$dest" \( -name '*.xml' -o -name '*.json' \) -type f 2>/dev/null); ` +
 			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
 			"rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"

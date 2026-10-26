@@ -64,6 +64,14 @@ type Service struct {
 	// StartAgent starts a managed one-off agent; nil uses Notify.Sessions.Start.
 	StartAgent    escalate.Start
 	CleanupMerged func(context.Context, Record, string) error
+	// WarmStore remembers the default branch commit each machine last warmed.
+	// Nil uses the local CI store.
+	WarmStore warmStore
+	// WarmDefinition reads the definition a warm run takes its job from, and
+	// WarmRun runs one warm run. Nil uses the local CI runner.
+	WarmDefinition  func(context.Context, string, string) (*localci.Definition, error)
+	WarmRun         func(context.Context, localci.Node, localci.WarmRequest) error
+	registeredWarms *warmRuns
 }
 
 func New() *Service { return &Service{Store: DefaultStore(), Notify: notify.Default(), Now: time.Now} }
