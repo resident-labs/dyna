@@ -30,7 +30,7 @@
   }
   let { detail = null, error = '', oncancel = null, onpause = null, onopen = null }: Props = $props()
 
-  const label: Record<string, string> = { running: 'Running', ok: 'Done', error: 'Failed', canceled: 'Canceled', unknown: 'No end recorded' }
+  const label: Record<string, string> = { running: 'Running', ok: 'Done', error: 'Failed', canceled: 'Canceled', interrupted: 'Interrupted', unknown: 'No end recorded' }
 
   let pausing = $state(false)
   let pauseError = $state('')
@@ -259,7 +259,7 @@
   .bad { color: var(--coral); }
   .hero { background: var(--side); border: 1px solid var(--line-soft); border-radius: 14px; padding: 18px 20px 16px; }
   .hero.running { border-color: color-mix(in srgb, var(--gold) 28%, var(--line-soft)); }
-  .hero.error { border-color: color-mix(in srgb, var(--coral) 28%, var(--line-soft)); }
+  .hero.error, .hero.interrupted { border-color: color-mix(in srgb, var(--coral) 28%, var(--line-soft)); }
   .title { display: flex; align-items: center; gap: 14px; }
   .tt { flex: 1; min-width: 0; }
   h1 { margin: 0; font-size: 22px; font-weight: 700; }
@@ -268,7 +268,7 @@
   .chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px; background: var(--raise); color: var(--muted); }
   .chip.running { color: var(--gold); background: rgba(230, 192, 123, 0.12); }
   .chip.ok { color: var(--sage); background: rgba(151, 201, 149, 0.12); }
-  .chip.error { color: var(--coral); background: rgba(239, 138, 128, 0.12); }
+  .chip.error, .chip.interrupted { color: var(--coral); background: rgba(239, 138, 128, 0.12); }
   .cancel { font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 7px; color: var(--coral); background: rgba(239, 138, 128, 0.1); border: 1px solid rgba(239, 138, 128, 0.28); flex: none; transition: background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .cancel:hover { background: color-mix(in srgb, var(--coral) 16%, transparent); }
@@ -291,7 +291,7 @@
   .fill { display: block; height: 100%; border-radius: 3px; background: var(--faint); transition: width var(--motion-slow); }
   .fill.running { background: linear-gradient(90deg, #b59654, var(--gold)); }
   .fill.ok { background: linear-gradient(90deg, #6fa66d, var(--sage)); }
-  .fill.error { background: linear-gradient(90deg, #b8574d, var(--coral)); }
+  .fill.error, .fill.interrupted { background: linear-gradient(90deg, #b8574d, var(--coral)); }
   dl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
   dt { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
   dd { margin: 3px 0 0; font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }

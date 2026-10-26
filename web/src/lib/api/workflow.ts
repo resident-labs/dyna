@@ -6,7 +6,7 @@ import type { Doing } from './room.ts'
 export interface RunSummary {
   id: string
   name: string
-  status: string // running|ok|error|canceled
+  status: string // running|ok|error|canceled|interrupted
   startedAt: string
   endedAt?: string
   roomId: string
