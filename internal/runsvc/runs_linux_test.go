@@ -4,13 +4,17 @@ package runsvc
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/shells"
@@ -97,5 +101,53 @@ func TestCancelLeavesAKeptWorkerShellRunning(t *testing.T) {
 	}
 	if in, err := s.Info(meta.ID); err != nil || in.Status != "running" {
 		t.Fatalf("kept shell = %s, error=%v, want running", in.Status, err)
+	}
+}
+
+// A kept job's child in a group of its own is part of the job and survives too.
+func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
+	dataDir := storetest.Isolate(t)
+	runID := "wf_20261026-010101-abcdef05"
+	runstoretest.Write(t, dataDir, runstore.Meta{ID: runID, Name: "keep-child", Status: "running", StartedAt: time.Now()})
+	t.Setenv("DYNA_WORKER_RUN", runID)
+	fifo := filepath.Join(t.TempDir(), "up")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := shells.DefaultStore()
+	meta, err := s.Create(shells.StartOptions{Run: runID, Keep: true, Cwd: t.TempDir(),
+		Cmd: []string{"sh", "-c", "setsid sleep 600 & echo up > " + fifo + "; wait"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan int, 1)
+	s.OnStarted = func(pid int) { started <- pid }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Supervise(ctx, meta.ID) }()
+	pid := <-started
+	var jobPids []int
+	t.Cleanup(func() {
+		for _, p := range jobPids {
+			_ = syscall.Kill(p, syscall.SIGKILL)
+		}
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		cancel()
+		<-done
+	})
+	if _, err := os.ReadFile(fifo); err != nil { // returns once the child has forked
+		t.Fatal(err)
+	}
+	jobPids = runprocs.Stamped(shells.JobEnv + "=" + meta.ID)
+	if len(jobPids) < 2 {
+		t.Fatalf("job processes = %v, want the shell and its child", jobPids)
+	}
+	if err := Cancel(authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner}), runID); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range jobPids {
+		if stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", p)); err != nil || strings.Contains(string(stat), ") Z ") {
+			t.Fatalf("kept job process %d ended: %v", p, err)
+		}
 	}
 }
