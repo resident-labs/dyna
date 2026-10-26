@@ -154,6 +154,23 @@ runs rootless Podman instead of Docker:
 dyna machine edit build-machine --container-socket unix:///run/user/1000/podman/podman.sock
 ```
 
+## Warming the act cache
+
+A job check restores the node's act cache, so a run is fast only when something
+filled that cache. Name the provider job that fills it:
+
+```yaml
+warm:
+  workflow: .github/workflows/ci.yml
+  name: cache-warm
+```
+
+After the default branch moves, Dyna runs that job through act on each CI
+machine that serves the repository, into the same cache store the job checks
+read. The run takes a slot like every other check, so it never starves a pull
+request's checks, and each machine remembers the commit it last warmed, so a
+commit warms a machine once.
+
 ## Resource limits
 
 A check runs with 2 CPUs and 4 GiB of memory in a container, and with 2 CPUs and
