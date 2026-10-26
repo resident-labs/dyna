@@ -22,7 +22,12 @@ func (e *engine) postBody(call goja.FunctionCall) (text, data string) {
 	vm := e.vm
 	arg, extra := call.Argument(1), call.Argument(2)
 	if obj, ok := arg.(*goja.Object); ok && len(call.Arguments) == 2 {
-		t, ok := obj.Get("text").Export().(string)
+		// Get returns nil for a missing property.
+		field := obj.Get("text")
+		if field == nil {
+			panic(vm.NewGoError(fmt.Errorf("post text must be a non-empty string")))
+		}
+		t, ok := field.Export().(string)
 		if !ok {
 			panic(vm.NewGoError(fmt.Errorf("post text must be a non-empty string")))
 		}
