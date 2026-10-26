@@ -1,6 +1,7 @@
 package computers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -14,6 +15,38 @@ import (
 type point struct {
 	X int `json:"x"`
 	Y int `json:"y"`
+}
+
+// UnmarshalJSON reads a point from the object form the guide and the action
+// schema show, {"x":80,"y":46}, or from a two-element array, [80, 46], so a batch
+// written either way runs.
+func (p *point) UnmarshalJSON(body []byte) error {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var pair []int
+		if err := json.Unmarshal(trimmed, &pair); err != nil {
+			return err
+		}
+		if len(pair) != 2 {
+			return fmt.Errorf("a point array must hold exactly x and y")
+		}
+		p.X, p.Y = pair[0], pair[1]
+		return nil
+	}
+	var named struct {
+		X *int `json:"x"`
+		Y *int `json:"y"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&named); err != nil {
+		return err
+	}
+	if named.X == nil || named.Y == nil {
+		return fmt.Errorf("a point needs exactly x and y")
+	}
+	p.X, p.Y = *named.X, *named.Y
+	return nil
 }
 
 func actionValue[T any](a Action, key string) (v T, err error) {
@@ -147,7 +180,7 @@ func validateAction(a Action, width, height int, waits, shots, texts *int) error
 		}
 	}
 	if kind == "drag" {
-		path, err := actionValue[[]Action](a, "path")
+		path, err := actionValue[[]point](a, "path")
 		if err != nil {
 			return err
 		}
@@ -155,11 +188,8 @@ func validateAction(a Action, width, height int, waits, shots, texts *int) error
 			return fmt.Errorf("drag path must contain 2–200 points")
 		}
 		for _, p := range path {
-			if len(p) != 2 {
-				return fmt.Errorf("drag points contain exactly x and y")
-			}
-			if err := coord(p, width, height); err != nil {
-				return err
+			if p.X < 0 || p.X >= width || p.Y < 0 || p.Y >= height {
+				return fmt.Errorf("drag points must be inside the %dx%d computer", width, height)
 			}
 		}
 	}
@@ -317,7 +347,8 @@ Fields:
   x, y: integer pixel coordinates inside the current screen.
   button: left, middle, or right.
   keys: 1–%d key names, such as CTRL, l, ENTER, or Escape.
-  path: 2–%d points, each with integer x and y.
+  path: 2–%d points, each an object with integer x and y. A point written as
+    [x, y] is accepted too.
   scroll_x, scroll_y: integers from -%d to %d; positive moves right/down.
   text: UTF-8 text, at most %d characters per batch.
   secret: true hides typed text from action events.
