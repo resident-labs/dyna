@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/syswait"
 )
 
 type pidfdHandle int
@@ -29,10 +31,7 @@ func (fd pidfdHandle) Wait() error {
 		if remaining <= 0 {
 			return errors.New("exited shell supervisor did not stop within 5 seconds")
 		}
-		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1)
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
+		n, err := syswait.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1)
 		if err != nil {
 			return fmt.Errorf("wait for exited shell supervisor: %w", err)
 		}
