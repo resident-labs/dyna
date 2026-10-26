@@ -217,6 +217,10 @@ func TestShortTempIsInsideTheTestRoot(t *testing.T) {
 // Only a folder ShortTemp made in this run passes: a Dyna data folder that is
 // named like one, or a folder of another run, must not.
 func TestCheckRefusesAShortLookingFolderThatShortTempDidNotMake(t *testing.T) {
+	// A root elsewhere, so /tmp is not inside it.
+	old := tempRoot
+	tempRoot = t.TempDir()
+	defer func() { tempRoot = old }()
 	foreign, err := os.MkdirTemp(shortRoot, shortPrefix+"data-")
 	if err != nil {
 		t.Fatal(err)
