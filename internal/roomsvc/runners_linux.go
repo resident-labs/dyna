@@ -1,10 +1,11 @@
 package roomsvc
 
 import (
-	"errors"
 	"sync"
 
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/syswait"
 )
 
 // runnerHandle is a pidfd: it becomes readable when the process exits.
@@ -23,11 +24,8 @@ func (h runnerHandle) wait(q *quitter) bool {
 		return false
 	}
 	fds := []unix.PollFd{{Fd: int32(h.fd), Events: unix.POLLIN}, {Fd: int32(quit), Events: unix.POLLIN}}
-	for {
-		_, err := unix.Poll(fds, -1)
-		if !errors.Is(err, unix.EINTR) {
-			break
-		}
+	if _, err := syswait.Poll(fds, -1); err != nil {
+		return false
 	}
 	return fds[0].Revents != 0 && fds[1].Revents == 0
 }
