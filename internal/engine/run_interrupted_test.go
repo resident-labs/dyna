@@ -16,9 +16,11 @@ import (
 )
 
 func TestSettleInterruptedByUpdate(t *testing.T) {
-	failed := runstore.Event{T: "agent_end", ID: 1, Status: "error", Error: "no such table"}
-	ok := runstore.Event{T: "agent_end", ID: 2, Status: "ok"}
-	cached := runstore.Event{T: "agent_end", ID: 3, Status: "error", Cached: true}
+	since := time.UnixMilli(1000)
+	failed := runstore.Event{T: "agent_end", ID: 1, TS: 2000, Status: "error", Error: "no such table"}
+	handled := runstore.Event{T: "agent_end", ID: 4, TS: 500, Status: "error", Error: "optional brief failed"}
+	ok := runstore.Event{T: "agent_end", ID: 2, TS: 2000, Status: "ok"}
+	cached := runstore.Event{T: "agent_end", ID: 3, TS: 2000, Status: "error", Cached: true}
 	const msg = "interrupted by update from v1 to v2; resume it with dyna run <script.js> --resume wf_settle"
 	for _, tc := range []struct {
 		name       string
@@ -35,6 +37,7 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 		{"other build, only a cached failure", "v1", "ok", []runstore.Event{cached}, "ok", ""},
 		{"other build, canceled stays canceled", "v1", "canceled", []runstore.Event{failed}, "canceled", ""},
 		{"same build, failed agent", "v2", "ok", []runstore.Event{failed}, "ok", ""},
+		{"other build, failure handled before the update", "v1", "ok", []runstore.Event{handled, ok}, "ok", ""},
 		{"other build, events unreadable", "v1", "ok", nil, "ok", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,7 +69,7 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			got, err := settleInterrupted(t.Context(), state.For(db), callspec.RunFinish{Run: run, Status: tc.status}, "v2")
+			got, err := settleInterrupted(t.Context(), state.For(db), callspec.RunFinish{Run: run, Status: tc.status}, "v2", since)
 			if err != nil {
 				t.Fatal(err)
 			}
