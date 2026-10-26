@@ -176,3 +176,77 @@ func TestPollReplyCutShortAdvancesNothing(t *testing.T) {
 		t.Fatal("a cut reply was accepted")
 	}
 }
+
+// Every attempt of a short call has a deadline of its own, so a connection that
+// is up but silent returns to the retry loop instead of blocking all the checks
+// of the node until the run ends.
+func TestEveryNodeCallAttemptHasADeadline(t *testing.T) {
+	var withDeadline, calls int
+	runner := Runner{Node: &Node{Name: "pve", SSH: "pip@pve"}}
+	runner.Command = func(ctx context.Context, _ string, _ io.Reader, _, _ io.Writer, _ string, _ ...string) error {
+		calls++
+		if _, ok := ctx.Deadline(); ok {
+			withDeadline++
+		}
+		return nil
+	}
+	if err := runner.startDetached(t.Context(), testSpec("a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.pollNode(t.Context(), []*watch{{spec: testSpec("a")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.stopDetached(t.Context(), testSpec("a")); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 || withDeadline != 3 {
+		t.Fatalf("%d of %d attempts had a deadline", withDeadline, calls)
+	}
+	_, args := runner.nodeProgram("bash", []string{"-c", "true"})
+	if !strings.Contains(strings.Join(args, " "), "ServerAliveInterval=15") {
+		t.Fatalf("ssh args %v lack a keepalive", args)
+	}
+}
+
+// An engine stop that cuts a launch short leaves the check alone, because the
+// launch may have reached the node, and records the intent first so the restarted
+// engine finds it. Any other stop cleans up the half-started check.
+func TestStopDuringLaunchKeepsTheCheckOnlyForAnEngineStop(t *testing.T) {
+	for _, engineStop := range []bool{false, true} {
+		t.Run(fmt.Sprint("engine stop ", engineStop), func(t *testing.T) {
+			previous := EngineStopping()
+			t.Cleanup(func() { engineStopping.Store(previous) })
+			ClearEngineStopping()
+			ctx, cancel := context.WithCancel(t.Context())
+			stops := 0
+			runner := Runner{Node: &Node{Name: "pve", SSH: "pip@pve"}}
+			runner.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
+				script, _, _ := decodeNodeScript(name, args)
+				switch script {
+				case detachedStartScript:
+					if engineStop {
+						MarkEngineStopping()
+					}
+					cancel()
+					return context.Canceled
+				case detachedStopScript:
+					stops++
+				}
+				return nil
+			}
+			poller, stop := runner.newPoller(t.Context())
+			defer stop()
+			recorded := 0
+			poller.started = func(detachSpec) { recorded++ }
+			if err := poller.Run(ctx, testSpec("a"), io.Discard); !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v", err)
+			}
+			if recorded != 1 {
+				t.Fatalf("launch intent recorded %d times, want once before the launch", recorded)
+			}
+			if want := map[bool]int{false: 1, true: 0}[engineStop]; stops != want {
+				t.Fatalf("stop calls = %d, want %d", stops, want)
+			}
+		})
+	}
+}
