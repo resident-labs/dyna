@@ -258,6 +258,14 @@ checks:
     memory: 4g
     reports: go
 
+  - id: desktop
+    job:
+      workflow: .github/workflows/ci.yml
+      name: desktop
+    cpus: 2
+    memory: 4g
+    reports: none
+
   - id: go-test-shard-7
     name: go-test-shard (7)
     providerGroup: go-test-shard
@@ -295,4 +303,4 @@ suites:
   - id: go
     group: go-test
     files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
-    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7]
+    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, desktop, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7]
