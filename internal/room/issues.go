@@ -526,6 +526,23 @@ func (s *Store) LinkIssueGoal(ctx context.Context, roomID, id, goalID, by string
 	})
 }
 
+// ReleaseIssueGoal returns an issue to open when the goal that linked it ends
+// without fixing it. The link check and the write share one locked step, so an
+// issue that another goal took in between keeps that link and returns
+// ErrIssueLeftGoal.
+func (s *Store) ReleaseIssueGoal(ctx context.Context, roomID, id, goalID, by string) (Issue, error) {
+	if strings.TrimSpace(goalID) == "" {
+		return Issue{}, errors.New("a goal release needs the goal ID")
+	}
+	return s.changeIssueFrom(ctx, roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
+		if i.State != IssueStateGoal || i.GoalID != goalID {
+			return ErrIssueLeftGoal
+		}
+		i.State, i.GoalID, i.Assignee = IssueStateOpen, "", ""
+		return nil
+	})
+}
+
 // CheckIssueGoalLink checks link permission before a goal or session changes.
 func (s *Store) CheckIssueGoalLink(ctx context.Context, roomID string) error {
 	rec, err := s.Resolve(roomID)
