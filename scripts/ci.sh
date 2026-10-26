@@ -83,13 +83,14 @@ case "$suite" in
     ;;
   go)
     if [[ "$phase" == all ]]; then
-      for step in modules build test vet; do bash scripts/ci.sh go "$step"; done
+      for step in modules format build test vet; do bash scripts/ci.sh go "$step"; done
       if [[ ${CI_DESKTOP:-1} == 1 ]]; then bash scripts/ci.sh go desktop; fi
       bash scripts/ci.sh go installer
       exit 0
     fi
     case "$phase" in
       modules) ci_diag_go mod verify ;;
+      format) bash scripts/ci-gofmt.sh ;;
       build) ci_diag_go build -o "$RUNNER_TEMP/dyna-ci" ./cmd/dyna ;;
       test)
         # No -race here: pull requests and merge trials run the same flags and share
