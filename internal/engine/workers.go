@@ -492,9 +492,21 @@ func fireTurnEnds(ctx context.Context, sessions *subagent.Store, h hooks.Service
 	return errors.Join(errs...)
 }
 
+// A worker pass runs with its own deadline. A pass that hangs would stop that
+// worker and every signal it should handle, so a post to an idle session would
+// queue with nothing in the log to say why. The tick gets the deadline, so work
+// that reads stores or sockets ends at it.
+var (
+	workerPassTimeout = 2 * time.Minute
+	// workerPassWarn is when a pass that finishes is worth a warning.
+	workerPassWarn = 15 * time.Second
+)
+
 // runWorker keeps one worker serial with itself. Other workers never wait for
-// this tick, including when a check-in pass is delivering a post.
-func runWorker(ctx context.Context, signal <-chan struct{}, tick func(context.Context) error, report func(error)) {
+// this tick, including when a check-in pass is delivering a post. Each pass is
+// timed: one that ends at its deadline, or runs past the warning threshold, is
+// reported once, so a slow pass is visible instead of silent.
+func runWorker(ctx context.Context, name string, signal <-chan struct{}, tick func(context.Context) error, report func(error)) {
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -503,8 +515,21 @@ func runWorker(ctx context.Context, signal <-chan struct{}, tick func(context.Co
 			if ctx.Err() != nil {
 				return
 			}
-			if err := tick(ctx); err != nil && ctx.Err() == nil {
+			started := time.Now()
+			passCtx, cancelPass := context.WithTimeout(ctx, workerPassTimeout)
+			err := tick(passCtx)
+			cancelPass()
+			elapsed := time.Since(started)
+			if ctx.Err() != nil {
+				return
+			}
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				report(fmt.Errorf("%s pass ended at its %s deadline; the next signal runs it again", name, workerPassTimeout))
+			case err != nil:
 				report(err)
+			case elapsed > workerPassWarn:
+				report(fmt.Errorf("%s pass took %s; a slow pass delays every post it delivers", name, elapsed.Round(time.Millisecond)))
 			}
 		}
 	}
@@ -532,7 +557,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 		running.Add(1)
 		go func() {
 			defer running.Done()
-			runWorker(ctx, signal, tick, func(err error) { report(name, err) })
+			runWorker(ctx, name, signal, tick, func(err error) { report(name, err) })
 		}()
 	}
 	// timed starts a worker that returns its next due time, and wakes it
