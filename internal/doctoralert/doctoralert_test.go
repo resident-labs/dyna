@@ -167,15 +167,15 @@ func TestSampleGapDoesNotAnnounceRecoveryWhileOverloaded(t *testing.T) {
 	}
 }
 
-// D-273: an idle session that still holds a goal, item or PR is not finished.
+// D-273: an idle session that still holds open work is not finished.
 func TestCountCallsAnIdleSessionFinishedOnlyWithoutOpenWork(t *testing.T) {
 	idle := func(id string) subagent.Info {
 		return subagent.Info{Meta: subagent.Meta{ID: id, RoomID: "a", Room: "a"}, Status: subagent.StatusIdle}
 	}
-	holds := Holds(map[string]map[string]int{"goalie": {"goal": 1}, "assignee": {"item": 2}, "author": {"pr": 1}, "waiter": {"question": 1}})
-	got := Count([]subagent.Info{idle("goalie"), idle("assignee"), idle("author"), idle("waiter"), idle("free")}, holds)
-	if len(got) != 1 || got[0].Idle != 5 || got[0].Finished != 2 {
-		t.Fatalf("count = %+v, want 5 idle and 2 finished (the question-only session and the free one)", got)
+	holds := Holds(map[string]map[string]int{"goalie": {"goal": 1}, "assignee": {"item": 2}, "author": {"pr": 1}, "waiter": {"question": 1}, "parent": {"child": 1}, "builder": {"shell": 1}, "runner": {"workflow": 1}})
+	got := Count([]subagent.Info{idle("goalie"), idle("assignee"), idle("author"), idle("waiter"), idle("parent"), idle("builder"), idle("runner"), idle("free")}, holds)
+	if len(got) != 1 || got[0].Idle != 8 || got[0].Finished != 1 {
+		t.Fatalf("count = %+v, want 8 idle and only the free one finished (a parent with a child is not)", got)
 	}
 }
 
