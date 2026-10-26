@@ -1302,13 +1302,18 @@ func noteScript(note string) string {
 // next check on the node may remove it. No check runs for that long.
 const staleCheckTmpMinutes = 360
 
+// checkTmpMarker is the file that marks a folder as a check's own. The sweep
+// removes only folders that hold it, so a folder that merely has a matching name
+// in a shared temporary directory is never touched.
+const checkTmpMarker = ".dyna-ci-check"
+
 // checkTmpFolder makes a host check's own temporary folder and sets isolated to
 // it. The folder is made inside the machine's check-tmp setting, else inside the
 // node's own temporary directory (TMPDIR, else /tmp), never under the run's
 // source folder, which can sit on slow storage. The check's exit trap removes
 // it. A check that was killed outright skips its trap, so the next check first
-// removes folders of this owner under the same parent that are older than six
-// hours and that no process uses (as its working folder, an open file or a
+// removes folders of this owner under the same parent that carry the marker, are
+// older than six hours and that no process uses (as its working folder, an open file or a
 // TMPDIR or HOME in its environment). Nothing builds up in a node's memory.
 func checkTmpFolder(setting string) string {
 	parent := `"${TMPDIR:-/tmp}"`
@@ -1316,10 +1321,13 @@ func checkTmpFolder(setting string) string {
 		parent = shellquote.Quote(setting)
 	}
 	sweep := `in_use() { grep -qaF -e "$1/" /proc/[0-9]*/environ 2>/dev/null || ls -l /proc/[0-9]*/cwd /proc/[0-9]*/fd 2>/dev/null | grep -qF -e " -> $1"; }; ` +
-		`mkdir -p "$tmpparent"; ` +
+		`mkdir -p "$tmpparent" || { echo "local CI: cannot make the temporary folder parent $tmpparent" >&2; exit 70; }; ` +
 		`find "$tmpparent" -mindepth 1 -maxdepth 1 -type d -name 'dyna-ci.*' -user "$(id -un)" -mmin +` + strconv.Itoa(staleCheckTmpMinutes) + ` -print 2>/dev/null | ` +
-		`while IFS= read -r old; do in_use "$old" || rm -rf -- "$old"; done || true; `
-	return "tmpparent=" + parent + "; " + sweep + "isolated=$(mktemp -d -p \"$tmpparent\" dyna-ci.XXXXXX); "
+		`while IFS= read -r old; do [ -f "$old/` + checkTmpMarker + `" ] && ! in_use "$old" && rm -rf -- "$old"; done || true; `
+	// The check does not start without its own folder: it would run with the
+	// node's real temporary and home folders instead.
+	make := `isolated=$(mktemp -d -p "$tmpparent" dyna-ci.XXXXXX) && : > "$isolated/` + checkTmpMarker + `" && mkdir "$isolated/tmp" || { echo "local CI: cannot make the check's temporary folder in $tmpparent" >&2; exit 70; }; `
+	return "tmpparent=" + parent + "; " + sweep + make
 }
 
 func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
@@ -1455,7 +1463,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 	}
 	if check.host {
-		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; " + checkTmpFolder(node.CheckTmp) + "mkdir \"$isolated/tmp\"; trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
+		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; " + checkTmpFolder(node.CheckTmp) + "trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
 		environment := map[string]string{
 			"RUNNER_TEMP": reportDir, "GITHUB_STEP_SUMMARY": path.Join(reportDir, "step-summary.md"),
 			"JUNIT_REPORT_PATH": path.Join(reportDir, string(check.id)+"-test.xml"),
