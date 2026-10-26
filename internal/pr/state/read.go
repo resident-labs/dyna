@@ -247,7 +247,7 @@ type fetched struct {
 }
 
 // unmarshalRecord is replaced by tests.
-var unmarshalRecord = json.Unmarshal
+var unmarshalRecord = func(data []byte, record *diskRecord) error { return json.Unmarshal(data, record) }
 
 // fetch copies the store's revision, its index and the rows newer than the
 // cached snapshot. It decodes nothing. The caller holds snapshot.

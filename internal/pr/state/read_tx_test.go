@@ -19,7 +19,7 @@ func TestSnapshotDecodesAfterTheReadTransactionEnds(t *testing.T) {
 	orig := unmarshalRecord
 	var decoded int
 	var busy []int
-	unmarshalRecord = func(data []byte, v any) error {
+	unmarshalRecord = func(data []byte, record *diskRecord) error {
 		// A TRUNCATE checkpoint reports busy while any read transaction is open.
 		var b, logFrames, moved int
 		err := db.QueryRowContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&b, &logFrames, &moved)
@@ -28,7 +28,7 @@ func TestSnapshotDecodesAfterTheReadTransactionEnds(t *testing.T) {
 		}
 		busy = append(busy, b)
 		decoded++
-		return orig(data, v)
+		return orig(data, record)
 	}
 	defer func() { unmarshalRecord = orig }()
 
