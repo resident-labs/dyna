@@ -119,3 +119,26 @@ func TestWarmRunSendsTheDefaultBranchPush(t *testing.T) {
 		t.Fatalf("the warm payload does not name the default branch: %s", script)
 	}
 }
+
+// A warm run works in the checkout the caller named, because the runner reads
+// Repo as a local directory, and it does not save a result: a cache-only run
+// must not replace the test evidence real checks saved for the same commit.
+func TestWarmRunUsesTheCheckoutAndSavesNoResult(t *testing.T) {
+	definition, err := ParseDefinition([]byte("version: 1\ntrial: [cache-warm]\nchecks:\n  - id: cache-warm\n    job: { workflow: .github/workflows/ci.yml, name: cache-warm }\nsuites:\n  - id: cache-warm\n    checks: [cache-warm]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := warmRunRequest(definition, WarmRequest{
+		Repo: "github.com/owner/repo", RepoDir: "/checkouts/owner/repo", RoomID: "room_dyna",
+		SHA: strings.Repeat("a", 40), Workflow: ".github/workflows/ci.yml", Job: "cache-warm", Branch: "main", Timeout: time.Minute,
+	})
+	if request.Repo != "/checkouts/owner/repo" || request.RepoDir != "/checkouts/owner/repo" {
+		t.Fatalf("the warm run works in %q and %q, want the checkout", request.Repo, request.RepoDir)
+	}
+	if !request.DeferSave {
+		t.Fatal("a warm run would save its result over the commit's test evidence")
+	}
+	if request.Event != "push" || request.Branch != "main" {
+		t.Fatalf("warm run event = %q on %q, want the default branch's push", request.Event, request.Branch)
+	}
+}
