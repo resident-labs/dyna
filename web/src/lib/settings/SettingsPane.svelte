@@ -17,6 +17,10 @@
   import { FAST, motion } from '../ui/motion.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
   import type { SettingItem } from '../api/settings.ts'
+  import { SERVICE_KEYS, REVIEWER_KEY, serviceTitles, reviewerItem } from './models.ts'
+
+  // roomId is the open room, whose PR reviewer pin the Services group sets.
+  let { roomId = '' }: { roomId?: string } = $props()
 
   let items = $state<SettingItem[]>([])
   let error = $state('')
@@ -36,7 +40,8 @@
     'content.maxFileBytes': 'File attachment size',
     'updater.autoCheck': 'Check for updates',
     'worktrees.retention': 'Keep workflow worktrees',
-    'root.profile': 'Default root profile',
+    'root.profile': 'Root model',
+    ...serviceTitles,
     'subagent.maxDepth': 'Session nesting depth',
     'steering.maxToolWait': 'Interrupt a busy tool after',
   }
@@ -45,6 +50,7 @@
     { title: 'Browser', keys: ['browser.path', 'browser.extraFlags', 'browser.useFlagsFile', 'browser.profileMode', 'browser.ownerProfile', 'browser.saveBack'] },
     { title: 'Cards and files', keys: ['content.maxCardBytes', 'content.maxFileBytes'] },
     { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait'] },
+    { title: 'Services', keys: [...SERVICE_KEYS] },
     { title: 'Workflows', keys: ['worktrees.retention'] },
     { title: 'App', keys: ['updater.autoCheck'] },
   ]
@@ -69,12 +75,35 @@
       error = ''
     } catch (e) {
       error = String(e)
+      return
+    }
+    await loadReviewer()
+  }
+
+  // The reviewer row is the room's service pin. A room without the service, or a
+  // read that fails, leaves the row out and the other models on screen.
+  async function loadReviewer() {
+    const room = roomId
+    if (!room) return
+    try {
+      const row = reviewerItem((await api.listServices(room)) ?? [], room)
+      items = [...items.filter((x) => x.key !== REVIEWER_KEY), ...(row ? [row] : [])]
+    } catch {
+      items = items.filter((x) => x.key !== REVIEWER_KEY)
     }
   }
 
   async function set(key: string, value: unknown) {
     errors = { ...errors, [key]: '' }
     try {
+      if (key === REVIEWER_KEY) {
+        await api.setServiceProfile(roomId, 'reviewer', String(value))
+        await loadReviewer()
+        drafts = { ...drafts, [key]: undefined }
+        saved = key
+        setTimeout(() => { if (saved === key) saved = '' }, 1500)
+        return
+      }
       const it = await api.setSetting(key, String(value))
       // Both content controls show a derived total, so refresh them together.
       items = key.startsWith('content.')
@@ -155,7 +184,7 @@
                 {#if saved === key}<span class="ok" transition:fade={{ duration: motion(FAST) }}>Saved</span>{/if}
               </div>
               <p class="help">{it.help}</p>
-              <p class="key mono">{key}</p>
+              {#if key !== REVIEWER_KEY}<p class="key mono">{key}</p>{/if}
               {#if errors[key]}<p class="err small">{errors[key]}</p>{/if}
             </div>
             <div class="ctl">

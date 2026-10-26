@@ -167,6 +167,8 @@ const settingItems: SettingItem[] = [
   item({ key: 'content.maxCardBytes', kind: 'bytes', value: 1048576, source: 'default', help: 'The largest HTML or JavaScript card a session can post.' }),
   item({ key: 'content.maxFileBytes', kind: 'bytes', value: 26214400, source: 'file', help: 'The largest file attachment a session can post.' }),
   item({ key: 'root.profile', kind: 'select', value: 'opus', options: ['opus', 'sol', 'mimo'], source: 'file', help: 'The profile a new root session uses.' }),
+  item({ key: 'library.profile', kind: 'select', value: '', options: ['', 'sol', 'mimo'], optionLabels: ['Auto · best taste + cost (sol)', 'sol · thrift 8', 'mimo · thrift 10'], source: 'default', help: 'One profile for all librarian work. Auto ranks enabled service profiles.' }),
+  item({ key: 'voice.provider', kind: 'enum', value: 'openai', options: ['openai', 'google', 'doubao'], source: 'file', help: 'The realtime provider for Voice calls.' }),
   item({ key: 'subagent.maxDepth', kind: 'int', value: 3, source: 'default', help: 'How deep sessions can start child sessions.' }),
   item({ key: 'sessions.checkInInterval', kind: 'duration', value: '15m', source: 'default', help: 'How often parents review their children.' }),
   item({ key: 'steering.maxToolWait', kind: 'duration', value: '30s', source: 'default', help: 'How long a busy tool can run before a message interrupts it.' }),
@@ -174,6 +176,8 @@ const settingItems: SettingItem[] = [
   item({ key: 'updater.autoCheck', kind: 'bool', value: true, source: 'default', help: 'Check for a new Dyna version in the background.' }),
 ]
 api.settings = () => later(empty ? [] : settingItems)
+api.listServices = () => later([{ role: 'reviewer', name: 'PR reviewers', page: 'services', profile: 'sol', pinned: '', source: 'auto', reason: '', scope: 'room', sessions: 0, profiles: ['sol', 'mimo'] }])
+api.setServiceProfile = () => later(null)
 api.setSetting = (key: string, value: string) => {
   const it = need(settingItems.find((x) => x.key === key))
   it.value = it.kind === 'bool' ? value === 'true' : it.kind === 'int' ? Number(value) : value
@@ -192,4 +196,4 @@ api.devices = () => later(empty ? [] : deviceList)
 api.revokeDevice = (kind: string, id: string) => { const keep = deviceList.filter((d) => d.kind !== kind || (id !== 'all' && d.id !== id)); deviceList.splice(0, deviceList.length, ...keep); return later(1) }
 api.setDeviceScopes = (id: string, scopes: string[]) => { const row = need(deviceList.find((d) => d.id === id)); row.scopes = scopes; row.legacy = false; row.scopeLabel = scopes.join(', '); return later(row) }
 
-mount(Settings, { target: need(document.getElementById('app'), 'app'), props: { start: pane, dataDir: '/home/user/.local/share/dyna', onclose: () => { document.body.dataset.closed = 'yes' } } })
+mount(Settings, { target: need(document.getElementById('app'), 'app'), props: { start: pane, roomId: 'room-1', dataDir: '/home/user/.local/share/dyna', onclose: () => { document.body.dataset.closed = 'yes' } } })
