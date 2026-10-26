@@ -405,23 +405,31 @@ func (s *Service) ReplyFinding(ctx context.Context, key, author, by, findingID, 
 			head = live
 		}
 		reply := state.FindingReply{Disposition: disposition, Message: message, Head: head, Author: by, At: s.now()}
-		found := false
+		current := false
 		for i := range r.Findings {
 			if r.Findings[i].ID == findingID {
 				r.Findings[i].Replies = append(r.Findings[i].Replies, reply)
-				found = true
+				current = true
 				break
 			}
 		}
-		if !found {
-			return fmt.Errorf("finding %q does not exist", findingID)
-		}
+		historical := false
 		for i := range r.ReviewRounds {
 			for j := range r.ReviewRounds[i].Findings {
 				if r.ReviewRounds[i].Findings[j].ID == findingID {
 					r.ReviewRounds[i].Findings[j].Replies = append(r.ReviewRounds[i].Findings[j].Replies, reply)
+					historical = true
 				}
 			}
+		}
+		if !current && !historical {
+			return fmt.Errorf("finding %q does not exist", findingID)
+		}
+		// A finding from an earlier round, cleared when a later head was
+		// reviewed, still takes its reply (D-271). That reply is a record: it
+		// does not reopen the review the new head already passed.
+		if !current {
+			return nil
 		}
 		// An author reply to requested changes or a question can ask for another
 		// review on the same head. Head changes already reset the assignment.
