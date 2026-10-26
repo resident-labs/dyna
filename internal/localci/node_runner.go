@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/systemdver"
 )
@@ -43,6 +44,7 @@ type nodeCheck struct {
 	name     CheckName
 	group    Group
 	inner    string
+	job      *JobRef
 	image    string
 	host     bool
 	hostUser bool
@@ -222,13 +224,18 @@ func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeC
 				}
 				continue
 			}
-			if command.Host && !allowHost {
+			// A workflow job runs containers the workflow chooses, including their
+			// options and volumes, so it needs the machine's host-check grant just
+			// as a host command does. act also keeps the host's container socket
+			// out of those containers, but that alone cannot bound what a workflow
+			// asks act to start.
+			if (command.Host || command.Job != nil) && !allowHost {
 				return nil, false, fmt.Errorf("%w: check %q", ErrHostChecksDisabled, check.ID)
 			}
 			seen[check.ID] = len(checks)
 			checks = append(checks, nodeCheck{
 				id: check.ID, name: check.Name, group: check.Group,
-				inner: command.Command, image: command.Image,
+				inner: command.Command, job: command.Job, image: command.Image,
 				host: command.Host, hostUser: command.HostUser, setup: command.Setup,
 				env: cloneStrings(command.Env), caches: append([]CacheDefinition(nil), command.Caches...),
 				reports: command.Reports, priority: command.Priority,
@@ -553,7 +560,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					// what is left there before the transport waits on output.
 					checkScope = ""
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control)))
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage(), node.ContainerSocket))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1024,7 +1031,7 @@ const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pg
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then exec 9>%s; flock -w %d 9 || exit 75; fi; ", shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
+		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
 }
 
 // noteScript writes at the start of a check's log what Dyna changed about its
@@ -1036,7 +1043,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check nodeCheck, timeout time.Duration, index int, noExpand bool) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket string) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1056,6 +1063,68 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
+	}
+	if check.job != nil {
+		// act starts the job in containers of its own; the wrapper is a host
+		// process, so the slot lock, the deadline and the cleanup stay exactly
+		// what they are for every other check.
+		artifacts := path.Join(reportDir, "artifacts")
+		cachePath := path.Join(base, "actcache")
+		label := "dyna.run=" + runID
+		event := path.Join(reportDir, "event.json")
+		eventBody := `{"pull_request":{"base":{"sha":"` + baseCommit + `"},"head":{"sha":"` + sha + `"}}}`
+		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
+		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
+		// act sees no host environment: a session token, an account key or a
+		// harness variable on this machine must never reach a job container. The
+		// allow-list is the act.env file next to the event, which is empty unless
+		// a repository needs one.
+		actHome := path.Join(reportDir, "home")
+		allowList := path.Join(reportDir, "act.env")
+		setup += "mkdir -p " + q(actHome) + "; : > " + q(allowList) + "; "
+		// The runtime socket is the machine's setting, not the host environment:
+		// a rootless Podman machine names its own socket and act talks to it.
+		if containerSocket == "" {
+			containerSocket = machines.DefaultContainerSocket
+		}
+		setup += "docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); export DOCKER_HOST=" + q(containerSocket) + "; "
+		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="+q(actHome)+" DOCKER_HOST="+q(containerSocket)+" ", seconds) +
+			q(actBinaryPath(base)) + " pull_request -W " + q(work) + "/" + q(check.job.Workflow) +
+			" --env-file " + q(allowList) +
+			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
+			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
+			// The slot this check holds names its artifact port, so checks in other
+			// slots of this node, whatever run they belong to, bind another one.
+			" --artifact-server-port $(( " + fmt.Sprint(actArtifactPortBase) + " + slot ))" +
+			// act mounts the host's container socket into job containers by default.
+			// A repository's workflow must not reach the host's runtime through it.
+			" --container-daemon-socket -" +
+			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
+		// --rm covers the normal case; a cancelled job can leave containers, so the
+		// labels remove exactly this check's, never a sibling check's.
+		setup += `"${docker[@]}" ps -aq --filter ` + q("label="+label) + " --filter " + q("label=dyna.check="+string(check.id)) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `
+		// The workflow uploads its JUnit as an artifact, and an upload is stored as
+		// <artifact>/<artifact>.zip; the existing reader reads the check's report
+		// directory, so the archives are unpacked into it first.
+		setup += "find " + q(artifacts) + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
+		// Each archive is unpacked into a directory of its own and every entry
+		// keeps the archive's name and its path inside it, so two uploads that
+		// both hold junit.xml land as two reports instead of overwriting one.
+		unpacked := q(path.Join(reportDir, "unpacked"))
+		// Every entry gets its own ordinal, so two entries never share a name,
+		// whatever their paths inside the archive look like.
+		setup += "rm -rf " + unpacked + "; mkdir -p " + unpacked + "; archiveOrdinal=0; " +
+			"while IFS= read -r archive; do archiveOrdinal=$((archiveOrdinal + 1)); " +
+			`artifact=$(basename "$archive" .zip); dest=` + unpacked + `/$archiveOrdinal-$artifact; mkdir -p "$dest"; ` +
+			`if command -v unzip >/dev/null 2>&1; then unzip -qq -o "$archive" -d "$dest" >/dev/null 2>&1 || true; ` +
+			`elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e "$archive" "$dest" >/dev/null 2>&1 || true; fi; ` +
+			`entryOrdinal=0; while IFS= read -r entry; do entryOrdinal=$((entryOrdinal + 1)); ` +
+			`cp "$entry" ` + q(reportDir) + `/"$archiveOrdinal-$entryOrdinal.xml" || true; ` +
+			`done < <(find "$dest" -name '*.xml' -type f 2>/dev/null); ` +
+			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
+			"rm -rf " + unpacked + "; "
+		setup += "( exit $check_status )"
+		return nodeSlotScript(base, node.Slots, index, setup)
 	}
 	if check.host {
 		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; isolated=$(mktemp -d); trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "

@@ -48,6 +48,9 @@ type Node struct {
 	// count bounds the request instead.
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
+	// ContainerSocket is the DOCKER_HOST a workflow job on this machine uses,
+	// so a machine with a rootless Podman socket runs the job through it.
+	ContainerSocket string `json:"containerSocket,omitempty"`
 	// Rooms limits the machine to those rooms' CI work. An empty list takes
 	// work from every room.
 	Rooms []string `json:"rooms,omitempty"`
@@ -177,7 +180,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms, Suites: m.Suites}
+		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, LowDisk: m.HoldsCI(), CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost()}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil

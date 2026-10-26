@@ -188,6 +188,9 @@ type MachinePatch struct {
 	Create          bool             `json:"create,omitempty"`
 	// Remove deletes the machine that the reference names.
 	Remove bool `json:"remove,omitempty"`
+	// ContainerSocket is the container runtime socket a workflow job uses on
+	// this machine, as a DOCKER_HOST value; an empty value means Docker's.
+	ContainerSocket *string `json:"containerSocket"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -335,6 +338,9 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
+	}
+	if patch.ContainerSocket != nil {
+		m.ContainerSocket = strings.TrimSpace(*patch.ContainerSocket)
 	}
 	if m.HasRole(machines.RoleCI) && m.CISlots < 1 && patch.CISlots == nil {
 		m.CISlots = 1

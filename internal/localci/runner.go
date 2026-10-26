@@ -53,10 +53,13 @@ type Request struct {
 	RepoDir     string
 	RoomID      string
 	SHA         string
-	Suites      []Suite
-	Timeout     time.Duration
-	MaxTest     time.Duration
-	Allowed     map[string]bool
+	// Base is the commit the change is compared against, which a workflow job
+	// sees as github.event.pull_request.base.sha.
+	Base    string
+	Suites  []Suite
+	Timeout time.Duration
+	MaxTest time.Duration
+	Allowed map[string]bool
 	// OnStart runs after node setup, before the first check starts.
 	OnStart func(context.Context) error
 	// DeferSave lets the scheduler apply room budgets before publishing a result.

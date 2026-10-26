@@ -79,13 +79,15 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    container:
-      image: golang:1.26.3
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.3"
+          cache: true
       - name: Trust workspace
         run: |
           echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
@@ -106,12 +108,12 @@ jobs:
       - name: Report the cache size
         # A jump here is what makes a restore slow again, so the size is visible
         # in the run that saved it.
-        run: du -sh /root/.cache/go-build /go/pkg/mod
+        run: du -sh /home/runner/.cache/go-build /home/runner/go/pkg/mod
       - uses: actions/cache/save@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
 
   # Go tests run in parallel shards balanced by measured package time (see
@@ -125,23 +127,22 @@ jobs:
     runs-on: ubuntu-latest
     # Go's own test timeout is 5 minutes. The runner slot hooks expect 30.
     timeout-minutes: 30
-    container:
-      image: golang:1.26.3
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
       CI_SHARD: ${{ matrix.shard }}/8
       # The slowest package, internal/pr/watch, is split across shards 0 and 7.
       CI_SLICE: ${{ matrix.shard == 0 && '0/2' || matrix.shard == 7 && '1/2' || '' }}
     steps:
       - uses: actions/checkout@v6
-      # The container runs as root, but the runner user owns the workspace.
-      # Git then refuses the repo, and go build fails with
-      # "error obtaining VCS status".
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.3"
+          cache: true
       - name: Trust workspace
         run: |
           echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
@@ -151,8 +152,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
       # go test pipes its results through the checker.
@@ -197,16 +198,15 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    container:
-      image: golang:1.26.3
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
       - uses: actions/checkout@v6
-      # The container runs as root, but the runner user owns the workspace.
-      # Git then refuses the repo, and go build fails with
-      # "error obtaining VCS status".
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.3"
+          cache: true
       - name: Trust workspace
         run: |
           echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
@@ -216,12 +216,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
       - name: Install shellcheck
-        run: apt-get update -qq && apt-get install -y -qq shellcheck >/dev/null
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck >/dev/null
       - name: Verify modules
         run: bash scripts/ci.sh go modules
       - name: Vet
@@ -247,13 +247,15 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    container:
-      image: golang:1.26.3
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.3"
+          cache: true
       - name: Trust workspace
         run: |
           echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
@@ -263,8 +265,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
           key: go-build-${{ github.sha }}
           restore-keys: go-build-
       - name: Build CI checker
