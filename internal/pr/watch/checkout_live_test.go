@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,5 +42,22 @@ func TestMergeRetryRunsGitInALiveCheckout(t *testing.T) {
 	_, err = e.s.checkoutDir(context.Background(), Record{RoomID: "room_missing", Key: "github.com/owner/repo#404", Dir: gone})
 	if err == nil || !strings.Contains(err.Error(), gone) || strings.Contains(err.Error(), "fork/exec") {
 		t.Fatalf("error for a removed checkout = %v, want it to name %s", err, gone)
+	}
+	// LookupDir and Dir are session directories, not proven checkouts, so a
+	// GitHub record keeps looking when one of them belongs to another repository.
+	other := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(other, "unrelated"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := e.s.checkoutDir(context.Background(), Record{RoomID: r.RoomID, Host: rec.Host, Repo: rec.Repo, LookupDir: filepath.Join(other, "unrelated")})
+	if err != nil {
+		t.Fatalf("unrelated directory: %v", err)
+	}
+	roomRec, err := e.s.Notify.Rooms.Resolve(r.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != roomRec.Repo {
+		t.Fatalf("checkout dir = %q, want the room repository %q", dir, roomRec.Repo)
 	}
 }
