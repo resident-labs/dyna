@@ -214,6 +214,110 @@ func TestNodeScopeSuitsTheSystemdThatRunsIt(t *testing.T) {
 	}
 }
 
+// A node command whose ssh dial dies before the node retries: a slow accept
+// path on the node stalls a fresh dial at the banner exchange, while a warm
+// ControlMaster socket hides the same stall from a direct shell and from the
+// machine probes, so only a run sees it (D-162). A dial-phase failure proves
+// nothing ran remotely, so a retry is safe for every node command. A failure
+// after the command started, or without a dial error, never retries.
+func TestNodeCommandRetriesSSHDial(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stdout    string
+		stderr    string
+		failures  int
+		wantCalls int
+		wantErr   bool
+		wantNote  bool
+	}{
+		{
+			name:      "banner exchange timeout clears",
+			stderr:    "ssh: connect to host node port 22: Operation timed out\r\nConnection timed out during banner exchange\r\nConnection to UNKNOWN port 65535 timed out\n",
+			failures:  2,
+			wantCalls: 3,
+			wantNote:  true,
+		},
+		{
+			name:      "connection refused clears",
+			stderr:    "ssh: connect to host node port 22: Connection refused\n",
+			failures:  1,
+			wantCalls: 2,
+			wantNote:  true,
+		},
+		{
+			name:      "dial error that never clears",
+			stderr:    "ssh: connect to host node port 22: Connection timed out\n",
+			failures:  3,
+			wantCalls: 3,
+			wantErr:   true,
+			wantNote:  true,
+		},
+		{
+			name:      "command had already started",
+			stdout:    "remote build output\n",
+			stderr:    "Connection timed out during banner exchange\n",
+			failures:  1,
+			wantCalls: 1,
+			wantErr:   true,
+		},
+		{
+			name:      "not a dial failure",
+			stderr:    "error: build failed\n",
+			failures:  1,
+			wantCalls: 1,
+			wantErr:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls, waits int
+			runner := Runner{Node: &Node{Name: "node", SSH: "ci@node", Slots: 1, Enabled: true}}
+			runner.dialWait = func(ctx context.Context, d time.Duration) error {
+				waits++
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if d <= 0 {
+					return errors.New("retry wait must be positive")
+				}
+				return nil
+			}
+			runner.Command = func(_ context.Context, _ string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
+				calls++
+				if name == "ssh" {
+					if !slices.Contains(args, "ConnectTimeout=10") {
+						t.Errorf("ssh args %v, want an explicit ConnectTimeout=10 like the machine probe", args)
+					}
+				}
+				if calls <= tc.failures {
+					fmt.Fprint(stderr, tc.stderr)
+					fmt.Fprint(out, tc.stdout)
+					return fmt.Errorf("exit status 255")
+				}
+				fmt.Fprint(stderr, tc.stderr)
+				fmt.Fprint(out, tc.stdout)
+				return nil
+			}
+			var out, stderr tailBuffer
+			err := runner.nodeCommand(t.Context(), &out, &stderr, "", "true")
+			if tc.wantErr && err == nil {
+				t.Fatal("nodeCommand succeeded, want it to fail")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("nodeCommand: %v", err)
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("command calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if waits != tc.wantCalls-1 && tc.wantNote {
+				t.Fatalf("waits = %d, want %d", waits, tc.wantCalls-1)
+			}
+			if got := strings.Contains(stderr.String(), "retrying ssh dial"); got != tc.wantNote {
+				t.Fatalf("stderr = %q, retry note %t want %t", stderr.String(), got, tc.wantNote)
+			}
+		})
+	}
+}
+
 func fakeNodeGit(dir string, out io.Writer, name string, args []string) bool {
 	if name != "git" {
 		return false
@@ -448,7 +552,8 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 					}
 					return nil
 				}
-				sawSSH = sawSSH || strings.Contains(strings.Join(args, " "), "-o BatchMode=yes pip@host")
+				joined := strings.Join(args, " ")
+				sawSSH = sawSSH || name == "ssh" && strings.Contains(joined, "pip@host")
 				script := args[len(args)-1]
 				if strings.Contains(script, "systemd-run") {
 					if entered {
