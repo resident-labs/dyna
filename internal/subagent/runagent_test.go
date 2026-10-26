@@ -292,7 +292,7 @@ func TestRunAgentInstructionsKeepTheJournalAndOfferNoDelegation(t *testing.T) {
 	meta := Meta{ID: RunAgentID("wf_1", 1), Name: "agent", Room: e.room.Name, RoomID: e.room.ID, Depth: 1, Leaf: true,
 		Run: &RunOwner{ID: "wf_1", Agent: 1, Journal: "/runs/wf_1/agents/1/journal.jsonl", JournalRoot: "/runs"}}
 	text := e.m.sessionInstructions(meta, "owner", 3, "").Text()
-	for _, want := range []string{"[DYNA WORK JOURNAL - REQUIRED]", `dyna journal "what changed or what you learned"`, "You are a leaf: complete the task yourself.", "$DYNA_SCRATCH"} {
+	for _, want := range []string{"[DYNA WORK JOURNAL - REQUIRED]", `dyna journal "what changed or what you learned"`, "You are a leaf: complete the task yourself.", "Do not build, compile or run tests unless the task explicitly asks for it.", "$DYNA_SCRATCH"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("run agent instructions miss %q", want)
 		}
@@ -301,6 +301,11 @@ func TestRunAgentInstructionsKeepTheJournalAndOfferNoDelegation(t *testing.T) {
 		if strings.Contains(text, unwanted) {
 			t.Errorf("run agent instructions offer %q", unwanted)
 		}
+	}
+	// A standalone leaf session still verifies its own changes.
+	standalone := Meta{ID: NewID(), Name: "leaf", Room: e.room.Name, RoomID: e.room.ID, Depth: 2, Leaf: true}
+	if strings.Contains(e.m.sessionInstructions(standalone, "owner", 3, "").Text(), "Do not build, compile or run tests") {
+		t.Error("a standalone leaf session is told not to build or test")
 	}
 	meta.Run.Journal = ""
 	if strings.Contains(e.m.sessionInstructions(meta, "owner", 3, "").Text(), "DYNA WORK JOURNAL") {
