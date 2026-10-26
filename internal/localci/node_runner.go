@@ -1107,12 +1107,20 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// <artifact>/<artifact>.zip; the existing reader reads the check's report
 		// directory, so the archives are unpacked into it first.
 		setup += "find " + q(artifacts) + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
+		// Each archive is unpacked into a directory of its own and every entry
+		// keeps the archive's name and its path inside it, so two uploads that
+		// both hold junit.xml land as two reports instead of overwriting one.
 		unpacked := q(path.Join(reportDir, "unpacked"))
-		setup += "rm -rf " + unpacked + "; mkdir -p " + unpacked + "; while IFS= read -r archive; do " +
-			"if command -v unzip >/dev/null 2>&1; then unzip -qq -o -j " + `"$archive"` + " -d " + unpacked + " >/dev/null 2>&1 || true; " +
-			"elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e " + `"$archive"` + " " + unpacked + " >/dev/null 2>&1 || true; fi; " +
-			"done < <(find " + q(artifacts) + " -name '*.zip' -type f 2>/dev/null); "
-		setup += "find " + unpacked + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; rm -rf " + unpacked + "; "
+		setup += "rm -rf " + unpacked + "; mkdir -p " + unpacked + "; ordinal=0; " +
+			"while IFS= read -r archive; do ordinal=$((ordinal + 1)); " +
+			`artifact=$(basename "$archive" .zip); dest=` + unpacked + `/$ordinal/$artifact; mkdir -p "$dest"; ` +
+			`if command -v unzip >/dev/null 2>&1; then unzip -qq -o "$archive" -d "$dest" >/dev/null 2>&1 || true; ` +
+			`elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e "$archive" "$dest" >/dev/null 2>&1 || true; fi; ` +
+			`while IFS= read -r entry; do relative=${entry#"$dest/"}; ` +
+			`cp "$entry" ` + q(reportDir) + `/"$ordinal-$artifact-$(printf '%s' "$relative" | tr '/' '_')" || true; ` +
+			`done < <(find "$dest" -name '*.xml' -type f 2>/dev/null); ` +
+			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
+			"rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
