@@ -51,11 +51,13 @@ func TestRoomHoldGivesTheMachineSlotBack(t *testing.T) {
 	a, _ = e.wait(a.ID, 1)
 	e.m.Store.UpdateTurn(a.ID, 1, func(t *Turn) { t.Status = TurnRunning; t.Ended = time.Time{} })
 	var held []string
-	e.m.Admit = func(context.Context, Meta) (func(), error) {
+	// The slot has its own manager, so a runner that the resume launches in
+	// this environment cannot add events to the list.
+	gate := &Manager{Admit: func(context.Context, Meta) (func(), error) {
 		held = append(held, "take")
 		return func() { held = append(held, "free") }, nil
-	}
-	slot := &turnSlot{m: e.m, meta: Meta{ID: a.ID, RoomID: a.RoomID}}
+	}}
+	slot := &turnSlot{m: gate, meta: Meta{ID: a.ID, RoomID: a.RoomID}}
 	if err := slot.take(e.ctx); err != nil {
 		t.Fatal(err)
 	}
