@@ -141,6 +141,12 @@ func installationRuns(account runtime.NativeAccount, selection store.Selection) 
 func (s *Service) Snapshot(ctx context.Context, refresh bool) Snapshot {
 	if refresh && ctx.Err() == nil {
 		s.refreshMu.Lock()
+		if ctx.Err() != nil {
+			// The caller expired while it waited behind another refresh, so it asks
+			// no provider and records nothing.
+			s.refreshMu.Unlock()
+			return s.cached()
+		}
 		accounts, problems, err := s.nativeHomeAccounts(ctx, true)
 		s.refreshMu.Unlock()
 		s.mu.Lock()
@@ -154,6 +160,13 @@ func (s *Service) Snapshot(ctx context.Context, refresh bool) Snapshot {
 	}
 	accounts, problems, err := s.nativeHomeAccounts(ctx, false)
 	return s.publish(accounts, problems, err)
+}
+
+// cached is the last published view.
+func (s *Service) cached() Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
 }
 
 // publish builds the view from one pass over the accounts and keeps it as the
