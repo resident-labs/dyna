@@ -44,6 +44,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
+			runner.dialWait = func(context.Context, time.Duration) error { return nil }
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
@@ -123,6 +124,55 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 				t.Fatalf("saved result lost the output: %+v", saved.Checks[0])
 			}
 		})
+	}
+}
+
+// A burst of report copies can make the node drop a connection (D-192). The
+// copy is repeated with a wait between attempts, and a check whose command
+// exited 0 stays an error that names the missing reports, never an ssh-drop
+// machine failure and never a pass.
+func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
+	node := Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}
+	runner := Runner{DataDir: t.TempDir(), Node: &node}
+	var waits []time.Duration
+	runner.dialWait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+	copies := 0
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) || fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		case strings.Contains(script, "tar -C"):
+			copies++
+			return sshDropError(t)
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
+		}
+		return nil
+	}
+	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
+	if err == nil {
+		t.Fatal("a run without reports must report the copy failure")
+	}
+	if copies != reportCopyAttempts || len(waits) != reportCopyAttempts-1 {
+		t.Fatalf("copies = %d, waits = %v, want %d copies with a wait between", copies, waits, reportCopyAttempts)
+	}
+	check := result.Checks[0]
+	if check.Status != OutcomeError || check.Cause != CauseReports || !strings.Contains(check.Error, "reports unavailable") {
+		t.Fatalf("check = %+v, want an error with cause %s that names the missing reports", check, CauseReports)
+	}
+	if result.Cause != CauseReports {
+		t.Fatalf("run cause = %s, want %s", result.Cause, CauseReports)
+	}
+	if exit := loggedExit(t, check); exit.ExitCode != 0 {
+		t.Fatalf("local log exit record = %+v, want the command's exit 0", exit)
 	}
 }
 
