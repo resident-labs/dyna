@@ -346,7 +346,7 @@ type workers struct {
 	stopLocalCI func(context.Context) []string
 }
 
-func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
+func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms
@@ -360,6 +360,8 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 	}
 	syncer := lanesync.New()
 	spool := hookService
+	// globalSchedule lets one global hook pass run at a time. It outlives the
+	// pass that schedules it, so the closure below needs the engine context.
 	var globalSchedule sync.Mutex
 	return workers{
 		prs:         prs.Tick,
@@ -416,14 +418,11 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 			// A built-in pass can take minutes, so the global schedule runs on
 			// its own goroutine instead of holding this worker. The next tick
 			// claims nothing until the interval is due again.
-			if globalSchedule.TryLock() {
-				go func() {
-					defer globalSchedule.Unlock()
-					if err := hookService.TickGlobal(ctx, time.Now()); err != nil && ctx.Err() == nil {
-						log.Print(watch.Sanitize("global hooks: " + err.Error()))
-					}
-				}()
-			}
+			// The engine's own context, not this pass's: the pass deadline must
+			// not cancel a hook that the schedule just started.
+			scheduleGlobalHooks(engineCtx, &globalSchedule, func(hookCtx context.Context) error {
+				return hookService.TickGlobal(hookCtx, time.Now())
+			})
 			return time.Now().Add(time.Minute), errors.Join(errs...)
 		},
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
@@ -500,7 +499,29 @@ var (
 	workerPassTimeout = 2 * time.Minute
 	// workerPassWarn is when a pass that finishes is worth a warning.
 	workerPassWarn = 15 * time.Second
+	// workerNow and workerPassContext let a test drive the pass clock and its
+	// deadline without waiting for either.
+	workerNow         = time.Now
+	workerPassContext = func(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(parent, d)
+	}
 )
+
+// scheduleGlobalHooks starts one global hook pass on the engine's own lifetime,
+// not on the pass that scheduled it. A built-in hook pass can take minutes, and
+// the worker's pass deadline belongs to the synchronous work only: cancelling it
+// here would stop a scheduled hook before it ran.
+func scheduleGlobalHooks(engineCtx context.Context, lock *sync.Mutex, tick func(context.Context) error) {
+	if !lock.TryLock() {
+		return
+	}
+	go func() {
+		defer lock.Unlock()
+		if err := tick(engineCtx); err != nil && engineCtx.Err() == nil {
+			log.Print(watch.Sanitize("global hooks: " + err.Error()))
+		}
+	}()
+}
 
 // runWorker keeps one worker serial with itself. Other workers never wait for
 // this tick, including when a check-in pass is delivering a post. Each pass is
@@ -515,11 +536,11 @@ func runWorker(ctx context.Context, name string, signal <-chan struct{}, tick fu
 			if ctx.Err() != nil {
 				return
 			}
-			started := time.Now()
-			passCtx, cancelPass := context.WithTimeout(ctx, workerPassTimeout)
+			started := workerNow()
+			passCtx, cancelPass := workerPassContext(ctx, workerPassTimeout)
 			err := tick(passCtx)
 			cancelPass()
-			elapsed := time.Since(started)
+			elapsed := workerNow().Sub(started)
 			if ctx.Err() != nil {
 				return
 			}
@@ -665,7 +686,7 @@ func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSign
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	workerSet := engineWorkers(rooms, signals, load, events, hookService, started)
+	workerSet := engineWorkers(ctx, rooms, signals, load, events, hookService, started)
 	// Cancellation starts with the engine, so the runs' remote teardown overlaps
 	// the worker ticks that are still ending. The budget for that teardown starts
 	// here too, so the wait below covers the work it waits for.
