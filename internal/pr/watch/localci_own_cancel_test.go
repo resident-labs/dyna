@@ -185,3 +185,46 @@ func TestForeignCancelledRunWithAFailedCheckStillFailsTheTrial(t *testing.T) {
 		t.Fatalf("trial = %s (%s), want failed: a foreign run's failed check is real evidence", ci.Status, ci.Reason)
 	}
 }
+
+// A provider name does not declare that the hosted job only repeats its
+// requirements: here the hosted "unit" job runs tests directly. Under Dyna's own
+// cancellation its failure stays evidence, while a check the definition marks
+// hostedAggregate is still an echo.
+func TestOwnCancellationKeepsAProviderNamedJobUnlessDeclaredAggregate(t *testing.T) {
+	definition, err := localci.ParseDefinition([]byte(`version: 1
+trial: [unit]
+checks:
+  - id: local-unit
+    name: local-unit
+    providerGroup: unit
+    image: node:22
+    command: bash run.sh
+  - id: gate
+    name: gate
+    hostedAggregate: true
+    image: node:22
+    command: bash gate.sh
+suites:
+  - id: unit
+    checks: [local-unit, gate]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const suite = int64(45)
+	for _, tc := range []struct {
+		name, failed string
+		want         bool
+	}{
+		{"provider-named job that ran tests", "unit", true},
+		{"declared aggregate job", "gate", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checks := []Check{suiteCheck(1, tc.failed, "failure", suite), suiteCheck(2, "other", "cancelled", suite)}
+			class := classifyHostedSuite(definition, checks, suite, true, true)
+			if class.realFailure != tc.want {
+				t.Fatalf("real failure = %t, want %t", class.realFailure, tc.want)
+			}
+		})
+	}
+}
