@@ -187,11 +187,57 @@ func TestTestBinaryIgnoresSessionTemporaryFolder(t *testing.T) {
 }
 
 // A unix socket path is limited to 108 bytes, so the folder a test binds under
-// must stay short even when TMPDIR is deep.
-func TestShortTempDirIsShortWhateverTMPDIR(t *testing.T) {
+// must leave room for one even when TMPDIR is deep.
+func TestShortTempDirLeavesRoomForASocket(t *testing.T) {
 	t.Setenv("TMPDIR", strings.Repeat("/deep", 20))
 	dir := ShortTempDir(t)
-	if !strings.HasPrefix(dir, "/tmp/") || len(dir) > 20 {
-		t.Fatalf("ShortTempDir = %q, want a short folder under /tmp", dir)
+	const socket = "/dyna/computers/control.sock"
+	if len(dir+socket) > 100 {
+		t.Fatalf("ShortTempDir = %q leaves no room for a socket path", dir)
+	}
+}
+
+// A test binary that a test starts (a computer daemon) drops every XDG folder
+// outside the test root, so the short folder must be inside it.
+func TestShortTempIsInsideTheTestRoot(t *testing.T) {
+	// A root too long for a socket path must not push the folder out of it.
+	old := tempRoot
+	tempRoot = "/tmp/" + strings.Repeat("x", 80)
+	defer func() { tempRoot = old }()
+	dir, err := ShortTemp("dc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if err := Check(dir); err != nil {
+		t.Fatalf("ShortTemp folder is outside the test root: %v", err)
+	}
+}
+
+// Only a folder ShortTemp made in this run passes: a Dyna data folder that is
+// named like one, or a folder of another run, must not.
+func TestCheckRefusesAShortLookingFolderThatShortTempDidNotMake(t *testing.T) {
+	// A root elsewhere, so /tmp is not inside it.
+	old := tempRoot
+	tempRoot = t.TempDir()
+	defer func() { tempRoot = old }()
+	foreign, err := os.MkdirTemp(shortRoot, shortPrefix+"data-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(foreign)
+	if err := Check(foreign); err == nil {
+		t.Fatal("Check accepted a folder with no marker")
+	}
+	other, err := ShortTemp("other-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(other)
+	if err := os.WriteFile(filepath.Join(other, shortMarker), []byte("/another/root"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(other); err == nil {
+		t.Fatal("Check accepted a folder made for another test root")
 	}
 }
