@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/systemdver"
 )
@@ -596,6 +597,26 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
 		return result, err
 	}
+	// Job checks each run act on a copy of the workflow whose name carries the
+	// run and the check, so parallel checks never share one container name.
+	// The engine tags the copy from the commit's own bytes before any check
+	// starts; a workflow it cannot parse fails the run as a clear error
+	// instead of a check that dies inside act.
+	taggedWorkflows := map[string]string{}
+	for _, check := range checks {
+		if check.job == nil {
+			continue
+		}
+		body, err := repoid.GitRaw(control, repo, "cat-file", "blob", sha+":"+check.job.Workflow)
+		if err != nil {
+			return result, fmt.Errorf("read workflow %s: %w", check.job.Workflow, err)
+		}
+		tagged, err := tagWorkflowBody([]byte(body), "CI-dyna-"+runID+"-"+string(check.id))
+		if err != nil {
+			return result, fmt.Errorf("tag workflow %s for %s: %w", check.job.Workflow, check.id, err)
+		}
+		taggedWorkflows[string(check.id)] = string(tagged)
+	}
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
@@ -698,7 +719,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					// what is left there before the transport waits on output.
 					checkScope = ""
 				}
-				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage(), node.ContainerSocket))
+				runErr := r.nodeCommandScoped(checkCtx, writer, writer, checkScope, check.resources.scope(check.host), nodeCheckScript(node, base, cache, runDir, runID, sha, req.Base, check, req.Timeout, i, r.systemdNeedsNoExpandFlag(control), req.Definition.ActImage(), node.ContainerSocket, taggedWorkflows[string(check.id)]))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
 				// A command that exited 0 is judged by its own marker even when
@@ -1276,7 +1297,7 @@ func noteScript(note string) string {
 	return "printf '%s\\n' " + shellquote.Quote(note) + "; "
 }
 
-func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket string) string {
+func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
 	work := path.Join(runDir, string(check.id), "work")
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
@@ -1297,8 +1318,29 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	if !check.host {
 		cleanup += `"${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
 	}
-	cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
-	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+	if check.job != nil {
+		// A job check's workspace is copied into the job container, so its
+		// repository must stand alone: a worktree's .git points back at the
+		// node's cache, which does not exist inside the container, and the
+		// workflow's own git steps then fail. A local clone keeps the objects
+		// shared with the cache and takes the commit under the ref the runner
+		// pushed.
+		cleanup += "rm -rf " + q(work) + " >/dev/null 2>&1 || true"
+	} else {
+		cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
+	}
+	setup := noteScript(check.resources.Note) + "mkdir -p " + q(reportDir) + "; started=$(date +%s%N); check_entered=0; docker=(docker); trap " + q(cleanup) + " EXIT; trap 'exit 143' HUP INT TERM; mkdir -p " + q(path.Dir(work)) + "; "
+	if check.job != nil {
+		// The checkout is a branch, not a detached commit: act copies the
+		// workspace into the job container file by file, so an empty refs tree
+		// never arrives and a detached commit leaves the copy a directory git
+		// refuses. A named ref is a file and lands with the copy.
+		setup += "git clone --quiet --no-checkout " + q(cache) + " " + q(work) + " || exit 69; " +
+			"git -C " + q(work) + " fetch --quiet " + q(cache) + " +refs/dyna/ci/*:refs/dyna/ci/* || exit 69; " +
+			"git -C " + q(work) + " checkout --quiet -B dyna-ci " + q(sha) + " || exit 69; "
+	} else {
+		setup += "git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+	}
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
 	}
@@ -1319,6 +1361,19 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			actEvent = "push"
 		}
 		setup += "cd " + q(work) + "; check_entered=1; check_status=0; " + installActScript(base)
+		// act names a job's containers after the workflow and the job alone, so
+		// two act processes that share a workflow fight over one container name,
+		// starting with the job every other job needs: nine checks of one run
+		// each started the workflow's "changes" job and collided. Each check
+		// runs a tagged copy of the workflow outside its checkout, which names
+		// every container it starts, its volumes included, alone. The workflow
+		// name is the one value a job can read of it (github.workflow); a
+		// repository that keys on that name sees the tagged one under act. The
+		// engine wrote the tagged copy from the commit's bytes, so the checkout
+		// keeps exactly what the commit holds and a job's own git commands see
+		// no edit.
+		tagged := path.Join(path.Dir(work), "workflow.yml")
+		setup += "printf '%s' " + q(taggedWorkflow) + " > " + q(tagged) + "; "
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
 		// harness variable on this machine must never reach a job container. The
@@ -1334,7 +1389,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		}
 		setup += "docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); export DOCKER_HOST=" + q(containerSocket) + "; "
 		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="+q(actHome)+" DOCKER_HOST="+q(containerSocket)+" ", seconds) +
-			q(actBinaryPath(base)) + " " + actEvent + " -W " + q(work) + "/" + q(check.job.Workflow) +
+			q(actBinaryPath(base)) + " " + actEvent + " -W " + q(tagged) +
 			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +

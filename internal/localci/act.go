@@ -1,10 +1,14 @@
 package localci
 
 import (
+	"fmt"
 	"path"
 	"strconv"
 
 	"dyna-agent/internal/shellquote"
+
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 )
 
 // actVersion is the nektos/act release Dyna installs on a CI node. Dyna pins
@@ -54,6 +58,57 @@ func actContainerOptions(check nodeCheck, runID string) string {
 		" --memory " + strconv.FormatInt(check.resources.MemoryMiB, 10) + "m" +
 		" --label dyna.run=" + runID +
 		" --label dyna.check=" + string(check.id)
+}
+
+// tagWorkflowBody returns content with its top-level name value replaced by
+// tag. act names a job's containers after the workflow, so two act processes
+// that share one workflow fight over one container name, and every job check
+// tags its own copy of the workflow it runs. The name is replaced through the
+// parsed document, because a valid name takes forms a line edit corrupts: a
+// quoted key gains a duplicate name, a block scalar keeps its content behind
+// the replaced line, and a value on the line after its key never matches a
+// same-line pattern at all. Everything outside the name value keeps its
+// structure. A document without a name key gains one in the parsed mapping.
+func tagWorkflowBody(content []byte, tag string) ([]byte, error) {
+	file, err := parser.ParseBytes(content, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow: %w", err)
+	}
+	if len(file.Docs) != 1 {
+		return nil, fmt.Errorf("the workflow is not one document")
+	}
+	body, ok := file.Docs[0].Body.(*ast.MappingNode)
+	if !ok {
+		return nil, fmt.Errorf("the workflow is not a mapping")
+	}
+	// A node parsed from the tag itself replaces the value, so no node is ever
+	// built by hand and the value renders as the plain scalar act reads.
+	tagged, err := parser.ParseBytes([]byte("name: "+tag), 0)
+	if err != nil {
+		return nil, err
+	}
+	tagName := tagged.Docs[0].Body.(*ast.MappingNode).Values[0]
+	for _, entry := range body.Values {
+		key, ok := entry.Key.(*ast.StringNode)
+		if !ok || key.Value != "name" {
+			continue
+		}
+		if err := entry.Replace(tagName.Value); err != nil {
+			return nil, fmt.Errorf("replace the name value: %w", err)
+		}
+		return []byte(file.String()), nil
+	}
+	// No name key: the name joins the parsed mapping, ahead of the other keys.
+	// Text in front of the content cannot do this, because a comment, a
+	// directive or a document marker before the mapping would leave the tag in
+	// a document of its own.
+	// The node comes from text at column 1, and the printer keeps every node's
+	// own column, so the name moves to the column the mapping's keys start at.
+	if len(body.Values) > 0 {
+		tagName.AddColumn(body.Values[0].Key.GetToken().Position.Column - tagName.Key.GetToken().Position.Column)
+	}
+	body.Values = append([]*ast.MappingValueNode{tagName}, body.Values...)
+	return []byte(file.String()), nil
 }
 
 // actArtifactPortBase is the first port the artifact server of a node's slot
