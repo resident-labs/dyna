@@ -525,15 +525,24 @@ func (s *Service) authorIn(ctx context.Context, roomRef, sessionRef, doing strin
 	if err != nil {
 		return room.Record{}, authority.Actor{}, subagent.Info{}, err
 	}
-	// A caller that names no session acts as itself. The authenticated owner
-	// has no session ID, so its work belongs to the room owner and uses the
-	// room's workspace. Root acts as its own session when its stamp has one.
+	// A caller that names no session: root acts as its own session when its
+	// stamp has one, and the owner and a sessionless root act as the room
+	// owner. Any other sessionless caller is refused below.
 	if sessionRef == "" {
 		if actor.Role == authority.Root {
 			sessionRef = actor.Session
 		}
-		if actor.Role == authority.Owner || (actor.Role == authority.Root && sessionRef == "") {
-			return rec, actor, subagent.Info{Meta: subagent.Meta{RoomID: rec.ID, Room: rec.Name, Dir: rec.Repo}}, nil
+		if sessionRef == "" {
+			// The authenticated owner has no session ID, so its work belongs to
+			// the room owner and uses the room's workspace; so does root without
+			// a session.
+			if actor.Role == authority.Owner || actor.Role == authority.Root {
+				return rec, actor, subagent.Info{Meta: subagent.Meta{RoomID: rec.ID, Room: rec.Name, Dir: rec.Repo}}, nil
+			}
+			// Any other sessionless caller, such as a workflow run coordinator
+			// (the Worker role), cannot own new work. Refuse here, not at the
+			// session store's "session id or address is required" (issue D-247).
+			return room.Record{}, authority.Actor{}, subagent.Info{}, fmt.Errorf("this caller has no session, so it cannot %s; only sessions, root and the owner can", doing)
 		}
 	}
 	info, err := s.SessionInRoom(rec.ID, sessionRef)
