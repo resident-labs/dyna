@@ -81,16 +81,18 @@ type CommandRunner interface {
 // execRecord is what a resumed run knows of one earlier run() call.
 type execRecord struct {
 	Shell  string
+	Stderr string // where the original run's command writes its standard error
 	Done   bool
 	Result any
 }
 
-// commandKey identifies a run() call across a resume. Timeouts and retries do
-// not matter: they decide how long to wait, not what runs.
-func commandKey(argv []string, cwd, label, parse string, env []string) string {
+// commandKey identifies a run() call across a resume. check is part of it: a
+// result accepted with check: false must not satisfy a call that rejects it.
+// Timeouts and retries do not matter: they decide how long to wait, not what runs.
+func commandKey(argv []string, cwd, label, parse string, check bool, env []string) string {
 	sorted := append([]string(nil), env...)
 	sort.Strings(sorted)
-	payload, _ := json.Marshal([]any{argv, cwd, label, parse, sorted})
+	payload, _ := json.Marshal([]any{argv, cwd, label, parse, check, sorted})
 	h := sha256.Sum256(payload)
 	return "x1:" + hex.EncodeToString(h[:])
 }
@@ -285,7 +287,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 	if label == "" {
 		label = fmt.Sprintf("command-%d", id)
 	}
-	key := commandKey(argv, o.cwd, cacheLabel, o.parse, o.env)
+	key := commandKey(argv, o.cwd, cacheLabel, o.parse, o.check, o.env)
 	line := commandLine(argv)
 	if len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" {
 		line = argv[2]
@@ -326,17 +328,17 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 	}
 	go func() {
 		defer e.workers.Done()
-		journal := func(state, shell string, result any, errStr string) {
+		journal := func(state, shell, stderr string, result any, errStr string) {
 			if e.opts.Run == nil {
 				return
 			}
 			e.opts.Run.Journal(runstore.JournalEntry{ID: id, Label: label, Key: key, Cwd: o.cwd, Prompt: line, Result: result, Error: errStr,
-				Workflow: e.workflowID, Kind: "exec", State: state, Shell: shell})
+				Workflow: e.workflowID, Kind: "exec", State: state, Shell: shell, Stderr: stderr})
 		}
 		// Resume: a finished command gives its recorded result and never runs again.
 		if hasPrior && prior.Done {
 			emit(runstore.Event{T: "exec_end", Status: "ok", Cached: true, Shell: prior.Shell, Preview: cachedSummary(prior.Result)})
-			journal("done", prior.Shell, prior.Result, "")
+			journal("done", prior.Shell, prior.Stderr, prior.Result, "")
 			resolve(prior.Result)
 			return
 		}
@@ -357,21 +359,21 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
-		attach := ""
+		attach, attachStderr := "", ""
 		if hasPrior {
 			if aerr := e.opts.Commands.Attach(e.ctx, prior.Shell); aerr != nil {
 				e.emitLog(runstore.LogProvenanceSystem, fmt.Sprintf("%s: cannot reattach to shell %s (%v); starting the command again", label, prior.Shell, aerr))
 			} else {
-				attach = prior.Shell
+				attach, attachStderr = prior.Shell, prior.Stderr
 			}
 		}
 		start := time.Now()
 		var res map[string]any
 		var runErr error
-		var shell string
+		var shell, stderrPath string
 		for attempt := 1; ; attempt++ {
-			res, shell, runErr = e.execAttempt(argv, o, id, label, line, attempt, attach, journal)
-			attach = ""
+			res, shell, stderrPath, runErr = e.execAttempt(argv, o, id, label, line, attempt, attach, attachStderr, journal)
+			attach, attachStderr = "", ""
 			if runErr == nil || attempt > o.retries || e.ctx.Err() != nil || !retryable(runErr) {
 				if res != nil {
 					res["attempts"] = attempt
@@ -390,7 +392,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			exitCode = &c
 		}
 		if runErr != nil && o.check || runErr != nil && res == nil {
-			journal("error", shell, nil, runErr.Error())
+			journal("error", shell, stderrPath, nil, runErr.Error())
 			emit(runstore.Event{T: "exec_end", Status: "error", DurMs: dur.Milliseconds(), Error: textutil.ClipOneLine(runErr.Error(), 2000), Shell: shell, ExitCode: exitCode, Tail: tail})
 			reject(runErr)
 			return
@@ -399,7 +401,7 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 		if runErr != nil {
 			status = "error" // check: false hands the failing result to the script
 		}
-		journal("done", shell, res, "")
+		journal("done", shell, stderrPath, res, "")
 		emit(runstore.Event{T: "exec_end", Status: status, DurMs: dur.Milliseconds(), Shell: shell, ExitCode: exitCode, Tail: tail, Preview: textutil.ClipOneLine(tail, 160)})
 		resolve(res)
 	}()
@@ -423,13 +425,13 @@ func retryable(err error) bool {
 // execAttempt starts the command (or reattaches to a shell of the earlier run),
 // waits for it, and builds the result. The error is set for a failure; the
 // result is set whenever the command ran, so check: false can return it.
-func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, line string, attempt int, attach string, journal func(state, shell string, result any, errStr string)) (map[string]any, string, error) {
+func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, line string, attempt int, attach, attachStderr string, journal func(state, shell, stderr string, result any, errStr string)) (map[string]any, string, string, error) {
 	shell := attach
-	stderrPath := ""
-	if e.opts.Run != nil && e.opts.Run.Dir != "" {
+	stderrPath := attachStderr
+	if shell == "" && e.opts.Run != nil && e.opts.Run.Dir != "" {
 		dir := filepath.Join(e.opts.Run.Dir, "commands")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, "", fmt.Errorf("prepare command logs: %w", err)
+			return nil, "", "", fmt.Errorf("prepare command logs: %w", err)
 		}
 		stderrPath = filepath.Join(dir, fmt.Sprintf("%d-%d.stderr", id, attempt))
 	}
@@ -437,10 +439,10 @@ func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, lin
 		var err error
 		shell, err = e.opts.Commands.Start(e.ctx, CommandSpec{Argv: argv, Cwd: o.cwd, Env: o.env, Name: "run " + e.runID() + ": " + textutil.ClipOneLine(label, 80), StderrPath: stderrPath})
 		if err != nil {
-			return nil, "", fmt.Errorf("start command: %w", err)
+			return nil, "", stderrPath, fmt.Errorf("start command: %w", err)
 		}
 	}
-	journal("running", shell, nil, "")
+	journal("running", shell, stderrPath, nil, "")
 	e.emit(runstore.Event{T: "exec_run", ID: id, Label: label, Shell: shell})
 
 	start := time.Now()
@@ -456,34 +458,34 @@ func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, lin
 		exit, _ = e.opts.Commands.Wait(sctx, shell)
 		scancel()
 		if !timedOut {
-			return nil, shell, err
+			return nil, shell, stderrPath, err
 		}
 	}
 	stdout, rerr := e.opts.Commands.Output(shell, commandParseLimit)
 	if rerr != nil {
-		return nil, shell, fmt.Errorf("read command output: %w", rerr)
+		return nil, shell, stderrPath, fmt.Errorf("read command output: %w", rerr)
 	}
 	stderr, _ := readCapped(stderrPath, commandInlineLimit)
 	inline, _ := clipInline(stdout)
 	res := execResult(exit.Code, inline, stderr, nil, time.Since(start), attempt, shell, exit.LogPath)
 	switch {
 	case timedOut:
-		return res, shell, &commandFailure{msg: fmt.Sprintf("command timed out after %s", o.timeout), retry: true}
+		return res, shell, stderrPath, &commandFailure{msg: fmt.Sprintf("command timed out after %s", o.timeout), retry: true}
 	case exit.Error != "":
-		return res, shell, &commandFailure{msg: "command did not run: " + exit.Error}
+		return res, shell, stderrPath, &commandFailure{msg: "command did not run: " + exit.Error}
 	case exit.Signal != "":
-		return res, shell, &commandFailure{msg: fmt.Sprintf("command stopped by signal %s", exit.Signal), retry: true}
+		return res, shell, stderrPath, &commandFailure{msg: fmt.Sprintf("command stopped by signal %s", exit.Signal), retry: true}
 	case exit.Code != 0:
-		return res, shell, &commandFailure{msg: fmt.Sprintf("command exited with code %d: %s", exit.Code, textutil.ClipOneLine(tailText(stderr+stdout), 400)), retry: true}
+		return res, shell, stderrPath, &commandFailure{msg: fmt.Sprintf("command exited with code %d: %s", exit.Code, textutil.ClipOneLine(tailText(stderr+stdout), 400)), retry: true}
 	}
 	if o.parse == "json" {
 		var parsed any
 		if jerr := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed); jerr != nil {
-			return res, shell, &commandFailure{msg: fmt.Sprintf("command output is not JSON: %v", jerr)}
+			return res, shell, stderrPath, &commandFailure{msg: fmt.Sprintf("command output is not JSON: %v", jerr)}
 		}
 		res["json"] = parsed
 	}
-	return res, shell, nil
+	return res, shell, stderrPath, nil
 }
 
 // newCommandLimit is the counting limit on commands that run at once.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -222,14 +224,18 @@ for (let i = 0; i < 3; i++) await run('true', { label: 'c' + i })
 
 func TestRunResumeReusesFinishedAndReattachesRunning(t *testing.T) {
 	cwd := t.TempDir()
+	oldStderr := filepath.Join(t.TempDir(), "3-1.stderr")
+	if err := os.WriteFile(oldStderr, []byte("warning from the first run"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	argv := []string{"sh", "-c", "build"}
-	doneKey := commandKey(argv, cwd, "done-step", "", nil)
-	liveKey := commandKey([]string{"sh", "-c", "wait"}, cwd, "live-step", "", nil)
-	failedKey := commandKey([]string{"sh", "-c", "flaky"}, cwd, "failed-step", "", nil)
+	doneKey := commandKey(argv, cwd, "done-step", "", true, nil)
+	liveKey := commandKey([]string{"sh", "-c", "wait"}, cwd, "live-step", "", true, nil)
+	failedKey := commandKey([]string{"sh", "-c", "flaky"}, cwd, "failed-step", "", true, nil)
 	cache := NewCache([]runstore.JournalEntry{
 		{ID: 1, Key: doneKey, Kind: "exec", State: "running", Shell: "sh_old1"},
 		{ID: 1, Key: doneKey, Kind: "exec", State: "done", Shell: "sh_old1", Result: map[string]any{"code": float64(0), "stdout": "kept"}},
-		{ID: 2, Key: liveKey, Kind: "exec", State: "running", Shell: "sh_old2"},
+		{ID: 2, Key: liveKey, Kind: "exec", State: "running", Shell: "sh_old2", Stderr: oldStderr},
 		{ID: 3, Key: failedKey, Kind: "exec", State: "error", Shell: "sh_old3", Error: "exit 1"},
 	})
 	fake := newFakeCommands()
@@ -238,12 +244,12 @@ func TestRunResumeReusesFinishedAndReattachesRunning(t *testing.T) {
 const a = await run('build', { label: 'done-step', cwd: args.cwd })
 const b = await run('wait', { label: 'live-step', cwd: args.cwd })
 const c = await run('flaky', { label: 'failed-step', cwd: args.cwd })
-return { a: a.stdout, b: b.stdout, c: c.shellId }
+return { a: a.stdout, b: b.stdout + '|' + b.stderr, c: c.shellId }
 `, Options{Commands: fake, Cache: cache, Args: map[string]any{"cwd": cwd}})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if want := `{"a":"kept","b":"from the live shell","c":"sh_1"}`; result != want {
+	if want := `{"a":"kept","b":"from the live shell|warning from the first run","c":"sh_1"}`; result != want {
 		t.Fatalf("result = %s, want %s", result, want)
 	}
 	if len(fake.specs) != 1 || fake.specs[0].Argv[2] != "flaky" {
@@ -264,8 +270,8 @@ return { a: a.stdout, b: b.stdout, c: c.shellId }
 }
 
 func TestCacheKeepsOneRecordPerExecCall(t *testing.T) {
-	key := commandKey([]string{"a"}, "/w", "x", "", nil)
-	dup := commandKey([]string{"b"}, "/w", "x", "", nil)
+	key := commandKey([]string{"a"}, "/w", "x", "", true, nil)
+	dup := commandKey([]string{"b"}, "/w", "x", "", true, nil)
 	cache := NewCache([]runstore.JournalEntry{
 		{ID: 1, Key: key, Kind: "exec", State: "running", Shell: "sh_1"},
 		{ID: 1, Key: key, Kind: "exec", State: "done", Shell: "sh_1", Result: "r"},
@@ -292,5 +298,22 @@ func TestRunEnvIsPassedToTheRunner(t *testing.T) {
 	b, _ := json.Marshal(fake.specs[0].Env)
 	if string(b) != `["A=1","B=2"]` {
 		t.Fatalf("env = %s, want sorted pairs", b)
+	}
+}
+
+func TestRunResumeDoesNotReuseAResultAcceptedWithCheckFalse(t *testing.T) {
+	cwd := t.TempDir()
+	lenient := commandKey([]string{"sh", "-c", "exit 3"}, cwd, "step", "", false, nil)
+	cache := NewCache([]runstore.JournalEntry{
+		{ID: 1, Key: lenient, Kind: "exec", State: "done", Shell: "sh_old", Result: map[string]any{"code": float64(3)}},
+	})
+	fake := newFakeCommands()
+	fake.next = func(CommandSpec) (CommandExit, string) { return CommandExit{Code: 3}, "" }
+	_, _, err := runCommandScript(t, `await run('exit 3', { label: 'step', cwd: args.cwd })`, Options{Commands: fake, Cache: cache, Args: map[string]any{"cwd": cwd}})
+	if err == nil || !strings.Contains(err.Error(), "code 3") {
+		t.Fatalf("error = %v, want the failure the stricter call must raise", err)
+	}
+	if len(fake.specs) != 1 {
+		t.Fatalf("started %d commands, want the changed call to run", len(fake.specs))
 	}
 }
