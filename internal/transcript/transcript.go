@@ -442,9 +442,9 @@ func mcpResultText(output string) string {
 
 // Summarize condenses one tool event.
 func Summarize(e workeroutput.Event) Tool {
-	// TODO: legacy/shim remove later — renders old normalized Muse envelopes;
-	// remove after affected artifacts expire or migrate.
-	e = workeroutput.UpgradeLegacyEvent(e)
+	// An old Muse tool envelope is shown as it was stored. Dyna keeps no reader
+	// for a removed harness's artifacts: owner decision of 2026-10-25, old
+	// sessions of a removed harness are deleted, not viewed.
 	t := Tool{Name: e.Name, Detail: e.Input, Output: e.Output, Exit: e.Exit}
 	t.Done = e.State == "completed" || e.State == "failed"
 	t.Failed = e.State == "failed" || (e.Exit != nil && *e.Exit != 0)
