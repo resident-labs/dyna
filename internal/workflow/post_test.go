@@ -33,7 +33,7 @@ func TestWorkflowPostUsesPoster(t *testing.T) {
 		text     string
 	}
 	var calls []call
-	result, err := Execute(context.Background(), Options{
+	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `const a = post("@parent", "Morning brief"); const b = post(["@decoder", "@parser"], "Both"); return [a, b];`,
 		Store:     postTestStore(), Run: run, WorkDir: t.TempDir(),
 		Poster: func(_ context.Context, runID string, mentions []string, text string) (PostResult, error) {
@@ -76,7 +76,7 @@ func TestWorkflowPostValidationAndUnavailable(t *testing.T) {
 		"empty text":   `return post("@root", "  ");`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := Execute(context.Background(), Options{
+			_, err := executeTest(context.Background(), Options{
 				ScriptSrc: script, Store: postTestStore(), Run: run, WorkDir: t.TempDir(),
 			})
 			if err == nil || (!strings.Contains(err.Error(), "unavailable") && !strings.Contains(err.Error(), "non-empty string") && !strings.Contains(err.Error(), "@mention") && !strings.Contains(err.Error(), "start with @")) {
@@ -84,7 +84,7 @@ func TestWorkflowPostValidationAndUnavailable(t *testing.T) {
 			}
 		})
 	}
-	result, err := Execute(context.Background(), Options{
+	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `return [typeof mail, typeof msg].join(",");`, Store: postTestStore(), Run: run, WorkDir: t.TempDir(),
 	})
 	if err != nil || result != `"undefined,undefined"` {

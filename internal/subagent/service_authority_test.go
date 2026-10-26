@@ -7,7 +7,7 @@ import (
 )
 
 func TestDormantServiceAuthority(t *testing.T) {
-	for _, process := range []string{"subagent", "workflow"} {
+	for _, process := range []string{"subagent"} {
 		t.Run(process, func(t *testing.T) {
 			t.Setenv("DYNA_MODE", process)
 			t.Setenv("DYNA_SESSION", "ses-test")
@@ -39,7 +39,7 @@ func TestPendingDismissRootAuthority(t *testing.T) {
 }
 
 func TestDormantServicesRejectBareStamps(t *testing.T) {
-	for _, key := range []string{"DYNA_SESSION", "DYNA_WORKER_RUN", "DYNA_WORKER_AGENT"} {
+	for _, key := range []string{"DYNA_SESSION", "DYNA_WORKER_RUN"} {
 		t.Run(key, func(t *testing.T) {
 			ownerDismissEnv(t)
 			t.Setenv(key, "bare-stamp")

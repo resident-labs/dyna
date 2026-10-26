@@ -137,7 +137,7 @@ func TestExecuteResumeReverseCompletionOrderWithCanceledHole(t *testing.T) {
 			// the three runs share it, so a loaded host must not trip it.
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			result, err := Execute(ctx, Options{ScriptSrc: script, Args: jobs("slow", "fast"), Store: store, Run: source, WorkDir: base, OnEvent: func(event runstore.Event) {
+			result, err := executeTest(ctx, Options{ScriptSrc: script, Args: jobs("slow", "fast"), Store: store, Run: source, WorkDir: base, OnEvent: func(event runstore.Event) {
 				if event.T == "agent_end" && event.Label == "fast" && event.Status == "ok" {
 					if err := os.WriteFile(gate, nil, 0600); err != nil {
 						t.Error(err)
@@ -172,7 +172,7 @@ func TestExecuteResumeReverseCompletionOrderWithCanceledHole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err = Execute(ctx, Options{ScriptSrc: script, Args: jobs("fast", "hole", "slow"), Store: store, Run: resumed, WorkDir: base, Cache: cache})
+			result, err = executeTest(ctx, Options{ScriptSrc: script, Args: jobs("fast", "hole", "slow"), Store: store, Run: resumed, WorkDir: base, Cache: cache})
 			resumed.Finish("ok", result, err)
 			if err != nil || result != `["fast","hole","slow"]` {
 				t.Fatalf("resumed = %s, %v", result, err)
@@ -198,7 +198,7 @@ func TestExecuteResumeReverseCompletionOrderWithCanceledHole(t *testing.T) {
 			}
 			// A second resume must use the upgraded identities, including the retried hole.
 			again := NewCache(output)
-			result, err = Execute(ctx, Options{ScriptSrc: script, Args: jobs("hole", "slow", "fast"), Store: store, WorkDir: base, Cache: again})
+			result, err = executeTest(ctx, Options{ScriptSrc: script, Args: jobs("hole", "slow", "fast"), Store: store, WorkDir: base, Cache: again})
 			var decoded []string
 			if err != nil || json.Unmarshal([]byte(result), &decoded) != nil || result != `["hole","slow","fast"]` || again.Stats().Hits != 3 {
 				t.Fatalf("second resume = %s, %v, %#v", result, err, again.Stats())
@@ -233,7 +233,7 @@ func TestExecuteCacheSameLabelDifferentCwdAndGeneratedLabels(t *testing.T) {
 			// Execute waits for completion; runner load must not cancel either run.
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			result, err := Execute(ctx, Options{ScriptSrc: script, Store: store, Run: source, WorkDir: base, Args: map[string]any{"dirs": dirs[:2], "label": label}})
+			result, err := executeTest(ctx, Options{ScriptSrc: script, Store: store, Run: source, WorkDir: base, Args: map[string]any{"dirs": dirs[:2], "label": label}})
 			source.Finish("ok", result, err)
 			if err != nil || result != `["executed","executed"]` {
 				t.Fatalf("source = %s, %v", result, err)
@@ -253,7 +253,7 @@ func TestExecuteCacheSameLabelDifferentCwdAndGeneratedLabels(t *testing.T) {
 				entries[i].Result = filepath.Base(entries[i].Cwd)
 			}
 			cache := NewCache(entries)
-			result, err = Execute(ctx, Options{ScriptSrc: script, Store: store, WorkDir: base, Args: map[string]any{"dirs": []string{dirs[1], dirs[2], dirs[0]}, "label": label}, Cache: cache})
+			result, err = executeTest(ctx, Options{ScriptSrc: script, Store: store, WorkDir: base, Args: map[string]any{"dirs": []string{dirs[1], dirs[2], dirs[0]}, "label": label}, Cache: cache})
 			if err != nil || result != `["b","executed","a"]` || cache.Stats().Hits != 2 {
 				t.Fatalf("reordered resume with cwd change = %s, %v, %#v", result, err, cache.Stats())
 			}
@@ -276,7 +276,7 @@ func TestExecuteResumeRequiresMatchingExecutionConfiguration(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	result, err := Execute(ctx, Options{ScriptSrc: script, Store: &profile.Store{Profiles: []profile.Profile{original}}, Run: source, WorkDir: base})
+	result, err := executeTest(ctx, Options{ScriptSrc: script, Store: &profile.Store{Profiles: []profile.Profile{original}}, Run: source, WorkDir: base})
 	source.Finish("ok", result, err)
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestExecuteResumeRequiresMatchingExecutionConfiguration(t *testing.T) {
 			p := original
 			tc.change(&p)
 			cache := NewCache(entries)
-			_, err := Execute(ctx, Options{ScriptSrc: script, Store: &profile.Store{Profiles: []profile.Profile{p}}, WorkDir: base, Cache: cache})
+			_, err := executeTest(ctx, Options{ScriptSrc: script, Store: &profile.Store{Profiles: []profile.Profile{p}}, WorkDir: base, Cache: cache})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"dyna-agent/internal/computers"
-	"dyna-agent/internal/mode"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/shells"
@@ -180,30 +179,6 @@ func TestCommandEnv(t *testing.T) {
 		env, _ := CommandEnv(ctx, dir, meta, base)
 		if got, ok := envLookup(env, "DISPLAY"); ok {
 			t.Errorf("DISPLAY = %q, want the key absent; the owner had no display", got)
-		}
-	})
-
-	t.Run("workflow worker keeps no owner display exemption", func(t *testing.T) {
-		writeSession(t, testSessionRecord{ID: owner, Role: rootRole})
-		base := append(desktopBase(shim), mode.EnvMode+"="+mode.Workflow)
-		// A running computer of the attributed session is still usable; the
-		// owner display exemption of its root session is not.
-		use(t, running)
-		env, _ := CommandEnv(ctx, dir, meta, base)
-		if got := value(env, "DISPLAY"); got != ":240" {
-			t.Errorf("DISPLAY = %q, want the computer display", got)
-		}
-		if got := value(env, "WAYLAND_DISPLAY"); got != "wayland-computer" {
-			t.Errorf("WAYLAND_DISPLAY = %q, want the computer display, not the owner one", got)
-		}
-		// Without a computer the same worker is isolated.
-		use(t, noComputer)
-		env, noDisplay := CommandEnv(ctx, dir, meta, base)
-		if !noDisplay {
-			t.Fatal("noDisplay = false; a workflow worker without a computer has no display")
-		}
-		if got, ok := envLookup(env, "DISPLAY"); ok {
-			t.Errorf("DISPLAY = %q, want the key absent", got)
 		}
 	})
 

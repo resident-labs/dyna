@@ -14,7 +14,7 @@ func TestProfilesGlobalModelListsAreIndependent(t *testing.T) {
 		{Name: "chain", Harness: profile.HarnessMock, Model: "first", Models: []string{"first", "second"}},
 		{Name: "legacy", Harness: profile.HarnessMock, Model: "legacy-model"},
 	}}
-	result, err := Execute(context.Background(), Options{
+	result, err := executeTest(context.Background(), Options{
 		ScriptSrc: `const models = profiles.map(p => Array.from(p.models)); profiles[0].models[0] = "changed"; return models;`,
 		Store:     store, WorkDir: t.TempDir(),
 	})

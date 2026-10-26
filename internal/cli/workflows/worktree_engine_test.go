@@ -46,6 +46,7 @@ func serveRunEngineAt(t *testing.T, dataDir string, extra ...map[string]websvc.C
 	for name, call := range workflowLifecycleCalls(t) {
 		calls[name] = call
 	}
+	addAgentCalls(t, calls)
 	for _, more := range extra {
 		maps.Copy(calls, more)
 	}

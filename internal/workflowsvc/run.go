@@ -55,6 +55,10 @@ type Result struct {
 	Value  string
 }
 
+// AgentEngine connects a run coordinator to the engine, which starts the leaf
+// session of each agent() call. Tests replace it with a fake engine.
+var AgentEngine = func() workflow.EngineCaller { return engineclient.New("") }
+
 // Execute owns the run lifecycle, including final status and completion delivery.
 func Execute(ctx context.Context, opts Options, store *profile.Store, observer Observer) (Result, error) {
 	return executeWithOutbox(ctx, opts, store, observer, newCoordinatorOutbox)
@@ -122,11 +126,12 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	if err == nil {
 		err = ctx.Err()
 	}
+	agents := AgentEngine()
 	if err == nil {
 		value, err = workflow.Execute(ctx, workflow.Options{
 			ScriptSrc: opts.ScriptSrc, ScriptPath: opts.ScriptPath, Args: opts.Args, Store: store, Run: run,
 			OnEvent: observer.OnEvent, OnWarning: warning, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir,
-			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, Cache: cache, ResumeFrom: opts.ResumeFrom,
+			MaxConc: opts.MaxConc, MaxAgents: opts.MaxAgents, Cache: cache, ResumeFrom: opts.ResumeFrom, Engine: agents,
 			Paused: func() bool { return runstore.IsPaused(run.Meta.ID) }, Poster: ScriptPoster,
 		})
 	}

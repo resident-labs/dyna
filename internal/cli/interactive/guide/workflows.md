@@ -47,8 +47,9 @@ Run `dyna profiles check` for installed binaries and output capabilities. Read `
 Scripts use JavaScript with top-level `await` and `return`; the return becomes the JSON result.
 They are not Node.js programs: no TypeScript, `require`, modules, filesystem, networking, or arbitrary environment access. Workers handle filesystem work.
 
-Workflow workers cannot delegate, start runs or sessions. They can read `dyna guide` and use every other dyna command. Dyna disables native delegation: Claude runs without the Agent tool.
-Workers receive `DYNA_MODE=workflow`, `DYNA_WORKER_RUN`, and `DYNA_WORKER_AGENT`. They can read run status and record progress with `dyna journal`.
+Each `agent()` call starts a leaf session: a regular agent session that cannot start subagents or runs. It has the same tools, instructions, and guides as any session. Dyna disables native delegation: Claude runs without the Agent tool.
+The run closes each agent session when its call resolves. Sessions of a run stay out of member lists and groups. Their results go to the run, not to a parent.
+A worker records progress with `dyna journal`; the run page shows the entries. Post to a running agent with `@run:<id>/agent:<n>`.
 Read `dyna guide delegation` for persistent sessions and `dyna guide recovery` after provider failure.
 
 Optional metadata goes first:

@@ -186,7 +186,7 @@ func TestWorkflowControlsUseService(t *testing.T) {
 	}
 }
 
-func TestSteerRunUsesWorkerPost(t *testing.T) {
+func TestSteerRunPostsToTheAgentsSession(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("workers")
 	t.Setenv("DYNA_RUN_ID", "wf_ops-steering")
@@ -197,19 +197,16 @@ func TestSteerRunUsesWorkerPost(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer run.Finish("ok", "null", nil)
-	if _, err = run.StartAgentJournal(1, "worker", "mock", "", "task"); err != nil {
+	agent, err := e.mgr.StartRunAgent(e.ctx, subagent.StartOptions{
+		Run: &subagent.RunOwner{ID: run.Meta.ID, Agent: 1}, Profile: "mock", Dir: t.TempDir(), Room: rec.ID, Task: "SLEEP:0\nRESPOND: ready",
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err = runstore.ActivateAgentSteering(run.Meta.ID, 1); err != nil {
-		t.Fatal(err)
-	}
+	e.wait(agent.ID, 1)
 	res, err := e.svc.SteerRun(e.ctx, run.Meta.ID, 1, "inspect parser")
-	if err != nil || len(res.Deliveries) != 1 || res.Deliveries[0].Delivery != "worker-steered" {
+	if err != nil || len(res.Deliveries) != 1 || res.Deliveries[0].Delivery != "session-queued" || res.Deliveries[0].To != agent.Address() {
 		t.Fatalf("steer: %+v %v", res, err)
-	}
-	msgs, _, err := runstore.ReadAgentSteeringFrom(run.Meta.ID, 1, 0, false)
-	if err != nil || len(msgs) != 1 || !strings.Contains(msgs[0].Message, "inspect parser") {
-		t.Fatalf("worker queue: %+v %v", msgs, err)
 	}
 }
 

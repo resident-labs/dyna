@@ -1,9 +1,8 @@
 // Package mode answers "what kind of dyna process is this?". Humans and plain
-// agents run dyna with no mode. Every workflow worker runs in workflow mode and
-// may never start dyna runs or subagents. A subagent session's worker runs in
-// subagent mode and may. The room's internal root session runs in root mode:
-// it is stamped with its room but acts as the room owner, like an unstamped
-// CLI.
+// agents run dyna with no mode. A session's worker runs in subagent mode; a
+// leaf session, such as a workflow's agent, may not start subagents or runs.
+// The room's internal root session runs in root mode: it is stamped with its
+// room but acts as the room owner, like an unstamped CLI.
 package mode
 
 import (
@@ -14,9 +13,8 @@ import (
 
 // Environment contract injected into workers.
 const (
-	EnvMode        = "DYNA_MODE"         // workflow | subagent | root
-	EnvWorkerRun   = "DYNA_WORKER_RUN"   // workflow mode: owning run id
-	EnvWorkerAgent = "DYNA_WORKER_AGENT" // workflow mode: agent id within that run
+	EnvMode        = "DYNA_MODE"         // subagent | root
+	EnvWorkerRun   = "DYNA_WORKER_RUN"   // a run agent's session: owning run id
 	EnvSession     = "DYNA_SESSION"      // subagent mode: session id
 	EnvDepth       = "DYNA_DEPTH"        // subagent mode: this session's depth (top level = 1)
 	EnvRoomID      = "DYNA_ROOM_ID"      // stamped work: canonical room id
@@ -26,16 +24,12 @@ const (
 	EnvRunDetached = "DYNA_RUN_DETACHED" // workflow script: detached runner
 	EnvAgentID     = "DYNA_AGENT_ID"     // workflow agent attribution
 
-	Workflow = "workflow"
 	Subagent = "subagent"
 	Root     = "root"
 )
 
-// Current returns the process's mode: Workflow, Subagent, or "".
+// Current returns the process's mode: Subagent, Root, or "".
 func Current() string { return strings.TrimSpace(os.Getenv(EnvMode)) }
-
-// InWorkflow reports whether this process is a workflow worker (or a child of one).
-func InWorkflow() bool { return Current() == Workflow }
 
 // Session describes the subagent session the process runs inside.
 type Session struct {
@@ -79,12 +73,9 @@ func StampFromEnv() (Stamp, bool) {
 	return s, s.RoomID != "" || s.Room != ""
 }
 
-// InsideDyna reports whether this process was launched by Dyna as a workflow
-// worker or as a subagent session.
+// InsideDyna reports whether this process was launched by Dyna as a subagent
+// session.
 func InsideDyna() bool {
-	if InWorkflow() {
-		return true
-	}
 	_, ok := CurrentSession()
 	return ok
 }
@@ -99,5 +90,5 @@ func OwnerProcess() bool {
 		return true
 	}
 	_, stamped := StampFromEnv()
-	return !stamped && Current() == "" && os.Getenv(EnvSession) == "" && os.Getenv(EnvWorkerRun) == "" && os.Getenv(EnvWorkerAgent) == ""
+	return !stamped && Current() == "" && os.Getenv(EnvSession) == "" && os.Getenv(EnvWorkerRun) == ""
 }

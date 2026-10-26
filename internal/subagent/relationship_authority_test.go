@@ -13,10 +13,6 @@ func TestSessionRelationshipRefusals(t *testing.T) {
 		{"unrelated promote", "subagent promote", "other", "child", mode.Subagent},
 		{"unrelated adopt", "subagent adopt", "other", "child", mode.Subagent},
 		{"unrelated rename", "subagent rename", "other", "child", mode.Subagent},
-		{"worker rename", "subagent rename", "child", "child", mode.Workflow},
-		{"worker promote", "subagent promote", "lead", "child", mode.Workflow},
-		{"worker adopt", "subagent adopt", "lead", "child", mode.Workflow},
-		{"worker close", "subagent close", "lead", "child", mode.Workflow},
 		{"self close", "subagent close", "child", "child", mode.Subagent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

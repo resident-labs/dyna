@@ -31,11 +31,9 @@ var guideHarnesses = []string{"claude", "other"}
 // root block first; the internal root (root mode) sees its own setup there. A
 // Dyna session already has its room, gets posts delivered and gets rules
 // injected, so it never sees the root block or the external-orchestration
-// topic, and neither does the internal root. A workflow worker is not a
-// session, but it works like one and reads the same session index.
+// topic, and neither does the internal root.
 func guideIndex() string {
 	_, stamped := mode.CurrentSession()
-	stamped = stamped || mode.InWorkflow()
 	internal := mode.Current() == mode.Root
 	var out strings.Builder
 	if !stamped {
