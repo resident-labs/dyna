@@ -1285,15 +1285,14 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// two act processes that share a workflow fight over one container name,
 		// starting with the job every other job needs: nine checks of one run
 		// each started the workflow's "changes" job and collided. Each check
-		// renames its own copy of the workflow to this run and check, which
-		// names every container it starts, its volumes included, alone. The
-		// workflow name is the one value a job can read of it (github.workflow);
-		// a repository that keys on that name sees the tagged one under act.
+		// runs a tagged copy of the workflow outside its checkout, which names
+		// every container it starts, its volumes included, alone. The workflow
+		// name is the one value a job can read of it (github.workflow); a
+		// repository that keys on that name sees the tagged one under act.
 		workflowFile := path.Join(work, check.job.Workflow)
+		tagged := path.Join(path.Dir(work), "workflow.yml")
 		tag := "CI-dyna-" + runID + "-" + string(check.id)
-		setup += "if grep -q '^name:' " + q(workflowFile) + "; then sed -i '0,/^name:.*/s//name: " + tag + "/' " + q(workflowFile) + "; " +
-			"elif [ \"$(head -n1 " + q(workflowFile) + ")\" = '---' ]; then sed -i '1a name: " + tag + "' " + q(workflowFile) + "; " +
-			"else sed -i '1i name: " + tag + "' " + q(workflowFile) + "; fi; "
+		setup += tagWorkflowSnippet(workflowFile, tagged, tag)
 		setup += "printf '%s' " + q(eventBody) + " > " + q(event) + "; "
 		// act sees no host environment: a session token, an account key or a
 		// harness variable on this machine must never reach a job container. The
@@ -1309,7 +1308,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		}
 		setup += "docker=(docker); command -v docker >/dev/null 2>&1 || docker=(podman); export DOCKER_HOST=" + q(containerSocket) + "; "
 		setup += fmt.Sprintf("timeout --foreground --signal=TERM --kill-after=10s %ds env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME="+q(actHome)+" DOCKER_HOST="+q(containerSocket)+" ", seconds) +
-			q(actBinaryPath(base)) + " " + actEvent + " -W " + q(work) + "/" + q(check.job.Workflow) +
+			q(actBinaryPath(base)) + " " + actEvent + " -W " + q(tagged) +
 			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
