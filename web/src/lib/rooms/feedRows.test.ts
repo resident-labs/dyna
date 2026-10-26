@@ -159,6 +159,12 @@ test('an issue folds its filing, change and close into one card', () => {
   assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['i4'])
 })
 
+test('each issue note keeps its own card beside the folded issue', () => {
+  const note = (id: string): FeedInput => ({ ...issuePost(id, 'updated', 'i1', 'open'), notice: { kind: 'noted' }, payload: { type: 'noted', issueId: 'i1', number: 3, title: 'Two retry loops', state: 'open', filer: 'dyna:librarian', detail: id } })
+  const rows = content(feedRows([issuePost('i1', 'filed', undefined, 'open'), note('n1'), note('n2'), issuePost('i3', 'closed', 'i1', 'closed')]))
+  assert.deepEqual(rows.map((row) => rowPosts(row).map((post) => post.id)), [['i1'], ['n1'], ['n2'], ['i3']])
+})
+
 // A passing run of a hook, one a minute, as the engine posts them.
 const pass = (n: number, hook = 'librarian') => hookPost(`pass-${hook}-${n}`, 'result', `${hook}-run-${n}`, 'passed', start + n * 60_000, hook)
 

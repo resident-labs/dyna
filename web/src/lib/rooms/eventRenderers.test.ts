@@ -79,7 +79,7 @@ const fixtures: Record<string, EventPayload> = {
     detail: 'exit 1',
   },
   ...Object.fromEntries(
-    (['filed', 'updated', 'closed'] as const).map((type) => [
+    (['filed', 'updated', 'closed', 'noted'] as const).map((type) => [
       `issue/${type}`,
       {
         type,
@@ -92,7 +92,7 @@ const fixtures: Record<string, EventPayload> = {
         direction: 'Keep one retry loop with an injected clock.',
         state: type === 'closed' ? 'closed' : type === 'updated' ? 'goal' : 'open',
         filer: 'dyna:librarian',
-        actor: type === 'filed' ? undefined : 'dyna:root',
+        actor: type === 'filed' ? undefined : type === 'noted' ? 'dyna:agent' : 'dyna:root',
         reason: type === 'closed' ? 'Fixed by PR #542' : undefined,
         closedBy: type === 'closed' ? { pr: 542, commit: '24c91eb' } : undefined,
         detail: `The note of the ${type} issue.`,
