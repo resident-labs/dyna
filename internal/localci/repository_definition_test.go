@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -134,4 +135,35 @@ suites:
 		t.Fatal(err)
 	}
 	return definition
+}
+
+// This repository's own definition parses, and its Go jobs run the workflow's
+// jobs through act with a cache-warming job named, so a broken definition is
+// caught here instead of by the next pull request.
+func TestThisRepositoryDefinitionParses(t *testing.T) {
+	body, err := os.ReadFile("../../.dyna/local-ci.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := ParseDefinition(body)
+	if err != nil {
+		t.Fatalf("this repository's definition does not parse: %v", err)
+	}
+	warm, ok := definition.Warm()
+	if !ok || warm.Name == "" {
+		t.Fatal("this repository's definition names no cache-warming job")
+	}
+	commands, ok := definition.ExecutableChecks("go")
+	if !ok {
+		t.Fatal("this repository's definition has no go suite")
+	}
+	var jobs int
+	for _, command := range commands {
+		if command.Job != nil {
+			jobs++
+		}
+	}
+	if jobs == 0 {
+		t.Fatal("the go suite runs no workflow job")
+	}
 }
