@@ -248,6 +248,52 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 	return tw.Close()
 }
 
+// A second run of the same commit must reach the node. An interrupted first run
+// can leave refs/dyna/ci/<sha> pointing at a missing object, and git refuses to
+// push over it, so the runner drops the ref before it pushes.
+func TestRunPushesACommitWhoseRefAPreviousRunLeft(t *testing.T) {
+	repo := t.TempDir()
+	gitRun := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	gitRun(repo, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(repo, "add", "file")
+	gitRun(repo, "-c", "user.name=Dyna Test", "-c", "user.email=dyna@example.invalid", "commit", "--quiet", "-m", "one")
+	sha := gitRun(repo, "rev-parse", "HEAD")
+	cache := filepath.Join(t.TempDir(), "cache.git")
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", cache).CombinedOutput(); err != nil {
+		t.Fatalf("init bare cache: %v: %s", err, out)
+	}
+	// The ref an interrupted run leaves behind names an object the node does not
+	// have, which is what a plain and a forced push both refuse.
+	ref := filepath.Join(cache, "refs", "dyna", "ci", sha)
+	if err := os.MkdirAll(filepath.Dir(ref), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ref, []byte(strings.Repeat("1", 40)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := Runner{Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	if err := runner.pushCommitToNode(t.Context(), repo, cache, sha); err != nil {
+		t.Fatalf("a second run of the commit could not push: %v", err)
+	}
+	if got := gitRun(cache, "rev-parse", "refs/dyna/ci/"+sha); got != sha {
+		t.Fatalf("node ref = %s, want %s", got, sha)
+	}
+	// A third run, now over the run's own ref, is a no-op rather than an error.
+	if err := runner.pushCommitToNode(t.Context(), repo, cache, sha); err != nil {
+		t.Fatalf("a repeated run of the same commit failed: %v", err)
+	}
+}
+
 func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T) {
 	const slots = 4
 	checks, _, err := nodeChecks(testDynaDefinition(t), []Suite{SuiteGo, SuiteCross}, true)
