@@ -76,7 +76,7 @@ func (c *connection) call(ctx context.Context, req Request, reply any) error {
 			if failure.Code != "" {
 				return &StreamError{Code: StreamFailureCode(failure.Code), Detail: failure.Reason, PermanentFailure: failure.Permanent}
 			}
-			return errors.New(failure.Error)
+			return &ReplyError{Message: failure.Error}
 		}
 	}
 	return json.Unmarshal(line, reply)
@@ -102,16 +102,30 @@ var ErrNoDaemon = errors.New("no computer daemon is running")
 // started before the version call existed.
 var ErrUnknownBuild = errors.New("the computer daemon does not report its build")
 
-// Build returns the build of the running daemon.
+// ReplyError is an error the daemon itself reported, as opposed to a failure
+// to reach it or to read its answer.
+type ReplyError struct{ Message string }
+
+func (e *ReplyError) Error() string { return e.Message }
+
+// Build returns the build of the running daemon. A daemon that answers the
+// version call with an error predates it; any other failure is returned as is.
 func (c *Client) Build(ctx context.Context) (string, error) {
 	conn, err := c.connect(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", fmt.Errorf("%w: %v", ErrNoDaemon, err)
 	}
 	defer conn.Close()
 	var build string
 	if err := conn.call(ctx, Request{Op: "version"}, &build); err != nil {
-		return "", fmt.Errorf("%w: %v", ErrUnknownBuild, err)
+		var reply *ReplyError
+		if errors.As(err, &reply) {
+			return "", fmt.Errorf("%w: %v", ErrUnknownBuild, err)
+		}
+		return "", err
 	}
 	return build, nil
 }
