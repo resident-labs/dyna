@@ -59,21 +59,48 @@ const RestartPending = "dyna-computers.restart-pending"
 
 // legacyDrainWindow is the refusal window of the computer services built before
 // the 10-minute one, which read the marker's own mtime as the time the restart
-// became pending. markerBackdate is how much older than now MarkRestartPending
-// stamps the marker, so such a service, which cannot be restarted to learn the new
-// window, stops refusing after the new 10 minutes. Readers add it back.
+// became pending, and ignore a marker older than their own start. Such a service
+// cannot be restarted to learn the new window, so the install stamps the marker
+// older than it is: the service then stops refusing after 10 minutes. The
+// backdate is stored in the marker, so readers add it back.
 const (
 	legacyDrainWindow = 30 * time.Minute
-	markerBackdate    = legacyDrainWindow - 10*time.Minute
+	maxMarkerBackdate = legacyDrainWindow - 10*time.Minute
 )
 
-func MarkRestartPending(dir string) error {
+// MarkRestartPending marks a deferred restart of a service whose start time is
+// unknown. Such a service keeps its own refusal window.
+func MarkRestartPending(dir string) error { return MarkRestartPendingFor(dir, time.Time{}) }
+
+// MarkRestartPendingFor marks a deferred restart of the service that started at
+// serviceStarted. It backdates the marker by up to 20 minutes, but never to before
+// that start: an older service ignores a marker older than itself, and would then
+// refuse nothing.
+func MarkRestartPendingFor(dir string, serviceStarted time.Time) error {
+	backdate := time.Duration(0)
+	if !serviceStarted.IsZero() {
+		backdate = min(maxMarkerBackdate, max(0, time.Since(serviceStarted)-time.Second))
+	}
 	path := filepath.Join(dir, RestartPending)
-	if err := fsutil.WriteFile(path, []byte("1\n"), 0600, true); err != nil {
+	if err := fsutil.WriteFile(path, []byte(strconv.Itoa(int(backdate.Seconds()))+"\n"), 0600, true); err != nil {
 		return err
 	}
-	at := time.Now().Add(-markerBackdate)
+	at := time.Now().Add(-backdate)
 	return os.Chtimes(path, at, at)
+}
+
+// markerBackdate reads the backdate a marker carries; a marker with none, or an
+// unreadable one, has none.
+func markerBackdate(path string) time.Duration {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	seconds, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || seconds < 0 {
+		return 0
+	}
+	return min(time.Duration(seconds)*time.Second, maxMarkerBackdate)
 }
 
 func RestartIsPending(dir string) bool {
@@ -91,13 +118,13 @@ func RestartPendingSince(dir string, started, now time.Time, window time.Duratio
 }
 
 // RestartPendingAt is when the restart became pending: the marker's mtime plus
-// the backdate MarkRestartPending applied.
+// the backdate the install stored in it.
 func RestartPendingAt(dir string) (time.Time, bool) {
 	st, err := os.Stat(filepath.Join(dir, RestartPending))
 	if err != nil {
 		return time.Time{}, false
 	}
-	return st.ModTime().Add(markerBackdate), true
+	return st.ModTime().Add(markerBackdate(filepath.Join(dir, RestartPending))), true
 }
 
 func ClearRestartPending(dir string) error {
@@ -474,7 +501,7 @@ func Install(ctx context.Context, o Options) error {
 			}
 		}
 		if busy != "" {
-			if err := MarkRestartPending(o.Dir); err != nil {
+			if err := MarkRestartPendingFor(o.Dir, computersStartedAt(run)); err != nil {
 				return err
 			}
 			fmt.Fprintf(o.Output, "Deferred restart of %s: %s. The engine restarts it at the first quiet moment.\n", Computers, busy)
@@ -577,4 +604,18 @@ func property(output, key string) string {
 		}
 	}
 	return ""
+}
+
+// computersStartedAt reads when the computer service last started, or the zero
+// time when systemd does not say.
+func computersStartedAt(run func(args ...string) (string, error)) time.Time {
+	out, err := run("show", Computers, "--property=ActiveEnterTimestamp", "--timestamp=unix")
+	if err != nil {
+		return time.Time{}
+	}
+	seconds, err := strconv.ParseInt(strings.TrimPrefix(property(out, "ActiveEnterTimestamp"), "@"), 10, 64)
+	if err != nil || seconds <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(seconds, 0)
 }
