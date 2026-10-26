@@ -3,9 +3,11 @@ package subagent
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
+	"dyna-agent/internal/admission"
 	"dyna-agent/internal/room"
 )
 
@@ -113,8 +115,11 @@ func (m *Manager) roomExecutionGate(ctx context.Context, id string, execute func
 // turnSlot is the machine slot of one running turn. A turn gives it back while
 // its room is held, so a paused room never keeps another room from running.
 type turnSlot struct {
-	m    *Manager
-	meta Meta
+	m     *Manager
+	meta  Meta
+	owner bool
+	// held tells the session record that the limit holds the turn.
+	held func(admission.Hold)
 	mu   sync.Mutex
 	free func()
 }
@@ -126,7 +131,7 @@ func (s *turnSlot) take(ctx context.Context) error {
 	if s.free != nil {
 		return nil
 	}
-	free, err := s.m.admit(ctx, s.meta)
+	free, err := s.m.admit(ctx, AdmitRequest{Meta: s.meta, Owner: s.owner, OnHold: s.held})
 	if err != nil {
 		return err
 	}
@@ -142,4 +147,11 @@ func (s *turnSlot) drop() {
 		s.free()
 		s.free = nil
 	}
+}
+
+// ownerCaused reports whether the owner's own message started this turn: the
+// owner sent the turn's first prompt, or the room's owner address is among the
+// senders the turn owes a report to.
+func ownerCaused(meta Meta, turn Turn) bool {
+	return slices.Contains(turn.ReportTo, meta.Room) || turn.N == 1 && meta.Owner != ""
 }

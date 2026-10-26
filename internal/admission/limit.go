@@ -1,59 +1,98 @@
 package admission
 
-import (
-	"bufio"
-	"fmt"
-	"os"
-	"runtime"
-	"strconv"
-	"strings"
+import "time"
+
+// Mode says what the gate does with its decision.
+type Mode string
+
+// The modes. Observe is the default: it records what enforcing would have held
+// and holds nothing, so an owner sees the effect before choosing to enforce.
+const (
+	ModeOff     Mode = "off"
+	ModeObserve Mode = "observe"
+	ModeEnforce Mode = "enforce"
 )
 
-// Defaults of the automatic limit. They describe a turn in general: a harness
-// process with its tools holds about a gibibyte, and about four turns per core
-// keep a machine busy without stalling it.
+// Tunables of the automatic limit. They describe agent turns in general, and
+// every one is replaced by a measurement or a setting where one exists.
 const (
-	PerTurnBytes   = 1 << 30
-	TurnsPerCore   = 4
-	MinReserve     = 2 << 30
-	reserveDivisor = 10 // keep a tenth of memory free
-	// OverloadLoad is the load per core above which no new turn starts.
-	OverloadLoad = 2.0
-	floorTurns   = 1
+	// FallbackTurnBytes is the memory one turn is assumed to use until Dyna has
+	// measured real turns on this machine.
+	FallbackTurnBytes = 1 << 30
+	TurnsPerCore      = 4
+	MinReserve        = 2 << 30
+	reserveDivisor    = 10 // keep a tenth of memory free
+	floorTurns        = 1
+	// EnterMemPressure and EnterCPUPressure are the PSI "some avg10" values at
+	// which the machine counts as overloaded. Without PSI, EnterLoad per core
+	// stands in.
+	EnterMemPressure = 10.0
+	EnterCPUPressure = 40.0
+	EnterLoad        = 2.0
+	// CalmReads is how many readings in a row must sit below half of every
+	// threshold before the machine counts as calm again.
+	CalmReads = 2
+	// DefaultMaxWait is how long an enforced turn may wait before it is admitted
+	// anyway, so no turn starves.
+	DefaultMaxWait = 2 * time.Minute
 )
 
 // Policy is the owner's setting.
 type Policy struct {
-	// MaxTurns is a fixed limit. Zero means automatic, and Off turns the gate off.
+	Mode Mode
+	// MaxTurns is a fixed limit; zero means automatic.
 	MaxTurns int
-	Off      bool
 	// Reserve is the memory kept free; zero means a tenth of the machine, at
 	// least MinReserve.
 	Reserve uint64
+	// MaxWait bounds a turn's wait; zero means DefaultMaxWait.
+	MaxWait time.Duration
 }
 
-// Readings is what the machine looks like now.
-type Readings struct {
-	Cores    int
-	Load1    float64
-	MemTotal uint64
-	MemAvail uint64
+// State is what the gate remembers between decisions, so a machine that flaps
+// around a threshold does not flap the limit.
+type State struct {
+	Overloaded bool `json:"overloaded"`
+	Calm       int  `json:"calm"`
+	// TurnBytes is the measured memory of one turn, and MeasuredAt when.
+	TurnBytes  uint64    `json:"turnBytes,omitempty"`
+	MeasuredAt time.Time `json:"measuredAt,omitempty"`
 }
 
-// Limit is the most turns of one pool that may run, given the turns that run
-// now. An automatic limit adds the turns the free memory can still take to the
-// turns that already run, and adds none while the machine is overloaded. At
-// least one turn always runs, so work never stops altogether.
-func Limit(p Policy, r Readings, held int) int {
-	if p.Off {
-		return -1
+// over reports whether r is past the thresholds, scaled by factor: 1 for
+// entering overload, 0.5 for the calm test.
+func over(r Readings, factor float64) bool {
+	if r.PressureMem >= 0 || r.PressureCPU >= 0 {
+		return r.PressureMem >= EnterMemPressure*factor || r.PressureCPU >= EnterCPUPressure*factor
+	}
+	return r.Cores > 0 && r.Load1/float64(r.Cores) > EnterLoad*factor
+}
+
+// Decide returns the most turns of one pool that may run, given the turns that
+// run now, and the state to keep. The limit adds the turns the free memory can
+// still take to the turns that run; it adds none while the machine is
+// overloaded, and an overload ends only after CalmReads calm readings. At least
+// one turn always runs.
+func Decide(p Policy, r Readings, held int, st State) (int, State) {
+	switch {
+	case over(r, 1):
+		st.Overloaded, st.Calm = true, 0
+	case st.Overloaded && over(r, 0.5):
+		st.Calm = 0
+	case st.Overloaded:
+		if st.Calm++; st.Calm >= CalmReads {
+			st.Overloaded, st.Calm = false, 0
+		}
 	}
 	if p.MaxTurns > 0 {
-		return p.MaxTurns
+		return p.MaxTurns, st
 	}
-	hard := max(r.Cores, 1) * TurnsPerCore
-	if r.Cores > 0 && r.Load1/float64(r.Cores) > OverloadLoad {
-		return max(held, floorTurns)
+	if st.Overloaded {
+		return max(held, floorTurns), st
+	}
+	per := st.TurnBytes
+	if per == 0 {
+		per = FallbackTurnBytes
 	}
 	reserve := p.Reserve
 	if reserve == 0 {
@@ -61,55 +100,13 @@ func Limit(p Policy, r Readings, held int) int {
 	}
 	room := 0
 	if r.MemAvail > reserve {
-		room = int((r.MemAvail - reserve) / PerTurnBytes)
+		room = int((r.MemAvail - reserve) / per)
 	}
-	return min(max(held+room, floorTurns), hard)
+	hard := max(r.Cores, 1) * TurnsPerCore
+	return min(max(held+room, floorTurns), hard), st
 }
 
 // RoomShare is the most slots one room may hold of a pool whose limit is
 // limit: half, so another room can always start. A pool of one or two slots
 // leaves a room one.
 func RoomShare(limit int) int { return max(limit/2, 1) }
-
-// Read reads the machine's load and memory from /proc. A machine without those
-// files returns an error, and the caller leaves the gate open.
-func Read() (Readings, error) {
-	r := Readings{Cores: runtime.NumCPU()}
-	loadavg, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return Readings{}, err
-	}
-	if _, err := fmt.Sscanf(string(loadavg), "%f", &r.Load1); err != nil {
-		return Readings{}, err
-	}
-	f, err := os.Open("/proc/meminfo")
-	if err != nil {
-		return Readings{}, err
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		key, rest, ok := strings.Cut(scanner.Text(), ":")
-		if !ok {
-			continue
-		}
-		fields := strings.Fields(rest)
-		if len(fields) == 0 {
-			continue
-		}
-		kb, err := strconv.ParseUint(fields[0], 10, 64)
-		if err != nil {
-			continue
-		}
-		switch key {
-		case "MemTotal":
-			r.MemTotal = kb << 10
-		case "MemAvailable":
-			r.MemAvail = kb << 10
-		}
-	}
-	if r.MemTotal == 0 {
-		return Readings{}, fmt.Errorf("no MemTotal in /proc/meminfo")
-	}
-	return r, scanner.Err()
-}

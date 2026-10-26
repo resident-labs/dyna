@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/admission"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/browserconfig"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 )
 
 // Item is one settings key with its effective value and where it came from.
@@ -41,7 +43,9 @@ var help = map[string]string{
 	settings.KeyVoiceURL:               "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
 	settings.KeyComputersEnabled:       "Give agent sessions a lazy Linux computer when labwc is installed. Applies to the next harness turn.",
 	settings.KeySessionCheckInInterval: "Parent check-in interval (default 15m). Zero disables check-ins.",
-	settings.KeyAdmissionMaxTurns:      "Most agent turns that run at once on this machine: auto (from free memory and load), off, or a number. Extra turns wait in the queue. Applies to the next turn.",
+	settings.KeyAdmissionMode:          "What the turn limit does: off, observe (default: record the turns it would hold and hold none) or enforce. The owner's own messages and room roots are never held. Applies to the next turn.",
+	settings.KeyAdmissionMaxWait:       "Longest an enforced turn waits for a free slot before it runs anyway. Applies to the next turn.",
+	settings.KeyAdmissionMaxTurns:      "Most agent turns that run at once on this machine: auto (from memory and CPU pressure) or a number. Applies to the next turn.",
 	settings.KeyAdmissionReserve:       "Memory the automatic turn limit keeps free: auto (a tenth of the machine, at least 2 GiB) or a size such as 4 GiB. Applies to the next turn.",
 	settings.KeyDoctorCondition:        "When the doctor hook examines a machine, such as \"load>2/core for 5m or memory>85%\". Empty uses the default. Applies to the next doctor run.",
 	settings.KeyLibraryEnabled:         "JSON list of main checkout paths whose librarian runs. Use dyna library enable and disable, which also add and remove the librarian hooks.",
@@ -94,6 +98,8 @@ func Items() ([]Item, error) {
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeySessionCheckInInterval, Value: v.SessionCheckInInterval.String(), Source: v.Source(settings.KeySessionCheckInInterval), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
+		{Key: settings.KeyAdmissionMode, Value: v.AdmissionMode, Source: v.Source(settings.KeyAdmissionMode), LiveVsRestart: settings.LiveNextOperation, Kind: "enum", Options: []string{settings.AdmissionOff, settings.AdmissionObserve, settings.AdmissionEnforce}, Display: admissionSummary(v)},
+		{Key: settings.KeyAdmissionMaxWait, Value: v.AdmissionMaxWait.String(), Source: v.Source(settings.KeyAdmissionMaxWait), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
 		{Key: settings.KeyAdmissionMaxTurns, Value: v.AdmissionMaxTurns, Source: v.Source(settings.KeyAdmissionMaxTurns), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyAdmissionReserve, Value: admissionReserveText(v), Source: v.Source(settings.KeyAdmissionReserve), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyDoctorCondition, Value: v.DoctorCondition, Source: v.Source(settings.KeyDoctorCondition), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
@@ -213,4 +219,25 @@ func admissionReserveText(v settings.Values) string {
 		return settings.AdmissionAuto
 	}
 	return settings.FormatBytes(v.AdmissionReserve)
+}
+
+// admissionSummary tells the owner what the turn limit did in the last day, so
+// the choice to enforce rests on a count and not a guess.
+func admissionSummary(v settings.Values) string {
+	if v.AdmissionMode == settings.AdmissionOff {
+		return v.AdmissionMode
+	}
+	sum, err := admission.Observed{DataDir: store.DataDir()}.Summarize(time.Now().Add(-24 * time.Hour))
+	if err != nil {
+		return v.AdmissionMode
+	}
+	verb := "held"
+	if v.AdmissionMode == settings.AdmissionObserve {
+		verb = "would have held"
+	}
+	text := fmt.Sprintf("%s · %s %d turns in the last 24 h", v.AdmissionMode, verb, sum.Turns)
+	if sum.Turns > 0 {
+		text += fmt.Sprintf(", up to %d over the limit", sum.MostOver)
+	}
+	return text
 }
