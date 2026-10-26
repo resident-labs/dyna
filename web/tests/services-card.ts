@@ -31,5 +31,5 @@ api.listServices = () => Promise.resolve([
 ])
 api.globalHookRunLog = () => Promise.resolve({ tail: 'maintenance: pruning worktrees\nerror: disk read failed on /var/lib/dyna\nexit status 1', exitCode: 1 })
 
-const room = { id: 'room-1', name: 'dyna', repo: '/repo', archived: false } as unknown as Room
+const room: Room = { id: 'room-1', name: 'dyna', repo: '/repo', lastActivity: '', unread: 0, running: 0, members: 1, pinned: false, pinOrder: 0, archived: false }
 mount(ServicesCard, { target: need(document.getElementById('app'), 'app'), props: { rooms: [room], onroom: (id: string, view?: string) => { document.body.dataset.opened = `${id}:${view ?? ''}` } } })
