@@ -196,6 +196,7 @@ not-state internal/shells/events.go Store.Notify 3 # a change nudge file for the
 not-state internal/shells/shells.go StartSupervisor 3 # the supervisor's own error log, and supervisor.pid, a process-liveness file like turn.lock; until item 2 moves the shell supervisor's writes into engine calls, with liveness from the recorded process and a pidfd watch
 not-state internal/shells/shells.go Store.Supervise 3 # the job's append-only output.log (rule r10), and the empty exited wake marker for Wait, written after the exit is saved in dyna.db
 not-state internal/shells/shells.go Store.create 1 # creates the job's empty append-only output.log
+not-state internal/shells/shells.go Store.discardStart 1 # removes the job folder (output.log and supervisor files) after the job row was deleted through the state helper
 not-state internal/shells/shells.go Store.logStop 1 # appends a stop reason to the job's append-only log
 not-state internal/store/store.go WriteJSON 1 # the JSON write primitives themselves
 not-state internal/store/store.go flock 1 # the JSON write primitives themselves

@@ -350,21 +350,21 @@ func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd st
 	if len(t.Env) > 0 {
 		cmd = append(append([]string{"env"}, t.Env...), cmd...)
 	}
-	meta, err := t.Store.Create(shells.StartOptions{Name: description, Cmd: cmd, Cwd: cwd, Owner: t.Owner, RoomID: t.RoomID, Room: t.Room})
-	if err != nil {
-		return err
-	}
 	// Hold the exit before the supervisor starts, so a fast command never
-	// both returns here and wakes the session.
-	if err := t.Store.HoldExit(meta.ID, holdUntil(limit)); err != nil {
-		return err
-	}
-	if t.Foreground {
+	// both returns here and wakes the session. A job that cannot begin leaves
+	// no record and no command behind.
+	meta, err := t.Store.StartJob(shells.StartOptions{Name: description, Cmd: cmd, Cwd: cwd, Owner: t.Owner, RoomID: t.RoomID, Room: t.Room}, holdUntil(limit), func(meta shells.Meta) error {
+		if t.Foreground {
+			t.mu.Lock()
+			t.started = append(t.started, meta.ID)
+			t.mu.Unlock()
+		}
+		return shells.Spawn(t.Exe, meta.ID)
+	})
+	if err != nil {
 		t.mu.Lock()
-		t.started = append(t.started, meta.ID)
+		t.started = slices.DeleteFunc(t.started, func(id string) bool { return id == meta.ID })
 		t.mu.Unlock()
-	}
-	if err := shells.Spawn(t.Exe, meta.ID); err != nil {
 		return err
 	}
 	in, ended, err := t.wait(ctx, meta.ID, limit, nil)
