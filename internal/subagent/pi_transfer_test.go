@@ -54,6 +54,9 @@ if os.environ.get("FAKE_PI_FAIL_RESUME") == "1" and resume:
 if os.environ.get("FAKE_PI_FAIL_CROSS_PROJECT") == "1" and "--session" in args and "--fork" not in args:
     sys.stderr.write("fake pi: Session found in different project. Fork this session into current directory? [y/N] Aborted.\n")
     sys.exit(2)
+if os.environ.get("FAKE_PI_FAIL_FORK_QUOTA") == "1" and "--fork" in args:
+    sys.stderr.write("429 quota exhausted\n")
+    sys.exit(2)
 
 def emit(record):
     print(json.dumps(record), flush=True)
