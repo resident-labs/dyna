@@ -18,6 +18,23 @@ test('a running worker shows its elapsed time and what it does now', async (t) =
   assert.match(body, /<p class="line live[^"]*">webfetch: https:\/\/x\.dev<\/p>/)
 })
 
+test('phases that share stages show a lanes grid and a failed agent in the attention strip', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const agent = (id: number, phase: string, status: string, label = `T${id}`): RunAgent => ({ id, label, phase, status })
+  const detail = {
+    run: { id: 'wf_a', name: 'continuous', status: 'running', startedAt: new Date().toISOString() },
+    agents: [agent(1, 'CH prepare', 'ok'), agent(2, 'BS prepare', 'ok'), agent(3, 'BS review', 'error', 'reviewer'), agent(4, 'CH review', 'running')],
+    agentTotal: 4, agentRunning: 1, agentFailed: 1, logs: [], phases: [],
+  }
+  const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, /aria-label="Progress by lane and stage"/)
+  assert.match(body, /reviewer failed in BS review/)
+  assert.match(body, /Tap a cell to see its agents/)
+  assert.doesNotMatch(body, /class="agent /, 'agents stay folded until a cell is opened')
+})
+
 test('a running run offers Pause, and a paused one says so and offers Resume', async (t) => {
   const vite = await createTestServer(t)
   const { render } = await vite.ssrLoadModule('svelte/server')
