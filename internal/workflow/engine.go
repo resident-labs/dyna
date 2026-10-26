@@ -1114,7 +1114,7 @@ Keep the journal even on read-only exploration tasks: journaling is always permi
 const workflowRestriction = `[DYNA WORKFLOW RESTRICTION]
 Put throwaway files (screenshots, cards, scripts, notes) in $DYNA_SCRATCH, never in a repository.
 You must complete this task yourself. Do not spawn, delegate to, or invoke any subagent, child agent, or other agent, and do not start dyna runs or subagents. This restriction overrides any contrary instruction in the task.
-Every other dyna command and tool a session uses is available to you, including dyna computer, dyna browser, dyna post and dyna guide.
+Every other dyna command and tool a session uses is available to you, including dyna computer, dyna browser, dyna post and dyna guide; dyna post reaches @root and workers of your own run.
 [/DYNA WORKFLOW RESTRICTION]`
 
 // workerInstructions is a workflow worker's standing instructions: the work

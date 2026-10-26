@@ -157,6 +157,9 @@ func TestWorkerInstructionsGrantSessionTools(t *testing.T) {
 	if !strings.Contains(text, "Every other dyna command and tool a session uses is available") {
 		t.Fatal("worker instructions do not grant every session tool")
 	}
+	if !strings.Contains(text, "dyna post reaches @root and workers of your own run") {
+		t.Fatal("worker instructions do not state the worker post scope")
+	}
 }
 
 func TestWorkflowRestrictionPromptReachesEveryWorker(t *testing.T) {
