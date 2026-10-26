@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -392,7 +393,8 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	}
 	cmd := exec.Command(m.Cmd[0], m.Cmd[1:]...)
 	cmd.Dir = m.Cwd
-	env, noDisplay := home.LaunchEnv(), false
+	// LaunchEnv was captured before awaitLaunch consumed the gate marker.
+	env, noDisplay := slices.DeleteFunc(home.LaunchEnv(), func(kv string) bool { return strings.HasPrefix(kv, launchGateEnv+"=") }), false
 	if s.CommandEnv != nil {
 		env, noDisplay = s.CommandEnv(ctx, dir, m, env)
 	}
@@ -942,6 +944,9 @@ func awaitLaunch() error {
 	if err != nil || fd < 3 {
 		return fmt.Errorf("invalid %s %q", launchGateEnv, v)
 	}
+	// The marker is consumed: the descriptor is closed below, so no later process
+	// may read it as a gate.
+	_ = os.Unsetenv(launchGateEnv)
 	gate := os.NewFile(uintptr(fd), "launch gate")
 	defer gate.Close()
 	var b [1]byte
