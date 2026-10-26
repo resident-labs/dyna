@@ -406,6 +406,28 @@ func ValidateName(name string) error {
 	return nil
 }
 
+// ValidID reports an ID in the shape NewID mints:
+// ses_<date>-<time>-<8 hex digits>. The generated-name suffix and the
+// worktree branch both rely on that shape.
+func ValidID(id string) bool {
+	rest, ok := strings.CutPrefix(id, runstore.SessionDirPrefix)
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, "-")
+	if len(parts) != 3 || len(parts[2]) != 8 {
+		return false
+	}
+	if _, err := time.Parse("20060102", parts[0]); err != nil {
+		return false
+	}
+	if _, err := time.Parse("150405", parts[1]); err != nil {
+		return false
+	}
+	_, err := hex.DecodeString(parts[2])
+	return err == nil
+}
+
 // NewID mints a session id.
 func NewID() string {
 	b := make([]byte, 4)
