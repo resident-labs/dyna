@@ -8,13 +8,13 @@
   import { createResultLoader, createWorkerResults, type LoadedResult, type WorkerRows } from './runResult.ts'
   import { errorText } from '../errorText.ts'
   import type { RunAgent, RunDetail, RunSummary } from '../api/workflow.ts'
-  import { hiddenConnectors } from './chain.ts'
   import JsonView from '../ui/JsonView.svelte'
   import WorkerDetail from './WorkerDetail.svelte'
   import { previewLine } from './runPreview.ts'
   import Segmented from '../ui/Segmented.svelte'
   import RunIcon from './RunIcon.svelte'
   import RunGrid from './RunGrid.svelte'
+  import PhaseList from './PhaseList.svelte'
   import { cellOf, laneGrid, type CellRef, type CellState } from './lanes.ts'
 
   interface Props {
@@ -82,12 +82,29 @@
   // A new run starts with no cell open. Only the id is read, so the refresh that
   // replaces `detail` every 2 seconds keeps the open cell.
   let runId = $derived(detail?.run.id ?? '')
+  // Without a grid, each phase row opens on its own.
+  // A phase is open while any agent id it holds is listed, so the open row stays
+  // put when the agent window trims some of its agents or a running phase adds more.
+  let openAgentIds = $state<number[]>([])
   $effect(() => {
     void runId
     picked = null
+    openAgentIds = []
   })
+  const isOpenGroup = (g: Group) => g.agents.some((a) => openAgentIds.includes(a.id))
+  // An open phase takes in the agents it gains, so trimming the old ones later keeps it open.
+  $effect(() => {
+    const gained = groups.filter(isOpenGroup).flatMap((g) => g.agents.map((a) => a.id)).filter((id) => !openAgentIds.includes(id))
+    if (gained.length) openAgentIds = [...openAgentIds, ...gained]
+  })
+  function togglePhase(key: number) {
+    const g = groups.find((x) => x.agents[0]?.id === key)
+    if (!g) return
+    const ids = g.agents.map((a) => a.id)
+    openAgentIds = isOpenGroup(g) ? openAgentIds.filter((id) => !ids.includes(id)) : [...openAgentIds, ...ids]
+  }
   let shownGroups = $derived.by(() => {
-    if (!grid) return groups
+    if (!grid) return groups.length > 1 ? [] : groups
     const cell = picked ? grid.lanes.find((l) => l.name === picked?.lane)?.cells[picked.col] : null
     return (cell?.phases ?? []).map((i) => groups[i]).filter((g): g is Group => !!g)
   })
@@ -106,23 +123,6 @@
   function pickGroup(group: number) {
     if (grid) picked = cellOf(grid, group)
   }
-  // The phase chain wraps, and a connector joins only two pills on one line:
-  // hide the connectors that fall across a wrap as the chain changes width.
-  let steps = $state<HTMLOListElement | null>(null)
-  $effect(() => {
-    const el = steps
-    const count = groups.length
-    if (!el || !count) return
-    const fit = () => {
-      const pills = [...el.querySelectorAll<HTMLElement>('li:not(.line)')]
-      const hidden = new Set(hiddenConnectors(pills.map((p) => p.offsetTop)))
-      el.querySelectorAll('li.line').forEach((line, i) => line.classList.toggle('wrap', hidden.has(i)))
-    }
-    fit()
-    const observer = new ResizeObserver(fit)
-    observer.observe(el)
-    return () => observer.disconnect()
-  })
   // Counts come from Go over every agent, not just the shown ones.
   let counts = $derived({ running: detail?.agentRunning ?? 0, error: detail?.agentFailed ?? 0, total: detail?.agentTotal ?? 0 })
   let pct = $derived(counts.total ? Math.round(((counts.total - counts.running) / counts.total) * 100) : 0)
@@ -167,6 +167,42 @@
     <p class="quiet">Loading run…</p>
   {:else}
     {@const run = detail.run}
+    {#snippet agentRows(g: Group)}
+      <div class="agents">
+        {#each g.agents as a (a.id)}
+          {@const row = workerRows[a.id]}
+          <div class="agent {a.status}" class:expanded={row?.open}>
+            <RunIcon status={a.status} size={18} />
+            <span class="who">
+              <span class="label">{a.label || `agent ${a.id}`}</span>
+              {#if a.profile}<span class="pill">{a.profile}</span>{/if}
+              {#if a.cached}<span class="pill">cached</span>{/if}
+            </span>
+            <span class="time">
+              {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Session</button>{/if}
+              {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
+              {#if a.status === 'ok' || a.status === 'running'}<button class="open" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {a.label || `agent ${a.id}`}" onclick={() => workers.toggle(run.id, a.id, a.status)}><span aria-hidden="true">›</span></button>{/if}
+            </span>
+            {#if a.error}
+              <p class="line bad">{a.error}</p>
+            {:else if a.status === 'running'}
+              {@const ms = a.doing?.since ? now - a.doing.since : 0}
+              <p class="line live" class:long={isLongCall(ms)}>{a.doing?.text || 'Starting'}{#if ms}{' · ' + elapsed(ms)}{/if}</p>
+            {:else if a.preview}
+              {@const line = previewLine(a.preview)}
+              {#if line}<p class="line">{line}</p>{/if}
+            {/if}
+            {#if row?.open}
+              <div class="full">
+                {#if row.value}<WorkerDetail value={row.value} />{/if}
+                {#if row.loading}<p class="quiet" role="status">{row.value ? 'Refreshing the result…' : 'Loading the result…'}</p>{/if}
+                {#if row.error}<div class="retry-row"><p class="err">Could not load the result: {row.error}</p><button class="retry" aria-label="Retry result for {a.label || ('agent ' + a.id)}" onclick={() => workers.retry(run.id, a.id, a.status)}>Retry</button></div>{/if}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/snippet}
     <header class="hero {run.status}">
       <div class="title">
         <RunIcon status={run.status} size={30} />
@@ -223,16 +259,9 @@
       <RunGrid {grid} {picked} onpick={(ref) => (picked = ref)} />
       {#if !picked}<p class="quiet">Tap a cell to see its agents.</p>{/if}
     {:else if groups.length > 1}
-      <ol class="steps" aria-label="Phases" bind:this={steps}>
-        {#each groups as g, i}
-          <li class={g.state}>
-            <RunIcon status={g.state} size={16} />
-            <span>{g.phase}</span>
-            <em>{g.done}/{g.agents.length}</em>
-          </li>
-          {#if i < groups.length - 1}<li class="line" aria-hidden="true"></li>{/if}
-        {/each}
-      </ol>
+      <PhaseList rows={groups.map((g) => ({ key: g.agents[0]?.id ?? 0, open: isOpenGroup(g), phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))} ontoggle={togglePhase}>
+        {#snippet agents(key)}{@const g = groups.find((x) => x.agents[0]?.id === key)}{#if g}{@render agentRows(g)}{/if}{/snippet}
+      </PhaseList>
     {/if}
 
     {#if !detail.agents.length}
@@ -243,40 +272,7 @@
     {/if}
     {#each shownGroups as g}
       <h2>{g.phase}<span>{g.agents.length} agent{g.agents.length === 1 ? '' : 's'}</span></h2>
-      <div class="agents">
-        {#each g.agents as a (a.id)}
-          {@const row = workerRows[a.id]}
-          <div class="agent {a.status}" class:expanded={row?.open}>
-            <RunIcon status={a.status} size={18} />
-            <span class="who">
-              <span class="label">{a.label || `agent ${a.id}`}</span>
-              {#if a.profile}<span class="pill">{a.profile}</span>{/if}
-              {#if a.cached}<span class="pill">cached</span>{/if}
-            </span>
-            <span class="time">
-              {#if a.session && onopen}<button class="session" onclick={() => onopen?.(run, a)} title="Open this agent's session to read it or send it a message">Session</button>{/if}
-              {a.durMs ? secs(a.durMs) : a.status === 'running' ? (a.started ? secs(now - a.started) : 'working…') : '—'}
-              {#if a.status === 'ok' || a.status === 'running'}<button class="open" aria-expanded={!!row?.open} aria-label="{row?.open ? 'Hide' : 'Show'} the {a.status === 'running' ? 'journal' : 'result'} of {a.label || `agent ${a.id}`}" onclick={() => workers.toggle(run.id, a.id, a.status)}><span aria-hidden="true">›</span></button>{/if}
-            </span>
-            {#if a.error}
-              <p class="line bad">{a.error}</p>
-            {:else if a.status === 'running'}
-              {@const ms = a.doing?.since ? now - a.doing.since : 0}
-              <p class="line live" class:long={isLongCall(ms)}>{a.doing?.text || 'Starting'}{#if ms}{' · ' + elapsed(ms)}{/if}</p>
-            {:else if a.preview}
-              {@const line = previewLine(a.preview)}
-              {#if line}<p class="line">{line}</p>{/if}
-            {/if}
-            {#if row?.open}
-              <div class="full">
-                {#if row.value}<WorkerDetail value={row.value} />{/if}
-                {#if row.loading}<p class="quiet" role="status">{row.value ? 'Refreshing the result…' : 'Loading the result…'}</p>{/if}
-                {#if row.error}<div class="retry-row"><p class="err">Could not load the result: {row.error}</p><button class="retry" aria-label="Retry result for {a.label || ('agent ' + a.id)}" onclick={() => workers.retry(run.id, a.id, a.status)}>Retry</button></div>{/if}
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
+      {@render agentRows(g)}
     {/each}
 
     {#if detail.logs.length}
@@ -366,12 +362,6 @@
   dd { margin: 3px 0 0; font-size: 16px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
   .runnote { color: var(--muted); margin: 14px 0 0; font-size: 14px; background: var(--raise); border-radius: 8px; padding: 10px 12px; }
   .runerr { color: var(--coral); margin: 14px 0 0; font-size: 14px; background: rgba(239, 138, 128, 0.08); border-radius: 8px; padding: 10px 12px; }
-  .steps { list-style: none; display: flex; align-items: center; padding: 0; margin: 18px 0 4px; flex-wrap: wrap; row-gap: 8px; }
-  .steps li:not(.line) { display: inline-flex; align-items: center; gap: 7px; background: var(--side); border: 1px solid var(--line-soft); border-radius: 18px; padding: 5px 12px 5px 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
-  .steps li.running { border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
-  .steps em { font-style: normal; font-weight: 500; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .steps .line { width: 22px; height: 2px; background: var(--line); }
-  .steps .line.wrap { visibility: hidden; }
   h2 { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 24px 0 8px; }
   h2 span { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); }
   /* A group never clips or shrinks a row, so every row keeps its whole content:

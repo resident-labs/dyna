@@ -35,6 +35,23 @@ test('phases that share stages show a lanes grid and a failed agent in the atten
   assert.doesNotMatch(body, /class="agent /, 'agents stay folded until a cell is opened')
 })
 
+test('phases without shared stages show one row each, with agents folded', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: Run } = await vite.ssrLoadModule('/src/lib/workflows/Run.svelte')
+  const agent = (id: number, phase: string): RunAgent => ({ id, label: `T${id}`, phase, status: id === 3 ? 'running' : 'ok' })
+  const detail = {
+    run: { id: 'wf_a', name: 'research', status: 'running', startedAt: new Date().toISOString() },
+    agents: [agent(1, 'Plan'), agent(2, 'Build'), agent(3, 'Build')],
+    agentTotal: 3, agentRunning: 1, agentFailed: 0, logs: [], phases: [],
+  }
+  const body = render(Run, { props: { detail } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, /aria-label="Phases"/)
+  assert.match(body, /class="name[^"]*">Build<\/span>[\s\S]*?1\/2/)
+  assert.doesNotMatch(body, /class="agent /, 'agents stay folded under their row')
+  assert.doesNotMatch(body, /class="steps/, 'the chip chain is gone')
+})
+
 test('a running run offers Pause, and a paused one says so and offers Resume', async (t) => {
   const vite = await createTestServer(t)
   const { render } = await vite.ssrLoadModule('svelte/server')
