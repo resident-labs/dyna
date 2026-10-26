@@ -267,47 +267,54 @@ func setPublic(t *testing.T, public bool) {
 	t.Cleanup(func() { publicRepo = previous })
 }
 
-// A read of a public repository outside every room runs (D-272); a write to it,
-// and a read of a repository that is not public, are still refused.
-func TestPublicReadOutsideTheRoomRunsButWritesDoNot(t *testing.T) {
+// A REST read of a public repository outside every room runs without any
+// credentials (D-272). Writes, other commands, other endpoints and a repository
+// that is not public now are refused.
+func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T) {
 	records := setupRooms(t, "resident-labs/project")
 	ctx := WithRoom(context.Background(), records[0].ID)
 	exe := filepath.Join(t.TempDir(), "gh")
 	log := filepath.Join(t.TempDir(), "calls")
 	t.Setenv("GH_CALLS", log)
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\necho \"$@\" >> \"$GH_CALLS\"\n"), 0700); err != nil {
+	t.Setenv("GH_TOKEN", "ambient-secret")
+	script := "#!/bin/sh\necho \"token=[$GH_TOKEN] config=$(ls -A \"$GH_CONFIG_DIR\" | wc -l) $*\" >> \"$GH_CALLS\"\n"
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
 	run := func(args ...string) error {
 		return Run(ctx, Command(ctx, exe, records[0].Repo, args...))
 	}
-	setPublic(t, true)
+	var asked []string
+	publicRepo = func(_ context.Context, r repository) bool { asked = append(asked, r.name); return true }
+	t.Cleanup(func() { publicRepo = func(context.Context, repository) bool { return false } })
 	for _, args := range [][]string{
 		{"api", "repos/ludovic111/horizon/issues/1340"},
-		{"api", "repos/ludovic111/horizon/issues/1340", "-X", "GET"},
-		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
-		{"pr", "view", "7", "--repo", "ludovic111/horizon"},
-		{"repo", "view", "ludovic111/horizon", "--repo", "ludovic111/horizon"},
+		{"api", "repos/ludovic111/horizon/issues/1340", "-X", "GET", "--jq", ".title"},
 	} {
 		if err := run(args...); err != nil {
 			t.Fatalf("public read %q = %v, want it to run", args, err)
 		}
 	}
+	// Each access asks again; the question names the repository the command reads.
+	if strings.Join(asked, " ") != "ludovic111/horizon ludovic111/horizon" {
+		t.Fatalf("visibility asked for %v, want one check per access of the endpoint's repository", asked)
+	}
 	for _, args := range [][]string{
 		{"api", "repos/ludovic111/horizon/issues", "-X", "POST"},
+		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
 		{"issue", "create", "--repo", "ludovic111/horizon"},
-		{"pr", "comment", "1", "--repo", "ludovic111/horizon"},
 	} {
 		if err := run(args...); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
-			t.Fatalf("write %q = %v, want the acting-room refusal", args, err)
+			t.Fatalf("%q = %v, want the acting-room refusal", args, err)
 		}
 	}
-	setPublic(t, false)
+	publicRepo = func(context.Context, repository) bool { return false }
 	if err := run("api", "repos/ludovic111/horizon/issues/1340"); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
-		t.Fatalf("read of a repository that is not public = %v, want the refusal", err)
+		t.Fatalf("read of a repository that is not public now = %v, want the refusal", err)
 	}
 	calls, _ := os.ReadFile(log)
-	if n := strings.Count(string(calls), "\n"); n != 5 {
-		t.Fatalf("gh ran %d times, want 5 (only the public reads):\n%s", n, calls)
+	want := "token=[] config=0 api repos/ludovic111/horizon/issues/1340\ntoken=[] config=0 api repos/ludovic111/horizon/issues/1340 -X GET --jq .title\n"
+	if string(calls) != want {
+		t.Fatalf("gh calls =\n%s\nwant only the two anonymous public reads:\n%s", calls, want)
 	}
 }
