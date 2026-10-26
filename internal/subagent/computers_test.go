@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"dyna-agent/internal/computers"
+	"dyna-agent/internal/testsafe"
 	"fmt"
 	"net"
 	"os"
@@ -14,7 +15,7 @@ import (
 
 func TestCloseReleasesComputerThroughTypedProtocol(t *testing.T) {
 	e := newTestEnv(t)
-	runtime, err := os.MkdirTemp("/tmp", "dcl-")
+	runtime, err := testsafe.ShortTemp("dcl-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestCloseReleasesComputerThroughTypedProtocol(t *testing.T) {
 
 func TestCloseContinuesAfterStaleComputerSocket(t *testing.T) {
 	e := newTestEnv(t)
-	runtime, err := os.MkdirTemp("/tmp", "dcs-")
+	runtime, err := testsafe.ShortTemp("dcs-")
 	if err != nil {
 		t.Fatal(err)
 	}
