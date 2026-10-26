@@ -269,14 +269,14 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 // answered past its deadline. The caller names the session, so the lookup is
 // exact, and no second start is needed.
 func lateStart(m *subagent.Manager, id string, err error, stderr io.Writer) (subagent.Info, bool) {
-	if id == "" || !callspec.IsLate(err) {
+	if id == "" || !(callspec.IsLate(err) || callspec.IsCutOff(err) || strings.Contains(err.Error(), "session "+id+" already exists")) {
 		return subagent.Info{}, false
 	}
 	info, lookupErr := m.Store.Info(id)
 	if lookupErr != nil {
 		return subagent.Info{}, false
 	}
-	fmt.Fprintf(stderr, "dyna: the engine answered StartSubagent late; session %s exists, so this start is not repeated\n", info.Address())
+	fmt.Fprintf(stderr, "dyna: StartSubagent got no answer; session %s exists, so this start is not repeated\n", info.Address())
 	return info, true
 }
 

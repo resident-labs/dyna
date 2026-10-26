@@ -25,6 +25,29 @@ func TestChildSuccessReportsOnlyToCurrentParent(t *testing.T) {
 	}
 }
 
+// A question posted to the parent mid-turn is not the report: the turn's final
+// result still reaches the parent (D-226).
+func TestMidTurnPostToParentDoesNotHideTheFinalReport(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	rec := e.room()
+	parent := e.start(rec, "lead", nil)
+	child := e.start(rec, "child", &parent)
+	child.CurrentTurn = 1
+	if _, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: child}, Mentions: []string{"@parent"}, Text: "Which option sets the lifetime?"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) { turn.Result = "Ready for review." }); err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Message.To, []string{parent.Address()}) || !turnReport(result.Message, room.TurnCompleted) {
+		t.Fatalf("the final report was hidden by the earlier post: %+v", result)
+	}
+}
+
 func TestExplicitPostSuppressesOnlySuccessfulCompletion(t *testing.T) {
 	for _, seat := range []bool{false, true} {
 		for _, failed := range []bool{false, true} {
@@ -40,15 +63,19 @@ func TestExplicitPostSuppressesOnlySuccessfulCompletion(t *testing.T) {
 				}
 				child := e.start(rec, "child", &parent)
 				child.CurrentTurn = 1
-				// The explicit post is the child's report: no successful completion
-				// may repeat it, though a failure still reports.
+				// With no final text the explicit post is the child's report: no
+				// successful completion may repeat it, though a failure still reports.
 				if _, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: child}, Mentions: []string{"@parent"}, Text: "The result is recorded."}); err != nil {
 					t.Fatal(err)
 				}
-				if failed {
-					if _, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) { turn.Status, turn.Error = subagent.TurnError, "provider unavailable" }); err != nil {
-						t.Fatal(err)
+				// The turn owes no final text, so the post is its whole report.
+				if _, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) {
+					turn.Result = nil
+					if failed {
+						turn.Status, turn.Error = subagent.TurnError, "provider unavailable"
 					}
+				}); err != nil {
+					t.Fatal(err)
 				}
 				result, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
 				if err != nil {

@@ -106,6 +106,11 @@ CREATE TABLE local_ci_hosted_runs (
  PRIMARY KEY(repo,sha)
 );`
 
+// resultsRecordedAtSchema stamps each result with the Unix second it was last
+// saved, so maintenance can delete old ones (PruneResults).
+const resultsRecordedAtSchema = `ALTER TABLE local_ci_results ADD COLUMN recorded_at INTEGER NOT NULL DEFAULT 0;
+UPDATE local_ci_results SET recorded_at=CAST(strftime('%s','now') AS INTEGER);`
+
 // cacheCleanSchema records when Dyna last cleaned a CI machine's own caches.
 const cacheCleanSchema = `CREATE TABLE IF NOT EXISTS local_ci_cache_cleans (
  node TEXT PRIMARY KEY,
@@ -140,7 +145,7 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "localci.schema", 4, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "localci.schema", 5, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
 			// The machines migration drops this table, so it may be gone already.
@@ -156,6 +161,12 @@ func (s Store) open() (*sql.DB, error) {
 		}
 		if old == 0 {
 			if _, err := conn.ExecContext(context.Background(), storeSchema); err != nil {
+				return err
+			}
+		}
+		if old < 5 {
+			// Existing results start their retention clock at the migration.
+			if _, err := conn.ExecContext(context.Background(), resultsRecordedAtSchema); err != nil {
 				return err
 			}
 		}
@@ -323,7 +334,7 @@ func (s Store) LoadResult(ctx context.Context, repo, sha string) (Result, error)
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "result:" + sha}, func(conn *sql.Conn) error {
 		// A runner may have saved a newer result after our initial read.
-		_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO local_ci_results(repo,sha,payload) VALUES(?,?,?)", repo, sha, raw)
+		_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO local_ci_results(repo,sha,payload,recorded_at) VALUES(?,?,?,?)", repo, sha, raw, resultClock().Unix())
 		return err
 	})
 	if err != nil {
@@ -399,6 +410,10 @@ func (s Store) savePayload(ctx context.Context, table, repo, sha string, value a
 		key = "hosted:" + sha
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: key}, func(conn *sql.Conn) error {
+		if table == "local_ci_results" {
+			_, err := conn.ExecContext(ctx, "INSERT INTO local_ci_results(repo,sha,payload,recorded_at) VALUES(?,?,?,?) ON CONFLICT(repo,sha) DO UPDATE SET payload=excluded.payload, recorded_at=excluded.recorded_at", repo, sha, raw, resultClock().Unix())
+			return err
+		}
 		_, err := conn.ExecContext(ctx, "INSERT INTO "+table+"(repo,sha,payload) VALUES(?,?,?) ON CONFLICT(repo,sha) DO UPDATE SET payload=excluded.payload", repo, sha, raw)
 		return err
 	})
@@ -449,4 +464,60 @@ func (s Store) SaveWarm(ctx context.Context, repo, node, head string, at time.Ti
 ON CONFLICT(repo,node) DO UPDATE SET head=excluded.head, warmed_at=excluded.warmed_at`, repo, node, head, at.UTC().Format(time.RFC3339Nano))
 		return err
 	})
+}
+
+// resultClock stamps saved results. Tests replace it.
+var resultClock = time.Now
+
+// PruneBatch bounds one PruneResults delete, so no write holds the writer lock long.
+const PruneBatch = 100
+
+// PruneResults deletes results last saved before cutoff, except those for a
+// commit in keep. It deletes in batches, one short write each, and reports how
+// many rows it removed.
+func (s Store) PruneResults(ctx context.Context, cutoff time.Time, keep map[string]bool) (int, error) {
+	db, err := s.open()
+	if err != nil {
+		return 0, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT repo, sha FROM local_ci_results WHERE recorded_at<?", cutoff.Unix())
+	if err != nil {
+		return 0, err
+	}
+	type key struct{ repo, sha string }
+	var old []key
+	for rows.Next() {
+		var k key
+		if err := rows.Scan(&k.repo, &k.sha); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !keep[k.sha] {
+			old = append(old, k)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	removed := 0
+	for len(old) > 0 && ctx.Err() == nil {
+		batch := old[:min(PruneBatch, len(old))]
+		old = old[len(batch):]
+		err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			for _, k := range batch {
+				// A result saved again after the scan has a new time and stays.
+				res, err := conn.ExecContext(ctx, "DELETE FROM local_ci_results WHERE repo=? AND sha=? AND recorded_at<?", k.repo, k.sha, cutoff.Unix())
+				if err != nil {
+					return err
+				}
+				n, _ := res.RowsAffected()
+				removed += int(n)
+			}
+			return nil
+		})
+		if err != nil {
+			return removed, err
+		}
+	}
+	return removed, ctx.Err()
 }
