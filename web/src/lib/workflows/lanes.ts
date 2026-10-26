@@ -14,6 +14,8 @@ export interface PhaseInput {
   total: number
   lane?: string
   stage?: string
+  // commands counts the run() command calls in the group; agents hold the rest.
+  commands?: number
 }
 
 export interface LaneCell {
@@ -22,6 +24,9 @@ export interface LaneCell {
   total: number
   // runs counts the phase groups in the cell: review, fix, review is 2 reviews.
   runs: number
+  // commands counts the run() command calls in the cell, so a cell of mixed
+  // steps shows that it holds commands.
+  commands: number
   // phases holds the indexes of those groups in the input.
   phases: number[]
 }
@@ -83,9 +88,10 @@ export function laneGrid(phases: PhaseInput[]): LaneGrid | null {
       cell.done += p.done
       cell.total += p.total
       cell.runs++
+      cell.commands += p.commands ?? 0
       cell.phases.push(i)
     } else {
-      lane.cells[col] = { state: p.state, done: p.done, total: p.total, runs: 1, phases: [i] }
+      lane.cells[col] = { state: p.state, done: p.done, total: p.total, runs: 1, commands: p.commands ?? 0, phases: [i] }
     }
     lane.state = worst(lane.state, p.state)
   })
