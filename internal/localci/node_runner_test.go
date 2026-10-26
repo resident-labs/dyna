@@ -1270,3 +1270,149 @@ func TestEngineStopCoversEveryWayACheckEnds(t *testing.T) {
 		t.Fatalf("a plain cancellation reported %s, want %s", got, CauseCancelled)
 	}
 }
+
+// fakeNodeTools writes the programs a host check's script needs into dir.
+func fakeNodeTools(t *testing.T, dir string) {
+	t.Helper()
+	for _, name := range []string{"docker", "git", "systemctl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemd-run"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// runHostCheck runs a host check's real script with fake systemd tools and
+// returns the TMPDIR the check saw. The check leaves a file in it, so the test
+// can tell whether the wrapper removed the folder when the check ended.
+func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen string) {
+	t.Helper()
+	dir := t.TempDir()
+	fakeNodeTools(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(dir, "seen-tmpdir")
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: "printf %s \"$TMPDIR\" > " + record + "; touch \"$TMPDIR/scratch\""}
+	inner := nodeCheckScript(node, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	// The wrapper kills the rest of its process group when the check ends.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+dir+":"+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, env...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("check: %v: %s", err, output)
+	}
+	data, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("the check did not run: %v", err)
+	}
+	return string(data)
+}
+
+// A host check's temporary folder lives in the machine's check-tmp setting, so
+// a machine whose /var/tmp is slow storage can use memory instead. The folder
+// is removed when the check ends.
+func TestHostCheckTempFolderFollowsTheMachineSetting(t *testing.T) {
+	parent := t.TempDir()
+	seen := runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
+	if filepath.Dir(filepath.Dir(seen)) != parent {
+		t.Fatalf("TMPDIR = %q, want a folder inside %q", seen, parent)
+	}
+	if _, err := os.Stat(seen); !os.IsNotExist(err) {
+		t.Fatalf("the check's temporary folder was not removed: %v", err)
+	}
+}
+
+// With no setting, the folder is under the node's own temporary directory, not
+// under the owner's home or the run's folder.
+func TestHostCheckTempFolderDefaultsToTheNodeTempDirectory(t *testing.T) {
+	nodeTmp := t.TempDir()
+	home := t.TempDir()
+	seen := runHostCheck(t, Node{Name: "local", Slots: 1}, home, "TMPDIR="+nodeTmp)
+	if filepath.Dir(filepath.Dir(seen)) != nodeTmp {
+		t.Fatalf("TMPDIR = %q, want a folder inside the node's %q", seen, nodeTmp)
+	}
+	if strings.HasPrefix(seen, home) {
+		t.Fatalf("TMPDIR %q is under the home folder", seen)
+	}
+}
+
+// A check that was killed outright never ran its exit trap. The next check on
+// the node removes such folders, but only old ones that no process uses, and
+// only the ones named like a check's.
+func TestHostCheckRemovesStaleTempFoldersOfKilledChecks(t *testing.T) {
+	parent := t.TempDir()
+	old := time.Now().Add(-7 * time.Hour)
+	young := time.Now().Add(-time.Hour)
+	folder := func(name string, at time.Time, marked bool) string {
+		dir := filepath.Join(parent, name)
+		if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if marked {
+			if err := os.WriteFile(filepath.Join(dir, checkTmpMarker), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chtimes(dir, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	stale := folder("dyna-ci.stale1", old, true)
+	recent := folder("dyna-ci.young1", young, true)
+	other := folder("not-a-check", old, true)
+	busy := folder("dyna-ci.busy11", old, true)
+	// A folder with a matching name that Dyna did not make has no marker.
+	foreign := folder("dyna-ci.mine22", old, false)
+	// A process that works inside an old folder keeps it, whatever its age.
+	sleeper := exec.Command("sleep", "30")
+	sleeper.Dir = filepath.Join(busy, "tmp")
+	if err := sleeper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
+
+	runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("the old unused folder was kept: %v", err)
+	}
+	for name, dir := range map[string]string{"young": recent, "not a check's": other, "in use": busy, "unmarked": foreign} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("the %s folder was removed: %v", name, err)
+		}
+	}
+}
+
+// A check must not run in the node's real temporary and home folders when its
+// own folder cannot be made.
+func TestHostCheckDoesNotStartWithoutItsTempFolder(t *testing.T) {
+	// A file where the parent folder should be makes mkdir -p fail.
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	fakeNodeTools(t, dir)
+	ran := filepath.Join(dir, "ran")
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true, inner: "touch " + ran}
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1, CheckTmp: filepath.Join(blocker, "sub")}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot make") {
+		t.Fatalf("check started without its folder: %v: %s", err, output)
+	}
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatal("the check command ran without its temporary folder")
+	}
+}
