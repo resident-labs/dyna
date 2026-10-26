@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -959,11 +960,35 @@ func (s *Service) launch(ctx context.Context, r Record, profile, task string) (s
 	if s.LaunchReviewer != nil {
 		return s.LaunchReviewer(ctx, r, r.ReviewerName, profile, task)
 	}
+	dir, err := s.reviewerDir(r)
+	if err != nil {
+		return "", err
+	}
 	m := s.Notify.Sessions
 
-	info, _, err := m.StartForEngine(subagent.StartOptions{Service: true, Profile: profile, Name: r.ReviewerName, Role: "reviewer", Room: r.RoomID, Dir: r.Dir,
+	info, _, err := m.StartForEngine(subagent.StartOptions{Service: true, Profile: profile, Name: r.ReviewerName, Role: "reviewer", Room: r.RoomID, Dir: dir,
 		Goal: fmt.Sprintf("Review %s at the assigned head; done when its Dyna verdict is recorded.", changeLabel(r)), Task: task})
 	return info.ID, err
+}
+
+// reviewerDir is the checkout a new reviewer session starts in. A record keeps
+// the author's worktree path, and closing that author's session removes the
+// worktree, so a reviewer never starts in a path that is gone. A reviewer reads
+// the assigned head from git, so any checkout of the repository serves, and the
+// room repository is the one checkout that outlives the sessions.
+func (s *Service) reviewerDir(r Record) (string, error) {
+	roomRepo := ""
+	if s.Notify != nil && s.Notify.Rooms != nil {
+		if rec, err := s.Notify.Rooms.Resolve(r.RoomID); err == nil {
+			roomRepo = rec.Repo
+		}
+	}
+	for _, dir := range []string{r.RepoPath, r.LookupDir, r.Dir, roomRepo} {
+		if st, err := os.Stat(dir); dir != "" && err == nil && st.IsDir() {
+			return dir, nil
+		}
+	}
+	return "", checkoutError(r)
 }
 func (s *Service) Verdict(ctx context.Context, key, actor, head string, verdict state.ReviewVerdict, summary string, reviewID int64) error {
 	return s.RecordReviewResult(ctx, key, actor, ReviewResult{Verdict: verdict, Head: head, Summary: summary, ReviewID: reviewID})
