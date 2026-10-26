@@ -308,7 +308,7 @@ func TestUpdateRecordsPrunesUntouchedRowsWithoutChangingRetainedSnapshot(t *test
 		t.Fatal(err)
 	}
 	expired := Record{Key: "github.com/acme/widgets#1", State: "closed", ClosedAt: time.Now().Add(-15 * 24 * time.Hour)}
-	body, err := json.Marshal(diskRecord{Record: &expired, Responses: map[string]CachedResponse{"/old": {ETag: "old"}}})
+	body, parts, err := splitStored(diskRecord{Record: &expired, Responses: map[string]CachedResponse{"/old": {ETag: "old"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,8 +316,13 @@ func TestUpdateRecordsPrunesUntouchedRowsWithoutChangingRetainedSnapshot(t *test
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	if err := writer.Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "UPDATE pr_records SET body=?, rev=rev+1 WHERE key=?", body, expired.Key); err != nil {
+		if _, err := conn.ExecContext(ctx, "UPDATE pr_rows SET body=?, rev=rev+1 WHERE key=?", body, expired.Key); err != nil {
 			return err
+		}
+		for name, part := range parts {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO pr_record_parts(key,part,body) VALUES(?,?,?) ON CONFLICT(key,part) DO UPDATE SET body=excluded.body", expired.Key, string(name), part); err != nil {
+				return err
+			}
 		}
 		_, err := conn.ExecContext(ctx, "UPDATE pr_state SET revision=revision+1 WHERE id=1")
 		return err

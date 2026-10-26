@@ -83,7 +83,7 @@ func TestQuotaDisplayIsDerivedAfterDiskRestart(t *testing.T) {
 	if got.Records["a"].RateLimit.Remaining == nil || *got.Records["a"].RateLimit.Remaining != n || got.Records["b"].RateLimit.Remaining != nil {
 		t.Fatalf("scope display: %+v", got.Records)
 	}
-	rows, err := mustOpen(t, root).Query("SELECT body FROM pr_records")
+	rows, err := mustOpen(t, root).Query("SELECT body FROM pr_rows")
 	if err != nil {
 		t.Fatal(err)
 	}

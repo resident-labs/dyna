@@ -57,7 +57,11 @@ type Notice struct {
 	Other  string `json:"other,omitempty"`
 	PostID string `json:"postId,omitempty"`
 	Done   bool   `json:"done"`
-	Error  string `json:"error,omitempty"`
+	// DoneAt is when delivery finished. PruneDoneNotices removes the notice
+	// DoneNoticeKeep after it; a notice from before this field is stamped when
+	// the pass first sees it.
+	DoneAt time.Time `json:"doneAt,omitempty"`
+	Error  string    `json:"error,omitempty"`
 }
 type AuthorNotes struct {
 	Intent    string `json:"intent"`
