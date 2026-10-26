@@ -25,15 +25,15 @@ func WindowPercent(w Window) (float64, bool) {
 }
 
 // windowReasonText is the CLI sentence for a window reason. The web app maps
-// the same codes to its own copy, so a reader's sentence is never UI text.
+// the same codes to its own copy, so a reader's sentence is never UI text. An
+// empty or unknown code reads as not reported, because a saved reading is
+// replaced on the next read and needs no migration.
 func windowReasonText(r store.WindowReason) string {
 	switch r {
-	case store.WindowReasonNotReported:
-		return "Remaining allowance not reported."
 	case store.WindowReasonProbableReset:
 		return probablyResetText
 	}
-	return ""
+	return "Remaining allowance not reported."
 }
 
 // WindowsSummary renders "5-hour 12% · weekly 41%, resets Sat 20:00".
@@ -63,11 +63,7 @@ func windowsSummary(a Account, now time.Time) string {
 			parts = append(parts, fmt.Sprintf("%s %.0f%%", w.Label, p))
 		} else {
 			parts = append(parts, w.Label)
-			reason := windowReasonText(w.Reason)
-			if reason == "" {
-				reason = "Remaining allowance not reported."
-			}
-			reasons = append(reasons, reason)
+			reasons = append(reasons, windowReasonText(w.Reason))
 			p = -1
 		}
 		if t, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil {
