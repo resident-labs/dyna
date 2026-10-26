@@ -715,10 +715,6 @@ func StampEnv(meta Meta) []string {
 	// A shared service has no scratch directory for this session in its own environment.
 	if path, err := scratch.Ensure(meta.ID); err == nil {
 		env[scratch.Env] = path
-		// A profile or caller that already chose a folder keeps it.
-		if v := os.Getenv("TMPDIR"); v == "" || v == "/tmp" {
-			_ = scratch.SetTemp(env, meta.ID)
-		}
 	}
 	var out []string
 	for k, v := range env {
