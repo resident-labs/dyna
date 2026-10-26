@@ -258,81 +258,50 @@ func TestCredentialRefreshWaitsForTurnLease(t *testing.T) {
 	}
 }
 
-// A request a running turn makes renews the grant it needs without waiting for
-// the switch gate, which waits for every Pi turn to end, including its own. The
-// account lock and Pi's credential lock still order the write.
-func TestRefreshCredentialsDuringTurnRenewsWhileTheLeaseIsHeld(t *testing.T) {
-	a, n, m := setupCredentialRefresh(t, true)
-	release, err := a.TurnLease(context.Background(), "pi")
+// A search runs inside a Pi turn that holds its lease. The one ChatGPT reader
+// must renew the due grant without waiting for the switch gate, which waits for
+// every Pi turn, including the caller's own, and it must return the renewed
+// token. The Pi renewal itself is the seam the account refresh already uses, so
+// the test writes the fresh entry where Pi writes it.
+func TestChatGPTGrantDuringTurnReturnsTheRenewedToken(t *testing.T) {
+	a := testAccounts(t)
+	n, err := a.CreateProvider("pi", accountstore.ProviderChatGPT, accountstore.KindOAuth, "ChatGPT")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	result, err := a.RefreshCredentialsDuringTurn(ctx, n.ID, "/fake/pi")
-	if err != nil {
-		t.Fatalf("renewal under a held turn lease: %v", err)
+	writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "stale-access", Refresh: "grant", Expires: time.Now().Add(-time.Hour).UnixMilli(), AccountID: "workspace"}})
+	if n, err = a.Capture(context.Background(), n.ID, ""); err != nil {
+		t.Fatal(err)
 	}
-	if m.activeCalls != 1 {
-		t.Fatalf("renewal calls = %d, want one", m.activeCalls)
+	if err = a.setActiveAccount(n); err != nil {
+		t.Fatal(err)
 	}
-	if time.Until(result.ExpiresAt) < 30*time.Minute {
-		t.Fatalf("expiry = %v, want the renewed grant", result.ExpiresAt)
-	}
-}
-
-// The whole reader runs under a held lease: a search from a Pi turn renews the
-// due grant and returns the rotated token.
-func TestChatGPTGrantDuringTurnRenewsUnderALease(t *testing.T) {
-	a, n, m := setupCredentialRefresh(t, true)
-	// The fixture writes the OpenAI entry, so its account serves that provider.
-	if err := a.transaction(func(st *accountstore.State) error {
-		if e := st.Find(n.ID); e != nil {
-			e.Provider = accountstore.ProviderChatGPT
-		}
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	renewals := 0
+	piRenewRunner = func(_ context.Context, home, provider, executable string) error {
+		renewals++
+		writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "fresh-access", Refresh: "grant", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "workspace"}})
 		return nil
-	}, true); err != nil {
-		t.Fatal(err)
 	}
-	// Pi reads its login from auth.json, so the fixture's entry is written there
-	// as well as in the saved snapshot.
-	login, err := readAccountLogin(n.Home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var files map[string]json.RawMessage
-	if err := json.Unmarshal(login.Credential.Payload, &files); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(n.Home, "auth.json"), files["auth.json"], 0600); err != nil {
-		t.Fatal(err)
-	}
-	// The fixture manager renews in place, so the resolved Pi copy is a path only.
-	a.PiExecutable = func() (string, error) { return "/fake/pi", nil }
-	stored, err := a.Find(n.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := a.setActiveAccount(stored); err != nil {
-		t.Fatal(err)
-	}
+	// The managed Pi copy is only named to the renewal, which the runner stands in for.
+	a.PiExecutable = func() (string, error) { return "/fake/pi/bin/pi", nil }
 	release, err := a.TurnLease(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	grant, err := a.ChatGPTGrantDuringTurn(ctx, "", "")
 	if err != nil {
 		t.Fatalf("grant under a held turn lease: %v", err)
 	}
-	if m.activeCalls != 1 {
-		t.Fatalf("renewal calls = %d, want one", m.activeCalls)
+	if renewals != 1 {
+		t.Fatalf("renewals = %d, want one", renewals)
 	}
-	if grant.Access == "" || grant.Account != "workspace" {
-		t.Fatalf("grant = %+v, want the renewed sign-in", grant)
+	if grant.Access != "fresh-access" || grant.Account != "workspace" {
+		t.Fatalf("grant = %+v, want the token the renewal wrote", grant)
 	}
 }
 
