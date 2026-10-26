@@ -487,6 +487,11 @@ func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, ho
 }
 
 func (s *Service) registeredJobResultComplete(ctx context.Context, job registeredCIJob, result localci.Result) bool {
+	if result.Status == localci.OutcomeError && result.Node != "" && result.Cause == localci.CauseEngineStop {
+		// Dyna stopped this run itself, so it tested nothing: the same head is
+		// admitted again instead of waiting for evidence that will never come.
+		return false
+	}
 	if result.Status == localci.OutcomeError && result.Node != "" {
 		return true
 	}

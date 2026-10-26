@@ -1012,3 +1012,26 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 		t.Fatalf("the detached child %d outlived the check", holder.Process.Pid)
 	}
 }
+
+// A run that the engine's own stop cancelled is not evidence about the commit:
+// it carries its own cause, so the same commit runs again instead of being
+// counted as a failure of the change.
+func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
+	node := Node{Name: "local", Slots: 1, Enabled: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := runCause(node, ctx, context.Canceled); got != CauseCancelled {
+		t.Fatalf("a plain cancellation = %s, want %s", got, CauseCancelled)
+	}
+	previous := EngineStopping()
+	MarkEngineStopping()
+	t.Cleanup(func() { engineStopping.Store(previous) })
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	if got := runCause(node, ctx, context.Canceled); got != CauseEngineStop {
+		t.Fatalf("an engine stop = %s, want %s", got, CauseEngineStop)
+	}
+	if label := CauseEngineStop.Label(); label == "" {
+		t.Fatal("the engine-stop cause has no label")
+	}
+}
