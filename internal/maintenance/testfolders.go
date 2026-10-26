@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/procident"
+	"dyna-agent/internal/scratch"
 )
 
 // Test binaries leave temporary folders in the host temp folder: a 16 GB tmpfs
@@ -102,6 +103,10 @@ func sweepDiskTemp(now time.Time, root string, dry bool) (Pruned, error) {
 	var freed Pruned
 	var errs []error
 	for _, entry := range entries {
+		if scratch.IsSessionTempName(entry.Name()) {
+			// A session's folder goes with its scratch folder, not by age.
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil || now.Sub(newestChange(filepath.Join(root, entry.Name()), info.ModTime())) <= diskTempRetention || !ownedByUser(info) {
 			continue

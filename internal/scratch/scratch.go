@@ -175,8 +175,7 @@ func SetTemp(env map[string]string, owner string) error {
 	if root == "" || !validOwner(owner) {
 		return nil
 	}
-	sum := sha256.Sum256([]byte(owner))
-	dir := filepath.Join(root, hex.EncodeToString(sum[:4]))
+	dir := filepath.Join(root, tempName(owner))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -186,6 +185,24 @@ func SetTemp(env map[string]string, owner string) error {
 		}
 	}
 	return nil
+}
+
+// tempName is the short folder name of an owner's temporary folder.
+func tempName(owner string) string {
+	sum := sha256.Sum256([]byte(owner))
+	return hex.EncodeToString(sum[:4])
+}
+
+// IsSessionTempName reports whether name is the folder SetTemp made for a
+// session. The scratch sweep removes it with the session's scratch, because
+// the age of its files does not show whether a live process still uses it: a
+// socket server can run for days without changing a file time.
+func IsSessionTempName(name string) bool {
+	if len(name) != 8 {
+		return false
+	}
+	_, err := hex.DecodeString(name)
+	return err == nil && strings.ToLower(name) == name
 }
 
 // SharedTempEnv returns TempVars as KEY=value pairs for a process that has no
@@ -324,6 +341,9 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 		}
 		result.Removed = append(result.Removed, path)
 		result.BytesFreed += bytes
+		if root := tempRoot(); root != "" {
+			_ = os.RemoveAll(filepath.Join(root, tempName(strings.Split(name, string(os.PathSeparator))[0])))
+		}
 	}
 	return result, nil
 }

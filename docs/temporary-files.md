@@ -18,8 +18,11 @@ own value.
 Hook runs and local CI checks have no session. They get the same variables set
 to `~/.cache/dyna/tmp` itself.
 
-The hourly maintenance pass removes an entry under `~/.cache/dyna/tmp` when
-nothing in it has changed for 24 hours. Only the engine's sockets and runtime
+A session's folder is removed with the session's scratch folder, seven days
+after the session closes. The hourly maintenance pass removes the other entries
+under `~/.cache/dyna/tmp` (hook and check files) when nothing in them has
+changed for 24 hours. Host checks of local CI run with their own folder there;
+container checks keep their in-memory `/tmp`, which ends with the container. Only the engine's sockets and runtime
 files stay in `XDG_RUNTIME_DIR`.
 
 Maintenance also removes old `dyna-test-*` folders and the folders that killed
