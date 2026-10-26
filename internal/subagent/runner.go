@@ -317,6 +317,13 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		},
 	}
 
+	// A turn waits here for a machine slot, still queued, and frees it when the
+	// runner ends.
+	release, err := m.admit(ctx, meta)
+	if err != nil {
+		return fail(err)
+	}
+	defer release()
 	if err := writes.waitSession(ctx, turn.HeldPrompt); err != nil {
 		return fail(err)
 	}
