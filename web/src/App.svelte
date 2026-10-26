@@ -7,6 +7,7 @@
   import { fade } from 'svelte/transition'
   import { FAST, motion } from './lib/ui/motion.ts'
   import { dialog } from './lib/ui/dialog.ts'
+  import { trackViewportHeight } from './lib/ui/viewport.ts'
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
   import { createReadMarker } from './lib/rooms/readMarker.ts'
   import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
@@ -279,6 +280,9 @@
   let olderFailed = $state(false) // the last older-page load failed
   let jobs = $state<ShellJob[] | null>(null) // the room's shell jobs, newest first: one list for every view
   let jobsError = $state('')
+  // The shell is exactly as tall as the screen shows, so a phone's browser bar or
+  // keyboard can never leave the end of a page out of reach.
+  $effect(() => trackViewportHeight())
   $effect(() => saveLayout({ threads: threadsOpen }))
   let showSide = $state(layout.side) // the room sidebar next to the rail
   // A narrow screen (a phone) has one column: the rail and the sidebar
@@ -2014,7 +2018,7 @@
 <style>
   .conversation-workspace { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
   .sess-wrap { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
-  .app { display: flex; height: 100vh; height: 100dvh; min-height: 0; }
+  .app { display: flex; height: 100vh; height: var(--app-height, 100dvh); min-height: 0; }
   .panel { display: contents; }
   .scrim { display: none; }
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--main); }
@@ -2054,7 +2058,7 @@
       position: fixed;
       z-index: 45;
       top: 0;
-      bottom: 0;
+      height: var(--app-height, 100dvh);
       right: 0;
       width: min(320px, 88vw);
       padding-top: env(safe-area-inset-top);
