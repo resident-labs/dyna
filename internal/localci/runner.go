@@ -398,14 +398,19 @@ func checkReports(sr *SuiteResult, mode ReportMode, dir string, max time.Duratio
 	}
 	var output bytes.Buffer
 	if !report.Write(&output, max, allowed) {
-		if sr.Status == OutcomePassed {
-			sr.Status = "failed"
+		// Only a real failure fails the check here. A test that ran over the
+		// room's per-test budget is recorded with its own cause and its time;
+		// whether that fails the check is the room's decision, made by the
+		// watcher from ciTimeBudget, so a slow run on warn still merges.
+		if len(report.Failures) > 0 {
+			if sr.Status == OutcomePassed {
+				sr.Status = OutcomeFailed
+			}
+			sr.Failures = append(sr.Failures, report.Failures...)
 		}
-		sr.Failures = append(sr.Failures, report.Failures...)
 		overBudget := 0
 		for _, test := range report.BudgetTests() {
 			if test.Duration > max && !test.Allowed(allowed) {
-				sr.Failures = append(sr.Failures, "OVER BUDGET "+test.ID())
 				overBudget++
 			}
 		}
