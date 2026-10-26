@@ -1190,11 +1190,16 @@ func combinedStatus(a, b Outcome) Outcome {
 // folder is left to the removal that stops the run's keeper first: deleting it
 // here would take the keeper's process ID away before anything could stop it.
 func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) string {
-	script := "set -e; docker=(docker); "
+	script := unitStoppedFunction + "set -e; docker=(docker); "
 	if node.SSH == "" {
 		script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
 	}
 	q := shellquote.Quote
+	// A status query that fails proves nothing: only a query that answers and
+	// finds nothing left counts. Each one exits 69 on a failed query and on a
+	// survivor, and the caller then keeps the run's workspace and record.
+	script += `no_container() { local out; out=$(timeout 15s "${docker[@]}" ps --format '{{.Names}}' "${@:2}") || { echo 'container status unavailable' >&2; return 69; }; if printf '%s\n' "$out" | grep -qx -- "$1"; then echo 'container cleanup failed' >&2; return 69; fi; }; `
+	script += `no_labelled() { local out; out=$(timeout 15s "${docker[@]}" ps -q "$@") || { echo 'container status unavailable' >&2; return 69; }; if [ -n "$out" ]; then echo 'container cleanup failed' >&2; return 69; fi; }; `
 	for _, check := range checks {
 		name := "dyna-ci-" + runID + "-" + string(check.id)
 		// A check known only by its id, such as one outside the current suite
@@ -1203,21 +1208,25 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 		unknown := !check.host && check.job == nil && check.image == ""
 		if check.image != "" || unknown {
 			script += `timeout 20s "${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; "
-			script += `if [ "$(timeout 10s "${docker[@]}" inspect -f '{{.State.Running}}' ` + q(name) + ` 2>/dev/null)" = true ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
+			script += "no_container " + q(name) + "; "
 		}
 		if check.job != nil || unknown {
-			label := q("label=dyna.run=" + runID)
-			script += `"${docker[@]}" ps -aq --filter ` + label + " --filter " + q("label=dyna.check="+string(check.id)) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `
-			script += `if [ -n "$("${docker[@]}" ps -q --filter ` + label + " --filter " + q("label=dyna.check="+string(check.id)) + ` 2>/dev/null)" ]; then echo 'container cleanup failed' >&2; exit 69; fi; `
+			filters := "--filter " + q("label=dyna.run="+runID) + " --filter " + q("label=dyna.check="+string(check.id))
+			script += `ids=$(timeout 15s "${docker[@]}" ps -aq ` + filters + `) || { echo 'container status unavailable' >&2; exit 69; }; `
+			script += `if [ -n "$ids" ]; then timeout 30s "${docker[@]}" rm -f $ids >/dev/null 2>&1 || true; fi; `
+			script += "no_labelled " + filters + "; "
 		}
-		// A host check's scope is forced down and must be gone afterwards.
-		scope := q(name + ".scope")
-		script += "timeout 10s systemctl --user stop " + scope + " >/dev/null 2>&1 || true; "
-		script += "systemctl --user kill --signal=KILL " + scope + " >/dev/null 2>&1 || true; "
-		script += "if systemctl --user is-active --quiet " + scope + " 2>/dev/null; then echo 'check scope cleanup failed' >&2; exit 69; fi; "
+		// A host check's scope is forced down, and the user manager must confirm it
+		// is gone.
+		if check.host || unknown {
+			scope := q(name + ".scope")
+			script += "timeout 10s systemctl --user stop " + scope + " >/dev/null 2>&1 || true; "
+			script += "systemctl --user kill --signal=KILL " + scope + " >/dev/null 2>&1 || true; "
+			script += "if command -v systemctl >/dev/null 2>&1; then unit_stopped " + scope + " || { echo 'check scope is not confirmed stopped' >&2; exit 69; }; fi; "
+		}
 		// The check's detached unit goes last: a check that ended on its own has
 		// nothing left to stop, and one that a lost poll left behind dies here. A
-		// unit that survives fails the teardown.
+		// unit that survives, or whose state cannot be read, fails the teardown.
 		script += "bash -c " + q(detachedStopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
 		script += "git --git-dir=" + q(cache) + " worktree remove --force " + q(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
 	}

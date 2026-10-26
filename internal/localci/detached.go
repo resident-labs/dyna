@@ -138,7 +138,7 @@ done
 
 // detachedStopScript runs on the node. It takes the check's folder and its unit
 // name, asks the check to stop, and kills what is left.
-const detachedStopScript = `d=$1; unit=$2
+const detachedStopScript = unitStoppedFunction + `d=$1; unit=$2
 timeout 20s systemctl --user stop "$unit" >/dev/null 2>&1 || true
 systemctl --user kill --signal=KILL "$unit" >/dev/null 2>&1 || true
 systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
@@ -147,11 +147,18 @@ if [ -s "$d/pid" ]; then
   kill -TERM -- "-$pid" 2>/dev/null || true
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- "-$pid" 2>/dev/null || break; sleep 1; done
   kill -KILL -- "-$pid" 2>/dev/null || true
+  if kill -0 -- "-$pid" 2>/dev/null; then echo "check process group is still running" >&2; exit 1; fi
+elif command -v systemctl >/dev/null 2>&1; then
+  # The stop counts only when the user manager says the unit is down. A manager
+  # that does not answer proves nothing, so that fails the call too.
+  unit_stopped "$unit" || { echo "unit $unit is not confirmed stopped" >&2; exit 1; }
 fi
-# The stop counts only when nothing is left: a unit or a process group that
-# survives fails the call, so the caller keeps the check's workspace.
-if systemctl --user is-active --quiet "$unit" 2>/dev/null; then echo "unit $unit is still active" >&2; exit 1; fi
-if [ -s "$d/pid" ] && kill -0 -- "-$(cat "$d/pid")" 2>/dev/null; then echo "check process group is still running" >&2; exit 1; fi
+`
+
+// unitStoppedFunction defines unit_stopped for a node script: it succeeds only
+// when the user manager answers and reports the unit inactive or failed. A query
+// that fails is not an answer, and a unit that is unknown is inactive.
+const unitStoppedFunction = `unit_stopped() { local s; s=$(timeout 10s systemctl --user show -p ActiveState --value "$1" 2>/dev/null) || return 2; case "$s" in inactive|failed) return 0 ;; *) return 1 ;; esac; }
 `
 
 // detachSpec is everything the node needs to run and find one check.
