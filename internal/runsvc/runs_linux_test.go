@@ -116,7 +116,7 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	}
 	s := shells.DefaultStore()
 	meta, err := s.Create(shells.StartOptions{Run: runID, Keep: true, Cwd: t.TempDir(),
-		Cmd: []string{"sh", "-c", "setsid sleep 600 & echo up > " + fifo + "; wait"}})
+		Cmd: []string{"sh", "-c", `setsid sh -c "echo up > ` + fifo + `; exec sleep 600" & wait`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +141,16 @@ func TestCancelLeavesAKeptShellsDetachedChildRunning(t *testing.T) {
 	jobPids = runprocs.Stamped(shells.JobEnv + "=" + meta.ID)
 	if len(jobPids) < 2 {
 		t.Fatalf("job processes = %v, want the shell and its child", jobPids)
+	}
+	// The child signals after setsid, so it is already outside the job's group.
+	detached := false
+	for _, p := range jobPids {
+		if g, err := syscall.Getpgid(p); err == nil && g != pid {
+			detached = true
+		}
+	}
+	if !detached {
+		t.Fatalf("no job process left the job's group %d: %v", pid, jobPids)
 	}
 	if err := Cancel(authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner}), runID); err != nil {
 		t.Fatal(err)
