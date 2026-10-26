@@ -441,3 +441,13 @@ func TestSaveProfileUsesRoundTrip(t *testing.T) {
 		t.Fatalf("no uses err = %v", err)
 	}
 }
+
+func TestSetDoctorConditionChecksTheGrammar(t *testing.T) {
+	isolate(t)
+	if _, err := Set(t.Context(), settings.KeyDoctorCondition, "load>2/core for 5m or memory>85%"); err != nil {
+		t.Fatalf("valid condition: %v", err)
+	}
+	if _, err := Set(t.Context(), settings.KeyDoctorCondition, "banana"); err == nil {
+		t.Fatal("an invalid condition was saved")
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/browserconfig"
+	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/settings"
@@ -146,6 +147,11 @@ func Set(ctx context.Context, key, value string) (Item, error) {
 	v, err := settings.Load(settings.DefaultPath())
 	if err != nil {
 		return Item{}, err
+	}
+	if key == settings.KeyDoctorCondition && value != "" {
+		if _, err := doctor.ParseCondition(value); err != nil {
+			return Item{}, fmt.Errorf("%s: %w", key, err)
+		}
 	}
 	if err := v.Set(key, value); err != nil {
 		return Item{}, err

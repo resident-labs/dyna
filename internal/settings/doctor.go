@@ -3,8 +3,6 @@ package settings
 import (
 	"fmt"
 	"strings"
-
-	"dyna-agent/internal/doctor"
 )
 
 // KeyDoctorCondition is the condition under which the doctor hook examines a
@@ -27,13 +25,9 @@ func (v *Values) loadDoctor(raw map[string]any) error {
 }
 
 func (v *Values) setDoctor(key, value string) error {
-	value = strings.TrimSpace(value)
-	if value != "" {
-		if _, err := doctor.ParseCondition(value); err != nil {
-			return fmt.Errorf("%s: %w", key, err)
-		}
-	}
-	v.DoctorCondition = value
+	// The setting holds text only. configsvc checks it against the doctor's
+	// grammar, so the settings package stays out of the computer daemon's imports.
+	v.DoctorCondition = strings.TrimSpace(value)
 	v.fromFile[key] = true
 	return nil
 }
