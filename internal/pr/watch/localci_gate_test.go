@@ -21,10 +21,10 @@ func TestPullRequestHeadDoesNotWaitForLocalCheckNames(t *testing.T) {
 	policy := ChangePolicy{RequiredChecks: []string{"go-test"}}
 	s := &Service{}
 	// A trial head still needs every name its base definition requires.
-	if obs := s.registeredLocalObservation(r, snap, policy, plan, localci.Result{}, true); obs.Status != VerdictPending {
+	if obs := s.registeredLocalObservation(r, snap, policy, plan, localci.Result{}, true, false); obs.Status != VerdictPending {
 		t.Fatalf("trial head = %s, want pending", obs.Status)
 	}
-	obs := s.registeredLocalObservation(r, snap, policy, plan, localci.Result{}, false)
+	obs := s.registeredLocalObservation(r, snap, policy, plan, localci.Result{}, false, false)
 	if obs.Status != VerdictPassed {
 		t.Fatalf("pull request head = %s (%s), want passed from the hosted provider", obs.Status, obs.Reason)
 	}

@@ -137,6 +137,10 @@ type Result struct {
 	// to another machine. A result that carries it is that retry, so a second
 	// infrastructure failure ends the run instead of walking around the fleet.
 	RetriedFrom string `json:"retriedFrom,omitempty"`
+	// Resumed marks a result that Dyna itself stopped and then replaced with
+	// another run on the same machine. One marker bounds that retry, so a run the
+	// engine keeps stopping cannot loop for ever.
+	Resumed bool `json:"resumed,omitempty"`
 }
 
 // CleanupWarning is a cleanup the runner did after a check that still decided
