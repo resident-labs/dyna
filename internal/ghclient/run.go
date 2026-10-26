@@ -39,10 +39,11 @@ func Run(ctx context.Context, cmd *exec.Cmd) error {
 func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) error) error {
 	r := repositoryFor(ctx, cmd)
 	if err := checkPolicy(ctx, cmd.Dir, r, cmd.Args[1:]); err != nil {
-		// A read of a public repository outside every room needs no room, and no
-		// room account: it runs as gh is signed in. Writes never take this path.
-		if publicRead(ctx, r, cmd.Args[1:]) {
-			return runWithToken(cmd, "")
+		// A REST read of a public repository outside every room needs no room
+		// and no account. It runs with no credentials at all, so it can read
+		// only what anyone can. Writes and every other command take no part.
+		if _, ok := publicAPIRead(ctx, r, cmd.Args[1:]); ok {
+			return runAnonymously(cmd)
 		}
 		return err
 	}
@@ -60,6 +61,18 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		}
 	}
 	return runWithToken(cmd, token)
+}
+
+// runAnonymously runs gh with no token and an empty configuration directory, so
+// neither the environment nor a saved login supplies credentials.
+func runAnonymously(cmd *exec.Cmd) error {
+	dir, err := os.MkdirTemp("", "dyna-gh-anonymous-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	cmd.Env = append(withoutTokens(cmd.Env), "GH_CONFIG_DIR="+dir)
+	return cmd.Run()
 }
 
 func runWithToken(cmd *exec.Cmd, token string) error {
