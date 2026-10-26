@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"dyna-agent/internal/cibudget"
@@ -100,6 +102,9 @@ type SuiteResult struct {
 	// memory request it clamped to the machine. It is empty when the check got
 	// what it asked for.
 	Note string `json:"note,omitempty"`
+	// Warnings are what the runner had to clean up after a check that still
+	// decided its commit, so the evidence says what the pass cost the machine.
+	Warnings []CleanupWarning `json:"warnings,omitempty"`
 }
 
 // Name is the name a check reports under: its own name, or its suite for a result
@@ -131,6 +136,26 @@ type Result struct {
 	// to another machine. A result that carries it is that retry, so a second
 	// infrastructure failure ends the run instead of walking around the fleet.
 	RetriedFrom string `json:"retriedFrom,omitempty"`
+}
+
+// CleanupWarning is a cleanup the runner did after a check that still decided
+// its commit. It never changes the verdict.
+type CleanupWarning string
+
+const (
+	// CleanupLeftoverOutput means the check's command exited, but a child it
+	// started kept the check's output pipe open. os/exec reports that as
+	// ErrWaitDelay; the runner kills what is left of the command's group.
+	CleanupLeftoverOutput CleanupWarning = "leftover-output"
+)
+
+// Label is the sentence the checks view shows for a cleanup warning.
+func (w CleanupWarning) Label() string {
+	switch w {
+	case CleanupLeftoverOutput:
+		return "a process left by the check held its output open; the runner killed it"
+	}
+	return ""
 }
 
 // FailureCause is why a check or a run stopped without testing the commit, or
@@ -208,13 +233,37 @@ func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Write
 	c.Stdin = in
 	c.Stdout = out
 	c.Stderr = stderr
-	err := c.Run()
+	err := runAndReap(c)
 	// A cancelled command reports the context, not the signal that stopped it.
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	return err
 }
+
+// runAndReap runs cmd and cleans up after a command that exited while a child
+// it started kept the output pipe open, which os/exec reports as ErrWaitDelay
+// once cmd.WaitDelay passes. The command's group id is its own pid, so what is
+// left of the group is killed here instead of outliving the check.
+func runAndReap(c *exec.Cmd) error {
+	return runAndReapWith(c.Run, c, reapGroup)
+}
+
+// runAndReapWith is runAndReap with the run and the reaper given, so a test can
+// prove the decision without a real wait deadline or a real child.
+func runAndReapWith(run func() error, c *exec.Cmd, reap func(int) error) error {
+	err := run()
+	if errors.Is(err, exec.ErrWaitDelay) && c.Process != nil {
+		_ = reap(c.Process.Pid)
+	}
+	return err
+}
+
+// reapGroup kills what is left of a command's process group, whose id is the
+// command's own pid. Tests replace it to observe the pid without racing a
+// zombie.
+var reapGroup = func(pid int) error { return syscall.Kill(-pid, syscall.SIGKILL) }
+
 func (r Runner) run(ctx context.Context, dir string, out io.Writer, name string, args ...string) error {
 	fn := r.Command
 	if fn == nil {
