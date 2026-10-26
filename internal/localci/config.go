@@ -27,6 +27,11 @@ const (
 // the requested commit. It is not a check failure or an infrastructure error.
 var ErrDefinitionNotFound = errors.New("repository has no " + DefinitionPath)
 
+// ErrDefinitionInvalid means the definition exists but this engine cannot parse
+// it, for example because a newer revision added a field this engine does not
+// know yet.
+var ErrDefinitionInvalid = errors.New("local CI definition is not valid for this engine")
+
 // ReportMode says which test evidence a command must leave in its report
 // directory. Every check also writes the generic execution timing file.
 type ReportMode string
@@ -232,7 +237,7 @@ func LoadDefinition(ctx context.Context, repo, ref string) (*Definition, error) 
 	}
 	definition, err := ParseDefinition([]byte(body))
 	if err != nil {
-		return nil, fmt.Errorf("%s at %.12s: %w", DefinitionPath, sha, err)
+		return nil, fmt.Errorf("%s at %.12s: %w: %w", DefinitionPath, sha, ErrDefinitionInvalid, err)
 	}
 	definition.revision = sha
 	return definition, nil
