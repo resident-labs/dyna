@@ -35,6 +35,7 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 		{"other build, only a cached failure", "v1", "ok", []runstore.Event{cached}, "ok", ""},
 		{"other build, canceled stays canceled", "v1", "canceled", []runstore.Event{failed}, "canceled", ""},
 		{"same build, failed agent", "v2", "ok", []runstore.Event{failed}, "ok", ""},
+		{"other build, events unreadable", "v1", "ok", nil, "ok", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := storetest.DataDir(t)
@@ -56,11 +57,14 @@ func TestSettleInterruptedByUpdate(t *testing.T) {
 				line, _ := json.Marshal(e)
 				lines = append(lines, string(line))
 			}
-			if err := os.MkdirAll(runstore.RunDir(run), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(runstore.RunDir(run), "events.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-				t.Fatal(err)
+			// A nil event list leaves no events file, which cannot be read.
+			if tc.events != nil {
+				if err := os.MkdirAll(runstore.RunDir(run), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(runstore.RunDir(run), "events.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			got, err := settleInterrupted(t.Context(), state.For(db), callspec.RunFinish{Run: run, Status: tc.status}, "v2")
 			if err != nil {
