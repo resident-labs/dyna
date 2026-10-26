@@ -29,6 +29,7 @@ jobs:
       relay: ${{ steps.filter.outputs.relay }}
       go: ${{ steps.filter.outputs.go }}
       computers: ${{ steps.filter.outputs.computers }}
+      web: ${{ steps.filter.outputs.web }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -319,9 +320,15 @@ jobs:
     steps:
       - name: Require every Go job
         env:
+          WEB: ${{ needs.changes.outputs.web }}
           RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.desktop.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
+          FRONTEND_CHECK: ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"
+          # frontend-check is skipped when no web file changed.
+          if [ "$WEB" != true ] && [ "$FRONTEND_CHECK" = skipped ]; then
+            RESULTS="${RESULTS% *} success"
+          fi
           for r in $RESULTS; do
             if [ "$r" != success ]; then echo "A Go job ended with $r" >&2; exit 1; fi
           done
@@ -332,7 +339,7 @@ jobs:
   frontend-build:
     name: frontend build
     needs: [changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -363,7 +370,7 @@ jobs:
   frontend-shard:
     name: frontend test (${{ matrix.shard }})
     needs: [changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -411,8 +418,11 @@ jobs:
     steps:
       - name: Require the build and every shard
         env:
+          WEB: ${{ needs.changes.outputs.web }}
           RESULTS: ${{ needs.frontend-build.result }} ${{ needs.frontend-shard.result }}
         run: |
+          # No web file changed: the jobs were skipped, so report success.
+          if [ "$WEB" != true ]; then echo "No web change; frontend jobs skipped"; exit 0; fi
           echo "Results: $RESULTS"
           for r in $RESULTS; do
             if [ "$r" != success ]; then echo "A frontend job ended with $r" >&2; exit 1; fi
@@ -421,7 +431,7 @@ jobs:
   frontend-check:
     name: frontend-check
     needs: [changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
