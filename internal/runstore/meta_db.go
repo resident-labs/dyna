@@ -92,6 +92,13 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	if err := migrateMeta(db, dataDir); err != nil {
 		return db, err
 	}
+	// Agents became sessions, so nothing keeps a worker steering queue.
+	if err := database.Migrate(db, "runs.steering", 3, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS run_agent_steering")
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 

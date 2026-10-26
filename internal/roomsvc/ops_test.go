@@ -269,3 +269,38 @@ func TestRoomWatchRereadsClosedSessionsOnlyOnFullScans(t *testing.T) {
 		}
 	}
 }
+
+// The run page opens an agent by its session ID. A run-owned session stays out
+// of the member list, yet its transcript still loads.
+func TestARunAgentSessionLoadsAlthoughMembersOmitIt(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("workers")
+	t.Setenv("DYNA_RUN_ID", "wf_ops-open")
+	t.Setenv("DYNA_ROOM_ID", rec.ID)
+	t.Setenv("DYNA_ROOM", rec.Name)
+	run, err := runstore.Create("open", "return null", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer run.Finish("ok", "null", nil)
+	agent, err := e.mgr.StartRunAgent(e.ctx, subagent.StartOptions{
+		Run: &subagent.RunOwner{ID: run.Meta.ID, Agent: 1}, Profile: "mock", Dir: t.TempDir(), Room: rec.ID, Task: "SLEEP:0\nRESPOND: ready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(agent.ID, 1)
+	members, err := e.svc.Members(rec.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range members {
+		if m.ID == agent.ID {
+			t.Fatalf("the member list holds run agent %s", agent.ID)
+		}
+	}
+	got, err := e.svc.Transcript(agent.ID)
+	if err != nil || got.Member.ID != agent.ID {
+		t.Fatalf("Transcript(%s) = %+v, %v; want the session", agent.ID, got.Member, err)
+	}
+}
