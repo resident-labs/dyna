@@ -87,6 +87,16 @@ func Wrap(cmd *exec.Cmd, name string) string {
 	return wrap(cmd, name, Slice)
 }
 
+// Stop kills every process left in the scope that Wrap returned, including a
+// daemon that left the command's process group. It ignores a scope that has
+// already ended, and does nothing for "".
+func Stop(unit string) {
+	if unit == "" {
+		return
+	}
+	_ = runCommand("systemctl", "--user", "kill", "--signal=SIGKILL", unit)
+}
+
 // wrap uses the same scope command for agent and foreground processes. It
 // returns the scope's unit name, or "" when it left cmd unchanged.
 func wrap(cmd *exec.Cmd, name, slice string, properties ...string) string {
