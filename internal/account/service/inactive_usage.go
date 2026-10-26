@@ -10,8 +10,6 @@ import (
 	"dyna-agent/internal/harness/runtime"
 )
 
-const inactiveUsageTTL = 30 * time.Minute
-
 // activeUsageRepoll re-reads the active account's usage while its turns run,
 // so failover always ranks a current reading.
 const activeUsageRepoll = 5 * time.Minute
@@ -40,7 +38,7 @@ func usageProbeAt(o *store.Observation, active bool) time.Time {
 	if attempted.IsZero() {
 		attempted = o.ObservedAt
 	}
-	ttl := inactiveUsageTTL
+	ttl := inactiveUsageWindow
 	if active {
 		ttl = activeUsageTTL
 	}
@@ -64,7 +62,7 @@ func usageProbeAt(o *store.Observation, active bool) time.Time {
 // turns is re-polled at activeUsageRepoll so its reading stays fresh.
 // Persisted attempt times survive engine restarts.
 func (s *Service) RefreshInactiveUsage(ctx context.Context, now time.Time) time.Time {
-	next := now.Add(inactiveUsageTTL)
+	next := now.Add(inactiveUsageWindow)
 	if s.o.Store == nil || ctx.Err() != nil {
 		return next
 	}

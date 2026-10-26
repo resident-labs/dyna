@@ -42,7 +42,7 @@ func Command(o Options) *cobra.Command {
 		Long: "List and choose the saved provider accounts. Each account is one provider sign-in, and a harness only runs it. " +
 			"An account used globally is the one its provider runs everywhere; an account used in a room overrides the global one for that room's turns.",
 	}
-	root.AddCommand(o.listCommand(), o.useCommand(), o.addCommand(), o.removeCommand())
+	root.AddCommand(o.listCommand(), o.refreshCommand(), o.useCommand(), o.addCommand(), o.removeCommand())
 	return root
 }
 
@@ -66,28 +66,55 @@ func (o Options) listCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List the saved accounts by provider",
 		Long: "List the saved accounts grouped by provider, with the sign-in state, the plan and the usage windows. " +
-			"The default reads the saved usage readings. --refresh asks each provider for current usage. " +
+			"The default reads the saved usage readings. --refresh asks each provider for the current usage of every account, " +
+			"the active one and the inactive ones. " +
 			"--room marks the account that room uses; its choice overrides the global one for that room's turns.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			snap, err := o.snapshot(c, room, refresh)
-			if err != nil {
-				return err
-			}
-			writeProblems(c, snap)
-			rows := filter(snap, provider)
-			if asJSON {
-				return json.NewEncoder(c.OutOrStdout()).Encode(rows)
-			}
-			writeAccounts(c.OutOrStdout(), rows, room)
-			return nil
+			return o.writeAccountsList(c, provider, room, refresh, asJSON)
 		},
 	}
 	cmd.Flags().StringVar(&provider, "provider", "", "only this provider, for example anthropic")
 	cmd.Flags().StringVar(&room, "room", "", "mark the account this room uses")
-	cmd.Flags().BoolVar(&refresh, "refresh", false, "ask the providers for current usage")
+	cmd.Flags().BoolVar(&refresh, "refresh", false, "ask the providers for the current usage of every account")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
+}
+
+// refreshCommand is the short form of list --refresh, because a forced refresh
+// is what an owner reaches for when a reading looks stuck (D-148).
+func (o Options) refreshCommand() *cobra.Command {
+	var provider, room string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "refresh",
+		Short: "Ask every provider for current usage, then list the accounts",
+		Long: "Ask each provider for the current usage of every saved account, active or inactive, then list them. " +
+			"This is the same as dyna accounts list --refresh.",
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			return o.writeAccountsList(c, provider, room, true, asJSON)
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "", "only this provider, for example anthropic")
+	cmd.Flags().StringVar(&room, "room", "", "mark the account this room uses")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	return cmd
+}
+
+// writeAccountsList reads the account view and prints it.
+func (o Options) writeAccountsList(c *cobra.Command, provider, room string, refresh, asJSON bool) error {
+	snap, err := o.snapshot(c, room, refresh)
+	if err != nil {
+		return err
+	}
+	writeProblems(c, snap)
+	rows := filter(snap, provider)
+	if asJSON {
+		return json.NewEncoder(c.OutOrStdout()).Encode(rows)
+	}
+	writeAccounts(c.OutOrStdout(), rows, room)
+	return nil
 }
 
 func (o Options) useCommand() *cobra.Command {
