@@ -585,14 +585,13 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			}
 		}
 		// A running turn cannot answer the handoff ask, so hold the ask until it
-		// ends and give the handoff its full window from there. Otherwise a long
-		// turn burns the wait and forces a transcript fallback. WaitSeconds 0
-		// asks for an immediate transcript fallback and never holds.
+		// ends. The hold is bounded by the request deadline: a turn that runs past
+		// the whole window is stopped, and the transcript fallback takes over, so
+		// a transfer never waits without end. When the ask goes out the window
+		// restarts, so the old model still gets its full handoff length. A
+		// zero-window transfer (WaitFor 0) falls back at once, without asking.
 		holdForTurn := !t.Posted && !last.Done() && t.WaitFor > 0
-		// The wait only starts once the ask goes out, so a turn that ends after
-		// the original deadline still gets its full window. A zero-window
-		// transfer (WaitFor 0) falls back immediately, without asking.
-		timedOut := !now.Before(t.Deadline) && (t.Posted || t.WaitFor == 0)
+		timedOut := !now.Before(t.Deadline)
 		reason := ""
 		switch {
 		case t.Handoff != "":
@@ -613,15 +612,9 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			})
 		}
 		if holdForTurn {
-			// Keep the poller sleeping past a long turn. The handoff window
-			// begins only when the ask goes out, below.
-			if now.Before(t.Deadline) {
-				return false, nil
-			}
-			return false, m.updateTransfer(id, token, func(_ *Meta, t *TransferState) error {
-				t.Deadline = now.Add(t.WaitFor)
-				return nil
-			})
+			// Keep the poller sleeping until the turn ends or the deadline above
+			// ends the hold. The ask, and its own window, start only after that.
+			return false, nil
 		}
 		// The ask is a typed session event, so its card says that a transfer
 		// needs a handoff and the agent text keeps the full instructions.
@@ -636,9 +629,9 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 					return err
 				}
 				t.Posted = true
-				// The handoff window starts when the ask goes out, so a wait held
-				// for a running turn still gets its full length. A shared or
-				// zero-window deadline (consolidation) is left untouched.
+				// The handoff window starts when the ask goes out, so the old model
+				// gets its full length after a turn that ended within the hold. A
+				// shared or zero-window deadline (consolidation) is left untouched.
 				if t.WaitFor > 0 {
 					t.Deadline = now.Add(t.WaitFor)
 				}
