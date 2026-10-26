@@ -84,10 +84,15 @@ func Command(o Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		sessions, _ := s.Notify.Sessions.Store.List(true)
+		// Only the holders of listed goals need a name. Listing every
+		// session, closed ones included, read and parsed all their records.
 		names := map[string]string{"owner": "owner"}
-		for _, m := range sessions {
-			names[m.ID] = m.Name
+		nameOf := func(id string) string {
+			if _, seen := names[id]; !seen {
+				info, _ := s.Notify.Sessions.Store.Inspect(id)
+				names[id] = info.Name
+			}
+			return names[id]
 		}
 		var yours, others []goals.Goal
 		for _, g := range records {
@@ -109,7 +114,7 @@ func Command(o Options) *cobra.Command {
 		line := func(g goals.Goal) {
 			holders := []string{}
 			for _, id := range g.Holders {
-				name := names[id]
+				name := nameOf(id)
 				if name == "" {
 					name = id
 				}
@@ -126,7 +131,7 @@ func Command(o Options) *cobra.Command {
 			if n := counts[g.ID]; n[1] > 0 {
 				items = fmt.Sprintf(" · %d/%d items", n[0], n[1])
 			}
-			setter := names[g.Setter]
+			setter := nameOf(g.Setter)
 			if setter == "" {
 				setter = g.Setter
 			}
