@@ -85,7 +85,11 @@ func retryRebuildFailure(queue []MergeQueueItem) string {
 	}
 	var rows []string
 	for _, item := range queue {
-		row := fmt.Sprintf("%s is %s", item.URL, item.State)
+		name := item.URL
+		if name == "" {
+			name = fmt.Sprintf("%q (%s)", item.Title, item.ChangeID)
+		}
+		row := fmt.Sprintf("%s is %s", name, item.State)
 		if item.Reason != "" {
 			row += ": " + item.Reason
 		}
