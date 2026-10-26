@@ -608,6 +608,12 @@ func (r *Runtime) GCGenerationsWithProbe(ctx context.Context, probe GenerationPr
 		return err
 	}
 	defer unlock()
+	// A detached runner of an earlier build can still write the legacy JSON
+	// indexes. Copy them under this lock, before any deletion decision, so a
+	// lease that runner creates or rebinds keeps its generation.
+	if err := r.generationState().ImportLegacy(ctx, r.Generations); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(r.Generations)
 	if err != nil {
 		return err
