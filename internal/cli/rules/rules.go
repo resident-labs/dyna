@@ -29,7 +29,7 @@ func Command(o Options) *cobra.Command {
 	}
 	var roomRef string
 	var asJSON, global bool
-	root := &cobra.Command{Use: "rules", Short: "List and change standing room rules", Long: "List and change standing room rules. With --global, list and change global rules, which apply in every room and reach each harness through its native instruction file. A global change takes effect when a harness next starts, and its notice goes only to the current room. Room rules win over global rules. Agents may add rules and change agent-written rules. Only the owner may change owner rules. The engine checks the caller identity and protects owner rules.", Args: cobra.NoArgs}
+	root := &cobra.Command{Use: "rules", Short: "List and change standing room rules", Long: "List and change standing room rules. With --global, list and change global rules, which apply in every room and reach each harness through its native instruction file. A global change takes effect when a harness next starts, and its notice goes only to the current room. Room rules win over global rules. Agents may add rules and change agent-written rules. Only the owner may change owner rules. The engine checks the caller identity and protects owner rules. Each open agent reads a room rule change as an instructions note on its next turn, so do not repost the rule to it.", Args: cobra.NoArgs}
 	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (default: the stamped room, else the current repo's room)")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print JSON")
 	root.PersistentFlags().BoolVar(&global, "global", false, "use global rules, which apply in every room")

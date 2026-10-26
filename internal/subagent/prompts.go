@@ -29,7 +29,7 @@ func firstTurnPrompt(roomContext, task string) string {
 }
 
 // postOnChangePrompt keeps posts to real changes. Root and workers share it.
-const postOnChangePrompt = `Post only to the session that must act next, and only for a blocker, a decision, or ready work that session owns. Never copy @root for information. At depth 1 @parent is @root, so the same rule applies. Your final result is your report; do not post it too.`
+const postOnChangePrompt = `Post only to the session that must act next, for a blocker, a decision, or ready work that session owns. Never copy @root for information. At depth 1 @parent is @root, so the same rule applies. Your final result is your report; do not post it too. Rule changes reach each open agent; never repost them.`
 
 const parentCheckInPrompt = `All parents, including root, remain responsible for their direct children. Check-ins cover running, queued, or idle children, listed stalest first with state, duration, goal/item, and PR state. Dormant and closed children do not count. Act on stuck work. If everything is on track, end your turn without posting.`
 
