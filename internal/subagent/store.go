@@ -85,7 +85,11 @@ var (
 type Meta struct {
 	HistoryOnly bool `json:"historyOnly,omitempty"`
 	// Service marks managed sessions and their helpers for mention routing and member grouping.
-	Service           bool            `json:"service,omitempty"`
+	Service bool `json:"service,omitempty"`
+	// Leaf marks a session that can start neither subagent sessions nor
+	// workflow runs; it completes its task itself. Workflow workers are
+	// started as leaf sessions.
+	Leaf              bool            `json:"leaf,omitempty"`
 	Role              string          `json:"role,omitempty"`
 	InheritedReceipts map[string]bool `json:"inheritedReceipts,omitempty"`
 	// UncertainInputIDs names posts a repaired turn had handed to its harness
