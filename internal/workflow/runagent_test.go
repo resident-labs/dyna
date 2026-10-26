@@ -116,21 +116,24 @@ func fastRetries(t *testing.T) *[]time.Duration {
 	return &waits
 }
 
-func TestRunAgentSessionPacesRetriesAndGivesUpAfterTheRecoveryBudget(t *testing.T) {
+func TestRunAgentSessionCountsTheTimeFailedCallsTakeInItsRecoveryBudget(t *testing.T) {
 	waits := fastRetries(t)
-	engine := &fakeEngine{}
-	for range 200 {
-		engine.startErrs = append(engine.startErrs, &engineclient.RemoteError{Status: 503, Message: "engine is stopping"})
+	clock := time.Unix(0, 0)
+	previous := retryNow
+	retryNow = func() time.Time { return clock }
+	t.Cleanup(func() { retryNow = previous })
+	calls := 0
+	// Each failed call takes a minute, as a missing socket does in the client.
+	slow := func() error {
+		calls++
+		clock = clock.Add(time.Minute)
+		return &engineclient.RemoteError{Status: 503, Message: "engine is stopping"}
 	}
-	if _, err := runAgentSession(t.Context(), engine, callspec.RunAgentStart{Run: "wf_1"}); err == nil {
-		t.Fatal("a start that never recovered succeeded")
+	if err := retryEngine(t.Context(), recoveryBudget, slow); err == nil {
+		t.Fatal("a call that never recovered succeeded")
 	}
-	var total time.Duration
-	for _, d := range *waits {
-		total += d
-	}
-	if (*waits)[0] != retryFirst || (*waits)[1] != 2*retryFirst || (*waits)[len(*waits)-1] != retryMax || total < recoveryBudget {
-		t.Fatalf("waits = %v (total %v); want a doubling pause up to %v, spent until the %v budget", *waits, total, retryMax, recoveryBudget)
+	if calls > 7 || len(*waits) == 0 || (*waits)[0] != retryFirst || (*waits)[1] != 2*retryFirst {
+		t.Fatalf("calls = %d, pauses = %v; want about five minutes of slow calls, paced by a doubling pause", calls, *waits)
 	}
 }
 
@@ -171,13 +174,18 @@ func TestNestedWorkflowAsksAgainWhenTheStopCallIsCutOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "", nil) })
-	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0), CloseErrs: []error{&engineclient.RemoteError{Status: 503, Message: "engine is stopping"}}}
+	// More cut-off stops than any recovery budget allows: the call keeps asking.
+	cutOff := make([]error, 100)
+	for i := range cutOff {
+		cutOff[i] = &engineclient.RemoteError{Status: 503, Message: "engine is stopping"}
+	}
+	engine := &enginefake.Engine{Profiles: mockWorkflowStore(0, 0), CloseErrs: cutOff}
 	got, err := executeWorkflowTest(t, `return await workflow("child");`, Options{Store: mockWorkflowStore(0, 0), Run: run, Engine: engine, WorkDir: dir, WorkflowDir: dir})
 	if err != nil || got != `"child done"` {
 		t.Fatalf("result = %s, %v", got, err)
 	}
-	if closed := engine.ClosedAgents(); len(closed) < 2 {
-		t.Fatalf("close calls = %+v; the cut-off stop must be asked again before the call lets go of its slots", closed)
+	if closed := engine.ClosedAgents(); len(closed) != 101 {
+		t.Fatalf("close calls = %d; the stop must be asked until it is confirmed, before the call lets go of its slots", len(closed))
 	}
 }
 
