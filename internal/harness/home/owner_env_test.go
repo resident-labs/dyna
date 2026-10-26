@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"dyna-agent/internal/shellquote"
@@ -144,5 +146,67 @@ func TestRestoreOwnerAfterToolBridge(t *testing.T) {
 	}
 	if _, err := Prepare(scope, os.Getenv("DYNA_BIN"), os.Environ()); err != nil {
 		t.Fatalf("nested Prepare: %v", err)
+	}
+}
+
+// The engine may start with a PATH that lacks the owner's tool directories; the
+// login shell's PATH adds them after the existing entries (D-265).
+func TestLoginPathAddsOwnerToolDirectories(t *testing.T) {
+	cargo := filepath.Join(t.TempDir(), ".cargo", "bin")
+	shell := filepath.Join(t.TempDir(), "login-shell")
+	script := "#!/bin/sh\necho banner\nprintf '%s' '/usr/bin:" + cargo + ":relative/bin' >\"$3\"\n"
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	login := loginPathFrom(shell, nil)
+	got := withLoginPath("/usr/local/bin:/usr/bin", login)
+	if want := "/usr/local/bin:/usr/bin:" + cargo; got != want {
+		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+	if loginPathFrom(filepath.Join(t.TempDir(), "missing"), nil) != "" {
+		t.Fatal("a missing login shell gave a PATH")
+	}
+}
+
+func TestPrepareGivesTheHarnessTheLoginPath(t *testing.T) {
+	scope, _, env := fixture(t)
+	cargo := filepath.Join(t.TempDir(), ".cargo", "bin")
+	old := loginPathSource
+	loginPathSource = func() string { return cargo }
+	t.Cleanup(func() { loginPathSource = old })
+	out, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(filepath.SplitList(out["PATH"]), cargo) {
+		t.Fatalf("harness PATH %q lacks the login PATH entry %q", out["PATH"], cargo)
+	}
+}
+
+// A background process that shell startup leaves holding stdout must not stall
+// the PATH lookup. The process blocks reading a FIFO that the test holds open,
+// so no clock decides the result; closing the FIFO at cleanup ends the process
+// by end-of-file.
+func TestLoginPathDoesNotWaitForABackgroundProcess(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hold")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A read-write open never blocks, and the background reader finds a writer.
+	hold, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { hold.Close() })
+	shell := filepath.Join(dir, "login-shell")
+	// The shell opens the FIFO itself before it starts the reader, so the reader
+	// exists with its end open when the shell returns, and ends when hold closes.
+	script := "#!/bin/sh\nexec 7<\"$FIFO\"\ncat <&7 7<&- &\nprintf '%s' /opt/tools/bin >\"$3\"\n"
+	if err := os.WriteFile(shell, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := loginPathFrom(shell, []string{"FIFO=" + fifo, "PATH=" + os.Getenv("PATH")}); got != "/opt/tools/bin" {
+		t.Fatalf("PATH = %q", got)
 	}
 }
