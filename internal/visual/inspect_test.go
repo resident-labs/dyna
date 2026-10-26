@@ -15,9 +15,13 @@ import (
 	"time"
 )
 
+// These tests launch a real Chromium per page. A hosted CI runner has two to
+// four cores, and ten browsers starting at once starve each other until the
+// browser start alone passes Inspect's 15 second budget: that is how they timed
+// out. They run one at a time instead, and a test never waits inside its own
+// body, so its measured time is the work it does. One inspection takes about
+// half a second that way, well inside the per-test budget.
 func TestInspect(t *testing.T) {
-	t.Parallel()
-
 	fixtures := []struct {
 		name, html string
 		statuses   map[string]string
@@ -33,7 +37,6 @@ func TestInspect(t *testing.T) {
 
 	for _, f := range fixtures {
 		t.Run(f.name, func(t *testing.T) {
-			t.Parallel()
 			r := inspectPage(t, []byte(f.html), "", false)
 			if len(r.Checks) != 5 {
 				t.Fatalf("checks: %+v", r.Checks)
@@ -108,7 +111,6 @@ func webpSize(t *testing.T, b []byte) (int, int) {
 }
 
 func TestInspectCSP(t *testing.T) {
-	t.Parallel()
 	r := inspectPage(t, []byte(`<p>Hello</p><img src="https://example.com/a.png"><script>console.error("must be blocked")</script>`), "default-src 'none'; style-src 'unsafe-inline'", false)
 	if r.Checks[1].Status != "pass" {
 		t.Fatalf("CSP did not block script: %+v", r.Checks)
@@ -119,14 +121,12 @@ func TestInspectCSP(t *testing.T) {
 }
 
 func TestInspectBlockedNetwork(t *testing.T) {
-	t.Parallel()
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(http.StatusNoContent) }))
 	t.Cleanup(server.Close)
 	host, _ := url.Parse(server.URL)
 	for _, allow := range []bool{false, true} {
 		t.Run(fmt.Sprint(allow), func(t *testing.T) {
-			t.Parallel()
 			r := inspectPage(t, []byte(fmt.Sprintf("<p>Hello</p><img src=%q>", server.URL)), "", allow)
 			want := "fail"
 			if allow {
@@ -155,7 +155,6 @@ func TestInspectCanceled(t *testing.T) {
 }
 
 func TestInspectBlocksWebSocket(t *testing.T) {
-	t.Parallel()
 	var connections atomic.Int32
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
@@ -169,7 +168,6 @@ func TestInspectBlocksWebSocket(t *testing.T) {
 	host, _ := url.Parse(address)
 	for _, allow := range []bool{false, true} {
 		t.Run(fmt.Sprint(allow), func(t *testing.T) {
-			t.Parallel()
 			r := inspectPage(t, []byte(fmt.Sprintf("<p>Hello</p><script>new WebSocket(%q)</script>", address)), "", allow)
 			want := "fail"
 			if allow {
@@ -188,13 +186,8 @@ func TestInspectBlocksWebSocket(t *testing.T) {
 	}
 }
 
-// Limit concurrent browsers so fixture tests do not compete for renderer resources.
-var renderSlots = make(chan struct{}, 3)
-
 func inspectPage(t *testing.T, doc []byte, csp string, allowNet bool) Result {
 	t.Helper()
-	renderSlots <- struct{}{}
-	defer func() { <-renderSlots }()
 	// Inspect allows itself 15s; the outer deadline stays above it, so a slow
 	// browser on a two-core CI runner reports its own error instead of a bare
 	// context deadline.
