@@ -174,8 +174,8 @@ const (
 	// judged from the node's own record that came back with the reports.
 	TransportDiedAfterCompletion CleanupWarning = "transport-died-after-completion"
 	// NodeCleanupUnfinished means the cleanup after the run did not finish on
-	// the node. The checks decided the commit; the next check on the node
-	// removes what the cleanup left.
+	// the node. The checks decided the commit. Nothing retries the cleanup later
+	// (D-263), so what it left may need removing by hand.
 	NodeCleanupUnfinished CleanupWarning = "node-cleanup-unfinished"
 )
 
@@ -187,7 +187,7 @@ func (w CleanupWarning) Label() string {
 	case TransportDiedAfterCompletion:
 		return "the connection to the CI machine died after the check completed; its exit came from the machine's own record"
 	case NodeCleanupUnfinished:
-		return "the cleanup on the CI machine did not finish after the run; the next check there removes what it left"
+		return "the cleanup on the CI machine did not finish after the run; a container or process the run started may still be there and may need removing by hand"
 	}
 	return ""
 }

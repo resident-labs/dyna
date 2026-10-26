@@ -107,6 +107,10 @@ func TestSlowNodeCleanupDoesNotChangeAPassedRun(t *testing.T) {
 	if len(result.Warnings) != 1 || result.Warnings[0] != NodeCleanupUnfinished {
 		t.Fatalf("warnings = %v, want the unfinished cleanup", result.Warnings)
 	}
+	// Nothing retries a failed cleanup yet, so the label must not promise it.
+	if label := result.Warnings[0].Label(); !strings.Contains(label, "removing by hand") || strings.Contains(label, "next check") {
+		t.Fatalf("label = %q, want it to say the leftovers may need removing by hand", label)
+	}
 }
 
 // A cleanup that fails once is tried again before the run's directory and record
