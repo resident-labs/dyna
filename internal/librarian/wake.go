@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
@@ -164,7 +165,8 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 		return Result{}, err
 	}
 	failed := rolesession.MergeFailures(st.FailedProfiles, recent)
-	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, failed, s.now(), subagent.RoleLibrarian)
+	repo := harnessruntime.RepoIdentity(ctx, r.Main)
+	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, repo, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
 	}
@@ -271,7 +273,8 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 		return Result{}, err
 	}
 	failed := rolesession.MergeFailures(st.SmellFailedProfiles, recent)
-	choice, err := rolesession.ChooseProfile(profiles, v.LibrarySmellProfile, failed, s.now(), subagent.RoleReviewer)
+	repo := harnessruntime.RepoIdentity(ctx, r.Main)
+	choice, err := rolesession.ChooseProfile(profiles, v.LibrarySmellProfile, repo, failed, s.now(), subagent.RoleReviewer)
 	if err != nil {
 		return Result{}, err
 	}
