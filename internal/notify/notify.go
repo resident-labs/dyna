@@ -1001,6 +1001,17 @@ func (s *Service) sessionParentTargets(meta subagent.Meta) []string {
 	return []string{parent.ID}
 }
 
+// turnHasResult reports whether the turn ended with a final result of its own.
+func turnHasResult(turn subagent.Turn) bool {
+	switch result := turn.Result.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(result) != ""
+	}
+	return true
+}
+
 func silentSessionCompletion(turn subagent.Turn) bool {
 	return turn.WrapUp || turn.StopReason == "transfer" || turn.StopReason == "consolidation" || turn.StopReason == "close"
 }
@@ -1237,7 +1248,10 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 				posted = append(posted, meta.Room)
 			}
 		}
-		if slices.ContainsFunc(posted, func(addr string) bool { return slices.Contains(turn.PostedTo, addr) }) {
+		// An explicit post stands in for the report only when the turn ends with
+		// no final text. A turn that wrote a final result still reports it, so a
+		// question posted to the parent mid-turn cannot hide the completion.
+		if !turnHasResult(turn) && slices.ContainsFunc(posted, func(addr string) bool { return slices.Contains(turn.PostedTo, addr) }) {
 			return nil, nil
 		}
 		ev, err := s.turnEvent(meta, turn)
