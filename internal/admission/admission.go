@@ -62,28 +62,17 @@ func (g Gate) Acquire(ctx context.Context, pool Pool, room string, onHold func(H
 	}
 	held := false
 	for {
-		slots, mine := scan(dir, room)
-		limit := g.Limit(pool, len(slots))
-		if limit < 0 {
-			return func() {}, nil
+		release, hold, err := g.attempt(dir, pool, room)
+		if err != nil {
+			return nil, err
 		}
-		limit = min(limit, maxSlots)
-		share := limit
-		if g.RoomShare != nil {
-			share = g.RoomShare(limit)
-		}
-		roomFull := mine >= share
-		if !roomFull {
-			if release, ok, err := take(dir, limit, room); err != nil {
-				return nil, err
-			} else if ok {
-				return release, nil
-			}
+		if release != nil {
+			return release, nil
 		}
 		if !held {
 			held = true
 			if onHold != nil {
-				onHold(Hold{Pool: pool, Limit: limit, Held: len(slots), RoomFull: roomFull && len(slots) < limit})
+				onHold(hold)
 			}
 		}
 		if err := g.Wait(ctx); err != nil {
@@ -92,11 +81,52 @@ func (g Gate) Acquire(ctx context.Context, pool Pool, room string, onHold func(H
 	}
 }
 
+// attempt tries once to take a slot. The scan, the limit check, the room check
+// and the lock of a slot run under one allocation lock, so two runners cannot
+// both see room for themselves. A nil release means the turn must wait.
+func (g Gate) attempt(dir string, pool Pool, room string) (func(), Hold, error) {
+	alloc, err := os.OpenFile(filepath.Join(dir, ".alloc"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, Hold{}, err
+	}
+	defer alloc.Close()
+	if err := syscall.Flock(int(alloc.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, Hold{}, err
+	}
+	defer syscall.Flock(int(alloc.Fd()), syscall.LOCK_UN)
+	slots, mine := scan(dir, room)
+	limit := g.Limit(pool, len(slots))
+	if limit < 0 {
+		return func() {}, Hold{}, nil
+	}
+	limit = min(limit, maxSlots)
+	share := limit
+	if g.RoomShare != nil {
+		share = g.RoomShare(limit)
+	}
+	// The count of live slots, not a slot index, is the limit: a limit that
+	// falls below the slots in use admits nobody until enough of them end.
+	if len(slots) >= limit {
+		return nil, Hold{Pool: pool, Limit: limit, Held: len(slots)}, nil
+	}
+	if mine >= share {
+		return nil, Hold{Pool: pool, Limit: limit, Held: len(slots), RoomFull: true}, nil
+	}
+	release, ok, err := take(dir, room)
+	if err != nil {
+		return nil, Hold{}, err
+	}
+	if !ok {
+		return nil, Hold{Pool: pool, Limit: limit, Held: len(slots)}, nil
+	}
+	return release, Hold{}, nil
+}
+
 func slotPath(dir string, i int) string { return filepath.Join(dir, fmt.Sprintf("slot-%03d", i)) }
 
-// take locks the first free slot below limit and writes the room into it.
-func take(dir string, limit int, room string) (func(), bool, error) {
-	for i := 0; i < limit; i++ {
+// take locks the first free slot and writes the room into it.
+func take(dir string, room string) (func(), bool, error) {
+	for i := 0; i < maxSlots; i++ {
 		f, err := os.OpenFile(slotPath(dir, i), os.O_RDWR|os.O_CREATE, 0o600)
 		if err != nil {
 			return nil, false, err
