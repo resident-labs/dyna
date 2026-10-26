@@ -44,13 +44,18 @@ const tempPrefix = "dyna-test-"
 const staleAfter = 5 * time.Minute
 
 func startRoot() string {
-	if inheritedRoot() {
-		return os.Getenv(rootEnv)
-	}
 	// A Dyna session exports a disk TMPDIR whose path is too long for the unix
 	// sockets that tests bind under t.TempDir(). Tests use the system folder.
-	if testing.Testing() && strings.Contains(os.Getenv("TMPDIR"), "/.cache/dyna/tmp") {
-		os.Unsetenv("TMPDIR")
+	// Go's t.TempDir reads GOTMPDIR before TMPDIR, so every variable goes.
+	if testing.Testing() {
+		for _, name := range []string{"TMPDIR", "TMP", "TEMP", "GOTMPDIR"} {
+			if strings.Contains(os.Getenv(name), "/.cache/dyna/tmp") {
+				os.Unsetenv(name)
+			}
+		}
+	}
+	if inheritedRoot() {
+		return os.Getenv(rootEnv)
 	}
 	return os.TempDir()
 }
