@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -375,7 +376,13 @@ func liveCommits(st state.State) map[string]bool {
 		if trial == nil || trial.Phase == state.MergeTrialPhasePublished {
 			continue
 		}
-		for _, change := range trial.Changes {
+		// The tested merge commit is trial.Head and each stack's Head; resuming a
+		// trial reads its saved result by those, not by the source changes.
+		keep[trial.Head], keep[trial.OriginalHead] = true, true
+		for _, stack := range trial.Stacks {
+			keep[stack.Head] = true
+		}
+		for _, change := range append(slices.Clone(trial.Changes), trial.StackChanges...) {
 			keep[change.Head] = true
 		}
 	}
