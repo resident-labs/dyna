@@ -45,7 +45,7 @@ Run `dyna profiles check` for installed binaries and output capabilities. Read `
 ## Runtime
 
 Scripts use JavaScript with top-level `await` and `return`; the return becomes the JSON result.
-They are not Node.js programs: no TypeScript, `require`, modules, filesystem, networking, or arbitrary environment access. Workers handle filesystem work.
+They are not Node.js programs: no TypeScript, `require`, modules, filesystem, networking, or arbitrary environment access. Workers handle filesystem work, and `run()` runs commands.
 
 Each `agent()` call starts a leaf session: a regular agent session that cannot start subagents or runs. It has the same tools, instructions, and guides as any session. Dyna disables native delegation: Claude runs without the Agent tool.
 The run closes each agent session when its call resolves. Sessions of a run stay out of member lists and groups. Their results go to the run, not to a parent.
@@ -81,6 +81,19 @@ Returns a promise for worker text or validated JSON. Options:
 - `isolation: { type: 'worktree', retention?: 'changed' | 'all' | 'none' }`: detached worktree at committed `HEAD`. Default `changed` retains changed trees; `all` retains all; `none` journals changes before removal.
 
 Isolation excludes uncommitted changes. Dyna never merges retained work. Hand later workers an engine-verified path from `worktrees()`, selected by author-controlled label; never trust worker-reported paths. Parallel writers need disjoint scopes or worktrees.
+
+### `run(command, opts?)`
+
+Runs a deterministic command with no model turn and returns `{ code, stdout, stderr, json, durationMs, attempts, shellId, logPath }`. An array runs without a shell; a string runs through `sh -c`.
+Options: `cwd` (default: run `--dir`), `env` (added to the run's environment), `label` (stable resume identity), `phase`, `lane`, `stage` (as for `agent()`), `timeout` seconds (default five hours), `retries` (default 0, because commands can have side effects), `check`, and `parse: 'json'`.
+A non-zero exit, a timeout, or output that is not JSON rejects, so `parallel()` yields `null` and `pipeline()` drops the item. With `check: false` the script gets the result instead.
+`stdout` and `stderr` keep the first 64 KiB; `logPath` has the full standard output. Each call is a managed shell of the run (see `dyna shell`), runs on the engine host, and stops when the run is canceled or ends. The run page shows its command, duration, exit code, and log tail.
+`--resume` reuses a finished command's result, reattaches to a shell still running, and reruns a failed one. Include `check` and a unique `label` in the call you want to match.
+
+```js
+const gate = await run(['python3', 'bridge.py', 'landed', '--unit', unit], { label: 'wait-' + unit, parse: 'json', timeout: 6 * 3600 })
+await agent('Review the landing: ' + JSON.stringify(gate.json), { schema })
+```
 
 ### `parallel(thunks)`
 
@@ -131,6 +144,7 @@ Partition implementation into disjoint file sets, then stream each writer into r
 ### Keep builds and tests out of the fan-out
 
 Fan out writing and reviewing freely. Run builds and tests in one agent of the run, or in the pull requests afterwards, reviewed outside the workflow. Concurrent builds exhaust CPU, memory and disk. Workers skip builds and tests unless the prompt asks.
+`run()` commands inside `parallel()` queue behind `--max-commands` (default 4, per run), so a script cannot start 200 builds at once. Commands do not count against `--max-agents`.
 
 ### Workflow templates
 
