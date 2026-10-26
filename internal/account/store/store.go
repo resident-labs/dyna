@@ -161,6 +161,11 @@ type Credential struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
+// SchemaPiNativeFiles is the Pi credential envelope: one auth.json holding the
+// provider entry. The retirement migration reads it to decide whether a Pi
+// account really holds the sign-in it would replace (D-125).
+const SchemaPiNativeFiles = "pi/native-files@1"
+
 type Entry struct {
 	Metadata
 	Credential Credential `json:"credential"`

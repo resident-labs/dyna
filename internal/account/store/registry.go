@@ -129,33 +129,32 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 // loses its active marks, repository scope, limit and, through the orphan cleanup,
 // its credential file. The engine backs up dyna.db before this migration.
 func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn, credentialDir string) error {
-	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), json_extract(CAST(metadata AS TEXT), '$.identity'), credential_schema, json_extract(CAST(metadata AS TEXT), '$.needsLogin') FROM accounts")
+	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), credential_schema, json_extract(CAST(metadata AS TEXT), '$.needsLogin') FROM accounts")
 	if err != nil {
 		return err
 	}
-	// replacements holds the provider sign-ins a signed-in Pi account covers. A Pi
-	// slot the owner has not signed in yet covers nothing: it carries no identity
-	// and no credential, so it cannot have taken over another sign-in (D-125).
-	replacements := map[string]map[string]bool{}
-	type candidate struct{ id, harness, provider, identity string }
+	// covered holds the providers a signed-in Pi account proves a sign-in for. A Pi
+	// slot the owner has not signed in yet proves nothing, and a saved envelope
+	// without a usable provider entry proves nothing either (D-125).
+	covered := map[string]bool{}
+	type candidate struct{ id, harness, provider string }
 	var candidates []candidate
 	for rows.Next() {
-		var id, harness, provider, identity, schema sql.NullString
+		var id, harness, provider, schema sql.NullString
 		var needsLogin sql.NullBool
-		if err := rows.Scan(&id, &harness, &provider, &identity, &schema, &needsLogin); err != nil {
+		if err := rows.Scan(&id, &harness, &provider, &schema, &needsLogin); err != nil {
 			rows.Close()
 			return err
 		}
 		if KnownHarness(harness.String) && !AccountsRetired(harness.String) {
-			if harness.String == "pi" && provider.String != "" && identity.String != "" && schema.String != "" && !needsLogin.Bool && piCredentialHolds(credentialDir, id.String, schema.String) {
-				if replacements[provider.String] == nil {
-					replacements[provider.String] = map[string]bool{}
+			if harness.String == "pi" && provider.String != "" && schema.String == SchemaPiNativeFiles && !needsLogin.Bool {
+				if c, ok := readCredentialAt(credentialDir, id.String); ok && c.Schema == SchemaPiNativeFiles && piCoversProvider(c, Provider(provider.String)) {
+					covered[provider.String] = true
 				}
-				replacements[provider.String][identity.String] = true
 			}
 			continue
 		}
-		candidates = append(candidates, candidate{id.String, harness.String, provider.String, identity.String})
+		candidates = append(candidates, candidate{id.String, harness.String, provider.String})
 	}
 	err = rows.Err()
 	rows.Close()
@@ -166,7 +165,7 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn, credentialDir s
 	retiredHarnesses := map[string]bool{"": true}
 	for _, row := range candidates {
 		retiredHarnesses[row.harness] = true
-		if !replacedByPi(replacements[row.provider], row.identity) {
+		if !covered[row.provider] {
 			continue
 		}
 		ids = append(ids, row.id)
@@ -195,12 +194,57 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn, credentialDir s
 	return nil
 }
 
-// replacedByPi reports whether a signed-in Pi account covers this provider
-// sign-in: the same provider and the same known identity. An empty identity is
-// never a wildcard, because a Pi slot the owner has not signed in has none, and a
-// sign-in the migration cannot match must be kept rather than discarded.
-func replacedByPi(covered map[string]bool, identity string) bool {
-	return identity != "" && covered[identity]
+// piCoversProvider reports whether a saved Pi credential really holds the sign-in
+// of provider: an envelope with exactly one auth.json entry whose Pi provider id
+// names the same provider, carrying the token kind that provider signs in with.
+// An envelope Dyna can read but Pi cannot use proves nothing, so the migration
+// keeps the source row instead of discarding the only saved copy (D-125).
+func piCoversProvider(c Credential, provider Provider) bool {
+	var files, auth map[string]json.RawMessage
+	if json.Unmarshal(c.Payload, &files) != nil || json.Unmarshal(files["auth.json"], &auth) != nil || len(auth) != 1 {
+		return false
+	}
+	for id, raw := range auth {
+		if piProviderOf(id) != provider {
+			return false
+		}
+		var entry struct {
+			Type      string `json:"type"`
+			Key       string `json:"key"`
+			Access    string `json:"access"`
+			Refresh   string `json:"refresh"`
+			AccountID string `json:"accountId"`
+		}
+		if json.Unmarshal(raw, &entry) != nil {
+			return false
+		}
+		switch provider {
+		case ProviderChatGPT:
+			return entry.Type == "oauth" && entry.Access != "" && entry.AccountID != ""
+		case ProviderMetaMuse:
+			return entry.Type == "oauth" && entry.Refresh != ""
+		case ProviderOpenCodeGo:
+			return entry.Type == "api_key" && entry.Key != ""
+		}
+		return entry.Key != "" || entry.Access != ""
+	}
+	return false
+}
+
+// piProviderOf maps a Pi provider id to the saved account provider, following the
+// aliases Pi accepts. An unknown id maps to itself.
+func piProviderOf(id string) Provider {
+	switch id {
+	case "openai-codex", "openai", "chatgpt":
+		return ProviderChatGPT
+	case "meta", "meta-muse", "muse":
+		return ProviderMetaMuse
+	case "opencode-go", "opencode":
+		return ProviderOpenCodeGo
+	case "kimi-coding", "kimi":
+		return ProviderKimiCode
+	}
+	return Provider(id)
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the
@@ -466,15 +510,6 @@ func readCredentialAt(dir, id string) (Credential, bool) {
 		return Credential{}, false
 	}
 	return c, true
-}
-
-// piCredentialHolds reports whether id's saved credential can stand in for a
-// retired harness sign-in: its file is readable, its schema matches the row, and
-// it carries a payload. Store.load treats a row whose file is missing or damaged
-// as signed out, so the migration must not trust a row's schema alone (D-125).
-func piCredentialHolds(dir, id, schema string) bool {
-	c, ok := readCredentialAt(dir, id)
-	return ok && c.Schema == schema && len(bytes.TrimSpace(c.Payload)) > 2
 }
 
 // writeCredential is the one writer of an account's credential file: login,
