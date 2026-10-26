@@ -305,6 +305,7 @@ const fixtures: Record<string, EventPayload> = {
     turn: 5,
     state: 'failed',
     error: 'the provider refused the request',
+    workerStderr: 'Error: 429 rate limit exceeded',
     detail: 'Inspect: dyna subagent output ses_20261023-120000-00000000 --turn 5 --transcript',
   },
   'turn/stopped': {
@@ -399,14 +400,15 @@ function fixtureTip(payload: EventPayload): string {
   return payload.detail || payload.reason
 }
 
-test('a failed turn states its cause and keeps worker stderr in the detail block', () => {
+test('a failed turn states its cause and keeps worker stderr behind a disclosure', () => {
   const payload: EventPayload = {
     session: 'dyna:notice-merge',
     sessionId: 'ses_20261023-120000-00000000',
     turn: 14,
     state: 'failed',
     error: 'worker pi (model muse-wonder-full-1.0) failed to start: no harness event within 2m0s of startup',
-    detail: 'Full output: dyna subagent output ses_20261023-120000-00000000 --turn 14\nWorker stderr: Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.',
+    workerStderr: 'Warning: Model "muse-wonder-full-1.0" not found for provider "meta". Using custom model id.',
+    detail: 'Full output: dyna subagent output ses_20261023-120000-00000000 --turn 14\nFailed model: pi / muse-wonder-full-1.0\nInspect: dyna subagent output ses_20261023-120000-00000000 --turn 14 --transcript\nRecover: dyna subagent transfer ses_20261023-120000-00000000 --profile <working-profile>',
   }
   const post = postFor('turn', 'failed', payload)
   for (const surface of ['feed', 'dm'] as const) {
@@ -414,13 +416,20 @@ test('a failed turn states its cause and keeps worker stderr in the detail block
     document.body.append(target)
     const mounted = web.mount(web.eventComponents.TurnCompletionRow, { target, props: { post, notice: post.notice, surface } })
     web.flushSync()
+    const text = target.textContent ?? ''
     // The body is the cause: the startup timeout, never the harness warning.
     const body = need(target.querySelector('.prose'), `the failed turn body on ${surface}`)
     assert.match(body.textContent ?? '', /no harness event within 2m0s of startup/, `turn/failed on ${surface} lost its cause`)
     assert.doesNotMatch(body.textContent ?? '', /Using custom model id/, `turn/failed on ${surface} glued stderr into the cause`)
-    // The warning stays readable as detail, on its own line.
-    const detail = need(target.querySelector('.turn-detail'), `the failed turn detail block on ${surface}`)
-    assert.match(detail.textContent ?? '', /Worker stderr: Warning: Model "muse-wonder-full-1.0" not found/, `turn/failed on ${surface} lost its worker stderr detail`)
+    // The warning stays readable behind the worker-stderr disclosure.
+    const stderr = need(target.querySelector('.turn-stderr'), `the failed turn stderr disclosure on ${surface}`)
+    assert.match(stderr.textContent ?? '', /Worker stderr/, `turn/failed on ${surface} lost its stderr label`)
+    assert.match(stderr.textContent ?? '', /Using custom model id/, `turn/failed on ${surface} lost its worker stderr evidence`)
+    // Agent-facing detail never reaches the row: no inspection commands and
+    // no raw session IDs (D-253).
+    assert.doesNotMatch(text, /dyna subagent (output|transfer)/, `turn/failed on ${surface} shows inspection commands`)
+    assert.doesNotMatch(text, /--transcript|--profile|Full output:|Inspect:|Recover:/, `turn/failed on ${surface} shows agent detail`)
+    assert.doesNotMatch(text, /ses_2026/, `turn/failed on ${surface} shows a raw session ID`)
     web.unmount(mounted)
     target.remove()
   }
