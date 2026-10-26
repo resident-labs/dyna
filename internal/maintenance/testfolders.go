@@ -66,6 +66,38 @@ func sweepTestFolders(now time.Time, root string, alive func(int) bool, dry bool
 	return freed, errors.Join(errs...)
 }
 
+// sweepDiskTemp removes every entry in root that has stood unchanged for the
+// retention. Root is a folder Dyna owns on disk (the shared temporary folder of
+// hook runs and local checks, and the test run folder), so any name in it is
+// ours. It never follows a link out of root.
+func sweepDiskTemp(now time.Time, root string, dry bool) (Pruned, error) {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return Pruned{}, nil
+	}
+	if err != nil {
+		return Pruned{}, err
+	}
+	var freed Pruned
+	var errs []error
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) <= testFolderRetention || !ownedByUser(info) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		freed.Items++
+		freed.Bytes += folderBytes(path)
+		if dry {
+			continue
+		}
+		if err := fsutil.RemoveTree(path); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return freed, errors.Join(errs...)
+}
+
 // processAlive reports whether a process still exists. The sweep takes it as a
 // parameter so a test can name the running binaries itself.
 var processAlive = procident.Alive
