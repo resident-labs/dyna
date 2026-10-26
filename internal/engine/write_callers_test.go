@@ -21,6 +21,7 @@ var handlerCallerChecks = map[string]string{
 	"AttachSeat":                  "Checks root attach with authority.Of(ctx).",
 	"FinishRun":                   "checkRunCoordinator requires the run's verified coordinator and its own request prefix.",
 	"StartRunAgent":               "checkRunAgentCoordinator requires the run's verified coordinator.",
+	"CloseRunAgent":               "checkRunAgentCoordinator requires the run's verified coordinator.",
 	"CloseRunAgents":              "checkRunAgentCoordinator requires the run's verified coordinator.",
 	"AddRunDirectories":           "checkRunCoordinator requires the run's verified coordinator and its own request prefix.",
 	"AddHook":                     "actor(ctx) resolves the author; hooks.Add checks git hooks add with authority.Of(ctx).",

@@ -30,6 +30,12 @@ func RunAgentBindings(sessions func() *subagent.Manager) []websvc.Binding {
 			}
 			return waitRunAgent(ctx, sessions(), ref)
 		}},
+		{Name: "CloseRunAgent", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: func(ctx context.Context, ref callspec.RunAgentRef) error {
+			if err := checkRunAgentCoordinator(ctx, ref.Run); err != nil {
+				return err
+			}
+			return sessions().CloseRunAgent(ctx, ref.Run, ref.Agent)
+		}},
 		{Name: "CloseRunAgents", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: func(ctx context.Context, run string) error {
 			if err := checkRunAgentCoordinator(ctx, run); err != nil {
 				return err

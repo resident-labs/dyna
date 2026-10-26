@@ -149,6 +149,14 @@ func TestCoordinatorAndEngineCanCloseRunAgents(t *testing.T) {
 			t.Fatalf("session %s = %+v, %v; want closed", id, got.Status, err)
 		}
 	}
+	// One agent of a run closes alone, for a nested script that ends early.
+	single := start(4, "mock", "RESPOND: y")
+	if err := e.m.CloseRunAgent(coordinator, run, 4); err != nil {
+		t.Fatalf("close one agent as the coordinator: %v", err)
+	}
+	if got, err := e.m.store().Info(single.ID); err != nil || got.Status != StatusClosed {
+		t.Fatalf("agent 4 = %+v, %v; want closed", got.Status, err)
+	}
 	// The engine has no caller: its own cleanup closes a run's agents too.
 	restore := authority.InEngine()
 	defer restore()
