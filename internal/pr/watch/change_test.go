@@ -325,6 +325,24 @@ func TestAuthorWritesRefuseAChangedAuthor(t *testing.T) {
 	}
 }
 
+func TestUpdatingOneNoteKeepsTheOthers(t *testing.T) {
+	e := newEnv(t)
+	r := e.track()
+	full := ChangeNotes{Intent: "why", Testing: "old", Risks: "risk", Questions: "ask"}
+	if err := e.s.UpdateChangeNotes(r.Key, r.Author, full, "fix", []string{"dep"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.UpdateChangeNotes(r.Key, r.Author, ChangeNotes{Testing: "new"}, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	want := full
+	want.Testing = "new"
+	got := e.record()
+	if got.Notes != want || got.Category != "fix" || len(got.Dependencies) != 1 {
+		t.Fatalf("update with only testing = %+v, %q, %v; want notes %+v and category and dependencies kept", got.Notes, got.Category, got.Dependencies, want)
+	}
+}
+
 func TestReviewDeltaExcludesRebasedMainChanges(t *testing.T) {
 	e := newEnv(t)
 	r, dir := localChange(t, e)
