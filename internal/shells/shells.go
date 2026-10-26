@@ -551,10 +551,6 @@ func timedOut(err error) bool {
 	return err != nil && (errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), context.DeadlineExceeded.Error()))
 }
 
-// stopOutputWait is how long a stopped job's supervisor lets its output drain
-// after the command ended, before it stops reading (D-190, D-210).
-const stopOutputWait = 3 * time.Second
-
 // outputDrainWait is how long a supervisor lets a job's output drain after
 // its command ended, before it stops reading (D-190, D-210).
 const outputDrainWait = 3 * time.Second
