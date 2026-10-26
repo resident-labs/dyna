@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
@@ -154,12 +155,17 @@ func checkRunEvent(ctx context.Context, conn *sql.Conn, event hub.Event) error {
 // unknownBuild names the build of a run that recorded none.
 const unknownBuild = "an unknown build"
 
+// engineStart is when this engine process started. An agent failure from
+// before it cannot come from this build, so it never marks a run interrupted.
+var engineStart = time.Now()
+
 // settleInterrupted decides the run's final status. An update can break a run
 // that started on another build, while its script still returns and reports
-// ok. A run from another build with a failed agent therefore ends
-// interrupted. Other runs keep the status the coordinator reported, and a
-// cancel stays a cancel.
-func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFinish, engineBuild string) (callspec.RunFinish, error) {
+// ok. A run from another build with an agent that failed since this engine
+// started (since) therefore ends interrupted. A failure the script handled
+// before the update does not count. Other runs keep the status the
+// coordinator reported, and a cancel stays a cancel.
+func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFinish, engineBuild string, since time.Time) (callspec.RunFinish, error) {
 	if in.Status != "ok" && in.Status != "error" {
 		return in, nil
 	}
@@ -179,7 +185,7 @@ func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFini
 		return in, nil
 	}
 	for _, e := range events {
-		if e.T == "agent_end" && e.Status == "error" && !e.Cached {
+		if e.T == "agent_end" && e.Status == "error" && !e.Cached && e.TS >= since.UnixMilli() {
 			from := meta.Build
 			if from == "" {
 				from = unknownBuild
@@ -197,7 +203,7 @@ func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish)
 	if err != nil {
 		return runstore.Meta{}, err
 	}
-	in, err = settleInterrupted(ctx, w, in, callspec.Build)
+	in, err = settleInterrupted(ctx, w, in, callspec.Build, engineStart)
 	if err != nil {
 		return runstore.Meta{}, err
 	}
