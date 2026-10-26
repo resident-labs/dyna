@@ -191,6 +191,38 @@ func TestRunTakeoverRefusesRecordWithoutController(t *testing.T) {
 	refuseTakeover(t, "a record without a controller", err)
 }
 
+// TestRunTakeoverSurvivesRootRefresh covers the D-252 recovery itself: root,
+// which no run owns, refreshed the change to a new head after the run author
+// closed, and the controller the run recorded must survive that refresh for
+// the next worker of the same controller.
+func TestRunTakeoverSurvivesRootRefresh(t *testing.T) {
+	env := newRunTakeoverEnv(t)
+	dir := env.workerBranch(t, "refreshed")
+	first := env.worker(t, "wf_first", env.controller, "ses_20261017-000008-11111111")
+	if _, _, err := env.open(t, first, dir); err != nil {
+		t.Fatal(err)
+	}
+	env.closeAuthor(t, first)
+
+	head := changeCommit(t, dir, "root fix\n")
+	refreshed, created, err := env.open(t, env.root, dir)
+	if err != nil || created {
+		t.Fatalf("root refresh: %+v created=%t %v", refreshed, created, err)
+	}
+	if refreshed.Head != head || refreshed.Author != env.root.ID {
+		t.Fatalf("root refresh record: %+v", refreshed)
+	}
+	if refreshed.Controller != state.Controller(env.controller) {
+		t.Fatalf("root refresh lost controller %q", refreshed.Controller)
+	}
+
+	second := env.worker(t, "wf_second", env.controller, "ses_20261017-000009-22222222")
+	taken, created, err := env.open(t, second, dir)
+	if err != nil || created || taken.Author != second.ID {
+		t.Fatalf("takeover after root refresh: %+v created=%t %v", taken, created, err)
+	}
+}
+
 // TestRunTakeoverOnPRTrack covers the same refusal when a later run agent
 // tracks the PR for the branch of the change it takes over.
 func TestRunTakeoverOnPRTrack(t *testing.T) {
