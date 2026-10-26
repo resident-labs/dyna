@@ -2,6 +2,7 @@ package runsvc
 
 import (
 	"context"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -51,5 +52,14 @@ func TestCancelStopsTheRunsWorkerShells(t *testing.T) {
 	}
 	if in.Pid > 0 && syscall.Kill(in.Pid, 0) == nil {
 		t.Fatal("worker shell process still exists after cancel")
+	}
+	// A worker still finishing a shell call after the cancellation fence is
+	// refused, so its supervisor never launches behind the cleanup snapshot.
+	if _, err := s.Create(shells.StartOptions{Run: runID, Cmd: []string{"sleep", "600"}, Cwd: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("create after cancel = %v, want a cancellation refusal", err)
+	}
+	list, err := s.List(false)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("open shells after cancel = %#v, %v; the refused create must publish no row", list, err)
 	}
 }

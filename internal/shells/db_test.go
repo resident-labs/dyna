@@ -96,11 +96,12 @@ func insertOldJob(conn *sql.Conn, m Meta, ex *Exit) error {
 	if err != nil {
 		return err
 	}
-	var ended any
+	var ended sql.NullString
 	var code int
 	var signal, message string
 	if ex != nil {
-		ended, code, signal, message = ex.Ended.UTC().Format(time.RFC3339Nano), ex.Code, ex.Signal, ex.Error
+		ended = sql.NullString{String: ex.Ended.UTC().Format(time.RFC3339Nano), Valid: true}
+		code, signal, message = ex.Code, ex.Signal, ex.Error
 	}
 	_, err = conn.ExecContext(context.Background(), `INSERT INTO shell_jobs(id, name, cmd, cwd, owner, keep, room_id, room, pid, supervisor, supervisor_start, started, ended, exit_code, exit_signal, exit_error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		m.ID, m.Name, string(cmd), m.Cwd, m.Owner, m.Keep, m.RoomID, m.Room, m.Pid, m.Supervisor, int64(m.SupervisorStartTime),

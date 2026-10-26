@@ -78,8 +78,8 @@ type Meta struct {
 	// Run names the workflow run whose worker started this job. Workflow
 	// workers inherit their parent session's identity, so Owner alone cannot
 	// attribute the job to the run a cancel must stop (D-165).
-	Run   string   `json:"run,omitempty"`
-	Pid   int      `json:"pid,omitempty"` // the command (process group leader)
+	Run string `json:"run,omitempty"`
+	Pid int    `json:"pid,omitempty"` // the command (process group leader)
 	// Supervisor is the detached `dyna shell _run` process.
 	Supervisor int `json:"supervisor,omitempty"`
 	// SupervisorStartTime is Linux /proc/<pid>/stat field 22 (clock ticks).
@@ -152,7 +152,7 @@ type StartOptions struct {
 	Cmd  []string
 	Cwd  string
 	// Owner overrides the owning agent session (default runstore.OwnerFromEnv).
-	Owner  string
+	Owner string
 	// Run names the workflow run whose worker starts the job, so a cancel of
 	// that run stops it (default runstore.WorkerRunFromEnv).
 	Run    string
@@ -172,6 +172,12 @@ func (s *Store) Create(opts StartOptions) (out Meta, err error) {
 		}
 		if strings.TrimSpace(opts.Run) == "" {
 			opts.Run = runstore.WorkerRunFromEnv()
+		}
+		// The publication lock serializes this check with StopRun's snapshot:
+		// a run marked canceling refuses new shells first, and a shell that
+		// published first is already in that snapshot (D-165).
+		if opts.Run != "" && runstore.Canceling(opts.Run) {
+			return fmt.Errorf("run %s is canceled; not starting a new shell", opts.Run)
 		}
 		out, err = s.create(opts)
 		return err
@@ -760,14 +766,19 @@ func (s *Store) StopOwner(owner string) error {
 
 // StopRun stops the non-keep shells that workers of runID started. A
 // cancelled run ends its workers, so their jobs stop the way a closed
-// session's do (D-165). Stop also waits for supervisors that have not yet
-// published their process ID.
+// session's do (D-165). The snapshot shares Create's publication lock, and
+// cancellation is marked before this runs, so a worker either published
+// before the snapshot or is refused afterwards. Stops wait outside the lock.
 func (s *Store) StopRun(runID string) error {
 	if runID == "" {
 		return nil
 	}
-	list, err := s.List(false)
-	if err != nil {
+	var list []Info
+	if err := sessionlife.WithPublication(context.Background(), s.Root, "publication.lock", func() error {
+		var err error
+		list, err = s.List(false)
+		return err
+	}); err != nil {
 		return err
 	}
 	var errs []error
