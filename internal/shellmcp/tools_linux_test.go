@@ -475,6 +475,17 @@ func TestCallRunsForTheSessionTheClientNames(t *testing.T) {
 	}
 }
 
+// D-190: a job that is still running must never be reported as lost.
+func TestRunningJobWithoutExitIsNotReportedLost(t *testing.T) {
+	tools := newTools(t, time.Second)
+	for _, status := range []string{"running", "starting"} {
+		in := shells.Info{Meta: shells.Meta{ID: "sh_20261026-000000-aaaaaaaa"}, Status: status}
+		if line := tools.exitLine(in); strings.Contains(line, "lost") || !strings.Contains(line, "still running") {
+			t.Errorf("%s job report = %q", status, line)
+		}
+	}
+}
+
 func TestLostJobReportsSupervisorErrors(t *testing.T) {
 	tools := newTools(t, time.Second)
 	meta, err := tools.Store.Create(shells.StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir(), Owner: tools.Owner})
