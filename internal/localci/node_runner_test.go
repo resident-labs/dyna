@@ -915,6 +915,42 @@ func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
 	}
 }
 
+// A node's detached checks run under the systemd user manager, whose PATH lacks
+// the owner's ~/.local/bin. A tool installed there, such as agent-browser, must
+// still be found by a host check, which runs with the owner's real HOME at the
+// time its PATH is set and an isolated HOME afterwards.
+func TestHostCheckFindsToolsInTheOwnersLocalBin(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "owner-tool"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"docker", "git", "systemctl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--\" ]; then shift; break; fi\n  shift\ndone\nexec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemd-run"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true, inner: "command -v owner-tool"}
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	// The wrapper kills the rest of its process group when the check ends.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+dir+":"+os.Getenv("PATH"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("host check did not find a tool in ~/.local/bin: %v: %s", err, output)
+	}
+}
+
 // The slot lock belongs to the wrapper. A check can start a daemon that leaves
 // the session and outlives it, as sccache does, and such a daemon must not
 // inherit fd 9: otherwise it keeps the slot for good and later checks wait for
