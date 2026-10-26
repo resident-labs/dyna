@@ -56,31 +56,24 @@ func TestFeedViewUnreadUsesWholeSharedIndex(t *testing.T) {
 	if err := e.svc.MarkReadMany(rec.ID, []string{first.ID}); err != nil {
 		t.Fatal(err)
 	}
-	completed, err := e.svc.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name},
+	// A turn completion is a quiet engine event, so it never counts as unread.
+	_, err := e.svc.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name},
 		Event: room.TurnEvent{Session: grandchild.Address(), SessionID: grandchild.ID, Turn: 1, State: room.TurnCompleted, Summary: "finished"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.say(rec, "lead", "general")
 	// Warm the same index through the room unread call before requesting a page.
-	if got := roomUnreadCount(t, e.svc, rec.ID); got != 3 {
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 2 {
 		t.Fatalf("room unread = %d", got)
 	}
 	page, err := e.svc.FeedTail(rec.ID, "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"general": 2, "channel:" + lead.ID: 1, "channel:" + child.ID: 1}
-	if page.Unread != 3 || len(page.Posts) != 1 || !reflect.DeepEqual(page.ViewUnread, want) {
+	want := map[string]int{"general": 2, "channel:" + lead.ID: 1}
+	if page.Unread != 2 || len(page.Posts) != 1 || !reflect.DeepEqual(page.ViewUnread, want) {
 		t.Fatalf("feed unread = %d, posts = %d, views = %v, want %v", page.Unread, len(page.Posts), page.ViewUnread, want)
-	}
-	if err := e.svc.MarkReadMany(rec.ID, []string{completed.ID}); err != nil {
-		t.Fatal(err)
-	}
-	page, err = e.svc.FeedTail(rec.ID, "", 1)
-	delete(want, "channel:"+child.ID)
-	if err != nil || page.Unread != 2 || !reflect.DeepEqual(page.ViewUnread, want) {
-		t.Fatalf("after read: %+v, %v", page, err)
 	}
 }
 

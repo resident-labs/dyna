@@ -565,7 +565,7 @@
   }
   const reload = createReloadGate(() => ({ room: roomId, visit: roomRequest }), visibleList)
   const readMarker = createReadMarker(api, {
-    current: () => ({ room: roomId, visit: roomRequest + ':' + view, visible: pageVisible && !(narrow && reviewOpen) && consolidationAlive && !drill && isFeedView(view) }),
+    current: () => ({ room: roomId, visit: roomRequest + ':' + view, visible: pageVisible && !(narrow && reviewOpen) && consolidationAlive && !drill && isFeedView(view), chat: view === GENERAL }),
     read: () => { soonRooms(); soonRooms('feed') },
   })
 

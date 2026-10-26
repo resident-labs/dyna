@@ -156,6 +156,7 @@ export const api = {
   preview: (roomId: string, draft: string) => app.Preview(roomId, draft),
   markRead: (roomId: string, messageId: string) => app.MarkRead(roomId, messageId),
   markReadMany: (roomId: string, ids: string[]) => app.MarkReadMany(roomId, ids),
+  markRoomRead: (roomId: string) => app.MarkRoomRead(roomId),
   transcript: (ref: string) => app.Transcript(ref),
   rootSession: (roomRef: string) => app.RootSession(roomRef),
   transcriptPage: (ref: string, before = '', limit = 6) => app.TranscriptPage(ref, before, limit),
