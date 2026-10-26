@@ -79,6 +79,12 @@ export interface Forward {
   attachments?: Attachment[]
 }
 
+// ScriptRef is room.ScriptRef: the workflow run behind a script's post.
+export interface ScriptRef {
+  runId: string
+  workflow: string
+}
+
 // Message is room.Message. ts is unix milliseconds.
 export interface Message {
   wake: boolean
@@ -95,6 +101,8 @@ export interface Message {
   // registry in events.gen.ts. Read it with an event helper, not by hand.
   payload?: EventPayload
   human?: boolean
+  // script is the workflow run that wrote the post (room.ScriptRef).
+  script?: ScriptRef
   // conversation is where the post was written: the room feed (or absent), one
   // session's DM (dm:<session id>), or the owner's voice call (voice).
   conversation?: string

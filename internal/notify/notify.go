@@ -194,7 +194,9 @@ type PostInput struct {
 	Sender   Sender
 	Mentions []string
 	Text     string
-	ReplyTo  string
+	// Script is the run behind a workflow script's post, kept on the stored post.
+	Script  *room.ScriptRef
+	ReplyTo string
 	// Conversation is where the writer wrote the post: the room feed, one
 	// session's DM or the owner's voice call. Empty lets the store decide
 	// (see room.HomeFor).
@@ -480,7 +482,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	} else {
 		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs, SenderRoomID: senderRoomID,
 			ID: in.ID, NeedsRoot: in.NeedsRoot, Conversation: in.Conversation,
-			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
+			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), Script: in.Script, To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
 			Attachments: atts, References: in.References,
 		})
 	}
