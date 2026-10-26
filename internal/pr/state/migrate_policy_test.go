@@ -35,19 +35,14 @@ func TestPolicyMigrationPreservesRealChecksAndHistory(t *testing.T) {
 	if strings.Contains(index, `"land"`) || strings.Contains(index, `"checks"`) || !strings.Contains(index, `"requiredChecks":["unit"]`) || !strings.Contains(index, "9007199254740993") || rev != 43 {
 		t.Fatal(index, rev)
 	}
-	if err := db.QueryRow("SELECT body FROM pr_records").Scan(&got); err != nil {
-		t.Fatal(err)
-	}
+	got = joinedBody(t, db, "one")
 	if !strings.Contains(got, `"policyOverride":{"requiredChecks":[]}`) || !strings.Contains(got, policy) || !strings.Contains(got, `"opaque":9`) {
 		t.Fatal(got)
 	}
 	if err := Migrate(filepath.Dir(root)); err != nil {
 		t.Fatal(err)
 	}
-	var replay string
-	if err := db.QueryRow("SELECT body FROM pr_records").Scan(&replay); err != nil {
-		t.Fatal(err)
-	}
+	replay := joinedBody(t, db, "one")
 	if replay != got {
 		t.Fatal("replay changed row")
 	}
