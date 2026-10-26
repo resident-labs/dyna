@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"dyna-agent/internal/testsafe"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ import (
 // the engine only immediately before execution; the redirected-child test does not.
 func hookLaunchTestEngine(t *testing.T, data string) <-chan callerid.Identity {
 	t.Helper()
-	root, err := os.MkdirTemp("/tmp", "hook-engine-")
+	root, err := testsafe.ShortTemp("hook-engine-")
 	if err != nil {
 		t.Fatal(err)
 	}
