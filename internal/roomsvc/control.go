@@ -163,6 +163,9 @@ type SubagentStart struct {
 	// OwnerDisplay asks for the new session's own shells to use the owner's
 	// display. Only an owner or root caller may set it.
 	OwnerDisplay bool
+	// ID is the caller's session ID, so a caller whose answer arrives late can
+	// find the session the engine created. Empty lets the engine mint one.
+	ID string
 }
 
 // StartSubagent starts a session for the caller in the room. A session
@@ -172,7 +175,7 @@ func (s *Service) StartSubagent(ctx context.Context, roomRef string, in Subagent
 	if err != nil {
 		return subagent.Info{}, err
 	}
-	info, _, err := s.Notify.Sessions.Start(ctx, subagent.StartOptions{Profile: in.Profile, Name: in.Name, Room: rec.ID, Dir: in.Dir, Cwd: in.Cwd, Schema: in.Schema, Goal: in.Goal, Under: in.Under, Fixes: in.Fixes, Task: in.Task, Owner: in.Owner, OwnerDisplay: in.OwnerDisplay})
+	info, _, err := s.Notify.Sessions.Start(ctx, subagent.StartOptions{ID: in.ID, Profile: in.Profile, Name: in.Name, Room: rec.ID, Dir: in.Dir, Cwd: in.Cwd, Schema: in.Schema, Goal: in.Goal, Under: in.Under, Fixes: in.Fixes, Task: in.Task, Owner: in.Owner, OwnerDisplay: in.OwnerDisplay})
 	return info, err
 }
 
