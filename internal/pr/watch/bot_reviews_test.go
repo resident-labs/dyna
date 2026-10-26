@@ -29,10 +29,8 @@ func TestBotReviewsClassifiesCIAndLatestAttempts(t *testing.T) {
 		{ID: 4, Context: "optional-actions-status", State: "failure", Creator: User{Login: "github-actions[bot]"}},
 	}}
 	want := []state.BotReview{
-		{Bot: "coderabbitai", State: "approved"},
 		{Bot: "githubactions", State: "changes_requested"},
 		{Bot: "greptile", State: "pending"},
-		{Bot: "thirdparty", State: "approved"},
 	}
 	if got := s.BotReviews("required"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("BotReviews() = %#v, want %#v", got, want)
@@ -82,7 +80,6 @@ func TestBotReviewsIssueCommentsAndUnknownApps(t *testing.T) {
 	}
 	want := []state.BotReview{
 		{Bot: "another", State: "commented", URL: "comment-only"},
-		{Bot: "app42", State: "approved"},
 		{Bot: "newreviewapp", State: "changes_requested", URL: "issue2"},
 		{Bot: "unknown", State: "pending"},
 	}
@@ -136,8 +133,8 @@ func TestBotReviewsMultipleChecksKeepFailuresAndReplaceAttempts(t *testing.T) {
 	s.Checks = append(s.Checks,
 		botSummaryCheck(5, "security", "greptile", "completed", "success"),
 		botSummaryCheck(6, "extra", "greptile", "completed", "success"))
-	if got := s.BotReviews(); len(got) != 1 || got[0].State != "approved" {
-		t.Fatalf("old failed attempts were retained: %#v", got)
+	if got := s.BotReviews(); len(got) != 0 {
+		t.Fatalf("successful checks without a review became feedback: %#v", got)
 	}
 }
 
@@ -152,6 +149,22 @@ func TestBotReviewsInlineCommentsDoNotApprove(t *testing.T) {
 	s.Comments[0].Commit = "old"
 	if got := s.BotReviews(); len(got) != 0 {
 		t.Fatalf("stale-only bot was retained: %#v", got)
+	}
+}
+
+func TestBotReviewsSuccessfulCheckIsNotAnApproval(t *testing.T) {
+	s := Snapshot{Statuses: []Status{{
+		ID: 1, Context: "go-test", State: "success", Creator: User{Login: "arismoko", Type: "Bot"},
+	}}}
+	if got := s.BotReviews(); len(got) != 0 {
+		t.Fatalf("BotReviews() invented an approval from a check: %#v", got)
+	}
+	s.Comments = []Comment{{
+		ID: 1, Kind: "issue-comments", User: User{Login: "arismoko", Type: "Bot"}, URL: "comment",
+	}}
+	want := []state.BotReview{{Bot: "arismoko", State: "commented", URL: "comment"}}
+	if got := s.BotReviews(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("BotReviews() dropped issue-comment feedback: %#v, want %#v", got, want)
 	}
 }
 
