@@ -144,6 +144,7 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 		item := MergeQueueItem{Title: r.Title, Author: r.Author, RoomID: r.RoomID, ChangeID: changeID(*r), URL: r.URL, Head: r.Head, ReadyAt: facts.ReadyAt(*r, observation)}
 		item.MissingRequiredReviewers = facts.MissingRequiredReviewers(*r)
 		item.Overlaps = state.SharedOverlaps(r.Overlaps)
+		dependency, dependencyWaiting := facts.UnmergedDependency(*r, st.Records)
 		p, status := storedDefault(st, *r)
 		if changeKind(*r) == "github" {
 			item.Main = &MainCI{State: status, Head: p.Head, Wait: defaultWait(p, status)}
@@ -159,7 +160,9 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 			item.State, item.Reason = "changes", "waiting on replies to owner comments"
 		case len(item.MissingRequiredReviewers) > 0:
 			item.State, item.Reason = "required-reviews", "waiting for required reviews: "+strings.Join(item.MissingRequiredReviewers, ", ")
-		case changeKind(*r) == "local" && localMergeReady(*r):
+		case dependencyWaiting:
+			item.State, item.Reason = "waiting-dependency", "waiting for dependency "+dependencyLabel(dependency)
+		case changeKind(*r) == "local" && localMergeReady(*r, st.Records):
 			item.State = "ready"
 		case changeKind(*r) == "local" && !facts.ApprovedAtHead(*r):
 			item.State, item.Reason = "review", "needs review on the current head"
@@ -171,7 +174,7 @@ func mergeQueue(st State, where LocalTrialRooms) []MergeQueueItem {
 			item.State, item.Reason = "conflict", "conflicts with "+observation.DefaultBranch+"; rebase"
 		case observation.DefaultBranch != "" && observation.Base != observation.DefaultBranch:
 			item.State, item.Reason = "waiting-base", "waiting for the base PR to merge and retarget"
-		case facts.Ready(*r, observation) || facts.ReadyWithoutHeadCI(*r, observation):
+		case facts.Ready(*r, observation, st.Records) || facts.ReadyWithoutHeadCI(*r, observation, st.Records):
 			item.State, item.Reason = "ready", ""
 			if f := st.RepositoryFacts[defaultRepo(*r)]; f.CheckedAt.IsZero() {
 				item.State, item.Reason = "waiting-repository", "waiting for repository facts"
@@ -300,6 +303,13 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	return rows, nil
 }
 
+func dependencyLabel(id string) string {
+	if hash := strings.LastIndex(id, "#"); hash >= 0 {
+		return id[hash:]
+	}
+	return id
+}
+
 // fastLandable reports a reviewer's approve-fast decision at the current head.
 // The merge-ready gate has already proved required CI at that exact head.
 func fastLandable(r Record) bool {
@@ -421,10 +431,14 @@ func (s *Service) mergeRecorded(expected Record) (bool, error) {
 	return saved.State == "merged" && !saved.Watching && saved.Head == expected.Head, nil
 }
 
+func mergeReadKeys(r Record) []string {
+	return append([]string{r.Key}, r.Dependencies...)
+}
+
 // mergeReady is the same complete gate before and after preparation. It
 // refreshes remote metadata through the shared writer, then current CI.
 func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool, error) {
-	st, err := s.Store.readRecords(expected.Key)
+	st, err := s.Store.readRecords(mergeReadKeys(expected)...)
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -452,13 +466,13 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 			return Record{}, false, err
 		}
 		saved, err := s.Store.Get(current.Key)
-		return saved, err == nil && saved.Head == expected.Head && localMergeReady(saved), err
+		return saved, err == nil && saved.Head == expected.Head && localMergeReady(saved, st.Records), err
 	}
 	err = s.ConfirmHeads(ctx, current.Key)
 	if err != nil {
 		return Record{}, false, err
 	}
-	st, err = s.Store.readRecords(expected.Key)
+	st, err = s.Store.readRecords(mergeReadKeys(*current)...)
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -480,7 +494,7 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 	if err != nil {
 		return Record{}, false, err
 	}
-	st, err = s.Store.readRecords(expected.Key)
+	st, err = s.Store.readRecords(mergeReadKeys(*current)...)
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -497,7 +511,7 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 	if err := s.process(ctx, current.Key, snap, ci, key, jobs, nil, false); err != nil {
 		return Record{}, false, err
 	}
-	st, err = s.Store.readRecords(expected.Key)
+	st, err = s.Store.readRecords(mergeReadKeys(*current)...)
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -507,7 +521,7 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 	}
 	policy = EffectivePolicy(st, *current)
 	fresh := snap.GitHubFacts(*current, policy.RequiredChecks...)
-	if !facts.Ready(*current, fresh) && !facts.ReadyWithoutHeadCI(*current, fresh) {
+	if !facts.Ready(*current, fresh, st.Records) && !facts.ReadyWithoutHeadCI(*current, fresh, st.Records) {
 		return Record{}, false, nil
 	}
 	if paused, err := s.RoomPaused(current.RoomID); err != nil {

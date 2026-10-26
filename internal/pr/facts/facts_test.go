@@ -12,7 +12,7 @@ func TestReadyUsesCurrentRemoteFacts(t *testing.T) {
 	now := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
 	r := state.Record{Watching: true, State: "open", Head: "abc", RoundHead: "abc", Verdict: "approve", CI: "passed", Created: now, BaseRef: "trunk"}
 	g := GitHub{Head: "abc", CIHead: "abc", CI: "passed", Base: "trunk", DefaultBranch: "trunk", Mergeable: &yes, ChecksAt: now.Add(time.Second)}
-	if !Ready(r, g) {
+	if !Ready(r, g, nil) {
 		t.Fatal("approved default-branch PR is not ready")
 	}
 	for _, tc := range []struct {
@@ -34,7 +34,7 @@ func TestReadyUsesCurrentRemoteFacts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			copy, observed := r, g
 			tc.change(&copy, &observed)
-			if Ready(copy, observed) {
+			if Ready(copy, observed, nil) {
 				t.Fatal("unsafe READY")
 			}
 		})
