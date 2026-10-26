@@ -95,6 +95,7 @@ checks:
     # own names, and all of them feed go-test. The hosted frontend job builds and
     # tests, so the provider name stays frontend too.
     name: frontend
+    hostedAggregate: true
     image: node:22
     command: bash scripts/ci.sh frontend build
     caches: [npm]

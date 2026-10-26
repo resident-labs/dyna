@@ -149,7 +149,7 @@ func aggregateCancelled(definition *localci.Definition, checks []Check, suite in
 	if definition == nil {
 		return "", false
 	}
-	class := classifyHostedSuite(definition, checks, suite, true)
+	class := classifyHostedSuite(definition, checks, suite, true, false)
 	if class.realFailure {
 		return "", false
 	}
@@ -276,18 +276,56 @@ type hostedSuiteClass struct {
 	cancelledOnlyAggregates map[localci.CheckName]bool
 }
 
+// hostedAggregateRows names every hosted job the repository definition
+// declares aggregate-only: the group a suite's checks feed, and each check
+// marked hostedAggregate. Such a job only repeats the outcome of the jobs it
+// requires. A provider name alone proves nothing, so any other failure is a
+// job that ran, whatever its name.
+func hostedAggregateRows(definition *localci.Definition) map[localci.CheckName]bool {
+	rows := map[localci.CheckName]bool{}
+	for _, id := range definition.Suites() {
+		described, _ := definition.Checks(id)
+		for _, check := range described {
+			if check.Group != "" {
+				rows[check.Group.Name()] = true
+			}
+			if definition.HostedAggregate(check.Name) {
+				rows[check.Name] = true
+			}
+		}
+	}
+	return rows
+}
+
 // classifyHostedSuite classifies one hosted suite. The caller disables
 // aggregate trust for a run without a suite ID or a replaceable workflow.
-func classifyHostedSuite(definition *localci.Definition, checks []Check, suite int64, trustAggregate bool) hostedSuiteClass {
+// ownCancellation says a saved record proves Dyna itself cancelled the run,
+// and Dyna cancels only a run that is still queued, so no test job inside it
+// ever ran: a failure it still reports is then a dependency-only aggregate
+// job echoing the cancellation it saw in its needs (D-168). Only a check the
+// definition declares an aggregate row earns that reading; a standalone or
+// unknown job that failed was started by the race between the queued-status
+// read and the cancel, and its failure stays evidence.
+func classifyHostedSuite(definition *localci.Definition, checks []Check, suite int64, trustAggregate, ownCancellation bool) hostedSuiteClass {
 	class := hostedSuiteClass{}
 	if trustAggregate {
 		class.cancelledOnlyAggregates = cancelledAggregates(definition, checks, suite)
+	}
+	var ownRows map[localci.CheckName]bool
+	if ownCancellation && definition != nil {
+		ownRows = hostedAggregateRows(definition)
 	}
 	for _, check := range checks {
 		if check.CheckSuite.ID != suite || check.Status != "completed" || success(check.Conclusion) || check.Conclusion == "cancelled" {
 			continue
 		}
 		if class.cancelledOnlyAggregates[localci.CheckName(check.Name)] {
+			continue
+		}
+		// The definition naming this check an aggregate row is positive evidence
+		// that the job only repeats its members; under Dyna's own cancellation
+		// such a failure echoes the cancellation rather than reporting a test.
+		if ownRows[localci.CheckName(check.Name)] {
 			continue
 		}
 		class.realFailure = true
@@ -318,7 +356,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns, de
 		}
 		suite := run.CheckSuiteID
 		cancelledSuites[suite] = true
-		class := classifyHostedSuite(definition, current, suite, replaceableHostedWorkflow(run))
+		class := classifyHostedSuite(definition, current, suite, replaceableHostedWorkflow(run), run.Conclusion == "cancelled")
 		aggregates[suite] = class.cancelledOnlyAggregates
 		// The saved record proves the cancellation is ours, so here a run that is
 		// still active, or one whose aggregate failed, counts too. This is the one
@@ -419,7 +457,7 @@ func withoutCancelledHostedWorkflows(snap Snapshot) Snapshot {
 			continue
 		}
 		suite := run.CheckSuiteID
-		class := classifyHostedSuite(snap.localCIDef, current, suite, suite != 0 && replaceableHostedWorkflow(run))
+		class := classifyHostedSuite(snap.localCIDef, current, suite, suite != 0 && replaceableHostedWorkflow(run), false)
 		if class.realFailure {
 			runs = append(runs, run)
 			continue
