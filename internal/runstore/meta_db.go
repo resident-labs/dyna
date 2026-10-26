@@ -477,6 +477,19 @@ func setPaused(dir, id string, paused bool) error {
 	return err
 }
 
+// setCanceling marks a running run's cancellation as started, so shell
+// publication refuses new worker shells before the signal lands (D-165).
+func setCanceling(dir, id string) (Meta, error) {
+	return changeMeta(dir, id, func(ctx context.Context, conn *sql.Conn) error {
+		rev, err := nextRev(ctx, conn)
+		if err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.canceling',json('true')), rev=? WHERE id=? AND status='running'`, rev, id)
+		return err
+	})
+}
+
 // IsPaused reads the canonical pause state of a running run.
 func IsPaused(id string) bool {
 	db, err := runsDB()
