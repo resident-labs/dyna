@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/fsutil"
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
@@ -31,6 +32,12 @@ const (
 	envFakePiHold   = "DYNA_TEST_FAKE_PI_HOLD"
 	envFakePiGate   = "DYNA_TEST_FAKE_PI_GATE"
 	envFakePiSignal = "DYNA_TEST_FAKE_PI_SIGNAL"
+	// envFakePiRejectFirst refuses the first plain prompt of the turn, the
+	// way a real pi refuses a prompt while its session creation stalls.
+	envFakePiRejectFirst = "DYNA_TEST_FAKE_PI_REJECT_FIRST"
+	// envFakePiSessions names the sessions directory PiSessionPath reads,
+	// for launches that carry no --session-dir of their own.
+	envFakePiSessions = "DYNA_TEST_FAKE_PI_SESSIONS"
 )
 
 // fakePiMain runs when the test binary is executed as `pi`. Every mode keeps
@@ -85,6 +92,31 @@ func fakePiMain() {
 			_ = conn.Close()
 		}
 	}
+	// firstPlainPrompt reports whether no plain prompt ran yet in the whole
+	// turn, across every fake process, by reading the shared log. A refused
+	// prompt counts as ran: only the very first plain prompt is refused.
+	firstPlainPrompt := func() bool {
+		if os.Getenv(envFakePiRejectFirst) == "" {
+			return false
+		}
+		raw, err := os.ReadFile(os.Getenv(envFakePiLog))
+		return err != nil || (!strings.Contains(string(raw), "PROMPT ") && !strings.Contains(string(raw), "REJECT"))
+	}
+	// persistSession writes the session file a real pi keeps once a session
+	// exists, so a later resume of the preassigned id finds it. A refused
+	// prompt leaves no session behind (D-221).
+	persistSession := func() {
+		id := fakePiOption(os.Args, "--session-id")
+		dir := fakePiOption(os.Args, "--session-dir")
+		if dir == "" {
+			dir = os.Getenv(envFakePiSessions)
+		}
+		if id == "" || dir == "" {
+			return
+		}
+		_ = os.MkdirAll(dir, 0o700)
+		_ = os.WriteFile(filepath.Join(dir, "20260101-000000_"+id+".jsonl"), []byte("{}\n"), 0o600)
+	}
 	// gatedPrompt holds a prompt whose response waits for the abort, the
 	// exact window where a canceled turn must still send the abort.
 	gatedPrompt := ""
@@ -116,12 +148,16 @@ func fakePiMain() {
 				if hold {
 					finish(command.Message)
 				}
+			} else if firstPlainPrompt() {
+				logf("REJECT preflight refused")
+				emit(map[string]any{"id": command.ID, "type": "response", "command": "prompt", "success": false, "error": "preflight refused"})
 			} else {
 				logf("PROMPT %s", command.Message)
 				if gate {
 					gatedPrompt = command.ID
 					signal()
 				} else {
+					persistSession()
 					respond(command.ID, "prompt", map[string]any{"disposition": "started"})
 					if !hold {
 						finish(command.Message)
@@ -153,11 +189,34 @@ func fakePiMain() {
 	}
 }
 
+// fakePiOption reads one option's value from argv, in "--opt value" or
+// "--opt=value" form.
+func fakePiOption(argv []string, option string) string {
+	for i := 1; i < len(argv); i++ {
+		if argv[i] == option && i+1 < len(argv) {
+			return argv[i+1]
+		}
+		if strings.HasPrefix(argv[i], option+"=") {
+			return strings.TrimPrefix(argv[i], option+"=")
+		}
+	}
+	return ""
+}
+
+// fakePiSessions is the sessions directory installFakePi prepared: the
+// same one PiSessionPath reads, so the fake can persist session files a
+// later resume finds.
+var fakePiSessions string
+
 // installFakePi puts a `pi` on PATH that re-runs the test binary in fake
 // mode. hold keeps a plain prompt unsettled until steering or abort arrives.
 func installFakePi(t *testing.T, hold bool) (logPath string) {
 	t.Helper()
 	storetest.Isolate(t)
+	if home, err := harnessruntime.NewAccounts().HarnessHome(profile.HarnessPi); err == nil {
+		fakePiSessions = filepath.Join(home, "sessions")
+		_ = os.MkdirAll(fakePiSessions, 0o700)
+	}
 	// The fake and its process guard re-execute the test binary. Keep race
 	// checks without their one-second child exit grace.
 	t.Setenv("GORACE", os.Getenv("GORACE")+" atexit_sleep_ms=0")
@@ -180,6 +239,9 @@ func fakePiProfile(logPath string, hold bool) profile.Profile {
 	env := map[string]string{envFakePi: "1", envFakePiLog: logPath}
 	if hold {
 		env[envFakePiHold] = "1"
+	}
+	if fakePiSessions != "" {
+		env[envFakePiSessions] = fakePiSessions
 	}
 	return profile.Profile{Name: "p", Harness: profile.HarnessPi, Env: env}
 }
@@ -518,7 +580,7 @@ func TestPiModelChangeRestartsTheSessionProcess(t *testing.T) {
 			second = line
 		}
 	}
-	if !strings.Contains(second, "--session "+sessionID) || !strings.Contains(second, "--model zai/glm-5.3-flash") {
+	if !strings.Contains(second, "--session ") || !strings.Contains(second, sessionID) || !strings.Contains(second, "--model zai/glm-5.3-flash") {
 		t.Fatalf("restart missing resume session or model:\n%s", second)
 	}
 	if strings.Contains(second, "--print") || !strings.Contains(second, "--mode rpc") {
@@ -544,5 +606,40 @@ func TestPiSessionKeyTreatsASessionPathAsItsID(t *testing.T) {
 	compact := []string{"pi", "--mode", "rpc", "--session", path, "--session-dir", dir}
 	if got, want := piSessionKey(compact, env), piSessionKey(fresh, env); got != want {
 		t.Fatalf("compact key %q differs from fresh key %q", got, want)
+	}
+}
+
+// TestPiMissingSessionFileNeverGetsANudge recovers a first attempt that
+// failed before pi wrote its session file: the same-session nudge must not
+// target a session that does not exist (a real pi exits with "No session
+// found matching"), so the turn starts a fresh session with the original
+// prompt instead.
+func TestPiMissingSessionFileNeverGetsANudge(t *testing.T) {
+	logPath := installFakePi(t, false)
+	p := fakePiProfile(logPath, false)
+	p.Env[envFakePiRejectFirst] = "1"
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	r, err := RunWithOptions(ctx, p, "task one", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if r.Output != "done: task one" {
+		t.Fatalf("output = %q", r.Output)
+	}
+	if !r.Nudged {
+		t.Fatalf("the failed first attempt was not recovered: %+v", r)
+	}
+	log := readTestFile(t, logPath)
+	if got := strings.Count(log, "SPAWN "); got != 2 {
+		t.Fatalf("SPAWN count = %d:\n%s", got, log)
+	}
+	for _, line := range strings.Split(log, "\n") {
+		if strings.HasPrefix(line, "SPAWN") && strings.Contains(line, " --session ") {
+			t.Fatalf("a launch resumed a session that does not exist: %s", line)
+		}
+	}
+	if !strings.Contains(log, "REJECT preflight refused") {
+		t.Fatalf("the fake never refused the first prompt:\n%s", log)
 	}
 }
