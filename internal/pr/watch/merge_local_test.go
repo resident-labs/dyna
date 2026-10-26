@@ -307,6 +307,46 @@ func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 		t.Fatalf("landed notices = %d, want one per change and one for the trial", len(landed))
 	}
 }
+
+// A second repository, such as a room's registered sidecar, lands its change
+// in its own integration branch and leaves the first repository's alone.
+func TestLocalTrialLandsASecondRepositoryInItsOwnLane(t *testing.T) {
+	e, dir, records, ci := localMergeEnvFor(t, false, "good")
+	side, base := changeRepo(t)
+	changeGit(t, side, "update-ref", "refs/remotes/origin/main", base)
+	changeGit(t, side, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	v, err := settings.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.LocalLaneRepos = append(v.LocalLaneRepos, side)
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	changeGit(t, side, "checkout", "-b", "side", "main")
+	if err := os.WriteFile(filepath.Join(side, "side.txt"), []byte("side"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changeGit(t, side, "add", ".")
+	changeGit(t, side, "commit", "-m", "side")
+	r, _, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: side})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Store.update(func(st *State) error {
+		live := st.Records[r.Key]
+		live.Verdict, live.RoundHead = "approve", live.Head
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	finishLocalTrials(t, e, ci, false)
+	changeGit(t, side, "merge-base", "--is-ancestor", r.Head, "dyna/integration")
+	changeGit(t, dir, "merge-base", "--is-ancestor", records[0].Head, "dyna/integration")
+	if out := changeGit(t, side, "branch", "--list", "good"); out != "" {
+		t.Fatalf("the first repository's change reached the second: %s", out)
+	}
+}
 func TestLocalTrialRootBisectPublishesPrefixAndReturnsBadChange(t *testing.T) {
 	e, dir, records, ci := localMergeEnvFor(t, true, "good", "bad")
 	localTick(t, e)

@@ -652,21 +652,26 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 }
 
 // CheckoutOfRoom refuses a caller's directory unless it is a checkout of the
-// room's repository: its main checkout or one of its worktrees.
+// room's repository or of a repository registered on the room: a main
+// checkout or one of its worktrees. A registered repository that left the disk
+// is skipped, so it fails no check.
 func CheckoutOfRoom(ctx context.Context, rec room.Record, dir string) error {
-	if rec.Repo == "" {
+	if rec.Repo == "" && len(rec.ExtraRepos) == 0 {
 		return fmt.Errorf("room %s has no repository, so it accepts no checkout path", rec.Name)
 	}
 	got, err := repoid.Resolve(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("%s is not a checkout of room %s's repository: %w", dir, rec.Name, err)
 	}
-	want, err := repoid.Resolve(ctx, rec.Repo)
-	if err != nil {
-		return err
+	// Each repository is checked on its own: one that is absent or unreadable
+	// must not hide a match among the others.
+	for _, path := range append([]string{rec.Repo}, rec.ExtraRepos...) {
+		if path == "" {
+			continue
+		}
+		if resolved, err := repoid.Resolve(ctx, path); err == nil && resolved.Main == got.Main {
+			return nil
+		}
 	}
-	if got.Main != want.Main {
-		return fmt.Errorf("%s is not a checkout of room %s's repository", dir, rec.Name)
-	}
-	return nil
+	return fmt.Errorf("%s is not a checkout of room %s's repository or of a repository registered on it", dir, rec.Name)
 }

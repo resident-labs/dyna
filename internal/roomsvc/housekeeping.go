@@ -30,6 +30,35 @@ func (s *Service) SetRoomRootProfile(ctx context.Context, ref, name string) erro
 	return s.rooms().SetRootProfile(ref, name)
 }
 
+// AddRoomRepo registers another repository whose checkouts the room accepts
+// for local changes. Only the owner or the room's root may.
+func (s *Service) AddRoomRepo(ctx context.Context, ref, path string) error {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	return s.rooms().AddRepo(ref, path)
+}
+
+// RemoveRoomRepo unregisters a repository added with AddRoomRepo.
+func (s *Service) RemoveRoomRepo(ctx context.Context, ref, path string) error {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	return s.rooms().RemoveRepo(ref, path)
+}
+
+func (s *Service) authorizeRoomEdit(ctx context.Context, ref string) error {
+	if err := authority.Check("room edit", authority.Of(ctx), nil); err != nil {
+		return err
+	}
+	rec, err := s.rooms().Resolve(ref)
+	if err != nil {
+		return err
+	}
+	_, err = authority.ActorIn(ctx, rec.ID)
+	return err
+}
+
 // DeleteRoom refuses deletion while open sessions or live work pin the room.
 // Closed session records remain readable after the room is deleted.
 func (s *Service) DeleteRoom(ctx context.Context, ref string) error {
