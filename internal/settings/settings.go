@@ -59,8 +59,10 @@ const (
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
 type Values struct {
-	PRTrustedBots         []string
-	LocalLaneRepos        []string
+	PRTrustedBots  []string
+	LocalLaneRepos []string
+	// DoctorCondition holds the thresholds of the doctor hook; empty uses the default.
+	DoctorCondition       string
 	LibraryEnabled        []string
 	LibraryProfile        string
 	LibrarySmellProfile   string
@@ -236,6 +238,9 @@ func Load(path string) (Values, error) {
 		return Values{}, err
 	}
 	if err := v.loadVoice(raw); err != nil {
+		return Values{}, err
+	}
+	if err := v.loadDoctor(raw); err != nil {
 		return Values{}, err
 	}
 	if err := v.loadLibrary(raw); err != nil {
@@ -429,6 +434,8 @@ func (v *Values) Set(key, value string) error {
 		v.fromFile[key] = true
 	case KeySessionCheckInInterval:
 		return v.setSession(key, value)
+	case KeyDoctorCondition:
+		return v.setDoctor(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
 		return v.setVoice(key, value)
 	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibrarySmellProfile, KeyLibraryReadmeMaxLines:
@@ -537,6 +544,7 @@ func (v Values) Save() error {
 	v.saveBrowser(raw)
 	v.saveSessions(raw)
 	v.saveVoice(raw)
+	v.saveDoctor(raw)
 	v.saveLibrary(raw)
 	content := nested(raw, "content")
 	content["maxCardBytes"] = v.MaxCardBytes
