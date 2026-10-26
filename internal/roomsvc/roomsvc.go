@@ -268,19 +268,9 @@ func (s *Service) Rooms() ([]Room, error) {
 		r.Members, r.Running = counts[rec.ID].Members, counts[rec.ID].Running
 		out = append(out, r)
 	}
-	// Rail order: unread first, then live work, then recent
-	// activity. Archived rooms go last.
-	rank := func(r Room) int {
-		switch {
-		case r.Archived:
-			return 4
-		case r.Unread > 0:
-			return 0
-		case r.Running > 0:
-			return 1
-		}
-		return 2
-	}
+	// Rail order is stable, so a room never moves under the pointer: pinned
+	// rooms in pin order, then active rooms by name, then archived rooms by
+	// name. Unread and running state show as badges, not as order.
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Pinned != b.Pinned {
@@ -289,11 +279,8 @@ func (s *Service) Rooms() ([]Room, error) {
 		if a.Pinned && a.PinOrder != b.PinOrder {
 			return a.PinOrder < b.PinOrder
 		}
-		if rank(a) != rank(b) {
-			return rank(a) < rank(b)
-		}
-		if !a.LastActivity.Equal(b.LastActivity) {
-			return a.LastActivity.After(b.LastActivity)
+		if a.Archived != b.Archived {
+			return b.Archived
 		}
 		return a.Name < b.Name
 	})
@@ -358,8 +345,12 @@ func ForOwner(m room.Message, roomName string) bool {
 
 // countsUnread reports whether a post to the owner can be unread. Shell exit
 // records live in shell jobs, and voice call lines are heard live in the call
-// and shown only in Voice's call widget, so neither is ever unread.
+// and shown only in Voice's call widget, so neither is ever unread. A quiet
+// engine notice (CI, PR and service events) is informational and never counts.
 func countsUnread(m room.Message, roomName string) bool {
+	if m.From == room.EngineSender || !m.Deliverable() {
+		return false
+	}
 	return ForOwner(m, roomName) && !IsShellResult(m) && m.Source != room.SourceVoice
 }
 
@@ -818,6 +809,23 @@ func (s *Service) MarkRead(roomID, messageID string) error {
 // MarkReadMany marks posts read by the owner, in one write.
 func (s *Service) MarkReadMany(roomID string, messageIDs []string) error {
 	return s.rooms().MarkOwnerReadMany(roomID, messageIDs)
+}
+
+// MarkRoomRead marks every post that counts as unread in the room as read, so
+// opening the room chat clears its badge, even for posts the feed has not loaded.
+func (s *Service) MarkRoomRead(roomID string) error {
+	rec, err := s.rooms().Resolve(roomID)
+	if err != nil {
+		return err
+	}
+	ids, err := s.ownerPosts(rec)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.rooms().MarkOwnerReadMany(rec.ID, ids)
 }
 
 // Member is one row of a room's member tree. The first row is the owner.
