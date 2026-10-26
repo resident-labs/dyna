@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
+	"dyna-agent/internal/store"
 )
 
 // killRecorder is a fake process kill: it records the stamps it was asked to
@@ -154,5 +156,37 @@ func TestRestartedEngineCleansAnEndedRunOnceAndMarksIt(t *testing.T) {
 	}
 	if meta, err := runstore.ReadMeta(run); err != nil || meta.ProcessesEnded == nil {
 		t.Fatalf("run meta = %+v, %v; want ProcessesEnded set", meta, err)
+	}
+}
+
+func TestOldUnmarkedEndedRunIsStillCleaned(t *testing.T) {
+	e := newTestEnv(t)
+	old := time.Now().Add(-72 * time.Hour)
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_old", Status: "ok", StartedAt: old, EndedAt: old})
+	rec := &killRecorder{}
+	e.m.killProcs = rec.kill
+	if err := e.m.CloseEndedRunAgents(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := rec.count("DYNA_WORKER_RUN=wf_old"); n != 1 {
+		t.Fatalf("run kills = %d; want 1 for a run that ended three days ago without a mark", n)
+	}
+}
+
+func TestDeadCoordinatorRunIsRetriedAfterAFailedCleanup(t *testing.T) {
+	e := newTestEnv(t)
+	// The coordinator is gone and the run still reads running; its agents are closed.
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_dead", Status: "running", Pid: 0, StartedAt: time.Now()})
+	rec := &killRecorder{fail: true}
+	e.m.killProcs = rec.kill
+	if err := e.m.CloseEndedRunAgents(e.ctx); err == nil {
+		t.Fatal("first pass error = nil; want the failed kill")
+	}
+	rec.fail = false
+	if err := e.m.CloseEndedRunAgents(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := rec.count("DYNA_WORKER_RUN=wf_dead"); n != 2 {
+		t.Fatalf("run kills = %d; want a failed pass and a successful retry with no restart", n)
 	}
 }

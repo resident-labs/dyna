@@ -99,6 +99,14 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	}); err != nil {
 		return db, err
 	}
+	// Runs that ended before the process-cleanup mark existed are marked once, so
+	// only a run that ends later waits for cleanup, however long that takes.
+	if err := database.Migrate(db, "runs.processes", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), `UPDATE runs SET body=json_set(body,'$.processesEnded',?) WHERE status!='running' AND json_extract(body,'$.processesEnded') IS NULL`, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 
@@ -507,14 +515,15 @@ func MarkProcessesEnded(id string) error {
 	return err
 }
 
-// EndedWithoutCleanup lists the live runs that ended after since and whose
-// processes are not marked ended yet.
-func EndedWithoutCleanup(since time.Time) ([]Meta, error) {
+// WithoutProcessCleanup lists the live runs that are not marked as having
+// their processes ended. A run that still reads running is in the list too: its
+// coordinator may have died, and the caller decides.
+func WithoutProcessCleanup() ([]Meta, error) {
 	db, err := runsDB()
 	if err != nil {
 		return nil, err
 	}
-	rows, _, err := metasWhere(db, `status!='running' AND json_extract(body,'$.processesEnded') IS NULL AND datetime(json_extract(body,'$.endedAt')) > datetime(?)`, since.UTC().Format(time.RFC3339Nano))
+	rows, _, err := metasWhere(db, `json_extract(body,'$.processesEnded') IS NULL`)
 	if err != nil {
 		return nil, err
 	}
