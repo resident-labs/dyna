@@ -50,7 +50,7 @@ func shellCommand() *cobra.Command {
 		// An update replaces the binary this server started from; when the
 		// state it serves moves past this build, restart on that binary so a
 		// schema bump never cuts the session's shells off (D-171).
-		if restart := restartOnOutdated(os.Args); restart != nil {
+		if restart := restartOutdatedServer(); restart != nil {
 			tools.SetRestart(restart)
 		}
 		// Only a session hears when a background job ends. Elsewhere, for

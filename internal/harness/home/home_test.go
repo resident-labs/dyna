@@ -482,11 +482,11 @@ func TestDynaBridgeExecsTheInstalledDyna(t *testing.T) {
 	}
 	// The engine's own path still wins when the owner PATH names no dyna, so
 	// an engine without an installation keeps working.
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git unavailable")
-	}
-	out, err = Prepare(scope, image, []string{"HOME=" + owner, "PATH=" + filepath.Dir(git)})
+	// The directory holds only a git stand-in: a real tool directory would make
+	// Prepare run the owner's go to read its roots, which takes seconds.
+	bare := filepath.Join(filepath.Dir(owner), "bare bin")
+	write(t, filepath.Join(bare, "git"), "#!/bin/sh\ntrue\n", 0700)
+	out, err = Prepare(scope, image, []string{"HOME=" + owner, "PATH=" + bare})
 	if err != nil {
 		t.Fatal(err)
 	}
