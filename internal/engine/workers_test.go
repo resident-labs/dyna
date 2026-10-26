@@ -667,6 +667,10 @@ func TestResumedRoomRunsACheckInPass(t *testing.T) {
 	}
 }
 
+// workerHangGuard only stops a broken run from blocking the suite; a passing run
+// never reaches it.
+const workerHangGuard = 10 * time.Second
+
 // A pass that reaches its deadline ends and the worker takes the next signal, a
 // pass that finishes past the warning threshold is reported once, and a global
 // hook that a pass schedules outlives that pass and stops with the engine.
@@ -681,10 +685,11 @@ func TestWorkerPassIsBoundedAndReported(t *testing.T) {
 	// The pass clock is the test's: a finish time is a value the test sets.
 	var clock atomic.Int64
 	workerNow = func() time.Time { return time.Unix(0, clock.Load()) }
-	passEnded := make(chan struct{})
+	// The pass context is already expired, as a pass that ended at its deadline
+	// has one: the tick waits on the context runWorker gave it, so a worker that
+	// passed the engine context instead would hang here.
 	workerPassContext = func(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
-		ctx, cancel := context.WithCancel(parent)
-		return ctx, func() { cancel() }
+		return context.WithDeadline(parent, time.Time{})
 	}
 	workerPassWarn = time.Second
 
@@ -692,15 +697,17 @@ func TestWorkerPassIsBoundedAndReported(t *testing.T) {
 	started := make(chan int, 4)
 	reports := make(chan error, 4)
 	var passes atomic.Int32
-	tick := func(context.Context) error {
+	var hanging atomic.Bool
+	hanging.Store(true)
+	tick := func(ctx context.Context) error {
 		n := int(passes.Add(1))
 		if n == 3 {
 			clock.Add(int64(2 * time.Second)) // this pass takes longer than the warning
 		}
 		started <- n
 		if n == 1 {
-			<-passEnded // the first pass hangs until the test ends its deadline
-			return context.DeadlineExceeded
+			<-ctx.Done() // the pass ends only because its deadline expired
+			return ctx.Err()
 		}
 		return nil
 	}
@@ -716,9 +723,15 @@ func TestWorkerPassIsBoundedAndReported(t *testing.T) {
 	if n := <-started; n != 1 {
 		t.Fatalf("first pass = %d", n)
 	}
-	close(passEnded)
-	if err := <-reports; !strings.Contains(err.Error(), "sessions pass ended at its") {
-		t.Fatalf("report = %v, want the bounded pass", err)
+	// A hang guard: a worker that ignored the pass context would block here.
+	var first error
+	select {
+	case first = <-reports:
+	case <-time.After(workerHangGuard):
+		t.Fatal("the pass never ended at its deadline")
+	}
+	if !strings.Contains(first.Error(), "sessions pass ended at its") {
+		t.Fatalf("report = %v, want the bounded pass", first)
 	}
 	signal <- struct{}{}
 	if n := <-started; n != 2 {
@@ -729,8 +742,13 @@ func TestWorkerPassIsBoundedAndReported(t *testing.T) {
 	if n := <-started; n != 3 {
 		t.Fatalf("third pass = %d, want 3", n)
 	}
-	if err := <-reports; !strings.Contains(err.Error(), "sessions pass took") {
-		t.Fatalf("report = %v, want the slow pass", err)
+	select {
+	case slow := <-reports:
+		if !strings.Contains(slow.Error(), "sessions pass took") {
+			t.Fatalf("report = %v, want the slow pass", slow)
+		}
+	case <-time.After(workerHangGuard):
+		t.Fatal("a slow pass was not reported")
 	}
 }
 
@@ -756,14 +774,14 @@ func TestScheduledGlobalHookOutlivesItsPass(t *testing.T) {
 		t.Fatal("the pass deadline cancelled a scheduled global hook")
 	default:
 	}
-	stopEngine()
-	<-hookEnded
-	// A second schedule is refused while the first still holds the lock.
-	blocked := make(chan struct{}, 1)
-	scheduleGlobalHooks(engineCtx, &lock, func(context.Context) error { blocked <- struct{}{}; return nil })
+	// A second schedule is refused while the first provably holds the lock.
+	second := make(chan struct{}, 1)
+	scheduleGlobalHooks(engineCtx, &lock, func(context.Context) error { second <- struct{}{}; return nil })
 	select {
-	case <-blocked:
+	case <-second:
 		t.Fatal("a second global pass started beside the running one")
 	default:
 	}
+	stopEngine()
+	<-hookEnded
 }
