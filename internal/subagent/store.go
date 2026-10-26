@@ -897,21 +897,11 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 			}
 		}
 		t.InputCutoff = cutoff
-		// Keep the live input the dead runner had handed over without a receipt
-		// from entering a later turn: the harness may already have run it. A
-		// steer read from the room log at the turn's start carries its source
-		// offset and stays with the claim that guards it.
-		for _, steer := range t.Steering {
-			if steer.ID == "" || steer.Delivered || slices.Contains(meta.UncertainInputIDs, steer.ID) {
-				continue
-			}
-			// Input the turn drained at its start was read from the room log and
-			// stays with the claim that guards it; a live post the runner handed
-			// over mid-turn is the uncertain one.
-			if slices.Contains(t.PendingInputIDs, steer.ID) {
-				continue
-			}
-			meta.UncertainInputIDs = append(meta.UncertainInputIDs, steer.ID)
+		// Save the quarantine first. A repair that stops after the terminal turn
+		// would never record it again, because a later repair sees a finished
+		// turn, and the uncertain input could then enter another turn.
+		if _, err := s.quarantineUncertainInput(&meta, t); err != nil {
+			return err
 		}
 		readRevision, _ := s.turnVersion(id, n)
 		var gate gateState
@@ -928,15 +918,38 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 		if err := s.writeTurn(id, t); err != nil {
 			return err
 		}
-		if len(meta.UncertainInputIDs) > 0 {
-			if err := s.writeMeta(meta); err != nil {
-				return err
-			}
-		}
 		repaired = true
 		return nil
 	})
 	return repaired, err
+}
+
+// quarantineUncertainInput saves the live input a dead runner handed to its
+// harness without a receipt, so no later turn admits it again. The write happens
+// before the terminal turn, in its own transaction: a repair that stops after the
+// turn would leave the quarantine unsaved forever.
+func (s *Store) quarantineUncertainInput(meta *Meta, t Turn) (bool, error) {
+	added := false
+	for _, steer := range t.Steering {
+		if steer.ID == "" || steer.Delivered || slices.Contains(meta.UncertainInputIDs, steer.ID) {
+			continue
+		}
+		// Input the turn drained at its start was read from the room log and
+		// stays with the claim that guards it; a live post the runner handed over
+		// mid-turn is the uncertain one.
+		if slices.Contains(t.PendingInputIDs, steer.ID) {
+			continue
+		}
+		meta.UncertainInputIDs = append(meta.UncertainInputIDs, steer.ID)
+		added = true
+	}
+	if !added {
+		return false, nil
+	}
+	if err := s.writeMeta(*meta); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ReportTarget supplies the obligation source for a first or schema turn:
