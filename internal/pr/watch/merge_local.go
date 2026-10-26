@@ -207,7 +207,12 @@ func (s *Service) withLocalTrialBase(ctx context.Context, job registeredCIJob) (
 // budget as a pull request head.
 func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialCI, error) {
 	registry := s.ciRegistry()
-	repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
+	dir, err := s.checkoutDir(ctx, job.record)
+	if err != nil {
+		return trialCI{}, err
+	}
+	job.record.RepoPath = dir
+	repo, err := localci.CanonicalRepo(ctx, dir)
 	if err != nil {
 		return trialCI{}, err
 	}
