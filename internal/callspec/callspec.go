@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+// CodeEngineStopping is the reply code of a call that the engine canceled while
+// it stops or restarts. The reply is a 503: the caller sends the same request
+// again to the engine that starts next (D-269).
+const CodeEngineStopping = "engine_stopping"
+
 // ErrRetryable marks a write the engine could not apply yet but may apply
 // later, so the caller keeps the request and sends it again with the same
 // request ID instead of dropping it.
