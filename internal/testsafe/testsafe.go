@@ -1,7 +1,7 @@
 // Package testsafe keeps a Go test binary away from the user's live Dyna: the
-// data folder and engine socket its environment names when it starts. A test
-// that sets its own folders later keeps them. Outside a test binary it
-// changes nothing.
+// data folder and engine socket its environment names when it starts. It also
+// disables automatic maintenance in temporary Git repositories. A test that
+// sets its own folders later keeps them. Outside a test binary it changes nothing.
 package testsafe
 
 import (
@@ -82,6 +82,7 @@ func init() {
 	if !testing.Testing() {
 		return
 	}
+	DisableGitAutoMaintenance()
 	// Only the binary that owns the root removes what earlier runs left: a
 	// child binary reuses its parent's folders and must not touch them.
 	if !inheritedRoot() {
@@ -113,6 +114,58 @@ func init() {
 	if scratchRoot == "" || Check(scratchRoot) != nil {
 		os.Setenv("DYNA_SCRATCH_ROOT", temporaryDir())
 	}
+}
+
+// DisableGitAutoMaintenance prevents background Git processes from pruning or
+// changing temporary repositories while a test uses them. Existing Git
+// configuration from the environment stays in place.
+func DisableGitAutoMaintenance() {
+	SetGitConfig("gc.auto", "0")
+	SetGitConfig("maintenance.auto", "false")
+}
+
+// SetGitConfig appends one Git command configuration without discarding
+// entries inherited from the caller.
+func SetGitConfig(key, value string) {
+	count := gitConfigCount(os.Environ())
+	_ = os.Setenv("GIT_CONFIG_KEY_"+strconv.Itoa(count), key)
+	_ = os.Setenv("GIT_CONFIG_VALUE_"+strconv.Itoa(count), value)
+	_ = os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(count+1))
+}
+
+// GitConfigWithoutAutoMaintenance adds the Git command configuration that
+// DisableGitAutoMaintenance installs to an arbitrary process environment.
+func GitConfigWithoutAutoMaintenance(env []string) []string {
+	out := appendGitConfig(env, "gc.auto", "0")
+	return appendGitConfig(out, "maintenance.auto", "false")
+}
+
+func appendGitConfig(env []string, key, value string) []string {
+	count := gitConfigCount(env)
+	return append(env,
+		"GIT_CONFIG_KEY_"+strconv.Itoa(count)+"="+key,
+		"GIT_CONFIG_VALUE_"+strconv.Itoa(count)+"="+value,
+		"GIT_CONFIG_COUNT="+strconv.Itoa(count+1),
+	)
+}
+
+func gitConfigCount(env []string) int {
+	count, err := strconv.Atoi(environmentValue(env, "GIT_CONFIG_COUNT"))
+	if err != nil || count < 0 {
+		return 0
+	}
+	return count
+}
+
+func environmentValue(env []string, key string) string {
+	value := ""
+	for _, entry := range env {
+		entryKey, entryValue, _ := strings.Cut(entry, "=")
+		if entryKey == key {
+			value = entryValue
+		}
+	}
+	return value
 }
 
 // temporaryDir makes a folder under the test root without logging.
