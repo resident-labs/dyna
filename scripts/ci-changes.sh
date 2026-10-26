@@ -12,8 +12,11 @@ if [ "${EVENT:-}" != "pull_request" ]; then
 fi
 if git rev-parse -q --verify HEAD^2 >/dev/null; then
   files=$(git diff --name-only HEAD^1 HEAD)
+elif [ -n "${BASE:-}" ]; then
+  files=$(git diff --name-only "$BASE"...HEAD)
 else
-  files=$(git diff --name-only "${BASE:?}"...HEAD)
+  # A manual run on an ordinary commit sends no base SHA.
+  files=$(git diff --name-only HEAD^1 HEAD)
 fi
 has() { printf '%s\n' "$files" | grep -Eq "$1" && echo true || echo false; }
 echo "relay=$(has '^(relay|\.github)/|^scripts/ci\.sh$')"

@@ -241,6 +241,87 @@ commits at the same time, so it must hold only what can be shared: a check that
 keeps something it mutates there, such as a copied source tree or a work
 directory, has to lock it itself.
 
+## Concurrency contract
+
+Many runs, of different commits, can be active on one node at the same time.
+Dyna and the repository share the work as follows.
+
+| Thing | Scope | Who keeps it safe |
+| --- | --- | --- |
+| Source checkout and working directory | One per run | Dyna |
+| Build output (`target`, `build`, `node_modules`, `.venv`) | One per run | The check: keep it inside the run's checkout |
+| Home, temporary directory and report paths | One per run | Dyna |
+| Declared caches | Shared by every run on the node | Dyna mounts them; the tool must be safe for parallel writers |
+| Toolchain (compiler, runtime, language version manager) | Shared by every run on the node | Install it once, then treat it as read-only |
+| Slot lock and its file descriptors | Dyna only | Dyna closes them before it starts your command |
+
+Rules for a check:
+
+- Never reuse one build directory across commits. Old file times can make a
+  build tool trust stale output from another commit. Speed comes from a shared
+  compiler cache, not from a shared build directory.
+- Declare in `caches` only what is safe for parallel writers: a compiler cache
+  such as sccache or ccache, or a package download cache such as the Cargo
+  registry, npm, or pip. A content-addressed store also qualifies. Do not put a
+  source tree, a build directory, or a language version manager there.
+- Install the toolchain once per node, under a lock you take yourself, in a
+  separate setup step. Runs then only read it. Two runs that install or update
+  components in the same toolchain home at once will conflict.
+- Write test reports to the report path Dyna supplies. Never write them to a
+  fixed shared path, or two runs will mix their results.
+- Do not open the slot lock, and do not use its file descriptors for your own
+  locks. Dyna gives your command no slot lock, so a background server that you
+  start cannot keep a slot busy after the check ends. Pick your own descriptor
+  numbers for your own locks, and stop daemons you start.
+
+### Example: a Rust check
+
+This host check shares only the Cargo download cache and the sccache compiler
+cache. Each run builds in its own `target` directory inside its checkout.
+
+```yaml
+caches:
+  - name: cargo-registry
+    env: CARGO_HOME
+  - name: sccache
+    env: SCCACHE_DIR
+
+checks:
+  - id: rust
+    host: true
+    command: |
+      set -u
+      # Host checks get a temporary HOME, so name a persistent toolchain home.
+      # The machine owner creates /srv/ci/rustup and makes it writable.
+      export RUSTUP_HOME=/srv/ci/rustup
+      toolchain=1.85.0
+      # Install the pinned toolchain once per node. Later runs skip the install.
+      (
+        flock 200
+        rustup toolchain list | grep -q "^$toolchain" ||
+          rustup toolchain install "$toolchain" --profile minimal -c clippy
+      ) 200>/srv/ci/rustup.lock || exit 1
+      export RUSTC_WRAPPER=sccache
+      export CARGO_TARGET_DIR="$PWD/target"
+      cargo +"$toolchain" clippy --all-targets -- -D warnings || exit 1
+      status=0
+      cargo +"$toolchain" nextest run --profile ci || status=$?
+      # Copy the report even when tests fail, so Dyna sees each failed test.
+      cp target/nextest/ci/junit.xml "$JUNIT_REPORT_PATH"
+      exit "$status"
+    reports: junit
+    caches: [cargo-registry, sccache]
+```
+
+The toolchain home and the lock file must live in folders that all runs on the
+node share. The per-run home and temporary directories would give each run its
+own toolchain and its own lock, so the example uses fixed paths. Host checks
+also need the machine owner's permission; see [Host checks](#host-checks). Enable JUnit output for the `ci` profile in
+`.config/nextest.toml`; the last step copies the file to `JUNIT_REPORT_PATH`. The
+same shape works for other languages: replace the toolchain step, the cache
+declarations, and the test command (for example `npm ci` with the npm cache, or
+`pip install` with the pip cache).
+
 ## Suites
 
 Each item in `suites` has:
