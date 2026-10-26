@@ -1335,3 +1335,44 @@ func TestHostCheckTempFolderDefaultsToTheNodeTempDirectory(t *testing.T) {
 		t.Fatalf("TMPDIR %q is under the home folder", seen)
 	}
 }
+
+// A check that was killed outright never ran its exit trap. The next check on
+// the node removes such folders, but only old ones that no process uses, and
+// only the ones named like a check's.
+func TestHostCheckRemovesStaleTempFoldersOfKilledChecks(t *testing.T) {
+	parent := t.TempDir()
+	old := time.Now().Add(-7 * time.Hour)
+	young := time.Now().Add(-time.Hour)
+	folder := func(name string, at time.Time) string {
+		dir := filepath.Join(parent, name)
+		if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, at, at); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	stale := folder("dyna-ci.stale1", old)
+	recent := folder("dyna-ci.young1", young)
+	other := folder("not-a-check", old)
+	busy := folder("dyna-ci.busy11", old)
+	// A process that works inside an old folder keeps it, whatever its age.
+	sleeper := exec.Command("sleep", "30")
+	sleeper.Dir = filepath.Join(busy, "tmp")
+	if err := sleeper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
+
+	runHostCheck(t, Node{Name: "local", Slots: 1, CheckTmp: parent}, t.TempDir())
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("the old unused folder was kept: %v", err)
+	}
+	for name, dir := range map[string]string{"young": recent, "not a check's": other, "in use": busy} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("the %s folder was removed: %v", name, err)
+		}
+	}
+}
