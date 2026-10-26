@@ -235,6 +235,8 @@ type engine struct {
 	settleOnce     sync.Once
 	phaseMu        sync.Mutex
 	curPhase       string
+	curLane        string // lane and stage of the current phase, when its script named them
+	curStage       string
 	workerMu       sync.Mutex
 	workers        sync.WaitGroup
 	stopping       bool
@@ -399,7 +401,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	prompt := call.Argument(0).String()
 	opts := call.Argument(1)
 
-	profName, label, phase, cwd, planNodeID := "", "", "", e.opts.WorkDir, ""
+	profName, label, phase, lane, stage, cwd, planNodeID := "", "", "", "", "", e.opts.WorkDir, ""
 	timeout := defaultAgentTimeout
 	timeoutSet := false
 	var schemaJSON, isolation string
@@ -417,6 +419,12 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		}
 		if v, ok := o["phase"].(string); ok {
 			phase = v
+		}
+		if v, ok := o["lane"].(string); ok {
+			lane = v
+		}
+		if v, ok := o["stage"].(string); ok {
+			stage = v
 		}
 		if v, ok := o["cwd"].(string); ok && v != "" {
 			cwd = v
@@ -504,6 +512,9 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	e.phaseMu.Lock()
 	if phase == "" {
 		phase = e.curPhase
+		if lane == "" && stage == "" {
+			lane, stage = e.curLane, e.curStage
+		}
 	}
 	e.phaseMu.Unlock()
 	if id > maxAgents {
@@ -537,6 +548,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	}
 	emitA := func(ev runstore.Event) {
 		cp.apply(&ev)
+		ev.Lane, ev.Stage = lane, stage
 		e.emit(ev)
 	}
 	emitA(runstore.Event{T: "agent_start", ID: id, Label: label, Profile: prof.Name, Phase: phase, Preview: textutil.ClipOneLine(prompt, 160)})
