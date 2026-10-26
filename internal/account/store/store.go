@@ -198,12 +198,13 @@ func KnownHarness(h string) bool {
 }
 
 // AccountsRetired reports whether the owner retired the saved accounts of
-// harness h on 2026-10-25, when Pi took over its provider: those sign-ins were
-// moved into Pi accounts by hand, so the harness-bound rows are dead weight and
-// the migration drops them. All three have since left KnownHarness, so nothing
-// writes a row for them either. The names stay here because a database older
-// than the migration upgrades straight to this release. Pi's own accounts for
-// chatgpt, meta-muse and opencode-go are not harness-bound and stay.
+// harness h on 2026-10-25, when Pi took over its provider. All three have since
+// left KnownHarness, so nothing writes a row for them either, and the names stay
+// here because a database older than the migration upgrades straight to this
+// release. Such a row is dropped only when a Pi account already holds the same
+// provider sign-in; an unmoved sign-in is kept for the owner to repair (D-125).
+// Pi's own accounts for chatgpt, meta-muse and opencode-go are not harness-bound
+// and are never candidates.
 func AccountsRetired(h string) bool {
 	switch h {
 	case "codex", "muse", "opencode":
