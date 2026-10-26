@@ -85,6 +85,7 @@ func TestComputerSessionBinsReusePreparedToolHome(t *testing.T) {
 // mismatch.
 func TestResumeRebuildsGenerationForANewDynaCommand(t *testing.T) {
 	r, p := runtimeFixture(t, "claude-code")
+	noInstalledDyna(t)
 	p.Env = map[string]string{"DYNA_BIN": dynaCommandStub(t, "first")}
 	_, pin, err := r.Prepare(context.Background(), p, nil)
 	if err != nil {
@@ -117,6 +118,19 @@ func dynaCommandStub(t *testing.T, build string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// noInstalledDyna points PATH at a directory with a git stand-in but no
+// dyna, so the profile's DYNA_BIN drives the tool-home bridge: since D-171 a
+// dyna the PATH installs wins over that path, and the ambient PATH of a
+// development machine names one.
+func noInstalledDyna(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
 }
 
 // Exercise the final Prepare merge rather than only individual adapter maps.
