@@ -12,10 +12,10 @@ import (
 
 	harnesshealth "dyna-agent/internal/harness/health"
 	harnessruntime "dyna-agent/internal/harness/runtime"
+
 	prfacts "dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
-	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
@@ -88,19 +88,19 @@ func (s *Service) profiles() ([]profile.Profile, error) {
 	return ps.Profiles, nil
 }
 
-// reviewRepoIdentity names the repository a review runs in, in the same form
-// as an account's saved repo scopes, so profile ranking counts only accounts
-// that may run there. A GitHub change names its repository directly; a local
-// change reads its worktree's origin, as the turn itself does.
-func reviewRepoIdentity(ctx context.Context, r Record) string {
-	if changeKind(r) == "local" {
-		return harnessruntime.RepoIdentity(ctx, r.RepoPath)
-	}
-	id, err := repoid.RemoteIdentity("", "https://"+r.Host+"/"+r.Repo+".git")
+// reviewRepoIdentity names the repository the review's turn runs in, in the
+// same form as an account's saved repo scopes. The turn runs in the checkout
+// reviewerDir picks, and that checkout's origin decides which accounts may
+// run there, so the ranking must read the identity the turn itself will use;
+// a fallback checkout can carry a different origin than the PR's repository.
+// A record without a live checkout answers "", which fails the quota check
+// open; the launch then reports the checkout error.
+func (s *Service) reviewRepoIdentity(ctx context.Context, r Record) string {
+	dir, err := s.reviewerDir(r)
 	if err != nil {
 		return ""
 	}
-	return id
+	return harnessruntime.RepoIdentity(ctx, dir)
 }
 
 func (s *Service) chooseProfile(cfg Reviewer, repo string) (rolesession.Choice, error) {
@@ -489,7 +489,7 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 	repo := ""
 	if queue := facts.Queue(roomID); len(queue) > 0 {
 		idCtx, cancel := context.WithTimeout(context.Background(), repoIdentityWait)
-		repo = reviewRepoIdentity(idCtx, *queue[0])
+		repo = s.reviewRepoIdentity(idCtx, *queue[0])
 		cancel()
 	}
 	choice, err := s.chooseProfile(cfg, repo)
@@ -738,7 +738,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			continue
 		}
 		cfg := st.Reviewers[roomID]
-		choice, e := s.chooseProfile(cfg, reviewRepoIdentity(ctx, *candidate))
+		choice, e := s.chooseProfile(cfg, s.reviewRepoIdentity(ctx, *candidate))
 		if e != nil {
 			return s.reviewBlocked(roomID, Sanitize(e.Error()))
 		}
