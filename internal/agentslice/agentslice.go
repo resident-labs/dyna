@@ -9,6 +9,7 @@ package agentslice
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
@@ -57,13 +59,19 @@ MemoryHigh=65%
 MemoryMax=80%
 `
 
+// commandTimeout bounds each systemd command, so a stalled user manager cannot
+// hold a caller such as a short version probe or the engine's shutdown.
+const commandTimeout = 3 * time.Second
+
 var (
 	lookPath   = exec.LookPath
-	runCommand = func(name string, args ...string) error { return childenv.Clean(exec.Command(name, args...)).Run() }
+	runCommand = func(ctx context.Context, name string, args ...string) error {
+		return childenv.Clean(exec.CommandContext(ctx, name, args...)).Run()
+	}
 	// runCommandOutput reads what a command prints, for the systemd version that
 	// decides the scope arguments.
-	runCommandOutput = func(name string, args ...string) ([]byte, error) {
-		return childenv.Clean(exec.Command(name, args...)).Output()
+	runCommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return childenv.Clean(exec.CommandContext(ctx, name, args...)).Output()
 	}
 	sliceOnce sync.Once
 	// noExpandOnce and noExpand cache what this systemd-run supports. Every agent
@@ -85,6 +93,21 @@ func Wrap(cmd *exec.Cmd, name string) string {
 		return ""
 	}
 	return wrap(cmd, name, Slice)
+}
+
+// Stop kills every process left in the scope that Wrap returned, including a
+// daemon that left the command's process group. It ignores a scope that has
+// already ended, and does nothing for "".
+func Stop(unit string) {
+	if unit == "" {
+		return
+	}
+	// Cleanup has its own bound, not the probe's context, so a probe that was
+	// canceled still gets its scope killed, and a stalled user manager cannot
+	// hold the caller.
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	_ = runCommand(ctx, "systemctl", "--user", "kill", "--signal=SIGKILL", unit)
 }
 
 // wrap uses the same scope command for agent and foreground processes. It
@@ -120,7 +143,9 @@ func wrap(cmd *exec.Cmd, name, slice string, properties ...string) string {
 // command that systemd rewrote.
 func noExpandArg(run string) string {
 	noExpandOnce.Do(func() {
-		out, err := runCommandOutput(run, "--version")
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		out, err := runCommandOutput(ctx, run, "--version")
 		if err != nil {
 			noExpand = systemdver.NoExpandFlag
 			return
@@ -159,7 +184,9 @@ func ensureSlice() {
 	}
 	changed, err := WriteSlice(filepath.Join(config, "systemd", "user"))
 	if err == nil && changed {
-		_ = runCommand("systemctl", "--user", "daemon-reload")
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		_ = runCommand(ctx, "systemctl", "--user", "daemon-reload")
 	}
 }
 

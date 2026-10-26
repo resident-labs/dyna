@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"dyna-agent/internal/store"
 )
 
 // OwnerEnvKey carries the owner's roots into a private harness launch, so every
@@ -58,7 +60,7 @@ func RestoreOwner(args []string) error {
 		current, set := os.LookupEnv(key)
 		owner, ownerSet := record.Env[key]
 		if current != private && (set != ownerSet || current != owner) {
-			return nil
+			return keepOwnerData(args, record)
 		}
 	}
 	for _, key := range ownerRestoreKeys {
@@ -81,6 +83,26 @@ func RestoreOwner(args []string) error {
 	}
 	launchEnv = launch
 	return os.Setenv("PATH", strings.Join(path, string(os.PathListSeparator)))
+}
+
+// keepOwnerData runs when the caller chose its own HOME or XDG roots, for
+// example a game helper that sets fresh ones before it runs dyna. The caller
+// keeps them, and so do its children. A dyna client command still needs the
+// owner's data folder to reach the engine, so it gets that through
+// store.DataDirEnv alone. `dyna engine run` may serve any folder the caller
+// picked, and a value the caller already set stays.
+func keepOwnerData(args []string, record ownerEnv) error {
+	if len(args) == 0 || args[0] == "engine" || os.Getenv(store.DataDirEnv) != "" {
+		return nil
+	}
+	data := record.Env["XDG_DATA_HOME"]
+	if data == "" && record.Env["HOME"] != "" {
+		data = filepath.Join(record.Env["HOME"], ".local", "share")
+	}
+	if !filepath.IsAbs(data) {
+		return nil
+	}
+	return os.Setenv(store.DataDirEnv, filepath.Join(data, "dyna"))
 }
 
 // KeepsPrivateRoots reports whether a dyna command runs with the harness's

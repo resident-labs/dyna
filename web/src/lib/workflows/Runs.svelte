@@ -17,7 +17,7 @@
   }
   let { room, list = null, error = '', onopen, onstart = null }: Props = $props()
 
-  const label: Record<string, string> = { running: 'Running', ok: 'Done', error: 'Failed', canceled: 'Canceled' }
+  const label: Record<string, string> = { running: 'Running', ok: 'Done', error: 'Failed', canceled: 'Canceled', interrupted: 'Interrupted' }
   let running = $derived((list?.runs ?? []).filter((r) => r.status === 'running'))
   let recent = $derived((list?.runs ?? []).filter((r) => r.status !== 'running'))
   let usage = $derived(list?.runs?.length ? `${list.running} running · ${list.total} total` : '')
@@ -135,7 +135,7 @@
   .id { font-size: 11.5px; }
   .st { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--raise); color: var(--muted); }
   .st.ok { color: var(--sage); background: rgba(151, 201, 149, 0.1); }
-  .st.error { color: var(--coral); background: rgba(239, 138, 128, 0.1); }
+  .st.error, .st.interrupted { color: var(--coral); background: rgba(239, 138, 128, 0.1); }
   .when { display: flex; flex-direction: column; align-items: flex-end; font-size: 12.5px; color: var(--muted); }
   .dur { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
   @media (max-width: 760px) {
