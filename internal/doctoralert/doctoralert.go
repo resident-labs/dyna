@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/database"
@@ -28,14 +29,30 @@ type RoomUse struct {
 	Room    string
 	Running int
 	Idle    int
+	// Finished counts the idle sessions that hold no goal, item or PR. Only
+	// these have nothing left to do and may be closed.
+	Finished int
 }
 
 // Sessions is the room's open session count.
 func (u RoomUse) Sessions() int { return u.Running + u.Idle }
 
+// Holds returns the sessions that own an open goal, goal item or PR, from the
+// counts by kind that subagent.Manager.ResponsibilityCounts reads.
+func Holds(counts map[string]map[string]int) map[string]bool {
+	out := map[string]bool{}
+	for id, byKind := range counts {
+		if byKind["goal"] > 0 || byKind["item"] > 0 || byKind["pr"] > 0 {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 // Count groups open sessions by room. A closed or dormant session holds no
-// agent process, and a session with no room belongs to nobody to tell.
-func Count(infos []subagent.Info) []RoomUse {
+// agent process, and a session with no room belongs to nobody to tell. An idle
+// session is finished only when it is not in holds.
+func Count(infos []subagent.Info, holds map[string]bool) []RoomUse {
 	byRoom := map[string]*RoomUse{}
 	for _, in := range infos {
 		if in.RoomID == "" {
@@ -58,6 +75,9 @@ func Count(infos []subagent.Info) []RoomUse {
 			u.Running++
 		} else {
 			u.Idle++
+			if !holds[in.ID] {
+				u.Finished++
+			}
 		}
 	}
 	out := make([]RoomUse, 0, len(byRoom))
@@ -77,6 +97,46 @@ type Note struct {
 	Total     int // agent sessions on the machine, all rooms
 	Report    doctor.Report
 	Recovered bool
+	// Outside lists the biggest programs on the machine that Dyna does not run,
+	// each with the room it belongs to when that can be told.
+	Outside []Outside
+}
+
+// Outside is a program outside Dyna and the room it belongs to, if known.
+type Outside struct {
+	Process doctor.Process
+	Room    string
+}
+
+// Text is the line a note shows for it.
+func (o Outside) Text() string { return o.Process.Text(o.Room) }
+
+// Locate names the room of each outside program. A working folder inside a
+// session's worktree names that session's room. Else a unit named after a room,
+// such as horizon-swarm-3.scope for room horizon, names that room.
+func Locate(procs []doctor.Process, infos []subagent.Info) []Outside {
+	sessionRoom := map[string]string{}
+	var rooms []string
+	for _, in := range infos {
+		if in.Room == "" {
+			continue
+		}
+		sessionRoom[in.ID] = in.Room
+		rooms = append(rooms, in.Room)
+	}
+	out := make([]Outside, len(procs))
+	for i, p := range procs {
+		out[i] = Outside{Process: p, Room: sessionRoom[doctor.SessionIn(p.Cwd)]}
+		if out[i].Room != "" {
+			continue
+		}
+		for _, name := range rooms {
+			if strings.HasPrefix(p.Unit, name+"-") && len(name) > len(out[i].Room) {
+				out[i].Room = name
+			}
+		}
+	}
+	return out
 }
 
 // Advice is the one action the note asks of the room's root.
@@ -85,10 +145,13 @@ func (n Note) Advice() string {
 		return fmt.Sprintf("%s is healthy again. No action is needed.", n.Machine)
 	}
 	share := fmt.Sprintf("this room runs %d of %d agent sessions on %s", n.Room.Sessions(), n.Total, n.Machine)
-	if n.Room.Idle > 0 {
-		return fmt.Sprintf("Close the %d idle sessions that have finished; %s.", n.Room.Idle, share)
+	if n.Room.Finished > 0 {
+		return fmt.Sprintf("Close the %d idle sessions that have finished and hold no goal, item or PR; %s.", n.Room.Finished, share)
 	}
-	return fmt.Sprintf("Pause or stop %d of the %d running agents; %s.", (n.Room.Running+1)/2, n.Room.Running, share)
+	if n.Room.Running > 0 {
+		return fmt.Sprintf("Pause or stop %d of the %d running agents; %s.", (n.Room.Running+1)/2, n.Room.Running, share)
+	}
+	return fmt.Sprintf("No session is finished: the %d idle sessions still hold a goal, item or PR. Finish or hand over that work, then close them; %s.", n.Room.Idle, share)
 }
 
 // Notifier decides which rooms to tell and remembers what it told them.
@@ -97,6 +160,9 @@ type Notifier struct {
 	Now     func() time.Time
 	// Use lists the rooms' open sessions on the machine.
 	Use func() ([]RoomUse, error)
+	// Outside, when set, lists the biggest outside programs. It is read once
+	// per pass, and only when a note is sent.
+	Outside func() []Outside
 	// Send posts one note to a room's root.
 	Send func(Note) error
 }
@@ -149,6 +215,8 @@ func (n Notifier) Alert(rep doctor.Report) error {
 	}
 	now := n.now()
 	var errs []error
+	var outside []Outside
+	outsideRead := false
 	for _, r := range rooms {
 		var last int64
 		err := db.QueryRow(`SELECT last_at FROM doctor_room_alerts WHERE machine=? AND room_id=?`, rep.Machine, r.RoomID).Scan(&last)
@@ -159,7 +227,10 @@ func (n Notifier) Alert(rep doctor.Report) error {
 			errs = append(errs, err)
 			continue
 		}
-		if err := n.Send(Note{Room: r, Machine: rep.Machine, Total: total, Report: rep}); err != nil {
+		if !outsideRead && n.Outside != nil {
+			outside, outsideRead = n.Outside(), true
+		}
+		if err := n.Send(Note{Room: r, Machine: rep.Machine, Total: total, Report: rep, Outside: outside}); err != nil {
 			errs = append(errs, fmt.Errorf("room %s: %w", r.Room, err))
 			continue
 		}
