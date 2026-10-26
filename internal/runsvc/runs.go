@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/worktrees"
@@ -28,14 +30,32 @@ func Pause(ctx context.Context, id string, paused bool) error {
 	return runstore.SetPaused(id, paused)
 }
 
+// runExitGrace is how long a canceled run's process may take to finalize
+// before its processes are killed.
+const runExitGrace = 10 * time.Second
+
 // Cancel stops a run only in the caller's room. A stopped run's workers are
-// gone, so their managed shell jobs stop the way a closed session's do (D-165).
+// gone, so their process groups end and their managed shell jobs stop the way
+// a closed session's do (D-165, D-185).
 func Cancel(ctx context.Context, id string) error {
-	if _, err := runForCaller(ctx, id); err != nil {
+	m, err := runForCaller(ctx, id)
+	if err != nil {
 		return err
 	}
 	if err := runstore.Cancel(id); err != nil {
 		return err
+	}
+	// The run process finalizes its own state on SIGTERM; give it time, then
+	// end every group it or its workers started, so a worker that is paused,
+	// detached or in a group of its own does not outlive the run.
+	for deadline := time.Now().Add(runExitGrace); runstore.Alive(m) && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+	}
+	leader := 0 // a recorded pid is the run's group only while that process lives
+	if runstore.Alive(m) {
+		leader = m.Pid
+	}
+	if err := runprocs.Kill(id, leader); err != nil {
+		return fmt.Errorf("run %s is canceled, but ending its processes failed: %w", id, err)
 	}
 	if err := shells.DefaultStore().StopRun(id); err != nil {
 		return fmt.Errorf("run %s is canceled, but stopping its shell jobs failed: %w", id, err)
