@@ -395,10 +395,8 @@ func TestRunDetailShowsRunningActivity(t *testing.T) {
 		{T: "agent_start", ID: 2, Label: "done"}, {T: "agent_end", ID: 2, Status: "ok"},
 	}, "")
 	for _, agent := range []int{1, 2} {
-		path, err := runstore.AgentNormalizedOutputPath(id, agent)
-		if err != nil {
-			t.Fatal(err)
-		}
+		// An agent is a session: its output is the session's first turn file.
+		path := filepath.Join(runstore.SessionsDir(), runstore.AgentSessionID(id, agent), "agents", "1", "output.jsonl")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
