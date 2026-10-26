@@ -4,53 +4,21 @@
 package enginesocket
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
-	"os/user"
 	"path/filepath"
 )
 
 // Path is the socket the engine listens on and the CLI dials.
+//
+// The path follows the runtime folder, not the data folder: every process on
+// this runtime folder meets the same engine, which is what the CLI relies on.
+// An engine on another data folder is refused by the owner record written beside
+// the socket (internal/engine), so it can never serve this one's traffic.
 func Path() (string, error) {
-	return PathFor(os.Getenv("XDG_RUNTIME_DIR"), DataDir())
-}
-
-// DataDir is the data folder this process uses, read the same way the engine
-// reads it: XDG_DATA_HOME, else HOME/.local/share/dyna.
-func DataDir() string {
-	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
-		return filepath.Join(dir, "dyna")
-	}
-	return filepath.Join(os.Getenv("HOME"), ".local", "share", "dyna")
-}
-
-// OwnerHome is this user's home from the password database, not from HOME, which
-// a caller can change. The owner's identity cannot depend on that environment.
-func OwnerHome() string {
-	if u, err := user.Current(); err == nil && u.HomeDir != "" {
-		return u.HomeDir
-	}
-	return os.Getenv("HOME")
-}
-
-// OwnerDataDir is the data folder of this user's own engine, which keeps the
-// historical socket path so an installed engine and the CLI still meet.
-func OwnerDataDir() string {
-	return filepath.Join(OwnerHome(), ".local", "share", "dyna")
-}
-
-// PathFor names the socket for one runtime folder and one data folder. The
-// owner's data folder keeps the plain path; any other data folder gets one of
-// its own, so a second engine can never take the owner's socket.
-func PathFor(runtime, dataDir string) (string, error) {
+	runtime := os.Getenv("XDG_RUNTIME_DIR")
 	if !filepath.IsAbs(runtime) {
 		return "", errors.New("XDG_RUNTIME_DIR must be an absolute path")
 	}
-	if dataDir == "" || filepath.Clean(dataDir) == filepath.Clean(OwnerDataDir()) {
-		return filepath.Join(runtime, "dyna", "engine.sock"), nil
-	}
-	sum := sha256.Sum256([]byte(filepath.Clean(dataDir)))
-	return filepath.Join(runtime, "dyna", "engines", hex.EncodeToString(sum[:8]), "engine.sock"), nil
+	return filepath.Join(runtime, "dyna", "engine.sock"), nil
 }

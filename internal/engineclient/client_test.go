@@ -2,11 +2,9 @@ package engineclient
 
 import (
 	"context"
-	"dyna-agent/internal/enginesocket"
 	"errors"
 	"net"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -37,23 +35,10 @@ func TestEngineDown(t *testing.T) {
 func TestSocketPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", root)
-	// The owner's own data folder keeps the historical path, so an installed
-	// engine and the CLI still meet. The owner's home comes from the password
-	// database, so the test points XDG_DATA_HOME at that home's share folder.
-	t.Setenv("XDG_DATA_HOME", filepath.Dir(enginesocket.OwnerDataDir()))
-	want, err := enginesocket.PathFor(root, enginesocket.OwnerDataDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := SocketPath(); err != nil || got != want {
-		t.Fatalf("owner path = %q, %v; want %q", got, err, want)
-	}
-	// Any other data folder gets one of its own, so a second engine cannot take
-	// the owner's socket.
-	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "other-data"))
-	other, err := SocketPath()
-	if err != nil || other == want || !strings.Contains(other, "engines") {
-		t.Fatalf("other data folder path = %q, %v; want a socket of its own", other, err)
+	// The socket follows the runtime folder, so the CLI and the engine meet on
+	// the same path whatever data folder each of them names.
+	if got, err := SocketPath(); err != nil || got != filepath.Join(root, "dyna", "engine.sock") {
+		t.Fatalf("path = %q, %v", got, err)
 	}
 	for _, invalid := range []string{"", "relative"} {
 		t.Setenv("XDG_RUNTIME_DIR", invalid)
