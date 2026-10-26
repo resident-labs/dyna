@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/repoid"
 )
 
@@ -196,7 +197,7 @@ suites:
 	// The granted size is what the container command runs with, and the note
 	// reaches the check's own log.
 	checks[0].resources = granted
-	script := nodeCheckScript(node, "/base", "/cache", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), checks[0], time.Minute, 0, false, DefaultActImage)
+	script := nodeCheckScript(node, "/base", "/cache", "/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), checks[0], time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
 	for _, want := range []string{"--cpus=16", "--memory=32g", "--memory-swap=32g", granted.Note} {
 		if !strings.Contains(script, want) {
 			t.Errorf("container check lacks %q", want)

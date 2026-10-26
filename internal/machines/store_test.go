@@ -512,3 +512,35 @@ INSERT INTO local_ci_results VALUES('repo','def','{"node":"setup","sha":"def","s
 		t.Fatalf("migration re-enabled an explicit owner decision: %#v, %v", hermes, err)
 	}
 }
+
+// A machine keeps the container runtime socket a workflow job uses, and one
+// that names none uses Docker's, so a rootless Podman machine can be pointed at
+// its own socket without changing any other machine.
+func TestMachineContainerSocketRoundTripsAndDefaultsToDocker(t *testing.T) {
+	ctx := context.Background()
+	store := fixture(t)
+	saved, err := store.Save(ctx, Machine{Name: "pve", Roles: []Role{RoleCI}, CISlots: 4, Enabled: true, SSH: "build@pve", ContainerSocket: "unix:///run/user/1000/podman/podman.sock"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read Machine
+	for _, machine := range list {
+		if machine.ID == saved.ID {
+			read = machine
+		}
+	}
+	if read.ContainerSocket != "unix:///run/user/1000/podman/podman.sock" || read.DockerHost() != read.ContainerSocket {
+		t.Fatalf("socket = %q, DOCKER_HOST = %q", read.ContainerSocket, read.DockerHost())
+	}
+	plain, err := store.Save(ctx, Machine{Name: "plain", Roles: []Role{RoleCI}, CISlots: 2, Enabled: true, SSH: "build@plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.DockerHost() != DefaultContainerSocket {
+		t.Fatalf("a machine without a socket uses %q, want %q", plain.DockerHost(), DefaultContainerSocket)
+	}
+}

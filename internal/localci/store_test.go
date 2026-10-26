@@ -69,7 +69,7 @@ func TestStoreNodesReadsCIMachines(t *testing.T) {
 		t.Fatalf("agents machine gained the ci role: %#v", other)
 	}
 	nodes, err := s.Nodes(ctx)
-	if err != nil || !reflect.DeepEqual(nodes, []Node{{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true}}) {
+	if err != nil || !reflect.DeepEqual(nodes, []Node{{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true, ContainerSocket: machines.DefaultContainerSocket}}) {
 		t.Fatalf("nodes = %#v, %v", nodes, err)
 	}
 	local, err := registry.GetLocal(ctx)
