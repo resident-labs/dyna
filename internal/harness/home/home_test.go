@@ -540,3 +540,28 @@ func TestGlobalGitWriteLeavesPublicationValid(t *testing.T) {
 		t.Fatalf("the tool's write was lost: %q %v", out, err)
 	}
 }
+
+// A later launch with another owner environment gets its own writable config, so
+// a running session keeps the settings it started with.
+func TestWritableGitConfigIsPerPublication(t *testing.T) {
+	scope, _, env := fixture(t)
+	first, err := Prepare(scope, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(first["GIT_CONFIG_GLOBAL"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Prepare(scope, "", append(env, "XDG_CONFIG_HOME=/other/config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second["GIT_CONFIG_GLOBAL"] == first["GIT_CONFIG_GLOBAL"] {
+		t.Fatal("two publications share one writable Git config")
+	}
+	after, err := os.ReadFile(first["GIT_CONFIG_GLOBAL"])
+	if err != nil || string(after) != string(before) || !strings.Contains(string(after), gitQuote(publishedConfig(first))) {
+		t.Fatalf("the first launch's config changed: %q, %v", after, err)
+	}
+}
