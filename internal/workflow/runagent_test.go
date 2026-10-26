@@ -116,6 +116,17 @@ func fastRetries(t *testing.T) *[]time.Duration {
 	return &waits
 }
 
+// fakeClockRetries makes every retry pause advance an injected clock instead of
+// waiting, so the recovery budget runs out in the test as it would in time.
+func fakeClockRetries(t *testing.T) {
+	t.Helper()
+	clock := time.Unix(0, 0)
+	previousNow, previousWait := retryNow, retryWait
+	retryNow = func() time.Time { return clock }
+	retryWait = func(_ context.Context, d time.Duration) error { clock = clock.Add(d); return nil }
+	t.Cleanup(func() { retryNow, retryWait = previousNow, previousWait })
+}
+
 func TestRunAgentSessionCountsTheTimeFailedCallsTakeInItsRecoveryBudget(t *testing.T) {
 	waits := fastRetries(t)
 	clock := time.Unix(0, 0)
@@ -165,7 +176,7 @@ func TestRunAgentSessionKeepsARefusalTerminal(t *testing.T) {
 }
 
 func TestNestedWorkflowAsksAgainWhenTheStopCallIsCutOff(t *testing.T) {
-	fastRetries(t)
+	fakeClockRetries(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	dir := t.TempDir()
 	writeWorkflowScript(t, dir, "child.js", `agent("`+enginefake.HoldTask+`", {label: "left running"}); await agent("`+enginefake.AfterHeldTask+`"); return "child done";`)
@@ -174,7 +185,8 @@ func TestNestedWorkflowAsksAgainWhenTheStopCallIsCutOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { run.Finish("ok", "", nil) })
-	// More cut-off stops than any recovery budget allows: the call keeps asking.
+	// The pauses add up to more than the recovery budget (100 stops at up to
+	// 5 s each), yet the call keeps asking until the stop is confirmed.
 	cutOff := make([]error, 100)
 	for i := range cutOff {
 		cutOff[i] = &engineclient.RemoteError{Status: 503, Message: "engine is stopping"}
