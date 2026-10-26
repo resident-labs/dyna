@@ -676,11 +676,10 @@ func settleFromStart(ctx context.Context, started time.Time) error {
 // the workers pass.
 var settleHookRuns = settleFromStart
 
-// localCIStop is how long a cancelled local CI run may take to leave its
-// machine: it stops the containers and then the keeper, which is the runner's
-// own teardown budget. A run still working then is reported; its keeper holds
-// the machine's cache lock until its own lifetime ends.
-const localCIStop = localci.TeardownBudget
+// localCIStop is how long an engine stop waits for local CI runs to stop
+// polling. Their checks run detached on the machines and keep running; the
+// restarted engine reattaches. A run still polling then is reported.
+const localCIStop = localci.StopWait
 
 func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) {
 	report := func(name string, err error) {
