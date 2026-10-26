@@ -69,7 +69,7 @@ func TestHostCheckNeedsMachineConsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := nodeCheckScript(*node, "/var/tmp/dyna-ci/local", "/var/tmp/dyna-ci/repo.git", "/var/tmp/dyna-ci/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), checks[0], time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket)
+	script := nodeCheckScript(*node, "/var/tmp/dyna-ci/local", "/var/tmp/dyna-ci/repo.git", "/var/tmp/dyna-ci/run", "run", strings.Repeat("a", 40), strings.Repeat("b", 40), checks[0], time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	for _, want := range []string{"env -i", "PIP_CACHE_DIR=/var/tmp/dyna-ci/local/caches/pip", "python -m pytest"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("allowed host script lacks %q", want)

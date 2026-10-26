@@ -170,10 +170,17 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if err := os.WriteFile(workflowFile, []byte(workflow), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The engine tags the workflow from the commit's bytes and hands the script
+	// the result; the script only writes it next to the checkout.
+	taggedBody, err := tagWorkflowBody([]byte(workflow), "CI-dyna-run-7-go-static")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowTagged := string(taggedBody)
 	check := nodeCheck{id: "go-static", name: "go-static", reports: ReportJUnit,
 		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock")
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock", workflowTagged)
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, script))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A host-only variable stands in for a session token or an account key.
