@@ -14,6 +14,12 @@ import (
 // the work ends sooner.
 const shutdownTimeout = localCIStop + time.Second
 
+// streamShutdownTimeout bounds the HTTP phase on its own. A page or a terminal
+// keeps a stream open, and a stream never ends by itself, so waiting for one to
+// finish made a restart sit for the whole shutdown budget while every dyna
+// command failed. After this bound the connections are closed instead.
+const streamShutdownTimeout = 3 * time.Second
+
 // stopEngine cancels every engine service before joining cleanup. HTTP, workers
 // and foreground process cleanup share one deadline, including error exits.
 func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*http.Server, cleanup ...func()) error {
@@ -31,7 +37,14 @@ func stopEngine(cancel context.CancelFunc, workers <-chan struct{}, servers []*h
 		go func() { defer pending.Done(); fn() }()
 	}
 	for _, server := range servers {
-		start(func() { _ = server.Shutdown(ctx) })
+		start(func() {
+			// A graceful stop ends a request that finishes, and then this deadline
+			// closes what is left, such as an open event stream.
+			streamCtx, cancelStream := context.WithTimeout(context.Background(), streamShutdownTimeout)
+			defer cancelStream()
+			_ = server.Shutdown(streamCtx)
+			_ = server.Close()
+		})
 	}
 	if workers != nil {
 		start(func() { <-workers })
