@@ -116,6 +116,9 @@ type Message struct {
 	Payload EventPayload `json:"payload,omitzero"`
 	// Human marks an owner post a person typed in the desktop composer.
 	Human bool `json:"human,omitempty"`
+	// Script names the workflow run that wrote the post. The feed shows the
+	// workflow's name and links to the run, not the run's address.
+	Script *ScriptRef `json:"script,omitempty"`
 	// Conversation is where the post was written: the room feed, one
 	// session's DM or the owner's voice call. The store decides it once, when
 	// the post is appended (see HomeFor), and never changes it. The empty
@@ -145,6 +148,14 @@ type Message struct {
 	// Attachments are files saved with the room before this post.
 	Attachments []Attachment `json:"attachments,omitempty"`
 	References  []Reference  `json:"references,omitempty"`
+}
+
+// ScriptRef is the workflow run behind a script's post, stored on the post so
+// the feed needs no lookup to name the sender.
+type ScriptRef struct {
+	RunID string `json:"runId"`
+	// Workflow is the run's name, as the Runs page shows it.
+	Workflow string `json:"workflow"`
 }
 
 // OwnerLabel names the room owner as a speaker. Root and the human both use
@@ -851,6 +862,8 @@ type PostInput struct {
 	// payload is the typed JSON of a sealed event. Only PostEvent sets it.
 	payload EventPayload
 	Human   bool
+	// Script is the workflow run that wrote the post, for a script's post().
+	Script  *ScriptRef
 	To      []string
 	Via     []string
 	ReplyTo string
@@ -1049,7 +1062,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		now := s.now()
 		out = Message{
 			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs, SenderRoomID: in.SenderRoomID,
-			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
+			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Script: in.Script, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
 		if in.ID != "" {
