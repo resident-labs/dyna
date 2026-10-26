@@ -2,6 +2,7 @@ package localci
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"slices"
 	"strings"
