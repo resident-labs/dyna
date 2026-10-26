@@ -30,6 +30,10 @@ const callTimeout = 5 * time.Second
 var LongCalls = map[string]time.Duration{
 	// Read-only input waits last 30 seconds and leave time for transport.
 	"RunnerWaitInput": time.Minute,
+	// A run agent wait lasts RunAgentWaitBound and leaves time for transport.
+	"WaitRunAgent": time.Minute,
+	// Closing a run agent stops its turn, which can take 25 seconds before SIGKILL.
+	"CloseRunAgent": time.Minute, "CloseRunAgents": time.Minute,
 	// Librarian setup resolves git, installs hooks, and can close a session.
 	"EnableLibrarian": 2 * time.Minute, "DisableLibrarian": 2 * time.Minute,
 	// A wake syncs a git worktree and starts or assigns a harness turn.

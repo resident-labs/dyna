@@ -215,6 +215,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		return fail(err)
 	}
 	p, ok := profs.Get(meta.Profile)
+	if meta.Run != nil && meta.Run.Profile != nil {
+		p, ok = meta.Run.Profile, true
+	}
 	if !ok {
 		return fail(fmt.Errorf("profile %q is no longer registered", meta.Profile))
 	}
@@ -676,6 +679,10 @@ func stampSession(env map[string]string, meta Meta) {
 	env[mode.EnvRoomID] = meta.RoomID
 	env[mode.EnvRoom] = meta.Room
 	env[mode.EnvAddress] = meta.Address()
+	if run := meta.Run; run != nil && run.Journal != "" {
+		env[runstore.AgentJournalEnv] = run.Journal
+		env[runstore.AgentJournalRootEnv] = run.JournalRoot
+	}
 	if meta.Role == RoleRoot {
 		env[mode.EnvMode] = mode.Root
 		env[mode.EnvDepth] = ""

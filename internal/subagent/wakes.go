@@ -45,7 +45,12 @@ func (m *Manager) tickSessions(ctx context.Context, targets []string) ([]string,
 			sessions = append(sessions, meta)
 		}
 	}
-	return m.tickSessionMetas(ctx, sessions)
+	var closeErr error
+	if targets == nil {
+		closeErr = m.closeEndedRunAgents(ctx, sessions)
+	}
+	started, err := m.tickSessionMetas(ctx, sessions)
+	return started, errors.Join(err, closeErr)
 }
 
 // TickSessionRoom recovers only the room whose pause was lifted.

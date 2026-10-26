@@ -182,7 +182,7 @@ func (s *Service) parse(rec room.Record, draft string) (Draft, error) {
 	}
 	var names []string
 	for _, m := range members {
-		if m.RoomID == rec.ID {
+		if m.RoomID == rec.ID && !m.RunOwned() {
 			names = append(names, m.EffectiveName())
 		}
 	}

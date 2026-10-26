@@ -89,7 +89,12 @@ type Meta struct {
 	// Leaf marks a session that can start neither subagent sessions nor
 	// workflow runs; it completes its task itself. Workflow workers are
 	// started as leaf sessions.
-	Leaf              bool            `json:"leaf,omitempty"`
+	Leaf bool `json:"leaf,omitempty"`
+	// Run names the workflow run that owns a leaf session and the agent call it
+	// serves. Such a session reports to its run, not to a parent session, and
+	// is no member of its room: it is outside member lists, selectors and
+	// check-ins, and the run closes it when its agent() call resolves.
+	Run               *RunOwner       `json:"run,omitempty"`
 	Role              string          `json:"role,omitempty"`
 	InheritedReceipts map[string]bool `json:"inheritedReceipts,omitempty"`
 	// UncertainInputIDs names posts a repaired turn had handed to its harness
@@ -411,15 +416,15 @@ func ValidateName(name string) error {
 }
 
 // ValidID reports an ID in the shape NewID mints:
-// ses_<date>-<time>-<8 hex digits>. The generated-name suffix and the
-// worktree branch both rely on that shape.
+// ses_<date>-<time>-<8 hex digits>, or 16 for a run agent's derived ID. The
+// generated-name suffix and the worktree branch both rely on that shape.
 func ValidID(id string) bool {
 	rest, ok := strings.CutPrefix(id, runstore.SessionDirPrefix)
 	if !ok {
 		return false
 	}
 	parts := strings.Split(rest, "-")
-	if len(parts) != 3 || len(parts[2]) != 8 {
+	if len(parts) != 3 || len(parts[2]) != 8 && len(parts[2]) != 16 {
 		return false
 	}
 	if _, err := time.Parse("20060102", parts[0]); err != nil {
