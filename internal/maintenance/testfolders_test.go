@@ -43,6 +43,28 @@ func TestSweepTestFoldersRemovesOnlyStaleOnes(t *testing.T) {
 	}
 }
 
+// A killed tool or test run leaves folders that carry no process ID. The sweep
+// removes them once they are old, and keeps a young one.
+func TestSweepRemovesOldLeakedToolFolders(t *testing.T) {
+	root := t.TempDir()
+	old := testFolder(t, root, "dyna-go-env-123456", 2*testFolderRetention, false)
+	oldBundle := testFolder(t, root, "dyna-pr-detail-AbC123", 2*testFolderRetention, false)
+	young := testFolder(t, root, "dyna-go-env-654321", 0, false)
+
+	freed, err := sweepTestFolders(time.Now(), root, func(int) bool { return false }, false)
+	if err != nil || freed.Items != 2 {
+		t.Fatalf("sweep = %+v, %v; want the two old folders", freed, err)
+	}
+	for _, gone := range []string{old, oldBundle} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("an old leaked folder stayed: %v", err)
+		}
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Fatalf("a young folder was removed: %v", err)
+	}
+}
+
 // The sweep removes only the folders this package makes. An unrelated program's
 // old workspace, a Go tool folder and a process guard's control folder all stay,
 // even when they are older than the retention.
