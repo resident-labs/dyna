@@ -330,7 +330,7 @@ func TestArtifactInspectionAccountsForDownloadQuota(t *testing.T) {
 	gh := e.s.github(e.author.RoomID)
 	rates := map[string]RateLimit{}
 	gh.requests = &requestCache{rates: rates, used: map[string]cachedResponse{}, now: e.s.now}
-	report, found, problems, err := inspectTestRun(t.Context(), gh, Record{Host: ref.Host, Repo: ref.Repo, Number: ref.Number}, Run{ID: 81, Attempt: 1})
+	report, found, problems, _, err := inspectTestRun(t.Context(), gh, Record{Host: ref.Host, Repo: ref.Repo, Number: ref.Number}, Run{ID: 81, Attempt: 1})
 	if err != nil || !found || len(problems) != 0 || len(report.Tests) != 1 {
 		t.Fatalf("inspection: found=%v problems=%v err=%v", found, problems, err)
 	}
