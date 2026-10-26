@@ -7,6 +7,7 @@ package genstate
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -33,7 +34,12 @@ CREATE TABLE IF NOT EXISTS generation_views (
  harness TEXT NOT NULL CHECK(harness <> ''),
  home TEXT NOT NULL CHECK(home <> ''),
  generation TEXT NOT NULL CHECK(generation <> ''),
+ updated_ms INTEGER NOT NULL,
  PRIMARY KEY(harness, home, generation)
+);
+CREATE TABLE IF NOT EXISTS legacy_generation_views (
+ path TEXT PRIMARY KEY NOT NULL CHECK(path <> ''),
+ digest TEXT NOT NULL CHECK(digest <> '')
 );`
 
 // Lease is one process's claim on a generation while its native conversation
@@ -76,8 +82,18 @@ func open(dataDir string) (*sql.DB, error) {
 	if err := state.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "harness.generations", 1, func(conn *sql.Conn, _ int) error {
+	// Version 3 adds the revision of each imported legacy view and the time a
+	// view was last published, so an unchanged or superseded file is not
+	// imported over a newer publication.
+	err = database.Migrate(db, "harness.generations", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
+		if old == 2 {
+			// A build of version 2 wrote the views without their publication
+			// time; keep its rows and add the column.
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE generation_views ADD COLUMN updated_ms INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
 		_, err := conn.ExecContext(ctx, schema)
 		return err
 	})
@@ -185,21 +201,32 @@ func (s Store) RecordView(ctx context.Context, view View, pending bool) error {
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		if !pending {
-			if _, err := conn.ExecContext(ctx, `DELETE FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home); err != nil {
-				return err
-			}
-		}
-		for _, dir := range view.Generations {
-			if dir == "" {
-				return errors.New("a generation view names an empty generation")
-			}
-			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation) VALUES(?,?,?)`, view.Harness, view.Home, dir); err != nil {
-				return err
-			}
-		}
-		return nil
+		return recordViewTx(ctx, conn, view, pending, time.Now())
 	})
+}
+
+// recordViewTx writes one publication view. A pending publication adds its
+// generation, a complete one replaces the set, and updated_ms marks when the
+// account home last read that set.
+func recordViewTx(ctx context.Context, conn *sql.Conn, view View, pending bool, updated time.Time) error {
+	if view.Harness == "" || view.Home == "" || len(view.Generations) == 0 {
+		return errors.New("a generation view needs a harness, a home and one generation")
+	}
+	if !pending {
+		if _, err := conn.ExecContext(ctx, `DELETE FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home); err != nil {
+			return err
+		}
+	}
+	for _, dir := range view.Generations {
+		if dir == "" {
+			return errors.New("a generation view names an empty generation")
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation,updated_ms) VALUES(?,?,?,?)`,
+			view.Harness, view.Home, dir, updated.UnixMilli()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteView removes one harness and home's publication view, for a harness
@@ -355,6 +382,18 @@ func importLegacyViews(ctx context.Context, conn *sql.Conn, dir string) error {
 		if err != nil {
 			return err
 		}
+		sum := sha256.Sum256(raw)
+		digest := hex.EncodeToString(sum[:])
+		// An unchanged file was imported before: the rows that a later
+		// complete publication replaced must stay replaced.
+		var stored string
+		err = conn.QueryRowContext(ctx, `SELECT digest FROM legacy_generation_views WHERE path=?`, path).Scan(&stored)
+		if err == nil && stored == digest {
+			continue
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		var view legacyView
 		if json.Unmarshal(raw, &view) != nil || view.Harness == "" || view.Home == "" || len(view.Generations) == 0 {
 			return fmt.Errorf("generation view record is invalid: %s", path)
@@ -363,9 +402,35 @@ func importLegacyViews(ctx context.Context, conn *sql.Conn, dir string) error {
 			if generation == "" {
 				return fmt.Errorf("generation view record is invalid: %s", path)
 			}
-			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation) VALUES(?,?,?)`, view.Harness, view.Home, generation); err != nil {
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		// A publication of this build that is newer than the file superseded
+		// it, so the file must not bring its old generations back.
+		var newest int64
+		err = conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(updated_ms),0) FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home).Scan(&newest)
+		if err != nil {
+			return err
+		}
+		superseded := newest > 0 && info.ModTime().UnixMilli() <= newest
+		if !superseded {
+			// A published set replaces what the account home read before.
+			if _, err := conn.ExecContext(ctx, `DELETE FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home); err != nil {
 				return err
 			}
+		}
+		if !superseded {
+			for _, generation := range view.Generations {
+				if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation,updated_ms) VALUES(?,?,?,?)`, view.Harness, view.Home, generation, info.ModTime().UnixMilli()); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO legacy_generation_views(path,digest) VALUES(?,?)
+ON CONFLICT(path) DO UPDATE SET digest=excluded.digest`, path, digest); err != nil {
+			return err
 		}
 	}
 	return nil
