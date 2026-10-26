@@ -247,6 +247,46 @@ func TestGenerationLeaseDeadOwnerAndBindingReplacement(t *testing.T) {
 	assertGenerationExists(t, g.Directory, false)
 }
 
+// A detached runner of an earlier build writes its lease file after the engine
+// migrated. Cleanup imports it under the lifecycle lock, so the generation
+// stays while that process can still read it.
+func TestGenerationGCAdoptsALegacyLeaseWrittenAfterMigration(t *testing.T) {
+	r, home, id := generationFixture(t, "claude-code")
+	g := buildGeneration(t, r, "claude-code", home, id)
+	uses := filepath.Join(r.Generations, ".uses")
+	if err := os.MkdirAll(uses, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := struct {
+		Version    int             `json:"version"`
+		Generation string          `json:"generation"`
+		OwnerPID   int             `json:"ownerPid"`
+		Native     json.RawMessage `json:"native,omitempty"`
+	}{Version: 1, Generation: g.Directory, OwnerPID: 1 << 30, Native: json.RawMessage(`{"pid":3}`)}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uses, "use-late.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The guarded process still runs, so the generation stays.
+	if err := r.GCGenerationsWithProbe(context.Background(), func(ref json.RawMessage) (bool, error) {
+		if string(ref) != `{"pid":3}` {
+			t.Fatalf("probe reference = %s", ref)
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertGenerationExists(t, g.Directory, true)
+	// Once the probe is gone, the imported lease no longer protects it.
+	if err := r.GCGenerationsWithProbe(context.Background(), func(json.RawMessage) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	assertGenerationExists(t, g.Directory, false)
+}
+
 func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 	for _, failure := range []string{"session", "lease", "candidate-link", "root-link"} {
 		t.Run(failure, func(t *testing.T) {
