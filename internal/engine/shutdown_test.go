@@ -33,7 +33,7 @@ func TestEngineStopsUnderOneSecondWithWorkInFlight(t *testing.T) {
 	workers := make(chan struct{})
 	go func() {
 		defer close(workers)
-		runWorker(ctx, signal, func(ctx context.Context) error { close(ticking); <-ctx.Done(); return ctx.Err() }, func(error) {})
+		runWorker(ctx, "sessions", signal, func(ctx context.Context) error { close(ticking); <-ctx.Done(); return ctx.Err() }, func(error) {})
 	}()
 	<-ticking
 

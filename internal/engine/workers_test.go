@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,7 +158,7 @@ func TestWorkerReportsFailureAndRetriesNextSignal(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runWorker(ctx, signals, func(context.Context) error { return failure }, func(err error) { reports <- err })
+		runWorker(ctx, "prs", signals, func(context.Context) error { return failure }, func(err error) { reports <- err })
 	}()
 	defer func() { cancel(); <-done }()
 	for i := 0; i < 2; i++ {
@@ -662,5 +664,53 @@ func TestResumedRoomRunsACheckInPass(t *testing.T) {
 	}
 	if signals.takeRoomResumed() {
 		t.Fatal("the resume mark survived one pass")
+	}
+}
+
+// A pass that blocks ends at its deadline and the worker takes the next signal,
+// and a pass that runs past the warning threshold is reported once.
+func TestWorkerPassIsBoundedAndReported(t *testing.T) {
+	previousTimeout, previousWarn := workerPassTimeout, workerPassWarn
+	workerPassTimeout, workerPassWarn = 80*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { workerPassTimeout, workerPassWarn = previousTimeout, previousWarn })
+
+	signal := make(chan struct{}, 1)
+	blocked := make(chan struct{}, 1)
+	reports := make(chan error, 4)
+	var passes atomic.Int32
+	tick := func(ctx context.Context) error {
+		if passes.Add(1) == 1 {
+			blocked <- struct{}{}
+			<-ctx.Done() // the pass hangs until its deadline ends it
+			return ctx.Err()
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runWorker(ctx, "sessions", signal, tick, func(err error) { reports <- err })
+		close(done)
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+
+	signal <- struct{}{}
+	<-blocked
+	select {
+	case err := <-reports:
+		if !strings.Contains(err.Error(), "sessions pass ended at its") {
+			t.Fatalf("report = %v, want the bounded pass", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a blocked pass was not bounded")
+	}
+	// Delivery goes on: the next signal runs another pass.
+	signal <- struct{}{}
+	deadline := time.Now().Add(5 * time.Second)
+	for passes.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if passes.Load() < 2 {
+		t.Fatalf("passes = %d, want a second pass after the bounded one", passes.Load())
 	}
 }
