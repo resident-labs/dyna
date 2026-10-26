@@ -111,11 +111,7 @@ not-state internal/harness/runtime/claude_pin.go Accounts.adoptSharedCredentials
 not-state internal/harness/runtime/claude_pin.go Accounts.switchPinned 1 # installed harness version pin
 not-state internal/harness/runtime/generation.go materializeNative 2 # installed harness generations
 not-state internal/harness/runtime/generation.go writeNativeGeneration 1 # installed harness generations
-not-state internal/harness/runtime/generation_lifecycle.go GenerationLease.Close 1 # installed harness generations
-not-state internal/harness/runtime/generation_lifecycle.go Runtime.GCGenerationsWithProbe 1 # installed harness generations
-not-state internal/harness/runtime/generation_lifecycle.go Runtime.currentGenerationPins 1 # drops a generation view of a harness this release no longer runs; private owned file, not state
 not-state internal/harness/runtime/generation_lifecycle.go Runtime.generateLocked 2 # installed harness generations
-not-state internal/harness/runtime/generation_lifecycle.go Runtime.leaseGenerationLocked 1 # installed harness generations
 not-state internal/harness/runtime/generation_lifecycle.go publishGenerationFile 1 # installed harness generations
 not-state internal/harness/runtime/generation_lifecycle.go removeLegacyGlobalRules 1 # installed harness generations
 not-state internal/harness/runtime/native_files.go nativeFilesManager.Activate 1 # a harness CLI's own native files
