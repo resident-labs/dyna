@@ -494,6 +494,37 @@ func setCanceling(dir, id string) (Meta, error) {
 	})
 }
 
+// MarkProcessesEnded records that the processes of an ended run were ended.
+func MarkProcessesEnded(id string) error {
+	_, err := changeMeta(RunDir(id), id, func(ctx context.Context, conn *sql.Conn) error {
+		rev, err := nextRev(ctx, conn)
+		if err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, `UPDATE runs SET body=json_set(body,'$.processesEnded',?), rev=? WHERE id=? AND status!='running'`, time.Now().UTC().Format(time.RFC3339Nano), rev, id)
+		return err
+	})
+	return err
+}
+
+// EndedWithoutCleanup lists the live runs that ended after since and whose
+// processes are not marked ended yet.
+func EndedWithoutCleanup(since time.Time) ([]Meta, error) {
+	db, err := runsDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := metasWhere(db, `status!='running' AND json_extract(body,'$.processesEnded') IS NULL AND datetime(json_extract(body,'$.endedAt')) > datetime(?)`, since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Meta, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 // IsPaused reads the canonical pause state of a running run.
 func IsPaused(id string) bool {
 	db, err := runsDB()
