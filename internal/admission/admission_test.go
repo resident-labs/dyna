@@ -128,3 +128,60 @@ func TestOffLimitTakesNoSlot(t *testing.T) {
 		}
 	}
 }
+
+// Slots 0 and 1 are held. Slot 0 ends and the limit falls to 1: one turn still
+// runs, so no new one may take the free slot 0.
+func TestAFallingLimitAdmitsNobodyUntilEnoughTurnsEnd(t *testing.T) {
+	limit := 2
+	waited := 0
+	g := Gate{
+		Dir:       t.TempDir(),
+		Limit:     func(Pool, int) int { return limit },
+		RoomShare: func(l int) int { return l },
+		Wait:      func(context.Context) error { waited++; return context.Canceled },
+	}
+	first, err := g.Acquire(t.Context(), Turns, "a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Acquire(t.Context(), Turns, "b", nil); err != nil {
+		t.Fatal(err)
+	}
+	first()
+	limit = 1
+	if _, err := g.Acquire(t.Context(), Turns, "c", nil); err == nil || waited != 1 {
+		t.Fatalf("a turn was admitted over a limit of 1 with one turn running: %v, waited %d", err, waited)
+	}
+}
+
+// Two runners of one room race for an empty pool whose room share is one.
+// Exactly one is admitted, every time.
+func TestRacingRunnersOfOneRoomShareOneSlot(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		g := Gate{
+			Dir:       t.TempDir(),
+			Limit:     func(Pool, int) int { return 2 },
+			RoomShare: RoomShare,
+			Wait:      func(context.Context) error { return context.Canceled },
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		for j := 0; j < 2; j++ {
+			go func() {
+				<-start
+				_, err := g.Acquire(t.Context(), Turns, "room", nil)
+				results <- err
+			}()
+		}
+		close(start)
+		admitted := 0
+		for j := 0; j < 2; j++ {
+			if err := <-results; err == nil {
+				admitted++
+			}
+		}
+		if admitted != 1 {
+			t.Fatalf("round %d admitted %d runners of one room, want 1", i, admitted)
+		}
+	}
+}

@@ -598,6 +598,10 @@ type runnerWrites struct {
 	out            *engineclient.Outbox
 	waitRetryAfter func(time.Duration) <-chan time.Time
 	waitCall       func(context.Context, string, []any, any) error
+	// suspend and resume give the turn's machine slot back while its room is
+	// held, and take one again after. Both are nil for a turn without a gate.
+	suspend        func()
+	resume         func(context.Context) error
 	terminalMu     sync.Mutex
 	terminal       context.Context
 	terminalCancel context.CancelFunc
