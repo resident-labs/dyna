@@ -63,6 +63,12 @@
     if (!machine || ssh === machine.ssh) return
     onsave({ ssh })
   }
+
+  function setConnectTimeout(e: Event & { currentTarget: HTMLInputElement }) {
+    const seconds = Number(e.currentTarget.value)
+    if (!Number.isInteger(seconds) || seconds < 0 || seconds === machine?.sshConnectTimeoutSeconds) return
+    onsave({ sshConnectTimeoutSeconds: seconds })
+  }
 </script>
 
 <section class="machine">
@@ -248,6 +254,12 @@
             {/if}
           {/snippet}
         </Row>
+        {#if !machine.local}
+          <Row dense text="SSH connect timeout">
+            {#snippet meta()}<span class="note">Seconds to wait for the connection. Raise it for a machine behind a slow jump host.</span>{/snippet}
+            {#snippet trail()}<input class="num" type="number" min="1" step="1" aria-label="SSH connect timeout in seconds" value={machine.sshConnectTimeoutSeconds ?? 10} disabled={busy} onchange={setConnectTimeout} />{/snippet}
+          </Row>
+        {/if}
         <Row dense text="Probe now">
           {#snippet meta()}<span class="note">Reads what the machine has and how it is loaded.</span>{/snippet}
           {#snippet trail()}
