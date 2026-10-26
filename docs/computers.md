@@ -162,7 +162,7 @@ but a runtime error can leave earlier actions applied.
 | `click` | `x`, `y`, `button`: `left`, `middle`, or `right`; optional `keys`. |
 | `double_click` | `x`, `y`; optional `keys`. Uses the left button. |
 | `move` | `x`, `y`. |
-| `drag` | `path`: 2–200 objects with exactly `x` and `y`; optional `keys`. |
+| `drag` | `path`: 2–200 objects with exactly `x` and `y`, such as `{"x":80,"y":46}`. A point written as `[80, 46]` is accepted too. Optional `keys`. |
 | `scroll` | `x`, `y`, `scroll_x`, `scroll_y`: integers from -3000 to 3000. |
 | `keypress` | `keys`: 1–12 key names. Pressed together and released in reverse order. |
 | `type` | `text`: valid Unicode text. Maximum 10,000 characters across a batch. Optional `secret`: `true` keeps the text out of the event feed and log. |
