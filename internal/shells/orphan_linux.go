@@ -68,17 +68,19 @@ func jobProcesses(id string, have map[int]pinned) map[int]pinned {
 			return err == nil && bytes.Contains(append([]byte{0}, env...), assignment)
 		})
 	}
-	// A group is ours to scan while one of its stamped processes holds its number.
-	groups := map[int]bool{}
+	// A group is ours to scan while one of its held processes, its anchor,
+	// still holds its number. The anchor is kept with the group and checked
+	// again after each candidate's group is read.
+	anchors := map[int]pinned{}
 	for pid, p := range have {
 		if !p.reserved() {
 			continue
 		}
 		if g, ok := readGroup(pid); ok && p.reserved() && g > 1 && g != selfGroup {
-			groups[g] = true
+			anchors[g] = p
 		}
 	}
-	if len(groups) == 0 {
+	if len(anchors) == 0 {
 		return have
 	}
 	entries, err := os.ReadDir("/proc")
@@ -90,8 +92,9 @@ func jobProcesses(id string, have map[int]pinned) map[int]pinned {
 		if err != nil {
 			continue
 		}
-		if g, ok := readGroup(pid); ok && groups[g] {
-			pin(pid, func() bool { g2, ok := readGroup(pid); return ok && g2 == g })
+		if g, ok := readGroup(pid); ok && anchors[g].fd != 0 {
+			anchor := anchors[g]
+			pin(pid, func() bool { g2, ok := readGroup(pid); return ok && g2 == g && anchor.reserved() })
 		}
 	}
 	return have
@@ -119,13 +122,14 @@ func processGroup(pid int) (int, bool) {
 	return group, true
 }
 
-// stopOrphans ends the processes of job id: SIGTERM to each, then SIGKILL to
-// those still alive after grace. Every signal goes through a pidfd. The job's
-// groups are scanned again after each process ends, until a scan finds nothing
-// alive, so children that a stamped process left unstamped or started late
-// (even from a SIGTERM handler) end too (D-190). It reports whether any process
-// was found. An error means a process outlived SIGKILL.
-func stopOrphans(id string, grace time.Duration) (bool, error) {
+// stopOrphans ends the processes of job id. It first stops every process with
+// SIGSTOP and scans the job's groups again until a scan adds nothing: a stopped
+// process can neither fork nor exit, so no member is lost or reaped meanwhile
+// and no group number is released. Then it sends SIGKILL through the pidfds and
+// waits until all have ended (D-190). The supervisor is gone, so nothing waits
+// for a clean exit. It reports whether any process was found. An error means a
+// process outlived SIGKILL.
+func stopOrphans(id string) (bool, error) {
 	set := jobProcesses(id, map[int]pinned{})
 	defer func() {
 		for _, p := range set {
@@ -135,38 +139,30 @@ func stopOrphans(id string, grace time.Duration) (bool, error) {
 	if len(set) == 0 {
 		return false, nil
 	}
-	// settle signals every live process once per signal until none lives.
-	settle := func(sig unix.Signal, timeout time.Duration) []pinned {
-		deadline := time.Now().Add(timeout)
-		sent := map[int]bool{}
-		for {
-			set = jobProcesses(id, set)
-			var alive []pinned
-			fds := []unix.PollFd{}
-			for _, p := range set {
-				if p.exited() {
-					continue
-				}
-				alive = append(alive, p)
-				fds = append(fds, unix.PollFd{Fd: int32(p.fd), Events: unix.POLLIN})
-				if !sent[p.pid] {
-					sent[p.pid] = true
-					p.signal(sig)
-				}
+	frozen := map[int]bool{}
+	for added := true; added; {
+		added = false
+		set = jobProcesses(id, set)
+		for _, p := range set {
+			if !frozen[p.pid] {
+				frozen[p.pid] = true
+				added = true
+				p.signal(unix.SIGSTOP)
 			}
-			left := time.Until(deadline)
-			if len(alive) == 0 || left <= 0 {
-				return alive
-			}
-			// Wake when any of them ends, then scan the groups again.
-			_, _ = syswait.Poll(fds, int(left.Milliseconds())+1)
 		}
 	}
-	if len(settle(unix.SIGTERM, grace)) == 0 {
-		return true, nil
+	for _, p := range set {
+		p.signal(unix.SIGKILL)
 	}
-	if alive := settle(unix.SIGKILL, 5*time.Second); len(alive) > 0 {
-		return true, errors.New("job processes did not end after SIGKILL: first is " + strconv.Itoa(alive[0].pid))
+	deadline := time.Now().Add(5 * time.Second)
+	for _, p := range set {
+		for !p.exited() {
+			left := time.Until(deadline)
+			if left <= 0 {
+				return true, errors.New("job processes did not end after SIGKILL: first is " + strconv.Itoa(p.pid))
+			}
+			_, _ = syswait.Poll([]unix.PollFd{{Fd: int32(p.fd), Events: unix.POLLIN}}, int(left.Milliseconds())+1)
+		}
 	}
 	return true, nil
 }
