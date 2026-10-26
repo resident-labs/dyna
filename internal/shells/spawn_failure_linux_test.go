@@ -72,4 +72,33 @@ func TestSuperviseDoesNotStartWhenTheLaunchGateClosesUnsent(t *testing.T) {
 	}
 }
 
+// A supervisor that gets the go-ahead consumes the gate marker: its command does
+// not inherit it, so a nested supervisor cannot read a stale descriptor.
+func TestSuperviseDoesNotPassTheLaunchGateMarkerToTheCommand(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	seen := filepath.Join(t.TempDir(), "seen")
+	meta, err := s.Create(StartOptions{Cmd: []string{"sh", "-c", "echo \"[${" + launchGateEnv + "-unset}]\" > " + seen}, Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateRead, gateWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gateWrite.Write([]byte{'g'}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(launchGateEnv, itoa(int(gateRead.Fd())))
+	if err := s.Supervise(context.Background(), meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "[unset]\n" {
+		t.Fatalf("the command saw the gate marker: %q", got)
+	}
+}
+
 func itoa(n int) string { return strconv.Itoa(n) }
