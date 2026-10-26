@@ -47,10 +47,18 @@ func installActScript(base string) string {
 // actContainerOptions are the limits and the label act gives every container
 // it starts for one check.
 func actContainerOptions(check nodeCheck, runID string) string {
+	// Two labels: the run one finds every container a run started, the check one
+	// finds exactly this check's, so one check's cleanup never removes a sibling
+	// check's containers.
 	return "--cpus " + strconv.Itoa(check.resources.CPUs) +
 		" --memory " + strconv.FormatInt(check.resources.MemoryMiB, 10) + "m" +
-		" --label dyna.run=" + runID
+		" --label dyna.run=" + runID +
+		" --label dyna.check=" + string(check.id)
 }
+
+// actArtifactPortBase is the first port the artifact server of a node's slot
+// uses. Each slot takes its own port, so two checks never share one.
+const actArtifactPortBase = 34000
 
 // matrixFlags selects one configuration of a matrix job, so a workflow shard is
 // its own check.

@@ -1,7 +1,9 @@
 package localci
 
 import (
+	"archive/zip"
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +93,26 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if err := os.MkdirAll(actDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// act stores an upload as <artifact>/<artifact>.zip, not loose XML files.
+	artifactZip := filepath.Join(dir, "upload.zip")
+	archive, err := os.Create(artifactZip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipWriter := zip.NewWriter(archive)
+	entry, err := zipWriter.Create("go-test.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte(`<testsuite><testcase name="fast" time="0.1"/></testsuite>`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
 	argsFile := filepath.Join(dir, "act.args")
 	envFile := filepath.Join(dir, "act.env.seen")
 	fakeAct := "#!/bin/sh\n" +
@@ -98,16 +120,17 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 		"env > " + envFile + "\n" +
 		"out=\n" +
 		"while [ $# -gt 0 ]; do case \"$1\" in --artifact-server-path) out=$2; shift 2 ;; *) shift ;; esac; done\n" +
-		"mkdir -p \"$out/42/go-test-report\" && printf '<testsuite><testcase name=\"fast\" time=\"0.1\"/></testsuite>' > \"$out/42/go-test-report/go-test.xml\"\n" +
+		"mkdir -p \"$out/42/go-test-report\" && cp " + artifactZip + " \"$out/42/go-test-report/go-test-report.zip\"\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(actDir, "act"), []byte(fakeAct), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	removed := filepath.Join(dir, "removed")
+	listed := filepath.Join(dir, "listed")
 	fakeDocker := "#!/bin/sh\n" +
 		"case \"$1\" in\n" +
 		"  info) exit 0 ;;\n" +
-		"  ps) echo 0123456789ab ;;\n" +
+		"  ps) printf '%s\\n' \"$@\" >> " + listed + "; echo 0123456789ab ;;\n" +
 		"  rm) printf '%s\\n' \"$@\" >> " + removed + "; exit 0 ;;\n" +
 		"esac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(fakeDocker), 0o755); err != nil {
@@ -138,7 +161,8 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	}
 	for _, want := range []string{"pull_request", "-W", ".github/workflows/ci.yml", "-j", "go-shard", "--matrix", "shard:7", "--rm",
 		"-P", "ubuntu-latest=catthehacker/ubuntu:act-22.04", "--cache-server-path", "--artifact-server-path",
-		"--container-options", "--cpus 4", "--memory 8192m", "--label dyna.run=run-7"} {
+		"--artifact-server-port", "--container-daemon-socket", "-",
+		"--container-options", "--cpus 4", "--memory 8192m", "--label dyna.run=run-7", "--label dyna.check=go-static"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("act args %q miss %q", args, want)
 		}
@@ -159,10 +183,41 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "reports", "go-static", "go-test.xml")); err != nil {
 		t.Fatalf("the uploaded JUnit did not reach the check's report directory: %v", err)
 	}
-	if data, err := os.ReadFile(removed); err != nil || !strings.Contains(string(data), "0123456789ab") {
-		t.Fatalf("the labelled containers were not removed: %q %v", data, err)
+	data, err := os.ReadFile(removed)
+	if err != nil {
+		t.Fatalf("the containers were not removed: %v", err)
+	}
+	if !strings.Contains(string(data), "0123456789ab") {
+		t.Fatalf("cleanup did not remove the listed container: %q", data)
+	}
+	// The cleanup names the run and the check, so it never removes a sibling
+	// check's containers.
+	filters, err := os.ReadFile(listed)
+	if err != nil {
+		t.Fatalf("the containers were not listed: %v", err)
+	}
+	for _, want := range []string{"label=dyna.run=run-7", "label=dyna.check=go-static"} {
+		if !strings.Contains(string(filters), want) {
+			t.Fatalf("cleanup filter %q miss %q", filters, want)
+		}
 	}
 	if !strings.Contains(out.String(), "DYNA_CI_CHECK_EXIT=0") {
 		t.Fatalf("job check lost its marker: %s", out.String())
+	}
+}
+
+// A workflow job runs containers the workflow chooses, so it needs the same
+// host-check grant a host command needs; without the grant the check is
+// refused before act starts.
+func TestJobCheckNeedsTheHostCheckGrant(t *testing.T) {
+	definition, err := ParseDefinition([]byte("version: 1\ntrial: [ci]\nchecks:\n  - id: build\n    job: { workflow: .github/workflows/ci.yml, name: build }\nsuites:\n  - id: ci\n    checks: [build]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := nodeChecks(definition, []Suite{"ci"}, false); !errors.Is(err, ErrHostChecksDisabled) {
+		t.Fatalf("error = %v, want %v", err, ErrHostChecksDisabled)
+	}
+	if _, _, err := nodeChecks(definition, []Suite{"ci"}, true); err != nil {
+		t.Fatalf("a granted machine refused the job check: %v", err)
 	}
 }

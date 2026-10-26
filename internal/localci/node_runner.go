@@ -224,7 +224,12 @@ func nodeChecks(definition *Definition, suites []Suite, allowHost bool) ([]nodeC
 				}
 				continue
 			}
-			if command.Host && !allowHost {
+			// A workflow job runs containers the workflow chooses, including their
+			// options and volumes, so it needs the machine's host-check grant just
+			// as a host command does. act also keeps the host's container socket
+			// out of those containers, but that alone cannot bound what a workflow
+			// asks act to start.
+			if (command.Host || command.Job != nil) && !allowHost {
 				return nil, false, fmt.Errorf("%w: check %q", ErrHostChecksDisabled, check.ID)
 			}
 			seen[check.ID] = len(checks)
@@ -1026,7 +1031,7 @@ const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pg
 func nodeSlotScript(base string, slots, index int, inner string) string {
 	return "set -euo pipefail; mkdir -p " + shellquote.Quote(path.Join(base, "slots")) + "; acquired=0; " +
 		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then exec 9>%s; flock -w %d 9 || exit 75; fi; ", shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
+		fmt.Sprintf("if [ \"$acquired\" = 0 ]; then slot=%d; exec 9>%s; flock -w %d 9 || exit 75; fi; ", index%slots, shellquote.Quote(path.Join(base, "slots", fmt.Sprintf("%d.lock", index%slots))), int(admissionWait.Seconds())) + inner
 }
 
 // noteScript writes at the start of a check's log what Dyna changed about its
@@ -1088,13 +1093,26 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			" --env-file " + q(allowList) +
 			" -j " + q(check.job.Name) + matrixFlags(check.job.Matrix) + " -e " + q(event) + " --rm -P " + q("ubuntu-latest="+actImage) +
 			" --cache-server-path " + q(cachePath) + " --artifact-server-path " + q(artifacts) +
+			// The slot this check holds names its artifact port, so checks in other
+			// slots of this node, whatever run they belong to, bind another one.
+			" --artifact-server-port $(( " + fmt.Sprint(actArtifactPortBase) + " + slot ))" +
+			// act mounts the host's container socket into job containers by default.
+			// A repository's workflow must not reach the host's runtime through it.
+			" --container-daemon-socket -" +
 			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
-		// --rm covers the normal case; a cancelled job can leave containers, so
-		// the label removes exactly this run's.
-		setup += `"${docker[@]}" ps -aq --filter ` + q("label="+label) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `
-		// The workflow uploads its JUnit as an artifact; the existing reader reads
-		// the check's report directory.
+		// --rm covers the normal case; a cancelled job can leave containers, so the
+		// labels remove exactly this check's, never a sibling check's.
+		setup += `"${docker[@]}" ps -aq --filter ` + q("label="+label) + " --filter " + q("label=dyna.check="+string(check.id)) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `
+		// The workflow uploads its JUnit as an artifact, and an upload is stored as
+		// <artifact>/<artifact>.zip; the existing reader reads the check's report
+		// directory, so the archives are unpacked into it first.
 		setup += "find " + q(artifacts) + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; "
+		unpacked := q(path.Join(reportDir, "unpacked"))
+		setup += "rm -rf " + unpacked + "; mkdir -p " + unpacked + "; while IFS= read -r archive; do " +
+			"if command -v unzip >/dev/null 2>&1; then unzip -qq -o -j " + `"$archive"` + " -d " + unpacked + " >/dev/null 2>&1 || true; " +
+			"elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e " + `"$archive"` + " " + unpacked + " >/dev/null 2>&1 || true; fi; " +
+			"done < <(find " + q(artifacts) + " -name '*.zip' -type f 2>/dev/null); "
+		setup += "find " + unpacked + " -name '*.xml' -type f -exec cp -t " + q(reportDir) + " {} + 2>/dev/null || true; rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
