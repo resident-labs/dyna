@@ -16,6 +16,9 @@ test('splitPost reads a fenced block, a bare line and a labelled line as data, a
     { kind: 'data', value: { unit: 'CH', list: [1] } },
     { kind: 'text', text: 'Run it.' },
   ])
+  // JSON inside another code fence stays code, and the text after it stays prose.
+  const other = '```text\n{"ok":true}\n```\nDone.'
+  assert.deepEqual(splitPost(other), [{ kind: 'text', text: other }])
   // Braces in prose, empty objects and a non-JSON fence are not data.
   const prose = 'Use {braces} and {} here.\n```json\n"just text"\n```'
   assert.deepEqual(splitPost(prose), [{ kind: 'text', text: prose }])
