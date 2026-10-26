@@ -77,9 +77,11 @@
   // Phases that share stages show as a lanes grid; the chosen cell opens its agents.
   let grid = $derived(laneGrid(groups.map((g) => ({ phase: g.phase, state: g.state, done: g.done, total: g.agents.length }))))
   let picked = $state<CellRef | null>(null)
+  // A new run starts with no cell open. Only the id is read, so the refresh that
+  // replaces `detail` every 2 seconds keeps the open cell.
+  let runId = $derived(detail?.run.id ?? '')
   $effect(() => {
-    // A new run starts with no cell open.
-    void detail?.run.id
+    void runId
     picked = null
   })
   let shownGroups = $derived.by(() => {
