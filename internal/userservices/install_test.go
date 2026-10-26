@@ -447,7 +447,6 @@ func TestRestartPendingSince(t *testing.T) {
 		if err := MarkRestartPending(dir); err != nil {
 			t.Fatal(err)
 		}
-		// A marker of an unknown service carries no backdate: its mtime is the pending time.
 		at := now.Add(-age)
 		if err := os.Chtimes(filepath.Join(dir, RestartPending), at, at); err != nil {
 			t.Fatal(err)
@@ -467,86 +466,5 @@ func TestRestartPendingSince(t *testing.T) {
 	mark(time.Hour)
 	if RestartPendingSince(dir, now.Add(-2*time.Hour), now, window) {
 		t.Fatal("a marker older than the window blocks for good")
-	}
-}
-
-// legacyRefuses is the predicate a computer service built before the 10-minute
-// window applies to the marker: pending when the marker is newer than the service
-// and younger than 30 minutes. Those services cannot be restarted to change it.
-func legacyRefuses(dir string, started, now time.Time) bool {
-	st, err := os.Stat(filepath.Join(dir, RestartPending))
-	return err == nil && st.ModTime().After(started) && now.Sub(st.ModTime()) < legacyDrainWindow
-}
-
-// An older service that has run for a while stops refusing after 10 minutes. A
-// recently started one keeps its 30-minute refusal: a marker backdated to before
-// its start would be ignored, and nothing would hold new desktops back at all.
-// The service process records its own start some time after systemd marks it
-// active, so each case also has the process start late.
-func TestMarkRestartPendingShortensAnOlderServicesRefusalWithoutLosingIt(t *testing.T) {
-	for name, tc := range map[string]struct {
-		activeFor  time.Duration // how long systemd says the service has been active
-		startDelay time.Duration // how long after that the process recorded its start
-		wantRefuse time.Duration // how long after the install the older service still refuses
-	}{
-		"long running":              {2 * time.Hour, 0, 10 * time.Minute},
-		"long running, slow start":  {2 * time.Hour, 4 * time.Minute, 10 * time.Minute},
-		"just old enough":           {25 * time.Minute, 4*time.Minute + 50*time.Second, 10 * time.Minute},
-		"just too young to shorten": {24 * time.Minute, 0, 30 * time.Minute},
-		"started 5m ago":            {5 * time.Minute, 20 * time.Second, 30 * time.Minute},
-		"started 1m ago":            {time.Minute, 30 * time.Second, 30 * time.Minute},
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			installed := time.Now()
-			active := installed.Add(-tc.activeFor)
-			daemonStarted := active.Add(tc.startDelay)
-			if err := MarkRestartPendingFor(dir, active); err != nil {
-				t.Fatal(err)
-			}
-			if !legacyRefuses(dir, daemonStarted, installed) {
-				t.Fatalf("an older service active for %v (process start %v later) ignores the marker", tc.activeFor, tc.startDelay)
-			}
-			// It refuses until the legacy window runs out, and not much longer.
-			if !legacyRefuses(dir, daemonStarted, installed.Add(tc.wantRefuse-time.Minute)) || legacyRefuses(dir, daemonStarted, installed.Add(tc.wantRefuse+time.Minute)) {
-				t.Fatalf("an older service active for %v should refuse for about %v", tc.activeFor, tc.wantRefuse)
-			}
-			if at, ok := RestartPendingAt(dir); !ok || at.Sub(installed) > time.Minute || installed.Sub(at) > time.Minute {
-				t.Fatalf("pending at %v, %v: want about the install time", at, ok)
-			}
-		})
-	}
-}
-
-func TestMarkRestartPendingOfAnUnknownServiceIsNotBackdated(t *testing.T) {
-	dir := t.TempDir()
-	if err := MarkRestartPending(dir); err != nil {
-		t.Fatal(err)
-	}
-	st, err := os.Stat(filepath.Join(dir, RestartPending))
-	if err != nil || time.Since(st.ModTime()) > time.Minute {
-		t.Fatalf("marker mtime %v, %v: want now", st.ModTime(), err)
-	}
-}
-
-func TestComputersStartedAtReadsSystemdsUnixTimestamp(t *testing.T) {
-	run := func(out string, err error) func(...string) (string, error) {
-		return func(args ...string) (string, error) {
-			if strings.Join(args, " ") != "show "+Computers+" --property=ActiveEnterTimestamp --timestamp=unix" {
-				t.Fatalf("asked systemd %v", args)
-			}
-			return out, err
-		}
-	}
-	if got := computersStartedAt(run("ActiveEnterTimestamp=@1793049000\n", nil)); !got.Equal(time.Unix(1793049000, 0)) {
-		t.Fatalf("started at %v", got)
-	}
-	for _, out := range []string{"ActiveEnterTimestamp=\n", "ActiveEnterTimestamp=n/a\n", ""} {
-		if got := computersStartedAt(run(out, nil)); !got.IsZero() {
-			t.Fatalf("%q read as %v, want unknown", out, got)
-		}
-	}
-	if got := computersStartedAt(run("", errors.New("no systemd"))); !got.IsZero() {
-		t.Fatalf("an error read as %v, want unknown", got)
 	}
 }

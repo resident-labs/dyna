@@ -57,58 +57,8 @@ type Options struct {
 // first quiet moment and removes the marker.
 const RestartPending = "dyna-computers.restart-pending"
 
-// legacyDrainWindow is the refusal window of the computer services built before
-// the 10-minute one, which read the marker's own mtime as the time the restart
-// became pending, and ignore a marker older than their own start. Such a service
-// cannot be restarted to learn the new window, so the install stamps the marker
-// older than it is: the service then stops refusing after 10 minutes. The
-// backdate is stored in the marker, so readers add it back.
-const (
-	legacyDrainWindow = 30 * time.Minute
-	maxMarkerBackdate = legacyDrainWindow - 10*time.Minute
-)
-
-// MarkRestartPending marks a deferred restart of a service whose start time is
-// unknown. Such a service keeps its own refusal window.
-func MarkRestartPending(dir string) error { return MarkRestartPendingFor(dir, time.Time{}) }
-
-// startMargin bounds how long after systemd marks a service active the service
-// process records its own start. The older service compares the marker with that
-// later time, so the backdate is only safe for a service that systemd says is
-// older than the backdate plus this margin.
-const startMargin = 5 * time.Minute
-
-// MarkRestartPendingFor marks a deferred restart of the service that systemd says
-// became active at serviceStarted. An older service ignores a marker older than
-// its own start and would then refuse nothing, so the marker is backdated by the
-// full 20 minutes only when the service is old enough that its own start is
-// surely before the backdated marker. Otherwise, and when the start is unknown,
-// the marker is not backdated and the older service keeps its 30-minute window.
-func MarkRestartPendingFor(dir string, serviceStarted time.Time) error {
-	backdate := time.Duration(0)
-	if !serviceStarted.IsZero() && time.Since(serviceStarted) >= maxMarkerBackdate+startMargin {
-		backdate = maxMarkerBackdate
-	}
-	path := filepath.Join(dir, RestartPending)
-	if err := fsutil.WriteFile(path, []byte(strconv.Itoa(int(backdate.Seconds()))+"\n"), 0600, true); err != nil {
-		return err
-	}
-	at := time.Now().Add(-backdate)
-	return os.Chtimes(path, at, at)
-}
-
-// markerBackdate reads the backdate a marker carries; a marker with none, or an
-// unreadable one, has none.
-func markerBackdate(path string) time.Duration {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	seconds, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || seconds < 0 {
-		return 0
-	}
-	return min(time.Duration(seconds)*time.Second, maxMarkerBackdate)
+func MarkRestartPending(dir string) error {
+	return fsutil.WriteFile(filepath.Join(dir, RestartPending), []byte("1\n"), 0600, true)
 }
 
 func RestartIsPending(dir string) bool {
@@ -121,18 +71,21 @@ func RestartIsPending(dir string) bool {
 // window at now. The window keeps a marker that nothing clears from holding the
 // service back for good.
 func RestartPendingSince(dir string, started, now time.Time, window time.Duration) bool {
-	at, ok := RestartPendingAt(dir)
-	return ok && at.After(started) && now.Sub(at) < window
+	st, err := os.Stat(filepath.Join(dir, RestartPending))
+	if err != nil {
+		return false
+	}
+	return st.ModTime().After(started) && now.Sub(st.ModTime()) < window
 }
 
-// RestartPendingAt is when the restart became pending: the marker's mtime plus
-// the backdate the install stored in it.
+// RestartPendingAt is when the install left the restart marker, which is when
+// the restart became pending.
 func RestartPendingAt(dir string) (time.Time, bool) {
 	st, err := os.Stat(filepath.Join(dir, RestartPending))
 	if err != nil {
 		return time.Time{}, false
 	}
-	return st.ModTime().Add(markerBackdate(filepath.Join(dir, RestartPending))), true
+	return st.ModTime(), true
 }
 
 func ClearRestartPending(dir string) error {
@@ -509,7 +462,7 @@ func Install(ctx context.Context, o Options) error {
 			}
 		}
 		if busy != "" {
-			if err := MarkRestartPendingFor(o.Dir, computersStartedAt(run)); err != nil {
+			if err := MarkRestartPending(o.Dir); err != nil {
 				return err
 			}
 			fmt.Fprintf(o.Output, "Deferred restart of %s: %s. The engine restarts it at the first quiet moment.\n", Computers, busy)
@@ -612,18 +565,4 @@ func property(output, key string) string {
 		}
 	}
 	return ""
-}
-
-// computersStartedAt reads when the computer service last started, or the zero
-// time when systemd does not say.
-func computersStartedAt(run func(args ...string) (string, error)) time.Time {
-	out, err := run("show", Computers, "--property=ActiveEnterTimestamp", "--timestamp=unix")
-	if err != nil {
-		return time.Time{}
-	}
-	seconds, err := strconv.ParseInt(strings.TrimPrefix(property(out, "ActiveEnterTimestamp"), "@"), 10, 64)
-	if err != nil || seconds <= 0 {
-		return time.Time{}
-	}
-	return time.Unix(seconds, 0)
 }
