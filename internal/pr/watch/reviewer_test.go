@@ -152,17 +152,17 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 		}
 	}
 	write("ses_20261017-000001-aaaaaaaa", subagent.TurnError, e.clock.Add(-time.Minute))
-	choice, err := e.s.chooseProfile(Reviewer{})
+	choice, err := e.s.chooseProfile(Reviewer{}, "")
 	if err != nil || choice.Name == "judge" {
 		t.Fatalf("recent failing profile: %s %v", choice.Name, err)
 	}
 	write("ses_20261017-000002-bbbbbbbb", subagent.TurnOK, e.clock)
-	cached, e2 := e.s.chooseProfile(Reviewer{})
+	cached, e2 := e.s.chooseProfile(Reviewer{}, "")
 	if e2 != nil || cached.Name == "judge" {
 		t.Fatal("profile scan did not reuse its minute cache")
 	}
 	e.clock = e.clock.Add(time.Minute)
-	choice, err = e.s.chooseProfile(Reviewer{})
+	choice, err = e.s.chooseProfile(Reviewer{}, "")
 	if err != nil || choice.Name != "judge" {
 		t.Fatalf("newer healthy turn: %s %v", choice.Name, err)
 	}
@@ -190,6 +190,26 @@ func TestProfileChoiceSkipsExhaustedAccountQuota(t *testing.T) {
 	if n, err = accounts.Capture(context.Background(), n.ID, "/fake/native"); err != nil || n.Status != "ready" {
 		t.Fatalf("account capture: %v %v", n, err)
 	}
+	// A healthy account of the same harness serves another repository only,
+	// so it must not hide the exhausted account's hold in this one.
+	other, err := accounts.Create("claude-code", "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{
+		".credentials.json": `{"claudeAiOauth":{"accessToken":"other-access","refreshToken":"other-refresh","expiresAt":1999999999999,"scopes":["user:inference"]}}`,
+		".claude.json":      `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-000000000002","emailAddress":"other@example.test"}}`,
+	} {
+		if err = os.WriteFile(filepath.Join(other.Home, name), []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if other, err = accounts.Capture(context.Background(), other.ID, "/fake/native"); err != nil || other.Status != "ready" {
+		t.Fatalf("other account capture: %v %v", other, err)
+	}
+	if err = accounts.SetRepos(other.ID, []string{"github.com/other/repo"}); err != nil {
+		t.Fatal(err)
+	}
 	scopes, err := reposcope.Open(filepath.Dir(accounts.Root))
 	if err != nil {
 		t.Fatal(err)
@@ -201,17 +221,23 @@ func TestProfileChoiceSkipsExhaustedAccountQuota(t *testing.T) {
 	top := profile.Profile{Name: "top", Harness: "claude-code", Model: "claude-sonnet-4.5", Diagnostics: 10, Cost: 10}
 	spare := profile.Profile{Name: "spare", Harness: profile.HarnessMock, Diagnostics: 6, Cost: 6}
 	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{top, spare}, nil }
-	choice, err := e.s.chooseProfile(Reviewer{})
+	repo := "github.com/owner/repo"
+	choice, err := e.s.chooseProfile(Reviewer{}, repo)
 	if err != nil || choice.Name != "spare" {
 		t.Fatalf("auto chose %q %v, want the profile whose account has quota", choice.Name, err)
 	}
-	choice, err = e.s.chooseProfile(Reviewer{Profile: "top"})
+	choice, err = e.s.chooseProfile(Reviewer{Profile: "top"}, repo)
 	if err != nil || choice.Name != "spare" || choice.Cause != rolesession.CauseQuotaBlocked || !strings.Contains(choice.Reason, "out of quota") {
 		t.Fatalf("pinned exhausted profile: %+v %v", choice, err)
 	}
+	// In the repository the healthy account serves, auto may pick the top one.
+	choice, err = e.s.chooseProfile(Reviewer{}, "github.com/other/repo")
+	if err != nil || choice.Name != "top" {
+		t.Fatalf("auto chose %q %v in the served repository, want the top profile", choice.Name, err)
+	}
 	// Past the reset, and past the quota cache's minute, auto takes it back.
 	e.clock = reset.Add(time.Minute)
-	choice, err = e.s.chooseProfile(Reviewer{})
+	choice, err = e.s.chooseProfile(Reviewer{}, repo)
 	if err != nil || choice.Name != "top" {
 		t.Fatalf("auto chose %q %v after the reset, want the top profile", choice.Name, err)
 	}
@@ -226,11 +252,11 @@ func TestPinnedProfileUsesNewerHealthyCheck(t *testing.T) {
 	haiku := profile.Profile{Name: "haiku", Harness: profile.HarnessMock, Diagnostics: 7, Cost: 10}
 	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{sol, haiku}, nil }
 	cfg := Reviewer{Profile: "sol", FailedProfiles: map[string]time.Time{"sol (not ready)": e.clock.Add(time.Hour)}}
-	if choice, err := e.s.chooseProfile(cfg); err != nil || choice.Name != "haiku" || choice.Cause != rolesession.CauseNotReady || !strings.Contains(choice.Reason, "pinned reviewer profile sol is unavailable") {
+	if choice, err := e.s.chooseProfile(cfg, ""); err != nil || choice.Name != "haiku" || choice.Cause != rolesession.CauseNotReady || !strings.Contains(choice.Reason, "pinned reviewer profile sol is unavailable") {
 		t.Fatalf("held profile: %+v %v", choice, err)
 	}
 	harnesshealth.New("").RecordProbe(sol, "built-in", harnesshealth.Observation{At: e.clock, Successful: true, StdoutSeen: true, RecognizedRecords: 2}, true)
-	if choice, err := e.s.chooseProfile(cfg); err != nil || choice.Name != "sol" || choice.Reason != "pinned by the room" || choice.Cause != "" {
+	if choice, err := e.s.chooseProfile(cfg, ""); err != nil || choice.Name != "sol" || choice.Reason != "pinned by the room" || choice.Cause != "" {
 		t.Fatalf("healthy check did not clear the hold: %+v %v", choice, err)
 	}
 }

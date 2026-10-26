@@ -36,7 +36,7 @@ func TestProfileSelection(t *testing.T) {
 		{"missing", "a", "pinned keeper profile missing is unavailable: no profile has that name"},
 	} {
 		t.Run(tc.pin, func(t *testing.T) {
-			choice, err := ChooseProfile(profiles, tc.pin, failures, now, "keeper")
+			choice, err := ChooseProfile(profiles, tc.pin, "", failures, now, "keeper")
 			if err != nil || choice.Name != tc.want || choice.Reason != tc.reason {
 				t.Fatalf("got %q %q %v", choice.Name, choice.Reason, err)
 			}
@@ -49,7 +49,7 @@ func TestProfileSelection(t *testing.T) {
 	if profiles[0].Name != "disabled" {
 		t.Fatal("ranking mutated source")
 	}
-	if _, err := ChooseProfile(nil, "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no enabled keeper profile") {
+	if _, err := ChooseProfile(nil, "", "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no enabled keeper profile") {
 		t.Fatalf("unavailable: %v", err)
 	}
 }
@@ -60,11 +60,11 @@ func TestReviewerRanksByDiagnostics(t *testing.T) {
 		{Name: "stylish", Taste: 10, Cost: 4, Diagnostics: 3, Intelligence: 5},
 		{Name: "sharp", Taste: 4, Cost: 4, Diagnostics: 10, Intelligence: 5},
 	}
-	if choice, err := ChooseProfile(profiles, "", nil, now, subagent.RoleReviewer); err != nil || choice.Name != "sharp" || choice.Reason != "auto: best diagnostics + cost" {
+	if choice, err := ChooseProfile(profiles, "", "", nil, now, subagent.RoleReviewer); err != nil || choice.Name != "sharp" || choice.Reason != "auto: best diagnostics + cost" {
 		t.Fatalf("reviewer chose %q %q, %v; want the high-diagnostics profile", choice.Name, choice.Reason, err)
 	}
 	// Other roles still choose a solution by taste.
-	if choice, err := ChooseProfile(profiles, "", nil, now, subagent.RoleLibrarian); err != nil || choice.Name != "stylish" || choice.Reason != "auto: best taste + cost" {
+	if choice, err := ChooseProfile(profiles, "", "", nil, now, subagent.RoleLibrarian); err != nil || choice.Name != "stylish" || choice.Reason != "auto: best taste + cost" {
 		t.Fatalf("librarian chose %q %q, %v; want the high-taste profile", choice.Name, choice.Reason, err)
 	}
 	// A profile saved before the rating existed ranks as 5, the neutral value,
@@ -209,13 +209,13 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	}
 	info := subagent.Info{Meta: subagent.Meta{Profile: "chain"}}
 	quota := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Quota, Error: "worker chain: 429 quota exhausted"}
-	if choice, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, quota, now), now, "reviewer"); err != nil || choice.Name != "chain" {
+	if choice, err := ChooseProfile(profiles, "chain", "", RecordFailure(nil, info, quota, now), now, "reviewer"); err != nil || choice.Name != "chain" {
 		t.Fatalf("a quota error hid a profile with healthy models: %q %v", choice.Name, err)
 	}
 	// A rejected sign-in blocks the whole account, so no model of the profile may
 	// be chosen, even though the turn recorded no model cooldown.
 	rejected := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Auth, Error: "worker chain: authentication_error: invalid api key"}
-	if choice, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, rejected, now), now, "reviewer"); err != nil || choice.Name != "spare" {
+	if choice, err := ChooseProfile(profiles, "chain", "", RecordFailure(nil, info, rejected, now), now, "reviewer"); err != nil || choice.Name != "spare" {
 		t.Fatalf("a rejected sign-in kept the profile selectable: %q %v", choice.Name, err)
 	}
 	// A capacity failure that ended the turn already spent the whole model chain,
@@ -225,12 +225,12 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	if got := RankProfiles(profiles, RecordFailure(nil, info, busy, now), now, "reviewer"); len(got) != 1 || got[0].Name != "spare" {
 		t.Fatalf("a completed capacity failure kept the multi-model profile: %+v", got)
 	}
-	if choice, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, busy, now), now, "reviewer"); err != nil || choice.Name != "spare" {
+	if choice, err := ChooseProfile(profiles, "chain", "", RecordFailure(nil, info, busy, now), now, "reviewer"); err != nil || choice.Name != "spare" {
 		t.Fatalf("a completed capacity failure kept the profile selectable: %q %v", choice.Name, err)
 	}
 	signedOut := subagent.Turn{Status: subagent.TurnError, Ended: now, Error: "worker chain runtime is not ready: the active private account is not signed in"}
 	failures := RecordFailure(nil, info, signedOut, now)
-	if choice, err := ChooseProfile(profiles, "chain", failures, now, "reviewer"); err != nil || choice.Name != "spare" {
+	if choice, err := ChooseProfile(profiles, "chain", "", failures, now, "reviewer"); err != nil || choice.Name != "spare" {
 		t.Fatalf("not-ready profile chosen: %q %v", choice.Name, err)
 	}
 	var cache FailureCache
@@ -290,7 +290,7 @@ func TestQuotaHoldKeepsProfileOut(t *testing.T) {
 	if got := RankProfiles([]profile.Profile{kimi, sol}, failures, now, subagent.RoleReviewer); len(got) != 1 || got[0].Name != "sol" {
 		t.Fatalf("quota-blocked profile stayed ranked: %+v", got)
 	}
-	choice, err := ChooseProfile([]profile.Profile{kimi, sol}, "kimi-max", failures, now, subagent.RoleReviewer)
+	choice, err := ChooseProfile([]profile.Profile{kimi, sol}, "kimi-max", "", failures, now, subagent.RoleReviewer)
 	if err != nil || choice.Name != "sol" || choice.Cause != CauseQuotaBlocked || !strings.Contains(choice.Reason, "out of quota") {
 		t.Fatalf("pinned quota-blocked profile: %+v %v", choice, err)
 	}
@@ -306,7 +306,7 @@ func TestConcurrentAccountRemainsSelectable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lease.Close()
-	choice, err := ChooseProfile([]profile.Profile{{Name: "parallel", Harness: "pi", Taste: 10}, {Name: "spare", Taste: 1}}, "", nil, time.Now(), "reviewer")
+	choice, err := ChooseProfile([]profile.Profile{{Name: "parallel", Harness: "pi", Taste: 10}, {Name: "spare", Taste: 1}}, "", "", nil, time.Now(), "reviewer")
 	if err != nil || choice.Name != "parallel" {
 		t.Fatalf("concurrent account was excluded: profile=%q error=%v", choice.Name, err)
 	}
