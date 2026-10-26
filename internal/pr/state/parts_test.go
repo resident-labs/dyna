@@ -158,3 +158,20 @@ func TestAPreSplitBinaryIsRefusedAfterTheSplit(t *testing.T) {
 		}
 	}
 }
+
+// A process that cached the old version can still delete a row. Its parts must
+// go with it, or a record created again under the same key would get the old
+// notices and responses back.
+func TestDeletingARowRemovesItsParts(t *testing.T) {
+	root := newRoot(t)
+	st, key := partsState()
+	if err := Write(root, st); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mustOpen(t, root).Exec("DELETE FROM pr_records WHERE key=?", key); err != nil {
+		t.Fatal(err)
+	}
+	if got := partRows(t, root); len(got) != 0 {
+		t.Fatalf("parts left after the row was deleted: %v", got)
+	}
+}
