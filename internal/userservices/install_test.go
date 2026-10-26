@@ -447,7 +447,8 @@ func TestRestartPendingSince(t *testing.T) {
 		if err := MarkRestartPending(dir); err != nil {
 			t.Fatal(err)
 		}
-		at := now.Add(-age)
+		// The marker's mtime is markerBackdate older than the time it became pending.
+		at := now.Add(-age - markerBackdate)
 		if err := os.Chtimes(filepath.Join(dir, RestartPending), at, at); err != nil {
 			t.Fatal(err)
 		}
@@ -466,5 +467,27 @@ func TestRestartPendingSince(t *testing.T) {
 	mark(time.Hour)
 	if RestartPendingSince(dir, now.Add(-2*time.Hour), now, window) {
 		t.Fatal("a marker older than the window blocks for good")
+	}
+}
+
+// A computer service built before the 10-minute window reads the marker's mtime
+// as the pending time and refuses for 30 minutes from it. MarkRestartPending
+// stamps the marker 20 minutes old, so that service stops refusing after the new
+// 10 minutes, though it cannot be restarted to learn them.
+func TestMarkRestartPendingShortensAnOlderServicesRefusalToTenMinutes(t *testing.T) {
+	dir := t.TempDir()
+	if err := MarkRestartPending(dir); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(dir, RestartPending))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRefusalLeft := legacyDrainWindow - time.Since(st.ModTime())
+	if legacyRefusalLeft > 10*time.Minute+time.Minute || legacyRefusalLeft < 9*time.Minute {
+		t.Fatalf("an older service refuses for another %v, want about 10 minutes", legacyRefusalLeft)
+	}
+	if at, ok := RestartPendingAt(dir); !ok || time.Since(at) > time.Minute || at.After(time.Now().Add(time.Second)) {
+		t.Fatalf("pending at %v, %v: want about now", at, ok)
 	}
 }
