@@ -105,6 +105,9 @@ func ParseDynaIssueNumbers(text string) ([]int, error) {
 
 // ParseFixLines reads the "Fixes D-5" and "Fixes #207" lines of a PR body.
 // Prose that names no issue is ignored, and one line may name several issues.
+// Only the list of references right after the keyword counts: it ends at the
+// first word that is not a reference, so "Closes D-5 on merge. This does not
+// close D-6." links D-5 alone.
 func ParseFixLines(body string) []IssueRef {
 	var out []IssueRef
 	for _, line := range strings.Split(body, "\n") {
@@ -115,9 +118,18 @@ func ParseFixLines(body string) []IssueRef {
 		for _, token := range strings.FieldsFunc(rest, func(r rune) bool {
 			return r == ',' || r == ' ' || r == '\t'
 		}) {
+			if strings.EqualFold(token, "and") || token == "&" {
+				continue
+			}
 			// Sentence punctuation follows a reference in prose: "Fixes D-5."
-			if ref, ok := parseIssueRef(strings.Trim(token, "()[]{}.,;:!?\"'\u201c\u201d\u2018\u2019")); ok {
-				out = append(out, ref)
+			ref, ok := parseIssueRef(strings.Trim(token, "()[]{}.,;:!?\"'\u201c\u201d\u2018\u2019"))
+			if !ok {
+				break
+			}
+			out = append(out, ref)
+			// A reference that ends a sentence ends the list.
+			if strings.HasSuffix(token, ".") {
+				break
 			}
 		}
 	}

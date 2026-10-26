@@ -272,6 +272,8 @@ type Turn struct {
 	NormEnd    int64  `json:"normEnd,omitempty"`
 	StopAsked  bool   `json:"stopAsked,omitempty"`
 	StopReason string `json:"stopReason,omitempty"`
+	// StopBy names who asked for the stop: a session's address, or "owner".
+	StopBy string `json:"stopBy,omitempty"`
 	// ReportTo records who made this turn owe a report: the immediate parent
 	// session and/or the room owner. It preserves obligation provenance;
 	// successful reports go to the current parent, or the owner if unavailable; failures also
