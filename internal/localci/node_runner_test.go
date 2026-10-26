@@ -1143,11 +1143,14 @@ func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 	// The writer open blocks until the wrapper's fake sleep opens the reader, and
 	// then reports that it did.
 	writerReady := make(chan *os.File, 1)
+	writerErr := make(chan error, 1)
 	go func() {
 		file, err := os.OpenFile(gate, os.O_WRONLY, 0o600)
-		if err == nil {
-			writerReady <- file
+		if err != nil {
+			writerErr <- err
+			return
 		}
+		writerReady <- file
 	}()
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -1156,7 +1159,16 @@ func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() { done <- cmd.Wait() }()
-	writer := <-writerReady
+	// The handshake is the wrapper opening its sleep gate. An early exit means it
+	// never waited for the slot, and a failed open is its own error.
+	var writer *os.File
+	select {
+	case writer = <-writerReady:
+	case err := <-writerErr:
+		t.Fatalf("open the sleep gate: %v", err)
+	case err := <-done:
+		t.Fatalf("the wrapper exited before it waited for the slot: %v", err)
+	}
 	// The wrapper is waiting for the slot: cancel the run and free the slot, so
 	// its next acquisition succeeds on a run that is gone.
 	if err := os.Remove(active); err != nil {
