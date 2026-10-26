@@ -26,9 +26,25 @@ func fixture(mode, root string) *exec.Cmd {
 // vendor programs, or persistent resource roots are used in these tests.
 func TestProcessGuardFixture(t *testing.T) {
 	mode, root := os.Getenv("PG_FIXTURE"), os.Getenv("PG_ROOT")
+	if mode != "" {
+		// A fixture must not outlive the test binary that started it: a test
+		// that is killed or times out never reaches its cleanup, and its fixtures
+		// would otherwise run for days.
+		dieWithParent()
+	}
 	switch mode {
 	case "":
 		return
+	case "idle":
+		_, _ = os.Stdout.WriteString("ready\n")
+		select {}
+	case "parent":
+		idle := fixture("idle", root)
+		idle.Stdout = os.Stdout
+		if idle.Start() != nil {
+			os.Exit(109)
+		}
+		select {}
 	case "runner":
 		tree := fixture("tree", root)
 		// Carry the caller's stdout through the guard, so it can read the tree's

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -561,4 +562,36 @@ func TestLocalSessionHaltStopsChild(t *testing.T) {
 		t.Fatal("write after halt succeeded, want no child")
 	}
 	s.Detach(DetachIdle)
+}
+
+// A host whose socket file is gone is unreachable, so it ends. A host whose
+// socket still exists keeps running.
+func TestWatchSocketStopsHostWhenSocketIsGone(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "host.sock")
+	if err := os.WriteFile(socket, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticks := make(chan time.Time)
+	stopped := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		watchSocket(ticks, socket, func() { close(stopped) }, make(chan struct{}))
+		close(finished)
+	}()
+	ticks <- time.Time{}
+	select {
+	case <-stopped:
+		t.Fatal("the host stopped while its socket existed")
+	default:
+	}
+	if err := os.Remove(socket); err != nil {
+		t.Fatal(err)
+	}
+	ticks <- time.Time{}
+	<-finished
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("the host kept running after its socket was removed")
+	}
 }
