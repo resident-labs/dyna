@@ -17,10 +17,17 @@
   import SupportBrief from './SupportBrief.svelte'
   import { healthChip } from './support.ts'
   import { costText, rangeBounds, type Period } from './accounts/activity.ts'
-  import type { ProfileCheck, ProfileList, ProfileUsageSnapshot, ProfileUsageStats, ProfileView } from '../api/profile.ts'
+  import type { ProfileCheck, ProfileList, ProfileProblem, ProfileUsageSnapshot, ProfileUsageStats, ProfileView } from '../api/profile.ts'
   import type { EditableProfile, ModelSelection } from './profiles/state.ts'
 
   type ConfirmKind = 'default' | 'disable' | 'enable' | 'remove'
+  // repairHint is the designed copy for a saved profile Dyna cannot run. It reads
+  // the typed problem code, so the host only sends codes.
+  function repairHint(problem: ProfileProblem): string {
+    return problem === 'retired-harness'
+      ? 'The harness this profile names is no longer part of Dyna. Choose another harness and save.'
+      : 'This profile is not valid. Fix its fields and save.'
+  }
   // The list with every part present, so a view reads it without a null check.
   type Loaded = { [K in keyof ProfileList]-?: NonNullable<ProfileList[K]> }
   interface Props {
@@ -274,6 +281,7 @@
               <span>{p.name}</span>
               {#if list.default === p.name}<span class="badge def">default</span>{/if}
               {#if p.disabled}<span class="badge">disabled</span>{/if}
+              {#if p.problem}<span class="badge warn" title={repairHint(p.problem)}>needs repair</span>{/if}
               {#if p.safeMode}<span class="badge">safe mode</span>{/if}
               {#if h}<span class="badge {h.tone}" title={h.title}>{h.text}</span>{/if}
             </div>
