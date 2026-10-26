@@ -225,6 +225,23 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 	return f
 }
 
+func TestBatchQueueWaitsForDependency(t *testing.T) {
+	f := mergeTrialEnv(t, 1, 2)
+	if err := f.e.s.Store.update(func(st *State) error {
+		st.Records["github.com/owner/repo#1"].Dependencies = []string{"github.com/owner/repo#2"}
+		st.Records["github.com/owner/repo#2"].Verdict = state.VerdictChanges
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*f.merged) != 0 || f.builds != 0 {
+		t.Fatalf("dependent PR entered a batch: merged=%v builds=%d", *f.merged, f.builds)
+	}
+}
+
 func TestAutomaticMergeWaitsForExactBatchTrial(t *testing.T) {
 	f := mergeTrialEnv(t, 3, 2, 1)
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {

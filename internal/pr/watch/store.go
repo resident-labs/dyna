@@ -356,7 +356,7 @@ func landable(st State, r Record, observed ...facts.GitHub) bool {
 	if len(observed) > 0 {
 		g = observed[0]
 	}
-	return EffectivePolicy(st, r).Review != "off" && (facts.Ready(r, g) || facts.ReadyWithoutHeadCI(r, g))
+	return EffectivePolicy(st, r).Review != "off" && (facts.Ready(r, g, st.Records) || facts.ReadyWithoutHeadCI(r, g, st.Records))
 }
 
 func landLine(r Record) string {

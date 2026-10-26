@@ -731,7 +731,7 @@ func TestBrokenLocalCheckoutDoesNotBlockHealthyGitHubTrial(t *testing.T) {
 		broken := *st.Records["github.com/owner/repo#1"]
 		broken.Key, broken.ChangeID, broken.Kind = "change_broken", "change_broken", "local"
 		broken.Number, broken.RepoPath, broken.Branch = 0, filepath.Join(t.TempDir(), "missing"), "local"
-		if !localMergeReady(broken) {
+		if !localMergeReady(broken, nil) {
 			t.Fatal("fixture must start with verified local facts")
 		}
 		st.Records[broken.Key] = &broken
@@ -751,7 +751,7 @@ func TestBrokenLocalCheckoutDoesNotBlockHealthyGitHubTrial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if broken.Error == "" || localMergeReady(broken) {
+	if broken.Error == "" || localMergeReady(broken, nil) {
 		t.Fatalf("broken local record remains ready: %+v", broken)
 	}
 	if _, ready, err := f.e.s.mergeReady(t.Context(), broken); ready {
