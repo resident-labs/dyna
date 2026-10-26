@@ -209,6 +209,17 @@ type PendingVerdict struct {
 	FastLand   *FastLand       `json:"fastLand,omitempty"`
 }
 
+// Controller names who controls the workflow run that opened a change: the
+// session that started that run, or ControllerRoot when root or the owner
+// started it. A later run agent of the same controller may take the change's
+// author role over once the run's earlier author closed (issue D-252). No
+// session id equals ControllerRoot, because session ids start "ses_".
+type Controller string
+
+// ControllerRoot is the controller of a run that the room's root session or
+// the owner started.
+const ControllerRoot Controller = "root"
+
 type Record struct {
 	PendingVerdict *PendingVerdict `json:"pendingVerdict,omitempty"`
 	// ReleaseReviewersAfterReplay holds closed reviewers until their saved verdicts replay.
@@ -258,18 +269,23 @@ type Record struct {
 
 	CIStaleCleanupHead string `json:"ciStaleCleanupHead,omitempty"`
 
-	Polling          Polling                      `json:"polling"`
-	RateLimit        RateLimit                    `json:"rateLimit"`
-	QuotaAccount     string                       `json:"quotaAccount,omitempty"`
-	Key              string                       `json:"key"`
-	Host             string                       `json:"host"`
-	Repo             string                       `json:"repo"`
-	Number           int                          `json:"number"`
-	URL              string                       `json:"url"`
-	Title            string                       `json:"title"`
-	RoomID           string                       `json:"roomId"`
-	Author           string                       `json:"authorSession"`
-	FormerAuthors    []string                     `json:"formerAuthors,omitempty"`
+	Polling       Polling   `json:"polling"`
+	RateLimit     RateLimit `json:"rateLimit"`
+	QuotaAccount  string    `json:"quotaAccount,omitempty"`
+	Key           string    `json:"key"`
+	Host          string    `json:"host"`
+	Repo          string    `json:"repo"`
+	Number        int       `json:"number"`
+	URL           string    `json:"url"`
+	Title         string    `json:"title"`
+	RoomID        string    `json:"roomId"`
+	Author        string    `json:"authorSession"`
+	FormerAuthors []string  `json:"formerAuthors,omitempty"`
+	// Controller is the controller of the run whose agent opened this change:
+	// the session that started that run, or ControllerRoot. Records stored
+	// before controllers were recorded, and changes no run opened, have none,
+	// so no takeover applies to them.
+	Controller       Controller                   `json:"controller,omitempty"`
 	ReviewHistory    []map[string]json.RawMessage `json:"reviewHistory,omitempty"`
 	Parent           string                       `json:"parentSession,omitempty"`
 	Dir              string                       `json:"dir"`
