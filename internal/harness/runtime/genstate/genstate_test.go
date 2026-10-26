@@ -194,3 +194,92 @@ func TestLegacyIndexesImportAndLeasesRoundTrip(t *testing.T) {
 		t.Fatal("a corrupt legacy lease was imported")
 	}
 }
+
+// An earlier build can rewrite its view with the same JSON after this build
+// published: the rewrite is a new publication and its set wins.
+func TestLegacyViewRewriteOfIdenticalJSONWins(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "harnesses", "generations")
+	viewsDir := filepath.Join(root, ".views")
+	if err := os.MkdirAll(viewsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.Join(root, "gen-v1-0123456789abcdef")
+	second := filepath.Join(root, "gen-v1-fedcba9876543210")
+	body, err := json.Marshal(legacyViewFixture{Harness: "pi", Home: "/home/pi", Generations: []string{first}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(viewsDir, "pi.json")
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := genstate.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	store := genstate.Store{DataDir: dir}
+	ctx := context.Background()
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{second}}, false); err != nil {
+		t.Fatal(err)
+	}
+	// The same bytes written again, later, are a new publication.
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	newer := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	views, err := store.Views(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || len(views[0].Generations) != 1 || views[0].Generations[0] != first {
+		t.Fatalf("views after a later identical rewrite = %+v", views)
+	}
+}
+
+// A publication in flight does not supersede a legacy view that this build has
+// not imported yet, because the home may still read it if the publication
+// fails.
+func TestPendingPublicationKeepsAnUnimportedLegacyView(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "harnesses", "generations")
+	viewsDir := filepath.Join(root, ".views")
+	if err := os.MkdirAll(viewsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(root, "gen-v1-0123456789abcdef")
+	pending := filepath.Join(root, "gen-v1-fedcba9876543210")
+	body, err := json.Marshal(legacyViewFixture{Harness: "pi", Home: "/home/pi", Generations: []string{legacy}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(viewsDir, "pi.json"), body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := genstate.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	store := genstate.Store{DataDir: dir}
+	ctx := context.Background()
+	if err := store.RecordView(ctx, genstate.View{Harness: "pi", Home: "/home/pi", Generations: []string{pending}}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ImportLegacy(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	views, err := store.Views(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || len(views[0].Generations) != 2 {
+		t.Fatalf("views during a pending publication = %+v, want both generations", views)
+	}
+}

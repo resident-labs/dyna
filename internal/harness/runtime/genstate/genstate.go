@@ -34,12 +34,18 @@ CREATE TABLE IF NOT EXISTS generation_views (
  harness TEXT NOT NULL CHECK(harness <> ''),
  home TEXT NOT NULL CHECK(home <> ''),
  generation TEXT NOT NULL CHECK(generation <> ''),
- updated_ms INTEGER NOT NULL,
  PRIMARY KEY(harness, home, generation)
+);
+CREATE TABLE IF NOT EXISTS generation_publications (
+ harness TEXT NOT NULL CHECK(harness <> ''),
+ home TEXT NOT NULL CHECK(home <> ''),
+ published_ms INTEGER NOT NULL CHECK(published_ms > 0),
+ PRIMARY KEY(harness, home)
 );
 CREATE TABLE IF NOT EXISTS legacy_generation_views (
  path TEXT PRIMARY KEY NOT NULL CHECK(path <> ''),
- digest TEXT NOT NULL CHECK(digest <> '')
+ digest TEXT NOT NULL CHECK(digest <> ''),
+ modified_ns INTEGER NOT NULL CHECK(modified_ns > 0)
 );`
 
 // Lease is one process's claim on a generation while its native conversation
@@ -82,18 +88,10 @@ func open(dataDir string) (*sql.DB, error) {
 	if err := state.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	// Version 3 adds the revision of each imported legacy view and the time a
-	// view was last published, so an unchanged or superseded file is not
-	// imported over a newer publication.
-	err = database.Migrate(db, "harness.generations", 3, func(conn *sql.Conn, old int) error {
+	// The tables are new in this release: no earlier build wrote them, so the
+	// first version creates the final shape.
+	err = database.Migrate(db, "harness.generations", 1, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
-		if old == 2 {
-			// A build of version 2 wrote the views without their publication
-			// time; keep its rows and add the column.
-			if _, err := conn.ExecContext(ctx, `ALTER TABLE generation_views ADD COLUMN updated_ms INTEGER NOT NULL DEFAULT 0`); err != nil {
-				return err
-			}
-		}
 		_, err := conn.ExecContext(ctx, schema)
 		return err
 	})
@@ -206,11 +204,17 @@ func (s Store) RecordView(ctx context.Context, view View, pending bool) error {
 }
 
 // recordViewTx writes one publication view. A pending publication adds its
-// generation, a complete one replaces the set, and updated_ms marks when the
-// account home last read that set.
-func recordViewTx(ctx context.Context, conn *sql.Conn, view View, pending bool, updated time.Time) error {
+// generation, because the home may still read the previous one. A complete
+// publication replaces the set and moves the watermark that decides whether a
+// legacy view file is older than what this build published.
+func recordViewTx(ctx context.Context, conn *sql.Conn, view View, pending bool, now time.Time) error {
 	if view.Harness == "" || view.Home == "" || len(view.Generations) == 0 {
 		return errors.New("a generation view needs a harness, a home and one generation")
+	}
+	for _, dir := range view.Generations {
+		if dir == "" {
+			return errors.New("a generation view names an empty generation")
+		}
 	}
 	if !pending {
 		if _, err := conn.ExecContext(ctx, `DELETE FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home); err != nil {
@@ -218,15 +222,17 @@ func recordViewTx(ctx context.Context, conn *sql.Conn, view View, pending bool, 
 		}
 	}
 	for _, dir := range view.Generations {
-		if dir == "" {
-			return errors.New("a generation view names an empty generation")
-		}
-		if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation,updated_ms) VALUES(?,?,?,?)`,
-			view.Harness, view.Home, dir, updated.UnixMilli()); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation) VALUES(?,?,?)`,
+			view.Harness, view.Home, dir); err != nil {
 			return err
 		}
 	}
-	return nil
+	if pending {
+		return nil
+	}
+	_, err := conn.ExecContext(ctx, `INSERT INTO generation_publications(harness,home,published_ms) VALUES(?,?,?)
+ON CONFLICT(harness,home) DO UPDATE SET published_ms=excluded.published_ms`, view.Harness, view.Home, now.UnixMilli())
+	return err
 }
 
 // DeleteView removes one harness and home's publication view, for a harness
@@ -382,13 +388,19 @@ func importLegacyViews(ctx context.Context, conn *sql.Conn, dir string) error {
 		if err != nil {
 			return err
 		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
 		sum := sha256.Sum256(raw)
 		digest := hex.EncodeToString(sum[:])
-		// An unchanged file was imported before: the rows that a later
-		// complete publication replaced must stay replaced.
-		var stored string
-		err = conn.QueryRowContext(ctx, `SELECT digest FROM legacy_generation_views WHERE path=?`, path).Scan(&stored)
-		if err == nil && stored == digest {
+		// Skip only a file this store has already read: the revision is the
+		// content and its write time, so an earlier build that rewrites the
+		// same JSON records a new publication.
+		var storedDigest string
+		var storedNs int64
+		err = conn.QueryRowContext(ctx, `SELECT digest, modified_ns FROM legacy_generation_views WHERE path=?`, path).Scan(&storedDigest, &storedNs)
+		if err == nil && storedDigest == digest && storedNs == info.ModTime().UnixNano() {
 			continue
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -403,33 +415,33 @@ func importLegacyViews(ctx context.Context, conn *sql.Conn, dir string) error {
 				return fmt.Errorf("generation view record is invalid: %s", path)
 			}
 		}
-		info, err := entry.Info()
-		if err != nil {
+		// A complete publication by this build that is at least as new as the
+		// file superseded it. A pending publication does not count: its home
+		// may still read what the file names.
+		var publishedMs int64
+		err = conn.QueryRowContext(ctx, `SELECT published_ms FROM generation_publications WHERE harness=? AND home=?`, view.Harness, view.Home).Scan(&publishedMs)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		// A publication of this build that is newer than the file superseded
-		// it, so the file must not bring its old generations back.
-		var newest int64
-		err = conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(updated_ms),0) FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home).Scan(&newest)
-		if err != nil {
-			return err
-		}
-		superseded := newest > 0 && info.ModTime().UnixMilli() <= newest
+		superseded := publishedMs > 0 && info.ModTime().UnixMilli() <= publishedMs
 		if !superseded {
-			// A published set replaces what the account home read before.
-			if _, err := conn.ExecContext(ctx, `DELETE FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home); err != nil {
-				return err
+			// Without a later publication of this build, the file may only add
+			// to the stored set, which can hold a publication in flight. With
+			// one, the file is a newer publication by an earlier build whose
+			// set replaces what the home read before.
+			if publishedMs > 0 {
+				if _, err := conn.ExecContext(ctx, `DELETE FROM generation_views WHERE harness=? AND home=?`, view.Harness, view.Home); err != nil {
+					return err
+				}
 			}
-		}
-		if !superseded {
 			for _, generation := range view.Generations {
-				if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation,updated_ms) VALUES(?,?,?,?)`, view.Harness, view.Home, generation, info.ModTime().UnixMilli()); err != nil {
+				if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO generation_views(harness,home,generation) VALUES(?,?,?)`, view.Harness, view.Home, generation); err != nil {
 					return err
 				}
 			}
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO legacy_generation_views(path,digest) VALUES(?,?)
-ON CONFLICT(path) DO UPDATE SET digest=excluded.digest`, path, digest); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO legacy_generation_views(path,digest,modified_ns) VALUES(?,?,?)
+ON CONFLICT(path) DO UPDATE SET digest=excluded.digest, modified_ns=excluded.modified_ns`, path, digest, info.ModTime().UnixNano()); err != nil {
 			return err
 		}
 	}
