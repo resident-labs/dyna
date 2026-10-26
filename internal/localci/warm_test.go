@@ -77,3 +77,30 @@ func TestWarmStateKeepsTheHeadPerMachine(t *testing.T) {
 		t.Fatalf("hermeslab warmed %q, want the newer commit %q", head, second)
 	}
 }
+
+// A repository names the job that fills its act cache, so the warm run and the
+// checks that restore the cache come from the same definition file.
+func TestDefinitionNamesTheWarmJob(t *testing.T) {
+	body := "version: 1\ntrial: [go]\nwarm: { workflow: .github/workflows/ci.yml, name: cache-warm }\nchecks:\n  - id: build\n    image: golang:1.26.3\n    command: go build ./...\nsuites:\n  - id: go\n    checks: [build]\n"
+	definition, err := ParseDefinition([]byte(body))
+	if err != nil {
+		t.Fatalf("a definition with a warm job did not parse: %v", err)
+	}
+	warm, ok := definition.Warm()
+	if !ok || warm.Workflow != ".github/workflows/ci.yml" || warm.Name != "cache-warm" {
+		t.Fatalf("warm = %+v, %v", warm, ok)
+	}
+	// A definition without one simply has no cache to warm.
+	plain, err := ParseDefinition([]byte("version: 1\ntrial: [go]\nchecks:\n  - id: build\n    image: golang:1.26.3\n    command: go build ./...\nsuites:\n  - id: go\n    checks: [build]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain.Warm(); ok {
+		t.Fatal("a definition without a warm job reports one")
+	}
+	for _, bad := range []string{"warm: { workflow: ci.yml, name: cache-warm }", "warm: { workflow: .github/workflows/ci.yml, name: 'cache warm' }"} {
+		if _, err := ParseDefinition([]byte("version: 1\ntrial: [go]\n" + bad + "\nchecks:\n  - id: build\n    image: golang:1.26.3\n    command: go build ./...\nsuites:\n  - id: go\n    checks: [build]\n")); err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+	}
+}
