@@ -71,14 +71,18 @@ esac
 		env = append(env, key+"="+value)
 	}
 	env = append(env, mode.EnvRoomID+"="+rec.ID)
-	run := func(args ...string) (string, error) {
+	// The guard reports its own work on stderr, including a slow state write on
+	// a busy host, so only the command's stdout is its answer.
+	run := func(args ...string) (string, string, error) {
 		cmd := exec.Command("/bin/sh", append([]string{"-c", `exec "$@"`, "session-tool"}, args...)...)
 		cmd.Dir, cmd.Env = rec.Repo, env
-		out, err := cmd.CombinedOutput()
-		return string(out), err
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		return stdout.String(), stderr.String(), err
 	}
-	if out, err := run("gh", "pr", "list"); err != nil || strings.TrimSpace(out) != "read allowed" {
-		t.Fatalf("session read: %s %v", out, err)
+	if out, logged, err := run("gh", "pr", "list"); err != nil || strings.TrimSpace(out) != "read allowed" {
+		t.Fatalf("session read: %s %v %s", out, err, logged)
 	}
 	for _, args := range [][]string{
 		{"gh", "pr", "create"},
@@ -87,9 +91,9 @@ esac
 		{"git", "push", "origin", "HEAD"},
 		{"git", "push", "https://github.com/work/guard.git", "HEAD"},
 	} {
-		out, err := run(args...)
-		if err == nil || !strings.Contains(out, "read-only") {
-			t.Fatalf("session write guard: %v: %s %v", args, out, err)
+		out, logged, err := run(args...)
+		if err == nil || !strings.Contains(out+logged, "read-only") {
+			t.Fatalf("session write guard: %v: %s %s %v", args, out, logged, err)
 		}
 	}
 	if _, err := os.Stat(writes); !os.IsNotExist(err) {
@@ -98,7 +102,7 @@ esac
 	if out, err := exec.Command("/usr/bin/git", "--git-dir", bare, "show-ref").CombinedOutput(); err == nil || len(out) != 0 {
 		t.Fatal("read-only session pushed to the local test remote")
 	}
-	if out, err := run("git", "remote", "get-url", "origin"); err != nil || strings.TrimSpace(out) != "https://github.com/work/guard.git" {
+	if out, _, err := run("git", "remote", "get-url", "origin"); err != nil || strings.TrimSpace(out) != "https://github.com/work/guard.git" {
 		t.Fatalf("fetch URL changed: %s %v", out, err)
 	}
 }
