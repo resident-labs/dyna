@@ -59,6 +59,7 @@ func (e *engine) bind(vm *goja.Runtime) error {
 		e.finish(outcome{err: fmt.Errorf("workflow failed: %s", msg)})
 	})
 	vm.Set("__spawn", e.spawn)
+	vm.Set("__exec", e.exec)
 	vm.Set("__workflow", e.workflow)
 	vm.Set("__post", e.post)
 	vm.Set("__worktrees", e.scriptWorktrees)

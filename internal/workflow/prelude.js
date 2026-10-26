@@ -125,6 +125,15 @@ globalThis.agent = function (prompt, opts) {
   return __spawn(String(prompt), applyPlanCtx(opts));
 };
 
+// run(command, opts?) -> Promise<{ code, stdout, stderr, json, durationMs, attempts, shellId, logPath }>
+// A deterministic command with no model turn. An array runs without a shell and
+// a string runs through sh -c. opts: { cwd, env, label, phase, lane, stage,
+// timeout, retries, check, parse: "json" }. A non-zero exit, a timeout or
+// output that is not JSON rejects unless check is false.
+globalThis.run = function (command, opts) {
+  return __exec(command, applyPlanCtx(opts));
+};
+
 // post(to, text, data?) or post(to, { text, data }) -> { id, deliveries, skipped?, error? }
 // to is one @mention string or an array of them; the script posts as the run.
 // data is an object or array that the feed shows as a key and value view.
