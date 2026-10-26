@@ -446,7 +446,7 @@ func (r *resolver) group(tok, sel string, rec room.Record) ([]recipient, []Skip,
 	var skipped []Skip
 	for _, info := range sessions {
 		// A parent's crew assignment is service work, even when it uses a group.
-		if !match(info) || (info.Service && sel != selChildren) {
+		if !match(info) || info.RunOwned() || (info.Service && sel != selChildren) {
 			continue
 		}
 		if why := usable(info); why != "" {
