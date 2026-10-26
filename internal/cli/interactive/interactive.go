@@ -31,9 +31,11 @@ var guideHarnesses = []string{"claude", "other"}
 // root block first; the internal root (root mode) sees its own setup there. A
 // Dyna session already has its room, gets posts delivered and gets rules
 // injected, so it never sees the root block or the external-orchestration
-// topic, and neither does the internal root.
+// topic, and neither does the internal root. A workflow worker is not a
+// session, but it works like one and reads the same session index.
 func guideIndex() string {
 	_, stamped := mode.CurrentSession()
+	stamped = stamped || mode.InWorkflow()
 	internal := mode.Current() == mode.Root
 	var out strings.Builder
 	if !stamped {
@@ -125,15 +127,6 @@ func NewGuideCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&plain, "plain", false, "raw markdown (default when piped)")
 	for _, name := range guideHarnesses {
 		harness[name] = cmd.Flags().Bool(name, false, "external-orchestration: the watcher recipe for "+name)
-	}
-	if mode.InWorkflow() {
-		// Refuse every form, including help and invalid flags, before parsing.
-		cmd.DisableFlagParsing = true
-		cmd.Args = nil
-		cmd.SilenceUsage = true
-		cmd.RunE = func(*cobra.Command, []string) error {
-			return fmt.Errorf("dyna guide is not available inside a workflow worker; complete the task yourself")
-		}
 	}
 	return cmd
 }

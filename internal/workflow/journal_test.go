@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/harness"
+	harnessconfig "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
@@ -36,11 +37,6 @@ func TestJournalWorkerPromptContract(t *testing.T) {
 		"Keep working after every entry",
 		"still return the final response",
 		"separate from any final-response JSON schema",
-		"running INSIDE a dyna workflow as a worker (workflow mode)",
-		"you are a leaf",
-		"Delegation is disabled",
-		"dyna run and dyna subagent fail inside a workflow worker",
-		"The only dyna commands you may use are dyna journal",
 	} {
 		if !strings.Contains(journalBoundary, required) {
 			t.Errorf("journal instructions do not contain %q", required)
@@ -142,13 +138,24 @@ return result;
 	}
 }
 
-func TestWorkerPromptsOfferNoGuidesAndKeepSchemaLast(t *testing.T) {
-	if strings.Contains(workflowRestriction, "dyna guide") || strings.Contains(journalBoundary, "dyna guide") {
-		t.Fatal("workflow worker instructions must not offer guide access")
-	}
+func TestWorkerPromptKeepsSchemaLast(t *testing.T) {
 	base := workerTaskPrompt("Complete the caller task.", "") + "\n\n---\nOUTPUT FORMAT: schema"
 	if strings.Index(base, "Complete the caller task.") > strings.Index(base, "OUTPUT FORMAT") {
 		t.Fatalf("schema wrapper did not remain last:\n%s", base)
+	}
+}
+
+// A workflow worker uses every dyna command and tool a session uses, so its
+// standing instructions must not fence it behind journal-only access.
+func TestWorkerInstructionsGrantSessionTools(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	e := &engine{opts: Options{}, Skills: func() ([]harnessconfig.ManagedSkill, error) { return nil, nil }}
+	text := e.workerInstructions(true).Text()
+	if strings.Contains(text, "The only dyna commands you may use") {
+		t.Fatal("worker instructions still allow only journal and read-only inspection")
+	}
+	if !strings.Contains(text, "Every other dyna command and tool a session uses is available") {
+		t.Fatal("worker instructions do not grant every session tool")
 	}
 }
 

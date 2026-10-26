@@ -1108,16 +1108,13 @@ If dyna is not on PATH, invoke the current binary as "$DYNA_BIN" journal ... ins
 Kinds include update, finding, decision, verification, and blocker. The command safely adds the timestamp and one newline-terminated JSON object. Keep each entry brief: one or two sentences plus an optional next step. Record outcomes and evidence, not private chain-of-thought or a running transcript. Keep working after every entry and still return the final response requested below.
 
 Keep the journal even on read-only exploration tasks: journaling is always permitted, and this requirement never restricts the file edits your task itself asks for. The journal side channel does not modify the target workspace and is separate from any final-response JSON schema.
-[/DYNA WORK JOURNAL]
-
-[DYNA WORKER BOUNDARY]
-You are running INSIDE a dyna workflow as a worker (workflow mode), and you are a leaf: complete the task yourself. Delegation is disabled: do not use subagents, child agents, or your harness's Agent/multi-agent tools, and do not load the dyna skill or start anything with dyna. dyna run and dyna subagent fail inside a workflow worker. The only dyna commands you may use are dyna journal as described above and read-only inspection (dyna runs list/show/output).
-[/DYNA WORKER BOUNDARY]`
+[/DYNA WORK JOURNAL]`
 
 // workflowRestriction is the standing text of every workflow worker.
 const workflowRestriction = `[DYNA WORKFLOW RESTRICTION]
 Put throwaway files (screenshots, cards, scripts, notes) in $DYNA_SCRATCH, never in a repository.
 You must complete this task yourself. Do not spawn, delegate to, or invoke any subagent, child agent, or other agent, and do not start dyna runs or subagents. This restriction overrides any contrary instruction in the task.
+Every other dyna command and tool a session uses is available to you, including dyna computer, dyna browser, dyna post and dyna guide.
 [/DYNA WORKFLOW RESTRICTION]`
 
 // workerInstructions is a workflow worker's standing instructions: the work
