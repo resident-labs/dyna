@@ -54,6 +54,11 @@ class ChangesTest(unittest.TestCase):
         base = self.pull_request("internal/x/y.go", main_file="docs/z.md")
         self.assertEqual(self.run_filter("pull_request", base)["go"], "true")
 
+    def test_empty_base_on_an_ordinary_commit_diffs_from_the_first_parent(self):
+        self.pull_request("docs/guide.md")
+        self.git("checkout", "-q", "pr")
+        self.assertEqual(self.run_filter("pull_request", ""), {"relay": "false", "go": "false", "computers": "false"})
+
     def test_other_events_run_everything(self):
         base = self.pull_request("docs/guide.md")
         self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true"})
