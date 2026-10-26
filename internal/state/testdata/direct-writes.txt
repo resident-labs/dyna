@@ -211,6 +211,7 @@ not-state internal/subagent/store.go Store.tryTurnLock 1 # turn.lock, held by a 
 not-state internal/subagent/transfer.go Manager.runTransfer 1 # a non-blocking flock for one transfer worker
 not-state internal/subagent/turngate.go writeGateState 1 # gate.json, the turn runner's identity and gate, written only by the runner for its steering hook and liveness probes; until g3458 moves the liveness readers to the SessionPid row and #1514's pidfd watch
 not-state internal/testsafe/testsafe.go init 1 # marks a temporary test root for child test binaries; test-only process coordination, not runtime state
+not-state internal/testsafe/testsafe.go ShortTempDir 1 # makes a short temporary folder for a test's socket; test-only, not runtime state
 not-state internal/turnlock/turnlock.go Held 1 # opens an existing empty turn.lock for a shared flock probe without writing content
 not-state internal/update/update.go Config.acquireLock 3 # the self-update lock file, not state
 not-state internal/update/update.go Config.replace 2 # self-update binary files
