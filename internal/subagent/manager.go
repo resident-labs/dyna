@@ -417,6 +417,13 @@ func (m *Manager) start(ctx context.Context, opts StartOptions, parent, owner st
 	} else if !ValidID(id) {
 		return Info{}, Turn{}, fmt.Errorf("invalid session id %q: it must be shaped like ses_20060102-150405-abcdef12", id)
 	}
+	// A repeat of a start that already wrote its session must say so before the
+	// name check, which would blame the session's own name.
+	if opts.ID != "" {
+		if _, err := store.ReadMeta(id); err == nil {
+			return Info{}, Turn{}, fmt.Errorf("session %s already exists", id)
+		}
+	}
 	name, err := checkAvailableName(store, roomRec, opts.Name, id)
 	if err != nil {
 		return Info{}, Turn{}, err

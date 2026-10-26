@@ -57,10 +57,16 @@ func (s *Service) issueState(roomID string, issues []room.Issue) ([]room.Issue, 
 			return nil, err
 		}
 	}
-	sessions, _ := s.sessions().ListSnapshot(true)
-	names := make(map[string]string, len(sessions))
-	for _, member := range sessions {
-		names[member.ID] = member.Name
+	// Only the holders of goals that hold these issues need a name. Listing
+	// every session, closed ones included, read and parsed all their records.
+	names := map[string]string{}
+	for _, issue := range issues {
+		for _, holder := range active[issue.GoalID].Holders {
+			if _, seen := names[holder]; !seen {
+				info, _ := s.sessions().Inspect(holder)
+				names[holder] = info.Name
+			}
+		}
 	}
 	for i := range issues {
 		issue := &issues[i]

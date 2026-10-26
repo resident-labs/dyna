@@ -149,6 +149,20 @@ func TestRepoPollAutoTracksOwnedWorktreePR(t *testing.T) {
 	}
 }
 
+func TestAutoTrackUsesSessionWorkingInInheritedWorktree(t *testing.T) {
+	e, tree := autoTrackEnv(t)
+	child := subagent.Meta{
+		ID: "ses_20261026-000001-cccccccc", Name: "child", RoomID: e.author.RoomID, Room: e.author.Room,
+		ParentSession: e.author.ID, Dir: tree, Status: subagent.StatusRunning,
+	}
+	recordtest.Write(t, e.s.Notify.Sessions.Store.Root, child.ID, child)
+	e.tick()
+	got, err := e.s.Store.Get("github.com/owner/repo#18")
+	if err != nil || got.Author != child.ID || got.Dir != tree {
+		t.Fatalf("inherited worktree PR author = %q, dir = %q, err = %v; want child %q", got.Author, got.Dir, err, child.ID)
+	}
+}
+
 func TestAutoTrackFailureDoesNotFailPollOrRepeatAtSameHead(t *testing.T) {
 	e, _ := autoTrackEnv(t)
 	e.f.Raw["repos/owner/repo/pulls/18"] = "HTTP/2.0 200 OK\r\n\r\ninvalid-json"
