@@ -225,13 +225,13 @@ func newEngineCommand() *cobra.Command {
 		return engine.Status(ctx, engineclient.New("").Call, c.OutOrStdout(), time.Now())
 	}})
 	var units string
-	var writeOnly, restartComputers bool
+	var writeOnly, restartComputers, noTunnel bool
 	services := &cobra.Command{Use: "install-services", Short: "Install engine and computer user services", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		exe, err := os.Executable()
 		if err != nil {
 			return err
 		}
-		o := userservices.Options{Binary: exe, Dir: units, RestartComputers: restartComputers, Quiet: computerrestart.QuietNow, Output: c.OutOrStdout(),
+		o := userservices.Options{Binary: exe, Dir: units, RestartComputers: restartComputers, NoTunnel: noTunnel, Quiet: computerrestart.QuietNow, Output: c.OutOrStdout(),
 			Healthy: func(ctx context.Context) error { return engine.WaitHealthy(ctx, engineclient.New("").Call, nil) }}
 		if writeOnly {
 			return userservices.Write(o)
@@ -241,7 +241,19 @@ func newEngineCommand() *cobra.Command {
 	services.Flags().StringVar(&units, "unit-dir", "", "unit directory (defaults to the user XDG config directory)")
 	services.Flags().BoolVar(&writeOnly, "write-only", false, "write unit files without enabling services or contacting systemd")
 	services.Flags().BoolVar(&restartComputers, "restart-computers", false, "restart the computer service when its runtime changed")
+	services.Flags().BoolVar(&noTunnel, "no-tunnel", false, "run no tunnel connector: no dyna-tunnel.service, and stop an installed one")
 	cmd.AddCommand(services)
+	var cloudflared string
+	tunnel := &cobra.Command{Use: "tunnel", Short: "Run the cloudflared connector for the managed tunnel", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		if code := engine.TunnelMain(ctx, cloudflared); code != 0 {
+			return fmt.Errorf("tunnel exited with code %d", code)
+		}
+		return nil
+	}}
+	tunnel.Flags().StringVar(&cloudflared, "cloudflared", "", "the cloudflared binary (default: cloudflared on PATH)")
+	cmd.AddCommand(tunnel)
 	cmd.AddCommand(&cobra.Command{Use: "connect", Short: "Manage Resident Labs Connect", DisableFlagParsing: true, RunE: func(cmd *cobra.Command, args []string) error {
 		if code := engine.ConnectMain(args); code != 0 {
 			return fmt.Errorf("engine connect exited with code %d", code)
