@@ -168,6 +168,29 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 	}
 }
 
+// signedClaudeAccount adds a ready claude-code account with a native sign-in
+// fixture, as the runtime package's own tests do.
+func signedClaudeAccount(t *testing.T, accounts *runtime.Accounts, label, uuid string) runtime.NativeAccount {
+	t.Helper()
+	n, err := accounts.Create("claude-code", label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{
+		".credentials.json": `{"claudeAiOauth":{"accessToken":"` + label + `-access","refreshToken":"` + label + `-refresh","expiresAt":1999999999999,"scopes":["user:inference"]}}`,
+		".claude.json":      `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-` + uuid + `","emailAddress":"` + label + `@example.test"}}`,
+	} {
+		if err = os.WriteFile(filepath.Join(n.Home, name), []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err = accounts.Capture(context.Background(), n.ID, "/fake/native")
+	if err != nil || n.Status != "ready" {
+		t.Fatalf("account %s capture: %v %v", label, n, err)
+	}
+	return n
+}
+
 // D-110: the account store already knows an account is out of quota, because
 // a failover recorded the limit after a real 429. Auto ranking must skip its
 // profile without first spending a turn on the same rejection, name the typed
@@ -175,39 +198,11 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 func TestProfileChoiceSkipsExhaustedAccountQuota(t *testing.T) {
 	e := newEnv(t)
 	accounts := runtime.NewAccounts()
-	n, err := accounts.Create("claude-code", "main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, raw := range map[string]string{
-		".credentials.json": `{"claudeAiOauth":{"accessToken":"main-access","refreshToken":"main-refresh","expiresAt":1999999999999,"scopes":["user:inference"]}}`,
-		".claude.json":      `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-000000000001","emailAddress":"main@example.test"}}`,
-	} {
-		if err = os.WriteFile(filepath.Join(n.Home, name), []byte(raw), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n, err = accounts.Capture(context.Background(), n.ID, "/fake/native"); err != nil || n.Status != "ready" {
-		t.Fatalf("account capture: %v %v", n, err)
-	}
+	n := signedClaudeAccount(t, accounts, "main", "000000000001")
 	// A healthy account of the same harness serves another repository only,
 	// so it must not hide the exhausted account's hold in this one.
-	other, err := accounts.Create("claude-code", "other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, raw := range map[string]string{
-		".credentials.json": `{"claudeAiOauth":{"accessToken":"other-access","refreshToken":"other-refresh","expiresAt":1999999999999,"scopes":["user:inference"]}}`,
-		".claude.json":      `{"oauthAccount":{"accountUuid":"aaaaaaaa-bbbb-cccc-dddd-000000000002","emailAddress":"other@example.test"}}`,
-	} {
-		if err = os.WriteFile(filepath.Join(other.Home, name), []byte(raw), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if other, err = accounts.Capture(context.Background(), other.ID, "/fake/native"); err != nil || other.Status != "ready" {
-		t.Fatalf("other account capture: %v %v", other, err)
-	}
-	if err = accounts.SetRepos(other.ID, []string{"github.com/other/repo"}); err != nil {
+	other := signedClaudeAccount(t, accounts, "other", "000000000002")
+	if err := accounts.SetRepos(other.ID, []string{"github.com/other/repo"}); err != nil {
 		t.Fatal(err)
 	}
 	scopes, err := reposcope.Open(filepath.Dir(accounts.Root))
@@ -240,6 +235,52 @@ func TestProfileChoiceSkipsExhaustedAccountQuota(t *testing.T) {
 	choice, err = e.s.chooseProfile(Reviewer{}, repo)
 	if err != nil || choice.Name != "top" {
 		t.Fatalf("auto chose %q %v after the reset, want the top profile", choice.Name, err)
+	}
+}
+
+// D-110 review: the turn runs in the checkout reviewerDir picks, and a
+// fallback checkout can carry a different origin than the PR's repository.
+// Ranking must read that origin, or a healthy account scoped to the PR
+// repository hides the hold of the only account that may run in the checkout
+// the turn actually uses.
+func TestProfileChoiceUsesTheLaunchCheckoutRepo(t *testing.T) {
+	e := newEnv(t)
+	checkout := t.TempDir()
+	if err := gitCommand(context.Background(), checkout, "init", "--quiet").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCommand(context.Background(), checkout, "remote", "add", "origin", "https://github.com/actual/checkout.git").Run(); err != nil {
+		t.Fatal(err)
+	}
+	accounts := runtime.NewAccounts()
+	limited := signedClaudeAccount(t, accounts, "limited", "000000000001")
+	serving := signedClaudeAccount(t, accounts, "serving", "000000000002")
+	if err := accounts.SetRepos(limited.ID, []string{"github.com/actual/checkout"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.SetRepos(serving.ID, []string{"github.com/owner/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := reposcope.Open(filepath.Dir(accounts.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = scopes.MarkLimited(limited.ID, e.clock.Add(5*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	top := profile.Profile{Name: "top", Harness: "claude-code", Model: "claude-sonnet-4.5", Diagnostics: 10, Cost: 10}
+	spare := profile.Profile{Name: "spare", Harness: profile.HarnessMock, Diagnostics: 6, Cost: 6}
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) { return []profile.Profile{top, spare}, nil }
+	// The GitHub record's own paths are gone, so the launch falls back to its
+	// session directory, a checkout of another repository.
+	r := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Key: "github.com/owner/repo#17", Dir: checkout}
+	repo := e.s.reviewRepoIdentity(context.Background(), r)
+	if repo != "github.com/actual/checkout" {
+		t.Fatalf("repo identity = %q, want the launch checkout's origin", repo)
+	}
+	choice, err := e.s.chooseProfile(Reviewer{}, repo)
+	if err != nil || choice.Name != "spare" {
+		t.Fatalf("auto chose %q %v, want the profile whose account has quota in the launch checkout", choice.Name, err)
 	}
 }
 
