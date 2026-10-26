@@ -154,6 +154,9 @@ func (s *Service) closeLocalCIAdmission() []localCIStopTarget {
 // started, without waiting for them. An engine calls it as soon as it stops, so
 // their teardown overlaps the workers that are still finishing.
 func (s *Service) CancelLocalCI() {
+	if s.registeredWarms != nil {
+		s.registeredWarms.cancelAll()
+	}
 	for _, target := range s.closeLocalCIAdmission() {
 		target.cancel()
 	}
