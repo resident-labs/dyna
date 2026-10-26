@@ -122,7 +122,7 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	check := nodeCheck{id: "go-static", name: "go-static", reports: ReportJUnit,
 		job:       &JobRef{Workflow: ".github/workflows/ci.yml", Name: "go-shard", Matrix: []string{"shard:7"}},
 		resources: checkResources{CPUs: 4, MemoryMiB: 8192}}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04")
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run-7", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, "catthehacker/ubuntu:act-22.04", "unix:///run/user/1000/podman/podman.sock")
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, script))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A host-only variable stands in for a session token or an account key.
@@ -146,6 +146,9 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	seen, err := os.ReadFile(envFile)
 	if err != nil {
 		t.Fatalf("act environment not recorded: %v", err)
+	}
+	if !strings.Contains(string(seen), "DOCKER_HOST=unix:///run/user/1000/podman/podman.sock") {
+		t.Fatalf("act did not get the machine's runtime socket: %s", seen)
 	}
 	if strings.Contains(string(seen), "DYNA_HOST_ONLY_SECRET") {
 		t.Fatalf("a host variable reached act: %s", seen)

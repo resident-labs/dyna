@@ -339,6 +339,7 @@ func editCommand() *cobra.Command {
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
+	var containerSocket string
 	var suites []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
@@ -390,6 +391,12 @@ func editCommand() *cobra.Command {
 				list := parseSuites(suites)
 				patch.Suites, changed = &list, true
 			}
+			if c.Flags().Changed("container-socket") {
+				if containerSocket != "" && !strings.HasPrefix(containerSocket, "unix://") {
+					return fmt.Errorf("container socket must be a unix:// path, such as unix:///var/run/docker.sock")
+				}
+				patch.ContainerSocket, changed = &containerSocket, true
+			}
 			if allowHostChecks || disallowHostChecks {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
@@ -418,6 +425,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
 	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
 	cmd.Flags().StringSliceVar(&suites, "suites", nil, "limit local CI to these suites (comma separated; empty allows every suite)")
+	cmd.Flags().StringVar(&containerSocket, "container-socket", "", "container runtime socket for workflow jobs (unix:// path; empty uses Docker's)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
