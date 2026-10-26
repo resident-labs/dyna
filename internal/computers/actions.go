@@ -132,7 +132,7 @@ type guardedInput struct {
 	keys keyDevice
 	held map[string]bool
 	// heldKeys lists the keys pressed and not released, in press order.
-	heldKeys []string
+	heldKeys []heldKey
 	epoch    uint64 // counts takeovers
 	opens    uint64 // the epoch the current action began in
 	cancel   context.CancelFunc
@@ -197,9 +197,13 @@ func (g *guardedInput) releaseLocked() {
 	}
 	g.held = map[string]bool{}
 	for i := len(g.heldKeys) - 1; i >= 0; i-- {
-		_ = g.keys.key(g.heldKeys[i], false)
+		_ = g.keys.key(g.heldKeys[i].name, false)
 	}
 	g.heldKeys = nil
+}
+
+func (g *guardedInput) heldIndex(id string) int {
+	return slices.IndexFunc(g.heldKeys, func(h heldKey) bool { return h.id == id })
 }
 
 // press presses a key and reports whether this call pressed it. A key already
@@ -212,13 +216,14 @@ func (g *guardedInput) press(name string) (bool, error) {
 	if g.epoch != g.opens {
 		return false, errControlLost
 	}
-	if slices.Contains(g.heldKeys, name) {
+	id := keyIdentity(name)
+	if g.heldIndex(id) >= 0 {
 		return false, nil
 	}
 	if err := g.keys.key(name, true); err != nil {
 		return false, err
 	}
-	g.heldKeys = append(g.heldKeys, name)
+	g.heldKeys = append(g.heldKeys, heldKey{id: id, name: name})
 	return true, nil
 }
 
@@ -227,16 +232,34 @@ func (g *guardedInput) press(name string) (bool, error) {
 func (g *guardedInput) releaseKey(name string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	at := slices.Index(g.heldKeys, name)
+	at := g.heldIndex(keyIdentity(name))
 	if at < 0 {
 		return nil
 	}
-	if err := g.keys.key(name, false); err != nil {
+	if err := g.keys.key(g.heldKeys[at].name, false); err != nil {
 		return err
 	}
 	g.heldKeys = slices.Delete(g.heldKeys, at, at+1)
 	return nil
 }
+
+// modifierMask is the modifier bit a key name sets, or 0 for an ordinary key.
+// Aliases and left and right forms of one modifier share a bit.
+func modifierMask(key string) uint32 {
+	return map[string]uint32{"Shift_L": 1, "Shift_R": 1, "Control_L": 4, "Control_R": 4, "Alt_L": 8, "Alt_R": 128, "Super_L": 64, "Super_R": 64, "Meta_L": 64, "Meta_R": 64}[keyName(key)]
+}
+
+// keyIdentity names the device key a key name presses, so CTRL and CONTROL
+// are one held key.
+func keyIdentity(key string) string {
+	if mask := modifierMask(key); mask != 0 {
+		return fmt.Sprintf("modifier %d", mask)
+	}
+	return keyName(key)
+}
+
+// heldKey is a key the guard holds: the device key and the name that pressed it.
+type heldKey struct{ id, name string }
 
 // actionKeys returns the key names an action presses. Shift rewrites symbols,
 // so the map, the press and the release all use this one normalization.

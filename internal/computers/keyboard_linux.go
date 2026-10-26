@@ -232,9 +232,7 @@ func (k *virtualKeyboard) send(op uint16, args ...uint32) (err error) {
 	}
 	return k.w.roundtrip()
 }
-func keyboardModifier(key string) uint32 {
-	return map[string]uint32{"Shift_L": 1, "Shift_R": 1, "Control_L": 4, "Control_R": 4, "Alt_L": 8, "Alt_R": 128, "Super_L": 64, "Super_R": 64, "Meta_L": 64, "Meta_R": 64}[keyName(key)]
-}
+func keyboardModifier(key string) uint32 { return modifierMask(key) }
 func (k *virtualKeyboard) syncModifiers() error {
 	mask := k.modifiers
 	if k.autoShift > 0 {
