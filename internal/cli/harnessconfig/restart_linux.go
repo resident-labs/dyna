@@ -7,19 +7,29 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	harnesshome "dyna-agent/internal/harness/home"
 )
+
+// restartOutdatedServer is the restart for this process's shell MCP server.
+func restartOutdatedServer() func() {
+	return restartOnOutdated(os.Args, harnesshome.LaunchEnv(), syscall.Exec)
+}
 
 // restartOnOutdated returns the restart for a session's shell MCP server: it
 // re-execs the server through the path that started it. An installed update
 // has replaced the binary at that path, and the exec inherits the server's
 // stdio, so the harness keeps its connection while the next request runs on
 // the current build: a schema bump no longer cuts a running session's shells
-// off (D-171). Exec returns only when it fails, in which case the server
-// keeps answering with the error it already reported.
-func restartOnOutdated(argv []string) func() {
+// off (D-171). environ is the environment this process launched with, not the
+// one main restored to the owner's roots: the restarted server must keep the
+// session's private HOME, roots and tool bridges. exec returns only when it
+// fails, in which case the server keeps answering with the error it already
+// reported.
+func restartOnOutdated(argv, environ []string, exec func(path string, argv, environ []string) error) func() {
 	return func() {
 		for _, target := range restartTargets(argv) {
-			if err := syscall.Exec(target, argv, os.Environ()); err == nil {
+			if err := exec(target, argv, environ); err == nil {
 				return
 			}
 		}
