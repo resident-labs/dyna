@@ -158,14 +158,14 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 	defer cancel()
 	started := time.Now()
 	result := ActionResult{Frames: []Frame{}}
-	var pointer *guardedPointer
+	pointer := newGuardedInput(nil)
 	var rawPointer *virtualPointer
 	defer func() {
 		s.mu.Lock()
 		s.actPointer = nil
 		s.mu.Unlock()
-		if pointer != nil {
-			pointer.release()
+		pointer.release()
+		if rawPointer != nil {
 			rawPointer.close()
 		}
 	}()
@@ -196,16 +196,18 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 			if err != nil {
 				return result, err
 			}
+			pointer.setKeys(keyboard)
 
 		}
 		switch kind {
 		case "click", "double_click", "move", "drag", "scroll", "pointer_down", "pointer_up":
-			if pointer == nil {
+			if rawPointer == nil {
 				raw, err := newVirtualPointer(ctx, display, width, height)
 				if err != nil {
 					return result, err
 				}
-				rawPointer, pointer = raw, newGuardedPointer(raw)
+				rawPointer = raw
+				pointer.setPointer(raw)
 			}
 		}
 		// Check control and start the action in one step under the lock a
@@ -261,27 +263,21 @@ func (s *supervisor) act(ctx context.Context, r Request) (ActionResult, error) {
 // beginAct starts an action only while the agent has control, and registers the
 // pointer so a takeover can interrupt it. The check and the start share one
 // critical section with the takeover, which also holds s.mu.
-func (s *supervisor) beginAct(p *guardedPointer, cancel context.CancelFunc) bool {
+func (s *supervisor) beginAct(p *guardedInput, cancel context.CancelFunc) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Control != ControlAgent {
 		return false
 	}
-	if p != nil {
-		s.actPointer = p
-		p.begin(cancel)
-	}
+	s.actPointer = p
+	p.begin(cancel)
 	return true
 }
 
 // runInputAction runs one input action whose context a takeover cancels. A
 // takeover during it turns the pointer's error into errControlLost.
-func runInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtualKeyboard, display string) error {
-	err := executeInputAction(ctx, a, p, k, display)
-	if p == nil {
-		return err
-	}
-	return p.end(err)
+func runInputAction(ctx context.Context, a Action, p *guardedInput, k *virtualKeyboard, display string) error {
+	return p.end(executeInputAction(ctx, a, p, k, display))
 }
 
 // A compositor roundtrip acknowledges input, not the application's focus work.
@@ -289,7 +285,7 @@ func runInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtual
 // before later input. Other windows can also damage the output; this is a
 // bounded scheduling aid, not an application-level acknowledgement. It fails
 // open: without damage, a fixed pause stands in and the action still succeeds.
-func executeInputAction(ctx context.Context, a Action, p *guardedPointer, k *virtualKeyboard, display string) error {
+func executeInputAction(ctx context.Context, a Action, p *guardedInput, k *virtualKeyboard, display string) error {
 	var damage *outputDamage
 	var damageErr error
 	waitForFocus := isShortcut(a) || actionType(a) == "click" || actionType(a) == "double_click"
@@ -344,21 +340,13 @@ func isShortcut(a Action) bool {
 	return modified && ordinary
 }
 
-// idleRefreshHz is the lowest output refresh rate: an unwatched desktop drops to
-// it. keypressHold lasts one and a half frames at that rate, so every frame
-// sees the key down.
-const (
-	idleRefreshHz = 10
-	keypressHold  = time.Second * 3 / (2 * idleRefreshHz)
-)
-
-func executeAction(ctx context.Context, a Action, p *guardedPointer, keyboard *virtualKeyboard) (err error) {
+func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *virtualKeyboard) (err error) {
 	kind := actionType(a)
 	keys, _ := actionValue[[]string](a, "keys")
-	if kind == "keypress" {
+	if kind == "keypress" || kind == "key_down" || kind == "key_up" {
 		keys = shiftedKeys(keys)
 	}
-	if kind == "keypress" || kind == "type" || len(keys) > 0 {
+	if kind == "keypress" || kind == "key_down" || kind == "key_up" || kind == "type" || len(keys) > 0 {
 		if err := keyboard.activate(); err != nil {
 			return err
 		}
@@ -370,18 +358,23 @@ func executeAction(ctx context.Context, a Action, p *guardedPointer, keyboard *v
 	var pressed []string
 	defer func() {
 		for i := len(pressed) - 1; i >= 0; i-- {
-			if releaseErr := keyboard.key(pressed[i], false); err == nil {
+			if releaseErr := p.key(pressed[i], false); err == nil {
 				err = releaseErr
 			}
 		}
 	}()
-	for _, key := range keys {
-		if err := keyboard.key(key, true); err != nil {
+	// key_down and key_up manage their keys themselves, below.
+	press := keys
+	if kind == "key_down" || kind == "key_up" {
+		press = nil
+	}
+	for _, key := range press {
+		if err := p.key(key, true); err != nil {
 			return err
 		}
 		pressed = append(pressed, key)
 	}
-	if kind != "keypress" && len(keys) > 0 {
+	if kind != "keypress" && len(press) > 0 {
 		if err := inputPause(ctx, 50*time.Millisecond); err != nil {
 			return err
 		}
@@ -432,7 +425,27 @@ func executeAction(ctx context.Context, a Action, p *guardedPointer, keyboard *v
 	case "keypress":
 		// Hold the keys for a moment. An app that samples key state once per
 		// frame misses a press that is released within the same frame.
-		return inputPause(ctx, keypressHold)
+		hold, err := keypressHold(a)
+		if err != nil {
+			return err
+		}
+		return inputPause(ctx, hold)
+	case "key_down":
+		// The keys stay held, tracked by the guard, until key_up, a takeover or
+		// the end of the batch.
+		for _, key := range keys {
+			if err := p.key(key, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "key_up":
+		for i := len(keys) - 1; i >= 0; i-- {
+			if err := p.key(keys[i], false); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "type":
 		text, _ := actionValue[string](a, "text")
 		return keyboard.typeText(ctx, text)

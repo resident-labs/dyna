@@ -84,8 +84,8 @@ func TestKeyboardMapExtrasKeepStandardUSKeys(t *testing.T) {
 }
 
 func TestKeypressHoldCoversIdleFrame(t *testing.T) {
-	if frame := time.Second / idleRefreshHz; keypressHold <= frame {
-		t.Fatalf("hold %v does not outlast one idle frame (%v)", keypressHold, frame)
+	if frame := time.Second / idleRefreshHz; defaultKeypressHold <= frame {
+		t.Fatalf("hold %v does not outlast one idle frame (%v)", defaultKeypressHold, frame)
 	}
 }
 

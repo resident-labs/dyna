@@ -82,7 +82,9 @@ A native or frame-driven app (for example an egui window) can miss a fast drag. 
 it with `step_ms` on `drag`, such as `{"type":"drag","step_ms":120,"path":[...]}`, so
 each point and the press last a few frames. Or split it into `pointer_down`, `move` and
 `pointer_up` actions with a `wait` between them. Without these fields the timing stays as
-before.
+before. To hold a key, such as a game's Use button for several ticks, send
+`{"type":"keypress","keys":["e"],"hold_ms":600}`, or `key_down`, a `wait`, and `key_up`.
+A person who takes control releases every held key and button at once.
 Its schema uses the same definition as input validation.
 
 Every input batch and `dyna browser open` require a short `--status` saying what you intend to do.

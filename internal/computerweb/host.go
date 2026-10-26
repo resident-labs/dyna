@@ -404,10 +404,10 @@ func Summarize(a computers.Action) string {
 			return "scroll · " + dir + at()
 		}
 		return "scroll" + at()
-	case "keypress":
+	case "keypress", "key_down", "key_up":
 		var keys []string
 		_ = json.Unmarshal(a["keys"], &keys)
-		return "keypress · " + strings.Join(keys, "+")
+		return strings.ReplaceAll(typ, "_", " ") + " · " + strings.Join(keys, "+")
 	case "type":
 		var secret bool
 		_ = json.Unmarshal(a["secret"], &secret)
