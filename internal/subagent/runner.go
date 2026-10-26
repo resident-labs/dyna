@@ -614,7 +614,7 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 	}
 	var out []room.Message
 	for messageID, n := range claims.claimedTurn {
-		if received[turnPost{n, messageID}] || claims.cancelled[messageID] || claims.dismissed[messageID] {
+		if received[turnPost{n, messageID}] || claims.cancelled[messageID] || claims.dismissed[messageID] || slices.Contains(meta.UncertainInputIDs, messageID) {
 			continue
 		}
 		// An accepted turn carried the claimed post in its prompt even when no
@@ -655,7 +655,7 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 		if claims.cancelled[msg.ID] && len(meta.InheritedInboxes) == 0 {
 			continue
 		}
-		if delivered[msg.ID] || claims.dismissed[msg.ID] {
+		if delivered[msg.ID] || claims.dismissed[msg.ID] || slices.Contains(meta.UncertainInputIDs, msg.ID) {
 			continue
 		}
 		delivered[msg.ID] = true

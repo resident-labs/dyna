@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,9 +85,13 @@ var (
 type Meta struct {
 	HistoryOnly bool `json:"historyOnly,omitempty"`
 	// Service marks managed sessions and their helpers for mention routing and member grouping.
-	Service              bool                 `json:"service,omitempty"`
-	Role                 string               `json:"role,omitempty"`
-	InheritedReceipts    map[string]bool      `json:"inheritedReceipts,omitempty"`
+	Service           bool            `json:"service,omitempty"`
+	Role              string          `json:"role,omitempty"`
+	InheritedReceipts map[string]bool `json:"inheritedReceipts,omitempty"`
+	// UncertainInputIDs names posts a repaired turn had handed to its harness
+	// with no delivery receipt. The harness may already have run them, so no
+	// later turn admits them again until the owner resolves the input.
+	UncertainInputIDs    []string             `json:"uncertainInputIds,omitempty"`
 	ConsolidationHistory []ConsolidationState `json:"consolidationHistory,omitempty"`
 	ID                   string               `json:"id"`
 	Name                 string               `json:"name,omitempty"`
@@ -214,7 +219,12 @@ type Delivery struct {
 type Turn struct {
 	// InputCutoff bounds posts present when a turn ended, to prevent automatic
 	// retries of failed turns. A fresh post beyond it can start another turn.
-	InputCutoff        *int64                          `json:"inputCutoff,omitempty"`
+	InputCutoff *int64 `json:"inputCutoff,omitempty"`
+	// StartCutoff is the input boundary when the turn started: posts before it
+	// were read, and a post after it wakes the session again. A repaired turn
+	// uses it as its input cutoff, so input queued while that turn ran is not
+	// mistaken for input it already read.
+	StartCutoff        *int64                          `json:"startCutoff,omitempty"`
 	Deadline           time.Time                       `json:"deadline,omitempty"`
 	RoomHeld           bool                            `json:"roomHeld,omitempty"`
 	PendingInputIDs    []string                        `json:"pendingInputIds,omitempty"`
@@ -280,6 +290,21 @@ type Turn struct {
 // the turn's prompt and the post was carried input, or a steering record
 // proves the post reached it. Claiming a post alone is not proof: a repaired
 // turn never accepted and its post must stay retryable.
+// DispatchedWithoutReceipt reports a steer this turn handed to its harness with
+// no delivery receipt yet. The engine and the runner can die between the two, so
+// automatic recovery must not run that input again: only the owner can decide.
+func (t Turn) DispatchedWithoutReceipt(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, steer := range t.Steering {
+		if steer.ID == id {
+			return !steer.Delivered
+		}
+	}
+	return false
+}
+
 func (t Turn) DeliveredPost(id string) bool {
 	if id == "" {
 		return false
@@ -860,12 +885,24 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		rooms := &room.Store{Root: filepath.Join(filepath.Dir(s.root()), "rooms")}
-		cutoff, err := terminalCutoff(rooms, meta.RoomID)
-		if err != nil {
-			return err
+		// The turn measured its input boundary when it started, so input queued
+		// while it ran is still fresh: a dead turn never read that input. Only a
+		// record from before that measurement falls back to the size now.
+		cutoff := t.StartCutoff
+		if cutoff == nil {
+			rooms := &room.Store{Root: filepath.Join(filepath.Dir(s.root()), "rooms")}
+			cutoff, err = terminalCutoff(rooms, meta.RoomID)
+			if err != nil {
+				return err
+			}
 		}
 		t.InputCutoff = cutoff
+		// Save the quarantine first. A repair that stops after the terminal turn
+		// would never record it again, because a later repair sees a finished
+		// turn, and the uncertain input could then enter another turn.
+		if _, err := s.quarantineUncertainInput(&meta, t); err != nil {
+			return err
+		}
 		readRevision, _ := s.turnVersion(id, n)
 		var gate gateState
 		if dir, err := s.Dir(id); err == nil {
@@ -885,6 +922,34 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 		return nil
 	})
 	return repaired, err
+}
+
+// quarantineUncertainInput saves the live input a dead runner handed to its
+// harness without a receipt, so no later turn admits it again. The write happens
+// before the terminal turn, in its own transaction: a repair that stops after the
+// turn would leave the quarantine unsaved forever.
+func (s *Store) quarantineUncertainInput(meta *Meta, t Turn) (bool, error) {
+	added := false
+	for _, steer := range t.Steering {
+		if steer.ID == "" || steer.Delivered || slices.Contains(meta.UncertainInputIDs, steer.ID) {
+			continue
+		}
+		// Input the turn drained at its start was read from the room log and
+		// stays with the claim that guards it; a live post the runner handed over
+		// mid-turn is the uncertain one.
+		if slices.Contains(t.PendingInputIDs, steer.ID) {
+			continue
+		}
+		meta.UncertainInputIDs = append(meta.UncertainInputIDs, steer.ID)
+		added = true
+	}
+	if !added {
+		return false, nil
+	}
+	if err := s.writeMeta(*meta); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ReportTarget supplies the obligation source for a first or schema turn:
