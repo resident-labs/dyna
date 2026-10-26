@@ -61,8 +61,11 @@
     if (!filed) return ''
     return short(filed, room?.name)
   })
+  // A note adds evidence to an issue; its card reads who wrote it, then the text.
+  let noted = $derived(payload?.type === 'noted')
+  let noter = $derived(payload?.actor ? short(payload.actor, room?.name) : '')
   let issueID = $derived(payload?.issueId ?? (payload ? post.id : ''))
-  let actionable = $derived(!!payload && payload.state === 'open' && issueID !== '')
+  let actionable = $derived(!!payload && !noted && payload.state === 'open' && issueID !== '')
   // What closed the issue, named once. An automatic close carries the merging
   // PR and its commit, so the reason line stays out: it says the same fact.
   let closedLine = $derived.by(() => {
@@ -115,7 +118,7 @@
   {surface}
   title={number > 0 ? `D-${number}` : 'Issue'}
   chips={issueState ? [{ label: stateWords[issueState], tone: stateTone[issueState] }] : []}
-  summary={[title, who ? `filed by ${who}` : ''].filter(Boolean).join(' · ')}
+  summary={[title, noted ? (noter ? `note by ${noter}` : 'note') : who ? `filed by ${who}` : ''].filter(Boolean).join(' · ')}
 >
   {#snippet icon()}◆{/snippet}
   {#snippet detail()}
@@ -132,6 +135,7 @@
     {#if payload?.cost || payload?.direction}
       <p class="meta">{payload.cost}{#if payload.cost && payload.direction}{' · '}{/if}{payload.direction}</p>
     {/if}
+    {#if noted && payload?.detail}<p class="reason">{payload.detail}</p>{/if}
     {#if payload?.assignee}<p class="meta">Assigned to {short(payload.assignee, room?.name)}</p>{/if}
     {#if closedLine}
       <p class="meta">{closedLine}</p>

@@ -638,6 +638,38 @@ func (s *Store) changeIssueFrom(ctx context.Context, roomID, id, by string, orig
 	return out, err
 }
 
+// NoteIssue adds evidence to an existing issue, in any state, and keeps the
+// issue as it is. The note is one quiet post of the issue's own event family, so
+// the issue history shows it and the room's root reads it without waking. Like
+// filing, any session or the owner may note, also from another room (D-111), so
+// it checks no triage right; by is the address that credits the note.
+func (s *Store) NoteIssue(roomID, id, by, text string, atts []Attachment) (Issue, error) {
+	text, by = strings.TrimSpace(text), strings.TrimSpace(by)
+	if by == "" || (text == "" && len(atts) == 0) {
+		return Issue{}, errors.New("a note needs an author and text or an attachment")
+	}
+	rec, err := s.Resolve(roomID)
+	if err != nil {
+		return Issue{}, err
+	}
+	if by != rec.Name && !strings.HasPrefix(by, rec.Name+":") && !s.filerNamesRoom(by) {
+		return Issue{}, errors.New("a note must come from a session or the owner")
+	}
+	i, err := s.Issue(rec.ID, id)
+	if err != nil {
+		return Issue{}, err
+	}
+	ev := IssueEvent{
+		Type: IssueNoted, IssueID: i.ID, Number: i.Number, Title: i.Title, State: i.State,
+		Filer: i.Filer, Actor: IssueActor(by), Assignee: i.Assignee, Detail: text,
+	}
+	if i.File != "" {
+		ev.Files = []IssueFile{{Path: i.File, Line: i.Line}}
+	}
+	_, err = s.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}, FreshID: true, Attachments: atts})
+	return i, err
+}
+
 // postIssueChange posts the typed event of one issue change. It is quiet: the
 // owner feed and an assignee read it, and no session wakes.
 func (s *Store) postIssueChange(rec Record, i *Issue, by string, origin CloseOrigin) error {
