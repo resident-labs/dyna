@@ -141,6 +141,14 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 			}
 			return VerdictPending, "", "local CI stopped with the engine; running it again", nil
 		}
+		// A run that never started says nothing about the commit, so the verdict
+		// names the scheduling cause instead of reporting a failed test.
+		if result.Cause == localci.CauseScheduling {
+			if result.Resumed {
+				return VerdictFailed, logs, localFailureNote(result), nil
+			}
+			return VerdictPending, "", "local CI could not start a run; trying again", nil
+		}
 		return VerdictFailed, logs, "local CI failed", nil
 	default:
 		return VerdictPending, "", "waiting for local CI", nil
