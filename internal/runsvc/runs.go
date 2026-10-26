@@ -53,15 +53,37 @@ func Cancel(ctx context.Context, id string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	stopGrace()
+	// Non-keep shells stop through their supervisors, which record the exit;
+	// a kept job outlives the run, so its groups are exempt from the kill.
+	store := shells.DefaultStore()
+	var errs []error
+	if err := store.StopRun(id); err != nil {
+		errs = append(errs, fmt.Errorf("stopping its shell jobs: %w", err))
+	}
+	keep := map[int]bool{}
+	if list, err := store.List(false); err == nil {
+		for _, in := range list {
+			if in.Run == id && in.Keep {
+				keep[in.Pid], keep[in.Supervisor] = true, true
+			}
+		}
+	} else {
+		errs = append(errs, fmt.Errorf("listing its shell jobs: %w", err))
+	}
 	leader := 0 // a recorded pid is the run's group only while that process lives
 	if runstore.Alive(m) {
 		leader = m.Pid
 	}
-	if err := runprocs.Kill(id, leader); err != nil {
-		return fmt.Errorf("run %s is canceled, but ending its processes failed: %w", id, err)
+	if err := runprocs.Kill(id, leader, keep); err != nil {
+		errs = append(errs, fmt.Errorf("ending its processes: %w", err))
 	}
-	if err := shells.DefaultStore().StopRun(id); err != nil {
-		return fmt.Errorf("run %s is canceled, but stopping its shell jobs failed: %w", id, err)
+	// A coordinator killed before it could finish leaves the run running.
+	// A run that already finished keeps its result.
+	if err := runstore.ForceStatus(id, "canceled", "canceled (processes ended after the grace period)"); err != nil {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("run %s is canceled, but cleanup failed: %w", id, err)
 	}
 	return nil
 }

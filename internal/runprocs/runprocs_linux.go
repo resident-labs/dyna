@@ -25,9 +25,10 @@ const exitWait = 3 * time.Second
 // Kill sends SIGKILL to every process group that holds a process stamped with
 // runID, and to the group led by leader (the run's own process, which starts
 // in its own session; 0 for none). It then waits for those processes to exit.
-// It never signals the caller's own group, and it touches only processes that
-// carry the run's stamp.
-func Kill(runID string, leader int) error {
+// It never signals the caller's own group or a group in keep (the groups of
+// jobs that outlive the run), and it touches only processes that carry the
+// run's stamp.
+func Kill(runID string, leader int, keep map[int]bool) error {
 	if runID == "" {
 		return errors.New("a run id is required")
 	}
@@ -46,7 +47,8 @@ func Kill(runID string, leader int) error {
 	}
 	var errs []error
 	for g := range groups {
-		if g <= 1 || g == own {
+		if g <= 1 || g == own || keep[g] {
+			delete(groups, g)
 			continue
 		}
 		if err := syscall.Kill(-g, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {

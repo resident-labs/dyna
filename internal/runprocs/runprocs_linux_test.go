@@ -26,7 +26,7 @@ func TestKillEndsStampedGroupsOnly(t *testing.T) {
 	stamped := start("DYNA_WORKER_RUN=" + run)
 	other := start("DYNA_WORKER_RUN=wf_20261026-010101-00000000")
 	plain := start()
-	if err := Kill(run, 0); err != nil {
+	if err := Kill(run, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := stamped.Wait(); err == nil || stamped.ProcessState.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
