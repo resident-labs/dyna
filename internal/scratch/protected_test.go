@@ -33,7 +33,7 @@ func TestSweepSkipsProtectedPathsAndLogsOnce(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = os.Chmod(blocked, 0700) })
 			var logs []string
-			opts := Options{Pressure: true, Lookup: func(string) Owner { return Owner{Known: true, ClosedAt: time.Now().Add(-48 * time.Hour)} }, Logf: func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }}
+			opts := Options{Lookup: func(string) Owner { return Owner{Known: true, ClosedAt: time.Now().Add(-ClosedRetention - time.Hour)} }, Logf: func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }}
 			for pass := 0; pass < 2; pass++ {
 				result, err := Sweep(t.Context(), opts)
 				if err != nil {
