@@ -75,6 +75,31 @@ type firstUseCall struct {
 	err       error
 }
 
+// WaitInstalls waits until no shared first-use install is running. An install
+// runs in the background so one shared install outlives a caller that stops
+// waiting, and it keeps writing into the bundle root until it finishes. A test
+// or a shutdown that removes that root waits here first (D-143).
+func WaitInstalls(ctx context.Context) error {
+	for {
+		firstUseMu.Lock()
+		pending := make([]chan struct{}, 0, len(firstUseCalls))
+		for _, call := range firstUseCalls {
+			pending = append(pending, call.done)
+		}
+		firstUseMu.Unlock()
+		if len(pending) == 0 {
+			return nil
+		}
+		for _, done := range pending {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+}
+
 var (
 	firstUseMu    sync.Mutex
 	firstUseCalls = map[string]*firstUseCall{}
