@@ -155,6 +155,10 @@ func TestLiveStopCancelsWithoutAMarker(t *testing.T) {
 	default:
 		t.Fatal("stop returned before cancelling the harness")
 	}
+	// The stopped turn names who asked, so it reads as a stop, not a failure (D-276).
+	if turn.StopBy != "owner" || !strings.Contains(turn.Error, "stopped by owner") {
+		t.Fatalf("stop attribution = %q, error %q", turn.StopBy, turn.Error)
+	}
 	dir, err := e.m.Store.Dir(info.ID)
 	if err != nil {
 		t.Fatal(err)

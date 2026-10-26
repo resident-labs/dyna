@@ -994,6 +994,19 @@ func (m *Manager) receivesReport(child Info, stopper string) bool {
 	return err == nil && ok && root.ID == stopper
 }
 
+// stopper names the caller of a stop for the turn record: the stopping
+// session's address, or "owner" for a stop that no session made.
+func (m *Manager) stopper(ctx context.Context) string {
+	actor := authority.Of(ctx)
+	if actor.Role == authority.Session && actor.Session != "" {
+		if meta, err := m.store().ReadMeta(actor.Session); err == nil {
+			return meta.Address()
+		}
+		return actor.Session
+	}
+	return "owner"
+}
+
 // stopSession permits only the owning coordinator to stop a reserved session.
 func (m *Manager) stopSession(ctx context.Context, ref, reservation, reason string) (Turn, error) {
 	if err := authority.Check("subagent stop", authority.Of(ctx), nil); err != nil {
@@ -1030,6 +1043,7 @@ func (m *Manager) stopSession(ctx context.Context, ref, reservation, reason stri
 		if turn, e := store.readTurnForUpdate(info.ID, n); e == nil {
 			turn.StopAsked = true
 			turn.StopReason = reason
+			turn.StopBy = m.stopper(ctx)
 			intentErr = store.writeTurn(info.ID, turn)
 		} else {
 			intentErr = e
