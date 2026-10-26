@@ -227,6 +227,9 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 				return fmt.Errorf("this change is closed; open a new branch")
 			}
 			record.Notes = mergeNotes(old.Notes, record.Notes)
+			if err := validateNotes(record.Notes); err != nil {
+				return err
+			}
 			if opts.Title == "" {
 				record.Title = old.Title
 			}
@@ -478,7 +481,11 @@ func (s *Service) UpdateChangeNotes(key, author string, notes ChangeNotes, categ
 		if err := sameAuthor(r, author); err != nil {
 			return err
 		}
-		r.Notes = mergeNotes(r.Notes, cleanNotes(notes))
+		merged := mergeNotes(r.Notes, cleanNotes(notes))
+		if err := validateNotes(merged); err != nil {
+			return err
+		}
+		r.Notes = merged
 		if category != "" {
 			r.Category = category
 		}
