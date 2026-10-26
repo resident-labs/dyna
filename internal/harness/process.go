@@ -166,7 +166,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	// so a hung startup fails with its stderr and exit detail instead of
 	// hanging. Once any thinking, tool, usage or text event arrives the worker
 	// has started, and the timer is disarmed for the rest of the turn.
-	startupWait := startupLimit
+	startupWait := StartupLimit
 	if execution.startupLimit > 0 {
 		startupWait = execution.startupLimit
 	}
