@@ -29,7 +29,7 @@ type RoomUse struct {
 	Room    string
 	Running int
 	Idle    int
-	// Finished counts the idle sessions that hold no goal, item or PR. Only
+	// Finished counts the idle sessions that hold no open work. Only
 	// these have nothing left to do and may be closed.
 	Finished int
 }
@@ -37,13 +37,17 @@ type RoomUse struct {
 // Sessions is the room's open session count.
 func (u RoomUse) Sessions() int { return u.Running + u.Idle }
 
-// Holds returns the sessions that own an open goal, goal item or PR, from the
-// counts by kind that subagent.Manager.ResponsibilityCounts reads.
+// Holds returns the sessions that own anything open (a goal, item, PR, question,
+// child, shell job or workflow), from the counts by kind that
+// subagent.Manager.ResponsibilityCounts reads. Closing such a session would
+// disrupt that work.
 func Holds(counts map[string]map[string]int) map[string]bool {
 	out := map[string]bool{}
 	for id, byKind := range counts {
-		if byKind["goal"] > 0 || byKind["item"] > 0 || byKind["pr"] > 0 {
-			out[id] = true
+		for _, n := range byKind {
+			if n > 0 {
+				out[id] = true
+			}
 		}
 	}
 	return out
@@ -146,12 +150,12 @@ func (n Note) Advice() string {
 	}
 	share := fmt.Sprintf("this room runs %d of %d agent sessions on %s", n.Room.Sessions(), n.Total, n.Machine)
 	if n.Room.Finished > 0 {
-		return fmt.Sprintf("Close the %d idle sessions that have finished and hold no goal, item or PR; %s.", n.Room.Finished, share)
+		return fmt.Sprintf("Close the %d idle sessions that have finished and hold no open work; %s.", n.Room.Finished, share)
 	}
 	if n.Room.Running > 0 {
 		return fmt.Sprintf("Pause or stop %d of the %d running agents; %s.", (n.Room.Running+1)/2, n.Room.Running, share)
 	}
-	return fmt.Sprintf("No session is finished: the %d idle sessions still hold a goal, item or PR. Finish or hand over that work, then close them; %s.", n.Room.Idle, share)
+	return fmt.Sprintf("No session is finished: the %d idle sessions still hold open work (a goal, item, PR, question, child, shell job or workflow). Finish or hand over that work, then close them; %s.", n.Room.Idle, share)
 }
 
 // Notifier decides which rooms to tell and remembers what it told them.
