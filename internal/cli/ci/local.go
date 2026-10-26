@@ -204,6 +204,11 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 			fmt.Fprintln(c.OutOrStdout(), suite.LogTail)
 		}
 	}
+	for _, warning := range result.Warnings {
+		if label := warning.Label(); label != "" {
+			fmt.Fprintf(c.OutOrStdout(), "  warning: %s\n", label)
+		}
+	}
 	if result.Error != "" {
 		if label := result.Cause.Label(); label != "" {
 			fmt.Fprintf(c.OutOrStdout(), "  cause: %s\n", label)

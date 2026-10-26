@@ -33,6 +33,8 @@ const (
 	// containerCleanupTimeout bounds the node command that stops a run's
 	// containers, scopes and worktrees.
 	containerCleanupTimeout = time.Minute
+	// nodeCleanupAttempts is how often the cleanup after a run is tried.
+	nodeCleanupAttempts = 2
 	// runRemovalTimeout bounds the node command that stops the run's keeper,
 	// which then removes the run directory and releases its locks.
 	runRemovalTimeout = 2 * time.Minute
@@ -589,13 +591,26 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		if EngineStopping() {
 			return
 		}
-		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
-		defer stop()
-		var log tailBuffer
 		script := teardownScript(node, cache, runDir, runID, checks)
-		if e := r.nodeCommand(cleanup, &log, &log, script); e != nil {
-			err = errors.Join(err, fmt.Errorf("cleanup node: %w: %s", e, log.String()))
+		// The checks decided the commit. A cleanup that fails or times out is
+		// tried once more, because a timeout is often a busy node, and the run's
+		// directory and record are removed right after this, so a survivor would
+		// have no second chance. A cleanup that still fails is a warning on the
+		// run, never an error that replaces a passed result.
+		var failure error
+		var lastOutput string
+		for attempt := 0; attempt < nodeCleanupAttempts; attempt++ {
+			cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
+			var tail tailBuffer
+			failure = r.nodeCommand(cleanup, &tail, &tail, script)
+			stop()
+			if failure == nil {
+				return
+			}
+			lastOutput = tail.String()
 		}
+		log.Printf("local CI %s: cleanup node: %v: %s", node.Name, failure, lastOutput)
+		result.Warnings = append(result.Warnings, NodeCleanupUnfinished)
 	}()
 	if req.OnStart != nil {
 		if err := req.OnStart(control); err != nil {
