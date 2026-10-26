@@ -23,6 +23,9 @@ type Pass struct {
 	Now      time.Time
 	// Post sends a new unhealthy report. A nil Post only saves it.
 	Post func(Report) error
+	// Clear runs for a machine that is not under the condition, so a caller
+	// can end what Post began. A nil Clear does nothing.
+	Clear func(machine string) error
 }
 
 // Do examines every machine and writes one line to log for each report that is
@@ -34,6 +37,11 @@ func (p Pass) Do(log io.Writer) error {
 		res, err := Run{DataDir: p.DataDir, Machine: machine, Target: "machine", Trigger: "hook schedule", If: p.If, Cooldown: p.Cooldown, Now: p.Now, Post: p.Post}.Do()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", machine, err))
+		}
+		if (!res.Ran || res.Report.Healthy) && p.Clear != nil {
+			if cerr := p.Clear(machine); cerr != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", machine, cerr))
+			}
 		}
 		if res.Ran && !res.Repeat {
 			if _, werr := fmt.Fprintln(log, res.Report.Text()); werr != nil {
