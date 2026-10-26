@@ -288,7 +288,7 @@ func (m *Manager) runOwned(byID map[string]Info) ([]owned, error) {
 			return nil, fmt.Errorf("workflow %s has invalid published identity", entry.Name())
 		}
 		switch job.Status {
-		case "running", "ok", "error", "canceled":
+		case "running", "ok", "error", "canceled", runstore.StatusInterrupted:
 		default:
 			return nil, fmt.Errorf("workflow %s has invalid published status", entry.Name())
 		}

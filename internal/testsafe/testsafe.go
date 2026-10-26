@@ -106,6 +106,11 @@ func init() {
 			os.Setenv(f.key, temporary(f.key, dir))
 		}
 	}
+	// DYNA_DATA_DIR names the data folder directly and wins over XDG_DATA_HOME,
+	// so one outside the temporary folder must go.
+	if dir := os.Getenv("DYNA_DATA_DIR"); dir != "" && Check(dir) != nil {
+		os.Unsetenv("DYNA_DATA_DIR")
+	}
 	// Session scratch uses a disk base under the owner's cache, not a
 	// temporary-folder variable, so a test must redirect it explicitly. Keep
 	// this redirect quiet: hook tests compare a hook's captured log exactly,
