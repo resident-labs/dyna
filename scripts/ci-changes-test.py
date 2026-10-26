@@ -48,7 +48,7 @@ class ChangesTest(unittest.TestCase):
 
     def test_docs_only_change_skips_go_when_main_moved(self):
         base = self.pull_request("docs/guide.md", main_file="internal/x/x.go")
-        self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false"})
+        self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false"})
 
     def test_go_change_runs_go(self):
         base = self.pull_request("internal/x/y.go", main_file="docs/z.md")
@@ -57,11 +57,20 @@ class ChangesTest(unittest.TestCase):
     def test_empty_base_on_an_ordinary_commit_diffs_from_the_first_parent(self):
         self.pull_request("docs/guide.md")
         self.git("checkout", "-q", "pr")
-        self.assertEqual(self.run_filter("pull_request", ""), {"relay": "false", "go": "false", "computers": "false"})
+        self.assertEqual(self.run_filter("pull_request", ""), {"relay": "false", "go": "false", "computers": "false", "web": "false"})
+
+    def test_go_change_skips_web(self):
+        base = self.pull_request("internal/x/y.go")
+        self.assertEqual(self.run_filter("pull_request", base)["web"], "false")
+
+    def test_web_change_runs_web_and_go(self):
+        base = self.pull_request("web/src/a.ts")
+        out = self.run_filter("pull_request", base)
+        self.assertEqual((out["web"], out["go"]), ("true", "true"))
 
     def test_other_events_run_everything(self):
         base = self.pull_request("docs/guide.md")
-        self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true"})
+        self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true", "web": "true"})
 
 
 if __name__ == "__main__":
