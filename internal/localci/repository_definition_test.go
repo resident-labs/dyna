@@ -157,13 +157,23 @@ func TestThisRepositoryDefinitionParses(t *testing.T) {
 	if !ok {
 		t.Fatal("this repository's definition has no go suite")
 	}
+	// The desktop module is a nested module, so the root Go commands never
+	// reach it: the suite keeps a check for the workflow's own desktop job.
 	var jobs int
+	desktop := false
 	for _, command := range commands {
-		if command.Job != nil {
-			jobs++
+		if command.Job == nil {
+			continue
+		}
+		jobs++
+		if command.Job.Name == "desktop" {
+			desktop = true
 		}
 	}
 	if jobs == 0 {
 		t.Fatal("the go suite runs no workflow job")
+	}
+	if !desktop {
+		t.Fatal("the go suite lost its desktop job, which no root Go command covers")
 	}
 }
