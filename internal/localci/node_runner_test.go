@@ -38,6 +38,8 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 		{"early container failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
 		{"killed container", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Killed"}, 137, CauseContainerFailure, OutcomeError},
 		{"ssh drop", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Connection to port 22 timed out"}, 255, CauseSSHDrop, OutcomeError},
+		{"ssh server timeout", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Timeout, server 192.168.2.9 not responding."}, 1, CauseSSHDrop, OutcomeError},
+		{"ssh timeout text on a local node", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Timeout, server 192.168.2.9 not responding."}, 1, CauseUnclassified, OutcomeError},
 		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
 		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
 		{"reports unavailable", Node{Name: "local", Slots: 1, Enabled: true}, []string{"ok ./...", "DYNA_CI_CHECK_EXIT=0"}, 0, CauseReports, OutcomeError},

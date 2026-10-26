@@ -349,6 +349,14 @@ func (r Runner) nodeProgram(name string, args []string) (string, []string) {
 // direct shell and a machine probe still succeed (D-162).
 var dialFailureNote = regexp.MustCompile(`(?i)banner exchange|kex_exchange_identification|connection refused|connection timed out|no route to host|network is unreachable|could not resolve hostname`)
 
+// sshServerTimeout matches what the ssh client prints when a live connection
+// stops answering: its keepalive gives up, or a read times out. The client may
+// then end with a status other than 255, so the check carries no marker and no
+// exit code that names the drop. Without the node's completion marker the
+// output proves the command never reported back, so a drop note on a node
+// reached over ssh is a transport failure (D-218).
+var sshServerTimeout = regexp.MustCompile(`(?i)timeout, server \S+ not responding|server \S+ not responding|connection to \S+ (?:port \d+ )?timed out|connection timed out`)
+
 // sshDialAttempts bounds how often a node command retries a dial that never
 // reached the node. Two retries with a growing wait outlast a stall of about
 // half a minute, while each dial still fails within its ConnectTimeout, so an
@@ -742,6 +750,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 						sr.Error = runErr.Error()
 					}
 					sr.Cause = checkCause(node, checkCtx, runErr, markers, check.image != "")
+					if sr.Cause == CauseUnclassified && len(markers) == 0 && node.SSH != "" && sshServerTimeout.MatchString(sr.LogTail) {
+						sr.Cause = CauseSSHDrop
+					}
 					if sr.Cause == CauseTestFailure {
 						sr.Status = OutcomeFailed
 					}
