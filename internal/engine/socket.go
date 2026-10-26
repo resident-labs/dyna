@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -26,6 +27,32 @@ func checkPrivateRuntime(stamped bool, runtimeDir string) error {
 		return nil
 	}
 	return fmt.Errorf("this engine was started by a Dyna session and XDG_RUNTIME_DIR is the login runtime folder %s, which holds the owner's engine socket: give it a runtime folder of its own", login)
+}
+
+// socketOwnerPath names the file beside the socket that records which data
+// folder the engine on that socket serves.
+func socketOwnerPath(path string) string { return path + ".data" }
+
+// checkSocketOwner refuses a socket that names another data folder. A second
+// engine must never take the socket of an engine that serves different data.
+func checkSocketOwner(path, dataDir string) error {
+	body, err := os.ReadFile(socketOwnerPath(path))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if owner := strings.TrimSpace(string(body)); owner != "" && filepath.Clean(owner) != filepath.Clean(dataDir) {
+		return fmt.Errorf("engine socket %s belongs to the engine on data folder %s, not %s", path, owner, dataDir)
+	}
+	return nil
+}
+
+// writeSocketOwner records the data folder this engine serves beside its socket,
+// so a later engine on another folder refuses that socket instead of serving it.
+func writeSocketOwner(path, dataDir string) error {
+	return os.WriteFile(socketOwnerPath(path), []byte(filepath.Clean(dataDir)+"\n"), 0o600)
 }
 
 // listenSocket never replaces an active listener or a non-socket file.
