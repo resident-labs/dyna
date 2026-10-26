@@ -39,20 +39,7 @@ func Kill(runID string, leader int) error {
 	if leader > 1 {
 		groups[leader] = true
 	}
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return err
-	}
-	stamp := []byte(mode.EnvWorkerRun + "=" + runID + "\x00")
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil || pid == os.Getpid() {
-			continue
-		}
-		env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
-		if err != nil || !bytes.Contains(append([]byte{0}, env...), append([]byte{0}, stamp...)) {
-			continue
-		}
+	for _, pid := range Stamped(mode.EnvWorkerRun + "=" + runID) {
 		if st, ok := readStat(pid); ok && st.state != 'Z' {
 			groups[st.group] = true
 		}
@@ -116,4 +103,26 @@ func anyLive(groups map[int]bool, own int) bool {
 		}
 	}
 	return false
+}
+
+// Stamped returns the processes, other than the caller, whose environment
+// holds the exact assignment "NAME=value".
+func Stamped(assignment string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	stamp := []byte("\x00" + assignment + "\x00")
+	var pids []int
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		env, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+		if err == nil && bytes.Contains(append([]byte{0}, env...), stamp) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
 }

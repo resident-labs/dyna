@@ -32,7 +32,7 @@ func Pause(ctx context.Context, id string, paused bool) error {
 
 // runExitGrace is how long a canceled run's process may take to finalize
 // before its processes are killed.
-const runExitGrace = 10 * time.Second
+var runExitGrace = 10 * time.Second
 
 // Cancel stops a run only in the caller's room. A stopped run's workers are
 // gone, so their process groups end and their managed shell jobs stop the way
@@ -48,8 +48,11 @@ func Cancel(ctx context.Context, id string) error {
 	// The run process finalizes its own state on SIGTERM; give it time, then
 	// end every group it or its workers started, so a worker that is paused,
 	// detached or in a group of its own does not outlive the run.
-	for deadline := time.Now().Add(runExitGrace); runstore.Alive(m) && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+	graceCtx, stopGrace := context.WithTimeout(ctx, runExitGrace)
+	for runstore.Alive(m) && graceCtx.Err() == nil {
+		time.Sleep(50 * time.Millisecond)
 	}
+	stopGrace()
 	leader := 0 // a recorded pid is the run's group only while that process lives
 	if runstore.Alive(m) {
 		leader = m.Pid
