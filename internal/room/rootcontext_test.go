@@ -127,6 +127,42 @@ func TestRootContext(t *testing.T) {
 // A room named after the engine holds engine posts under the room's own
 // address. A session note addressed to a worker is that worker's, never the
 // owner's DM, so the root's [OWNER DMS] block keeps the owner's words.
+// The sender's room is a stored identity, not text. A room rename or an
+// address that looks local must not change whether root wakes for a session
+// from another room.
+func TestRootWakeUsesTheStoredSenderRoom(t *testing.T) {
+	const roomName = "renamed"
+	// A session of this room wrote the post under the room's old name. Its
+	// quiet notice must not wake root.
+	sameRoom := Message{
+		Wake: true, ID: "msg_same", RoomID: "room_1", From: "old-name:lead",
+		SenderRoomID: "room_1", SessionIDs: map[string]string{"old-name:lead": "ses_lead"},
+		Kind: "notice", To: []string{roomName},
+	}
+	if decision, _ := RootContext(sameRoom, roomName); decision == RootWake {
+		t.Fatalf("a same-room notice woke root after a rename: %+v", sameRoom)
+	}
+	// A session of another room asks this seat to act even when its display
+	// address carries this room's name.
+	otherRoom := Message{
+		Wake: true, ID: "msg_other", RoomID: "room_1", From: "renamed:lead",
+		SenderRoomID: "room_2", SessionIDs: map[string]string{"renamed:lead": "ses_lead"},
+		Kind: "notice", To: []string{roomName},
+	}
+	if decision, _ := RootContext(otherRoom, roomName); decision != RootWake {
+		t.Fatalf("a notice from another room did not wake root: %d", decision)
+	}
+	// A post stored before the field existed keeps reading by its address.
+	legacy := Message{
+		Wake: true, ID: "msg_legacy", RoomID: "room_1", From: "elsewhere:lead",
+		SessionIDs: map[string]string{"elsewhere:lead": "ses_lead"},
+		Kind:       "notice", To: []string{roomName},
+	}
+	if decision, _ := RootContext(legacy, roomName); decision != RootWake {
+		t.Fatalf("a legacy post from another room did not wake root: %d", decision)
+	}
+}
+
 func TestRootContextEngineNoteIsNoOwnerDM(t *testing.T) {
 	const roomName = EngineSender
 	for _, note := range []struct {
