@@ -226,6 +226,16 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		if artifact.Expired || artifact.ID <= 0 {
 			continue
 		}
+		// A rerun lists the artifacts of earlier attempts too, so the filter for
+		// the current attempt comes first: an old file must not count as skipped
+		// or oversized, and it must not take a fallback slot.
+		if run.Attempt > 1 {
+			started, startErr := time.Parse(time.RFC3339, run.Started)
+			created, createErr := time.Parse(time.RFC3339, artifact.Created)
+			if startErr != nil || createErr != nil || created.Before(started) {
+				continue
+			}
+		}
 		apart := !likelyTestArtifact(artifact.Name)
 		if apart {
 			auxiliary++
@@ -237,13 +247,6 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 				oversized++
 			}
 			continue
-		}
-		if run.Attempt > 1 {
-			started, startErr := time.Parse(time.RFC3339, run.Started)
-			created, createErr := time.Parse(time.RFC3339, artifact.Created)
-			if startErr != nil || createErr != nil || created.Before(started) {
-				continue
-			}
 		}
 		if !likelyTestArtifact(artifact.Name) {
 			if fallbackCount == 0 || artifact.Size > fallbackBytes {

@@ -174,6 +174,51 @@ func TestAuxiliaryArtifactsPreferRawTestOutput(t *testing.T) {
 	}
 }
 
+// A rerun keeps the earlier attempt's artifacts in the same list. Only the
+// current attempt's files may count as skipped, oversized or inspected, so the
+// line reports 1 of 4 here and says nothing about the four old ones.
+func TestAuxiliaryCountIgnoresEarlierAttemptArtifacts(t *testing.T) {
+	e := newEnv(t)
+	testReportFixture(t, e, nil)
+	// A rerun starts at the fixture clock, so anything older than it belongs to
+	// the earlier attempt.
+	e.f.Runs = []Run{{ID: 81, Attempt: 2, Status: "completed", Conclusion: "success", Event: "pull_request", Name: "CI", Started: e.clock.Format(time.RFC3339)}}
+	old := e.clock.Add(-time.Hour).Format(time.RFC3339)
+	size := testReportZip(t, map[string]string{"notes.xml": "<settings/>"})
+	listed := []string{fmt.Sprintf(`{"id":300,"name":"go-diagnostics-old","size_in_bytes":%d,"created_at":%q}`, 1024, old)}
+	listed = append(listed, fmt.Sprintf(`{"id":301,"name":"go-diagnostics-older","size_in_bytes":%d,"created_at":%q}`, maxTestArtifact+1, old))
+	for i := 0; i < 3; i++ {
+		id := 302 + i
+		listed = append(listed, fmt.Sprintf(`{"id":%d,"name":"go-diagnostics-old-%d","size_in_bytes":%d,"created_at":%q}`, id, i, 1024, old))
+	}
+	for i := 0; i < 4; i++ {
+		id := 310 + i
+		listed = append(listed, fmt.Sprintf(`{"id":%d,"name":"go-diagnostics-%d","size_in_bytes":%d,"created_at":%q}`, id, i, 1024, e.clock.Format(time.RFC3339)))
+		e.f.Blobs[fmt.Sprintf("repos/owner/repo/actions/artifacts/%d/zip", id)] = size
+	}
+	e.f.Raw["repos/owner/repo/actions/runs/81/artifacts?per_page=100"] = `HTTP/2.0 200 OK` + "\r\n\r\n" + `{"artifacts":[` + strings.Join(listed, ",") + `]}`
+	e.track()
+	e.tick()
+	var text strings.Builder
+	for _, sent := range e.sent {
+		text.WriteString(sent.Text)
+	}
+	const want = "Other CI artifacts: 1 of 4 not inspected (the limit is 3 files and 20 MiB per run)."
+	if strings.Count(text.String(), want) != 1 {
+		t.Fatalf("rerun counted the earlier attempt's artifacts:\n%s", text.String())
+	}
+	if strings.Contains(text.String(), "20 MiB size limit") {
+		t.Fatalf("an earlier attempt's oversized artifact produced a warning:\n%s", text.String())
+	}
+	calls, err := os.ReadFile(e.calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "artifacts/300/zip") || strings.Contains(string(calls), "artifacts/310/zip") == false {
+		t.Fatalf("an earlier attempt's artifact was inspected, or the current ones were not:\n%s", calls)
+	}
+}
+
 // A log excerpt drops colors and GitHub's job, step and time prefixes, and
 // keeps only the last lines.
 func TestLogExcerptStripsColorsAndGitHubPrefixes(t *testing.T) {
