@@ -129,23 +129,25 @@ func movedHarnessActive(ctx context.Context, conn *sql.Conn) (bool, error) {
 // loses its active marks, repository scope, limit and, through the orphan cleanup,
 // its credential file. The engine backs up dyna.db before this migration.
 func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
-	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), json_extract(CAST(metadata AS TEXT), '$.identity') FROM accounts")
+	rows, err := conn.QueryContext(ctx, "SELECT id, json_extract(CAST(metadata AS TEXT), '$.harness'), json_extract(CAST(metadata AS TEXT), '$.provider'), json_extract(CAST(metadata AS TEXT), '$.identity'), credential_schema, json_extract(CAST(metadata AS TEXT), '$.needsLogin') FROM accounts")
 	if err != nil {
 		return err
 	}
-	// replacements holds the provider sign-ins a Pi account already covers. An
-	// empty key means the account names no identity, so it covers its provider.
+	// replacements holds the provider sign-ins a signed-in Pi account covers. A Pi
+	// slot the owner has not signed in yet covers nothing: it carries no identity
+	// and no credential, so it cannot have taken over another sign-in (D-125).
 	replacements := map[string]map[string]bool{}
 	type candidate struct{ id, harness, provider, identity string }
 	var candidates []candidate
 	for rows.Next() {
-		var id, harness, provider, identity sql.NullString
-		if err := rows.Scan(&id, &harness, &provider, &identity); err != nil {
+		var id, harness, provider, identity, schema sql.NullString
+		var needsLogin sql.NullBool
+		if err := rows.Scan(&id, &harness, &provider, &identity, &schema, &needsLogin); err != nil {
 			rows.Close()
 			return err
 		}
 		if KnownHarness(harness.String) && !AccountsRetired(harness.String) {
-			if harness.String == "pi" && provider.String != "" {
+			if harness.String == "pi" && provider.String != "" && identity.String != "" && schema.String != "" && !needsLogin.Bool {
 				if replacements[provider.String] == nil {
 					replacements[provider.String] = map[string]bool{}
 				}
@@ -193,15 +195,12 @@ func dropRemovedHarnessRows(ctx context.Context, conn *sql.Conn) error {
 	return nil
 }
 
-// replacedByPi reports whether a Pi account covers this provider sign-in: the
-// same provider, and the same identity unless the Pi account names none. An
-// account whose identity is unknown is covered only by an account whose identity
-// is unknown too, so a migration never discards a sign-in it cannot match.
+// replacedByPi reports whether a signed-in Pi account covers this provider
+// sign-in: the same provider and the same known identity. An empty identity is
+// never a wildcard, because a Pi slot the owner has not signed in has none, and a
+// sign-in the migration cannot match must be kept rather than discarded.
 func replacedByPi(covered map[string]bool, identity string) bool {
-	if len(covered) == 0 {
-		return false
-	}
-	return covered[identity] || covered[""]
+	return identity != "" && covered[identity]
 }
 
 // fillProviders writes each row's provider and kind from ProviderFor, so the

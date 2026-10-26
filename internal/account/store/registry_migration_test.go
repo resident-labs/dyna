@@ -41,20 +41,25 @@ CREATE TABLE accounts_registry (
 );`); err != nil {
 			return err
 		}
-		for _, row := range []struct{ id, harness, provider string }{
-			{"pi-chatgpt", "pi", "chatgpt"},
-			{"pi-muse", "pi", "meta-muse"},
-			{"pi-opencode", "pi", "opencode-go"},
-			{"codex", "codex", "chatgpt"},
-			{"muse", "muse", "meta-muse"},
-			{"opencode", "opencode", "opencode-go"},
-			{"unknown", "retired-agent", "google"},
+		for _, row := range []struct{ id, harness, provider, identity string }{
+			{"pi-chatgpt", "pi", "chatgpt", "owner@example.test"},
+			{"pi-muse", "pi", "meta-muse", "owner@example.test"},
+			{"pi-opencode", "pi", "opencode-go", "owner@example.test"},
+			{"codex", "codex", "chatgpt", "owner@example.test"},
+			{"muse", "muse", "meta-muse", "owner@example.test"},
+			{"opencode", "opencode", "opencode-go", "owner@example.test"},
+			{"unknown", "retired-agent", "google", "someone@example.test"},
 		} {
-			metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth"})
+			metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth", "identity": row.identity})
 			if err != nil {
 				return err
 			}
-			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES(?, 0, ?)", row.id, metadata); err != nil {
+			// Only a signed-in Pi account can have taken over a sign-in.
+			schema := ""
+			if row.harness == "pi" {
+				schema = "claude-oauth"
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES(?, 0, ?, ?)", row.id, metadata, schema); err != nil {
 				return err
 			}
 		}
@@ -205,18 +210,22 @@ func TestRegistryMigrationDropsHarnessRowsWrittenAfterVersionEight(t *testing.T)
 CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []struct{ id, harness, provider string }{
-		{"pi-chatgpt", "pi", "chatgpt"},
-		{"pi-muse", "pi", "meta-muse"},
-		{"pi-opencode", "pi", "opencode-go"},
-		{"muse", "muse", "meta-muse"},
-		{"opencode", "opencode", "opencode-go"},
+	for _, row := range []struct{ id, harness, provider, identity string }{
+		{"pi-chatgpt", "pi", "chatgpt", "owner@example.test"},
+		{"pi-muse", "pi", "meta-muse", "owner@example.test"},
+		{"pi-opencode", "pi", "opencode-go", "owner@example.test"},
+		{"muse", "muse", "meta-muse", "owner@example.test"},
+		{"opencode", "opencode", "opencode-go", "owner@example.test"},
 	} {
-		metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth"})
+		metadata, err := json.Marshal(map[string]string{"id": row.id, "harness": row.harness, "provider": row.provider, "kind": "oauth", "identity": row.identity})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES(?, 0, ?)", row.id, metadata); err != nil {
+		schema := ""
+		if row.harness == "pi" {
+			schema = "claude-oauth"
+		}
+		if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES(?, 0, ?, ?)", row.id, metadata, schema); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.ExecContext(ctx, "INSERT INTO account_active(provider, harness, scope, account) VALUES(?,?,?,?)", row.provider, row.harness, "", row.id); err != nil {
@@ -411,5 +420,77 @@ CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL
 	}
 	if selected != 0 {
 		t.Fatalf("kept %d selections of a harness this release does not run", selected)
+	}
+}
+
+// D-125 review: a Pi account the owner has not signed in yet is a slot. It holds
+// no identity and no credential, so it must not count as the replacement for an
+// unmoved sign-in; otherwise the migration drops the only saved copy of it.
+func TestRegistryMigrationKeepsASignInWhenThePiSlotIsUnsigned(t *testing.T) {
+	s := registryStore(t)
+	dataDir := filepath.Dir(s.Root)
+	ctx := context.Background()
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE accounts (
+ id TEXT PRIMARY KEY,
+ ord INTEGER NOT NULL,
+ metadata BLOB NOT NULL CHECK(json_valid(metadata)),
+ credential_schema TEXT NOT NULL DEFAULT ''
+);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, activeSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE account_repo_scopes (account_id TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY (account_id, repo));
+CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`); err != nil {
+		t.Fatal(err)
+	}
+	// The Pi slot names the provider, waits for a sign-in, and holds no identity.
+	slot, err := json.Marshal(map[string]any{"id": "pi-chatgpt-slot", "harness": "pi", "provider": "chatgpt", "kind": "oauth", "needsLogin": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES('pi-chatgpt-slot', 0, ?)", slot); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := json.Marshal(map[string]string{"id": "codex", "harness": "codex", "provider": "chatgpt", "kind": "oauth", "identity": "owner@example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata) VALUES('codex', 1, ?)", moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(s.credentialDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.credentialPath("codex"), []byte(`{"schema":"fixture-v1","payload":{"token":"owner-sign-in"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT OR REPLACE INTO meta(key, value) VALUES('account.registry', '8')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	state, err := s.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]bool{}
+	for _, entry := range state.Entries {
+		kept[entry.ID] = true
+	}
+	if !kept["codex"] || !kept["pi-chatgpt-slot"] {
+		t.Fatalf("migration kept %v, want the unsigned Pi slot and the unmoved Codex sign-in", kept)
+	}
+	if err := s.Update(func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.credentialPath("codex")); err != nil {
+		t.Fatalf("the unsigned Pi slot discarded the only saved sign-in: %v", err)
 	}
 }
