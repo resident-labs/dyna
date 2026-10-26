@@ -29,3 +29,28 @@ func TestPullRequestHeadDoesNotWaitForLocalCheckNames(t *testing.T) {
 		t.Fatalf("pull request head = %s (%s), want passed from the hosted provider", obs.Status, obs.Reason)
 	}
 }
+
+// A run that Dyna's own stop cancelled is not a finished head: the scheduler
+// admits the same commit again. A cancellation that a superseded head or the
+// owner asked for stays conclusive.
+func TestEngineStopResultIsRerunNotComplete(t *testing.T) {
+	s := &Service{}
+	job := registeredCIJob{record: Record{Key: "pr"}, head: strings.Repeat("a", 40)}
+	stopped := localci.Result{SHA: job.head, Node: "node", Status: localci.OutcomeError, Cause: localci.CauseEngineStop}
+	if s.registeredJobResultComplete(t.Context(), job, stopped) {
+		t.Fatal("an engine-stop result counted as a finished head")
+	}
+	cancelled := localci.Result{SHA: job.head, Node: "node", Status: localci.OutcomeError, Cause: localci.CauseCancelled}
+	if !s.registeredJobResultComplete(t.Context(), job, cancelled) {
+		t.Fatal("a plain cancellation stopped being conclusive")
+	}
+	failed := localci.Result{SHA: job.head, Node: "node", Status: localci.OutcomeFailed}
+	if !s.registeredJobResultComplete(t.Context(), job, failed) {
+		t.Fatal("a failed run stopped being conclusive")
+	}
+	// The trial's own verdict reads the same evidence: an engine stop leaves it
+	// pending, so the batch keeps running and the trial is repeated.
+	if verdict, _, _ := registeredResultStatus(stopped); verdict != VerdictPending {
+		t.Fatalf("an engine-stop result decided %s, want pending", verdict)
+	}
+}

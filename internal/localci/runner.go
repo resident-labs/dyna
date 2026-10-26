@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -187,6 +188,11 @@ const (
 	CauseTimeout FailureCause = "timeout"
 	// CauseCancelled is a check or a run that its caller stopped.
 	CauseCancelled FailureCause = "cancelled"
+	// CauseEngineStop is a check or a run that Dyna itself stopped because its
+	// engine was shutting down. It proves nothing about the commit, unlike a
+	// cancellation that a superseded head or an owner asked for, so the same
+	// commit is run again.
+	CauseEngineStop FailureCause = "engine-stop"
 	// CauseDiskFull is a check that ran out of disk space on the node.
 	CauseDiskFull FailureCause = "disk-full"
 	// CauseReports is a check whose report files were missing or could not be
@@ -212,6 +218,8 @@ func (c FailureCause) Label() string {
 		return "timeout"
 	case CauseCancelled:
 		return "cancelled"
+	case CauseEngineStop:
+		return "engine stopping"
 	case CauseDiskFull:
 		return "disk full"
 	case CauseReports:
@@ -486,3 +494,13 @@ func tail(s string) string {
 	}
 	return s
 }
+
+// engineStopping records that this process is stopping the engine, so a run this
+// stop cancels reports CauseEngineStop rather than a plain cancellation.
+var engineStopping atomic.Bool
+
+// MarkEngineStopping tells the runner that the engine is shutting down.
+func MarkEngineStopping() { engineStopping.Store(true) }
+
+// EngineStopping reports whether the engine is shutting down.
+func EngineStopping() bool { return engineStopping.Load() }

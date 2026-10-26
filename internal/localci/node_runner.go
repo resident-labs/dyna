@@ -825,6 +825,12 @@ func runCause(node Node, ctx context.Context, err error) FailureCause {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return CauseTimeout
 		}
+		// The engine's own stop is not the repository's fault: the same commit
+		// runs again, so the cause must be told apart from a cancellation that
+		// a superseded head or the owner asked for.
+		if EngineStopping() {
+			return CauseEngineStop
+		}
 		return CauseCancelled
 	}
 	var exit *exec.ExitError
