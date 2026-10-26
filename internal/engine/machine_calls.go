@@ -52,7 +52,7 @@ func checkMachineWrite(actor authority.Actor, args []json.RawMessage) error {
 		if onlyHostChecks(patch) {
 			return nil
 		}
-		return fmt.Errorf("SaveMachine is owner only for a machine's roles, slots, route and switch; the owner changes them, and a room root changes host checks with %s", hostChecksCommand)
+		return fmt.Errorf("SaveMachine is owner only for a machine's creation, name, roles, slots, route and switch; the owner changes them, and a room root changes host checks with %s", hostChecksCommand)
 	}
 	return fmt.Errorf("SaveMachine is owner only; the owner allows host checks with %s", hostChecksCommand)
 }
@@ -71,8 +71,9 @@ func machinePatchOf(args []json.RawMessage) (websvc.MachinePatch, bool) {
 }
 
 // onlyHostChecks reports whether the patch changes the host-check permission
-// and no other machine field. The room list is one of the others: it decides
-// which rooms' CI work the machine takes, which is the owner's to set.
+// and no other machine field. The room list, the suites, the name and the
+// creation of a machine decide where the engine sends work, which is the
+// owner's to set.
 func onlyHostChecks(patch websvc.MachinePatch) bool {
-	return patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil
+	return !patch.Create && patch.Name == nil && patch.Suites == nil && patch.AllowHostChecks != nil && patch.Enabled == nil && patch.Roles == nil && patch.CISlots == nil && patch.SSH == nil && patch.Rooms == nil
 }

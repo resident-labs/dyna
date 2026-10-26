@@ -174,14 +174,18 @@ type MachineLoad struct {
 }
 
 // MachinePatch is one change to a machine. A nil field keeps its value; the
-// store checks the result before it writes.
+// store checks the result before it writes. Create adds the machine that the
+// reference names when the registry has none.
 type MachinePatch struct {
+	Name            *string          `json:"name,omitempty"`
 	Enabled         *bool            `json:"enabled"`
 	Roles           *[]machines.Role `json:"roles"`
 	CISlots         *int             `json:"ciSlots"`
 	AllowHostChecks *bool            `json:"allowHostChecks"`
 	Rooms           *[]string        `json:"rooms"`
+	Suites          *[]string        `json:"suites"`
 	SSH             *string          `json:"ssh"`
+	Create          bool             `json:"create,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -246,12 +250,61 @@ func (a MachineAPI) Machine(ctx context.Context, id string) (MachineDetail, erro
 	return a.machine(ctx, m, a.ciRuns()), nil
 }
 
-// SaveMachine writes the fields a change names and answers with the page the
-// machine has after it.
-func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePatch) (MachineDetail, error) {
-	m, err := a.find(ctx, id)
+// SaveMachine applies one change to the machine that ref names, by ID or by
+// name, and answers with the page the machine has after it. It is the one
+// machine mutation path for the web, the CLI and the CI-node alias: it
+// normalizes the result and the store validates it before it writes.
+func (a MachineAPI) SaveMachine(ctx context.Context, ref string, patch MachinePatch) (MachineDetail, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return MachineDetail{}, errors.New("a machine reference is required")
+	}
+	m, found, err := a.resolve(ctx, ref)
 	if err != nil {
 		return MachineDetail{}, err
+	}
+	if found && patch.Create {
+		return MachineDetail{}, fmt.Errorf("machine %s exists; use dyna machine edit", m.Name)
+	}
+	if !found {
+		if !patch.Create {
+			return MachineDetail{}, fmt.Errorf("machine %q: %w", ref, os.ErrNotExist)
+		}
+		m = machines.Machine{Name: ref, Enabled: true}
+	}
+	if err := applyMachinePatch(&m, patch); err != nil {
+		return MachineDetail{}, err
+	}
+	saved, err := a.Store.Save(ctx, m)
+	if err != nil {
+		return MachineDetail{}, err
+	}
+	if patch.AllowHostChecks != nil {
+		// The grant changes inside the store's writer transaction, so this
+		// answer cannot restore a grant that another caller refused meanwhile.
+		if _, err := a.Store.UpdateHostChecksGrants(ctx, saved.ID, func(stored machines.Machine) ([]machines.HostChecksGrant, error) {
+			return hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
+		}); err != nil {
+			return MachineDetail{}, err
+		}
+	}
+	stored, err := a.find(ctx, saved.ID)
+	if err != nil {
+		return MachineDetail{}, err
+	}
+	return a.machine(ctx, stored, a.ciRuns()), nil
+}
+
+// applyMachinePatch writes the fields the patch names and keeps the rules the
+// fields imply: the ci role needs a slot, and rooms, suites and host checks
+// belong to a machine that holds CI work.
+func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
+		if err := machines.ValidateName(name); err != nil {
+			return err
+		}
+		m.Name = name
 	}
 	if patch.Enabled != nil {
 		m.Enabled = *patch.Enabled
@@ -265,26 +318,44 @@ func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePat
 	if patch.Rooms != nil {
 		m.Rooms = *patch.Rooms
 	}
+	if patch.Suites != nil {
+		m.Suites = *patch.Suites
+	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
 	}
-	if _, err := a.Store.Save(ctx, m); err != nil {
-		return MachineDetail{}, err
+	if m.HasRole(machines.RoleCI) && m.CISlots < 1 && patch.CISlots == nil {
+		m.CISlots = 1
 	}
-	if patch.AllowHostChecks != nil {
-		// The grant changes inside the store's writer transaction, so this
-		// answer cannot restore a grant that another caller refused meanwhile.
-		if _, err := a.Store.UpdateHostChecksGrants(ctx, id, func(stored machines.Machine) ([]machines.HostChecksGrant, error) {
-			return hostChecksGrants(stored.HostChecksGrants, authority.Of(ctx), *patch.AllowHostChecks)
-		}); err != nil {
-			return MachineDetail{}, err
+	if patch.Rooms != nil && len(*patch.Rooms) > 0 && !m.HasRole(machines.RoleCI) {
+		return errors.New("a room list requires the ci role")
+	}
+	if patch.Suites != nil && len(*patch.Suites) > 0 && !m.HasRole(machines.RoleCI) {
+		return errors.New("a suite list requires the ci role")
+	}
+	if patch.AllowHostChecks != nil && *patch.AllowHostChecks && !m.HasRole(machines.RoleCI) {
+		return errors.New("host checks require the ci role")
+	}
+	return nil
+}
+
+// resolve finds the machine that ref names, by ID first and then by name.
+func (a MachineAPI) resolve(ctx context.Context, ref string) (machines.Machine, bool, error) {
+	list, err := a.Store.List(ctx)
+	if err != nil {
+		return machines.Machine{}, false, err
+	}
+	for _, m := range list {
+		if m.ID == ref {
+			return m, true, nil
 		}
 	}
-	saved, err := a.find(ctx, id)
-	if err != nil {
-		return MachineDetail{}, err
+	for _, m := range list {
+		if m.Name == ref {
+			return m, true, nil
+		}
 	}
-	return a.machine(ctx, saved, a.ciRuns()), nil
+	return machines.Machine{}, false, nil
 }
 
 // hostChecksGrants answers one allow or refuse of host checks with the machine's
