@@ -82,6 +82,15 @@ func TestRoomRootChangesOperatingSettings(t *testing.T) {
 	if len(*patches) != 2 {
 		t.Fatalf("saved patches = %+v, want both settings", *patches)
 	}
+	// A remote container endpoint sends every room's workflow containers to
+	// another host, so it stays the owner's; restoring the default is allowed.
+	if _, err := calls["SaveMachine"](root, saveMachineArgs(`{"containerSocket":"tcp://other-host:2375"}`)); err == nil || !strings.Contains(err.Error(), "owner only") {
+		t.Fatalf("a root setting a TCP container endpoint = %v, want an owner-only refusal", err)
+	}
+	if _, err := calls["SaveMachine"](root, saveMachineArgs(`{"containerSocket":""}`)); err != nil {
+		t.Fatalf("a root restoring the default socket = %v, want it allowed", err)
+	}
+	*patches = (*patches)[:2]
 	session := localCallerContext(t,
 		websvc.Caller{Kind: websvc.Session, Session: "ses_1"},
 		authority.Actor{Role: authority.Session, Session: "ses_1", Room: "room_dyna"})
