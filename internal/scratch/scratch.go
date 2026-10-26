@@ -28,7 +28,6 @@ const RootEnv = "DYNA_SCRATCH_ROOT"
 // ClosedRetention is how long a closed session's scratch stays after the close,
 // so a parent can still read the files the session returned.
 const ClosedRetention = 7 * 24 * time.Hour
-const UnknownRetention = 3 * 24 * time.Hour
 
 // Root is the disk folder that holds one store's scratch: a short namespace
 // derived from the canonical data folder under the owner's cache base. It
@@ -158,9 +157,9 @@ type Options struct {
 	Logf func(string, ...any)
 	Now  time.Time
 	// Lookup receives a top-level session or run ID. All workers of a run
-	// share its retention date. A nil Lookup treats every owner as unknown.
-	Lookup   func(owner string) Owner
-	Pressure bool
+	// share its retention date. A nil Lookup treats every owner as unknown, so
+	// nothing is removed.
+	Lookup func(owner string) Owner
 	// Only limits the sweep to a relative owner path and its descendants.
 	Only string
 }
@@ -173,7 +172,7 @@ type Result struct {
 }
 
 // Sweep expires scratch files. Confined operations and WalkDir do not follow
-// links outside Root. An open owner is always kept, even under disk pressure.
+// links outside Root. An open, dormant or unknown owner is always kept.
 func Sweep(ctx context.Context, o Options) (Result, error) {
 	result := Result{Removed: []string{}, Kept: []Kept{}}
 	if o.Only != "" && !validOwner(o.Only) {
@@ -236,33 +235,27 @@ func Sweep(ctx context.Context, o Options) (Result, error) {
 			keep("owner is open")
 			continue
 		}
-		if owner.Known {
-			if owner.ClosedAt.IsZero() {
-				keep("owner has no close time")
-				continue
-			}
-			if !o.Pressure && now.Before(owner.ClosedAt.Add(ClosedRetention)) {
-				keep("closed retention period")
-				continue
-			}
+		// Only a folder whose owner record exists, is closed, and closed more
+		// than ClosedRetention ago is removed. Disk pressure does not change that.
+		if !owner.Known {
+			keep("owner record not found")
+			continue
 		}
-		newest, bytes, err := inspect(ctx, r, name)
+		if owner.ClosedAt.IsZero() {
+			keep("owner has no close time")
+			continue
+		}
+		if !now.After(owner.ClosedAt.Add(ClosedRetention)) {
+			keep("closed retention period")
+			continue
+		}
+		_, bytes, err := inspect(ctx, r, name)
 		if err != nil {
 			if ctx.Err() != nil {
 				return result, ctx.Err()
 			}
 			protected(err)
 			continue
-		}
-		if !owner.Known {
-			retention := UnknownRetention
-			if o.Pressure {
-				retention = 24 * time.Hour
-			}
-			if now.Before(newest.Add(retention)) {
-				keep("unknown owner has recent changes")
-				continue
-			}
 		}
 		if err := r.RemoveAll(name); err != nil {
 			protected(err)

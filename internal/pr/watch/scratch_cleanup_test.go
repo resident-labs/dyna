@@ -10,7 +10,15 @@ import (
 	"time"
 
 	"dyna-agent/internal/maintenance"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/scratch"
+	"dyna-agent/internal/sessionlife/recordtest"
+)
+
+// Two closed sessions whose scratch is past its retention; the first sorts first.
+const (
+	protectedOwner = "ses_20260101-000000-aaaaaaaa"
+	expiredOwner   = "ses_20260101-000000-zzzzzzzz"
 )
 
 func TestMergedPRCleanupSkipsProtectedScratch(t *testing.T) {
@@ -22,7 +30,9 @@ func TestMergedPRCleanupSkipsProtectedScratch(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	old := time.Now().Add(-4 * 24 * time.Hour)
-	for _, owner := range []string{"a-protected", "z-expired"} {
+	closed := time.Now().Add(-scratch.ClosedRetention - time.Hour).UTC().Truncate(time.Second)
+	for _, owner := range []string{protectedOwner, expiredOwner} {
+		recordtest.WriteRaw(t, runstore.SessionsDir(), owner, []byte(`{"closed":"`+closed.Format(time.RFC3339)+`"}`))
 		dir, err := scratch.Ensure(owner)
 		if err != nil {
 			t.Fatal(err)
@@ -37,7 +47,7 @@ func TestMergedPRCleanupSkipsProtectedScratch(t *testing.T) {
 			}
 		}
 	}
-	blocked := filepath.Join(scratch.Root(), "a-protected")
+	blocked := filepath.Join(scratch.Root(), protectedOwner)
 	if err := os.Chmod(blocked, 0500); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +79,7 @@ func TestMergedPRCleanupSkipsProtectedScratch(t *testing.T) {
 	if len(logs) != 1 || !strings.Contains(logs[0], blocked) {
 		t.Fatalf("protected path log: %v", logs)
 	}
-	if _, err := os.Stat(filepath.Join(scratch.Root(), "z-expired")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(scratch.Root(), expiredOwner)); !os.IsNotExist(err) {
 		t.Fatalf("cleanup stopped before next scratch owner: %v", err)
 	}
 }
