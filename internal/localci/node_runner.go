@@ -757,6 +757,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		// The deadline can end the copy itself, and then the reports are gone.
 		stopped = control.Err()
 	}
+	copyCause := reportCopyCause(node, control, copyErr)
 	result.Status = OutcomePassed
 	for i := range result.Suites {
 		sr := &result.Suites[i]
@@ -770,7 +771,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			}
 		case copyErr != nil:
 			if sr.Status == OutcomePassed {
-				sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), CauseReports
+				sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), copyCause
 			}
 		default:
 			// The reports say what the exit status cannot: the execution timing,
@@ -807,10 +808,24 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, stopped
 	}
 	if copyErr != nil {
-		result.Cause = CauseReports
+		result.Cause = copyCause
 		return result, fmt.Errorf("copy reports: %w", copyErr)
 	}
 	return result, nil
+}
+
+// reportCopyCause names why the report copy failed. A copy whose SSH client
+// lost the connection is a machine cause, the same one a check gets, so the
+// scheduler retries the run on another machine; any other copy failure leaves
+// the reports unavailable (D-170).
+func reportCopyCause(node Node, ctx context.Context, err error) FailureCause {
+	if err == nil {
+		return CauseReports
+	}
+	if cause := runCause(node, ctx, err); cause == CauseSSHDrop {
+		return cause
+	}
+	return CauseReports
 }
 
 // rejudgeTransportDeath decides a check whose connection to the node died.
