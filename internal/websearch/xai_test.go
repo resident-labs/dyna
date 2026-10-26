@@ -11,10 +11,10 @@ import (
 	"testing"
 )
 
-const xaiText = "Go is a language and it has docs [[1]](https://go.dev/doc). The release notes list the changes."
+const xaiText = "Go is a language and it has docs.[[1]](https://go.dev/doc) The release notes list the changes."
 
 // xaiCite is the citation the answer carries in the shape xAI documents: the
-// offsets mark the numeric link, and the title is only its label.
+// marker sits after the sentence's terminator, and the title is only its label.
 func xaiCite() xaiCitation {
 	start := strings.Index(xaiText, "[[1]]")
 	return xaiCitation{Type: "url_citation", URL: "https://go.dev/doc", Title: "1", StartIndex: start, EndIndex: start + len("[[1]](https://go.dev/doc)")}
@@ -115,7 +115,7 @@ func TestXAIAsksItsSearchToolAndMapsCitations(t *testing.T) {
 		t.Fatalf("first result = %+v, want the cited source named by its URL: the label \"1\" names nothing", got[0])
 	}
 	if got[0].Snippet != "Go is a language and it has docs." {
-		t.Fatalf("snippet = %q, want the sentence around the citation with its marker removed", got[0].Snippet)
+		t.Fatalf("snippet = %q, want the sentence before the citation, and not the one after it", got[0].Snippet)
 	}
 	if got[1].URL != "https://go.dev" || got[1].Title != "Go" {
 		t.Fatalf("second result = %+v, want the search call source", got[1])
@@ -123,6 +123,44 @@ func TestXAIAsksItsSearchToolAndMapsCitations(t *testing.T) {
 	if got[1].Snippet != "" {
 		t.Fatalf("snippet = %q, want none: a source carries no snippet", got[1].Snippet)
 	}
+}
+
+// Adjacent citations each name the sentence before them, and a URL inside a
+// neighbouring marker never looks like a sentence end.
+func TestXAISnippetsTheProseBeforeAdjacentCitations(t *testing.T) {
+	const answer = "Grok is an AI assistant.[[1]](https://x.ai/)[[2]](https://example.com/a.b)"
+	first := xaiCitation{Type: "url_citation", URL: "https://x.ai/", Title: "1", StartIndex: strings.Index(answer, "[[1]]")}
+	first.EndIndex = first.StartIndex + len("[[1]](https://x.ai/)")
+	second := xaiCitation{Type: "url_citation", URL: "https://example.com/a.b", Title: "2", StartIndex: strings.Index(answer, "[[2]]")}
+	second.EndIndex = second.StartIndex + len("[[2]](https://example.com/a.b)")
+	server := xaiServer(t, xaiTwoCitationStream(t, answer, first, second))
+	got, err := (XAI{BaseURL: server.URL, Token: xaiToken("token")}).Search(t.Context(), Query{Text: "grok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("results = %+v, want both citations", got)
+	}
+	for i, result := range got {
+		if result.Snippet != "Grok is an AI assistant." {
+			t.Fatalf("result %d snippet = %q, want the cited sentence", i, result.Snippet)
+		}
+	}
+}
+
+// xaiTwoCitationStream is one answer stream that carries two citations, in the
+// adjacent shape xAI writes when a sentence has more than one source.
+func xaiTwoCitationStream(t *testing.T, answer string, cites ...xaiCitation) string {
+	t.Helper()
+	lines := []string{`data: {"type":"response.output_text.delta","delta":"` + answer + `"}`}
+	for _, cite := range cites {
+		encoded, err := json.Marshal(cite)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, `data: {"type":"response.output_text.annotation.added","annotation":`+string(encoded)+`}`)
+	}
+	return strings.Join(append(lines, `data: [DONE]`, ""), "\n\n")
 }
 
 // A source the answer cited twice, or that the search call repeats, is one

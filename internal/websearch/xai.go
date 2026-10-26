@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -304,46 +306,57 @@ func (s *xaiStream) results() []Result {
 	return results
 }
 
-// xaiCitedText is the answer sentence a citation supports. xAI's offsets mark
-// the citation marker itself, such as "[[1]](https://example.com)", and not the
-// sentence that cites it, so the snippet is the sentence around that marker with
-// the marker removed.
+// xaiCitedText is the prose a citation supports. xAI writes a citation after
+// its sentence's terminator, often with several citations in a row, so the
+// snippet is the sentence before the citation. Each marker is blanked first:
+// a marker holds a URL, and a URL's dots would look like sentence ends.
 func xaiCitedText(answer string, cite xaiCitation) string {
 	runes := []rune(answer)
-	if cite.StartIndex < 0 || cite.StartIndex > len(runes) || cite.EndIndex < cite.StartIndex || cite.EndIndex > len(runes) {
+	if cite.StartIndex < 0 || cite.StartIndex > len(runes) || cite.EndIndex < cite.StartIndex {
 		return ""
 	}
-	sentence := string(runes[xaiSentenceStart(runes, cite.StartIndex):xaiSentenceEnd(runes, cite.EndIndex)])
-	sentence = xaiMarkers.ReplaceAllString(sentence, "")
-	return text(xaiSpacing.ReplaceAllString(sentence, "$1"))
+	prose := xaiBlankMarkers(runes)
+	end := cite.StartIndex
+	for end > 0 && unicode.IsSpace(prose[end-1]) {
+		end--
+	}
+	return text(string(prose[xaiSentenceStart(prose, end):end]))
 }
 
 // xaiMarkers are the citation links xAI writes into an answer: the numeric
 // label in brackets, then the source URL in parentheses.
 var xaiMarkers = regexp.MustCompile(`\[\[?\d+\]?\]\([^)]*\)`)
 
-// xaiSpacing is the gap a removed marker leaves before punctuation.
-var xaiSpacing = regexp.MustCompile(`\s+([.,!?;:])`)
+// xaiBlankMarkers replaces every citation marker with spaces. Each character
+// keeps its place, so a citation's offset still points at the same position.
+func xaiBlankMarkers(answer []rune) []rune {
+	blanked := make([]rune, len(answer))
+	copy(blanked, answer)
+	prose := string(answer)
+	for _, found := range xaiMarkers.FindAllStringIndex(prose, -1) {
+		start := utf8.RuneCountInString(prose[:found[0]])
+		stop := start + utf8.RuneCountInString(prose[found[0]:found[1]])
+		for i := start; i < stop; i++ {
+			blanked[i] = ' '
+		}
+	}
+	return blanked
+}
 
-// xaiSentenceStart is where the sentence that holds a span begins.
-func xaiSentenceStart(runes []rune, at int) int {
-	for i := at - 1; i >= 0; i-- {
-		if strings.ContainsRune(".!?\n", runes[i]) {
+// xaiSentenceStart is where the sentence that ends at end begins. The
+// terminator just before end belongs to that sentence, so the boundary is the
+// terminator before it.
+func xaiSentenceStart(prose []rune, end int) int {
+	at := end - 1
+	if at >= 0 && strings.ContainsRune(".!?\n", prose[at]) {
+		at--
+	}
+	for i := at; i >= 0; i-- {
+		if strings.ContainsRune(".!?\n", prose[i]) {
 			return i + 1
 		}
 	}
 	return 0
-}
-
-// xaiSentenceEnd is where the sentence that holds a span ends, after its own
-// terminator.
-func xaiSentenceEnd(runes []rune, at int) int {
-	for i := at; i < len(runes); i++ {
-		if strings.ContainsRune(".!?\n", runes[i]) {
-			return i + 1
-		}
-	}
-	return len(runes)
 }
 
 // xaiTitle names a citation. xAI titles a citation with its numeric label, so a
