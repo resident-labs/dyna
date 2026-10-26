@@ -23,6 +23,7 @@ import (
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/shellmcp"
 )
 
 const generationPrefix = "gen-v1-"
@@ -174,7 +175,7 @@ func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup fu
 		}
 	}
 	if dynaShell {
-		snapshot.MCP = append(snapshot.MCP, harnessmgr.ManagedMCP{Name: dynaMCPName, MCPDefinition: harnessmgr.MCPDefinition{Command: inputs.CLI, Args: []string{"mcp", "shell"}}, EnabledHarnesses: []string{h}})
+		snapshot.MCP = append(snapshot.MCP, harnessmgr.ManagedMCP{Name: dynaMCPName, MCPDefinition: harnessmgr.MCPDefinition{Command: inputs.CLI, Args: []string{"mcp", "shell"}, TimeoutSeconds: int(shellmcp.MaxRequestTimeout.Seconds())}, EnabledHarnesses: []string{h}})
 	}
 	slices.SortFunc(snapshot.MCP, func(a, b harnessmgr.ManagedMCP) int { return strings.Compare(a.Name, b.Name) })
 	inputs.MCP = snapshot.MCP

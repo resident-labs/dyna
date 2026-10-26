@@ -140,6 +140,10 @@ export interface ManagedMCP {
   args?: string[]
   envKeys?: string[]
   url?: string
+  // One server's request timeout in seconds; empty keeps the harness default.
+  timeoutSeconds?: number
+  // How Pi exposes this server's tools; empty keeps Pi's default, codemode.
+  exposure?: 'codemode' | 'codemode-deferred' | 'deferred' | 'direct' | 'hidden'
   enabledHarnesses: string[]
 }
 export interface ManagedSkill {
