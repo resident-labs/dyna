@@ -34,7 +34,7 @@ type RoleLink struct {
 // ForSession reads one consistent snapshot. The writer uses atomic rename;
 // readers never create the PR directory or change the state.
 func ForSession(root, session, roomID string) ([]Link, error) {
-	st, err := state.Read(root)
+	st, err := state.ReadForSessions(root, roomID, session)
 	if err != nil {
 		return nil, err
 	}
