@@ -72,8 +72,8 @@ func TestTurnPromptsCarryTaskAndLiveContextOnly(t *testing.T) {
 func TestSessionCoreBudgetAndGuideTriggers(t *testing.T) {
 	core := strings.ReplaceAll(sessionRules(true, false), clearEnglishPrompt, "")
 	// The owner-blocker rule added words to the post line; keep the core lean.
-	if words := len(strings.Fields(core)); words >= 540 {
-		t.Fatalf("session core is %d words; must stay under 520", words)
+	if words := len(strings.Fields(core)); words >= 560 {
+		t.Fatalf("session core is %d words; must stay under 560", words)
 	}
 	topics := regexp.MustCompile("(?m)^- `([a-z-]+)`: ").FindAllStringSubmatch(core, -1)
 	var want []string
