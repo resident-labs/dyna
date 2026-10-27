@@ -1,4 +1,4 @@
-// The sidebar's Work and Machine rows (Library is the last Work row). A row with more than one tab shows
+// The sidebar's rows below Chat (Computers is the last row). A row with more than one tab shows
 // the tabs in the header; each tab keeps its own view id, so links and the
 // saved last view still name one page. A row opens its first tab.
 export interface Tab {
@@ -16,29 +16,14 @@ export interface Row {
   computers?: boolean
 }
 
-export interface Section {
-  label: string
-  rows: Row[]
-}
-
-export const sections: Section[] = [
-  {
-    label: 'Work',
-    rows: [
-      { id: 'requests', label: 'requests', hint: 'Questions and terminal requests that need the owner', tabs: [{ id: 'requests', label: 'Requests' }] },
-      { id: 'goals', label: 'goals', hint: 'Room goals', tabs: [{ id: 'goals', label: 'Goals' }] },
-      { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }, { id: 'jobs', label: 'Shell jobs', hidden: true }] },
-      { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
-      { id: 'visuals', label: 'visuals', hint: 'Every HTML card in this room', tabs: [{ id: 'visuals', label: 'Visuals' }] },
-      { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
-    ],
-  },
-  {
-    label: 'Machine',
-    rows: [
-      { id: 'computers', label: 'computers', hint: 'Every agent computer in this room', computers: true, tabs: [{ id: 'computers', label: 'Computers' }] },
-    ],
-  },
+export const rows: Row[] = [
+  { id: 'requests', label: 'requests', hint: 'Questions and terminal requests that need the owner', tabs: [{ id: 'requests', label: 'Requests' }] },
+  { id: 'goals', label: 'goals', hint: 'Room goals', tabs: [{ id: 'goals', label: 'Goals' }] },
+  { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }, { id: 'jobs', label: 'Shell jobs', hidden: true }] },
+  { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
+  { id: 'visuals', label: 'visuals', hint: 'Every HTML card in this room', tabs: [{ id: 'visuals', label: 'Visuals' }] },
+  { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
+  { id: 'computers', label: 'computers', hint: 'Every agent computer in this room', computers: true, tabs: [{ id: 'computers', label: 'Computers' }] },
 ]
 
 // canonicalView keeps links and saved views from before the Requests rename.
@@ -48,7 +33,7 @@ export const canonicalView = (view: string): string => view === 'questions' ? 'r
 // rowOf is the sidebar row that holds a view, or undefined for the feed.
 export function rowOf(view: string): Row | undefined {
   const canonical = canonicalView(view)
-  for (const s of sections) for (const r of s.rows) if (r.tabs.some((t) => t.id === canonical)) return r
+  return rows.find((r) => r.tabs.some((t) => t.id === canonical))
 }
 
 // shown filters rows by what the room and this client have.
