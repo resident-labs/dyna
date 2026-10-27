@@ -305,7 +305,9 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Resu
 	}
 	failed := rolesession.MergeFailures(st.SmellFailedProfiles, recent)
 	repo := harnessruntime.RepoIdentity(ctx, r.Main)
-	choice, err := rolesession.ChooseProfile(profiles, v.LibrarySmellProfile, repo, failed, s.now(), subagent.RoleReviewer)
+	// The smell pass uses the librarian pin, the same profile as the feature
+	// map. An empty pin ranks by taste, not by reviewer diagnostics.
+	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, repo, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
 	}
