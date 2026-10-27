@@ -471,7 +471,7 @@ func PostCmd() *cobra.Command {
 			"for structured input); choice is optional. It works only right after the owner clicks or types in the card.\n" +
 			"The app then shows the text under the card, and the owner must press the app's own Send button to send it.\n" +
 			"What is sent is marked as written by a card. If the owner presses Cancel, you get ok: false, error: 'cancelled'.\n" +
-			"With dyna ask --html, the text (or the choice, when it is one of the options) answers the question. On any\n" +
+			"With dyna request question --html, the text (or the choice, when it is one of the options) answers the question. On any\n" +
 			"other card it is an owner reply to you, which wakes you. The card gets back\n" +
 			"{type: 'dyna:submitted', ok: true|false, error?: 'answered'|'cancelled'|'replaced'} in a window 'message' event.\n" +
 			"To size the card, call parent.postMessage({type: 'dyna:height', height: 480}, '*'), or set\n" +

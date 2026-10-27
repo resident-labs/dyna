@@ -48,7 +48,7 @@ Root and the owner hold no goals: when only they are left above a session, close
 until each held goal is done, dropped, or transferred with `dyna goal edit <id> --for @agent`
 to an open agent. The refusal names each goal and its commands, and the app offers the same choices.
 A forced close does not move goals to the owner. If only the owner can unblock the work,
-root asks the owner first with `dyna ask`, then resolves the goal.
+root asks the owner first with `dyna request question`, then resolves the goal.
 Live workflow runs are canceled because their running coordinator cannot change owners.
 Questions withdraw; non-kept shells stop. Empty children close; other children move to the heir.
 The command and app show what moved or stopped. A failed handoff keeps the session open;
@@ -84,18 +84,19 @@ Stored hierarchy controls parent selectors and depth, even when `DYNA_DEPTH` pre
 
 ## Questions
 
-Only root uses `dyna ask` to ask the human owner. Other sessions use `dyna post @parent` for questions.
+Only root uses `dyna request question` to ask the human owner. Other sessions use `dyna post @parent` for questions.
 A worker blocked on something only the owner can do, such as a sign-in, a live check on a
 device, a secret, or an outside decision, posts to @root or to its parent root. The post states
-what is needed and why the work stops without it. Root turns that post into one `dyna ask`
+what is needed and why the work stops without it. Root turns that post into one `dyna request question`
 question. Workers never ask the owner directly.
+For a step that needs a person in a terminal, such as a sign-in or `sudo`, any session files `dyna request terminal --reason "<why>" -- <command>`. The request climbs your parent chain: each holder runs `dyna request approve <id>` or `dyna request deny <id> --reason "<why>"`, and root's approval shows it to the owner. `dyna request list` shows yours and the ones you hold.
 Root can use these question commands:
 
 ```bash
-dyna ask "Which format?" --meanwhile "Inspect the parser" --options "JSON,CSV"
-dyna ask
-dyna ask withdraw <id> --why "Resolved"
-dyna ask answer <id> --choice JSON
+dyna request question "Which format?" --meanwhile "Inspect the parser" --options "JSON,CSV"
+dyna request question
+dyna request withdraw <id> --why "Resolved"
+dyna request answer <id> --choice JSON
 ```
 
 Ask returns immediately; answers arrive as posts. It also accepts `--html` and `--attach`.

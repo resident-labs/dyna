@@ -302,7 +302,7 @@ func (s *Store) reserve(conn *sql.Conn, sessionsRoot string, q *Question, toErr 
 		}
 	}
 	if asker >= 10 || total >= 200 {
-		return fmt.Errorf("open question limit reached; use dyna ask withdraw <id> --why \"no longer needed\"")
+		return fmt.Errorf("open question limit reached; use dyna request withdraw <id> --why \"no longer needed\"")
 	}
 	q.ID = fmt.Sprintf("q%d", st.Next[q.Room]+1)
 	q.State = "open"

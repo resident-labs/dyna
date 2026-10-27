@@ -479,7 +479,7 @@ Closing transfers author roles to the nearest open ancestor, or root, with
 author history and pending notices intact. Reviewer roles return to the pool.
 A failed handoff keeps the session open unless force close is chosen.
 A held goal that would reach root is resolved first: root asks the owner with
-`dyna ask` when only the owner can unblock it, then finishes or drops the goal,
+`dyna request question` when only the owner can unblock it, then finishes or drops the goal,
 or hands it to an open agent. A forced close never leaves the goal with the owner.
 The engine service owns the single worker process and its restart policy.
 Worker errors go to the engine log. The database serializes writes.

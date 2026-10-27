@@ -34,7 +34,7 @@ func TestCloseRefusesGoalsThatWouldReachRoot(t *testing.T) {
 		"dyna goal drop " + goal.ID,
 		"dyna goal edit " + goal.ID + " --for @",
 		"a forced close keeps the work here",
-		"ask the owner first with dyna ask",
+		"ask the owner first with dyna request question",
 		"hand it to an open session",
 	} {
 		if !strings.Contains(err.Error(), want) {

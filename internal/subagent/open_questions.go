@@ -50,7 +50,7 @@ func (m *Manager) openQuestions(meta Meta) instructions.Section {
 		}
 	}
 	if len(section.Items) > 0 {
-		section.Text = "[DYNA OPEN QUESTIONS]\nYour open questions and call requests to the owner. Answers and call results arrive as posts. Withdraw a call with `dyna call withdraw <id>`. Withdraw a question that has gone stale with `dyna ask withdraw <id> --why \"<reason>\"`."
+		section.Text = "[DYNA OPEN QUESTIONS]\nYour open questions and call requests to the owner. Answers and call results arrive as posts. Withdraw a call with `dyna call withdraw <id>`. Withdraw a question that has gone stale with `dyna request withdraw <id> --why \"<reason>\"`."
 	}
 	return section
 }

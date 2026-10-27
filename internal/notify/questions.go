@@ -79,7 +79,7 @@ func (s *Service) QuestionRoom(snd Sender, ref string) (room.Record, error) {
 
 // ErrAskAgent rejects questions to agents. Agents can answer posts, so a
 // question between agents is a post, and questions wait only for the owner.
-var ErrAskAgent = errors.New("Ask agents with dyna post; dyna ask is for the owner.")
+var ErrAskAgent = errors.New("Ask agents with dyna post; dyna request question is for the owner.")
 
 func (s *Service) Ask(ctx context.Context, snd Sender, roomRef, to, text, meanwhile string, options []string, files []File) (questions.Question, error) {
 	if snd.Kind == SenderSession {
@@ -95,7 +95,7 @@ func (s *Service) Ask(ctx context.Context, snd Sender, roomRef, to, text, meanwh
 	if to != "" && to != "@root" && to != "owner" {
 		return questions.Question{}, ErrAskAgent
 	}
-	if err := authority.Check("ask", senderActor(snd), nil); err != nil {
+	if err := authority.Check("request question", senderActor(snd), nil); err != nil {
 		return questions.Question{}, err
 	}
 	rec, err := s.QuestionRoom(snd, roomRef)
@@ -109,7 +109,7 @@ func (s *Service) Ask(ctx context.Context, snd Sender, roomRef, to, text, meanwh
 	}
 	var deliveryErr error
 	q, err = s.QuestionStore().Ask(q, func(q questions.Question) (string, error) {
-		body := fmt.Sprintf("[QUESTION %s] %s\nWhile waiting: %s\nAnswer: dyna ask answer %s \"your answer\"", q.ID, q.Text, q.Meanwhile, q.ID)
+		body := fmt.Sprintf("[QUESTION %s] %s\nWhile waiting: %s\nAnswer: dyna request answer %s \"your answer\"", q.ID, q.Text, q.Meanwhile, q.ID)
 		if len(q.Options) > 0 {
 			body += "\nOptions: " + strings.Join(q.Options, ", ")
 		}
@@ -260,7 +260,7 @@ func (s *Service) DeliverAnswers(ctx context.Context, roomID string) error {
 	return errors.Join(errs...)
 }
 func (s *Service) WithdrawQuestion(snd Sender, roomRef, id, reason string) error {
-	if err := authority.Check("ask withdraw", senderActor(snd), nil); err != nil {
+	if err := authority.Check("request withdraw", senderActor(snd), nil); err != nil {
 		return err
 	}
 	rec, err := s.QuestionRoom(snd, roomRef)
