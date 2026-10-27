@@ -299,8 +299,9 @@ const MERGE_ICON: Record<string, string> = { sage: 'ok', done: 'ok', coral: 'bad
 // each for the checks, the review and the merge. status is the statusBox
 // answer, for the action bar's buttons.
 // state is the row's mergeState. A row is { id, icon, title, note, link };
-// icon is ok, run, bad or wait, and link names the tab or part it opens.
-// One row of the merge box. link names the tab it opens, or ''.
+// icon is ok, run, bad or wait, and link names the part it opens: 'checks'
+// or 'review' a tab of the detail, 'session' the live reviewer session.
+// One row of the merge box. link names the part it opens, or ''.
 export interface BoxRow {
   id: string
   icon: string
@@ -341,7 +342,10 @@ export function mergeBox(c: Row, { merge = null, state = null, review = true, na
   return {
     rows: [
       { id: 'checks', ...checks, link: 'checks' },
-      { id: 'review', ...rv, note: reviewNote, link: c.reviewRound ? 'review' : '' },
+      // While the reviewer works there is no new review to read yet, so the
+      // row opens the reviewer's live session; every other state keeps the
+      // review tab, and a first round that has not started has no link.
+      { id: 'review', ...rv, note: reviewNote, link: c.reviewState === 'reviewing' && c.reviewerSession ? 'session' : c.reviewRound ? 'review' : '' },
       ...required,
       { id: 'merge', icon, title: m.label, note, link: '' },
     ],

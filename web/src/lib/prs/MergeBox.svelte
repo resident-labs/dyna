@@ -5,7 +5,8 @@
   //
   // Props:
   //   change, box (the mergeBox answer)
-  //   onchecks opens the Checks tab; onread shows the latest review
+  //   onchecks opens the Checks tab; onread shows the latest review;
+  //   while the reviewer works, the review row opens the live reviewer session instead
   //   onresume, ontrack, onreviewer: PRActions' buttons
   //   onauthor opens the author session; onrules the PR's rules; onuntrack stops watching
   //   actions  extra buttons, such as Mention in chat
@@ -43,11 +44,12 @@
 
 <section class="mbox" aria-label="Merge">
   {#each box.rows as r (r.id)}
-    {@const go = r.link === 'checks' ? onchecks : r.link === 'review' ? onread : null}
+    {@const live = r.link === 'session' && !!onreviewer}
+    {@const go = r.link === 'checks' ? onchecks : live ? onreviewer : r.link ? onread : null}
     <div class="r">
       <span class="ic {r.icon}" aria-hidden="true">{icons[r.icon] ?? (r.id === 'merge' ? '3' : '·')}</span>
       <span class="what"><b>{r.title}</b>{#if r.note}<small>{r.note}</small>{/if}</span>
-      {#if go}<button class="go" onclick={go}>{r.link === 'checks' ? 'Show checks' : 'Read the review'}</button>{/if}
+      {#if go}<button class="go" onclick={go}>{r.link === 'checks' ? 'Show checks' : live ? 'Open reviewer session' : 'Read the review'}</button>{/if}
     </div>
   {/each}
   <div class="bar">
