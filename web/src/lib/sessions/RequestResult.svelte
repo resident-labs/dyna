@@ -4,7 +4,7 @@
   // reports done or failed with a note. Sharing the last lines is off, and
   // ticking it shows exactly what would be sent before anything is.
   import type { Question } from '../api/room.ts'
-  import { emptyForm, type ResultForm } from './termRequest.ts'
+  import { emptyForm, whatAgentGets, type ResultForm } from './termRequest.ts'
 
   let { q, exit, onpreview, onreport }: {
     q: Question
@@ -41,7 +41,7 @@
   {#if !ready}
     <p class="line">Running for <b>{q.askerName}</b>. When it exits you can report the result.</p>
   {:else}
-    <p class="line">{#if exit !== undefined}The command exited with code <b>{exit}</b>.{:else}Report when the step is done.{/if} {q.askerName} gets only {exit !== undefined ? 'the exit code and ' : ''}your note.</p>
+    <p class="line">{#if exit !== undefined}The command exited with code <b>{exit}</b>.{:else}Report when the step is done.{/if} {whatAgentGets(q.askerName, exit !== undefined, form)}</p>
     <input bind:value={form.note} placeholder="Note to {q.askerName} (optional)" aria-label="Note" maxlength="2000" />
     <label class="share"><input type="checkbox" checked={form.share} onchange={tick} /> Also share the last 20 lines</label>
     {#if form.share && form.lines !== null}
