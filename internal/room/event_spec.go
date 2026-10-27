@@ -713,6 +713,30 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Question {questionId} was withdrawn: {reason}",
 	},
+	// A terminal request wakes the session that holds it. A request that waits
+	// for the owner wakes no session; the poster turns the wake off.
+	{
+		Family:   FamilyTerminal,
+		Type:     TypeRequest,
+		Renderer: "TerminalRequestCard",
+		Payload:  reflect.TypeOf(TerminalRequestEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "Terminal request {requestId} from {asker}: {reason}",
+	},
+	// The owner's report is the asking session's answer, so it wakes that
+	// session. A withdrawal is quiet; the poster turns the wake off.
+	{
+		Family:   FamilyTerminal,
+		Type:     TypeRequestDone,
+		Renderer: "TerminalRequestCard",
+		Payload:  reflect.TypeOf(TerminalDoneEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Audience: AudienceSession,
+		Blocks:   []string{"detail", "note", "sharedLines"},
+		Text:     "Terminal request {requestId} ended: {verdict}.",
+	},
 	// A shell result is the parent's own command, so it wakes the parent and
 	// reaches the owner feed as a row. It stays out of the room watch and out
 	// of the room chat: the session DM and the shell view carry it.
@@ -804,6 +828,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(AlertSeverity("")), Values: enumValues(alertSeverities)},
 	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
 	{Type: reflect.TypeOf(HelperOutcomeReason("")), Values: enumValues(helperOutcomeReasons)},
+	{Type: reflect.TypeOf(TerminalVerdict("")), Values: enumValues(terminalVerdicts)},
 	{Type: reflect.TypeOf(ShellState("")), Values: enumValues(shellStates)},
 	{Type: reflect.TypeOf(RunState("")), Values: enumValues(runStates)},
 	{Type: reflect.TypeOf(TurnState("")), Values: enumValues(turnStates)},
