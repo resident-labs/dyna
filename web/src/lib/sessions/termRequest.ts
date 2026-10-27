@@ -57,6 +57,5 @@ export function requestActions(api: RequestApi) {
     run: () => api.run(),
     decline: (reason: string) => api.report('declined', reason.trim(), false),
     preview: () => api.preview(),
-    report: (code: number) => api.report(autoVerdict(code), '', false),
   }
 }

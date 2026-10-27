@@ -68,7 +68,7 @@
   .line { margin: 0; display: flex; flex-wrap: wrap; gap: var(--s2); align-items: baseline; }
   .line b { color: var(--ink); }
   .again { font-size: var(--t-sm); color: var(--muted); }
-  .link { background: none; padding: 0; font-size: var(--t-sm); color: var(--muted); text-decoration: underline; }
+  .link { background: none; padding: 0; font-size: var(--t-sm); color: var(--muted); text-decoration: underline; transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .link:hover { color: var(--ink); }
   }

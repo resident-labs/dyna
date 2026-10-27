@@ -41,6 +41,15 @@ func (s services) termRequestRun(ctx context.Context, roomRef, id string, argv [
 		_ = s.terminals.Close(info.ID)
 		return terminalsvc.Info{}, err
 	}
+	// The engine sees the exit, so the filer hears back even if the owner
+	// closes the tab or the browser first.
+	if err := s.terminals.AfterExit(info.ID, func(code int) {
+		if err := s.rooms.Notify.ReportTerminalExit(context.Background(), rec.ID, id, code); err != nil {
+			log.Printf("terminal request %s: report on exit: %v", id, err)
+		}
+	}); err != nil {
+		log.Printf("terminal request %s: watch exit: %v", id, err)
+	}
 	return info, nil
 }
 
