@@ -375,6 +375,13 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 				return snap, nil
 			}
 		}
+		// An empty or fully disabled fleet serves no room either. A trial with no
+		// saved result and no hosted fallback would wait for ever, so it fails
+		// with the same cause and fix.
+		if (mode == localci.ModeLocal || mode == localci.ModeBoth) && job.trial && !hostedFallback && result.Node == "" {
+			snap.localCI = &registeredCIObservation{Status: VerdictFailed, Key: "room-unserved:" + r.Head, Reason: localci.RoomNotServedError{RoomID: r.RoomID}.Error()}
+			return snap, nil
+		}
 		if len(saved.IDs) == 0 {
 			return snap, nil
 		}
