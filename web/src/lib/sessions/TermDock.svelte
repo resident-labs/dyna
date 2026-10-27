@@ -22,7 +22,7 @@
   import type { Question } from '../api/room.ts'
   import RequestReview from './RequestReview.svelte'
   import RequestResult from './RequestResult.svelte'
-  import { requestActions, type ResultForm } from './termRequest.ts'
+  import { autoVerdict, followUpText, requestActions, type SentReport } from './termRequest.ts'
 
   // session set: only that session's shells show, and + opens one in its
   // folder (a session view). owner names the room's folder in the chips; names
@@ -32,7 +32,7 @@
   // a one-shot request ID the owner chose to review; later dock opens leave the
   // current tab alone.
   // noRepo: the room has no repository, so a room terminal has no folder.
-  let { roomId, session = '', owner = '', narrow = false, names = {}, noRepo = false, request = 0, review = { request: 0, id: '' }, requests = [] }: { roomId: string; session?: string; owner?: string; narrow?: boolean; names?: Record<string, string>; noRepo?: boolean; request?: number; review?: { request: number; id: string }; requests?: Question[] } = $props()
+  let { roomId, session = '', owner = '', narrow = false, names = {}, noRepo = false, request = 0, review = { request: 0, id: '', run: false }, requests = [] }: { roomId: string; session?: string; owner?: string; narrow?: boolean; names?: Record<string, string>; noRepo?: boolean; request?: number; review?: { request: number; id: string; run: boolean }; requests?: Question[] } = $props()
   let ref = $derived(session || roomId)
   let roomless = $derived(noRepo && ref === roomId)
 
@@ -86,7 +86,10 @@
   $effect(() => {
     if (request === seen) return
     seen = request
-    if (review.request === request && review.id) showReview(review.id)
+    if (review.request === request && review.id) {
+      if (review.run) startRequest(review.id)
+      else showReview(review.id)
+    }
     else show()
   })
 
@@ -158,19 +161,27 @@
   const requestOf = (termId: string): Question | undefined => waiting.find((q) => termOf(q) === termId)
 
   const requestApi = (q: Question) => requestActions({
-    run: (argv) => api.termRequestRun(roomId, q.id, argv, narrow ? 48 : 120, narrow ? 24 : 32),
+    run: () => api.termRequestRun(roomId, q.id, null, narrow ? 48 : 120, narrow ? 24 : 32),
     preview: () => api.termRequestPreview(roomId, q.id),
     report: (verdict, note, share) => api.termRequestReport(roomId, q.id, verdict, note, share),
   })
 
   // run starts the command in a new terminal and shows it.
-  async function runRequest(q: Question, argv: string[] | null) {
-    const t = await requestApi(q).run(argv)
+  async function runRequest(q: Question) {
+    const t = await requestApi(q).run()
     ran = { ...ran, [q.id]: t.id }
     all = [...(all ?? []), t]
     viewing = ''
     pick(t)
     load()
+  }
+
+  // startRequest runs a request exactly as filed, from the chat card's Run. A
+  // failure leaves the review open, where the error shows on its Run button.
+  async function startRequest(id: string) {
+    const q = waiting.find((r) => r.id === id)
+    if (!q || termOf(q)) { showReview(id); return }
+    try { await runRequest(q) } catch (e) { error = errorText(e); showReview(id) }
   }
 
   async function declineRequest(q: Question, reason: string) {
@@ -180,9 +191,34 @@
     if (narrow) sheet = false
   }
 
-  async function reportRequest(q: Question, verdict: 'done' | 'failed', form: ResultForm) {
-    await requestApi(q).report(verdict, form)
-    reported = new Set([...reported, q.id])
+  // sent: terminal ID to the result sent to its filer when the command exited.
+  let sent = $state<Record<string, SentReport>>({})
+  let sending = new Set<string>()
+
+  // reportExit sends the result the moment the command exits: exit code 0 is
+  // done, anything else failed. The owner clicks nothing.
+  async function reportExit(q: Question, termId: string, code: number) {
+    if (sending.has(q.id)) return
+    sending.add(q.id)
+    try {
+      await requestApi(q).report(code)
+      sent = { ...sent, [termId]: { requestId: q.id, askerName: q.askerName, verdict: autoVerdict(code), code } }
+      reported = new Set([...reported, q.id])
+    } catch (e) { error = errorText(e) }
+  }
+
+  $effect(() => {
+    for (const q of waiting) {
+      const termId = termOf(q)
+      const t = termId ? list.find((x) => x.id === termId) : undefined
+      const code = termId ? exited[termId] ?? (t?.exited ? t.exitCode : undefined) : undefined
+      if (termId && code !== undefined) reportExit(q, termId, code)
+    }
+  })
+
+  // followUp tells the filer more about a result already sent.
+  async function followUp(s: SentReport, note: string, lines: string | null) {
+    await api.send(roomId, followUpText(s, note, lines))
   }
 
   // showReview opens the review of one request, or its terminal once it ran.
@@ -368,7 +404,7 @@
 <svelte:window onkeydowncapture={shortcut} />
 
 {#snippet reviewPane(q: Question)}
-  <RequestReview {q} onrun={(argv) => runRequest(q, argv)} ondecline={(reason) => declineRequest(q, reason)} />
+  <RequestReview {q} onrun={() => runRequest(q)} ondecline={(reason) => declineRequest(q, reason)} />
 {/snippet}
 
 {#snippet body(t: TermInfo | undefined)}
@@ -384,7 +420,12 @@
       </div>
     {/if}
     {#if req}
-      <RequestResult q={req} exit={exited[t.id] ?? (t.exited ? t.exitCode : undefined)} onpreview={() => requestApi(req).preview()} onreport={(verdict, form) => reportRequest(req, verdict, form)} />
+      <RequestResult name={req.askerName} sent={undefined} onpreview={() => api.termRequestPreview(roomId, req.id)} onfollowup={async () => {}} />
+    {:else}
+      {@const s = sent[t.id]}
+      {#if s}
+      <RequestResult name={s.askerName} sent={s} onpreview={() => api.termRequestPreview(roomId, s.requestId)} onfollowup={(note, lines) => followUp(s, note, lines)} />
+      {/if}
     {/if}
     {#key t.id}
       <TermPane bind:this={panes[t.id]} bind:ctrl id={t.id} {narrow} onexit={(code) => (exited = { ...exited, [t.id]: code })} />

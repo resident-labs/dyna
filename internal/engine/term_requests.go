@@ -44,9 +44,10 @@ func (s services) termRequestRun(ctx context.Context, roomRef, id string, argv [
 	return info, nil
 }
 
-// termRequestPreview returns the lines the owner could share.
+// termRequestPreview returns the lines the owner could share, also after the
+// exit report went out.
 func (s services) termRequestPreview(roomRef, id string) (string, error) {
-	_, q, err := s.rooms.Notify.OwnerTerminalRequest(roomRef, id)
+	_, q, err := s.rooms.Notify.OwnedTerminalRequest(roomRef, id)
 	if err != nil {
 		return "", err
 	}

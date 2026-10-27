@@ -130,7 +130,7 @@
             {#if terminalCommand(t.argv)}<pre class="command mono">{terminalCommand(t.argv)}</pre>{/if}
             <p class="terminal-answer">Run it in a terminal, then report.{#if t.cwd} <span>Folder: <code>{t.cwd}</code></span>{/if}</p>
             <div class="terminal-actions">
-              <button class="review" type="button" disabled={busy.has(q.id)} onclick={() => run(q)}>Review and run</button>
+              <button class="review" type="button" disabled={busy.has(q.id)} onclick={() => run(q)}>Review</button>
               <button class="decline" type="button" disabled={busy.has(q.id)} onclick={() => { declining = q.id; declineReason = '' }}>Decline…</button>
             </div>
             {#if declining === q.id}

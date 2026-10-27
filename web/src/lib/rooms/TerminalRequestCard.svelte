@@ -1,7 +1,7 @@
 <script lang="ts">
   // The feed's row for a terminal request. While it waits for the owner it is
-  // a card with the reason and the exact command, "Review and run" (which
-  // opens the review in the dock; nothing runs yet) and "Decline…". Afterwards
+  // a card with the reason and the exact command, "Run" (one click opens the
+  // terminal in the dock and runs the command as filed) and "Decline…". Afterwards
   // it is a quiet row, and the result row shows the verdict and exit code. It
   // reads the typed payload of the post, never the text.
   import type { EventNotice } from '../api/room.ts'
@@ -65,7 +65,7 @@
       </div>
     {:else}
       <div class="row">
-        <button class="b primary" onclick={() => onreviewrequest?.(filed.requestId)}>Review and run</button>
+        <button class="b primary" onclick={() => onreviewrequest?.(filed.requestId)}>Run</button>
         <button class="b" onclick={() => (declining = true)}>Decline…</button>
       </div>
     {/if}

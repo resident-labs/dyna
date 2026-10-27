@@ -294,7 +294,7 @@
   const NARROW = '(max-width: 760px)'
   let narrow = $state(window.matchMedia(NARROW).matches)
   let dockRequest = $state(0) // counts up to open the terminal dock
-  let dockReview = $state({ request: 0, id: '' }) // a terminal request to review once
+  let dockReview = $state({ request: 0, id: '', run: false }) // a terminal request to review once
   let navOpen = $state(false) // the drawer, on a narrow screen
   let showMembers = $state(layout.members && !window.matchMedia(NARROW).matches)
   // The saved layout is the wide one; a phone's toggles do not change it.
@@ -619,10 +619,15 @@
     error: (message) => (loadError = message),
     openView: (name) => openView(name),
   })
-  // Review and run opens the request's review in the dock; nothing runs yet.
+  // The Requests page opens the request's review in the dock; nothing runs yet.
+  function reviewTerminalRequest(id: string) {
+    dockRequest++
+    dockReview = { request: dockRequest, id, run: false }
+  }
+  // The chat card's Run shows the exact command, so that click starts it.
   function runTerminalRequest(id: string) {
     dockRequest++
-    dockReview = { request: dockRequest, id }
+    dockReview = { request: dockRequest, id, run: true }
   }
   async function declineTerminalRequest(id: string, reason: string) {
     await api.termRequestReport(roomId, id, 'declined', reason, false)
@@ -1887,7 +1892,7 @@
         {#if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'requests'}
-          {#key room.id}<Requests roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onrun={runTerminalRequest} ondecline={declineTerminalRequest} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
+          {#key room.id}<Requests roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onrun={reviewTerminalRequest} ondecline={declineTerminalRequest} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
           {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
         {:else if view === 'visuals'}
