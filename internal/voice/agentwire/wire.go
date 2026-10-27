@@ -20,6 +20,10 @@ const (
 	// MinSessionRate and MaxSessionRate bound the agent's sample rate.
 	MinSessionRate = 8000
 	MaxSessionRate = 96000
+	// MinOutputSpeed and MaxOutputSpeed bound audio.output.speed. 1 is the
+	// provider default. OpenAI Realtime uses this range.
+	MinOutputSpeed = 0.25
+	MaxOutputSpeed = 1.5
 	// MaxImageBytes is the largest image one image line may carry.
 	MaxImageBytes = 5 << 20
 )
@@ -125,6 +129,9 @@ type SessionRequest struct {
 	// Turns is auto or manual. Empty means auto. Manual turns the provider's
 	// turn detection off, so only a client commit ends a turn.
 	Turns TurnMode `json:"turns,omitempty"`
+	// Speed is the speaking speed, from MinOutputSpeed to MaxOutputSpeed.
+	// Zero keeps the provider default.
+	Speed float64 `json:"speed,omitempty"`
 }
 
 // InMessage is one line from the agent.
@@ -140,9 +147,12 @@ type InMessage struct {
 	// False is the default: a text line only adds context.
 	Respond bool `json:"respond,omitempty"`
 	// Mode is set on InSay; empty means SayAppend.
-	Mode   SayMode `json:"mode,omitempty"`
-	CallID string  `json:"call_id,omitempty"`
-	Output string  `json:"output,omitempty"`
+	Mode SayMode `json:"mode,omitempty"`
+	// Instructions, on a say line or a text line that asks for a reply, is
+	// style for that reply only. It does not add a conversation item.
+	Instructions string `json:"instructions,omitempty"`
+	CallID       string `json:"call_id,omitempty"`
+	Output       string `json:"output,omitempty"`
 	// Image and Mime are the file's bytes and type on InImage.
 	Image []byte `json:"image,omitempty"`
 	Mime  string `json:"mime,omitempty"`

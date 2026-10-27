@@ -969,3 +969,105 @@ func TestSessionLateCommitEmptyBufferIsSilent(t *testing.T) {
 		t.Fatalf("unrelated error = %+v, want the provider message", m)
 	}
 }
+
+// instructedProtocol names a styled response so a test can see the instructions.
+type instructedProtocol struct{ sessionProtocol }
+
+func (instructedProtocol) ResponseInstructed(key, instructions string) any {
+	return "respond:" + key + ":" + instructions
+}
+
+// A session can set speaking speed and style one reply. A provider without
+// the feature rejects the flag before ready, or the line with an error and
+// no send. OpenAI maps speed to audio.output.speed and instructions to
+// response.create.
+func TestSessionSpeedAndResponseInstructions(t *testing.T) {
+	clock := newFakeClock()
+	plain := fakeProvider()
+	closed := make(chan agentwire.InMessage)
+	close(closed)
+	silent := SessionIO{In: closed, Out: func(agentwire.OutMessage) error { return nil }}
+	_, err := fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{Speed: 2}, silent)
+	if err == nil || !strings.Contains(err.Error(), "0.25 to 1.5") {
+		t.Fatalf("bad speed error = %v", err)
+	}
+	_, err = fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{Speed: 1.25}, silent)
+	if err == nil || !strings.Contains(err.Error(), "does not take --speed") {
+		t.Fatalf("unsupported speed error = %v", err)
+	}
+
+	conn := newChanConn()
+	r := startSession(t, fakeSessions(plain, conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InSay, Text: "hello", Instructions: "warm accent"}
+	if m := r.next(t); m.Type != agentwire.OutError || !strings.Contains(m.Message, "does not take per-response instructions") {
+		t.Fatalf("unsupported say instructions = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: "note", Respond: true, Instructions: "warm accent"}
+	if m := r.next(t); m.Type != agentwire.OutError || !strings.Contains(m.Message, "does not take per-response instructions") {
+		t.Fatalf("unsupported text instructions = %+v", m)
+	}
+	if got := conn.sentSoFar(); len(got) != 0 {
+		t.Fatalf("unsupported instructions sent %v", got)
+	}
+	close(r.in)
+
+	var gotSession realtime.Session
+	capable := plain
+	capable.Caps.OutputSpeed = true
+	capable.Caps.ResponseInstructions = true
+	capable.Protocol = instructedProtocol{}
+	conn = newChanConn()
+	s := fakeSessions(capable, conn, clock)
+	s.dial = func(_ context.Context, _ realtime.Provider, sess realtime.Session) (sayConn, error) {
+		gotSession = sess
+		return conn, nil
+	}
+	r = startSession(t, s, conn, clock, agentwire.SessionRequest{Speed: 1.25})
+	if gotSession.Speed != 1.25 {
+		t.Fatalf("dialed speed = %v, want 1.25", gotSession.Speed)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InSay, Text: "hello", Instructions: "warm accent"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after say = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[text:Say exactly this, word for word, and nothing else: hello respond::warm accent]" {
+		t.Fatalf("say sent %s", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: "the cake is ready", Respond: true, Instructions: "short and warm"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync during reply = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); !strings.Contains(got, "text:the cake is ready") || strings.Count(got, "respond:") != 1 {
+		t.Fatalf("busy text sent %s, want the reply queued", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone {
+		t.Fatalf("response done = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); !strings.HasSuffix(got, "respond::short and warm]") {
+		t.Fatalf("queued reply sent %s, want the saved instructions", got)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: "context only", Instructions: "do not use"}
+	if m := r.next(t); m.Type != agentwire.OutError || !strings.Contains(m.Message, "respond") {
+		t.Fatalf("text instructions without respond = %+v", m)
+	}
+
+	op := realtime.OpenAI("wss://example.invalid", func(context.Context) (string, string, error) { return "t", "a", nil })
+	raw, err := json.Marshal(op.Session(realtime.Session{Instructions: "hi", Speed: 1.25}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"speed":1.25`) {
+		t.Fatalf("OpenAI session = %s, want audio.output.speed", raw)
+	}
+	styled, err := json.Marshal(realtime.GA{}.ResponseInstructed("", "warm accent"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(styled) != `{"response":{"instructions":"warm accent"},"type":"response.create"}` {
+		t.Fatalf("response.create = %s", styled)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -28,7 +29,7 @@ type sessionConn interface {
 
 func newSessionCommand() *cobra.Command {
 	var req agentwire.SessionRequest
-	var promptFile, toolsFile, turns string
+	var promptFile, toolsFile, turns, speed string
 	cmd := &cobra.Command{
 		Use:   "session",
 		Short: "Run a live two-way voice session",
@@ -61,6 +62,13 @@ func newSessionCommand() *cobra.Command {
 				req.Tools = tools
 			}
 			req.Turns = agentwire.TurnMode(turns)
+			if strings.TrimSpace(speed) != "" {
+				v, err := strconv.ParseFloat(strings.TrimSpace(speed), 64)
+				if err != nil {
+					return fmt.Errorf("--speed must be a number from %g to %g", agentwire.MinOutputSpeed, agentwire.MaxOutputSpeed)
+				}
+				req.Speed = v
+			}
 			ctx, stop := signal.NotifyContext(c.Context(), os.Interrupt)
 			defer stop()
 			conn, err := engineclient.New("").Stream(ctx, "/api/voice/session")
@@ -78,6 +86,7 @@ func newSessionCommand() *cobra.Command {
 	cmd.Flags().IntVar(&req.MaxMinutes, "max-minutes", agentwire.DefaultSessionMinutes, fmt.Sprintf("longest session, at most %d", agentwire.MaxSessionMinutes))
 	cmd.Flags().StringVar(&req.VADEagerness, "vad-eagerness", "", "how soon turn detection ends a turn: low, medium, high or auto (default: the provider's own)")
 	cmd.Flags().StringVar(&turns, "turns", string(agentwire.TurnsAuto), "who ends a turn: auto (the provider) or manual (only a commit line)")
+	cmd.Flags().StringVar(&speed, "speed", "", "speaking speed, from 0.25 to 1.5 (default: the provider's own)")
 	return cmd
 }
 
