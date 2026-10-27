@@ -394,6 +394,17 @@ func (s *Service) registeredCINodes(ctx context.Context) ([]localci.Node, error)
 	return enabled, nil
 }
 
+// roomServedByCI reports whether an enabled machine takes CI work for the room.
+// A machine list that cannot be read counts as serving, so a store error never
+// fails a head.
+func (s *Service) roomServedByCI(roomID string) bool {
+	if s.LocalCIRegistry == nil && s.Store == nil {
+		return true
+	}
+	nodes, err := s.registeredCINodes(context.Background())
+	return err != nil || len(localci.NodesForRoom(nodes, roomID)) > 0
+}
+
 // activeRegisteredCISlots counts the slots the runs in flight hold per machine.
 func activeRegisteredCISlots(runs *registeredCIRuns) map[string]int {
 	active := map[string]int{}
