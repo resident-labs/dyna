@@ -17,6 +17,7 @@ import { prHash, parsePRHash, issueHash, parseIssueHash, parseFileHash } from '.
 import { roomIDPattern as ROOM, postIDPattern as POST, postHref } from '../ui/posts.ts'
 import { questionID } from '../requests/requests.ts'
 import { isShellResult, shellJobID } from './feedRows.ts'
+import { shellDestination } from '../sessions/shellRoute.ts'
 import { trimFeed } from './feedWindow.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
@@ -37,7 +38,7 @@ const loaderCode = moduleFunctions(loaderSource)
 const declarations = parse(source, { modern: true }).instance?.content.body ?? []
 // The member selection moved to lib/app/selection.svelte.ts with the reset that
 // selectRoom runs, so installSelection brings it into the state.
-const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
+const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR', 'openShellLog', 'shellParent']
 const routerCode = moduleFunctions(routerSource, names)
 const appCode = (name: string): string | undefined => {
   const node = declarations.find((entry) => entry.type === 'FunctionDeclaration' && entry.id?.name === name)
@@ -159,6 +160,9 @@ interface NavState {
   view: string
   openRun: string
   openJob: string
+  sessionTab: string
+  jobs: { id: string; owner?: string }[] | null
+  shellDestination: typeof shellDestination
   drill: NavDrill | null
   card?: { id?: string } | null
   viewing?: { id?: string; postId?: string } | null
@@ -291,7 +295,7 @@ function navigation() {
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
     ROOM, POST, GENERAL, VOICE, routedParents: '', isFeedView, inView, homeView, isShellResult, shellJobID, trimFeed, mergeFeedPage, questionID, feedViews: feedModel([]), posts: [],
-    view: GENERAL, openRun: '', openJob: '', drill: null, feed: null, feedAtBottom: true, location: { hash: '', pathname: '/', search: '' },
+    view: GENERAL, openRun: '', openJob: '', sessionTab: 'chat', jobs: null, shellDestination, drill: null, feed: null, feedAtBottom: true, location: { hash: '', pathname: '/', search: '' },
     started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, sessionTurn: 0, entries: [], prLink: null, unreadFrom: '', loadError: '',
     goals: [], goalId: '', fetchedGoal: null, fetchedGoalVersion: 0, hierarchy: [], earlierLoad: null, STEP: 50, workflowData: null, roomSessionController: null, home: null,
     selectingSessions: false, consolidating: null, roomRefreshes: new Set<unknown>(), roomTimer: null,
@@ -313,6 +317,7 @@ function navigation() {
       feedAround: async () => ({}),
       transcriptTurn() { calls.push('transcript'); return Promise.resolve({ member: {} }) },
       transcript() { calls.push('transcript'); return Promise.resolve({ member: {} }) },
+      shellJobs: async () => ({ items: [], older: false, cursor: '' }),
       goal: async () => ({ id: '' }),
       goalItems: async () => [],
       changes: async () => ({ items: [], older: false, cursor: '' }),
@@ -451,7 +456,8 @@ test('a current cross-room link still opens the requested log', async () => {
   pending.resolve(opened(A))
   await opening
   assert.equal(c.roomId, A)
-  assert.equal(c.view, 'jobs')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.sessionTab, 'shell')
   assert.equal(c.openJob, target('shell').id)
 })
 
@@ -488,14 +494,14 @@ test('a later same-room selection wins over an older room response', async () =>
   assert.deepEqual(applied, [A])
 })
 
-for (const workspace of ['files', 'github', 'jobs']) {
+for (const workspace of ['files', 'github']) {
   test(`opening saved ${workspace} does not mark hidden feed view messages read`, async () => {
     const { c } = navigation()
     c.posts = [{ id: 'hidden-child-result', unread: true }, { id: 'other-channel-result', unread: true }]
     const marked: NavPost[] = []
     c.markShown = (posts) => { marked.push(...posts) }
     assert.equal(await c.selectRoom(B, workspace), true)
-    assert.equal(c.view, workspace === 'jobs' ? 'jobs' : GENERAL)
+    assert.equal(c.view, GENERAL)
     assert.deepEqual(marked, [])
   })
 }
@@ -531,14 +537,15 @@ test('a pin 10,000 posts back waits for the in-flight page then uses one around 
   assert.deepEqual(pages, [[B, 'first', 100], [B, result.id, 100]])
 })
 
-test('a pin to a shell result opens its job in shell-jobs', async () => {
+test('a pin to a shell result opens that job on the Shell tab', async () => {
   const { c, calls } = navigation()
   const shell = 'sh_20261017-120000-0000000a'
   c.feed = { room: { id: B }, posts: [{ id: 'shell-result', from: `shell:${shell}`, kind: 'failed', completion: true }] }
   await c.jumpTo('shell-result')
-  assert.equal(c.view, 'jobs')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.sessionTab, 'shell')
   assert.equal(c.openJob, shell)
-  assert.deepEqual(calls, [])
+  assert.deepEqual(calls, ['session'])
 })
 
 test('a pin waiting for history preserves a later workspace selection', async () => {
@@ -745,7 +752,14 @@ for (const itemHash of [prHash(B, 844), issueHash(B, 444)]) {
       else await c.jumpTo('pin')
       c.syncRoute()
       assert.equal(c.prLink, null)
-      const view = kind === 'run' ? 'runs' : kind === 'shell' ? 'jobs' : GENERAL
+      if (kind === 'shell') {
+        assert.equal(c.view, GENERAL)
+        assert.equal(c.sessionTab, 'shell')
+        assert.equal(c.openJob, 'sh_20261017-120000-0000000a')
+        assert.equal(c.entries.some((entry) => entry[1].includes('view=jobs')), false)
+        continue
+      }
+      const view = kind === 'run' ? 'runs' : GENERAL
       assert.equal(c.view, view)
       assert.deepEqual(c.entries, [['push', kind === 'run' ? `#room=${B}&run=${run}` : routeHash({ room: B, view, session: '', turn: 0, run: '' })]])
     }
@@ -1026,14 +1040,22 @@ test('Back reopens a PR that a link or reload opened: the next screen pushes its
   assert.deepEqual(c.entries, [['push', `#room=${B}&review=files`]])
 })
 
-test('a shell link followed in the open room still opens its log', async () => {
-  const { c } = navigation()
+test('a shell link followed in the open room opens the owning session Shell tab', async () => {
+  const { c, calls } = navigation()
   const shell = 'sh_20261017-100000-aaaaaaaa'
+  const session = 'ses_20261017-100000-cccccccc'
+  c.hierarchy = [{ id: session, name: 'lead', address: 'room:lead' }]
+  c.api.shellJobs = async () => ({ items: [{ id: shell, owner: session }], older: false, cursor: '' })
+  c.api.transcript = async () => { calls.push('transcript'); return { member: { id: session, name: 'lead' } } }
+  c.openSession = (member) => { calls.push('session'); c.drill = member }
   c.location.hash = detailHref({ kind: 'shell', id: shell }, B)
   assert.equal(c.hashTarget(), true)
   await setImmediate()
-  assert.equal(c.view, 'jobs')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.sessionTab, 'shell')
   assert.equal(c.openJob, shell)
+  assert.equal(c.drill?.id, session)
+  assert.equal(calls.includes('session'), true)
 })
 
 test('a pairing link on a paired device keeps the open room; an empty address opens all rooms', async () => {
