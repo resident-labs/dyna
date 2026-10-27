@@ -29,3 +29,24 @@ func TestVoiceSettingsDefaultSetSaveAndLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestVoiceAgentIsOnByDefaultAndSavesOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	v, err := Load(path)
+	if err != nil || !v.VoiceAgent {
+		t.Fatalf("default VoiceAgent = %v, %v", v.VoiceAgent, err)
+	}
+	if err := v.Set(KeyVoiceAgent, "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil || got.VoiceAgent || got.Source(KeyVoiceAgent) != SourceFile {
+		t.Fatalf("loaded VoiceAgent = %v, source %q, %v", got.VoiceAgent, got.Source(KeyVoiceAgent), err)
+	}
+	if err := v.Set(KeyVoiceAgent, "maybe"); err == nil {
+		t.Error("voice.agent accepted maybe")
+	}
+}
