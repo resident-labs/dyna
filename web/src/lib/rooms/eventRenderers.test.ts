@@ -275,6 +275,9 @@ const fixtures: Record<string, EventPayload> = {
     service: 'librarian', session: 'dyna:librarian', turn: 4,
     error: 'turn failed: harness exited with status 1', profile: 'deepseek', model: 'deepseek-flash',
   },
+  'service/waiting': {
+    service: 'librarian', profile: 'sonnet', reason: 'pinned librarian profile sonnet is unavailable: it is disabled',
+  },
   'service/helper-outcome': {
     reason: 'no-artifact', session: 'dyna:helper-check', turn: 2,
   },
@@ -392,7 +395,8 @@ function fixtureTip(payload: EventPayload): string {
   if ('caches' in payload) return payload.name
   if ('builds' in payload) return payload.name
   if ('source' in payload) return payload.reportId ?? payload.remedy ?? payload.summary ?? payload.source
-  if ('service' in payload) return payload.error
+  if ('service' in payload && 'error' in payload) return payload.error
+  if ('service' in payload) return payload.reason
   if ('minutes' in payload) return String(payload.minutes)
   if ('questionId' in payload) return payload.questionId
   if ('shellId' in payload) return payload.label
