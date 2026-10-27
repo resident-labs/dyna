@@ -98,7 +98,8 @@ test('availability matches across palette and slash input', () => {
   for (const surface of ['palette', 'slash'] as const) {
     const ids = actionItems(registry, surface).map((a) => a.id)
     for (const id of ['files', 'github', 'issues', 'terminal']) assert.equal(ids.includes(id), false)
-    for (const id of ['jobs', 'run', 'workflows']) assert.equal(ids.includes(id), true)
+    for (const id of ['run', 'workflows']) assert.equal(ids.includes(id), true)
+    assert.equal(ids.includes('jobs'), false)
   }
   c.room = null
   assert.equal(actionItems(actions(c), 'slash').length, 0)

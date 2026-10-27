@@ -93,8 +93,8 @@
   import ReviewIcon from './lib/ui/ReviewIcon.svelte'
   import SessionTabs from './lib/sessions/SessionTabs.svelte'
   import UseIcons from './lib/sessions/UseIcons.svelte'
-  import ShellGrid from './lib/sessions/ShellGrid.svelte'
-  import { runningShells } from './lib/sessions/shells.ts'
+  import { runningShells, sessionShellJobs } from './lib/sessions/shells.ts'
+  import { shellDestination } from './lib/sessions/shellRoute.ts'
   import Tabs from './lib/ui/Tabs.svelte'
   import { rowOf, visibleTabs } from './lib/rooms/workViews.ts'
   import SessionMedia from './lib/sessions/SessionMedia.svelte'
@@ -219,7 +219,7 @@
   const view = $derived(router.view) // the open view of the room
   const drill = $derived(router.drill) // the member whose transcript is open
   const sessionTurn = $derived(router.sessionTurn) // a completion link opens its exact stored turn
-  const openJob = $derived(router.openJob) // the shell job whose detail is open, in the jobs view
+  const openJob = $derived(router.openJob) // the shell job selected on the session Shell tab
   const openRun = $derived(router.openRun) // the run whose detail is open, in the runs view
   const reviewOpen = $derived(router.reviewOpen)
   const reviewTab = $derived(router.reviewTab)
@@ -488,6 +488,7 @@
   const showPreview = $derived(computerView.showPreview)
   const { computerOf, loadComputers, handleComputer } = computerView
   const drillShells = $derived(drill ? runningShells(jobs, drill) : [])
+  const shellTabJobs = $derived(drill ? sessionShellJobs(jobs, drill, openJob) : [])
   let reveal = $state('') // a file the Files view opens, from Changes
   let revealFolder = $state<{ path: string } | null>(null) // a folder the Files view shows, from Library; an object so the root and repeats still open
   let starting = $state(false) // the Run workflow dialog is open
@@ -536,7 +537,7 @@
   let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(feedViews, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
   let runTrail = $derived(view === 'runs' && openRun && runDetail?.run?.parentId ? parentTrail(feedViews, runDetail.run.parentId, rootMember()) : [])
   let viewLabel = $derived(viewLead?.name ?? roomLabel(current ?? room))
-  // Shell exit records live in shell-jobs, not in feed views.
+  // Shell exit records stay out of feed views. A log link opens the session Shell tab.
   let posts = $derived((feed?.posts ?? []).filter((p) => !isShellResult(p) && (!isFeedView(view) || inView(p, view))))
   // What the owner chose to show in this feed view; hidden posts still count as read.
   let shownPosts = $derived(isFeedView(view) ? posts.filter(visibleTo(look, revealed) as (post: Post) => boolean) : posts)
@@ -821,7 +822,7 @@
     clearItemLink()
     const post = (feed?.posts ?? []).find((p) => p.id === id)
     if (post && questionID(post)) { openQuestion(post); return }
-    if (post && isShellResult(post)) { router.openJob = shellJobID(post); router.view = 'jobs'; return }
+    if (post && isShellResult(post)) { await openShellLog(shellJobID(post), shellParent(post)); return }
     // A voice call line has no feed view; Voice's call widget shows it.
     if (post && inView(post, VOICE)) return
     router.view = post ? homeView(post) : GENERAL
@@ -1039,6 +1040,7 @@
     router.drill = m
     router.readOnlyDm = readOnly
     router.sessionTurn = turn
+    router.openJob = ''
     if (initial) transcripts.setSession(initial)
     else loadSession()
     setTimeout(() => sessionView?.focus(), 0)
@@ -1344,7 +1346,8 @@
     // Any other link becomes the address of the screen it opens.
     if (!item && location.hash !== routeHash(r)) history.replaceState(null, '', location.pathname + location.search + routeHash(r))
     router.routing++
-    // A shell link names no screen of its own, so it always reaches openDetail.
+    // A shell link names no screen of its own, so it always reaches openDetail,
+    // which opens the owning session's Shell tab.
     const opening = id === roomId && !post && !item && target?.kind !== 'shell' ? Promise.resolve(routeHere(r)) : openTarget(id, post, issue ? 'issues' : pr ? 'github' : file ? 'files' : r.view)
     opening.then(async (opened) => {
       if (!opened || opened.roomId !== roomId || opened.request !== detailRequest) return
@@ -1500,7 +1503,6 @@
   const ICON = {
     files: 'M3 5.5a1.5 1.5 0 0 1 1.5-1.5h3.4l1.6 1.8h6a1.5 1.5 0 0 1 1.5 1.5v7.2a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5Z',
     terminal: 'M3.5 4h13a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM6 8l2.5 2L6 12M10.5 12.5H14',
-    jobs: 'M7.5 5.5h9M7.5 10h9M7.5 14.5h9M3.5 5.5h.01M3.5 10h.01M3.5 14.5h.01',
     github: 'M6 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM6 15.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM17 15.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM4.5 6v8M15.5 14V8.5a2.5 2.5 0 0 0-2.5-2.5h-3M11.5 4 9.5 6l2 2',
     run: 'M6.5 4.5v11l9-5.5Z',
     stop: 'M5.5 5.5h9v9h-9Z',
@@ -1512,6 +1514,51 @@
     device: 'M7 3h6a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 13 17H7a1.5 1.5 0 0 1-1.5-1.5v-11A1.5 1.5 0 0 1 7 3ZM9 14.5h2',
     gear: 'M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4',
     side: 'M3.5 4.5h13v11h-13ZM8 4.5v11',
+  }
+
+  // shellParent is the session a shell result names, empty when the owner started it.
+  function shellParent(post: { payload?: unknown }): string {
+    const payload = post.payload
+    if (!payload || typeof payload !== 'object' || !('parent' in payload)) return ''
+    const parent = payload.parent
+    return typeof parent === 'string' ? parent : ''
+  }
+
+  // openShellLog opens the owning session's Shell tab with this job selected and its log open.
+  // A shell with no session, such as a root or hook shell, opens on the root seat.
+  async function openShellLog(id: string, owner = '') {
+    const request = router.detailRequest
+    let who = owner || (jobs ?? []).find((j) => j.id === id)?.owner || ''
+    if (!who) {
+      try {
+        const page = await api.shellJobs(roomId, '', 0)
+        if (request !== detailRequest) return
+        who = (page.items ?? []).find((j) => j.id === id)?.owner || ''
+      } catch {
+        if (request !== detailRequest) return
+      }
+    }
+    if (request !== detailRequest) return
+    const dest = shellDestination(id, who, hierarchy)
+    if (dest.session === ROOT_SESSION) openSession({ rootSeat: true })
+    else {
+      const member = hierarchy.find((m) => m.id === dest.session)
+      if (member) openSession(member)
+      else {
+        try {
+          const data = await api.transcript(dest.session)
+          if (request !== detailRequest) return
+          openSession(data.member, 0, data)
+        } catch {
+          if (request !== detailRequest) return
+          openSession({ rootSeat: true })
+          say({ tone: 'info', subject: 'Opened the log on root', text: 'That shell has no open session.' })
+        }
+      }
+    }
+    sessionTab = 'shell'
+    router.openJob = id
+    router.view = GENERAL
   }
 
   // Completion links open stored UI details. They never invoke a command.
@@ -1530,8 +1577,7 @@
       if (!await selecting || request !== detailRequest || rid !== roomId) return
     }
     if (target.kind === 'shell') {
-      openView('jobs')
-      router.openJob = target.id
+      await openShellLog(target.id)
     } else if (target.kind === 'run') {
       showRun({ id: target.id })
     } else if (target.kind === 'session') {
@@ -1877,12 +1923,12 @@
             {#if sessionTab === 'computer' && computers}
               <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, onpending: (pending: boolean) => noteComposerWork('computer:' + drill.id, pending), session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
             {:else if sessionTab === 'shell'}
-              <ShellGrid jobs={drillShells} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} />
+              <Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} jobs={shellTabJobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />
             {:else if sessionTab === 'media'}
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} onstop={(m: Member) => askConfirm({ kind: 'stop', m })} bind:readingHistory={transcripts.readingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} onpending={(pending) => noteComposerWork('session:' + drill.id, pending)} />
+              <Session readOnly={readOnlyDm} onstop={(m: Member) => askConfirm({ kind: 'stop', m })} bind:readingHistory={transcripts.readingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => openShellLog(job.id, job.owner ?? '')} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} onpending={(pending) => noteComposerWork('session:' + drill.id, pending)} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
@@ -1899,8 +1945,6 @@
           {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
         {:else if view === 'computers' && computers}
           {#key room.id}<Computers list={computers} error={computerError} onopen={(c: ComputerInfo) => { const m = hierarchy.find((x) => x.id === c.session); if (m) { openSession(m); sessionTab = 'computer' } else popOut(room.id, c.session) }} />{/key}
-        {:else if view === 'jobs'}
-          {#key room.id}<Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} {jobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />{/key}
         {:else if view === 'goals'}
           {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
         {:else if view === 'runs'}
