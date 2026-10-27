@@ -24,7 +24,7 @@ func NewCommand() *cobra.Command {
 	var attach []string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "ask [question]", Short: "Root asks the owner a question and keeps working", Args: func(c *cobra.Command, args []string) error {
-		if len(args) > 1 && strings.HasPrefix(args[0], "@") {
+		if mentions, _ := room.SplitLeadingMentions(args); len(mentions) > 0 && len(args) > 1 {
 			return notify.ErrAskAgent
 		}
 		return cobra.MaximumNArgs(1)(c, args)

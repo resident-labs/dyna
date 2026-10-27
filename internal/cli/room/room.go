@@ -406,24 +406,6 @@ func membersCmd() *cobra.Command {
 	return cmd
 }
 
-// SplitMentions separates the leading @mention arguments from the text. The
-// mentions end at the first argument that does not start with "@", or at
-// "--".
-func SplitMentions(args []string) (mentions []string, text string) {
-	i := 0
-	for ; i < len(args); i++ {
-		if args[i] == "--" {
-			i++
-			break
-		}
-		if !strings.HasPrefix(args[i], "@") {
-			break
-		}
-		mentions = append(mentions, args[i])
-	}
-	return mentions, strings.Join(args[i:], " ")
-}
-
 // PostCmd is `dyna post`, the only command that sends a post.
 // engineClient is the engine client that dyna post, pin and unpin use. Tests
 // replace it.
@@ -503,7 +485,8 @@ func PostCmd() *cobra.Command {
 			if n := cmd.ArgsLenAtDash(); n >= 0 {
 				args = append(append(append([]string{}, args[:n]...), "--"), args[n:]...)
 			}
-			mentions, text := SplitMentions(args)
+			mentions, rest := room.SplitLeadingMentions(args)
+			text := strings.Join(rest, " ")
 			if strings.TrimSpace(text) == "" && len(attach) == 0 && richPath == "" && forward == "" {
 				return errors.New("a post needs text, --attach or --forward")
 			}
