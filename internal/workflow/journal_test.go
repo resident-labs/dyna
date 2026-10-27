@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"dyna-agent/internal/harness/fakeworker"
-	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 )
@@ -108,13 +107,6 @@ func TestExecuteWaitsForDanglingWorkerTerminalJournal(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-dangling-journal")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
-	// Cleanup shuts the session host down while the fake worker is still blocked
-	// on its pipe. Shutdown then closes stdin and waits the orderly stop grace,
-	// which is 5s, because this child ignores a closed stdin. The journal
-	// assertions do not depend on that grace, so fire it at once. Production
-	// still waits the full grace.
-	previousStop := sessionhost.SetStopGraceFiredForTest(true)
-	t.Cleanup(func() { sessionhost.SetStopGraceFiredForTest(previousStop) })
 	script := `
 agent("keep working until the orchestrator finishes", {profile: "slow", label: "dangling worker"});
 agent("wait behind the first worker", {profile: "slow", label: "queued worker"});
