@@ -48,7 +48,7 @@ var help = map[string]string{
 	settings.KeyAdmissionMode:          "Watch the machine and record when a limit on concurrent agent turns would have held new turns (observe, the default), or turn the watcher off. Nothing is ever held. While memory is short, the watcher also stops up to 3 agent processes per sample that have sat idle for 5 minutes or more, longest first, and never one with a turn running, queued or waiting for input; the session resumes in a new process on its next turn. The engine samples about every 45 seconds. Applies to the next sample.",
 	settings.KeyDoctorCondition:        "When the doctor hook examines a machine, such as \"load>2/core for 5m or memory>85%\". Empty uses the default. Applies to the next doctor run.",
 	settings.KeyLibraryEnabled:         "JSON list of main checkout paths whose librarian runs. Use dyna library enable and disable, which also add and remove the librarian hooks.",
-	settings.KeyLibraryProfile:         "One profile for all librarian work. Auto ranks enabled service profiles.",
+	settings.KeyLibraryProfile:         "Default librarian profile when a room has no pin. Auto ranks enabled service profiles. A room pin is dyna services profile library.",
 	settings.KeyLibrarySmellsPerDay:    "Most smells the librarian files for one repository in a UTC day (default 10). Zero means no cap. A pass started with dyna library wake --smells --now has no cap. Applies to the next smell.",
 	settings.KeyLibraryReadmeMaxLines:  "Longest README.md the librarian may leave (default 300 lines). Its README change fails dyna library check-readme when it is longer.",
 	settings.KeyMaxCardBytes:           "Maximum HTML/JavaScript card size (default 25 MiB). Accepts 25 MiB, 25MB, 25m or a byte count; MB means MiB. Applies to the next operation, without restart.",
@@ -156,6 +156,11 @@ func Set(ctx context.Context, key, value string) (Item, error) {
 		return Item{}, err
 	}
 	key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+	// The global librarian default affects every room that has no pin, so only
+	// the owner may change it. A root sets its own room with dyna services profile.
+	if key == settings.KeyLibraryProfile && authority.Of(ctx).Role != authority.Owner {
+		return Item{}, fmt.Errorf("library.profile is the default for rooms with no pin; set your room with dyna services profile library, or ask the owner for every room")
+	}
 	v, err := settings.Load(settings.DefaultPath())
 	if err != nil {
 		return Item{}, err

@@ -133,6 +133,76 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 	}
 }
 
+// One caller gets one answer for every service profile. The owner may change
+// any room, or every room. A root may change only its own room, never another
+// room and never every room. A session may change none.
+func TestServiceProfileSameCallerSameAnswer(t *testing.T) {
+	e := newEnv(t)
+	home := e.room("perm-home")
+	other := e.room("perm-other")
+	root := authority.WithActor(context.Background(), authority.Actor{Role: authority.Root, Room: home.ID, Session: "ses_20261027-000000-0000root"})
+	session := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Room: home.ID, Session: "ses_20261027-000000-0000sess"})
+	steps := []struct {
+		name  string
+		ctx   context.Context
+		allow bool
+		run   func(context.Context, string) error
+	}{
+		{"owner other room", ownerCtx, true, func(ctx context.Context, role string) error {
+			return e.svc.SetServiceProfile(ctx, other.Name, role, "")
+		}},
+		{"root own room", root, true, func(ctx context.Context, role string) error {
+			return e.svc.SetServiceProfile(ctx, home.Name, role, "")
+		}},
+		{"root other room", root, false, func(ctx context.Context, role string) error {
+			return e.svc.SetServiceProfile(ctx, other.Name, role, "")
+		}},
+		{"session", session, false, func(ctx context.Context, role string) error {
+			return e.svc.SetServiceProfile(ctx, home.Name, role, "")
+		}},
+		{"owner all rooms", ownerCtx, true, func(ctx context.Context, role string) error {
+			return e.svc.SetServiceProfileAll(ctx, role, "")
+		}},
+		{"root all rooms", root, false, func(ctx context.Context, role string) error {
+			return e.svc.SetServiceProfileAll(ctx, role, "")
+		}},
+	}
+	for _, step := range steps {
+		libErr := step.run(step.ctx, "library")
+		revErr := step.run(step.ctx, "reviewer")
+		if (libErr == nil) != (revErr == nil) || (libErr == nil) != step.allow {
+			t.Fatalf("%s: library %v, reviewer %v, allow %v", step.name, libErr, revErr, step.allow)
+		}
+		if libErr != nil && revErr != nil && libErr.Error() != revErr.Error() {
+			t.Fatalf("%s: library %q, reviewer %q", step.name, libErr, revErr)
+		}
+	}
+	// All rooms writes every room. A later pin by that room's root does not
+	// change the other room.
+	for _, role := range []string{"library", "reviewer"} {
+		if err := e.svc.SetServiceProfileAll(ownerCtx, role, "mock"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{home.Name, other.Name} {
+		rec, err := e.svc.Notify.Rooms.Resolve(name)
+		if err != nil || !rec.LibraryPinSet || rec.LibraryPin != "mock" {
+			t.Fatalf("%s library pin = set %v %q (%v)", name, rec.LibraryPinSet, rec.LibraryPin, err)
+		}
+		cfg, err := e.svc.PRs.PRSettings(name)
+		if err != nil || cfg.ReviewerProfile != "mock" {
+			t.Fatalf("%s reviewer pin = %q (%v)", name, cfg.ReviewerProfile, err)
+		}
+	}
+	if err := e.svc.SetServiceProfile(root, home.Name, "library", ""); err != nil {
+		t.Fatal(err)
+	}
+	otherRec, err := e.svc.Notify.Rooms.Resolve(other.Name)
+	if err != nil || otherRec.LibraryPin != "mock" {
+		t.Fatalf("a root pin changed another room: %+v %v", otherRec, err)
+	}
+}
+
 // D-110: the reviewer profile is a room setting, so the room's own root may
 // pin it. Root of another room and plain sessions stay out, and the owner
 // keeps pinning any room's service.

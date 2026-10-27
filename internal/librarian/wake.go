@@ -42,6 +42,20 @@ type Service struct {
 	Now        func() time.Time
 	// Notice posts one typed event to the librarian's room. Nil skips it.
 	Notice func(ctx context.Context, roomID string, ev room.Event) error
+	// Rooms reads a room pin. Nil keeps the global library.profile.
+	Rooms *room.Store
+}
+
+// libraryProfile is the room pin when the room has one, otherwise global.
+func (s Service) libraryProfile(roomID, global string) string {
+	if s.Rooms == nil || roomID == "" {
+		return global
+	}
+	rec, err := s.Rooms.Resolve(roomID)
+	if err != nil || !rec.LibraryPinSet {
+		return global
+	}
+	return rec.LibraryPin
 }
 
 func (s Service) now() time.Time {
@@ -210,11 +224,12 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	}
 	failed := rolesession.MergeFailures(st.FailedProfiles, recent)
 	repo := harnessruntime.RepoIdentity(ctx, r.Main)
-	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, repo, failed, s.now(), subagent.RoleLibrarian)
+	pin := s.libraryProfile(st.RoomID, v.LibraryProfile)
+	choice, err := rolesession.ChooseProfile(profiles, pin, repo, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
 	}
-	if waited, ok := s.pinnedWait(ctx, st.RoomID, v.LibraryProfile, choice); ok {
+	if waited, ok := s.pinnedWait(ctx, st.RoomID, pin, choice); ok {
 		waited.Head = st.Head
 		return waited, nil
 	}
@@ -329,11 +344,12 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Resu
 	repo := harnessruntime.RepoIdentity(ctx, r.Main)
 	// The smell pass uses the librarian pin, the same profile as the feature
 	// map. An empty pin ranks by taste, not by reviewer diagnostics.
-	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, repo, failed, s.now(), subagent.RoleLibrarian)
+	pin := s.libraryProfile(st.RoomID, v.LibraryProfile)
+	choice, err := rolesession.ChooseProfile(profiles, pin, repo, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
 	}
-	if waited, ok := s.pinnedWait(ctx, st.RoomID, v.LibraryProfile, choice); ok {
+	if waited, ok := s.pinnedWait(ctx, st.RoomID, pin, choice); ok {
 		waited.Head = st.SmellHead
 		return waited, nil
 	}

@@ -80,6 +80,16 @@ func ActorIn(ctx context.Context, roomID string) (Actor, error) {
 	return actor, nil
 }
 
+// MaySetServiceProfile is the one rule for a service profile pin.
+// The owner may change any room. A root may change only its own room.
+// A root may not change another room. There is no grant that lets a root
+// act for the owner in a room it does not hold.
+func MaySetServiceProfile(actor Actor, roomID, roomName string) error {
+	return Check("SetServiceProfile", actor, func(relation Relation) bool {
+		return relation == RootRoom && (actor.Room == roomID || (roomName != "" && actor.Room == roomName))
+	})
+}
+
 var inEngine atomic.Bool
 
 // InEngine marks this process as the engine. The engine's own environment is
@@ -222,9 +232,11 @@ var Rules = []Rule{
 	{Action: "profiles set-default", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	{Action: "profiles enable", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	{Action: "profiles disable", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
-	// The reviewer profile is a room setting, so the room's own root may pin
-	// it; the owner pins any room's.
+	// One rule for every service profile. The owner may pin any room.
+	// A root may pin only its own room, never another room.
 	{Action: "SetServiceProfile", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may pin only its own room's service profile; ask the owner for other rooms"},
+	// --all-rooms writes every room. Only the owner may do that.
+	{Action: "SetServiceProfileAll", Allowed: []Role{Owner}, Instead: "only the owner may set a service profile for every room"},
 	// The owner's review comments speak for the human owner, so no agent sends them.
 	{Action: "SendDiffComments", Allowed: []Role{Owner}, Instead: "ask the owner to send review comments"},
 	{Action: "SendWorktreeComments", Allowed: []Role{Owner}, Instead: "ask the owner to send review comments"},
