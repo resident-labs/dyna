@@ -23,6 +23,10 @@ import (
 // Interval is the shortest time between two alerts to one room.
 const Interval = 30 * time.Minute
 
+// Hold is how long a room stays quiet after a recovery note. An overload that
+// returns inside Hold is a flap around the threshold, so it is not alerted.
+const Hold = 30 * time.Minute
+
 // RoomUse is the agent sessions one room has open on the machine.
 type RoomUse struct {
 	RoomID  string
@@ -173,6 +177,7 @@ type Notifier struct {
 
 const schema = `CREATE TABLE IF NOT EXISTS doctor_room_alerts (
  machine TEXT NOT NULL, room_id TEXT NOT NULL, last_at INTEGER NOT NULL,
+ recovered_at INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(machine, room_id)
 )`
 
@@ -188,9 +193,16 @@ func (n Notifier) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, database.Migrate(db, "doctor_room_alerts.version", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+	return db, database.Migrate(db, "doctor_room_alerts.version", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if _, err := conn.ExecContext(ctx, schema); err != nil {
+			return err
+		}
+		if old == 1 {
+			_, err := conn.ExecContext(ctx, `ALTER TABLE doctor_room_alerts ADD COLUMN recovered_at INTEGER NOT NULL DEFAULT 0`)
+			return err
+		}
+		return nil
 	})
 }
 
@@ -222,9 +234,12 @@ func (n Notifier) Alert(rep doctor.Report) error {
 	var outside []Outside
 	outsideRead := false
 	for _, r := range rooms {
-		var last int64
-		err := db.QueryRow(`SELECT last_at FROM doctor_room_alerts WHERE machine=? AND room_id=?`, rep.Machine, r.RoomID).Scan(&last)
-		if err == nil && now.Sub(time.Unix(last, 0)) < Interval {
+		var last, recovered int64
+		err := db.QueryRow(`SELECT last_at, recovered_at FROM doctor_room_alerts WHERE machine=? AND room_id=?`, rep.Machine, r.RoomID).Scan(&last, &recovered)
+		if err == nil && recovered > 0 && now.Sub(time.Unix(recovered, 0)) < Hold {
+			continue
+		}
+		if err == nil && recovered == 0 && now.Sub(time.Unix(last, 0)) < Interval {
 			continue
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -240,21 +255,22 @@ func (n Notifier) Alert(rep doctor.Report) error {
 		}
 		ctx := context.Background()
 		errs = append(errs, state.For(db).Write(ctx, hub.Event{Topic: "doctor"}, func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(ctx, `INSERT OR REPLACE INTO doctor_room_alerts VALUES (?,?,?)`, rep.Machine, r.RoomID, now.Unix())
+			_, err := conn.ExecContext(ctx, `INSERT OR REPLACE INTO doctor_room_alerts VALUES (?,?,?,0)`, rep.Machine, r.RoomID, now.Unix())
 			return err
 		}))
 	}
 	return errors.Join(errs...)
 }
 
-// Recover sends one recovered note to every room that was told about machine,
-// then forgets them, so a later overload alerts again at once.
+// Recover sends one recovered note to every room that was told about machine
+// and has not yet heard of a recovery. It marks them recovered, so an overload
+// that returns within Hold stays quiet; after Hold the next overload alerts.
 func (n Notifier) Recover(machine string) error {
 	db, err := n.open()
 	if err != nil {
 		return err
 	}
-	rows, err := db.Query(`SELECT room_id FROM doctor_room_alerts WHERE machine=?`, machine)
+	rows, err := db.Query(`SELECT room_id FROM doctor_room_alerts WHERE machine=? AND recovered_at=0`, machine)
 	if err != nil {
 		return err
 	}
@@ -294,7 +310,7 @@ func (n Notifier) Recover(machine string) error {
 		}
 		ctx := context.Background()
 		errs = append(errs, state.For(db).Write(ctx, hub.Event{Topic: "doctor"}, func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(ctx, `DELETE FROM doctor_room_alerts WHERE machine=? AND room_id=?`, machine, id)
+			_, err := conn.ExecContext(ctx, `UPDATE doctor_room_alerts SET recovered_at=? WHERE machine=? AND room_id=?`, n.now().Unix(), machine, id)
 			return err
 		}))
 	}
