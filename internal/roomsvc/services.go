@@ -86,25 +86,89 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 	return out, nil
 }
 
-// SetServiceProfile pins a service to an enabled profile; "" means Auto.
-// The reviewer profile is a room setting, so the room's own root may pin it;
-// the owner pins any room's.
+// SetServiceProfile pins a service to an enabled profile; "" means auto.
+// Library and reviewer use the same rule: the owner may change any room,
+// and a root may change only its own room.
 func (s *Service) SetServiceProfile(ctx context.Context, roomRef, role, profile string) error {
 	rec, err := s.rooms().Resolve(roomRef)
 	if err != nil {
 		return err
 	}
-	actor := authority.Of(ctx)
-	if err := authority.Check("SetServiceProfile", actor, func(relation authority.Relation) bool {
-		return relation == authority.RootRoom && (actor.Room == rec.ID || actor.Room == rec.Name)
-	}); err != nil {
+	return s.writeServiceProfile(ctx, rec, role, profile)
+}
+
+// SetServiceProfileAll pins one service in every room, including archived
+// rooms. Only the owner may do it. A library pin also updates the global
+// default, so a later room with no pin uses the same profile.
+func (s *Service) SetServiceProfileAll(ctx context.Context, role, profile string) error {
+	if err := authority.Check("SetServiceProfileAll", authority.Of(ctx), nil); err != nil {
+		return err
+	}
+	if err := s.usableServiceProfile(profile); err != nil {
+		return err
+	}
+	if err := knownService(role); err != nil {
+		return err
+	}
+	rooms, err := s.rooms().List(true)
+	if err != nil {
+		return err
+	}
+	if role == "library" {
+		if err := s.setGlobalLibraryProfile(profile); err != nil {
+			return err
+		}
+	}
+	for _, rec := range rooms {
+		if err := s.writeServiceProfile(ctx, rec, role, profile); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func knownService(role string) error {
+	switch role {
+	case "reviewer", "library":
+		return nil
+	default:
+		return fmt.Errorf("unknown service %q", role)
+	}
+}
+
+func (s *Service) usableServiceProfile(name string) error {
+	if s.PRs == nil {
+		return fmt.Errorf("service profile store is unavailable")
+	}
+	return s.PRs.Watcher().UsableServiceProfile(name)
+}
+
+func (s *Service) writeServiceProfile(ctx context.Context, rec room.Record, role, profile string) error {
+	if err := authority.MaySetServiceProfile(authority.Of(ctx), rec.ID, rec.Name); err != nil {
+		return err
+	}
+	if err := s.usableServiceProfile(profile); err != nil {
 		return err
 	}
 	switch role {
 	case "reviewer":
-		return s.PRs.SetReviewerProfile(ctx, roomRef, profile)
+		return s.PRs.SetReviewerProfile(ctx, rec.ID, profile)
+	case "library":
+		return s.rooms().SetLibraryPin(rec.ID, true, profile)
+	default:
+		return fmt.Errorf("unknown service %q", role)
 	}
-	return fmt.Errorf("unknown service %q", role)
+}
+
+func (s *Service) setGlobalLibraryProfile(profile string) error {
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		return err
+	}
+	if err := v.Set(settings.KeyLibraryProfile, profile); err != nil {
+		return err
+	}
+	return v.Save()
 }
 
 // librarianView is the librarian row. A pin that cannot run stays the shown
@@ -114,11 +178,19 @@ func (s *Service) librarianView(rec room.Record) ServiceView {
 	v, err := settings.Load(settings.DefaultPath())
 	if err != nil {
 		view.Reason = err.Error()
+		if rec.LibraryPinSet {
+			view.Pinned, view.Profile, view.Scope = rec.LibraryPin, rec.LibraryPin, "room"
+		}
 		return view
 	}
-	view.Pinned = v.LibraryProfile
-	view.Profile = v.LibraryProfile
-	if v.LibraryProfile == "" {
+	pin := v.LibraryProfile
+	if rec.LibraryPinSet {
+		pin = rec.LibraryPin
+		view.Scope = "room"
+	}
+	view.Pinned = pin
+	view.Profile = pin
+	if pin == "" {
 		return view
 	}
 	if rec.Repo == "" {
@@ -147,11 +219,11 @@ func (s *Service) librarianView(rec room.Record) ServiceView {
 		recent = nil
 	}
 	failed := rolesession.MergeFailures(st.FailedProfiles, recent)
-	choice, err := rolesession.ChooseProfile(ps.Profiles, v.LibraryProfile, runtime.RepoIdentity(context.Background(), rec.Repo), failed, time.Now(), "librarian")
+	choice, err := rolesession.ChooseProfile(ps.Profiles, pin, runtime.RepoIdentity(context.Background(), rec.Repo), failed, time.Now(), "librarian")
 	if err != nil || choice.Cause == "" {
 		return view
 	}
-	view.Profile = v.LibraryProfile
+	view.Profile = pin
 	view.Reason = "waiting: " + choice.Reason
 	return view
 }

@@ -61,7 +61,7 @@
         </button>
         <div class="ctl">
           {#if row.profile}
-            <span class="sel flat" title="Set in Settings > Settings > Models">{row.profile.value || 'auto'}</span>
+            <span class="sel flat" title="Set with dyna services profile">{row.profile.value || 'auto'}</span>
           {/if}
           {#if row.id === 'update' && row.toggle}
             <button class="run" disabled={isSaving(row.id)} onclick={() => run(row)}>Run now</button>

@@ -46,6 +46,20 @@ func (s *Store) SetRootProfile(ref, name string) error {
 	})
 }
 
+// SetLibraryPin stores this room's librarian profile. set false clears the
+// pin so the room uses the global library.profile again. An empty profile
+// with set true is auto for this room only.
+func (s *Store) SetLibraryPin(ref string, set bool, profile string) error {
+	return s.UpdatePreferences(ref, func(r *Record) error {
+		r.LibraryPinSet = set
+		r.LibraryPin = ""
+		if set {
+			r.LibraryPin = strings.TrimSpace(profile)
+		}
+		return nil
+	})
+}
+
 func (s *Store) Rename(ref, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" || !utf8.ValidString(name) || len(name) > 128 || strings.ContainsAny(name, "\x00\r\n") {

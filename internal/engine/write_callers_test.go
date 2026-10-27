@@ -71,6 +71,7 @@ var handlerCallerChecks = map[string]string{
 	"RunnerTurnNote":              "runnerSession requires the caller session and uses only that session ID.",
 	"RunnerTurnStart":             "runnerSession requires the caller session and uses only that session ID.",
 	"SetServiceProfile":           "Checks SetServiceProfile with authority.Of(ctx).",
+	"SetServiceProfileAll":        "Checks SetServiceProfileAll with authority.Of(ctx).",
 	"StampPlanAncestry":           "Checks authority.Of(ctx) and confines workers to their own run.",
 	"StopShell":                   "Checks that authority.Of(ctx) is the owner, and that the shell belongs to the room.",
 	"SyncFetch":                   "Checks git sync fetch with authority.Of(ctx).",

@@ -561,13 +561,14 @@ func (s *Service) ReviewerStatus(roomRef string) (watch.ReviewerStatus, error) {
 	return s.Watcher().ReviewerStatus(rec.ID)
 }
 
-// SetReviewerProfile pins the room's reviewer to a profile; "" means Auto.
+// SetReviewerProfile pins the room's reviewer to a profile; "" means auto.
+// It uses the same rule as every other service profile.
 func (s *Service) SetReviewerProfile(ctx context.Context, roomRef, profile string) error {
 	rec, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return err
 	}
-	if err := checkIn(ctx, "git pr reviewer", rec.ID); err != nil {
+	if err := authority.MaySetServiceProfile(authority.Of(ctx), rec.ID, rec.Name); err != nil {
 		return err
 	}
 	return s.Watcher().SetReviewerProfile(rec.ID, profile)

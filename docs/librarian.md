@@ -82,8 +82,9 @@ the pull request.
 ## Settings
 
 - `library.enabled`: JSON list of main checkout paths. Use `enable` and `disable`.
-- `library.profile`: one profile for all librarian work. Empty ranks service profiles.
-  Change it with `dyna services profile library <profile|auto>`, never as part of a bulk
-  move of sessions: the librarian is a service, not a worker.
+- `library.profile`: the default profile for librarian work when a room has no pin. Empty ranks service profiles.
+  A room pin overrides it. Set one with `dyna services profile library <profile|auto> [--room R]`.
+  The owner sets every room with `--all-rooms`. A room's root may set only its own room.
+  Never change it as part of a bulk move of sessions: the librarian is a service, not a worker.
 - `library.smellsPerDay`: the most smells automatic passes file for one repository in a UTC day (default 10, 0 for no cap).
 - `library.readmeMaxLines`: the longest README the librarian may leave (default 300).

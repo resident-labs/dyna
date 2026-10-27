@@ -49,8 +49,8 @@ A failed handoff keeps the session open. Use force close only when the work
 cannot move and you accept leaving it unresolved.
 Dyna closes reviewers that have no live turn on a needed current head, including
 after a verdict. Paused rooms start no new reviewers.
-Use `dyna git pr reviewer` to inspect reviewers, `--profile <profile>` to pin one,
-`--auto` for automatic choice, or `--restart` to restart them.
+Use `dyna git pr reviewer` to inspect reviewers, or `--restart` to restart them.
+Pin the profile with `dyna services profile reviewer <profile|auto>`.
 `dyna git pr review on|off` controls automatic review.
 Only the assigned reviewer records an agent verdict. Reviewers may use up to
 3 helpers on their profile or a cheaper one. Helpers cannot delegate.
