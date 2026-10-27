@@ -1,17 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { sections, rowOf, shown, runningWork, visibleTabs } from './workViews.ts'
+import { rows, rowOf, shown, runningWork, visibleTabs } from './workViews.ts'
 
-test('the sidebar has eight rows in Work and Machine; Room settings is a modal, not a row', () => {
-  assert.deepEqual(sections.map((s) => [s.label, s.rows.map((r) => r.id)]), [
-    ['Work', ['requests', 'goals', 'runs', 'services', 'visuals', 'library']],
-    ['Machine', ['computers']],
-  ])
+test('the sidebar is one list of seven rows ending in Computers; Room settings is a modal, not a row', () => {
+  assert.deepEqual(rows.map((r) => r.id), ['requests', 'goals', 'runs', 'services', 'visuals', 'library', 'computers'])
 })
 
 test('work views resolve to their sidebar rows; PRs and Issues belong to the room', () => {
-  const rows = Object.fromEntries(['requests', 'questions', 'goals', 'runs', 'jobs', 'services', 'visuals', 'files', 'github', 'issues', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
-  assert.deepEqual(rows, { requests: 'requests', questions: 'requests', goals: 'goals', runs: 'runs', jobs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, library: 'library', terminal: undefined, computers: 'computers' })
+  const byView = Object.fromEntries(['requests', 'questions', 'goals', 'runs', 'jobs', 'services', 'visuals', 'files', 'github', 'issues', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
+  assert.deepEqual(byView, { requests: 'requests', questions: 'requests', goals: 'goals', runs: 'runs', jobs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, library: 'library', terminal: undefined, computers: 'computers' })
   assert.equal(rowOf('files'), undefined)
   assert.equal(rowOf('changes'), undefined)
   for (const view of ['settings', 'rules', 'room-general', 'room-hooks']) assert.equal(rowOf(view), undefined, view)
@@ -20,7 +17,7 @@ test('work views resolve to their sidebar rows; PRs and Issues belong to the roo
 })
 
 test('rows that need a repo or computers hide without them', () => {
-  const ids = (have: { repo?: boolean; computers?: boolean }) => shown(sections.flatMap((s) => s.rows), have).map((r) => r.id)
+  const ids = (have: { repo?: boolean; computers?: boolean }) => shown(rows, have).map((r) => r.id)
   assert.deepEqual(ids({}), ['requests', 'goals', 'runs', 'services', 'visuals'])
   assert.deepEqual(ids({ repo: true, computers: true }), ['requests', 'goals', 'runs', 'services', 'visuals', 'library', 'computers'])
 })
@@ -37,12 +34,10 @@ test('the runs header shows no Shell jobs tab, but a job log stays under the run
   assert.equal(rowOf('jobs')?.id, 'runs')
 })
 
-test('Library is the last Work row, repo-scoped, and the library view still resolves', () => {
-  const work = sections.find((s) => s.label === 'Work')?.rows ?? []
-  assert.equal(work.at(-1)?.id, 'library')
+test('Library is repo-scoped and the library view still resolves', () => {
   assert.equal(rowOf('library')?.repo, true)
   assert.deepEqual(rowOf('library')?.tabs.map((t) => t.id), ['library'])
-  assert.ok(!shown(work, {}).some((r) => r.id === 'library'), 'hidden in a room without a repository')
+  assert.ok(!shown(rows, {}).some((r) => r.id === 'library'), 'hidden in a room without a repository')
 })
 
 test('Issues has no room row of its own', () => {
