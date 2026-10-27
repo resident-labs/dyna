@@ -711,6 +711,7 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 			}
 			raw, _ := store.RawOutputPath(id)
 			norm, _ := store.NormalizedPath(id)
+			first := meta.Turns == 0
 			meta.Turns++
 			meta.LastActivity = time.Now()
 			meta.Status, meta.Finished = StatusIdle, time.Time{}
@@ -723,6 +724,7 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 				RoomHeld: roomPause.Paused || roomPause.ResumePending,
 				N:        meta.Turns, Prompt: prompt, Schema: schema, WrapUp: wrapUp, Status: TurnQueued, Created: time.Now(),
 				Profile: meta.Profile, Model: meta.Model, TransferID: transferID,
+				Wake:     m.wakeCause(meta, messageID, transferID, wrapUp, first),
 				RawStart: fileSize(raw), NormStart: fileSize(norm),
 			}
 			for _, addr := range owe {
@@ -739,6 +741,9 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 			}
 			if messageID != "" {
 				if _, err := store.claimPosts(context.Background(), m.rooms(), meta, []string{messageID}, turn.N); err != nil {
+					return err
+				}
+				if err := m.noteHow(context.Background(), meta, []string{messageID}, room.DeliveryWoke, turn.N); err != nil {
 					return err
 				}
 			}
