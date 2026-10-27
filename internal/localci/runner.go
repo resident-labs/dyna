@@ -237,6 +237,9 @@ const (
 	// fetch of the trial head or base. No check ran, so nothing in the result says
 	// anything about the commit.
 	CauseScheduling FailureCause = "scheduling"
+	// CauseGit is a push or a checkout that git itself rejected. The job keeps
+	// the git error text, so a trial can name it instead of an unknown job.
+	CauseGit FailureCause = "git"
 )
 
 // Label is how a cause reads to a person. The stored value never changes; only a
@@ -265,6 +268,8 @@ func (c FailureCause) Label() string {
 		return "cause not proven"
 	case CauseScheduling:
 		return "the run could not start"
+	case CauseGit:
+		return "git error"
 	}
 	return ""
 }

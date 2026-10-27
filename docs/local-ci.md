@@ -126,6 +126,20 @@ directory setting, and `JUNIT_REPORT_PATH`. The runner always writes
 `execution.json` from the check's admitted execution time. A `junit` or `go`
 command writes its XML under the same report directory.
 
+## Git LFS
+
+Dyna pushes the commit to the CI machine with `GIT_LFS_SKIP_PUSH=1` and
+without the repository's pre-push hooks. The checkout on the machine sets
+`GIT_LFS_SKIP_SMUDGE=1`. A check therefore sees Git LFS pointer files, not the
+file contents.
+
+A check that needs the real file contents must fetch them itself. Run
+`git lfs pull` in the check, with credentials the check provides. Dyna does
+not send LFS credentials to the CI machine.
+
+A failed push or checkout is a job in the result. That job keeps the git error
+text, so a trial names the error instead of an unknown job.
+
 ## Workflow job checks
 
 A check with `job` runs a job from a workflow file, in containers `act` starts,
