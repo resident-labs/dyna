@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/roomsvc"
@@ -43,12 +44,21 @@ func TestPublishStateRoutesPRChanges(t *testing.T) {
 	default:
 		t.Fatal("call-request commit did not wake the notifier")
 	}
-	publish(hub.Event{Topic: "localci", Key: "result:head"})
+	publish(hub.Event{Topic: localci.Topic, Key: localci.ResultEventKey("head").String()})
 	for _, worker := range []string{"prs", "merges"} {
 		select {
 		case <-signals.channels[worker]:
 		default:
 			t.Fatalf("local CI completion did not wake %s", worker)
+		}
+	}
+	// A cache write is a localci key, but it is not a wake family.
+	publish(hub.Event{Topic: localci.Topic, Key: localci.CachesEventKey("node").String()})
+	for _, worker := range []string{"prs", "merges"} {
+		select {
+		case <-signals.channels[worker]:
+			t.Fatalf("a cache cleanup woke %s", worker)
+		default:
 		}
 	}
 }
@@ -67,7 +77,7 @@ func TestPublishLocalCIRefreshesOnlyRoomsUsingHead(t *testing.T) {
 		events := hub.New(1)
 		stream, _, closeStream := events.Subscribe()
 		defer closeStream()
-		publishState(events, rooms, newWorkerSignals(nil))(hub.Event{Topic: "localci", Key: "result:" + head})
+		publishState(events, rooms, newWorkerSignals(nil))(hub.Event{Topic: localci.Topic, Key: localci.ResultEventKey(head).String()})
 		want := uint64(1)
 		if head == "unrelated" {
 			want = 0

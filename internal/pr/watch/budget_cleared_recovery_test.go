@@ -172,7 +172,7 @@ func TestTickClearedBudgetPreservesPendingPolling(t *testing.T) {
 	e.f.Runs[0].Status, e.f.Runs[0].Conclusion = "completed", "success"
 	e.tick()
 	after := e.record()
-	if after.CI != "passed" || strings.HasPrefix(after.CIKey, "budget:") || after.Failures != 0 || after.CIPaused || after.PauseReason != "" {
+	if _, budget := ParseBudgetFailureKey(after.CIKey); after.CI != "passed" || budget || after.Failures != 0 || after.CIPaused || after.PauseReason != "" {
 		t.Fatalf("pending CI did not converge after success: CI=%s, key=%s, failures=%d, paused=%v", after.CI, after.CIKey, after.Failures, after.CIPaused)
 	}
 }
@@ -185,7 +185,7 @@ func TestTickCandidateFreeQuietAddsNoRecoveryWork(t *testing.T) {
 	e.f.Pull.Updated = "2026-10-17T12:00:00Z"
 	e.tick()
 	before := e.record()
-	if before.CI != "passed" || strings.HasPrefix(before.CIKey, "budget:") {
+	if _, budget := ParseBudgetFailureKey(before.CIKey); before.CI != "passed" || budget {
 		t.Fatal("clean quiet fixture has a pending recovery")
 	}
 	requireQuietRecoveryRepeats(t, e, before, decodes, 0)
