@@ -131,7 +131,9 @@ func rootWakes(msg Message, roomName string) bool {
 		if msg.Sender() == SenderSession && msg.Wake {
 			return true
 		}
-		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice || ownerNamesRoot(msg, roomName)
+		// A quiet post never asks root to act, even when the owner's identity
+		// names the seat. --quiet wins over that wake.
+		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice || (ownerNamesRoot(msg, roomName) && msg.Wake)
 	// TODO: legacy/shim remove later — a post stored before its family was
 	// typed still reads by its old kind. Remove when retained history ages out.
 	case "notice":
@@ -150,8 +152,10 @@ func rootWakes(msg Message, roomName string) bool {
 
 // ownerNamesRoot reports a post the owner's identity addressed to the root
 // seat by name: a script, CI hook or bridge that runs `dyna post @<room>:root`.
-// It asks root to act, like the same post typed in the desktop. Without the
-// name, an owner-identity post is an orchestrator's echo and stays quiet.
+// A post that asks for a wake asks root to act, like the same post typed in
+// the desktop. A quiet one still names the seat, so root reads it as context,
+// but it does not ask root to act. Without the name, an owner-identity post
+// is an orchestrator's echo and is not root context.
 func ownerNamesRoot(msg Message, roomName string) bool {
 	return msg.From == roomName && !msg.EngineEvent() && msg.RootSeatTarget(roomName)
 }
