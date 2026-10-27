@@ -594,7 +594,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 			log.Printf("seed built-in hooks: %v", err)
 		}
 	}
-	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hookService, sync: lanesync.New(), health: health, load: load}, readOnly)
+	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load}, readOnly)
 	if err != nil {
 		return err
 	}

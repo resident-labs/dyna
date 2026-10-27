@@ -43,6 +43,7 @@ import (
 	clisubagent "dyna-agent/internal/cli/subagent"
 	cliupdate "dyna-agent/internal/cli/update"
 	versioncmd "dyna-agent/internal/cli/version"
+	clivoice "dyna-agent/internal/cli/voice"
 	"dyna-agent/internal/cli/workflows"
 	"dyna-agent/internal/computerrestart"
 	"dyna-agent/internal/engine"
@@ -165,6 +166,7 @@ func newRootCommand() *cobra.Command {
 		skillCmd(),
 		mcpCmd(),
 		cliruntime.NewCommand(),
+		clivoice.NewCommand(),
 		cliupdate.NewCommand(version),
 		versioncmd.NewCommand(version),
 	)

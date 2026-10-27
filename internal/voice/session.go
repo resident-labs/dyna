@@ -98,6 +98,11 @@ func chosenProvider(load func(string) (settings.Values, error)) (realtime.Provid
 	if err != nil {
 		return realtime.Provider{}, err
 	}
+	return providerFor(v)
+}
+
+// providerFor builds the provider that v's voice settings name.
+func providerFor(v settings.Values) (realtime.Provider, error) {
 	switch v.VoiceProvider {
 	case "speech-to-speech":
 		if v.VoiceURL == "" {

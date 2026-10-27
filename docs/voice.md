@@ -47,6 +47,21 @@ The call is a floating widget above every view, so it stays while you move betwe
   The desktop app allows microphone requests only from the app origin, and only for audio. WebKitGTK denies a request that the host does not answer.
 - **Each new call is fresh.** A call resumed after an engine restart restores saved conversation context and pending root updates.
 
+## Speech for agents
+
+Any session can turn text into a speech file with `dyna voice say`. It is for narration, demo voice-overs, accessibility audio and game or app characters.
+
+```
+dyna voice say "Welcome to the server!" --voice marin --style "a cheerful village helper" --out hello.wav
+```
+
+- It uses the provider in Settings > Voice, or the one you name with `--provider`. A provider that cannot speak text on request (MiniCPM-o) fails with a clear error.
+- `--voice` takes the provider's preset voices only. There is no voice cloning. `--style` tells the model how to speak.
+- The file is WAV (16-bit mono PCM) by default. `--format ogg` or `--format mp3` needs `ffmpeg` on the PATH, and fails with a message when it is missing. The format also follows the `--out` extension.
+- The text may have up to 4000 characters, and a clip may take up to 60 seconds. The engine runs at most 2 clips at once; a third fails as busy.
+- Say uses its own provider connection. It never posts to a room, never joins or changes the owner's call and keeps no transcript. Each clip uses the voice provider's account quota.
+- A realtime model can change a word. The instruction to speak the text exactly usually holds, but is not guaranteed.
+
 ## Limits
 
 - If the provider connection drops, the call ends; the page can start a new one.

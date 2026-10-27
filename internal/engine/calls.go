@@ -41,6 +41,7 @@ type services struct {
 	config    *configsvc.Service
 	computers *computerweb.Host
 	voice     *voice.Calls
+	say       *voice.Sayer
 	hooks     hooks.Service
 	sync      *lanesync.Service
 	health    func() Health
@@ -463,6 +464,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "VoiceResume", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Resume},
 		{Name: "VoiceStart", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Start},
 		{Name: "VoiceStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.voice.Status},
+		{Name: "VoiceSay", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.say.Say},
 		{Name: "VoiceStop", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Stop},
 	}...)
 }
