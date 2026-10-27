@@ -137,7 +137,13 @@ func Command(o Options) *cobra.Command {
 			fmt.Fprintf(out, "\n%s\n", note)
 		}
 		for _, n := range notes {
-			fmt.Fprintf(out, "\nnote from %s · %s\n%s\n", n.By, time.UnixMilli(n.At).Local().Format("2006-01-02 15:04"), n.Text)
+			fmt.Fprintf(out, "\nnote from %s · %s\n", n.By, time.UnixMilli(n.At).Local().Format("2006-01-02 15:04"))
+			if n.Text != "" {
+				fmt.Fprintln(out, n.Text)
+			}
+			for _, att := range n.Attachments {
+				fmt.Fprintf(out, "attachment: %s (%s)\n", att.Name, att.Path)
+			}
 		}
 		return nil
 	}
