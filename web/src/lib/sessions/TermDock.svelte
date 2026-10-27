@@ -18,15 +18,20 @@
   import { dialog } from '../ui/dialog.ts'
   import { dockReduce, clampHeight, clampRect, type DockAction, type Rect, type Win } from './termDock.ts'
   import type { TermInfo } from '../api/terminal.ts'
+  import type { Question } from '../api/room.ts'
+  import RequestReview from './RequestReview.svelte'
+  import RequestResult from './RequestResult.svelte'
+  import { requestActions, type ResultForm } from './termRequest.ts'
 
   // session set: only that session's shells show, and + opens one in its
   // folder (a session view). owner names the room's folder in the chips; names
   // maps session ids to names. request counts up when the app wants the dock
   // open (the old terminal link, the palette).
-  // selection carries a one-shot terminal ID, such as a terminal request the
-  // owner just started. Later dock opens leave the current tab alone.
+  // requests are the terminal requests that wait for the owner. review carries
+  // a one-shot request ID the owner chose to review; later dock opens leave the
+  // current tab alone.
   // noRepo: the room has no repository, so a room terminal has no folder.
-  let { roomId, session = '', owner = '', narrow = false, names = {}, noRepo = false, request = 0, selection = { request: 0, id: '' } }: { roomId: string; session?: string; owner?: string; narrow?: boolean; names?: Record<string, string>; noRepo?: boolean; request?: number; selection?: { request: number; id: string } } = $props()
+  let { roomId, session = '', owner = '', narrow = false, names = {}, noRepo = false, request = 0, review = { request: 0, id: '' }, requests = [] }: { roomId: string; session?: string; owner?: string; narrow?: boolean; names?: Record<string, string>; noRepo?: boolean; request?: number; review?: { request: number; id: string }; requests?: Question[] } = $props()
   let ref = $derived(session || roomId)
   let roomless = $derived(noRepo && ref === roomId)
 
@@ -80,7 +85,7 @@
   $effect(() => {
     if (request === seen) return
     seen = request
-    if (selection.request === request && selection.id) showRequest(selection.id)
+    if (review.request === request && review.id) showReview(review.id)
     else show()
   })
 
@@ -138,14 +143,64 @@
     }
   }
 
-  // showRequest selects the terminal a request just started. The list may be
-  // stale, so read it before choosing the tab or phone sheet.
-  async function showRequest(id: string) {
-    await load()
-    const requested = list.find((t) => t.id === id)
-    if (requested) pick(requested)
-    else show()
+  // The request being reviewed in the dock, by ID. A request the owner ran is
+  // a terminal tab with a banner; one not yet run has its own tab.
+  let viewing = $state('')
+  // reported: requests the owner just ended, hidden at once while the engine's list catches up.
+  let reported = $state(new Set<string>())
+  let waiting = $derived(requests.filter((q) => q.state === 'open' && !reported.has(q.id)))
+  // ran: request ID to the terminal the owner just started, until the engine's list shows it.
+  let ran = $state<Record<string, string>>({})
+  const termOf = (q: Question): string | undefined => q.terminal?.termId || ran[q.id]
+  let unstarted = $derived(waiting.filter((q) => !termOf(q)))
+  let reviewQ = $derived(unstarted.find((q) => q.id === viewing))
+  const requestOf = (termId: string): Question | undefined => waiting.find((q) => termOf(q) === termId)
+
+  const requestApi = (q: Question) => requestActions({
+    run: (argv) => api.termRequestRun(roomId, q.id, argv, narrow ? 48 : 120, narrow ? 24 : 32),
+    preview: () => api.termRequestPreview(roomId, q.id),
+    report: (verdict, note, share) => api.termRequestReport(roomId, q.id, verdict, note, share),
+  })
+
+  // run starts the command in a new terminal and shows it.
+  async function runRequest(q: Question, argv: string[] | null) {
+    const t = await requestApi(q).run(argv)
+    ran = { ...ran, [q.id]: t.id }
+    all = [...(all ?? []), t]
+    viewing = ''
+    pick(t)
+    load()
   }
+
+  async function declineRequest(q: Question, reason: string) {
+    await requestApi(q).decline(reason)
+    reported = new Set([...reported, q.id])
+    viewing = ''
+    if (narrow) sheet = false
+  }
+
+  async function reportRequest(q: Question, verdict: 'done' | 'failed', form: ResultForm) {
+    await requestApi(q).report(verdict, form)
+    reported = new Set([...reported, q.id])
+  }
+
+  // showReview opens the review of one request, or its terminal once it ran.
+  async function showReview(id: string) {
+    const q = waiting.find((r) => r.id === id)
+    if (!q) { show(); return }
+    const termId = termOf(q)
+    if (termId) {
+      await load()
+      const t = list.find((x) => x.id === termId)
+      if (t) { pick(t); return }
+    }
+    viewing = id
+    if (narrow) sheet = true
+    else act({ type: 'show' })
+  }
+
+  // The gold chip opens the first request that waits.
+  const openFirstRequest = () => { const q = waiting[0]; if (q) showReview(q.id) }
 
   // show opens the dock; with no shell to show it starts one.
   async function show() {
@@ -166,6 +221,7 @@
 
   // A chip shows its shell: in the dock, or by raising its window.
   function pick(t: TermInfo) {
+    viewing = ''
     if (narrow) { act({ type: 'tab', ref, id: t.id }); listing = false; sheet = true }
     else if (winOf(t.id)) act({ type: 'raise', id: t.id })
     else { act({ type: 'tab', ref, id: t.id }); act({ type: 'show' }) }
@@ -319,15 +375,24 @@
 
 <svelte:window onkeydowncapture={shortcut} />
 
+{#snippet reviewPane(q: Question)}
+  <RequestReview {q} onrun={(argv) => runRequest(q, argv)} ondecline={(reason) => declineRequest(q, reason)} />
+{/snippet}
+
 {#snippet body(t: TermInfo | undefined)}
   {#if error}<p class="err">{error}</p>{/if}
   {#if t}
-    {#if exited[t.id] !== undefined || t.alive === false}
+    {@const req = requestOf(t.id)}
+    <!-- A request's shell is reported on, not restarted: its banner replaces this one. -->
+    {#if !req && (exited[t.id] !== undefined || t.alive === false)}
       <div class="exit">
         <span>{exitText(t)}</span>
         <button onclick={() => close(t)}>Close tab</button>
         {#if !roomless}<button class="primary" onclick={async () => { await open(); close(t) }}>Start a new shell</button>{/if}
       </div>
+    {/if}
+    {#if req}
+      <RequestResult q={req} exit={exited[t.id] ?? (t.exited ? t.exitCode : undefined)} onpreview={() => requestApi(req).preview()} onreport={(verdict, form) => reportRequest(req, verdict, form)} />
     {/if}
     {#key t.id}
       <TermPane bind:this={panes[t.id]} bind:ctrl id={t.id} {narrow} onexit={(code) => (exited = { ...exited, [t.id]: code })} />
@@ -349,6 +414,7 @@
     <button class="pbar" onclick={() => (listing = true)} aria-haspopup="dialog">
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 3.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM4.5 6.5l2 1.5-2 1.5M8 10h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
       <span>{list.length === 1 ? '1 terminal' : list.length ? `${list.length} terminals` : 'Terminal'}</span>
+      {#if waiting.length}<span class="reqchip">{waiting.length === 1 ? '1 request' : `${waiting.length} requests`}</span>{/if}
       {#if !list.length}<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>{/if}
     </button>
   </div>
@@ -357,6 +423,9 @@
     <div class="scrim" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) listing = false }}>
     <div class="list" role="dialog" aria-modal="true" aria-label="Terminals" use:dialog={{ close: () => (listing = false) }}>
       <h2>Terminals</h2>
+      {#each unstarted as q (q.id)}
+        <div class="row req"><button class="rname" onclick={() => { listing = false; showReview(q.id) }}><span class="dot" aria-hidden="true"></span><span class="tl">request · {q.askerName}</span><span class="rcwd">waiting for you</span></button></div>
+      {/each}
       {#each list as t (t.id)}
         <div class="row" class:dead={t.alive === false || exited[t.id] !== undefined}>
           <button class="rname" onclick={() => pick(t)}><span class="dot" aria-hidden="true"></span><span class="tl">{label(t)}</span><span class="rcwd mono">{base(t.cwd)}</span></button>
@@ -369,15 +438,19 @@
     </div>
     </div>
   {/if}
-  {#if sheet && sheetTerm}
+  {#if sheet && (reviewQ || sheetTerm)}
     <div class="sheetback">
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="Terminal {label(sheetTerm)}" use:dialog={{ close: () => (sheet = false) }}>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label={reviewQ ? `Request from ${reviewQ.askerName}` : `Terminal ${sheetTerm ? label(sheetTerm) : ''}`} use:dialog={{ close: () => (sheet = false) }}>
       <header role="presentation" ontouchstart={swipeStart} ontouchend={swipeEnd}>
         <span class="grab" aria-hidden="true"></span>
-        <span class="tl">{label(sheetTerm)}</span>
+        <span class="tl">{reviewQ ? `request · ${reviewQ.askerName}` : sheetTerm ? label(sheetTerm) : ''}</span>
         <button class="tx" onclick={() => (sheet = false)} aria-label="Back to the room"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
       </header>
-      {@render body(sheetTerm)}
+      {#if reviewQ}
+        {@render reviewPane(reviewQ)}
+      {:else}
+        {@render body(sheetTerm)}
+      {/if}
     </div>
     </div>
   {/if}
@@ -388,7 +461,7 @@
       <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal" aria-valuenow={height} aria-valuemin={120} tabindex="0" onpointerdown={drag} onkeydown={gripKey}></div>
     {/if}
     <div class="strip">
-      {#if !list.length && !dock.open}
+      {#if !list.length && !unstarted.length && !dock.open}
         <button class="bare" onclick={show} disabled={roomless} title={roomless ? 'This room has no repository, so a room terminal has no folder' : 'Open a terminal (Ctrl+`)'}>
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
           Terminal
@@ -396,10 +469,18 @@
       {:else}
         <!-- svelte-ignore a11y_interactive_supports_focus -->
         <div class="tablist" role="tablist" aria-label="Terminals" bind:this={tabsEl} onkeydown={tabKey}>
+          {#each unstarted as q (q.id)}
+            <div class="tab req" class:on={dock.open && viewing === q.id}>
+              <button role="tab" aria-selected={dock.open && viewing === q.id} tabindex="-1" class="tname" onclick={() => showReview(q.id)} title={q.terminal?.reason}>
+                <span class="dot" aria-hidden="true"></span>
+                <span class="tl">request · {q.askerName}</span>
+              </button>
+            </div>
+          {/each}
           {#each list as t (t.id)}
             {@const w = winOf(t.id)}
-            <div class="tab" class:on={dock.open && t.id === active} class:dead={t.alive === false || exited[t.id] !== undefined} class:outside={!!w}>
-              <button role="tab" aria-selected={dock.open && t.id === active} tabindex={t.id === active ? 0 : -1} class="tname" onclick={() => pick(t)} title={w ? `${t.cwd} (in a window)` : t.cwd}>
+            <div class="tab" class:on={dock.open && !reviewQ && t.id === active} class:dead={t.alive === false || exited[t.id] !== undefined} class:outside={!!w}>
+              <button role="tab" aria-selected={dock.open && !reviewQ && t.id === active} tabindex={t.id === active ? 0 : -1} class="tname" onclick={() => pick(t)} title={w ? `${t.cwd} (in a window)` : t.cwd}>
                 <span class="dot" aria-hidden="true"></span>
                 <span class="tl">{label(t)}</span>
                 {#if w}<svg class="inwin" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M6.5 3.5h6v6M12.5 3.5l-7 7M3.5 6.5v6h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>{/if}
@@ -414,8 +495,8 @@
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
         </button>{/if}
       {/if}
-      <!-- The right end: a later requests chip goes before the dock buttons. -->
       <div class="slot">
+        {#if waiting.length}<button class="reqchip" onclick={openFirstRequest} title="A session asks you to run a command">{waiting.length === 1 ? '1 request' : `${waiting.length} requests`}</button>{/if}
         {#if dock.open}
           {#if current?.cwd}<span class="cwd mono" title={current.cwd}>{base(current.cwd)}</span>{/if}
           {#if current}<button class="ib" onclick={() => popOut(current)} aria-label="Pop out as a window" title="Pop out as a window">
@@ -432,7 +513,11 @@
     </div>
     {#if dock.open}
       <div class="dockbody" style:height={dock.maxed ? undefined : `${height}px`}>
-        {@render body(current)}
+        {#if reviewQ}
+          {@render reviewPane(reviewQ)}
+        {:else}
+          {@render body(current)}
+        {/if}
       </div>
     {/if}
   </section>
@@ -511,6 +596,13 @@
   }
   .bare:active:not(:disabled) { background: var(--select); }
   .bare:disabled { opacity: 0.5; }
+  .reqchip { padding: 2px var(--s2); border-radius: 5px; background: var(--gold-wash); color: var(--gold); font-size: var(--t-sm); font-weight: 600; white-space: nowrap; transition: background-color var(--motion-fast) var(--ease); }
+  @media (hover: hover) {
+    .reqchip:hover { background: var(--gold-wash-hover); }
+  }
+  .reqchip:active { background: var(--select); }
+  .tab.req .dot, .row.req .dot { background: var(--gold); }
+  .tab.req.on { background: var(--gold-wash-hover); }
   .slot { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; min-width: 0; }
   .cwd { padding: 0 var(--s2); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
   .tab.outside .tl { font-style: italic; }
