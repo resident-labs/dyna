@@ -106,6 +106,16 @@ func completeLocalCI(result localci.Result, definition *localci.Definition, suit
 	return definition.CoversSuites(result, suites)
 }
 
+// withLocalJobs names the checks a failed local result could not complete, so
+// the trial card shows those jobs instead of an unknown failure.
+func withLocalJobs(ci trialCI, result localci.Result) trialCI {
+	if ci.Status != VerdictFailed {
+		return ci
+	}
+	ci.Failed = localFailedChecks(result)
+	return ci
+}
+
 func localCIStatus(result localci.Result, repo, head string, definition *localci.Definition, suites []localci.Suite) (CIVerdict, string, string, error) {
 	if result.SHA != head || result.Repo != repo {
 		return "", "", "", errors.New("local CI result does not match repository and trial head")
@@ -258,7 +268,7 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 		if !retryStop && (result.Status == localci.OutcomeFailed || result.Status == localci.OutcomeError) {
 			// A saved failure stays readable without the commits that produced it.
 			status, logs, reason, statusErr := localCIStatus(result, repo, job.head, nil, nil)
-			return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
+			return withLocalJobs(trialCI{Status: status, Logs: logs, Reason: reason}, result), statusErr
 		}
 	}
 	job, err = s.withLocalTrialBase(ctx, job)
@@ -274,7 +284,7 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 	}
 	if saved && !retryStop && completeLocalCI(result, plan.required, plan.suites) {
 		status, logs, reason, statusErr := localCIStatus(result, repo, job.head, plan.required, plan.suites)
-		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
+		return withLocalJobs(trialCI{Status: status, Logs: logs, Reason: reason}, result), statusErr
 	}
 	if !s.roomServedByCI(job.record.RoomID) {
 		note := localci.RoomNotServedError{RoomID: job.record.RoomID}.Error()

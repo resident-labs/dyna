@@ -225,8 +225,13 @@ func (r Runner) pushCommitToNode(ctx context.Context, repo, cache, sha string) e
 		// the machine's connect timeout allows, for this one command only.
 		args = []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o " + machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout)}
 	}
-	args = append(args, "push", dest, sha+":refs/dyna/ci/"+sha)
-	if err := r.run(ctx, repo, &output, "git", args...); err != nil {
+	// --no-verify skips the repository's own pre-push hooks. A Git LFS hook
+	// would upload to this bare CI remote and fail the push. GIT_LFS_SKIP_PUSH
+	// is set on this command only: the process guard strips GIT_* from every
+	// child, so the variable has to be set again for git itself.
+	args = append(args, "push", "--no-verify", dest, sha+":refs/dyna/ci/"+sha)
+	push := append([]string{"GIT_LFS_SKIP_PUSH=1", "git"}, args...)
+	if err := r.run(ctx, repo, &output, "env", push...); err != nil {
 		return fmt.Errorf("push commit to node: %w: %s", err, &output)
 	}
 	return nil
@@ -564,6 +569,17 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 		output.Reset()
 		if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
+			// No check has started, so the git error would otherwise be an empty
+			// result and the trial would report an unknown job.
+			cause := runCause(node, control, err)
+			if cause == CauseUnclassified {
+				cause = CauseGit
+			}
+			result.Cause = cause
+			job := gitTransportJob(node.Name, gitPushCheck, cause, err)
+			// The copy from suites to checks is registered later, so a return here
+			// has to set both. The trial reads checks.
+			result.Suites, result.Checks = []SuiteResult{job}, []SuiteResult{job}
 			return result, err
 		}
 	}
@@ -737,6 +753,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				if sr.Status == OutcomeFailed && diskFull(sr.LogTail+"\n"+sr.Error) {
 					sr.Status, sr.Error, sr.Cause = OutcomeError, "check ran out of disk space on the CI machine", CauseDiskFull
 				}
+				// A checkout that failed before the check ran keeps the git error as
+				// this job's evidence. The exit status alone would hide that text.
+				if text, ok := gitErrorText(sr.LogTail); ok && len(markers) == 0 {
+					sr.Status, sr.Error = OutcomeError, text
+					if sr.Cause == "" || sr.Cause == CauseContainerFailure || sr.Cause == CauseUnclassified {
+						sr.Cause = CauseGit
+					}
+				}
 				if blobErr == nil {
 					logs[i] = blob
 					blob.exitCode = checkExitCode(runErr, markers)
@@ -909,6 +933,41 @@ func readReports(sr *SuiteResult, mode ReportMode, reportRoot string, max time.D
 // run's own end, not a caller's decision, so it does not count.
 func cancelled(ctx context.Context) bool {
 	return ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+// gitPushCheck is the job a failed push records. No suite check has started,
+// so this name is the evidence the trial shows instead of an unknown job.
+const gitPushCheck CheckName = "git-push"
+
+// gitTransportJob is one push or checkout failure, with the git error text.
+func gitTransportJob(node string, name CheckName, cause FailureCause, err error) SuiteResult {
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	return SuiteResult{CheckName: name, Node: node, Status: OutcomeError, Cause: cause, Error: text, LogTail: text}
+}
+
+// gitNodeStep runs one git command on the node. Smudge is skipped, so a
+// checkout leaves Git LFS pointer files. A failure prints the git error as a
+// marker the runner stores on the job.
+func gitNodeStep(command string) string {
+	return `git_err=$(GIT_LFS_SKIP_SMUDGE=1 ` + command + ` 2>&1) || { printf 'DYNA_CI_GIT_ERROR=%s\n' "$(printf '%s' "$git_err" | tr '\n' ' ' | head -c 2000)"; exit 69; }; `
+}
+
+// gitErrorText is the git error a node step printed, when the log has one.
+var gitErrorMarker = regexp.MustCompile(`(?m)^DYNA_CI_GIT_ERROR=(.*)$`)
+
+func gitErrorText(log string) (string, bool) {
+	matches := gitErrorMarker.FindAllStringSubmatch(log, -1)
+	if len(matches) == 0 {
+		return "", false
+	}
+	text := strings.TrimSpace(matches[len(matches)-1][1])
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 // checkMarker is the exit status the node writes after a check's command ran.
@@ -1413,11 +1472,11 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// workspace into the job container file by file, so an empty refs tree
 		// never arrives and a detached commit leaves the copy a directory git
 		// refuses. A named ref is a file and lands with the copy.
-		setup += "git clone --quiet --no-checkout " + q(cache) + " " + q(work) + " || exit 69; " +
-			"git -C " + q(work) + " fetch --quiet " + q(cache) + " +refs/dyna/ci/*:refs/dyna/ci/* || exit 69; " +
-			"git -C " + q(work) + " checkout --quiet -B dyna-ci " + q(sha) + " || exit 69; "
+		setup += gitNodeStep("git clone --quiet --no-checkout "+q(cache)+" "+q(work)) +
+			gitNodeStep("git -C "+q(work)+" fetch --quiet "+q(cache)+" +refs/dyna/ci/*:refs/dyna/ci/*") +
+			gitNodeStep("git -C "+q(work)+" checkout --quiet -B dyna-ci "+q(sha))
 	} else {
-		setup += "git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha) + " || exit 69; "
+		setup += gitNodeStep("git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha))
 	}
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "

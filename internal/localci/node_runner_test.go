@@ -517,13 +517,13 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 				if fakeSystemdVersion(out, name, args) {
 					return nil
 				}
+				joined := strings.Join(args, " ")
+				if strings.Contains(joined, "push") && strings.Contains(joined, "pip@host:") {
+					sawPush = true
+				}
 				if fakeNodeGit(dir, out, name, args) {
-					if strings.Contains(strings.Join(args, " "), "push") {
-						sawPush = strings.Contains(strings.Join(args, " "), "push pip@host:")
-					}
 					return nil
 				}
-				joined := strings.Join(args, " ")
 				sawSSH = sawSSH || name == "ssh" && strings.Contains(joined, "pip@host")
 				script := args[len(args)-1]
 				if name == "systemd-run" {
