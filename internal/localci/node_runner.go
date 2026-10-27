@@ -955,9 +955,9 @@ func gitNodeStep(command string) string {
 	return `git_err=$(GIT_LFS_SKIP_SMUDGE=1 ` + command + ` 2>&1) || { printf 'DYNA_CI_GIT_ERROR=%s\n' "$(printf '%s' "$git_err" | tr '\n' ' ' | head -c 2000)"; exit 69; }; `
 }
 
-// gitErrorText is the git error a node step printed, when the log has one.
 var gitErrorMarker = regexp.MustCompile(`(?m)^DYNA_CI_GIT_ERROR=(.*)$`)
 
+// gitErrorText is the git error a node step printed, when the log has one.
 func gitErrorText(log string) (string, bool) {
 	matches := gitErrorMarker.FindAllStringSubmatch(log, -1)
 	if len(matches) == 0 {

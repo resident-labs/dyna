@@ -160,6 +160,12 @@ func localCIStatus(result localci.Result, repo, head string, definition *localci
 			}
 			return VerdictPending, "", "local CI could not start a run; trying again", nil
 		}
+		// A machine fault, including a git push or checkout failure, retries on
+		// another machine. The trial waits for that retry. A spent retry falls
+		// through and fails with the saved git error.
+		if machineFailureRetryFrom(result) != "" {
+			return VerdictPending, "", "retrying local CI after a machine failure", nil
+		}
 		return VerdictFailed, logs, "local CI failed", nil
 	default:
 		return VerdictPending, "", "waiting for local CI", nil
