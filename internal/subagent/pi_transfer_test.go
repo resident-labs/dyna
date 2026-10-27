@@ -90,6 +90,8 @@ for line in sys.stdin:
         emit({"type": "agent_settled"})
     elif kind == "abort":
         emit({"id": rid, "type": "response", "command": "abort", "success": True})
+    elif kind == "set_auto_retry":
+        emit({"id": rid, "type": "response", "command": "set_auto_retry", "success": True})
     elif kind == "compact":
         emit({"id": rid, "type": "response", "command": "compact", "success": True,
               "data": {"summary": "ok"}})
