@@ -4,8 +4,8 @@ import { sections, rowOf, shown, runningWork, visibleTabs } from './workViews.ts
 
 test('the sidebar has eight rows in Work and Machine; Room settings is a modal, not a row', () => {
   assert.deepEqual(sections.map((s) => [s.label, s.rows.map((r) => r.id)]), [
-    ['Work', ['questions', 'goals', 'runs', 'services', 'visuals']],
-    ['Machine', ['library', 'terminal', 'computers']],
+    ['Work', ['questions', 'goals', 'runs', 'services', 'visuals', 'library']],
+    ['Machine', ['terminal', 'computers']],
   ])
 })
 
@@ -37,12 +37,12 @@ test('the runs header shows no Shell jobs tab, but a job log stays under the run
   assert.equal(rowOf('jobs')?.id, 'runs')
 })
 
-test('Library is the first Machine row, repo-scoped, and the library view still resolves', () => {
-  const machine = sections.find((s) => s.label === 'Machine')?.rows ?? []
-  assert.deepEqual(machine.map((r) => r.id), ['library', 'terminal', 'computers'])
+test('Library is the last Work row, repo-scoped, and the library view still resolves', () => {
+  const work = sections.find((s) => s.label === 'Work')?.rows ?? []
+  assert.equal(work.at(-1)?.id, 'library')
   assert.equal(rowOf('library')?.repo, true)
   assert.deepEqual(rowOf('library')?.tabs.map((t) => t.id), ['library'])
-  assert.ok(!shown(machine, {}).some((r) => r.id === 'library'), 'hidden in a room without a repository')
+  assert.ok(!shown(work, {}).some((r) => r.id === 'library'), 'hidden in a room without a repository')
 })
 
 test('Issues has no room row of its own', () => {

@@ -9,6 +9,30 @@ const code = await bundle({
   format: "export const initials = (name) => name.slice(0, 2); export const roomLabel = (room) => room.displayName || room.name;",
 })
 
+test('the rail keeps Settings and Sign out at its bottom', async () => {
+  const dom = installDom()
+  const ui = await importBundle(code, '../rooms/RoomRail')
+  const calls: string[] = []
+  const target = document.getElementById('app')
+  assert.ok(target)
+  try {
+    const rail = ui.mount(ui.default, { target, props: { rooms: [], onselect() {}, update: true, onsettings: () => calls.push('settings'), onlogout: () => calls.push('logout') } })
+    try {
+      ui.flushSync()
+      document.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')?.click()
+      document.querySelector<HTMLButtonElement>('button[aria-label="Sign out this device"]')?.click()
+      assert.deepEqual(calls, ['settings', 'logout'])
+      assert.ok(document.querySelector('.udot'))
+    } finally {
+      await ui.unmount(rail)
+    }
+  } finally {
+    dom.window.close()
+    for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
+
 test('phone rows expose full room names and actions while the desktop keeps its rail', async () => {
   const dom = installDom()
   const ui = await importBundle(code, '../rooms/RoomRail')
