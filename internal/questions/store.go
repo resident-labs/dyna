@@ -46,6 +46,68 @@ const (
 
 func (k AskerKind) valid() bool { return k == AskerOwner || k == AskerSession || k == AskerRun }
 
+// Kind says what a stored question asks for. A row with no kind is a plain
+// question.
+type Kind string
+
+const (
+	KindQuestion Kind = "question"
+	// KindTerminal asks the owner to run a command in a terminal.
+	KindTerminal Kind = "terminal"
+)
+
+// TerminalVerdict is how the owner ended a terminal request.
+type TerminalVerdict string
+
+const (
+	VerdictDone     TerminalVerdict = "done"
+	VerdictFailed   TerminalVerdict = "failed"
+	VerdictDeclined TerminalVerdict = "declined"
+)
+
+func (v TerminalVerdict) valid() bool {
+	return v == VerdictDone || v == VerdictFailed || v == VerdictDeclined
+}
+
+// TerminalStage is where a terminal request stands. A request climbs the
+// session chain, each holder approving or denying, and the owner sees it only
+// at waiting-owner. The owner's verdict and a denial end it.
+type TerminalStage string
+
+const (
+	StageWaitingSession TerminalStage = "waiting-session"
+	StageWaitingOwner   TerminalStage = "waiting-owner"
+	StageDenied         TerminalStage = "denied"
+	StageDone           TerminalStage = "done"
+	StageFailed         TerminalStage = "failed"
+	StageDeclined       TerminalStage = "declined"
+	StageWithdrawn      TerminalStage = "withdrawn"
+)
+
+// Limits of a terminal request.
+const (
+	MaxTerminalReason = 500
+	MaxTerminalArgv   = 4 << 10
+)
+
+// TerminalRequest is what a session asks the owner to run in a terminal, and
+// what the owner reports back. SharedLines is set only when the owner chose to
+// share the end of the screen. A denial keeps its reason and the denier in the
+// question's Answer.
+type TerminalRequest struct {
+	// Argv is empty when the owner gets a plain login shell.
+	Argv   []string      `json:"argv"`
+	Cwd    string        `json:"cwd"`
+	Reason string        `json:"reason"`
+	Stage  TerminalStage `json:"stage"`
+	// Holder is the session that decides next, while the stage is
+	// waiting-session.
+	Holder      string `json:"holder,omitempty"`
+	TermID      string `json:"termId,omitempty"`
+	ExitCode    *int   `json:"exitCode,omitempty"`
+	SharedLines string `json:"sharedLines,omitempty"`
+}
+
 type Question struct {
 	ID    string `json:"id"`
 	Room  string `json:"room"`
@@ -66,7 +128,26 @@ type Question struct {
 	GroupKey        string    `json:"groupKey"`
 	AskedTurn       int       `json:"askedTurn,omitempty"`
 	AnswerDelivered bool      `json:"answerDelivered,omitempty"`
+	Kind            Kind      `json:"kind,omitempty"`
+	// Terminal holds a terminal request's command and result. Replace the
+	// pointer on change; the store compares a copy against it.
+	Terminal *TerminalRequest `json:"terminal,omitempty"`
 }
+
+// IsTerminal reports a terminal request.
+func (q Question) IsTerminal() bool { return q.Kind == KindTerminal }
+
+// TerminalStage is the stage of a terminal request, which a withdrawal ends.
+func (q Question) TerminalStage() TerminalStage {
+	switch {
+	case !q.IsTerminal() || q.Terminal == nil:
+		return ""
+	case q.State == "withdrawn":
+		return StageWithdrawn
+	}
+	return q.Terminal.Stage
+}
+
 type State struct {
 	Version   int                 `json:"version"`
 	Next      map[string]int      `json:"next"`
@@ -85,6 +166,9 @@ func Validate(q Question) error {
 	}
 	if !q.AskerKind.valid() {
 		return fmt.Errorf("a question needs an asker kind")
+	}
+	if q.IsTerminal() {
+		return validateTerminal(q)
 	}
 	if strings.TrimSpace(q.Meanwhile) == "" {
 		return fmt.Errorf("--meanwhile is required: say what useful safe work you will do while you wait")
@@ -107,6 +191,38 @@ func Validate(q Question) error {
 	}
 	return nil
 }
+func validateTerminal(q Question) error {
+	t := q.Terminal
+	if q.AskerKind != AskerSession || t == nil {
+		return fmt.Errorf("only a work session files a terminal request")
+	}
+	if strings.TrimSpace(q.Text) == "" || !utf8.ValidString(q.Text) || utf8.RuneCountInString(q.Text) > MaxTerminalReason {
+		return fmt.Errorf("--reason must have 1 to %d characters", MaxTerminalReason)
+	}
+	if t.Cwd == "" {
+		return fmt.Errorf("a terminal request needs a folder")
+	}
+	if t.Stage != StageWaitingOwner && (t.Stage != StageWaitingSession || t.Holder == "") {
+		return fmt.Errorf("a new terminal request waits for a session or the owner")
+	}
+	return CheckArgv(t.Argv)
+}
+
+// CheckArgv limits a terminal request's command to valid text of bounded size.
+func CheckArgv(argv []string) error {
+	size := 0
+	for _, arg := range argv {
+		if !utf8.ValidString(arg) || strings.ContainsRune(arg, 0) {
+			return fmt.Errorf("the command must be valid text")
+		}
+		size += len(arg) + 1
+	}
+	if size > MaxTerminalArgv {
+		return fmt.Errorf("the command is longer than %d bytes", MaxTerminalArgv)
+	}
+	return nil
+}
+
 func GroupKey(text string, options []string) string {
 	return strings.ToLower(strings.Join(strings.Fields(text), " ")) + "|" + strings.Join(options, "|")
 }
@@ -192,6 +308,10 @@ func (s *Store) reserve(conn *sql.Conn, sessionsRoot string, q *Question, toErr 
 	q.State = "open"
 	q.AskedAt = time.Now()
 	q.GroupKey = GroupKey(q.Text, q.Options)
+	if q.IsTerminal() {
+		// A terminal request never joins another question's answer.
+		q.GroupKey = "terminal:" + q.ID
+	}
 	if q.To == "" {
 		q.To = "owner"
 	}
@@ -217,6 +337,9 @@ func (s *Store) Answer(room, id string, a Answer) ([]Question, error) {
 		}
 		if q.State != "open" {
 			return fmt.Errorf("question %s is %s", id, q.State)
+		}
+		if q.IsTerminal() {
+			return fmt.Errorf("%s is a terminal request; the owner reports it from the terminal", id)
 		}
 		a.Text = strings.TrimSpace(a.Text)
 		if a.Choice == "" && a.Text == "" {
@@ -327,4 +450,119 @@ func (s *Store) OpenAskedBy(room, asker string) ([]Question, error) {
 		}
 	}
 	return out, err
+}
+
+// TerminalReport is the owner's result for a terminal request.
+type TerminalReport struct {
+	Verdict     TerminalVerdict
+	ExitCode    *int
+	Note        string
+	SharedLines string
+	Human       bool
+}
+
+// editTerminal changes one open terminal request at the given stage. It stores
+// a new copy of the request, so the transaction sees the change.
+func (s *Store) editTerminal(room, id string, stage TerminalStage, edit func(*Question, *TerminalRequest) error) (Question, error) {
+	var out Question
+	err := s.update(func(st *State) error {
+		q, ok := st.Questions[key(room, id)]
+		if !ok || !q.IsTerminal() || q.Terminal == nil {
+			return fmt.Errorf("no terminal request %s in this room", id)
+		}
+		if q.State != "open" || q.Terminal.Stage != stage {
+			return fmt.Errorf("request %s is %s, not %s", id, q.TerminalStage(), stage)
+		}
+		t := *q.Terminal
+		if err := edit(&q, &t); err != nil {
+			return err
+		}
+		q.Terminal = &t
+		st.Questions[key(room, id)] = q
+		out = q
+		return nil
+	})
+	return out, err
+}
+
+// byHolder is editTerminal for a request that the session holds.
+func (s *Store) byHolder(room, id, holder string, edit func(*Question, *TerminalRequest) error) (Question, error) {
+	return s.editTerminal(room, id, StageWaitingSession, func(q *Question, t *TerminalRequest) error {
+		if t.Holder != holder {
+			return fmt.Errorf("you do not hold request %s", id)
+		}
+		return edit(q, t)
+	})
+}
+
+// Approve passes a held request to the next holder, or to the owner when next
+// is empty.
+func (s *Store) ApproveTerminal(room, id, holder, next string) (Question, error) {
+	return s.byHolder(room, id, holder, func(_ *Question, t *TerminalRequest) error {
+		t.Holder, t.Stage = next, StageWaitingOwner
+		if next != "" {
+			t.Stage = StageWaitingSession
+		}
+		return nil
+	})
+}
+
+// DenyTerminal ends a held request. The reason is the answer the filer reads.
+func (s *Store) DenyTerminal(room, id, holder, reason string) (Question, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || !utf8.ValidString(reason) || utf8.RuneCountInString(reason) > 2000 {
+		return Question{}, fmt.Errorf("--reason must have 1 to 2000 characters")
+	}
+	return s.byHolder(room, id, holder, func(q *Question, t *TerminalRequest) error {
+		t.Holder, t.Stage = "", StageDenied
+		q.State, q.Answer = "answered", &Answer{At: time.Now(), By: holder, Text: reason}
+		return nil
+	})
+}
+
+// ReassignHolder moves the requests that a closing session holds to the next
+// holder, or to the owner when to is empty.
+func (s *Store) ReassignHolder(room, from, to string) error {
+	return s.update(func(st *State) error {
+		for k, q := range st.Questions {
+			if q.Room != room || q.State != "open" || q.Terminal == nil || q.Terminal.Stage != StageWaitingSession || q.Terminal.Holder != from {
+				continue
+			}
+			t := *q.Terminal
+			t.Holder, t.Stage = to, StageWaitingOwner
+			if to != "" {
+				t.Stage = StageWaitingSession
+			}
+			q.Terminal = &t
+			st.Questions[k] = q
+		}
+		return nil
+	})
+}
+
+// SetTerminal records the terminal the owner started for a request and the
+// command the owner ran, which may differ from the one the session filed.
+func (s *Store) SetTerminal(room, id string, argv []string, termID string) (Question, error) {
+	return s.editTerminal(room, id, StageWaitingOwner, func(_ *Question, t *TerminalRequest) error {
+		t.Argv, t.TermID = argv, termID
+		return nil
+	})
+}
+
+// ReportTerminal closes a request that waits for the owner as answered. The
+// owner's note is the answer text.
+func (s *Store) ReportTerminal(room, id string, r TerminalReport) (Question, error) {
+	note := strings.TrimSpace(r.Note)
+	if !r.Verdict.valid() {
+		return Question{}, fmt.Errorf("verdict must be done, failed or declined")
+	}
+	if !utf8.ValidString(note) || utf8.RuneCountInString(note) > 2000 {
+		return Question{}, fmt.Errorf("note must have at most 2000 characters")
+	}
+	return s.editTerminal(room, id, StageWaitingOwner, func(q *Question, t *TerminalRequest) error {
+		t.Stage, t.ExitCode, t.SharedLines = TerminalStage(r.Verdict), r.ExitCode, r.SharedLines
+		q.State = "answered"
+		q.Answer = &Answer{At: time.Now(), By: "owner", Human: r.Human, Text: note}
+		return nil
+	})
 }

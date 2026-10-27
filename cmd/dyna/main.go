@@ -33,6 +33,7 @@ import (
 	climaintenance "dyna-agent/internal/cli/maintenance"
 	"dyna-agent/internal/cli/managed"
 	"dyna-agent/internal/cli/profiles"
+	"dyna-agent/internal/cli/request"
 	cliroom "dyna-agent/internal/cli/room"
 	cliroot "dyna-agent/internal/cli/root"
 	"dyna-agent/internal/cli/rules"
@@ -133,6 +134,7 @@ func newRootCommand() *cobra.Command {
 		managed.NewInstallCommand(),
 		managed.NewUninstallCommand(),
 		ask.NewCommand(),
+		request.NewCommand(),
 		call.NewCommand(),
 		cligit.NewCommand(),
 		cliissue.NewCommand(),

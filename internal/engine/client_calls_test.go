@@ -92,6 +92,7 @@ var dynamicCallSites = map[string][]string{
 	"internal/cli/pr/pr.go call":                    {"MergeFixPR", "UntrackPR", "ResumePR", "SetPRDraft", "RequirePRReviewers"},
 	"internal/cli/room/pins.go call":                {"Pin", "Unpin"},
 	"internal/cli/room/session_controls.go method":  {"PauseRoomSessions", "ResumeRoomSessions", "ClearDormantSessions"},
+	"internal/cli/request/request.go method":        {"ApproveRequest", "DenyRequest", "WithdrawRequest"},
 	"internal/cli/rules/rules.go method":            {"AddRule", "EditRule", "RemoveRule"},
 	"internal/cli/subagent/consolidation.go method": {"ResumeSessionConsolidation", "CancelSessionConsolidation"},
 	"internal/cli/sync/operation.go method":         {"SyncRefresh"},

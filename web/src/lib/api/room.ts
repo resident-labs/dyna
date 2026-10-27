@@ -340,8 +340,30 @@ export interface QuestionWithdrawal {
 // Question is roomsvc.Question. Go embeds questions.Question, so its fields
 // sit at the top level of the JSON. attachments is null when the question's
 // post has none.
+// TerminalStage is questions.TerminalStage: where a terminal request stands.
+export type TerminalStage = 'waiting-session' | 'waiting-owner' | 'denied' | 'done' | 'failed' | 'declined' | 'withdrawn'
+
+// TerminalVerdict is questions.TerminalVerdict: how the owner ends a request.
+export type TerminalVerdict = 'done' | 'failed' | 'declined'
+
+// TerminalRequest is questions.TerminalRequest. sharedLines is set only when
+// the owner chose to share the end of the screen.
+export interface TerminalRequest {
+  argv: string[] | null
+  cwd: string
+  reason: string
+  stage: TerminalStage
+  holder?: string
+  termId?: string
+  exitCode?: number
+  sharedLines?: string
+}
+
 export interface Question {
   id: string
+  // kind is "terminal" for a terminal request; a plain question has none.
+  kind?: 'question' | 'terminal'
+  terminal?: TerminalRequest
   room: string
   asker: string
   to: string

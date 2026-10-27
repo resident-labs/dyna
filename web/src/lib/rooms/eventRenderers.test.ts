@@ -282,6 +282,8 @@ const fixtures: Record<string, EventPayload> = {
     reason: 'no-artifact', session: 'dyna:helper-check', turn: 2,
   },
   'engine/root-flush': { minutes: 15 },
+  'terminal/request': { requestId: 'q3', asker: 'dyna:leaf', argv: ['gh', 'auth', 'login'], cwd: '/work', reason: 'sign in to GitHub' },
+  'terminal/request.done': { requestId: 'q3', verdict: 'done', exit: { code: 0 }, note: 'logged in', detail: 'Exit code 0.' },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
   'shell/result': {
     shellId: 'sh_20261023-120000-0000000a',
@@ -413,6 +415,7 @@ function fixtureTip(payload: EventPayload): string {
     if (payload.type === 'transfer-request') return payload.profile ?? payload.session
     return payload.session
   }
+  if ('verdict' in payload) return payload.detail || payload.verdict
   return payload.detail || payload.reason
 }
 

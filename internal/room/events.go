@@ -112,6 +112,11 @@ const (
 	FamilyService  EventFamily = "service"
 	FamilyEngine   EventFamily = "engine"
 	FamilyQuestion EventFamily = "question"
+	// FamilyTerminal is a session's request for the owner to run a command in
+	// a terminal, and how it ended.
+	FamilyTerminal  EventFamily = "terminal"
+	TypeRequest     EventType   = "request"
+	TypeRequestDone EventType   = "request.done"
 
 	// TypeSummary tells a check-in apart from any other event of its family.
 	TypeSummary EventType = "summary"
@@ -820,6 +825,30 @@ func (m Message) VoiceSession() (VoiceSessionEvent, bool) {
 	var ev VoiceSessionEvent
 	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Voice == "" {
 		return VoiceSessionEvent{}, false
+	}
+	return ev, true
+}
+
+// TerminalRequest returns the payload of a filed terminal request.
+func (m Message) TerminalRequest() (TerminalRequestEvent, bool) {
+	if m.Kind != string(FamilyTerminal) || m.Notice.Kind != string(TypeRequest) || len(m.Payload.raw) == 0 {
+		return TerminalRequestEvent{}, false
+	}
+	var ev TerminalRequestEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.RequestID == "" {
+		return TerminalRequestEvent{}, false
+	}
+	return ev, true
+}
+
+// TerminalDone returns the payload of a finished terminal request.
+func (m Message) TerminalDone() (TerminalDoneEvent, bool) {
+	if m.Kind != string(FamilyTerminal) || m.Notice.Kind != string(TypeRequestDone) || len(m.Payload.raw) == 0 {
+		return TerminalDoneEvent{}, false
+	}
+	var ev TerminalDoneEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.RequestID == "" {
+		return TerminalDoneEvent{}, false
 	}
 	return ev, true
 }

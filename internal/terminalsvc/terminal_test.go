@@ -218,3 +218,19 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 		t.Fatal("close did not stop the background job")
 	}
 }
+
+func TestRequestTerminalQuotesTheCommandAndStripsAgentEnv(t *testing.T) {
+	s, _ := terminalTest(t, Options{})
+	argument := "literal ; $(never-run)"
+	info, err := s.OpenRequest("room_test", "", t.TempDir(), []string{"sh", "-c", `printf '%s|%s' "$1" "${DYNA_SESSION-unset}"`, "request", argument}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := until(t, s, info.ID, 0, func(ev Event) bool { return ev.Exited })
+	if ev.ExitCode != 0 || string(ev.Data) != argument+"|unset" {
+		t.Fatalf("request command or env mismatch: code=%d, output=%q", ev.ExitCode, ev.Data)
+	}
+	if tail, err := s.Tail(info.ID, 20); err != nil || tail != argument+"|unset" {
+		t.Fatalf("tail = %q, %v", tail, err)
+	}
+}

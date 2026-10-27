@@ -42,6 +42,9 @@ export type ServiceRole = "librarian" | "reviewer" | "helper"
 // HelperOutcomeReason is a named string type of an event payload.
 export type HelperOutcomeReason = "parent-unavailable" | "no-artifact"
 
+// TerminalVerdict is a named string type of an event payload.
+export type TerminalVerdict = "done" | "failed" | "declined" | "denied" | "withdrawn"
+
 // ShellState is a named string type of an event payload.
 export type ShellState = "completed" | "failed" | "stopped"
 
@@ -394,6 +397,27 @@ export interface QuestionEvent {
   detail?: string
 }
 
+// TerminalRequestEvent is the payload of the terminal/request events.
+export interface TerminalRequestEvent {
+  requestId: string
+  asker: string
+  argv?: string[]
+  cwd: string
+  reason: string
+  holder?: string
+  detail?: string
+}
+
+// TerminalDoneEvent is the payload of the terminal/request.done events.
+export interface TerminalDoneEvent {
+  requestId: string
+  verdict: TerminalVerdict
+  exit?: { code: number }
+  note?: string
+  sharedLines?: string[]
+  detail?: string
+}
+
 // ShellEvent is the payload of the shell/result events.
 export interface ShellEvent {
   shellId: string
@@ -432,10 +456,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "run" | "turn"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1115,6 +1139,26 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "Question {questionId} was withdrawn: {reason}",
   },
   {
+    family: "terminal",
+    type: "request",
+    renderer: "TerminalRequestCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Terminal request {requestId} from {asker}: {reason}",
+  },
+  {
+    family: "terminal",
+    type: "request.done",
+    renderer: "TerminalRequestCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "session",
+    text: "Terminal request {requestId} ended: {verdict}.",
+  },
+  {
     family: "shell",
     type: "result",
     renderer: "ShellResultRow",
@@ -1180,6 +1224,7 @@ const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine", "consoli
 const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
 const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
+const TERMINAL_VERDICT: ReadonlySet<unknown> = new Set(["done", "failed", "declined", "denied", "withdrawn"])
 const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
@@ -1527,6 +1572,27 @@ export function isQuestionEvent(v: unknown): v is QuestionEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isTerminalRequestEvent(v: unknown): v is TerminalRequestEvent {
+  return isRecord(v) &&
+    typeof v.requestId === "string" &&
+    typeof v.asker === "string" &&
+    (v.argv === undefined || isStringList(v.argv)) &&
+    typeof v.cwd === "string" &&
+    typeof v.reason === "string" &&
+    (v.holder === undefined || typeof v.holder === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isTerminalDoneEvent(v: unknown): v is TerminalDoneEvent {
+  return isRecord(v) &&
+    typeof v.requestId === "string" &&
+    TERMINAL_VERDICT.has(v.verdict) &&
+    (v.exit === undefined || (isRecord(v.exit) && Number.isInteger(v.exit.code))) &&
+    (v.note === undefined || typeof v.note === "string") &&
+    (v.sharedLines === undefined || isStringList(v.sharedLines)) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
 export function isShellEvent(v: unknown): v is ShellEvent {
   return isRecord(v) &&
     typeof v.shellId === "string" &&
@@ -1631,6 +1697,8 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "service" && type === "helper-outcome") return isHelperOutcomeEvent(v)
   if (family === "engine" && type === "root-flush") return isEngineEvent(v)
   if (family === "question" && type === "withdrawn") return isQuestionEvent(v)
+  if (family === "terminal" && type === "request") return isTerminalRequestEvent(v)
+  if (family === "terminal" && type === "request.done") return isTerminalDoneEvent(v)
   if (family === "shell" && type === "result") return isShellEvent(v)
   if (family === "run" && type === "result") return isRunEvent(v)
   if (family === "turn" && type === "completed") return isTurnEvent(v)

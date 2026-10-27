@@ -3,7 +3,52 @@ package terminalsvc
 import (
 	"encoding/base64"
 	"errors"
+	"strings"
+
+	"dyna-agent/internal/shellquote"
 )
+
+// RequestLines is how many lines of a request terminal the owner may share.
+const RequestLines = 20
+
+// OpenRequest starts the owner's login shell for a terminal request. A command
+// runs quoted, so no word of it is read as shell syntax, and the shell exits
+// with it. With no command the owner gets a plain shell.
+func (s *Service) OpenRequest(roomID, sessionID, cwd string, argv []string, cols, rows uint16) (Info, error) {
+	if len(argv) == 0 {
+		return s.Open(roomID, sessionID, cwd, cols, rows)
+	}
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		quoted[i] = shellquote.Quote(arg)
+	}
+	return s.openShell(roomID, sessionID, cwd, []string{"-c", strings.Join(quoted, " ")}, cols, rows)
+}
+
+// Info returns one terminal's facts.
+func (s *Service) Info(id string) (Info, error) {
+	t, err := s.get(id)
+	if err != nil {
+		return Info{}, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.info, nil
+}
+
+// Tail returns the last n non-empty lines of a terminal's retained output as
+// plain text.
+func (s *Service) Tail(id string, n int) (string, error) {
+	ev, _, err := s.Read(id, 0)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimRight(plainLines(string(ev.Data)), "\n "), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n"), nil
+}
 
 // TermOpen starts a shell in the directory selected by the process wiring.
 func (s *Service) TermOpen(ref string, cols, rows uint16) (Info, error) {
