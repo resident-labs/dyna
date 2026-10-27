@@ -72,7 +72,7 @@ func newSessionCommand() *cobra.Command {
 	cmd.Flags().StringVar(&promptFile, "prompt-file", "", "file with the instructions for the voice (default: a short friendly assistant)")
 	cmd.Flags().StringVar(&req.Voice, "voice", "", "voice name; the provider's presets only (default: the provider's default voice)")
 	cmd.Flags().StringVar(&req.Provider, "provider", "", "voice provider (default: the provider in Settings > Voice)")
-	cmd.Flags().StringVar(&toolsFile, "tools", "", "JSON file with a list of {name, description, parameters} tools; each call goes to stdout")
+	cmd.Flags().StringVar(&toolsFile, "tools", "", "JSON file with a list of {name, description, parameters, after} tools; after is reply (default), later or silent")
 	cmd.Flags().IntVar(&req.Rate, "rate", agentwire.DefaultSessionRate, "sample rate in hertz of the audio you send and read")
 	cmd.Flags().IntVar(&req.MaxMinutes, "max-minutes", agentwire.DefaultSessionMinutes, fmt.Sprintf("longest session, at most %d", agentwire.MaxSessionMinutes))
 	return cmd
@@ -89,7 +89,7 @@ func readTools(path string) ([]agentwire.SessionTool, error) {
 	dec := json.NewDecoder(f)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tools); err != nil {
-		return nil, fmt.Errorf("%s must be a JSON list of {name, description, parameters}: %w", path, err)
+		return nil, fmt.Errorf("%s must be a JSON list of {name, description, parameters, after}: %w", path, err)
 	}
 	return tools, nil
 }
