@@ -85,7 +85,7 @@ func TestSeatRowsCarryTheRootDecisions(t *testing.T) {
 		{
 			name: "agent post to root",
 			in:   PostInput{Wake: true, From: roomName + ":lead", Kind: "message", To: []string{roomName}, Text: "Paused the queue"},
-			row:  true, mode: DeliveryQuiet, category: RootQuietPost,
+			row:  true, mode: DeliveryWake, input: true,
 		},
 		{
 			name: "owner shell post to the root session",
