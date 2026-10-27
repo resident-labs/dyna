@@ -239,8 +239,18 @@ func TestEditGoalWithEmptyFixesUnlinksIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.svc.FinishGoal(ctx, r.ID, g.ID, "not needed", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	dropped, err := e.svc.goalService().Store.Get(r.ID, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "", nil, []int{}); err != nil {
 		t.Fatal(err)
+	}
+	if after, err := e.svc.goalService().Store.Get(r.ID, g.ID); err != nil || after.State != dropped.State || after.Done == nil {
+		t.Fatalf("clearing the links changed the dropped goal: %+v -> %+v, %v", dropped, after, err)
 	}
 	if got := e.issue(t, r.ID, issue.ID); got.State != "open" || got.GoalID != "" {
 		t.Fatalf("issue after clear = %+v, want open with no goal", got)

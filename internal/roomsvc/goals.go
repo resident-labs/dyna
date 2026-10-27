@@ -212,7 +212,20 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 	// An empty, non-nil list is "--fixes ''": it unlinks the goal's issues. A nil
 	// list leaves the links alone.
 	clearLinks := fixes != nil && len(fixes) == 0
-	if (len(fixes) > 0 || clearLinks) && text == "" && selectors == nil {
+	if clearLinks && text == "" && selectors == nil {
+		// Only the links change. editGoal would set the goal active again, so a
+		// dropped or done goal could not hand its issues back and stay ended.
+		g, err := s.goalService().Store.Get(r.ID, id)
+		if err != nil {
+			return goals.Goal{}, err
+		}
+		actor := author.Address
+		if author.ID == "owner" {
+			actor = r.Name
+		}
+		return g, s.releaseGoalIssues(ctx, r.ID, g.ID, actor)
+	}
+	if len(fixes) > 0 && text == "" && selectors == nil {
 		current, err := s.goalService().Store.Get(r.ID, id)
 		if err != nil {
 			return goals.Goal{}, err
@@ -230,9 +243,6 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 	g, err := s.editGoal(ctx, r.ID, id, text, holders, shared)
 	if err != nil {
 		return g, err
-	}
-	if clearLinks {
-		return g, s.releaseGoalIssues(ctx, r.ID, g.ID, actor)
 	}
 	if len(fixes) == 0 {
 		return g, nil
