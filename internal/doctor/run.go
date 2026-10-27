@@ -18,8 +18,8 @@ type Run struct {
 }
 
 // Result is what a Run did. Ran is false when the condition did not hold;
-// then nothing was examined or stored. Repeat means Report is the earlier
-// report that the cooldown matched.
+// then nothing was examined or stored. Repeat means the cooldown matched an
+// earlier report: Report has its ID but the numbers of this run.
 type Result struct {
 	Report Report
 	Ran    bool
@@ -69,7 +69,10 @@ func (r Run) Do() (Result, error) {
 			if err != nil {
 				return Result{}, err
 			}
-			return r.deliver(reports, Result{Report: prev, Ran: true, Repeat: true})
+			// The cooldown keeps the earlier report's ID and delivery, but every
+			// number is from this examination.
+			rep.ID, rep.Delivered = prev.ID, prev.Delivered
+			return r.deliver(reports, Result{Report: rep, Ran: true, Repeat: true})
 		}
 	}
 	if rep.ID, err = reports.Save(rep); err != nil {

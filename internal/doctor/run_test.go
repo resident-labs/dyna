@@ -39,6 +39,9 @@ func TestRunPostsOnceWithinTheCooldown(t *testing.T) {
 	if err != nil || !second.Repeat || second.Report.ID != first.Report.ID {
 		t.Fatalf("second = %+v, %v", second, err)
 	}
+	if !second.Report.At.Equal(run.Now) {
+		t.Fatalf("a repeat must carry this run's numbers, report time = %s, want %s", second.Report.At, run.Now)
+	}
 	if len(posted) != 1 || posted[0].ID != first.Report.ID {
 		t.Fatalf("posted = %+v", posted)
 	}
