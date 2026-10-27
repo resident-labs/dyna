@@ -116,6 +116,18 @@ type IssueNote struct {
 	By   string `json:"by"`
 	At   int64  `json:"at"`
 	Text string `json:"text"`
+	// Attachments are the files saved with the note, so an attachment-only note
+	// still shows where its evidence is.
+	Attachments []IssueNoteAttachment `json:"attachments,omitempty"`
+}
+
+// IssueNoteAttachment names one file of a note and the path of its saved bytes.
+type IssueNoteAttachment struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	MIME string `json:"mime"`
+	Size int64  `json:"size"`
+	Path string `json:"path"`
 }
 
 // IssueNotes lists the notes added to an issue with dyna issue note, oldest
@@ -143,7 +155,15 @@ func (s *Service) IssueNotes(roomRef, id string) ([]IssueNote, error) {
 		if by == "" {
 			by = msg.From
 		}
-		notes = append(notes, IssueNote{By: by, At: msg.TS, Text: strings.TrimSpace(ev.Detail)})
+		note := IssueNote{By: by, At: msg.TS, Text: strings.TrimSpace(ev.Detail)}
+		for _, att := range msg.Attachments {
+			path, err := s.rooms().AttachmentPath(r.ID, att.ID)
+			if err != nil {
+				return nil, err
+			}
+			note.Attachments = append(note.Attachments, IssueNoteAttachment{ID: att.ID, Name: att.Name, MIME: att.MIME, Size: att.Size, Path: path})
+		}
+		notes = append(notes, note)
 	}
 	return notes, nil
 }

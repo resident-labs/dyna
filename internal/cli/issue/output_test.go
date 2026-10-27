@@ -219,6 +219,23 @@ func TestIssueShowIncludesLaterNotes(t *testing.T) {
 	}
 }
 
+// An attachment-only note still shows where its evidence is.
+func TestIssueShowNamesAttachmentOfAttachmentOnlyNote(t *testing.T) {
+	f := newIssueFixture(t)
+	i := f.file(t)
+	att, err := f.svc.Attach(f.rec.ID, "trace.txt", []byte("boom"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.rooms.NoteIssue(f.rec.ID, i.Label(), f.rec.Name, "", []room.Attachment{att}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.run("show", i.Label())
+	if err != nil || !strings.Contains(out, "attachment: trace.txt") {
+		t.Fatalf("show = %q, %v, want the attachment", out, err)
+	}
+}
+
 func TestIssueNoteAppendsEvidenceWithoutFilingAnother(t *testing.T) {
 	f := newIssueFixture(t)
 	i := f.file(t)
