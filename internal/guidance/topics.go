@@ -20,7 +20,7 @@ var Topics = []Topic{
 	{"posting", "before you attach files, post a card, pin a post or start a build, test run or dev server"},
 	{"git", "before you create a worktree, open, track, review or comment on a pull request, check CI, change merge policy, or manage hooks; also when a hook fails"},
 	{"computers", "before you start a GUI app, take a screenshot or send computer input"},
-	{"voice-agents", "before you build speech or a live voice conversation into an app or game"},
+	{"voice-agents", "to add speech or live voice to apps"},
 	{"recovery", "to transfer, consolidate, mute or pause sessions, or after a model or provider failure"},
 	{RootTopic, "root only: arm one watcher for root input blocks and load the rules"},
 }
