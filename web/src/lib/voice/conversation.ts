@@ -125,7 +125,7 @@ type ToolArgs = Record<string, unknown>
 const TOOLS: Record<string, (a: ToolArgs) => string> = {
   check_pr: (a) => (a.number ? `Checked PR ${a.number}` : 'Checked a PR'),
   check_merge_queue: () => 'Checked the merge queue',
-  answer_question: () => 'Answered your question',
+  answer_question: () => 'Answered your request',
   [WORK]: () => 'Starting the work',
 }
 

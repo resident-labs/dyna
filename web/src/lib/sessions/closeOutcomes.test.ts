@@ -18,7 +18,7 @@ test('close rows name the work, what happened and where it went', () => {
     ['PR #42', 'handed over to dyna:root'],
     ['Goal g7', 'handed over to dyna:lead'],
     ['Workflow wf_one', 'canceled'],
-    ['Question q2', 'withdrawn'],
+    ['Request q2', 'withdrawn'],
     ['worker-2', 'closed'],
   ])
   assert.deepEqual(rows[0]?.target, { kind: 'pr', number: 42 })

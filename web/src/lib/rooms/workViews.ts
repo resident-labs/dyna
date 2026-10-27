@@ -25,7 +25,7 @@ export const sections: Section[] = [
   {
     label: 'Work',
     rows: [
-      { id: 'questions', label: 'questions', hint: 'Questions agents ask while they keep working', tabs: [{ id: 'questions', label: 'Questions' }] },
+      { id: 'requests', label: 'requests', hint: 'Questions and terminal requests that need the owner', tabs: [{ id: 'requests', label: 'Requests' }] },
       { id: 'goals', label: 'goals', hint: 'Room goals', tabs: [{ id: 'goals', label: 'Goals' }] },
       { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }, { id: 'jobs', label: 'Shell jobs', hidden: true }] },
       { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
@@ -41,9 +41,14 @@ export const sections: Section[] = [
   },
 ]
 
+// canonicalView keeps links and saved views from before the Requests rename.
+// TODO(legacy/shim): remove the questions alias after retained links migrate.
+export const canonicalView = (view: string): string => view === 'questions' ? 'requests' : view
+
 // rowOf is the sidebar row that holds a view, or undefined for the feed.
 export function rowOf(view: string): Row | undefined {
-  for (const s of sections) for (const r of s.rows) if (r.tabs.some((t) => t.id === view)) return r
+  const canonical = canonicalView(view)
+  for (const s of sections) for (const r of s.rows) if (r.tabs.some((t) => t.id === canonical)) return r
 }
 
 // shown filters rows by what the room and this client have.

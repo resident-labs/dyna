@@ -23,8 +23,10 @@
   // folder (a session view). owner names the room's folder in the chips; names
   // maps session ids to names. request counts up when the app wants the dock
   // open (the old terminal link, the palette).
+  // selection carries a one-shot terminal ID, such as a terminal request the
+  // owner just started. Later dock opens leave the current tab alone.
   // noRepo: the room has no repository, so a room terminal has no folder.
-  let { roomId, session = '', owner = '', narrow = false, names = {}, noRepo = false, request = 0 }: { roomId: string; session?: string; owner?: string; narrow?: boolean; names?: Record<string, string>; noRepo?: boolean; request?: number } = $props()
+  let { roomId, session = '', owner = '', narrow = false, names = {}, noRepo = false, request = 0, selection = { request: 0, id: '' } }: { roomId: string; session?: string; owner?: string; narrow?: boolean; names?: Record<string, string>; noRepo?: boolean; request?: number; selection?: { request: number; id: string } } = $props()
   let ref = $derived(session || roomId)
   let roomless = $derived(noRepo && ref === roomId)
 
@@ -75,7 +77,12 @@
   })
 
   let seen = untrack(() => request)
-  $effect(() => { if (request !== seen) { seen = request; show() } })
+  $effect(() => {
+    if (request === seen) return
+    seen = request
+    if (selection.request === request && selection.id) showRequest(selection.id)
+    else show()
+  })
 
   function revealTab() {
     const tab = tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')?.closest<HTMLElement>('.tab')
@@ -129,6 +136,15 @@
     } finally {
       opening = false
     }
+  }
+
+  // showRequest selects the terminal a request just started. The list may be
+  // stale, so read it before choosing the tab or phone sheet.
+  async function showRequest(id: string) {
+    await load()
+    const requested = list.find((t) => t.id === id)
+    if (requested) pick(requested)
+    else show()
   }
 
   // show opens the dock; with no shell to show it starts one.
