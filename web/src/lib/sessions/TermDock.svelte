@@ -57,6 +57,8 @@
   let area = $derived({ w: availW, h: avail })
   let active = $derived(docked.find((t) => t.id === dock.active[ref])?.id ?? docked.at(-1)?.id ?? '')
   let current = $derived(docked.find((t) => t.id === active))
+  // The phone has no windows, so its sheet shows the chosen shell wherever it sits.
+  let sheetTerm = $derived(list.find((t) => t.id === dock.active[ref]) ?? list.at(-1))
   let height = $derived(clampHeight(dock.height, avail))
 
   // Not while dragging: one write when the handle is let go.
@@ -101,7 +103,8 @@
     try {
       all = (await api.terms()) ?? []
       error = ''
-      untrack(() => act({ type: 'prune', keep: (all ?? []).map((t) => t.id) }))
+      // An empty answer (a restarting engine) proves nothing: keep the windows.
+      untrack(() => { if (all?.length) act({ type: 'prune', keep: all.map((t) => t.id) }) })
     } catch (e) {
       if (!quiet) error = errorText(e)
     }
@@ -208,14 +211,18 @@
       e.stopPropagation()
       return
     }
-    if (!dock.open || !(e.target instanceof Node && rootEl?.contains(e.target))) return
+    // From the dock, or from a window (then the shortcut means that window's shell).
+    const from = e.target instanceof Element ? e.target.closest<HTMLElement>('.termdock, .win') : null
+    const inWin = from?.dataset.term
+    if (!from || !(inWin || dock.open)) return
+    const subject = inWin ? list.find((t) => t.id === inWin) : current
     const k = e.key.toLowerCase()
     const i = docked.findIndex((t) => t.id === active)
     const go = (n: number) => { const t = docked[n]; if (t) act({ type: 'tab', ref, id: t.id }) }
     if (e.shiftKey && k === 't') open()
-    else if (e.shiftKey && k === 'w' && current) askClose(current)
-    else if (k === 'pagedown' && docked.length) go((i + 1) % docked.length)
-    else if (k === 'pageup' && docked.length) go((i - 1 + docked.length) % docked.length)
+    else if (e.shiftKey && k === 'w' && subject) askClose(subject)
+    else if (k === 'pagedown' && !inWin && docked.length) go((i + 1) % docked.length)
+    else if (k === 'pageup' && !inWin && docked.length) go((i - 1 + docked.length) % docked.length)
     else return
     e.preventDefault()
   }
@@ -346,15 +353,15 @@
     </div>
     </div>
   {/if}
-  {#if sheet && current}
+  {#if sheet && sheetTerm}
     <div class="sheetback">
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="Terminal {label(current)}" use:dialog={{ close: () => (sheet = false) }}>
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Terminal {label(sheetTerm)}" use:dialog={{ close: () => (sheet = false) }}>
       <header role="presentation" ontouchstart={swipeStart} ontouchend={swipeEnd}>
         <span class="grab" aria-hidden="true"></span>
-        <span class="tl">{label(current)}</span>
+        <span class="tl">{label(sheetTerm)}</span>
         <button class="tx" onclick={() => (sheet = false)} aria-label="Back to the room"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
       </header>
-      {@render body(current)}
+      {@render body(sheetTerm)}
     </div>
     </div>
   {/if}
@@ -419,7 +426,7 @@
       {#if w && !w.min}
         {@const r = clampRect(w, area)}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div class="win" role="group" aria-label="Terminal {label(t)}" style:left="{r.x}px" style:top="{r.y}px" style:width="{r.w}px" style:height="{r.h}px" style:z-index={w.z} onpointerdowncapture={() => act({ type: 'raise', id: t.id })}>
+        <div class="win" data-term={t.id} role="group" aria-label="Terminal {label(t)}" style:left="{r.x}px" style:top="{r.y}px" style:width="{r.w}px" style:height="{r.h}px" style:z-index={w.z} onpointerdowncapture={() => act({ type: 'raise', id: t.id })}>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="wtitle" onpointerdown={(e) => moveWin(e, t.id, r)}>
             <span class="dot" aria-hidden="true"></span>
