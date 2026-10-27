@@ -16,7 +16,7 @@
   import { errorText } from '../errorText.ts'
   import { loadDock, saveDock } from '../ui/prefs.ts'
   import { dialog } from '../ui/dialog.ts'
-  import { dockReduce, clampHeight, type DockAction } from './termDock.ts'
+  import { dockReduce, clampHeight, clampRect, type DockAction, type Rect, type Win } from './termDock.ts'
   import type { TermInfo } from '../api/terminal.ts'
 
   // session set: only that session's shells show, and + opens one in its
@@ -34,11 +34,12 @@
   let opening = $state(false)
   let exited = $state<Record<string, number>>({}) // id -> exit code
   let closing = $state<TermInfo | null>(null) // the terminal waiting on the close confirm
-  let pane = $state<{ key(name: string): void; send(text: string): void; focus(): void }>()
+  let panes = $state<Record<string, { key(name: string): void; send(text: string): void; focus(): void } | undefined>>({})
   let ctrl = $state(false)
   let tabsEl = $state<HTMLElement>()
   let rootEl = $state<HTMLElement>()
   let avail = $state(800) // height of the main area
+  let availW = $state(1000)
   let dragging = $state(false)
   let listing = $state(false) // phone: the list of terminals
   let sheet = $state(false) // phone: the open terminal
@@ -49,8 +50,13 @@
   // lists that session's.
   let list = $derived((all ?? []).filter((t) => (ref === roomId ? t.roomId === roomId || t.ref === roomId : t.sessionId === ref || t.ref === ref)))
   // The saved tab, or the newest shell when it is gone or this ref has none yet.
-  let active = $derived(list.find((t) => t.id === dock.active[ref])?.id ?? list.at(-1)?.id ?? '')
-  let current = $derived(list.find((t) => t.id === active))
+  // Shells popped out into windows are not in the dock; the bar lists both.
+  const winOf = (id: string): Win | undefined => dock.wins.find((w) => w.id === id)
+  let docked = $derived(list.filter((t) => !winOf(t.id)))
+  let windowed = $derived(list.filter((t) => winOf(t.id)))
+  let area = $derived({ w: availW, h: avail })
+  let active = $derived(docked.find((t) => t.id === dock.active[ref])?.id ?? docked.at(-1)?.id ?? '')
+  let current = $derived(docked.find((t) => t.id === active))
   let height = $derived(clampHeight(dock.height, avail))
 
   // Not while dragging: one write when the handle is let go.
@@ -59,8 +65,9 @@
   $effect(() => {
     const el = rootEl?.parentElement
     if (!el) return
-    avail = el.clientHeight
-    const observer = new ResizeObserver(() => (avail = el.clientHeight))
+    const measure = () => { avail = el.clientHeight; availW = el.clientWidth }
+    measure()
+    const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
   })
@@ -94,9 +101,7 @@
     try {
       all = (await api.terms()) ?? []
       error = ''
-      untrack(() => {
-        if (!list.some((t) => t.id === active)) act({ type: 'tab', ref, id: list.at(-1)?.id ?? '' })
-      })
+      untrack(() => act({ type: 'prune', keep: (all ?? []).map((t) => t.id) }))
     } catch (e) {
       if (!quiet) error = errorText(e)
     }
@@ -140,9 +145,22 @@
 
   const toggle = () => (dock.open ? act({ type: 'hide' }) : show())
 
+  // A chip shows its shell: in the dock, or by raising its window.
   function pick(t: TermInfo) {
+    if (narrow) { act({ type: 'tab', ref, id: t.id }); listing = false; sheet = true }
+    else if (winOf(t.id)) act({ type: 'raise', id: t.id })
+    else { act({ type: 'tab', ref, id: t.id }); act({ type: 'show' }) }
+  }
+
+  function popOut(t: TermInfo) {
+    act({ type: 'pop', id: t.id, area })
+    if (!docked.length) act({ type: 'hide' })
+  }
+
+  function dockIn(t: TermInfo) {
+    act({ type: 'dockIn', id: t.id })
     act({ type: 'tab', ref, id: t.id })
-    if (narrow) { listing = false; sheet = true } else act({ type: 'show' })
+    act({ type: 'show' })
   }
 
   async function close(t: TermInfo) {
@@ -153,8 +171,8 @@
       error = errorText(e)
     }
     all = (all ?? []).filter((x) => x.id !== t.id)
-    if (active === t.id) act({ type: 'tab', ref, id: list.at(-1)?.id ?? '' })
-    if (!list.length) { act({ type: 'hide' }); sheet = false }
+    act({ type: 'dockIn', id: t.id })
+    if (!docked.length) { act({ type: 'hide' }); sheet = false }
     load()
   }
 
@@ -192,12 +210,12 @@
     }
     if (!dock.open || !(e.target instanceof Node && rootEl?.contains(e.target))) return
     const k = e.key.toLowerCase()
-    const i = list.findIndex((t) => t.id === active)
-    const go = (n: number) => { const t = list[n]; if (t) act({ type: 'tab', ref, id: t.id }) }
+    const i = docked.findIndex((t) => t.id === active)
+    const go = (n: number) => { const t = docked[n]; if (t) act({ type: 'tab', ref, id: t.id }) }
     if (e.shiftKey && k === 't') open()
     else if (e.shiftKey && k === 'w' && current) askClose(current)
-    else if (k === 'pagedown' && list.length) go((i + 1) % list.length)
-    else if (k === 'pageup' && list.length) go((i - 1 + list.length) % list.length)
+    else if (k === 'pagedown' && docked.length) go((i + 1) % docked.length)
+    else if (k === 'pageup' && docked.length) go((i - 1 + docked.length) % docked.length)
     else return
     e.preventDefault()
   }
@@ -218,19 +236,36 @@
     } else if (e.key === 'Delete' && current) askClose(current)
   }
 
+  // track follows one pointer drag on the element that got the press.
+  function track(e: PointerEvent, onmove: (m: PointerEvent) => void) {
+    const el = e.currentTarget
+    if (!(el instanceof HTMLElement)) return
+    el.setPointerCapture(e.pointerId)
+    dragging = true
+    const up = () => { dragging = false; el.removeEventListener('pointermove', onmove); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up) }
+    el.addEventListener('pointermove', onmove)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', up)
+  }
+
   // The top edge resizes the dock; the arrow keys do the same in steps.
   function drag(e: PointerEvent) {
     if (!rootEl) return
-    const grip = e.currentTarget as HTMLElement
-    grip.setPointerCapture(e.pointerId)
-    dragging = true
     const bottom = rootEl.getBoundingClientRect().bottom
     const strip = rootEl.querySelector<HTMLElement>('.strip')?.offsetHeight ?? 0
-    const move = (m: PointerEvent) => act({ type: 'resize', height: bottom - strip - m.clientY, avail })
-    const up = () => { dragging = false; grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up) }
-    grip.addEventListener('pointermove', move)
-    grip.addEventListener('pointerup', up)
-    grip.addEventListener('pointercancel', up)
+    track(e, (m) => act({ type: 'resize', height: bottom - strip - m.clientY, avail }))
+  }
+
+  // A window moves by its title and resizes by its lower right corner.
+  function moveWin(e: PointerEvent, id: string, r: Rect) {
+    if (e.target instanceof Element && e.target.closest('button')) return
+    const dx = e.clientX - r.x, dy = e.clientY - r.y
+    track(e, (m) => act({ type: 'move', id, x: m.clientX - dx, y: m.clientY - dy, area }))
+  }
+
+  function sizeWin(e: PointerEvent, id: string, r: Rect) {
+    const x = e.clientX, y = e.clientY
+    track(e, (m) => act({ type: 'size', id, w: r.w + m.clientX - x, h: r.h + m.clientY - y, area }))
   }
 
   function gripKey(e: KeyboardEvent) {
@@ -261,21 +296,21 @@
 
 <svelte:window onkeydowncapture={shortcut} />
 
-{#snippet body()}
+{#snippet body(t: TermInfo | undefined)}
   {#if error}<p class="err">{error}</p>{/if}
-  {#if current}
-    {#if exited[current.id] !== undefined || current.alive === false}
+  {#if t}
+    {#if exited[t.id] !== undefined || t.alive === false}
       <div class="exit">
-        <span>{exitText(current)}</span>
-        <button onclick={() => close(current)}>Close tab</button>
-        {#if !roomless}<button class="primary" onclick={async () => { const old = current; await open(); close(old) }}>Start a new shell</button>{/if}
+        <span>{exitText(t)}</span>
+        <button onclick={() => close(t)}>Close tab</button>
+        {#if !roomless}<button class="primary" onclick={async () => { await open(); close(t) }}>Start a new shell</button>{/if}
       </div>
     {/if}
-    {#key current.id}
-      <TermPane bind:this={pane} bind:ctrl id={current.id} {narrow} onexit={(code) => (exited = { ...exited, [current.id]: code })} />
+    {#key t.id}
+      <TermPane bind:this={panes[t.id]} bind:ctrl id={t.id} {narrow} onexit={(code) => (exited = { ...exited, [t.id]: code })} />
     {/key}
     {#if narrow}
-      <PhoneKeys {ctrl} onkey={(k: string) => { if (k === 'ctrl') { ctrl = !ctrl; pane?.focus() } else pane?.key(k) }} />
+      <PhoneKeys {ctrl} onkey={(k: string) => { if (k === 'ctrl') { ctrl = !ctrl; panes[t.id]?.focus() } else panes[t.id]?.key(k) }} />
     {/if}
   {:else if all === null}
     <p class="quiet">Starting a shell…</p>
@@ -319,7 +354,7 @@
         <span class="tl">{label(current)}</span>
         <button class="tx" onclick={() => (sheet = false)} aria-label="Back to the room"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
       </header>
-      {@render body()}
+      {@render body(current)}
     </div>
     </div>
   {/if}
@@ -339,10 +374,12 @@
         <!-- svelte-ignore a11y_interactive_supports_focus -->
         <div class="tablist" role="tablist" aria-label="Terminals" bind:this={tabsEl} onkeydown={tabKey}>
           {#each list as t (t.id)}
-            <div class="tab" class:on={dock.open && t.id === active} class:dead={t.alive === false || exited[t.id] !== undefined}>
-              <button role="tab" aria-selected={dock.open && t.id === active} tabindex={t.id === active ? 0 : -1} class="tname" onclick={() => pick(t)} title={t.cwd}>
+            {@const w = winOf(t.id)}
+            <div class="tab" class:on={dock.open && t.id === active} class:dead={t.alive === false || exited[t.id] !== undefined} class:outside={!!w}>
+              <button role="tab" aria-selected={dock.open && t.id === active} tabindex={t.id === active ? 0 : -1} class="tname" onclick={() => pick(t)} title={w ? `${t.cwd} (in a window)` : t.cwd}>
                 <span class="dot" aria-hidden="true"></span>
                 <span class="tl">{label(t)}</span>
+                {#if w}<svg class="inwin" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M6.5 3.5h6v6M12.5 3.5l-7 7M3.5 6.5v6h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>{/if}
               </button>
               <button class="tx" onclick={() => askClose(t)} aria-label="Close {label(t)}" title="Close (Ctrl+Shift+W)">
                 <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
@@ -358,6 +395,9 @@
       <div class="slot">
         {#if dock.open}
           {#if current?.cwd}<span class="cwd mono" title={current.cwd}>{base(current.cwd)}</span>{/if}
+          {#if current}<button class="ib" onclick={() => popOut(current)} aria-label="Pop out as a window" title="Pop out as a window">
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6.5 3.5h6v6M12.5 3.5l-7 7M3.5 6.5v6h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>{/if}
           <button class="ib" onclick={() => act({ type: 'maximize' })} aria-label={dock.maxed ? 'Restore the dock' : 'Maximize the dock'} aria-pressed={dock.maxed} title={dock.maxed ? 'Restore' : 'Maximize'}>
             <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">{#if dock.maxed}<path d="M5.5 2.5v3h-3M10.5 2.5v3h3M5.5 13.5v-3h-3M10.5 13.5v-3h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />{:else}<rect x="3" y="3" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" />{/if}</svg>
           </button>
@@ -369,10 +409,40 @@
     </div>
     {#if dock.open}
       <div class="dockbody" style:height={dock.maxed ? undefined : `${height}px`}>
-        {@render body()}
+        {@render body(current)}
       </div>
     {/if}
   </section>
+  <div class="wins">
+    {#each windowed as t (t.id)}
+      {@const w = winOf(t.id)}
+      {#if w && !w.min}
+        {@const r = clampRect(w, area)}
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div class="win" role="group" aria-label="Terminal {label(t)}" style:left="{r.x}px" style:top="{r.y}px" style:width="{r.w}px" style:height="{r.h}px" style:z-index={w.z} onpointerdowncapture={() => act({ type: 'raise', id: t.id })}>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="wtitle" onpointerdown={(e) => moveWin(e, t.id, r)}>
+            <span class="dot" aria-hidden="true"></span>
+            <span class="tl" title={t.cwd}>{label(t)}</span>
+            <span class="wbtns">
+              <button class="ib" onclick={() => dockIn(t)} aria-label="Dock {label(t)} again" title="Dock again">
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9.5 12.5h-6v-6M3.5 12.5l7-7M12.5 9.5v-6h-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </button>
+              <button class="ib" onclick={() => act({ type: 'minimize', id: t.id })} aria-label="Minimize {label(t)}" title="Minimize to the bar">
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 11.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+              </button>
+              <button class="ib" onclick={() => askClose(t)} aria-label="Close {label(t)}" title="Close the terminal">
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+              </button>
+            </span>
+          </div>
+          <div class="wbody">{@render body(t)}</div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="wsize" onpointerdown={(e) => sizeWin(e, t.id, r)}></div>
+        </div>
+      {/if}
+    {/each}
+  </div>
 {/if}
 
 {#if closing}
@@ -420,6 +490,15 @@
   .bare:disabled { opacity: 0.5; }
   .slot { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; min-width: 0; }
   .cwd { padding: 0 var(--s2); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  .tab.outside .tl { font-style: italic; }
+  .inwin { color: var(--faint); flex: none; }
+  .wins { position: absolute; inset: 0; pointer-events: none; z-index: 15; overflow: hidden; }
+  .win { position: absolute; pointer-events: auto; display: flex; flex-direction: column; min-width: 0; background: #19181a; border: 1px solid #45424a; border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); overflow: hidden; }
+  .wtitle { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 var(--s1) 0 var(--s3); background: #232126; color: var(--ink-2); font-size: var(--t-sm); font-weight: 500; cursor: move; flex: none; touch-action: none; user-select: none; }
+  .wtitle .tl { flex: 1; min-width: 0; }
+  .wbtns { display: flex; gap: 2px; flex: none; }
+  .wbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .wsize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 55%, var(--faint) 55% 62%, transparent 62% 76%, var(--faint) 76% 83%, transparent 83%); opacity: 0.6; }
   .dockbody { display: flex; flex-direction: column; min-height: 0; background: #19181a; border-top: 1px solid var(--line-soft); }
   .maxed .dockbody { flex: 1; }
   .exit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: var(--s2) 14px; font-size: var(--t-ui); color: var(--ink-2); background: var(--gold-wash); border-bottom: 1px solid var(--line-soft); }
