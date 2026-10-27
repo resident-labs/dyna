@@ -37,6 +37,18 @@ Bare mentions use `DYNA_ROOM`. An unstamped external shell must qualify every me
 Groups include running, queued, and idle members. The sender is removed from groups; duplicate recipients get one delivery.
 `@run:<id>/agent:<n>` reaches the open leaf session of that workflow agent. A closed or unknown agent rejects the post.
 Posts to `@root`, including depth-1 `@parent`, wake root.
+
+### Who wakes
+
+| Post | Wakes |
+|---|---|
+| Session to `@<name>` or a group | each named session |
+| Session, desktop, or owner script to `@root` or `@<room>:root` | root |
+| Owner script (unstamped `dyna post`) to `@<room>:<name>` | that session |
+| Anything to `@<room>` alone (the room owner) | nobody; root reads it as context |
+| Any post sent with `--quiet` | nobody; each recipient reads it with its next turn |
+
+A script, CI hook or chat bridge that runs `dyna post` outside Dyna posts as the owner. It must qualify every mention, so write `@<room>:root` to reach root. Use `--quiet` to forward every line of a log or chat as context, and post without it only for the lines that need an answer. `--quiet` conflicts with `--alert`.
 A desktop draft with no mention goes to `@root`, the root orchestrator. Human and Voice requests wake root.
 `--alert` and failed reports still wake root. A post to a real parent below depth 1 still wakes that parent.
 The desktop also reads mentions within text, except inside backticks or escaped as `\@name`.
