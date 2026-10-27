@@ -56,6 +56,7 @@ func checkRequest(req *agentwire.SessionRequest) error {
 	if req.Speed != 0 && (req.Speed != req.Speed || req.Speed < agentwire.MinOutputSpeed || req.Speed > agentwire.MaxOutputSpeed) {
 		return fmt.Errorf("--speed must be from %g to %g", agentwire.MinOutputSpeed, agentwire.MaxOutputSpeed)
 	}
+	req.ReplyInstructions = strings.TrimSpace(req.ReplyInstructions)
 	if strings.TrimSpace(req.Instructions) == "" {
 		req.Instructions = defaultSessionInstructions
 	}
@@ -165,6 +166,12 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	}
 	if req.Speed != 0 && !p.Caps.OutputSpeed {
 		return SessionEnd{}, fmt.Errorf("%s does not take --speed; choose another provider with --provider, or drop the flag", p.Label)
+	}
+	if req.ReplyInstructions != "" {
+		_, instructed := p.Protocol.(realtime.InstructedProtocol)
+		if !p.Caps.ResponseInstructions || !instructed {
+			return SessionEnd{}, fmt.Errorf("%s does not take --reply-instructions; choose another provider with --provider, or drop the flag", p.Label)
+		}
 	}
 	tools := make([]realtime.Tool, len(req.Tools))
 	for i, t := range req.Tools {
@@ -329,9 +336,14 @@ func (l *sessionLoop) ask(instructions string) (agentwire.EndReason, bool) {
 }
 
 // create sends response.create. A non-empty instructions value uses the
-// provider's per-response instructions. The caller already checked that the
-// provider can take them.
+// provider's per-response instructions. Empty instructions use the session
+// default, when one is set. The caller already checked that the provider
+// can take them.
 func (l *sessionLoop) create(instructions string) (agentwire.EndReason, bool) {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		instructions = l.req.ReplyInstructions
+	}
 	event := l.p.Protocol.ResponseCreate("")
 	if instructions != "" {
 		event = l.p.Protocol.(realtime.InstructedProtocol).ResponseInstructed("", instructions)
@@ -412,14 +424,9 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		if text == "" {
 			return l.fail("the %s line has no text", m.Type)
 		}
-		instructions := strings.TrimSpace(m.Instructions)
-		if instructions != "" && !l.p.Caps.ResponseInstructions {
-			return l.fail("%s does not take per-response instructions; drop the instructions field, or choose another provider with --provider", l.p.Label)
-		}
-		if instructions != "" {
-			if _, ok := l.p.Protocol.(realtime.InstructedProtocol); !ok {
-				return l.fail("%s does not take per-response instructions; drop the instructions field, or choose another provider with --provider", l.p.Label)
-			}
+		instructions, reason, ended, stopped := l.lineInstructions(m.Instructions)
+		if stopped {
+			return reason, ended
 		}
 		if m.Type == agentwire.InSay && m.Mode != "" && m.Mode != agentwire.SayAppend && m.Mode != agentwire.SayReplace {
 			return l.fail("unknown say mode %q; use %q or %q", m.Mode, agentwire.SayAppend, agentwire.SayReplace)
@@ -455,15 +462,37 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 	case agentwire.InInterrupt:
 		return l.stopPlayback()
 	case agentwire.InCommit:
-		return l.commit()
+		instructions, reason, ended, stopped := l.lineInstructions(m.Instructions)
+		if stopped {
+			return reason, ended
+		}
+		return l.commit(instructions)
 	}
 	return l.fail("unknown line type %q", m.Type)
 }
 
-// commit ends the buffered user turn and asks for one reply. The reply uses
-// the same one-response queue as every other ask. The provider's committed
-// echo of this line must not ask again.
-func (l *sessionLoop) commit() (agentwire.EndReason, bool) {
+// lineInstructions returns style for this line. Empty is allowed. A
+// provider that cannot set per-response instructions gets an error line,
+// and stopped is true so the caller sends nothing.
+func (l *sessionLoop) lineInstructions(raw string) (instructions string, reason agentwire.EndReason, ended, stopped bool) {
+	instructions = strings.TrimSpace(raw)
+	if instructions == "" {
+		return "", "", false, false
+	}
+	if l.p.Caps.ResponseInstructions {
+		if _, ok := l.p.Protocol.(realtime.InstructedProtocol); ok {
+			return instructions, "", false, false
+		}
+	}
+	reason, ended = l.fail("%s does not take per-response instructions; drop the instructions field, or choose another provider with --provider", l.p.Label)
+	return "", reason, ended, true
+}
+
+// commit ends the buffered user turn and asks for one reply. instructions
+// is style for that reply only; empty uses the session default. The reply
+// uses the same one-response queue as every other ask. The provider's
+// committed echo of this line must not ask again.
+func (l *sessionLoop) commit(instructions string) (agentwire.EndReason, bool) {
 	if !l.p.Caps.ManualCommit {
 		return l.fail("%s cannot commit a turn by hand", l.p.Label)
 	}
@@ -481,7 +510,7 @@ func (l *sessionLoop) commit() (agentwire.EndReason, bool) {
 	}
 	l.heardSpeech = false
 	l.commitAsked = true
-	return l.reply()
+	return l.ask(instructions)
 }
 
 // pcmHasSpeech reports whether pcm has a non-zero sample. The voice
