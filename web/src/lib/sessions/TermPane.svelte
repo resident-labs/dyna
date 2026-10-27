@@ -143,7 +143,9 @@
         // focus: when it blurs, this pane shows the hint instead of going quiet.
         const input = made.input
         const onFocus = () => (focused = true)
-        const onBlur = () => (focused = false)
+        // Removing the pane blurs the input in the middle of Svelte's own
+        // update, where a state write throws; a microtask writes after it.
+        const onBlur = () => queueMicrotask(() => { if (!gone) focused = false })
         input.addEventListener('focus', onFocus)
         input.addEventListener('blur', onBlur)
         dropFocusListeners = () => {

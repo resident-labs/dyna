@@ -47,6 +47,7 @@ test('the terminal pane shows a focus hint', () => {
   assert.match(pane, /terminalFocusOnOpen\(/, 'the pane decides focus on open from its props')
   assert.match(pane, /addEventListener\('focus'/, 'the pane follows the terminal input focus')
   assert.match(pane, /addEventListener\('blur'/, 'the pane follows the terminal input blur')
+  assert.match(pane, /onBlur = \(\) => queueMicrotask\(/, 'a blur while the pane unmounts must not write state inside the update')
   assert.match(pane, /terminalTypeHint\(/, 'the hint text follows the pointer')
   // Readiness is derived from attached, failed and exited, so no later
   // assignment can revive it after the attach stream reported an exit.
