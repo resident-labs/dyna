@@ -78,6 +78,16 @@ export const emptyForm = (): ResultForm => ({ note: '', share: false, lines: nul
 // sharesLines is true only for lines the owner ticked and was shown.
 export const sharesLines = (f: ResultForm): boolean => f.share && f.lines !== null
 
+// whatAgentGets says what the filer will receive, so the owner knows before
+// reporting. The lines count only when the owner ticked the box and saw them.
+export function whatAgentGets(name: string, exited: boolean, f: ResultForm): string {
+  const parts = [exited ? 'the exit code' : '', 'your note']
+  if (sharesLines(f)) parts.push('the 20 lines below')
+  const list = parts.filter(Boolean)
+  const last = list.pop()
+  return `${name} gets ${list.length ? `${list.join(', ')} and ` : 'only '}${last}.`
+}
+
 // RequestApi is the engine's three owner calls for one request.
 export interface RequestApi {
   run(argv: string[] | null): Promise<TermInfo>

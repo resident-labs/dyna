@@ -30,7 +30,7 @@
   import { sealedEvent, rendererFor } from './eventRenderers.ts'
   import UnknownEventRow from './UnknownEventRow.svelte'
   import type { EventPost } from './eventRenderers.ts'
-  import { prEvent, terminalRequestEvent } from './eventPayloads.ts'
+  import { prEvent, terminalDoneEvent, terminalRequestEvent } from './eventPayloads.ts'
   import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
   import type { Attachment, Post, ProfileChoice, Question, Room } from '../api/room.ts'
@@ -284,7 +284,7 @@
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} focus={flash?.key === row.key ? flash.id : ''} />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? terminalDoneEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <UnknownEventRow />
         {/if}

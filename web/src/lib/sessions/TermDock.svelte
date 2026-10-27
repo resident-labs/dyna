@@ -265,6 +265,9 @@
   // The chip: the owner of the folder (the session, or the room's repo), then
   // the shell.
   function label(t: TermInfo) {
+    // A request's shell keeps the request's name while the request lasts.
+    const asked = requestOf(t.id)
+    if (asked) return `request · ${asked.askerName}`
     const who = (t.sessionId && names[t.sessionId]) || owner
     const shell = t.title || t.shell?.split('/').pop() || 'shell'
     const name = who ? `${who} · ${shell}` : shell
@@ -427,7 +430,7 @@
         <div class="row req"><button class="rname" onclick={() => { listing = false; showReview(q.id) }}><span class="dot" aria-hidden="true"></span><span class="tl">request · {q.askerName}</span><span class="rcwd">waiting for you</span></button></div>
       {/each}
       {#each list as t (t.id)}
-        <div class="row" class:dead={t.alive === false || exited[t.id] !== undefined}>
+        <div class="row" class:dead={t.alive === false || exited[t.id] !== undefined} class:req={!!requestOf(t.id)}>
           <button class="rname" onclick={() => pick(t)}><span class="dot" aria-hidden="true"></span><span class="tl">{label(t)}</span><span class="rcwd mono">{base(t.cwd)}</span></button>
           <button class="tx" onclick={() => askClose(t)} aria-label="Close {label(t)}"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
         </div>
@@ -479,7 +482,7 @@
           {/each}
           {#each list as t (t.id)}
             {@const w = winOf(t.id)}
-            <div class="tab" class:on={dock.open && !reviewQ && t.id === active} class:dead={t.alive === false || exited[t.id] !== undefined} class:outside={!!w}>
+            <div class="tab" class:on={dock.open && !reviewQ && t.id === active} class:dead={t.alive === false || exited[t.id] !== undefined} class:outside={!!w} class:req={!!requestOf(t.id)}>
               <button role="tab" aria-selected={dock.open && !reviewQ && t.id === active} tabindex={t.id === active ? 0 : -1} class="tname" onclick={() => pick(t)} title={w ? `${t.cwd} (in a window)` : t.cwd}>
                 <span class="dot" aria-hidden="true"></span>
                 <span class="tl">{label(t)}</span>

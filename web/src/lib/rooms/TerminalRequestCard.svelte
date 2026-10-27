@@ -29,7 +29,9 @@
   let reason = $state('')
   let busy = $state(false)
   let error = $state('')
-  let title = $derived(done ? `Terminal request ${done.requestId} ${done.verdict}` : `Terminal request ${filed?.requestId ?? ''}`.trim())
+  let id = $derived(done?.requestId ?? filed?.requestId ?? '')
+  // Who and what; the ID stays in the icon's tooltip.
+  let title = $derived(request?.askerName ? `${request.askerName}'s terminal request` : 'Terminal request')
   let summary = $derived(done ? [done.note ?? ''].filter(Boolean).join(' · ') : [filed?.argv?.join(' ') ?? '', filed?.reason ?? ''].filter(Boolean).join(' · '))
   let chips = $derived(done ? [{ label: done.verdict, failure: done.verdict === 'failed' || done.verdict === 'denied' }, ...(done.exit ? [{ label: `exit ${done.exit.code}`, failure: done.exit.code !== 0 }] : [])] : [])
 
@@ -45,7 +47,7 @@
 </script>
 
 {#snippet icon()}
-  <span aria-hidden="true">&gt;_</span>
+  <span title="Request {id}" aria-hidden="true">&gt;_</span>
 {/snippet}
 
 {#if waiting && filed && request}

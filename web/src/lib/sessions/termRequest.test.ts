@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { commandLine, editedArgv, emptyForm, requestActions, splitCommand, type RequestApi } from './termRequest.ts'
+import { commandLine, editedArgv, emptyForm, requestActions, splitCommand, whatAgentGets, type RequestApi } from './termRequest.ts'
 import type { TermInfo } from '../api/terminal.ts'
 
 function fake() {
@@ -45,4 +45,12 @@ test('a command shows with quotes and reads back the same; a broken edit is an e
   assert.deepEqual(splitCommand('a "b \\"c\\"" d\\ e'), { argv: ['a', 'b "c"', 'd e'] })
   assert.ok('error' in splitCommand("echo 'open"))
   assert.ok('error' in splitCommand('   '))
+})
+
+test('the banner says what the agent gets, and names the lines only when they are ticked and shown', () => {
+  const f = emptyForm()
+  assert.equal(whatAgentGets('builder', true, f), 'builder gets the exit code and your note.')
+  assert.equal(whatAgentGets('builder', false, f), 'builder gets only your note.')
+  assert.equal(whatAgentGets('builder', true, { ...f, share: true }), 'builder gets the exit code and your note.', 'ticked but not shown yet')
+  assert.equal(whatAgentGets('builder', true, { ...f, share: true, lines: 'a' }), 'builder gets the exit code, your note and the 20 lines below.')
 })
