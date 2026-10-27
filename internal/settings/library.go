@@ -15,8 +15,8 @@ const (
 	// KeyLibraryProfile is the profile for feature map and docs work; empty
 	// ranks enabled service profiles.
 	KeyLibraryProfile = "library.profile"
-	// KeyLibrarySmellProfile is the profile for code-reading smell passes;
-	// empty ranks profiles with the reviewer's diagnostics preference.
+	// KeyLibrarySmellProfile remains so an old settings file still loads.
+	// The smell pass uses library.profile, the librarian pin.
 	KeyLibrarySmellProfile = "library.smellProfile"
 	// KeyLibraryReadmeMaxLines is the longest README the librarian may leave.
 	KeyLibraryReadmeMaxLines = "library.readmeMaxLines"

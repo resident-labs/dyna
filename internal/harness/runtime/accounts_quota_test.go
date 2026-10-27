@@ -80,3 +80,26 @@ func TestQuotaHeldOutSkipsAccountsTheRepoRefuses(t *testing.T) {
 		t.Fatal("the healthy account's repo was held out")
 	}
 }
+
+// A profile whose every account has no quota left in its saved usage reading
+// is held out, even when no failover limit is stored. Service ranking reads
+// this hold, so it must not start that profile and fail the turn.
+func TestQuotaHeldOutSkipsSpentUsage(t *testing.T) {
+	a := testAccounts(t)
+	sooner := signedClaude(t, a, "sooner", "aaaaaaaa-bbbb-cccc-dddd-000000000011")
+	later := signedClaude(t, a, "later", "aaaaaaaa-bbbb-cccc-dddd-000000000012")
+	now := time.Now().Truncate(time.Second)
+	used := 100.0
+	setReading(t, a, sooner, &store.Observation{Windows: []store.Window{{ID: "seven_day", UsedPercent: &used, ResetsAt: now.Add(time.Hour).Format(time.RFC3339Nano)}}})
+	setReading(t, a, later, &store.Observation{Windows: []store.Window{{ID: "seven_day", UsedPercent: &used, ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339Nano)}}})
+	until, held := a.QuotaHeldOut("claude-code", store.ProviderAnthropic, "github.com/owner/repo", now)
+	if !held || !until.Equal(now.Add(time.Hour)) {
+		t.Fatalf("held = %v until %v, want the sooner usage reset", held, until)
+	}
+	// One account with quota left keeps the harness pickable.
+	open := 10.0
+	setReading(t, a, later, &store.Observation{Windows: []store.Window{{ID: "seven_day", UsedPercent: &open, ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339Nano)}}})
+	if _, held := a.QuotaHeldOut("claude-code", store.ProviderAnthropic, "github.com/owner/repo", now); held {
+		t.Fatal("a harness with one account under the cap was held out")
+	}
+}
