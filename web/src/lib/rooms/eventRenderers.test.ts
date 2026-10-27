@@ -413,6 +413,7 @@ function fixtureTip(payload: EventPayload): string {
     if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
     if (payload.type === 'seat') return payload.seat ?? payload.session
     if (payload.type === 'transfer-request') return payload.profile ?? payload.session
+    if (payload.type === 'computer-reminder') return 'Computer still open'
     return payload.session
   }
   if ('verdict' in payload) return payload.detail || payload.verdict
