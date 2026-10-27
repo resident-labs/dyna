@@ -102,10 +102,7 @@ func parseFormat(format, out string) (Format, error) {
 	case WAV, "":
 		return WAV, nil
 	}
-	if format == "" {
-		return WAV, nil
-	}
-	return "", fmt.Errorf("unknown format %q; use wav, ogg or mp3", format)
+	return "", fmt.Errorf("unknown format %q; use wav, ogg or mp3, or name the file with a .wav, .ogg or .mp3 extension", name)
 }
 
 // writeAudio saves res to path in format f.
@@ -114,12 +111,20 @@ func writeAudio(ctx context.Context, path string, f Format, res enginevoice.SayR
 	if f == WAV {
 		return os.WriteFile(path, wav, 0o644)
 	}
-	ffmpeg := exec.CommandContext(ctx, "ffmpeg", "-y", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", string(f), path)
+	// Encode to a temporary file beside the target, so a failed encode leaves
+	// no partial file and a name that starts with "-" is not read as an option.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".dyna-say-*")
+	if err != nil {
+		return err
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+	ffmpeg := exec.CommandContext(ctx, "ffmpeg", "-y", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", string(f), tmp.Name())
 	ffmpeg.Stdin = bytes.NewReader(wav)
 	if msg, err := ffmpeg.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg could not write %s: %w: %s", f, err, strings.TrimSpace(string(msg)))
 	}
-	return nil
+	return os.Rename(tmp.Name(), path)
 }
 
 // WAVBytes wraps PCM16 mono little-endian audio in a WAV file.

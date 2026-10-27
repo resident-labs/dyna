@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestParseFormat(t *testing.T) {
+	for _, c := range []struct {
+		format, out string
+		want        Format
+		fails       bool
+	}{
+		{"", "a.wav", WAV, false},
+		{"", "a", WAV, false},
+		{"", "a.OGG", OGG, false},
+		{"mp3", "a.wav", MP3, false},
+		{"", "a.flac", "", true},
+		{"flac", "a.wav", "", true},
+	} {
+		got, err := parseFormat(c.format, c.out)
+		if got != c.want || (err != nil) != c.fails {
+			t.Errorf("parseFormat(%q, %q) = %q, %v; want %q, fails=%v", c.format, c.out, got, err, c.want, c.fails)
+		}
+	}
+}
+
 func TestWAVHeaderMatchesSampleRateAndLength(t *testing.T) {
 	pcm := []byte{1, 0, 2, 0, 3, 0}
 	wav := WAVBytes(pcm, 24000)

@@ -90,3 +90,15 @@ func TestSayRefusesAThirdAtOnce(t *testing.T) {
 		t.Errorf("err = %v, want a busy error", err)
 	}
 }
+
+func TestSayFailsWhenTheResponseWasCancelled(t *testing.T) {
+	conn := &fakeSayConn{events: []realtime.Event{
+		{Kind: realtime.AudioDelta, Audio: []byte{1, 2}},
+		{Kind: realtime.ResponseDone, Text: "cancelled"},
+	}}
+	var session realtime.Session
+	s := fakeSayer(conn, realtime.Provider{Label: "Fake"}, &session)
+	if _, err := s.Say(context.Background(), SayRequest{Text: "hi"}); err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("err = %v, want a failure naming the status", err)
+	}
+}

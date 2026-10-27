@@ -125,6 +125,9 @@ var LongCalls = map[string]time.Duration{
 	// browser add calls above. Item 8 will move generation to a background job.
 	"AddCatalogMCP": 10 * time.Minute, "AddCatalogSkill": 10 * time.Minute,
 	"RemoveCatalogEntry": 10 * time.Minute, "SetCatalogEntryEnabled": 10 * time.Minute,
+	// A say dials a voice provider and waits for the whole clip; it ends
+	// itself after voice.SayTimeout (60 s), and the call leaves time for transport.
+	"VoiceSay": 75 * time.Second,
 	// Explicit account sync performs the same synchronous private generation.
 	"SyncCatalogAccount": 10 * time.Minute,
 }
