@@ -92,6 +92,17 @@ func (e SuiteBlockedError) Error() string {
 		strings.Join(SuiteNames(e.Suites), ", "), strings.Join(SuiteNames(e.Suites), ","))
 }
 
+// RoomNotServedError names a room that no enabled CI machine serves. The
+// scheduler never starts a run for such a room, so a head that waits for local
+// CI waits for ever; the head that asked for it fails with this error instead.
+type RoomNotServedError struct {
+	RoomID string
+}
+
+func (e RoomNotServedError) Error() string {
+	return fmt.Sprintf("no enabled CI machine serves room %s; an owner adds the room to a CI machine with dyna machine edit <name> --rooms %s, or in Settings > Machines", e.RoomID, e.RoomID)
+}
+
 // NodesForRoom keeps the machines that take CI work for the room. A machine
 // that names no room takes work from every room, so it stays.
 func NodesForRoom(nodes []Node, roomID string) []Node {
