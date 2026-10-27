@@ -206,6 +206,19 @@ func TestIssueCloseAcceptsPositionalReason(t *testing.T) {
 	}
 }
 
+// D-298: issue show lists the notes added after filing, in text and in JSON.
+func TestIssueShowIncludesLaterNotes(t *testing.T) {
+	f := newIssueFixture(t)
+	i := f.file(t)
+	if _, err := f.run("note", i.Label(), "scope narrowed to the gate"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.run("show", i.Label())
+	if err != nil || !strings.Contains(out, "scope narrowed to the gate") {
+		t.Fatalf("show = %q, %v, want the later note", out, err)
+	}
+}
+
 func TestIssueNoteAppendsEvidenceWithoutFilingAnother(t *testing.T) {
 	f := newIssueFixture(t)
 	i := f.file(t)

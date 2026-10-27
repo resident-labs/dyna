@@ -22,6 +22,8 @@ type Options struct{ Service func() *roomsvc.Service }
 type shownIssue struct {
 	room.Issue
 	Note string `json:"note,omitempty"`
+	// Notes are the notes added after filing, oldest first.
+	Notes []roomsvc.IssueNote `json:"notes,omitempty"`
 }
 
 func NewCommand() *cobra.Command { return Command(Options{}) }
@@ -96,8 +98,12 @@ func Command(o Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		notes, err := s.IssueNotes(r.ID, ref)
+		if err != nil {
+			return err
+		}
 		if asJSON {
-			return json.NewEncoder(c.OutOrStdout()).Encode(shownIssue{Issue: i, Note: note})
+			return json.NewEncoder(c.OutOrStdout()).Encode(shownIssue{Issue: i, Note: note, Notes: notes})
 		}
 		out := c.OutOrStdout()
 		fmt.Fprintf(out, "%s  %s  %s\n", i.Label(), i.State, i.Title)
@@ -129,6 +135,9 @@ func Command(o Options) *cobra.Command {
 		}
 		if note != "" {
 			fmt.Fprintf(out, "\n%s\n", note)
+		}
+		for _, n := range notes {
+			fmt.Fprintf(out, "\nnote from %s · %s\n%s\n", n.By, time.UnixMilli(n.At).Local().Format("2006-01-02 15:04"), n.Text)
 		}
 		return nil
 	}

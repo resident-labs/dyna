@@ -111,6 +111,43 @@ func (s *Service) Issue(roomRef, id string) (room.Issue, string, error) {
 	return one[0], strings.TrimSpace(issueText(post)), nil
 }
 
+// IssueNote is one note added to an issue after it was filed.
+type IssueNote struct {
+	By   string `json:"by"`
+	At   int64  `json:"at"`
+	Text string `json:"text"`
+}
+
+// IssueNotes lists the notes added to an issue with dyna issue note, oldest
+// first. The note the filer gave is not among them: Issue returns it.
+func (s *Service) IssueNotes(roomRef, id string) ([]IssueNote, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return nil, err
+	}
+	i, err := s.rooms().Issue(r.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	msgs, err := s.rooms().Messages(r.ID)
+	if err != nil {
+		return nil, err
+	}
+	var notes []IssueNote
+	for _, msg := range msgs {
+		ev, ok := msg.Issue()
+		if !ok || ev.Type != room.IssueNoted || ev.IssueID != i.ID {
+			continue
+		}
+		by := string(ev.Actor)
+		if by == "" {
+			by = msg.From
+		}
+		notes = append(notes, IssueNote{By: by, At: msg.TS, Text: strings.TrimSpace(ev.Detail)})
+	}
+	return notes, nil
+}
+
 // Issue mutations use the same triage policy as the CLI, with the caller that
 // the engine verified instead of the engine process's owner identity.
 func (s *Service) CloseIssue(ctx context.Context, roomRef, id, reason string) (room.Issue, error) {
