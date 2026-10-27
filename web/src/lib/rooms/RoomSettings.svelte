@@ -45,6 +45,7 @@
     room: Room
     profiles?: ProfileChoice[]
     onrootprofile?: (roomId: string, profile: string) => void
+    oncheckin?: (roomId: string, value: string) => void
     start?: string
     hookRun?: HookLogTarget | null
     reviewer?: ReviewerStatus | null
@@ -57,7 +58,7 @@
     onopenglobal?: () => unknown
     onclose: () => void
   }
-  let { room, profiles = [], onrootprofile = () => {}, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
   let rootProfile = $state(untrack(() => room.rootProfile || ''))
   let rootProfileBusy = $state(false)
   let rootProfileError = $state('')
@@ -78,6 +79,32 @@
       }
     } finally {
       rootProfileBusy = false
+    }
+  }
+
+  // The parent check-in field takes the same value as the CLI: a duration,
+  // off, or empty for the hook's global interval. It saves when it commits.
+  let checkIn = $state(untrack(() => room.checkIn || ''))
+  let checkInBusy = $state(false)
+  let checkInError = $state('')
+  $effect(() => { checkIn = room.checkIn || '' })
+
+  async function saveCheckIn() {
+    const target = room.id
+    const value = checkIn.trim()
+    checkInBusy = true
+    checkInError = ''
+    try {
+      await api.setRoomCheckIn(target, value)
+      checkIn = value
+      oncheckin(target, value)
+    } catch (e) {
+      if (room.id === target) {
+        checkIn = room.checkIn || ''
+        checkInError = errorText(e)
+      }
+    } finally {
+      checkInBusy = false
     }
   }
   const nav: { id: string; label: string }[] = [
@@ -280,6 +307,11 @@
             {#if rootProfile && !profiles.some((p) => p.name === rootProfile)}<option value={rootProfile} disabled>{rootProfile} (unavailable)</option>{/if}
             {#each profiles as p}<option value={p.name}>{p.name}</option>{/each}
           </select>
+        {/snippet}
+      </Row>
+      <Row title="Parent check-ins" help="How often Dyna wakes a parent to check its children in this room: a duration such as 30m, off, or empty for the global interval." error={checkInError}>
+        {#snippet control()}
+          <input class="field" aria-label="Parent check-ins" type="text" placeholder="default" spellcheck="false" bind:value={checkIn} disabled={checkInBusy} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} onchange={saveCheckIn} />
         {/snippet}
       </Row>
     </Group>

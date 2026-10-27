@@ -129,6 +129,7 @@ export interface Engine {
   UnarchiveRoom(ref: string): Promise<null>
   RenameRoom(ref: string, name: string): Promise<null>
   SetRoomRootProfile(ref: string, name: string): Promise<null>
+  SetRoomCheckIn(ref: string, value: string): Promise<null>
   DeleteRoom(ref: string): Promise<null>
   PinRoom(ref: string, order: number): Promise<null>
   UnpinRoom(ref: string): Promise<null>
