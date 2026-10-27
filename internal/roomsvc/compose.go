@@ -66,29 +66,17 @@ func Choices(members []string) []string {
 // ParseDraft reads a composer draft for the owner of roomName. members are
 // the names of the room's open sessions.
 //
-// Leading @mentions are mentions and leave the text; a bare "--" ends them,
-// like dyna post. A mention may end in punctuation: "@lead," is @lead. Later in the text, an @token is a mention too when it
+// Leading @mentions come from room.SplitLeadingMentionText, the same rule
+// as dyna post. A mention may end in punctuation: "@lead," is @lead. Later in the text, an @token is a mention too when it
 // names @team or an open member; it stays in the text. Such a token starts
 // the text or follows a space or "(", and may end in punctuation. Tokens
 // inside `code` and tokens written \@name are text. A draft with no mention
 // goes to @root, so the owner never wakes every top-level agent by accident.
 func ParseDraft(draft, roomName string, members []string) Draft {
 	var d Draft
-	rest := strings.TrimSpace(draft)
-	for rest != "" {
-		word := rest
-		if i := strings.IndexAny(rest, " \t\n"); i >= 0 {
-			word = rest[:i]
-		}
-		if word == "--" {
-			rest = strings.TrimSpace(strings.TrimPrefix(rest, word))
-			break
-		}
-		if !strings.HasPrefix(word, "@") {
-			break
-		}
+	mentions, rest := room.SplitLeadingMentionText(strings.TrimSpace(draft))
+	for _, word := range mentions {
 		d.Mentions = append(d.Mentions, trimToken(word))
-		rest = strings.TrimSpace(strings.TrimPrefix(rest, word))
 	}
 	known := map[string]bool{TeamMention: true}
 	for _, n := range members {
