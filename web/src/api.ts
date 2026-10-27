@@ -249,6 +249,7 @@ export const api = {
   termOpen: (ref: string, cols = 80, rows = 24) => app.TermOpen(ref, cols, rows),
   termRequestRun: (room: string, id: string, argv: string[] | null = null, cols = 80, rows = 24) => app.TermRequestRun(room, id, argv, cols, rows),
   termRequestReport: (room: string, id: string, verdict: 'done' | 'failed' | 'declined', note = '', shareLines = false) => app.TermRequestReport(room, id, verdict, note, shareLines),
+  termRequestPreview: (room: string, id: string) => app.TermRequestPreview(room, id),
   terms: () => app.Terms(),
   termAttach,
   termWrite,

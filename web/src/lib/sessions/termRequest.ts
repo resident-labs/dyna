@@ -10,8 +10,6 @@ export const waitsForOwner = (q: Question): boolean => q.kind === 'terminal' && 
 
 export const ownerRequests = (questions: readonly Question[]): Question[] => questions.filter(waitsForOwner)
 
-// started: the owner ran it, so its terminal exists.
-export const started = (q: Question): boolean => !!q.terminal?.termId
 
 // quoteArg shows one argument as a shell would need it typed.
 export function quoteArg(arg: string): string {

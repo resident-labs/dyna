@@ -30,7 +30,7 @@
   import { sealedEvent, rendererFor } from './eventRenderers.ts'
   import UnknownEventRow from './UnknownEventRow.svelte'
   import type { EventPost } from './eventRenderers.ts'
-  import { prEvent } from './eventPayloads.ts'
+  import { prEvent, terminalRequestEvent } from './eventPayloads.ts'
   import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
   import type { Attachment, Post, ProfileChoice, Question, Room } from '../api/room.ts'
@@ -66,12 +66,14 @@
     // Where a result opens its detail: the app's DetailTarget.
     ondetail?: (target: { kind: string; id: string; roomId?: string; turn?: number }) => unknown
     onquestion?: (post: Post) => void
+    onreviewrequest?: (id: string) => void
+    ondeclinerequest?: (id: string, reason: string) => Promise<unknown>
     onacceptcall?: (request: CallRequest) => void
     ondeclinecall?: (request: CallRequest) => void
     ongoal?: (id: string) => unknown
     stuck?: boolean
   }
-  let { room, label = ROOM_CHAT, intro = true, posts = [], profiles = [], onnewprofile = null, questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
+  let { room, label = ROOM_CHAT, intro = true, posts = [], profiles = [], onnewprofile = null, questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onreviewrequest, ondeclinerequest, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
 
   let scroller = $state<HTMLDivElement>()
   // The list's jump and scroll calls, which only it knows how to make.
@@ -282,7 +284,7 @@
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} focus={flash?.key === row.key ? flash.id : ''} />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <UnknownEventRow />
         {/if}

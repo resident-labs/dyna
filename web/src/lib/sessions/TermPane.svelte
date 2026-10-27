@@ -128,7 +128,8 @@
           // Typed keys, pastes and terminal replies (such as device attribute
           // answers) all go back to the shell.
           onData: (d) => send(d),
-          onResize: (cols, rows) => api.termResize(id, cols, rows).catch(() => {}),
+          // A shell that exited has nothing to resize; the host would refuse.
+          onResize: (cols, rows) => { if (!exited) api.termResize(id, cols, rows).catch(() => {}) },
           onSelectionChange: () => {},
           beforeKey: () => true,
           onLinkActivate: (text) => openExternal(text),

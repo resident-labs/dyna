@@ -37,7 +37,7 @@ import TerminalRequestCard from './TerminalRequestCard.svelte'
 import ReviewResultCard from './ReviewResultCard.svelte'
 import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
-import type { EventNotice, Room } from '../api/room.ts'
+import type { EventNotice, Question, Room } from '../api/room.ts'
 import type { EventPayload } from './events.gen.ts'
 import type { HookFold } from './feedRows.ts'
 import type { PostSelection } from '../ui/postSelect.ts'
@@ -90,6 +90,11 @@ export interface EventProps {
   ongoal?: (id: string) => void
   // onissue opens the room's Issues panel, where an issue's actions live.
   onissue?: (issue: string) => void
+  // request is the live question behind a terminal request post, and the
+  // owner's two actions on it: open its review in the dock, or decline it.
+  request?: Question
+  onreviewrequest?: (id: string) => void
+  ondeclinerequest?: (id: string, reason: string) => Promise<unknown>
 }
 
 // GoalRef is the part of a goal a card reads.
