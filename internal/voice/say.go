@@ -147,6 +147,10 @@ func (s *Sayer) Say(ctx context.Context, req SayRequest) (SayResult, error) {
 		case realtime.Error:
 			return SayResult{}, fmt.Errorf("%s failed: %s", p.Label, ev.Text)
 		case realtime.ResponseDone:
+			switch ev.Text {
+			case "cancelled", "failed", "incomplete":
+				return SayResult{}, fmt.Errorf("%s ended the speech early (%s)", p.Label, ev.Text)
+			}
 			if len(audio) == 0 {
 				return SayResult{}, fmt.Errorf("%s sent no audio", p.Label)
 			}
