@@ -193,15 +193,13 @@ func envValue(env []string, key string) string {
 func BusSocket(id string) string { return filepath.Join(RuntimeDir(id), "bus") }
 
 // privateBusEnvironment names the computer's own session bus for an app, so its
-// portal requests, such as file choosers, stay inside the computer. It is empty
-// while the computer has no bus (a stopped computer, or no dbus-daemon): the app
-// keeps the environment it had.
+// portal requests, such as file choosers, stay inside the computer. The address
+// is fixed and never depends on the bus existing yet: the desktop starts lazily,
+// and an app that got the host's bus address while the computer was still
+// stopped drew its file chooser on the host display (D-274). If the computer has
+// no bus (no dbus-daemon), the app finds no bus, never the host's.
 func privateBusEnvironment(id string) map[string]string {
-	path := BusSocket(id)
-	if _, err := os.Stat(path); err != nil {
-		return nil
-	}
-	return map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=" + path}
+	return map[string]string{"DBUS_SESSION_BUS_ADDRESS": "unix:path=" + BusSocket(id)}
 }
 
 func mergeEnvironment(base []string, values map[string]string) []string {
