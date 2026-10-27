@@ -13,7 +13,8 @@ import (
 // AccountSwitch names the accounts of a turn that moved after a usage limit.
 type AccountSwitch struct {
 	From, To string
-	Until    time.Time // when From recovers
+	Until    time.Time // when From recovers; a guess unless Stated
+	Stated   bool
 }
 
 // FailoverAccount switches the harness to another account that may run in the
@@ -30,12 +31,14 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 	if err != nil {
 		return nil, err
 	}
-	until := UnavailableUntil(failure.Error(), time.Now())
-	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, until)
+	now := time.Now()
+	until := UnavailableUntil(failure.Error(), now)
+	stated := !UsageResetAt(failure.Error(), now).IsZero()
+	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, until, stated)
 	if err != nil {
 		return nil, err
 	}
-	return &AccountSwitch{From: from.Label, To: to.Label, Until: until}, nil
+	return &AccountSwitch{From: from.Label, To: to.Label, Until: until, Stated: stated}, nil
 }
 
 // accountFailoverPrompt continues an exact session that ran on the account
