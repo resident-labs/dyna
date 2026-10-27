@@ -10,17 +10,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// dirWatch wakes when a file in a job directory is created or written, or
-// when wake is called.
-type dirWatch struct {
+// DirWatch wakes when a file in a watched directory is created or written,
+// or when Wake is called. It serves wait loops outside this package too,
+// such as the shell server's steering watch.
+type DirWatch struct {
 	inotify, event int
-	// mu orders wake and close: a wake after close must not write to a
+	// mu orders Wake and Close: a wake after close must not write to a
 	// descriptor number that something else has reused.
 	mu     sync.Mutex
 	closed bool
 }
 
-func watchDir(dir string) (*dirWatch, error) {
+// WatchDir watches dir for writes and creations of the files inside it.
+func WatchDir(dir string) (*DirWatch, error) {
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		return nil, err
@@ -34,11 +36,11 @@ func watchDir(dir string) (*dirWatch, error) {
 		unix.Close(fd)
 		return nil, err
 	}
-	return &dirWatch{inotify: fd, event: event}, nil
+	return &DirWatch{inotify: fd, event: event}, nil
 }
 
-// next returns after a change, a wake, or d, whichever comes first.
-func (w *dirWatch) next(d time.Duration) error {
+// Next returns after a change, a wake, or d, whichever comes first.
+func (w *DirWatch) Next(d time.Duration) error {
 	fds := []unix.PollFd{{Fd: int32(w.inotify), Events: unix.POLLIN}, {Fd: int32(w.event), Events: unix.POLLIN}}
 	n, err := unix.Poll(fds, int(d.Milliseconds())+1)
 	if err != nil && !errors.Is(err, unix.EINTR) {
@@ -55,8 +57,8 @@ func (w *dirWatch) next(d time.Duration) error {
 	return nil
 }
 
-// wake makes the current or next call to next return at once.
-func (w *dirWatch) wake() {
+// Wake makes the current or next call to Next return at once.
+func (w *DirWatch) Wake() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if !w.closed {
@@ -64,10 +66,11 @@ func (w *dirWatch) wake() {
 	}
 }
 
-func (w *dirWatch) close() {
+// Close releases the watch's descriptors.
+func (w *DirWatch) Close() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.closed = true
+	w.mu.Unlock()
 	unix.Close(w.inotify)
 	unix.Close(w.event)
 }

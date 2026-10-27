@@ -46,7 +46,7 @@ func shellCommand() *cobra.Command {
 				}
 			}
 		}
-		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch}
+		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch, Steer: steerWatch}
 		// An update replaces the binary this server started from; when the
 		// state it serves moves past this build, restart on that binary so a
 		// schema bump never cuts the session's shells off (D-171).
@@ -62,6 +62,23 @@ func shellCommand() *cobra.Command {
 		}
 		return shellmcp.Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), tools)
 	}}
+}
+
+// steerWatch returns a signal that fires when the engine queues steering
+// for a session: it appends a steer_submitted line to the session's event
+// journal when it hands a post to the running turn. A blocking shell wait
+// that ends on the signal lets the harness read the message at its tool
+// boundary (D-349). Anything but a session, or a session with no journal,
+// never interrupts a wait.
+func steerWatch(session string) (<-chan struct{}, func()) {
+	if !runstore.IsSessionDirID(session) {
+		return nil, func() {}
+	}
+	path, err := subagent.DefaultStore().EventsPath(session)
+	if err != nil {
+		return nil, func() {}
+	}
+	return shellmcp.WatchSteerJournal(path)
 }
 
 // engineSearch runs one web search in the engine, which holds every provider
