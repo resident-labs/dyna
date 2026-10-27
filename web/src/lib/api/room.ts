@@ -14,6 +14,9 @@ export interface Room {
   displayName?: string
   repo?: string
   rootProfile?: string
+  // checkIn is the room's own parent check-in cadence, as typed: a duration
+  // such as 30m, or off. Empty uses the hook's global interval.
+  checkIn?: string
   lastActivity: string
   unread: number
   running: number

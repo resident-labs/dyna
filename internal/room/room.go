@@ -63,6 +63,9 @@ type Record struct {
 	LibraryPinSet bool         `json:"libraryPinSet,omitempty"`
 	LibraryPin    string       `json:"libraryPin,omitempty"`
 	SessionPause  SessionPause `json:"sessionPause,omitempty"`
+	// CheckIn is this room's parent check-in cadence (see CheckIn). The zero
+	// value inherits the parent check-ins hook's global interval.
+	CheckIn CheckIn `json:"checkIn,omitempty"`
 	// Seat is the row's seat column, which only writeSeat writes.
 	Seat          Seat   `json:"-"`
 	DisplayName   string `json:"displayName,omitempty"`
