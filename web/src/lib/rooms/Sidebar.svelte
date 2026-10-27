@@ -105,7 +105,7 @@
       {#if room.repo}<p class="repo mono" title={room.repo}><bdi>{room.repo}</bdi></p>{/if}
     </header>
     <div class="scroll">
-      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(viewUnread[GENERAL] ?? 0) > 0} title="Room chat" onclick={() => onview(GENERAL)}>
+      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(viewUnread[GENERAL] ?? 0) > 0} title="Chat" onclick={() => onview(GENERAL)}>
         <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">Chat</span>{#if viewUnread[GENERAL]}<span class="count">{viewUnread[GENERAL]}</span>{/if}
       </button>
       <hr class="split" />
