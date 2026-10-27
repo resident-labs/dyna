@@ -109,4 +109,37 @@ Every view then shows the newest version; older versions stay in the full view.
 `dyna attachment get` prints the current file when you no longer have it.
 Pin decisions and results sparingly.
 
+## Interactive cards
+
+A card can collect the owner's input, such as a choice or a short text, with `dyna ask --html`. The card sends
+`dyna:submit` with `parent.postMessage`. The app shows the exact text under the card with Send and Cancel buttons.
+Only the owner's click on Send sends it. The text is at most 16 KB, so send JSON for structured input.
+It answers the open question; `choice` must be one of the question's `--options` when you set it.
+The app replies with `dyna:submitted` (`ok`, `error?`). A question already answered gives `error: 'answered'`.
+The card may only submit right after the owner clicked or typed in it, and once every 2 seconds.
+
+```html
+<title>Pick a voice</title>
+<form id="f"><select id="v"><option>marin</option><option>cedar</option></select>
+<button>Choose</button> <span id="s"></span></form>
+<script>
+f.onsubmit = (e) => {
+  e.preventDefault();
+  parent.postMessage({ type: 'dyna:submit', text: JSON.stringify({ voice: v.value }) }, '*');
+  s.textContent = 'Waiting for the owner to confirm…';
+};
+addEventListener('message', (e) => {
+  if (e.data?.type === 'dyna:submitted') s.textContent = e.data.ok ? 'Sent.' : 'Not sent: ' + e.data.error;
+});
+</script>
+```
+
+```sh
+dyna ask --html "$DYNA_SCRATCH/pick.html" --meanwhile "Preparing the persona file" "Which voice should the guide use?"
+```
+
+The answer arrives as a post, with `source: "card"`. Treat it as the owner's input, but check it as data. On a plain
+card from `dyna post --html`, a submit posts the text as an owner reply to you. Run `dyna visual check` first.
+The voice guide (`dyna guide voice-agents`) uses this to let the owner choose a persona before a session.
+
 For issue filing and triage, read `dyna guide git`.
