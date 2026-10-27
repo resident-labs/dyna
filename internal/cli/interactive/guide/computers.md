@@ -139,6 +139,27 @@ Set `secret:true` when typing secrets. Action events show up to 24 typed charact
 
 Run containers with --user $(id -u):$(id -g), so nothing under $DYNA_SCRATCH is root-owned.
 
+## Desktop and GPU apps
+
+A computer runs native Wayland apps and X11 apps (through Xwayland), including OpenGL apps and games.
+They use the host GPU through `/dev/dri`. Qt 6 apps need the `qt6-wayland` plugin or `QT_QPA_PLATFORM=xcb`.
+
+```sh
+dyna computer run --status "Checking GL" -- glxinfo -B   # Xwayland; use eglinfo -B for Wayland
+dyna computer open --status "Opening the app" -- <app> <args>
+dyna computer shot
+```
+
+An agent session has a private `HOME`, so an app can start with empty data and show first-run setup.
+Copy the app's data folder to `$DYNA_SCRATCH` and pass the copy with the app's data-folder flag.
+Never point the app at the owner's own folder without the owner's consent: it holds their sign-in tokens, and two
+instances that write one folder can corrupt it. Use a separate test account for online games or services.
+
+Limits: actions move the pointer to absolute positions only, so mouse-look in a game that locks the pointer does not
+turn. A computer has no audio output. The computer shares the owner's files and sign-ins. Menus, keys, chat and
+screenshots work. For sound, see `dyna guide voice-agents`: `dyna voice say` and `dyna voice session` write
+audio to your program, not to the computer.
+
 ## Read-only branch web QA
 
 Use the shared launcher to build the branch web app and keep QA running:
