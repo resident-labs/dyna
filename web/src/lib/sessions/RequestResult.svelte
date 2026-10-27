@@ -6,8 +6,12 @@
   import { errorText } from '../errorText.ts'
   import { sentLine, type SentReport } from './termRequest.ts'
 
-  let { name, sent, onpreview, onfollowup }: {
+  let { name, sent, plain, onreport, onpreview, onfollowup }: {
     name: string
+    // plain is a shell with no command: nothing ends it, so the owner reports.
+    plain: boolean
+    onreport: (verdict: 'done' | 'failed') => Promise<unknown>
+
     // sent is the result sent on exit, or undefined while the command runs.
     sent: SentReport | undefined
     onpreview: () => Promise<string>
@@ -29,6 +33,13 @@
     open = kind
   }
 
+  async function report(verdict: 'done' | 'failed') {
+    if (busy) return
+    busy = true
+    error = ''
+    try { await onreport(verdict) } catch (e) { error = errorText(e) } finally { busy = false }
+  }
+
   async function send() {
     if (busy) return
     busy = true
@@ -43,7 +54,14 @@
 </script>
 
 <section class="result" aria-label="Result for {name}">
-  {#if !sent}
+  {#if !sent && plain}
+    <p class="line">A shell for <b>{name}</b>. The result goes to {name} when the shell exits, or when you report it here.</p>
+    {#if error}<p class="err" role="alert">{error}</p>{/if}
+    <div class="row">
+      <button class="b primary" onclick={() => report('done')} disabled={busy}>Report done</button>
+      <button class="b" onclick={() => report('failed')} disabled={busy}>Report failed</button>
+    </div>
+  {:else if !sent}
     <p class="line">Running for <b>{name}</b>. The result goes to {name} when it exits.</p>
   {:else}
     <p class="line">{sentLine(sent)}
