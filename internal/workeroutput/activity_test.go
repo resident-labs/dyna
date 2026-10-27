@@ -90,3 +90,44 @@ func TestLastActivityKeepsStartTimeThroughUpdates(t *testing.T) {
 		t.Fatalf("a finished tool still reports a start: %+v", a)
 	}
 }
+
+// A running tool call says its step kind, and whether a new message for the
+// session ends it early: Dyna's own shell run and wait do; another server's
+// tools of the same name, and other calls, run to their own end.
+func TestLastActivityStepKindAndSteerable(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "output.jsonl")
+	write := func(lines ...string) string {
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, tc := range []struct {
+		name  string
+		line  string
+		step  string
+		steer bool
+	}{
+		{"dyna shell run", `{"v":1,"kind":"tool","name":"mcp__dyna__shell","state":"started","id":"t1","ts":1000,"input":"{\"command\":\"sleep 60\",\"description\":\"Wait a minute\"}"}`, StepRun, true},
+		{"dyna shell wait", `{"v":1,"kind":"tool","name":"mcp__dyna__shell_output","state":"started","id":"t2","ts":1000,"input":"{\"job_id\":\"sh_1\",\"wait\":\"exit\"}"}`, StepWait, true},
+		{"another server's shell", `{"v":1,"kind":"tool","name":"mcp__other__shell","state":"started","id":"t3","ts":1000,"input":"{\"command\":\"sleep 60\"}"}`, StepRun, false},
+		{"a file read", `{"v":1,"kind":"tool","name":"mcp__pi__read","state":"started","id":"t4","ts":1000,"input":"{\"file_path\":\"/repo/dm.ts\"}"}`, StepRead, false},
+		{"a computer tool", `{"v":1,"kind":"tool","name":"mcp__dyna__computer_input","state":"started","id":"t5","ts":1000,"input":"{\"action\":\"click\"}"}`, StepTool, false},
+	} {
+		a := LastActivity(write(tc.line))
+		if a.Step != tc.step || a.Steerable != tc.steer {
+			t.Errorf("%s: step %q steerable %v, want %q %v", tc.name, a.Step, a.Steerable, tc.step, tc.steer)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		line string
+	}{
+		{"thinking", `{"v":1,"kind":"reasoning","text":"Let me check"}`},
+		{"writing", `{"v":1,"kind":"message","role":"assistant","text":"Done"}`},
+	} {
+		if a := LastActivity(write(tc.line)); a.Step != "" || a.Steerable {
+			t.Errorf("%s: step %q steerable %v, want none", tc.name, a.Step, a.Steerable)
+		}
+	}
+}
