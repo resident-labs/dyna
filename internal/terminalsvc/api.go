@@ -26,8 +26,10 @@ func (s *Service) OpenRequest(roomID, sessionID, cwd string, argv []string, cols
 }
 
 // AfterExit calls fn once with the terminal's exit code after the process
-// ended, however it ended, also when it already has. fn runs in its own
-// goroutine, so a closed browser tab cannot lose the call.
+// ended on its own, also when it already has. A terminal that was closed or
+// stopped on purpose, or a process a signal ended, is not an exit the owner
+// chose, so fn does not run for it. fn runs in its own goroutine, so a closed
+// browser tab cannot lose the call.
 func (s *Service) AfterExit(id string, fn func(code int)) error {
 	t, err := s.get(id)
 	if err != nil {
@@ -35,12 +37,18 @@ func (s *Service) AfterExit(id string, fn func(code int)) error {
 	}
 	go func() {
 		<-t.done
-		t.mu.Lock()
-		code := t.info.ExitCode
-		t.mu.Unlock()
-		fn(code)
+		if code, ok := t.ownExit(); ok {
+			fn(code)
+		}
 	}()
 	return nil
+}
+
+// ownExit is the exit code of a process that ended on its own.
+func (t *terminal) ownExit() (int, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.info.ExitCode, !t.closed && t.info.ExitCode >= 0
 }
 
 // Info returns one terminal's facts.
