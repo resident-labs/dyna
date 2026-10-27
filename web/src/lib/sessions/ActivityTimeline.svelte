@@ -5,6 +5,7 @@
   import ShellResultRow from '../rooms/ShellResultRow.svelte'
   import StepIcon from './StepIcon.svelte'
   import { blockState, mergeJob, metaOf, titleOf } from './shell.ts'
+  import { toolCallLabel } from './toolCallLabel.ts'
   import { elapsed, stamp } from '../ui/format.ts'
   import type { Doing } from '../api/room.ts'
   import type { ShellJob } from '../api/terminal.ts'
@@ -19,13 +20,6 @@
   }
   let { row, jobs = [], doing, onjob = null, onthread = null }: Props = $props()
 
-  // stepWord names a step that has no label of its own, so a row never shows a
-  // raw tool ID.
-  const stepWords: Record<string, string> = {
-    read: 'Read', edit: 'Edit', write: 'Write', search: 'Search', list: 'List', run: 'Command',
-    fetch: 'Fetch', delegate: 'Delegate', plan: 'Plan', monitor: 'Monitor', tool: 'Tool',
-  }
-  const stepWord = (kind?: string) => stepWords[kind ?? ''] ?? 'Tool'
   // stepTime reads a step's own duration. A call under a second reads in
   // milliseconds, so a quick step does not look like a clock that failed to move.
   const stepTime = (ms?: number): string => {
@@ -55,6 +49,7 @@
       {@const activeTool = step.kind === 'tool' && !step.failed && !step.done && row.turn?.status === 'running'}
       {@const state = job ? blockState(job) : step.kind === 'child' ? (step.member.state === 'live' ? 'running' : step.member.status === 'error' ? 'failed' : 'done') : step.failed ? 'failed' : activeTool ? 'running' : 'done'}
       {@const expanded = opened[step.key] ?? state === 'failed'}
+      {@const call = toolCallLabel(step)}
       <li class={state} id={step.kind === 'shell' ? `shell-${step.jobId}` : undefined}>
         <details open={expanded} ontoggle={(event) => opened[step.key] = event.currentTarget.open}>
           <summary>
@@ -69,7 +64,7 @@
               <span class="meta">{step.member.state === 'live' ? 'running' : step.member.status}</span>
             {:else}
               <StepIcon kind={step.step} />
-              <span class="label" title={step.target || step.label}>{step.label || step.target || stepWord(step.step)}</span>
+              <span class="label" title={call.paths.join(', ') || step.target || call.title}>{call.title}</span>
               <span class="chip {state}">{state === 'running' ? 'running' : state === 'failed' ? 'failed' : 'done'}</span>
               {#if stepTime(step.durationMs)}<span class="meta">{stepTime(step.durationMs)}</span>{/if}
             {/if}
@@ -86,13 +81,13 @@
                 {#each step.posts as post (post.id)}<pre>{post.text}</pre>{/each}
                 {#if onthread}<button class="link" onclick={() => onthread?.(step.member.address)}>Open {step.member.name} thread</button>{/if}
               {:else}
-                <!-- The raw tool name, the full target and the exit code stay
-                     here: the row above shows the designed step only. -->
-                <p class="muted">{stepWord(step.step)}{#if step.toolName} · {step.toolName}{/if}{#if step.tool && step.tool !== step.label} · {step.tool}{/if}</p>
-                {#if step.target}<pre class="full-target">{step.target}</pre>{/if}
+                <!-- The harness tool name stays here when it is not the kind
+                     word. The title already says the kind once. -->
+                {#if call.detail}<p class="muted">{call.detail}</p>{/if}
+                {#if call.paths.length}<pre class="full-target">{call.paths.join('\n')}</pre>{/if}
                 {#if step.failed}<FailedCall command={step.command ?? step.target} output={step.output} exit={step.exit} />
                 {:else if step.command || step.output}<pre>{[step.command, step.output].filter(Boolean).join('\n\n')}</pre>
-                {:else if !step.target}<p class="muted">No more details were captured.</p>{/if}
+                {:else if call.paths.length === 0 && !call.detail}<p class="muted">No more details were captured.</p>{/if}
               {/if}
             </div>
           {/if}
