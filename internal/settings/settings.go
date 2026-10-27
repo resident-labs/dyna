@@ -115,8 +115,8 @@ type Values struct {
 	// VoiceAgent lets agents use voice (dyna voice say and session).
 	VoiceAgent bool
 	Extra      map[string]any
-	path         string
-	fromFile     map[string]bool
+	path       string
+	fromFile   map[string]bool
 }
 
 func DefaultPath() string {
