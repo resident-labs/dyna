@@ -383,6 +383,16 @@ func TestLaunchThatCannotStartRecordsAFailedRun(t *testing.T) {
 	}
 }
 
+func TestLaunchExecutableDefaultsToTheInstalledPath(t *testing.T) {
+	got, err := launchExecutable("")
+	if err != nil || strings.HasPrefix(got, "/proc/") || filepath.Base(got) != filepath.Base(os.Args[0]) {
+		t.Fatalf("default executable = %q, %v", got, err)
+	}
+	if got, err := launchExecutable("/given"); err != nil || got != "/given" {
+		t.Fatalf("given executable = %q, %v", got, err)
+	}
+}
+
 func TestDetachedLaunchStillReturnsBeforeWorkerExit(t *testing.T) {
 	listener := launchFixture(t, "slow")
 	id, err := Launch(t.Context(), Options{ScriptSrc: "return 1"}, LaunchOptions{})

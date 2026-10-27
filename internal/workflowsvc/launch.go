@@ -95,11 +95,9 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 		}
 		defer log.Close()
 	}
-	if launch.Executable == "" {
-		launch.Executable, err = fsutil.RunningExecutable()
-		if err != nil {
-			return "", err
-		}
+	launch.Executable, err = launchExecutable(launch.Executable)
+	if err != nil {
+		return "", err
 	}
 	cmd := exec.Command(launch.Executable, "run-worker", optionsPath)
 	cmd.Env = launch.Env
@@ -159,6 +157,17 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 		return id, nil
 	}
 	return id, waitForeground(ctx, cmd, ended, launch.Foreground.StopWaiting)
+}
+
+// launchExecutable keeps a given path. By default a detached CLI exits before
+// the launcher runs the worker, so /proc/<cli pid>/exe would be gone ("Failed to
+// execute: No such file or directory"); the installed path outlives this
+// process and an update.
+func launchExecutable(given string) (string, error) {
+	if given != "" {
+		return given, nil
+	}
+	return fsutil.InstalledExecutable()
 }
 
 // envValue returns the last value set for key in an environment list.
