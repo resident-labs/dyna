@@ -318,10 +318,10 @@ func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T)
 	}
 }
 
-// D-302: list, view and search reads of public repositories outside the room run
+// D-302: REST search reads of public repositories outside the room run
 // anonymously. A search needs every repo: name to be public; a private name,
 // a search with no name and writes stay refused.
-func TestPublicListViewAndSearchReadsOutsideTheRoom(t *testing.T) {
+func TestPublicSearchReadsOutsideTheRoom(t *testing.T) {
 	records := setupRooms(t, "resident-labs/project")
 	ctx := WithRoom(context.Background(), records[0].ID)
 	exe := filepath.Join(t.TempDir(), "gh")
@@ -340,11 +340,7 @@ func TestPublicListViewAndSearchReadsOutsideTheRoom(t *testing.T) {
 	allowed := [][]string{
 		{"api", "-X", "GET", "search/issues", "-f", "q=repo:ludovic111/horizon is:open"},
 		{"api", "search/issues?q=repo:ludovic111/horizon+is:open"},
-		{"pr", "list", "-R", "ludovic111/horizon"},
-		{"issue", "list", "--repo", "ludovic111/horizon"},
-		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
-		{"search", "issues", "--repo", "ludovic111/horizon", "crash"},
-		{"search", "prs", "repo:ludovic111/horizon repo:other/project", "fix"},
+		{"api", "-X", "GET", "search/issues", "-f", "q=repo:ludovic111/horizon repo:other/project"},
 	}
 	for _, args := range allowed {
 		if err := run(args...); err != nil {
@@ -356,12 +352,11 @@ func TestPublicListViewAndSearchReadsOutsideTheRoom(t *testing.T) {
 		t.Fatalf("anonymous gh calls = %d, want %d:\n%s", got, len(allowed), calls)
 	}
 	for _, args := range [][]string{
-		{"api", "search/issues", "-f", "q=repo:ludovic111/horizon repo:other/private"},
-		{"api", "search/issues", "-f", "q=is:open"},
-		{"search", "issues", "--repo", "other/private", "crash"},
-		{"search", "issues", "crash"},
-		{"pr", "list", "-R", "other/private"},
-		{"issue", "list", "-R", "ludovic111/horizon", "--web=false", "--limit", "1", "--json", "number", "--repo", "other/private"},
+		{"api", "-X", "GET", "search/issues", "-f", "q=repo:ludovic111/horizon repo:other/private"},
+		{"api", "-X", "GET", "search/issues", "-f", "q=is:open"},
+		{"api", "-X", "GET", "search/issues", "-f", "q=repo:other/project repo:other/private"},
+		{"api", "search/issues?q=repo:other/private"},
+		{"pr", "list", "-R", "ludovic111/horizon"},
 		{"pr", "merge", "1", "-R", "ludovic111/horizon"},
 		{"api", "-X", "POST", "search/issues", "-f", "q=repo:ludovic111/horizon"},
 	} {
