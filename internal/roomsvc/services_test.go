@@ -30,10 +30,10 @@ func TestServicesListAutoProfiles(t *testing.T) {
 	rec := e.room("svc")
 	got := servicesByRole(t, e, rec.Name)
 	reviewer := got["reviewer"]
-	if len(got) != 1 || reviewer.Name != "PR reviewer" || reviewer.Page != "pull-requests" || reviewer.Scope != "room" {
+	if reviewer.Name != "PR reviewer" || reviewer.Page != "pull-requests" || reviewer.Scope != "room" || got["librarian"].Role != "librarian" {
 		t.Fatalf("services = %+v", got)
 	}
-	// The reviewer is the only service here, and it ranks by diagnostics.
+	// The reviewer ranks by diagnostics. The librarian row is separate.
 	view := got["reviewer"]
 	if view.Source != "auto" || view.Pinned != "" || view.Profile != "mock" || view.Reason != "auto: best diagnostics + cost" || view.Sessions != 0 {
 		t.Fatalf("auto service = %+v", view)
@@ -122,7 +122,7 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := servicesByRole(t, e, rec.Name)
-	if len(got) != 1 || got["reviewer"].Profile != "" || got["reviewer"].Reason == "" {
+	if got["reviewer"].Profile != "" || got["reviewer"].Reason == "" {
 		t.Fatalf("broken reviewer = %+v", got)
 	}
 }

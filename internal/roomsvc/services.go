@@ -3,8 +3,16 @@ package roomsvc
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/harness/runtime"
+	"dyna-agent/internal/librarianstate"
+	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/rolesession"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 )
 
@@ -41,7 +49,10 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 		reviewer.Reason = err.Error()
 	} else {
 		reviewer.Profile, reviewer.Pinned, reviewer.Reason = status.Profile, st.Reviewers[rec.ID].Profile, status.ProfileReason
-		if reviewer.Profile == "" {
+		if status.ProfileCause != "" && reviewer.Pinned != "" {
+			reviewer.Profile = reviewer.Pinned
+			reviewer.Reason = "waiting: " + status.ProfileReason
+		} else if reviewer.Profile == "" {
 			reviewer.Reason = status.LastError
 		}
 	}
@@ -59,7 +70,7 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 			choices = append(choices, p.Name)
 		}
 	}
-	out := []ServiceView{reviewer}
+	out := []ServiceView{reviewer, s.librarianView(rec)}
 	for i := range out {
 		out[i].Profiles = choices
 		out[i].Source = "auto"
@@ -94,4 +105,42 @@ func (s *Service) SetServiceProfile(ctx context.Context, roomRef, role, profile 
 		return s.PRs.SetReviewerProfile(ctx, roomRef, profile)
 	}
 	return fmt.Errorf("unknown service %q", role)
+}
+
+// librarianView is the librarian row. A pin that cannot run stays the shown
+// profile, with waiting and the reason. Auto keeps an empty pin.
+func (s *Service) librarianView(rec room.Record) ServiceView {
+	view := ServiceView{Role: "librarian", Name: "Librarian", Page: "library", Scope: "global"}
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		view.Reason = err.Error()
+		return view
+	}
+	view.Pinned = v.LibraryProfile
+	view.Profile = v.LibraryProfile
+	if v.LibraryProfile == "" {
+		return view
+	}
+	if rec.Repo == "" {
+		return view
+	}
+	repo, err := repoid.Resolve(context.Background(), rec.Repo)
+	if err != nil {
+		return view
+	}
+	st, err := (librarianstate.Store{DataDir: store.DataDir()}).Get(repo.ID)
+	if err != nil {
+		return view
+	}
+	ps, err := s.Notify.Sessions.ProfileStore()
+	if err != nil {
+		return view
+	}
+	choice, err := rolesession.ChooseProfile(ps.Profiles, v.LibraryProfile, runtime.RepoIdentity(context.Background(), rec.Repo), st.FailedProfiles, time.Now(), "librarian")
+	if err != nil || choice.Cause == "" {
+		return view
+	}
+	view.Profile = v.LibraryProfile
+	view.Reason = "waiting: " + choice.Reason
+	return view
 }

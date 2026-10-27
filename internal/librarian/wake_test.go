@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store/storetest"
@@ -514,5 +515,44 @@ func TestGateRunsForStalePins(t *testing.T) {
 	ws := git(t, repo, "rev-parse", "HEAD")
 	if reason, err := Gate(ctx, repo, target, ws, []library.Entry{agents}); err != nil || reason != "" {
 		t.Fatalf("whitespace since the pin: %q %v", reason, err)
+	}
+}
+
+// A pinned librarian does not start on another profile when the pin cannot
+// run. It waits and names the pin in one notice.
+func TestPinnedLibrarianDoesNotSwitch(t *testing.T) {
+	h := setup(t)
+	h.sessions.profiles = []profile.Profile{
+		{Name: "sonnet", Harness: profile.HarnessMock, Disabled: true, Taste: 10, Cost: 5},
+		{Name: "mock", Harness: profile.HarnessMock, Taste: 1, Cost: 1},
+	}
+	h.svc.Settings = func() (settings.Values, error) {
+		return settings.Values{LibraryEnabled: []string{h.repo}, LibraryProfile: "sonnet"}, nil
+	}
+	var notices []room.Event
+	h.svc.Notice = func(_ context.Context, roomID string, ev room.Event) error {
+		if roomID != "room_1" {
+			t.Errorf("notice room = %q", roomID)
+		}
+		notices = append(notices, ev)
+		return nil
+	}
+	h.clock = h.clock.Add(Interval)
+	res, err := h.svc.Wake(context.Background(), h.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != "waiting" || !strings.Contains(res.Reason, "sonnet") {
+		t.Fatalf("wake = %+v, want waiting on the sonnet pin", res)
+	}
+	if h.sessions.starts != 0 {
+		t.Fatalf("started %d sessions, want none", h.sessions.starts)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("notices = %d, want one", len(notices))
+	}
+	ev, ok := notices[0].(room.ServiceWaitEvent)
+	if !ok || ev.Profile != "sonnet" || ev.Service != room.ServiceLibrarian || ev.Reason == "" {
+		t.Fatalf("notice = %#v", notices[0])
 	}
 }

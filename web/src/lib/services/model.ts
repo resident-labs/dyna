@@ -320,10 +320,11 @@ export function buildRows(i: Inputs): Row[] {
     ...base,
     id: 'reviewer',
     name: 'PR reviewers',
-    state: !rev ? 'unreadable' : !rev.enabled ? 'off' : rev.lastError ? 'error' : limited ? 'rate-limited' : rev.current ? 'running' : rev.queued ? 'waiting' : 'idle',
+    state: !rev ? 'unreadable' : !rev.enabled ? 'off' : reviewerSvc?.reason.startsWith('waiting:') ? 'waiting' : rev.lastError ? 'error' : limited ? 'rate-limited' : rev.current ? 'running' : rev.queued ? 'waiting' : 'idle',
     tone: !rev ? 'off' : !rev.enabled ? 'off' : rev.lastError ? 'error' : rev.current ? 'live' : 'on',
     detail: !rev
       ? 'Reviewer state could not be read'
+      : reviewerSvc?.reason.startsWith('waiting:') ? reviewerSvc.reason
       : rev.lastError || (rev.current ? `reviewing #${rev.current.pr} · ${rev.current.title}` : rev.queued ? `${rev.queued} waiting for review` : 'nothing to review now'),
     toggle: rev ? { id: 'review.enabled', on: rev.enabled } : null,
     profile: reviewerSvc ? { id: 'review.profile', value: reviewerSvc.pinned, options: ['', ...reviewerSvc.profiles] } : null,
@@ -419,7 +420,9 @@ export function buildRows(i: Inputs): Row[] {
     name: 'Librarian',
     state: libraryOn === null ? unknown : libraryOn ? 'on' : 'off',
     tone: libraryOn === null ? 'off' : libraryOn ? 'on' : 'off',
-    detail: libraryOn === null
+    detail: svc('librarian')?.reason.startsWith('waiting:')
+      ? svc('librarian')!.reason
+      : libraryOn === null
       ? !i.repo ? 'No repository for this room' : 'Librarian settings could not be read'
       : libraryOn ? 'Keeps the feature map current' : 'Turn on with dyna library enable on this machine',
     profile: i.settings ? { id: 'library.profile', value: i.settings['library.profile'] ?? '', options: [] } : null,
