@@ -229,7 +229,7 @@ func TestPostNoteNamesTheOutsideProgramsInTheOutsideFinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep := doctor.Report{ID: 8, Machine: "laptop", Summary: "laptop: load 3.0/core", Findings: []doctor.Finding{{Cause: "outside Dyna uses 6.0 cores", Evidence: "It used 1.0 cores at 11:00"}}}
+	rep := doctor.Report{ID: 8, Machine: "laptop", Summary: "laptop: load 3.0/core", Findings: []doctor.Finding{{Kind: doctor.GroupOutside, Cause: "outside Dyna uses 6.0 cores", Evidence: "It used 1.0 cores at 11:00"}}}
 	out := []Outside{{Process: doctor.Process{Command: "java", Count: 4, Cores: 5.5, Unit: "horizon-swarm-3.scope"}, Room: "horizon"}}
 	if err := PostNote(store, Note{Room: RoomUse{RoomID: rec.ID, Room: rec.Name, Idle: 1}, Machine: "laptop", Total: 2, Report: rep, Outside: out}); err != nil {
 		t.Fatal(err)
@@ -238,5 +238,32 @@ func TestPostNoteNamesTheOutsideProgramsInTheOutsideFinding(t *testing.T) {
 	alert, ok := posts[0].Alert()
 	if !ok || len(alert.Findings) != 1 || !strings.Contains(alert.Findings[0].Cause, "java (4 processes) uses 5.5 cores") || !strings.Contains(alert.Findings[0].Cause, "room horizon") {
 		t.Fatalf("finding = %+v", alert.Findings)
+	}
+}
+
+func TestPostNoteReadsOutsideKindNotCauseText(t *testing.T) {
+	store := &room.Store{Root: t.TempDir()}
+	rec, err := store.Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := doctor.Report{ID: 9, Machine: "laptop", Summary: "laptop: load 3.0/core", Findings: []doctor.Finding{
+		{Kind: doctor.GroupOutside, Cause: "other programs use 6.0 cores", Evidence: "It used 1.0 cores at 11:00"},
+		{Cause: "outside Dyna uses 6.0 cores", Evidence: "It used 1.0 cores at 11:00"},
+	}}
+	out := []Outside{{Process: doctor.Process{Command: "java", Count: 4, Cores: 5.5, Unit: "horizon-swarm-3.scope"}, Room: "horizon"}}
+	if err := PostNote(store, Note{Room: RoomUse{RoomID: rec.ID, Room: rec.Name, Idle: 1}, Machine: "laptop", Total: 2, Report: rep, Outside: out}); err != nil {
+		t.Fatal(err)
+	}
+	posts, _ := store.Messages(rec.ID)
+	alert, ok := posts[0].Alert()
+	if !ok || len(alert.Findings) != 2 {
+		t.Fatalf("findings = %+v", alert.Findings)
+	}
+	if !strings.Contains(alert.Findings[0].Cause, "java (4 processes) uses 5.5 cores") {
+		t.Fatalf("kind finding = %+v", alert.Findings[0])
+	}
+	if strings.Contains(alert.Findings[1].Cause, "java") {
+		t.Fatalf("prefix without kind was treated as outside: %+v", alert.Findings[1])
 	}
 }

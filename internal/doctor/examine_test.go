@@ -51,8 +51,8 @@ func TestExamineNamesTheGrowingConsumer(t *testing.T) {
 	// Engine (0.5) and ses_b (0.5) hold under a tenth of 7 cores; outside
 	// Dyna holds 7 - 0.5 - 5.5 = 1 core.
 	want := []Finding{
-		{Cause: "session:ses_a uses 5.0 cores, 71% of the machine's CPU", Evidence: "It used 0.2 cores at " + then, Command: "dyna subagent show ses_a"},
-		{Cause: "outside Dyna uses 1.0 cores, 14% of the machine's CPU", Evidence: "It used 1.3 cores at " + then, Command: "ps -eo pid,pcpu,rss,comm --sort=-pcpu | head -n 15"},
+		{Cause: "session:ses_a uses 5.0 cores, 71% of the machine's CPU", Evidence: "It used 0.2 cores at " + then, Command: "dyna subagent show ses_a", Kind: GroupSession},
+		{Cause: "outside Dyna uses 1.0 cores, 14% of the machine's CPU", Evidence: "It used 1.3 cores at " + then, Command: "ps -eo pid,pcpu,rss,comm --sort=-pcpu | head -n 15", Kind: GroupOutside},
 	}
 	if len(r.Findings) != len(want) {
 		t.Fatalf("findings = %+v", r.Findings)
@@ -67,6 +67,37 @@ func TestExamineNamesTheGrowingConsumer(t *testing.T) {
 	}
 	if !strings.Contains(r.Text(), "1. session:ses_a uses 5.0 cores") || !strings.Contains(r.Text(), "Next: `dyna subagent show ses_a`") {
 		t.Fatalf("text = %s", r.Text())
+	}
+}
+
+func TestGroupKindDrivesInclusionAndCommand(t *testing.T) {
+	machine := Sample{Group: sysload.Group{Name: "machine", Cores: 10, Memory: 1000}}
+	session := Sample{Group: sysload.Group{Name: "busy worker", Cores: 4}, Kind: GroupSession, SessionID: "ses_a"}
+	engine := Sample{Group: sysload.Group{Name: "service", Cores: 2}, Kind: GroupEngine}
+	computers := Sample{Group: sysload.Group{Name: "desktops", Cores: 1}, Kind: GroupComputers}
+	agents := Sample{Group: sysload.Group{Name: "agents", Cores: 3}}
+	leaves := withOutside([]Sample{machine, session, engine, computers, agents}, machine)
+	byKind := map[GroupKind]Sample{}
+	for _, x := range leaves {
+		byKind[x.Kind] = x
+	}
+	if byKind[GroupSession].SessionID != "ses_a" || byKind[GroupEngine].Kind != GroupEngine || byKind[GroupComputers].Kind != GroupComputers {
+		t.Fatalf("leaves = %+v", leaves)
+	}
+	if byKind[GroupOutside].Group.Cores != 4 || byKind[GroupOutside].Group.Name != OutsideGroup {
+		t.Fatalf("outside = %+v", byKind[GroupOutside])
+	}
+	if cmd := finding(byKind[GroupSession], cpu, machine, nil).Command; cmd != "dyna subagent show ses_a" {
+		t.Fatalf("session command = %q", cmd)
+	}
+	if cmd := finding(byKind[GroupEngine], cpu, machine, nil).Command; cmd != "systemctl --user status dyna-engine.service" {
+		t.Fatalf("engine command = %q", cmd)
+	}
+	if cmd := finding(byKind[GroupComputers], cpu, machine, nil).Command; cmd != "dyna computer status" {
+		t.Fatalf("computers command = %q", cmd)
+	}
+	if f := finding(byKind[GroupOutside], cpu, machine, nil); f.Kind != GroupOutside || !strings.HasPrefix(f.Command, "ps ") {
+		t.Fatalf("outside finding = %+v", f)
 	}
 }
 
