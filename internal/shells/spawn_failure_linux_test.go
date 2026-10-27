@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 )
 
@@ -63,7 +64,7 @@ func TestSuperviseDoesNotStartWhenTheLaunchGateClosesUnsent(t *testing.T) {
 	gateWrite.Close()
 	// awaitLaunch reads the descriptor named by the environment; the test's pipe
 	// is not descriptor 3, so name it by number.
-	t.Setenv(launchGateEnv, itoa(int(gateRead.Fd())))
+	t.Setenv(launchGateEnv, itoa(handOffFD(t, gateRead)))
 	if err := s.Supervise(context.Background(), meta.ID); err == nil {
 		t.Fatal("Supervise started although the launch gate closed unsent")
 	}
@@ -88,7 +89,7 @@ func TestSuperviseDoesNotPassTheLaunchGateMarkerToTheCommand(t *testing.T) {
 	if _, err := gateWrite.Write([]byte{'g'}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(launchGateEnv, itoa(int(gateRead.Fd())))
+	t.Setenv(launchGateEnv, itoa(handOffFD(t, gateRead)))
 	if err := s.Supervise(context.Background(), meta.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +114,20 @@ func TestSendGoAheadIgnoresAGateWhoseReaderEnded(t *testing.T) {
 	if err := sendGoAhead(gateWrite); err != nil {
 		t.Fatalf("sendGoAhead = %v; want nil for a closed gate", err)
 	}
+}
+
+// handOffFD returns a duplicate of f's descriptor and closes f. awaitLaunch takes
+// ownership of the number and closes it; keeping f open would let its garbage
+// collection finalizer close that number a second time, possibly after another
+// file reused it.
+func handOffFD(t *testing.T, f *os.File) int {
+	t.Helper()
+	fd, err := syscall.Dup(int(f.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	return fd
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
