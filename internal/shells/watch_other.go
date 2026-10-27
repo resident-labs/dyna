@@ -2,18 +2,20 @@
 
 package shells
 
-import "time"
+import (
+	"time"
+)
 
-// dirWatch polls where inotify is not available.
-type dirWatch struct{}
+// DirWatch polls where inotify is not available.
+type DirWatch struct{}
 
-func watchDir(string) (*dirWatch, error) { return &dirWatch{}, nil }
+func WatchDir(string) (*DirWatch, error) { return &DirWatch{}, nil }
 
-func (*dirWatch) next(d time.Duration) error {
+func (*DirWatch) Next(d time.Duration) error {
 	time.Sleep(min(d, 100*time.Millisecond))
 	return nil
 }
 
-func (*dirWatch) wake() {}
+func (*DirWatch) Wake() {}
 
-func (*dirWatch) close() {}
+func (*DirWatch) Close() {}
