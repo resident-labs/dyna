@@ -389,7 +389,7 @@ func TestConsolidationReturnsGoalsAndMovesQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := e.m.questionStore().Ask(questions.Question{Room: b.RoomID, Asker: b.ID, To: "owner", Text: "Which option?", Meanwhile: "continue"}, nil)
+	q, err := e.m.questionStore().Ask(questions.Question{Room: b.RoomID, Asker: b.ID, AskerKind: questions.AskerSession, To: "owner", Text: "Which option?", Meanwhile: "continue"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

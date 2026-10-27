@@ -27,7 +27,7 @@ func TestResponsibilityCountsMatchOneSessionReads(t *testing.T) {
 	if _, err := e.m.goalStore().Add(first.RoomID, "owner", goals.Input{Text: "unfinished", Holders: []string{first.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.questionStore().Ask(questions.Question{Room: second.RoomID, Asker: second.ID, To: "owner", Text: "Which option?", Meanwhile: "continue"}, nil); err != nil {
+	if _, err := e.m.questionStore().Ask(questions.Question{Room: second.RoomID, Asker: second.ID, AskerKind: questions.AskerSession, To: "owner", Text: "Which option?", Meanwhile: "continue"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	job := "sh_20261013-184235-2b655443"

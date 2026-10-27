@@ -40,7 +40,7 @@ func TestAskWhileARecordWriteHoldsTheSessionLock(t *testing.T) {
 	asked := make(chan error, 1)
 	store := &questions.Store{Root: filepath.Join(data, "questions")}
 	go func() {
-		_, err := store.Ask(questions.Question{Room: "room_1", Asker: id, To: "owner", Text: "still needed?", Meanwhile: "continue"}, nil)
+		_, err := store.Ask(questions.Question{Room: "room_1", Asker: id, AskerKind: questions.AskerSession, To: "owner", Text: "still needed?", Meanwhile: "continue"}, nil)
 		asked <- err
 	}()
 	<-asking // Ask is about to wait for the session lock the writer holds.
@@ -81,7 +81,7 @@ func TestAskOnAFreshDataFolderFinishes(t *testing.T) {
 	store := &questions.Store{Root: filepath.Join(data, "questions")}
 	asked := make(chan error, 1)
 	go func() {
-		_, err := store.Ask(questions.Question{Room: "room_1", Asker: id, To: "owner", Text: "still needed?", Meanwhile: "continue"}, nil)
+		_, err := store.Ask(questions.Question{Room: "room_1", Asker: id, AskerKind: questions.AskerSession, To: "owner", Text: "still needed?", Meanwhile: "continue"}, nil)
 		asked <- err
 	}()
 	select {
@@ -119,7 +119,7 @@ func TestAskPostsOutsideItsTransaction(t *testing.T) {
 	store := &questions.Store{Root: filepath.Join(data, "questions")}
 	asked := make(chan error, 1)
 	go func() {
-		_, err := store.Ask(questions.Question{Room: "room_1", Asker: id, To: "owner", Text: "still needed?", Meanwhile: "continue"}, post)
+		_, err := store.Ask(questions.Question{Room: "room_1", Asker: id, AskerKind: questions.AskerSession, To: "owner", Text: "still needed?", Meanwhile: "continue"}, post)
 		asked <- err
 	}()
 	<-posting

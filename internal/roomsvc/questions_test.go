@@ -85,7 +85,7 @@ func TestQuestionViewsAndEvents(t *testing.T) {
 	if err = e.svc.Notify.AnswerQuestion(e.ctx, notify.Sender{Kind: notify.SenderOwner, Human: true}, other.ID, q.ID, "east", ""); err == nil {
 		t.Fatal("cross-room answer accepted")
 	}
-	if _, err = e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "session", Text: "Why?", Meanwhile: "test"}, nil); err != nil {
+	if _, err = e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "session", AskerKind: questions.AskerSession, Text: "Why?", Meanwhile: "test"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	open, err = e.svc.Notify.QuestionStore().OpenAskedBy(rec.ID, "session")
@@ -140,7 +140,7 @@ func TestQuestionsTellRootFromHuman(t *testing.T) {
 	}
 	// The withdrawal names whoever withdrew, not the asker.
 	store := e.svc.Notify.QuestionStore()
-	asked, err := store.Ask(questions.Question{Room: rec.ID, Asker: "owner", Human: true, Text: "Pause the deploy?", Meanwhile: "wait"}, nil)
+	asked, err := store.Ask(questions.Question{Room: rec.ID, Asker: "owner", AskerKind: questions.AskerOwner, Human: true, Text: "Pause the deploy?", Meanwhile: "wait"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestQuestionWriteEmitsOneCanonicalEvent(t *testing.T) {
 			e.svc.StoreChanged(event.Topic)
 		}
 	})
-	if _, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "owner", Text: "Which region?", Meanwhile: "check data"}, nil); err != nil {
+	if _, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "owner", AskerKind: questions.AskerOwner, Text: "Which region?", Meanwhile: "check data"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.svc.scanQuestions(sig, &version, false, func(event Event) {

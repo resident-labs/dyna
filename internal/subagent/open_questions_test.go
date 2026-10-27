@@ -14,7 +14,7 @@ func TestRootSeesOpenQuestionsAndAnAnswerIsADriftNote(t *testing.T) {
 	store := &questions.Store{Root: filepath.Join(filepath.Dir(e.m.store().root()), "questions")}
 	ask := func(text string) questions.Question {
 		t.Helper()
-		q, err := store.Ask(questions.Question{Room: e.room.ID, Asker: e.room.Name, To: "owner", Text: text, Meanwhile: "keep working"}, nil)
+		q, err := store.Ask(questions.Question{Room: e.room.ID, Asker: e.room.Name, AskerKind: questions.AskerOwner, To: "owner", Text: text, Meanwhile: "keep working"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestRootSeesOpenQuestionsAndAnAnswerIsADriftNote(t *testing.T) {
 func TestAnsweredQuestionReachesRunningRootAsANote(t *testing.T) {
 	e := newTestEnv(t)
 	store := &questions.Store{Root: filepath.Join(filepath.Dir(e.m.store().root()), "questions")}
-	q, err := store.Ask(questions.Question{Room: e.room.ID, Asker: e.room.Name, To: "owner", Text: "Which format?", Meanwhile: "keep working"}, nil)
+	q, err := store.Ask(questions.Question{Room: e.room.ID, Asker: e.room.Name, AskerKind: questions.AskerOwner, To: "owner", Text: "Which format?", Meanwhile: "keep working"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
