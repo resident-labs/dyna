@@ -251,7 +251,9 @@ func (s *Service) SenderOf(c Claim) (Sender, error) {
 // PostRequest is one post that a CLI process asks the engine to store and
 // deliver. It has no sender: the engine decides it from the caller.
 type PostRequest struct {
-	Kind      string
+	Kind string
+	// Quiet stores the post as context for the recipient's next turn and wakes no one.
+	Quiet     bool
 	Mentions  []string
 	Text      string
 	ReplyTo   string
@@ -265,7 +267,7 @@ type PostRequest struct {
 
 // Input is the post that req asks for, from snd.
 func (req PostRequest) Input(snd Sender) PostInput {
-	return PostInput{Kind: req.Kind, Sender: snd, Mentions: req.Mentions, Text: req.Text, ReplyTo: req.ReplyTo, ForwardOf: req.ForwardOf, Conversation: req.Conversation, References: req.References, Files: req.Files}
+	return PostInput{Kind: req.Kind, NoWake: req.Quiet, Sender: snd, Mentions: req.Mentions, Text: req.Text, ReplyTo: req.ReplyTo, ForwardOf: req.ForwardOf, Conversation: req.Conversation, References: req.References, Files: req.Files}
 }
 
 // File is one attachment to save with a post.
