@@ -149,6 +149,16 @@ func TestDialSignsInAndSendsTheSession(t *testing.T) {
 	if len(tools) != 1 || field(tools[0], "name") != "agents" || field(tools[0], "type") != "function" {
 		t.Errorf("session.tools = %v, want the one flat agents function", tools)
 	}
+	turn, _ := field(s, "audio", "input", "turn_detection").(map[string]any)
+	if _, ok := turn["eagerness"]; ok {
+		t.Errorf("default session must not set eagerness")
+	}
+	eager := testSession
+	eager.VADEagerness = "high"
+	eagerTurn := openAISession(eager).(msg)["audio"].(msg)["input"].(msg)["turn_detection"].(msg)
+	if eagerTurn["eagerness"] != "high" || eagerTurn["type"] != "semantic_vad" || eagerTurn["create_response"] != false {
+		t.Errorf("eager turn detection = %v", eagerTurn)
+	}
 }
 
 func TestDialReportsARefusedSession(t *testing.T) {
