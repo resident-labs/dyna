@@ -15,6 +15,7 @@
   import PhoneKeys from '../ui/PhoneKeys.svelte'
   import { errorText } from '../errorText.ts'
   import { loadDock, saveDock } from '../ui/prefs.ts'
+  import { dialog } from '../ui/dialog.ts'
   import { dockReduce, clampHeight, type DockAction } from './termDock.ts'
   import type { TermInfo } from '../api/terminal.ts'
 
@@ -294,8 +295,9 @@
     </button>
   </div>
   {#if listing}
-    <button class="scrim" aria-label="Close the list" onclick={() => (listing = false)}></button>
-    <div class="list" role="dialog" aria-modal="true" aria-label="Terminals">
+    <!-- The backdrop is dismissed by Escape and the dialog action too; the tap is a touch convenience. -->
+    <div class="scrim" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) listing = false }}>
+    <div class="list" role="dialog" aria-modal="true" aria-label="Terminals" use:dialog={{ close: () => (listing = false) }}>
       <h2>Terminals</h2>
       {#each list as t (t.id)}
         <div class="row" class:dead={t.alive === false || exited[t.id] !== undefined}>
@@ -307,15 +309,18 @@
       {#if roomless}<p class="quiet">This room has no repository, so a room terminal has no folder. Open one from a session.</p>
       {:else}<button class="row new" onclick={open} disabled={opening}>+ New terminal</button>{/if}
     </div>
+    </div>
   {/if}
   {#if sheet && current}
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="Terminal {label(current)}">
+    <div class="sheetback">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Terminal {label(current)}" use:dialog={{ close: () => (sheet = false) }}>
       <header role="presentation" ontouchstart={swipeStart} ontouchend={swipeEnd}>
         <span class="grab" aria-hidden="true"></span>
         <span class="tl">{label(current)}</span>
         <button class="tx" onclick={() => (sheet = false)} aria-label="Back to the room"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg></button>
       </header>
       {@render body()}
+    </div>
     </div>
   {/if}
 {:else}
@@ -378,7 +383,7 @@
 <style>
   .termdock { flex: none; display: flex; flex-direction: column; min-width: 0; background: #19181a; border-top: 1px solid var(--line-soft); }
   .termdock.maxed { position: absolute; inset: 0; z-index: 20; }
-  .grip { height: 5px; margin-bottom: -3px; cursor: ns-resize; position: relative; z-index: 1; touch-action: none; }
+  .grip { transition: background-color var(--motion-fast) var(--ease); height: 5px; margin-bottom: -3px; cursor: ns-resize; position: relative; z-index: 1; touch-action: none; }
   .grip:hover, .grip:focus-visible, .grip:active { background: var(--iris); opacity: 0.6; outline: none; }
   .strip { display: flex; align-items: center; gap: 2px; height: 26px; padding: 0 var(--s1); background: var(--main); flex: none; min-width: 0; font-size: var(--t-sm); }
   .tablist { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
@@ -406,10 +411,12 @@
     .add:hover:not(:disabled), .ib:hover { color: var(--ink); background: var(--hover); }
   }
   .add:active:not(:disabled), .ib:active { background: var(--select); }
-  .bare { display: flex; align-items: center; gap: 6px; padding: 3px var(--s2); border-radius: 5px; color: var(--muted); font-size: var(--t-sm); font-weight: 500; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
+  .bare { display: flex; align-items: center; gap: 6px; padding: 3px var(--s2); border-radius: 5px; color: var(--muted); font-size: var(--t-sm); font-weight: 500; }
+  .bare:not(:disabled) { transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .bare:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
   }
+  .bare:active:not(:disabled) { background: var(--select); }
   .bare:disabled { opacity: 0.5; }
   .slot { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; min-width: 0; }
   .cwd { padding: 0 var(--s2); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
@@ -436,7 +443,8 @@
   .pbar { display: flex; align-items: center; gap: var(--s2); width: 100%; min-height: 36px; padding: 0 var(--s3); color: var(--muted); font-size: var(--t-ui); font-weight: 500; text-align: left; }
   .pbar:active { background: var(--select); }
   .scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.5); }
-  .list { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; max-height: 70dvh; overflow-y: auto; background: var(--main); border-radius: 14px 14px 0 0; border-top: 1px solid var(--line-soft); padding: var(--s3) var(--s2) calc(var(--s3) + env(safe-area-inset-bottom)); }
+  .sheetback { display: contents; }
+  .list { position: absolute; left: 0; right: 0; bottom: 0; max-height: 70dvh; overflow-y: auto; background: var(--main); border-radius: 14px 14px 0 0; border-top: 1px solid var(--line-soft); padding: var(--s3) var(--s2) calc(var(--s3) + env(safe-area-inset-bottom)); }
   .list h2 { margin: 0 var(--s2) var(--s2); font-size: var(--t-ui); color: var(--muted); font-weight: 600; }
   .row { display: flex; align-items: center; border-radius: 8px; }
   .rname { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); min-height: 48px; padding: 0 var(--s3); font-size: var(--t-ui); color: var(--ink); text-align: left; }
