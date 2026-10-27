@@ -37,7 +37,7 @@ func TestWebReadsDoNotRepairSessionsOrChangeRoomFiles(t *testing.T) {
 			e.say(rec, "lead", "A retained post")
 			id := "ses_20261017-120000-aabbccdd"
 			activityRecord(t, e.mgr.Store.Root, id, map[string]any{"id": id, "name": "orphan", "roomId": rec.ID, "turns": 1}, []map[string]any{{"status": "running", "started": time.Now()}})
-			if _, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: id, Text: "A retained question", Meanwhile: "Check other work"}, nil); err != nil {
+			if _, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: id, AskerKind: questions.AskerSession, Text: "A retained question", Meanwhile: "Check other work"}, nil); err != nil {
 				t.Fatal(err)
 			}
 			writeRun(t, runstore.Meta{ID: "wf_20261017-120000-aabbccdd", Name: "legacy-run", Status: "ok", ParentSession: id, StartedAt: time.Now()}, nil, "")

@@ -749,7 +749,7 @@ func TestQueuedIntegrationsKeepExactSessionWakeTargets(t *testing.T) {
 	if !completion.Message.Wake || completion.Message.SessionIDs[f.lead.Address()] != f.lead.ID {
 		t.Fatalf("completion lost target identity: %+v", completion.Message)
 	}
-	q, err := f.svc.QuestionStore().Ask(questions.Question{Room: f.a.ID, Asker: f.decoder.ID, To: "owner", Text: "Continue?", Meanwhile: "test", Options: []string{"yes", "no"}}, nil)
+	q, err := f.svc.QuestionStore().Ask(questions.Question{Room: f.a.ID, Asker: f.decoder.ID, AskerKind: questions.AskerSession, To: "owner", Text: "Continue?", Meanwhile: "test", Options: []string{"yes", "no"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
