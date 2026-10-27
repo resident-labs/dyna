@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"path/filepath"
 	"reflect"
 	"time"
@@ -62,14 +61,7 @@ func (m *Manager) RunnerClaimInput(ctx context.Context, input InputClaim) (Claim
 // claimInput is the one startup/live selection and claim boundary. Callers
 // never hold their gate across the call.
 func (m *Manager) claimInput(ctx context.Context, id string, input InputClaim) (ClaimedInput, error) {
-	reply, err := m.selectInput(ctx, id, input, false)
-	if err != nil || reply.readOnly || len(reply.Posts) == 0 {
-		return reply, err
-	}
-	if noteErr := m.noteIncluded(ctx, id, input.Turn, reply); noteErr != nil {
-		log.Printf("session %s: note delivery: %v", id, noteErr)
-	}
-	return reply, nil
+	return m.selectInput(ctx, id, input, false)
 }
 
 // selectInput shares eligibility and framing between a read-only wait and
@@ -181,7 +173,11 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 			if err != nil {
 				return err
 			}
-			return storeClaimReply(ctx, m.rooms(), meta, claimed, covered, input.Turn, result)
+			notes, err := m.deliveryHowGroups(meta, claimed, input.Turn)
+			if err != nil {
+				return err
+			}
+			return storeClaimReply(ctx, m.rooms(), meta, claimed, covered, input.Turn, result, notes)
 		}
 
 		var selected []room.Message
