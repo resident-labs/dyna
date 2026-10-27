@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { routeSubmit } from './cardSubmit.ts'
+import { replyDraft, routeSubmit } from './cardSubmit.ts'
 
 const question = (state: string) => ({ id: 'q7', post: 'p1', state, options: ['yes', 'no'] })
 const card = { id: 'p1', conversation: 'dm:s9', reply: { kind: 'session' as const, address: 'dyna:builder' } }
@@ -13,8 +13,15 @@ test('a card on a question post answers the question', () => {
 })
 
 test('a card on any other post replies to its author in the post conversation', () => {
-  assert.deepEqual(routeSubmit(card, [question('open')].map((q) => ({ ...q, post: 'other' })), { text: 'go' }), {
-    kind: 'reply', draft: '@dyna:builder go', replyTo: 'p1', conversation: 'dm:s9',
+  const route = routeSubmit(card, [question('open')].map((q) => ({ ...q, post: 'other' })), { text: 'go' })
+  assert.deepEqual(route, {
+    kind: 'reply', recipient: 'dyna:builder', text: 'go', replyTo: 'p1', conversation: 'dm:s9',
+  })
+  // The wire draft is built from the typed recipient. Text that starts with an address stays text.
+  if (route.kind !== 'reply') assert.fail('expected a reply route')
+  assert.equal(replyDraft(route), '@dyna:builder go')
+  assert.deepEqual(routeSubmit(card, [], { text: '@other keep' }), {
+    kind: 'reply', recipient: 'dyna:builder', text: '@other keep', replyTo: 'p1', conversation: 'dm:s9',
   })
   assert.deepEqual(routeSubmit({ id: 'p2' }, [], { text: 'go' }), { kind: 'refuse', error: 'no-recipient' })
 })
