@@ -231,7 +231,7 @@ func Command(o Options) *cobra.Command {
 	var editFixes string
 	var editAmend string
 	edit.Flags().StringArrayVar(&editFor, "for", nil, "replace holders with these selectors (repeatable)")
-	edit.Flags().StringVar(&editFixes, "fixes", "", "room issues linked to this existing goal, such as D-35,D-40")
+	edit.Flags().StringVar(&editFixes, "fixes", "", "room issues linked to this existing goal, such as D-35,D-40; an empty value unlinks all of its issues")
 	edit.Flags().StringVar(&editAmend, "amend", "", "append a correction to the goal's brief; the goal text and holders stay")
 	edit.RunE = func(c *cobra.Command, a []string) error {
 		if c.Flags().Changed("amend") {
@@ -257,9 +257,6 @@ func Command(o Options) *cobra.Command {
 			var err error
 			if fixes, err = prstate.ParseDynaIssueNumbers(editFixes); err != nil {
 				return err
-			}
-			if len(fixes) == 0 {
-				return fmt.Errorf("--fixes needs at least one room issue such as D-35")
 			}
 		}
 		var g goals.Goal

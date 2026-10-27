@@ -209,6 +209,22 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 		}
 		holders, shared = &h, sh
 	}
+	// An empty, non-nil list is "--fixes ''": it unlinks the goal's issues. A nil
+	// list leaves the links alone.
+	clearLinks := fixes != nil && len(fixes) == 0
+	if clearLinks && text == "" && selectors == nil {
+		// Only the links change. editGoal would set the goal active again, so a
+		// dropped or done goal could not hand its issues back and stay ended.
+		g, err := s.goalService().Store.Get(r.ID, id)
+		if err != nil {
+			return goals.Goal{}, err
+		}
+		actor := author.Address
+		if author.ID == "owner" {
+			actor = r.Name
+		}
+		return g, s.releaseGoalIssues(ctx, r.ID, g.ID, actor)
+	}
 	if len(fixes) > 0 && text == "" && selectors == nil {
 		current, err := s.goalService().Store.Get(r.ID, id)
 		if err != nil {
@@ -225,10 +241,32 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 		return goals.Goal{}, err
 	}
 	g, err := s.editGoal(ctx, r.ID, id, text, holders, shared)
-	if err != nil || len(fixes) == 0 {
+	if err != nil {
 		return g, err
 	}
+	if clearLinks {
+		return g, s.releaseGoalIssues(ctx, r.ID, g.ID, actor)
+	}
+	if len(fixes) == 0 {
+		return g, nil
+	}
 	return g, s.goalService().Store.LinkPreparedIssues(ctx, r.ID, g.ID, actor, links, goals.ClaimAny)
+}
+
+// releaseGoalIssues returns every issue the goal links to open. An issue that
+// another goal took in the meantime keeps its new link.
+func (s *Service) releaseGoalIssues(ctx context.Context, roomID, goalID, by string) error {
+	linked, err := s.goalIssues(roomID, goalID)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, issue := range linked {
+		if _, err := s.rooms().ReleaseIssueGoal(ctx, roomID, issue.Label(), goalID, by); err != nil && !errors.Is(err, room.ErrIssueLeftGoal) {
+			failures = append(failures, fmt.Errorf("unlink %s: %w", issue.Label(), err))
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holders *[]string, shared bool) (goals.Goal, error) {
