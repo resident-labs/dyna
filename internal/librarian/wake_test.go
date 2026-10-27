@@ -25,15 +25,19 @@ import (
 // fakeSessions records what Wake asks of the session manager. Each new
 // turn ends at once with status next (ok by default), or stays running.
 type fakeSessions struct {
-	info   subagent.Info
-	turns  []subagent.Turn
-	next   string
-	tasks  []string
-	starts int
-	closed []string
+	info     subagent.Info
+	turns    []subagent.Turn
+	next     string
+	tasks    []string
+	starts   int
+	closed   []string
+	profiles []profile.Profile
 }
 
 func (f *fakeSessions) Profiles() ([]profile.Profile, error) {
+	if f.profiles != nil {
+		return f.profiles, nil
+	}
 	return []profile.Profile{{Name: "mock", Harness: profile.HarnessMock}, {Name: "diagnostic", Harness: profile.HarnessMock}}, nil
 }
 func (f *fakeSessions) Failures(time.Time) (map[string]time.Time, error) { return nil, nil }
@@ -242,7 +246,7 @@ func TestWakeRunsOnlyWhenTheGatePasses(t *testing.T) {
 func TestSmellWakeUsesItsOwnCheckpointAndProfile(t *testing.T) {
 	h := setup(t)
 	h.svc.Settings = func() (settings.Values, error) {
-		return settings.Values{LibraryEnabled: []string{h.repo}, LibrarySmellProfile: "diagnostic"}, nil
+		return settings.Values{LibraryEnabled: []string{h.repo}, LibraryProfile: "diagnostic"}, nil
 	}
 	baseline := git(t, h.repo, "rev-parse", "HEAD")
 	if _, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Update(h.id, false, func(st *librarianstate.State) error {
@@ -282,6 +286,36 @@ func TestSmellWakeUsesItsOwnCheckpointAndProfile(t *testing.T) {
 	tasks := len(h.sessions.tasks)
 	if res, err = h.svc.Wake(context.Background(), h.repo); err != nil || res.Action != "current" || len(h.sessions.tasks) != tasks {
 		t.Fatalf("smell pass inside interval = %+v %v, tasks %d -> %d", res, err, tasks, len(h.sessions.tasks))
+	}
+}
+
+// The smell pass uses the librarian pin, not reviewer ranking. A higher
+// diagnostics profile must not win while library.profile names another.
+func TestSmellWakeUsesTheLibrarianPin(t *testing.T) {
+	h := setup(t)
+	h.sessions.profiles = []profile.Profile{
+		{Name: "mock", Harness: profile.HarnessMock, Taste: 1, Diagnostics: 1, Cost: 1},
+		{Name: "diagnostic", Harness: profile.HarnessMock, Taste: 1, Diagnostics: 10, Cost: 10},
+	}
+	h.svc.Settings = func() (settings.Values, error) {
+		return settings.Values{LibraryEnabled: []string{h.repo}, LibraryProfile: "mock"}, nil
+	}
+	baseline := git(t, h.repo, "rev-parse", "HEAD")
+	commitFile(t, h.repo, "agents/run.go", "package agents\n\nfunc Run() { panic(1) }\n")
+	target := git(t, h.repo, "rev-parse", "HEAD")
+	if _, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Update(h.id, false, func(st *librarianstate.State) error {
+		st.Head, st.SmellHead, st.SmellLastRun = target, baseline, h.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock = h.clock.Add(SmellInterval)
+	res, err := h.svc.Wake(context.Background(), h.repo)
+	if err != nil || res.Action != "started" {
+		t.Fatalf("smell wake = %+v %v", res, err)
+	}
+	if h.sessions.info.Name != subagent.LibrarianSmellName || h.sessions.info.Profile != "mock" {
+		t.Fatalf("smell session = %q profile %q, want the librarian pin mock", h.sessions.info.Name, h.sessions.info.Profile)
 	}
 }
 
