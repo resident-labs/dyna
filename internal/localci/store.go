@@ -272,7 +272,7 @@ func (s Store) SetMode(ctx context.Context, roomID, mode string) error {
 	if err != nil {
 		return err
 	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Room: roomID, Key: "mode"}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Room: roomID, Key: ModeEventKey().String()}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_modes(room_id,mode) VALUES(?,?)
 ON CONFLICT(room_id) DO UPDATE SET mode=excluded.mode`, roomID, mode)
 		return err
@@ -352,7 +352,7 @@ func (s Store) LoadResult(ctx context.Context, repo, sha string) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
-	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "result:" + sha}, func(conn *sql.Conn) error {
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: ResultEventKey(sha).String()}, func(conn *sql.Conn) error {
 		// A runner may have saved a newer result after our initial read.
 		_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO local_ci_results(repo,sha,payload,recorded_at) VALUES(?,?,?,?)", repo, sha, raw, resultClock().Unix())
 		return err
@@ -391,7 +391,7 @@ func (s Store) SaveCacheClean(ctx context.Context, node string, at time.Time) er
 	if err != nil {
 		return err
 	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "caches:" + node}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: CachesEventKey(node).String()}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_cache_cleans(node,cleaned_at) VALUES(?,?)
 ON CONFLICT(node) DO UPDATE SET cleaned_at=excluded.cleaned_at`, node, at.UTC().Format(time.RFC3339Nano))
 		return err
@@ -425,9 +425,9 @@ func (s Store) savePayload(ctx context.Context, table, repo, sha string, value a
 	if err != nil {
 		return err
 	}
-	key := "result:" + sha
+	key := ResultEventKey(sha).String()
 	if table == "local_ci_hosted_runs" {
-		key = "hosted:" + sha
+		key = HostedEventKey(sha).String()
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: key}, func(conn *sql.Conn) error {
 		if table == "local_ci_results" {
@@ -479,7 +479,7 @@ func (s Store) SaveWarm(ctx context.Context, repo, node, head string, at time.Ti
 	if err != nil {
 		return err
 	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "warm:" + repo + ":" + node}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: WarmEventKey(repo, node).String()}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_warms(repo,node,head,warmed_at) VALUES(?,?,?,?)
 ON CONFLICT(repo,node) DO UPDATE SET head=excluded.head, warmed_at=excluded.warmed_at`, repo, node, head, at.UTC().Format(time.RFC3339Nano))
 		return err

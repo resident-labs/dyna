@@ -427,7 +427,7 @@ func (s *Service) ciStatus(snap Snapshot, r Record, policy ChangePolicy) (state,
 		if state == "failed" && strings.HasPrefix(reason, "tests over ") {
 			return state, key, append(jobs, reason), runs
 		}
-		return "failed", "budget:" + snap.Pull.Head.SHA + ":" + token, []string{reason}, nil
+		return "failed", NewBudgetFailureKey(snap.Pull.Head.SHA, token).String(), []string{reason}, nil
 	}
 	if !snap.hasRealCI(policy.RequiredChecks...) && r.Head == snap.Pull.Head.SHA && !r.HeadSeen.IsZero() && !s.now().Before(r.HeadSeen.Add(5*time.Minute)) {
 		state = "absent"
@@ -747,7 +747,7 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 					n.raise(r.Author, noticeFacts{Type: room.PRCIPaused, Summary: strings.Join(jobs, ", ")})
 					n.addCI(r.Author, text)
 				}
-			} else if !r.CIPaused && !strings.HasPrefix(ciKey, "budget:") {
+			} else if _, budget := ParseBudgetFailureKey(ciKey); !r.CIPaused && !budget {
 				names := strings.Join(jobs, ", ")
 				if names == "" {
 					names = "failed workflow"
