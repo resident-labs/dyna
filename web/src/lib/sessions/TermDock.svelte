@@ -12,11 +12,12 @@
   import { base } from '../files/repo.ts'
   import TermPane from './TermPane.svelte'
   import Confirm from '../ui/Confirm.svelte'
+  import FloatWindow from '../ui/FloatWindow.svelte'
   import PhoneKeys from '../ui/PhoneKeys.svelte'
   import { errorText } from '../errorText.ts'
   import { loadDock, saveDock } from '../ui/prefs.ts'
   import { dialog } from '../ui/dialog.ts'
-  import { dockReduce, clampHeight, clampRect, type DockAction, type Rect, type Win } from './termDock.ts'
+  import { dockReduce, clampHeight, clampRect, type DockAction, type Win } from './termDock.ts'
   import type { TermInfo } from '../api/terminal.ts'
   import type { Question } from '../api/room.ts'
   import RequestReview from './RequestReview.svelte'
@@ -338,18 +339,6 @@
     track(e, (m) => act({ type: 'resize', height: bottom - strip - m.clientY, avail }))
   }
 
-  // A window moves by its title and resizes by its lower right corner.
-  function moveWin(e: PointerEvent, id: string, r: Rect) {
-    if (e.target instanceof Element && e.target.closest('button')) return
-    const dx = e.clientX - r.x, dy = e.clientY - r.y
-    track(e, (m) => act({ type: 'move', id, x: m.clientX - dx, y: m.clientY - dy, area }))
-  }
-
-  function sizeWin(e: PointerEvent, id: string, r: Rect) {
-    const x = e.clientX, y = e.clientY
-    track(e, (m) => act({ type: 'size', id, w: r.w + m.clientX - x, h: r.h + m.clientY - y, area }))
-  }
-
   function gripKey(e: KeyboardEvent) {
     const step = e.key === 'ArrowUp' ? 24 : e.key === 'ArrowDown' ? -24 : 0
     if (!step) return
@@ -529,28 +518,30 @@
       {@const w = winOf(t.id)}
       {#if w && !w.min}
         {@const r = clampRect(w, area)}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div class="win" data-term={t.id} role="group" aria-label="Terminal {label(t)}" style:left="{r.x}px" style:top="{r.y}px" style:width="{r.w}px" style:height="{r.h}px" style:z-index={w.z} onpointerdowncapture={() => act({ type: 'raise', id: t.id })}>
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="wtitle" onpointerdown={(e) => moveWin(e, t.id, r)}>
+        <FloatWindow
+          rect={r} {area} label="Terminal {label(t)}" z={w.z} term={t.id}
+          onmove={(x, y, a) => act({ type: 'move', id: t.id, x, y, area: a })}
+          onsize={(nw, nh, a) => act({ type: 'size', id: t.id, w: nw, h: nh, area: a })}
+          onraise={() => act({ type: 'raise', id: t.id })}
+          ondrag={(on) => (dragging = on)}
+        >
+          {#snippet title()}
             <span class="dot" aria-hidden="true"></span>
             <span class="tl" title={t.cwd}>{label(t)}</span>
-            <span class="wbtns">
-              <button class="ib" onclick={() => dockIn(t)} aria-label="Dock {label(t)} again" title="Dock again">
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9.5 12.5h-6v-6M3.5 12.5l7-7M12.5 9.5v-6h-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              </button>
-              <button class="ib" onclick={() => act({ type: 'minimize', id: t.id })} aria-label="Minimize {label(t)}" title="Minimize to the bar">
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 11.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-              </button>
-              <button class="ib" onclick={() => askClose(t)} aria-label="Close {label(t)}" title="Close the terminal">
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-              </button>
-            </span>
-          </div>
-          <div class="wbody">{@render body(t)}</div>
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="wsize" onpointerdown={(e) => sizeWin(e, t.id, r)}></div>
-        </div>
+          {/snippet}
+          {#snippet buttons()}
+            <button class="ib" onclick={() => dockIn(t)} aria-label="Dock {label(t)} again" title="Dock again">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9.5 12.5h-6v-6M3.5 12.5l7-7M12.5 9.5v-6h-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            </button>
+            <button class="ib" onclick={() => act({ type: 'minimize', id: t.id })} aria-label="Minimize {label(t)}" title="Minimize to the bar">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 11.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+            </button>
+            <button class="ib" onclick={() => askClose(t)} aria-label="Close {label(t)}" title="Close the terminal">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+            </button>
+          {/snippet}
+          {@render body(t)}
+        </FloatWindow>
       {/if}
     {/each}
   </div>
@@ -611,12 +602,6 @@
   .tab.outside .tl { font-style: italic; }
   .inwin { color: var(--faint); flex: none; }
   .wins { position: absolute; inset: 0; pointer-events: none; z-index: 15; overflow: hidden; }
-  .win { position: absolute; pointer-events: auto; display: flex; flex-direction: column; min-width: 0; background: #19181a; border: 1px solid #45424a; border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); overflow: hidden; }
-  .wtitle { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 var(--s1) 0 var(--s3); background: #232126; color: var(--ink-2); font-size: var(--t-sm); font-weight: 500; cursor: move; flex: none; touch-action: none; user-select: none; }
-  .wtitle .tl { flex: 1; min-width: 0; }
-  .wbtns { display: flex; gap: 2px; flex: none; }
-  .wbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .wsize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 55%, var(--faint) 55% 62%, transparent 62% 76%, var(--faint) 76% 83%, transparent 83%); opacity: 0.6; }
   .dockbody { display: flex; flex-direction: column; min-height: 0; background: #19181a; border-top: 1px solid var(--line-soft); }
   .maxed .dockbody { flex: 1; }
   .exit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: var(--s2) 14px; font-size: var(--t-ui); color: var(--ink-2); background: var(--gold-wash); border-bottom: 1px solid var(--line-soft); }
