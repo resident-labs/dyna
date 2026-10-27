@@ -155,6 +155,18 @@ func (sv *server) stopLocked() {
 
 // shutdown stops every child, orderly then killed, and ends the server.
 func (sv *server) shutdown() {
+	sv.shutdownWith(false)
+}
+
+// shutdownWith stops every child. When fireStopGrace is set, the orderly stop
+// grace is an already-closed channel, so a child that ignores closed stdin is
+// killed at once. Production calls shutdown and still waits the grace.
+func (sv *server) shutdownWith(fireStopGrace bool) {
+	if fireStopGrace {
+		fired := make(chan time.Time)
+		close(fired)
+		stopGraceAfter = func(time.Duration) <-chan time.Time { return fired }
+	}
 	sv.host.closeAll()
 	sv.mu.Lock()
 	sv.stopLocked()
@@ -230,7 +242,7 @@ func (c *hostConn) loop() {
 			continue
 		}
 		if m.Op == opShutdown {
-			c.sv.shutdown()
+			c.sv.shutdownWith(m.FireStopGrace)
 			c.reply(nil, message{})
 			return
 		}

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/fakeworker"
+	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 )
@@ -108,16 +108,13 @@ func TestExecuteWaitsForDanglingWorkerTerminalJournal(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_engine-dangling-journal")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
-	// The canceled fake workers never answer the interrupt, so waiting the whole
-	// grace cost this test 2s on a slow CI machine, which is the per-test limit.
-	// The harness lets a test shorten the grace.
-	previous := harness.SetClaudeInterruptGraceForTest(50 * time.Millisecond)
-	t.Cleanup(func() { harness.SetClaudeInterruptGraceForTest(previous) })
-	// The fake claude reads its input only after a turn's body returns, and this
-	// body blocks until the test ends, so a canceled turn waits the whole grace.
-	// The wait is not what this test proves, so shorten it.
-	grace := harness.SetClaudeInterruptGraceForTest(50 * time.Millisecond)
-	t.Cleanup(func() { harness.SetClaudeInterruptGraceForTest(grace) })
+	// Cleanup shuts the session host down while the fake worker is still blocked
+	// on its pipe. Shutdown then closes stdin and waits the orderly stop grace,
+	// which is 5s, because this child ignores a closed stdin. The journal
+	// assertions do not depend on that grace, so fire it at once. Production
+	// still waits the full grace.
+	previousStop := sessionhost.SetStopGraceFiredForTest(true)
+	t.Cleanup(func() { sessionhost.SetStopGraceFiredForTest(previousStop) })
 	script := `
 agent("keep working until the orchestrator finishes", {profile: "slow", label: "dangling worker"});
 agent("wait behind the first worker", {profile: "slow", label: "queued worker"});
