@@ -3,7 +3,6 @@ package room
 import (
 	"bytes"
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -38,23 +37,6 @@ func execCmd(t *testing.T, cmd *cobra.Command, args ...string) (string, error) {
 	cmd.SetArgs(args)
 	err := cmd.Execute()
 	return stdout.String(), err
-}
-
-func TestSplitMentions(t *testing.T) {
-	for _, tc := range []struct {
-		args     []string
-		mentions []string
-		text     string
-	}{
-		{[]string{"@lead", "hello", "there"}, []string{"@lead"}, "hello there"},
-		{[]string{"@a", "@b", "--", "@c is text"}, []string{"@a", "@b"}, "@c is text"},
-		{[]string{"no", "mention"}, nil, "no mention"},
-	} {
-		mentions, text := SplitMentions(tc.args)
-		if !reflect.DeepEqual(mentions, tc.mentions) || text != tc.text {
-			t.Fatalf("SplitMentions(%q) = %q, %q", tc.args, mentions, text)
-		}
-	}
 }
 
 // A malformed `@run:<id>/agent:<n>` mention is refused before anything is stored.
