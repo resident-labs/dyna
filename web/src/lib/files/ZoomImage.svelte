@@ -211,12 +211,13 @@
   .stage.panning.zoomed { cursor: grabbing; }
   img { display: block; max-width: none; max-height: none; flex: none; transform-origin: center; will-change: transform; -webkit-user-drag: none; }
   .controls { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; background: color-mix(in srgb, var(--side) 88%, transparent); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); box-shadow: 0 4px 20px #0005; }
-  .controls button { min-width: 36px; height: 36px; padding: 0 8px; display: grid; place-items: center; border-radius: 6px; color: var(--ink-2); font-size: 12px; }
-  .controls button:disabled { opacity: 0.4; }
+  .controls button { min-width: 36px; height: 36px; padding: 0 8px; display: grid; place-items: center; border-radius: 6px; color: var(--ink-2); font-size: 12px; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  .controls button:disabled { opacity: 0.4; pointer-events: none; }
   .controls button:focus-visible { outline: 2px solid var(--iris-edge); outline-offset: 1px; }
   @media (hover: hover) {
-    .controls button:not(:disabled):hover { background: var(--hover); color: var(--ink); }
+    .controls button:hover { background: var(--hover); color: var(--ink); }
   }
+  .controls button:active { background: var(--select); }
   .percent { min-width: 52px; text-align: center; font: 12px var(--mono); color: var(--muted); }
   @media (max-width: 600px) {
     .controls { bottom: 10px; }
