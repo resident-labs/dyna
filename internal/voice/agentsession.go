@@ -565,6 +565,17 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 		// A rejected commit sends no echo. Drop the pending mark so the
 		// next real turn still gets a reply.
 		l.commitAsked = false
+		// OpenAI and Azure reject a commit of an empty or too-small buffer
+		// with this code. The message is "buffer is empty" or "buffer too
+		// small ... 0.00ms". The provider already ended the turn, or the
+		// buffer had nothing to commit. That is not a client error, and it
+		// must not ask for another reply.
+		if ev.Code == "input_audio_buffer_commit_empty" {
+			if l.active == "" {
+				l.creating = false
+			}
+			return "", false
+		}
 		// A busy refusal means a response still holds the slot. Any other
 		// error ends a create the provider has not started.
 		busy := ev.Code == "conversation_already_has_active_response"
