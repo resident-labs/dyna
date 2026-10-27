@@ -69,6 +69,19 @@ func (v TerminalVerdict) valid() bool {
 	return v == VerdictDone || v == VerdictFailed || v == VerdictDeclined
 }
 
+// Stage is the stage a verdict ends a request at, or "" for an invalid verdict.
+func (v TerminalVerdict) Stage() TerminalStage {
+	switch v {
+	case VerdictDone:
+		return StageDone
+	case VerdictFailed:
+		return StageFailed
+	case VerdictDeclined:
+		return StageDeclined
+	}
+	return ""
+}
+
 // TerminalStage is where a terminal request stands. A request climbs the
 // session chain, each holder approving or denying, and the owner sees it only
 // at waiting-owner. The owner's verdict and a denial end it.
@@ -83,6 +96,12 @@ const (
 	StageDeclined       TerminalStage = "declined"
 	StageWithdrawn      TerminalStage = "withdrawn"
 )
+
+// TerminalStages lists every stage, for the code that must map each one.
+var TerminalStages = []TerminalStage{StageWaitingSession, StageWaitingOwner, StageDenied, StageDone, StageFailed, StageDeclined, StageWithdrawn}
+
+// Ended says whether the request is over: no holder or owner decides next.
+func (s TerminalStage) Ended() bool { return s != StageWaitingSession && s != StageWaitingOwner }
 
 // Limits of a terminal request.
 const (
@@ -568,7 +587,7 @@ func (s *Store) ReportTerminal(room, id string, r TerminalReport) (Question, err
 		return Question{}, fmt.Errorf("note must have at most 2000 characters")
 	}
 	return s.editTerminal(room, id, StageWaitingOwner, func(q *Question, t *TerminalRequest) error {
-		t.Stage, t.ExitCode, t.SharedLines = TerminalStage(r.Verdict), r.ExitCode, r.SharedLines
+		t.Stage, t.ExitCode, t.SharedLines = r.Verdict.Stage(), r.ExitCode, r.SharedLines
 		q.State = "answered"
 		q.Answer = &Answer{At: time.Now(), By: "owner", Human: r.Human, Text: note}
 		return nil
