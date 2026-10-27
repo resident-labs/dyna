@@ -235,6 +235,17 @@ func (s *Service) ReportTerminalRequest(ctx context.Context, roomRef, id string,
 	return s.DeliverAnswers(ctx, rec.ID)
 }
 
+// ReportTerminalExit reports a request whose terminal exited: code 0 is done,
+// anything else failed. The owner clicks nothing. A request already reported
+// is left alone.
+func (s *Service) ReportTerminalExit(ctx context.Context, roomRef, id string, code int) error {
+	verdict := questions.VerdictDone
+	if code != 0 {
+		verdict = questions.VerdictFailed
+	}
+	return s.ReportTerminalRequest(ctx, roomRef, id, questions.TerminalReport{Verdict: verdict, ExitCode: &code, Human: true})
+}
+
 // terminalVerdict maps an ended stage to the verdict the event carries. It is
 // the one place the store's stages meet the event's verdicts; a stage that
 // has not ended has none.

@@ -13,16 +13,13 @@ function fake() {
   return { calls, api }
 }
 
-test('making the actions calls nothing; Run starts the filed command and an exit reports by its code', async () => {
+test('making the actions calls nothing; Run starts the filed command and Decline reports the reason', async () => {
   const { calls, api } = fake()
   const act = requestActions(api)
   assert.deepEqual(calls, [])
   await act.run()
-  await act.report(0)
-  await act.report(2)
-  await act.report(-1)
   await act.decline(' not now ')
-  assert.deepEqual(calls, [['run'], ['report', 'done', '', false], ['report', 'failed', '', false], ['report', 'failed', '', false], ['report', 'declined', 'not now', false]])
+  assert.deepEqual(calls, [['run'], ['report', 'declined', 'not now', false]])
 })
 
 test('a command shows with quotes', () => {

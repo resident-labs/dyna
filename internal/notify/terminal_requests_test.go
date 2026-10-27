@@ -115,6 +115,28 @@ func TestTerminalReportSharesLinesOnlyWhenChosen(t *testing.T) {
 	}
 }
 
+func TestTerminalExitReportsDoneOrFailedWithItsCode(t *testing.T) {
+	c := newChain(t)
+	for _, tc := range []struct {
+		code    int
+		verdict questions.TerminalStage
+	}{{0, questions.StageDone}, {3, questions.StageFailed}} {
+		q := c.file(t, "run it")
+		for _, approver := range []Sender{c.mid, c.root} {
+			if err := c.e.svc.ApproveTerminalRequest(c.e.ctx, approver, "", q.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := c.e.svc.ReportTerminalExit(c.e.ctx, c.rec.ID, q.ID, tc.code); err != nil {
+			t.Fatal(err)
+		}
+		_, got, _ := c.e.svc.OwnedTerminalRequest(c.rec.ID, q.ID)
+		if got.Terminal.Stage != tc.verdict || got.Terminal.ExitCode == nil || *got.Terminal.ExitCode != tc.code {
+			t.Fatalf("exit %d ended as %+v", tc.code, got.Terminal)
+		}
+	}
+}
+
 func TestOwnerReadsAReportedRequestOnlyAsDoneOrFailed(t *testing.T) {
 	c := newChain(t)
 	q := c.file(t, "sign in to GitHub")
