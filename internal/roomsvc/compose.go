@@ -272,5 +272,41 @@ func (s *Service) MentionChoices(ref string) ([]string, error) {
 			names = append(names, info.EffectiveName())
 		}
 	}
-	return Choices(names), nil
+	out := Choices(names)
+	elsewhere, err := s.otherRoomChoices(rec, live)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, elsewhere...), nil
+}
+
+// otherRoomChoices lists the owner's cross-room mentions: for each other room
+// in name order, @room:root, then its open sessions as @room:session.
+func (s *Service) otherRoomChoices(from room.Record, open []subagent.Info) ([]string, error) {
+	records, err := s.rooms().List(false)
+	if err != nil {
+		return nil, err
+	}
+	names := map[string][]string{}
+	for _, info := range open {
+		if info.RoomID != from.ID && info.Status != subagent.StatusClosed && !info.RunOwned() {
+			names[info.RoomID] = append(names[info.RoomID], info.EffectiveName())
+		}
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].Name < records[j].Name })
+	var out []string
+	for _, rec := range records {
+		if rec.ID == from.ID {
+			continue
+		}
+		out = append(out, "@"+rec.Name+":"+room.RootAgent)
+		sessions := names[rec.ID]
+		sort.Strings(sessions)
+		for _, n := range sessions {
+			if n != room.RootAgent {
+				out = append(out, "@"+rec.Name+":"+n)
+			}
+		}
+	}
+	return out, nil
 }

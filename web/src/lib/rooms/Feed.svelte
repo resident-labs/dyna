@@ -165,7 +165,10 @@
 
   function recipients(p: Post) {
     const groups = (p.via || []).filter((v) => /^@(.*:)?(children|siblings|parent)$/.test(v))
-    const names = (p.to || []).map((a) => short(a, room.name))
+    // The owner's post to another room names the session it went to, as the
+    // owner wrote it (dyna:root), not the room's owner address in that room.
+    const crossRoom = p.owner ? (p.via || []).filter((v) => /^@[^:]+:[^:]+$/.test(v) && v.slice(1).split(':')[0] !== room.name) : []
+    const names = crossRoom.length ? crossRoom.map((v) => v.slice(1)) : (p.to || []).map((a) => short(a, room.name))
     return { groups, names }
   }
 

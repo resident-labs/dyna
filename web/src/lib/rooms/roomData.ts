@@ -43,6 +43,9 @@ export function createRoomData(host: unknown, hooks: RoomDataHooks) {
   const reloadRooms = createReloadGate(() => ({ room: 'rooms', visit: 0 }), () => visible('rooms'))
   const selected = (room: string, visit: number) => alive && room === hooks.current().room && visit === hooks.current().visit
   let roster = '', loadedChoices = '', rosterSelection: RoomSelection | null = null
+  // The mentions of other rooms (@room:session) come from the engine only; a
+  // roster patch keeps the ones last loaded.
+  let otherRooms: string[] = []
   const rosterKey = (members: Member[]) => {
     const { room, visit } = hooks.current()
     rosterSelection = { room, visit }
@@ -55,6 +58,7 @@ export function createRoomData(host: unknown, hooks: RoomDataHooks) {
       const choices = await api.mentions(hooks.current().room)
       if (!current() || key !== roster) return
       loadedChoices = key
+      otherRooms = (choices ?? []).filter((c) => c.includes(':'))
       hooks.choices(choices ?? [])
     } catch { /* Keep the current suggestions until the next refresh. */ }
   }) }
@@ -74,7 +78,7 @@ export function createRoomData(host: unknown, hooks: RoomDataHooks) {
         const members = hooks.patchMembers(change)
         roster = rosterKey(members)
         loadedChoices = roster
-        hooks.choices(memberChoices(members))
+        hooks.choices([...memberChoices(members), ...otherRooms])
       })
     },
     loadRooms() { return reloadRooms('rooms', async (current) => {

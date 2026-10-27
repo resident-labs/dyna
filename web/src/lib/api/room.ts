@@ -142,6 +142,8 @@ export interface Post extends Message {
   completion: boolean
   fromHue: number
   speaker: string
+  // fromRoom names the room the owner wrote this post from, when it is not this room.
+  fromRoom?: string
   detail?: PostDetail
   // reply names who a reply to this post answers, read from the post's stored
   // sender identity. A post with no reply target keeps the draft's recipients.

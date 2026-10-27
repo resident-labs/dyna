@@ -360,6 +360,35 @@ func TestCrossRoomPostLivesInRecipientRoom(t *testing.T) {
 	}
 }
 
+// The owner writes from room a to a session of room b. The post lives in b and
+// names room a as its sender, so the session's reply goes to a, where the
+// owner wrote. Room a keeps a copy with the same ID, which wakes nobody.
+func TestOwnerCrossRoomPostRepliesToTheSendersRoom(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: Sender{Kind: SenderOwner, Room: f.a.Name, Human: true}, Mentions: []string{"@" + f.b.Name + ":other"}, Text: "SLEEP:0\nhello other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent.Message.RoomID != f.b.ID || sent.Message.From != f.a.Name || sent.Message.SenderRoomID != f.a.ID {
+		t.Fatalf("message = %#v", sent.Message)
+	}
+	copied, err := f.svc.Rooms.Message(f.a.ID, sent.Message.ID)
+	if err != nil || copied.Text != sent.Message.Text || !copied.Human || !reflect.DeepEqual(copied.Via, []string{"@" + f.b.Name + ":other"}) || copied.Wake {
+		t.Fatalf("copy in the sender's room = %#v, %v", copied, err)
+	}
+	reply := f.svc.sessionStore().ReplyAddress(sent.Message)
+	if reply != f.a.Name {
+		t.Fatalf("reply address = %q, want the sender's room %q", reply, f.a.Name)
+	}
+	answer, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.other), Mentions: []string{"@" + reply}, Text: "hi owner", ReplyTo: sent.Message.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.Message.RoomID != f.a.ID || answer.Message.ReplyTo != sent.Message.ID {
+		t.Fatalf("reply = %#v, want a post in the sender's room", answer.Message)
+	}
+}
+
 func TestExplicitBadRecipientsRejectGroupMembersSkip(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.mgr.Store.UpdateMeta(f.parser.ID, func(m *subagent.Meta) { m.Resumable = false }); err != nil {

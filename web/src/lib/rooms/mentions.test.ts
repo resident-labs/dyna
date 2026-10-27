@@ -16,6 +16,12 @@ test('mention choices carry the composer hints and match by prefix', () => {
   assert.equal(matchMentions(options, '@', 2).length, 2)
 })
 
+test('a mention of a session in another room completes by its room prefix', () => {
+  const options = mentionOptions(['@root', '@lead', '@cozycraft:root', '@cozycraft:lead'])
+  assert.equal(options[2]?.hint, 'another room')
+  assert.deepEqual(matchMentions(options, '@cozy').map((o) => o.value), ['@cozycraft:root', '@cozycraft:lead'])
+})
+
 test('file mentions browse folders and insert paths without creating recipients', async () => {
   const { fileMentionOptions, fileMentionDirectory, fileMentionText } = await import('./mentions.ts')
   const entries = [{ path: 'web/src', name: 'src', kind: 'dir' as const }, { path: 'web/package.json', name: 'package.json', kind: 'file' as const }] as const
