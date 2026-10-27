@@ -158,3 +158,18 @@ func TestClosingAHolderTellsTheNextHolder(t *testing.T) {
 	}
 	t.Fatal("the new holder got no request post")
 }
+
+func TestEveryEndedTerminalStageMapsToAVerdict(t *testing.T) {
+	for _, stage := range questions.TerminalStages {
+		verdict, ok := terminalVerdict(stage)
+		if ok != stage.Ended() || (ok && verdict == "") {
+			t.Errorf("stage %q: ended=%v but maps to (%q, %v)", stage, stage.Ended(), verdict, ok)
+		}
+	}
+	for _, v := range []questions.TerminalVerdict{questions.VerdictDone, questions.VerdictFailed, questions.VerdictDeclined} {
+		stage := v.Stage()
+		if got, ok := terminalVerdict(stage); !ok || string(got) != string(v) {
+			t.Errorf("verdict %q ends at %q, which maps back to %q", v, stage, got)
+		}
+	}
+}

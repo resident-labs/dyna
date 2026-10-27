@@ -224,9 +224,31 @@ func (s *Service) ReportTerminalRequest(ctx context.Context, roomRef, id string,
 	return s.DeliverAnswers(ctx, rec.ID)
 }
 
+// terminalVerdict maps an ended stage to the verdict the event carries. It is
+// the one place the store's stages meet the event's verdicts; a stage that
+// has not ended has none.
+func terminalVerdict(stage questions.TerminalStage) (room.TerminalVerdict, bool) {
+	switch stage {
+	case questions.StageDone:
+		return room.TerminalDone, true
+	case questions.StageFailed:
+		return room.TerminalFailed, true
+	case questions.StageDeclined:
+		return room.TerminalDeclined, true
+	case questions.StageDenied:
+		return room.TerminalDenied, true
+	case questions.StageWithdrawn:
+		return room.TerminalWithdrawn, true
+	case questions.StageWaitingSession, questions.StageWaitingOwner:
+		return "", false
+	}
+	return "", false
+}
+
 // terminalDone is the typed result the filer reads.
 func terminalDone(q questions.Question, by string) room.TerminalDoneEvent {
-	ev := room.TerminalDoneEvent{RequestID: q.ID, Verdict: room.TerminalVerdict(q.TerminalStage())}
+	verdict, _ := terminalVerdict(q.TerminalStage())
+	ev := room.TerminalDoneEvent{RequestID: q.ID, Verdict: verdict}
 	if q.Answer != nil {
 		ev.Note = q.Answer.Text
 	}
