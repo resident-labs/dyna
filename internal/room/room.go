@@ -275,6 +275,53 @@ func (m Message) SessionAddressed(id, addr string) bool {
 // binding survives a rename, so the DM of a renamed session keeps its rows.
 func (m Message) AuthorSessionID() string { return m.SessionIDs[m.From] }
 
+// SenderKind names what kind of author wrote a post.
+type SenderKind string
+
+const (
+	// SenderEngine is the engine's own address.
+	SenderEngine SenderKind = "engine"
+	// SenderOwner is the human owner, or a post written as the room itself.
+	SenderOwner SenderKind = "owner"
+	// SenderRoot is a room's root seat.
+	SenderRoot SenderKind = "root"
+	// SenderSession is any other agent session of a room, bound to its
+	// session ID in SessionIDs.
+	SenderSession SenderKind = "session"
+	// SenderUnbound is a room:agent address that SessionIDs does not bind.
+	SenderUnbound SenderKind = "unbound"
+	// SenderShell is a Dyna-managed shell.
+	SenderShell SenderKind = "shell"
+	// SenderRun is a workflow run.
+	SenderRun SenderKind = "run"
+)
+
+// Sender parses the post's author from fields every post already has. The
+// shell: and run: address prefixes are read here and nowhere else.
+func (m Message) Sender() SenderKind {
+	if m.Human {
+		return SenderOwner
+	}
+	switch {
+	case m.From == EngineSender:
+		return SenderEngine
+	case strings.HasPrefix(m.From, "shell:"):
+		return SenderShell
+	case strings.HasPrefix(m.From, "run:"):
+		return SenderRun
+	}
+	if _, agent, ok := strings.Cut(m.From, ":"); ok && agent != "" {
+		if agent == RootAgent {
+			return SenderRoot
+		}
+		if m.AuthorSessionID() != "" {
+			return SenderSession
+		}
+		return SenderUnbound
+	}
+	return SenderOwner
+}
+
 // SentBySession reports whether post m was written by session id, currently
 // named addr. It follows the same binding rule as SessionAddressed.
 func (m Message) SentBySession(id, addr string) bool {
