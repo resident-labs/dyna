@@ -13,11 +13,12 @@ import (
 // D-349: a blocking wait must end when steering is queued for the calling
 // session, so the harness reads the owner's message at the tool boundary
 // instead of after the whole wait. The fake signal fires at once: the
-// message is already queued when the wait starts. The wait cap bounds only
-// the failing case; the steered return needs no timeout.
+// message is already queued when the wait starts. The call asks for the
+// full 600 s against a job that never ends, so it can only return by
+// cancelling the Store.Wait goroutine's context and joining it: a leaked
+// waiter shows up as the bound, not as a silent pass.
 func TestOutputEndsWhenSteeringArrives(t *testing.T) {
 	tools := newTools(t, 50*time.Millisecond)
-	tools.WaitCap = 200 * time.Millisecond
 	gate, release := fifo(t)
 	call(t, tools, "shell", map[string]any{"command": "cat " + gate, "description": "Wait at the gate"})
 	job := onlyJob(t, tools)
@@ -29,7 +30,16 @@ func TestOutputEndsWhenSteeringArrives(t *testing.T) {
 		close(fired)
 		return fired, func() {}
 	}
-	text := call(t, tools, "shell_output", map[string]any{"job_id": job.ID, "wait": "exit", "timeout_seconds": 600})
+	answered := make(chan string, 1)
+	go func() {
+		answered <- call(t, tools, "shell_output", map[string]any{"job_id": job.ID, "wait": "exit", "timeout_seconds": 600})
+	}()
+	var text string
+	select {
+	case text = <-answered:
+	case <-time.After(5 * time.Second): // safety bound; the signal fires at once
+		t.Fatal("the steered wait did not end: the Store.Wait goroutine was not cancelled and joined")
+	}
 	if !strings.Contains(text, "Job "+job.ID+" is still running.") || !strings.Contains(text, steerNote) {
 		t.Fatalf("steered wait answered %q", text)
 	}
@@ -37,7 +47,6 @@ func TestOutputEndsWhenSteeringArrives(t *testing.T) {
 	// finds it, here to its end.
 	tools.Steer = nil
 	release()
-	tools.WaitCap = 0
 	if end := call(t, tools, "shell_output", map[string]any{"job_id": job.ID, "wait": "exit"}); !strings.HasPrefix(end, "Job "+job.ID+". Exit code 0.") {
 		t.Fatalf("job after the steered wait = %q", end)
 	}
