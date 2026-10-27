@@ -5,7 +5,6 @@ package computers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,7 +23,6 @@ import (
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/turnlock"
-	"dyna-agent/internal/userservices"
 )
 
 type SupervisorOptions struct {
@@ -365,33 +363,6 @@ func (s *supervisor) desktopEnv() []string {
 	return mergeEnvironment(os.Environ(), values)
 }
 
-// ErrServiceUpdating refuses a new desktop while the service waits for a quiet
-// moment to restart on a new build.
-var ErrServiceUpdating = errors.New("Dyna's computer service is updating to a new build; retry in a few minutes")
-
-var (
-	daemonStarted = time.Now()
-	// restartDrainWindow is the most that a pending restart refuses new
-	// desktops. It lets a busy service shed its desktops for a short time, and
-	// never holds the owner's computers back for hours while a few stay in use.
-	restartDrainWindow = 10 * time.Minute
-	restartPending     = func(now time.Time) bool {
-		return userservices.RestartPendingSince(userservices.Dir(), daemonStarted, now, restartDrainWindow)
-	}
-)
-
-// refusedDesktop returns the error start would give a stopped computer that the
-// service will not start a desktop for now, and nil for a running or starting
-// computer, or one that may start.
-func (s *supervisor) refusedDesktop() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.starting != nil || s.compositor.alive() || !restartPending(time.Now()) {
-		return nil
-	}
-	return ErrServiceUpdating
-}
-
 // start shares one startup attempt among this computer's first connections.
 // No caller holds mu while waiting for labwc or an existing attempt.
 func (s *supervisor) start() error {
@@ -410,12 +381,6 @@ func (s *supervisor) start() error {
 		s.lastActivity = time.Now()
 		s.mu.Unlock()
 		return nil
-	}
-	// A running desktop keeps working. Only a new one waits, so the set of busy
-	// computers shrinks until the deferred restart of this service can run.
-	if restartPending(time.Now()) {
-		s.mu.Unlock()
-		return ErrServiceUpdating
 	}
 	ctx, cancel := context.WithCancel(s.ctx)
 	attempt := &desktopStart{done: make(chan struct{}), cancel: cancel}
