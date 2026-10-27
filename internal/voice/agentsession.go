@@ -162,7 +162,11 @@ type sessionLoop struct {
 	lastAudio time.Time
 	// active is the response that plays, empty when none does.
 	active string
-	// owed: a reply is due and waits for the active response to end.
+	// creating is true after response.create until that request ends.
+	// It is set before the provider says the response started, so a second
+	// reply waits while l.active is still empty.
+	creating bool
+	// owed: one follow-up reply waits for the in-flight response to end.
 	owed bool
 	// dropped holds the cancelled responses whose late audio is not sent.
 	dropped map[string]bool
@@ -250,16 +254,22 @@ func (l *sessionLoop) send(event any) (agentwire.EndReason, bool) {
 	return "", false
 }
 
-// reply asks for a response, or waits for the active one to end first.
+// reply asks for a response. Every provider has one response slot, so a
+// create that was sent, or a response that started and has not ended, holds
+// it. A second reply queues one follow-up instead of sending now.
 func (l *sessionLoop) reply() (agentwire.EndReason, bool) {
 	if l.p.Caps.NoClientResponses {
 		return "", false // the provider answers on its own
 	}
-	if l.active != "" && l.p.Caps.SingleResponseSlot {
+	if l.creating || l.active != "" {
 		l.owed = true
 		return "", false
 	}
-	return l.send(l.p.Protocol.ResponseCreate(""))
+	if reason, ended := l.send(l.p.Protocol.ResponseCreate("")); ended {
+		return reason, true
+	}
+	l.creating = true
+	return "", false
 }
 
 // say speaks the text just added. Replace cancels the active response first.
@@ -424,18 +434,35 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 		}()
 		return l.emit(agentwire.OutMessage{Type: agentwire.OutToolCall, CallID: ev.CallID, Name: ev.Name, Args: ev.Args})
 	case realtime.ResponseDone:
+		// A done event for the response that plays, or while none has started,
+		// frees the slot. A done event for some other response does not.
 		if ev.ResponseID == l.active || l.active == "" {
 			l.active = ""
+			l.creating = false
 		}
 		if reason, ended := l.emit(agentwire.OutMessage{Type: agentwire.OutResponseDone, ResponseID: ev.ResponseID}); ended {
 			return reason, true
 		}
-		if l.owed {
+		if l.owed && !l.creating && l.active == "" {
 			l.owed = false
 			return l.reply()
 		}
 	case realtime.Error:
-		return l.fail("%s", ev.Text)
+		// A busy refusal means a response still holds the slot. Any other
+		// error ends a create the provider has not started.
+		busy := ev.Code == "conversation_already_has_active_response"
+		if busy {
+			l.creating = true
+		} else {
+			l.creating = false
+		}
+		if reason, ended := l.fail("%s", ev.Text); ended {
+			return reason, true
+		}
+		if !busy && l.active == "" && l.owed {
+			l.owed = false
+			return l.reply()
+		}
 	}
 	return "", false
 }
