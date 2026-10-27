@@ -64,7 +64,7 @@ export function saveFeedViewList(value: string) {
 // lastRoom is the room the owner had open: {room, view}, or null when none
 // was saved. room is '' for the all-rooms page.
 // The views a room reopens on: the feed filters and the workspace views.
-const VIEWS = ['general', 'files', 'github', 'issues', 'library', 'terminal', 'jobs', 'requests']
+const VIEWS = ['general', 'files', 'github', 'issues', 'library', 'terminal', 'requests']
 
 const viewOrGeneral = (view: unknown) => {
   // TODO(legacy/shim): keep old saved Questions views on the Requests page.

@@ -7,8 +7,9 @@ test('the sidebar is one list of seven rows ending in Computers; Room settings i
 })
 
 test('work views resolve to their sidebar rows; PRs and Issues belong to the room', () => {
-  const byView = Object.fromEntries(['requests', 'questions', 'goals', 'runs', 'jobs', 'services', 'visuals', 'files', 'github', 'issues', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
-  assert.deepEqual(byView, { requests: 'requests', questions: 'requests', goals: 'goals', runs: 'runs', jobs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, library: 'library', terminal: undefined, computers: 'computers' })
+  const byView = Object.fromEntries(['requests', 'questions', 'goals', 'runs', 'services', 'visuals', 'files', 'github', 'issues', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
+  assert.deepEqual(byView, { requests: 'requests', questions: 'requests', goals: 'goals', runs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, library: 'library', terminal: undefined, computers: 'computers' })
+  assert.equal(rowOf('jobs'), undefined)
   assert.equal(rowOf('files'), undefined)
   assert.equal(rowOf('changes'), undefined)
   for (const view of ['settings', 'rules', 'room-general', 'room-hooks']) assert.equal(rowOf(view), undefined, view)
@@ -29,9 +30,9 @@ test('the runs count is running workflows only, never a total and never shell jo
   assert.equal(runningWork(null), 0)
 })
 
-test('the runs header shows no Shell jobs tab, but a job log stays under the runs row', () => {
+test('the runs header is one Workflows tab and has no shell jobs tab', () => {
   assert.equal(visibleTabs(rowOf('runs')), null)
-  assert.equal(rowOf('jobs')?.id, 'runs')
+  assert.deepEqual(rowOf('runs')?.tabs.map((t) => t.id), ['runs'])
 })
 
 test('Library is repo-scoped and the library view still resolves', () => {

@@ -19,7 +19,7 @@ export interface Row {
 export const rows: Row[] = [
   { id: 'requests', label: 'requests', hint: 'Questions and terminal requests that need the owner', tabs: [{ id: 'requests', label: 'Requests' }] },
   { id: 'goals', label: 'goals', hint: 'Room goals', tabs: [{ id: 'goals', label: 'Goals' }] },
-  { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }, { id: 'jobs', label: 'Shell jobs', hidden: true }] },
+  { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }] },
   { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
   { id: 'visuals', label: 'visuals', hint: 'Every HTML card in this room', tabs: [{ id: 'visuals', label: 'Visuals' }] },
   { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
@@ -46,7 +46,7 @@ export const runningJob = (j: { state: string }): boolean => j.state === 'runnin
 export const runningWork = (runs: { running?: number } | null | undefined): number => runs?.running ?? 0
 
 // visibleTabs is the tabs a row shows in the header, or null for one tab.
-// A hidden tab only keeps its view under the row, such as a shell job log.
+// A hidden tab stays under the row and does not appear in the header.
 export function visibleTabs(row: Row | undefined): Tab[] | null {
   const tabs = row?.tabs.filter((t) => !t.hidden)
   return tabs && tabs.length > 1 ? tabs : null
