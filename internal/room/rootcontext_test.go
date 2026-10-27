@@ -162,14 +162,25 @@ func TestRootWakeUsesTheStoredSenderRoom(t *testing.T) {
 	if decision, _ := RootContext(otherRoom, roomName); decision != RootWake {
 		t.Fatalf("a notice from another room did not wake root: %d", decision)
 	}
-	// A post stored before the field existed keeps reading by its address.
-	legacy := Message{
-		Wake: true, ID: "msg_legacy", RoomID: "room_1", From: "elsewhere:lead",
-		SessionIDs: map[string]string{"elsewhere:lead": "ses_lead"},
-		Kind:       "notice", To: []string{roomName},
-	}
-	if decision, _ := RootContext(legacy, roomName); decision != RootWake {
-		t.Fatalf("a legacy post from another room did not wake root: %d", decision)
+}
+
+func TestMessageSenderParsesTheAuthorKind(t *testing.T) {
+	for _, tc := range []struct {
+		msg  Message
+		want SenderKind
+	}{
+		{Message{From: EngineSender}, SenderEngine},
+		{Message{From: "r"}, SenderOwner},
+		{Message{From: "r", Human: true}, SenderOwner},
+		{Message{From: "r:" + RootAgent}, SenderRoot},
+		{Message{From: "r:lead", SessionIDs: map[string]string{"r:lead": "ses_1"}}, SenderSession},
+		{Message{From: "r:lead"}, SenderUnbound},
+		{Message{From: "shell:sh_1"}, SenderShell},
+		{Message{From: "run:wf_1"}, SenderRun},
+	} {
+		if got := tc.msg.Sender(); got != tc.want {
+			t.Errorf("Sender(%q) = %q, want %q", tc.msg.From, got, tc.want)
+		}
 	}
 }
 

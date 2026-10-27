@@ -1,7 +1,5 @@
 package room
 
-import "strings"
-
 // RootDecision says how one post reaches the root seat.
 type RootDecision int
 
@@ -34,7 +32,12 @@ func rootSelfPost(msg Message, roomName string) bool {
 	if ev, ok := msg.TurnResult(); ok {
 		return ev.Session == roomName+":"+RootAgent || ev.Session == roomName
 	}
-	return msg.From == roomName+":"+RootAgent
+	return authoredByRootSeat(msg, roomName)
+}
+
+// authoredByRootSeat reports a post written by this room's root seat.
+func authoredByRootSeat(msg Message, roomName string) bool {
+	return msg.Sender() == SenderRoot && msg.From == roomName+":"+RootAgent
 }
 
 // RootContext classifies one post for the root seat: wake, quiet or skip,
@@ -90,7 +93,7 @@ func rootInput(msg Message, roomName string) bool {
 // not wait in the quiet digest. Human requests, Voice, alerts, failed reports
 // and root-owned shell/workflow results keep their wake behavior.
 func rootWakes(msg Message, roomName string) bool {
-	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) || msg.From == roomName+":"+RootAgent {
+	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) || authoredByRootSeat(msg, roomName) {
 		return false
 	}
 	// A registered event follows its spec, so its family decides how it
@@ -116,7 +119,7 @@ func rootWakes(msg Message, roomName string) bool {
 	// display address cannot change the decision. The engine, a shell and a
 	// workflow run record no sender room, so their posts keep the kind rules
 	// below.
-	if senderFromAnotherRoom(msg, roomName) {
+	if senderFromAnotherRoom(msg) {
 		return msg.Wake
 	}
 	switch msg.Kind {
@@ -125,7 +128,7 @@ func rootWakes(msg Message, roomName string) bool {
 		// to its parent root must not wait in the quiet digest. notify binds a
 		// session's own address to its session, so the engine, shells and
 		// workflow runs keep the rules below.
-		if msg.AuthorSessionID() != "" && msg.Wake {
+		if msg.Sender() == SenderSession && msg.Wake {
 			return true
 		}
 		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice || ownerNamesRoot(msg, roomName)
@@ -138,7 +141,7 @@ func rootWakes(msg Message, roomName string) bool {
 	case "seat", "pr", "merge":
 		return msg.NeedsRoot
 	case "completed":
-		return msg.OwnerReport && (strings.HasPrefix(msg.From, "shell:") || strings.HasPrefix(msg.From, "run:"))
+		return msg.OwnerReport && (msg.Sender() == SenderShell || msg.Sender() == SenderRun)
 	case "failed", "stopped":
 		return msg.OwnerReport
 	}
@@ -155,19 +158,8 @@ func ownerNamesRoot(msg Message, roomName string) bool {
 
 // senderFromAnotherRoom reports a post whose sender is a session of a room
 // other than this one. The post records the sender's room when it is stored,
-// so the decision reads that identity instead of the display address. A post
-// stored before the field existed falls back to its address, whose room part
-// was current when the post was written.
-func senderFromAnotherRoom(msg Message, roomName string) bool {
-	if msg.SenderRoomID != "" {
-		return msg.SenderRoomID != msg.RoomID
-	}
-	// TODO: legacy/shim remove later — a session post stored before
-	// senderRoomId falls back to the room part of its address. Remove when
-	// retained history ages out.
-	if msg.SessionIDs[msg.From] == "" {
-		return false
-	}
-	room, agent, ok := strings.Cut(msg.From, ":")
-	return ok && agent != "" && room != roomName
+// so the decision reads that identity instead of the display address.
+func senderFromAnotherRoom(msg Message) bool {
+	kind := msg.Sender()
+	return (kind == SenderSession || kind == SenderRoot) && msg.SenderRoomID != "" && msg.SenderRoomID != msg.RoomID
 }
