@@ -244,6 +244,9 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 	if err != nil {
 		return g, err
 	}
+	if clearLinks {
+		return g, s.releaseGoalIssues(ctx, r.ID, g.ID, actor)
+	}
 	if len(fixes) == 0 {
 		return g, nil
 	}
