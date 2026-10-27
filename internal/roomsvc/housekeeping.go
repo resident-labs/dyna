@@ -30,6 +30,22 @@ func (s *Service) SetRoomRootProfile(ctx context.Context, ref, name string) erro
 	return s.rooms().SetRootProfile(ref, name)
 }
 
+// SetRoomCheckIn stores a room's parent check-in cadence: a duration such as
+// 30m, off to stop this room's check-ins, or default to use the parent
+// check-ins hook's global interval. Only the owner and the room's root may
+// change it, like every room setting.
+func (s *Service) SetRoomCheckIn(ctx context.Context, ref, value string) error {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	setting, err := room.ParseCheckIn(value)
+	if err != nil {
+		return err
+	}
+	_, err = s.rooms().SetCheckIn(ctx, ref, setting)
+	return err
+}
+
 // AddRoomRepo registers another repository whose checkouts the room accepts
 // for local changes. Only the owner or the room's root may.
 func (s *Service) AddRoomRepo(ctx context.Context, ref, path string) error {

@@ -58,11 +58,13 @@ test('each section shows its moved controls in one shared layout', async () => {
     // No pause state yet: the switch waits for the host.
     assert.match(show('general'), /aria-label="Pause agents" disabled/)
     const root = show('general', {
-      room: { ...room, rootProfile: 'chosen' },
+      room: { ...room, rootProfile: 'chosen', checkIn: 'off' },
       profiles: [{ name: 'chosen', harness: 'mock' }, { name: 'opus', harness: 'claude-code' }],
     })
     assert.match(root, /aria-label="Root profile"/)
     assert.match(text(root), /Root profile .*Global default .*chosen .*opus/)
+    assert.match(root, /aria-label="Parent check-ins"[^>]*value="off"/)
+    assert.doesNotMatch(show('general'), /value="off"/) // no setting: the field starts empty
 
     const review = text(show('review', { reviewer: { enabled: true } }))
     assert.match(review, /Review &amp; landing .*Automatic review Review new PRs .*Reviewer sessions .*Restart reviewer/)
@@ -126,10 +128,13 @@ interface PageState {
   githubAccess: string
   mergeMaxParallel: number
   publishError: string
+  checkIn: string
+  checkInBusy: boolean
+  checkInError: string
 }
 
 function page<K extends keyof PageFns>(api: object, names: readonly K[], extra: Record<string, unknown> = {}): PageState & Pick<PageFns, K> {
-  const state: PageState = { roomId: 'r', policy: null, form: null, busy: false, dirty: true, error: '', saved: false, reviewPublishing: 'local', githubAccess: 'read-only', mergeMaxParallel: 3, publishError: '' }
+  const state: PageState = { roomId: 'r', policy: null, form: null, busy: false, dirty: true, error: '', saved: false, reviewPublishing: 'local', githubAccess: 'read-only', mergeMaxParallel: 3, publishError: '', checkIn: 'off', checkInBusy: false, checkInError: '' }
   const context = Object.assign({ api, $state: (value: unknown) => value, normalizePolicy, budgetForm, checksText, saveRoomPolicy, errorText, onreviewer: async () => {}, prSettings: null, ...extra }, state)
   vm.createContext(context)
   vm.runInContext(stripTypes(handlers([...names, 'formOf', 'policyRequest', 'policyRoom', 'policyLoading', 'saveAfterPolicy', 'reviewerBusy'])), context)
@@ -371,4 +376,20 @@ test('parallel prefix trials load, save, and restore after a failed write', asyn
  await c.savePublishing()
  assert.equal(c.mergeMaxParallel, 4)
  assert.match(c.publishError, /write failed/)
+})
+
+test('the parent check-in field saves its value and restores the stored one after a failed write', async () => {
+ let fail = false
+ let saved = ''
+ const pageRoom = { id: 'r', checkIn: 'off' }
+ const c = page({ setRoomCheckIn: async (_room: string, value: string) => { if (fail) throw new Error('interval must be a duration'); pageRoom.checkIn = value } }, ['saveCheckIn'] as const, { room: pageRoom, oncheckin: (_id: string, value: string) => { saved = value; pageRoom.checkIn = value } })
+ c.checkIn = ' 30m '
+ await c.saveCheckIn()
+ assert.equal(pageRoom.checkIn, '30m') // trimmed before it is sent
+ assert.equal(saved, '30m')
+ fail = true
+ c.checkIn = 'nonsense'
+ await c.saveCheckIn()
+ assert.equal(c.checkIn, '30m') // the stored value comes back
+ assert.match(c.checkInError, /interval must be a duration/)
 })
