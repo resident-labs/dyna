@@ -65,6 +65,8 @@ export interface Turn {
   usage: Usage
   items: Item[] | null
   omitted?: boolean
+  // wake is why the turn started. The session view draws line; it does not parse it.
+  wake?: { kind: string; postId?: string; sender?: string; name?: string; line: string }
 }
 
 // SessionReference is roomsvc.ReferenceRow: one post of another conversation,

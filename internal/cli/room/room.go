@@ -291,6 +291,9 @@ func logCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\ncreated %s, last activity %s\n\n", rec.Name, rec.ID, rec.CreatedAt.Format(time.RFC3339), rec.LastActivity.Format(time.RFC3339))
 			for _, msg := range out {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s %s -> %s [%s] %s\n", time.UnixMilli(msg.TS).Format("2006-01-02 15:04:05"), msg.ID, msg.From, strings.Join(msg.To, ", "), msg.Kind, oneline(msg.Text))
+				if line := wokeLine(rec.ID, msg); line != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
+				}
 			}
 			return nil
 		},
@@ -330,6 +333,12 @@ func readCmd() *cobra.Command {
 			reply := notify.Default().Sessions.Store.ReplyAddress(msg)
 			files, _ := store().FilesDir(rec.ID)
 			fmt.Fprintln(cmd.OutOrStdout(), msg.Frame(room.FrameOptions{Room: rec.Name, Reader: reader, Reply: reply, FilesDir: files}))
+			if lines := deliveryReport(rec, msg.ID); len(lines) > 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "Deliveries:")
+				for _, line := range lines {
+					fmt.Fprintln(cmd.OutOrStdout(), "  "+line)
+				}
+			}
 			return nil
 		},
 	}
@@ -849,4 +858,29 @@ func postNeedsCallHint(ctx context.Context, msg room.Message) bool {
 	}
 	err := engineclient.New("").Call(ctx, "VoiceStatus", nil, &status)
 	return err != nil || !status.Live || status.RoomID != msg.RoomID
+}
+
+func wokeLine(roomID string, msg room.Message) string {
+	rows, err := store().PostDeliveries(roomID, msg.ID)
+	if err != nil {
+		return ""
+	}
+	for _, row := range rows {
+		if row.How == room.DeliveryWoke {
+			return room.WakeLine(msg.ID, room.WakeSender(msg))
+		}
+	}
+	return ""
+}
+
+func deliveryReport(rec room.Record, postID string) []string {
+	rows, err := store().PostDeliveries(rec.ID, postID)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines = append(lines, row.Summary(room.DeliveryLabel(row.SessionID, rec.Name)))
+	}
+	return lines
 }

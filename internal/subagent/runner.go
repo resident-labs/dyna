@@ -468,6 +468,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			}
 		}
 	}
+	if line := turn.Wake.HeaderLine(); line != "" {
+		roomContext += "\n" + line
+	}
 	if n == 1 || turn.TransferID != "" {
 		// A new session's brief is in the instructions. A transfer packet or a
 		// service assignment still follows it.

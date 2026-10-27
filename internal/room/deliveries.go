@@ -1,6 +1,11 @@
 package room
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+)
 
 // DeliveryMode says whether a post asks its recipient to act now or only adds
 // context for its next turn.
@@ -38,6 +43,18 @@ const (
 	DeliveryDismissed DeliveryState = "dismissed"
 )
 
+// DeliveryHow says how a stored delivery reached its recipient.
+type DeliveryHow string
+
+const (
+	// DeliveryWoke means this delivery started the recipient's turn.
+	DeliveryWoke DeliveryHow = "woke"
+	// DeliveryBatched means the post was included in a turn something else started.
+	DeliveryBatched DeliveryHow = "batched"
+	// DeliveryQuietContext means the post waited as context and did not start a turn.
+	DeliveryQuietContext DeliveryHow = "quiet"
+)
+
 // Delivery is one recipient of one post, as stored in post_deliveries.
 // PostID names the post the delivery carries, and is empty in the deliveries
 // that DeliveriesFor builds for a post it is about to index. Category is the
@@ -50,6 +67,103 @@ type Delivery struct {
 	Category    string
 	State       DeliveryState
 	ClaimedTurn int
+	// How is set when a turn takes the delivery. Empty means it has not been taken.
+	How DeliveryHow
+	// DeliveredAt is the unix-millisecond time the recipient's turn took the
+	// post. Zero means it has not been taken. It is a clock time, not the
+	// row version in updated_at.
+	DeliveredAt int64
+}
+
+// HowText is the owner-facing delivery phrase: woke, batched into turn N, or
+// quiet context. Empty means the delivery has not been taken.
+func (d Delivery) HowText() string {
+	switch d.How {
+	case DeliveryWoke:
+		return "woke"
+	case DeliveryBatched:
+		if d.ClaimedTurn > 0 {
+			return fmt.Sprintf("batched into turn %d", d.ClaimedTurn)
+		}
+		return "batched"
+	case DeliveryQuietContext:
+		return "quiet context"
+	default:
+		return ""
+	}
+}
+
+// Summary is one recipient line for dyna room read: who, how, and when.
+func (d Delivery) Summary(label string) string {
+	how := d.HowText()
+	if how == "" {
+		if d.State == DeliveryQueued || d.State == "" || d.State == DeliveryImported {
+			return label + ": not delivered yet"
+		}
+		how = string(d.Mode)
+	}
+	if d.DeliveredAt > 0 {
+		return fmt.Sprintf("%s: %s at %s", label, how, time.UnixMilli(d.DeliveredAt).Local().Format("2006-01-02 15:04:05"))
+	}
+	return label + ": " + how
+}
+
+// DeliveryLabel is the recipient name a person reads. A root-seat row names
+// the room's root, not the seat key.
+func DeliveryLabel(sessionID, roomName string) string {
+	if strings.HasPrefix(sessionID, seatPrefix) {
+		if roomName == "" {
+			return "root"
+		}
+		return roomName + ":root"
+	}
+	return sessionID
+}
+
+// DeliveryReceipt is the dyna post line for one session delivery. A quiet
+// post queues no turn, so it must not say session-queued.
+func DeliveryReceipt(mode DeliveryMode) string {
+	if mode == DeliveryQuiet {
+		return "session-quiet"
+	}
+	return "session-queued"
+}
+
+// WakeSender is the short name in "woke on <post> from <sender>".
+func WakeSender(msg Message) string {
+	if msg.Human {
+		return "the owner"
+	}
+	if msg.Script != nil {
+		if msg.Script.Workflow != "" {
+			return msg.Script.Workflow
+		}
+		if msg.Script.RunID != "" {
+			return msg.Script.RunID
+		}
+	}
+	if msg.Kind == string(FamilyCheckin) {
+		return "parent check-in"
+	}
+	if msg.Kind == string(FamilyEngine) && msg.Notice.Kind == string(TypeRootFlush) {
+		return "a schedule"
+	}
+	if msg.From == "" {
+		return "the engine"
+	}
+	return msg.From
+}
+
+// WakeLine is the short line a turn and a room log show for a post that
+// started a turn.
+func WakeLine(postID, sender string) string {
+	if postID == "" {
+		return ""
+	}
+	if sender == "" {
+		sender = "the engine"
+	}
+	return fmt.Sprintf("woke on %s from %s", postID, sender)
 }
 
 // RootInput reports whether a root-seat delivery is turn input: a post that

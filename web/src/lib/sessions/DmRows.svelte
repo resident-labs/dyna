@@ -57,6 +57,7 @@
     {#if row.kind === 'turn'}
       {@const t = row.turn}
       <div class="rule" id="turn-{t.n}"><span>{turnHead(t)} · {stamp(t.started)}{#if !done.includes(t.status ?? '')}{' · '}<b class={t.status}>{turnText[t.status ?? ''] || t.status}</b>{/if}</span></div>
+      {#if t.wake?.line}<p class="wake-line">{t.wake.line}</p>{/if}
     {:else if row.kind === 'turnEnd'}
       <p class="turn-end" class:enter={isNew(row.key)}><b class={row.turn.status}>{turnText[row.turn.status ?? ''] || row.turn.status}</b>{turnTail(row.turn) ? ` · ${turnTail(row.turn)}` : ''}</p>
     {:else if row.kind === 'message'}
@@ -116,6 +117,7 @@
     color: var(--faint);
     transform: translateY(-50%);
   }
+  .wake-line { margin: -10px var(--s4) var(--s3); text-align: center; font-size: var(--t-sm); color: var(--faint); }
   .turn-end { margin: 6px var(--s4) 0 var(--gutter); font-size: var(--t-cap); color: var(--faint); }
   :is(.rule, .turn-end) b { font-weight: 600; }
   :is(.rule, .turn-end) b.ok { color: var(--sage); }

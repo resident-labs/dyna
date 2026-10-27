@@ -27,8 +27,10 @@ import (
 //
 // schemaVersion 1 held the tables as PR 4b part 1 wrote them. Version 2 adds
 // claimed_turn and the dismissed state, which replaced the session_queues
-// JSON blob (see room/deliverystate.go).
-const postIndexVersion = 2
+// JSON blob (see room/deliverystate.go). Version 3 adds delivered_at, a clock
+// time, and how, which says whether the delivery woke the turn, was batched
+// into it, or stayed quiet context.
+const postIndexVersion = 3
 
 const postIndexSchema = `CREATE TABLE post_homes (
  room_id TEXT NOT NULL,
@@ -117,6 +119,15 @@ func (s *Store) postIndexDB() (*sql.DB, error) {
 		}
 		if old < 2 {
 			if _, err := conn.ExecContext(ctx, postDeliveriesV2); err != nil {
+				return err
+			}
+		}
+		if old < 3 {
+			// delivered_at is a clock time. updated_at stays the row version.
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE post_deliveries ADD COLUMN delivered_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE post_deliveries ADD COLUMN how TEXT NOT NULL DEFAULT ''`); err != nil {
 				return err
 			}
 		}

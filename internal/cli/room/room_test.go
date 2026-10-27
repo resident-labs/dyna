@@ -175,8 +175,12 @@ func TestQuietPostFromRoomIdentityDoesNotWakeRoot(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	clearStamp(t)
 	work := workRoom(t)
-	if _, err := execCmd(t, PostCmd(), "--quiet", "@work:root", "[voice] player said hello"); err != nil {
+	out, err := execCmd(t, PostCmd(), "--quiet", "@work:root", "[voice] player said hello")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(out, "session-queued") {
+		t.Fatalf("quiet post queued a turn:\n%s", out)
 	}
 	msgs, err := room.DefaultStore().Messages(work.ID)
 	if err != nil {

@@ -61,8 +61,9 @@ Records without `roomId` fail closed.
 
 `dyna post --json` returns `{message, deliveries, skipped?}`.
 Each delivery is `{to, delivery, turn?, pointer?, error?}`.
-Delivery values include `room`, `session-queued`, and `failed`.
+Delivery values include `room`, `session-queued`, `session-quiet`, and `failed`.
 `session-queued` means the post and its wake intent are saved. The engine starts or steers the session after the store event.
+`session-quiet` means the post is stored as context for the next turn. It queues no turn, so a quiet post does not print `session-queued`.
 If the engine is down, messages wait until it starts. The receipt does not include a turn number.
 Session delivery no longer returns `session-steered` or `session-followup` from the posting process.
 If delivery fails, the CLI exits nonzero; the stored post and successful deliveries remain.

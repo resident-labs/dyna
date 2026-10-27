@@ -349,6 +349,44 @@ func MarkDeliveredIn(ctx context.Context, conn *sql.Conn, set DeliverySet, postI
 	return marked, nil
 }
 
+// NoteDeliveries records how a turn took the deliveries of postIDs, and when.
+// A woke row stays woke: a later note must not call the cause a batched post.
+// deliveredAt is a clock time. The row version still moves on its own.
+func (s *Store) NoteDeliveries(ctx context.Context, ev hub.Event, set DeliverySet, postIDs []string, how DeliveryHow, turn int, deliveredAt int64) error {
+	if how == "" || !set.Claimed() || len(postIDs) == 0 {
+		return nil
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, ev, func(conn *sql.Conn) error {
+		return NoteDeliveriesIn(ctx, conn, set, postIDs, how, turn, deliveredAt)
+	})
+}
+
+// NoteDeliveriesIn is NoteDeliveries on conn, inside the caller's transaction.
+func NoteDeliveriesIn(ctx context.Context, conn *sql.Conn, set DeliverySet, postIDs []string, how DeliveryHow, turn int, deliveredAt int64) error {
+	if how == "" || !set.Claimed() || len(postIDs) == 0 {
+		return nil
+	}
+	version, err := deliveryWriteTime(ctx, conn)
+	if err != nil {
+		return err
+	}
+	query := "UPDATE post_deliveries SET how=?, delivered_at=CASE WHEN delivered_at=0 THEN ? ELSE delivered_at END, claimed_turn=CASE WHEN claimed_turn=0 THEN ? ELSE claimed_turn END, updated_at=?" +
+		" WHERE room_id=? AND post_id=? AND session_id IN (" + inClause(set.Keys) + ") AND state NOT IN ('cancelled','dismissed') AND (? = 'woke' OR how <> 'woke')"
+	for _, postID := range postIDs {
+		args := []any{string(how), deliveredAt, turn, version, set.RoomID, postID}
+		args = keyArgs(args, set.Keys)
+		args = append(args, string(how))
+		if _, err := conn.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeliveryWrite runs fn in one transaction on the delivery rows and publishes
 // ev after it commits. A caller that must commit something else in the same
 // transaction uses it: subagent's input claim keeps the delivered frames in

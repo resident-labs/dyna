@@ -111,12 +111,16 @@ func resultText(t subagent.Turn) string {
 
 func printResult(c *cobra.Command, t subagent.Turn) {
 	text := resultText(t)
-	if text == "" {
-		return
+	if text != "" {
+		fmt.Fprint(c.OutOrStdout(), text)
+		if !strings.HasSuffix(text, "\n") {
+			fmt.Fprintln(c.OutOrStdout())
+		}
 	}
-	fmt.Fprint(c.OutOrStdout(), text)
-	if !strings.HasSuffix(text, "\n") {
-		fmt.Fprintln(c.OutOrStdout())
+	// The result stays first so a caller that reads the result text is unchanged.
+	// The wake line follows it.
+	if line := t.Wake.Line(); line != "" {
+		fmt.Fprintln(c.OutOrStdout(), line)
 	}
 }
 
@@ -153,12 +157,14 @@ type turnView struct {
 	Error          string             `json:"error"`
 	HarnessSession string             `json:"harnessSession"`
 	Usage          workeroutput.Usage `json:"usage"`
+	Wake           string             `json:"wake,omitempty"`
 }
 
 func turnEnvelope(info subagent.Info, t subagent.Turn) turnView {
 	return turnView{
 		Session: info.ID, Name: info.Name, Turn: t.N, Status: t.Status,
 		Result: t.Result, Error: t.Error, HarnessSession: t.HarnessSession, Usage: t.Usage,
+		Wake: t.Wake.Line(),
 	}
 }
 

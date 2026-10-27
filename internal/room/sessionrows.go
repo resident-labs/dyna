@@ -140,7 +140,7 @@ func (s *Store) DeliverySignature(roomID string, keys []string) (int64, error) {
 
 // deliveryColumns is the column list every delivery read scans, in the order
 // scanDelivery reads them.
-const deliveryColumns = "post_id, session_id, mode, category, state, claimed_turn"
+const deliveryColumns = "post_id, session_id, mode, category, state, claimed_turn, how, delivered_at"
 
 // rowScanner is the part of *sql.Rows and *sql.Row a delivery read needs.
 type rowScanner interface {
@@ -149,11 +149,36 @@ type rowScanner interface {
 
 // scanDelivery reads one row of deliveryColumns.
 func scanDelivery(row rowScanner) (Delivery, error) {
-	var sessionID, mode, category, state string
+	var sessionID, mode, category, state, how string
 	var d Delivery
-	if err := row.Scan(&d.PostID, &sessionID, &mode, &category, &state, &d.ClaimedTurn); err != nil {
+	if err := row.Scan(&d.PostID, &sessionID, &mode, &category, &state, &d.ClaimedTurn, &how, &d.DeliveredAt); err != nil {
 		return Delivery{}, err
 	}
-	d.SessionID, d.Mode, d.Category, d.State = sessionID, DeliveryMode(mode), category, DeliveryState(state)
+	d.SessionID, d.Mode, d.Category, d.State, d.How = sessionID, DeliveryMode(mode), category, DeliveryState(state), DeliveryHow(how)
 	return d, nil
+}
+
+// PostDeliveries reads every recipient row of one post, in session-id order.
+func (s *Store) PostDeliveries(roomID, postID string) ([]Delivery, error) {
+	if roomID == "" || postID == "" {
+		return nil, nil
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query("SELECT "+deliveryColumns+" FROM post_deliveries WHERE room_id=? AND post_id=? ORDER BY session_id", roomID, postID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Delivery
+	for rows.Next() {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }

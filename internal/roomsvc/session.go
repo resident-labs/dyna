@@ -82,6 +82,24 @@ type Turn struct {
 	Usage              workeroutput.Usage              `json:"usage"`
 	Items              []Item                          `json:"items"`
 	Omitted            bool                            `json:"omitted,omitempty"`
+	Wake               *wakeView                       `json:"wake,omitempty"`
+}
+
+// wakeView is the typed wake cause the session view draws. Line is the short
+// sentence; the other fields are the facts, so the view does not parse text.
+type wakeView struct {
+	Kind   string `json:"kind"`
+	PostID string `json:"postId,omitempty"`
+	Sender string `json:"sender,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Line   string `json:"line"`
+}
+
+func wakeViewOf(c subagent.WakeCause) *wakeView {
+	if c.Kind == "" {
+		return nil
+	}
+	return &wakeView{Kind: string(c.Kind), PostID: c.PostID, Sender: c.Sender, Name: c.Name, Line: c.Line()}
 }
 
 // Item is one transcript entry. Kind is prompt, steering, reply, tool,
@@ -302,7 +320,7 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 				claimed[it.Tool.JobID] = true
 			}
 		}
-		turn := Turn{WrapUp: t.WrapUp, Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: t.Omitted}
+		turn := Turn{WrapUp: t.WrapUp, Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: t.Omitted, Wake: wakeViewOf(t.Wake)}
 		for _, it := range items {
 			item := sessionItem(it)
 			if in, ok := byID[item.JobID]; ok && item.JobOp == "run" {
