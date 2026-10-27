@@ -1,8 +1,11 @@
 package subagent
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
+
+	"dyna-agent/internal/workeroutput"
 )
 
 // forgedDeliveryNote opens the next turn after a reply that imitated a delivery.
@@ -42,3 +45,18 @@ type ForgedDeliveryJournal struct {
 }
 
 func (ForgedDeliveryJournal) journalKind() JournalKind { return JournalForgedDelivery }
+
+// turnImitatesDelivery reports whether any assistant message of the turn, not
+// only its final reply, imitates a delivery. Pi can write one after an
+// automatic retry.
+func (s *Store) turnImitatesDelivery(id string, t Turn) bool {
+	path, _ := s.NormalizedPath(id)
+	found := false
+	scanTail(path, t.NormStart, func(line []byte) {
+		var e workeroutput.Event
+		if !found && json.Unmarshal(line, &e) == nil && e.Kind == "message" && e.Role == "assistant" && looksLikeDelivery(e.Text) {
+			found = true
+		}
+	})
+	return found
+}

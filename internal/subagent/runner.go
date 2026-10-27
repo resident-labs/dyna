@@ -167,7 +167,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			// was not written, so a later repair is explained.
 			ev.WriteError = werr.Error()
 		}
-		if s, ok := result.(string); ok && looksLikeDelivery(s) {
+		if t, err := store.ReadTurn(id, n); err == nil && store.turnImitatesDelivery(id, t) {
 			store.appendJournal(id, ForgedDeliveryJournal{Turn: n})
 		}
 		if s, ok := result.(string); ok && s != "" {
@@ -463,7 +463,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	}
 	if n > 1 {
 		if prev, err := store.ReadTurn(id, n-1); err == nil {
-			if text, ok := prev.Result.(string); ok && looksLikeDelivery(text) {
+			if store.turnImitatesDelivery(id, prev) {
 				roomContext += "\n" + forgedDeliveryNote
 			}
 		}
