@@ -1,6 +1,7 @@
 // What the Dyna home screen shows. The functions are pure; Home.svelte loads
 // the data and draws the result.
 import { accountLabel, accountStatus, needsSignIn, remainingPercent } from '../settings/accounts/state.ts'
+import { requestFilter } from '../requests/requests.ts'
 import type { AccountLike } from '../settings/accounts/state.ts'
 import type { Provider, ProviderAccounts, ScopeAccount } from '../api/account.ts'
 import { HARNESS_ORDER, harnessRowState } from '../settings/harnesses/state.ts'
@@ -80,22 +81,28 @@ export interface HomeQuestion {
   text?: string
   human?: boolean
   askerName?: string
+  kind?: 'question' | 'terminal'
+  terminal?: { stage?: string }
 }
 
-export interface RootQuestionRow {
+export interface HomeRequestRow {
   key: string
   room: HomeRoom
   text?: string
+  kind?: 'question' | 'terminal'
+  askerName?: string
 }
 
-// rootQuestions lists the open questions root asked the human. Agents ask
-// root, not the human, so the home screen shows nothing else that waits.
-export function rootQuestions(rooms: HomeRoom[], questionsByRoom: Record<string, HomeQuestion[] | undefined>): RootQuestionRow[] {
-  const rows: RootQuestionRow[] = []
+// homeRequests lists root's open questions and terminal requests waiting for
+// the owner. Ordinary questions from other agents still go to root, not Home.
+export function homeRequests(rooms: HomeRoom[], questionsByRoom: Record<string, HomeQuestion[] | undefined>): HomeRequestRow[] {
+  const rows: HomeRequestRow[] = []
   for (const room of rooms) {
     if (room.archived) continue
     for (const q of questionsByRoom[room.id] ?? []) {
-      if (q.state === 'open' && q.to === 'owner' && q.asker === 'owner' && !q.human) rows.push({ key: `${room.id}:${q.id}`, room, text: q.text })
+      const rootQuestion = q.state === 'open' && q.to === 'owner' && q.kind !== 'terminal' && q.asker === 'owner' && !q.human
+      const terminalRequest = q.to === 'owner' && q.kind === 'terminal' && requestFilter(q) === 'open'
+      if (rootQuestion || terminalRequest) rows.push({ key: `${room.id}:${q.id}`, room, text: q.text, kind: q.kind, askerName: q.askerName })
     }
   }
   return rows

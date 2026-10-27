@@ -57,11 +57,11 @@
   import SyncBadge from './lib/lanesync/SyncBadge.svelte'
   import { syncDelay } from './lib/lanesync/sync.ts'
   import Library from './lib/library/Library.svelte'
-  import Questions from './lib/questions/Questions.svelte'
+  import Requests from './lib/requests/Requests.svelte'
   import Visuals from './lib/rooms/Visuals.svelte'
   import Services from './lib/services/Services.svelte'
   import { changesVisuals } from './lib/files/visuals.ts'
-  import { questionID } from './lib/questions/questions.ts'
+  import { ownerRequestCount, questionID } from './lib/requests/requests.ts'
   import Goals from './lib/goals/Goals.svelte'
   import GoalDetail from './lib/goals/GoalDetail.svelte'
   import { expedite, expediteScope, isExpedited } from './lib/rooms/expedite.ts'
@@ -293,6 +293,7 @@
   const NARROW = '(max-width: 760px)'
   let narrow = $state(window.matchMedia(NARROW).matches)
   let dockRequest = $state(0) // counts up to open the terminal dock
+  let dockSelection = $state({ request: 0, id: '' }) // a request terminal to select once
   let navOpen = $state(false) // the drawer, on a narrow screen
   let showMembers = $state(layout.members && !window.matchMedia(NARROW).matches)
   // The saved layout is the wide one; a phone's toggles do not change it.
@@ -617,6 +618,15 @@
     error: (message) => (loadError = message),
     openView: (name) => openView(name),
   })
+  async function runTerminalRequest(id: string) {
+    const terminal = await api.termRequestRun(roomId, id, null, narrow ? 48 : 120, narrow ? 24 : 32)
+    dockRequest++
+    dockSelection = { request: dockRequest, id: terminal.id }
+  }
+  async function declineTerminalRequest(id: string, reason: string) {
+    await api.termRequestReport(roomId, id, 'declined', reason, false)
+    await loadQuestions()
+  }
   bindPins({
     reload,
     error: (message) => (loadError = message),
@@ -1785,7 +1795,7 @@
 <ComputerPopout room={pop.room} session={pop.session} />
 {:else}
 <div class="app" class:narrow>
-  <NavPane open={navOpen} {narrow} suspended={phonePanelOpen} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onclose={() => (navOpen = false)} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, questions: questions.filter((q) => q.state === 'open' && q.to === 'owner').length, live, runs, dataDir, ownerHue, route, onview: openView, onmember: openAgent }} />
+  <NavPane open={navOpen} {narrow} suspended={phonePanelOpen} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onclose={() => (navOpen = false)} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, requests: ownerRequestCount(questions), live, runs, dataDir, ownerHue, route, onview: openView, onmember: openAgent }} />
   {#if narrow && navOpen && !phonePanelOpen}
     <button class="scrim" aria-label="Close the room list" onclick={() => (navOpen = false)}></button>
   {/if}
@@ -1875,8 +1885,8 @@
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} />{/if}
         {#if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
-        {:else if view === 'questions'}
-          {#key room.id}<Questions roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
+        {:else if view === 'requests'}
+          {#key room.id}<Requests roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onrun={runTerminalRequest} ondecline={declineTerminalRequest} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
           {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
         {:else if view === 'visuals'}
@@ -1932,7 +1942,7 @@
       </div>
     </div>
     {#if roomId && room && hasTerminal}
-      {#key room.id}<TermDock roomId={room.id} session={drill && !drill.rootSeat ? drill.id : ''} owner={room.repo ? base(room.repo) : room.name} noRepo={!room.repo} {narrow} request={dockRequest} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
+      {#key room.id}<TermDock roomId={room.id} session={drill && !drill.rootSeat ? drill.id : ''} owner={room.repo ? base(room.repo) : room.name} noRepo={!room.repo} {narrow} request={dockRequest} selection={dockSelection} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
     {/if}
   </main>
   <VoiceWidget bind:this={voiceWidget} bind:link={callPush} {narrow} {rooms} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />

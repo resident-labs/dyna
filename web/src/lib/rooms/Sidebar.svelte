@@ -21,7 +21,7 @@
   import { sessionStatus } from '../sessions/status.ts'
   import MachineRow from '../machines/MachineRow.svelte'
   import { machinesSub } from '../machines/machines.ts'
-  // questions: open questions to the owner, the one "needs you" count.
+  // requests: open questions and waiting-owner terminal requests, one count.
   // computers: the room's computers, or null when the feature is off.
   // runs: the room's workflow runs.
   // machines: the registered machines, or null until they first load.
@@ -38,7 +38,7 @@
     room?: Room | null
     view?: string
     viewUnread?: Record<string, number>
-    questions?: number
+    requests?: number
     live?: Member[]
     runs?: RunList | null
     dataDir?: string
@@ -49,14 +49,14 @@
     onview: (view: string) => void
     onmember: (member: Member) => void
   }
-  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, viewUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, prs = {}, computers = null, onroommenu = null, onview, onmember }: Props = $props()
+  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, viewUnread = {}, requests = 0, live = [], runs = null, dataDir = '', ownerHue = 0, prs = {}, computers = null, onroommenu = null, onview, onmember }: Props = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
   let open = $derived(rowOf(view)?.id)
   const icons: Record<string, string> = {
     messages: 'M4 4.5h12a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3H4A1.5 1.5 0 0 1 2.5 13V6A1.5 1.5 0 0 1 4 4.5Z',
-    questions: 'M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14ZM7.9 8.1a2.1 2.1 0 1 1 3 1.9c-.6.3-.9.7-.9 1.3v.4M10 13.9v.1',
+    requests: 'M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14ZM7.9 8.1a2.1 2.1 0 1 1 3 1.9c-.6.3-.9.7-.9 1.3v.4M10 13.9v.1',
     runs: 'M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14ZM8.5 7.2v5.6l4.3-2.8Z',
     services: 'M4 4.5h12M4 10h12M4 15.5h7',
     visuals: 'M3 3v14h14M7 13V9M11 13V5M15 13V7',
@@ -116,7 +116,7 @@
             <button class="chan" class:sel={open === r.id} title={r.hint} onclick={() => { const tab = r.tabs[0]; if (tab) onview(tab.id) }}>
               {#if r.id === 'goals'}<span class="wglyph"><GoalGlyph neutral /></span>{:else}<svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons[r.id]} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
               {/if}<span class="label">{r.label}</span>
-              {#if r.id === 'questions' && questions}<span class="count live" title="{questions} waiting for you">{questions}</span>{/if}
+              {#if r.id === 'requests' && requests}<span class="count live" title="{requests} {requests === 1 ? 'request' : 'requests'} waiting for you">{requests}</span>{/if}
               {#if r.id === 'runs' && running}<span class="lv" title="{running} running">● {running}</span>{/if}
               {#if r.id === 'computers' && liveComputers}<span class="lv">{liveComputers} live</span>{/if}
             </button>

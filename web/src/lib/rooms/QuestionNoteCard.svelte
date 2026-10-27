@@ -12,7 +12,7 @@
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   let payload = $derived(questionEvent(post))
-  let title = $derived(payload ? `Question ${payload.questionId} withdrawn` : 'Question withdrawn')
+  let title = $derived(payload ? `Request ${payload.questionId} withdrawn` : 'Request withdrawn')
   let summary = $derived([payload?.by ? `by ${payload.by}` : '', payload?.reason ?? ''].filter(Boolean).join(' · '))
 </script>
 

@@ -20,7 +20,7 @@
   import EmptyState from '../ui/EmptyState.svelte'
   import NoticeCard from './NoticeCard.svelte'
   import ServicesCard from './ServicesCard.svelte'
-  import { accountRows, allClear, updateRows, rootQuestions } from './home.ts'
+  import { accountRows, allClear, updateRows, homeRequests } from './home.ts'
   // update: the dyna update notice ({current, latest}) or null.
   // The machine list owns the load card now: Home shows what needs the owner.
   interface Props {
@@ -45,7 +45,7 @@
 
   let accounts = $derived(accountRows(usage))
   let updates = $derived(updateRows(update, runtimes))
-  let asked = $derived(rootQuestions(rooms, questions))
+  let asked = $derived(homeRequests(rooms, questions))
   let alertCount = $derived(accounts.alerts.length + notices.length + $heldComments.comments.length)
   // Set only by a successful load: a slow or failed source is not "empty".
   let questionsLoaded = $state(false)
@@ -184,7 +184,7 @@
   {#if asked.length}
     <Card>
       {#each asked as q (q.key)}
-        <Row dense text="Question from root: {q.text}" onclick={() => onroom(q.room.id, 'questions')}>
+        <Row dense text={q.kind === 'terminal' ? `Terminal request from ${q.askerName ?? 'agent'}: ${q.text ?? ''}` : `Request from root: ${q.text ?? ''}`} onclick={() => onroom(q.room.id, 'requests')}>
           {#snippet lead()}<span class="ico gold">?</span>{/snippet}
           {#snippet trail()}<Chip>{roomLabel(q.room)}</Chip>{/snippet}
         </Row>
@@ -225,7 +225,7 @@
   {/if}
 
   {#if $heldComments.error}<p class="err" role="alert">Could not load held PR comments: {$heldComments.error}</p>{/if}
-  {#if clear && !firstRoom}<EmptyState title="All clear">No questions, alerts or updates need you.</EmptyState>{/if}
+  {#if clear && !firstRoom}<EmptyState title="All clear">No requests, alerts or updates need you.</EmptyState>{/if}
 </div>
 </section>
 
