@@ -56,7 +56,7 @@ func TestSettingsListJSON(t *testing.T) {
 		settings.KeySubagentMaxDepth, settings.KeySteeringToolWait,
 		settings.KeyBrowserPath, settings.KeyBrowserExtraFlags, settings.KeyBrowserUseFlagsFile,
 		settings.KeyBrowserProfileMode, settings.KeyBrowserOwnerProfile, settings.KeyBrowserSaveBack,
-		settings.KeyVoiceProvider, settings.KeyVoiceModel, settings.KeyVoiceURL,
+		settings.KeyVoiceProvider, settings.KeyVoiceModel, settings.KeyVoiceURL, settings.KeyVoiceAgent,
 	} {
 		if _, exists := keys[key]; !exists {
 			t.Errorf("missing settings key %q", key)
