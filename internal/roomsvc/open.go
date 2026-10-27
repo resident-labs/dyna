@@ -47,7 +47,11 @@ func (s *Service) Open(ref string, tail int, withClosed bool) (Opened, error) {
 		}
 		names = append(names, m.Name)
 	}
-	out.Choices = Choices(names)
+	elsewhere, err := s.otherRoomChoices(rec, all)
+	if err != nil {
+		return Opened{}, err
+	}
+	out.Choices = append(Choices(names), elsewhere...)
 	if out.Pins, err = s.pinsOf(rec, book); err != nil {
 		return Opened{}, err
 	}
