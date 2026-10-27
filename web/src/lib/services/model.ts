@@ -414,17 +414,17 @@ export function buildRows(i: Inputs): Row[] {
   const repos = libraryRepos(i.settings)
   const libraryOn = repos === null || !i.repo ? null : repos.includes(i.repo)
   const batch = hook(i.hooks, 'librarian-batch')
+  const libraryWait = svc('librarian')?.reason
+  const libraryWaiting = libraryWait?.startsWith('waiting:') ? libraryWait : ''
   rows.push({
     ...base,
     id: 'librarian',
     name: 'Librarian',
-    state: libraryOn === null ? unknown : libraryOn ? 'on' : 'off',
+    state: libraryWaiting ? 'waiting' : libraryOn === null ? unknown : libraryOn ? 'on' : 'off',
     tone: libraryOn === null ? 'off' : libraryOn ? 'on' : 'off',
-    detail: svc('librarian')?.reason.startsWith('waiting:')
-      ? svc('librarian')!.reason
-      : libraryOn === null
+    detail: libraryWaiting || (libraryOn === null
       ? !i.repo ? 'No repository for this room' : 'Librarian settings could not be read'
-      : libraryOn ? 'Keeps the feature map current' : 'Turn on with dyna library enable on this machine',
+      : libraryOn ? 'Keeps the feature map current' : 'Turn on with dyna library enable on this machine'),
     profile: i.settings ? { id: 'library.profile', value: i.settings['library.profile'] ?? '', options: [] } : null,
     value: turnsOf(i.usage, 'librarian'),
     last: batch?.lastRun?.startedAt ?? '',
