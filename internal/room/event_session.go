@@ -27,12 +27,14 @@ const (
 	SessionSpawned SessionChange = "spawned"
 	// SessionTransfer asks a session for the handoff a model transfer needs.
 	SessionTransfer SessionChange = "transfer-request"
+	// SessionComputer reminds a session that its computer is still open.
+	SessionComputer SessionChange = "computer-reminder"
 )
 
 // sessionChanges lists every session change the web needs as a union type.
 var sessionChanges = []SessionChange{
 	SessionRenamed, SessionPromoted, SessionAdopted, SessionAccount,
-	SessionInstructions, SessionSeat, SessionSpawned, SessionTransfer,
+	SessionInstructions, SessionSeat, SessionSpawned, SessionTransfer, SessionComputer,
 }
 
 // AccountReason is why a turn moved to another account or profile.
@@ -105,6 +107,8 @@ type SessionEvent struct {
 	Dir string `json:"dir,omitempty"`
 	// Seat is the label of a root-seat change.
 	Seat string `json:"seat,omitempty"`
+	// Apps are the titles of the apps open on a computer that a reminder names.
+	Apps []string `json:"apps,omitempty"`
 	// Sections lists the instruction sections that changed.
 	Sections []InstructionChange `json:"sections,omitempty"`
 	// Occurrence counts the notes about one kind of change, so a change that

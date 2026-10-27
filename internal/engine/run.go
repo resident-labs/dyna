@@ -676,6 +676,9 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 			events.Publish(hub.Event{Topic: ev.Kind, Room: ev.RoomID, Key: ev.Session, Body: ev})
 		})
 	})
+	if !readOnly {
+		startService(func() { runComputerReminders(ctx, rooms.Notify) })
+	}
 	srv, err := websvc.New(websvc.Options{
 		Callers:    callers.identify,
 		Routes:     routes,
