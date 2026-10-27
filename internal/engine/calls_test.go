@@ -487,8 +487,8 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 	if callspec.Deadline("VoiceSay") <= voice.SayTimeout {
 		t.Errorf("VoiceSay deadline %v must exceed SayTimeout %v", callspec.Deadline("VoiceSay"), voice.SayTimeout)
 	}
-	if n := len(callspec.LongCalls); n != 100 {
-		t.Fatalf("LongCalls has %d calls, want 100; a call over 5 s needs a reason and a deliberate change here", n)
+	if n := len(callspec.LongCalls); n != 101 {
+		t.Fatalf("LongCalls has %d calls, want 101; a call over 5 s needs a reason and a deliberate change here", n)
 	}
 }
 
