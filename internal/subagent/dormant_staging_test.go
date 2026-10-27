@@ -53,7 +53,7 @@ func TestDormantRunStagingAndPublishedEvidence(t *testing.T) {
 		close bool
 	}{
 		{"empty workflow", nil, true},
-		{"detached workflow staging", map[string]string{"script.js": "export default 1", "plan.json": "{}", "daemon.log": ""}, true},
+		{"detached workflow staging", map[string]string{"script.js": "export default 1", "plan.json": "{}", "launch.json": "{}", "daemon.log": "Failed to execute"}, true},
 		{"interrupted workflow Create", map[string]string{"script.js": "export default 1", "events.jsonl": "", "journal.jsonl": ""}, false},
 		{"workflow startup log", map[string]string{"daemon.log": "startup failed"}, true},
 		{"empty workflow execution file", map[string]string{"events.jsonl": ""}, false},

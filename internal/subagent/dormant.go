@@ -255,7 +255,7 @@ func unpublishedDormantJob(root, id string) (bool, error) {
 			return false, nil
 		}
 		switch entry.Name() {
-		case "script.js", "plan.json", "daemon.log", "result.json":
+		case "script.js", "plan.json", "launch.json", "daemon.log", "result.json":
 			// Staging or orphan artifacts alone cannot execute. Create
 			// opens both execution journals before publishing metadata.
 			// Even empty journals therefore remain ambiguous evidence.

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runsvc"
@@ -73,7 +74,13 @@ func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, in
 	if s.Notify.Sessions.Executable == "" {
 		return StartedRun{}, fmt.Errorf("dyna executable is unavailable")
 	}
-	id, err := workflowsvc.Launch(ctx, workflowsvc.Options{ScriptSrc: string(src), ScriptPath: script, Args: json.RawMessage(b), WorkDir: dir}, workflowsvc.LaunchOptions{Executable: s.Notify.Sessions.Executable, Env: env})
+	// The configured path is /proc/<engine pid>/exe, which stops resolving while
+	// the engine restarts for an update. A copy of the running image does not.
+	executable := s.Notify.Sessions.Executable
+	if stable, err := fsutil.StableImage(executable); err == nil {
+		executable = stable
+	}
+	id, err := workflowsvc.Launch(ctx, workflowsvc.Options{ScriptSrc: string(src), ScriptPath: script, Args: json.RawMessage(b), WorkDir: dir}, workflowsvc.LaunchOptions{Executable: executable, Env: env})
 	if err != nil {
 		return StartedRun{}, err
 	}
