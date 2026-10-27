@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -68,10 +70,10 @@ func outsideReadError(r repository, args []string, err error) error {
 	if !errors.Is(err, errNotInRoom) || !isRead(args) {
 		return err
 	}
-	if name, ok := publicReadTarget(r, args); ok {
-		return fmt.Errorf("%w: reads outside the room work only for public repositories, and %s could not be confirmed public: it is private or missing, or GitHub did not answer", err, name)
+	if names, ok := publicReadTargets(r, args); ok {
+		return fmt.Errorf("%w: reads outside the room work only for public repositories, and %s could not be confirmed public: it is private or missing, or GitHub did not answer", err, strings.Join(names, ", "))
 	}
-	return fmt.Errorf("%w: reads outside the room work only for public repositories, as a plain gh api repos/<owner>/<repo> read on github.com", err)
+	return fmt.Errorf("%w: reads outside the room work only for public repositories, as a plain gh api repos/<owner>/<repo> read, a gh list or view command with --repo, or a search limited to repo: names, on github.com", err)
 }
 
 // roomFor checks local room metadata only. It never discovers GitHub repositories.
@@ -177,6 +179,13 @@ func isRead(args []string) bool {
 			return true
 		}
 	}
+	if len(args) >= 2 && args[0] == "search" && isSearchKind(args[1]) {
+		// With the room's token a search is a read only when it names exactly one
+		// repository by flag, the one the room check sees.
+		repos, rest := searchFlagRepos(args[2:])
+		_, qualified := searchTargets(strings.Join(rest, " "))
+		return len(repos) == 1 && !qualified
+	}
 	if args[0] != "api" {
 		return false
 	}
@@ -222,19 +231,138 @@ var publicRepo = fetchPublicRepo
 // so the check binds to what the command fetches. GraphQL, other endpoints and
 // every other gh command are not public reads: they need an account.
 func publicAPIRead(ctx context.Context, r repository, args []string) (string, bool) {
-	name, ok := publicReadTarget(r, args)
-	if !ok || !publicRepo(ctx, repository{r.host, name}) {
+	names, ok := publicReadTargets(r, args)
+	if !ok {
 		return "", false
 	}
-	return name, true
+	for _, name := range names {
+		if !publicRepo(ctx, repository{"github.com", name}) {
+			return "", false
+		}
+	}
+	return names[0], true
 }
 
-// publicReadTarget returns the repository of a plain REST read on github.com:
-// the only form of read outside the room that can qualify. It asks no one.
-func publicReadTarget(r repository, args []string) (string, bool) {
-	if r.host != "github.com" || len(args) < 2 || args[0] != "api" || !isRead(args) {
-		return "", false
+// publicListCommands are the read-only gh commands that name one repository
+// with --repo, -R or a URL and can run anonymously on a public repository.
+var publicListCommands = map[string]bool{
+	"repo view": true, "pr list": true, "pr view": true, "pr diff": true, "pr checks": true,
+	"issue list": true, "issue view": true, "run list": true, "run view": true,
+}
+
+// searchRepoQualifier matches a `repo:owner/name` search qualifier.
+var searchRepoQualifier = regexp.MustCompile(`(?:^|\s)repo:([\w.-]+/[\w.-]+)(?:\s|$)`)
+
+// searchTargets returns the repositories a search query is limited to. It
+// reports false when the query names no repository.
+func searchTargets(q string) ([]string, bool) {
+	var names []string
+	for _, m := range searchRepoQualifier.FindAllStringSubmatch(q, -1) {
+		names = append(names, m[1])
 	}
+	return names, len(names) > 0
+}
+
+// searchFlagRepos returns the --repo/-R values of a `gh search` command and
+// the other arguments, which hold the query.
+func searchFlagRepos(args []string) (repos, rest []string) {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case (a == "--repo" || a == "-R") && i+1 < len(args):
+			repos = append(repos, args[i+1])
+			i++
+		case strings.HasPrefix(a, "--repo="):
+			repos = append(repos, strings.TrimPrefix(a, "--repo="))
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return repos, rest
+}
+
+// publicReadTargets returns the repositories of a read on github.com that can
+// run outside the room: a plain REST read, a list or view command with an
+// explicit repository, or a search limited to named repositories. It asks no one.
+func publicReadTargets(r repository, args []string) ([]string, bool) {
+	// A command that names no repository by flag has no host yet; gh then uses
+	// github.com unless it is told otherwise.
+	if (r.host != "" && r.host != "github.com") || len(args) < 2 || slices.ContainsFunc(args, func(a string) bool { return a == "--hostname" || strings.HasPrefix(a, "--hostname=") }) {
+		return nil, false
+	}
+	switch {
+	case args[0] == "api" && isRead(args):
+		if names, ok := apiSearchTargets(args); ok {
+			return names, true
+		}
+		name, ok := publicReadTarget(args)
+		if !ok {
+			return nil, false
+		}
+		return []string{name}, true
+	case args[0] == "search" && isSearchKind(args[1]):
+		repos, rest := searchFlagRepos(args[2:])
+		for _, a := range rest {
+			if q, ok := searchTargets(a); ok {
+				repos = append(repos, q...)
+			}
+		}
+		return repos, len(repos) > 0
+	case publicListCommands[args[0]+" "+args[1]] && r.name != "" && r.host == "github.com":
+		return []string{r.name}, true
+	}
+	return nil, false
+}
+
+func isSearchKind(kind string) bool {
+	switch kind {
+	case "issues", "prs", "repos", "code", "commits":
+		return true
+	}
+	return false
+}
+
+// apiSearchTargets returns the repositories named by repo: qualifiers of a
+// `gh api search/...` query, or false when the command is not such a search or
+// a query names no repository.
+func apiSearchTargets(args []string) ([]string, bool) {
+	search := false
+	var names []string
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(strings.TrimPrefix(a, "/"), "search/") {
+			search = true
+			if _, q, ok := strings.Cut(a, "?"); ok {
+				a = q
+				if u, err := url.QueryUnescape(q); err == nil {
+					a = u
+				}
+			}
+		}
+		for _, v := range []string{a, argValue(args, i)} {
+			if _, q, ok := strings.Cut(v, "q="); ok {
+				if found, ok := searchTargets(q); ok {
+					names = append(names, found...)
+				}
+			}
+		}
+	}
+	return names, search && len(names) > 0
+}
+
+// argValue returns the value following a field flag at position i, if any.
+func argValue(args []string, i int) string {
+	switch args[i] {
+	case "-f", "-F", "--field", "--raw-field":
+		if i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// publicReadTarget returns the repository of a plain REST read: the first
+// form of read outside the room that can qualify.
+func publicReadTarget(args []string) (string, bool) {
 	var endpoint []string
 	valueFlags := map[string]bool{"-X": true, "--method": true, "-q": true, "--jq": true, "-t": true, "--template": true, "-H": true, "--header": true, "--cache": true}
 	for i := 1; i < len(args); i++ {
