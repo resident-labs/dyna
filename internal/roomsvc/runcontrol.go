@@ -74,11 +74,14 @@ func (s *Service) StartRun(ctx context.Context, ref string, source RunSource, in
 	if s.Notify.Sessions.Executable == "" {
 		return StartedRun{}, fmt.Errorf("dyna executable is unavailable")
 	}
-	// The configured path is /proc/<engine pid>/exe, which stops resolving while
-	// the engine restarts for an update. A copy of the running image does not.
+	// The engine configures /proc/<engine pid>/exe, which stops resolving once
+	// an update replaces the binary (systemd-run: "Failed to execute: No such
+	// file or directory"). Launch from the installed path instead.
 	executable := s.Notify.Sessions.Executable
-	if stable, err := fsutil.StableImage(executable); err == nil {
-		executable = stable
+	if strings.HasPrefix(executable, "/proc/") {
+		if installed, err := fsutil.InstalledExecutable(); err == nil {
+			executable = installed
+		}
 	}
 	id, err := workflowsvc.Launch(ctx, workflowsvc.Options{ScriptSrc: string(src), ScriptPath: script, Args: json.RawMessage(b), WorkDir: dir}, workflowsvc.LaunchOptions{Executable: executable, Env: env})
 	if err != nil {
