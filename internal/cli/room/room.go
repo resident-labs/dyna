@@ -445,7 +445,7 @@ func callEnginePost(ctx context.Context, req notify.PostRequest) (notify.Result,
 
 func PostCmd() *cobra.Command {
 	var replyTo string
-	var alert bool
+	var alert, quiet bool
 	var jsonOut bool
 	var attach []string
 	var richPath string
@@ -461,7 +461,13 @@ func PostCmd() *cobra.Command {
 			"@children, and @run:<run-id>/agent:<n>.\n" +
 			"Bare mentions resolve in your stamped room. Outside Dyna, qualify them: @<room>:<name>,\n" +
 			"@<room>:children. All recipients must be in one room. Every member can read every post.\n\n" +
-			"A session's message to @root, or to its parent root, wakes root at once.\n\n" +
+			"Who wakes: a post wakes each session it mentions. @root (or @<room>:root) wakes the room's root\n" +
+			"when a session, the desktop, or an owner-run script posts it; so does @parent when the parent is root.\n" +
+			"A script, CI hook or bridge that runs dyna post outside Dyna posts as the owner and must write\n" +
+			"@<room>:root. A post that only mentions @<room> or @<room>:<name> of a closed session wakes no one.\n" +
+			"--quiet stores the post as context that each mentioned session reads with its next turn.\n" +
+			"It wakes no one, so a bridge or log can forward every line and wake only on chosen ones.\n" +
+			"Run dyna guide posting for the full table.\n\n" +
 			"Leading arguments that start with @ are mentions; use -- before text that starts with @.\n\n" +
 			"--attach saves a file with the room and lists it in the post; repeat it for more files.\n" +
 			"With --attach the text may be empty. Mentions are read from the text only, never from files.\n" +
@@ -506,6 +512,9 @@ func PostCmd() *cobra.Command {
 			if count > room.MaxPostAttachments {
 				return fmt.Errorf("a post can carry at most %d attachments", room.MaxPostAttachments)
 			}
+			if quiet && alert {
+				return errors.New("--quiet and --alert conflict: an alert asks someone to act")
+			}
 			limits, err := settings.Content()
 			if err != nil {
 				return err
@@ -535,7 +544,7 @@ func PostCmd() *cobra.Command {
 			if alert {
 				kind = notify.ServiceAlertKind
 			}
-			result, err := sendPost(cmd.Context(), notify.PostRequest{Kind: kind, Mentions: mentions, Text: text, ReplyTo: replyTo, ForwardOf: forward, Files: files, Claim: notify.ClaimOf(snd)})
+			result, err := sendPost(cmd.Context(), notify.PostRequest{Kind: kind, Quiet: quiet, Mentions: mentions, Text: text, ReplyTo: replyTo, ForwardOf: forward, Files: files, Claim: notify.ClaimOf(snd)})
 			if result.Message.ID == "" {
 				return err
 			}
@@ -583,6 +592,7 @@ func PostCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "post id this replies to")
 	cmd.Flags().BoolVar(&alert, "alert", false, "report an actionable service problem to the owner or actual parent")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "store the post as context for the recipients' next turn; wake no one")
 	cmd.Flags().StringVar(&forward, "forward", "", "id of a post in the room to forward; the text becomes your note")
 	cmd.Flags().StringArrayVar(&attach, "attach", nil, "attach a file (repeatable)")
 	cmd.Flags().StringVar(&richPath, "html", "", "attach one .html file as a desktop card (needs post text)")
