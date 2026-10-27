@@ -58,9 +58,9 @@ test('the sidebar feed view list ignores the old agent views switch', () => {
 
 test('the dock state is saved per room and does not erase other layout keys', () => {
   saveLastRoom('repo', 'files')
-  saveDock('a', { open: true, height: 300, maxed: false, active: { a: 't1' } })
-  saveDock('b', { open: false, height: 150, maxed: false, active: {} })
-  assert.deepEqual(loadDock('a'), { open: true, height: 300, maxed: false, active: { a: 't1' } })
+  saveDock('a', { open: true, height: 300, maxed: false, active: { a: 't1' }, wins: [{ id: 't2', x: 10, y: 20, w: 400, h: 300, z: 2, min: false }] })
+  saveDock('b', { open: false, height: 150, maxed: false, active: {}, wins: [] })
+  assert.deepEqual(loadDock('a'), { open: true, height: 300, maxed: false, active: { a: 't1' }, wins: [{ id: 't2', x: 10, y: 20, w: 400, h: 300, z: 2, min: false }] })
   assert.equal(loadDock('b').height, 150)
   assert.equal(loadDock('c').open, false)
   assert.deepEqual(lastRoom(), { room: 'repo', view: 'files' })
