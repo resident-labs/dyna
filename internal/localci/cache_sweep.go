@@ -30,7 +30,12 @@ func CleanCachesTick(ctx context.Context, dataDir string, report ScratchReporter
 		if report != nil && swept.FreedBytes > 0 {
 			scratchErr = errors.Join(scratchErr, report(ctx, node, swept))
 		}
-		return cleaned, errors.Join(err, scratchErr)
+		// A scratch failure must not discard the cache result or its hourly
+		// stamp, so it is logged and the next hour sweeps again.
+		if scratchErr != nil {
+			log.Printf("local CI %s: scratch sweep: %v", node.Name, scratchErr)
+		}
+		return cleaned, err
 	})
 }
 
