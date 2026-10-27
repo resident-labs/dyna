@@ -60,6 +60,10 @@ type message struct {
 	Idle    []IdleSession `json:"idle,omitempty"`
 	MinIdle time.Duration `json:"minIdle,omitempty"`
 	Done    bool          `json:"done,omitempty"`
+	// FireStopGrace asks shutdown to fire the orderly stop grace at once.
+	// Production leaves it false and waits the grace. A test sets it so a
+	// child that ignores closed stdin does not add real time.
+	FireStopGrace bool `json:"fireStopGrace,omitempty"`
 }
 
 // wireLaunch is the part of Launch the host process needs.

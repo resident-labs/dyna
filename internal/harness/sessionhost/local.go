@@ -435,13 +435,18 @@ func (s *localSession) liveChild(fingerprint string) *child {
 	return nil
 }
 
+// stopGraceAfter is the clock of the orderly stop wait. Production uses
+// time.After. A test shutdown can replace it with an already-closed channel
+// so a child that ignores closed stdin does not add the grace.
+var stopGraceAfter = time.After
+
 // stopChild ends one child: stdin closes first (an orderly shutdown), then a
 // grace, then a group kill.
 func stopChild(c *child) {
 	_ = c.stdin.Close()
 	select {
 	case <-c.exited:
-	case <-time.After(localStopGrace):
+	case <-stopGraceAfter(localStopGrace):
 		_ = c.controller.Signal(syscall.SIGKILL)
 		<-c.exited
 	}
