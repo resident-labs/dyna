@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/rolesession"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 )
@@ -39,6 +40,8 @@ type Service struct {
 	Issues     Issues
 	Settings   func() (settings.Values, error)
 	Now        func() time.Time
+	// Notice posts one typed event to the librarian's room. Nil skips it.
+	Notice func(ctx context.Context, roomID string, ev room.Event) error
 }
 
 func (s Service) now() time.Time {
@@ -74,6 +77,9 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if smelled.Action == "waiting" && (mapped.Action == "current" || mapped.Action == "skipped" || mapped.Action == "batched") {
+		return smelled, nil
+	}
 	if mapped.Action == "current" && (smelled.Action == "assigned" || smelled.Action == "started" || smelled.Action == "busy") {
 		return smelled, nil
 	}
@@ -103,6 +109,18 @@ func (s Service) WakeSmellsNow(ctx context.Context, actor authority.Actor, calle
 		}
 	}
 	return s.wakeSmells(ctx, repoDir, true)
+}
+
+// pinnedWait reports that the librarian pin cannot run. The service waits
+// and does not start on another profile. An empty pin is auto and is not a wait.
+func (s Service) pinnedWait(ctx context.Context, roomID, pin string, choice rolesession.Choice) (Result, bool) {
+	if pin == "" || choice.Cause == "" {
+		return Result{}, false
+	}
+	if s.Notice != nil {
+		_ = s.Notice(ctx, roomID, room.ServiceWaitEvent{Service: room.ServiceLibrarian, Profile: pin, Reason: choice.Reason})
+	}
+	return Result{Action: "waiting", Reason: choice.Reason}, true
 }
 
 func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
@@ -195,6 +213,10 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, repo, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
+	}
+	if waited, ok := s.pinnedWait(ctx, st.RoomID, v.LibraryProfile, choice); ok {
+		waited.Head = st.Head
+		return waited, nil
 	}
 	name := choice.Name
 
@@ -310,6 +332,10 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string, now bool) (Resu
 	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, repo, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
+	}
+	if waited, ok := s.pinnedWait(ctx, st.RoomID, v.LibraryProfile, choice); ok {
+		waited.Head = st.SmellHead
+		return waited, nil
 	}
 	name := choice.Name
 	tree := SmellTreePath(s.DataDir, r.ID)

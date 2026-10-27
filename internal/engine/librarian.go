@@ -44,6 +44,17 @@ func (s services) librarianService() librarian.Service {
 		DataDir:  store.DataDir(),
 		Sessions: librarian.Live{Manager: n.Sessions, Rooms: n.Rooms}, Issues: n.Rooms,
 		ListHooks: s.hooks.List, AddHook: s.addHook, RemoveHook: s.hooks.Remove,
+		Notice: func(ctx context.Context, roomID string, ev room.Event) error {
+			rec, err := n.Rooms.Resolve(roomID)
+			if err != nil {
+				return err
+			}
+			_, err = n.Rooms.PostEventInput(room.PostEventInput{
+				RoomID: rec.ID, Event: ev, Producer: room.ProducerLibrarian,
+				To: []string{rec.Name}, NeedsRoot: true,
+			})
+			return err
+		},
 	}
 }
 

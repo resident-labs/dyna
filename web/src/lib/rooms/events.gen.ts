@@ -364,6 +364,13 @@ export interface ServiceFailedEvent {
   detail?: string
 }
 
+// ServiceWaitEvent is the payload of the service/waiting events.
+export interface ServiceWaitEvent {
+  service: ServiceRole
+  profile: string
+  reason: string
+}
+
 // HelperOutcomeEvent is the payload of the service/helper-outcome events.
 export interface HelperOutcomeEvent {
   reason: HelperOutcomeReason
@@ -425,10 +432,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1069,6 +1076,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
   },
   {
     family: "service",
+    type: "waiting",
+    renderer: "ServiceWaitCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "The {service} service is waiting. Its pinned profile {profile} cannot run: {reason}",
+  },
+  {
+    family: "service",
     type: "helper-outcome",
     renderer: "HelperOutcomeRow",
     quiet: false,
@@ -1480,6 +1497,13 @@ export function isServiceFailedEvent(v: unknown): v is ServiceFailedEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isServiceWaitEvent(v: unknown): v is ServiceWaitEvent {
+  return isRecord(v) &&
+    SERVICE_ROLE.has(v.service) &&
+    typeof v.profile === "string" &&
+    typeof v.reason === "string"
+}
+
 export function isHelperOutcomeEvent(v: unknown): v is HelperOutcomeEvent {
   return isRecord(v) &&
     HELPER_OUTCOME_REASON.has(v.reason) &&
@@ -1603,6 +1627,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "alert" && type === "engine") return isAlertEvent(v)
   if (family === "alert" && type === "consolidation") return isAlertEvent(v)
   if (family === "service" && type === "failed") return isServiceFailedEvent(v)
+  if (family === "service" && type === "waiting") return isServiceWaitEvent(v)
   if (family === "service" && type === "helper-outcome") return isHelperOutcomeEvent(v)
   if (family === "engine" && type === "root-flush") return isEngineEvent(v)
   if (family === "question" && type === "withdrawn") return isQuestionEvent(v)
