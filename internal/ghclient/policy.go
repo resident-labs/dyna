@@ -73,7 +73,7 @@ func outsideReadError(r repository, args []string, err error) error {
 	if names, ok := publicReadTargets(r, args); ok {
 		return fmt.Errorf("%w: reads outside the room work only for public repositories, and %s could not be confirmed public: it is private or missing, or GitHub did not answer", err, strings.Join(names, ", "))
 	}
-	return fmt.Errorf("%w: reads outside the room work only for public repositories, as a plain gh api repos/<owner>/<repo> read, a gh list or view command with --repo, or a search limited to repo: names, on github.com", err)
+	return fmt.Errorf("%w: reads outside the room work only for public repositories, as a plain gh api repos/<owner>/<repo> read or a gh api search/... query limited to repo: names, on github.com (gh pr list and gh search need an account, so use gh api repos/<owner>/<repo>/pulls or gh api search/issues)", err)
 }
 
 // roomFor checks local room metadata only. It never discovers GitHub repositories.
@@ -179,13 +179,6 @@ func isRead(args []string) bool {
 			return true
 		}
 	}
-	if len(args) >= 2 && args[0] == "search" && isSearchKind(args[1]) {
-		// With the room's token a search is a read only when it names exactly one
-		// repository by flag, the one the room check sees.
-		repos, rest := searchFlagRepos(args[2:])
-		_, qualified := searchTargets(strings.Join(rest, " "))
-		return len(repos) == 1 && !qualified
-	}
 	if args[0] != "api" {
 		return false
 	}
@@ -243,42 +236,20 @@ func publicAPIRead(ctx context.Context, r repository, args []string) (string, bo
 	return names[0], true
 }
 
-// publicListCommands are the read-only gh commands that name one repository
-// with --repo, -R or a URL and can run anonymously on a public repository.
-var publicListCommands = map[string]bool{
-	"repo view": true, "pr list": true, "pr view": true, "pr diff": true, "pr checks": true,
-	"issue list": true, "issue view": true, "run list": true, "run view": true,
-}
-
-// searchRepoQualifier matches a `repo:owner/name` search qualifier.
-var searchRepoQualifier = regexp.MustCompile(`(?:^|\s)repo:([\w.-]+/[\w.-]+)(?:\s|$)`)
-
 // searchTargets returns the repositories a search query is limited to. It
-// reports false when the query names no repository.
+// reports false when the query names no repository. Qualifiers split on white
+// space, so adjacent repo: names are all returned.
 func searchTargets(q string) ([]string, bool) {
 	var names []string
-	for _, m := range searchRepoQualifier.FindAllStringSubmatch(q, -1) {
-		names = append(names, m[1])
+	for _, word := range strings.Fields(q) {
+		if name, ok := strings.CutPrefix(word, "repo:"); ok && repoName.MatchString(name) {
+			names = append(names, name)
+		}
 	}
 	return names, len(names) > 0
 }
 
-// searchFlagRepos returns the --repo/-R values of a `gh search` command and
-// the other arguments, which hold the query.
-func searchFlagRepos(args []string) (repos, rest []string) {
-	for i := 0; i < len(args); i++ {
-		switch a := args[i]; {
-		case (a == "--repo" || a == "-R") && i+1 < len(args):
-			repos = append(repos, args[i+1])
-			i++
-		case strings.HasPrefix(a, "--repo="):
-			repos = append(repos, strings.TrimPrefix(a, "--repo="))
-		default:
-			rest = append(rest, a)
-		}
-	}
-	return repos, rest
-}
+var repoName = regexp.MustCompile(`^[\w.-]+/[\w.-]+$`)
 
 // publicReadTargets returns the repositories of a read on github.com that can
 // run outside the room: a plain REST read, a list or view command with an
@@ -299,26 +270,8 @@ func publicReadTargets(r repository, args []string) ([]string, bool) {
 			return nil, false
 		}
 		return []string{name}, true
-	case args[0] == "search" && isSearchKind(args[1]):
-		repos, rest := searchFlagRepos(args[2:])
-		for _, a := range rest {
-			if q, ok := searchTargets(a); ok {
-				repos = append(repos, q...)
-			}
-		}
-		return repos, len(repos) > 0
-	case publicListCommands[args[0]+" "+args[1]] && r.name != "" && r.host == "github.com":
-		return []string{r.name}, true
 	}
 	return nil, false
-}
-
-func isSearchKind(kind string) bool {
-	switch kind {
-	case "issues", "prs", "repos", "code", "commits":
-		return true
-	}
-	return false
 }
 
 // apiSearchTargets returns the repositories named by repo: qualifiers of a
