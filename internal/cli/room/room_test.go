@@ -186,3 +186,29 @@ func TestListShowsPausedRooms(t *testing.T) {
 		t.Fatalf("room list = %q, %v; want work paused", out, err)
 	}
 }
+
+// An owner script that runs dyna post @<room>:root wakes root. With --quiet
+// the same post is stored as next-turn context and wakes no one.
+func TestPostCmdOwnerScriptWakesRootUnlessQuiet(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	clearStamp(t)
+	work := workRoom(t)
+	for _, tc := range []struct {
+		args []string
+		want room.RootDecision
+	}{
+		{[]string{"@work:root", "player", "asked"}, room.RootWake},
+		{[]string{"--quiet", "@work:root", "player", "chatted"}, room.RootQuiet},
+	} {
+		if _, err := execCmd(t, PostCmd(), tc.args...); err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := room.DefaultStore().Messages(work.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := room.RootContext(msgs[len(msgs)-1], "work"); got != tc.want {
+			t.Fatalf("%v: root decision = %d, want %d", tc.args, got, tc.want)
+		}
+	}
+}
