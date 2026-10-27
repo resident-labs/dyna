@@ -40,6 +40,7 @@ import (
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lanesync"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/mode"
@@ -262,8 +263,9 @@ func printDevices(svc *devicesvc.Service, out io.Writer) int {
 func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignals) func(hub.Event) {
 	return func(ev hub.Event) {
 		switch ev.Topic {
-		case "localci":
-			if head, ok := strings.CutPrefix(ev.Key, "result:"); ok {
+		case localci.Topic:
+			key, _ := localci.ParseEventKey(ev.Key)
+			if head, ok := key.ResultSHA(); ok {
 				roomIDs, err := rooms.PRs.LocalCIResultRooms(head)
 				if err != nil {
 					log.Printf("local CI room refresh: %v", err)
@@ -273,7 +275,7 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 					events.Publish(hub.Event{Topic: "prs", Room: roomID, Body: change})
 				}
 			}
-			if ev.Key == "mode" || strings.HasPrefix(ev.Key, "node:") || strings.HasPrefix(ev.Key, "result:") {
+			if key.WakesCI() {
 				wakeWorker(signals.channels["prs"])
 				wakeWorker(signals.channels["merges"])
 			}

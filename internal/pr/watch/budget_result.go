@@ -178,7 +178,7 @@ func (s *Service) quietBudgetRecovery(ctx context.Context, r Record, policy Chan
 			candidate = true
 			// Every candidate must name the applied token and reason. One
 			// matching token cannot hide a different unfinished outcome.
-			reconciled = reconciled && r.CIKey == "budget:"+r.Head+":"+token && r.CIReason == reason
+			reconciled = reconciled && r.CIKey == NewBudgetFailureKey(r.Head, token).String() && r.CIReason == reason
 		}
 	}
 	// With no current overrun, the applied cancellation reason already
@@ -188,7 +188,7 @@ func (s *Service) quietBudgetRecovery(ctx context.Context, r Record, policy Chan
 	}
 	// A replaced overrun can leave its old applied key behind. That key is
 	// recovery evidence even when no stored outcome still exceeds the budget.
-	staleBudgetKey := strings.HasPrefix(r.CIKey, "budget:"+r.Head+":")
+	staleBudgetKey := BudgetFailureNamesHead(r.CIKey, r.Head)
 	if (!candidate && !staleBudgetKey) || (candidate && reconciled) {
 		return false
 	}
