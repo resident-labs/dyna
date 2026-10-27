@@ -169,6 +169,32 @@ func TestListShowsPausedRooms(t *testing.T) {
 	}
 }
 
+// An unstamped desktop service posts as the room identity. --quiet must win:
+// the post stays context for root's next turn and never asks root to act.
+func TestQuietPostFromRoomIdentityDoesNotWakeRoot(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	clearStamp(t)
+	work := workRoom(t)
+	if _, err := execCmd(t, PostCmd(), "--quiet", "@work:root", "[voice] player said hello"); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := room.DefaultStore().Messages(work.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := msgs[len(msgs)-1]
+	if msg.Wake || msg.From != "work" || !msg.RootSeatTarget("work") {
+		t.Fatalf("stored post = from %q wake %v names root %v; want an unstamped quiet post that names root", msg.From, msg.Wake, msg.RootSeatTarget("work"))
+	}
+	seat, ok, err := room.DefaultStore().SeatDelivery(work.ID, msg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || seat.Mode != room.DeliveryQuiet || seat.Category != room.RootQuietPost || seat.RootInput() {
+		t.Fatalf("quiet post still wakes root: row %v mode %q category %q input %v", ok, seat.Mode, seat.Category, seat.RootInput())
+	}
+}
+
 // An owner script that runs dyna post @<room>:root wakes root. With --quiet
 // the same post is stored as next-turn context and wakes no one.
 func TestPostCmdOwnerScriptWakesRootUnlessQuiet(t *testing.T) {
