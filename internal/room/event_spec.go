@@ -625,6 +625,17 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "[DYNA MODEL TRANSFER] Prepare a handoff for transfer {transfer}:",
 	},
+	// A computer reminder steers a running session, or wakes an idle one, to
+	// look at its open computer. Each reminder is its own post.
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionComputer),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Wake:     WakeTarget,
+		Audience: AudienceSession,
+		Text:     "Your computer is open (apps: {apps}). Run `dyna computer shot` to check it, and `dyna computer stop --status \"...\"` when you are done.",
+	},
 	// An alert needs the root seat now, so it always wakes it. The doctor and
 	// the engine are the only posters.
 	{

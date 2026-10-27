@@ -22,7 +22,7 @@ export type GoalState = "active" | "done" | "dropped"
 export type CheckinState = "running" | "queued" | "idle"
 
 // SessionChange is a named string type of an event payload.
-export type SessionChange = "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request"
+export type SessionChange = "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request" | "computer-reminder"
 
 // AccountReason is a named string type of an event payload.
 export type AccountReason = "usage-limit" | "fallback"
@@ -318,7 +318,7 @@ export interface PREvent {
   dropped?: number
 }
 
-// SessionEvent is the payload of the session/renamed and session/promoted and session/adopted and session/account and session/instructions and session/seat and session/spawned and session/transfer-request events.
+// SessionEvent is the payload of the session/renamed and session/promoted and session/adopted and session/account and session/instructions and session/seat and session/spawned and session/transfer-request and session/computer-reminder events.
 export interface SessionEvent {
   type: SessionChange
   session: string
@@ -331,6 +331,7 @@ export interface SessionEvent {
   transfer?: string
   dir?: string
   seat?: string
+  apps?: string[]
   sections?: InstructionChange[]
   occurrence?: number
   detail?: string
@@ -459,7 +460,7 @@ export interface TurnEvent {
 export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1059,6 +1060,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "[DYNA MODEL TRANSFER] Prepare a handoff for transfer {transfer}:",
   },
   {
+    family: "session",
+    type: "computer-reminder",
+    renderer: "SessionNoteCard",
+    quiet: false,
+    wake: "target",
+    once: false,
+    audience: "session",
+    text: "Your computer is open (apps: {apps}). Run `dyna computer shot` to check it, and `dyna computer stop --status \"...\"` when you are done.",
+  },
+  {
     family: "alert",
     type: "doctor",
     renderer: "AlertCard",
@@ -1217,7 +1228,7 @@ const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "
 const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "amended", "items_done", "finished", "dropped"])
 const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
 const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"])
-const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned", "transfer-request"])
+const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned", "transfer-request", "computer-reminder"])
 const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
 const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
 const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine", "consolidation"])
@@ -1506,6 +1517,7 @@ export function isSessionEvent(v: unknown): v is SessionEvent {
     (v.transfer === undefined || typeof v.transfer === "string") &&
     (v.dir === undefined || typeof v.dir === "string") &&
     (v.seat === undefined || typeof v.seat === "string") &&
+    (v.apps === undefined || isStringList(v.apps)) &&
     (v.sections === undefined || isInstructionChangeList(v.sections)) &&
     (v.occurrence === undefined || Number.isInteger(v.occurrence)) &&
     (v.detail === undefined || typeof v.detail === "string")
@@ -1689,6 +1701,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "session" && type === "seat") return isSessionEvent(v)
   if (family === "session" && type === "spawned") return isSessionEvent(v)
   if (family === "session" && type === "transfer-request") return isSessionEvent(v)
+  if (family === "session" && type === "computer-reminder") return isSessionEvent(v)
   if (family === "alert" && type === "doctor") return isAlertEvent(v)
   if (family === "alert" && type === "engine") return isAlertEvent(v)
   if (family === "alert" && type === "consolidation") return isAlertEvent(v)
