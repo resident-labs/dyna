@@ -11,6 +11,7 @@
   import Document from './Document.svelte'
   import TablePreview from './TablePreview.svelte'
   import PDFPreview from './PDFPreview.svelte'
+  import ZoomImage from './ZoomImage.svelte'
   import { previewKind, previewLabel, markdownDocument, documentHTML, formatJSON, TEXT_LIMIT } from './preview.ts'
   import type { Attachment } from '../api/room.ts'
 
@@ -156,7 +157,7 @@
     {#if downloadError}<p class="err" role="alert">{downloadError}</p>{/if}
     <div class="content" class:media={image}>
       {#if image}
-        <img src={fileURL(roomId, att.id)} alt={att.name} onerror={() => error = 'This image could not be loaded.'} />
+        <ZoomImage src={fileURL(roomId, att.id)} alt={att.name} onerror={() => error = 'This image could not be loaded.'} />
         {#if error}<p class="err" role="alert">{error}</p>{/if}
       {:else if kind === 'pdf'}
         <PDFPreview {roomId} {att} />
@@ -191,7 +192,7 @@
   .frame { width: min(1040px, 100%); height: min(860px, 100%); min-height: 0; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: var(--side); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 24px 100px #0007; overflow: hidden; outline: none; animation: open var(--motion) var(--ease); }
   @keyframes open { from { opacity: 0; transform: scale(0.98); } }
   .frame.card { width: min(1400px, 100%); height: min(1000px, 100%); }
-  .frame.image { width: fit-content; height: auto; min-width: min(480px, 100%); }
+  .frame.image { width: 100%; height: 100%; }
   header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); flex: none; }
   .file-mark { width: 38px; height: 42px; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; display: grid; place-items: center; color: var(--iris); font: 10px var(--mono); flex: none; }
   .heading { min-width: 0; display: flex; flex-direction: column; gap: 3px; flex: 1; }
@@ -214,8 +215,7 @@
   .source.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
   .content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--main); }
   .document-scroll { flex: 1; min-height: 0; overflow: auto; }
-  .media { display: block; overflow: auto; text-align: center; background: var(--rail); }
-  img { display: block; max-width: 100%; max-height: calc(100dvh - 160px); object-fit: contain; margin: auto; }
+  .media { background: var(--rail); }
   .source { flex: 1; overflow: auto; margin: 0; padding: 24px; font: 12.5px/1.75 var(--mono); color: var(--ink-2); white-space: pre; tab-size: 4; }
   .status { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 24px; flex: 1; text-align: center; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .status strong { color: var(--ink); font-weight: 500; }
