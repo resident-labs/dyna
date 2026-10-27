@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"dyna-agent/internal/questions"
 	"errors"
 	"fmt"
 	"os"
@@ -99,6 +100,10 @@ type Manager struct {
 
 	// ClosePRs hands live PR roles to the heir through the PR service.
 	ClosePRs func(context.Context, Info, Info) ([]sessionclose.Outcome, error)
+
+	// HandOffTerminalRequests tells each new holder, or the owner, about the
+	// terminal requests a closing session held.
+	HandOffTerminalRequests func(context.Context, []questions.Question) error
 
 	WrapUpProviders []WrapUpProvider
 
@@ -1312,8 +1317,14 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		return info, err
 	}
 	// A request the closing session holds moves to its heir, or to the owner.
-	if err := m.questionStore().ReassignHolder(info.RoomID, info.ID, heir.ID); err != nil {
+	moved, err := m.questionStore().ReassignHolder(info.RoomID, info.ID, heir.ID)
+	if err != nil {
 		return info, err
+	}
+	if len(moved) > 0 && m.HandOffTerminalRequests != nil {
+		if err := m.HandOffTerminalRequests(ctx, moved); err != nil {
+			return info, err
+		}
 	}
 	m.closeGoals(info, heir.ID)
 	store.appendJournal(info.ID, SessionClosedJournal{By: opts.by, Handoff: closeJournalLines(summary)})

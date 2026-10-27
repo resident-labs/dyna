@@ -210,6 +210,7 @@ func New(n *notify.Service) *Service {
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]sessionclose.Outcome, error) {
 		return s.PRs.Watcher().CloseSession(ctx, from, heir)
 	}
+	n.Sessions.HandOffTerminalRequests = n.RepostTerminalRequests
 	return s
 }
 

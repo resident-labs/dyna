@@ -37,7 +37,7 @@ func (s services) termRequestRun(ctx context.Context, roomRef, id string, argv [
 	if err != nil {
 		return info, err
 	}
-	if _, err := s.rooms.Notify.QuestionStore().SetTerminal(rec.ID, id, argv, info.ID); err != nil {
+	if _, err := s.rooms.Notify.QuestionStore().SetTerminal(rec.ID, id, argv, t.TermID, info.ID); err != nil {
 		_ = s.terminals.Close(info.ID)
 		return terminalsvc.Info{}, err
 	}
