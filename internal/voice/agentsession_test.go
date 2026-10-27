@@ -546,3 +546,102 @@ func TestSessionLaterAndSilentToolsDoNotAskForAReply(t *testing.T) {
 		t.Fatalf("sent = %s\nwant %s", got, want)
 	}
 }
+
+// commitProtocol names a manual turn commit so a test can see it.
+type commitProtocol struct{ sessionProtocol }
+
+func (commitProtocol) AudioCommit() any { return "commit" }
+
+// A client can set turn-detection eagerness and end a turn by hand. A provider
+// without the feature rejects the flag before ready, or the commit line with
+// an error and no send. A commit asks for one reply through the same queue as
+// a text line with respond, and the provider's commit echo does not ask again.
+func TestSessionCommitAndVADEagerness(t *testing.T) {
+	clock := newFakeClock()
+	plain := fakeProvider()
+	closed := make(chan agentwire.InMessage)
+	close(closed)
+	_, err := fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{VADEagerness: "fast"}, SessionIO{
+		In: closed, Out: func(agentwire.OutMessage) error { return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "low, medium, high or auto") {
+		t.Fatalf("bad eagerness error = %v", err)
+	}
+	_, err = fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{VADEagerness: "high"}, SessionIO{
+		In: closed, Out: func(agentwire.OutMessage) error { return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not take --vad-eagerness") {
+		t.Fatalf("unsupported flag error = %v", err)
+	}
+
+	conn := newChanConn()
+	r := startSession(t, fakeSessions(plain, conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	if m := r.next(t); m.Type != agentwire.OutError || !strings.Contains(m.Message, "cannot commit a turn") {
+		t.Fatalf("unsupported commit = %+v", m)
+	}
+	if got := conn.sentSoFar(); len(got) != 0 {
+		t.Fatalf("unsupported commit sent %v", got)
+	}
+	close(r.in)
+
+	var gotSession realtime.Session
+	capable := plain
+	capable.Caps.ManualCommit = true
+	capable.Caps.VADEagerness = true
+	capable.Protocol = commitProtocol{}
+	conn = newChanConn()
+	s := fakeSessions(capable, conn, clock)
+	s.dial = func(_ context.Context, _ realtime.Provider, sess realtime.Session) (sayConn, error) {
+		gotSession = sess
+		return conn, nil
+	}
+	r = startSession(t, s, conn, clock, agentwire.SessionRequest{VADEagerness: "HIGH"})
+	if gotSession.VADEagerness != "high" {
+		t.Fatalf("dialed eagerness = %q, want high", gotSession.VADEagerness)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after idle commit = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond:]" {
+		t.Fatalf("idle commit sent %s, want [commit respond:]", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.Committed}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "turn"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "turn" {
+		t.Fatalf("after commit echo = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond:]" {
+		t.Fatalf("commit echo sent %s, want no second reply", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.AudioDelta, ResponseID: "r1", Audio: pcm16(1)}
+	if m := r.next(t); m.Type != agentwire.OutAudio || m.ResponseID != "r1" {
+		t.Fatalf("reply audio = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync during reply = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond: commit]" {
+		t.Fatalf("busy commit sent %s, want the reply queued", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
+		t.Fatalf("response done = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond: commit respond:]" {
+		t.Fatalf("queued reply sent %s", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.Committed}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "again"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "again" {
+		t.Fatalf("after second echo = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond: commit respond:]" {
+		t.Fatalf("second echo sent %s, want no third reply", got)
+	}
+}

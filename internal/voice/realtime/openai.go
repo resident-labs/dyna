@@ -31,7 +31,7 @@ func OpenAI(url string, creds Credentials) Provider {
 		Label:     "OpenAI Realtime",
 		Aliases:   []string{"gpt-live", "gpt-realtime"},
 		InputRate: 24000, OutputRate: 24000,
-		Caps:     Capabilities{FunctionCalling: true, AcknowledgesSessionUpdate: true, ImageInput: true},
+		Caps:     Capabilities{FunctionCalling: true, AcknowledgesSessionUpdate: true, ImageInput: true, ManualCommit: true, VADEagerness: true},
 		Protocol: GA{},
 		Endpoint: func(ctx context.Context) (string, http.Header, error) {
 			token, account, err := creds(ctx)
@@ -65,11 +65,24 @@ func openAISession(s Session) any {
 				"noise_reduction": msg{"type": "near_field"},
 				// The call creates and cancels every response itself, so a
 				// Dyna item never races the owner's turn.
-				"turn_detection": msg{"type": "semantic_vad", "create_response": false, "interrupt_response": false},
+				// eagerness is low, medium, high or auto. Empty keeps the
+				// provider default, which waits longer than high.
+				"turn_detection": openAITurnDetection(s.VADEagerness),
 			},
 			"output": output,
 		},
 	}
+}
+
+// openAITurnDetection is semantic VAD with Dyna's response flags. eagerness
+// is set only when the session names one, so the default session stays as
+// the provider defines it.
+func openAITurnDetection(eagerness string) msg {
+	turn := msg{"type": "semantic_vad", "create_response": false, "interrupt_response": false}
+	if eagerness != "" {
+		turn["eagerness"] = eagerness
+	}
+	return turn
 }
 
 // gaTools lists tools in the GA form: flat function objects.

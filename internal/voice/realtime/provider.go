@@ -65,6 +65,15 @@ type Capabilities struct {
 	// the owner is muted the call keeps sending a second of silence each
 	// second, and the model can finish its reply (MiniCPM-o full duplex).
 	SteppedByInput bool
+	// ManualCommit: the client can end the buffered audio turn now.
+	// Protocol.AudioCommit is that message. The session then asks for one
+	// reply through the one-response queue. A provider without it rejects
+	// a commit line.
+	ManualCommit bool
+	// VADEagerness: the session setup takes low, medium, high or auto for
+	// how soon turn detection ends a turn. A provider without it rejects
+	// the flag.
+	VADEagerness bool
 }
 
 // Session is what Dyna wants from every provider's session.
@@ -75,6 +84,10 @@ type Session struct {
 	// TranscriptionPrompt lists the words the owner's transcription should expect.
 	TranscriptionPrompt string
 	Language            string
+	// VADEagerness is how soon turn detection ends a turn: low, medium,
+	// high or auto. Empty means the provider default. Only a provider with
+	// Capabilities.VADEagerness applies it.
+	VADEagerness string
 }
 
 // Registry finds a provider by its key or an alias.

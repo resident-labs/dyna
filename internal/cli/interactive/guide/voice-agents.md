@@ -22,6 +22,7 @@ dyna voice session --prompt-file persona.md --voice marin --tools tools.json --r
 ```
 
 `--rate` is the sample rate of your audio (8000 to 96000, default 24000). `--max-minutes` defaults to 30 (at most 120).
+`--vad-eagerness` is `low`, `medium`, `high` or `auto`. It sets how soon turn detection ends a turn. OpenAI Realtime supports it. `high` ends sooner. `low` waits longer. Omit it to keep the provider default. A provider that cannot set it rejects the flag, and the session does not start.
 `--tools` is a JSON list of `{"name","description","parameters","after"}`. `parameters` is a JSON Schema.
 `after` says what a result does. `reply` (the default) asks the model to speak. `later` keeps the result
 as context and asks for no reply, as Dyna Voice's dispatch does. `silent` gives the model an empty result
@@ -36,6 +37,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 | `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | Answer a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
+| `{"type":"commit"}` | End the turn now. The engine commits the buffered audio and asks for one reply. If a reply is already in flight, the new reply waits, the same way a text line with `"respond":true` does. OpenAI Realtime can do this. A provider that cannot sends an `error` line, and the session goes on. |
 | `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG (at most 5 MB). No reply. OpenAI Realtime only; others send an `error` line. |
 
 | Out (your stdout) | Meaning |
@@ -52,7 +54,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 Rules to design for:
 
 - **Turn-taking.** The provider detects when people speak and the engine asks for each reply. Send audio all the time,
-  also silence, so it can see where speech ends. A session with no input audio for 60 seconds ends as `idle`.
+  also silence, so it can see where speech ends. If your program already knows the person stopped talking, send `commit` instead of waiting for turn detection. A session with no input audio for 60 seconds ends as `idle`.
   When stdin ends, the session ends as `input-closed`: keep stdin open until you have the last `response_done`.
 - **Barge-in.** On `speech_started`, drop the audio you have queued and stop playback at once. The engine has
   already cancelled the reply. Truncation is approximate, because the engine does not know how much you played.
