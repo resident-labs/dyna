@@ -13,7 +13,8 @@
 # list prints, tab separated:
 #   FREE <kb>                          free space of the root's file system
 #   FOLDER <newest-epoch> <kb> <name>  one folder of the root
-#   BUILD <newest-epoch> <kb> <name> <path>  a build output inside that folder
+#   BUILD <newest-epoch> <kb> <name> <path>  a build output inside that folder,
+#                                      beside its project file (Cargo.toml, package.json, ...)
 # The newest time is the last change of any file inside, so the caller judges
 # a folder by activity and never by its name.
 set -u
@@ -37,6 +38,23 @@ kb() {
   du -sk -x -- "$1" 2>/dev/null | cut -f1
 }
 
+# has_marker BUILD: a build output counts only beside the project file that
+# makes it one, so a source folder that happens to be named build or dist stays.
+has_marker() {
+  local parent=${1%/*} marker
+  case "${1##*/}" in
+  target) set -- Cargo.toml pom.xml ;;
+  node_modules | dist) set -- package.json ;;
+  build) set -- build.gradle build.gradle.kts settings.gradle settings.gradle.kts CMakeLists.txt ;;
+  .gradle) set -- build.gradle build.gradle.kts settings.gradle settings.gradle.kts ;;
+  *) return 1 ;;
+  esac
+  for marker in "$@"; do
+    [ -f "$parent/$marker" ] && [ ! -L "$parent/$marker" ] && return 0
+  done
+  return 1
+}
+
 plain_name() {
   case "$1" in *[[:cntrl:]]*) return 1 ;; esac
 }
@@ -56,7 +74,7 @@ list)
     printf 'FOLDER\t%s\t%s\t%s\n' "$(newest "$dir")" "$(kb "$dir")" "$name"
     while IFS= read -r -d '' build; do
       rel=${build#"$dir"/}
-      plain_name "$rel" || continue
+      plain_name "$rel" && has_marker "$build" || continue
       printf 'BUILD\t%s\t%s\t%s\t%s\n' "$(newest "$build")" "$(kb "$build")" "$name" "$rel"
     done < <(find "$dir" -xdev -mindepth 1 -maxdepth 6 -type d \
       \( -name target -o -name node_modules -o -name build -o -name dist -o -name .gradle \) -prune -print0 2>/dev/null)
