@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { frameKey } from './rich.ts'
+import { frameKey, readCardMessage, SUBMIT_LIMIT } from './rich.ts'
 import type { CardAction, CardGuard } from './rich.ts'
 
 test('a card frame reloads when the same bytes change network policy', () => {
@@ -9,6 +9,15 @@ test('a card frame reloads when the same bytes change network policy', () => {
   assert.notEqual(frameKey(closed), frameKey(open), 'closed to open loads a new frame')
   assert.notEqual(frameKey(open), frameKey(closed), 'open to closed loads a new frame')
   assert.equal(frameKey(closed), frameKey({ ...closed }), 'the same card keeps its frame')
+})
+
+test('dyna:submit carries text and an optional choice, and nothing else', () => {
+  assert.deepEqual(readCardMessage({ type: 'dyna:submit', text: 'hi' }), { type: 'submit', text: 'hi' })
+  assert.deepEqual(readCardMessage({ type: 'dyna:submit', text: 'hi', choice: 'yes', extra: 1 }), { type: 'submit', text: 'hi', choice: 'yes' })
+  assert.deepEqual(readCardMessage({ type: 'dyna:submit', text: 'x'.repeat(SUBMIT_LIMIT) })?.type, 'submit')
+  for (const bad of [{ text: 5 }, { text: 'x'.repeat(SUBMIT_LIMIT + 1) }, { text: 'a', choice: 3 }, {}]) {
+    assert.equal(readCardMessage({ type: 'dyna:submit', ...bad }), null)
+  }
 })
 
 test('a policy change starts a fresh guard, so the new document is not a navigation', async () => {

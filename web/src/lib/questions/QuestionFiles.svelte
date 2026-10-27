@@ -6,9 +6,11 @@
   interface Props {
     roomId: string
     items?: Attachment[]
+    // The id of the post that carries the question and its cards.
+    post: string
     onopen: (attachment: Attachment) => void
   }
-  let { roomId, items = [], onopen }: Props = $props()
+  let { roomId, items = [], post, onopen }: Props = $props()
   let expanded = $state(false)
   let fullHeight = $state(360)
   let cards = $derived(items.filter((a) => a.render === 'html'))
@@ -16,7 +18,7 @@
 
 {#each cards as a (a.id)}
   <div class="card">
-    <CardFrame {roomId} att={a} height="{expanded ? cardHeight(fullHeight) : 320}px" onheight={(h: number) => fullHeight = h} />
+    <CardFrame {roomId} att={a} post={{ id: post }} height="{expanded ? cardHeight(fullHeight) : 320}px" onheight={(h: number) => fullHeight = h} />
     <div class="tools">
       <button onclick={() => expanded = !expanded}>{expanded ? 'Collapse' : 'Expand'}</button>
       <button onclick={() => onopen(a)}>Open</button>
