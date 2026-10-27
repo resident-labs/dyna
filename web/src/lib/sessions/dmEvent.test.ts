@@ -117,3 +117,42 @@ test('the DM shows the PR card and hides the agent text until Details opens', ()
   web.unmount(mounted)
   target.remove()
 })
+
+// A message the running turn has not read yet says what the session's live
+// step is and when that step reads it (D-350): a plain tool step reads when it
+// ends, a steerable one, Dyna's shell run or wait, reads now, and once the turn
+// reads the message the receipt names that turn.
+test('a delivered message names the live step that delays it, then the turn that read it', () => {
+  const note: Message = {
+    id: 'msg_delivered_state', ts: 2, roomId: 'room_1', from: 'room_1', to: ['room_1:author'], wake: true,
+    kind: 'message', text: 'Please also check the migration.',
+  }
+  const turns = (delivered: boolean) => [{
+    n: 3, status: 'running', started: '2026-10-23T08:00:00Z',
+    items: [{ kind: 'steering', postId: note.id, from: 'room_1', delivered, ts: '2026-10-23T08:01:00Z' }],
+  }]
+  const mount = (member: Record<string, unknown>, delivered: boolean) => {
+    const target = document.createElement('div')
+    document.body.append(target)
+    const mounted = web.mount(web.DmRows, {
+      target,
+      props: {
+        dm: web.dmView({ address: 'room_1:author', posts: [note], turns: turns(delivered) }, { name: 'room_1' }),
+        room: { id: 'room_1', name: 'room_1' }, member,
+        onthread: () => {}, onopenfile: () => {},
+      },
+    })
+    web.flushSync()
+    const receipts = [...target.querySelectorAll('.receipt')].map((r) => (r.textContent ?? '').trim())
+    web.unmount(mounted)
+    target.remove()
+    return receipts
+  }
+  const live = (doing: Record<string, unknown>) => ({ name: 'author', address: 'room_1:author', hue: 0, state: 'live', doing })
+  assert.deepEqual(mount(live({ text: 'Run the web tests', step: 'run' }), false),
+    ['author is running a shell command; it reads your message when that step ends'])
+  assert.deepEqual(mount(live({ text: 'reading shell output', step: 'wait', steerable: true }), false),
+    ['author is waiting on a shell job; it reads your message now'])
+  assert.deepEqual(mount(live({ text: 'Thinking' }), false), ['delivered'], 'no tool step keeps the plain receipt')
+  assert.deepEqual(mount({ name: 'author', address: 'room_1:author', hue: 0, state: 'idle' }, true), ['read in turn 3'])
+})
