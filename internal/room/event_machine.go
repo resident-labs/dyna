@@ -58,3 +58,30 @@ func (m MachineCacheEvent) eventSubject() string { return m.Name }
 // eventDedupe keys one repair per machine and time, so a retried post of the
 // same repair posts once.
 func (m MachineCacheEvent) eventDedupe() string { return strconv.Itoa(m.AtMS) }
+
+// MachineScratchEvent tells a room what a sweep of a machine's scratch folders
+// freed. It carries counts and sizes, never a path, which belongs to the
+// machine and not the room.
+type MachineScratchEvent struct {
+	Name string `json:"name"`
+	// Folders counts the folders removed because no file in them changed for
+	// the retention period. Builds counts the build outputs removed because
+	// the machine was under its CI disk floor.
+	Folders int `json:"folders"`
+	Builds  int `json:"builds"`
+	// FreedBytes is the space the sweep freed.
+	FreedBytes int `json:"freedBytes"`
+	// Summary is the short facts line the agent text reads.
+	Summary string `json:"summary"`
+	// AtMS is when Dyna posted the notice, in milliseconds since the Unix epoch.
+	AtMS int `json:"atMs"`
+}
+
+func (MachineScratchEvent) eventFamily() EventFamily { return FamilyMachine }
+func (MachineScratchEvent) eventType() EventType     { return TypeScratchFreed }
+
+// eventSubject is the machine, so sweeps of one machine fold into one card.
+func (m MachineScratchEvent) eventSubject() string { return m.Name }
+
+// eventDedupe keys one notice per machine and time, so a retried post posts once.
+func (m MachineScratchEvent) eventDedupe() string { return strconv.Itoa(m.AtMS) }

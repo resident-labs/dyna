@@ -60,6 +60,14 @@ const fixtures: Record<string, EventPayload> = {
     summary: 'Go build cache and Go module cache',
     atMs: 1792774800000,
   },
+  'machine/scratch-freed': {
+    name: 'hermeslab',
+    folders: 2,
+    builds: 3,
+    freedBytes: 40 * 1024 ** 3,
+    summary: '40.0 GiB freed: 2 idle folders and 3 build outputs removed',
+    atMs: 1792774800000,
+  },
   'worktree/kept': {
     owner: 'session-1',
     path: '/home/a/.dyna-worktrees/dyna-4708ae0b/composer-tidy',
@@ -382,6 +390,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('ruleId' in payload) return payload.sessions?.length ? `reached ${payload.sessions.length} sessions` : payload.ruleId
   if ('floorBytes' in payload) return payload.name
   if ('caches' in payload) return payload.name
+  if ('builds' in payload) return payload.name
   if ('source' in payload) return payload.reportId ?? payload.remedy ?? payload.summary ?? payload.source
   if ('service' in payload) return payload.error
   if ('minutes' in payload) return String(payload.minutes)

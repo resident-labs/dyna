@@ -333,6 +333,18 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
 	},
+	// A sweep of a machine's scratch folders that freed space posts one quiet
+	// machine fact, so rooms that use the machine see what went and why.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeScratchFreed,
+		Renderer: "MachineScratchCard",
+		Payload:  reflect.TypeOf(MachineScratchEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Machine {name} freed scratch space: {summary}.",
+	},
 	// The owner's answer to a call request is a fact of the room: root asked for
 	// the call and stops waiting when it reads the answer.
 	{
