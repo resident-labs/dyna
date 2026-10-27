@@ -97,7 +97,7 @@
   <div class="strip">Viewing v{shown.version || 1} · <button onclick={() => pick(versions[0]?.attachment.version || 1)}>Back to latest</button></div>
 {/if}
 <!-- A new frame per version, even for the same bytes: switching the URL of one frame reads as a navigation to its link guard, and each version has its own network policy. -->
-<div class="body">{#if ready}{#key current.post?.id ?? shown.id}<CardFrame {roomId} att={shown} />{/key}{/if}</div>
+<div class="body">{#if ready}{#key current.post?.id ?? shown.id}<CardFrame {roomId} att={shown} post={current.post} />{/key}{/if}</div>
 
 <style>
   header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); flex: none; position: relative; z-index: 1; }

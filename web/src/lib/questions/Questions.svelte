@@ -91,7 +91,7 @@
           </div>
           <div class="prose question-text">{@html markdown(q.text)}</div>
           <p class="meanwhile"><span>While waiting</span> · {q.meanwhile}</p>
-          {#if q.attachments?.length}<QuestionFiles {roomId} items={q.attachments} onopen={onopenfile} />{/if}
+          {#if q.attachments?.length}<QuestionFiles {roomId} items={q.attachments} post={q.post} onopen={onopenfile} />{/if}
           <form class="answers" onsubmit={(e) => { e.preventDefault(); answer(q, '', replies[q.id] ?? '') }}>
             {#each q.options ?? [] as option, i}
               <button class="option" class:gold={i === 0} type="button" disabled={busy.has(q.id)} onclick={() => answer(q, option)}>{option}</button>

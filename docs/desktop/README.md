@@ -423,6 +423,18 @@ height}` resizes it, and `{type: 'dyna:open', url}` opens an http or https
 link in the owner's browser, only right after a click in that card. A card
 that navigates itself by a link is restored once, then stopped.
 
+A card can also send the owner's input back with `{type: 'dyna:submit', text,
+choice?}`. `text` is up to 16 KB; a card that needs structure sends JSON in it.
+The app accepts a submit only while the card has focus and the owner has just
+clicked or typed in it, and at most once every two seconds. If the card is the
+post of an open question (`dyna ask --html`), the submit answers the question,
+with `choice` when it is one of the question's options and with `text`
+otherwise. On any other card it posts `text` as an owner reply to the card's
+author, in the post's conversation, so the author wakes. The app answers the
+card with `{type: 'dyna:submitted', ok, error?}`. A question that is already
+answered gives `ok: false` and `error: 'answered'`. There is no confirm
+dialog: the owner's click on the card's own button is the confirmation.
+
 ## Repository files and Git previews
 
 The shared API lists one directory level, reads text, serves image previews,
