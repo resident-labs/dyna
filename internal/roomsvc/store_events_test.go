@@ -43,7 +43,7 @@ func TestStoreMutationPublishesOnlyAfterCommit(t *testing.T) {
 	}{
 		{"goals", "goals", func() error { _, err := g.Add("room", "owner", goals.Input{Text: "A goal", Shared: true}); return err }},
 		{"questions", "questions", func() error {
-			_, err := q.Ask(questions.Question{Room: "room", Asker: "owner", Text: "A question?", Meanwhile: "Read code"}, nil)
+			_, err := q.Ask(questions.Question{Room: "room", Asker: "owner", AskerKind: questions.AskerOwner, Text: "A question?", Meanwhile: "Read code"}, nil)
 			return err
 		}},
 		{"notices", "notices", func() error {

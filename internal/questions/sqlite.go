@@ -23,6 +23,12 @@ CREATE INDEX IF NOT EXISTS questions_room ON questions(room);
 CREATE INDEX IF NOT EXISTS questions_open_asker ON questions(state,room,asker);
 CREATE TABLE IF NOT EXISTS question_next (room TEXT PRIMARY KEY, next INTEGER NOT NULL);`
 
+// askerKindBackfill stores the asker kind on rows written before the field
+// existed. Schema version 3 runs it once; readers use only the stored kind.
+const askerKindBackfill = `UPDATE questions SET body=json_set(body,'$.askerKind',
+ CASE WHEN asker='owner' THEN 'owner' WHEN asker LIKE 'run:%' THEN 'run' ELSE 'session' END)
+WHERE json_extract(body,'$.askerKind') IS NULL`
+
 // Migrate creates the questions tables and imports the old JSON store at
 // engine start. Ordinary clients only check the completed migration.
 func Migrate(dataDir string) error {
@@ -40,7 +46,7 @@ func (s *Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.Migrate(db, "questions.schema", 2, func(conn *sql.Conn, _ int) error {
+	if err := database.Migrate(db, "questions.schema", 3, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
 		if _, err := conn.ExecContext(ctx, questionsSchema); err != nil {
 			return err
@@ -59,6 +65,9 @@ func (s *Store) open() (*sql.DB, error) {
 			}
 		}
 		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('questions.revision','0')"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, askerKindBackfill); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='questions.imported'")

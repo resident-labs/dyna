@@ -33,7 +33,7 @@ func TestWithdrawalRoutingIsFixedByStartupMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := questions.Question{ID: "q1", Room: rec.ID, Asker: "asker", Post: "original", Withdrawn: &questions.Withdraw{By: "owner"}}
+	q := questions.Question{ID: "q1", Room: rec.ID, Asker: "asker", AskerKind: questions.AskerSession, Post: "original", Withdrawn: &questions.Withdraw{By: "owner"}}
 	body, _ := json.Marshal(q)
 	if _, err := db.Exec("INSERT INTO questions(key,room,state,asker,body) VALUES(?,?,?,?,?)", rec.ID+"/q1", rec.ID, "withdrawn", "asker", string(body)); err != nil {
 		t.Fatal(err)
