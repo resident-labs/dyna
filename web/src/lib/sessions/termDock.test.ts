@@ -10,13 +10,13 @@ test('the dock height stays between 120 px and 80% of the main area', () => {
   assert.equal(clampHeight(NaN, 800), 280)
 })
 
-test('toggle opens and hides; hiding drops maximize but keeps height and tabs', () => {
+test('hide drops maximize but keeps height and tabs', () => {
   let v = dockReduce(closedDock(), { type: 'resize', height: 400, avail: 1000 })
   v = dockReduce(dockReduce(v, { type: 'tab', ref: 'r', id: 't1' }), { type: 'maximize' })
   assert.deepEqual([v.open, v.maxed], [true, true])
-  v = dockReduce(v, { type: 'toggle' })
+  v = dockReduce(v, { type: 'hide' })
   assert.deepEqual([v.open, v.maxed, v.height, v.active], [false, false, 400, { r: 't1' }])
-  assert.equal(dockReduce(v, { type: 'toggle' }).open, true)
+  assert.equal(dockReduce(v, { type: 'show' }).open, true)
 })
 
 test('a saved dock is read back and broken values fall back to closed', () => {

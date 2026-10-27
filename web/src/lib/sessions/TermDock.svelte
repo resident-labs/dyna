@@ -47,7 +47,8 @@
   // A room lists every shell in the room, its sessions' too; a session view
   // lists that session's.
   let list = $derived((all ?? []).filter((t) => (ref === roomId ? t.roomId === roomId || t.ref === roomId : t.sessionId === ref || t.ref === ref)))
-  let active = $derived(dock.active[ref] ?? '')
+  // The saved tab, or the newest shell when it is gone or this ref has none yet.
+  let active = $derived(list.find((t) => t.id === dock.active[ref])?.id ?? list.at(-1)?.id ?? '')
   let current = $derived(list.find((t) => t.id === active))
   let height = $derived(clampHeight(dock.height, avail))
 
@@ -123,6 +124,14 @@
 
   // show opens the dock; with no shell to show it starts one.
   async function show() {
+    if (narrow) {
+      // A phone has no dock: one shell opens its sheet, several open the list.
+      if (all === null) await load()
+      const only = list.length === 1 ? list[0] : undefined
+      if (only) pick(only)
+      else listing = true
+      return
+    }
     act({ type: 'show' })
     if (all === null) await load()
     if (!list.length && !roomless) open()
@@ -267,8 +276,12 @@
     {#if narrow}
       <PhoneKeys {ctrl} onkey={(k: string) => { if (k === 'ctrl') { ctrl = !ctrl; pane?.focus() } else pane?.key(k) }} />
     {/if}
-  {:else}
+  {:else if all === null}
     <p class="quiet">Starting a shell…</p>
+  {:else if roomless}
+    <p class="quiet">This room has no repository, so a room terminal has no folder. Open one from a session.</p>
+  {:else}
+    <p class="quiet">No terminal open. <button class="open" onclick={open} disabled={opening}>Open a terminal</button></p>
   {/if}
 {/snippet}
 
@@ -414,6 +427,7 @@
     button.primary:hover { background: var(--iris-hover); color: #18161d; }
   }
   button.primary:active { background: var(--select); color: var(--ink); }
+  .open { margin-left: var(--s2); padding: 4px var(--s3); border-radius: 6px; background: var(--iris); color: #18161d; font-weight: 600; }
   .quiet { color: var(--faint); font-size: var(--t-ui); padding: var(--s4); margin: 0; }
   .err { margin: 0; padding: 6px 14px; font-size: var(--t-sm); color: var(--coral); background: rgba(239, 138, 128, 0.08); }
 
