@@ -117,10 +117,11 @@ func printResult(c *cobra.Command, t subagent.Turn) {
 			fmt.Fprintln(c.OutOrStdout())
 		}
 	}
-	// The result stays first so a caller that reads the result text is unchanged.
-	// The wake line follows it.
+	// Plain stdout is the result only. A schema turn returns JSON, and trailing
+	// text would break a parser. The wake line goes to stderr, and --json
+	// carries it in the wake field.
 	if line := t.Wake.Line(); line != "" {
-		fmt.Fprintln(c.OutOrStdout(), line)
+		fmt.Fprintln(c.ErrOrStderr(), line)
 	}
 }
 

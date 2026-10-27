@@ -162,39 +162,29 @@ func (m *Manager) noteHow(ctx context.Context, meta Meta, postIDs []string, how 
 	return m.rooms().NoteDeliveries(ctx, hub.Event{}, noteSet(meta), postIDs, how, turn, time.Now().UnixMilli())
 }
 
-// noteIncluded records how this turn took each post it included. The post
-// that started the turn stays woke.
-func (m *Manager) noteIncluded(ctx context.Context, id string, turn int, reply ClaimedInput) error {
-	var ids []string
-	for _, post := range reply.Posts {
-		if post.Steer.ID != "" {
-			ids = append(ids, post.Steer.ID)
-		}
+// deliveryHowGroups says how this turn took each post. The post that started
+// the turn stays woke. An empty list needs no read.
+func (m *Manager) deliveryHowGroups(meta Meta, postIDs []string, turn int) (map[room.DeliveryHow][]string, error) {
+	if len(postIDs) == 0 {
+		return nil, nil
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	meta, err := m.store().ReadMeta(id)
+	rows, err := inputRows(m.rooms(), meta.RoomID, meta.ID, meta.Address(), postIDs)
 	if err != nil {
-		return err
-	}
-	rows, err := inputRows(m.rooms(), meta.RoomID, meta.ID, meta.Address(), ids)
-	if err != nil {
-		return err
+		return nil, err
 	}
 	var seats map[string]room.Delivery
 	if meta.Role == RoleRoot {
-		seats, err = m.rooms().SeatDeliveries(meta.RoomID, ids)
+		seats, err = m.rooms().SeatDeliveries(meta.RoomID, postIDs)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	stored, err := m.store().ReadTurn(id, turn)
+	stored, err := m.store().ReadTurn(meta.ID, turn)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	groups := map[room.DeliveryHow][]string{}
-	for _, postID := range ids {
+	for _, postID := range postIDs {
 		mode := room.DeliveryWake
 		if row, ok := rows[postID]; ok {
 			mode = row.Mode
@@ -210,6 +200,27 @@ func (m *Manager) noteIncluded(ctx context.Context, id string, turn int, reply C
 			how = room.DeliveryWoke
 		}
 		groups[how] = append(groups[how], postID)
+	}
+	return groups, nil
+}
+
+// noteIncluded records how this turn took each post it included. The claim
+// path writes the same groups in its own transaction. This remains for a
+// caller that notes posts the claim did not take.
+func (m *Manager) noteIncluded(ctx context.Context, id string, turn int, reply ClaimedInput) error {
+	var ids []string
+	for _, post := range reply.Posts {
+		if post.Steer.ID != "" {
+			ids = append(ids, post.Steer.ID)
+		}
+	}
+	meta, err := m.store().ReadMeta(id)
+	if err != nil {
+		return err
+	}
+	groups, err := m.deliveryHowGroups(meta, ids, turn)
+	if err != nil {
+		return err
 	}
 	for how, posts := range groups {
 		if err := m.noteHow(ctx, meta, posts, how, turn); err != nil {

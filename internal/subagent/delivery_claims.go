@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -150,7 +151,7 @@ func (s *Store) deliverySignature(meta Meta) string {
 // the same transaction: the posts the read claimed, the notes a held prompt
 // covered, and the reply the request receipt keeps. A retry reads the same
 // rows and replays the same receipt.
-func storeClaimReply(ctx context.Context, rooms *room.Store, meta Meta, claimed, covered []string, turn int, reply []byte) error {
+func storeClaimReply(ctx context.Context, rooms *room.Store, meta Meta, claimed, covered []string, turn int, reply []byte, notes map[room.DeliveryHow][]string) error {
 	ev := hub.Event{}
 	if len(claimed) > 0 || len(covered) > 0 {
 		ev = sessionlife.Changed(meta.ID)
@@ -159,12 +160,20 @@ func storeClaimReply(ctx context.Context, rooms *room.Store, meta Meta, claimed,
 	if err != nil {
 		return err
 	}
+	at := time.Now().UnixMilli()
 	return rooms.DeliveryWrite(ctx, ev, func(conn *sql.Conn) error {
 		if _, err := room.ClaimDeliveriesIn(ctx, conn, deliverySet(meta), claimed, turn); err != nil {
 			return err
 		}
 		if _, err := room.CoverDeliveriesIn(ctx, conn, deliverySet(meta), covered); err != nil {
 			return err
+		}
+		// how and delivered_at land with the claim, so a crash cannot leave a
+		// claimed row with no outcome.
+		for how, ids := range notes {
+			if err := room.NoteDeliveriesIn(ctx, conn, noteSet(meta), ids, how, turn, at); err != nil {
+				return err
+			}
 		}
 		return state.For(db).FinishRequestIn(ctx, conn, "RunnerClaimInput", reply)
 	})
