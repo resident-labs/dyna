@@ -218,6 +218,12 @@ func (s *Service) DeliverAnswers(ctx context.Context, roomID string) error {
 				}
 			}
 		}
+		if q.IsTerminal() {
+			if err := s.deliverTerminalResult(rec, q, target, by, closed); err != nil {
+				errs = append(errs, err)
+			}
+			continue
+		}
 		answer := a.Choice
 		if a.Text != "" {
 			if answer != "" {
@@ -266,6 +272,7 @@ func (s *Service) WithdrawQuestion(snd Sender, roomRef, id, reason string) error
 		return err
 	}
 	s.noteQuestions(context.Background(), rec.ID)
+
 	// TODO(legacy): State-only questions have no post to reply to.
 	if q.Post == "" {
 		return nil

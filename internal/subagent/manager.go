@@ -1311,6 +1311,10 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	if err := m.withdrawClosedQuestions(info); err != nil {
 		return info, err
 	}
+	// A request the closing session holds moves to its heir, or to the owner.
+	if err := m.questionStore().ReassignHolder(info.RoomID, info.ID, heir.ID); err != nil {
+		return info, err
+	}
 	m.closeGoals(info, heir.ID)
 	store.appendJournal(info.ID, SessionClosedJournal{By: opts.by, Handoff: closeJournalLines(summary)})
 	closed, err := store.Info(info.ID)

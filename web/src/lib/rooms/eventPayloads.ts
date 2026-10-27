@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineCacheEvent, isMachineEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineCacheEvent, MachineEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineCacheEvent, isMachineEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineCacheEvent, MachineEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -222,4 +222,16 @@ export function questionEvent(post: EventPost): QuestionEvent | undefined {
 // isQuestionWithdrawn reports the quiet note that a question was withdrawn.
 export function isQuestionWithdrawn(post: EventPost): boolean {
   return post.kind === 'question' && post.notice?.kind === 'withdrawn'
+}
+
+// terminalRequestEvent returns the typed payload of a filed terminal request.
+export function terminalRequestEvent(post: EventPost): TerminalRequestEvent | undefined {
+  if (post.kind !== 'terminal' || post.notice?.kind !== 'request') return undefined
+  return isTerminalRequestEvent(post.payload) ? post.payload : undefined
+}
+
+// terminalDoneEvent returns the typed payload of a finished terminal request.
+export function terminalDoneEvent(post: EventPost): TerminalDoneEvent | undefined {
+  if (post.kind !== 'terminal' || post.notice?.kind !== 'request.done') return undefined
+  return isTerminalDoneEvent(post.payload) ? post.payload : undefined
 }

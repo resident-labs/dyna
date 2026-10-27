@@ -21,7 +21,7 @@ import type { SyncStarted, SyncStatus } from './lanesync.ts'
 import type { MachineDetail, MachinePatch, MachineSummary } from './machine.ts'
 import type { LibraryView } from './library.ts'
 import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, ProfileView } from './profile.ts'
-import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SpawnResult, Visual } from './room.ts'
+import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SpawnResult, TerminalVerdict, Visual } from './room.ts'
 import type { ServiceView } from './service.ts'
 import type { BulkSessionOptions, BulkSessionResult, ConsolidationOptions, ConsolidationState, MemberProfile, QueueItem, RoomSessionMutation, RoomSessionState, Session, TransferOptions, TransferState } from './session.ts'
 import type { Device, Hook, HookRun, HookRunLog, HookSummary, Notice, Pairing, SettingItem, UpdateNotice } from './settings.ts'
@@ -228,6 +228,10 @@ export interface Engine {
 
   // Terminals, computers and the Voice call.
   TermOpen(ref: string, cols: number, rows: number): Promise<TermInfo>
+  // Terminal requests: owner-only. argv is the command the owner edited, or null to run the filed one.
+  TermRequestRun(room: string, id: string, argv: string[] | null, cols: number, rows: number): Promise<TermInfo>
+  TermRequestPreview(room: string, id: string): Promise<string>
+  TermRequestReport(room: string, id: string, verdict: TerminalVerdict, note: string, shareLines: boolean): Promise<null>
   Terms(): Promise<TermInfo[] | null>
   TermAttach(id: string, after: number): Promise<TermEvent>
   TermWrite(id: string, base64: string): Promise<null>

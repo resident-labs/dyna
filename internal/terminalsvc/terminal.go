@@ -119,6 +119,12 @@ func dimensions(cols, rows uint16) error {
 
 // Open starts the user's interactive login shell in the supplied directory.
 func (s *Service) Open(roomID, sessionID, cwd string, cols, rows uint16) (Info, error) {
+	return s.openShell(roomID, sessionID, cwd, nil, cols, rows)
+}
+
+// openShell starts the login shell with extra arguments, such as -c and a
+// command line.
+func (s *Service) openShell(roomID, sessionID, cwd string, extra []string, cols, rows uint16) (Info, error) {
 	if err := dimensions(cols, rows); err != nil {
 		return Info{}, err
 	}
@@ -129,7 +135,7 @@ func (s *Service) Open(roomID, sessionID, cwd string, cols, rows uint16) (Info, 
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	cmd := exec.Command(shell, "-l")
+	cmd := exec.Command(shell, append([]string{"-l"}, extra...)...)
 	cmd.Dir = cwd
 	// An owner terminal must never inherit agent identity stamps.
 	for _, e := range os.Environ() {

@@ -13,6 +13,9 @@ import (
 var ownerCalls = []string{
 	"TermWrite",
 	"TermOpen",
+	"TermRequestRun",
+	"TermRequestPreview",
+	"TermRequestReport",
 	"CreatePairing",
 	"SetDeviceScopes",
 	"RevokeDevice",
