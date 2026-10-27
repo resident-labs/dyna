@@ -9,7 +9,7 @@ test('terminal tab Home and End reveal their tab while shell shortcuts keep focu
   const context: Record<string, unknown> = {
     list, docked: list, active: 'b', current: list[1], tick: () => Promise.resolve(),
     setTimeout: (fn: () => void) => fn(), focused: 'shell', ref: 'r', dock: { open: true }, narrow: false,
-    rootEl: { contains: () => true }, Node: class {},
+    Element: class { closest() { return { dataset: {} } } },
     act: (a: { type: string; id?: string }) => { if (a.type === 'tab') context.active = a.id },
   }
   const strip = {
@@ -37,7 +37,7 @@ test('terminal tab Home and End reveal their tab while shell shortcuts keep focu
   assert.equal(context.focused, 'c')
   assert.equal(strip.scrollLeft, 80)
   context.focused = 'shell'
-  call(context, 'shortcut', { ...key('PageUp'), ctrlKey: true, target: new (context.Node as new () => object)() })
+  call(context, 'shortcut', { ...key('PageUp'), ctrlKey: true, target: new (context.Element as new () => object)() })
   await Promise.resolve()
   assert.equal(context.active, 'b')
   assert.equal(context.focused, 'shell')
