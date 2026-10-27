@@ -224,6 +224,44 @@ func TestGoalIssueLinks(t *testing.T) {
 	}
 }
 
+// D-297: an empty fixes list unlinks every issue of the goal, so a dropped
+// goal can hand its issue back.
+func TestEditGoalWithEmptyFixesUnlinksIssues(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	lead := e.start(r, "lead", nil)
+	ctx := authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: lead.ID, Room: r.ID})
+	issue, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Unlink me", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := e.svc.AddGoal(ctx, r.ID, "", nil, []int{issue.Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "", nil, []int{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.issue(t, r.ID, issue.ID); got.State != "open" || got.GoalID != "" {
+		t.Fatalf("issue after clear = %+v, want open with no goal", got)
+	}
+}
+
+func (e *env) issue(t *testing.T, roomID, id string) room.Issue {
+	t.Helper()
+	rows, err := e.svc.rooms().Issues(roomID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range rows {
+		if i.ID == id {
+			return i
+		}
+	}
+	t.Fatalf("issue %s not found", id)
+	return room.Issue{}
+}
+
 // D-285: a goal marked done closes no linked issue by itself, because its done
 // note may say the issue is not fixed. It lists the issues it left open, and
 // --close closes the ones the finisher names. A merged PR still closes the
