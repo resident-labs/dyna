@@ -184,10 +184,19 @@ export interface FeedSearch {
   more: boolean
 }
 
+// DoingStep is workeroutput.Activity.Step: the kind of tool call a live
+// session runs now, in the session view's own words. wait is Dyna's own
+// shell_output wait, the one step a new message can end at once.
+export type DoingStep = 'run' | 'wait' | 'read' | 'edit' | 'write' | 'search' | 'fetch' | 'tool'
+
 // Doing is workeroutput.Activity: what a live session does now.
 export interface Doing {
   text?: string
   since?: number // unix milliseconds
+  step?: DoingStep
+  // steerable says a new message for the session ends this step early
+  // (Dyna's shell run or wait), so the session reads it at once.
+  steerable?: boolean
 }
 
 export interface Seat {

@@ -7,7 +7,7 @@
   import PostFiles from '../ui/PostFiles.svelte'
   import PostLink from '../ui/PostLink.svelte'
   import { markdown, stamp, clock } from '../ui/format.ts'
-  import { postedTo } from './dm.ts'
+  import { deliveredState, postedTo } from './dm.ts'
   import { speaker } from '../ui/posts.ts'
   import { postParts } from '../ui/postParts.ts'
   import { postPreview } from '../ui/preview.ts'
@@ -98,7 +98,10 @@
 {#snippet receipt()}
   {#if delivery && !row.quietReceipt}
     {@const pending = row.pending}
-    <div class="receipt"><span>{delivery}</span>
+    <!-- While the session has the message but has not read it, the receipt says
+         what its live step is and when that step reads the message (D-350). -->
+    {@const state = delivery === 'delivered' && member?.state === 'live' ? deliveredState(member.name, member.doing) : ''}
+    <div class="receipt"><span>{state || delivery}</span>
       {#if pending && ondismiss}
         <span aria-hidden="true"> · </span><button onclick={() => ondismiss(pending)} disabled={!!removing} aria-label="Dismiss this pending message" title="Dismiss with confirmation">Dismiss</button>
       {:else if pending?.cancellable && pending.state === 'waiting' && onunqueue}
