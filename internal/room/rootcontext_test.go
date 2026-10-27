@@ -35,9 +35,9 @@ func TestRootContext(t *testing.T) {
 			decision: RootWake,
 		},
 		{
-			name:     "an unstamped owner script naming root with no wake is quiet",
+			name:     "an unstamped owner script naming root with no wake is quiet context",
 			msg:      Message{ID: "bridge", From: roomName, Kind: "message", To: []string{roomName}, Via: []string{"@" + roomName + ":root"}},
-			decision: RootQuiet,
+			decision: RootQuiet, category: RootQuietPost,
 		},
 		{
 			name:     "agent message to the owner is quiet",
