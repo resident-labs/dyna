@@ -50,7 +50,7 @@ func TestQuietTestBudgetDecodesEachCIInputOnce(t *testing.T) {
 	}
 	policy := ChangePolicy{CITimeBudget: "enforce", RequiredChecks: []string{"external"}}
 	ci, key, _, _ := snap.CIStatus(policy.RequiredChecks...)
-	if ci != "failed" || key == "" || strings.HasPrefix(key, "budget:") {
+	if _, budget := ParseBudgetFailureKey(key); ci != "failed" || key == "" || budget {
 		t.Fatal("fixture needs an ordinary failed-CI key")
 	}
 	const reason = "tests over 1s: package/TestSlow"

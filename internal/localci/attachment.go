@@ -76,7 +76,7 @@ func (s Store) saveAttachment(ctx context.Context, repo, sha, node string, att a
 		return err
 	}
 	pid, start := attachmentOwner()
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: AttachEventKey(sha).String()}, func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(ctx, attachmentSchema); err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (s Store) updateAttachments(ctx context.Context, sha, query string, args ..
 	if err != nil {
 		return err
 	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: AttachEventKey(sha).String()}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, query, args...)
 		if isMissingAttachmentTable(err) {
 			return nil
@@ -169,7 +169,7 @@ func (s Store) claimAttachment(ctx context.Context, repo, sha, node string) (att
 			continue
 		}
 		taken := false
-		err := state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "attach:" + sha}, func(conn *sql.Conn) error {
+		err := state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: AttachEventKey(sha).String()}, func(conn *sql.Conn) error {
 			res, err := conn.ExecContext(ctx, "UPDATE local_ci_attachments SET owner_pid=?, owner_start=?, saved_at=? WHERE repo=? AND sha=? AND node=? AND run_id=? AND owner_pid=? AND owner_start=?",
 				pid, start, resultClock().Unix(), repo, sha, node, row.RunID, row.ownerPID, row.ownerStart)
 			if err != nil {
