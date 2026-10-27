@@ -121,11 +121,21 @@ func (s *Service) noteQuestions(ctx context.Context, roomID string) {
 	}
 }
 func (s *Service) AnswerQuestion(ctx context.Context, snd Sender, roomRef, id, choice, text string) error {
+	return s.answerQuestion(ctx, snd, roomRef, id, choice, text, "")
+}
+
+// AnswerQuestionFromCard answers for an owner who confirmed text that an HTML
+// card wrote. The stored answer and its post carry room.SourceCard.
+func (s *Service) AnswerQuestionFromCard(ctx context.Context, snd Sender, roomRef, id, choice, text string) error {
+	return s.answerQuestion(ctx, snd, roomRef, id, choice, text, room.SourceCard)
+}
+
+func (s *Service) answerQuestion(ctx context.Context, snd Sender, roomRef, id, choice, text, source string) error {
 	rec, err := s.QuestionRoom(snd, roomRef)
 	if err != nil {
 		return err
 	}
-	_, err = s.QuestionStore().Answer(rec.ID, id, questions.Answer{By: questionIdentity(snd), Human: snd.Human, Choice: choice, Text: text})
+	_, err = s.QuestionStore().Answer(rec.ID, id, questions.Answer{By: questionIdentity(snd), Human: snd.Human, Choice: choice, Text: text, Source: source})
 	if err != nil {
 		qs, readErr := s.QuestionStore().List(rec.ID)
 		retry := false
@@ -211,7 +221,7 @@ func (s *Service) DeliverAnswers(ctx context.Context, roomID string) error {
 		}
 		msg, err := s.Rooms.Post(rec.ID, room.PostInput{
 			SessionIDs: sessionIDs, Wake: !closed && q.Asker != a.By, ID: questions.PostID(q.Room, q.ID, "answer"), From: from, Human: a.Human,
-			Kind: "message", To: []string{target.addr}, Via: []string{"@" + target.addr}, Text: body,
+			Kind: "message", Source: a.Source, To: []string{target.addr}, Via: []string{"@" + target.addr}, Text: body,
 		})
 		if err != nil {
 			errs = append(errs, err)

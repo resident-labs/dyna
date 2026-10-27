@@ -58,6 +58,7 @@ export interface Engine {
   DeclineCallRequest(roomId: string, id: string): Promise<CallRequest>
   Visuals(roomId: string): Promise<Visual[]>
   AnswerQuestion(roomId: string, id: string, choice: string, text: string): Promise<null>
+  AnswerQuestionFromCard(roomId: string, id: string, choice: string, text: string): Promise<null>
 
   // Goals and rules.
   Goals(room: string, before: string, limit: number): Promise<Page<Goal>>
@@ -121,6 +122,7 @@ export interface Engine {
   MarkRoomRead(roomId: string): Promise<null>
   Send(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string, conversation: string): Promise<SendResult>
   SendWithReferences(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string, references: Reference[], conversation: string): Promise<SendResult>
+  SendFromCard(roomId: string, draft: string, replyTo: string, conversation: string): Promise<PostResult>
   Attach(roomId: string, name: string, base64: string): Promise<Attachment>
   AttachmentText(roomId: string, id: string): Promise<string>
   ArchiveRoom(ref: string): Promise<null>
