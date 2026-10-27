@@ -6,8 +6,8 @@ import { computerLabel } from '../computers/computers.ts'
 
 const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8')
 
-test('Questions, Runs and Computers use the shared TabHeader', () => {
-  for (const p of ['./../questions/Questions.svelte', '../workflows/Runs.svelte', '../computers/Computers.svelte']) {
+test('Requests, Runs and Computers use the shared TabHeader', () => {
+  for (const p of ['./../requests/Requests.svelte', '../workflows/Runs.svelte', '../computers/Computers.svelte']) {
     assert.match(read(p), /<TabHeader /, p)
   }
   assert.doesNotMatch(read('../workflows/Runs.svelte'), /class="glyph"|class="tally"/)
