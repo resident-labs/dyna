@@ -1,56 +1,39 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { commandLine, editedArgv, emptyForm, requestActions, splitCommand, whatAgentGets, type RequestApi } from './termRequest.ts'
+import { autoVerdict, commandLine, followUpText, requestActions, sentLine, type RequestApi, type SentReport } from './termRequest.ts'
 import type { TermInfo } from '../api/terminal.ts'
 
 function fake() {
   const calls: unknown[][] = []
   const api: RequestApi = {
-    run: async (...a) => { calls.push(['run', ...a]); return { id: 't1' } as TermInfo },
+    run: async () => { calls.push(['run']); return { id: 't1' } as TermInfo },
     preview: async () => { calls.push(['preview']); return 'one\ntwo' },
     report: async (...a) => { calls.push(['report', ...a]) },
   }
   return { calls, api }
 }
 
-test('making the actions calls nothing; only Run starts the command, with argv only when edited', async () => {
+test('making the actions calls nothing; Run starts the filed command and an exit reports by its code', async () => {
   const { calls, api } = fake()
   const act = requestActions(api)
   assert.deepEqual(calls, [])
-  const same = editedArgv(['gh', 'auth', 'login', '--scopes', 'a b'], "gh auth login --scopes 'a b'")
-  assert.deepEqual(same, { argv: null })
-  await act.run(null)
-  const changed = editedArgv(['gh', 'auth', 'login'], 'gh auth status')
-  assert.deepEqual(changed, { argv: ['gh', 'auth', 'status'] })
-  await act.run(['gh', 'auth', 'status'])
-  assert.deepEqual(calls, [['run', null], ['run', ['gh', 'auth', 'status']]])
-})
-
-test('sharing lines is off by default and sends only lines the owner saw', async () => {
-  const { calls, api } = fake()
-  const act = requestActions(api)
-  const f = emptyForm()
-  assert.equal(f.share, false)
-  await act.report('done', { ...f, note: ' logged in ' })
-  await act.report('done', { ...f, share: true }) // ticked, never shown
-  await act.report('failed', { ...f, share: true, lines: 'one\ntwo' })
+  await act.run()
+  await act.report(0)
+  await act.report(2)
+  await act.report(-1)
   await act.decline(' not now ')
-  assert.deepEqual(calls, [['report', 'done', 'logged in', false], ['report', 'done', '', false], ['report', 'failed', '', true], ['report', 'declined', 'not now', false]])
+  assert.deepEqual(calls, [['run'], ['report', 'done', '', false], ['report', 'failed', '', false], ['report', 'failed', '', false], ['report', 'declined', 'not now', false]])
 })
 
-test('a command shows with quotes and reads back the same; a broken edit is an error', () => {
-  const argv = ['echo', "it's", 'a b', '', '$HOME']
-  const line = commandLine(argv)
-  assert.deepEqual(splitCommand(line), { argv })
-  assert.deepEqual(splitCommand('a "b \\"c\\"" d\\ e'), { argv: ['a', 'b "c"', 'd e'] })
-  assert.ok('error' in splitCommand("echo 'open"))
-  assert.ok('error' in splitCommand('   '))
+test('a command shows with quotes', () => {
+  assert.equal(commandLine(['echo', "it's", 'a b', '', '$HOME']), `echo 'it'\\''s' 'a b' '' '$HOME'`)
 })
 
-test('the banner says what the agent gets, and names the lines only when they are ticked and shown', () => {
-  const f = emptyForm()
-  assert.equal(whatAgentGets('builder', true, f), 'builder gets the exit code and your note.')
-  assert.equal(whatAgentGets('builder', false, f), 'builder gets only your note.')
-  assert.equal(whatAgentGets('builder', true, { ...f, share: true }), 'builder gets the exit code and your note.', 'ticked but not shown yet')
-  assert.equal(whatAgentGets('builder', true, { ...f, share: true, lines: 'a' }), 'builder gets the exit code, your note and the 20 lines below.')
+test('the sent line and the follow-up say what went to the filer', () => {
+  const s: SentReport = { requestId: 'q1', askerName: 'root', verdict: autoVerdict(0), code: 0 }
+  assert.equal(sentLine(s), 'Sent to root: done (exit 0)')
+  assert.equal(sentLine({ ...s, verdict: 'failed', code: 3 }), 'Sent to root: failed (exit 3)')
+  assert.equal(sentLine({ ...s, verdict: 'failed', code: -1 }), 'Sent to root: failed (shell lost)')
+  assert.equal(followUpText(s, ' logged in ', null), '@root Follow-up on terminal request q1 (done).\n\nlogged in')
+  assert.match(followUpText(s, '', 'one\ntwo\n'), /```\none\ntwo\n```$/)
 })
