@@ -116,7 +116,7 @@
   import { withoutReviewers } from './lib/prs/pr.ts'
   import { boot, watch, registerWorker } from './lib/settings/link.ts'
   import { engineWatch, browserEngine, type EngineStatus } from './lib/engineStatus.ts'
-  import { loadLayout, saveLayout, lastRoom, saveLastRoom } from './lib/ui/prefs.ts'
+  import { loadLayout, saveLayout, lastRoom, saveLastRoom, loadDock, saveDock } from './lib/ui/prefs.ts'
   import { dmView } from './lib/sessions/dm.ts'
   import { followInternalLink, internalLinkHash, roomLabel, short } from './lib/ui/format.ts'
   import { parseDetailHref } from './lib/ui/details.ts'
@@ -940,7 +940,7 @@
     router.reviewTab = startView === 'github' ? 'prs' : startView === 'issues' ? 'issues' : 'files'
     // TODO: legacy/shim remove later — the terminal view became the dock.
     const start = legacyView(startView, GENERAL)
-    if (start.dock) dockRequest++
+    if (start.dock) { saveDock(id, { ...loadDock(id), open: true }); dockRequest++ }
     router.view = ['all', 'owner', 'turns', 'files', 'github'].includes(start.view) ? GENERAL : start.view
     roomData.clearMembers()
     runs = null

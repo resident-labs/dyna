@@ -164,7 +164,9 @@
   function label(t: TermInfo) {
     const who = (t.sessionId && names[t.sessionId]) || owner
     const shell = t.title || t.shell?.split('/').pop() || 'shell'
-    return who ? `${who} · ${shell}` : shell
+    const name = who ? `${who} · ${shell}` : shell
+    const same = list.filter((x) => x.sessionId === t.sessionId)
+    return same.length > 1 ? `${name} ${same.indexOf(t) + 1}` : name
   }
 
   // Ctrl+` shows or hides the dock from anywhere. Ctrl+Shift+T opens a tab,
@@ -234,7 +236,8 @@
   const swipeEnd = (e: TouchEvent) => { if ((e.changedTouches[0]?.clientY ?? 0) - swipeFrom > 70) sheet = false }
 
   onMount(() => {
-    load()
+    // A dock left open with no shell (a reload, the old terminal link) starts one.
+    load().then(() => { if (dock.open && !list.length && !roomless && !narrow) open() })
     // Shells can end or vanish elsewhere (another device, a host restart);
     // keep the tabs current.
     const t = setInterval(refresh, 5000)
