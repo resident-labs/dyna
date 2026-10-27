@@ -120,7 +120,7 @@ func (s *Sayer) Say(ctx context.Context, req SayRequest) (SayResult, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	conn, err := s.dial(ctx, p, realtime.Session{Instructions: sayInstructions(req.Style), Voice: req.Voice})
+	conn, err := s.dial(ctx, p, realtime.Session{Instructions: sayInstructions(req.Style), Voice: req.Voice, Language: "en"})
 	if err != nil {
 		return SayResult{}, err
 	}
