@@ -1,4 +1,4 @@
-import type { Member, Post } from '../api/room.ts'
+import type { Doing, DoingStep, Member, Post } from '../api/room.ts'
 import type { Item, QueueState, SessionReference, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isSessionReference } from '../api/guards.ts'
@@ -38,6 +38,35 @@ const receiptProjections: Record<QueueState, ReceiptProjection> = {
 }
 const receiptProjection = (state: QueueState): ReceiptProjection | undefined => receiptProjections[state]
 const receiptDelivery = (receipt: Receipt | undefined): ReceiptProjection['delivery'] => receipt ? receiptProjection(receipt.state)?.delivery : undefined
+
+// The words for what a live step is, one per DoingStep. deliveredState names
+// the session's current step with them.
+const stepPhrases: Record<DoingStep, string> = {
+  run: 'running a shell command',
+  wait: 'waiting on a shell job',
+  read: 'reading a file',
+  edit: 'editing a file',
+  write: 'writing a file',
+  search: 'searching',
+  fetch: 'fetching a page',
+  tool: 'in a tool call',
+}
+
+// deliveredState is the line under a message the session has not read yet
+// (D-350): what its current step is, and when it reads the message. A
+// steerable step, Dyna's shell run or wait, ends at once on the message, so
+// it reads now; any other step reads when it ends. A worker that is not in a
+// tool step keeps the plain receipt, so the line is empty then.
+export function deliveredState(name: string, doing?: Doing): string {
+  const step = doing?.step
+  if (!step) return ''
+  return `${name} is ${stepPhrases[step]}; it reads your message ${doing.steerable ? 'now' : 'when that step ends'}`
+}
+
+// readReceipt is the receipt of a message a turn has read: which turn read it.
+const readReceipt = (n: number): string => `read in turn ${n}`
+// isReadReceipt matches every read receipt, plain or with its turn.
+const isReadReceipt = (delivery?: string): boolean => delivery === 'read' || !!delivery?.startsWith('read in turn ')
 
 // A transcript item and turn as the DM reads them. A page holds the whole
 // Item and Turn; each field here is one the DM uses.
@@ -337,7 +366,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
         const id = it.postId || `item:${t.n}:${i}`
         // A notice that opens a turn woke the agent; one that is steering landed mid-turn.
         if (it.postId) wakes.set(it.postId, { n: t.n, woke: it.kind === 'prompt' })
-        if (it.postId) delivered.set(id, { delivery: it.delivered ? 'read' : 'delivered', pending: it.delivered ? undefined : receipt })
+        if (it.postId) delivered.set(id, { delivery: it.delivered ? readReceipt(t.n) : 'delivered', pending: it.delivered ? undefined : receipt })
         if (!post) peerItems.set(id, { id, identified: !!it.postId, from: author, to: [address], ts: receipt?.ts ?? at, text: receipt?.text ?? it.text ?? '' })
         continue
       }
@@ -352,7 +381,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
         if (post && shellEvent(post)) {
           wakes.set(it.postId, { n: t.n, woke: it.kind === 'prompt' })
           carried.add(it.postId)
-          delivered.set(it.postId, { delivery: it.delivered ? 'read' : 'delivered', pending: it.delivered ? undefined : receipt })
+          delivered.set(it.postId, { delivery: it.delivered ? readReceipt(t.n) : 'delivered', pending: it.delivered ? undefined : receipt })
           continue
         }
         if (post && systemEvent(post)) {
@@ -367,16 +396,16 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
         // only when and how the post reached this session.
         if (post) {
           carried.add(it.postId)
-          delivered.set(it.postId, { delivery: it.delivered ? 'read' : 'delivered', pending: it.delivered ? undefined : receipt })
+          delivered.set(it.postId, { delivery: it.delivered ? readReceipt(t.n) : 'delivered', pending: it.delivered ? undefined : receipt })
           continue
         }
         // The room no longer holds the post, or the queue has not posted it
         // yet. No post row exists, so the item stands in for it.
         matched.add(it.postId)
-        events.push({ ...it, kind: 'message', itemKind: it.kind, author, human: receipt?.human ?? /\(human\)$/.test(it.from || ''), ts: receipt?.ts ?? at, text: receipt?.text ?? it.text, key: `post:${it.postId}`, post, pending: it.delivered ? undefined : receipt, delivery: it.delivered ? 'read' : 'delivered' })
+        events.push({ ...it, kind: 'message', itemKind: it.kind, author, human: receipt?.human ?? /\(human\)$/.test(it.from || ''), ts: receipt?.ts ?? at, text: receipt?.text ?? it.text, key: `post:${it.postId}`, post, pending: it.delivered ? undefined : receipt, delivery: it.delivered ? readReceipt(t.n) : 'delivered' })
         continue
       }
-      const row = { ...it, itemKind: it.kind, author, human: /\(human\)$/.test(it.from || ''), ts: at, key: `item:${t.n}:${i}`, delivery: it.kind === 'steering' ? (it.delivered ? 'read' : 'delivered') : undefined, n: t.n }
+      const row = { ...it, itemKind: it.kind, author, human: /\(human\)$/.test(it.from || ''), ts: at, key: `item:${t.n}:${i}`, delivery: it.kind === 'steering' ? (it.delivered ? readReceipt(t.n) : 'delivered') : undefined, n: t.n }
       if (input || it.kind === 'reply') events.push({ ...row, kind: 'message' })
       else if (it.kind === 'tool') events.push({ ...row, kind: 'tool' })
       else events.push({ ...row, kind: isItemKind(it.kind) ? it.kind : 'note' })
@@ -588,7 +617,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   for (const row of messages) if (row.itemKind === 'reply') row.folded = own.some((r) => r.post?.turn === row.n && sameText(r.text, row.text))
   // Only the newest read message shows its read label; pending states always
   // show. The delivery itself stays on every row.
-  const reads = rows.filter((r) => r.delivery === 'read')
+  const reads = rows.filter((r) => isReadReceipt(r.delivery))
   for (const r of reads.slice(0, -1)) if (r.kind === 'message') r.quietReceipt = true
   // Shell job completions are timeline steps, not threads.
   return { address, threads: [...threads.values()].filter((t) => !t.key.startsWith('shell:')), rows: groupMessages(rows) }
