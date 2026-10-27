@@ -107,6 +107,7 @@ interface PageFns {
   save(): Promise<void>
   loadPublishing(): Promise<void>
   savePublishing(): Promise<void>
+  saveCheckIn(): Promise<void>
   fill(): void
   formOf(...args: unknown[]): unknown
   policyRequest(...args: unknown[]): unknown
