@@ -27,12 +27,16 @@ const samplesSchema = `CREATE TABLE IF NOT EXISTS doctor_samples (
 CREATE INDEX IF NOT EXISTS doctor_samples_at ON doctor_samples(at);`
 
 // Sample is one group's minute. Load (the 1-minute load average per core)
-// and MemoryTotal are set only on the machine group.
+// and MemoryTotal are set only on the machine group. Kind is what the group
+// is, apart from its display name. SessionID is set only for GroupSession.
+// The alert and the command read Kind; they do not match display text.
 type Sample struct {
 	At          time.Time
 	Group       sysload.Group
 	Load        float64
 	MemoryTotal uint64
+	Kind        GroupKind
+	SessionID   string
 }
 
 // Samples stores samples in the shared dyna.db of DataDir.
@@ -132,6 +136,7 @@ func (s Samples) query(q string, args ...any) ([]Sample, error) {
 			return nil, err
 		}
 		x.At = time.Unix(at, 0).UTC()
+		x.Kind, x.SessionID = kindFromName(g.Name)
 		out = append(out, x)
 	}
 	return out, rows.Err()
