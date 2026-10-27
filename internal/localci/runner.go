@@ -237,8 +237,9 @@ const (
 	// fetch of the trial head or base. No check ran, so nothing in the result says
 	// anything about the commit.
 	CauseScheduling FailureCause = "scheduling"
-	// CauseGit is a push or a checkout that git itself rejected. The job keeps
-	// the git error text, so a trial can name it instead of an unknown job.
+	// CauseGit is a push or a checkout that git itself rejected. It is a machine
+	// fault, so the run retries on another machine. The job still keeps the git
+	// error text, so a spent retry names that error instead of an unknown job.
 	CauseGit FailureCause = "git"
 )
 

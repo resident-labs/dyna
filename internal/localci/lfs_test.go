@@ -78,3 +78,40 @@ func TestPushFailureIsJobEvidence(t *testing.T) {
 		t.Fatalf("job = %+v, want the git error text as job evidence", job)
 	}
 }
+
+// A checkout that fails before the check runs keeps the git error on that job.
+// Exit 69 alone would hide the text and call it a container failure.
+func TestCheckoutFailureKeepsGitError(t *testing.T) {
+	const gitErr = "smudge filter lfs failed"
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "hermeslab", SSH: "pip@hermeslab", Slots: 1, Enabled: true}}
+	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeSystemdVersion(out, name, args) {
+			return nil
+		}
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "push") || (name == "git" && fakeNodeGit(dir, out, name, args)) {
+			return nil
+		}
+		if strings.Contains(joined, "df -Pk") {
+			fmt.Fprint(out, "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vda 1000000 1 999999 1% /var/tmp\n")
+			return nil
+		}
+		if name == "systemd-run" {
+			fmt.Fprintf(out, "DYNA_CI_GIT_ERROR=%s\n", gitErr)
+			return exitError(t, 69)
+		}
+		return nil
+	}
+	newFakeMachine(t, legacy).attach(&runner)
+	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
+	if err != nil {
+		t.Fatalf("a checkout failure is a job result, not a run error: %v", err)
+	}
+	if len(result.Checks) != 1 {
+		t.Fatalf("checks = %+v, want the checkout job", result.Checks)
+	}
+	job := result.Checks[0]
+	if job.Status != OutcomeError || job.Cause != CauseGit || !strings.Contains(job.Error, gitErr) {
+		t.Fatalf("job = %+v, want cause %s and the git error", job, CauseGit)
+	}
+}

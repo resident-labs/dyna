@@ -700,7 +700,7 @@ func machineFailureRetryFrom(result localci.Result) string {
 // commit.
 func machineCause(cause localci.FailureCause) bool {
 	switch cause {
-	case localci.CauseContainerFailure, localci.CauseSSHDrop, localci.CauseDiskFull, localci.CauseUnclassified:
+	case localci.CauseContainerFailure, localci.CauseSSHDrop, localci.CauseDiskFull, localci.CauseUnclassified, localci.CauseGit:
 		return true
 	}
 	return false
