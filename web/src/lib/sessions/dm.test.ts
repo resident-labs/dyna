@@ -84,7 +84,7 @@ test('thread posts carry their delivery state for the thread panel', () => {
     turns: [{ n: 1, started: ts(0), items: [{ kind: 'steering', postId: 'p1', from: peer, text: 'p1', ts: ts(3), delivered: true }] }] }
   const queue: Receipt[] = [{ id: 'p2', from: peer, text: 'p2', ts: ts(2), state: 'waiting' }, { id: 'p3', from: peer, text: 'p3', ts: ts(4), state: 'delivering' }]
   const thread = need(dmView(session, room, {}, queue).threads.find((t) => t.key === peer))
-  assert.deepEqual(thread.posts.map((p) => [p.id, p.delivery, p.pending?.id]), [['p1', 'read', undefined], ['p2', 'queued', 'p2'], ['p3', 'delivered', 'p3']])
+  assert.deepEqual(thread.posts.map((p) => [p.id, p.delivery, p.pending?.id]), [['p1', 'read in turn 1', undefined], ['p2', 'queued', 'p2'], ['p3', 'delivered', 'p3']])
   assert.equal(need(session.posts[1]).delivery, undefined, 'stored posts stay unchanged')
 })
 test('a turn reply that repeats the partner\'s post to the owner folds under that post', () => {

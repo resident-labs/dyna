@@ -25,7 +25,7 @@ const session = { member, turns: [turn], posts }
 
 test('sent posts keep one stable transcript row through queued, delivered, and read', () => {
   const rows = dmView(session, room, {}, queue).rows.filter(isKind('message'))
-  assert.deepEqual(rows.map((r) => [r.key, r.text, r.delivery]), queue.map((q, i) => [`post:${q.id}`, q.text, ['queued', 'delivered', 'read'][i]]))
+  assert.deepEqual(rows.map((r) => [r.key, r.text, r.delivery]), queue.map((q, i) => [`post:${q.id}`, q.text, ['queued', 'delivered', 'read in turn 1'][i]]))
   const first = need(queue[0])
   const waiting = need(dmView({ member, turns: [], posts: [] }, room, {}, [first]).rows[0])
   const claimed = need(dmView({ member, turns: [], posts: [] }, room, {}, [{ ...first, state: 'delivering' }]).rows[0])
@@ -38,7 +38,7 @@ test('only your newest read message says read; pending ones keep their state', (
   const steer = (postId: string, s: number, extra: Partial<DmItem> = {}): DmItem => ({ kind: 'steering', postId, delivered: true, from: 'alpha (human)', text: postId, ts: ts(s), ...extra })
   const items: DmItem[] = [steer('a', 1), steer('b', 2), { kind: 'steering', from: 'alpha (human)', text: 'legacy', delivered: true, ts: ts(3) }, steer('c', 4), steer('d', 5, { delivered: false })]
   const rows = dmView({ member, turns: [{ ...turn, items }], posts: [] }, room).rows.filter(isKind('message'))
-  assert.deepEqual(rows.map((r) => [r.text, r.delivery, !!r.quietReceipt]), [['a', 'read', true], ['b', 'read', true], ['legacy', 'read', true], ['c', 'read', false], ['d', 'delivered', false]])
+  assert.deepEqual(rows.map((r) => [r.text, r.delivery, !!r.quietReceipt]), [['a', 'read in turn 1', true], ['b', 'read in turn 1', true], ['legacy', 'read in turn 1', true], ['c', 'read in turn 1', false], ['d', 'delivered', false]])
 })
 
 test('identical posts in one turn keep independent receipts and keys', () => {
@@ -47,13 +47,13 @@ test('identical posts in one turn keep independent receipts and keys', () => {
   const before = dmView({ member, turns: [], posts: [] }, room, {}, repeated).rows
   const after = dmView({ member, turns, posts: [] }, room, {}, repeated).rows.filter(isKind('message'))
   assert.deepEqual(after.map((r) => r.key), before.map((r) => r.key))
-  assert.deepEqual(after.map((r) => r.delivery), ['read', 'queued'])
+  assert.deepEqual(after.map((r) => r.delivery), ['read in turn 1', 'queued'])
   const both: Receipt[] = repeated.map((q) => ({ ...q, state: 'delivering', turn: 1 }))
   const firstTurn = need(turns[0])
   firstTurn.items?.push({ ...need(firstTurn.items?.[0]), postId: need(repeated[1]).id, ts: ts(6) })
   const read = dmView({ member, turns, posts: [] }, room, {}, both).rows.filter(isKind('message'))
   assert.deepEqual(read.map((r) => r.key), before.map((r) => r.key))
-  assert.deepEqual(read.map((r) => [r.delivery, !!r.quietReceipt]), [['read', true], ['read', false]], 'only the newest read message shows read')
+  assert.deepEqual(read.map((r) => [r.delivery, !!r.quietReceipt]), [['read in turn 1', true], ['read in turn 1', false]], 'only the newest read message shows read')
 })
 
 test('post IDs preserve one row through framing, truncation, and whitespace changes', () => {
@@ -67,7 +67,7 @@ test('post IDs preserve one row through framing, truncation, and whitespace chan
     const only = need(rows[0])
     assert.equal(only.key, `post:${q.id}`)
     assert.equal(only.text, q.text)
-    assert.equal(only.delivery, 'read')
+    assert.equal(only.delivery, 'read in turn 1')
     assert.deepEqual(only.post?.attachments, [attachment])
   }
 })
@@ -83,7 +83,7 @@ test('dispatched steering stays delivered and dismissible until acknowledgement'
   const key = need(rows()[0]).key
   item.delivered = true
   assert.equal(need(rows()[0]).key, key)
-  assert.equal(need(rows()[0]).delivery, 'read')
+  assert.equal(need(rows()[0]).delivery, 'read in turn 1')
   assert.equal(need(rows()[0]).pending, undefined)
 })
 
@@ -92,7 +92,7 @@ test('a transcript loaded before its queue still links the original post once', 
   const rows = dmView(session, room).rows.filter((r) => r.kind === 'message' && r.text === last.text)
   assert.equal(rows.length, 1)
   assert.equal(need(rows[0]).key, `post:${last.id}`)
-  assert.equal(need(rows[0]).delivery, 'read')
+  assert.equal(need(rows[0]).delivery, 'read in turn 1')
 })
 
 test('incoming peer receipts preserve thread history and counts, and stay in the thread chip', () => {

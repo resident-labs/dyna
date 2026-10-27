@@ -20,7 +20,29 @@ const activityTail = 16 << 10
 type Activity struct {
 	Text  string `json:"text,omitempty"`
 	Since int64  `json:"since,omitempty"`
+	// Step is the running tool call's kind, in the closed set the session
+	// view words for it (run, wait, read, edit, write, search, fetch, tool):
+	// what the call is, not its arguments. It is empty when the worker
+	// thinks, writes or compacts, which are not tool steps.
+	Step string `json:"step,omitempty"`
+	// Steerable says a new message for the session ends this step early: the
+	// call is one of Dyna's shell tools, which return on steering (D-349), so
+	// the session reads the message at once. Every other call runs to its own
+	// end, and the message waits for the next tool boundary.
+	Steerable bool `json:"steerable,omitempty"`
 }
+
+// The step kinds of a running tool call, as the session view words them.
+const (
+	StepRun    = "run"
+	StepWait   = "wait"
+	StepRead   = "read"
+	StepEdit   = "edit"
+	StepWrite  = "write"
+	StepSearch = "search"
+	StepFetch  = "fetch"
+	StepTool   = "tool"
+)
 
 const compactingText = "Compacting context…"
 
@@ -82,10 +104,12 @@ func LastActivity(path string) Activity {
 				continue
 			}
 			if !finished && e.State != "started" && e.ID != "" && !ended[e.ID] {
-				running, runningID = &Activity{Text: toolLine(e), Since: e.TS}, e.ID
+				a := toolActivity(e)
+				a.Since = e.TS
+				running, runningID = &a, e.ID
 				continue
 			}
-			a := Activity{Text: toolLine(e)}
+			a := toolActivity(e)
 			if e.State == "started" && !ended[e.ID] {
 				a.Since = e.TS
 			}
@@ -104,6 +128,65 @@ func LastActivity(path string) Activity {
 		return *running
 	}
 	return Activity{}
+}
+
+// toolActivity is one tool call as an Activity: its readable line, its step
+// kind, and whether a new message for the session ends it early.
+func toolActivity(e Event) Activity {
+	name := strings.ToLower(strings.TrimSpace(e.Name))
+	return Activity{Text: toolLine(e), Step: stepKindOf(name), Steerable: steerableStep(name)}
+}
+
+// stepKindOf names what a tool call is, in the closed set the session view
+// shares (see Activity.Step): run for a command, wait for a job wait, read,
+// edit, write, search and fetch for those tools, and tool for anything else.
+// lower is the lowercased tool name.
+func stepKindOf(lower string) string {
+	bare := bareTool(lower)
+	if dynaShellOp(lower) == "output" || bare == "shell_output" {
+		return StepWait
+	}
+	if shellTools[bare] {
+		return StepRun
+	}
+	if kind := stepKinds[bare]; kind != "" {
+		return kind
+	}
+	return StepTool
+}
+
+// stepKinds maps the file, search and fetch tools a harness names to the
+// session view's step kind for them. A tool that is not here is StepTool.
+var stepKinds = map[string]string{
+	"read": StepRead, "read_file": StepRead, "view_file": StepRead,
+	"edit": StepEdit, "multiedit": StepEdit, "edit_file": StepEdit, "apply_patch": StepEdit, "file_change": StepEdit,
+	"write": StepWrite, "write_file": StepWrite,
+	"grep": StepSearch, "grep_search": StepSearch, "codebase_search": StepSearch, "search": StepSearch, "web_search": StepSearch, "websearch": StepSearch, "search_web": StepSearch,
+	"webfetch": StepFetch, "web_fetch": StepFetch, "read_url_content": StepFetch,
+}
+
+// steerableStep reports whether a new message for the session ends this
+// running call early: Dyna's own shell run and shell wait return on steering
+// (D-349). Another server's tool of the same name, and every other call,
+// runs to its own end.
+func steerableStep(lower string) bool {
+	op := dynaShellOp(lower)
+	return op == "run" || op == "output"
+}
+
+// dynaShellOp names the job tool of Dyna's MCP server that a tool name calls,
+// in each harness's spelling, for example mcp__dyna__shell, dyna_shell or
+// dyna.shell. It mirrors transcript.dynaShellOp; the import direction keeps
+// the two apart. It returns "run", "output", "stop", or "" for any other
+// tool.
+func dynaShellOp(lower string) string {
+	name := strings.NewReplacer("__", "_", ".", "_", "/", "_", "-", "_", ":", "_").Replace(lower)
+	for _, tool := range []struct{ suffix, op string }{{"dyna_shell", "run"}, {"dyna_shell_output", "output"}, {"dyna_shell_stop", "stop"}} {
+		if name == tool.suffix || strings.HasSuffix(name, "_"+tool.suffix) {
+			return tool.op
+		}
+	}
+	return ""
 }
 
 // bareTool strips an MCP server prefix from a tool name, so
