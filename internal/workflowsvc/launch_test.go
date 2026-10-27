@@ -366,6 +366,23 @@ func TestForegroundRegistrationFailureKeepsWorkerGated(t *testing.T) {
 	}
 }
 
+func TestLaunchThatCannotStartRecordsAFailedRun(t *testing.T) {
+	storetest.Isolate(t)
+	env := []string{mode.EnvMode + "=" + mode.Subagent, mode.EnvSession + "=ses_20261026-000000-abcdef01", mode.EnvRoomID + "=room_x", mode.EnvRoom + "=x"}
+	_, err := Launch(t.Context(), Options{ScriptSrc: "return 1", Name: "gone"}, LaunchOptions{Executable: filepath.Join(t.TempDir(), "missing-dyna"), Env: env})
+	if err == nil {
+		t.Fatal("launch of a missing executable succeeded")
+	}
+	runs, listErr := runstore.List()
+	if listErr != nil || len(runs) != 1 {
+		t.Fatalf("runs = %+v, %v", runs, listErr)
+	}
+	got := runs[0]
+	if got.Status != "error" || got.ParentSession != "ses_20261026-000000-abcdef01" || got.RoomID != "room_x" || !strings.Contains(got.Error, "worker did not start") {
+		t.Fatalf("failed run meta = %+v", got)
+	}
+}
+
 func TestDetachedLaunchStillReturnsBeforeWorkerExit(t *testing.T) {
 	listener := launchFixture(t, "slow")
 	id, err := Launch(t.Context(), Options{ScriptSrc: "return 1"}, LaunchOptions{})

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store"
@@ -123,6 +125,7 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	// A workflow run acts as authority's worker role, never as a session.
 	record := callerid.Launch{DataDir: store.DataDir(), Name: id, Actor: callerid.Identity{Kind: callerid.Worker, Run: id}, Launcher: "workflow"}
+	runEnv := cmd.Env
 	started, ended := make(chan error, 1), make(chan error, 1)
 	go func() {
 		if launch.Foreground != nil {
@@ -141,12 +144,32 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 		}
 	}()
 	if err := <-started; err != nil {
+		// The folder stays, so publish it as failed: the owner then finds the
+		// failure in its run list and a close check sees a finished run.
+		failed := runstore.Meta{ID: id, Name: opts.Name, Session: envValue(runEnv, mode.EnvSession), RoomID: envValue(runEnv, mode.EnvRoomID), Room: envValue(runEnv, mode.EnvRoom)}
+		if failed.Session != "" && envValue(runEnv, mode.EnvMode) == mode.Subagent {
+			failed.ParentSession = failed.Session
+		}
+		if recordErr := runstore.RecordLaunchFailure(failed, err); recordErr != nil {
+			err = errors.Join(err, fmt.Errorf("record failed run %s: %w", id, recordErr))
+		}
 		return "", err
 	}
 	if launch.Foreground == nil {
 		return id, nil
 	}
 	return id, waitForeground(ctx, cmd, ended, launch.Foreground.StopWaiting)
+}
+
+// envValue returns the last value set for key in an environment list.
+func envValue(env []string, key string) string {
+	value := ""
+	for _, item := range env {
+		if v, ok := strings.CutPrefix(item, key+"="); ok {
+			value = v
+		}
+	}
+	return value
 }
 
 func waitForeground(ctx context.Context, cmd *exec.Cmd, ended <-chan error, stopWaiting <-chan struct{}) error {
