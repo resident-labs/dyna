@@ -28,7 +28,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 | In (your stdin) | Meaning |
 | --- | --- |
 | `{"type":"audio","pcm":"<base64>"}` | Microphone audio. |
-| `{"type":"text","text":"…"}` | Add context. The voice does not reply. |
+| `{"type":"text","text":"…"}` | Add context. The voice does not reply, unless the line also has `"respond":true`. That asks for one reply and waits for speech that still plays, the same way `say` mode `append` does. |
 | `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | Answer a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
@@ -54,7 +54,7 @@ Rules to design for:
   already cancelled the reply. Truncation is approximate, because the engine does not know how much you played.
 - **Tool calls.** Answer each `tool_call` with a `tool_result` that has the same `call_id`, within 10 seconds.
   Later, the model gets an error result and you get an `error` line. Do slow work in the background and
-  answer fast, for example "started"; then tell the model the result with `text` or `say`.
+  answer fast, for example "started"; then tell the model the result with `{"type":"text","text":"…","respond":true}` or `say`.
 - **Images.** Write the file, send `{"type":"image","path":…}`, then ask about it with `text` or let the person ask.
 - **`ready` first.** Do not send audio before `ready`; a start failure prints the error and exits non-zero.
 

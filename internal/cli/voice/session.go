@@ -38,7 +38,7 @@ func newSessionCommand() *cobra.Command {
 			"Dyna holds the provider connection, so your program never sees the account token. One agent session\n" +
 			"runs at a time. It ends at --max-minutes, after 60 seconds with no input audio, or when stdin ends.\n" +
 			"The voice provider hears every voice you send, so tell the people who talk to your app.\n\n" +
-			"Lines in:  {\"type\":\"audio\",\"pcm\":\"...\"}  {\"type\":\"text\",\"text\":\"...\"} (context, no reply)\n" +
+			"Lines in:  {\"type\":\"audio\",\"pcm\":\"...\"}  {\"type\":\"text\",\"text\":\"...\"} (context; \"respond\":true asks for one reply)\n" +
 			"           {\"type\":\"say\",\"text\":\"...\"}  {\"type\":\"tool_result\",\"call_id\":\"...\",\"output\":\"...\"}\n" +
 			"           {\"type\":\"interrupt\"}  {\"type\":\"image\",\"path\":\"/abs/file.png\"} (PNG or JPEG, up to 5 MB)\n" +
 			"Lines out: ready, audio, speech_started, transcript, tool_call, response_done, error, closed.\n" +

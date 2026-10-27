@@ -381,3 +381,32 @@ func TestSessionSayReplaceCancelsAndAppendWaits(t *testing.T) {
 		t.Fatalf("sent = %s\nwant %s", got, want)
 	}
 }
+
+func TestSessionTextRespondAsksOnceAndWaitsLikeAppend(t *testing.T) {
+	conn, clock := newChanConn(), newFakeClock()
+	r := startSession(t, fakeSessions(fakeProvider(), conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: "a player joined"}
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: "what changed?", Respond: true}
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.AudioDelta, ResponseID: "r1", Audio: pcm16(1, 2)}
+	if m := r.next(t); m.Type != agentwire.OutAudio || m.ResponseID != "r1" {
+		t.Fatalf("got %+v, want audio of the reply that plays", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: "[BACKEND] the door is open", Respond: true}
+	r.in <- agentwire.InMessage{Type: agentwire.InText, Text: " "}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("an empty text line gave %+v, want an error line", m)
+	}
+	held := "[text:a player joined text:what changed? respond: text:[BACKEND] the door is open]"
+	if got := fmt.Sprint(conn.sentSoFar()); got != held {
+		t.Fatalf("while speech plays, sent = %s\nwant %s", got, held)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
+		t.Fatalf("got %+v, want response_done for r1", m)
+	}
+	want := "[text:a player joined text:what changed? respond: text:[BACKEND] the door is open respond:]"
+	if got := fmt.Sprint(conn.sentSoFar()); got != want {
+		t.Fatalf("sent = %s\nwant %s", got, want)
+	}
+}
