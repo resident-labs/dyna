@@ -135,6 +135,17 @@ func TestCommandEnv(t *testing.T) {
 		}
 	})
 
+	t.Run("root session gets the owner bus back from the computer's", func(t *testing.T) {
+		use(t, noComputer)
+		writeSession(t, testSessionRecord{ID: owner, Role: rootRole})
+		base := append(desktopBase(shim), computers.OwnerBusKey+"=unix:path=/run/user/1000/bus")
+		base = envSet(base, "DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/dyna/computers/x/bus")
+		env, _ := CommandEnv(ctx, dir, meta, base)
+		if got := value(env, "DBUS_SESSION_BUS_ADDRESS"); got != "unix:path=/run/user/1000/bus" {
+			t.Errorf("DBUS_SESSION_BUS_ADDRESS = %q, want the owner bus", got)
+		}
+	})
+
 	t.Run("root session restores the owner display", func(t *testing.T) {
 		use(t, noComputer)
 		writeSession(t, testSessionRecord{ID: owner, Role: rootRole})
