@@ -28,7 +28,7 @@ func PostNote(rooms *room.Store, n Note) error {
 				severity = room.AlertCritical
 			}
 			cause := f.Evidence
-			if strings.HasPrefix(f.Cause, doctor.OutsideGroup+" ") && len(n.Outside) > 0 {
+			if f.Kind == doctor.GroupOutside && len(n.Outside) > 0 {
 				lines := make([]string, len(n.Outside))
 				for j, o := range n.Outside {
 					lines[j] = o.Text()
