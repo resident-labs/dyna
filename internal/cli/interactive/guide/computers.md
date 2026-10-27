@@ -70,6 +70,8 @@ dyna computer env --size 390x844 --status "Checking phone layout"
 dyna computer open --size 844x390 --status "Checking landscape layout" -- foot
 ```
 
+A desktop width is rounded up to a multiple of 4 (390 becomes 392) so screenshots work; the command prints the real width. For an exact 390 px phone layout, use the browser's device emulation inside the window.
+
 Use `dyna computer env`, `dyna computer status`, `dyna computer shot`, and:
 
 ```sh

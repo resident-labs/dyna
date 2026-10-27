@@ -188,7 +188,10 @@ but a runtime error can leave earlier actions applied.
 | `screenshot` | Captures at this point. Maximum ten per batch. |
 
 Coordinates are integers from the upper-left corner, with `0 <= x < width` and
-`0 <= y < height`. The default size is 1280 × 800. Capture rejects an unexpected
+`0 <= y < height`. The default size is 1280 × 800. A requested width is rounded up to a multiple of 4
+(390 becomes 392), because the compositor's screenshot buffer is rejected at other
+widths ("Invalid stride"); `dyna computer env --size` and `open --size` print the real
+width. Use the browser's device emulation for an exact phone width. Capture rejects an unexpected
 output size. Positive scroll values move down or right. Scroll values are
 relative amounts, not exact pixel guarantees.
 

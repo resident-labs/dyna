@@ -1,6 +1,8 @@
 package computer
 
 import (
+	"fmt"
+
 	"dyna-agent/internal/computers"
 	"github.com/spf13/cobra"
 )
@@ -22,5 +24,11 @@ func applySize(c *cobra.Command, id string, size *computers.Size, intent string)
 		return nil
 	}
 	var state computers.Status
-	return computers.NewClient(id).Call(c.Context(), computers.Request{Op: "size", Size: size, Status: intent}, &state)
+	if err := computers.NewClient(id).Call(c.Context(), computers.Request{Op: "size", Size: size, Status: intent}, &state); err != nil {
+		return err
+	}
+	if state.Width != size.Width {
+		fmt.Fprintf(c.ErrOrStderr(), "width %d rounded up to %d so screenshots work; the computer is %dx%d\n", size.Width, state.Width, state.Width, state.Height)
+	}
+	return nil
 }
