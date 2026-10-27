@@ -61,6 +61,83 @@ dyna voice say "Welcome to the server!" --voice marin --style "a cheerful villag
 - The text may have up to 4000 characters, and a clip may take up to 60 seconds. The engine runs at most 2 clips at once; a third fails as busy.
 - Say uses its own provider connection. It never posts to a room, never joins or changes the owner's call and keeps no transcript. Each clip uses the voice provider's account quota.
 - A realtime model can change a word. The instruction to speak the text exactly usually holds, but is not guaranteed.
+- The owner can turn off agent voice for `say` and `session` with **Let agents use voice** in Settings > Voice (`voice.agent`, on by default). While it is off, both fail with "the owner turned off agent voice in Settings > Voice". Owner calls are not affected.
+
+## Live sessions for agents
+
+`dyna voice session` is a live two-way voice conversation that a program drives. Use it for a voice character in an app or a game, a voice front end for a tool, a kiosk or phone prototype, or to test a voice app. The program writes microphone audio to the command's stdin and reads reply audio, transcripts and tool calls from its stdout. It plays the audio wherever it wants.
+
+```
+dyna voice session --prompt-file persona.md --voice marin --tools tools.json --rate 48000
+```
+
+Flags:
+
+- `--prompt-file` sets the instructions of the voice. Without it, the voice is a short friendly assistant.
+- `--voice` and `--provider` work as in `say`.
+- `--tools` is a JSON file with a list of `{"name", "description", "parameters"}` tools (`parameters` is a JSON Schema object). A provider without function calling rejects it.
+- `--rate` is the sample rate in hertz of the audio you send and read (default 24000, from 8000 to 96000). Dyna converts it to the provider's rate. At 48 kHz this is about 128 KB/s of base64 text each way.
+- `--max-minutes` is the longest session (default 30, at most 120).
+
+The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rate`.
+
+| In (stdin) | Meaning |
+| --- | --- |
+| `{"type":"audio","pcm":"…"}` | Microphone audio. |
+| `{"type":"text","text":"…"}` | Add context to the conversation. The voice does not reply. |
+| `{"type":"say","text":"…"}` | Make the voice speak this text. |
+| `{"type":"tool_result","call_id":"…","output":"…"}` | The result of a tool call. |
+| `{"type":"interrupt"}` | Stop the reply that plays. |
+| `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG image (up to 5 MB) to the conversation, with no reply. Only providers that take images accept it (OpenAI Realtime); others return an `error` line. |
+
+| Out (stdout) | Meaning |
+| --- | --- |
+| `{"type":"ready","rate":48000}` | The session is live. |
+| `{"type":"audio","response_id":"…","pcm":"…"}` | Reply audio. |
+| `{"type":"speech_started"}` | Someone spoke, so stop playback now. The engine has already cancelled the reply. |
+| `{"type":"transcript","role":"user"\|"assistant","text":"…"}` | What was said. |
+| `{"type":"tool_call","call_id":"…","name":"…","args":{…}}` | The model calls one of your tools. |
+| `{"type":"response_done","response_id":"…"}` | A reply ended. |
+| `{"type":"error","message":"…"}` | A problem. The session goes on, except before `ready`, where the command fails with this message. |
+| `{"type":"closed","reason":"…"}` | The session ended: `input-closed`, `time-limit`, `idle`, `provider-closed`, `error` or `cancelled`. |
+
+The provider's turn detection decides when you spoke, and the engine asks for each reply. A tool result must come within 10 seconds, or the model gets an error result and you get an `error` line. A provider that cannot take client text (MiniCPM-o) rejects `text`, `say` and `image`.
+
+A short Python example:
+
+```python
+import base64, json, subprocess
+
+p = subprocess.Popen(["dyna", "voice", "session", "--prompt-file", "persona.md", "--rate", "16000"],
+                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+
+def send(line):
+    p.stdin.write(json.dumps(line) + "\n")
+    p.stdin.flush()
+
+send({"type": "say", "text": "Hello! How can I help?"})
+for raw in p.stdout:                       # run a thread to feed microphone chunks:
+    line = json.loads(raw)                 #   send({"type": "audio", "pcm": base64.b64encode(chunk).decode()})
+    if line["type"] == "audio":
+        play(base64.b64decode(line["pcm"]))    # your own sink
+    elif line["type"] == "speech_started":
+        stop_playback()
+    elif line["type"] == "closed":
+        break
+```
+
+Limits and behavior:
+
+- One agent session runs at a time in the engine, separate from the 2 `say` slots. A second one fails as busy.
+- A session ends at `--max-minutes`, after 60 seconds with no input audio, or when stdin ends. Send audio at least every minute (silence counts), or the session ends as idle.
+- The engine holds the provider connection, so the program never sees the account token. A session never posts, wakes nobody and keeps no transcript: transcript lines go to stdout only.
+- When a session starts and when it ends, its room gets a quiet notice that names the session, the provider, and at the end the time used and why it ended. The notices wake nobody. They let the owner see how much voice quota agents use. A session from the owner's own shell, outside any room, posts none.
+- Barge-in truncation is approximate: the engine cancels the reply when it hears speech, and does not know how much audio your program already played.
+
+Risks to tell your users:
+
+- **Privacy.** Every voice you send goes to the voice provider under the owner's account. A project that lets other people talk to a session must tell them.
+- **Quota.** A live session uses much more of the owner's quota than `say`. The ChatGPT sign-in is not an official Realtime credential and could stop working.
 
 ## Limits
 

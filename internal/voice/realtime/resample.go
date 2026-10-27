@@ -30,3 +30,6 @@ func resample(pcm []byte, from, to int) []byte {
 	}
 	return out
 }
+
+// Resample converts PCM16 little-endian mono audio from rate from to rate to.
+func Resample(pcm []byte, from, to int) []byte { return resample(pcm, from, to) }

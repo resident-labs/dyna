@@ -57,6 +57,9 @@ type Capabilities struct {
 	// NoClientResponses: the client cannot add items or ask for replies, so
 	// Dyna's items cannot be said and are reported unspoken at once.
 	NoClientResponses bool
+	// ImageInput: the service takes an image as a conversation item, and its
+	// Protocol is an ImageProtocol.
+	ImageInput bool
 	// SteppedByInput: the model moves one step per input chunk, so while
 	// the owner is muted the call keeps sending a second of silence each
 	// second, and the model can finish its reply (MiniCPM-o full duplex).

@@ -212,6 +212,8 @@ const fixtures: Record<string, EventPayload> = {
   ...Object.fromEntries(
     (['joined', 'declined', 'withdrawn'] as const).map((type) => [`call/${type}`, { type, call: 'c1' }]),
   ),
+  'voice-session/started': { type: 'started', voice: 'v1', session: 'dyna:storyteller', provider: 'openai' },
+  'voice-session/ended': { type: 'ended', voice: 'v1', session: 'dyna:storyteller', provider: 'openai', seconds: 200, reason: 'time-limit' },
   ...Object.fromEntries(
     (['renamed', 'promoted', 'adopted', 'account', 'instructions', 'seat', 'spawned', 'transfer-request'] as const).map((type) => [
       `session/${type}`,
@@ -386,6 +388,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('questionId' in payload) return payload.questionId
   if ('shellId' in payload) return payload.label
   if ('runId' in payload) return payload.name
+  if ('voice' in payload) return payload.session
   if ('call' in payload) return payload.type === 'withdrawn' ? 'Call request' : 'the call'
   if ('sessions' in payload) return `reached ${payload.sessions.length} sessions`
   if ('session' in payload) {
@@ -455,6 +458,21 @@ test('a call row says how the owner answered, without its request ID', () => {
       web.unmount(mounted)
       target.remove()
     }
+  }
+})
+
+test('a voice session row names the agent, the provider and the time used', () => {
+  for (const [type, words] of [['started', /dyna:storyteller on openai/], ['ended', /used 3 min 20 s on openai, it reached its time limit/]] as const) {
+    const payload = fixtures[`voice-session/${type}`]
+    assert.ok(payload, `the voice-session/${type} fixture is missing`)
+    const post = postFor('voice-session', type, payload, `dyna:storyteller ${type} a live voice session.`)
+    const target = document.createElement('div')
+    document.body.append(target)
+    const mounted = web.mount(web.eventComponents.VoiceSessionCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+    web.flushSync()
+    assert.match((target.textContent ?? '').trim(), words, `voice/${type}`)
+    web.unmount(mounted)
+    target.remove()
   }
 })
 

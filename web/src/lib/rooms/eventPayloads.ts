@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineCacheEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineCacheEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineCacheEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineCacheEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -151,6 +151,13 @@ export function machineCacheEvent(post: EventPost): MachineCacheEvent | undefine
 export function callEvent(post: EventPost): CallEvent | undefined {
   if (post.kind !== 'call') return undefined
   return isCallEvent(post.payload) ? post.payload : undefined
+}
+
+// voiceSessionEvent returns the typed payload of an agent voice session's
+// start or end.
+export function voiceSessionEvent(post: EventPost): VoiceSessionEvent | undefined {
+  if (post.kind !== 'voice-session') return undefined
+  return isVoiceSessionEvent(post.payload) ? post.payload : undefined
 }
 
 // sessionEvent returns the typed payload of a session note: a rename, a move,
