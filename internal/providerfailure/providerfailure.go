@@ -123,7 +123,12 @@ var protocolPatterns = []struct {
 	reason  Reason
 	pattern *regexp.Regexp
 }{
-	{Capacity, regexp.MustCompile(`(?i)overloaded|at capacity|over capacity|service unavailable|server is busy`)},
+	// A spent quota is checked before a short rate limit: "usage limit ... try
+	// again in 3 seconds" still needs another account.
+	{Quota, regexp.MustCompile(`(?i)\bquotas?\b|credit balance|insufficient credits?|out of credits?|no credits? left|usage[ _-]?limit|session limit|weekly limit`)},
+	// A per-minute rate limit is a short busy spell: wait and retry the same
+	// account, like capacity.
+	{Capacity, regexp.MustCompile(`(?i)overloaded|at capacity|over capacity|service unavailable|server is busy|\bper[ -]?min(?:ute)?\b|\btry again in \d+(?:\.\d+)? ?(?:s|sec|seconds?|ms)\b|\bretry[- ]after:? ?\d{1,2}\b`)},
 	{Auth, regexp.MustCompile(`(?i)authentication[_ ]error|unauthorized|invalid api key|invalid[_ ]api[_ ]key|invalid x-api-key|not logged in|not signed in|signed out|reauthenticate`)},
 	{Quota, regexp.MustCompile(`(?i)\bquotas?\b|credit balance|insufficient credits?|out of credits?|no credits? left|\b429\b|rate[ _-]?limit|usage[ _-]?limit|session limit|weekly limit|too many requests`)},
 	{Unavailable, regexp.MustCompile(`(?i)internal server error|bad gateway|gateway timeout`)},
@@ -137,7 +142,8 @@ var stderrPatterns = []struct {
 	reason  Reason
 	pattern *regexp.Regexp
 }{
-	{Capacity, regexp.MustCompile(`(?i)\bprovider (?:is )?overloaded\b|\boverloaded_error\b|\bat capacity\b|\bservice unavailable\b|\bserver is busy\b`)},
+	{Quota, regexp.MustCompile(`(?i)\bquotas? (?:exhausted|exceeded|reached|too low)\b|\busage[ _-]?limit\b|\bsession limit\b|\bweekly limit\b|\bcredit balance (?:is )?too low\b|\binsufficient credits?\b|\bout of credits?\b|\bno credits? left\b`)},
+	{Capacity, regexp.MustCompile(`(?i)\bprovider (?:is )?overloaded\b|\boverloaded_error\b|\bat capacity\b|\bservice unavailable\b|\bserver is busy\b|\bper[ -]?min(?:ute)?\b|\btry again in \d+(?:\.\d+)? ?(?:s|sec|seconds?|ms)\b|\bretry[- ]after:? ?\d{1,2}\b`)},
 	{Auth, regexp.MustCompile(`(?i)\bauthentication[_ ]error\b|\binvalid api[_ ]key\b|\binvalid[_ ]api[_ ]key\b|\binvalid x-api-key\b|\bnot logged in\b|\bnot signed in\b|\bsigned out\b|\bunauthorized\b|\breauthenticate\b`)},
 	{Quota, regexp.MustCompile(`(?i)\b(?:http|status|code|error)[ /:=]*429\b|\b429 (?:too many requests|rate[ _-]?limit|quota)|\bquotas? (?:exhausted|exceeded|reached|too low)\b|\busage[ _-]?limit\b|\bsession limit\b|\bweekly limit\b|\bcredit balance (?:is )?too low\b|\binsufficient credits?\b|\bout of credits?\b|\bno credits? left\b|\brate[ _-]?limit (?:exceeded|reached|hit)\b|\btoo many requests\b`)},
 	{Unavailable, regexp.MustCompile(`(?i)\binternal server error\b|\bbad gateway\b|\bgateway timeout\b`)},
@@ -226,8 +232,6 @@ const (
 	// ActionRetryLater keeps the same model, waits with backoff, and then moves
 	// to the next model.
 	ActionRetryLater Action = "retry-later"
-	// ActionTryAnotherModel moves to the next model of the profile.
-	ActionTryAnotherModel Action = "try-another-model"
 )
 
 // Action returns the one recovery this reason allows.
@@ -237,10 +241,8 @@ func (r Reason) Action() Action {
 		return ActionReauthenticate
 	case Quota:
 		return ActionMoveAccount
-	case Capacity:
+	case Capacity, Unavailable:
 		return ActionRetryLater
-	case Unavailable:
-		return ActionTryAnotherModel
 	}
 	return ""
 }
