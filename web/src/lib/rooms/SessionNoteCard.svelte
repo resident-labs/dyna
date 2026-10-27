@@ -23,6 +23,7 @@
     seat: 'iris',
     spawned: 'iris',
     'transfer-request': 'gold',
+    'computer-reminder': 'gold',
   }
 
   let payload = $derived(sessionEvent(post))
@@ -48,6 +49,8 @@
         return p.seat ?? 'Root seat changed'
       case 'spawned':
         return `Started @${p.name}${p.profile ? ` (${p.profile})` : ''}${p.dir ? ` in ${p.dir}` : ''}`
+      case 'computer-reminder':
+        return `${surface === 'dm' ? '' : `${p.session}: `}Computer still open${p.apps?.length ? ` (${p.apps.join(', ')})` : ''}`
       case 'transfer-request': {
         // The DM already names the session, so it states the fact alone. The
         // target profile and requested handoff describe the transfer without

@@ -26,6 +26,7 @@ const (
 	KeyPRTrustedBots         = "pr.trustedBots"
 	KeyLocalLaneRepos        = "lane.local.repos"
 	KeyComputersEnabled      = "computers.enabled"
+	KeyComputersReminder     = "computers.reminderMinutes"
 	KeyAutoCheck             = "updater.autoCheck"
 	KeyRunsRetention         = "runs.retention"
 	KeyWorktreesRetention    = "worktrees.retention"
@@ -53,10 +54,11 @@ const (
 
 // Defaults for the subagent and steering keys.
 const (
-	DefaultSubagentMaxDepth            = 3
-	DefaultSteeringToolWait            = 120 * time.Second
-	DefaultIdleUnloadMinutes           = 10
-	DefaultWorktreesMinFreeBytes int64 = 10 << 30
+	DefaultSubagentMaxDepth               = 3
+	DefaultSteeringToolWait               = 120 * time.Second
+	DefaultIdleUnloadMinutes              = 10
+	DefaultComputersReminderMinutes       = 2
+	DefaultWorktreesMinFreeBytes    int64 = 10 << 30
 )
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
@@ -83,6 +85,9 @@ type Values struct {
 	BrowserOwnerProfile string
 	BrowserSaveBack     bool
 	ComputersEnabled    bool
+	// ComputersReminderMinutes is how often an open computer reminds its
+	// session to look at the screen; zero turns the reminder off.
+	ComputersReminderMinutes int
 	// TODO: legacy/shim remove later — the seeded parent check-ins hook imports this interval once; remove the key with that import.
 	SessionCheckInInterval time.Duration
 	MaxCardBytes           int64
@@ -133,6 +138,7 @@ func Defaults() Values {
 		BrowserOwnerProfile:      "Default",
 		BrowserSaveBack:          true,
 		ComputersEnabled:         true,
+		ComputersReminderMinutes: DefaultComputersReminderMinutes,
 		SessionCheckInInterval:   15 * time.Minute,
 		AdmissionMode:            AdmissionObserve,
 		LibraryReadmeMaxLines:    DefaultLibraryReadmeMaxLines,
@@ -221,6 +227,10 @@ func Load(path string) (Values, error) {
 		if enabled, ok := computers["enabled"].(bool); ok {
 			v.ComputersEnabled = enabled
 			v.fromFile[KeyComputersEnabled] = true
+		}
+		if n, ok := asInt(computers["reminderMinutes"]); ok && n >= 0 {
+			v.ComputersReminderMinutes = n
+			v.fromFile[KeyComputersReminder] = true
 		}
 	}
 	if section, exists := raw["lane"]; exists {
@@ -457,6 +467,13 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.ComputersEnabled = b
 		v.fromFile[key] = true
+	case KeyComputersReminder:
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s must be a whole number of minutes, 0 or more (0 turns the reminder off)", key)
+		}
+		v.ComputersReminderMinutes = n
+		v.fromFile[key] = true
 	case KeySessionCheckInInterval:
 		return v.setSession(key, value)
 	case KeyAdmissionMode:
@@ -583,6 +600,7 @@ func (v Values) Save() error {
 	raw["localci"] = localci
 	computers := nested(raw, "computers")
 	computers["enabled"] = v.ComputersEnabled
+	computers["reminderMinutes"] = v.ComputersReminderMinutes
 	raw["computers"] = computers
 	v.saveBrowser(raw)
 	v.saveSessions(raw)
