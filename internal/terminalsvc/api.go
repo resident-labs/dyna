@@ -25,6 +25,24 @@ func (s *Service) OpenRequest(roomID, sessionID, cwd string, argv []string, cols
 	return s.openShell(roomID, sessionID, cwd, []string{"-c", strings.Join(quoted, " ")}, cols, rows)
 }
 
+// AfterExit calls fn once with the terminal's exit code after the process
+// ended, however it ended, also when it already has. fn runs in its own
+// goroutine, so a closed browser tab cannot lose the call.
+func (s *Service) AfterExit(id string, fn func(code int)) error {
+	t, err := s.get(id)
+	if err != nil {
+		return err
+	}
+	go func() {
+		<-t.done
+		t.mu.Lock()
+		code := t.info.ExitCode
+		t.mu.Unlock()
+		fn(code)
+	}()
+	return nil
+}
+
 // Info returns one terminal's facts.
 func (s *Service) Info(id string) (Info, error) {
 	t, err := s.get(id)

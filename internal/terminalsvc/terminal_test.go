@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -216,6 +217,28 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("close did not stop the background job")
+	}
+}
+
+func TestAfterExitReportsTheExitCode(t *testing.T) {
+	s, _ := terminalTest(t, Options{})
+	for _, want := range []int{0, 3} {
+		info, err := s.OpenRequest("room_test", "", t.TempDir(), []string{"sh", "-c", "exit " + strconv.Itoa(want)}, 80, 24)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make(chan int, 1)
+		if err := s.AfterExit(info.ID, func(code int) { got <- code }); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case code := <-got:
+			if code != want {
+				t.Fatalf("exit code %d, want %d", code, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no exit callback")
+		}
 	}
 }
 

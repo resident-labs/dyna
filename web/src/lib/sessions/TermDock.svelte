@@ -195,16 +195,14 @@
   let sent = $state<Record<string, SentReport>>({})
   let sending = new Set<string>()
 
-  // reportExit sends the result the moment the command exits: exit code 0 is
-  // done, anything else failed. The owner clicks nothing.
-  async function reportExit(q: Question, termId: string, code: number) {
+  // noteExit shows the result the engine sends the moment the command exits:
+  // exit code 0 is done, anything else failed. The engine reports, so a closed
+  // tab loses nothing; this only keeps the line for the follow-ups.
+  function noteExit(q: Question, termId: string, code: number) {
     if (sending.has(q.id)) return
     sending.add(q.id)
-    try {
-      await requestApi(q).report(code)
-      sent = { ...sent, [termId]: { requestId: q.id, askerName: q.askerName, verdict: autoVerdict(code), code } }
-      reported = new Set([...reported, q.id])
-    } catch (e) { error = errorText(e) }
+    sent = { ...sent, [termId]: { requestId: q.id, askerName: q.askerName, verdict: autoVerdict(code), code } }
+    reported = new Set([...reported, q.id])
   }
 
   $effect(() => {
@@ -212,7 +210,7 @@
       const termId = termOf(q)
       const t = termId ? list.find((x) => x.id === termId) : undefined
       const code = termId ? exited[termId] ?? (t?.exited ? t.exitCode : undefined) : undefined
-      if (termId && code !== undefined) reportExit(q, termId, code)
+      if (termId && code !== undefined) noteExit(q, termId, code)
     }
   })
 
