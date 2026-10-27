@@ -245,3 +245,4 @@ not-state internal/harness/fakeworker/fakeworker.go InstallClaude 1 # writes the
 not-state internal/harness/home/login_path.go loginPathFrom 1 # a temporary file the login shell writes its PATH to, removed at once; not state
 not-state internal/scratch/scratch.go NewRunTemp 1 # makes a throwaway temporary folder for one hook run or check; not shared state
 not-state internal/scratch/scratch.go Sweep 1 # removes a closed session's temporary folder next to its scratch folder
+not-state internal/cli/voice/voice.go writeAudio 3 # writes the audio file the user asked for with --out, not Dyna state
