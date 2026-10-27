@@ -87,6 +87,9 @@ export const api = {
   declineCallRequest: (roomId: string, id: string) => app.DeclineCallRequest(roomId, id),
   visuals: (roomId: string) => app.Visuals(roomId),
   answerQuestion: (roomId: string, id: string, choice: string, text: string) => app.AnswerQuestion(roomId, id, choice, text),
+  // The text came from an HTML card and the owner confirmed it.
+  answerQuestionFromCard: (roomId: string, id: string, choice: string, text: string) => app.AnswerQuestionFromCard(roomId, id, choice, text),
+  sendFromCard: (roomId: string, draft: string, replyTo: string, conversation: string) => app.SendFromCard(roomId, draft, replyTo, conversation),
 
   goals: (room = '', before = '', limit = 0) => app.Goals(room, before, limit),
   // One goal by ID, for links to goals no loaded page holds.

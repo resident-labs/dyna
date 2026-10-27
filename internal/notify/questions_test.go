@@ -301,3 +301,25 @@ func TestUnverifiedQuestionRecordIdentity(t *testing.T) {
 		t.Fatalf("withdrawal post author = %q; want unverified", got)
 	}
 }
+
+func TestCardAnswerCarriesTheCardSource(t *testing.T) {
+	e := newTestEnv(t)
+	rec := e.room()
+	e.human(rec, "SLEEP:0 RESPOND: root ready", "@root")
+	asker := e.wait(e.rootSession(rec).ID, 1)
+	q, err := e.svc.Ask(e.ctx, Sender{Kind: SenderSession, Room: rec.Name, Session: asker}, "", "", "Which?", "wait", []string{"yes", "no"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.svc.AnswerQuestionFromCard(e.ctx, Sender{Kind: SenderOwner, Room: rec.Name, Human: true}, "", q.ID, "yes", ""); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := e.svc.QuestionStore().List(rec.ID)
+	if len(list) != 1 || list[0].Answer == nil || list[0].Answer.Source != room.SourceCard {
+		t.Fatalf("stored answer: %+v", list)
+	}
+	post, err := e.svc.Rooms.Message(rec.ID, questions.PostID(rec.ID, q.ID, "answer"))
+	if err != nil || post.Source != room.SourceCard {
+		t.Fatalf("answer post: %+v, %v", post, err)
+	}
+}

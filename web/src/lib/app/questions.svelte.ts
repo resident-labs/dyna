@@ -78,6 +78,12 @@ async function answerQuestion(id: string, choice: string, text: string) {
   await loadQuestions()
 }
 
+// answerFromCard answers with text an HTML card wrote and the owner confirmed.
+async function answerFromCard(id: string, choice: string, text: string) {
+  await api.answerQuestionFromCard(roomId, id, choice, text)
+  await loadQuestions()
+}
+
 // openQuestion opens the Questions view on the question this post asks.
 function openQuestion(post: Post) {
   questionsHost.openView('questions')
@@ -94,6 +100,7 @@ export const questionView = {
   loadQuestions,
   loadVisuals,
   answerQuestion,
+  answerFromCard,
   openQuestion,
   /** A question change patches the list in place. */
   setQuestions(rows: Question[]) { questions = rows },
