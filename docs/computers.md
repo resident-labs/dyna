@@ -263,9 +263,13 @@ launcher such as Prism Launcher can join a Minecraft server directly:
 `dyna computer open -- prismlauncher --launch <instance> --server host:port`.
 
 An agent session can run with a private `HOME` for its harness, so an app may
-start with empty data and show its first-run setup. To use the owner's existing
-app data, pass the app's data folder flag, for example
-`prismlauncher --dir /home/<user>/.local/share/PrismLauncher`.
+start with empty data and show its first-run setup. To give an agent existing
+app data, copy the data folder and pass the copy with the app's data folder
+flag, for example `prismlauncher --dir "$DYNA_SCRATCH/PrismLauncher"`, or sign
+the copy in with a separate test account. Do not point the app at the owner's
+own data folder unless the owner agrees: it shares their account tokens and
+settings. Never do it while the owner's own copy of the app is open, because
+two instances that write one folder can corrupt it.
 
 Limits for game QA:
 
