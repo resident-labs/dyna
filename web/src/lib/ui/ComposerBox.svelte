@@ -88,14 +88,14 @@
       {#if model}<span class="chip model" title={model}>{model}</span>{/if}
       {#if mode && mode !== 'Message'}<span class="chip mode">{mode}</span>{/if}
       {#if attachments}
-        <button class="tool" type="button" onclick={() => picker?.click()} disabled={busy || closed} aria-label="Attach files" title="Attach files">
+        <button class="tool" type="button" onclick={() => picker?.click()} disabled={busy || closed} aria-label="Attach files" title="Attach files · @ in the message mentions files and sessions">
           <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="m7 11 5-5a2.1 2.1 0 0 1 3 3l-6 6a3.5 3.5 0 0 1-5-5l6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
         </button>
         <input bind:this={picker} type="file" multiple hidden onchange={(event) => { attachments.addFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
       {/if}
-      {#if onreference}<button class="tool reference" type="button" onclick={onreference} disabled={busy || closed} aria-label="Attach a PR or issue" title="Attach a PR or issue">#</button>{/if}
+      {#if onreference}<button class="tool reference" type="button" onclick={onreference} disabled={busy || closed} aria-label="Attach a PR or issue" title="Attach a PR or issue · type # in the message">#</button>{/if}
     </div>
-    <button class="send" class:labeled={!!submitLabel} type="button" onclick={onsend} disabled={!canSend || busy || closed} aria-label={submitLabel || 'Send'}>
+    <button class="send" class:labeled={!!submitLabel} type="button" onclick={onsend} disabled={!canSend || busy || closed} aria-label={submitLabel || 'Send'} title={(submitLabel || 'Send') + ' · Enter sends, Shift+Enter adds a line'}>
       {#if submitLabel}{submitLabel}{:else}<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 15V5m-5 5 5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>{/if}
     </button>
   </div>

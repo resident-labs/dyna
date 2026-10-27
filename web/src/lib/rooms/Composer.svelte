@@ -462,9 +462,10 @@
   <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
-      <button class="command-chip" type="button" aria-label="Browse commands" title="Browse sessions and commands" disabled={busy} onclick={openCommands}>/</button>
+      <button class="command-chip" type="button" aria-label="Browse commands" title="Type / for sessions and commands" disabled={busy} onclick={openCommands}>/</button>
     {/snippet}
   </ComposerBox>
+  {#if error || failed || command || spawn || wakeLine || note}
   <div class="foot">
     {#if error}
       <span class="err">{error}</span>
@@ -480,10 +481,9 @@
       <span class:warn={!preview?.wakes?.length}>{wakeLine} · <kbd>Enter</kbd> to send</span>
     {:else if note}
       <span class="ok">{note}</span>
-    {:else}
-      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <span class="mono">@</span> for files and sessions · <span class="mono">#</span> for PRs and issues · <span class="mono">/</span> for sessions and commands</span>
     {/if}
   </div>
+  {/if}
 </div>
 
 <style>
