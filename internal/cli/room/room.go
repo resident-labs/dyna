@@ -40,7 +40,7 @@ func RoomCmd() *cobra.Command {
 			"Every member and the owner can read every post. Mentions decide who wakes, not who can read. " +
 			"Work started without --room goes to the current repo's room; outside a repo, pass --room.",
 	}
-	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), editCmd(), repoCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
+	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), editCmd(), setCmd(), repoCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
 	return cmd
 }
 
@@ -89,6 +89,41 @@ func createCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repo, "repo", "", "derive the room from the git repo at this path")
 	cmd.Flags().StringVar(&rootProfile, "root-profile", "", "profile for a new room's internal root (empty uses the global default)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the full room record as JSON")
+	return cmd
+}
+
+// setCmd is `dyna room set`: one room setting, shown without a value.
+func setCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set <room> checkInInterval [<duration|off|default>]",
+		Short: "Change a room setting",
+		Long: "Change a room setting, or show it without a value. Only the owner and the room's root may change one.\n" +
+			"checkInInterval is how often Dyna wakes a parent to check its children in this room: a duration such as 30m,\n" +
+			"off to stop check-ins in this room, or default to use the parent check-ins hook's global interval.",
+		Args: cobra.RangeArgs(2, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if args[1] != "checkInInterval" {
+				return fmt.Errorf("unknown room setting %q; checkInInterval is the only setting this command changes", args[1])
+			}
+			rec, err := store().Resolve(args[0])
+			if err != nil {
+				return err
+			}
+			if len(args) == 2 {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\n", rec.CheckIn.String())
+				return nil
+			}
+			setting, err := room.ParseCheckIn(args[2])
+			if err != nil {
+				return err
+			}
+			if err := engineClient().Call(cmd.Context(), "SetRoomCheckIn", []any{rec.Name, args[2]}, nil); err != nil {
+				return fmt.Errorf("the room was not updated: %w", err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s parent check-ins: %s\n", rec.Name, setting.String())
+			return nil
+		},
+	}
 	return cmd
 }
 
