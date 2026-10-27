@@ -301,7 +301,6 @@ func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T)
 	}
 	for _, args := range [][]string{
 		{"api", "repos/ludovic111/horizon/issues", "-X", "POST"},
-		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
 		{"issue", "create", "--repo", "ludovic111/horizon"},
 	} {
 		if err := run(args...); err == nil || !strings.Contains(err.Error(), "does not belong to the acting room") {
@@ -319,6 +318,63 @@ func TestPublicReadOutsideTheRoomRunsAnonymouslyAndNothingElseDoes(t *testing.T)
 	}
 }
 
+// D-302: list, view and search reads of public repositories outside the room run
+// anonymously. A search needs every repo: name to be public; a private name,
+// a search with no name and writes stay refused.
+func TestPublicListViewAndSearchReadsOutsideTheRoom(t *testing.T) {
+	records := setupRooms(t, "resident-labs/project")
+	ctx := WithRoom(context.Background(), records[0].ID)
+	exe := filepath.Join(t.TempDir(), "gh")
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_CALLS", log)
+	script := "#!/bin/sh\necho \"token=[$GH_TOKEN] $*\" >> \"$GH_CALLS\"\n"
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { publicRepo = func(context.Context, repository) bool { return false } })
+	publicRepo = func(_ context.Context, r repository) bool { return r.name != "other/private" }
+	outside := t.TempDir()
+	run := func(args ...string) error {
+		return Run(ctx, Command(ctx, exe, outside, args...))
+	}
+	allowed := [][]string{
+		{"api", "-X", "GET", "search/issues", "-f", "q=repo:ludovic111/horizon is:open"},
+		{"api", "search/issues?q=repo:ludovic111/horizon+is:open"},
+		{"pr", "list", "-R", "ludovic111/horizon"},
+		{"issue", "list", "--repo", "ludovic111/horizon"},
+		{"issue", "view", "1340", "--repo", "ludovic111/horizon"},
+		{"search", "issues", "--repo", "ludovic111/horizon", "crash"},
+		{"search", "prs", "repo:ludovic111/horizon repo:other/project", "fix"},
+	}
+	for _, args := range allowed {
+		if err := run(args...); err != nil {
+			t.Fatalf("public read %q = %v, want it to run", args, err)
+		}
+	}
+	calls, _ := os.ReadFile(log)
+	if got := strings.Count(string(calls), "token=[] "); got != len(allowed) {
+		t.Fatalf("anonymous gh calls = %d, want %d:\n%s", got, len(allowed), calls)
+	}
+	for _, args := range [][]string{
+		{"api", "search/issues", "-f", "q=repo:ludovic111/horizon repo:other/private"},
+		{"api", "search/issues", "-f", "q=is:open"},
+		{"search", "issues", "--repo", "other/private", "crash"},
+		{"search", "issues", "crash"},
+		{"pr", "list", "-R", "other/private"},
+		{"issue", "list", "-R", "ludovic111/horizon", "--web=false", "--limit", "1", "--json", "number", "--repo", "other/private"},
+		{"pr", "merge", "1", "-R", "ludovic111/horizon"},
+		{"api", "-X", "POST", "search/issues", "-f", "q=repo:ludovic111/horizon"},
+	} {
+		if err := run(args...); err == nil || strings.Contains(err.Error(), "executable file") {
+			t.Fatalf("%q = %v, want it refused", args, err)
+		}
+	}
+	after, _ := os.ReadFile(log)
+	if string(after) != string(calls) {
+		t.Fatalf("refused commands ran gh:\n%s", after)
+	}
+}
+
 // D-294: a refused read outside the room says what the rule allows, not only
 // that the repository is not the room's.
 func TestRefusedOutsideReadExplainsPublicOnlyRule(t *testing.T) {
@@ -329,9 +385,9 @@ func TestRefusedOutsideReadExplainsPublicOnlyRule(t *testing.T) {
 	if apiErr == nil || !strings.Contains(apiErr.Error(), "reads outside the room work only for public repositories") || !strings.Contains(apiErr.Error(), "other/private could not be confirmed public") {
 		t.Fatalf("gh api read error = %v", apiErr)
 	}
-	viewErr := Run(ctx, Command(ctx, "/missing/gh", records[0].Repo, "repo", "view", "other/private"))
+	viewErr := Run(ctx, Command(ctx, "/missing/gh", records[0].Repo, "run", "download", "-R", "other/private"))
 	if viewErr == nil || !strings.Contains(viewErr.Error(), "gh api repos/<owner>/<repo>") {
-		t.Fatalf("gh repo view error = %v", viewErr)
+		t.Fatalf("gh run download error = %v", viewErr)
 	}
 	// A public repository read in an unsupported form is not called private.
 	setPublic(t, true)
