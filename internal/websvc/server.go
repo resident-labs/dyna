@@ -206,6 +206,9 @@ type Options struct {
 	// Voice relays /api/voice/realtime to the owner's live voice call. nil
 	// turns the route off.
 	Voice VoiceHost
+	// AgentVoice runs the live voice sessions of agents at
+	// /api/voice/session, for local callers only. nil turns the route off.
+	AgentVoice AgentVoiceHost
 	// Ext is Resident Labs Connect, or nil.
 	Ext Extension
 	// Push serves browser notifications independently of Connect.
@@ -404,6 +407,8 @@ func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 		s.computers(w, r, rt, tok, pr)
 	case p == "/api/voice/realtime":
 		s.voiceRealtime(w, r, rt, tok, pr)
+	case p == "/api/voice/session":
+		s.voiceSession(w, r)
 	case p == "/api/events":
 		s.events(w, r, tok, pr)
 	case p == "/api/events/poll":

@@ -17,6 +17,7 @@ import MergeCard from './MergeCard.svelte'
 import MachineDiskCard from './MachineDiskCard.svelte'
 import MachineCacheCard from './MachineCacheCard.svelte'
 import CallCard from './CallCard.svelte'
+import VoiceSessionCard from './VoiceSessionCard.svelte'
 import PRCard from '../prs/PRCard.svelte'
 import IssueCard from '../issues/IssueCard.svelte'
 import GoalPost from '../goals/GoalPost.svelte'
@@ -100,7 +101,7 @@ export type EventRenderer = Component<EventProps>
 // component here draws the unknown event row, and the test fails.
 export const eventComponents: Record<string, EventRenderer> = {
   WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard,
-  CallCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, HelperOutcomeRow, EngineNoticeCard, QuestionNoteCard, ReviewResultCard,
+  CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, HelperOutcomeRow, EngineNoticeCard, QuestionNoteCard, ReviewResultCard,
   ShellResultRow, RunResultCard, TurnCompletionRow,
 }
 

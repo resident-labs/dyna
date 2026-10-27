@@ -17,6 +17,10 @@ const (
 	KeyVoiceURL = "voice.url"
 	// KeyVoiceDucking enables optional microphone-driven playback attenuation.
 	KeyVoiceDucking = "voice.ducking"
+	// KeyVoiceAgent lets agents use voice: dyna voice say and dyna voice
+	// session. It is on by default; the owner turns it off to keep agents off
+	// the voice provider's quota.
+	KeyVoiceAgent = "voice.agent"
 )
 
 // VoiceProviders are the voice.provider values.
@@ -32,11 +36,11 @@ func (v *Values) loadVoice(raw map[string]any) error {
 	if !ok {
 		return fmt.Errorf("voice settings must be an object")
 	}
-	for _, key := range []string{KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking} {
+	for _, key := range []string{KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking, KeyVoiceAgent} {
 		if value, ok := values[strings.TrimPrefix(key, "voice.")]; ok {
-			if key == KeyVoiceDucking {
+			if key == KeyVoiceDucking || key == KeyVoiceAgent {
 				if _, ok := value.(bool); !ok {
-					return fmt.Errorf("voice.ducking must be a boolean")
+					return fmt.Errorf("%s must be a boolean", key)
 				}
 			}
 			if err := v.setVoice(key, fmt.Sprint(value)); err != nil {
@@ -50,12 +54,16 @@ func (v *Values) loadVoice(raw map[string]any) error {
 func (v *Values) setVoice(key, value string) error {
 	value = strings.TrimSpace(value)
 	switch key {
-	case KeyVoiceDucking:
+	case KeyVoiceDucking, KeyVoiceAgent:
 		b, err := parseBool(value)
 		if err != nil {
 			return err
 		}
-		v.VoiceDucking = b
+		if key == KeyVoiceAgent {
+			v.VoiceAgent = b
+		} else {
+			v.VoiceDucking = b
+		}
 	case KeyVoiceProvider:
 		if !slices.Contains(VoiceProviders, value) {
 			return fmt.Errorf("voice.provider must be one of %s", strings.Join(VoiceProviders, ", "))
@@ -77,5 +85,6 @@ func (v Values) saveVoice(raw map[string]any) {
 	values := nested(raw, "voice")
 	values["provider"], values["model"], values["url"] = v.VoiceProvider, v.VoiceModel, v.VoiceURL
 	values["ducking"] = v.VoiceDucking
+	values["agent"] = v.VoiceAgent
 	raw["voice"] = values
 }

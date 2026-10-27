@@ -136,6 +136,10 @@ const (
 	// its text.
 	FamilyCall EventFamily = "call"
 
+	// FamilyVoice tells the room that an agent started or ended a live voice
+	// session, so the owner sees who spends the voice provider's quota.
+	FamilyVoice EventFamily = "voice-session"
+
 	// TypeRootFlush is the engine's nudge that delivers the quiet posts a room
 	// held for its root seat.
 	TypeRootFlush EventType = "root-flush"
@@ -890,6 +894,64 @@ func (m MachineCacheEvent) eventSubject() string { return m.Name }
 // eventDedupe keys one repair per machine and time, so a retried post of the
 // same repair posts once.
 func (m MachineCacheEvent) eventDedupe() string { return strconv.Itoa(m.AtMS) }
+
+// VoiceSessionState is the end of a live agent voice session that a notice
+// reports.
+type VoiceSessionState string
+
+// Voice session states.
+const (
+	VoiceStarted VoiceSessionState = "started"
+	VoiceEnded   VoiceSessionState = "ended"
+)
+
+// VoiceEndReason is why a live agent voice session ended.
+type VoiceEndReason string
+
+// Voice end reasons.
+const (
+	// VoiceEndInput: the agent closed its input.
+	VoiceEndInput VoiceEndReason = "input-closed"
+	// VoiceEndTimeLimit: the session ran as long as its limit allows.
+	VoiceEndTimeLimit VoiceEndReason = "time-limit"
+	// VoiceEndIdle: no input audio came for the idle limit.
+	VoiceEndIdle VoiceEndReason = "idle"
+	// VoiceEndProvider: the voice provider closed the connection.
+	VoiceEndProvider VoiceEndReason = "provider-closed"
+	// VoiceEndError: the session failed.
+	VoiceEndError VoiceEndReason = "error"
+	// VoiceEndCancelled: the engine or the caller's connection ended it.
+	VoiceEndCancelled VoiceEndReason = "cancelled"
+)
+
+var (
+	voiceSessionStates = []VoiceSessionState{VoiceStarted, VoiceEnded}
+	voiceEndReasons    = []VoiceEndReason{VoiceEndInput, VoiceEndTimeLimit, VoiceEndIdle, VoiceEndProvider, VoiceEndError, VoiceEndCancelled}
+)
+
+// VoiceSessionEvent tells a room that an agent's live voice session started
+// or ended. It names the session that spent the provider's quota, the
+// provider, and for an end the time used and why it ended.
+type VoiceSessionEvent struct {
+	Type VoiceSessionState `json:"type"`
+	// Voice is the voice session's own ID, which pairs a start with its end.
+	Voice string `json:"voice"`
+	// Session is the address of the session that holds the voice session.
+	Session  string `json:"session"`
+	Provider string `json:"provider"`
+	// Seconds is the time the session ran. It is set on an end.
+	Seconds int            `json:"seconds,omitempty"`
+	Reason  VoiceEndReason `json:"reason,omitempty"`
+}
+
+func (VoiceSessionEvent) eventFamily() EventFamily { return FamilyVoice }
+func (v VoiceSessionEvent) eventType() EventType   { return EventType(v.Type) }
+
+// eventSubject is the voice session, so its start and end fold into one row.
+func (v VoiceSessionEvent) eventSubject() string { return v.Voice }
+
+// eventDedupe keys one post per voice session and state.
+func (v VoiceSessionEvent) eventDedupe() string { return string(v.Type) + "\x00" + v.Voice }
 
 // CallState is how the owner answered a call request: they joined it, they
 // declined it, or the request was withdrawn before they answered.
@@ -1889,6 +1951,28 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "The call request {call} was withdrawn.",
 	},
+	// A voice session notice wakes nobody: it tells the owner who is using the
+	// voice quota, and the agent in the session already knows.
+	{
+		Family:   FamilyVoice,
+		Type:     EventType(VoiceStarted),
+		Renderer: "VoiceSessionCard",
+		Payload:  reflect.TypeOf(VoiceSessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{session} started a live voice session on {provider}.",
+	},
+	{
+		Family:   FamilyVoice,
+		Type:     EventType(VoiceEnded),
+		Renderer: "VoiceSessionCard",
+		Payload:  reflect.TypeOf(VoiceSessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{session} ended its live voice session on {provider} after {seconds} seconds: {reason}.",
+	},
 	// A review result wakes the PR author only when it asks for changes. The
 	// watcher posts an approval or a stop-early quietly to the room feed.
 	{
@@ -2304,6 +2388,8 @@ var eventEnums = []eventEnum{
 		string(ReviewSuperseded), string(ReviewDuplicate), string(ReviewEmpty), string(ReviewTooLarge),
 	}},
 	{Type: reflect.TypeOf(CallState("")), Values: enumValues(callStates)},
+	{Type: reflect.TypeOf(VoiceSessionState("")), Values: enumValues(voiceSessionStates)},
+	{Type: reflect.TypeOf(VoiceEndReason("")), Values: enumValues(voiceEndReasons)},
 }
 
 // eventObjects are the struct types that an event payload embeds. The
@@ -3077,6 +3163,18 @@ func (m Message) Call() (CallEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil || ev.Call == "" {
 		return CallEvent{}, false
+	}
+	return ev, true
+}
+
+// VoiceSession returns the payload of a live voice session notice.
+func (m Message) VoiceSession() (VoiceSessionEvent, bool) {
+	if m.Kind != string(FamilyVoice) || len(m.Payload.raw) == 0 {
+		return VoiceSessionEvent{}, false
+	}
+	var ev VoiceSessionEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Voice == "" {
+		return VoiceSessionEvent{}, false
 	}
 	return ev, true
 }

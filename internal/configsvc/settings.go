@@ -38,6 +38,7 @@ type Item struct {
 
 var help = map[string]string{
 	settings.KeyVoiceDucking:           "Lower Voice by 10 dB after sustained speech above the microphone noise floor. Off by default. Applies to the next call; server speech detection still controls interruption.",
+	settings.KeyVoiceAgent:             "Let agents use voice: dyna voice say and dyna voice session. On by default. Both spend the voice provider's quota, such as the ChatGPT sign-in's. Turn it off to stop them; owner calls are not affected. Applies to the next say or session.",
 	settings.KeyVoiceProvider:          "The realtime voice provider for the next call: openai (the ChatGPT sign-in), speech-to-speech (a self-hosted server), dashscope (Alibaba Cloud, with DASHSCOPE_API_KEY) google-live (Gemini Live, with GOOGLE_API_KEY or GEMINI_API_KEY) doubao-seeduplex (Volcengine, with DOUBAO_API_KEY) stepfun (StepFun, with STEPFUN_API_KEY) or minicpm-o (a self-hosted MiniCPM-o server at voice.url; it cannot use tools, so Voice cannot dispatch work on it).",
 	settings.KeyVoiceModel:             "The voice provider's model, such as qwen3.5-omni-plus-realtime for dashscope. Empty uses the provider's default.",
 	settings.KeyVoiceURL:               "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
@@ -94,6 +95,7 @@ func Items() ([]Item, error) {
 	items := []Item{
 		{Key: settings.KeyPRTrustedBots, Value: v.PRTrustedBots, Source: v.Source(settings.KeyPRTrustedBots), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of trusted GitHub bot logins. Other outside comments are held for the owner."},
 		{Key: settings.KeyVoiceDucking, Value: v.VoiceDucking, Source: v.Source(settings.KeyVoiceDucking), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
+		{Key: settings.KeyVoiceAgent, Value: v.VoiceAgent, Source: v.Source(settings.KeyVoiceAgent), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeySessionCheckInInterval, Value: v.SessionCheckInInterval.String(), Source: v.Source(settings.KeySessionCheckInInterval), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},

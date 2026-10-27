@@ -89,6 +89,21 @@ func (GA) UserText(text string) any {
 	}}
 }
 
+// ImageProtocol is a Protocol that can add an image to the conversation. A
+// provider that does so also sets Capabilities.ImageInput.
+type ImageProtocol interface {
+	// UserImage adds a PNG or JPEG image as a user item. It asks for no reply.
+	UserImage(mime string, data []byte) any
+}
+
+// UserImage adds the image as an input_image item with a data URL.
+func (GA) UserImage(mime string, data []byte) any {
+	return msg{"type": "conversation.item.create", "item": msg{
+		"type": "message", "role": "user",
+		"content": []msg{{"type": "input_image", "image_url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}},
+	}}
+}
+
 // Context adds text without completing a turn or requesting speech.
 func (g GA) Context(text string) any { return g.UserText(text) }
 

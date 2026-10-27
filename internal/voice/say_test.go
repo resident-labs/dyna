@@ -102,3 +102,13 @@ func TestSayFailsWhenTheResponseWasCancelled(t *testing.T) {
 		t.Errorf("err = %v, want a failure naming the status", err)
 	}
 }
+
+func TestSayRefusedWhenOwnerTurnedAgentVoiceOff(t *testing.T) {
+	var session realtime.Session
+	s := fakeSayer(&fakeSayConn{}, realtime.Provider{Label: "Fake"}, &session)
+	s.enabled = func() error { return ErrAgentVoiceOff }
+	_, err := s.Say(t.Context(), SayRequest{Text: "hi"})
+	if err == nil || err.Error() != "the owner turned off agent voice in Settings > Voice" {
+		t.Fatalf("say with agent voice off: %v", err)
+	}
+}
