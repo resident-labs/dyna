@@ -412,6 +412,12 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	if !trial && result.Node == "" {
 		localState, localJobs, logs = VerdictAbsent, nil, ""
 	}
+	// A pull request head's saved run that ended without a verdict, such as a
+	// run lost to a machine outage, is no evidence either: nothing retries it,
+	// so only a run that is live now may hold the head.
+	if !trial && localState == VerdictPending && !s.localCIRunning(r) {
+		localState, localJobs, logs = VerdictAbsent, nil, ""
+	}
 	if result.Status == localci.OutcomePassed && (!plan.runnable() || !plan.required.CoversSuites(result, plan.suites)) {
 		localState = VerdictPending
 		if !trial {
@@ -442,10 +448,7 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		if localState == VerdictAbsent {
 			observation.Reason = "waiting for CI"
 		}
-		runs := s.nodeRuns()
-		runs.Lock()
-		live := runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]
-		runs.Unlock()
+		live := s.liveLocalCIRun(r)
 		switch {
 		case live != nil:
 			observation.Reason = "running local CI on " + live.node
@@ -491,6 +494,16 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 	}
 	return observation
 }
+
+// liveLocalCIRun is the local run now executing for a record's head, if any.
+func (s *Service) liveLocalCIRun(r Record) *registeredCIRun {
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	return runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]
+}
+
+func (s *Service) localCIRunning(r Record) bool { return s.liveLocalCIRun(r) != nil }
 
 // savedLocalSettles reports whether a saved local result can decide a head with
 // no ready node. A conclusive failure always can; a pass must cover the whole
