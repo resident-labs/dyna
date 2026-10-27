@@ -760,6 +760,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		}
 		if cfg.Profile != "" && choice.Cause != "" {
 			s.noticePinnedWait(ctx, roomID, cfg.Profile, choice.Reason)
+			// The pin is room-wide, so no other change in this room can launch either.
 			return nil
 		}
 		name := choice.Name

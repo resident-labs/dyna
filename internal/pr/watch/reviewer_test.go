@@ -10,6 +10,7 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/rolesession"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 	"encoding/json"
@@ -431,4 +432,48 @@ func reviewState(t *testing.T, e *testEnv, st State, r Record) (string, *int, st
 		t.Fatal(err)
 	}
 	return facts.ReviewState(r)
+}
+
+func TestPinnedReviewerDoesNotLaunch(t *testing.T) {
+	e := newEnv(t)
+	e.s.Notify = notify.New(room.DefaultStore(), &subagent.Manager{Store: subagent.DefaultStore()})
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) {
+		return []profile.Profile{
+			{Name: "sonnet", Disabled: true, Diagnostics: 9, Cost: 5},
+			{Name: "judge", Diagnostics: 1, Cost: 1},
+		}, nil
+	}
+	e.setCI("success", 1)
+	r := e.track()
+	if err := e.s.process(context.Background(), r.Key, Snapshot{Pull: e.f.Pull}, "passed", "pass", nil, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Store.update(func(st *State) error {
+		cfg := st.Reviewers[r.RoomID]
+		cfg.Profile = "sonnet"
+		st.Reviewers[r.RoomID] = cfg
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.dispatchAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.launches) != 0 {
+		t.Fatalf("pinned reviewer launched %v, want none", e.launches)
+	}
+	msgs, err := room.DefaultStore().Messages(r.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var waits int
+	for _, m := range msgs {
+		ev, ok := m.ServiceWait()
+		if ok && ev.Service == room.ServiceReviewer && ev.Profile == "sonnet" && ev.Reason != "" {
+			waits++
+		}
+	}
+	if waits != 1 {
+		t.Fatalf("wait notices = %d, want one ServiceWaitEvent for sonnet", waits)
+	}
 }
