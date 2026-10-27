@@ -406,10 +406,14 @@ func (s *Store) fileIssue(roomID string, in IssueInput, otherRoomFiler bool) (Is
 	if err != nil {
 		return Issue{}, err
 	}
-	if by != rec.Name && !strings.HasPrefix(by, rec.Name+":") {
-		if !otherRoomFiler || !s.filerNamesRoom(by) {
+	switch s.filerActor(rec, by) {
+	case FilerRoomOwner, FilerRoomSession:
+	case FilerOtherRoom:
+		if !otherRoomFiler {
 			return Issue{}, errors.New("issue filer must belong to this room")
 		}
+	default:
+		return Issue{}, errors.New("issue filer must belong to this room")
 	}
 	note := strings.TrimSpace(in.Note)
 	files := in.Files
@@ -669,7 +673,7 @@ func (s *Store) NoteIssue(roomID, id, by, text string, atts []Attachment) (Issue
 	if err != nil {
 		return Issue{}, err
 	}
-	if by != rec.Name && !strings.HasPrefix(by, rec.Name+":") && !s.filerNamesRoom(by) {
+	if s.filerActor(rec, by) == FilerUnknown {
 		return Issue{}, errors.New("a note must come from a session or the owner")
 	}
 	i, err := s.Issue(rec.ID, id)
@@ -735,13 +739,35 @@ func (s *Store) withIssuesLock(roomID string, fn func() error) error {
 	return fn()
 }
 
-// filerNamesRoom reports whether a filer address names an existing room,
-// optionally with a member of it, such as "fl-rea:merge-captain".
-func (s *Store) filerNamesRoom(by string) bool {
+// FilerKind tells who an issue filer address is, relative to one room.
+type FilerKind int
+
+const (
+	// FilerUnknown names no room, so it may not file or note.
+	FilerUnknown FilerKind = iota
+	// FilerRoomOwner is the room's own name, such as "dyna".
+	FilerRoomOwner
+	// FilerRoomSession is a member of this room, such as "dyna:smells".
+	FilerRoomSession
+	// FilerOtherRoom is the name of another existing room, or a member of it,
+	// such as "fl-rea:merge-captain".
+	FilerOtherRoom
+)
+
+// filerActor resolves the kind of the filer address by once, for the room rec.
+func (s *Store) filerActor(rec Record, by string) FilerKind {
+	switch {
+	case by == rec.Name:
+		return FilerRoomOwner
+	case strings.HasPrefix(by, rec.Name+":"):
+		return FilerRoomSession
+	}
 	name, _, _ := strings.Cut(by, ":")
 	if strings.TrimSpace(name) == "" {
-		return false
+		return FilerUnknown
 	}
-	_, err := s.Resolve(name)
-	return err == nil
+	if _, err := s.Resolve(name); err != nil {
+		return FilerUnknown
+	}
+	return FilerOtherRoom
 }
