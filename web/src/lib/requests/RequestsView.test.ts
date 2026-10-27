@@ -6,8 +6,9 @@ import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
 import { parse } from 'svelte/compiler'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installQuestions } from '../../../test/appModules.ts'
+import { requestFilter } from './requests.ts'
 
-const source = readFileSync(new URL('./Questions.svelte', import.meta.url), 'utf8')
+const source = readFileSync(new URL('./Requests.svelte', import.meta.url), 'utf8')
 const code = (parse(source, { modern: true }).instance?.content.body ?? []).filter((n) =>
   n.type === 'FunctionDeclaration' && n.id?.name === 'applyFocusRequest' ||
   n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === 'appliedFocus'),
@@ -22,6 +23,7 @@ interface QuestionRow {
 }
 
 interface QuestionsState {
+  requestFilter: typeof requestFilter
   focusId: string
   focusRequest: number
   questions: QuestionRow[]
@@ -32,7 +34,7 @@ interface QuestionsState {
 
 test('live question refreshes preserve the chosen filter and Reply focus', () => {
   const calls: string[] = []
-  const c: QuestionsState = { focusId: 'q1', focusRequest: 1, questions: [{ id: 'q1', state: 'open' }], filter: 'open', focus: (id: string) => calls.push(id), applyFocusRequest() {} }
+  const c: QuestionsState = { requestFilter, focusId: 'q1', focusRequest: 1, questions: [{ id: 'q1', state: 'open' }], filter: 'open', focus: (id: string) => calls.push(id), applyFocusRequest() {} }
   vm.createContext(c)
   vm.runInContext(stripTypes(code), c)
   const fns = vm.runInContext('({ applyFocusRequest })', c) as Pick<QuestionsState, 'applyFocusRequest'>
@@ -84,18 +86,57 @@ test('a delayed question snapshot cannot replace a newer answer', async () => {
 
 const { bundle, importBundle, installDom, domNames } = await import('../prs/prDetailHarness.ts')
 const { rm } = await import('node:fs/promises')
-const renderedCode = await bundle({ component: '../questions/Questions' })
+const renderedCode = await bundle({ component: '../requests/Requests' })
+
+test('a waiting-owner terminal row runs its command and declines with an optional reason', async () => {
+  const dom = installDom()
+  globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+  const ui = await importBundle(renderedCode, '../requests/Requests')
+  const ran: string[] = []
+  const declined: string[][] = []
+  const terminal = { argv: ['gh', 'auth', 'login', '--scopes', 'workflow'], cwd: '/tmp/work', reason: 'Sign in', stage: 'waiting-owner' }
+  const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
+    roomId: 'r', questions: [
+      { id: 'q1', to: 'owner', state: 'open', askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] },
+      { id: 'q2', to: 'owner', state: 'open', kind: 'terminal', terminal, askerName: 'builder', askerHue: 2, text: 'Sign in', askedAt: '2026-10-22T00:01:00Z', options: [] },
+      { id: 'q3', to: 'owner', state: 'open', kind: 'terminal', terminal: { ...terminal, stage: 'waiting-session', reason: 'Held request' }, askerName: 'builder', askerHue: 2, text: 'Held request', askedAt: '2026-10-22T00:02:00Z', options: [] },
+    ],
+    onanswer: () => {}, onrun: (id: string) => { ran.push(id) }, ondecline: (id: string, reason: string) => { declined.push([id, reason]) },
+  } })
+  const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); ui.flushSync() } }
+  const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)
+  try {
+    ui.flushSync()
+    assert.equal(document.querySelectorAll('article').length, 2)
+    assert.equal(document.body.textContent?.includes('Held request'), false)
+    assert.ok(document.querySelector('.command')?.textContent?.includes('gh auth login --scopes workflow'))
+    button('Review and run')?.click(); await settle()
+    assert.deepEqual(ran, ['q2'])
+    button('Decline…')?.click(); ui.flushSync()
+    const reason = document.querySelector<HTMLInputElement>('input[aria-label="Reason for declining q2"]')
+    assert.ok(reason)
+    reason.value = 'Not needed'; reason.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync()
+    document.querySelector<HTMLFormElement>('.decline-form')?.requestSubmit(); await settle()
+    assert.deepEqual(declined, [['q2', 'Not needed']])
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
 
 test('free-text Send requires content, submits once, and keeps a failed draft for retry', async () => {
   const dom = installDom()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
-  const ui = await importBundle(renderedCode, '../questions/Questions')
+  const ui = await importBundle(renderedCode, '../requests/Requests')
   let finish: () => void = () => { throw new Error('no pending answer') }
   let fail: (reason: unknown) => void = () => { throw new Error('no pending answer') }
   const sent: unknown[][] = []
   const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
     roomId: 'r', questions: [{ id: 'q1', to: 'owner', state: 'open', askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] }],
     onanswer: (...args: unknown[]) => { sent.push(args); return new Promise<void>((resolve, reject) => { finish = resolve; fail = reject }) },
+    onrun: () => {}, ondecline: () => {},
   } })
   const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); ui.flushSync() } }
   try {

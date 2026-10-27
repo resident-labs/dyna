@@ -14,7 +14,7 @@ import { nextRules } from '../src/lib/rooms/rules.ts'
 import { errorText } from '../src/lib/errorText.ts'
 import { clipText, dismissDelay, makeToast, TOAST_DETAIL_MS, TOAST_MS } from '../src/lib/ui/toast.ts'
 import { reconcileRows } from '../src/lib/ui/reloadGate.ts'
-import { questionID, visualKey } from '../src/lib/questions/questions.ts'
+import { questionID, visualKey } from '../src/lib/requests/requests.ts'
 import type { CloseOutcome } from '../src/lib/api/room.ts'
 
 // The visual set is a .svelte.ts module with rune state at module scope, which

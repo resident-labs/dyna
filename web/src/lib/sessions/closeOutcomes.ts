@@ -96,7 +96,7 @@ function subjectOf(outcome: CloseOutcome): string {
     case 'item':
       return `Goal item ${outcome.id ?? ''}`.trim()
     case 'question':
-      return `Question ${outcome.id ?? ''}`.trim()
+      return `Request ${outcome.id ?? ''}`.trim()
     case 'child':
       return outcome.name ?? 'Child session'
     case 'shell':

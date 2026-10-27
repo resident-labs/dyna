@@ -74,7 +74,7 @@ test('rows: posts and tool calls in time order; dispatch shows only when it fail
   assert.deepEqual(rows[3]?.tool, { label: 'Starting the work', state: 'failed' })
   assert.deepEqual(rows[4]?.tool, { label: 'Checked the merge queue', state: 'running' })
   assert.equal(toolLabel('unknown_tool', 'not json'), 'unknown_tool')
-  assert.equal(toolLabel('answer_question', '{"text":"yes"}'), 'Answered your question')
+  assert.equal(toolLabel('answer_question', '{"text":"yes"}'), 'Answered your request')
 })
 
 test('a shared file is its own quiet line after its post, and a post of only files is only its lines', () => {

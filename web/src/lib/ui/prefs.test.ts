@@ -28,6 +28,10 @@ test('unknown views reopen as general and nested views persist', () => {
   assert.deepEqual(lastRoom(), { room: 'repo', view: 'general' })
   saveLastRoom('repo', 'issues')
   assert.deepEqual(lastRoom(), { room: 'repo', view: 'issues' })
+  storage.setItem('dyna.layout', JSON.stringify({ room: 'repo', view: 'questions' }))
+  assert.deepEqual(lastRoom(), { room: 'repo', view: 'requests' })
+  saveLastRoom('repo', 'requests')
+  assert.deepEqual(lastRoom(), { room: 'repo', view: 'requests' })
 })
 
 

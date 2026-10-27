@@ -12,7 +12,7 @@ const kinds: [kind: string, one: string, many: string][] = [
   ['pr', 'pull request', 'pull requests'],
   ['goal', 'goal', 'goals'],
   ['item', 'goal item', 'goal items'],
-  ['question', 'question', 'questions'],
+  ['question', 'request', 'requests'],
   ['child', 'child', 'children'],
   ['shell', 'shell', 'shells'],
   ['workflow', 'workflow', 'workflows'],

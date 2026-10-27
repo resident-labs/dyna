@@ -1,4 +1,5 @@
 import { ancestors } from './memberOrder.ts'
+import { canonicalView } from './workViews.ts'
 
 // Feed views filter the existing room feed. They never change delivery or wakes.
 export const GENERAL = 'general'
@@ -62,6 +63,7 @@ export function feedModel(members: readonly FeedMember[] = []) {
   const leads = agents.filter((m) => parentIds.has(m.id))
 
   function resolveView(view: string): string {
+    view = canonicalView(view)
     if (!view.startsWith('channel:')) return view
     // A saved channel link now opens the room chat.
     return GENERAL

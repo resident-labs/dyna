@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { accountRows, updateRows, rootQuestions, allClear } from './home.ts'
+import { accountRows, updateRows, homeRequests, allClear } from './home.ts'
 import { account } from '../../../test/account-fixtures.ts'
 import type { ScopeAccount } from '../api/account.ts'
 
@@ -49,7 +49,7 @@ test('updates list dyna and installed harnesses with a newer recommended version
   assert.deepEqual(updateRows({}, null), [])
 })
 
-test('the home screen shows only open questions root asked the human', () => {
+test('the home screen shows root questions and terminal requests waiting for the owner', () => {
   const rooms = [{ id: 'a', name: 'dyna-agent' }, { id: 'b', name: 'old', archived: true }, { id: 'c', name: 'other' }]
   const questions = {
     c: [{ id: 'q1', state: 'open', to: 'owner', asker: 'owner', askerName: 'root', text: 'Merge?' }],
@@ -58,11 +58,13 @@ test('the home screen shows only open questions root asked the human', () => {
       { id: 'q2', state: 'open', to: 'owner', asker: 'ses_x', askerName: 'ui' },
       { id: 'q3', state: 'answered', to: 'owner', asker: 'owner', askerName: 'root' },
       { id: 'q4', state: 'open', to: 'owner', asker: 'owner', human: true, askerName: 'you' },
+      { id: 'q6', state: 'open', to: 'owner', asker: 'ses_t', askerName: 'builder', text: 'Sign in', kind: 'terminal' as const, terminal: { stage: 'waiting-owner' } },
+      { id: 'q7', state: 'open', to: 'owner', asker: 'ses_t', askerName: 'builder', kind: 'terminal' as const, terminal: { stage: 'waiting-session' } },
     ],
     b: [{ id: 'q5', state: 'open', to: 'owner', asker: 'owner', askerName: 'root' }],
   }
   // Question IDs are unique only within a room, so the row key names both.
-  assert.deepEqual(rootQuestions(rooms, questions).map((r) => [r.key, r.room.id, r.text]), [['a:q1', 'a', 'Ship it?'], ['c:q1', 'c', 'Merge?']])
+  assert.deepEqual(homeRequests(rooms, questions).map((r) => [r.key, r.room.id, r.text]), [['a:q1', 'a', 'Ship it?'], ['a:q6', 'a', 'Sign in'], ['c:q1', 'c', 'Merge?']])
 })
 
 test('home keeps a provider card for a known plan that reports a period without a percentage', () => {
