@@ -46,11 +46,6 @@ func (s *supervisor) openApp(ctx context.Context, r Request) (Opened, error) {
 	s.mu.Lock()
 	s.recordIntent(intent)
 	s.mu.Unlock()
-	// Start the desktop before building the app's environment: the environment
-	// names the computer's own session bus, which exists only once the desktop runs.
-	if err := s.start(); err != nil {
-		return Opened{}, err
-	}
 	if _, _, _, _, _, err := s.agentTarget(ctx); err != nil {
 		return Opened{}, err
 	}
