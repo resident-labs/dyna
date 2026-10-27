@@ -128,15 +128,26 @@ func (s *Service) librarianView(rec room.Record) ServiceView {
 	if err != nil {
 		return view
 	}
+	if !v.LibraryOn(repo.Main) && !v.LibraryOn(rec.Repo) {
+		return view
+	}
 	st, err := (librarianstate.Store{DataDir: store.DataDir()}).Get(repo.ID)
 	if err != nil {
+		return view
+	}
+	if s.Notify == nil || s.Notify.Sessions == nil {
 		return view
 	}
 	ps, err := s.Notify.Sessions.ProfileStore()
 	if err != nil {
 		return view
 	}
-	choice, err := rolesession.ChooseProfile(ps.Profiles, v.LibraryProfile, runtime.RepoIdentity(context.Background(), rec.Repo), st.FailedProfiles, time.Now(), "librarian")
+	recent, err := rolesession.RecentProfileFailures(s.Notify.Sessions.Store, time.Now())
+	if err != nil {
+		recent = nil
+	}
+	failed := rolesession.MergeFailures(st.FailedProfiles, recent)
+	choice, err := rolesession.ChooseProfile(ps.Profiles, v.LibraryProfile, runtime.RepoIdentity(context.Background(), rec.Repo), failed, time.Now(), "librarian")
 	if err != nil || choice.Cause == "" {
 		return view
 	}

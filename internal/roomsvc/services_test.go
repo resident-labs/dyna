@@ -3,13 +3,19 @@ package roomsvc
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 )
 
 func servicesByRole(t *testing.T, e *env, roomName string) map[string]ServiceView {
@@ -149,5 +155,79 @@ func TestServiceProfileAllowsOnlyTheRoomsOwnRoot(t *testing.T) {
 		if err := e.svc.SetServiceProfile(ctx, rec.Name, "reviewer", ""); err == nil || !strings.Contains(err.Error(), " only;") {
 			t.Errorf("%s pinned the reviewer profile: %v", who, err)
 		}
+	}
+}
+
+func TestListServicesShowsAPinnedLibrarianWaiting(t *testing.T) {
+	e := newEnv(t)
+	repo := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.email", "t@example.com")
+	git("config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "a.go")
+	git("commit", "-qm", "init")
+	id, err := repoid.Resolve(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = (librarianstate.Store{DataDir: store.DataDir()}).Update(id.ID, true, func(st *librarianstate.State) error {
+		st.Main = id.Main
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := e.svc.Notify.Rooms.Create(room.CreateInput{Name: "lib-wait", Repo: repo, CreatedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = (librarianstate.Store{DataDir: store.DataDir()}).Update(id.ID, false, func(st *librarianstate.State) error {
+		st.RoomID = rec.ID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.mgr.Profiles = func() (*profile.Store, error) {
+		return &profile.Store{Profiles: []profile.Profile{
+			{Name: "sonnet", Harness: profile.HarnessMock, Disabled: true},
+			{Name: "mock", Harness: profile.HarnessMock, Taste: 1},
+		}}, nil
+	}
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = v.Set(settings.KeyLibraryProfile, "sonnet"); err != nil {
+		t.Fatal(err)
+	}
+	if err = v.Set(settings.KeyLibraryEnabled, `["`+id.Main+`"]`); err != nil {
+		t.Fatal(err)
+	}
+	if err = v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got := servicesByRole(t, e, rec.Name)["librarian"]
+	if got.Profile != "sonnet" || got.Pinned != "sonnet" || !strings.HasPrefix(got.Reason, "waiting:") || !strings.Contains(got.Reason, "sonnet") {
+		t.Fatalf("enabled library = %+v, want the pin and a waiting reason", got)
+	}
+	if err = v.Set(settings.KeyLibraryEnabled, `[]`); err != nil {
+		t.Fatal(err)
+	}
+	if err = v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	off := servicesByRole(t, e, rec.Name)["librarian"]
+	if strings.HasPrefix(off.Reason, "waiting:") {
+		t.Fatalf("library off still waits: %+v", off)
 	}
 }
