@@ -72,7 +72,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVar(&meanwhile, "meanwhile", "", "useful safe work you will do while you wait (required)")
 	cmd.Flags().StringVar(&to, "to", "", "only the owner (@root); ask agents with dyna post")
 	cmd.Flags().StringVar(&opts, "options", "", "up to six comma-separated options")
-	cmd.Flags().StringVar(&html, "html", "", "attach an HTML card")
+	cmd.Flags().StringVar(&html, "html", "", "attach an HTML card; the card can answer the question with parent.postMessage({type: 'dyna:submit', text, choice?}, '*') after the owner clicks (see dyna post --help)")
 	cmd.Flags().StringArrayVar(&attach, "attach", nil, "attach a file (repeatable)")
 	var open bool
 	ls := &cobra.Command{Use: "list", Short: "List every question in this room", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {

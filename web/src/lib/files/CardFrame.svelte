@@ -1,18 +1,24 @@
 <script lang="ts">
-  import { openExternal, cardURL } from '../../api.ts'
+  import { api, openExternal, cardURL } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
+  import { questionView } from '../app/questions.svelte.ts'
   import { sandbox, guard, onLoad, readCardMessage, frameKey, forKey } from '../ui/rich.ts'
   import type { CardGuard } from '../ui/rich.ts'
+  import { routeSubmit } from './cardSubmit.ts'
+  import type { CardPost } from './cardSubmit.ts'
   import type { Attachment } from '../api/room.ts'
 
   interface Props {
     roomId: string
     att: Attachment
+    // The post that carries the card. It decides where dyna:submit goes.
+    post?: CardPost
     height?: string
     onheight?: (height: number) => void
   }
   // One HTML card frame with its link guard and its message channel. See
   // rich.ts for the rules.
-  let { roomId, att, height = '100%', onheight }: Props = $props()
+  let { roomId, att, post, height = '100%', onheight }: Props = $props()
   let attId = $derived(att.id)
   let title = $derived(att.title || att.name)
   let g = $state<CardGuard>(guard())
@@ -66,11 +72,13 @@
   // a flood cannot thrash the feed layout. A link opens only while the card
   // has focus and the owner has just clicked or typed (transient user
   // activation), so a card cannot open pages on load or on a timer. One
-  // open per card every two seconds: one click, one link.
+  // open per card every two seconds: one click, one link. A dyna:submit
+  // follows the same rules, with its own two-second limit.
   let lastHeight = 0
   let heightAt = 0
   let heightTimer: ReturnType<typeof setTimeout> | undefined
   let openAt = 0
+  let submitAt = 0
   function message(e: MessageEvent) {
     if (!frame || e.source !== frame.contentWindow || e.origin !== 'null') return
     const m = readCardMessage(e.data)
@@ -91,6 +99,31 @@
       openAt = now
       openExternal(m.url)
     }
+    // A submit passes the same gate as an open. A card with no post (a file
+    // preview) has nowhere to send, so it gets an error.
+    if (m?.type === 'submit' && document.activeElement === frame && navigator.userActivation?.isActive === true) {
+      if (now - submitAt < 2000) return
+      submitAt = now
+      submit(m.text, m.choice).then(
+        () => reply({ type: 'dyna:submitted', ok: true }),
+        (err) => reply({ type: 'dyna:submitted', ok: false, error: errorText(err) }),
+      )
+    }
+  }
+
+  // The answer or the reply goes through the same calls the app's own
+  // question buttons and composer use.
+  async function submit(text: string, choice?: string) {
+    if (!post) throw new Error('no-post')
+    const route = routeSubmit(post, questionView.questions, { text, choice })
+    if (route.kind === 'refuse') throw new Error(route.error)
+    if (route.kind === 'answer') await questionView.answerQuestion(route.question, route.choice, route.text)
+    else await api.send(roomId, route.draft, route.replyTo, [], '', [], route.conversation)
+  }
+
+  // The card's origin is opaque, so the only target origin that reaches it is "*".
+  function reply(message: { type: 'dyna:submitted'; ok: boolean; error?: string }) {
+    frame?.contentWindow?.postMessage(message, '*')
   }
 </script>
 
