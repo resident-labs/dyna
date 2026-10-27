@@ -82,9 +82,10 @@ type Capabilities struct {
 	// OutputSpeed: the session setup takes a speaking speed. A provider
 	// without it rejects --speed.
 	OutputSpeed bool
-	// ResponseInstructions: a say or text line can set style for the reply
-	// it asks for. A provider without it rejects that field. Its Protocol
-	// is an InstructedProtocol.
+	// ResponseInstructions: a response request can set style for that reply.
+	// A say, text or commit line can set it, and the session default applies
+	// when the line does not. A provider without it rejects that field and
+	// the session flag. Its Protocol is an InstructedProtocol.
 	ResponseInstructions bool
 }
 
