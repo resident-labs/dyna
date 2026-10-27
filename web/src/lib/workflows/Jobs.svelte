@@ -2,9 +2,9 @@
   import LoadOlder from '../ui/LoadOlder.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import InlineConfirm from '../ui/InlineConfirm.svelte'
-  // Background `dyna shell` commands in the room, with the tail of the
-  // selected one's log. A running job's log follows itself every two
-  // seconds while it stays open. jobs is App's one room list, newest first.
+  // The session Shell tab: this session's shell jobs, with the selected
+  // one's log open. A running job's log follows itself every two seconds
+  // while it stays open. jobs is the session's rows, newest first.
   // onstop(job) stops a running job and resolves when it has ended.
   import { onMount, tick, untrack } from 'svelte'
   import { api } from '../../api.ts'
@@ -68,9 +68,18 @@
           logError = ''
         }
       }
-      if (found && requested !== handledJobId) {
+      if (requested && requested !== handledJobId) {
         handledJobId = requested
-        pick(found)
+        if (found) pick(found)
+        else {
+          sel = requested
+          stopAsk = ''
+          stopError = ''
+          log = null
+          logError = ''
+          follow = true
+          loadLog()
+        }
       }
     })
   })
@@ -159,18 +168,18 @@
   {#if !narrow || !job}
     <div class="list">
       <header>
-        <h1>Shell jobs</h1>
-        <p>Existing managed background commands in this room. New starts are disabled.</p>
+        <h1>Shell</h1>
+        <p>Commands this session started. Select one to read its log.</p>
       </header>
       {#if jobId && jobs && !jobs.some((j) => j.id === jobId)}
-        <p class="err">Job {jobId} is not available in this room.</p>
+        <p class="err">This job is not in the loaded list. Its log is still open.</p>
       {/if}
       {#if error}
         <p class="err">{error}</p>
       {:else if !jobs}
         <p class="quiet">Loading jobs…</p>
       {:else if !jobs.length}
-        <EmptyState title="No shell jobs">New managed shell jobs are disabled. Run commands directly in your session.</EmptyState>
+        <EmptyState title="No shells">This session has no shell jobs in the loaded list.</EmptyState>
       {:else}
         <div class="rows">
           <h2>Active jobs <span class="total">{running.length}</span></h2>
@@ -202,7 +211,7 @@
       <LoadOlder {older} loading={loadingOlder} onclick={onolder} />
     </div>
   {/if}
-  {#if job}
+  {#if sel}
     <div class="log">
       <header class="lh">
         {#if narrow}
@@ -210,13 +219,13 @@
             <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
           </button>
         {/if}
-        <span class="st {tone(job)}"></span>
+        <span class="st {job ? tone(job) : ''}"></span>
         <span class="lt">
-          <span class="cmd mono">{cmd(job.command)}</span>
-          <span class="sub mono" title={job.cwd}>{job.cwd}</span>
+          <span class="cmd mono">{job ? cmd(job.command) : sel}</span>
+          <span class="sub mono" title={job?.cwd ?? ''}>{job?.cwd ?? 'Log'}</span>
         </span>
-        <span class="code {tone(job)}">{codeText(job)}</span>
-        {#if onstop && runningJob(job)}
+        <span class="code {job ? tone(job) : ''}">{job ? codeText(job) : ''}</span>
+        {#if job && onstop && runningJob(job)}
           {#if stopAsk === job.id}
             <InlineConfirm ask="Stop this job?" action="Stop" busy={stopBusy} onconfirm={() => stop(job)} oncancel={() => (stopAsk = '')} />
           {:else}
@@ -233,7 +242,7 @@
       {#if log}
         {#if log.truncated}<p class="cut">Showing the last 400 lines.</p>{/if}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (The log scrolls with the keyboard.) -->
-        <pre bind:this={logEl} tabindex="0" role="region" aria-label="Log for {job.id}" onscroll={trackFollow}>{log.text || '(no output yet)'}</pre>
+        <pre bind:this={logEl} tabindex="0" role="region" aria-label="Log for {job?.id ?? sel}" onscroll={trackFollow}>{log.text || '(no output yet)'}</pre>
       {/if}
     </div>
   {:else if !narrow && jobs?.length}

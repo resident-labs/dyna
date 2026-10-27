@@ -19,7 +19,7 @@ export type Action = { id: string; run: Handler } & {
 export interface ActionContext {
   room: ActionRoom | null
   rooms: Partial<Pick<Room, 'pinOrder'>>[]
-  icons: Partial<Record<'files' | 'github' | 'terminal' | 'jobs' | 'run' | 'stop' | 'flows' | 'pin' | 'find' | 'gear' | 'rename' | 'archive' | 'trash' | 'device' | 'side', string>>
+  icons: Partial<Record<'files' | 'github' | 'terminal' | 'run' | 'stop' | 'flows' | 'pin' | 'find' | 'gear' | 'rename' | 'archive' | 'trash' | 'device' | 'side', string>>
   hasTerminal: boolean
   narrow?: boolean
   runs?: { runs?: ActionRun[] | null } | null
@@ -63,7 +63,6 @@ export function actions(c: ActionContext): Action[] {
     )
     if (c.hasTerminal) out.push({ id: 'terminal', palette: { label: 'Open terminal', hint: `in ${label}`, icon: icon.terminal, terms: 'shell console bash command' }, slash: { name: 'terminal', hint: 'a shell in the repo' }, run: () => c.openView('terminal') })
     out.push(
-      { id: 'jobs', palette: { label: 'Open shell jobs', icon: icon.jobs, terms: 'dyna shell background log build test' }, slash: { name: 'jobs', hint: 'dyna shell jobs and logs' }, run: () => c.openView('jobs') },
       { id: 'run', palette: { label: 'Run a workflow…', icon: icon.run, terms: 'start workflow template run' }, slash: { name: 'run', arg: 'template and input', listTitle: 'Workflow templates', hint: 'start a workflow', options: c.templateOptions }, run: c.startWorkflow },
     )
     for (const run of (c.runs?.runs ?? []).filter((x) => x.status === 'running')) out.push({ id: `cancel-${run.id}`, palette: { label: `Cancel ${run.name}`, hint: 'running workflow', icon: icon.stop, danger: true, terms: 'cancel stop workflow run' }, run: () => c.cancelRun(run) })
