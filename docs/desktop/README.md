@@ -200,15 +200,16 @@ its shells. On a phone, Review fills the screen; **Back to chat** closes it.
   lists every shell in the room, its sessions' too, named by session. The
   terminal shows only in builds with a terminal renderer
   (`TermPane.svelte` exports `available`).
-- **Shell jobs:** background `dyna shell` commands in the room, newest
-  first, with a gold, green or red state dot and the exit code. A job opens
-  to the last 400 lines of its log, which follows a running job.
+- **Shell jobs:** background `dyna shell` commands belong to the session
+  that started them. The session's Shell tab lists them, newest first, with
+  a gold, green or red state dot and the exit code. A job opens to the last
+  400 lines of its log, which follows a running job. A shell with no session,
+  such as a root or hook shell, opens on the root seat's Shell tab.
 
 Automatic shell-job results do not show in channel feeds, and they never
-count as unread or send a push. `#shell-jobs` lists each job with its state
-and log. The result post still reaches the job's parent session, so agent
-delivery does not change. A link or pin to a shell result opens that job in
-`#shell-jobs`.
+count as unread or send a push. The result post still reaches the job's
+parent session, so agent delivery does not change. A link or pin to a shell
+result opens that job on the owning session's Shell tab.
 
 A session view shows cards, images, and files inline. Your attachments appear below
 your prompt without repeating its text. **Show earlier turns** loads six more

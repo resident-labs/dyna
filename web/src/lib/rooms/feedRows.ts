@@ -80,8 +80,8 @@ const senderGap = 7 * 60 * 1000
 const shellSender = /^shell:sh_\d{8}-\d{6}-[a-f0-9]{8}$/
 const resultKinds: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped'])
 
-// Automatic `dyna shell` exit records stay out of feed views; the
-// shell-jobs view lists those jobs. They still wake the job's parent. A typed
+// Automatic `dyna shell` exit records stay out of feed views. A log link
+// opens the owning session's Shell tab. They still wake the job's parent. A typed
 // shell result is its own event; an older one names its job in the sender.
 //
 // TODO: legacy/shim remove later — the sender and kind form reads a shell
