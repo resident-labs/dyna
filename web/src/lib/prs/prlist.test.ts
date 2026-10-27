@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
 import type { BotReview } from '../api/change.ts'
-import { classify, listView, mergeState, mergeBox, rowsFromGitHub, botNote, statusBox, factsLine, isReady, isBotAuthor, asksChanges, botKey, moveKey, type MergeItem, type Row } from './prlist.ts'
+import { classify, listView, mergeState, mergeBox, reviewerRef, rowsFromGitHub, botNote, statusBox, factsLine, isReady, isBotAuthor, asksChanges, botKey, moveKey, type MergeItem, type Row } from './prlist.ts'
 import type { CheckRow } from './pr.ts'
 
 const open = (o: Row = {}): Row => ({ changeId: 'c', kind: 'pr', number: 1, state: 'open', status: 'ci-running', ci: 'pending', ...o })
@@ -309,6 +309,13 @@ test('the merge box does not call cancelled or unfinished checks passed', () => 
   const box = (states: string[]) => mergeBox(open({ checks: chk(...states) }), {}).rows[0]
   assert.deepEqual(box(['success', 'cancelled']), { id: 'checks', icon: 'run', title: 'Some checks did not finish', note: '1 of 2 checks passed · c1 cancelled', link: 'checks' })
   assert.deepEqual(box(['success', 'skipped']), { id: 'checks', icon: 'ok', title: 'All checks passed', note: '1 of 2 checks passed · 1 skipped', link: 'checks' })
+})
+
+test('a reviewer session opens by id even though it is no member', () => {
+  // A pool reviewer is a service outside the room hierarchy, so the row link opens it by id alone.
+  assert.deepEqual(reviewerRef(open({ reviewerSession: 'ses_r', reviewerName: 'reviewer-9' }), 'room_1'), { id: 'ses_r', name: 'reviewer-9', hue: 0, roomId: 'room_1' })
+  assert.equal(reviewerRef(open({ reviewerSession: 'ses_r' }), 'room_1')?.name, 'reviewer of #1')
+  assert.equal(reviewerRef(open({}), 'room_1'), null)
 })
 
 test('the overlap list names conflicting files before shared files', async () => {
