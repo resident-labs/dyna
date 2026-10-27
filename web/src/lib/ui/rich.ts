@@ -61,15 +61,22 @@ export function onLoad(g: CardGuard): [CardGuard, CardAction] {
   }
 }
 
-export type CardMessage = { type: 'height'; height: number } | { type: 'open'; url: string }
+export type CardMessage =
+  | { type: 'height'; height: number }
+  | { type: 'open'; url: string }
+  | { type: 'submit'; text: string; choice?: string }
+
+// The most text one dyna:submit carries, in UTF-16 units.
+export const SUBMIT_LIMIT = 16 * 1024
 
 // Any non-null object passes, arrays included; a message from a card is
 // read by its own keys, so an array without them is ignored.
 const isObjectLike = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object'
 
-// readCardMessage reads the two messages a card may send its parent:
+// readCardMessage reads the messages a card may send its parent:
 //   {type: 'dyna:height', height: <px>}  resize the feed card
 //   {type: 'dyna:open', url: 'https://…'} open a link in the owner's browser
+//   {type: 'dyna:submit', text, choice?} send the owner's input back (text up to 16 KB)
 // Anything else is ignored. The caller checks that the message came from
 // that card's own frame.
 export function readCardMessage(data: unknown): CardMessage | null {
@@ -85,6 +92,10 @@ export function readCardMessage(data: unknown): CardMessage | null {
     } catch {
       return null
     }
+  }
+  if (data.type === 'dyna:submit' && isString(data.text) && data.text.length <= SUBMIT_LIMIT) {
+    if (data.choice === undefined) return { type: 'submit', text: data.text }
+    if (isString(data.choice) && data.choice.length <= SUBMIT_LIMIT) return { type: 'submit', text: data.text, choice: data.choice }
   }
   return null
 }
