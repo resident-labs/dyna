@@ -79,6 +79,13 @@ type Capabilities struct {
 	// --turns manual. It also needs ManualCommit, so the client can end
 	// the turn it now owns.
 	ManualTurns bool
+	// OutputSpeed: the session setup takes a speaking speed. A provider
+	// without it rejects --speed.
+	OutputSpeed bool
+	// ResponseInstructions: a say or text line can set style for the reply
+	// it asks for. A provider without it rejects that field. Its Protocol
+	// is an InstructedProtocol.
+	ResponseInstructions bool
 }
 
 // Session is what Dyna wants from every provider's session.
@@ -97,6 +104,9 @@ type Session struct {
 	// commit then ends a turn. Only a provider with Capabilities.ManualTurns
 	// applies it.
 	ManualTurns bool
+	// Speed is the speaking speed. Zero means the provider default. Only a
+	// provider with Capabilities.OutputSpeed applies it.
+	Speed float64
 }
 
 // Registry finds a provider by its key or an alias.

@@ -24,6 +24,7 @@ dyna voice session --prompt-file persona.md --voice marin --tools tools.json --r
 `--rate` is the sample rate of your audio (8000 to 96000, default 24000). `--max-minutes` defaults to 30 (at most 120).
 `--vad-eagerness` is `low`, `medium`, `high` or `auto`. It sets how soon turn detection ends a turn. OpenAI Realtime supports it. `high` ends sooner. `low` waits longer. Omit it to keep the provider default. A provider that cannot set it rejects the flag, and the session does not start.
 `--turns` is `auto` (the default) or `manual`. `auto` keeps the provider's turn detection. `manual` turns that detection off. OpenAI Realtime then gets `turn_detection` null. Only `{"type":"commit"}` ends a turn and asks for one reply. `--vad-eagerness` conflicts with `manual`, and the session does not start. A provider that cannot turn detection off rejects `--turns manual`, and the session does not start.
+`--speed` is the speaking speed, from 0.25 to 1.5. OpenAI Realtime sets `audio.output.speed`. 1 is normal speed. Omit it to keep the provider default. A provider that cannot set speed rejects the flag, and the session does not start.
 `--tools` is a JSON list of `{"name","description","parameters","after"}`. `parameters` is a JSON Schema.
 `after` says what a result does. `reply` (the default) asks the model to speak. `later` keeps the result
 as context and asks for no reply, as Dyna Voice's dispatch does. `silent` gives the model an empty result
@@ -34,8 +35,8 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 | In (your stdin) | Meaning |
 | --- | --- |
 | `{"type":"audio","pcm":"<base64>"}` | Microphone audio. |
-| `{"type":"text","text":"…"}` | Add context. The voice does not reply, unless the line also has `"respond":true`. That asks for one reply and waits for speech that still plays, the same way `say` mode `append` does. |
-| `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). |
+| `{"type":"text","text":"…"}` | Add context. The voice does not reply, unless the line also has `"respond":true`. That asks for one reply and waits for speech that still plays, the same way `say` mode `append` does. Optional `"instructions"` sets style for that reply only. It needs `"respond":true`. It does not add a conversation item. OpenAI Realtime puts it on `response.create`. A provider that cannot set it sends an `error` line, and the session goes on. |
+| `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). Optional `"instructions"` sets style for this reply only. It does not add a conversation item. OpenAI Realtime puts it on `response.create`. A provider that cannot set it sends an `error` line, and the session goes on. |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | Answer a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
 | `{"type":"commit"}` | End the turn now, if new speech arrived since the last commit. Keepalive silence does not count. The engine commits that speech and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits, the same way a text line with `"respond":true` does. With `--turns manual`, this line is the only way a turn ends. OpenAI Realtime can do this. A provider that cannot sends an `error` line, and the session goes on. |

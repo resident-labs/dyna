@@ -120,6 +120,30 @@ func (GA) ResponseCreate(key string) any {
 	return msg{"type": "response.create", "response": msg{"metadata": msg{speakKey: key}}}
 }
 
+// InstructedProtocol can put instructions on one response. A provider that
+// does so also sets Capabilities.ResponseInstructions.
+type InstructedProtocol interface {
+	// ResponseInstructed asks for a response and sets its instructions.
+	// A non-empty key marks a reply that speaks a Dyna item, as ResponseCreate does.
+	ResponseInstructed(key, instructions string) any
+}
+
+// ResponseInstructed asks for one response and sets its instructions. Empty
+// instructions are the same as ResponseCreate.
+func (GA) ResponseInstructed(key, instructions string) any {
+	response := msg{}
+	if key != "" {
+		response["metadata"] = msg{speakKey: key}
+	}
+	if instructions != "" {
+		response["instructions"] = instructions
+	}
+	if len(response) == 0 {
+		return msg{"type": "response.create"}
+	}
+	return msg{"type": "response.create", "response": response}
+}
+
 // speakKey is the response metadata field that names the Dyna item a reply speaks.
 const speakKey = "dyna_speak"
 
