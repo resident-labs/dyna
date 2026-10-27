@@ -17,7 +17,8 @@ test('ComputerChat uses DmRows and the shared composer, with no renderer of its 
 test('computer chat leaves modal Escape to the active dialog', async () => {
   const dom = installDom()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
-  globalThis.matchMedia = (query: string): MediaQueryList => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList // jsdom has no matchMedia
+  // jsdom has no matchMedia; the chat only reads matches and listens for changes.
+  Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: (media: string) => ({ matches: false, media, addEventListener() {}, removeEventListener() {} }) })
   globalThis.addEventListener = dom.window.addEventListener.bind(dom.window)
   globalThis.removeEventListener = dom.window.removeEventListener.bind(dom.window)
   let api: Awaited<ReturnType<typeof importBundle>> | undefined, component: ReturnType<NonNullable<typeof api>['mount']> | undefined
