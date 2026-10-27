@@ -67,6 +67,12 @@ type Tools struct {
 	// Search runs one web search in the engine, which holds every provider
 	// credential. A session's own process never sees a token or a key.
 	Search func(ctx context.Context, in callspec.WebSearchRequest) (callspec.WebSearchResponse, error)
+	// Steer, when set, returns a channel that closes when a new steering
+	// post is queued for the named session. A blocking wait returns early
+	// when it fires, with a note that a message arrived, so the harness
+	// reads the steering at the tool boundary instead of after the whole
+	// wait (D-349). A nil Steer, or a nil channel, never interrupts.
+	Steer func(session string) (<-chan struct{}, func())
 	// Restart re-execs this server on the binary its start path now holds. A
 	// call that fails because this binary is older than the state it serves
 	// marks the server outdated; Serve runs Restart after that call's answer
@@ -94,7 +100,7 @@ func (t *Tools) forCaller(clientSession string) *Tools {
 	if !ok {
 		return t
 	}
-	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search, Restart: t.Restart, outdated: t.outdated}
+	return &Tools{Store: t.Store, Exe: t.Exe, Limit: t.Limit, WaitCap: t.WaitCap, Owner: c.Owner, RoomID: c.RoomID, Room: c.Room, Cwd: c.Cwd, Env: c.Env, Search: t.Search, Steer: t.Steer, Restart: t.Restart, outdated: t.outdated}
 }
 
 // SetRestart enables the outdated restart for this server and every caller
@@ -151,6 +157,10 @@ func (t *Tools) tools() []toolDefinition {
 	if t.WaitCap > 0 {
 		output := &list[1]
 		output.Description += fmt.Sprintf(" A wait lasts at most %s, so call it again to keep waiting.", t.WaitCap)
+	}
+	if t.Steer != nil && !t.Foreground {
+		output := &list[1]
+		output.Description += " A wait also ends when a new message arrives for you; read it, then call it again to keep waiting."
 	}
 	return list
 }
@@ -367,7 +377,7 @@ func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd st
 		t.mu.Unlock()
 		return err
 	}
-	in, ended, err := t.wait(ctx, meta.ID, limit, nil)
+	in, ended, steered, err := t.wait(ctx, meta.ID, limit, nil)
 	if ended {
 		r.claim = meta.ID
 	} else if err == nil {
@@ -384,23 +394,72 @@ func (t *Tools) run(ctx context.Context, r *Result, command, description, cwd st
 		r.Text = t.exitLine(in) + "\n" + out
 		return nil
 	}
-	r.Text = fmt.Sprintf("Job %s. Still running after %s, so it moved to the background. "+
-		"Dyna wakes you with its exit code and last lines when it ends. "+
-		"Use shell_output to wait or read new output, or shell_stop to stop it.\n%s", meta.ID, limit, out)
+	lead := fmt.Sprintf("Job %s. Still running after %s, so it moved to the background.", meta.ID, limit)
+	if steered {
+		lead = fmt.Sprintf("Job %s. Still running, so it moved to the background.", meta.ID)
+	}
+	r.Text = lead +
+		" Dyna wakes you with its exit code and last lines when it ends. " +
+		"Use shell_output to wait or read new output, or shell_stop to stop it.\n" + out
+	if steered {
+		r.Text += "\n" + steerNote
+	}
 	return nil
 }
 
-// wait blocks until the job ends, ready reports true, or the limit passes.
-// It holds the exit while it waits. When the job ends, the hold stays until
-// Commit claims the exit or Abort releases it.
-func (t *Tools) wait(ctx context.Context, id string, limit time.Duration, ready func() bool) (shells.Info, bool, error) {
+// wait blocks until the job ends, ready reports true, the limit passes, or
+// steering is queued for this session. It holds the exit while it waits.
+// When the job ends, the hold stays until Commit claims the exit or Abort
+// releases it. A wait ended by steering reports steered: the job keeps
+// running, and the caller's answer tells the session to read the message
+// and wait again (D-349).
+func (t *Tools) wait(ctx context.Context, id string, limit time.Duration, ready func() bool) (shells.Info, bool, bool, error) {
 	if err := t.Store.HoldExit(id, holdUntil(limit)); err != nil {
-		return shells.Info{}, false, err
+		return shells.Info{}, false, false, err
 	}
-	in, _, err := t.Store.Wait(ctx, id, limit, ready)
-	ended := in.Status == "exited" || in.Status == "lost"
-	// A seen exit stays held only until Commit or Abort; if this process
-	// dies first, the supervisor wakes the session after holdGrace.
+	var steer <-chan struct{}
+	if t.Steer != nil {
+		if ch, stop := t.Steer(t.Owner); ch != nil {
+			steer = ch
+			defer stop()
+		}
+	}
+	waitCtx, cancelWait := context.WithCancel(ctx)
+	defer cancelWait()
+	type waited struct {
+		in    shells.Info
+		ended bool
+		err   error
+	}
+	done := make(chan waited, 1)
+	go func() {
+		in, _, err := t.Store.Wait(waitCtx, id, limit, ready)
+		done <- waited{in, in.Status == "exited" || in.Status == "lost", err}
+	}()
+	select {
+	case w := <-done:
+		return t.settleHold(id, w.in, w.ended, false, w.err)
+	case <-steer:
+		// The message is queued for this turn; end the wait so the harness
+		// can read it at the tool boundary.
+		cancelWait()
+		w := <-done
+		if w.ended {
+			// The job ended as the message arrived; its exit wins.
+			return t.settleHold(id, w.in, true, false, w.err)
+		}
+		if errors.Is(w.err, context.Canceled) {
+			w.err = nil
+		}
+		return t.settleHold(id, w.in, false, true, w.err)
+	}
+}
+
+// settleHold re-arms the exit hold after a wait and packs its answer. A
+// seen exit stays held only until Commit or Abort; if this process dies
+// first, the supervisor wakes the session after holdGrace. Anything else
+// releases the hold, so the supervisor wakes the session when the job ends.
+func (t *Tools) settleHold(id string, in shells.Info, ended, steered bool, err error) (shells.Info, bool, bool, error) {
 	hold := time.Time{}
 	if ended {
 		hold = time.Now().Add(holdGrace)
@@ -408,7 +467,7 @@ func (t *Tools) wait(ctx context.Context, id string, limit time.Duration, ready 
 	if holdErr := t.Store.HoldExit(id, hold); err == nil {
 		err = holdErr
 	}
-	return in, ended, err
+	return in, ended, steered, err
 }
 
 // holdUntil is when a hold for a wait of limit lapses. 0 waits until the end.
@@ -430,10 +489,11 @@ func (t *Tools) output(ctx context.Context, r *Result, id, wait string, seconds 
 	}
 	timeout = t.capped(timeout)
 	matched := false
+	steered := false
 	switch {
 	case wait == "":
 	case wait == "exit":
-		in, _, err = t.wait(ctx, id, timeout, nil)
+		in, _, steered, err = t.wait(ctx, id, timeout, nil)
 	default:
 		pattern, compileErr := regexp.Compile(wait)
 		if compileErr != nil {
@@ -443,7 +503,7 @@ func (t *Tools) output(ctx context.Context, r *Result, id, wait string, seconds 
 		if offsetErr != nil {
 			return offsetErr
 		}
-		in, _, err = t.wait(ctx, id, timeout, func() bool {
+		in, _, steered, err = t.wait(ctx, id, timeout, func() bool {
 			matched = t.matches(id, from, pattern)
 			return matched
 		})
@@ -464,7 +524,9 @@ func (t *Tools) output(ctx context.Context, r *Result, id, wait string, seconds 
 		status = fmt.Sprintf("Job %s is running. Its output matched %q.", id, wait)
 	case in.Status == "running" || in.Status == "starting":
 		status = fmt.Sprintf("Job %s is still running.", id)
-		if wait != "" {
+		if steered {
+			status += " " + steerNote
+		} else if wait != "" {
 			status = fmt.Sprintf("Job %s is still running after %s.", id, timeout)
 		}
 	}

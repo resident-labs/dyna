@@ -754,13 +754,13 @@ func (s *Store) Wait(ctx context.Context, id string, timeout time.Duration, read
 	if err != nil {
 		return Info{}, false, err
 	}
-	w, err := watchDir(dir)
+	w, err := WatchDir(dir)
 	if err != nil {
 		return Info{}, false, err
 	}
-	defer w.close()
+	defer w.Close()
 	// A cancelled caller must not wait out the current poll step.
-	defer context.AfterFunc(ctx, w.wake)()
+	defer context.AfterFunc(ctx, w.Wake)()
 	deadline := time.Now().Add(timeout)
 	for {
 		in, err := s.Info(id)
@@ -786,7 +786,7 @@ func (s *Store) Wait(ctx context.Context, id string, timeout time.Duration, read
 			}
 			step = min(step, left)
 		}
-		if err := w.next(step); err != nil {
+		if err := w.Next(step); err != nil {
 			return in, false, err
 		}
 	}

@@ -9,12 +9,12 @@ import (
 )
 
 func TestWakeAfterCloseWritesNothing(t *testing.T) {
-	w, err := watchDir(t.TempDir())
+	w, err := WatchDir(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	old := w.event
-	w.close()
+	w.Close()
 	// Linux reuses the lowest free descriptors: close freed the inotify
 	// and event descriptors, so two new eventfds take both numbers.
 	var reused int = -1
@@ -32,7 +32,7 @@ func TestWakeAfterCloseWritesNothing(t *testing.T) {
 		t.Fatalf("descriptor %d was not reused", old)
 	}
 	// A cancellation callback that starts after Wait returned.
-	w.wake()
+	w.Wake()
 	var buf [8]byte
 	if _, err := unix.Read(reused, buf[:]); err != unix.EAGAIN {
 		t.Fatalf("wake after close wrote to a reused descriptor: %v %v", buf, err)
