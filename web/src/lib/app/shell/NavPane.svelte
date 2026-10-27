@@ -22,16 +22,20 @@
     onselect: (id: string) => void
     onclose: () => void
     onmenu: ((room: Room, x: number, y: number, anchor?: HTMLElement) => void) | null
+    /** An update is ready; the settings button shows a dot. */
+    update: boolean
+    onsettings: () => void
+    onlogout: () => void
     sidebar: ComponentProps<typeof Sidebar>
   }
-  let { open, narrow, suspended = false, showSide, rooms, selected, onselect, onclose, onmenu, sidebar }: Props = $props()
+  let { open, narrow, suspended = false, showSide, rooms, selected, onselect, onclose, onmenu, update, onsettings, onlogout, sidebar }: Props = $props()
   let modal = $derived(narrow && open && !suspended)
 </script>
 
 <!-- The wrapper is a dialog only while the phone drawer owns focus. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div class="nav" class:open={open && !suspended} inert={narrow && !modal} use:dialog={{ active: modal, close: onclose }} role={modal ? 'dialog' : undefined} aria-modal={modal ? 'true' : undefined} aria-label={modal ? 'Rooms and views' : undefined} tabindex={modal ? -1 : undefined}>
-  <RoomRail {narrow} {rooms} {selected} {onselect} {onmenu} />
+  <RoomRail {narrow} {rooms} {selected} {onselect} {onmenu} {update} {onsettings} {onlogout} />
   {#if showSide || narrow}
     <Sidebar {...sidebar} />
   {/if}
