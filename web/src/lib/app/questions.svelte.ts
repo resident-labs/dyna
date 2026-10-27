@@ -1,10 +1,10 @@
-// The room's open questions and the visuals its posts carry. lib/questions
-// holds the question rows and lib/files/visuals holds the visual set the feed
+// The room's open questions and the visuals its posts carry. lib/requests
+// holds the request rows and lib/files/visuals holds the visual set the feed
 // and the Visuals view read; this module keeps the lists and the requests that
 // keep them current, so App.svelte only hosts them.
 import { api } from '../../api.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
-import { questionID, visualKey } from '../questions/questions.ts'
+import { questionID, visualKey } from '../requests/requests.ts'
 import { setVisuals } from '../files/visuals.svelte.ts'
 import { router } from './router.svelte.ts'
 import type { Post, Question, Visual } from '../api/room.ts'
@@ -84,9 +84,9 @@ async function answerFromCard(id: string, choice: string, text: string) {
   await loadQuestions()
 }
 
-// openQuestion opens the Questions view on the question this post asks.
+// openQuestion opens the Requests view on the question this post asks.
 function openQuestion(post: Post) {
-  questionsHost.openView('questions')
+  questionsHost.openView('requests')
   questionFocus = questionID(post)
   questionFocusRequest++
 }

@@ -67,6 +67,7 @@ test('saved channel links resolve to the room chat', () => {
   assert.equal(model.resolveView(feedView(lead.id)), GENERAL)
   assert.equal(model.resolveView(feedView('missing')), GENERAL)
   assert.equal(model.resolveView('files'), 'files')
+  assert.equal(model.resolveView('questions'), 'requests')
 })
 test('closed child history keeps its parent feed view available', () => {
   const archived = feedModel([owner, lead, { ...child, closed: true }])

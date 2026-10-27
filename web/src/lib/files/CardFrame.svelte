@@ -170,7 +170,7 @@
   {#if current.restores}<p class="note">{NOTE}</p>{/if}
   {#if pending && pending.kind !== 'refuse'}
     <div class="confirm" role="group" aria-label="Confirm what the card sends">
-      <p class="what">{pending.kind === 'answer' ? 'This card wants to answer the question with' : 'This card wants to reply to its author with'}</p>
+      <p class="what">{pending.kind === 'answer' ? 'This card wants to answer the request with' : 'This card wants to reply to its author with'}</p>
       <pre class="text">{pending.kind === 'answer' ? pending.choice || pending.text : pending.text}</pre>
       <div class="buttons"><button class="send" disabled={sending} onclick={confirm}>Send</button><button disabled={sending} onclick={cancel}>Cancel</button></div>
     </div>

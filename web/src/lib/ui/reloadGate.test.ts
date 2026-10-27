@@ -351,7 +351,7 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
 
 test('the App visual loader reuses each card by the shared visual identity', async () => {
   const app = await appSource()
-  const { visualKey } = await import('../questions/questions.ts')
+  const { visualKey } = await import('../requests/requests.ts')
   let response: VisualRow[] = [
     { id: 'p1', post: { id: 'p1' }, attachment: { id: 'a', title: 'first' } },
     { id: 'p2', post: { id: 'p2' }, attachment: { id: 'a', title: 'second' } },
@@ -403,7 +403,7 @@ test('a room change drops pending item patches', async () => {
 
 test('a visual update reaches chat cards while chat stays open', async () => {
   const app = await appSource()
-  const { visualKey } = await import('../questions/questions.ts')
+  const { visualKey } = await import('../requests/requests.ts')
   const { byVisual, newestVersion } = await import('../files/visuals.ts')
   const v1: Visual = { id: 'a1', render: 'html', version: 1 }
   const v2: Visual = { id: 'a2', render: 'html', visual: 'p1', version: 2 }
