@@ -251,6 +251,13 @@ func TestSessionToolCallRoundTripAndTimeout(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutError {
 		t.Fatalf("a late result gave %+v, want an error line", m)
 	}
+	// The first reply still holds the slot, so the timeout's reply waits for it.
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "x"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone {
+		t.Fatalf("got %+v, want response_done", m)
+	}
+	r.next(t)
 	want := `[tool:c1:done respond: tool:c2:{"error":"the tool did not answer in time"} respond:]`
 	if got := fmt.Sprint(conn.sentSoFar()); got != want {
 		t.Fatalf("sent = %s\nwant %s", got, want)
@@ -406,6 +413,43 @@ func TestSessionTextRespondAsksOnceAndWaitsLikeAppend(t *testing.T) {
 		t.Fatalf("got %+v, want response_done for r1", m)
 	}
 	want := "[text:a player joined text:what changed? respond: text:[BACKEND] the door is open respond:]"
+	if got := fmt.Sprint(conn.sentSoFar()); got != want {
+		t.Fatalf("sent = %s\nwant %s", got, want)
+	}
+}
+
+// A tool result that arrives before response.done must not send a second
+// response.create. The fake provider has no SingleResponseSlot flag, so this
+// is the OpenAI path: the response that made the call is still active.
+func TestSessionToolResultWaitsWhileAResponseIsActive(t *testing.T) {
+	conn, clock := newChanConn(), newFakeClock()
+	r := startSession(t, fakeSessions(fakeProvider(), conn, clock), conn, clock, agentwire.SessionRequest{
+		Tools: []agentwire.SessionTool{{Name: "wave"}},
+	})
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.ToolCall, CallID: "c1", Name: "wave", Args: []byte(`{}`)}
+	if m := r.next(t); m.Type != agentwire.OutToolCall || m.CallID != "c1" {
+		t.Fatalf("tool line = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InToolResult, CallID: "c1", Output: "done"}
+	// The unknown line is handled only after the tool result, so the send has finished.
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync line gave %+v, want an error line", m)
+	}
+	held := "[tool:c1:done]"
+	if got := fmt.Sprint(conn.sentSoFar()); got != held {
+		t.Fatalf("while r1 is active, sent = %s\nwant %s", got, held)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "x"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
+		t.Fatalf("got %+v, want response_done", m)
+	}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "x" {
+		t.Fatalf("got %+v, want the transcript after the queued reply", m)
+	}
+	want := "[tool:c1:done respond:]"
 	if got := fmt.Sprint(conn.sentSoFar()); got != want {
 		t.Fatalf("sent = %s\nwant %s", got, want)
 	}
