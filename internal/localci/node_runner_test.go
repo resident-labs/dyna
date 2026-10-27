@@ -1022,6 +1022,11 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 		// The node's systemctl: is-active says inactive, kill records itself and
 		// kills the holder, everything else does nothing.
 		"systemctl": "#!/bin/sh\ncase \"$2\" in\n  is-active) exit 1 ;;\n  kill) printf 'kill\\n' >> " + events + "; kill -KILL \"$(cat " + pidFile + ")\" 2>/dev/null; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+		// The check start sweeps containers through the machine's daemon. A real
+		// docker info is a multi-second wait on CI and says nothing about scope
+		// order, so these stand-ins return at once.
+		"docker": "#!/bin/sh\nexit 0\n",
+		"podman": "#!/bin/sh\nexit 0\n",
 	}
 	for name, body := range fakes {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
