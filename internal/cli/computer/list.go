@@ -50,7 +50,11 @@ func printComputerList(c *cobra.Command, values []computers.Status, all, asJSON 
 		if apps == "" {
 			apps = "-"
 		}
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", row.SessionID, row.Room, row.State, apps, (time.Duration(row.IdleSeconds) * time.Second).String())
+		state := string(row.State)
+		if row.Keep {
+			state += " (kept)"
+		}
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", row.SessionID, row.Room, state, apps, (time.Duration(row.IdleSeconds) * time.Second).String())
 	}
 	if err := out.Flush(); err != nil {
 		return err

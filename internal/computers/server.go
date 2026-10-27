@@ -207,6 +207,9 @@ func (f *FakeSupervisor) Dispatch(ctx context.Context, r Request) (any, error) {
 		f.Current.Control = r.Mode
 		f.changed()
 		return Control{r.Mode}, nil
+	case "keep":
+		f.Current.Keep = r.Keep
+		return f.Current, nil
 	case "stop":
 		f.Current.State = StateIdleStopped
 		f.views = map[string]string{}
