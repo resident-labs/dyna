@@ -83,3 +83,18 @@ func TestEngineStopResultIsRerunNotDecided(t *testing.T) {
 		t.Fatalf("an engine-stop result decided %s, want pending", verdict)
 	}
 }
+
+// A manual local run on a pull request head can die with its machine. Nothing
+// retries it, so its error result must not hold the head in "waiting for CI"
+// and keep the PR out of every later merge trial.
+func TestLostManualRunOnPullRequestHeadIsAbsent(t *testing.T) {
+	head := strings.Repeat("e", 40)
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "feature", Watching: true, State: "open", HeadSeen: time.Unix(1, 0)}
+	lost := localci.Result{SHA: head, Node: "pve", Status: localci.OutcomeError, Cause: localci.CauseSSHDrop}
+	var snap Snapshot
+	snap.Pull.Head.SHA = head
+	s := &Service{}
+	if obs := s.registeredLocalObservation(r, snap, ChangePolicy{}, localCIPlan{}, lost, false, false); obs.Status != VerdictAbsent {
+		t.Fatalf("pull request head = %s (%s), want absent", obs.Status, obs.Reason)
+	}
+}
