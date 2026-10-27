@@ -24,8 +24,8 @@ export interface SentReport {
   requestId: string
   askerName: string
   verdict: 'done' | 'failed'
-  // code is the exit code; -1 means the shell was lost.
-  code: number
+  // code is the exit code; undefined when the owner reported a plain shell.
+  code?: number
 }
 
 // autoVerdict is the report for an exit code: 0 is done, anything else failed.
@@ -33,7 +33,7 @@ export const autoVerdict = (code: number): 'done' | 'failed' => (code === 0 ? 'd
 
 // sentLine is the one quiet line that replaces the report form.
 export const sentLine = (s: SentReport): string =>
-  `Sent to ${s.askerName}: ${s.verdict} (${s.code < 0 ? 'shell lost' : `exit ${s.code}`})`
+  `Sent to ${s.askerName}: ${s.verdict}${s.code === undefined ? '' : ` (exit ${s.code})`}`
 
 // followUpText is the message that adds a note, and the lines the owner saw, to
 // a result already sent.

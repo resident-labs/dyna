@@ -193,24 +193,37 @@
 
   // sent: terminal ID to the result sent to its filer when the command exited.
   let sent = $state<Record<string, SentReport>>({})
-  let sending = new Set<string>()
+  // started: terminal ID to its request, kept so the sent line survives the
+  // engine's list dropping the request once it reports.
+  const started = new Map<string, Question>()
 
   // noteExit shows the result the engine sends the moment the command exits:
   // exit code 0 is done, anything else failed. The engine reports, so a closed
-  // tab loses nothing; this only keeps the line for the follow-ups.
+  // tab loses nothing; this only keeps the line for the follow-ups. A lost
+  // shell (code below 0) was not reported, so the request stays open.
   function noteExit(q: Question, termId: string, code: number) {
-    if (sending.has(q.id)) return
-    sending.add(q.id)
+    if (sent[termId] || code < 0) return
     sent = { ...sent, [termId]: { requestId: q.id, askerName: q.askerName, verdict: autoVerdict(code), code } }
+    reported = new Set([...reported, q.id])
+  }
+
+  // reportShell is the owner's own report for a plain shell, which has no
+  // command to end it.
+  async function reportShell(q: Question, termId: string, verdict: 'done' | 'failed') {
+    await api.termRequestReport(roomId, q.id, verdict, '', false)
+    sent = { ...sent, [termId]: { requestId: q.id, askerName: q.askerName, verdict } }
     reported = new Set([...reported, q.id])
   }
 
   $effect(() => {
     for (const q of waiting) {
       const termId = termOf(q)
-      const t = termId ? list.find((x) => x.id === termId) : undefined
-      const code = termId ? exited[termId] ?? (t?.exited ? t.exitCode : undefined) : undefined
-      if (termId && code !== undefined) noteExit(q, termId, code)
+      if (termId) started.set(termId, q)
+    }
+    for (const [termId, q] of started) {
+      const t = list.find((x) => x.id === termId)
+      const code = exited[termId] ?? (t?.exited ? t.exitCode : undefined)
+      if (code !== undefined) noteExit(q, termId, code)
     }
   })
 
@@ -418,11 +431,11 @@
       </div>
     {/if}
     {#if req}
-      <RequestResult name={req.askerName} sent={undefined} onpreview={() => api.termRequestPreview(roomId, req.id)} onfollowup={async () => {}} />
+      <RequestResult name={req.askerName} sent={undefined} plain={(req.terminal?.argv ?? []).length === 0} onreport={(verdict) => reportShell(req, t.id, verdict)} onpreview={async () => ''} onfollowup={async () => {}} />
     {:else}
       {@const s = sent[t.id]}
       {#if s}
-      <RequestResult name={s.askerName} sent={s} onpreview={() => api.termRequestPreview(roomId, s.requestId)} onfollowup={(note, lines) => followUp(s, note, lines)} />
+      <RequestResult name={s.askerName} sent={s} plain={false} onreport={async () => {}} onpreview={() => api.termRequestPreview(roomId, s.requestId)} onfollowup={(note, lines) => followUp(s, note, lines)} />
       {/if}
     {/if}
     {#key t.id}

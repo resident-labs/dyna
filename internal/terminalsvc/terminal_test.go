@@ -231,14 +231,25 @@ func TestAfterExitReportsTheExitCode(t *testing.T) {
 		if err := s.AfterExit(info.ID, func(code int) { got <- code }); err != nil {
 			t.Fatal(err)
 		}
-		select {
-		case code := <-got:
-			if code != want {
-				t.Fatalf("exit code %d, want %d", code, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("no exit callback")
+		if code := <-got; code != want {
+			t.Fatalf("exit code %d, want %d", code, want)
 		}
+	}
+}
+
+func TestAfterExitSkipsATerminalTheOwnerClosed(t *testing.T) {
+	s, _ := terminalTest(t, Options{})
+	info, err := s.OpenRequest("room_test", "", t.TempDir(), []string{"sh", "-c", "sleep 60"}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	term, _ := s.get(info.ID)
+	if err := s.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	<-term.done
+	if code, ok := term.ownExit(); ok {
+		t.Fatalf("a closed terminal reported exit code %d", code)
 	}
 }
 

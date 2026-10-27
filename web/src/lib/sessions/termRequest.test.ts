@@ -30,7 +30,7 @@ test('the sent line and the follow-up say what went to the filer', () => {
   const s: SentReport = { requestId: 'q1', askerName: 'root', verdict: autoVerdict(0), code: 0 }
   assert.equal(sentLine(s), 'Sent to root: done (exit 0)')
   assert.equal(sentLine({ ...s, verdict: 'failed', code: 3 }), 'Sent to root: failed (exit 3)')
-  assert.equal(sentLine({ ...s, verdict: 'failed', code: -1 }), 'Sent to root: failed (shell lost)')
+  assert.equal(sentLine({ requestId: 'q1', askerName: 'root', verdict: 'done' }), 'Sent to root: done')
   assert.equal(followUpText(s, ' logged in ', null), '@root Follow-up on terminal request q1 (done).\n\nlogged in')
   assert.match(followUpText(s, '', 'one\ntwo\n'), /```\none\ntwo\n```$/)
 })
