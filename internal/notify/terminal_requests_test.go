@@ -132,3 +132,29 @@ func TestSecondTerminalRequestReplacesTheFirst(t *testing.T) {
 		}
 	}
 }
+
+func TestClosingAHolderTellsTheNextHolder(t *testing.T) {
+	c := newChain(t)
+	q := c.file(t, "sign in to GitHub")
+	// This is the move a closing holder makes, and the hook the manager calls.
+	moved, err := c.e.svc.QuestionStore().ReassignHolder(c.rec.ID, c.midInfo.ID, c.rootInfo.ID)
+	if err != nil || len(moved) != 1 {
+		t.Fatalf("moved %d requests: %v", len(moved), err)
+	}
+	if err := c.e.svc.RepostTerminalRequests(c.e.ctx, moved); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := c.e.svc.QuestionStore().List(c.rec.ID)
+	for _, got := range list {
+		if got.ID == q.ID && got.Terminal.Holder != c.rootInfo.ID {
+			t.Fatalf("the request did not move to root: %+v", got.Terminal)
+		}
+	}
+	msgs, _ := c.e.svc.Rooms.Messages(c.rec.ID)
+	for _, m := range msgs {
+		if ev, ok := m.TerminalRequest(); ok && ev.Holder == c.rootInfo.Address() {
+			return
+		}
+	}
+	t.Fatal("the new holder got no request post")
+}

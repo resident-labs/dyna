@@ -521,9 +521,10 @@ func (s *Store) DenyTerminal(room, id, holder, reason string) (Question, error) 
 }
 
 // ReassignHolder moves the requests that a closing session holds to the next
-// holder, or to the owner when to is empty.
-func (s *Store) ReassignHolder(room, from, to string) error {
-	return s.update(func(st *State) error {
+// holder, or to the owner when to is empty. It returns the moved requests.
+func (s *Store) ReassignHolder(room, from, to string) ([]Question, error) {
+	var moved []Question
+	err := s.update(func(st *State) error {
 		for k, q := range st.Questions {
 			if q.Room != room || q.State != "open" || q.Terminal == nil || q.Terminal.Stage != StageWaitingSession || q.Terminal.Holder != from {
 				continue
@@ -535,15 +536,22 @@ func (s *Store) ReassignHolder(room, from, to string) error {
 			}
 			q.Terminal = &t
 			st.Questions[k] = q
+			moved = append(moved, q)
 		}
 		return nil
 	})
+	return moved, err
 }
 
 // SetTerminal records the terminal the owner started for a request and the
-// command the owner ran, which may differ from the one the session filed.
-func (s *Store) SetTerminal(room, id string, argv []string, termID string) (Question, error) {
+// command the owner ran, which may differ from the one the session filed. It
+// refuses when another call set the terminal since prev, so two runs of one
+// request never leave an orphan.
+func (s *Store) SetTerminal(room, id string, argv []string, prev, termID string) (Question, error) {
 	return s.editTerminal(room, id, StageWaitingOwner, func(_ *Question, t *TerminalRequest) error {
+		if t.TermID != prev {
+			return fmt.Errorf("request %s already has a terminal", id)
+		}
 		t.Argv, t.TermID = argv, termID
 		return nil
 	})

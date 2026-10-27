@@ -293,3 +293,24 @@ func (s *Service) deliverTerminalResult(rec room.Record, q questions.Question, t
 	}
 	return s.QuestionStore().MarkDelivered(rec.ID, q.ID)
 }
+
+// RepostTerminalRequests tells the new holder of each moved request, or the
+// owner, so a request does not stall when its holder closes.
+func (s *Service) RepostTerminalRequests(ctx context.Context, moved []questions.Question) error {
+	var errs []error
+	for _, q := range moved {
+		rec, err := s.Rooms.Resolve(q.Room)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		asker := q.Asker
+		if info, err := s.sessionStore().Info(q.Asker); err == nil {
+			asker = info.Address()
+		}
+		if _, err := s.postTerminalRequest(ctx, rec, q, asker); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
