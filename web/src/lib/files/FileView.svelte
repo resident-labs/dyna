@@ -13,6 +13,7 @@
   import { code, setWrap } from './codeprefs.svelte.ts'
   import { crumbs, isMarkdown } from './repo.ts'
   import History from './History.svelte'
+  import ZoomImage from './ZoomImage.svelte'
   import { ago } from '../ui/format.ts'
   import type { GitBlameResult, GitCommit, WorkspaceFile } from '../api/file.ts'
 
@@ -194,7 +195,7 @@
     {:else if !file}
       <p class="quiet">Loading {name}…</p>
     {:else if file.binary && file.url}
-      <div class="image"><img src={file.url} alt={name} /></div>
+      <div class="image"><ZoomImage src={file.url} alt={name} /></div>
     {:else if file.binary}
       <div class="empty">
         <strong>No preview for this file</strong>
@@ -268,8 +269,7 @@
   .wrap .c { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: calc(14px + 2ch); text-indent: -2ch; }
   .tool.on { color: var(--iris); background: var(--iris-wash); }
   .doc { background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; }
-  .image { flex: 1; display: grid; place-items: center; border-radius: 8px; padding: 16px; background: repeating-conic-gradient(#1f1e21 0 25%, #252427 0 50%) 0 0 / 20px 20px; }
-  .image img { max-width: 100%; max-height: 70vh; object-fit: contain; }
+  .image { flex: 1; display: flex; min-height: 320px; border-radius: 8px; overflow: hidden; }
   .empty { margin: 24px auto; max-width: 420px; text-align: center; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; padding: 22px; }
   .empty p { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
   .cut { margin: 0 0 8px; font-size: 12.5px; color: var(--gold); background: var(--gold-wash); border-radius: 6px; padding: 6px 10px; }
