@@ -37,7 +37,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 | `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | Answer a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
-| `{"type":"commit"}` | End the turn now, if microphone audio arrived since the last commit. The engine commits that audio and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits, the same way a text line with `"respond":true` does. OpenAI Realtime can do this. A provider that cannot sends an `error` line, and the session goes on. |
+| `{"type":"commit"}` | End the turn now, if new speech arrived since the last commit. Keepalive silence does not count. The engine commits that speech and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits, the same way a text line with `"respond":true` does. OpenAI Realtime can do this. A provider that cannot sends an `error` line, and the session goes on. |
 | `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG (at most 5 MB). No reply. OpenAI Realtime only; others send an `error` line. |
 
 | Out (your stdout) | Meaning |
@@ -54,7 +54,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 Rules to design for:
 
 - **Turn-taking.** The provider detects when people speak and the engine asks for each reply. Send audio all the time,
-  also silence, so it can see where speech ends. If your program already knows the person stopped talking, send `commit` instead of waiting for turn detection. A `commit` after the provider already ended that turn does nothing, so you can send it whenever speech stops and it will not answer twice. A session with no input audio for 60 seconds ends as `idle`.
+  also silence, so it can see where speech ends. If your program already knows the person stopped talking, send `commit` instead of waiting for turn detection. A `commit` after the provider already ended that turn does nothing, even if you kept sending silence, so it will not answer twice. A session with no input audio for 60 seconds ends as `idle`.
   When stdin ends, the session ends as `input-closed`: keep stdin open until you have the last `response_done`.
 - **Barge-in.** On `speech_started`, drop the audio you have queued and stop playback at once. The engine has
   already cancelled the reply. Truncation is approximate, because the engine does not know how much you played.

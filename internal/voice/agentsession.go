@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,10 +200,10 @@ type sessionLoop struct {
 	// swallow the next real turn. ResponseDone does not clear it: the echo
 	// can arrive after the reply ends, and that echo is not a new turn.
 	commitAsked bool
-	// uncommittedAudio is true after input audio was appended and before
-	// the next commit, from the client or from the provider. A client
-	// commit with none must not send an empty commit or ask again.
-	uncommittedAudio bool
+	// heardSpeech is true after speech started, or after a non-silent
+	// audio chunk, until the turn is committed. Keepalive silence does
+	// not set it, so a later client commit does not ask again.
+	heardSpeech bool
 }
 
 // run reads the agent and the provider until the session ends.
@@ -348,7 +349,9 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		if len(pcm) == 0 {
 			return "", false
 		}
-		l.uncommittedAudio = true
+		if pcmHasSpeech(pcm) {
+			l.heardSpeech = true
+		}
 		return l.send(l.p.Protocol.AudioAppend(pcm))
 	case agentwire.InText, agentwire.InSay:
 		if l.p.Caps.NoClientResponses {
@@ -406,15 +409,26 @@ func (l *sessionLoop) commit() (agentwire.EndReason, bool) {
 	}
 	// The provider may already have committed this audio. An empty commit
 	// is an error and would queue a second reply to the same turn.
-	if !l.uncommittedAudio {
+	if !l.heardSpeech {
 		return "", false
 	}
 	if reason, ended := l.send(event); ended {
 		return reason, true
 	}
-	l.uncommittedAudio = false
+	l.heardSpeech = false
 	l.commitAsked = true
 	return l.reply()
+}
+
+// pcmHasSpeech reports whether pcm has a non-zero sample. The voice
+// guide's keepalive is an all-zero chunk, and that must not start a turn.
+func pcmHasSpeech(pcm []byte) bool {
+	for i := 0; i+1 < len(pcm); i += 2 {
+		if int16(binary.LittleEndian.Uint16(pcm[i:])) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // image adds an image to the conversation without a reply.
@@ -496,15 +510,19 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 		return l.emit(agentwire.OutMessage{Type: agentwire.OutAudio, ResponseID: ev.ResponseID, PCM: pcm})
 	case realtime.SpeechStarted, realtime.Interrupted:
 		// A new turn started. The pending commit echo, if it never comes,
-		// must not swallow this turn's commit.
+		// must not swallow this turn's commit. Speech starting is real
+		// speech even when the chunks after it are silence.
 		l.commitAsked = false
+		if ev.Kind == realtime.SpeechStarted {
+			l.heardSpeech = true
+		}
 		return l.stopPlayback()
 	case realtime.SpeechStopped:
 		// Turn detection already ended this turn. Audio still in flight
 		// belongs to the commit the provider is about to send.
-		l.uncommittedAudio = false
+		l.heardSpeech = false
 	case realtime.Committed:
-		l.uncommittedAudio = false
+		l.heardSpeech = false
 		if l.commitAsked {
 			l.commitAsked = false
 			return "", false

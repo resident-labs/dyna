@@ -672,6 +672,12 @@ func TestSessionCommitAfterProviderCommitIsNoop(t *testing.T) {
 		t.Fatalf("provider commit sent %s, want one reply", got)
 	}
 
+	// Keepalive silence after the provider commit must not arm another reply.
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(0, 0, 0, 0)}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after silence = %+v", m)
+	}
 	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
 	r.in <- agentwire.InMessage{Type: "sync"}
 	if m := r.next(t); m.Type != agentwire.OutError || strings.Contains(m.Message, "commit") || strings.Contains(m.Message, "buffer") {
@@ -681,8 +687,8 @@ func TestSessionCommitAfterProviderCommitIsNoop(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutResponseDone {
 		t.Fatalf("response done = %+v", m)
 	}
-	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 respond:]" {
-		t.Fatalf("late commit sent %s, want no second commit or reply", got)
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 respond: audio:8]" {
+		t.Fatalf("silence after commit sent %s, want no second commit or reply", got)
 	}
 
 	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(9)}
@@ -700,8 +706,22 @@ func TestSessionCommitAfterProviderCommitIsNoop(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutError || strings.Contains(m.Message, "commit") || strings.Contains(m.Message, "buffer") {
 		t.Fatalf("commit after speech_stopped emitted %+v", m)
 	}
-	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 respond: audio:2]" {
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 respond: audio:8 audio:2]" {
 		t.Fatalf("commit after speech_stopped sent %s, want no commit or reply", got)
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.SpeechStarted}
+	if m := r.next(t); m.Type != agentwire.OutSpeechStart {
+		t.Fatalf("speech = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(0, 0)}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after new speech = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 respond: audio:8 audio:2 audio:4 commit respond:]" {
+		t.Fatalf("commit after speech started sent %s, want one commit and reply", got)
 	}
 }
 
