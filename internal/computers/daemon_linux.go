@@ -185,6 +185,17 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 	}
 	d.mu.Lock()
 	s := d.computers[r.Session]
+	// A saved computer the service has not loaded since a restart can still be kept.
+	if r.Op == "keep" && s == nil {
+		if _, err := ReadMeta(r.Session); err == nil {
+			var err error
+			if s, err = newComputer(d.ctx, r.Session, "", d.options, d.emit); err != nil {
+				d.mu.Unlock()
+				return nil, err
+			}
+			d.computers[r.Session] = s
+		}
+	}
 	if r.Op == "register" {
 		if s == nil {
 			var err error

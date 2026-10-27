@@ -67,6 +67,9 @@ type Status struct {
 	StreamRSSKiB     int64         `json:"stream_rss_kib"`
 	Reason           string        `json:"reason,omitempty"`
 	Recording        bool          `json:"recording,omitempty"`
+	// Keep stops the idle timeout from stopping the computer. It is stored
+	// with the computer and survives a service restart.
+	Keep bool `json:"keep,omitempty"`
 }
 
 // Recording describes a screen recording: running now, or the last one finished.
@@ -118,18 +121,20 @@ type Stopped struct {
 // unknown fields and reject fractional coordinates before any input is sent.
 type Action map[string]json.RawMessage
 type Request struct {
-	Size        *Size       `json:"size,omitempty"`
-	Command     []string    `json:"command,omitempty"`
-	Status      string      `json:"status,omitempty"`
-	BrowserArgs []string    `json:"browser_args,omitempty"`
-	Session     string      `json:"session"`
-	Room        string      `json:"room,omitempty"`
-	Op          string      `json:"op"`
-	Fresh       bool        `json:"fresh,omitempty"`
-	Actions     []Action    `json:"actions,omitempty"`
-	ViewerID    string      `json:"viewer_id,omitempty"`
-	Mode        ControlMode `json:"mode,omitempty"`
-	TimeoutMS   int64       `json:"timeout_ms,omitempty"`
+	Size        *Size    `json:"size,omitempty"`
+	Command     []string `json:"command,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	BrowserArgs []string `json:"browser_args,omitempty"`
+	Session     string   `json:"session"`
+	Room        string   `json:"room,omitempty"`
+	Op          string   `json:"op"`
+	Fresh       bool     `json:"fresh,omitempty"`
+	// Keep is the new keep-running setting for the "keep" op.
+	Keep      bool        `json:"keep,omitempty"`
+	Actions   []Action    `json:"actions,omitempty"`
+	ViewerID  string      `json:"viewer_id,omitempty"`
+	Mode      ControlMode `json:"mode,omitempty"`
+	TimeoutMS int64       `json:"timeout_ms,omitempty"`
 	// Record limits for "record.start". Zero means the default.
 	RecordSeconds int `json:"record_seconds,omitempty"`
 	RecordFPS     int `json:"record_fps,omitempty"`

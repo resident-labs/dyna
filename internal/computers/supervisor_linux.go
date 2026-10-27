@@ -123,6 +123,7 @@ func newComputer(ctx context.Context, id, room string, options SupervisorOptions
 		if (Size{Width: prior.Width, Height: prior.Height}).Validate() == nil {
 			s.state.Width, s.state.Height = prior.Width, prior.Height
 		}
+		s.state.Keep = prior.Keep
 		s.state.ShotCapturedAt = prior.ShotCapturedAt
 		s.state.LatestStatus = prior.LatestStatus
 		path := filepath.Join(Dir(id), "last.png")
@@ -929,6 +930,11 @@ func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
 		s.lastActivity = time.Now()
 		s.record("control", nil)
 		return Control{r.Mode}, nil
+	case "keep":
+		s.state.Keep = r.Keep
+		s.lastActivity = time.Now()
+		s.record("status", nil)
+		return s.status(), nil
 	case "stop":
 		if r.Status != "" {
 			intent, err := RequiredStatus(r.Status)
@@ -1086,8 +1092,12 @@ func sameApps(a, b []App) bool {
 // alive: each holds a relay connection for as long as it runs, so a browser
 // left open would never stop. A running turn or shell job of the owning
 // session does, because an agent drives its browser over CDP, which this
-// supervisor never sees.
+// supervisor never sees. A computer with keep on never stops here, for an app
+// that no session turn launched, such as a game client run by a service.
 func (s *supervisor) stopIfIdle() {
+	if s.state.Keep {
+		return
+	}
 	if s.compositor.alive() && len(s.viewers) == 0 && time.Since(s.lastActivity) >= s.idleAfter {
 		if sessionTurnRunning(s.meta.SessionID) || sessionShellRunning(s.meta.SessionID) {
 			s.lastActivity = time.Now()

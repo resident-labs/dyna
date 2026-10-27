@@ -4,7 +4,6 @@ package computer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -158,6 +157,20 @@ func NewCommand() *cobra.Command {
 		return printJSON(c, v)
 	}}
 	stop.Flags().StringVar(&stopIntent, "status", "", "required: short intent (maximum 80 characters)")
+	keep := &cobra.Command{Use: "keep on|off [COMPUTER]", Short: "Keep a computer running past the idle stop, or as root or the owner any computer", Long: "With keep on, the computer is not stopped for being idle, even with no viewer or running turn. Use it for a long-lived app that no session turn launched, such as a game client. A plain stop still works. The setting is stored with the computer.", Example: "dyna computer keep on\ndyna computer keep off root-room_20261026-165854-c2b0418a", Args: cobra.RangeArgs(1, 2), RunE: func(c *cobra.Command, args []string) error {
+		if args[0] != "on" && args[0] != "off" {
+			return fmt.Errorf("keep takes on or off")
+		}
+		id, err := targetComputer("keep", args[1:], resolve)
+		if err != nil {
+			return err
+		}
+		var v computers.Status
+		if err := computers.NewClient(id).Call(c.Context(), computers.Request{Op: "keep", Keep: args[0] == "on"}, &v); err != nil {
+			return err
+		}
+		return printJSON(c, v)
+	}}
 	var post []string
 	shot := &cobra.Command{Use: "shot", Short: "Capture your computer and print its screenshot path", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		m, err := ensure(c)
@@ -245,19 +258,23 @@ func NewCommand() *cobra.Command {
 	open.Flags().SetInterspersed(false)
 	open.Flags().StringVar(&openIntent, "status", "", "required: short intent (maximum 80 characters)")
 	open.Flags().DurationVar(&openTimeout, "timeout", 15*time.Second, "maximum wait for a new window")
-	root.AddCommand(status, list, env, stop, shot, act, open, newRunCommand(), newRecordCommand(ensure))
+	root.AddCommand(status, list, env, stop, keep, shot, act, open, newRunCommand(), newRecordCommand(ensure))
 	return root
 }
 
-// stopTarget is the acting computer, or the named one. Only root or the owner
-// may stop another session's computer; IDs come from dyna computer list.
 func stopTarget(args []string, resolve func() (string, string, error)) (string, error) {
+	return targetComputer("stop", args, resolve)
+}
+
+// targetComputer is the acting computer, or the named one. Only root or the
+// owner may act on another session's computer; IDs come from dyna computer list.
+func targetComputer(verb string, args []string, resolve func() (string, string, error)) (string, error) {
 	if len(args) == 0 {
 		id, _, err := resolve()
 		return id, err
 	}
 	if !mode.OwnerProcess() {
-		return "", errors.New("only root or the owner can stop another session's computer; run dyna computer stop with no ID to stop your own")
+		return "", fmt.Errorf("only root or the owner can %s another session's computer; run dyna computer %s with no ID to act on your own", verb, verb)
 	}
 	return args[0], computers.ValidateID(args[0])
 }
