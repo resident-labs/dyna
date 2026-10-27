@@ -3,7 +3,11 @@ package localci
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -74,5 +78,52 @@ func TestSweepScratchRetainsByActivityAndFreesBuildsOldestFirst(t *testing.T) {
 	host = &fakeScratch{free: 500, folders: []ScratchFolder{{Name: "task", Newest: ago(h), Builds: []ScratchBuild{{Path: "target", Newest: ago(99 * h), Bytes: 9}}}}}
 	if _, err := SweepScratch(context.Background(), host, now, 40); err != nil || len(host.removed) != 0 {
 		t.Fatalf("removed %v, err %v", host.removed, err)
+	}
+}
+
+// The script is the safety-critical part: in a temporary HOME it lists only
+// build outputs that sit beside a project file, and its remove refuses a path
+// that escapes the root or crosses a symlink.
+func TestScratchScriptListsMarkedBuildsAndRefusesEscapes(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".cache", "dyna", "scratch")
+	outside := filepath.Join(home, "outside")
+	for _, dir := range []string{filepath.Join(root, "task/rust/target"), filepath.Join(root, "task/src/build"), outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "task/rust/Cargo.toml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "keep"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "task/link")); err != nil {
+		t.Fatal(err)
+	}
+	run := func(mode, rel string) (string, error) {
+		cmd := exec.Command("bash", "-c", scratchSweepBody)
+		cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "DYNA_SCRATCH_MODE=" + mode, "DYNA_SCRATCH_PATH=" + rel}
+		out, err := cmd.Output()
+		return string(out), err
+	}
+	out, err := run("list", "")
+	if err != nil || !strings.Contains(out, "BUILD\t") || !strings.Contains(out, "\ttask\trust/target\n") || strings.Contains(out, "src/build") {
+		t.Fatalf("list = %q, %v", out, err)
+	}
+	for _, rel := range []string{"../outside", "task/link/keep", "task/link"} {
+		if _, err := run("remove", rel); err == nil {
+			t.Fatalf("remove %q succeeded", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outside, "keep")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("remove", "task/rust/target"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "task/rust/target")); !os.IsNotExist(err) {
+		t.Fatalf("target remains: %v", err)
 	}
 }
