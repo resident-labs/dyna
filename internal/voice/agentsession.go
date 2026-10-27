@@ -53,6 +53,9 @@ func checkRequest(req *agentwire.SessionRequest) error {
 	if req.Turns == agentwire.TurnsManual && req.VADEagerness != "" {
 		return fmt.Errorf("--vad-eagerness conflicts with --turns manual; drop --vad-eagerness")
 	}
+	if req.Speed != 0 && (req.Speed != req.Speed || req.Speed < agentwire.MinOutputSpeed || req.Speed > agentwire.MaxOutputSpeed) {
+		return fmt.Errorf("--speed must be from %g to %g", agentwire.MinOutputSpeed, agentwire.MaxOutputSpeed)
+	}
 	if strings.TrimSpace(req.Instructions) == "" {
 		req.Instructions = defaultSessionInstructions
 	}
@@ -160,6 +163,9 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	if req.Turns == agentwire.TurnsManual && (!p.Caps.ManualTurns || !p.Caps.ManualCommit) {
 		return SessionEnd{}, fmt.Errorf("%s does not take --turns manual; choose another provider with --provider, or use --turns auto", p.Label)
 	}
+	if req.Speed != 0 && !p.Caps.OutputSpeed {
+		return SessionEnd{}, fmt.Errorf("%s does not take --speed; choose another provider with --provider, or drop the flag", p.Label)
+	}
 	tools := make([]realtime.Tool, len(req.Tools))
 	for i, t := range req.Tools {
 		tools[i] = realtime.Tool{
@@ -169,7 +175,7 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 		}
 	}
 	// Dial can take a while: the context ends it, not the session's limits.
-	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en", VADEagerness: req.VADEagerness, ManualTurns: req.Turns == agentwire.TurnsManual})
+	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en", VADEagerness: req.VADEagerness, ManualTurns: req.Turns == agentwire.TurnsManual, Speed: req.Speed})
 	if err != nil {
 		return SessionEnd{}, err
 	}
@@ -201,7 +207,9 @@ type sessionLoop struct {
 	// reply waits while l.active is still empty.
 	creating bool
 	// owed: one follow-up reply waits for the in-flight response to end.
-	owed bool
+	// owedInstructions is the style for that reply, empty when it has none.
+	owed             bool
+	owedInstructions string
 	// dropped holds the cancelled responses whose late audio is not sent.
 	dropped map[string]bool
 	// pending holds the tool calls that wait for the agent's result, by tool name.
@@ -298,18 +306,37 @@ func (l *sessionLoop) send(event any) (agentwire.EndReason, bool) {
 	return "", false
 }
 
-// reply asks for a response. Every provider has one response slot, so a
-// create that was sent, or a response that started and has not ended, holds
-// it. A second reply queues one follow-up instead of sending now.
+// reply asks for a response with no extra style. Every provider has one
+// response slot, so a create that was sent, or a response that started and
+// has not ended, holds it. A second reply queues one follow-up instead of
+// sending now.
 func (l *sessionLoop) reply() (agentwire.EndReason, bool) {
+	return l.ask("")
+}
+
+// ask asks for a response. instructions is style for that reply only.
+// A busy slot keeps one follow-up, and that follow-up keeps these instructions.
+func (l *sessionLoop) ask(instructions string) (agentwire.EndReason, bool) {
 	if l.p.Caps.NoClientResponses {
 		return "", false // the provider answers on its own
 	}
 	if l.creating || l.active != "" {
 		l.owed = true
+		l.owedInstructions = instructions
 		return "", false
 	}
-	if reason, ended := l.send(l.p.Protocol.ResponseCreate("")); ended {
+	return l.create(instructions)
+}
+
+// create sends response.create. A non-empty instructions value uses the
+// provider's per-response instructions. The caller already checked that the
+// provider can take them.
+func (l *sessionLoop) create(instructions string) (agentwire.EndReason, bool) {
+	event := l.p.Protocol.ResponseCreate("")
+	if instructions != "" {
+		event = l.p.Protocol.(realtime.InstructedProtocol).ResponseInstructed("", instructions)
+	}
+	if reason, ended := l.send(event); ended {
 		return reason, true
 	}
 	l.creating = true
@@ -318,9 +345,10 @@ func (l *sessionLoop) reply() (agentwire.EndReason, bool) {
 
 // say speaks the text just added. Replace cancels the active response first.
 // Append never overlaps: it waits until the active response ends.
-func (l *sessionLoop) say(mode agentwire.SayMode) (agentwire.EndReason, bool) {
+// instructions is style for this reply only.
+func (l *sessionLoop) say(mode agentwire.SayMode, instructions string) (agentwire.EndReason, bool) {
 	if l.active == "" {
-		return l.reply()
+		return l.ask(instructions)
 	}
 	if mode == agentwire.SayReplace {
 		l.dropped[l.active] = true
@@ -332,7 +360,16 @@ func (l *sessionLoop) say(mode agentwire.SayMode) (agentwire.EndReason, bool) {
 		return "", false
 	}
 	l.owed = true
+	l.owedInstructions = instructions
 	return "", false
+}
+
+// releaseOwed sends the one follow-up reply and its saved style.
+func (l *sessionLoop) releaseOwed() (agentwire.EndReason, bool) {
+	instructions := l.owedInstructions
+	l.owed = false
+	l.owedInstructions = ""
+	return l.create(instructions)
 }
 
 // stopPlayback cancels the active response and tells the agent to stop playing.
@@ -375,8 +412,21 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		if text == "" {
 			return l.fail("the %s line has no text", m.Type)
 		}
+		instructions := strings.TrimSpace(m.Instructions)
+		if instructions != "" && !l.p.Caps.ResponseInstructions {
+			return l.fail("%s does not take per-response instructions; drop the instructions field, or choose another provider with --provider", l.p.Label)
+		}
+		if instructions != "" {
+			if _, ok := l.p.Protocol.(realtime.InstructedProtocol); !ok {
+				return l.fail("%s does not take per-response instructions; drop the instructions field, or choose another provider with --provider", l.p.Label)
+			}
+		}
 		if m.Type == agentwire.InSay && m.Mode != "" && m.Mode != agentwire.SayAppend && m.Mode != agentwire.SayReplace {
 			return l.fail("unknown say mode %q; use %q or %q", m.Mode, agentwire.SayAppend, agentwire.SayReplace)
+		}
+		// A text line that does not ask for a reply has no response to style.
+		if m.Type == agentwire.InText && instructions != "" && !m.Respond {
+			return l.fail("instructions on a text line need \"respond\":true, or use a say line")
 		}
 		if m.Type == agentwire.InSay {
 			text = "Say exactly this, word for word, and nothing else: " + text
@@ -385,12 +435,12 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 			return reason, true
 		}
 		if m.Type == agentwire.InSay {
-			return l.say(m.Mode)
+			return l.say(m.Mode, instructions)
 		}
 		// respond asks for one reply and waits for speech that plays,
 		// the same queue as say mode append. The default stays silent.
 		if m.Respond {
-			return l.say(agentwire.SayAppend)
+			return l.say(agentwire.SayAppend, instructions)
 		}
 		return "", false
 	case agentwire.InImage:
@@ -589,8 +639,7 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 			return reason, true
 		}
 		if l.owed && !l.creating && l.active == "" {
-			l.owed = false
-			return l.reply()
+			return l.releaseOwed()
 		}
 	case realtime.Error:
 		// A rejected commit sends no echo. Drop the pending mark so the
@@ -619,8 +668,7 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 			return reason, true
 		}
 		if !busy && l.active == "" && l.owed {
-			l.owed = false
-			return l.reply()
+			return l.releaseOwed()
 		}
 	}
 	return "", false

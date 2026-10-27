@@ -31,7 +31,7 @@ func OpenAI(url string, creds Credentials) Provider {
 		Label:     "OpenAI Realtime",
 		Aliases:   []string{"gpt-live", "gpt-realtime"},
 		InputRate: 24000, OutputRate: 24000,
-		Caps:     Capabilities{FunctionCalling: true, AcknowledgesSessionUpdate: true, ImageInput: true, ManualCommit: true, VADEagerness: true, ManualTurns: true},
+		Caps:     Capabilities{FunctionCalling: true, AcknowledgesSessionUpdate: true, ImageInput: true, ManualCommit: true, VADEagerness: true, ManualTurns: true, OutputSpeed: true, ResponseInstructions: true},
 		Protocol: GA{},
 		Endpoint: func(ctx context.Context) (string, http.Header, error) {
 			token, account, err := creds(ctx)
@@ -52,6 +52,10 @@ func openAISession(s Session) any {
 	output := msg{"format": pcm}
 	if s.Voice != "" {
 		output["voice"] = s.Voice
+	}
+	// speed is 0.25 to 1.5. Zero keeps the provider default, which is 1.
+	if s.Speed != 0 {
+		output["speed"] = s.Speed
 	}
 	return msg{
 		"type":              "realtime",
