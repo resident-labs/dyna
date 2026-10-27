@@ -86,7 +86,7 @@ func TestGroupedQuestionAnswersReachEachAsker(t *testing.T) {
 	first := e.start(rec, "first", nil)
 	second := e.start(rec, "second", nil)
 	for _, asker := range []subagent.Info{first, second} {
-		if _, err := e.svc.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: asker.ID, To: "owner", Text: "Same question?", Meanwhile: "test", Options: []string{"yes", "no"}}, nil); err != nil {
+		if _, err := e.svc.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: asker.ID, AskerKind: questions.AskerSession, To: "owner", Text: "Same question?", Meanwhile: "test", Options: []string{"yes", "no"}}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
