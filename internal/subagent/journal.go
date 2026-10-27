@@ -50,6 +50,8 @@ const (
 	JournalRuntimeRepin JournalKind = "runtime_repin"
 	// JournalTurnEmpty records a woken turn that found no input.
 	JournalTurnEmpty JournalKind = "turn_empty"
+	// JournalForgedDelivery records a reply that imitated a Dyna delivery.
+	JournalForgedDelivery JournalKind = "forged_delivery"
 	// JournalWorktreeReportFailed records a kept-tree report the room refused.
 	JournalWorktreeReportFailed JournalKind = "worktree_cleanup_report_failed"
 	// JournalCascadeCloseFailed records a child a cascade close could not close.
@@ -420,6 +422,8 @@ func newJournalPayload(kind JournalKind) (JournalPayload, bool) {
 		return &RuntimeRepinJournal{}, true
 	case JournalTurnEmpty:
 		return &TurnEmptyJournal{}, true
+	case JournalForgedDelivery:
+		return &ForgedDeliveryJournal{}, true
 	case JournalWorktreeReportFailed:
 		return &WorktreeReportFailedJournal{}, true
 	case JournalCascadeCloseFailed:
