@@ -318,6 +318,10 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Visuals", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Visuals},
 		{Name: "AskQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.askQuestion},
 		{Name: "WithdrawQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.withdrawQuestion, Local: true},
+		{Name: "AnswerQuestionFromCard", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.answerQuestionFromCard},
+		{Name: "SendFromCard", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, roomID, draft, replyTo, conversation string) (roomsvc.PostResult, error) {
+			return s.rooms.PostFromCard(ctx, roomID, draft, replyTo, room.Conversation(conversation))
+		}},
 		{Name: "AnswerQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.answerQuestion},
 		{Name: "Rules", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Rules},
 		{Name: "AddRule", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.AddRule},

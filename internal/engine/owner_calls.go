@@ -24,6 +24,8 @@ var ownerCalls = []string{
 	"RespondPrivateRuntimeLogin",
 	"StartIssueWork",
 	"Send",
+	"SendFromCard",
+	"AnswerQuestionFromCard",
 	"SendWithReferences",
 	"SendToSessionWithReferences",
 	"SendToSession",

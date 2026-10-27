@@ -326,6 +326,8 @@ export interface QuestionAnswer {
   human?: boolean
   choice?: string
   text?: string
+  // source is "card" when an HTML card wrote the answer and the owner confirmed it.
+  source?: string
 }
 
 export interface QuestionWithdrawal {
