@@ -23,18 +23,10 @@ missing, the computer works as before. Shells keep the missing-socket address
 described below.
 
 A new build installs without stopping busy computers: the service restarts later.
-For the first 10 minutes after that restart becomes pending, the service refuses
-to start new desktops; after that it starts them again, so a few busy computers
-never hold the rest back. The service restarts at the first moment no computer has
-an app open; a running desktop with no app, however recent its input, does not
-hold it back. `dyna computer list` shows "restart pending since <time>" while one
-waits.
-
-The 10-minute limit runs inside the computer service, so a service built before it
-keeps refusing for 30 minutes until it restarts onto this build. That happens once,
-on the upgrade that brings this change: the old service cannot be told the new
-limit, and a marker backdated to shorten its window would be ignored by a service
-that started recently, which would refuse nothing at all.
+The service keeps starting new desktops on the running build while the restart
+waits. It restarts at the first moment no computer has an app open; a running
+desktop with no app, however recent its input, does not hold it back.
+`dyna computer list` shows "restart pending since <time>" while one waits.
 
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit
