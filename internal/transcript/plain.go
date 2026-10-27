@@ -39,6 +39,9 @@ func WriteTurn(w io.Writer, t Turn, o PlainOptions) {
 		head += strings.Repeat("─", n)
 	}
 	fmt.Fprintln(w, head)
+	if line := t.Wake.Line(); line != "" {
+		fmt.Fprintln(w, "   "+line)
+	}
 	if t.Omitted {
 		fmt.Fprintln(w, "   … earlier activity in this turn is not shown")
 	}

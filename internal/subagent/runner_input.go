@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"reflect"
 	"time"
@@ -61,7 +62,14 @@ func (m *Manager) RunnerClaimInput(ctx context.Context, input InputClaim) (Claim
 // claimInput is the one startup/live selection and claim boundary. Callers
 // never hold their gate across the call.
 func (m *Manager) claimInput(ctx context.Context, id string, input InputClaim) (ClaimedInput, error) {
-	return m.selectInput(ctx, id, input, false)
+	reply, err := m.selectInput(ctx, id, input, false)
+	if err != nil || reply.readOnly || len(reply.Posts) == 0 {
+		return reply, err
+	}
+	if noteErr := m.noteIncluded(ctx, id, input.Turn, reply); noteErr != nil {
+		log.Printf("session %s: note delivery: %v", id, noteErr)
+	}
+	return reply, nil
 }
 
 // selectInput shares eligibility and framing between a read-only wait and
@@ -78,8 +86,9 @@ func (m *Manager) selectInput(ctx context.Context, id string, input InputClaim, 
 		}
 		// Delivery aliases and reply addresses can read other sessions. Resolve
 		// them with the gate released, then recheck eligibility before claiming.
+		facts := m.inputFacts(frames.meta, frames.pending)
 		for _, msg := range frames.pending {
-			options := m.store().frameOptions(frames.meta, msg)
+			options := facts[msg.ID]
 			frame := msg.Frame(options)
 			if !input.Startup {
 				frame, _ = msg.SteeringFrame(options, runstore.MaxSteeringMessageBytes)

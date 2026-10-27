@@ -154,7 +154,11 @@ func (m *Manager) startTurn(ctx context.Context, id string, s TurnStart) error {
 		store.appendJournal(id, RoomDrainedJournal{Turn: s.Turn, Message: d.Steer.ID})
 	}
 	if s.Running {
-		store.appendJournal(id, TurnStartJournal{Turn: s.Turn})
+		cause := WakeCause{}
+		if saved, err := store.ReadTurn(id, s.Turn); err == nil {
+			cause = saved.Wake
+		}
+		store.appendJournal(id, TurnStartJournal{Turn: s.Turn, Wake: cause})
 	}
 	return nil
 }

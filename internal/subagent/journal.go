@@ -129,7 +129,8 @@ func (SessionReparentedJournal) journalKind() JournalKind { return JournalSessio
 
 // TurnStartJournal records a turn that opened.
 type TurnStartJournal struct {
-	Turn int `json:"turn"`
+	Turn int       `json:"turn"`
+	Wake WakeCause `json:"wake,omitzero"`
 }
 
 func (TurnStartJournal) journalKind() JournalKind { return JournalTurnStart }

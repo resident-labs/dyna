@@ -567,6 +567,26 @@ func (s *Service) engineDown(out Result) bool {
 	return !engineclient.Running("")
 }
 
+// recipientMode is how this post reaches one session. The root seat can
+// differ from the post-wide mode: a quiet seat row does not queue a turn.
+func (s *Service) recipientMode(msg room.Message, r recipient) room.DeliveryMode {
+	if r.session.Role == subagent.RoleRoot {
+		if seat, ok, err := s.Rooms.SeatDelivery(msg.RoomID, msg.ID); err == nil && ok {
+			return seat.Mode
+		}
+	}
+	rows, err := s.Rooms.SessionDeliveries(msg.RoomID, room.DeliveryKeys(r.session.ID, r.addr), []string{msg.ID})
+	if err == nil {
+		if row, ok := rows[msg.ID]; ok {
+			return row.Mode
+		}
+	}
+	if msg.Wake {
+		return room.DeliveryWake
+	}
+	return room.DeliveryQuiet
+}
+
 // deliver hands one stored post to one recipient.
 func (s *Service) deliver(msg room.Message, r recipient) Delivery {
 	d := Delivery{To: r.addr}
@@ -581,9 +601,10 @@ func (s *Service) deliver(msg room.Message, r recipient) Delivery {
 	case toOwner, toVoice:
 		d.Delivery = "room"
 	case toSession:
-		// The engine observes the stored post and starts or steers its target.
-		// The receipt means storage succeeded, even while the engine is down.
-		d.Delivery = "session-queued"
+		// The engine observes a waking post and starts or steers its target.
+		// A quiet post is context for the next turn, so the receipt must not
+		// say that a turn was queued.
+		d.Delivery = room.DeliveryReceipt(s.recipientMode(msg, r))
 	}
 	return d
 }

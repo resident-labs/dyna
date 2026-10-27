@@ -365,6 +365,12 @@ type FrameOptions struct {
 	// FilesDir is the room's attachment directory on this host. Empty lists
 	// attachments by retrieval command instead of path.
 	FilesDir string
+	// Sent is when the post was stored. Delivered is when this turn took it.
+	// Input is "waking" or "quiet". Empty omits those lines, so an old frame
+	// stays unchanged.
+	Sent      time.Time
+	Delivered time.Time
+	Input     string
 }
 
 // Named returns the recipients the sender named one by one, without the
@@ -441,6 +447,15 @@ func (m Message) Header(o FrameOptions) string {
 		if len(groups) > 0 && o.ReplyTo == "" {
 			fmt.Fprintf(&b, "   (to all: add %s)", strings.Join(groups, " "))
 		}
+	}
+	if o.Input != "" {
+		if !o.Sent.IsZero() {
+			fmt.Fprintf(&b, "\nSent: %s", o.Sent.Local().Format("2006-01-02 15:04:05"))
+		}
+		if !o.Delivered.IsZero() {
+			fmt.Fprintf(&b, "\nDelivered: %s", o.Delivered.Local().Format("2006-01-02 15:04:05"))
+		}
+		fmt.Fprintf(&b, "\nInput: %s", o.Input)
 	}
 	return b.String()
 }
