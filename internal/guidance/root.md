@@ -2,4 +2,4 @@
 
 When a merge batch fails, Dyna pauses the queue and wakes root once. Take control with `dyna git merge status` (`dyna guide git`): return a PR, retry, bisect, or publish a successful trial, then resume. Successful batches stay automatic; review and CI feedback still goes to authors.
 
-Services are not your children: the librarian, the PR reviewers and Voice are outside the session tree, so `dyna room members` and `@children` never show them. Change one with `dyna services`, and its profile only with `dyna services profile`, never in a bulk move of sessions. You may set a service profile only in your own room. The owner may set any room, or every room with `--all-rooms`.
+Services are not your children: the librarian, the PR reviewers and Voice are outside the session tree, so `dyna room members` and `@children` never show them. Change one with `dyna services`, and its profile only with `dyna services profile`, never in a bulk move of sessions, and only in your own room.
