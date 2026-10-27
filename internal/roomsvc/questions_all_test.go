@@ -20,7 +20,7 @@ func TestQuestionsAllRoomsReturnsOpenRowsByRoom(t *testing.T) {
 	archived := e.room("archived")
 	store := e.svc.Notify.QuestionStore()
 	ask := func(room, text string) questions.Question {
-		q, err := store.Ask(questions.Question{Room: room, Asker: "owner", Text: text, Meanwhile: "Check other work"}, nil)
+		q, err := store.Ask(questions.Question{Room: room, Asker: "owner", AskerKind: questions.AskerOwner, Text: text, Meanwhile: "Check other work"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +86,7 @@ func TestQuestionReadDoesNotCloneUnrelatedLog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.svc.rooms().Root, r.ID, "messages.jsonl"), log.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: r.ID, Asker: "owner", Text: "One question", Meanwhile: "Check other work"}, func(questions.Question) (string, error) { return "msg_00000", nil })
+	_, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: r.ID, Asker: "owner", AskerKind: questions.AskerOwner, Text: "One question", Meanwhile: "Check other work"}, func(questions.Question) (string, error) { return "msg_00000", nil })
 	if err != nil {
 		t.Fatal(err)
 	}

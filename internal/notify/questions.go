@@ -39,6 +39,20 @@ func questionIdentity(snd Sender) string {
 	}
 }
 
+// questionAskerKind is empty for an unverified sender, so the store rejects it.
+func questionAskerKind(snd Sender) questions.AskerKind {
+	switch snd.Kind {
+	case SenderUnverified:
+		return ""
+	case SenderSession:
+		return questions.AskerSession
+	case SenderScript:
+		return questions.AskerRun
+	default:
+		return questions.AskerOwner
+	}
+}
+
 // QuestionRoom uses the sender's room, or an explicit room for the owner's CLI.
 func (s *Service) QuestionRoom(snd Sender, ref string) (room.Record, error) {
 	if snd.Room != "" {
@@ -89,7 +103,7 @@ func (s *Service) Ask(ctx context.Context, snd Sender, roomRef, to, text, meanwh
 		return questions.Question{}, err
 	}
 	snd.Room = rec.Name
-	q := questions.Question{Room: rec.ID, Asker: questionIdentity(snd), Human: snd.Human, To: "owner", Text: text, Meanwhile: meanwhile, Options: options}
+	q := questions.Question{Room: rec.ID, Asker: questionIdentity(snd), AskerKind: questionAskerKind(snd), Human: snd.Human, To: "owner", Text: text, Meanwhile: meanwhile, Options: options}
 	if snd.Kind == SenderSession {
 		q.AskedTurn = snd.Session.CurrentTurn
 	}
@@ -179,8 +193,8 @@ func (s *Service) DeliverAnswers(ctx context.Context, roomID string) error {
 		}
 		target := recipient{kind: toOwner, addr: rec.Name, rec: rec}
 		closed := false
-		if q.Asker != "owner" {
-			if strings.HasPrefix(q.Asker, "run:") {
+		if q.AskerKind != questions.AskerOwner {
+			if q.AskerKind == questions.AskerRun {
 				resolved, err := s.resolve(Sender{Kind: SenderOwner, Room: rec.Name}, []string{"@" + q.Asker})
 				if err != nil {
 					errs = append(errs, err)

@@ -93,7 +93,7 @@ func TestQuestionBrowserAnswerIsHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := s.rooms.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "owner", Text: "Proceed?", Meanwhile: "check data"}, nil)
+	q, err := s.rooms.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "owner", AskerKind: questions.AskerOwner, Text: "Proceed?", Meanwhile: "check data"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

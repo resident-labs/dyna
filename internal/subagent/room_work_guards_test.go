@@ -28,7 +28,7 @@ func TestRoomClearUsesActualManagerGoalAndQuestionStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "question":
-				if _, err := e.m.questionStore().Ask(questions.Question{Room: a.RoomID, Asker: a.ID, To: "owner", Text: "still needed?", Meanwhile: "continue"}, nil); err != nil {
+				if _, err := e.m.questionStore().Ask(questions.Question{Room: a.RoomID, Asker: a.ID, AskerKind: questions.AskerSession, To: "owner", Text: "still needed?", Meanwhile: "continue"}, nil); err != nil {
 					t.Fatal(err)
 				}
 			default:

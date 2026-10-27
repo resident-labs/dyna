@@ -9,7 +9,7 @@ import (
 )
 
 func sample(asker string) Question {
-	return Question{Room: "room", Asker: asker, Text: "May I download it?", Meanwhile: "test a slice", Options: []string{"yes", "no"}}
+	return Question{Room: "room", Asker: asker, AskerKind: AskerSession, Text: "May I download it?", Meanwhile: "test a slice", Options: []string{"yes", "no"}}
 }
 
 // holdWriter stores q as the room's next open question inside a store

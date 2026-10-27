@@ -56,7 +56,7 @@ func TestQuestionWrapUpWaitsForAnotherTurn(t *testing.T) {
 	info, _ := e.start("SLEEP:1 RESPOND: ready")
 	info, _ = e.wait(info.ID, 1)
 	waitRunners()
-	q, err := e.m.questionStore().Ask(questions.Question{Room: info.RoomID, Asker: info.ID, Text: "Keep this?", Meanwhile: "test", AskedTurn: 1}, nil)
+	q, err := e.m.questionStore().Ask(questions.Question{Room: info.RoomID, Asker: info.ID, AskerKind: questions.AskerSession, Text: "Keep this?", Meanwhile: "test", AskedTurn: 1}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
