@@ -77,7 +77,7 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="list">
     {#if !shown.length}
-      <EmptyState title="No {filter} questions">{#if filter === 'open'}Agents ask with <code>dyna ask</code>.{:else}{filter === 'answered' ? 'Questions you answer are kept here.' : 'Questions agents withdraw are kept here.'}{/if}</EmptyState>
+      <EmptyState title="No {filter} questions">{#if filter === 'open'}Agents ask with <code>dyna request question</code>.{:else}{filter === 'answered' ? 'Questions you answer are kept here.' : 'Questions agents withdraw are kept here.'}{/if}</EmptyState>
     {/if}
     {#each shown as q (q.id)}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
