@@ -173,7 +173,8 @@ func TestMessageSenderParsesTheAuthorKind(t *testing.T) {
 		{Message{From: "r"}, SenderOwner},
 		{Message{From: "r", Human: true}, SenderOwner},
 		{Message{From: "r:" + RootAgent}, SenderRoot},
-		{Message{From: "r:lead"}, SenderSession},
+		{Message{From: "r:lead", SessionIDs: map[string]string{"r:lead": "ses_1"}}, SenderSession},
+		{Message{From: "r:lead"}, SenderUnbound},
 		{Message{From: "shell:sh_1"}, SenderShell},
 		{Message{From: "run:wf_1"}, SenderRun},
 	} {
