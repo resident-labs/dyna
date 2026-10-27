@@ -330,6 +330,11 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		if m.Type == agentwire.InSay {
 			return l.say(m.Mode)
 		}
+		// respond asks for one reply and waits for speech that plays,
+		// the same queue as say mode append. The default stays silent.
+		if m.Respond {
+			return l.say(agentwire.SayAppend)
+		}
 		return "", false
 	case agentwire.InImage:
 		return l.image(m)

@@ -36,7 +36,8 @@ const (
 	InEnd MessageType = "end"
 	// InAudio carries microphone PCM16 mono at the session's rate.
 	InAudio MessageType = "audio"
-	// InText adds text to the conversation without asking for a reply.
+	// InText adds text to the conversation. It asks for a reply only when
+	// the line sets Respond.
 	InText MessageType = "text"
 	// InSay asks the voice to speak the text. Its Mode says what to do with
 	// speech that still plays.
@@ -100,6 +101,10 @@ type InMessage struct {
 	// PCM is audio, base64 in JSON.
 	PCM  []byte `json:"pcm,omitempty"`
 	Text string `json:"text,omitempty"`
+	// Respond, on an InText line, asks for one reply after the text is added.
+	// The reply waits for speech that still plays, as say mode append does.
+	// False is the default: a text line only adds context.
+	Respond bool `json:"respond,omitempty"`
 	// Mode is set on InSay; empty means SayAppend.
 	Mode   SayMode `json:"mode,omitempty"`
 	CallID string  `json:"call_id,omitempty"`
