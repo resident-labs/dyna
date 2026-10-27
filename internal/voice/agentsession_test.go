@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -450,6 +451,97 @@ func TestSessionToolResultWaitsWhileAResponseIsActive(t *testing.T) {
 		t.Fatalf("got %+v, want the transcript after the queued reply", m)
 	}
 	want := "[tool:c1:done respond:]"
+	if got := fmt.Sprint(conn.sentSoFar()); got != want {
+		t.Fatalf("sent = %s\nwant %s", got, want)
+	}
+}
+
+// quietProtocol records a later or silent result without asking for speech.
+type quietProtocol struct{ sessionProtocol }
+
+func (quietProtocol) QuietFunctionOutput(id, out string) any { return "quiet:" + id + ":" + out }
+
+// A later or silent tool keeps its result as context and asks for no reply,
+// including after the response that called it ends. A plain tool still asks.
+func TestSessionLaterAndSilentToolsDoNotAskForAReply(t *testing.T) {
+	p := fakeProvider()
+	p.Protocol = quietProtocol{}
+	closed := make(chan agentwire.InMessage)
+	close(closed)
+	_, err := fakeSessions(p, newChanConn(), newFakeClock()).Run(t.Context(), agentwire.SessionRequest{
+		Tools: []agentwire.SessionTool{{Name: "x", After: "wait"}},
+	}, SessionIO{In: closed, Out: func(agentwire.OutMessage) error { return nil }})
+	if err == nil || !strings.Contains(err.Error(), `"wait"`) {
+		t.Fatalf("bad after = %v, want a refusal that names the value", err)
+	}
+
+	conn, clock := newChanConn(), newFakeClock()
+	var seen []realtime.Tool
+	s := fakeSessions(p, conn, clock)
+	s.dial = func(_ context.Context, _ realtime.Provider, sess realtime.Session) (sayConn, error) {
+		seen = append([]realtime.Tool(nil), sess.Tools...)
+		return conn, nil
+	}
+	r := startSession(t, s, conn, clock, agentwire.SessionRequest{
+		Tools: []agentwire.SessionTool{
+			{Name: "wave"},
+			{Name: "dispatch", After: agentwire.ToolAfterLater},
+			{Name: "hush", After: agentwire.ToolAfterSilent},
+		},
+	})
+	wantMark := []struct {
+		name          string
+		later, silent bool
+	}{
+		{"wave", false, false},
+		{"dispatch", true, false},
+		{"hush", false, true},
+	}
+	if len(seen) != len(wantMark) {
+		t.Fatalf("provider tools = %+v", seen)
+	}
+	for i, want := range wantMark {
+		got := seen[i]
+		if got.Name != want.name || got.Later != want.later || got.Silent != want.silent {
+			t.Fatalf("tool %d = %+v, want %s later=%v silent=%v", i, got, want.name, want.later, want.silent)
+		}
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.ToolCall, CallID: "c1", Name: "dispatch"}
+	if m := r.next(t); m.Type != agentwire.OutToolCall || m.Name != "dispatch" {
+		t.Fatalf("tool line = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InToolResult, CallID: "c1", Output: "started"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync gave %+v, want an error line", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
+		t.Fatalf("got %+v, want response_done with no queued reply", m)
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.ToolCall, CallID: "c2", Name: "hush"}
+	if m := r.next(t); m.Type != agentwire.OutToolCall || m.CallID != "c2" {
+		t.Fatalf("tool line = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InToolResult, CallID: "c2", Output: "ok"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync gave %+v, want an error line", m)
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.ToolCall, CallID: "c3", Name: "wave"}
+	if m := r.next(t); m.Type != agentwire.OutToolCall || m.CallID != "c3" {
+		t.Fatalf("tool line = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InToolResult, CallID: "c3", Output: "done"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync gave %+v, want an error line", m)
+	}
+	want := "[quiet:c1:started quiet:c2: tool:c3:done respond:]"
 	if got := fmt.Sprint(conn.sentSoFar()); got != want {
 		t.Fatalf("sent = %s\nwant %s", got, want)
 	}

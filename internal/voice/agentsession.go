@@ -46,6 +46,11 @@ func checkRequest(req *agentwire.SessionRequest) error {
 			return fmt.Errorf("the tool %q is listed twice", t.Name)
 		}
 		seen[t.Name] = true
+		switch t.After {
+		case "", agentwire.ToolAfterReply, agentwire.ToolAfterLater, agentwire.ToolAfterSilent:
+		default:
+			return fmt.Errorf("tool %q has after %q; use %q, %q or %q", t.Name, t.After, agentwire.ToolAfterReply, agentwire.ToolAfterLater, agentwire.ToolAfterSilent)
+		}
 	}
 	return nil
 }
@@ -132,7 +137,11 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	}
 	tools := make([]realtime.Tool, len(req.Tools))
 	for i, t := range req.Tools {
-		tools[i] = realtime.Tool{Name: t.Name, Description: t.Description, Parameters: t.Parameters}
+		tools[i] = realtime.Tool{
+			Name: t.Name, Description: t.Description, Parameters: t.Parameters,
+			Later:  t.After == agentwire.ToolAfterLater,
+			Silent: t.After == agentwire.ToolAfterSilent,
+		}
 	}
 	// Dial can take a while: the context ends it, not the session's limits.
 	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en"})
@@ -143,7 +152,7 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	if io.Started != nil {
 		io.Started(p.Key)
 	}
-	l := &sessionLoop{s: s, req: req, p: p, conn: conn, io: io, started: s.now(), pending: map[string]bool{}, dropped: map[string]bool{}}
+	l := &sessionLoop{s: s, req: req, p: p, conn: conn, io: io, started: s.now(), pending: map[string]string{}, dropped: map[string]bool{}}
 	reason := l.run(ctx)
 	end := SessionEnd{Provider: p.Key, Elapsed: s.now().Sub(l.started), Reason: reason}
 	_ = io.Out(agentwire.OutMessage{Type: agentwire.OutClosed, Reason: reason})
@@ -170,8 +179,8 @@ type sessionLoop struct {
 	owed bool
 	// dropped holds the cancelled responses whose late audio is not sent.
 	dropped map[string]bool
-	// pending holds the tool calls that wait for the agent's result.
-	pending map[string]bool
+	// pending holds the tool calls that wait for the agent's result, by tool name.
+	pending map[string]string
 	// timeouts delivers the ID of a tool call whose time ran out.
 	timeouts chan string
 }
@@ -349,11 +358,12 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 	case agentwire.InImage:
 		return l.image(m)
 	case agentwire.InToolResult:
-		if !l.pending[m.CallID] {
+		name, ok := l.pending[m.CallID]
+		if !ok {
 			return l.fail("there is no tool call %q waiting for a result", m.CallID)
 		}
 		delete(l.pending, m.CallID)
-		return l.toolOutput(m.CallID, m.Output)
+		return l.toolOutput(m.CallID, m.Output, l.toolAfter(name))
 	case agentwire.InInterrupt:
 		return l.stopPlayback()
 	}
@@ -375,10 +385,37 @@ func (l *sessionLoop) image(m agentwire.InMessage) (agentwire.EndReason, bool) {
 	return l.send(proto.UserImage(m.Mime, m.Image))
 }
 
-// toolOutput gives the model a tool's output and asks it to go on.
-func (l *sessionLoop) toolOutput(callID, output string) (agentwire.EndReason, bool) {
-	if reason, ended := l.send(l.p.Protocol.FunctionOutput(callID, output)); ended {
+// toolAfter is how a result for name should continue. An unknown name replies.
+func (l *sessionLoop) toolAfter(name string) agentwire.ToolAfter {
+	for _, t := range l.req.Tools {
+		if t.Name == name {
+			return t.After
+		}
+	}
+	return agentwire.ToolAfterReply
+}
+
+// toolOutput gives the model a tool's output. reply asks it to go on. later and
+// silent keep the result as context and ask for no reply, the same marks Dyna
+// Voice uses. A provider that can complete a tool quietly, such as Google, does
+// so, so the result does not resume speech by itself. A silent success sends an
+// empty result. An error, including a timeout, still asks for a reply.
+func (l *sessionLoop) toolOutput(callID, output string, after agentwire.ToolAfter) (agentwire.EndReason, bool) {
+	quiet := after == agentwire.ToolAfterLater || after == agentwire.ToolAfterSilent
+	if quiet && after == agentwire.ToolAfterSilent {
+		output = ""
+	}
+	send := l.p.Protocol.FunctionOutput
+	if quiet {
+		if p, ok := l.p.Protocol.(interface{ QuietFunctionOutput(string, string) any }); ok {
+			send = p.QuietFunctionOutput
+		}
+	}
+	if reason, ended := l.send(send(callID, output)); ended {
 		return reason, true
+	}
+	if quiet {
+		return "", false
 	}
 	return l.reply()
 }
@@ -386,7 +423,7 @@ func (l *sessionLoop) toolOutput(callID, output string) (agentwire.EndReason, bo
 // toolTimedOut gives the model an error result for a call the agent did not
 // answer in time.
 func (l *sessionLoop) toolTimedOut(callID string) (agentwire.EndReason, bool) {
-	if !l.pending[callID] {
+	if _, ok := l.pending[callID]; !ok {
 		return "", false
 	}
 	delete(l.pending, callID)
@@ -396,7 +433,7 @@ func (l *sessionLoop) toolTimedOut(callID string) (agentwire.EndReason, bool) {
 	out, _ := json.Marshal(struct {
 		Error string `json:"error"`
 	}{"the tool did not answer in time"})
-	return l.toolOutput(callID, string(out))
+	return l.toolOutput(callID, string(out), agentwire.ToolAfterReply)
 }
 
 // fromProvider handles one provider event.
@@ -419,7 +456,7 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 	case realtime.VoiceTranscript:
 		return l.emit(agentwire.OutMessage{Type: agentwire.OutTranscript, Role: agentwire.RoleAssistant, Text: ev.Text})
 	case realtime.ToolCall:
-		l.pending[ev.CallID] = true
+		l.pending[ev.CallID] = ev.Name
 		expired := l.s.after(realtime.ToolTimeout)
 		go func() {
 			select {

@@ -74,11 +74,27 @@ const (
 	OutClosed       MessageType = "closed"
 )
 
+// ToolAfter says what a tool result does to the conversation.
+type ToolAfter string
+
+const (
+	// ToolAfterReply asks the model to speak about the result. It is the default.
+	ToolAfterReply ToolAfter = "reply"
+	// ToolAfterLater keeps the result as context and asks for no reply.
+	// The real answer comes later, as Dyna Voice's dispatch does.
+	ToolAfterLater ToolAfter = "later"
+	// ToolAfterSilent gives the model an empty result and asks for no reply.
+	// The tool has no spoken effect, as Dyna Voice's remain_silent does.
+	ToolAfterSilent ToolAfter = "silent"
+)
+
 // SessionTool is a function the model may call. Each call goes to the agent.
 type SessionTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	// After is reply, later or silent. Empty means reply.
+	After ToolAfter `json:"after,omitempty"`
 }
 
 // SessionRequest opens a session. Zero values use the defaults: no extra
