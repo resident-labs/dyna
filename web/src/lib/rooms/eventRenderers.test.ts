@@ -223,7 +223,7 @@ const fixtures: Record<string, EventPayload> = {
   'voice-session/started': { type: 'started', voice: 'v1', session: 'dyna:storyteller', provider: 'openai' },
   'voice-session/ended': { type: 'ended', voice: 'v1', session: 'dyna:storyteller', provider: 'openai', seconds: 200, reason: 'time-limit' },
   ...Object.fromEntries(
-    (['renamed', 'promoted', 'adopted', 'account', 'instructions', 'seat', 'spawned', 'transfer-request'] as const).map((type) => [
+    (['renamed', 'promoted', 'adopted', 'account', 'instructions', 'seat', 'spawned', 'transfer-request', 'computer-reminder'] as const).map((type) => [
       `session/${type}`,
       {
         type,
@@ -413,6 +413,7 @@ function fixtureTip(payload: EventPayload): string {
     if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
     if (payload.type === 'seat') return payload.seat ?? payload.session
     if (payload.type === 'transfer-request') return payload.profile ?? payload.session
+    if (payload.type === 'computer-reminder') return 'Computer still open'
     return payload.session
   }
   if ('verdict' in payload) return payload.detail || payload.verdict

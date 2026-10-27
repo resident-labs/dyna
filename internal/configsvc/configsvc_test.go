@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 34 {
+	if err != nil || len(items) != 35 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
