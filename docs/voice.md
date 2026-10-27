@@ -79,6 +79,7 @@ Flags:
 - `--rate` is the sample rate in hertz of the audio you send and read (default 24000, from 8000 to 96000). Dyna converts it to the provider's rate. At 48 kHz this is about 128 KB/s of base64 text each way.
 - `--max-minutes` is the longest session (default 30, at most 120).
 - `--vad-eagerness` is `low`, `medium`, `high` or `auto`. It sets how soon turn detection ends a turn. OpenAI Realtime supports it. `high` ends sooner. Omit it to keep the provider default. A provider that cannot set it rejects the flag, and the session does not start.
+- `--turns` is `auto` (the default) or `manual`. `auto` keeps the provider's turn detection. `manual` turns that detection off. OpenAI Realtime then gets `turn_detection` null. Only a `commit` line ends a turn and asks for one reply. `--vad-eagerness` conflicts with `manual`, and the session does not start. A provider that cannot turn detection off rejects `--turns manual`, and the session does not start.
 
 The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rate`.
 
@@ -89,7 +90,7 @@ The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rat
 | `{"type":"say","text":"…"}` | Make the voice speak this text. |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | The result of a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
-| `{"type":"commit"}` | End the turn now, if new speech arrived since the last commit. Keepalive silence does not count. The engine commits that speech and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits. OpenAI Realtime can do this. A provider that cannot returns an `error` line. |
+| `{"type":"commit"}` | End the turn now, if new speech arrived since the last commit. Keepalive silence does not count. The engine commits that speech and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits. With `--turns manual`, this line is the only way a turn ends. OpenAI Realtime can do this. A provider that cannot returns an `error` line. |
 | `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG image (up to 5 MB) to the conversation, with no reply. Only providers that take images accept it (OpenAI Realtime); others return an `error` line. |
 
 | Out (stdout) | Meaning |
@@ -103,7 +104,7 @@ The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rat
 | `{"type":"error","message":"…"}` | A problem. The session goes on, except before `ready`, where the command fails with this message. |
 | `{"type":"closed","reason":"…"}` | The session ended: `input-closed`, `time-limit`, `idle`, `provider-closed`, `error` or `cancelled`. |
 
-The provider's turn detection decides when you spoke, and the engine asks for each reply. Send `{"type":"commit"}` when your program already knows the person stopped talking. A commit after the provider already ended that turn does nothing, even if you kept sending silence, so it will not answer twice. A tool result must come within 10 seconds, or the model gets an error result and you get an `error` line. A provider that cannot take client text (MiniCPM-o) rejects `text`, `say` and `image`.
+With `--turns auto`, the provider's turn detection decides when you spoke, and the engine asks for each reply. Send `{"type":"commit"}` when your program already knows the person stopped talking. A commit after the provider already ended that turn does nothing, even if you kept sending silence, so it will not answer twice. With `--turns manual`, send `commit` when the person has finished. That is the only end. A tool result must come within 10 seconds, or the model gets an error result and you get an `error` line. A provider that cannot take client text (MiniCPM-o) rejects `text`, `say` and `image`.
 
 A short Python example:
 
@@ -134,7 +135,7 @@ Limits and behavior:
 - A session ends at `--max-minutes`, after 60 seconds with no input audio, or when stdin ends. Send audio at least every minute (silence counts), or the session ends as idle.
 - The engine holds the provider connection, so the program never sees the account token. A session never posts, wakes nobody and keeps no transcript: transcript lines go to stdout only.
 - When a session starts and when it ends, its room gets a quiet notice that names the session, the provider, and at the end the time used and why it ended. The notices wake nobody. They let the owner see how much voice quota agents use. A session from the owner's own shell, outside any room, posts none.
-- Barge-in truncation is approximate: the engine cancels the reply when it hears speech, and does not know how much audio your program already played.
+- Barge-in truncation is approximate: the engine cancels the reply when it hears speech, and does not know how much audio your program already played. With `--turns manual`, audio that arrives while a reply plays does nothing automatic. Send `{"type":"interrupt"}` to stop playback. The engine does not cancel that reply on its own.
 
 Risks to tell your users:
 
