@@ -276,6 +276,10 @@ func (s *Service) savedTrialCI(ctx context.Context, job registeredCIJob) (trialC
 		status, logs, reason, statusErr := localCIStatus(result, repo, job.head, plan.required, plan.suites)
 		return trialCI{Status: status, Logs: logs, Reason: reason}, statusErr
 	}
+	if !s.roomServedByCI(job.record.RoomID) {
+		note := localci.RoomNotServedError{RoomID: job.record.RoomID}.Error()
+		return trialCI{Status: VerdictFailed, Logs: note, Reason: note}, nil
+	}
 	started, err := s.startRegisteredCI(ctx, job)
 	// A suite that no machine allows never becomes available, so the trial fails
 	// now with an error that names it instead of waiting for a machine that

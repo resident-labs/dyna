@@ -442,6 +442,11 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		switch {
 		case live != nil:
 			observation.Reason = "running local CI on " + live.node
+		case trial && !hostedFallback && result.Node == "" && !s.roomServedByCI(r.RoomID):
+			// No run will ever start: the scheduler only uses machines that serve
+			// the room. The trial fails with the cause and the fix.
+			observation.Status = VerdictFailed
+			observation.Reason = localci.RoomNotServedError{RoomID: r.RoomID}.Error()
 		case localInfrastructureError(result):
 			// No hosted provider is coming in a local-only room: name the retry
 			// that really is, instead of a fallback that never arrives.
