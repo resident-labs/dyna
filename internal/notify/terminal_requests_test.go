@@ -115,6 +115,26 @@ func TestTerminalReportSharesLinesOnlyWhenChosen(t *testing.T) {
 	}
 }
 
+func TestOwnerReadsAReportedRequestOnlyAsDoneOrFailed(t *testing.T) {
+	c := newChain(t)
+	q := c.file(t, "sign in to GitHub")
+	for _, approver := range []Sender{c.mid, c.root} {
+		if err := c.e.svc.ApproveTerminalRequest(c.e.ctx, approver, "", q.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.e.svc.ReportTerminalRequest(c.e.ctx, c.rec.ID, q.ID, questions.TerminalReport{Verdict: questions.VerdictFailed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.e.svc.OwnedTerminalRequest(c.rec.ID, q.ID); err != nil {
+		t.Fatalf("the owner cannot read the failed request: %v", err)
+	}
+	other := c.file(t, "second")
+	if _, _, err := c.e.svc.OwnedTerminalRequest(c.rec.ID, other.ID); err == nil {
+		t.Fatal("the owner read a request that is not theirs")
+	}
+}
+
 func TestSecondTerminalRequestReplacesTheFirst(t *testing.T) {
 	c := newChain(t)
 	first := c.file(t, "first")

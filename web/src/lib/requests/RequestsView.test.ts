@@ -110,7 +110,7 @@ test('a waiting-owner terminal row runs its command and declines with an optiona
     assert.equal(document.querySelectorAll('article').length, 2)
     assert.equal(document.body.textContent?.includes('Held request'), false)
     assert.ok(document.querySelector('.command')?.textContent?.includes('gh auth login --scopes workflow'))
-    button('Review and run')?.click(); await settle()
+    button('Review')?.click(); await settle()
     assert.deepEqual(ran, ['q2'])
     button('Decline…')?.click(); ui.flushSync()
     const reason = document.querySelector<HTMLInputElement>('input[aria-label="Reason for declining q2"]')

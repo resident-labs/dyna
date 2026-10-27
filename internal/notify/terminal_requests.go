@@ -211,6 +211,17 @@ func (s *Service) OwnerTerminalRequest(roomRef, id string) (room.Record, questio
 	return rec, questions.Question{}, fmt.Errorf("no terminal request %s in this room", id)
 }
 
+// OwnedTerminalRequest returns a request the owner runs or has just reported
+// as done or failed. The owner can still read the last lines of its terminal
+// to add them to the report that was sent when the command exited.
+func (s *Service) OwnedTerminalRequest(roomRef, id string) (room.Record, questions.Question, error) {
+	rec, q, err := s.OwnerTerminalRequest(roomRef, id)
+	if err != nil && q.Terminal != nil && (q.Terminal.Stage == questions.StageDone || q.Terminal.Stage == questions.StageFailed) {
+		return rec, q, nil
+	}
+	return rec, q, err
+}
+
 // ReportTerminalRequest records the owner's result and wakes the filer.
 func (s *Service) ReportTerminalRequest(ctx context.Context, roomRef, id string, r questions.TerminalReport) error {
 	rec, _, err := s.OwnerTerminalRequest(roomRef, id)
