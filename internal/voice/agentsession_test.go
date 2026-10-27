@@ -766,8 +766,8 @@ func TestSessionCommitWithoutEchoDoesNotSwallowTheNextTurn(t *testing.T) {
 	if m := r.next(t); m.Type != agentwire.OutError {
 		t.Fatalf("sync = %+v", m)
 	}
-	conn.events <- realtime.Event{Kind: realtime.Error, Code: "input_audio_buffer_commit_empty", Text: "buffer is empty"}
-	if m := r.next(t); m.Type != agentwire.OutError || m.Message != "buffer is empty" {
+	conn.events <- realtime.Event{Kind: realtime.Error, Code: "server_error", Text: "provider failed"}
+	if m := r.next(t); m.Type != agentwire.OutError || m.Message != "provider failed" {
 		t.Fatalf("provider error = %+v", m)
 	}
 	conn.events <- realtime.Event{Kind: realtime.Committed}
@@ -777,5 +777,56 @@ func TestSessionCommitWithoutEchoDoesNotSwallowTheNextTurn(t *testing.T) {
 	}
 	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond: respond:]" {
 		t.Fatalf("after a rejected commit, sent %s, want the next turn to ask", got)
+	}
+}
+
+// A client commit that the provider rejects as an empty or too-small buffer
+// is silent. OpenAI uses the code input_audio_buffer_commit_empty for both
+// messages, including "buffer too small ... 0.00ms". The client must not see
+// an error line, and that rejection must not ask for another reply. The same
+// words with a different code are still a real error.
+func TestSessionLateCommitEmptyBufferIsSilent(t *testing.T) {
+	clock := newFakeClock()
+	p := fakeProvider()
+	p.Caps.ManualCommit = true
+	p.Protocol = commitProtocol{}
+	conn := newChanConn()
+	r := startSession(t, fakeSessions(p, conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(1, 2)}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond:]" {
+		t.Fatalf("commit sent %s", got)
+	}
+	conn.events <- realtime.Event{
+		Kind: realtime.Error,
+		Code: "input_audio_buffer_commit_empty",
+		Text: "Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.",
+	}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "later"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "later" {
+		t.Fatalf("after empty-buffer rejection = %+v, want the transcript and no error line", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond:]" {
+		t.Fatalf("after the rejection, sent %s, want no second reply", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone {
+		t.Fatalf("response done = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond:]" {
+		t.Fatalf("after response done, sent %s, want no second reply", got)
+	}
+
+	conn.events <- realtime.Event{
+		Kind: realtime.Error,
+		Code: "server_error",
+		Text: "Error committing input audio buffer: buffer too small. Expected at least 100ms of audio, but buffer only has 0.00ms of audio.",
+	}
+	if m := r.next(t); m.Type != agentwire.OutError || !strings.Contains(m.Message, "buffer too small") {
+		t.Fatalf("unrelated error = %+v, want the provider message", m)
 	}
 }
