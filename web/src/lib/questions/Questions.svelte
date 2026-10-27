@@ -3,6 +3,7 @@
   import { tick } from 'svelte'
   import { errorText } from '../errorText.ts'
   import Avatar from '../ui/Avatar.svelte'
+  import Chip from '../ui/Chip.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import TabHeader from '../rooms/TabHeader.svelte'
   import QuestionFiles from './QuestionFiles.svelte'
@@ -91,7 +92,7 @@
           </div>
           <div class="prose question-text">{@html markdown(q.text)}</div>
           <p class="meanwhile"><span>While waiting</span> · {q.meanwhile}</p>
-          {#if q.attachments?.length}<QuestionFiles {roomId} items={q.attachments} onopen={onopenfile} />{/if}
+          {#if q.attachments?.length}<QuestionFiles {roomId} items={q.attachments} post={q.post} onopen={onopenfile} />{/if}
           <form class="answers" onsubmit={(e) => { e.preventDefault(); answer(q, '', replies[q.id] ?? '') }}>
             {#each q.options ?? [] as option, i}
               <button class="option" class:gold={i === 0} type="button" disabled={busy.has(q.id)} onclick={() => answer(q, option)}>{option}</button>
@@ -107,7 +108,7 @@
           <div class="outcome">
             <Avatar name={q.askerName} hue={q.askerHue} emoji={q.askerEmoji} owner={q.asker === 'owner'} size={16} ring="var(--raise)" />
             <span class="asker hue-{q.askerHue}">{q.askerName}</span><span>·</span><span class="mono">{q.id}</span><span>·</span>
-            {#if q.answer}{@const answered = q.answer}<span class="answered"><span aria-hidden="true">✓</span> {answeredLine({ answererName: q.answererName, answer: answered })} · {ago(answered.at)}</span>
+            {#if q.answer}{@const answered = q.answer}<span class="answered"><span aria-hidden="true">✓</span> {answeredLine({ answererName: q.answererName, answer: answered })} · {ago(answered.at)}</span>{#if answered.source === 'card'}<Chip outline title="A card wrote this answer. You confirmed it before it was sent.">card</Chip>{/if}
             {:else if q.withdrawn}<span class="withdrawn">Withdrawn: {q.withdrawn.reason} · {ago(q.withdrawn.at)}</span>{/if}
           </div>
         {/if}

@@ -211,12 +211,18 @@ func (s *Service) parse(rec room.Record, draft string) (Draft, error) {
 // Attachments must be saved in the room first (Attach); mentions come from
 // the draft text only, never from the files.
 func (s *Service) Post(ctx context.Context, roomRef, draft, replyTo string, atts ...room.Attachment) (PostResult, error) {
-	return s.postIn(ctx, roomRef, draft, replyTo, "", "", nil, atts...)
+	return s.postIn(ctx, roomRef, draft, replyTo, "", "", false, nil, atts...)
+}
+
+// PostFromCard is Post for text that an HTML card wrote and the owner
+// confirmed. The stored post carries room.SourceCard.
+func (s *Service) PostFromCard(ctx context.Context, roomRef, draft, replyTo string, conversation room.Conversation) (PostResult, error) {
+	return s.postIn(ctx, roomRef, draft, replyTo, "", conversation, true, nil)
 }
 
 // postIn posts one composer draft in the conversation its writer named: the
 // room feed when conversation is empty.
-func (s *Service) postIn(ctx context.Context, roomRef, draft, replyTo, forwardOf string, conversation room.Conversation, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
+func (s *Service) postIn(ctx context.Context, roomRef, draft, replyTo, forwardOf string, conversation room.Conversation, card bool, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
 	// A spawn-shaped draft is a command, never text: posting "/opus fix it"
 	// to @root would be a silent misfire. Send routes it; "//" escapes it.
 	if _, _, ok := splitSpawn(draft); ok {
@@ -235,7 +241,7 @@ func (s *Service) postIn(ctx context.Context, roomRef, draft, replyTo, forwardOf
 		return PostResult{}, errors.New("type a post after the mentions")
 	}
 	res, err := s.Notify.Post(ctx, notify.PostInput{
-		Sender:   notify.Sender{Kind: notify.SenderOwner, Room: rec.Name, Human: true},
+		Sender:   notify.Sender{Kind: notify.SenderOwner, Room: rec.Name, Human: true, Card: card},
 		Mentions: d.Mentions, Text: strings.TrimSpace(d.Text), ReplyTo: replyTo, ForwardOf: forwardOf, Attachments: atts, References: refs, Conversation: conversation,
 	})
 	out := PostResult{Message: res.Message, Deliveries: res.Deliveries, Failed: res.Failed(), Sticky: d.Sticky()}

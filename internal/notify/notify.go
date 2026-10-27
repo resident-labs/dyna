@@ -129,12 +129,17 @@ type Sender struct {
 	// Human marks an owner who is a person typing in the desktop composer, not
 	// an orchestrator process. Only owner posts carry it.
 	Human bool
+	// Card marks text that an HTML card wrote and the owner confirmed.
+	Card bool
 }
 
 // source is the room.Message source of the sender's posts.
 func (s Sender) source() string {
 	if s.Kind == SenderVoice {
 		return room.SourceVoice
+	}
+	if s.Card {
+		return room.SourceCard
 	}
 	return ""
 }

@@ -52,6 +52,14 @@ func (s services) withdrawQuestion(ctx context.Context, ref, id, reason string) 
 	return s.rooms.Notify.WithdrawQuestion(snd, ref, id, reason)
 }
 
+func (s services) answerQuestionFromCard(ctx context.Context, ref, id, choice, text string) error {
+	snd, err := s.questionSender(ctx)
+	if err != nil {
+		return err
+	}
+	return s.rooms.Notify.AnswerQuestionFromCard(ctx, snd, ref, id, choice, text)
+}
+
 func (s services) answerQuestion(ctx context.Context, ref, id, choice, text string) error {
 	snd, err := s.questionSender(ctx)
 	if err != nil {

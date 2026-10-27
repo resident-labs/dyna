@@ -127,7 +127,7 @@ type Message struct {
 	// the post is appended (see HomeFor), and never changes it. The empty
 	// value reads as the room feed.
 	Conversation Conversation `json:"conversation,omitempty"`
-	// Source is SourceVoice on posts of the owner's voice call.
+	// Source is SourceVoice on posts of the owner's voice call and SourceCard on text an HTML card wrote.
 	Source string `json:"source,omitempty"`
 	// Spoken marks a transcript line of the voice call.
 	Spoken bool `json:"spoken,omitempty"`
