@@ -29,3 +29,6 @@ export function terminalReady(state: {
 export function terminalFocusOnOpen(autofocus: boolean | null | undefined, narrow: boolean): boolean {
   return autofocus ?? !narrow
 }
+
+// terminalTypeHint is the focus hint's text: a touch screen taps, a mouse clicks.
+export const terminalTypeHint = (coarse: boolean): string => (coarse ? 'Tap to type' : 'Click to type')
