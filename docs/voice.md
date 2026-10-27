@@ -84,7 +84,7 @@ The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rat
 | In (stdin) | Meaning |
 | --- | --- |
 | `{"type":"audio","pcm":"…"}` | Microphone audio. |
-| `{"type":"text","text":"…"}` | Add context to the conversation. The voice does not reply. |
+| `{"type":"text","text":"…"}` | Add context. The voice does not reply, unless the line also has `"respond":true`. That asks for one reply and waits for speech that still plays, the same way `say` with `"mode":"append"` does. |
 | `{"type":"say","text":"…"}` | Make the voice speak this text. |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | The result of a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
