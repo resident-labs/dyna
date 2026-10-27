@@ -27,7 +27,7 @@ func TestQuestionDelivery(t *testing.T) {
 		t.Fatalf("target: %+v", q)
 	}
 	p, err := e.svc.Rooms.Message(rec.ID, q.Post)
-	if err != nil || p.Kind != "message" || len(p.Attachments) != 1 || !p.Addressed(rec.Name) || !strings.Contains(p.Text, "dyna ask answer "+q.ID) {
+	if err != nil || p.Kind != "message" || len(p.Attachments) != 1 || !p.Addressed(rec.Name) || !strings.Contains(p.Text, "dyna request answer "+q.ID) {
 		t.Fatal(p, err)
 	}
 	if err = e.svc.AnswerQuestion(e.ctx, Sender{Kind: SenderOwner, Room: rec.Name}, "", q.ID, "yes", "Keep the slice."); err != nil {
@@ -195,7 +195,7 @@ func TestAskRejectsAgentTargets(t *testing.T) {
 	e.start(rec, "target", nil)
 	snd := Sender{Kind: SenderOwner, Room: rec.Name}
 	for _, to := range []string{"@target", "@parent", "target"} {
-		if _, err := e.svc.Ask(e.ctx, snd, "", to, "Which fix?", "test", nil, nil); !errors.Is(err, ErrAskAgent) || err.Error() != "Ask agents with dyna post; dyna ask is for the owner." {
+		if _, err := e.svc.Ask(e.ctx, snd, "", to, "Which fix?", "test", nil, nil); !errors.Is(err, ErrAskAgent) || err.Error() != "Ask agents with dyna post; dyna request question is for the owner." {
 			t.Fatalf("%s: %v", to, err)
 		}
 	}
@@ -221,7 +221,7 @@ func TestHumanOwnerOnlyAnswersQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = e.svc.WithdrawQuestion(human, "", q.ID, "no"); err == nil || !strings.Contains(err.Error(), "ask withdraw is root or session or worker only;") {
+	if err = e.svc.WithdrawQuestion(human, "", q.ID, "no"); err == nil || !strings.Contains(err.Error(), "request withdraw is root or session or worker only;") {
 		t.Fatalf("human withdraw: %v", err)
 	}
 	if err = e.svc.AnswerQuestion(e.ctx, human, "", q.ID, "", "yes"); err != nil {

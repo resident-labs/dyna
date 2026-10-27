@@ -81,7 +81,7 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "dyna goal done "+g.ID) {
 					t.Fatalf("close with root above = %+v, %v; want the goal refusal", closed, err)
 				}
-				if _, err = e.svc.ForceCloseSession(e.ctx, rec.ID, author.ID); err == nil || !strings.Contains(err.Error(), "dyna ask") {
+				if _, err = e.svc.ForceCloseSession(e.ctx, rec.ID, author.ID); err == nil || !strings.Contains(err.Error(), "dyna request question") {
 					t.Fatalf("forced close = %v; want the goal refusal", err)
 				}
 				// Root asks the owner, then finishes the goal and closes.

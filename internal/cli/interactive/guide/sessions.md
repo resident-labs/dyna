@@ -17,7 +17,7 @@ Closing transfers PR authorship and held goals to the nearest open ancestor.
 It releases reviewer roles, cancels live workflows, and reports the handoff.
 Root and the owner hold no goals, so close is refused when only they are left above
 the session, and a forced close does not move the goals to the owner. Root asks the
-owner about the blocker with `dyna ask` when only the owner can clear it, then the
+owner about the blocker with `dyna request question` when only the owner can clear it, then the
 goal is finished, dropped, or handed to an open agent.
 A failed handoff keeps the session open unless force close is chosen.
 

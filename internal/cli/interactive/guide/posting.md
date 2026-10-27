@@ -111,7 +111,7 @@ Pin decisions and results sparingly.
 
 ## Interactive cards
 
-A card can collect the owner's input, such as a choice or a short text, with `dyna ask --html`. The card sends
+A card can collect the owner's input, such as a choice or a short text, with `dyna request question --html`. The card sends
 `dyna:submit` with `parent.postMessage`. The app shows the exact text under the card with Send and Cancel buttons.
 Only the owner's click on Send sends it. The text is at most 16 KB, so send JSON for structured input.
 It answers the open question; `choice` must be one of the question's `--options` when you set it.
@@ -135,7 +135,7 @@ addEventListener('message', (e) => {
 ```
 
 ```sh
-dyna ask --html "$DYNA_SCRATCH/pick.html" --meanwhile "Preparing the persona file" "Which voice should the guide use?"
+dyna request question --html "$DYNA_SCRATCH/pick.html" --meanwhile "Preparing the persona file" "Which voice should the guide use?"
 ```
 
 The answer arrives as a post, with `source: "card"`. Treat it as the owner's input, but check it as data. On a plain

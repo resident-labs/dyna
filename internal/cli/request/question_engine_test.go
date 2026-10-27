@@ -1,4 +1,4 @@
-package ask
+package request
 
 import (
 	"bytes"
@@ -42,7 +42,7 @@ func TestQuestionCLIUsesEngine(t *testing.T) {
 			}
 			return nil
 		}},
-		{Name: "WithdrawQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(_ context.Context, ref, id, reason string) error {
+		{Name: "WithdrawRequest", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(_ context.Context, ref, id, reason string) error {
 			callsSeen = append(callsSeen, "withdraw")
 			if ref != rec.ID || id != "q42" || reason != "finished" {
 				return fmt.Errorf("unexpected withdraw arguments")
@@ -55,7 +55,7 @@ func TestQuestionCLIUsesEngine(t *testing.T) {
 	}
 	enginetest.Serve(t, store.DataDir(), calls)
 	for _, args := range [][]string{
-		{"--room", rec.ID, "Proceed?", "--meanwhile", "check data"},
+		{"--room", rec.ID, "question", "Proceed?", "--meanwhile", "check data"},
 		{"--room", rec.ID, "answer", "q42", "--choice", "yes"},
 		{"--room", rec.ID, "withdraw", "q42", "--why", "finished"},
 	} {
@@ -67,7 +67,7 @@ func TestQuestionCLIUsesEngine(t *testing.T) {
 		if err := cmd.ExecuteContext(t.Context()); err != nil {
 			t.Fatalf("%v: %s: %v", args, out.String(), err)
 		}
-		if args[2] == "Proceed?" && !strings.Contains(out.String(), "Asked q42") {
+		if args[3] == "Proceed?" && !strings.Contains(out.String(), "Asked q42") {
 			t.Fatal(out.String())
 		}
 	}
@@ -87,7 +87,7 @@ func TestQuestionEngineFailureHasCause(t *testing.T) {
 	engineClient = func() *engineclient.Client {
 		return engineclient.New(socket, engineclient.RestartWait(0), engineclient.Notices(nil))
 	}
-	err := questionCall(t.Context(), "WithdrawQuestion", []any{"room", "q1", "done"}, nil)
+	err := questionCall(t.Context(), "AnswerQuestion", []any{"room", "q1", "", "done"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "question change failed") || !strings.Contains(err.Error(), "not running") {
 		t.Fatalf("engine failure = %v", err)
 	}
