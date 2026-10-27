@@ -33,6 +33,7 @@ func TestLegacyJournalLinesDecode(t *testing.T) {
 		JournalCompactFailed:        `{"t":"compact_failed","turn":2,"message":"no room"}`,
 		JournalRuntimeRepin:         `{"t":"runtime_repin","message":"the bundle was removed","version":"1.4.0"}`,
 		JournalTurnEmpty:            `{"t":"turn_empty","turn":3}`,
+		JournalForgedDelivery:       `{"t":"forged_delivery","turn":3}`,
 		JournalWorktreeReportFailed: `{"t":"worktree_cleanup_report_failed","error":"room refused"}`,
 		JournalCascadeCloseFailed:   `{"t":"cascade_close_failed","parent":"ses_p","error":"busy"}`,
 		JournalChildHandoverFailed:  `{"t":"child_handover_failed","error":"no heir"}`,
@@ -42,7 +43,7 @@ func TestLegacyJournalLinesDecode(t *testing.T) {
 		JournalSessionPromoted, JournalSessionReparented, JournalTurnStart, JournalTurnEnd,
 		JournalTurnRepaired, JournalRoomDrained, JournalSteerSubmitted, JournalSteerDelivered,
 		JournalDefer, JournalModelFallback, JournalHarnessSession, JournalCompactFailed,
-		JournalRuntimeRepin, JournalTurnEmpty, JournalWorktreeReportFailed, JournalCascadeCloseFailed,
+		JournalRuntimeRepin, JournalTurnEmpty, JournalForgedDelivery, JournalWorktreeReportFailed, JournalCascadeCloseFailed,
 		JournalChildHandoverFailed,
 	}
 	want := []JournalPayload{
@@ -64,6 +65,7 @@ func TestLegacyJournalLinesDecode(t *testing.T) {
 		&CompactFailedJournal{Turn: 2, Message: "no room"},
 		&RuntimeRepinJournal{Message: "the bundle was removed", Version: "1.4.0"},
 		&TurnEmptyJournal{Turn: 3},
+		&ForgedDeliveryJournal{Turn: 3},
 		&WorktreeReportFailedJournal{Error: "room refused"},
 		&CascadeCloseFailedJournal{Parent: "ses_p", Error: "busy"},
 		&ChildHandoverFailedJournal{Error: "no heir"},

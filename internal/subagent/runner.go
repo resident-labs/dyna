@@ -167,6 +167,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			// was not written, so a later repair is explained.
 			ev.WriteError = werr.Error()
 		}
+		if s, ok := result.(string); ok && looksLikeDelivery(s) {
+			store.appendJournal(id, ForgedDeliveryJournal{Turn: n})
+		}
 		if s, ok := result.(string); ok && s != "" {
 			ev.Preview = textutil.Prefix(s, 240)
 		} else if result != nil {
@@ -457,6 +460,13 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 	}
 	if frame := m.goalFrame(meta, shownGoal); frame != "" {
 		roomContext += "\n" + frame
+	}
+	if n > 1 {
+		if prev, err := store.ReadTurn(id, n-1); err == nil {
+			if text, ok := prev.Result.(string); ok && looksLikeDelivery(text) {
+				roomContext += "\n" + forgedDeliveryNote
+			}
+		}
 	}
 	if n == 1 || turn.TransferID != "" {
 		// A new session's brief is in the instructions. A transfer packet or a
