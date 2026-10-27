@@ -57,7 +57,12 @@ type Record struct {
 	MergeMaxParallel int          `json:"mergeMaxParallel,omitempty"`
 	GitHubAccess     GitHubAccess `json:"githubAccess,omitempty"`
 	RootProfile      string       `json:"rootProfile,omitempty"`
-	SessionPause     SessionPause `json:"sessionPause,omitempty"`
+	// LibraryPinSet is true when this room has its own librarian profile.
+	// LibraryPin is that profile; empty means auto for this room only.
+	// When LibraryPinSet is false, the room uses the global library.profile.
+	LibraryPinSet bool         `json:"libraryPinSet,omitempty"`
+	LibraryPin    string       `json:"libraryPin,omitempty"`
+	SessionPause  SessionPause `json:"sessionPause,omitempty"`
 	// Seat is the row's seat column, which only writeSeat writes.
 	Seat          Seat   `json:"-"`
 	DisplayName   string `json:"displayName,omitempty"`

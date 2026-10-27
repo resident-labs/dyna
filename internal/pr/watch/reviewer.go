@@ -545,6 +545,11 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 	return out, nil
 }
 
+// UsableServiceProfile reports whether name can pin a service. Empty means auto.
+func (s *Service) UsableServiceProfile(name string) error {
+	return s.validateReviewerProfile(name)
+}
+
 func (s *Service) validateReviewerProfile(name string) error {
 	if name != "" {
 		profiles, err := s.profiles()

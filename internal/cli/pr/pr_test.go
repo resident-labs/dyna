@@ -159,14 +159,11 @@ func TestPRCommandsAndPauseExplanation(t *testing.T) {
 	if _, err = call("reviewer", "--room", rec.Name, "--session", reviewer.ID); err == nil {
 		t.Fatal("removed --session accepted")
 	}
-	if _, err = call("reviewer", "--room", rec.Name, "--profile", "judge"); err != nil {
-		t.Fatal(err)
+	if _, err = call("reviewer", "--room", rec.Name, "--profile", "judge"); err == nil {
+		t.Fatal("removed --profile accepted")
 	}
-	if out, err := call("reviewer", "--room", rec.Name); err != nil || !strings.Contains(out, `"profile": "judge"`) {
-		t.Fatalf("reviewer profile: %s %v", out, err)
-	}
-	if _, err = call("reviewer", "--room", rec.Name, "--profile", "judge", "--session", reviewer.ID); err == nil {
-		t.Fatal("ambiguous reviewer accepted")
+	if _, err = call("reviewer", "--room", rec.Name, "--auto"); err == nil {
+		t.Fatal("removed --auto accepted")
 	}
 	if _, err = call("review", "off", "--room", rec.Name); err != nil {
 		t.Fatal(err)

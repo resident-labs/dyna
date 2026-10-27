@@ -131,8 +131,7 @@ func TestLibrarianOffOutsideItsRepositories(t *testing.T) {
 	}
 }
 
-// The profile write goes to the call that owns it: the reviewer through the
-// service profile call, the librarian through its settings key.
+// Library and reviewer profile writes use the same engine call.
 func TestProfileWritesTheOwningCall(t *testing.T) {
 	reader := readerWith(t, map[string]any{
 		"ListServices":   []map[string]any{{"role": "reviewer", "profiles": []string{"sonnet", "deepseek"}}},
@@ -152,8 +151,13 @@ func TestProfileWritesTheOwningCall(t *testing.T) {
 	if err := setProfile(context.Background(), reader, refs{Room: "dyna", Repo: "/repo/dyna"}, Library, "sonnet", &out); err != nil {
 		t.Fatal(err)
 	}
-	w, ok = reader.write("SetSetting")
-	if !ok || fmt.Sprint(w.args) != "[library.profile sonnet]" {
+	found := false
+	for _, w := range reader.writes {
+		if w.method == "SetServiceProfile" && fmt.Sprint(w.args) == "[dyna library sonnet]" {
+			found = true
+		}
+	}
+	if !found {
 		t.Fatalf("librarian profile write = %+v", reader.writes)
 	}
 }

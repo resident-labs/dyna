@@ -211,6 +211,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetReviewPublishing", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.PRs.SetReviewPublishing},
 		{Name: "ListServices", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ListServices},
 		{Name: "SetServiceProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetServiceProfile},
+		{Name: "SetServiceProfileAll", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetServiceProfileAll},
 		{Name: "RestartReviewer", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RestartReviewer},
 		{Name: "ListHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.List},
 		{Name: "ListGlobalHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.ListGlobal},

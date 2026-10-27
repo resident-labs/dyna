@@ -68,8 +68,8 @@ runner step time along the longest dependency chain. Set room budgets with dyna 
 Dyna manages a reviewer pool per room when CI passes. Each open, watched
 change keeps one reviewer session, including after a verdict. Queued changes
 wait when the pool is full. Sessions use reviewer-<PR> or reviewer-<short change id>.
-Use dyna git pr reviewer --profile P to pin a profile,
---auto for automatic choice, or --restart to recreate the reviewer pool.
+Pin a reviewer profile with dyna services profile reviewer <profile>.
+Use dyna git pr reviewer --restart to recreate the reviewer pool.
 Use dyna git pr review on|off --room R to control automatic review. CodeRabbit review signals remain visible,
 but cannot establish passing CI without another check, workflow or commit status.
 Unknown external CI stays eligible. Agent reviews stay in Dyna.
@@ -284,10 +284,8 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return prWrite(c, s, r.Key(), "ReleasePRReviewers", a[1:])
 	}}
 
-	reviewer := &cobra.Command{Use: "reviewer", Short: "Show the managed reviewer pool, profiles, attached changes and waiting queue", Long: "Show the managed reviewer pool. Only live turns on needed current heads occupy capacity. Completed or inactive reviewers close. Queued changes wait when the pool is full. Paused rooms dispatch no reviews.", Args: cobra.NoArgs}
+	reviewer := &cobra.Command{Use: "reviewer", Short: "Show the managed reviewer pool, profiles, attached changes and waiting queue", Long: "Show the managed reviewer pool. Only live turns on needed current heads occupy capacity. Completed or inactive reviewers close. Queued changes wait when the pool is full. Paused rooms dispatch no reviews. Pin a profile with dyna services profile reviewer. --restart closes and recreates the room reviewer pool.", Args: cobra.NoArgs}
 	roomRef := reviewer.Flags().String("room", "", "room name or ID (default: current stamped room)")
-	profileName := reviewer.Flags().String("profile", "", "pin an enabled reviewer profile")
-	auto := reviewer.Flags().Bool("auto", false, "choose the reviewer profile automatically")
 	restart := reviewer.Flags().Bool("restart", false, "close and recreate the room reviewer pool")
 	roomFor := mergeRoomFor
 
@@ -385,16 +383,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		if *auto && c.Flags().Changed("profile") {
-			return fmt.Errorf("choose --profile or --auto")
-		}
-		// The engine checks the caller on both writes (requirements item 3).
 		engine := engineclient.New("")
-		if *auto || c.Flags().Changed("profile") {
-			if err = engine.Call(c.Context(), "SetReviewerProfile", []any{roomID, *profileName}, nil); err != nil {
-				return err
-			}
-		}
 		if *restart {
 			if err = engine.Call(c.Context(), "RestartReviewer", []any{roomID}, nil); err != nil {
 				return err

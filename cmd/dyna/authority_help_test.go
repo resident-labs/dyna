@@ -18,6 +18,7 @@ var serviceAuthorityActions = map[string]bool{
 	"SetGitHubAccess":         true,
 	"SetPRSettings":           true,
 	"SetServiceProfile":       true,
+	"SetServiceProfileAll":    true,
 	"ConfigCheckProfile":      true,
 	"SyncPrivateRuntime":      true,
 	"ResolveFinding":          true,

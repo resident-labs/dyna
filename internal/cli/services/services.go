@@ -356,7 +356,14 @@ func libraryRow(f facts) Row {
 		row.Pinned, row.Source, row.Profiles = listed.Pinned, listed.Source, listed.Profiles
 	}
 	repos, known := f.listSetting("library.enabled")
-	if profile, ok := f.textSetting("library.profile"); ok {
+	// ListServices owns the room pin, including the global default when the
+	// room has no pin. Settings is only the fallback when that list is missing.
+	if listed, ok := f.service(Library); ok {
+		row.Profile = listed.Profile
+		if listed.Pinned != "" || listed.Source != "" {
+			row.Pinned, row.Source = listed.Pinned, listed.Source
+		}
+	} else if profile, ok := f.textSetting("library.profile"); ok {
 		row.Profile, row.Pinned = profile, profile
 		row.Source = "pinned"
 		if profile == "" {
@@ -530,9 +537,10 @@ var client = func() engineCaller { return engineclient.New("") }
 
 // options are the flags a command shares.
 type options struct {
-	room   string
-	repo   string
-	asJSON bool
+	room     string
+	repo     string
+	asJSON   bool
+	allRooms bool
 }
 
 func (o *options) bind(c *cobra.Command) {
@@ -667,8 +675,9 @@ func profileCmd() *cobra.Command {
 		Use:   "profile <service> <profile|auto>",
 		Short: "Pin a service to a profile; auto ranks the enabled service profiles",
 		Long: "Pin one service to an enabled profile, or pass auto to rank the enabled service\n" +
-			"profiles again. Change a service's profile here only: a bulk move of sessions never\n" +
-			"changes a service, so a service keeps the profile you chose for it.",
+			"profiles again. The owner may change any room, or every room with --all-rooms.\n" +
+			"A room's root may change only its own room. A root may not change another room.\n" +
+			"Change a service's profile here only: a bulk move of sessions never changes a service.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
 			id, err := ParseServiceID(args[0])
@@ -679,11 +688,18 @@ func profileCmd() *cobra.Command {
 			if strings.EqualFold(profile, "auto") || profile == "-" {
 				profile = ""
 			}
+			if o.allRooms {
+				if o.room != "" {
+					return fmt.Errorf("pass --room or --all-rooms, not both")
+				}
+				return setProfileAll(c.Context(), client(), id, profile, c.OutOrStdout())
+			}
 			return setProfile(c.Context(), client(), resolveRefs(o.room, o.repo), id, profile, c.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&o.room, "room", "", "room whose service to change (default: the current room)")
 	cmd.Flags().StringVar(&o.repo, "repo", "", "repository path (default: the current one)")
+	cmd.Flags().BoolVar(&o.allRooms, "all-rooms", false, "set this profile in every room (owner only)")
 	return cmd
 }
 
@@ -706,15 +722,11 @@ func setProfile(ctx context.Context, call engineCaller, r refs, id ServiceID, pr
 		}
 	}
 	switch id {
-	case Reviewer:
+	case Reviewer, Library:
 		if r.Room == "" {
 			return fmt.Errorf("no room; pass --room <room>")
 		}
-		if err := call.Call(ctx, "SetServiceProfile", []any{r.Room, string(Reviewer), profile}, nil); err != nil {
-			return err
-		}
-	case Library:
-		if err := call.Call(ctx, "SetSetting", []any{"library.profile", profile}, nil); err != nil {
+		if err := call.Call(ctx, "SetServiceProfile", []any{r.Room, string(id), profile}, nil); err != nil {
 			return err
 		}
 	case Voice:
@@ -725,6 +737,23 @@ func setProfile(ctx context.Context, call engineCaller, r refs, id ServiceID, pr
 		chosen = "auto"
 	}
 	fmt.Fprintf(out, "%s profile: %s\n", id, chosen)
+	return nil
+}
+
+// setProfileAll writes one service profile in every room. The engine refuses
+// a caller that is not the owner before it writes.
+func setProfileAll(ctx context.Context, call engineCaller, id ServiceID, profile string, out io.Writer) error {
+	if id == Voice {
+		return fmt.Errorf("voice has no profile of its own: its calls use the voice provider settings")
+	}
+	if err := call.Call(ctx, "SetServiceProfileAll", []any{string(id), profile}, nil); err != nil {
+		return err
+	}
+	chosen := profile
+	if chosen == "" {
+		chosen = "auto"
+	}
+	fmt.Fprintf(out, "%s profile: %s for all rooms\n", id, chosen)
 	return nil
 }
 

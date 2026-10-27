@@ -51,7 +51,7 @@ func (s *Service) queuedUnread(session string, postIDs map[string]bool) (map[str
 // transfer reports whether the role moved. A skipped stale transfer is not an error.
 func (s *Service) transfer(ctx context.Context, key, role string, to subagent.Info, dir string, opts transferOptions) (bool, error) {
 	if role != "author" {
-		return false, fmt.Errorf("only author transfers are supported; use dyna git pr reviewer --profile or --restart for the managed reviewer")
+		return false, fmt.Errorf("only author transfers are supported; the managed reviewer is pinned with dyna services profile reviewer, or restarted with dyna git pr reviewer --restart")
 	}
 	// git runs here, never under the PR lock.
 	var path string

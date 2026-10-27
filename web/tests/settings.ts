@@ -167,7 +167,7 @@ const settingItems: SettingItem[] = [
   item({ key: 'content.maxCardBytes', kind: 'bytes', value: 1048576, source: 'default', help: 'The largest HTML or JavaScript card a session can post.' }),
   item({ key: 'content.maxFileBytes', kind: 'bytes', value: 26214400, source: 'file', help: 'The largest file attachment a session can post.' }),
   item({ key: 'root.profile', kind: 'select', value: 'opus', options: ['opus', 'sol', 'mimo'], source: 'file', help: 'The profile a new root session uses.' }),
-  item({ key: 'library.profile', kind: 'select', value: '', options: ['', 'sol', 'mimo'], optionLabels: ['Auto · best taste + cost (sol)', 'sol · thrift 8', 'mimo · thrift 10'], source: 'default', help: 'One profile for all librarian work. Auto ranks enabled service profiles.' }),
+  item({ key: 'library.profile', kind: 'select', value: '', options: ['', 'sol', 'mimo'], optionLabels: ['Auto · best taste + cost (sol)', 'sol · thrift 8', 'mimo · thrift 10'], source: 'default', help: 'Default librarian profile when a room has no pin. Auto ranks enabled service profiles. A room pin is dyna services profile library.' }),
   item({ key: 'voice.provider', kind: 'enum', value: 'openai', options: ['openai', 'google', 'doubao'], source: 'file', help: 'The realtime provider for Voice calls.' }),
   item({ key: 'subagent.maxDepth', kind: 'int', value: 3, source: 'default', help: 'How deep sessions can start child sessions.' }),
   item({ key: 'sessions.checkInInterval', kind: 'duration', value: '15m', source: 'default', help: 'How often parents review their children.' }),

@@ -94,9 +94,11 @@ holds no goal and owns no place in the tree, so it never appears in
 `dyna room members`, a parent check-in, the Children section of a session's
 threads or an `@children` selector. It appears only with `dyna services`:
 `list`, `show <service>`, `enable|disable <service>`,
-`profile <service> <profile|auto>`, `restart <service>` and `log <service>`.
+`profile <service> <profile|auto> [--room R | --all-rooms]`, `restart <service>` and `log <service>`.
 
 Change a service's profile with `dyna services profile` only, and never as part
-of a bulk move of sessions: a service keeps the profile chosen for it. A failed
-service turn posts one alert that names the service, its turn and its error.
+of a bulk move of sessions: a service keeps the profile chosen for it.
+The owner may set any room, or every room with `--all-rooms`. A room's root may
+set only its own room.
+A failed service turn posts one alert that names the service, its turn and its error.
 Never manage a service with `dyna subagent transfer` or a raw settings key.
