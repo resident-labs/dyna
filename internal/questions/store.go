@@ -33,10 +33,25 @@ type Withdraw struct {
 	Human  bool   `json:"human,omitempty"`
 	Reason string `json:"reason"`
 }
+
+// AskerKind says what kind of sender asked a question, so answer delivery
+// does not parse the Asker address.
+type AskerKind string
+
+const (
+	AskerOwner   AskerKind = "owner"
+	AskerSession AskerKind = "session"
+	AskerRun     AskerKind = "run"
+)
+
+func (k AskerKind) valid() bool { return k == AskerOwner || k == AskerSession || k == AskerRun }
+
 type Question struct {
 	ID    string `json:"id"`
 	Room  string `json:"room"`
 	Asker string `json:"asker"`
+	// AskerKind is stored with the question and set when it is asked.
+	AskerKind AskerKind `json:"askerKind"`
 	// Human marks an owner question a person asked, like room.Message.Human.
 	Human           bool      `json:"human,omitempty"`
 	To              string    `json:"to"`
@@ -67,6 +82,9 @@ func key(room, id string) string { return room + "/" + id }
 func Validate(q Question) error {
 	if q.Room == "" || q.Asker == "" {
 		return fmt.Errorf("a question needs a room and an asker")
+	}
+	if !q.AskerKind.valid() {
+		return fmt.Errorf("a question needs an asker kind")
 	}
 	if strings.TrimSpace(q.Meanwhile) == "" {
 		return fmt.Errorf("--meanwhile is required: say what useful safe work you will do while you wait")

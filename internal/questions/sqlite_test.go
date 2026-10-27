@@ -61,7 +61,7 @@ func migratedQuestions(t *testing.T, root string) {
 	}
 	defer db.Close()
 	var value int
-	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'questions.schema'").Scan(&value); err != nil || value != 2 {
+	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'questions.schema'").Scan(&value); err != nil || value != 3 {
 		t.Fatalf("schema version: %d, %v", value, err)
 	}
 }
@@ -269,7 +269,7 @@ func TestInterruptedQuestionImportRetriesUnchangedSource(t *testing.T) {
 	}
 	defer database.Close(filepath.Dir(root))
 	if _, err := db.Exec(`CREATE TRIGGER interrupt_import BEFORE INSERT ON meta
-WHEN NEW.key='questions.schema' AND NEW.value='2' BEGIN SELECT RAISE(ABORT,'interrupted import'); END`); err != nil {
+WHEN NEW.key='questions.schema' AND NEW.value='3' BEGIN SELECT RAISE(ABORT,'interrupted import'); END`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Read(); err == nil || !strings.Contains(err.Error(), "interrupted import") {
@@ -407,11 +407,11 @@ func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.wantError {
-				if version == 2 || rows != 0 || counters != 0 {
+				if version == 3 || rows != 0 || counters != 0 {
 					t.Fatalf("failed import committed: version=%d rows=%d counters=%d", version, rows, counters)
 				}
 			} else {
-				if version != 2 || markers != 0 {
+				if version != 3 || markers != 0 {
 					t.Fatalf("migration: version=%d markers=%d", version, markers)
 				}
 				if tc.canonical == "" && tc.name != "empty" {
@@ -464,5 +464,27 @@ func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMigrationStoresAskerKindOnOldRows(t *testing.T) {
+	root := questionRoot(t)
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	source := `{"version":1,"next":{"room":3},"questions":{` +
+		`"room/q1":{"id":"q1","room":"room","state":"open","asker":"owner"},` +
+		`"room/q2":{"id":"q2","room":"room","state":"open","asker":"run:r1"},` +
+		`"room/q3":{"id":"q3","room":"room","state":"open","asker":"ses_1"}}}`
+	if err := os.WriteFile(filepath.Join(root, "state.json"), []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := (&Store{Root: root}).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := []AskerKind{st.Questions["room/q1"].AskerKind, st.Questions["room/q2"].AskerKind, st.Questions["room/q3"].AskerKind}
+	if got[0] != AskerOwner || got[1] != AskerRun || got[2] != AskerSession {
+		t.Fatalf("asker kinds: %v", got)
 	}
 }
