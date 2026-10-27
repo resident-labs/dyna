@@ -48,6 +48,8 @@ const (
 	InInterrupt MessageType = "interrupt"
 	// InImage adds a PNG or JPEG image to the conversation without a reply.
 	InImage MessageType = "image"
+	// InCommit ends the buffered user turn now and asks for one reply.
+	InCommit MessageType = "commit"
 )
 
 // SayMode says what an InSay line does when an earlier reply still plays.
@@ -107,6 +109,9 @@ type SessionRequest struct {
 	Tools        []SessionTool `json:"tools,omitempty"`
 	Rate         int           `json:"rate,omitempty"`
 	MaxMinutes   int           `json:"maxMinutes,omitempty"`
+	// VADEagerness is how soon turn detection ends a turn: low, medium, high
+	// or auto. Empty keeps the provider default.
+	VADEagerness string `json:"vadEagerness,omitempty"`
 }
 
 // InMessage is one line from the agent.

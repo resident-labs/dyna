@@ -40,7 +40,7 @@ func newSessionCommand() *cobra.Command {
 			"The voice provider hears every voice you send, so tell the people who talk to your app.\n\n" +
 			"Lines in:  {\"type\":\"audio\",\"pcm\":\"...\"}  {\"type\":\"text\",\"text\":\"...\"} (context; \"respond\":true asks for one reply)\n" +
 			"           {\"type\":\"say\",\"text\":\"...\"}  {\"type\":\"tool_result\",\"call_id\":\"...\",\"output\":\"...\"}\n" +
-			"           {\"type\":\"interrupt\"}  {\"type\":\"image\",\"path\":\"/abs/file.png\"} (PNG or JPEG, up to 5 MB)\n" +
+			"           {\"type\":\"interrupt\"}  {\"type\":\"commit\"} (end the turn now)  {\"type\":\"image\",\"path\":\"/abs/file.png\"} (PNG or JPEG, up to 5 MB)\n" +
 			"Lines out: ready, audio, speech_started, transcript, tool_call, response_done, error, closed.\n" +
 			"See docs/voice.md, \"Live sessions for agents\".",
 		Example: "  dyna voice session --prompt-file persona.md --voice marin --tools tools.json --rate 48000 < mic.jsonl > replies.jsonl",
@@ -75,6 +75,7 @@ func newSessionCommand() *cobra.Command {
 	cmd.Flags().StringVar(&toolsFile, "tools", "", "JSON file with a list of {name, description, parameters, after} tools; after is reply (default), later or silent")
 	cmd.Flags().IntVar(&req.Rate, "rate", agentwire.DefaultSessionRate, "sample rate in hertz of the audio you send and read")
 	cmd.Flags().IntVar(&req.MaxMinutes, "max-minutes", agentwire.DefaultSessionMinutes, fmt.Sprintf("longest session, at most %d", agentwire.MaxSessionMinutes))
+	cmd.Flags().StringVar(&req.VADEagerness, "vad-eagerness", "", "how soon turn detection ends a turn: low, medium, high or auto (default: the provider's own)")
 	return cmd
 }
 

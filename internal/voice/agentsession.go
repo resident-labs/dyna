@@ -34,6 +34,14 @@ func checkRequest(req *agentwire.SessionRequest) error {
 	if req.MaxMinutes < 1 || req.MaxMinutes > agentwire.MaxSessionMinutes {
 		return fmt.Errorf("--max-minutes must be from 1 to %d", agentwire.MaxSessionMinutes)
 	}
+	switch strings.ToLower(strings.TrimSpace(req.VADEagerness)) {
+	case "":
+		req.VADEagerness = ""
+	case "low", "medium", "high", "auto":
+		req.VADEagerness = strings.ToLower(strings.TrimSpace(req.VADEagerness))
+	default:
+		return fmt.Errorf("--vad-eagerness must be low, medium, high or auto")
+	}
 	if strings.TrimSpace(req.Instructions) == "" {
 		req.Instructions = defaultSessionInstructions
 	}
@@ -135,6 +143,9 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	if len(req.Tools) > 0 && !p.Caps.FunctionCalling {
 		return SessionEnd{}, fmt.Errorf("%s cannot call tools; choose another provider with --provider, or drop --tools", p.Label)
 	}
+	if req.VADEagerness != "" && !p.Caps.VADEagerness {
+		return SessionEnd{}, fmt.Errorf("%s does not take --vad-eagerness; choose another provider with --provider, or drop the flag", p.Label)
+	}
 	tools := make([]realtime.Tool, len(req.Tools))
 	for i, t := range req.Tools {
 		tools[i] = realtime.Tool{
@@ -144,7 +155,7 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 		}
 	}
 	// Dial can take a while: the context ends it, not the session's limits.
-	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en"})
+	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en", VADEagerness: req.VADEagerness})
 	if err != nil {
 		return SessionEnd{}, err
 	}
@@ -183,6 +194,9 @@ type sessionLoop struct {
 	pending map[string]string
 	// timeouts delivers the ID of a tool call whose time ran out.
 	timeouts chan string
+	// manualCommits is how many commit lines still wait for the provider's
+	// committed echo. That echo must not ask for a second reply.
+	manualCommits int
 }
 
 // run reads the agent and the provider until the session ends.
@@ -366,8 +380,28 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		return l.toolOutput(m.CallID, m.Output, l.toolAfter(name))
 	case agentwire.InInterrupt:
 		return l.stopPlayback()
+	case agentwire.InCommit:
+		return l.commit()
 	}
 	return l.fail("unknown line type %q", m.Type)
+}
+
+// commit ends the buffered user turn and asks for one reply. The reply uses
+// the same one-response queue as every other ask. The provider's committed
+// echo of this line must not ask again.
+func (l *sessionLoop) commit() (agentwire.EndReason, bool) {
+	if !l.p.Caps.ManualCommit {
+		return l.fail("%s cannot commit a turn by hand", l.p.Label)
+	}
+	event := l.p.Protocol.AudioCommit()
+	if event == nil {
+		return l.fail("%s cannot commit a turn by hand", l.p.Label)
+	}
+	if reason, ended := l.send(event); ended {
+		return reason, true
+	}
+	l.manualCommits++
+	return l.reply()
 }
 
 // image adds an image to the conversation without a reply.
@@ -450,6 +484,10 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 	case realtime.SpeechStarted, realtime.Interrupted:
 		return l.stopPlayback()
 	case realtime.Committed:
+		if l.manualCommits > 0 {
+			l.manualCommits--
+			return "", false
+		}
 		return l.reply()
 	case realtime.OwnerTranscript:
 		return l.emit(agentwire.OutMessage{Type: agentwire.OutTranscript, Role: agentwire.RoleUser, Text: ev.Text})
