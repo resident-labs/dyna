@@ -7,7 +7,7 @@ test('terminal tab Home and End reveal their tab while shell shortcuts keep focu
   const source = readFileSync(new URL('./TermDock.svelte', import.meta.url), 'utf8')
   const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
   const context: Record<string, unknown> = {
-    list, active: 'b', current: list[1], tick: () => Promise.resolve(),
+    list, docked: list, active: 'b', current: list[1], tick: () => Promise.resolve(),
     setTimeout: (fn: () => void) => fn(), focused: 'shell', ref: 'r', dock: { open: true }, narrow: false,
     rootEl: { contains: () => true }, Node: class {},
     act: (a: { type: string; id?: string }) => { if (a.type === 'tab') context.active = a.id },
