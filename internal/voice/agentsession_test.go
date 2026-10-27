@@ -1071,3 +1071,106 @@ func TestSessionSpeedAndResponseInstructions(t *testing.T) {
 		t.Fatalf("response.create = %s", styled)
 	}
 }
+
+// replyInstructionProtocol names a styled response and a hand commit.
+type replyInstructionProtocol struct{ commitProtocol }
+
+func (replyInstructionProtocol) ResponseInstructed(key, instructions string) any {
+	return "respond:" + key + ":" + instructions
+}
+
+// A session default styles every reply the session asks for, including the
+// automatic reply after turn detection and the reply after a tool result.
+// A commit line's own instructions replace that default for that reply.
+// A provider that cannot set per-response instructions rejects the flag
+// before ready, and a commit line that names instructions.
+func TestSessionReplyInstructionsOnAutomaticAndToolReplies(t *testing.T) {
+	clock := newFakeClock()
+	plain := fakeProvider()
+	closed := make(chan agentwire.InMessage)
+	close(closed)
+	silent := SessionIO{In: closed, Out: func(agentwire.OutMessage) error { return nil }}
+	_, err := fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{ReplyInstructions: "steady accent"}, silent)
+	if err == nil || !strings.Contains(err.Error(), "does not take --reply-instructions") {
+		t.Fatalf("unsupported flag error = %v", err)
+	}
+
+	conn := newChanConn()
+	r := startSession(t, fakeSessions(plain, conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit, Instructions: "this turn"}
+	if m := r.next(t); m.Type != agentwire.OutError || !strings.Contains(m.Message, "does not take per-response instructions") {
+		t.Fatalf("unsupported commit instructions = %+v", m)
+	}
+	if got := conn.sentSoFar(); len(got) != 0 {
+		t.Fatalf("unsupported commit instructions sent %v", got)
+	}
+	close(r.in)
+
+	capable := plain
+	capable.Caps.ResponseInstructions = true
+	capable.Caps.ManualCommit = true
+	capable.Protocol = replyInstructionProtocol{}
+	conn, clock = newChanConn(), newFakeClock()
+	r = startSession(t, fakeSessions(capable, conn, clock), conn, clock, agentwire.SessionRequest{
+		ReplyInstructions: "steady accent",
+		Tools:             []agentwire.SessionTool{{Name: "wave"}},
+	})
+	conn.events <- realtime.Event{Kind: realtime.Committed}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "heard"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "heard" {
+		t.Fatalf("after turn detection = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[respond::steady accent]" {
+		t.Fatalf("automatic reply sent %s, want the session default", got)
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.ToolCall, CallID: "c1", Name: "wave", Args: []byte(`{}`)}
+	if m := r.next(t); m.Type != agentwire.OutToolCall || m.CallID != "c1" {
+		t.Fatalf("tool line = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InToolResult, CallID: "c1", Output: "done"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync during reply = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[respond::steady accent tool:c1:done]" {
+		t.Fatalf("tool result while a reply is active sent %s, want the reply to wait", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
+		t.Fatalf("response done = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[respond::steady accent tool:c1:done respond::steady accent]" {
+		t.Fatalf("reply after tool result sent %s, want the session default", got)
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r2"}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r2"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r2" {
+		t.Fatalf("released reply done = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(1)}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit, Instructions: "this turn"}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after commit = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); !strings.HasSuffix(got, "audio:2 commit respond::this turn]") {
+		t.Fatalf("commit instructions sent %s, want them to replace the default", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r3"}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r3"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r3" {
+		t.Fatalf("commit reply done = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(1)}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after plain commit = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); !strings.HasSuffix(got, "audio:2 commit respond::steady accent]") {
+		t.Fatalf("plain commit sent %s, want the session default", got)
+	}
+}

@@ -132,6 +132,11 @@ type SessionRequest struct {
 	// Speed is the speaking speed, from MinOutputSpeed to MaxOutputSpeed.
 	// Zero keeps the provider default.
 	Speed float64 `json:"speed,omitempty"`
+	// ReplyInstructions is style for every reply this session asks for,
+	// including the automatic reply after turn detection and the reply after
+	// a tool result. A line's own instructions replace it for that reply.
+	// Empty means none.
+	ReplyInstructions string `json:"replyInstructions,omitempty"`
 }
 
 // InMessage is one line from the agent.
@@ -148,8 +153,9 @@ type InMessage struct {
 	Respond bool `json:"respond,omitempty"`
 	// Mode is set on InSay; empty means SayAppend.
 	Mode SayMode `json:"mode,omitempty"`
-	// Instructions, on a say line or a text line that asks for a reply, is
-	// style for that reply only. It does not add a conversation item.
+	// Instructions, on a say line, a text line that asks for a reply, or a
+	// commit line, is style for that reply only. It replaces the session's
+	// reply instructions for that reply. It does not add a conversation item.
 	Instructions string `json:"instructions,omitempty"`
 	CallID       string `json:"call_id,omitempty"`
 	Output       string `json:"output,omitempty"`
