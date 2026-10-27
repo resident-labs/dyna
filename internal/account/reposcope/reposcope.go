@@ -25,7 +25,8 @@ const schema = `CREATE TABLE IF NOT EXISTS account_repo_scopes (
 );
 CREATE TABLE IF NOT EXISTS account_limits (
  account_id TEXT PRIMARY KEY,
- until INTEGER NOT NULL
+ until INTEGER NOT NULL,
+ stated INTEGER NOT NULL DEFAULT 0
 );`
 
 // Store reads and writes account_repo_scopes in one data directory.
@@ -49,9 +50,16 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account_repo_scopes.version", 2, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+	err = database.Migrate(db, "account_repo_scopes.version", 3, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if _, err := conn.ExecContext(ctx, schema); err != nil {
+			return err
+		}
+		if old == 2 {
+			_, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN stated INTEGER NOT NULL DEFAULT 0`)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -151,15 +159,45 @@ const writeWait = 10 * time.Second
 
 // MarkLimited records that the account hit a usage limit that lasts until the given time.
 // A shorter limit never replaces a longer one: the upsert keeps the later end.
+// The end is a guess; MarkReset records one the provider stated.
 func (s *Store) MarkLimited(accountID string, until time.Time) error {
+	return s.mark(accountID, until, false)
+}
+
+// MarkReset is MarkLimited for an end the provider stated, so Stated reports it.
+func (s *Store) MarkReset(accountID string, reset time.Time) error {
+	return s.mark(accountID, reset, true)
+}
+
+func (s *Store) mark(accountID string, until time.Time, stated bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
 	defer cancel()
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx,
-			`INSERT INTO account_limits(account_id, until) VALUES(?,?)
- ON CONFLICT(account_id) DO UPDATE SET until=MAX(until, excluded.until)`, accountID, until.Unix())
+			`INSERT INTO account_limits(account_id, until, stated) VALUES(?,?,?)
+ ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, until=MAX(until, excluded.until)`, accountID, until.Unix(), stated)
 		return err
 	})
+}
+
+// Stated returns the limit ends that the provider stated and that are still
+// after now. A limit end not in it is a guess.
+func (s *Store) Stated(now time.Time) (map[string]time.Time, error) {
+	rows, err := s.db.Query("SELECT account_id, until FROM account_limits WHERE until>? AND stated=1", now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var id string
+		var until int64
+		if err := rows.Scan(&id, &until); err != nil {
+			return nil, err
+		}
+		out[id] = time.Unix(until, 0)
+	}
+	return out, rows.Err()
 }
 
 // Forget deletes an account's repo list and limit inside the caller's
