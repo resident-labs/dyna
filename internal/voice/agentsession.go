@@ -42,6 +42,17 @@ func checkRequest(req *agentwire.SessionRequest) error {
 	default:
 		return fmt.Errorf("--vad-eagerness must be low, medium, high or auto")
 	}
+	switch agentwire.TurnMode(strings.ToLower(strings.TrimSpace(string(req.Turns)))) {
+	case "", agentwire.TurnsAuto:
+		req.Turns = agentwire.TurnsAuto
+	case agentwire.TurnsManual:
+		req.Turns = agentwire.TurnsManual
+	default:
+		return fmt.Errorf("--turns must be auto or manual")
+	}
+	if req.Turns == agentwire.TurnsManual && req.VADEagerness != "" {
+		return fmt.Errorf("--vad-eagerness conflicts with --turns manual; drop --vad-eagerness")
+	}
 	if strings.TrimSpace(req.Instructions) == "" {
 		req.Instructions = defaultSessionInstructions
 	}
@@ -146,6 +157,9 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	if req.VADEagerness != "" && !p.Caps.VADEagerness {
 		return SessionEnd{}, fmt.Errorf("%s does not take --vad-eagerness; choose another provider with --provider, or drop the flag", p.Label)
 	}
+	if req.Turns == agentwire.TurnsManual && (!p.Caps.ManualTurns || !p.Caps.ManualCommit) {
+		return SessionEnd{}, fmt.Errorf("%s does not take --turns manual; choose another provider with --provider, or use --turns auto", p.Label)
+	}
 	tools := make([]realtime.Tool, len(req.Tools))
 	for i, t := range req.Tools {
 		tools[i] = realtime.Tool{
@@ -155,7 +169,7 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 		}
 	}
 	// Dial can take a while: the context ends it, not the session's limits.
-	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en", VADEagerness: req.VADEagerness})
+	conn, err := s.dial(ctx, p, realtime.Session{Instructions: req.Instructions, Tools: tools, Voice: req.Voice, Language: "en", VADEagerness: req.VADEagerness, ManualTurns: req.Turns == agentwire.TurnsManual})
 	if err != nil {
 		return SessionEnd{}, err
 	}
@@ -516,12 +530,29 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 		if ev.Kind == realtime.SpeechStarted {
 			l.heardSpeech = true
 		}
+		// Manual mode does not barge in. Audio that arrives while a reply
+		// plays, and a speech event for that audio, leave the reply running.
+		// The client sends interrupt. An Interrupted event means the server
+		// already stopped the reply, so the client still has to drop playback.
+		if l.req.Turns == agentwire.TurnsManual && ev.Kind == realtime.SpeechStarted {
+			return "", false
+		}
 		return l.stopPlayback()
 	case realtime.SpeechStopped:
 		// Turn detection already ended this turn. Audio still in flight
-		// belongs to the commit the provider is about to send.
+		// belongs to the commit the provider is about to send. In manual
+		// mode the provider must not end the turn, so this event is ignored.
+		if l.req.Turns == agentwire.TurnsManual {
+			return "", false
+		}
 		l.heardSpeech = false
 	case realtime.Committed:
+		// In manual mode only the client's commit asks for a reply. An
+		// unsolicited provider commit must not end the turn or clear the
+		// speech the client still has to commit.
+		if l.req.Turns == agentwire.TurnsManual && !l.commitAsked {
+			return "", false
+		}
 		l.heardSpeech = false
 		if l.commitAsked {
 			l.commitAsked = false

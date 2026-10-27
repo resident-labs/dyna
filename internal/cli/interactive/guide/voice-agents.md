@@ -23,6 +23,7 @@ dyna voice session --prompt-file persona.md --voice marin --tools tools.json --r
 
 `--rate` is the sample rate of your audio (8000 to 96000, default 24000). `--max-minutes` defaults to 30 (at most 120).
 `--vad-eagerness` is `low`, `medium`, `high` or `auto`. It sets how soon turn detection ends a turn. OpenAI Realtime supports it. `high` ends sooner. `low` waits longer. Omit it to keep the provider default. A provider that cannot set it rejects the flag, and the session does not start.
+`--turns` is `auto` (the default) or `manual`. `auto` keeps the provider's turn detection. `manual` turns that detection off. OpenAI Realtime then gets `turn_detection` null. Only `{"type":"commit"}` ends a turn and asks for one reply. `--vad-eagerness` conflicts with `manual`, and the session does not start. A provider that cannot turn detection off rejects `--turns manual`, and the session does not start.
 `--tools` is a JSON list of `{"name","description","parameters","after"}`. `parameters` is a JSON Schema.
 `after` says what a result does. `reply` (the default) asks the model to speak. `later` keeps the result
 as context and asks for no reply, as Dyna Voice's dispatch does. `silent` gives the model an empty result
@@ -37,7 +38,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 | `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | Answer a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
-| `{"type":"commit"}` | End the turn now, if new speech arrived since the last commit. Keepalive silence does not count. The engine commits that speech and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits, the same way a text line with `"respond":true` does. OpenAI Realtime can do this. A provider that cannot sends an `error` line, and the session goes on. |
+| `{"type":"commit"}` | End the turn now, if new speech arrived since the last commit. Keepalive silence does not count. The engine commits that speech and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits, the same way a text line with `"respond":true` does. With `--turns manual`, this line is the only way a turn ends. OpenAI Realtime can do this. A provider that cannot sends an `error` line, and the session goes on. |
 | `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG (at most 5 MB). No reply. OpenAI Realtime only; others send an `error` line. |
 
 | Out (your stdout) | Meaning |
@@ -53,11 +54,12 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 
 Rules to design for:
 
-- **Turn-taking.** The provider detects when people speak and the engine asks for each reply. Send audio all the time,
-  also silence, so it can see where speech ends. If your program already knows the person stopped talking, send `commit` instead of waiting for turn detection. A `commit` after the provider already ended that turn does nothing, even if you kept sending silence, so it will not answer twice. A session with no input audio for 60 seconds ends as `idle`.
+- **Turn-taking.** With `--turns auto`, the provider detects when people speak and the engine asks for each reply. Send audio all the time,
+  also silence, so it can see where speech ends. If your program already knows the person stopped talking, send `commit` instead of waiting for turn detection. A `commit` after the provider already ended that turn does nothing, even if you kept sending silence, so it will not answer twice. With `--turns manual`, the provider does not end the turn. Send `commit` when the person has finished. That is the only end, and it asks for one reply. A session with no input audio for 60 seconds ends as `idle`.
   When stdin ends, the session ends as `input-closed`: keep stdin open until you have the last `response_done`.
 - **Barge-in.** On `speech_started`, drop the audio you have queued and stop playback at once. The engine has
   already cancelled the reply. Truncation is approximate, because the engine does not know how much you played.
+  With `--turns manual`, audio that arrives while a reply plays does nothing automatic. The engine does not cancel that reply, and it does not send `speech_started` for that audio. Send `{"type":"interrupt"}` to stop playback. Then send `commit` when the person has finished the new turn.
 - **Tool calls.** Answer each `tool_call` with a `tool_result` that has the same `call_id`, within 10 seconds.
   After that, with no result, the model gets an error and you get an `error` line. That error still asks
   for a reply, even on a `later` or `silent` tool. Do slow work in the background and answer fast, for

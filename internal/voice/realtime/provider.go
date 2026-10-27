@@ -74,6 +74,11 @@ type Capabilities struct {
 	// how soon turn detection ends a turn. A provider without it rejects
 	// the flag.
 	VADEagerness bool
+	// ManualTurns: the session can turn off this provider's turn detection.
+	// Only a client commit then ends a turn. A provider without it rejects
+	// --turns manual. It also needs ManualCommit, so the client can end
+	// the turn it now owns.
+	ManualTurns bool
 }
 
 // Session is what Dyna wants from every provider's session.
@@ -88,6 +93,10 @@ type Session struct {
 	// high or auto. Empty means the provider default. Only a provider with
 	// Capabilities.VADEagerness applies it.
 	VADEagerness string
+	// ManualTurns turns off the provider's turn detection. Only a client
+	// commit then ends a turn. Only a provider with Capabilities.ManualTurns
+	// applies it.
+	ManualTurns bool
 }
 
 // Registry finds a provider by its key or an alias.
