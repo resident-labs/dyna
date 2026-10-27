@@ -22,7 +22,11 @@ dyna voice session --prompt-file persona.md --voice marin --tools tools.json --r
 ```
 
 `--rate` is the sample rate of your audio (8000 to 96000, default 24000). `--max-minutes` defaults to 30 (at most 120).
-`--tools` is a JSON list of `{"name","description","parameters"}` with a JSON Schema in `parameters`.
+`--tools` is a JSON list of `{"name","description","parameters","after"}`. `parameters` is a JSON Schema.
+`after` says what a result does. `reply` (the default) asks the model to speak. `later` keeps the result
+as context and asks for no reply, as Dyna Voice's dispatch does. `silent` gives the model an empty result
+and asks for no reply, as Dyna Voice's remain_silent does. The session passes those marks to the
+provider, as Dyna Voice does. Any other value is an error, and the session does not start.
 Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--rate`.
 
 | In (your stdin) | Meaning |
@@ -53,8 +57,10 @@ Rules to design for:
 - **Barge-in.** On `speech_started`, drop the audio you have queued and stop playback at once. The engine has
   already cancelled the reply. Truncation is approximate, because the engine does not know how much you played.
 - **Tool calls.** Answer each `tool_call` with a `tool_result` that has the same `call_id`, within 10 seconds.
-  Later, the model gets an error result and you get an `error` line. Do slow work in the background and
-  answer fast, for example "started"; then tell the model the result with `{"type":"text","text":"…","respond":true}` or `say`.
+  After that, with no result, the model gets an error and you get an `error` line. That error still asks
+  for a reply, even on a `later` or `silent` tool. Do slow work in the background and answer fast, for
+  example "started". A `later` tool keeps that word as context and does not speak. Tell the model the real
+  result later with `{"type":"text","text":"…","respond":true}` or `say`.
 - **Images.** Write the file, send `{"type":"image","path":…}`, then ask about it with `text` or let the person ask.
 - **`ready` first.** Do not send audio before `ready`; a start failure prints the error and exits non-zero.
 
