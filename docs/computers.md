@@ -248,6 +248,40 @@ The compositor uses GLES2 when a render node works, with a pixman software
 fallback. wayvnc enables GPU features after a successful VA-API H.264 encode probe.
 The viewer negotiates its actual encoding and can use normal Tight/ZRLE encodings.
 
+## Desktop apps, GPU apps and games
+
+A computer runs native Wayland apps and X11 apps through Xwayland. Qt 6 apps
+need the `qt6-wayland` plugin or use Xwayland with `QT_QPA_PLATFORM=xcb`.
+Apps get the host GPU through `/dev/dri`, so OpenGL apps render with hardware
+acceleration when the host has a working driver. Check what an app sees
+with `dyna computer run --status "check GL" -- glxinfo -B` (Xwayland) or
+`eglinfo -B` (Wayland).
+
+Open an app with `dyna computer open -- <app>`, then drive it with
+`dyna computer act` and check it with screenshots. For example, a game
+launcher such as Prism Launcher can join a Minecraft server directly:
+`dyna computer open -- prismlauncher --launch <instance> --server host:port`.
+
+An agent session can run with a private `HOME` for its harness, so an app may
+start with empty data and show its first-run setup. To give an agent existing
+app data, copy the data folder and pass the copy with the app's data folder
+flag, for example `prismlauncher --dir "$DYNA_SCRATCH/PrismLauncher"`, or sign
+the copy in with a separate test account. Do not point the app at the owner's
+own data folder unless the owner agrees: it shares their account tokens and
+settings. Never do it while the owner's own copy of the app is open, because
+two instances that write one folder can corrupt it.
+
+Limits for game QA:
+
+- Actions move the pointer to absolute positions only. A game that locks the
+  pointer and reads relative motion, such as mouse-look, does not turn. Menus,
+  keys, chat and screenshots work.
+- A computer has no audio output. Most games run without sound.
+- The computer shares the owner's files and sign-ins (see below). A game that
+  allows one session per account disconnects the owner's own session when an
+  agent joins with that account. Use a separate test account, or ask the owner
+  first.
+
 ## Trust and sharing gaps
 
 A computer shares the owner's Unix account and files. It is not a sandbox.
