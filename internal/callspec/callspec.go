@@ -50,7 +50,7 @@ var LongCalls = map[string]time.Duration{
 	// Posting delivers to sessions, which can start a harness: delivery to a
 	// room's root can close it and start a new root (notify.deliverRoot).
 	// Item 8 commits the post and returns at once, with delivery after it.
-	"Send": 30 * time.Second, "SendToSession": 30 * time.Second, "Post": 30 * time.Second,
+	"Send": 30 * time.Second, "SendFromCard": 30 * time.Second, "SendToSession": 30 * time.Second, "Post": 30 * time.Second,
 	// Giving the root seat back delivers its handoff the same way.
 	"ReturnSeat": 30 * time.Second,
 	// Taking the root seat gives the internal root up to 30 s to write its

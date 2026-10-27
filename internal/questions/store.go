@@ -22,6 +22,9 @@ type Answer struct {
 	Human  bool   `json:"human,omitempty"`
 	Choice string `json:"choice,omitempty"`
 	Text   string `json:"text,omitempty"`
+	// Source is room.SourceCard when an HTML card wrote the answer and the
+	// owner confirmed it.
+	Source string `json:"source,omitempty"`
 }
 type Withdraw struct {
 	At time.Time `json:"at"`

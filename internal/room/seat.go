@@ -60,6 +60,10 @@ const VoiceAgent = "voice-call"
 // SourceVoice marks the posts of the owner's voice call.
 const SourceVoice = "voice"
 
+// SourceCard marks an owner post or question answer that an HTML card wrote
+// and the owner confirmed with the app's own Send button.
+const SourceCard = "card"
+
 // OwnerRequest reports whether msg is the owner's own request: a post the
 // human typed, or one Voice relays from the owner's speech. Such a post
 // starts the internal root and owes the owner its report.

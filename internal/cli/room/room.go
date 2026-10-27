@@ -487,9 +487,11 @@ func PostCmd() *cobra.Command {
 			"To get the owner's input back, use plain inputs and your own Send button (not a <form> submit), and on that click call\n" +
 			"parent.postMessage({type: 'dyna:submit', text: '…', choice: '…'}, '*'). text is up to 16 KB (send JSON\n" +
 			"for structured input); choice is optional. It works only right after the owner clicks or types in the card.\n" +
+			"The app then shows the text under the card, and the owner must press the app's own Send button to send it.\n" +
+			"What is sent is marked as written by a card. If the owner presses Cancel, you get ok: false, error: 'cancelled'.\n" +
 			"With dyna ask --html, the text (or the choice, when it is one of the options) answers the question. On any\n" +
 			"other card it is an owner reply to you, which wakes you. The card gets back\n" +
-			"{type: 'dyna:submitted', ok: true|false, error?: 'answered'} in a window 'message' event.\n" +
+			"{type: 'dyna:submitted', ok: true|false, error?: 'answered'|'cancelled'|'replaced'} in a window 'message' event.\n" +
 			"To size the card, call parent.postMessage({type: 'dyna:height', height: 480}, '*'), or set\n" +
 			"<meta name=\"dyna-height\" content=\"480\"> (120-1200 px, default 360). <title> names the card.\n" +
 			"Every room member can read the file, so never put secrets in it.\n\n" +

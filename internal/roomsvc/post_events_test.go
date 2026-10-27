@@ -56,3 +56,18 @@ func TestOnePostIsOnePostsEvent(t *testing.T) {
 		t.Fatalf("the write also published %+v; want the watch's event only", published)
 	}
 }
+
+func TestPostFromCardMarksTheSource(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	if _, _, err := e.svc.rooms().SetSeat(e.ctx, rec.ID, room.Seat{External: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.PostFromCard(e.ctx, "alpha", "@root hello", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Message.Source != room.SourceCard || !res.Message.Human {
+		t.Fatalf("post: %+v", res.Message)
+	}
+}

@@ -390,6 +390,6 @@ func (s *Service) SendFromConversation(ctx context.Context, roomRef, draft, repl
 		}
 		return SendResult{Kind: "spawn", Spawn: &res}, nil
 	}
-	res, err := s.postIn(ctx, roomRef, draft, replyTo, forwardOf, conversation, refs, atts...)
+	res, err := s.postIn(ctx, roomRef, draft, replyTo, forwardOf, conversation, false, refs, atts...)
 	return SendResult{Kind: "post", Post: &res}, err
 }
