@@ -52,8 +52,16 @@ func TestEachRoomWithAgentsHearsOncePerIntervalThenRecovery(t *testing.T) {
 	if err := n.Recover("laptop"); err != nil || len(*sent) != 6 {
 		t.Fatalf("second recovery sent %d, %v", len(*sent), err)
 	}
+	*now = t0.Add(Interval + Hold - time.Minute)
+	if err := n.Alert(rep); err != nil || len(*sent) != 6 {
+		t.Fatalf("an overload inside Hold after recovery is a flap, sent %d, %v", len(*sent), err)
+	}
+	if err := n.Recover("laptop"); err != nil || len(*sent) != 6 {
+		t.Fatalf("a flap must not send a second recovery, sent %d, %v", len(*sent), err)
+	}
+	*now = t0.Add(Interval + Hold)
 	if err := n.Alert(rep); err != nil || len(*sent) != 8 {
-		t.Fatalf("a new overload must alert at once, sent %d, %v", len(*sent), err)
+		t.Fatalf("an overload after Hold must alert, sent %d, %v", len(*sent), err)
 	}
 }
 
@@ -94,9 +102,10 @@ func TestPostNoteWakesRootForAnOverloadButNotForRecovery(t *testing.T) {
 	}
 }
 
-// An overload that returns inside the report cooldown must alert again, and a
-// pass with no fresh samples must not announce recovery.
-func TestOverloadRecoveryThenSameOverloadAlertsAgain(t *testing.T) {
+// An overload that returns inside Hold after a recovery stays quiet, one that
+// returns after Hold alerts, and a pass with no fresh samples must not announce
+// recovery.
+func TestOverloadRecoveryThenSameOverloadAlertsAfterHold(t *testing.T) {
 	n, sent, now := fake(t, []RoomUse{{RoomID: "a", Room: "a", Running: 2}})
 	samples := doctor.Samples{DataDir: n.DataDir}
 	load := func(at time.Time, perCore float64) {
@@ -122,9 +131,15 @@ func TestOverloadRecoveryThenSameOverloadAlertsAgain(t *testing.T) {
 	}
 	*now = now.Add(time.Minute)
 	load(*now, 3)
-	pass() // the same overload, inside the report cooldown, alerts again
+	pass() // the same overload, inside Hold, is a flap: no alert
+	if len(*sent) != 2 {
+		t.Fatalf("sent %d after a flap, want none new", len(*sent))
+	}
+	*now = now.Add(Hold)
+	load(*now, 3)
+	pass() // after Hold the overload alerts again
 	if len(*sent) != 3 || (*sent)[2].Recovered {
-		t.Fatalf("sent %d after the overload returned, want a new alert", len(*sent))
+		t.Fatalf("sent %d after Hold, want a new alert", len(*sent))
 	}
 	*now = now.Add(time.Hour) // the samples are stale now
 	pass()
