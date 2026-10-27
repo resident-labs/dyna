@@ -484,6 +484,9 @@ func TestLongCallsAreBoundAndListedOnPurpose(t *testing.T) {
 		}
 	}
 	// VoiceResume can dial a provider, like VoiceStart.
+	if callspec.Deadline("VoiceSay") <= voice.SayTimeout {
+		t.Errorf("VoiceSay deadline %v must exceed SayTimeout %v", callspec.Deadline("VoiceSay"), voice.SayTimeout)
+	}
 	if n := len(callspec.LongCalls); n != 100 {
 		t.Fatalf("LongCalls has %d calls, want 100; a call over 5 s needs a reason and a deliberate change here", n)
 	}
