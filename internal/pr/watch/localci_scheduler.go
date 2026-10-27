@@ -198,9 +198,9 @@ func shortHead(head string) string {
 	return head
 }
 
-// A merge trial uses the same node slots as an integration sync, and it is the
-// only work these machines schedule: a pull request head is checked by GitHub's
-// hosted CI, so nothing here queues one.
+// A merge trial uses the same node slots as an integration sync. A pull request
+// head is checked by GitHub's hosted CI, except in a local-only room, where
+// localOnlyPRHeadJobs queues it.
 func registeredCIJobs(st State) []registeredCIJob {
 	var jobs []registeredCIJob
 	for _, b := range st.MergeTrials {
@@ -251,6 +251,34 @@ func registeredCIJobs(st State) []registeredCIJob {
 	return jobs
 }
 
+// localOnlyPRHeadJobs returns a job for the current head of each open, watched
+// pull request in a room whose CI mode is local. Such a room has no hosted CI to
+// test the head, and the merge queue waits for a head result, so the scheduler
+// runs it as it runs a trial. Hosted and both modes keep GitHub's run as it was.
+func (s *Service) localOnlyPRHeadJobs(ctx context.Context, st State) ([]registeredCIJob, error) {
+	var jobs []registeredCIJob
+	modes := map[string]string{}
+	for _, r := range st.Records {
+		if r == nil || changeKind(*r) != "github" || !r.Watching || r.State != "open" || r.Head == "" || !headVerified(*r) ||
+			!strings.EqualFold(r.HeadRepo, r.Repo) || strings.HasPrefix(r.Branch, "dyna/merge-trial/") {
+			continue
+		}
+		mode, ok := modes[r.RoomID]
+		if !ok {
+			var err error
+			if mode, err = s.ciRegistry().Mode(ctx, r.RoomID); err != nil {
+				return nil, err
+			}
+			modes[r.RoomID] = mode
+		}
+		if mode == localci.ModeLocal {
+			jobs = append(jobs, registeredCIJob{record: *r, head: r.Head, branch: r.Branch, base: r.Base})
+		}
+	}
+	sort.Slice(jobs, func(i, j int) bool { return registeredJobKey(jobs[i]) < registeredJobKey(jobs[j]) })
+	return jobs, nil
+}
+
 // scheduleRegisteredCI owns only live cancellation handles. Nodes, modes,
 // completed results and hosted cancellations live in SQLite.
 func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
@@ -277,7 +305,13 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	desired := map[string]registeredCIJob{}
 	var jobs []registeredCIJob
 	modes := map[string]string{}
-	for _, job := range registeredCIJobs(st) {
+	wanted := registeredCIJobs(st)
+	// Trials come first: they hold merges that the heads wait behind.
+	headJobs, err := s.localOnlyPRHeadJobs(ctx, st)
+	if err != nil {
+		return err
+	}
+	for _, job := range append(wanted, headJobs...) {
 		if job.hosted() {
 			// The room's hosted CI mode decides hosted work only: admission
 			// applies the local trial hold to a local head, so a room in GitHub
@@ -986,7 +1020,12 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 		return err
 	}
 	current := false
-	for _, candidate := range registeredCIJobs(st) {
+	candidates := registeredCIJobs(st)
+	headJobs, err := s.localOnlyPRHeadJobs(ctx, st)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range append(candidates, headJobs...) {
 		if registeredJobKey(candidate) == registeredJobKey(job) {
 			job = candidate
 			current = true
