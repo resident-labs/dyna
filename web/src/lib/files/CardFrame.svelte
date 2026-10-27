@@ -4,7 +4,7 @@
   import { questionView } from '../app/questions.svelte.ts'
   import { sandbox, guard, onLoad, readCardMessage, frameKey, forKey } from '../ui/rich.ts'
   import type { CardGuard } from '../ui/rich.ts'
-  import { routeSubmit } from './cardSubmit.ts'
+  import { replyDraft, routeSubmit } from './cardSubmit.ts'
   import type { CardPost, SubmitRoute } from './cardSubmit.ts'
   import type { Attachment } from '../api/room.ts'
 
@@ -135,7 +135,7 @@
     sending = true
     try {
       if (route.kind === 'answer') await questionView.answerFromCard(route.question, route.choice, route.text)
-      else await api.sendFromCard(roomId, route.draft, route.replyTo, route.conversation)
+      else await api.sendFromCard(roomId, replyDraft(route), route.replyTo, route.conversation)
       reply({ type: 'dyna:submitted', ok: true })
     } catch (err) {
       reply({ type: 'dyna:submitted', ok: false, error: errorText(err) })
@@ -171,7 +171,7 @@
   {#if pending && pending.kind !== 'refuse'}
     <div class="confirm" role="group" aria-label="Confirm what the card sends">
       <p class="what">{pending.kind === 'answer' ? 'This card wants to answer the question with' : 'This card wants to reply to its author with'}</p>
-      <pre class="text">{pending.kind === 'answer' ? pending.choice || pending.text : pending.draft.replace(/^@\S+ /, '')}</pre>
+      <pre class="text">{pending.kind === 'answer' ? pending.choice || pending.text : pending.text}</pre>
       <div class="buttons"><button class="send" disabled={sending} onclick={confirm}>Send</button><button disabled={sending} onclick={cancel}>Cancel</button></div>
     </div>
   {/if}
