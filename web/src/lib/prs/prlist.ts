@@ -3,7 +3,7 @@
 // PRDetail.svelte draw the result.
 import type { BotReview, ChangePolicy, Finding, MainCI, MergeQueueItem, MergeTrialStatus } from '../api/change.ts'
 import type { GitHubItem, GitHubUser } from '../api/github.ts'
-import { ordinal, verdictMeta, isLocal, prTracks, withCI, checkSummary, checkMeta, type Facts, type Meta } from './pr.ts'
+import { ordinal, verdictMeta, isLocal, prTracks, withCI, checkSummary, checkMeta, changeName, type Facts, type Meta } from './pr.ts'
 
 // A list row: a change, or the stand-in row of a GitHub PR no change covers.
 // A detail row also holds its findings.
@@ -294,6 +294,22 @@ function mergeStep(c: Row, merge: Pick<MergeItem, 'state'> | null): Step {
 }
 
 const MERGE_ICON: Record<string, string> = { sage: 'ok', done: 'ok', coral: 'bad', gold: 'run', run: 'run', iris: 'run' }
+
+// A session opened by id alone, without a member row: a pool reviewer is a
+// service outside the room hierarchy, so a change row carries only its id
+// and name. The workflow run view opens its agents the same way.
+export interface SessionRef {
+  id: string
+  name: string
+  hue: number
+  roomId?: string
+}
+
+// reviewerRef is the live reviewer of a change, to open its session view
+// while it works. It returns null when no reviewer session is assigned.
+export function reviewerRef(c: Row, roomId: string): SessionRef | null {
+  return c.reviewerSession ? { id: c.reviewerSession, name: c.reviewerName || `reviewer of ${changeName(c)}`, hue: 0, roomId } : null
+}
 
 // mergeBox is the GitHub-style box at the end of the conversation: one row
 // each for the checks, the review and the merge. status is the statusBox
