@@ -24,7 +24,6 @@ export function clampHeight(height: number, avail: number): number {
 }
 
 export type DockAction =
-  | { type: 'toggle' }
   | { type: 'show' }
   | { type: 'hide' }
   | { type: 'maximize' }
@@ -33,7 +32,6 @@ export type DockAction =
 
 export function dockReduce(v: DockView, a: DockAction): DockView {
   switch (a.type) {
-    case 'toggle': return dockReduce(v, { type: v.open ? 'hide' : 'show' })
     case 'show': return { ...v, open: true }
     case 'hide': return { ...v, open: false, maxed: false }
     case 'maximize': return { ...v, open: true, maxed: !v.maxed }
