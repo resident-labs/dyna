@@ -1,4 +1,4 @@
-// The sidebar's Work and Machine rows. A row with more than one tab shows
+// The sidebar's Work and Machine rows (Library is the last Work row). A row with more than one tab shows
 // the tabs in the header; each tab keeps its own view id, so links and the
 // saved last view still name one page. A row opens its first tab.
 export interface Tab {
@@ -31,12 +31,12 @@ export const sections: Section[] = [
       { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }, { id: 'jobs', label: 'Shell jobs', hidden: true }] },
       { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
       { id: 'visuals', label: 'visuals', hint: 'Every HTML card in this room', tabs: [{ id: 'visuals', label: 'Visuals' }] },
+      { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
     ],
   },
   {
     label: 'Machine',
     rows: [
-      { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
       { id: 'terminal', label: 'terminal', hint: 'A shell on the host', terminal: true, tabs: [{ id: 'terminal', label: 'Terminal' }] },
       { id: 'computers', label: 'computers', hint: 'Every agent computer in this room', computers: true, tabs: [{ id: 'computers', label: 'Computers' }] },
     ],

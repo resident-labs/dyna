@@ -11,8 +11,6 @@
   import { motion, BASE, FAST } from '../ui/motion.ts'
   import { GENERAL, ROOM_CHAT } from './feedViews.ts'
   import Avatar from '../ui/Avatar.svelte'
-  import PushBell from '../settings/PushBell.svelte'
-  import { features } from '../../api.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import PRChip from '../prs/PRChip.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
@@ -46,16 +44,13 @@
     runs?: RunList | null
     dataDir?: string
     ownerHue?: number
-    update?: boolean
     prs?: Record<string, Facts[]>
     computers?: ComputerInfo[] | null
     onroommenu?: ((x: number, y: number, anchor?: HTMLElement) => void) | null
     onview: (view: string) => void
     onmember: (member: Member) => void
-    onsettings?: (() => void) | null
-    onlogout?: (() => void) | null
   }
-  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, viewUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null }: Props = $props()
+  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, viewUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, prs = {}, computers = null, onroommenu = null, onview, onmember }: Props = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
@@ -142,18 +137,6 @@
       <span title={dataDir}>{room ? `owner of ${roomLabel(room)}` : 'room owner'}</span>
       {#if route}<span class="route" title={route.better ? `A nearer route is open: ${route.better}` : ''}>via {route.label}{route.better ? ' · nearer: ' + route.better : ''}</span>{/if}
     </div>
-    {#if onsettings}
-    <button class="gear" onclick={onsettings} aria-label="Settings" title="Profiles and settings">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg>
-      {#if update}<span class="udot" aria-label="Update available"></span>{/if}
-    </button>
-    {/if}
-    {#if onlogout}
-    {#if features.push}<PushBell />{/if}
-    <button class="gear" onclick={onlogout} aria-label="Sign out this device" title="Sign out this device">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M14 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2H14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M11 12h9m-3.2-3.5L20.3 12l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-    </button>
-    {/if}
   </footer>
 </aside>
 
@@ -264,14 +247,6 @@
     padding: 0 var(--s3);
   }
   .who { display: flex; flex-direction: column; min-width: 0; line-height: var(--leading-tight); flex: 1; }
-  .gear { position: relative; width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); flex: none; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .gear:hover { background: var(--hover); color: var(--ink); }
-  }
-  .gear:active {
-    background: var(--select);
-}
-  .udot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px #18171a; }
   .who strong { font-size: var(--t-body); font-weight: 600; }
   .who .route { font-size: var(--t-cap); }
   .who span { font-size: var(--t-cap); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
