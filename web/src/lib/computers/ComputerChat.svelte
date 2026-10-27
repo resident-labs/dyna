@@ -5,6 +5,8 @@
   // Chat: the recent thread grows upward. The rules live in chatState.ts.
   import { tick, untrack, onMount, onDestroy } from 'svelte'
   import DmRows from '../sessions/DmRows.svelte'
+  import FloatWindow from '../ui/FloatWindow.svelte'
+  import { clampRect, type Area, type Rect } from '../sessions/termDock.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
   import { dmView } from '../sessions/dm.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
@@ -88,6 +90,19 @@
     if (shape === CHAT) tick().then(() => scroller && (scroller.scrollTop = scroller.scrollHeight))
   })
 
+  // The open chat is a floating window over the stream's frame; a phone keeps the bottom sheet.
+  let phone = $state(false)
+  let area = $state<Area>({ w: 0, h: 0 })
+  let box = $state<Rect | null>(null)
+  // The first place is the old one: bottom centre, 420 px wide.
+  const placeChat = (a: Area): Rect => {
+    const w = 420, h = Math.min(420, Math.floor(a.h * 0.62))
+    return { w, h, x: Math.floor((a.w - w) / 2), y: a.h - h - 8 }
+  }
+  const winRect = $derived(clampRect(box ?? placeChat(area), area))
+  const moveWin = (x: number, y: number, a: Area) => { box = clampRect({ ...winRect, x, y }, a) }
+  const sizeWin = (w: number, h: number, a: Area) => { box = clampRect({ ...winRect, w, h }, a) }
+
   const go = (where: ChatWhere) => { shape = chatClick(shape, where) }
   // Stop the stream from taking a click on the chat, and tuck on a click on the stream.
   export function streamClick() { go('stream') }
@@ -109,7 +124,11 @@
   onMount(() => {
     // Capture: the computer's key handler would otherwise take Ctrl+/ first.
     addEventListener('keydown', onkey, true)
-    return () => removeEventListener('keydown', onkey, true)
+    const narrow = matchMedia('(max-width: 760px)')
+    const sync = () => { phone = narrow.matches }
+    sync()
+    narrow.addEventListener('change', sync)
+    return () => { removeEventListener('keydown', onkey, true); narrow.removeEventListener('change', sync) }
   })
 
   async function send() {
@@ -143,7 +162,34 @@
   const placeholder = $derived(m?.closed ? `${who} is closed` : `Message @${who}`)
 </script>
 
-<div class="dock" data-chat data-state={shape} bind:this={dockEl}>
+{#snippet chatBody()}
+  <p class="intent">{line}</p>
+  <div class="thread" bind:this={scroller}>
+    {#if shown && m}<DmRows compact dm={shown} {room} member={m} {members} onthread={() => onmessages?.()} {onopenfile} {onpost} />{/if}
+    {#if !shown?.rows.length}<p class="empty">Nothing said yet.</p>{/if}
+  </div>
+  <div class="input">
+    <ComposerBox model={m?.profile || m?.model || ''} mode="Direct message" skin="glass" {attachments} bind:draft bind:field {placeholder} {busy} {canSend} bad={!!sendError} closed={!!m?.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
+  </div>
+  {#if sendError}<p class="err" role="alert">{sendError}</p>{/if}
+{/snippet}
+
+<div class="root" data-chat data-state={shape} bind:this={dockEl}>
+{#if shape === CHAT && !phone}
+  <!-- On a desktop the open chat is the shared floating window: it moves, resizes and scrolls like a terminal window. -->
+  <div class="layer" bind:clientWidth={area.w} bind:clientHeight={area.h}>
+    <FloatWindow rect={winRect} {area} label={`Chat with ${who}`} z={1} onmove={moveWin} onsize={sizeWin}>
+      {#snippet title()}
+        <span class="status-dot" aria-hidden="true"></span><span class="tl"><b>{who}</b>{#if age}<span class="age"> {age}</span>{/if}</span>
+      {/snippet}
+      {#snippet buttons()}
+        <button class="ib" onclick={() => go('header')} aria-label="Tuck the chat" title="Tuck (Esc)">⌄</button>
+      {/snippet}
+      {@render chatBody()}
+    </FloatWindow>
+  </div>
+{:else}
+<div class="dock">
   {#if shape === TUCKED}
     <button class="pill glass pop" onclick={() => go('pill')} title={line} aria-label={`Open chat: ${line}`}>
       <span class="status-dot" class:unread aria-hidden="true"></span>
@@ -175,21 +221,20 @@
         <span class="status-dot" aria-hidden="true"></span><b>{who}</b>{#if age}<span class="age">{age}</span>{/if}
         <button class="x" onclick={() => go('header')} aria-label="Tuck the chat" title="Tuck (Esc)">⌄</button>
       </header>
-      <p class="intent">{line}</p>
-      <div class="thread" bind:this={scroller}>
-        {#if shown && m}<DmRows compact dm={shown} {room} member={m} {members} onthread={() => onmessages?.()} {onopenfile} {onpost} />{/if}
-        {#if !shown?.rows.length}<p class="empty">Nothing said yet.</p>{/if}
-      </div>
-      <div class="input">
-        <ComposerBox model={m?.profile || m?.model || ''} mode="Direct message" skin="glass" {attachments} bind:draft bind:field {placeholder} {busy} {canSend} bad={!!sendError} closed={!!m?.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
-      </div>
-      {#if sendError}<p class="err" role="alert">{sendError}</p>{/if}
+      {@render chatBody()}
     </div>
   {/if}
+</div>
+{/if}
 </div>
 
 <style>
   /* The tucked pill starts below the stream. Open chat grows upward. */
+  .root { display: contents; }
+  /* The window's area is the stream's frame; only the window takes pointer input. */
+  .layer { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+  .layer :global(.win) { position: absolute; }
+  .layer .age { margin-left: 4px; }
   .dock { position: absolute; left: 50%; bottom: -42px; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; max-width: calc(100% - 16px); }
   .glass { background: rgba(var(--glass-ink), var(--glass)); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border: 1px solid var(--hair-strong); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
   .pop { animation: pop var(--motion-slow) var(--ease); }
@@ -221,10 +266,10 @@
   @media (hover: hover) {
     .chat header .x:hover { color: var(--ink); }
   }
-  .thread { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 14px 12px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .thread { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 14px 12px; display: flex; flex-direction: column; }
   .thread > :global(:first-child) { margin-top: auto; }
   .empty { color: var(--faint); text-align: center; font-size: 12.5px; }
-  .chat .input { margin: 0 8px 8px; }
+  .chat .input, .layer .input { margin: 0 8px 8px; }
 
   .err { margin: 0 10px 6px; font-size: 12px; color: var(--coral); }
   @media (max-width: 760px) {
