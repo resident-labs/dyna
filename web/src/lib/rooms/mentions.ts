@@ -15,7 +15,7 @@ export interface MentionMember {
 }
 
 export function mentionOptions(choices: readonly string[]): MentionOption[] {
-  return choices.map((c) => ({ value: c, hint: c === '@root' ? 'external orchestrators watching this room' : c === '@team' ? 'your top-level sessions' : 'member' }))
+  return choices.map((c) => ({ value: c, hint: c === '@root' ? 'external orchestrators watching this room' : c === '@team' ? 'your top-level sessions' : c.includes(':') ? 'another room' : 'member' }))
 }
 
 export function matchMentions(options: readonly MentionOption[], text: string, limit = 8): MentionOption[] {

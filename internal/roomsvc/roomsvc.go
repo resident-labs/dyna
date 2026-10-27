@@ -428,6 +428,10 @@ type Post struct {
 	FromEmoji string `json:"fromEmoji,omitempty"`
 	// Speaker is the sender's label (see SpeakerLabel).
 	Speaker string `json:"speaker"`
+	// FromRoom names the room the owner wrote this post from, set only on a
+	// post the owner sent from another room. The feed marks such a post as a
+	// cross-room message.
+	FromRoom string `json:"fromRoom,omitempty"`
 	// FullResult marks a completion whose Text the feed replaced with the
 	// turn's full result from the session store. The stored post keeps its
 	// short preview; agents read that one.

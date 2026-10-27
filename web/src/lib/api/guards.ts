@@ -153,6 +153,7 @@ export function isPost(v: unknown): v is Post {
     isBoolean(v.completion) &&
     isNumber(v.fromHue) &&
     isString(v.speaker) &&
+    optional(v.fromRoom, isString) &&
     optional(v.detail, isPostDetail) &&
     optional(v.preview, isString) &&
     optional(v.hidden, isNumber) &&

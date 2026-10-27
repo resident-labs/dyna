@@ -42,6 +42,18 @@ type fullResult struct {
 // result, read from the session store like `dyna subagent output`. Only the
 // UI calls it; the stored post, and what agents read, stay short.
 func (s *Service) expand(p Post, book avatarBook) Post {
+	p = s.expandResult(p, book)
+	// A post the owner wrote in another room names that room, so the feed marks
+	// it as a message from there. Agents' cross-room posts stay as they are.
+	if p.Human && p.SenderRoomID != "" && p.SenderRoomID != p.RoomID {
+		if from, err := s.rooms().Resolve(p.SenderRoomID); err == nil {
+			p.FromRoom = from.Name
+		}
+	}
+	return p
+}
+
+func (s *Service) expandResult(p Post, book avatarBook) Post {
 	if ev, ok := p.Shell(); ok {
 		return s.expandShellEvent(p, ev)
 	}
