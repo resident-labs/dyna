@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store'
 import { isRecord } from '../api/guards.ts'
+import { dockOf, type DockView } from '../sessions/termDock.ts'
 
 // Layout preferences live in the webview's localStorage. They are view
 // state only, so Go never sees them. A missing or broken store falls back
@@ -75,4 +76,16 @@ export function lastRoom() {
 
 export function saveLastRoom(room: string, view: string) {
   saveLayout({ room, view: viewOrGeneral(view) })
+}
+
+// The terminal dock's state (open, height, maximized, open shell) is kept per
+// room on this device.
+export function loadDock(room: string): DockView {
+  const saved = read().terminalDock
+  return dockOf(isRecord(saved) ? saved[room] : undefined)
+}
+
+export function saveDock(room: string, dock: DockView) {
+  const saved = read().terminalDock
+  saveLayout({ terminalDock: { ...(isRecord(saved) ? saved : {}), [room]: dock } })
 }
