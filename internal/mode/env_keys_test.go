@@ -138,6 +138,7 @@ var nonStampPrefixes = map[string]string{
 	"DYNA_HOOK_":     "Hook event fields, not the process caller stamp.",
 	"DYNA_MCP_":      "Generated per-server MCP execution bridge settings.",
 	"DYNA_CI_CLEAN_": "Settings of the cache cleanup that a run sends to a CI machine.",
+	"DYNA_SCRATCH_": "Settings of the scratch sweep that Dyna sends to a CI machine.",
 	"DYNA_CHROMIUM_": "Chromium launcher settings for a shell's browser, not a caller stamp.",
 	"DYNA_FAKE_":     "Fixture switches that only the test-only fake harness reads.",
 	"DYNA_PI_":       "Path of the Pi package the renewal script imports; a launch input, not a caller stamp.",
