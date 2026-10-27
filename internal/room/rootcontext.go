@@ -82,7 +82,7 @@ func rootInput(msg Message, roomName string) bool {
 	// A check-in is input for the parent it names, whoever posted it: the
 	// engine now, and "system:parent-checkin" for a post stored before the
 	// typed events. The family check covers both.
-	return rootWakes(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == "dyna" || msg.Kind == string(FamilyCheckin))
+	return rootWakes(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == EngineSender || msg.Kind == string(FamilyCheckin))
 }
 
 // rootWakes reports whether a post requires the root seat to act. A session's
