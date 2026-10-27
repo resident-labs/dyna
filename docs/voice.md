@@ -89,7 +89,7 @@ The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rat
 | `{"type":"say","text":"…"}` | Make the voice speak this text. |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | The result of a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
-| `{"type":"commit"}` | End the turn now. The engine commits the buffered audio and asks for one reply. If a reply is already in flight, the new reply waits. OpenAI Realtime can do this. A provider that cannot returns an `error` line. |
+| `{"type":"commit"}` | End the turn now, if microphone audio arrived since the last commit. The engine commits that audio and asks for one reply. If the provider already ended the turn, or no new audio arrived, the line does nothing: no error and no second reply. If a reply is already in flight, the new reply waits. OpenAI Realtime can do this. A provider that cannot returns an `error` line. |
 | `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG image (up to 5 MB) to the conversation, with no reply. Only providers that take images accept it (OpenAI Realtime); others return an `error` line. |
 
 | Out (stdout) | Meaning |
@@ -103,7 +103,7 @@ The protocol is JSON lines. Audio is base64 PCM16 mono, little endian, at `--rat
 | `{"type":"error","message":"…"}` | A problem. The session goes on, except before `ready`, where the command fails with this message. |
 | `{"type":"closed","reason":"…"}` | The session ended: `input-closed`, `time-limit`, `idle`, `provider-closed`, `error` or `cancelled`. |
 
-The provider's turn detection decides when you spoke, and the engine asks for each reply. Send `{"type":"commit"}` when your program already knows the person stopped talking. A tool result must come within 10 seconds, or the model gets an error result and you get an `error` line. A provider that cannot take client text (MiniCPM-o) rejects `text`, `say` and `image`.
+The provider's turn detection decides when you spoke, and the engine asks for each reply. Send `{"type":"commit"}` when your program already knows the person stopped talking. A commit after the provider already ended that turn does nothing, so it will not answer twice. A tool result must come within 10 seconds, or the model gets an error result and you get an `error` line. A provider that cannot take client text (MiniCPM-o) rejects `text`, `say` and `image`.
 
 A short Python example:
 

@@ -199,6 +199,10 @@ type sessionLoop struct {
 	// swallow the next real turn. ResponseDone does not clear it: the echo
 	// can arrive after the reply ends, and that echo is not a new turn.
 	commitAsked bool
+	// uncommittedAudio is true after input audio was appended and before
+	// the next commit, from the client or from the provider. A client
+	// commit with none must not send an empty commit or ask again.
+	uncommittedAudio bool
 }
 
 // run reads the agent and the provider until the session ends.
@@ -344,6 +348,7 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		if len(pcm) == 0 {
 			return "", false
 		}
+		l.uncommittedAudio = true
 		return l.send(l.p.Protocol.AudioAppend(pcm))
 	case agentwire.InText, agentwire.InSay:
 		if l.p.Caps.NoClientResponses {
@@ -399,9 +404,15 @@ func (l *sessionLoop) commit() (agentwire.EndReason, bool) {
 	if event == nil {
 		return l.fail("%s cannot commit a turn by hand", l.p.Label)
 	}
+	// The provider may already have committed this audio. An empty commit
+	// is an error and would queue a second reply to the same turn.
+	if !l.uncommittedAudio {
+		return "", false
+	}
 	if reason, ended := l.send(event); ended {
 		return reason, true
 	}
+	l.uncommittedAudio = false
 	l.commitAsked = true
 	return l.reply()
 }
@@ -488,7 +499,12 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 		// must not swallow this turn's commit.
 		l.commitAsked = false
 		return l.stopPlayback()
+	case realtime.SpeechStopped:
+		// Turn detection already ended this turn. Audio still in flight
+		// belongs to the commit the provider is about to send.
+		l.uncommittedAudio = false
 	case realtime.Committed:
+		l.uncommittedAudio = false
 		if l.commitAsked {
 			l.commitAsked = false
 			return "", false
