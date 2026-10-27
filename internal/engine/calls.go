@@ -464,7 +464,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "VoiceResume", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Resume},
 		{Name: "VoiceStart", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Start},
 		{Name: "VoiceStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.voice.Status},
-		{Name: "VoiceSay", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.say.Say},
+		{Name: "VoiceSay", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voiceSay},
 		{Name: "VoiceStop", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Stop},
 	}...)
 }
