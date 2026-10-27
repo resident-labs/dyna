@@ -60,15 +60,15 @@ func TestPushCommitToNodeUsesNodeConnectTimeout(t *testing.T) {
 	var pushed []string
 	r := Runner{Node: &Node{Name: "pve", SSH: "fl-rea-pve", SSHConnectTimeout: 60 * time.Second}}
 	r.Command = func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
-		if name == "git" {
-			pushed = args
+		if strings.Contains(strings.Join(args, " "), "push") {
+			pushed = append([]string{name}, args...)
 		}
 		return nil
 	}
 	if err := r.pushCommitToNode(t.Context(), "/repo", "/var/tmp/cache", "abc123"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=60", "push", "fl-rea-pve:/var/tmp/cache", "abc123:refs/dyna/ci/abc123"}
+	want := []string{"env", "GIT_LFS_SKIP_PUSH=1", "git", "-c", "core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=60", "push", "--no-verify", "fl-rea-pve:/var/tmp/cache", "abc123:refs/dyna/ci/abc123"}
 	if !slices.Equal(pushed, want) {
 		t.Fatalf("git args = %q, want %q", pushed, want)
 	}

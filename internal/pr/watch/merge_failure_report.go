@@ -73,6 +73,12 @@ func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.Merg
 	if len(jobs) == 0 {
 		jobs = logJobs
 	}
+	// A push or checkout that failed before a suite ran still has a saved job.
+	// That job's git error replaces an unknown name.
+	localLines, localFiles := s.localCIFailureEvidence(ctx, r, b.Head, b.Logs)
+	if len(jobs) == 0 && len(localLines) > 0 {
+		jobs = append(jobs, localLines...)
+	}
 	out.WriteString("Failed jobs:\n")
 	if len(jobs) == 0 {
 		// Only a read that observed nothing but a cancellation says the CI never
@@ -103,7 +109,6 @@ func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.Merg
 	}
 	// Local CI keeps the failing suite output that a hosted read never sees: a
 	// compile, vet or type-check error is a real failure even when no test ran.
-	localLines, localFiles := s.localCIFailureEvidence(ctx, r, b.Head, b.Logs)
 	if len(localLines) > 0 {
 		out.WriteString("Local CI failures:\n")
 		for _, line := range localLines {

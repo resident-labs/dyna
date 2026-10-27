@@ -222,7 +222,7 @@ func TestMergeFailureReportReadsLocalCISuiteFailures(t *testing.T) {
 			t.Errorf("missing %q in report:\n%s", want, report)
 		}
 	}
-	if strings.Contains(report, "no recognized test failure") {
+	if strings.Contains(report, "no recognized test failure") || strings.Contains(report, "job evidence unavailable") {
 		t.Errorf("report still calls the failure unknown:\n%s", report)
 	}
 }
