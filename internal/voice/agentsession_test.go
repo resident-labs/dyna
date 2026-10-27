@@ -357,3 +357,27 @@ func TestSessionRefusesImageAndTextTheProviderCannotTake(t *testing.T) {
 		t.Fatalf("sent = %v; the provider takes neither", sent)
 	}
 }
+
+func TestSessionSayReplaceCancelsAndAppendWaits(t *testing.T) {
+	conn, clock := newChanConn(), newFakeClock()
+	r := startSession(t, fakeSessions(fakeProvider(), conn, clock), conn, clock, agentwire.SessionRequest{})
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.AudioDelta, ResponseID: "r1", Audio: pcm16(1, 2)}
+	if m := r.next(t); m.Type != agentwire.OutAudio {
+		t.Fatalf("got %+v, want the audio of r1", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InSay, Text: "one", Mode: agentwire.SayAppend}
+	r.in <- agentwire.InMessage{Type: agentwire.InSay, Text: "two", Mode: agentwire.SayReplace}
+	if m := r.next(t); m.Type != agentwire.OutSpeechStart {
+		t.Fatalf("replace gave %+v, want speech_started", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.AudioDelta, ResponseID: "r1", Audio: pcm16(1, 2)}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone {
+		t.Fatalf("got %+v, want response_done with no audio of the cancelled reply", m)
+	}
+	want := "[text:Say exactly this, word for word, and nothing else: one text:Say exactly this, word for word, and nothing else: two cancel respond:]"
+	if got := fmt.Sprint(conn.sentSoFar()); got != want {
+		t.Fatalf("sent = %s\nwant %s", got, want)
+	}
+}
