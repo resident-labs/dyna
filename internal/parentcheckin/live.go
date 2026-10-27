@@ -18,11 +18,30 @@ import (
 
 var systemNow = time.Now
 
+// RoomInterval applies one room's own check-in setting to the hook's global
+// interval: a room override wins, Off returns zero and stops that room's
+// check-ins. A room that no longer resolves keeps the global interval, so a
+// broken read never silences every room.
+func RoomInterval(rooms *room.Store) func(string, time.Duration) time.Duration {
+	return func(roomID string, global time.Duration) time.Duration {
+		if rooms == nil {
+			return global
+		}
+		rec, err := rooms.Resolve(roomID)
+		if err != nil {
+			return global
+		}
+		return rec.CheckIn.Effective(global)
+	}
+}
+
 // New connects the scheduler to the engine's session and room services. The
-// caller sets Interval: the parent check-ins hook owns the interval now.
+// caller sets Interval: the parent check-ins hook owns the interval now. Each
+// room's own check-in setting overrides it or turns that room's check-ins off.
 func New(n *notify.Service) *Scheduler {
 	s := &Scheduler{Root: store.DataDir(), Now: systemNow}
 	s.Interval = func() (time.Duration, error) { return DefaultInterval, nil }
+	s.IntervalFor = RoomInterval(n.Rooms)
 	s.Targets = func() ([]Target, error) {
 		live, err := n.Sessions.Store.ListSnapshot(false)
 		if err != nil {

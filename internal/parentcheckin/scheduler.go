@@ -30,8 +30,11 @@ type Scheduler struct {
 	Root     string
 	Now      func() time.Time
 	Interval func() (time.Duration, error)
-	Targets  func() ([]Target, error)
-	Deliver  func(context.Context, Target, string) (bool, error)
+	// IntervalFor adjusts the global interval for one room. Zero turns that
+	// room's check-ins off. Nil means every room uses the global interval.
+	IntervalFor func(room string, global time.Duration) time.Duration
+	Targets     func() ([]Target, error)
+	Deliver     func(context.Context, Target, string) (bool, error)
 }
 
 func Migrate(root string) error {
@@ -74,7 +77,6 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 	if err != nil {
 		return posted, time.Time{}, err
 	}
-	slack := min(dueSlack, interval/2)
 	targets, err := s.Targets()
 	if err != nil {
 		return posted, time.Time{}, err
@@ -83,9 +85,23 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 	if err != nil {
 		return posted, time.Time{}, err
 	}
+	intervals := map[string]time.Duration{}
+	adjust := s.IntervalFor
+	if adjust == nil {
+		adjust = func(_ string, global time.Duration) time.Duration { return global }
+	}
+	// effective is the interval one room checks in with, read once per pass.
+	effective := func(roomID string) time.Duration {
+		every, ok := intervals[roomID]
+		if !ok {
+			every = adjust(roomID, interval)
+			intervals[roomID] = every
+		}
+		return every
+	}
 	active := map[string]Target{}
-	if interval > 0 {
-		for _, target := range targets {
+	for _, target := range targets {
+		if effective(target.Room) > 0 {
 			active[target.ID] = target
 		}
 	}
@@ -117,13 +133,14 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 				continue
 			}
 			delete(active, e.ID)
-			if e.interval != int64(interval) {
-				e.due, e.pending, e.interval = now.Add(interval).UnixNano(), false, int64(interval)
+			every := effective(e.Room)
+			if e.interval != int64(every) {
+				e.due, e.pending, e.interval = now.Add(every).UnixNano(), false, int64(every)
 				if _, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET due=?,pending=0,interval_ns=? WHERE session=?", e.due, e.interval, e.ID); err != nil {
 					return err
 				}
 			}
-			if e.due <= now.Add(slack).UnixNano() && !e.pending {
+			if e.due <= now.Add(min(dueSlack, every/2)).UnixNano() && !e.pending {
 				if _, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET pending=1 WHERE session=?", e.ID); err != nil {
 					return err
 				}
@@ -133,8 +150,9 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 		}
 		entries = kept
 		for _, target := range active {
-			e := entry{Target: target, due: now.Add(interval).UnixNano()}
-			if _, err := conn.ExecContext(ctx, "INSERT INTO parent_checkins(session,room,due,interval_ns) VALUES(?,?,?,?)", e.ID, e.Room, e.due, int64(interval)); err != nil {
+			every := effective(target.Room)
+			e := entry{Target: target, due: now.Add(every).UnixNano(), interval: int64(every)}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO parent_checkins(session,room,due,interval_ns) VALUES(?,?,?,?)", e.ID, e.Room, e.due, e.interval); err != nil {
 				return err
 			}
 			entries = append(entries, e)
@@ -166,7 +184,7 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 			continue
 		}
 		posted++
-		due := now.Add(interval)
+		due := now.Add(time.Duration(e.interval))
 		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 			_, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET due=?,pending=0 WHERE session=? AND due=?", due.UnixNano(), e.ID, e.due)
 			return err

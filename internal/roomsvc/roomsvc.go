@@ -219,19 +219,31 @@ func (s *Service) sessions() *subagent.Store { return s.Notify.Sessions.Store }
 
 // Room is one row of the room rail.
 type Room struct {
-	DisplayName  string    `json:"displayName,omitempty"`
-	Pinned       bool      `json:"pinned"`
-	PinOrder     int       `json:"pinOrder"`
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Repo         string    `json:"repo,omitempty"`
-	RootProfile  string    `json:"rootProfile,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	Pinned      bool   `json:"pinned"`
+	PinOrder    int    `json:"pinOrder"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Repo        string `json:"repo,omitempty"`
+	RootProfile string `json:"rootProfile,omitempty"`
+	// CheckIn is the room's own parent check-in cadence, as typed: a duration
+	// such as 30m, or off. Empty uses the hook's global interval.
+	CheckIn      string    `json:"checkIn,omitempty"`
 	LastActivity time.Time `json:"lastActivity"`
 	Unread       int       `json:"unread"`
 	Running      int       `json:"running"`
 	Members      int       `json:"members"`
 	Archived     bool      `json:"archived"`
 	Paused       bool      `json:"paused,omitempty"` // the owner paused this room's sessions
+}
+
+// roomCheckIn is the room's own check-in value for the rail, empty while the
+// room uses the hook's global interval.
+func roomCheckIn(rec room.Record) string {
+	if rec.CheckIn.Off || rec.CheckIn.Every > 0 {
+		return rec.CheckIn.String()
+	}
+	return ""
 }
 
 // Rooms lists every room, active first, then by recent activity.
@@ -252,7 +264,7 @@ func (s *Service) Rooms() ([]Room, error) {
 	live := s.Notify.ActiveRoomIDs()
 	var out []Room
 	for _, rec := range records {
-		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
+		r := Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), LastActivity: rec.LastActivity, Archived: rec.Archived(now, live[rec.ID]), Paused: rec.SessionPause.Paused}
 		ids, err := s.ownerPosts(rec)
 		if err != nil {
 			return nil, err
@@ -668,7 +680,7 @@ func (s *Service) feedOf(rec room.Record, msgs []room.Message, offset int64, boo
 	if err != nil {
 		return Feed{}, err
 	}
-	return Feed{Room: Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
+	return Feed{Room: Room{DisplayName: rec.DisplayName, Pinned: rec.Pinned, PinOrder: rec.PinOrder, ID: rec.ID, Name: rec.Name, Repo: rec.Repo, RootProfile: rec.RootProfile, CheckIn: roomCheckIn(rec), LastActivity: rec.LastActivity}, Offset: offset, Posts: posts}, nil
 }
 
 // postsOf decorates messages as posts. full replaces a completion's stored
