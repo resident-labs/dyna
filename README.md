@@ -91,7 +91,7 @@ Set `sessions.checkInInterval` to change the interval; `0s` disables check-ins.
 
 ### Questions
 
-Root asks you with `dyna ask` and keeps working while it waits. Your answer
+Root asks you with `dyna request question` and keeps working while it waits. Your answer
 arrives as a post. Other sessions ask their parent instead.
 
 ### Pull requests and merging

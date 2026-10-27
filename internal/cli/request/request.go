@@ -78,35 +78,7 @@ func NewCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		rec, err := s.QuestionRoom(snd, roomRef)
-		if err != nil {
-			return err
-		}
-		qs, err := s.QuestionStore().List(rec.ID)
-		if err != nil {
-			return err
-		}
-		me := "owner"
-		if snd.Kind == notify.SenderSession {
-			me = snd.Session.ID
-		}
-		out := []questions.Question{}
-		for _, q := range qs {
-			if mine(q, me) {
-				out = append(out, q)
-			}
-		}
-		if jsonOut {
-			return json.NewEncoder(c.OutOrStdout()).Encode(out)
-		}
-		for _, q := range out {
-			role := "yours"
-			if q.Asker != me {
-				role = "held by you, filed by " + q.Asker
-			}
-			fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s\n", q.ID, role, stageWords(q), q.Text)
-		}
-		return nil
+		return listMine(c, s, snd, roomRef, jsonOut)
 	}}
 
 	approve := &cobra.Command{Use: "approve <id>", Short: "Pass a request you hold up to your parent; the root's approval shows it to the owner", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
@@ -122,8 +94,45 @@ func NewCommand() *cobra.Command {
 		return call(c, roomRef, "WithdrawRequest", func(ref string) []any { return []any{ref, args[0], withdrawWhy} })
 	}}
 	withdraw.Flags().StringVar(&withdrawWhy, "why", "", "why the request no longer matters")
-	cmd.AddCommand(terminal, list, approve, deny, withdraw)
+	cmd.AddCommand(terminal, newQuestion(&roomRef, &jsonOut), newAnswer(&roomRef), list, approve, deny, withdraw)
 	return cmd
+}
+
+// listMine prints the requests the caller filed and the ones it holds.
+func listMine(c *cobra.Command, s *notify.Service, snd notify.Sender, roomRef string, jsonOut bool) error {
+	rec, err := s.QuestionRoom(snd, roomRef)
+	if err != nil {
+		return err
+	}
+	qs, err := s.QuestionStore().List(rec.ID)
+	if err != nil {
+		return err
+	}
+	me := "owner"
+	if snd.Kind == notify.SenderSession {
+		me = snd.Session.ID
+	}
+	out := []questions.Question{}
+	for _, q := range qs {
+		if mine(q, me) {
+			out = append(out, q)
+		}
+	}
+	if jsonOut {
+		return json.NewEncoder(c.OutOrStdout()).Encode(out)
+	}
+	for _, q := range out {
+		role := "yours"
+		if q.Asker != me {
+			role = "held by you, filed by " + q.Asker
+		}
+		fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s", q.ID, role, stageWords(q), q.Text)
+		if q.Answer != nil && !q.IsTerminal() {
+			fmt.Fprintf(c.OutOrStdout(), " — %s %s", q.Answer.Choice, q.Answer.Text)
+		}
+		fmt.Fprintln(c.OutOrStdout())
+	}
+	return nil
 }
 
 // mine reports a request the caller filed that is open or ended within a day,

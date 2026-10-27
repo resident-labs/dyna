@@ -432,7 +432,7 @@ outside the frame. Only a click on Send sends it. A newer submit replaces a
 waiting one, and Cancel gives the card `ok: false` and `error: 'cancelled'`.
 What is sent is marked as written by a card (post `source: "card"`, shown as a
 small "card" label). If the card is the
-post of an open question (`dyna ask --html`), the submit answers the question,
+post of an open question (`dyna request question --html`), the submit answers the question,
 with `choice` when it is one of the question's options and with `text`
 otherwise. On any other card it posts `text` as an owner reply to the card's
 author, in the post's conversation, so the author wakes. The app answers the

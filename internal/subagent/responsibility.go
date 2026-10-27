@@ -205,7 +205,7 @@ func (m *Manager) questionOwned(byID map[string]Info) ([]owned, error) {
 				if q.Asker != info.ID {
 					continue
 				}
-				out = append(out, owned{info: info, r: Responsibility{Kind: "question", ID: q.ID, Text: fmt.Sprintf("%s awaits question %s; cancel: dyna ask withdraw %s --why \"no longer needed\"", info.Address(), q.ID, q.ID)}})
+				out = append(out, owned{info: info, r: Responsibility{Kind: "question", ID: q.ID, Text: fmt.Sprintf("%s awaits question %s; cancel: dyna request withdraw %s --why \"no longer needed\"", info.Address(), q.ID, q.ID)}})
 			}
 		}
 	}

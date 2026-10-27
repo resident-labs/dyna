@@ -42,7 +42,7 @@ func TestRelations(t *testing.T) {
 }
 
 func TestAskHelpAndGuide(t *testing.T) {
-	if got := Who("ask"); got != "Who: root only." {
+	if got := Who("request question"); got != "Who: root only." {
 		t.Fatal(got)
 	}
 	if Who("unknown") != "" {
@@ -90,8 +90,8 @@ func TestRoleLimits(t *testing.T) {
 		{"call", []Role{Root}},
 		{"call list", []Role{Root}},
 		{"call withdraw", []Role{Root}},
-		{"ask", []Role{Root}},
-		{"ask withdraw", []Role{Root, Session, Worker}},
+		{"request question", []Role{Root}},
+		{"request withdraw", []Role{Root, Session, Worker}},
 		{"room create", []Role{Owner, Root}},
 		{"room edit", []Role{Owner, Root}},
 		{"room delete", []Role{Owner, Root}},

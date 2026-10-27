@@ -28,7 +28,7 @@ func TestRootSeesOpenQuestionsAndAnAnswerIsADriftNote(t *testing.T) {
 		"[DYNA OPEN QUESTIONS]",
 		"- " + first.ID + " · asked by " + e.room.Name + " · " + first.AskedAt.UTC().Format("2006-01-02 15:04 UTC") + " · Which format?",
 		"· Ship the beta now?",
-		"dyna ask withdraw <id> --why",
+		"dyna request withdraw <id> --why",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("root instructions lack %q:\n%s", want, text)

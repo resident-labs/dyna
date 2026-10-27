@@ -41,7 +41,7 @@ func (m *Manager) questionWrapUp(info Info) []string {
 	if len(items) == 0 {
 		return nil
 	}
-	return []string{"Open questions you asked: " + strings.Join(items, ", ") + ".\n  Withdraw any that no longer matter with `dyna ask withdraw <id> --why \"…\"`."}
+	return []string{"Open questions you asked: " + strings.Join(items, ", ") + ".\n  Withdraw any that no longer matter with `dyna request withdraw <id> --why \"…\"`."}
 }
 func (m *Manager) wrapUp(ctx context.Context, id string, n int) {
 	store := m.store()

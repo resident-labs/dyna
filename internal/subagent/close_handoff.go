@@ -73,7 +73,7 @@ func (m *Manager) refuseGoalsForHeir(info, heir Info) error {
 	for i, o := range held {
 		goals[i] = o.r
 	}
-	message := fmt.Sprintf("%s\nRoot and the owner hold no goals, so a forced close keeps the work here instead of handing it to them. If only the owner can unblock a goal, ask the owner first with dyna ask. Then run one command above for each goal, or hand it to an open session.", responsibilityError("close", goals))
+	message := fmt.Sprintf("%s\nRoot and the owner hold no goals, so a forced close keeps the work here instead of handing it to them. If only the owner can unblock a goal, ask the owner first with dyna request question. Then run one command above for each goal, or hand it to an open session.", responsibilityError("close", goals))
 	return newCloseRefusal(message, errGoalNeedsRoot, CloseReasonGoalNeedsAgent, []CloseAction{CloseActionRetry}, goals)
 }
 
@@ -116,7 +116,7 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionc
 			// A goal moves only to a live agent. Root and the owner hold no
 			// goals, so a goal that would reach them is refused, never assigned.
 			if heir.ID == "" || heir.Role == RoleRoot {
-				errs = append(errs, fmt.Errorf("%w: %s; ask the owner with dyna ask, then drop or finish it, or hand it to an open agent", errGoalNeedsRoot, item.ID))
+				errs = append(errs, fmt.Errorf("%w: %s; ask the owner with dyna request question, then drop or finish it, or hand it to an open agent", errGoalNeedsRoot, item.ID))
 				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityGoal, Result: sessionclose.ResultFailed, ID: item.ID, Failure: sessionclose.FailureGoalNeedsAgent})
 				continue
 			}

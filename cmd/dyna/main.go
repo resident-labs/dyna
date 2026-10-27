@@ -19,7 +19,6 @@ import (
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/callspec"
 	cliaccounts "dyna-agent/internal/cli/accounts"
-	"dyna-agent/internal/cli/ask"
 	"dyna-agent/internal/cli/call"
 	"dyna-agent/internal/cli/computer"
 	clidoctor "dyna-agent/internal/cli/doctor"
@@ -133,7 +132,6 @@ func newRootCommand() *cobra.Command {
 		newEngineCommand(),
 		managed.NewInstallCommand(),
 		managed.NewUninstallCommand(),
-		ask.NewCommand(),
 		request.NewCommand(),
 		call.NewCommand(),
 		cligit.NewCommand(),

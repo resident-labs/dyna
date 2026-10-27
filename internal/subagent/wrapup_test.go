@@ -65,7 +65,7 @@ func TestQuestionWrapUpWaitsForAnotherTurn(t *testing.T) {
 	}
 	info.Turns = 2
 	lines := e.m.questionWrapUp(info)
-	if len(lines) != 1 || !strings.Contains(lines[0], q.ID) || !strings.Contains(lines[0], "dyna ask withdraw") {
+	if len(lines) != 1 || !strings.Contains(lines[0], q.ID) || !strings.Contains(lines[0], "dyna request withdraw") {
 		t.Fatal(lines)
 	}
 	if _, err = e.m.questionStore().Withdraw(info.RoomID, q.ID, info.ID, false, "done"); err != nil {

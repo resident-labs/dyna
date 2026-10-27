@@ -1,4 +1,4 @@
-package ask
+package request
 
 import (
 	"bytes"
@@ -36,7 +36,7 @@ func TestAskCLI(t *testing.T) {
 		{Name: "AnswerQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, ref, id, choice, text string) error {
 			return svc.AnswerQuestion(ctx, sender, ref, id, choice, text)
 		}},
-		{Name: "WithdrawQuestion", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(_ context.Context, ref, id, reason string) error {
+		{Name: "WithdrawRequest", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(_ context.Context, ref, id, reason string) error {
 			return svc.WithdrawQuestion(sender, ref, id, reason)
 		}},
 	})
@@ -53,7 +53,7 @@ func TestAskCLI(t *testing.T) {
 		err := c.Execute()
 		return b.String(), err
 	}
-	if _, err := run("Why?"); err == nil || !strings.Contains(err.Error(), "--meanwhile") {
+	if _, err := run("question", "Why?"); err == nil || !strings.Contains(err.Error(), "--meanwhile") {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -64,7 +64,7 @@ func TestAskCLI(t *testing.T) {
 	}
 	_ = os.WriteFile(file, []byte("notes"), 0600)
 	// Keep attachment transport here; visual.Preview owns browser rendering.
-	out, err := run("May I?", "--meanwhile", "test a slice", "--options", "yes, no", "--attach", html, "--attach", file)
+	out, err := run("question", "May I?", "--meanwhile", "test a slice", "--options", "yes, no", "--attach", html, "--attach", file)
 	if err != nil || !strings.Contains(out, "Asked q1. Keep working;") {
 		t.Fatal(out, err)
 	}
@@ -82,12 +82,12 @@ func TestAskCLI(t *testing.T) {
 		t.Fatal(p, err)
 	}
 	// Agents talk with posts. Only the owner gets questions.
-	for _, args := range [][]string{{"Helper?", "--meanwhile", "test", "--to", "@helper"}, {"@helper", "Helper?", "--meanwhile", "test"}} {
-		if _, err = run(args...); err == nil || !strings.Contains(err.Error(), "Ask agents with dyna post; dyna ask is for the owner.") {
+	for _, args := range [][]string{{"question", "Helper?", "--meanwhile", "test", "--to", "@helper"}, {"question", "@helper", "Helper?", "--meanwhile", "test"}} {
+		if _, err = run(args...); err == nil || !strings.Contains(err.Error(), "Ask agents with dyna post; dyna request question is for the owner.") {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
-	if _, err = run("Owner?", "--meanwhile", "test", "--to", "@root"); err != nil {
+	if _, err = run("question", "Owner?", "--meanwhile", "test", "--to", "@root"); err != nil {
 		t.Fatal(err)
 	}
 	qs, _ = s.QuestionStore().List(rec.ID)
@@ -97,10 +97,10 @@ func TestAskCLI(t *testing.T) {
 	if _, err = run("answer", "q1", "--choice", "yes"); err != nil {
 		t.Fatal(err)
 	}
-	if out, err = run(); err != nil || !strings.Contains(out, "answered") {
+	if out, err = run("question"); err != nil || !strings.Contains(out, "answered") {
 		t.Fatal(out, err)
 	}
-	if _, err = run("More?", "--meanwhile", "test", "--options", "a,b,c,d,e,f,g"); err == nil {
+	if _, err = run("question", "More?", "--meanwhile", "test", "--options", "a,b,c,d,e,f,g"); err == nil {
 		t.Fatal("too many options")
 	}
 }

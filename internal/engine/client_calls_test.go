@@ -87,7 +87,7 @@ func TestClientCallsAreServedByTheEngine(t *testing.T) {
 // argument hides it from the walk, so the site is listed here and checked
 // against the engine's table.
 var dynamicCallSites = map[string][]string{
-	"internal/cli/ask/ask.go method":                {"AskQuestion", "WithdrawQuestion", "AnswerQuestion"},
+	"internal/cli/request/question.go method":       {"AskQuestion", "AnswerQuestion"},
 	"internal/cli/hooks/hooks.go method":            {"RunHook", "TestHook"},
 	"internal/cli/pr/pr.go call":                    {"MergeFixPR", "UntrackPR", "ResumePR", "SetPRDraft", "RequirePRReviewers"},
 	"internal/cli/room/pins.go call":                {"Pin", "Unpin"},
