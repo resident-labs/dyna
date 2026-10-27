@@ -128,6 +128,8 @@ const (
 	// TypeCacheRepaired is a run that switched linked managed cache paths back
 	// to real directories.
 	TypeCacheRepaired EventType = "cache-repaired"
+	// TypeScratchFreed is a sweep that freed scratch space on a machine.
+	TypeScratchFreed EventType = "scratch-freed"
 
 	// FamilyCall reports how the owner answered a call request. The engine
 	// posts it, so the answer wears no invented voice and carries no raw ID in

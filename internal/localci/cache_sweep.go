@@ -21,9 +21,16 @@ const cacheCleanRetry = time.Hour
 // CleanCachesTick cleans the caches of every enabled CI machine that has no
 // cleanup in the last hour, and returns when the next cleanup is due. A machine
 // change wakes the worker, so a machine enabled later gets its own deadline.
-func CleanCachesTick(ctx context.Context, dataDir string) (time.Time, error) {
+// The same pass sweeps the machine's scratch folders and reports what it freed.
+func CleanCachesTick(ctx context.Context, dataDir string, report ScratchReporter) (time.Time, error) {
 	return cleanCachesTick(ctx, dataDir, time.Now, func(ctx context.Context, node Node) (CacheCleanResult, error) {
-		return Runner{DataDir: dataDir}.CleanCaches(ctx, node, false)
+		runner := Runner{DataDir: dataDir}
+		cleaned, err := runner.CleanCaches(ctx, node, false)
+		swept, scratchErr := sweepNodeScratch(ctx, runner, node, time.Now())
+		if report != nil && swept.FreedBytes > 0 {
+			scratchErr = errors.Join(scratchErr, report(ctx, node, swept))
+		}
+		return cleaned, errors.Join(err, scratchErr)
 	})
 }
 
