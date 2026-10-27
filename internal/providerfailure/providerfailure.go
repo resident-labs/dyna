@@ -226,8 +226,6 @@ const (
 	// ActionRetryLater keeps the same model, waits with backoff, and then moves
 	// to the next model.
 	ActionRetryLater Action = "retry-later"
-	// ActionTryAnotherModel moves to the next model of the profile.
-	ActionTryAnotherModel Action = "try-another-model"
 )
 
 // Action returns the one recovery this reason allows.
@@ -237,10 +235,8 @@ func (r Reason) Action() Action {
 		return ActionReauthenticate
 	case Quota:
 		return ActionMoveAccount
-	case Capacity:
+	case Capacity, Unavailable:
 		return ActionRetryLater
-	case Unavailable:
-		return ActionTryAnotherModel
 	}
 	return ""
 }
