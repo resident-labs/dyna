@@ -31,7 +31,7 @@
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
   import { changeTitle, isLocal, withoutReviewers } from './pr.ts'
-  import { authorName, mergeState, listView, rowsFromGitHub, moveKey, type Names, type Row } from './prlist.ts'
+  import { authorName, mergeState, listView, rowsFromGitHub, moveKey, reviewerRef, type Names, type Row, type SessionRef } from './prlist.ts'
   import { neighbor } from './prboard.ts'
   import { prHash, parsePRHash, prRef, findPR, lookupNumber, issueHash, parseIssueHash, type Link } from './prlink.ts'
   import { roomHash, routeHash } from '../ui/route.ts'
@@ -75,7 +75,7 @@
     changes?: Row[] | null
     members?: Member[]
     link?: Link | null
-    onsession?: (member: Member, tab?: string) => void
+    onsession?: (member: Member | SessionRef, tab?: string) => void
     onpr: (number: number) => void
     ontrack?: (number: number | undefined, member: Member) => void
     onuntrack?: ChangeAction
@@ -88,8 +88,9 @@
   }
 
   // changes: the room's Changes rows, local changes and PRs.
-  // members: the room's sessions, to name and open author and reviewer
-  // sessions. onmention adds a PR or issue to the composer.
+  // members: the room's sessions, to name and open author sessions. A pool
+  // reviewer is no member, so its row opens by id through onsession instead.
+  // onmention adds a PR or issue to the composer.
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
@@ -147,7 +148,9 @@
   let anyRows = $derived(listRows.length > 0)
   let chg = $derived(inPRs ? allRows.find((c) => c.changeId === selId) ?? null : null)
   let chgAuthor = $derived(chg?.authorSession ? byId[chg.authorSession] : null)
-  let chgReviewer = $derived(chg?.reviewerSession ? byId[chg.reviewerSession] : null)
+  // A pool reviewer is a service outside the member hierarchy, so its row
+  // opens by id, the way the workflow run view opens its agents.
+  let chgReviewer = $derived(chg ? reviewerRef(chg, roomId) : null)
   let rowItems = $derived(list?.items ?? [])
   let issueAPIState = $derived(listState === 'unhandled' || listState === 'in-progress' ? 'open' : listState)
   let allIssueRows = $derived(unifiedIssues(rowItems, localIssues, source, issueAPIState, query))
