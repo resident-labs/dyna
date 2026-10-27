@@ -42,7 +42,8 @@ type Capabilities struct {
 	// FunctionCalling: the model can call tools, so Voice can reach root.
 	FunctionCalling bool
 	// SingleResponseSlot: the service refuses a response.create while a
-	// response is active, instead of queueing it.
+	// response is active, instead of queueing it. Agent sessions wait for
+	// every provider, so they do not read this flag.
 	SingleResponseSlot bool
 	// AcknowledgesSessionUpdate: the service answers session.update with
 	// session.updated, so Dial can wait for it.
