@@ -72,7 +72,7 @@ const (
 // The wrapper acknowledges live input and keeps the terminal result current
 // until Dyna retires it.
 const claudeWrapper = `#!/usr/bin/env python3
-import json, os, re, subprocess, sys
+import json, os, re, select, subprocess, sys, threading
 if "--version" in sys.argv:
     print("fake-worker-1.0")
     sys.exit(0)
@@ -89,6 +89,43 @@ body = os.environ.get("DYNA_FAKE_WORKER_BODY", "")
 
 def emit(value):
     print(json.dumps(value), flush=True)
+
+# The session host closes stdin to ask for an orderly exit. A body that is
+# blocked on a pipe never sees that close, so this watcher ends the process
+# when the write end goes away. Production shutdown then does not wait its
+# stop grace for a fixture that ignores stdin.
+body_proc = {"p": None}
+
+def stop_when_stdin_closes():
+    poller = select.poll()
+    try:
+        poller.register(sys.stdin.fileno(), select.POLLIN)
+    except (ValueError, OSError):
+        return
+    while True:
+        try:
+            events = poller.poll()
+        except Exception:
+            return
+        for _, event in events:
+            if event & (select.POLLHUP | select.POLLERR | select.POLLNVAL):
+                proc = body_proc["p"]
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.kill()
+                        proc.wait()
+                    except OSError:
+                        pass
+                os._exit(0)
+            if event & select.POLLIN:
+                # Buffered input still belongs to the turn loop. Wait only for
+                # hangup from here, so a live control message is not a shutdown.
+                try:
+                    poller.modify(sys.stdin.fileno(), 0)
+                except Exception:
+                    return
+
+threading.Thread(target=stop_when_stdin_closes, daemon=True).start()
 
 code = 0
 for line in sys.stdin:
@@ -121,11 +158,15 @@ for line in sys.stdin:
                 instructions = source.read()
         elif arg == "--append-system-prompt":
             instructions = sys.argv[index + 2]
-    worker = subprocess.run(["/bin/sh", "-c", body], input="", text=True, capture_output=True,
-                            env=dict(os.environ, DYNA_FAKE_PROMPT=text, DYNA_FAKE_MODEL=model,
-                                     DYNA_FAKE_ARGS="\n".join(sys.argv[1:]),
-                                     DYNA_FAKE_INSTRUCTIONS=instructions))
-    sys.stderr.write(worker.stderr)
+    worker = subprocess.Popen(["/bin/sh", "-c", body], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             env=dict(os.environ, DYNA_FAKE_PROMPT=text, DYNA_FAKE_MODEL=model,
+                                      DYNA_FAKE_ARGS="\n".join(sys.argv[1:]),
+                                      DYNA_FAKE_INSTRUCTIONS=instructions))
+    body_proc["p"] = worker
+    worker_out, worker_err = worker.communicate()
+    body_proc["p"] = None
+    sys.stderr.write(worker_err or "")
     # A compliant worker writes its own journal entry; this fake does too, so a
     # turn never ends with the write-now reminder unless the body wrote one.
     if journal and os.path.getsize(journal) == before:
@@ -133,15 +174,15 @@ for line in sys.stdin:
             log.write(json.dumps({"ts": int(__import__("time").time() * 1000), "kind": "verification",
                                   "message": "Fixture worker finished.", "source": "agent"}) + "\n")
     code = worker.returncode
-    if worker.stdout:
+    if worker_out:
         # A real worker says what it did before the turn ends.
         emit({"type": "assistant", "message": {"role": "assistant",
-              "content": [{"type": "text", "text": worker.stdout}]}})
+              "content": [{"type": "text", "text": worker_out}]}})
     result = {"type": "result", "session_id": "fake-worker",
               "subtype": "success" if code == 0 else "error_during_execution",
-              "result": worker.stdout, "is_error": code != 0}
-    if code != 0 and worker.stderr.strip():
-        result["errors"] = [worker.stderr.strip()]
+              "result": worker_out, "is_error": code != 0}
+    if code != 0 and worker_err.strip():
+        result["errors"] = [worker_err.strip()]
     if code != 0 and os.environ.get("DYNA_FAKE_STATUS"):
         # A provider's own status names the reason; prose does not.
         result["api_error_status"] = int(os.environ["DYNA_FAKE_STATUS"])

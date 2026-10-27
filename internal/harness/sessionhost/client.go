@@ -225,7 +225,6 @@ func (h *socketHost) shutdownUsed() {
 	for _, done := range pending {
 		<-done
 	}
-	fire := stopGraceFired
 	for _, key := range keys {
 		socket, _ := hostPaths(dir, key)
 		conn, err := net.DialTimeout("unix", socket, detachWait)
@@ -233,22 +232,9 @@ func (h *socketHost) shutdownUsed() {
 			continue
 		}
 		r := newRemote(conn)
-		_, _ = r.call(context.Background(), message{Op: opShutdown, FireStopGrace: fire}, stopWait, nil)
+		_, _ = r.call(context.Background(), message{Op: opShutdown}, stopWait, nil)
 		_ = conn.Close()
 	}
-}
-
-// stopGraceFired asks host shutdown to fire the orderly stop grace at once.
-// The host is another process, so the flag rides on the shutdown message.
-var stopGraceFired bool
-
-// SetStopGraceFiredForTest tells host shutdown to fire the orderly stop grace
-// at once, and returns the previous setting. Only a test calls it. Production
-// shutdown still waits the full grace.
-func SetStopGraceFiredForTest(fired bool) bool {
-	previous := stopGraceFired
-	stopGraceFired = fired
-	return previous
 }
 
 // remoteSession is one attached client connection.
