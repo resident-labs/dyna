@@ -21,7 +21,7 @@ func TestEnvironmentPreservesOwnerServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"WAYLAND_DISPLAY": "dyna-public", "DISPLAY": ":234", "DYNA_OWNER_WAYLAND_DISPLAY": "wayland-owner", "DYNA_OWNER_DISPLAY": ":0", "DBUS_SESSION_BUS_ADDRESS": "unix:path=/owner/bus", "XDG_RUNTIME_DIR": "/owner/runtime", "HYPRLAND_INSTANCE_SIGNATURE": "owner-hypr"} {
+	for key, want := range map[string]string{"WAYLAND_DISPLAY": "dyna-public", "DISPLAY": ":234", "DYNA_OWNER_WAYLAND_DISPLAY": "wayland-owner", "DYNA_OWNER_DISPLAY": ":0", "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + BusSocket(m.SessionID), "XDG_RUNTIME_DIR": "/owner/runtime", "HYPRLAND_INSTANCE_SIGNATURE": "owner-hypr"} {
 		if got := envValue(env, key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
@@ -92,7 +92,7 @@ func TestInjectRegistersStampedSessionWithFake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if envValue(got, "WAYLAND_DISPLAY") != "public-test" || envValue(got, "DISPLAY") != ":345" || envValue(got, "DBUS_SESSION_BUS_ADDRESS") != "owner-bus" {
+	if envValue(got, "WAYLAND_DISPLAY") != "public-test" || envValue(got, "DISPLAY") != ":345" || envValue(got, "DBUS_SESSION_BUS_ADDRESS") == "owner-bus" {
 		t.Fatal(got)
 	}
 }

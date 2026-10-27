@@ -1,8 +1,6 @@
 package computers
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -52,32 +50,19 @@ func TestBusLaunchSetup(t *testing.T) {
 }
 
 // Every launch path that builds an app's environment (computer open, run, env
-// and the browser all use Environment) gives the app the computer's own bus once
-// the computer has one, and leaves it alone before.
-func TestEnvironmentPointsAppsAtTheComputersBus(t *testing.T) {
+// and the browser all use Environment) names the computer's own bus, even while
+// the lazy desktop has not started its bus yet. Naming the host's bus then sent
+// file choosers to the host display (D-274).
+func TestEnvironmentNamesTheComputersBusBeforeItExists(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	runtime := t.TempDir()
-	t.Setenv("XDG_RUNTIME_DIR", runtime)
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	m := Meta{SessionID: "bus-test", WaylandDisplay: "private", Display: ":9"}
 	base := []string{"PATH=/usr/bin", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"}
-	before, err := Environment(m, base)
+	env, err := Environment(m, base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := envValue(before, "DBUS_SESSION_BUS_ADDRESS"); got != "unix:path=/run/user/1000/bus" {
-		t.Fatalf("bus before the computer has one = %q, want the app's own", got)
-	}
-	if err := os.MkdirAll(filepath.Dir(BusSocket(m.SessionID)), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(BusSocket(m.SessionID), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	after, err := Environment(m, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := envValue(after, "DBUS_SESSION_BUS_ADDRESS"), "unix:path="+BusSocket(m.SessionID); got != want {
-		t.Fatalf("bus after = %q, want the computer's own %q", got, want)
+	if got, want := envValue(env, "DBUS_SESSION_BUS_ADDRESS"), "unix:path="+BusSocket(m.SessionID); got != want {
+		t.Fatalf("bus = %q, want the computer's own %q", got, want)
 	}
 }
