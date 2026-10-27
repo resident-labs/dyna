@@ -15,6 +15,7 @@ func (s *supervisor) resize(ctx context.Context, r Request) (Status, error) {
 	if err := r.Size.Validate(); err != nil {
 		return Status{}, err
 	}
+	size := r.Size.Aligned()
 	intent, err := RequiredStatus(r.Status)
 	if err != nil {
 		return Status{}, err
@@ -59,12 +60,12 @@ func (s *supervisor) resize(ctx context.Context, r Request) (Status, error) {
 			return Status{}, err
 		}
 		if s.compositor.alive() {
-			if err := setOutputSize(ctx, s.desktopEnv(), r.Size.Width, r.Size.Height, s.state.RefreshHz, liveOutputTimeout); err != nil {
+			if err := setOutputSize(ctx, s.desktopEnv(), size.Width, size.Height, s.state.RefreshHz, liveOutputTimeout); err != nil {
 				unlock()
 				return Status{}, err
 			}
 		}
-		s.state.Width, s.state.Height = r.Size.Width, r.Size.Height
+		s.state.Width, s.state.Height = size.Width, size.Height
 		s.lastActivity = time.Now()
 		s.record("status", nil)
 		state := *statusCopy(s.state)

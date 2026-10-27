@@ -29,6 +29,19 @@ func (s Size) Validate() error {
 	return nil
 }
 
+// widthAlign is the step of an output width. The compositor's screenshot buffer
+// uses 3 bytes a pixel with a stride rounded up to 4 bytes, and rejects that
+// stride when it is not a multiple of 3; a width that is a multiple of 4 avoids
+// it (D-279). Heights have no such limit.
+const widthAlign = 4
+
+// Aligned returns the size the compositor can screenshot: the width rounded up
+// to a multiple of widthAlign.
+func (s Size) Aligned() Size {
+	s.Width = (s.Width + widthAlign - 1) / widthAlign * widthAlign
+	return s
+}
+
 func ParseSize(raw string) (Size, error) {
 	width, height, ok := strings.Cut(raw, "x")
 	w, ew := strconv.Atoi(width)
