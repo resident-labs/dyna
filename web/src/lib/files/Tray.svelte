@@ -1,6 +1,7 @@
 <script lang="ts">
   import { human, extOf } from './attach.ts'
   import { dialog } from '../ui/dialog.ts'
+  import ZoomImage from './ZoomImage.svelte'
   import type { DraftItem } from './attach.ts'
 
   interface Props {
@@ -56,18 +57,17 @@
         <h2 id={titleId}>{preview.name}</h2>
         <button class="close" onclick={closePreview} aria-label="Close preview">Close</button>
       </header>
-      <img class="preview-image" src={preview.url} alt={preview.name} />
+      <ZoomImage src={preview.url} alt={preview.name} />
     </div>
   </div>
 {/if}
 
 <style>
   .preview-backdrop { position: fixed; inset: 0; z-index: 60; padding: var(--s4); background: rgba(8, 8, 10, 0.72); display: grid; place-items: center; }
-  .preview { width: min(960px, 100%); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--side); outline: none; }
+  .preview { width: min(1400px, 100%); height: calc(100dvh - 32px); display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--side); outline: none; }
   .preview header { display: flex; align-items: center; gap: var(--s3); }
   .preview h2 { flex: 1; min-width: 0; margin: 0; font-size: var(--t-title); overflow-wrap: anywhere; }
   .close { min-height: 44px; padding: 0 var(--s3); border-radius: var(--r-xs); background: var(--raise); font-size: var(--t-ui); }
-  .preview-image { width: 100%; min-height: 0; max-height: calc(100dvh - 140px); object-fit: contain; }
   .thumbnail { flex: none; padding: 0; border-radius: 5px; }
 
   .tray {
