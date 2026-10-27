@@ -668,6 +668,18 @@ var eventSpecs = []EventSpec{
 		Text:      "The {service} service failed on turn {turn} ({session}): {error}",
 		Producers: []EventProducer{ProducerLibrarian, ProducerReviewer, ProducerHelper},
 	},
+	// A pinned service that cannot run its pin waits. Root hears it once per
+	// pin and reason, and the service does not start on another profile.
+	{
+		Family:    FamilyService,
+		Type:      TypeWaiting,
+		Renderer:  "ServiceWaitCard",
+		Payload:   reflect.TypeOf(ServiceWaitEvent{}),
+		Wake:      WakeRoot,
+		Once:      true,
+		Text:      "The {service} service is waiting. Its pinned profile {profile} cannot run: {reason}",
+		Producers: []EventProducer{ProducerLibrarian, ProducerReviewer},
+	},
 	// A helper outcome wakes its available parent. An unavailable parent sends
 	// the warning to the owner with NeedsRoot, which wakes the root seat too.
 	{

@@ -103,6 +103,22 @@ func (s *Service) reviewRepoIdentity(ctx context.Context, r Record) string {
 	return harnessruntime.RepoIdentity(ctx, dir)
 }
 
+// noticePinnedWait tells root once that the reviewer pin cannot run. The
+// pool does not start on another profile.
+func (s *Service) noticePinnedWait(ctx context.Context, roomID, pin, reason string) {
+	if s.Notify == nil || s.Notify.Rooms == nil {
+		return
+	}
+	rec, err := s.Notify.Rooms.Resolve(roomID)
+	if err != nil {
+		return
+	}
+	_, _ = s.Notify.Rooms.PostEventInput(room.PostEventInput{
+		RoomID: rec.ID, Event: room.ServiceWaitEvent{Service: room.ServiceReviewer, Profile: pin, Reason: reason},
+		Producer: room.ProducerReviewer, To: []string{rec.Name}, NeedsRoot: true,
+	})
+}
+
 func (s *Service) chooseProfile(cfg Reviewer, repo string) (rolesession.Choice, error) {
 	profiles, err := s.profiles()
 	if err != nil {
@@ -741,6 +757,10 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		choice, e := s.chooseProfile(cfg, s.reviewRepoIdentity(ctx, *candidate))
 		if e != nil {
 			return s.reviewBlocked(roomID, Sanitize(e.Error()))
+		}
+		if cfg.Profile != "" && choice.Cause != "" {
+			s.noticePinnedWait(ctx, roomID, cfg.Profile, choice.Reason)
+			return nil
 		}
 		name := choice.Name
 		if busy >= reviewerProfileCap(name, profiles) {

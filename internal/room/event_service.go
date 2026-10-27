@@ -92,3 +92,20 @@ func (h HelperOutcomeEvent) eventSubject() string   { return h.Session }
 func (h HelperOutcomeEvent) eventDedupe() string {
 	return strconv.Itoa(h.Turn) + "\x00" + string(h.Reason)
 }
+
+// TypeWaiting is a pinned service that cannot run its pin and does not switch.
+const TypeWaiting EventType = "waiting"
+
+// ServiceWaitEvent tells root that a pinned service is waiting. It names the
+// pin and why that pin cannot run. One notice is kept per service, pin and
+// reason, so a later wake with the same cause does not post again.
+type ServiceWaitEvent struct {
+	Service ServiceRole `json:"service"`
+	Profile string      `json:"profile"`
+	Reason  string      `json:"reason"`
+}
+
+func (ServiceWaitEvent) eventFamily() EventFamily { return FamilyService }
+func (ServiceWaitEvent) eventType() EventType     { return TypeWaiting }
+func (s ServiceWaitEvent) eventSubject() string   { return string(s.Service) }
+func (s ServiceWaitEvent) eventDedupe() string    { return s.Profile + "\x00" + s.Reason }

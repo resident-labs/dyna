@@ -396,6 +396,9 @@ func libraryRow(f facts) Row {
 			row.NextRun = nextScheduled(batch)
 		}
 	}
+	if listed, ok := f.service(Library); ok && strings.HasPrefix(listed.Reason, "waiting:") {
+		row.State, row.Detail = "waiting", listed.Reason
+	}
 	return row
 }
 
@@ -437,6 +440,12 @@ func reviewerRow(f facts) Row {
 	}
 	if len(st.Queue) > 0 {
 		row.NextRun = fmt.Sprintf("%d waiting for review", len(st.Queue))
+	}
+	if listed, ok := f.service(Reviewer); ok && strings.HasPrefix(listed.Reason, "waiting:") {
+		row.State, row.Detail = "waiting", listed.Reason
+		if listed.Pinned != "" {
+			row.Profile, row.Pinned, row.Source = listed.Pinned, listed.Pinned, "pinned"
+		}
 	}
 	return row
 }

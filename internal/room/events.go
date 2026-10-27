@@ -754,6 +754,20 @@ func (m Message) ServiceFailed() (ServiceFailedEvent, bool) {
 	return ev, true
 }
 
+// ServiceWait returns the payload of a pinned service that is waiting.
+func (m Message) ServiceWait() (ServiceWaitEvent, bool) {
+	if m.Kind != string(FamilyService) || m.Notice.Kind != string(TypeWaiting) || len(m.Payload.raw) == 0 {
+		return ServiceWaitEvent{}, false
+	}
+	var ev ServiceWaitEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Service == "" || ev.Profile == "" {
+		return ServiceWaitEvent{}, false
+	}
+	return ev, true
+}
+
 // HelperOutcome returns the payload of an automatic helper outcome warning.
 func (m Message) HelperOutcome() (HelperOutcomeEvent, bool) {
 	if m.Kind != string(FamilyService) || m.Notice.Kind != string(TypeHelperOutcome) || len(m.Payload.raw) == 0 {
