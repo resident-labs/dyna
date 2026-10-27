@@ -8,10 +8,10 @@ import { call, runFunctions } from '../../../test/svelte-source.ts'
 test('no shortcut or action opens a room terminal without a repository', async () => {
   const source = readFileSync(new URL('./TermDock.svelte', import.meta.url), 'utf8')
   const calls: unknown[][] = []
-  const c: Record<string, unknown> = { roomless: true, opening: false, narrow: false, ref: 'room_x', roomId: 'room_x', all: [], list: [], docked: [], active: '', error: '', current: null, load() {}, askClose() {}, act() {}, dock: { open: true }, rootEl: { contains: () => true }, Node: class {},
+  const c: Record<string, unknown> = { roomless: true, opening: false, narrow: false, ref: 'room_x', roomId: 'room_x', all: [], list: [], docked: [], active: '', error: '', current: null, load() {}, askClose() {}, act() {}, dock: { open: true }, Element: class { closest() { return { dataset: {} } } },
     api: { termOpen: async (...args: unknown[]) => { calls.push(args); return { id: 't1' } } } }
   runFunctions(source, ['open', 'shortcut'], c)
-  call(c, 'shortcut', { ctrlKey: true, shiftKey: true, key: 'T', target: new (c.Node as new () => object)(), preventDefault() {}, stopPropagation() {} })
+  call(c, 'shortcut', { ctrlKey: true, shiftKey: true, key: 'T', target: new (c.Element as new () => object)(), preventDefault() {}, stopPropagation() {} })
   await call(c, 'open')
   assert.deepEqual(calls, [])
   assert.equal(c.error, '')
