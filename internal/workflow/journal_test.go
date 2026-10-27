@@ -12,9 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/fakeworker"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/workflow/enginefake"
 )
 
 func TestExecuteKeepsCallerPromptAndWritesCompleteAgentJournal(t *testing.T) {
@@ -104,9 +107,22 @@ return result;
 }
 
 func TestExecuteWaitsForDanglingWorkerTerminalJournal(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
 	t.Setenv("DYNA_RUN_ID", "wf_engine-dangling-journal")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
+	// Registered after TempDir, so this runs before that directory is removed.
+	// The dangling worker's harness run still writes health into the data
+	// folder after Execute returns. Join that write, then close the database,
+	// before cleanup deletes the folder. The interrupt grace is only a timer;
+	// this worker never answers it, so fire it at once and keep the join fast.
+	engine := &enginefake.Engine{}
+	previousGrace := harness.SetClaudeInterruptGraceForTest(0)
+	t.Cleanup(func() {
+		engine.Stop()
+		_ = database.Close(filepath.Join(dataHome, "dyna"))
+		harness.SetClaudeInterruptGraceForTest(previousGrace)
+	})
 	script := `
 agent("keep working until the orchestrator finishes", {profile: "slow", label: "dangling worker"});
 agent("wait behind the first worker", {profile: "slow", label: "queued worker"});
@@ -147,8 +163,9 @@ return "workflow done";
 	// event-driven, including on a busy race-enabled CI runner.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	engine.Profiles = store
 	resultJSON, err := executeTest(ctx, Options{
-		ScriptSrc: script, Store: store, Run: run, WorkDir: dir,
+		ScriptSrc: script, Store: store, Run: run, WorkDir: dir, Engine: engine,
 		Poster: func(_ context.Context, _ string, _ []string, _ string) (PostResult, error) {
 			select {
 			case err := <-started:

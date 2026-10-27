@@ -97,17 +97,42 @@ func (f *Engine) Bindings() []websvc.Binding {
 
 func (f *Engine) closeAgent(_ context.Context, ref callspec.RunAgentRef) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.agentCloses = append(f.agentCloses, ref)
 	if len(f.CloseErrs) > 0 {
 		err := f.CloseErrs[0]
 		f.CloseErrs = f.CloseErrs[1:]
+		f.mu.Unlock()
 		return err
 	}
-	if a := f.agents[ref]; a != nil {
+	f.mu.Unlock()
+	// Join the harness run. Cancel alone returns while the turn's health
+	// write is still creating files under the test data directory.
+	f.stopAgents(func(got callspec.RunAgentRef) bool { return got == ref })
+	return nil
+}
+
+// Stop cancels every agent and waits until its harness run has finished,
+// including the health write after the turn. A test registers Stop with
+// Cleanup after TempDir so that write cannot recreate files during removal.
+func (f *Engine) Stop() { f.stopAgents(nil) }
+
+// stopAgents cancels the selected agents and waits for their runs. The caller
+// must not hold f.mu: the run can finish only after this wait releases it.
+func (f *Engine) stopAgents(match func(callspec.RunAgentRef) bool) {
+	f.mu.Lock()
+	agents := make([]*agent, 0, len(f.agents))
+	for ref, a := range f.agents {
+		if match == nil || match(ref) {
+			agents = append(agents, a)
+		}
+	}
+	f.mu.Unlock()
+	for _, a := range agents {
 		a.cancel()
 	}
-	return nil
+	for _, a := range agents {
+		<-a.done
+	}
 }
 
 // ClosedAgents lists the CloseRunAgent calls received, in order.
@@ -122,13 +147,9 @@ const HoldTask = "HOLD UNTIL CLOSED"
 
 func (f *Engine) closeRun(_ context.Context, run string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.closes++
-	for ref, a := range f.agents {
-		if ref.Run == run {
-			a.cancel()
-		}
-	}
+	f.mu.Unlock()
+	f.stopAgents(func(ref callspec.RunAgentRef) bool { return ref.Run == run })
 	return nil
 }
 
