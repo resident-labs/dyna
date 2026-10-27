@@ -9,7 +9,7 @@
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import { motion, BASE, FAST } from '../ui/motion.ts'
-  import { GENERAL, ROOM_CHAT } from './feedViews.ts'
+  import { GENERAL } from './feedViews.ts'
   import Avatar from '../ui/Avatar.svelte'
   import { ago, roomLabel } from '../ui/format.ts'
   import PRChip from '../prs/PRChip.svelte'
@@ -17,7 +17,7 @@
   import { expedite, agentExpedited } from './expedite.ts'
   import GoalGlyph from '../goals/GoalGlyph.svelte'
   import { isLive } from '../computers/computers.ts'
-  import { sections, rowOf, shown, runningWork } from './workViews.ts'
+  import { rows, rowOf, shown, runningWork } from './workViews.ts'
   import { sessionStatus } from '../sessions/status.ts'
   import MachineRow from '../machines/MachineRow.svelte'
   import { machinesSub } from '../machines/machines.ts'
@@ -105,23 +105,18 @@
       {#if room.repo}<p class="repo mono" title={room.repo}><bdi>{room.repo}</bdi></p>{/if}
     </header>
     <div class="scroll">
-      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(viewUnread[GENERAL] ?? 0) > 0} title="Room chat" onclick={() => onview(GENERAL)}>
-        <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">{ROOM_CHAT}</span>{#if viewUnread[GENERAL]}<span class="count">{viewUnread[GENERAL]}</span>{/if}
+      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(viewUnread[GENERAL] ?? 0) > 0} title="Chat" onclick={() => onview(GENERAL)}>
+        <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">Chat</span>{#if viewUnread[GENERAL]}<span class="count">{viewUnread[GENERAL]}</span>{/if}
       </button>
-      {#each sections as section (section.label)}
-        {@const rows = shown(section.rows, { repo: !!room.repo, computers: !!computers })}
-        {#if rows.length}
-          <h2>{section.label}</h2>
-          {#each rows as r (r.id)}
-            <button class="chan" class:sel={open === r.id} title={r.hint} onclick={() => { const tab = r.tabs[0]; if (tab) onview(tab.id) }}>
-              {#if r.id === 'goals'}<span class="wglyph"><GoalGlyph neutral /></span>{:else}<svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons[r.id]} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              {/if}<span class="label">{r.label}</span>
-              {#if r.id === 'requests' && requests}<span class="count live" title="{requests} {requests === 1 ? 'request' : 'requests'} waiting for you">{requests}</span>{/if}
-              {#if r.id === 'runs' && running}<span class="lv" title="{running} running">● {running}</span>{/if}
-              {#if r.id === 'computers' && liveComputers}<span class="lv">{liveComputers} live</span>{/if}
-            </button>
-          {/each}
-        {/if}
+      <hr class="split" />
+      {#each shown(rows, { repo: !!room.repo, computers: !!computers }) as r (r.id)}
+        <button class="chan" class:sel={open === r.id} title={r.hint} onclick={() => { const tab = r.tabs[0]; if (tab) onview(tab.id) }}>
+          {#if r.id === 'goals'}<span class="wglyph"><GoalGlyph neutral /></span>{:else}<svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons[r.id]} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          {/if}<span class="label">{r.label}</span>
+          {#if r.id === 'requests' && requests}<span class="count live" title="{requests} {requests === 1 ? 'request' : 'requests'} waiting for you">{requests}</span>{/if}
+          {#if r.id === 'runs' && running}<span class="lv" title="{running} running">● {running}</span>{/if}
+          {#if r.id === 'computers' && liveComputers}<span class="lv">{liveComputers} live</span>{/if}
+        </button>
       {/each}
       {#if live.length}
         <h2>Working now</h2>
@@ -194,6 +189,7 @@
     color: var(--muted);
   }
   h2:first-child { margin-top: 6px; }
+  .split { height: 1px; margin: var(--s2) var(--s2); border: 0; background: var(--hover); }
   .chan {
     width: 100%;
     display: flex;
