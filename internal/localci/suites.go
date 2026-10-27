@@ -100,7 +100,7 @@ type RoomNotServedError struct {
 }
 
 func (e RoomNotServedError) Error() string {
-	return fmt.Sprintf("no enabled CI machine serves room %s; an owner adds the room to a CI machine with dyna machine edit <name> --rooms %s, or in Settings > Machines", e.RoomID, e.RoomID)
+	return fmt.Sprintf("no enabled CI machine serves room %s; an owner adds the room to a CI machine with dyna machine edit <name> --rooms %s, or in Settings > Machines; then run dyna git merge retry", e.RoomID, e.RoomID)
 }
 
 // NodesForRoom keeps the machines that take CI work for the room. A machine
