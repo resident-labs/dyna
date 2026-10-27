@@ -17,12 +17,43 @@ const (
 // Baseline is how far back "since" readings look.
 const Baseline = 30 * time.Minute
 
+// GroupKind is what a sample group is, apart from its display name.
+// SessionID on the sample is set only for GroupSession.
+type GroupKind string
+
+const (
+	GroupOutside   GroupKind = "outside"
+	GroupEngine    GroupKind = "engine"
+	GroupComputers GroupKind = "computers"
+	GroupSession   GroupKind = "session"
+)
+
+// kindFromName reads a stored group name once, at the sample boundary.
+// Later readers use GroupKind, not the name.
+func kindFromName(name string) (GroupKind, string) {
+	switch name {
+	case "engine":
+		return GroupEngine, ""
+	case "computers":
+		return GroupComputers, ""
+	case OutsideGroup:
+		return GroupOutside, ""
+	default:
+		if id, ok := strings.CutPrefix(name, "session:"); ok {
+			return GroupSession, id
+		}
+		return "", ""
+	}
+}
+
 // Finding is one cause with its numbers and, when one exists, the exact next
-// command.
+// command. Kind is the sample group this cause names. The alert reads Kind,
+// not the cause text.
 type Finding struct {
-	Cause    string `json:"cause"`
-	Evidence string `json:"evidence"`
-	Command  string `json:"command,omitempty"`
+	Cause    string    `json:"cause"`
+	Evidence string    `json:"evidence"`
+	Command  string    `json:"command,omitempty"`
+	Kind     GroupKind `json:"kind,omitempty"`
 }
 
 // Report is one examination.
@@ -161,13 +192,17 @@ func withOutside(latest []Sample, m Sample) []Sample {
 	var out []Sample
 	outside := m
 	outside.Group.Name = OutsideGroup
+	outside.Kind = GroupOutside
+	outside.SessionID = ""
 	outside.Group.IO = 0
 	for _, x := range latest {
-		if x.Group.Name == "engine" || x.Group.Name == "computers" || x.Group.Name == "agents" {
+		// Agents are not a ranked kind. Subtract them so a session is not
+		// counted again inside them.
+		if x.Kind == GroupEngine || x.Kind == GroupComputers || x.Group.Name == "agents" {
 			outside.Group.Cores = max(0, outside.Group.Cores-x.Group.Cores)
 			outside.Group.Memory -= min(outside.Group.Memory, x.Group.Memory)
 		}
-		if x.Group.Name == "engine" || x.Group.Name == "computers" || strings.HasPrefix(x.Group.Name, "session:") {
+		if x.Kind == GroupEngine || x.Kind == GroupComputers || x.Kind == GroupSession {
 			out = append(out, x)
 		}
 	}
@@ -191,7 +226,7 @@ func rank(leaves []Sample, res resource, m Sample) []Sample {
 
 func finding(x Sample, res resource, m Sample, base map[string]Sample) Finding {
 	v := res.of(x)
-	f := Finding{Cause: fmt.Sprintf("%s uses %s", x.Group.Name, res.unit(v))}
+	f := Finding{Cause: fmt.Sprintf("%s uses %s", x.Group.Name, res.unit(v)), Kind: x.Kind}
 	if res.share && res.of(m) > 0 {
 		f.Cause += fmt.Sprintf(", %.0f%% of the machine's %s", v/res.of(m)*100, res.name)
 	}
@@ -202,15 +237,17 @@ func finding(x Sample, res resource, m Sample, base map[string]Sample) Finding {
 	} else {
 		f.Evidence = fmt.Sprintf("It has no sample from %s ago, so it started since then", Baseline)
 	}
-	switch name := x.Group.Name; {
-	case strings.HasPrefix(name, "session:"):
-		f.Command = "dyna subagent show " + strings.TrimPrefix(name, "session:")
-	case name == "engine":
+	switch x.Kind {
+	case GroupSession:
+		f.Command = "dyna subagent show " + x.SessionID
+	case GroupEngine:
 		f.Command = "systemctl --user status dyna-engine.service"
-	case name == "computers":
+	case GroupComputers:
 		f.Command = "dyna computer status"
-	case res.sort != "":
-		f.Command = "ps -eo pid,pcpu,rss,comm --sort=" + res.sort + " | head -n 15"
+	default:
+		if res.sort != "" {
+			f.Command = "ps -eo pid,pcpu,rss,comm --sort=" + res.sort + " | head -n 15"
+		}
 	}
 	return f
 }
