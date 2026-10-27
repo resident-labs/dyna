@@ -13,7 +13,6 @@ export interface Row {
   hint: string
   tabs: Tab[]
   repo?: boolean
-  terminal?: boolean
   computers?: boolean
 }
 
@@ -37,7 +36,6 @@ export const sections: Section[] = [
   {
     label: 'Machine',
     rows: [
-      { id: 'terminal', label: 'terminal', hint: 'A shell on the host', terminal: true, tabs: [{ id: 'terminal', label: 'Terminal' }] },
       { id: 'computers', label: 'computers', hint: 'Every agent computer in this room', computers: true, tabs: [{ id: 'computers', label: 'Computers' }] },
     ],
   },
@@ -49,7 +47,7 @@ export function rowOf(view: string): Row | undefined {
 }
 
 // shown filters rows by what the room and this client have.
-export const shown = (rows: Row[], { repo = false, terminal = false, computers = false }: { repo?: boolean; terminal?: boolean; computers?: boolean }): Row[] => rows.filter((r) => (!r.repo || repo) && (!r.terminal || terminal) && (!r.computers || computers))
+export const shown = (rows: Row[], { repo = false, computers = false }: { repo?: boolean; computers?: boolean }): Row[] => rows.filter((r) => (!r.repo || repo) && (!r.computers || computers))
 
 export const runningJob = (j: { state: string }): boolean => j.state === 'running' || j.state === 'starting'
 
