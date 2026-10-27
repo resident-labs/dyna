@@ -5,6 +5,8 @@
   import { cubicOut } from 'svelte/easing'
   import { motion, BASE, FAST } from '../ui/motion.ts'
   import { initials, roomLabel } from '../ui/format.ts'
+  import PushBell from '../settings/PushBell.svelte'
+  import { features } from '../../api.ts'
   // selected is the open room's ID, or '' for the machines list, the rail's
   // own tile.
   interface Props {
@@ -13,8 +15,13 @@
     selected?: string
     onselect: (id: string) => void
     onmenu?: ((room: Room, x: number, y: number, anchor?: HTMLElement) => void) | null
+    // The bottom of the rail keeps Settings, Notifications and Sign out in
+    // reach on every page, even when the sidebar is hidden.
+    update?: boolean
+    onsettings?: (() => void) | null
+    onlogout?: (() => void) | null
   }
-  let { narrow = false, rooms = [], selected = '', onselect, onmenu = null }: Props = $props()
+  let { narrow = false, rooms = [], selected = '', onselect, onmenu = null, update = false, onsettings = null, onlogout = null }: Props = $props()
   // Pinned rooms first, in pin order, then the rest as Go sorts them. A
   // pinned room stays on the rail even after it goes quiet.
   let pinned = $derived(rooms.filter((r) => r.pinned).sort((a, b) => (a.pinOrder || 0) - (b.pinOrder || 0)))
@@ -74,6 +81,23 @@
       <div animate:flip={{ duration: motion(BASE), easing: cubicOut }} in:fade={{ duration: motion(FAST) }}>{@render tile(r)}</div>
     {/each}
   </div>
+  {#if onsettings || onlogout}
+    <div class="sep"></div>
+    <div class="tools">
+      {#if onsettings}
+        <button class="tool" onclick={onsettings} aria-label="Settings" title="Profiles and settings">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg>
+          {#if update}<span class="udot" aria-label="Update available"></span>{/if}
+        </button>
+      {/if}
+      {#if onlogout}
+        {#if features.push}<PushBell />{/if}
+        <button class="tool" onclick={onlogout} aria-label="Sign out this device" title="Sign out this device">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M14 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2H14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M11 12h9m-3.2-3.5L20.3 12l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+      {/if}
+    </div>
+  {/if}
 </nav>
 
 <style>
@@ -98,6 +122,14 @@
     scrollbar-width: none;
   }
   .list::-webkit-scrollbar { display: none; }
+  .tools { display: flex; flex-direction: column; align-items: center; gap: var(--s1); flex: none; }
+  .tool { position: relative; width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  @media (hover: hover) {
+    .tool:hover { background: var(--hover); color: var(--ink); }
+  }
+  .tool:active { background: var(--select); }
+  .udot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px var(--rail); }
+  .tools :global(.bell) { width: 40px; height: 40px; border-radius: 8px; }
   .sep { width: 32px; height: 2px; border-radius: 1px; background: var(--line); flex: none; }
   .sep.small { width: 20px; height: 2px; background: var(--line-soft); }
   .slot { position: relative; width: 72px; display: flex; justify-content: center; }
@@ -193,7 +225,8 @@
   .rail.phone .badge { position: static; flex: none; min-width: 20px; height: 20px; border: 0; }
   .rail.phone .live { position: static; flex: none; width: 8px; height: 8px; border: 0; }
   .rail.phone .room-actions { display: grid; place-items: center; flex: none; width: 40px; height: 44px; border-radius: 8px; color: var(--muted); transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
-  .rail.phone .sep { width: calc(100% - 16px); margin: var(--s1) var(--s2); align-self: center; }
+  .rail.phone .tools { flex-direction: row; justify-content: space-around; padding: 0 var(--s2); }
+  .rail.phone .sep {width: calc(100% - 16px); margin: var(--s1) var(--s2); align-self: center; }
   .rail.phone .slot.sel .tile { border-radius: 8px; background: var(--select); color: var(--ink); }
   .rail.phone .slot.sel .home { color: var(--iris); }
   .rail.phone .slot:active .tile { background: var(--select); }

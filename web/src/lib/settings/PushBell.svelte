@@ -1,6 +1,6 @@
 <script lang="ts">
   import { pushSupported, pushState, pushOn, pushOff, pushNames, pushTest } from './link.ts'
-  // The bell in the sidebar footer and its small panel: Web Push on or off,
+  // The bell at the bottom of the room rail and its small panel: Web Push on or off,
   // whether a notification may show room and sender names, and a test.
   let open = $state(false)
   let on = $state(false)
@@ -73,7 +73,7 @@
   }
   .bell:active { background: var(--select); }
   .bell.on { color: var(--iris); }
-  .panel { position: absolute; bottom: 40px; right: -44px; width: 216px; z-index: 20; background: var(--field); border-radius: 8px; padding: var(--s3); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+  .panel { position: fixed; bottom: 12px; left: 76px; width: 216px; z-index: 20; background: var(--field); border-radius: 8px; padding: var(--s3); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: var(--t-ui); color: var(--ink-2); }
   .test { height: 32px; border-radius: 6px; background: var(--select); color: var(--ink); font-size: var(--t-ui); font-weight: 600; }
   .test:disabled { opacity: 0.5; cursor: default; }
