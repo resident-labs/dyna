@@ -34,11 +34,10 @@ func checkRequest(req *agentwire.SessionRequest) error {
 	if req.MaxMinutes < 1 || req.MaxMinutes > agentwire.MaxSessionMinutes {
 		return fmt.Errorf("--max-minutes must be from 1 to %d", agentwire.MaxSessionMinutes)
 	}
-	switch strings.ToLower(strings.TrimSpace(req.VADEagerness)) {
-	case "":
-		req.VADEagerness = ""
-	case "low", "medium", "high", "auto":
-		req.VADEagerness = strings.ToLower(strings.TrimSpace(req.VADEagerness))
+	eagerness := strings.ToLower(strings.TrimSpace(req.VADEagerness))
+	switch eagerness {
+	case "", "low", "medium", "high", "auto":
+		req.VADEagerness = eagerness
 	default:
 		return fmt.Errorf("--vad-eagerness must be low, medium, high or auto")
 	}
@@ -194,9 +193,12 @@ type sessionLoop struct {
 	pending map[string]string
 	// timeouts delivers the ID of a tool call whose time ran out.
 	timeouts chan string
-	// manualCommits is how many commit lines still wait for the provider's
-	// committed echo. That echo must not ask for a second reply.
-	manualCommits int
+	// commitAsked means a commit line already asked for a reply, and its
+	// provider echo has not arrived. That echo must not ask again. Speech
+	// starting, or a provider error, clears it. A missing echo then cannot
+	// swallow the next real turn. ResponseDone does not clear it: the echo
+	// can arrive after the reply ends, and that echo is not a new turn.
+	commitAsked bool
 }
 
 // run reads the agent and the provider until the session ends.
@@ -400,7 +402,7 @@ func (l *sessionLoop) commit() (agentwire.EndReason, bool) {
 	if reason, ended := l.send(event); ended {
 		return reason, true
 	}
-	l.manualCommits++
+	l.commitAsked = true
 	return l.reply()
 }
 
@@ -482,10 +484,13 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 		pcm := realtime.Resample(ev.Audio, l.p.OutputRate, l.req.Rate)
 		return l.emit(agentwire.OutMessage{Type: agentwire.OutAudio, ResponseID: ev.ResponseID, PCM: pcm})
 	case realtime.SpeechStarted, realtime.Interrupted:
+		// A new turn started. The pending commit echo, if it never comes,
+		// must not swallow this turn's commit.
+		l.commitAsked = false
 		return l.stopPlayback()
 	case realtime.Committed:
-		if l.manualCommits > 0 {
-			l.manualCommits--
+		if l.commitAsked {
+			l.commitAsked = false
 			return "", false
 		}
 		return l.reply()
@@ -523,6 +528,9 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 			return l.reply()
 		}
 	case realtime.Error:
+		// A rejected commit sends no echo. Drop the pending mark so the
+		// next real turn still gets a reply.
+		l.commitAsked = false
 		// A busy refusal means a response still holds the slot. Any other
 		// error ends a create the provider has not started.
 		busy := ev.Code == "conversation_already_has_active_response"

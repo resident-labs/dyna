@@ -645,3 +645,56 @@ func TestSessionCommitAndVADEagerness(t *testing.T) {
 		t.Fatalf("second echo sent %s, want no third reply", got)
 	}
 }
+
+// A commit that gets no echo must not swallow the next real turn. OpenAI
+// sends no committed event when the buffer was already committed or was
+// empty. Speech starting, or a provider error, ends that pending echo.
+func TestSessionCommitWithoutEchoDoesNotSwallowTheNextTurn(t *testing.T) {
+	clock := newFakeClock()
+	p := fakeProvider()
+	p.Caps.ManualCommit = true
+	p.Protocol = commitProtocol{}
+	conn := newChanConn()
+	r := startSession(t, fakeSessions(p, conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond:]" {
+		t.Fatalf("commit sent %s", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.SpeechStarted}
+	if m := r.next(t); m.Type != agentwire.OutSpeechStart {
+		t.Fatalf("speech = %+v", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.Committed}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone {
+		t.Fatalf("done = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond: respond:]" {
+		t.Fatalf("next turn sent %s, want a reply after speech", got)
+	}
+	close(r.in)
+
+	conn = newChanConn()
+	r = startSession(t, fakeSessions(p, conn, clock), conn, clock, agentwire.SessionRequest{})
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync = %+v", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.Error, Code: "input_audio_buffer_commit_empty", Text: "buffer is empty"}
+	if m := r.next(t); m.Type != agentwire.OutError || m.Message != "buffer is empty" {
+		t.Fatalf("provider error = %+v", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.Committed}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "spoke"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "spoke" {
+		t.Fatalf("after rejected commit = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[commit respond: respond:]" {
+		t.Fatalf("after a rejected commit, sent %s, want the next turn to ask", got)
+	}
+}
