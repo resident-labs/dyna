@@ -44,7 +44,10 @@ type reminderState struct {
 	// reminder for this stretch went out.
 	idle, idleSent bool
 	turns          int
-	acted          time.Time
+	// wokenTurn is the turn the idle reminder starts. It belongs to the same
+	// stretch, so it does not earn the session another idle reminder.
+	wokenTurn int
+	acted     time.Time
 }
 
 // pass sends the reminders that are due now. It forgets every session whose
@@ -79,11 +82,18 @@ func (r *computerReminders) pass(ctx context.Context) {
 			acted = c.LatestStatus.At
 		}
 		st := r.seen[info.ID]
-		if st == nil || st.idle != idle || st.turns != info.Turns || !st.acted.Equal(acted) {
+		if st != nil && st.idleSent && st.acted.Equal(acted) && info.Turns <= st.wokenTurn {
+			// The idle reminder caused this turn, so it is the same stretch. The
+			// session still gets no second idle reminder when the turn ends.
+			if st.idle != idle {
+				st.idle, st.since = idle, now
+			}
+			st.turns = info.Turns
+		} else if st == nil || st.idle != idle || st.turns != info.Turns || !st.acted.Equal(acted) {
 			r.seen[info.ID] = &reminderState{since: now, idle: idle, turns: info.Turns, acted: acted}
 			continue
 		}
-		if now.Sub(st.since) < every || st.idleSent {
+		if now.Sub(st.since) < every || idle && st.idleSent {
 			continue
 		}
 		var apps []string
@@ -95,7 +105,9 @@ func (r *computerReminders) pass(ctx context.Context) {
 			continue
 		}
 		st.since = now
-		st.idleSent = idle
+		if idle {
+			st.idleSent, st.wokenTurn = true, info.Turns+1
+		}
 	}
 	for id := range r.seen {
 		if !live[id] {
