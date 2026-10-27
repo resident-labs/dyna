@@ -34,7 +34,7 @@ func NewCommand() *cobra.Command {
 		Short: "Use Dyna's voice from the command line",
 		Args:  cobra.NoArgs,
 	}
-	cmd.AddCommand(newSayCommand())
+	cmd.AddCommand(newSayCommand(), newSessionCommand())
 	return cmd
 }
 

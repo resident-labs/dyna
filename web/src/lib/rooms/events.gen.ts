@@ -75,6 +75,12 @@ export type ReviewStopReason = "superseded" | "duplicate" | "empty" | "too-large
 // CallState is a named string type of an event payload.
 export type CallState = "joined" | "declined" | "withdrawn"
 
+// VoiceSessionState is a named string type of an event payload.
+export type VoiceSessionState = "started" | "ended"
+
+// VoiceEndReason is a named string type of an event payload.
+export type VoiceEndReason = "input-closed" | "time-limit" | "idle" | "provider-closed" | "error" | "cancelled"
+
 // MergePR is a struct of an event payload.
 export interface MergePR {
   number: number
@@ -247,6 +253,16 @@ export interface CallEvent {
   call: string
 }
 
+// VoiceSessionEvent is the payload of the voice-session/started and voice-session/ended events.
+export interface VoiceSessionEvent {
+  type: VoiceSessionState
+  voice: string
+  session: string
+  provider: string
+  seconds?: number
+  reason?: VoiceEndReason
+}
+
 // ReviewEvent is the payload of the review/result events.
 export interface ReviewEvent {
   kind: ReviewKind
@@ -399,10 +415,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "consolidation" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -730,6 +746,26 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "The call request {call} was withdrawn.",
+  },
+  {
+    family: "voice-session",
+    type: "started",
+    renderer: "VoiceSessionCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{session} started a live voice session on {provider}.",
+  },
+  {
+    family: "voice-session",
+    type: "ended",
+    renderer: "VoiceSessionCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{session} ended its live voice session on {provider} after {seconds} seconds: {reason}.",
   },
   {
     family: "review",
@@ -1118,6 +1154,8 @@ const REVIEW_KIND: ReadonlySet<unknown> = new Set(["approve", "changes", "approv
 const REVIEW_SEVERITY: ReadonlySet<unknown> = new Set(["blocking", "should-fix", "nit"])
 const REVIEW_STOP_REASON: ReadonlySet<unknown> = new Set(["superseded", "duplicate", "empty", "too-large"])
 const CALL_STATE: ReadonlySet<unknown> = new Set(["joined", "declined", "withdrawn"])
+const VOICE_SESSION_STATE: ReadonlySet<unknown> = new Set(["started", "ended"])
+const VOICE_END_REASON: ReadonlySet<unknown> = new Set(["input-closed", "time-limit", "idle", "provider-closed", "error", "cancelled"])
 
 export function isMergePR(v: unknown): v is MergePR {
   return isRecord(v) &&
@@ -1311,6 +1349,16 @@ export function isCallEvent(v: unknown): v is CallEvent {
     typeof v.call === "string"
 }
 
+export function isVoiceSessionEvent(v: unknown): v is VoiceSessionEvent {
+  return isRecord(v) &&
+    VOICE_SESSION_STATE.has(v.type) &&
+    typeof v.voice === "string" &&
+    typeof v.session === "string" &&
+    typeof v.provider === "string" &&
+    (v.seconds === undefined || Number.isInteger(v.seconds)) &&
+    (v.reason === undefined || VOICE_END_REASON.has(v.reason))
+}
+
 export function isReviewEvent(v: unknown): v is ReviewEvent {
   return isRecord(v) &&
     REVIEW_KIND.has(v.kind) &&
@@ -1494,6 +1542,8 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "call" && type === "joined") return isCallEvent(v)
   if (family === "call" && type === "declined") return isCallEvent(v)
   if (family === "call" && type === "withdrawn") return isCallEvent(v)
+  if (family === "voice-session" && type === "started") return isVoiceSessionEvent(v)
+  if (family === "voice-session" && type === "ended") return isVoiceSessionEvent(v)
   if (family === "review" && type === "result") return isReviewEvent(v)
   if (family === "pr" && type === "opened") return isPREvent(v)
   if (family === "pr" && type === "ready") return isPREvent(v)

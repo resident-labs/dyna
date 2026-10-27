@@ -112,9 +112,11 @@ type Values struct {
 	VoiceURL      string
 	// VoiceDucking optionally lowers playback while the owner speaks.
 	VoiceDucking bool
-	Extra        map[string]any
-	path         string
-	fromFile     map[string]bool
+	// VoiceAgent lets agents use voice (dyna voice say and session).
+	VoiceAgent bool
+	Extra      map[string]any
+	path       string
+	fromFile   map[string]bool
 }
 
 func DefaultPath() string {
@@ -147,6 +149,7 @@ func Defaults() Values {
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
 		VoiceProvider:            "openai",
+		VoiceAgent:               true,
 		Extra:                    map[string]any{},
 		fromFile:                 map[string]bool{},
 	}
@@ -460,7 +463,7 @@ func (v *Values) Set(key, value string) error {
 		return v.setAdmission(key, value)
 	case KeyDoctorCondition:
 		return v.setDoctor(key, value)
-	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
+	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking, KeyVoiceAgent:
 		return v.setVoice(key, value)
 	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibrarySmellProfile, KeyLibraryReadmeMaxLines, KeyLibrarySmellsPerDay:
 		return v.setLibrary(key, value)

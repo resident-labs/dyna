@@ -47,6 +47,23 @@ type sayConn interface {
 	Close() error
 }
 
+// ErrAgentVoiceOff is the error for agent voice that the owner turned off.
+var ErrAgentVoiceOff = errors.New("the owner turned off agent voice in Settings > Voice")
+
+// agentVoiceEnabled reports ErrAgentVoiceOff when the voice settings turn
+// agent voice off. It reads the settings on every call, so the owner's change
+// applies to the next say or session.
+func agentVoiceEnabled(load func(string) (settings.Values, error)) error {
+	v, err := load(settings.DefaultPath())
+	if err != nil {
+		return err
+	}
+	if !v.VoiceAgent {
+		return ErrAgentVoiceOff
+	}
+	return nil
+}
+
 // Sayer turns text into speech for agents. The zero value is not ready:
 // use NewSayer.
 type Sayer struct {
@@ -55,6 +72,9 @@ type Sayer struct {
 	provider func(name string) (realtime.Provider, error)
 	// dial opens a connection; tests replace it.
 	dial func(context.Context, realtime.Provider, realtime.Session) (sayConn, error)
+	// enabled returns an error when the owner turned agent voice off. Nil
+	// means on.
+	enabled func() error
 	// timeout bounds one say.
 	timeout time.Duration
 	slots   chan struct{}
@@ -67,6 +87,7 @@ func NewSayer() *Sayer {
 		dial: func(ctx context.Context, p realtime.Provider, s realtime.Session) (sayConn, error) {
 			return realtime.Dial(ctx, p, s)
 		},
+		enabled: func() error { return agentVoiceEnabled(settings.Load) },
 		timeout: SayTimeout,
 		slots:   make(chan struct{}, MaxSays),
 	}
@@ -98,6 +119,11 @@ func sayInstructions(style string) string {
 // Say speaks req.Text and returns the audio. It fails with a busy error when
 // MaxSays are already running.
 func (s *Sayer) Say(ctx context.Context, req SayRequest) (SayResult, error) {
+	if s.enabled != nil {
+		if err := s.enabled(); err != nil {
+			return SayResult{}, err
+		}
+	}
 	text := strings.TrimSpace(req.Text)
 	switch n := utf8.RuneCountInString(text); {
 	case n == 0:

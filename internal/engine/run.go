@@ -623,6 +623,10 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 		}
 	}
 	callers.actForCallers(calls)
+	var agentVoiceHost websvc.AgentVoiceHost
+	if !readOnly {
+		agentVoiceHost = callers.agentVoice(rooms)
+	}
 	if writer != nil {
 		applyOnce(calls, writer, log.Printf)
 	}
@@ -682,6 +686,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 		Terminals:  terminals,
 		Computers:  computers,
 		Voice:      voiceCalls,
+		AgentVoice: agentVoiceHost,
 		Ext:        ext,
 		Version:    callspec.Build,
 		Push:       push,

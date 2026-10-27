@@ -31,7 +31,7 @@ func OpenAI(url string, creds Credentials) Provider {
 		Label:     "OpenAI Realtime",
 		Aliases:   []string{"gpt-live", "gpt-realtime"},
 		InputRate: 24000, OutputRate: 24000,
-		Caps:     Capabilities{FunctionCalling: true, AcknowledgesSessionUpdate: true},
+		Caps:     Capabilities{FunctionCalling: true, AcknowledgesSessionUpdate: true, ImageInput: true},
 		Protocol: GA{},
 		Endpoint: func(ctx context.Context) (string, http.Header, error) {
 			token, account, err := creds(ctx)
