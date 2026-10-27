@@ -103,7 +103,9 @@
   import ComputerPreview from './lib/computers/ComputerPreview.svelte'
   import { previewVisible, inUse } from './lib/computers/preview.ts'
   import { applyEvent, pushAction, openedApps, popOut } from './lib/computers/computers.ts'
-  import Terminal from './lib/sessions/Terminal.svelte'
+  import TermDock from './lib/sessions/TermDock.svelte'
+  import { legacyView } from './lib/sessions/termDock.ts'
+  import { base } from './lib/files/repo.ts'
   import { available as hasTerminal } from './lib/sessions/TermPane.svelte'
   import Jobs from './lib/workflows/Jobs.svelte'
   import Prompt from './lib/ui/Prompt.svelte'
@@ -290,6 +292,7 @@
   // The desktop window never gets this narrow (its minimum is 960 px).
   const NARROW = '(max-width: 760px)'
   let narrow = $state(window.matchMedia(NARROW).matches)
+  let dockRequest = $state(0) // counts up to open the terminal dock
   let navOpen = $state(false) // the drawer, on a narrow screen
   let showMembers = $state(layout.members && !window.matchMedia(NARROW).matches)
   // The saved layout is the wide one; a phone's toggles do not change it.
@@ -935,7 +938,10 @@
     reply = null
     router.reviewOpen = startView === 'files' || startView === 'github' || startView === 'issues'
     router.reviewTab = startView === 'github' ? 'prs' : startView === 'issues' ? 'issues' : 'files'
-    router.view = ['all', 'owner', 'turns', 'files', 'github'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
+    // TODO: legacy/shim remove later — the terminal view became the dock.
+    const start = legacyView(startView, GENERAL)
+    if (start.dock) dockRequest++
+    router.view = ['all', 'owner', 'turns', 'files', 'github'].includes(start.view) ? GENERAL : start.view
     roomData.clearMembers()
     runs = null
     listPages = {}
@@ -1565,7 +1571,7 @@
   function actionRegistry(r = current ?? room) {
     return actions({
       room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id ?? ''],
-      openView, openSettings, renameRoom, deleteRoom, roomAction, say: sayLine, loadRooms,
+      openView: (v) => (v === 'terminal' ? dockRequest++ : openView(v)), openSettings, renameRoom, deleteRoom, roomAction, say: sayLine, loadRooms,
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
       openSearch: (arg) => openSearch(arg || ''),
@@ -1869,8 +1875,6 @@
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} />{/if}
         {#if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
-        {:else if view === 'terminal' && hasTerminal}
-          {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
           {#key room.id}<Questions roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
@@ -1927,6 +1931,9 @@
       {/if}
       </div>
     </div>
+    {#if roomId && room && hasTerminal}
+      {#key room.id}<TermDock roomId={room.id} session={drill && !drill.rootSeat ? drill.id : ''} owner={room.repo ? base(room.repo) : room.name} noRepo={!room.repo} {narrow} request={dockRequest} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
+    {/if}
   </main>
   <VoiceWidget bind:this={voiceWidget} bind:link={callPush} {narrow} {rooms} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
 </div>
@@ -2012,7 +2019,7 @@
   .app { display: flex; height: 100vh; height: var(--app-height, 100dvh); min-height: 0; }
   .panel { display: contents; }
   .scrim { display: none; }
-  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--main); }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--main); position: relative; }
   .content { flex: 1; display: flex; min-height: 0; }
   .center { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
   .toast-details {

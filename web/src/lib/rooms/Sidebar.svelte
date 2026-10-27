@@ -17,7 +17,6 @@
   import { expedite, agentExpedited } from './expedite.ts'
   import GoalGlyph from '../goals/GoalGlyph.svelte'
   import { isLive } from '../computers/computers.ts'
-  import { available as terminal } from '../sessions/TermPane.svelte'
   import { sections, rowOf, shown, runningWork } from './workViews.ts'
   import { sessionStatus } from '../sessions/status.ts'
   import MachineRow from '../machines/MachineRow.svelte'
@@ -110,7 +109,7 @@
         <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">{ROOM_CHAT}</span>{#if viewUnread[GENERAL]}<span class="count">{viewUnread[GENERAL]}</span>{/if}
       </button>
       {#each sections as section (section.label)}
-        {@const rows = shown(section.rows, { repo: !!room.repo, terminal, computers: !!computers })}
+        {@const rows = shown(section.rows, { repo: !!room.repo, computers: !!computers })}
         {#if rows.length}
           <h2>{section.label}</h2>
           {#each rows as r (r.id)}
