@@ -29,7 +29,7 @@ Every line is one JSON object. Audio is base64 PCM16 mono, little endian, at `--
 | --- | --- |
 | `{"type":"audio","pcm":"<base64>"}` | Microphone audio. |
 | `{"type":"text","text":"…"}` | Add context. The voice does not reply. |
-| `{"type":"say","text":"…"}` | Make the voice speak this text. |
+| `{"type":"say","text":"…","mode":"append"}` | Make the voice speak this text. `mode` is `append` (default: wait for the speech that plays) or `replace` (cancel it and speak now). |
 | `{"type":"tool_result","call_id":"…","output":"…"}` | Answer a tool call. |
 | `{"type":"interrupt"}` | Stop the reply that plays. |
 | `{"type":"image","path":"/abs/file.png"}` | Add a PNG or JPEG (at most 5 MB). No reply. OpenAI Realtime only; others send an `error` line. |
@@ -57,6 +57,14 @@ Rules to design for:
   answer fast, for example "started"; then tell the model the result with `text` or `say`.
 - **Images.** Write the file, send `{"type":"image","path":…}`, then ask about it with `text` or let the person ask.
 - **`ready` first.** Do not send audio before `ready`; a start failure prints the error and exits non-zero.
+
+## Speaker mode: a stream of lines
+
+An NPC, narrator or kiosk speaks many lines and must not overlap clips. Open one session with no
+microphone, and send each line as `say`. Use `"mode":"replace"` for a line that makes the old one stale; the
+engine cancels the reply, sends `speech_started` (drop your buffered audio), and sends no more audio of the old
+reply. Use `append` for lines that must all be heard in order. One open session keeps the voice and style
+steady and has low latency per line. It needs a provider that takes text (not audio-only ones).
 
 ## Example bridge: Python
 

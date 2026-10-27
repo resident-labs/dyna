@@ -38,7 +38,8 @@ const (
 	InAudio MessageType = "audio"
 	// InText adds text to the conversation without asking for a reply.
 	InText MessageType = "text"
-	// InSay asks the voice to speak the text.
+	// InSay asks the voice to speak the text. Its Mode says what to do with
+	// speech that still plays.
 	InSay MessageType = "say"
 	// InToolResult answers a tool call.
 	InToolResult MessageType = "tool_result"
@@ -46,6 +47,18 @@ const (
 	InInterrupt MessageType = "interrupt"
 	// InImage adds a PNG or JPEG image to the conversation without a reply.
 	InImage MessageType = "image"
+)
+
+// SayMode says what an InSay line does when an earlier reply still plays.
+type SayMode string
+
+const (
+	// SayAppend waits for the reply that plays, then speaks. It is the default.
+	SayAppend SayMode = "append"
+	// SayReplace cancels the reply that plays and speaks the new text now. The
+	// engine sends speech_started so the agent drops audio it has buffered, and
+	// sends no more audio of the cancelled reply.
+	SayReplace SayMode = "replace"
 )
 
 // Lines the engine sends out.
@@ -85,10 +98,12 @@ type InMessage struct {
 	// Request is set on InStart.
 	Request *SessionRequest `json:"request,omitempty"`
 	// PCM is audio, base64 in JSON.
-	PCM    []byte `json:"pcm,omitempty"`
-	Text   string `json:"text,omitempty"`
-	CallID string `json:"call_id,omitempty"`
-	Output string `json:"output,omitempty"`
+	PCM  []byte `json:"pcm,omitempty"`
+	Text string `json:"text,omitempty"`
+	// Mode is set on InSay; empty means SayAppend.
+	Mode   SayMode `json:"mode,omitempty"`
+	CallID string  `json:"call_id,omitempty"`
+	Output string  `json:"output,omitempty"`
 	// Image and Mime are the file's bytes and type on InImage.
 	Image []byte `json:"image,omitempty"`
 	Mime  string `json:"mime,omitempty"`

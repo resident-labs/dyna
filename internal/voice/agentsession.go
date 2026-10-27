@@ -143,7 +143,7 @@ func (s *Sessions) Run(ctx context.Context, req agentwire.SessionRequest, io Ses
 	if io.Started != nil {
 		io.Started(p.Key)
 	}
-	l := &sessionLoop{s: s, req: req, p: p, conn: conn, io: io, started: s.now(), pending: map[string]bool{}}
+	l := &sessionLoop{s: s, req: req, p: p, conn: conn, io: io, started: s.now(), pending: map[string]bool{}, dropped: map[string]bool{}}
 	reason := l.run(ctx)
 	end := SessionEnd{Provider: p.Key, Elapsed: s.now().Sub(l.started), Reason: reason}
 	_ = io.Out(agentwire.OutMessage{Type: agentwire.OutClosed, Reason: reason})
@@ -164,6 +164,8 @@ type sessionLoop struct {
 	active string
 	// owed: a reply is due and waits for the active response to end.
 	owed bool
+	// dropped holds the cancelled responses whose late audio is not sent.
+	dropped map[string]bool
 	// pending holds the tool calls that wait for the agent's result.
 	pending map[string]bool
 	// timeouts delivers the ID of a tool call whose time ran out.
@@ -260,6 +262,25 @@ func (l *sessionLoop) reply() (agentwire.EndReason, bool) {
 	return l.send(l.p.Protocol.ResponseCreate(""))
 }
 
+// say speaks the text just added. Replace cancels the active response first.
+// Append never overlaps: it waits until the active response ends.
+func (l *sessionLoop) say(mode agentwire.SayMode) (agentwire.EndReason, bool) {
+	if l.active == "" {
+		return l.reply()
+	}
+	if mode == agentwire.SayReplace {
+		l.dropped[l.active] = true
+		if reason, ended := l.stopPlayback(); ended {
+			return reason, true
+		}
+	}
+	if l.p.Caps.NoClientResponses {
+		return "", false
+	}
+	l.owed = true
+	return "", false
+}
+
 // stopPlayback cancels the active response and tells the agent to stop playing.
 func (l *sessionLoop) stopPlayback() (agentwire.EndReason, bool) {
 	if l.active != "" && !l.p.Caps.NoClientResponses {
@@ -297,6 +318,9 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 		if text == "" {
 			return l.fail("the %s line has no text", m.Type)
 		}
+		if m.Type == agentwire.InSay && m.Mode != "" && m.Mode != agentwire.SayAppend && m.Mode != agentwire.SayReplace {
+			return l.fail("unknown say mode %q; use %q or %q", m.Mode, agentwire.SayAppend, agentwire.SayReplace)
+		}
 		if m.Type == agentwire.InSay {
 			text = "Say exactly this, word for word, and nothing else: " + text
 		}
@@ -304,7 +328,7 @@ func (l *sessionLoop) fromAgent(m agentwire.InMessage) (agentwire.EndReason, boo
 			return reason, true
 		}
 		if m.Type == agentwire.InSay {
-			return l.reply()
+			return l.say(m.Mode)
 		}
 		return "", false
 	case agentwire.InImage:
@@ -366,6 +390,9 @@ func (l *sessionLoop) fromProvider(ctx context.Context, ev realtime.Event, done 
 	case realtime.ResponseStarted:
 		l.active = ev.ResponseID
 	case realtime.AudioDelta:
+		if l.dropped[ev.ResponseID] {
+			return "", false
+		}
 		pcm := realtime.Resample(ev.Audio, l.p.OutputRate, l.req.Rate)
 		return l.emit(agentwire.OutMessage{Type: agentwire.OutAudio, ResponseID: ev.ResponseID, PCM: pcm})
 	case realtime.SpeechStarted, realtime.Interrupted:
