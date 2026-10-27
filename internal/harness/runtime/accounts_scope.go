@@ -101,8 +101,10 @@ func (a *Accounts) SelectForRepo(ctx context.Context, harness string, provider s
 	now := time.Now()
 	earliest, earliestLabel := time.Time{}, ""
 	open := allowed
+	var limits, stated map[string]time.Time
 	if scopes, e := a.scopes(); e == nil {
-		if limits, e := scopes.Limits(now); e == nil {
+		stated, _ = scopes.Stated(now)
+		if limits, e = scopes.Limits(now); e == nil {
 			open = nil
 			for _, n := range allowed {
 				if end, hit := limits[n.ID]; hit {
@@ -120,7 +122,7 @@ func (a *Accounts) SelectForRepo(ctx context.Context, harness string, provider s
 		if earliest.IsZero() {
 			return fmt.Errorf("Every %s account that may run in %s is at its usage limit.", provider, repoName(repo))
 		}
-		return fmt.Errorf("No %s account with quota left may run in %s. %s resets %s.", provider, repoName(repo), earliestLabel, earliest.Local().Format("Mon 15:04"))
+		return fmt.Errorf("No %s account with quota left may run in %s. %s", provider, repoName(repo), resetSentence(earliestLabel, earliest, limits, stated))
 	}
 	return a.Switch(ctx, chosen.ID, executable)
 }
@@ -161,6 +163,25 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 	return p, r.Accounts.SelectForRepo(ctx, p.Harness, ProviderForModel(p.Harness, p.Model), p.Env[mode.EnvRoomID], p.RuntimeRepo, b.Executable)
 }
 
+// resetSentence says when label's account resets. A time that is only a stored
+// guess (in limits, not in stated) is never shown: the sentence says the
+// provider named no time.
+func resetSentence(label string, at time.Time, limits, stated map[string]time.Time) string {
+	guess := false
+	for _, end := range limits {
+		guess = guess || end.Equal(at)
+	}
+	for _, end := range stated {
+		if end.Equal(at) {
+			guess = false
+		}
+	}
+	if guess {
+		return label + " reports no reset time."
+	}
+	return fmt.Sprintf("%s resets %s.", label, at.Local().Format("Mon 15:04"))
+}
+
 // Failover runs after a turn on the account failedID hit a usage limit that
 // lasts until the given time. It remembers that limit, then picks another
 // account of the same provider that the repo allows, is signed in and has quota
@@ -170,7 +191,7 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 // turn may have switched since. The active account is kept when it qualifies.
 // It never picks an account the repo rules refuse. With none left, it names
 // the earliest reset.
-func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failedID, repo, executable string, until time.Time) (from, to NativeAccount, err error) {
+func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failedID, repo, executable string, until time.Time, stated bool) (from, to NativeAccount, err error) {
 	if from, err = a.Find(failedID); err != nil {
 		return from, to, err
 	}
@@ -178,7 +199,14 @@ func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failed
 	if err != nil {
 		return from, to, err
 	}
-	if err = scopes.MarkLimited(from.ID, until); err != nil {
+	// An end that the provider did not state still keeps the account out for
+	// now, but no message shows it as a reset time.
+	if stated {
+		err = scopes.MarkReset(from.ID, until)
+	} else {
+		err = scopes.MarkLimited(from.ID, until)
+	}
+	if err != nil {
 		return from, to, err
 	}
 	rules, err := scopes.Rules()
@@ -186,6 +214,10 @@ func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failed
 		return from, to, err
 	}
 	limits, err := scopes.Limits(time.Now())
+	if err != nil {
+		return from, to, err
+	}
+	statedLimits, err := scopes.Stated(time.Now())
 	if err != nil {
 		return from, to, err
 	}
@@ -213,7 +245,7 @@ func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failed
 	}
 	chosen, earliest, earliestLabel := a.chooseUsage(ctx, open, earliest, earliestLabel, time.Now())
 	if chosen == nil {
-		return from, to, fmt.Errorf("No other %s account may run in %s with quota left. %s resets %s.", provider, repoName(repo), earliestLabel, earliest.Local().Format("Mon 15:04"))
+		return from, to, fmt.Errorf("No other %s account may run in %s with quota left. %s", provider, repoName(repo), resetSentence(earliestLabel, earliest, limits, statedLimits))
 	}
 	if chosen.Active {
 		return from, *chosen, nil

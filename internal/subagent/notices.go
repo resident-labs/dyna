@@ -17,7 +17,8 @@ func (m *Manager) notices() notices.Store {
 // postCooldownNotice tells the owner that a profile entered provider cooldown.
 // The key holds one notice per profile; a newer failure replaces its facts.
 func postCooldownNotice(s notices.Store, profileName, failure string, at time.Time) error {
-	resets := harness.UnavailableUntil(failure, at)
+	// A zero time means the provider named none; a guess is never shown.
+	resets := harness.UsageResetAt(failure, at)
 	_, err := s.Post(notices.Notice{
 		Key:      "provider:" + profileName,
 		Kind:     notices.KindProvider,
