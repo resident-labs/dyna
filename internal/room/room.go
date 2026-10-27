@@ -285,8 +285,11 @@ const (
 	SenderOwner SenderKind = "owner"
 	// SenderRoot is a room's root seat.
 	SenderRoot SenderKind = "root"
-	// SenderSession is any other agent session of a room.
+	// SenderSession is any other agent session of a room, bound to its
+	// session ID in SessionIDs.
 	SenderSession SenderKind = "session"
+	// SenderUnbound is a room:agent address that SessionIDs does not bind.
+	SenderUnbound SenderKind = "unbound"
 	// SenderShell is a Dyna-managed shell.
 	SenderShell SenderKind = "shell"
 	// SenderRun is a workflow run.
@@ -311,7 +314,10 @@ func (m Message) Sender() SenderKind {
 		if agent == RootAgent {
 			return SenderRoot
 		}
-		return SenderSession
+		if m.AuthorSessionID() != "" {
+			return SenderSession
+		}
+		return SenderUnbound
 	}
 	return SenderOwner
 }
