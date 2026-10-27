@@ -152,7 +152,13 @@ func Environment(m Meta, base []string) ([]string, error) {
 	if ownerDisplay == "" {
 		ownerDisplay = envValue(base, "DISPLAY")
 	}
-	env := mergeEnvironment(base, map[string]string{"DYNA_OWNER_WAYLAND_DISPLAY": ownerWayland, "DYNA_OWNER_DISPLAY": ownerDisplay, "WAYLAND_DISPLAY": m.WaylandDisplay, "DISPLAY": m.Display, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "PATH": shim + string(os.PathListSeparator) + envValue(base, "PATH")})
+	// Save the bus the app had, so a shell that keeps the owner display gets the
+	// owner's bus back. A bus saved by an earlier injection stays.
+	ownerBus, saved := envLookup(base, OwnerBusKey)
+	if !saved {
+		ownerBus = envValue(base, "DBUS_SESSION_BUS_ADDRESS")
+	}
+	env := mergeEnvironment(base, map[string]string{OwnerBusKey: ownerBus, "DYNA_OWNER_WAYLAND_DISPLAY": ownerWayland, "DYNA_OWNER_DISPLAY": ownerDisplay, "WAYLAND_DISPLAY": m.WaylandDisplay, "DISPLAY": m.Display, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "PATH": shim + string(os.PathListSeparator) + envValue(base, "PATH")})
 	// Every launch path that builds an app's environment here (open, run, env,
 	// the browser) points it at the computer's own session bus.
 	env = mergeEnvironment(env, privateBusEnvironment(m.SessionID))
@@ -179,6 +185,21 @@ func Inject(ctx context.Context, base []string) ([]string, error) {
 	}
 	return Environment(m, base)
 }
+
+// OwnerBusKey holds the session bus address an environment had before
+// Environment pointed it at the computer's bus.
+const OwnerBusKey = "DYNA_OWNER_DBUS_SESSION_BUS_ADDRESS"
+
+func envLookup(env []string, key string) (string, bool) {
+	prefix := key + "="
+	for _, line := range env {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix), true
+		}
+	}
+	return "", false
+}
+
 func envValue(env []string, key string) string {
 	prefix := key + "="
 	for _, line := range env {

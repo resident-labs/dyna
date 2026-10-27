@@ -124,7 +124,13 @@ func ownerDisplayEnv(base []string, computer string) []string {
 	}
 	out := withoutComputerBrowser(base, computer)
 	out = envSet(out, "WAYLAND_DISPLAY", value(base, ownerWaylandKey))
-	return envSet(out, "DISPLAY", value(base, ownerDisplayKey))
+	out = envSet(out, "DISPLAY", value(base, ownerDisplayKey))
+	// The computer's bus is a socket this shell does not use. An injection from
+	// before the owner bus was saved leaves the bus as it is.
+	if bus, ok := envLookup(base, computers.OwnerBusKey); ok {
+		out = envSet(out, "DBUS_SESSION_BUS_ADDRESS", bus)
+	}
+	return out
 }
 
 // computerInjected reports whether computers.Environment routed this
