@@ -37,7 +37,7 @@ function app(hash: string): Harness {
     callTarget, callPush: null, URLSearchParams, location, history, entries, parsePRHash, parseIssueHash, parseFileHash, prHash, parseDetailHref: () => null,
     ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute, started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, openRun: '',
     roomId: A, reviewOpen: false, reviewTab: 'files', reviewVersion: 0, isFeedView: (v: string) => v === 'general', loadChanges() {}, loadReviewer() {}, view: 'general', drill: null, detailRequest: 0, roomRequest: 0, sessionVisit: 0,
-    GENERAL: 'general', hasTerminal: true, feed: null, feedAtBottom: false, needPair: false,
+    GENERAL: 'general', dockRequest: 0, legacyView: (view: string) => ({ view, dock: false }), feed: null, feedAtBottom: false, needPair: false,
     selectionRevision: 0, consolidationRequest: 0, consolidationView: 0, questionsRequest: 0,
     rooms: [{ id: A }, { id: B }], ROOM: /^room_/, POST: /^msg_/,
     feedViews: { resolveView: (v: string) => v }, trimFeed: (v: unknown) => v, setPicked() {}, visitRoomControls() {},

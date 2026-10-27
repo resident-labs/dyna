@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { terminalFocusHint, terminalFocusOnOpen, terminalReady } from './terminalFocus.ts'
+import { terminalFocusHint, terminalFocusOnOpen, terminalTypeHint, terminalReady } from './terminalFocus.ts'
 
 test('a terminal that failed to attach is not ready, so it shows no hint', () => {
   assert.equal(terminalReady({ attached: true, failed: false, exited: false }), true)
@@ -47,9 +47,14 @@ test('the terminal pane shows a focus hint', () => {
   assert.match(pane, /terminalFocusOnOpen\(/, 'the pane decides focus on open from its props')
   assert.match(pane, /addEventListener\('focus'/, 'the pane follows the terminal input focus')
   assert.match(pane, /addEventListener\('blur'/, 'the pane follows the terminal input blur')
-  assert.match(pane, /Click to type/)
+  assert.match(pane, /terminalTypeHint\(/, 'the hint text follows the pointer')
   // Readiness is derived from attached, failed and exited, so no later
   // assignment can revive it after the attach stream reported an exit.
   assert.match(pane, /exited = true/, 'an exit event marks the terminal gone')
   assert.doesNotMatch(pane, /^\s*ready = /m, 'readiness is derived, never assigned')
+})
+
+test('the focus hint says tap on a touch screen and click with a mouse', () => {
+  assert.equal(terminalTypeHint(true), 'Tap to type')
+  assert.equal(terminalTypeHint(false), 'Click to type')
 })

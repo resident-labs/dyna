@@ -1,4 +1,5 @@
 import { test } from 'node:test'
+import { legacyView } from '../sessions/termDock.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
@@ -142,7 +143,8 @@ interface NavState {
   reviewVersion: number
   mergeVersion: number
   narrow: boolean
-  hasTerminal: boolean
+  dockRequest: number
+  legacyView: typeof legacyView
   selectionRevision: number
   consolidationView: number
   consolidationAlive: boolean
@@ -285,7 +287,7 @@ function navigation() {
   const calls: string[] = []
   const applied: string[] = []
   const state: NavState = {
-    reviewOpen: false, reviewTab: 'files', reviewVersion: 0, mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
+    reviewOpen: false, reviewTab: 'files', reviewVersion: 0, mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, dockRequest: 0, legacyView,
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
     ROOM, POST, GENERAL, VOICE, routedParents: '', isFeedView, inView, homeView, isShellResult, shellJobID, trimFeed, mergeFeedPage, questionID, feedViews: feedModel([]), posts: [],

@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach, after } from 'node:test'
 import { JSDOM } from 'jsdom'
 import assert from 'node:assert/strict'
-import { lastRoom, saveLastRoom, showReasoning, saveShowReasoning, feedViewListOf } from './prefs.ts'
+import { lastRoom, saveLastRoom, showReasoning, saveShowReasoning, feedViewListOf, loadDock, saveDock } from './prefs.ts'
 
 const dom = new JSDOM('', { url: 'https://preferences.example.test' })
 const storage = dom.window.localStorage
@@ -54,4 +54,14 @@ test('the sidebar feed view list ignores the old agent views switch', () => {
   // The layout keeps its old key, so a saved list survives the rename.
   assert.equal(feedViewListOf({ agentChannels: false, channelList: 'messages' }), 'messages')
   assert.equal(feedViewListOf({ channelList: 'bogus' }), 'all')
+})
+
+test('the dock state is saved per room and does not erase other layout keys', () => {
+  saveLastRoom('repo', 'files')
+  saveDock('a', { open: true, height: 300, maxed: false, active: { a: 't1' } })
+  saveDock('b', { open: false, height: 150, maxed: false, active: {} })
+  assert.deepEqual(loadDock('a'), { open: true, height: 300, maxed: false, active: { a: 't1' } })
+  assert.equal(loadDock('b').height, 150)
+  assert.equal(loadDock('c').open, false)
+  assert.deepEqual(lastRoom(), { room: 'repo', view: 'files' })
 })
