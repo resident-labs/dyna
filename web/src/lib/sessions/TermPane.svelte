@@ -14,7 +14,7 @@
   import { errorText } from '../errorText.ts'
   import type { TermEvent } from '../api/terminal.ts'
   import type { GhosttyTerminalSurface } from './ghostty/surface.ts'
-  import { terminalFocusHint, terminalFocusOnOpen, terminalReady } from './terminalFocus.ts'
+  import { terminalFocusHint, terminalFocusOnOpen, terminalReady, terminalTypeHint } from './terminalFocus.ts'
 
   // autofocus null follows the layout: a wide pane takes focus, a phone pane
   // leaves it so the soft keyboard stays down.
@@ -34,6 +34,7 @@
   let attached = $state(false)
   let exited = $state(false)
   let focused = $state(false)
+  const coarse = matchMedia('(pointer: coarse)').matches // a touch screen, whatever its width
   const ready = $derived(terminalReady({ attached, failed: failed !== '', exited }))
   const takesFocus = $derived(terminalFocusOnOpen(autofocus, narrow))
   const showHint = $derived(terminalFocusHint({ ready, focused }))
@@ -142,7 +143,9 @@
         // focus: when it blurs, this pane shows the hint instead of going quiet.
         const input = made.input
         const onFocus = () => (focused = true)
-        const onBlur = () => (focused = false)
+        // Removing the pane blurs the input in the middle of Svelte's own
+        // update, where a state write throws; a microtask writes after it.
+        const onBlur = () => queueMicrotask(() => { if (!gone) focused = false })
         input.addEventListener('focus', onFocus)
         input.addEventListener('blur', onBlur)
         dropFocusListeners = () => {
@@ -195,7 +198,7 @@
   {#if failed}<p class="err">{failed}</p>{/if}
   <div class="term-frame">
     <div class="term-host" bind:this={host}></div>
-    {#if showHint}<p class="type-hint" role="status">Click to type</p>{/if}
+    {#if showHint}<p class="type-hint" role="status">{terminalTypeHint(coarse)}</p>{/if}
   </div>
 </div>
 
