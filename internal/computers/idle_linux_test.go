@@ -19,6 +19,37 @@ import (
 	"dyna-agent/internal/turnlock"
 )
 
+// A computer with keep on survives the idle stop with no viewer, turn or shell
+// job, such as a game client run by a service; keep off stops it again.
+func TestIdleStopSkipsKeptComputer(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	id := testSessionID(t, "keep")
+	s, err := newComputer(t.Context(), id, "test", SupervisorOptions{IdleAfter: time.Minute}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	desktop, err := startProcess(os.Environ(), filepath.Join(t.TempDir(), "desktop.log"), "sleep", "30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compositor = desktop
+	s.state.Keep = true
+	s.lastActivity = time.Now().Add(-time.Hour)
+	s.stopIfIdle()
+	if !s.compositor.alive() {
+		t.Fatalf("a kept computer was stopped for being idle: state %s", s.state.State)
+	}
+	s.state.Keep = false
+	s.stopIfIdle()
+	if s.compositor.alive() {
+		t.Fatal("an idle computer with keep off kept running")
+	}
+}
+
 // An open app holds a relay connection for its whole life. It must not keep
 // an unwatched computer alive; only a running turn or shell job of its session
 // does, and a lock left with a departed runner does not.
