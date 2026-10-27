@@ -52,6 +52,16 @@ const (
 	InCommit MessageType = "commit"
 )
 
+// TurnMode says who ends a user turn.
+type TurnMode string
+
+const (
+	// TurnsAuto keeps the provider's turn detection. It is the default.
+	TurnsAuto TurnMode = "auto"
+	// TurnsManual turns detection off. Only a client commit ends a turn.
+	TurnsManual TurnMode = "manual"
+)
+
 // SayMode says what an InSay line does when an earlier reply still plays.
 type SayMode string
 
@@ -110,8 +120,11 @@ type SessionRequest struct {
 	Rate         int           `json:"rate,omitempty"`
 	MaxMinutes   int           `json:"maxMinutes,omitempty"`
 	// VADEagerness is how soon turn detection ends a turn: low, medium, high
-	// or auto. Empty keeps the provider default.
+	// or auto. Empty keeps the provider default. It conflicts with TurnsManual.
 	VADEagerness string `json:"vadEagerness,omitempty"`
+	// Turns is auto or manual. Empty means auto. Manual turns the provider's
+	// turn detection off, so only a client commit ends a turn.
+	Turns TurnMode `json:"turns,omitempty"`
 }
 
 // InMessage is one line from the agent.

@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -778,6 +779,144 @@ func TestSessionCommitWithoutEchoDoesNotSwallowTheNextTurn(t *testing.T) {
 	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond: respond:]" {
 		t.Fatalf("after a rejected commit, sent %s, want the next turn to ask", got)
 	}
+}
+
+// Manual turns turn off the provider's turn detection. Only a client commit
+// ends a turn and asks for one reply. Audio and a provider speech event
+// while a reply plays do not cancel it; the client sends interrupt.
+// --vad-eagerness conflicts with manual, and a provider that cannot turn
+// detection off rejects the option before ready.
+func TestSessionManualTurns(t *testing.T) {
+	clock := newFakeClock()
+	plain := fakeProvider()
+	closed := make(chan agentwire.InMessage)
+	close(closed)
+	silent := SessionIO{In: closed, Out: func(agentwire.OutMessage) error { return nil }}
+
+	_, err := fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{Turns: "push"}, silent)
+	if err == nil || !strings.Contains(err.Error(), "auto or manual") {
+		t.Fatalf("bad turns error = %v", err)
+	}
+	_, err = fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{Turns: agentwire.TurnsManual, VADEagerness: "low"}, silent)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with --turns manual") {
+		t.Fatalf("conflict error = %v", err)
+	}
+	_, err = fakeSessions(plain, newChanConn(), clock).Run(t.Context(), agentwire.SessionRequest{Turns: agentwire.TurnsManual}, silent)
+	if err == nil || !strings.Contains(err.Error(), "does not take --turns manual") {
+		t.Fatalf("unsupported turns error = %v", err)
+	}
+
+	op := realtime.OpenAI("ws://127.0.0.1/unused", func(context.Context) (string, string, error) { return "", "", nil })
+	if got := openAITurn(t, op, realtime.Session{ManualTurns: true}); got != nil {
+		t.Fatalf("manual turn_detection = %v, want null", got)
+	}
+	auto, _ := openAITurn(t, op, realtime.Session{}).(map[string]any)
+	if auto["type"] != "semantic_vad" {
+		t.Fatalf("auto turn_detection = %v, want semantic_vad", auto)
+	}
+
+	var gotSession realtime.Session
+	capable := plain
+	capable.Caps.ManualTurns = true
+	capable.Caps.ManualCommit = true
+	capable.Protocol = commitProtocol{}
+	conn := newChanConn()
+	s := fakeSessions(capable, conn, clock)
+	s.dial = func(_ context.Context, _ realtime.Provider, sess realtime.Session) (sayConn, error) {
+		gotSession = sess
+		return conn, nil
+	}
+	r := startSession(t, s, conn, clock, agentwire.SessionRequest{Turns: "MANUAL"})
+	if !gotSession.ManualTurns {
+		t.Fatal("dialed session did not turn detection off")
+	}
+
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(1, 2)}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after audio = %+v", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.SpeechStarted}
+	conn.events <- realtime.Event{Kind: realtime.Committed}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "still talking"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "still talking" {
+		t.Fatalf("after provider turn events = %+v, want the transcript and no barge-in", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4]" {
+		t.Fatalf("provider turn events sent %s, want no commit, cancel or reply", got)
+	}
+
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync after commit = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond:]" {
+		t.Fatalf("client commit sent %s, want one commit and one reply", got)
+	}
+
+	conn.events <- realtime.Event{Kind: realtime.ResponseStarted, ResponseID: "r1"}
+	conn.events <- realtime.Event{Kind: realtime.AudioDelta, ResponseID: "r1", Audio: pcm16(9)}
+	if m := r.next(t); m.Type != agentwire.OutAudio || m.ResponseID != "r1" {
+		t.Fatalf("reply audio = %+v", m)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(3)}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync during reply = %+v", m)
+	}
+	conn.events <- realtime.Event{Kind: realtime.SpeechStarted}
+	conn.events <- realtime.Event{Kind: realtime.OwnerTranscript, Text: "barge"}
+	if m := r.next(t); m.Type != agentwire.OutTranscript || m.Text != "barge" {
+		t.Fatalf("audio during reply = %+v, want no automatic barge-in", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); got != "[audio:4 commit respond: audio:2]" {
+		t.Fatalf("audio during reply sent %s, want no cancel", got)
+	}
+	r.in <- agentwire.InMessage{Type: agentwire.InInterrupt}
+	if m := r.next(t); m.Type != agentwire.OutSpeechStart {
+		t.Fatalf("interrupt = %+v, want speech_started", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); !strings.Contains(got, "cancel") {
+		t.Fatalf("interrupt sent %s, want a cancel", got)
+	}
+
+	r.in <- agentwire.InMessage{Type: agentwire.InAudio, PCM: pcm16(4)}
+	r.in <- agentwire.InMessage{Type: agentwire.InCommit}
+	r.in <- agentwire.InMessage{Type: "sync"}
+	if m := r.next(t); m.Type != agentwire.OutError {
+		t.Fatalf("sync on queued commit = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); strings.Count(got, "respond:") != 1 {
+		t.Fatalf("commit during a reply sent %s, want the next reply to wait", got)
+	}
+	conn.events <- realtime.Event{Kind: realtime.ResponseDone, ResponseID: "r1"}
+	if m := r.next(t); m.Type != agentwire.OutResponseDone || m.ResponseID != "r1" {
+		t.Fatalf("response done = %+v", m)
+	}
+	if got := fmt.Sprint(conn.sentSoFar()); strings.Count(got, "respond:") != 2 || strings.Count(got, "commit") != 2 {
+		t.Fatalf("queued reply sent %s, want the waiting commit to ask once", got)
+	}
+}
+
+// openAITurn is the turn_detection value of one OpenAI session setup.
+func openAITurn(t *testing.T, p realtime.Provider, s realtime.Session) any {
+	t.Helper()
+	raw, err := json.Marshal(p.Session(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	audio, _ := doc["audio"].(map[string]any)
+	input, _ := audio["input"].(map[string]any)
+	val, ok := input["turn_detection"]
+	if !ok {
+		t.Fatal("turn_detection is missing; manual mode needs null, not an omitted field")
+	}
+	return val
 }
 
 // A client commit that the provider rejects as an empty or too-small buffer
