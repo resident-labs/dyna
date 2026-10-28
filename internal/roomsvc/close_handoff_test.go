@@ -117,27 +117,28 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 }
 
 // No runner is started: cancel finalizes this run from its stored metadata.
-func TestCloseCancelsWorkflowFromSQLite(t *testing.T) {
+func TestCloseHandsWorkflowFromSQLiteToParent(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
-	author := e.start(rec, "author", nil)
+	parent := e.start(rec, "lead", nil)
+	author := e.start(rec, "author", &parent)
 	if _, err := e.svc.goalService().Store.Finish(rec.ID, author.Goal, "owner", "Fixture completed", false); err != nil {
 		t.Fatal(err)
 	}
 	const runID = "wf_close-handoff"
 	// The row is seeded directly: the engine may open the run store before a
 	// legacy meta.json import could run.
-	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: runID, Session: author.ID, ParentSession: author.ID, Status: "running"})
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: runID, Session: author.ID, ParentSession: author.ID, Status: "running", Detached: true, OwnerHandoff: true})
 	closed, err := e.svc.CloseSession(e.ctx, rec.ID, author.ID)
 	if err != nil || !closed.Closed {
 		t.Fatalf("close = %+v, %v", closed, err)
 	}
 	got, err := runstore.ReadMeta(runID)
-	if err != nil || got.Status != "canceled" {
+	if err != nil || got.Status != "running" || got.ParentSession != parent.ID {
 		t.Fatalf("run = %+v, %v", got, err)
 	}
-	if !canceledWorkflow(closed.CloseSummary, runID) {
-		t.Fatalf("missing the canceled run in the close result: %+v", closed.CloseSummary)
+	if !movedWorkflow(closed.CloseSummary, runID, parent.Address()) {
+		t.Fatalf("missing the moved run in the close result: %+v", closed.CloseSummary)
 	}
 }
 
@@ -148,9 +149,9 @@ func movedPR(outcomes []sessionclose.Outcome, number int, to string) bool {
 	})
 }
 
-// canceledWorkflow reports whether a close canceled the run id.
-func canceledWorkflow(outcomes []sessionclose.Outcome, id string) bool {
+// movedWorkflow reports whether a close moved the run to its heir.
+func movedWorkflow(outcomes []sessionclose.Outcome, id, to string) bool {
 	return slices.ContainsFunc(outcomes, func(o sessionclose.Outcome) bool {
-		return o.Kind == sessionclose.ResponsibilityWorkflow && o.Result == sessionclose.ResultCanceled && o.ID == id
+		return o.Kind == sessionclose.ResponsibilityWorkflow && o.Result == sessionclose.ResultMoved && o.ID == id && o.To == to
 	})
 }

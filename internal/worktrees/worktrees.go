@@ -19,6 +19,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 const (
@@ -139,6 +140,11 @@ func Track(rec Record) error {
 	if err != nil {
 		return err
 	}
+	if rec.RunID != "" {
+		if err := runstore.Migrate(store.DataDir()); err != nil {
+			return err
+		}
+	}
 	ctx := context.Background()
 	// Each conflict reloads committed claims, so retries skip occupied blocks
 	// and converge on a free block or the allocation limit.
@@ -192,6 +198,18 @@ func Track(rec Record) error {
 				}
 			}
 
+			if rec.RunID != "" {
+				run, err := runstore.LoadStored(ctx, conn, rec.RunID)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil && run.OwnerHandoff {
+					rec.Session = run.ParentSession
+					if rec.Session == "" {
+						rec.Session = run.Session
+					}
+				}
+			}
 			if rec.Port == 0 {
 				records, err := loadRecords(ctx, conn, "")
 				if err != nil {
