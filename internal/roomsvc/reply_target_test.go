@@ -8,6 +8,25 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+func TestTurnReplyTargetsSessionID(t *testing.T) {
+	store := &room.Store{Root: t.TempDir()}
+	rec, err := store.Create(room.CreateInput{Name: "alpha", CreatedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book := newAvatarBook(memberSessions(), "room_alpha")
+	for _, tc := range []struct{ id, address string }{{"ses_beta", "beta:other"}, {"ses_closed_lead", ""}} {
+		msg, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{"alpha"}, Event: room.TurnEvent{Session: "alpha:" + tc.id, SessionID: tc.id, Turn: 1, State: room.TurnCompleted}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ReplyTarget{Kind: ReplySession, ID: tc.id, Address: tc.address}
+		if got := replyTarget(msg, "alpha", book); got == nil || *got != want {
+			t.Fatalf("target = %+v, want %+v", got, want)
+		}
+	}
+}
+
 // replyTarget names the stored sender of a post, so a session in another room
 // is named as itself and no address prefix decides a recipient.
 func TestReplyTargetReadsStoredSender(t *testing.T) {
