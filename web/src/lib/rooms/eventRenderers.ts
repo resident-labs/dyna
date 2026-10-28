@@ -18,6 +18,7 @@ import MachineDiskCard from './MachineDiskCard.svelte'
 import MachineCacheCard from './MachineCacheCard.svelte'
 import MachineScratchCard from './MachineScratchCard.svelte'
 import MachineLimitsCard from './MachineLimitsCard.svelte'
+import RoomCapCard from './RoomCapCard.svelte'
 import CallCard from './CallCard.svelte'
 import VoiceSessionCard from './VoiceSessionCard.svelte'
 import PRCard from '../prs/PRCard.svelte'
@@ -109,7 +110,7 @@ export type EventRenderer = Component<EventProps>
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
 export const eventComponents: Record<string, EventRenderer> = {
-  WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineScratchCard, MachineLimitsCard,
+  WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineScratchCard, MachineLimitsCard, RoomCapCard,
   CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, ServiceWaitCard, HelperOutcomeRow, EngineNoticeCard, QuestionNoteCard, TerminalRequestCard, ReviewResultCard,
   ShellResultRow, RunResultCard, TurnCompletionRow,
 }
