@@ -39,6 +39,48 @@ func generationFixture(t *testing.T, h string) (*Runtime, string, string) {
 	return r, home, n.ID
 }
 
+func TestPiCodeModeGeneration(t *testing.T) {
+	r, home, id := generationFixture(t, "pi")
+	addGenerationMCP(t, r, "pi", "example")
+	read := func() map[string]any {
+		g := buildGeneration(t, r, "pi", home, id)
+		raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	first := read()
+	tools, ok := first["defaultTools"].([]any)
+	if !ok || len(tools) != 1 || tools[0] != "+codemode" || first["codemode"].(map[string]any)["mode"] != "only" {
+		t.Fatalf("default Pi settings: %v", first)
+	}
+	if _, ok := first["mcpServers"].(map[string]any)["example"]; !ok {
+		t.Fatal("MCP server missing")
+	}
+	path := filepath.Join(store.ConfigDir(), "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"harness":{"piCodeMode":"off"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	off := read()
+	if _, ok := off["defaultTools"]; ok {
+		t.Fatalf("off changed default tools: %v", off)
+	}
+	if _, ok := off["codemode"]; ok {
+		t.Fatalf("off changed code mode: %v", off)
+	}
+	if _, ok := off["mcpServers"].(map[string]any)["example"]; !ok {
+		t.Fatal("MCP server missing with off")
+	}
+}
+
 func buildGeneration(t *testing.T, r *Runtime, h, home, id string) harnessmgr.ConfigGeneration {
 	t.Helper()
 	g, err := r.generate(h, home, id, os.LookupEnv)
