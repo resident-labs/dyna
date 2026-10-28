@@ -48,6 +48,9 @@ func Status(ctx context.Context, call func(context.Context, string, []any, any) 
 	fmt.Fprintf(out, "\nwrites in flight: %d, oldest %s; waiting for the writer lock: %d\n", w.InFlight, ms(w.Oldest), h.WritersWaiting)
 	fmt.Fprintf(out, "events: revision %d, %d streams, largest lag %d, %d dropped\n", h.Events.Seq, h.Events.Streams, h.Events.MaxLag, h.Events.Dropped)
 	fmt.Fprintf(out, "sqlite busy retries: %d\n", h.SQLiteBusyRetries)
+	m := h.DatabaseMetrics
+	fmt.Fprintf(out, "database duration counts since start (<=1ms, <=10ms, <=100ms, <=1s, >1s): hold %v, commit %v, checkpoint %v\n", m.WriteHold, m.Commit, m.CheckpointDuration)
+	fmt.Fprintf(out, "scheduled checkpoints since start: total frames observed %d, copied %d, incomplete %d, errors %d\n", m.CheckpointFrames, m.CheckpointMoved, m.CheckpointIncomplete, m.CheckpointErrors)
 	fmt.Fprintf(out, "callers refused: %d\n", h.CallersRefused)
 	fmt.Fprintf(out, "safety sweep findings: %d\n", h.SweepFindings)
 	return nil
