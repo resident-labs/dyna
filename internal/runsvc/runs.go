@@ -13,7 +13,10 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
+	"dyna-agent/internal/store"
+	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/worktrees"
 	"dyna-agent/internal/worktreesvc"
 )
@@ -28,6 +31,45 @@ func Pause(ctx context.Context, id string, paused bool) error {
 		return fmt.Errorf("run %s is not running (status %s)", id, m.Status)
 	}
 	return runstore.SetPaused(id, paused)
+}
+
+// Transfer moves a live run to an open session in its room.
+func Transfer(ctx context.Context, id, target string) error {
+	return sessionlife.WithPublication(ctx, runstore.RunsDir(), "publication.lock", func() error {
+		m, err := runForCaller(ctx, id)
+		if err != nil {
+			return err
+		}
+		actor, err := authority.ActorIn(ctx, m.RoomID)
+		if err != nil {
+			return err
+		}
+		owner := m.ParentSession
+		if owner == "" {
+			owner = m.Session
+		}
+		if actor.Role != authority.Owner && actor.Role != authority.Root && (actor.Role != authority.Session || actor.Session != owner) {
+			return errors.New("only the run owner, room root, or owner can transfer a run")
+		}
+		to, err := subagent.DefaultStore().ResolveSnapshot(target)
+		if err != nil {
+			return err
+		}
+		if to.RoomID != m.RoomID || !to.Closed.IsZero() || to.Closing.Active() || to.RunOwned() {
+			return errors.New("target must be an open session in the run's room")
+		}
+		if err := worktrees.Migrate(store.DataDir()); err != nil {
+			return err
+		}
+		moved, err := shells.DefaultStore().HandoffRunOwner(ctx, id, owner, to.ID, worktrees.HandoffRunTx)
+		if err != nil {
+			return err
+		}
+		if !moved {
+			return errors.New("run is no longer running or its owner changed")
+		}
+		return nil
+	})
 }
 
 // runExitGrace is how long a canceled run's process may take to finalize

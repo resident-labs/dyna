@@ -369,6 +369,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "StartRun", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.StartRun},
 		{Name: "CancelRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.CancelRun},
 		{Name: "PauseRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: runsvc.Pause},
+		{Name: "TransferRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Transfer},
 		{Name: "RemoveRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Remove},
 		{Name: "ClearRuns", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Clear},
 		{Name: "ArchiveRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: runsvc.Archive},

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionclose"
+	"dyna-agent/internal/shells"
+	"dyna-agent/internal/store"
+	"dyna-agent/internal/worktrees"
 )
 
 // closeHeir follows stored parents, skipping closed ancestors, then uses the
@@ -103,11 +105,16 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionc
 	for _, item := range items {
 		switch item.Kind {
 		case "workflow":
-			if err := runstore.Cancel(item.ID); err != nil {
-				errs = append(errs, fmt.Errorf("cancel workflow %s: %w", item.ID, err))
+			err := worktrees.Migrate(store.DataDir())
+			var moved bool
+			if err == nil {
+				moved, err = shells.DefaultStore().HandoffRunOwner(ctx, item.ID, info.ID, heir.ID, worktrees.HandoffRunTx)
+			}
+			if err != nil {
+				errs = append(errs, fmt.Errorf("handoff workflow %s: %w", item.ID, err))
 				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityWorkflow, Result: sessionclose.ResultFailed, ID: item.ID, Failure: sessionclose.FailureHandoff})
-			} else {
-				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityWorkflow, Result: sessionclose.ResultCanceled, ID: item.ID})
+			} else if moved {
+				summary = append(summary, sessionclose.Outcome{Kind: sessionclose.ResponsibilityWorkflow, Result: sessionclose.ResultMoved, ID: item.ID, To: heirAddress(heir)})
 			}
 		case "goal":
 			if m.checkpoint != nil {

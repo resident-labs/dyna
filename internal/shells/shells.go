@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -174,6 +175,8 @@ type StartOptions struct {
 	Cwd  string
 	// Owner overrides the owning agent session (default runstore.OwnerFromEnv).
 	Owner string
+	// WorkflowOwner resolves the current run owner under the shell publication lock.
+	WorkflowOwner bool
 	// Run names the workflow run whose worker starts the job, so a cancel of
 	// that run stops it (default runstore.WorkerRunFromEnv).
 	Run    string
@@ -188,7 +191,20 @@ type StartOptions struct {
 func (s *Store) Create(opts StartOptions) (out Meta, err error) {
 	err = sessionlife.WithPublication(context.Background(), s.Root, "publication.lock", func() error {
 		owner := strings.TrimSpace(opts.Owner)
-		if owner == "" {
+		if opts.WorkflowOwner {
+			meta, err := runstore.ReadMeta(opts.Run)
+			if err != nil {
+				return err
+			}
+			if meta.Status != "running" {
+				return fmt.Errorf("workflow %s is no longer running", opts.Run)
+			}
+			owner = meta.ParentSession
+			if owner == "" {
+				owner = meta.Session
+			}
+			opts.Owner = owner
+		} else if owner == "" {
 			owner = runstore.OwnerFromEnv()
 		}
 		if e := sessionlife.Activate(filepath.Join(filepath.Dir(s.Root), "sessions"), owner); e != nil {
@@ -236,7 +252,7 @@ func (s *Store) create(opts StartOptions) (Meta, error) {
 		return Meta{}, err
 	}
 	owner := strings.TrimSpace(opts.Owner)
-	if owner == "" {
+	if owner == "" && !opts.WorkflowOwner {
 		owner = runstore.OwnerFromEnv()
 	}
 	if err := os.WriteFile(filepath.Join(dir, "output.log"), nil, 0o600); err != nil {
@@ -1089,6 +1105,26 @@ func (s *Store) launchedSupervisor(id string) int {
 		return 0
 	}
 	return pid
+}
+
+// HandoffRunOwner serializes ownership moves with shell publication. A live
+// shell keeps its caller identity, so its owner cannot move until it exits.
+func (s *Store) HandoffRunOwner(ctx context.Context, id, from, to string, handoffTrees func(context.Context, *sql.Conn, string, string) error) (bool, error) {
+	var moved bool
+	err := sessionlife.WithPublication(ctx, s.Root, "publication.lock", func() error {
+		jobs, err := s.loadAll("WHERE ended IS NULL")
+		if err != nil {
+			return err
+		}
+		for _, job := range jobs {
+			if job.Run == id && job.Owner == from {
+				return fmt.Errorf("%w: workflow %s has an unresolved shell step %s; wait for it to finish or stop it with dyna shell stop %s, then retry", runstore.ErrHandoffUnsafe, id, job.ID, job.ID)
+			}
+		}
+		moved, err = runstore.HandoffOwner(id, from, to, handoffTrees)
+		return err
+	})
+	return moved, err
 }
 
 // StopOwner stops non-keep shells belonging to exactly this session.

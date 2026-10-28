@@ -56,6 +56,7 @@ var cliCalls = []string{
 	"UnarchiveRun",
 	"CancelRun",
 	"PauseRun",
+	"TransferRun",
 	"RemoveRun",
 	"ClearRuns",
 	"SyncRefresh",

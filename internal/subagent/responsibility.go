@@ -300,27 +300,15 @@ func (m *Manager) runOwned(byID map[string]Info) ([]owned, error) {
 		if job.Status != "running" {
 			continue
 		}
-		for _, id := range uniqueIDs(job.ParentSession, job.Session) {
-			info, ok := byID[id]
-			if !ok {
-				continue
-			}
+		owner := job.ParentSession
+		if owner == "" {
+			owner = job.Session
+		}
+		if info, ok := byID[owner]; ok {
 			out = append(out, owned{info: info, r: Responsibility{Kind: "workflow", ID: job.ID, Text: "owns live workflow run " + job.ID + "; cancel it: dyna runs cancel " + job.ID}})
 		}
 	}
 	return out, nil
-}
-
-// uniqueIDs drops the empty and repeated IDs, so a run whose parent session is
-// also its session counts once.
-func uniqueIDs(ids ...string) []string {
-	out := ids[:0]
-	for _, id := range ids {
-		if id != "" && !slices.Contains(out, id) {
-			out = append(out, id)
-		}
-	}
-	return out
 }
 
 // handOverChildren runs under the names lock after a session closes. It
