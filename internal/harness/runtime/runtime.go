@@ -356,6 +356,7 @@ func privateHomeWarnings(nativeHome, harness string, tools []string) []string {
 		"Private tool caches: " + filepath.Join(harnesshome.Home(nativeHome), ".cache"),
 		"Owner HOME bridges: " + strings.Join(append([]string{"dyna", "git"}, tools...), ", "),
 		"Cloud and registry configuration is unavailable by default. Add trusted CLI names to toolHomeBridges in harness-config.json to use owner configuration.",
+		"systemd-run also bridges to the owner binary: with DYNA_ROOM_SLICE set, its --user calls without a slice of their own join the room's slice.",
 	}
 	switch harness {
 	case "claude-code":
