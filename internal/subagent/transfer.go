@@ -703,6 +703,12 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				return true, m.failTransfer(id, token, err)
 			}
 		}
+		// The retained harness process of the old profile keeps its memory and
+		// holds its runtime bundle lease until a next turn replaces it or the
+		// idle close reaps it. Stop it now, so a transfer leaves nothing behind.
+		if err := m.stopHarnessProcesses(ctx, id); err != nil {
+			return true, m.failTransfer(id, token, err)
+		}
 		// Resolve the target profile first: a conversion needs its model and
 		// harness, and every path below needs it.
 		ps, err := m.profiles()
