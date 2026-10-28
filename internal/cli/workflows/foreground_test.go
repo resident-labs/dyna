@@ -26,6 +26,7 @@ import (
 	"dyna-agent/internal/cli/version"
 	"dyna-agent/internal/engine"
 	"dyna-agent/internal/enginetest"
+	"dyna-agent/internal/harness"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
@@ -210,6 +211,10 @@ func TestDemoLeavesSavedProfilesUntouched(t *testing.T) {
 	inRepo(t)
 	storetest.Isolate(t)
 	serveProductionWorkflowEngine(t)
+	// The demo's six mock turns need no hold: the test only waits for the run
+	// to finish, so nothing has to catch a worker in flight.
+	defer func(previous time.Duration) { harness.MockDefaultDelay = previous }(harness.MockDefaultDelay)
+	harness.MockDefaultDelay = 0
 	owner := profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{
 		Name: "owner-profile", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true,
 	}}}
