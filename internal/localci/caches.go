@@ -204,10 +204,10 @@ type CacheCleanError struct {
 	Node   string
 	Path   string
 	Reason string
-	// LastSuccessMS identifies the continuous failure period. Failed retries
-	// keep it; a successful cleanup starts the next period.
-	LastSuccessMS int64
-	cause         error
+	// Generation identifies the continuous failure period. Failed retries keep
+	// it; every successful real cleanup advances it.
+	Generation int64
+	cause      error
 }
 
 func (e *CacheCleanError) Error() string {
@@ -283,6 +283,13 @@ func (r Runner) CleanCaches(ctx context.Context, node Node, dryRun bool) (CacheC
 		return result, newCacheCleanError(node.Name, err, stderr.String())
 	}
 	result.Paths, result.FreedBytes = parseCacheClean(out.String())
+	if !dryRun {
+		// Every real cleanup advances the incident generation, including disk
+		// recovery outside the scheduled tick. A dry run changes no state.
+		if err := (Store{DataDir: r.root()}).AdvanceCacheCleanGeneration(ctx, node.Name); err != nil {
+			return result, fmt.Errorf("record cache cleanup generation of %s: %w", node.Name, err)
+		}
+	}
 	return result, nil
 }
 

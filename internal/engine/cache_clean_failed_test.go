@@ -54,7 +54,7 @@ func TestCacheCleanFailurePostsOneTypedAlert(t *testing.T) {
 
 	// The successful pass changes the generation. The same path and reason in
 	// the next failure period must not reuse the old alert.
-	failure.LastSuccessMS = 1700000000000
+	failure.Generation = 1
 	if err := report(t.Context(), node, failure); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestCacheCleanFailurePostsOneTypedAlert(t *testing.T) {
 		t.Fatalf("stored %d cleanup alerts after a new incident, want two: %+v", len(alerts), posts)
 	}
 	ev, ok = alerts[1].MachineCacheCleanFailed()
-	if !ok || ev.LastSuccessMS != failure.LastSuccessMS {
+	if !ok || ev.Generation != failure.Generation {
 		t.Fatalf("new incident payload = %+v, %v", ev, ok)
 	}
 }
