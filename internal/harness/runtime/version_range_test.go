@@ -42,7 +42,7 @@ func TestPiForkVersionSatisfiesUpstreamMinimum(t *testing.T) {
 	if ok, reason := supportedVersionRange("pi", "1.4.0"); ok {
 		t.Fatalf("upstream npm Pi accepted: %s", reason)
 	}
-	if versionAtLeast("1.2.9-dyna.3", "1.3.0") {
+	if versionAtLeast("1.2.9-dyna.5", "1.3.0") {
 		t.Fatal("Dyna suffix raised an older upstream base version")
 	}
 }

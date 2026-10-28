@@ -53,6 +53,10 @@ if os.environ.get("FAKE_PI_FAIL_FIRST") == "1" and launch == 0:
 if os.environ.get("FAKE_PI_FAIL_RESUME") == "1" and resume:
     sys.stderr.write("fake pi: context_length_exceeded while resuming\n")
     sys.exit(2)
+if os.environ.get("FAKE_PI_MISSING_SESSION") == "1" and resume:
+    session = args[args.index("--session") + 1]
+    sys.stderr.write("session not found: " + session + "\n")
+    sys.exit(2)
 if os.environ.get("FAKE_PI_FAIL_CROSS_PROJECT") == "1" and "--session" in args and "--fork" not in args:
     sys.stderr.write("fake pi: Session found in different project. Fork this session into current directory? [y/N] Aborted.\n")
     sys.exit(2)
@@ -303,8 +307,7 @@ func driveTransfer(t *testing.T, e *testEnv, state TransferState) {
 
 // assertFreshFallback checks that the native attempt was abandoned for the
 // bounded handoff conversation, and that the fresh turn carried the packet.
-// wantResume says whether a resume launch was expected first: a session file
-// that never existed is refused before any launch.
+// wantResume says whether a native resume launch was expected first.
 func assertFreshFallback(t *testing.T, e *testEnv, id string, state TransferState, logPath string, wantResume bool) {
 	t.Helper()
 	got, err := e.m.TransferStatus(id)
@@ -352,15 +355,15 @@ func assertFreshFallback(t *testing.T, e *testEnv, id string, state TransferStat
 // A first Pi launch can fail before Pi writes any session file, while Dyna has
 // already recorded the preassigned id. The turn recovers with a fresh
 // session (never a nudge at the missing session), but no session file ever
-// exists, so a later transfer cannot resume natively and must recover with
-// the fresh handoff conversation instead of repeating the same failure.
+// exists, so a later transfer gets Pi's stable missing-session failure and
+// must recover with the fresh handoff conversation.
 func TestPiTransferFallsBackWhenNoSessionExists(t *testing.T) {
 	path, logPath := installFakePiTurn(t)
 	old := piTestProfile("pi-old", "old/provider-model", path, logPath)
 	next := piTestProfile("pi-next", "new/provider-model", path, logPath)
 	for _, p := range []*profile.Profile{&old, &next} {
 		p.Env["FAKE_PI_FAIL_FIRST"] = "1"
-		p.Env["FAKE_PI_FAIL_RESUME"] = "1"
+		p.Env["FAKE_PI_MISSING_SESSION"] = "1"
 	}
 	e := piFallbackEnv(t, &old, &next, path)
 	info, _ := e.start("RESPOND: keep the decoder work", func(so *StartOptions) { so.Profile = "pi-old" })
@@ -375,10 +378,10 @@ func TestPiTransferFallsBackWhenNoSessionExists(t *testing.T) {
 	if state.Phase != "stopping" {
 		t.Fatalf("Pi transfer did not skip the handoff wait: %+v", state)
 	}
-	// No session file exists, so the resume is refused before any launch and
-	// the fallback starts at once.
+	// Pi refuses the native resume before it reads a prompt, then the fallback
+	// starts. The missing-session error must not trigger a same-session nudge.
 	driveTransfer(t, e, state)
-	assertFreshFallback(t, e, info.ID, state, logPath, false)
+	assertFreshFallback(t, e, info.ID, state, logPath, true)
 }
 
 // A history that no longer fits the target model can fail both Pi's compaction

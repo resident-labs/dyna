@@ -29,8 +29,10 @@ Both use closely related structured formats and track file operations cumulative
 Auto-compaction triggers when:
 
 ```
-contextTokens > contextWindow - reserveTokens
+contextTokens > min(triggerTokens, contextWindow - reserveTokens)
 ```
+
+`triggerTokens` is optional: when it is set, compaction starts once the context passes that absolute count, but never later than the reserve-based limit. When it is unset (the default), the rule is simply `contextTokens > contextWindow - reserveTokens`. Both settings accept a global value and a per-model value under `compaction.modelOverrides["<provider>/<model>"]`. The `--compaction-trigger-tokens <n>` flag sets the trigger for one process and wins over both the setting and model overrides.
 
 By default, `reserveTokens` is 16384 tokens (configurable in `~/.pi/agent/settings.json` or `<project-dir>/.pi/settings.json`). It only decides when compaction starts. Summary requests use the model's output limit, reduced when needed so input and output fit the context window.
 
