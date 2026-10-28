@@ -32,13 +32,19 @@ class ChangesTest(unittest.TestCase):
         out = subprocess.run(["bash", str(FILTER)], cwd=self.repo, env=env, check=True, capture_output=True, text=True).stdout
         return dict(line.split("=") for line in out.split())
 
-    def pull_request(self, pr_file, main_file=None):
+    def pull_request(self, pr_file, main_file=None, large=False):
         """A merge commit of a PR branch into a main that has moved since the event's base."""
         self.git("init", "-q", "-b", "main")
         self.commit("README.md", "first")
         base = self.git("rev-parse", "HEAD")
         self.git("checkout", "-qb", "pr")
         self.commit(pr_file, "pr")
+        if large:
+            for i in range(2100):
+                path = self.repo / "third_party/pi/packages/coding-agent/src" / f"file-{i}.ts"
+                path.write_text("export {}\n")
+            self.git("add", "-A")
+            self.git("commit", "-qm", "large subtree")
         self.git("checkout", "-q", "main")
         if main_file:
             self.commit(main_file, "main moved")
@@ -77,7 +83,7 @@ class ChangesTest(unittest.TestCase):
         self.assertEqual(self.run_filter("pull_request", base)["web"], "true")
 
     def test_pi_change_runs_only_pi(self):
-        base = self.pull_request("third_party/pi/packages/coding-agent/src/cli.ts")
+        base = self.pull_request("third_party/pi/packages/coding-agent/src/cli.ts", large=True)
         self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false", "web": "false", "pi": "true"})
 
     def test_other_events_run_everything(self):
