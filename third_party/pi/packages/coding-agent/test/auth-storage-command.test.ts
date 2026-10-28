@@ -51,6 +51,53 @@ describe("auth storage commands", () => {
 		await runAuthStorageCommand(storageCommand(["auth", "remove", "--provider", "alpha"]), undefined, backend);
 	});
 
+	it("applies a whole edit under one lock and prints the entries", async () => {
+		await runAuthStorageCommand(
+			storageCommand(["auth", "set", "--provider", "alpha"]),
+			JSON.stringify({ type: "api_key", key: "a" }),
+			backend,
+		);
+		await runAuthStorageCommand(
+			storageCommand(["auth", "apply"]),
+			JSON.stringify({ set: { beta: { type: "api_key", key: "b" } }, remove: ["alpha"] }),
+			backend,
+		);
+		await runAuthStorageCommand(storageCommand(["auth", "list", "--json"]), undefined, backend);
+		expect(JSON.parse(output[1])).toEqual({ beta: { type: "api_key", key: "b" } });
+	});
+
+	it("applies when expect still matches the file", async () => {
+		await runAuthStorageCommand(
+			storageCommand(["auth", "set", "--provider", "alpha"]),
+			JSON.stringify({ type: "api_key", key: "a" }),
+			backend,
+		);
+		await runAuthStorageCommand(
+			storageCommand(["auth", "apply"]),
+			JSON.stringify({ expect: { alpha: { type: "api_key", key: "a" } }, set: { alpha: { type: "api_key", key: "a2" } } }),
+			backend,
+		);
+		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
+		expect(stored).toEqual({ alpha: { type: "api_key", key: "a2" } });
+	});
+
+	it("refuses an apply whose expect does not match and writes nothing", async () => {
+		await runAuthStorageCommand(
+			storageCommand(["auth", "set", "--provider", "alpha"]),
+			JSON.stringify({ type: "api_key", key: "a" }),
+			backend,
+		);
+		await expect(
+			runAuthStorageCommand(
+				storageCommand(["auth", "apply"]),
+				JSON.stringify({ expect: {}, set: { beta: { type: "api_key", key: "b" } } }),
+				backend,
+			),
+		).rejects.toThrow("changed");
+		const stored = JSON.parse(readFileSync(join(dir, "auth.json"), "utf-8"));
+		expect(stored).toEqual({ alpha: { type: "api_key", key: "a" } });
+	});
+
 	it("waits for a second writer holding the lock", async () => {
 		const holder = backend.withLockAsync(async () => {
 			await new Promise((resolve) => {
