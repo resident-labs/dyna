@@ -10,6 +10,32 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+func TestForwardTurnUsesFullResultAndSession(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	rec := e.room()
+	lead := e.start(rec, "lead", nil)
+	child := e.start(rec, "child", &lead)
+	_, err := e.mgr.Store.UpdateTurn(child.ID, 1, func(turn *subagent.Turn) {
+		turn.Status = subagent.TurnOK
+		turn.Result = strings.Repeat("full result ", 100)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderOwner, Room: rec.Name, Human: true}, Mentions: []string{"@root"}, ForwardOf: orig.Message.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := forward.Message.Forward
+	if f == nil || f.From != child.Address() || !strings.Contains(f.Text, strings.Repeat("full result ", 99)) {
+		t.Fatalf("forward = %+v", f)
+	}
+}
+
 // A detached shell posts a typed result: its label, state, exit code, duration
 // and output lines are facts the row reads, and the agent text keeps the tail
 // and the pointer to the full output.
