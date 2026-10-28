@@ -19,6 +19,10 @@ const OwnerEnvKey = "DYNA_OWNER_ENV"
 // the record was absent for the owner and is unset.
 var ownerRestoreKeys = append([]string{"HOME", "GIT_CONFIG_GLOBAL", "DYNA_BIN"}, xdgNames...)
 
+// bundleWriteCommands change the harness bundle store directly, in this
+// process or through the engine: install, rm, rollback, gc.
+var bundleWriteCommands = []string{"install", "rm", "rollback", "gc"}
+
 type ownerEnv struct {
 	// Scope is the native scope whose private roots Prepare set.
 	Scope string            `json:"scope"`
@@ -40,11 +44,11 @@ func ownerRecord(nativeScope, realDyna string, owner map[string]string) (string,
 // real dyna binary when it starts inside a private harness HOME. It covers every
 // way of starting dyna: PATH, $DYNA_BIN, an absolute path, a hook or a
 // generated wrapper. It also drops private bridge directories from PATH, so a
-// nested Prepare resolves owner tools. It changes nothing when the caller set
-// an XDG root that is neither private nor the owner's, and for
-// `dyna mcp serve`, whose generated servers read private discovery roots.
-// A caller that set its own HOME keeps it, and an inherited XDG_DATA_HOME
-// then gives way so the data folder follows that home (see keepOwnerData).
+// nested Prepare resolves owner tools. It changes nothing when the caller set a
+// HOME or XDG root that is neither private nor the owner's — except that a
+// bundle-writing harness command then refuses rather than write the owner's
+// live store — and for `dyna mcp serve`, whose generated servers read
+// private discovery roots.
 func RestoreOwner(args []string) error {
 	raw, ok := os.LookupEnv(OwnerEnvKey)
 	if !ok || KeepsPrivateRoots(args) {
@@ -67,7 +71,16 @@ func RestoreOwner(args []string) error {
 		}
 	}
 	if len(callerRoots) > 0 {
-		return keepOwnerData(args, record, callerRoots)
+		// A bundle-writing command in a shell whose caller chose HOME or
+		// XDG_DATA_HOME would write the owner's live store while the caller's
+		// roots point somewhere else (D-398). The caller picks a scratch
+		// DYNA_DATA_DIR for tests, or drops its changed roots.
+		if os.Getenv(store.DataDirEnv) == "" &&
+			(slices.Contains(callerRoots, "HOME") || slices.Contains(callerRoots, "XDG_DATA_HOME")) &&
+			len(args) >= 2 && args[0] == "harness" && slices.Contains(bundleWriteCommands, args[1]) {
+			return fmt.Errorf("%s %s would write the owner's live bundle store from a shell with its own HOME or XDG_DATA_HOME; set DYNA_DATA_DIR to a scratch folder for tests, or unset the changed roots to act on the owner's store", args[0], args[1])
+		}
+		return keepOwnerData(args, record)
 	}
 	for _, key := range ownerRestoreKeys {
 		var err error
@@ -91,30 +104,14 @@ func RestoreOwner(args []string) error {
 	return os.Setenv("PATH", strings.Join(path, string(os.PathListSeparator)))
 }
 
-// keepOwnerData runs when the caller chose its own HOME or XDG roots
-// (callerRoots), for example a game helper that sets fresh ones before it runs
-// dyna. The caller keeps them, and so do its children. A caller that set a
-// data root of its own — DYNA_DATA_DIR, XDG_DATA_HOME or HOME — has Dyna
-// resolve the data folder from that root, so Dyna never points it back at the
-// owner's live store (D-398), for `dyna engine run` as for any command: a
-// chosen XDG_DATA_HOME rules, and a chosen HOME drops an inherited
-// XDG_DATA_HOME, whether the harness's private root or the owner's, so the
-// folder follows the caller's home. A dyna client command whose caller
-// changed only other roots still needs the owner's data folder to reach the
-// engine, so it gets that through store.DataDirEnv alone; `dyna engine run`
-// may serve any folder the caller picked, and a value the caller already set
-// stays.
-func keepOwnerData(args []string, record ownerEnv, callerRoots []string) error {
-	if os.Getenv(store.DataDirEnv) != "" {
-		return nil
-	}
-	if slices.Contains(callerRoots, "XDG_DATA_HOME") {
-		return nil
-	}
-	if slices.Contains(callerRoots, "HOME") {
-		return os.Unsetenv("XDG_DATA_HOME")
-	}
-	if len(args) == 0 || args[0] == "engine" {
+// keepOwnerData runs when the caller chose its own HOME or XDG roots, for
+// example a game helper that sets fresh ones before it runs dyna. The caller
+// keeps them, and so do its children. A dyna client command still needs the
+// owner's data folder to reach the engine, so it gets that through
+// store.DataDirEnv alone. `dyna engine run` may serve any folder the caller
+// picked, and a value the caller already set stays.
+func keepOwnerData(args []string, record ownerEnv) error {
+	if len(args) == 0 || args[0] == "engine" || os.Getenv(store.DataDirEnv) != "" {
 		return nil
 	}
 	data := record.Env["XDG_DATA_HOME"]
