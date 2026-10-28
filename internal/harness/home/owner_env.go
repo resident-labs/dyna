@@ -40,9 +40,11 @@ func ownerRecord(nativeScope, realDyna string, owner map[string]string) (string,
 // real dyna binary when it starts inside a private harness HOME. It covers every
 // way of starting dyna: PATH, $DYNA_BIN, an absolute path, a hook or a
 // generated wrapper. It also drops private bridge directories from PATH, so a
-// nested Prepare resolves owner tools. It changes nothing when the caller set a
-// HOME or XDG root that is neither private nor the owner's, and for
+// nested Prepare resolves owner tools. It changes nothing when the caller set
+// an XDG root that is neither private nor the owner's, and for
 // `dyna mcp serve`, whose generated servers read private discovery roots.
+// A caller that set its own HOME keeps it, and an inherited XDG_DATA_HOME
+// then gives way so the data folder follows that home (see keepOwnerData).
 func RestoreOwner(args []string) error {
 	raw, ok := os.LookupEnv(OwnerEnvKey)
 	if !ok || KeepsPrivateRoots(args) {
@@ -94,16 +96,22 @@ func RestoreOwner(args []string) error {
 // dyna. The caller keeps them, and so do its children. A caller that set a
 // data root of its own — DYNA_DATA_DIR, XDG_DATA_HOME or HOME — has Dyna
 // resolve the data folder from that root, so Dyna never points it back at the
-// owner's live store (D-398). A dyna client command whose caller changed only
-// other roots still needs the owner's data folder to reach the engine, so it
-// gets that through store.DataDirEnv alone. `dyna engine run` may serve any
-// folder the caller picked, and a value the caller already set stays.
+// owner's live store (D-398): a chosen XDG_DATA_HOME rules, and a chosen HOME
+// drops an inherited XDG_DATA_HOME, whether the harness's private root or the
+// owner's, so the folder follows the caller's home. A dyna client command
+// whose caller changed only other roots still needs the owner's data folder
+// to reach the engine, so it gets that through store.DataDirEnv alone.
+// `dyna engine run` may serve any folder the caller picked, and a value the
+// caller already set stays.
 func keepOwnerData(args []string, record ownerEnv, callerRoots []string) error {
 	if len(args) == 0 || args[0] == "engine" || os.Getenv(store.DataDirEnv) != "" {
 		return nil
 	}
-	if slices.Contains(callerRoots, "HOME") || slices.Contains(callerRoots, "XDG_DATA_HOME") {
+	if slices.Contains(callerRoots, "XDG_DATA_HOME") {
 		return nil
+	}
+	if slices.Contains(callerRoots, "HOME") {
+		return os.Unsetenv("XDG_DATA_HOME")
 	}
 	data := record.Env["XDG_DATA_HOME"]
 	if data == "" && record.Env["HOME"] != "" {
