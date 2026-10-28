@@ -119,7 +119,7 @@ func TestInstallInspectionFailurePreservesFiles(t *testing.T) {
 
 func TestComputerEnvironmentPreservesAbsentSettings(t *testing.T) {
 	dir := environment(t)
-	if err := ComputerEnvironment(dir, []string{`DYNA_OWNER_DISPLAY=:1`, `PATH=/test tools/100%`, `DYNA_OWNER_WAYLAND_DISPLAY=a"b\c`}); err != nil {
+	if err := ComputerEnvironment(dir, []string{`DYNA_OWNER_DISPLAY=:1`, `PATH=/test tools/100%`, `DYNA_OWNER_WAYLAND_DISPLAY=a"b\c`, `DYNA_SLICE=off`}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ComputerEnvironment(dir, []string{"PATH=/new/tools"}); err != nil {
@@ -129,7 +129,7 @@ func TestComputerEnvironmentPreservesAbsentSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`DYNA_OWNER_DISPLAY=":1"`, `PATH="/new/tools"`, `DYNA_OWNER_WAYLAND_DISPLAY="a\"b\\c"`} {
+	for _, want := range []string{`DYNA_OWNER_DISPLAY=":1"`, `PATH="/new/tools"`, `DYNA_OWNER_WAYLAND_DISPLAY="a\"b\\c"`, `DYNA_SLICE="off"`} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("missing %q: %s", want, data)
 		}

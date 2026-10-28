@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"dyna-agent/internal/mode"
 )
 
 // startBrowser uses the same shim as interactive and automation browser calls.
@@ -25,6 +27,10 @@ func (s *supervisor) startBrowser(ctx context.Context) (Browser, error) {
 		var env []string
 		env, err = buildEnvironment(s.meta, os.Environ(), gpuEnvValues(s.desktopGPU))
 		if err == nil {
+			// A browser that starts its own systemd units joins the room's
+			// slice, so a room's systemd-run shim keeps it inside the room's
+			// limits; an empty value clears one the daemon itself inherited.
+			env = mergeEnvironment(env, map[string]string{mode.EnvRoomSlice: s.roomSlice})
 			launched, err = startProcess(env, filepath.Join(Dir(s.meta.SessionID), "browser.log"), chromiumWrapper(s.meta.SessionID), "about:blank")
 		}
 		if err == nil {

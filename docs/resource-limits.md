@@ -20,6 +20,10 @@ Agents need no flag. Shells, tests and builds that an agent starts stay in its t
 - Every process Dyna launches for a room carries `DYNA_ROOM_SLICE=dyna-room-<room>.slice` in its environment.
 - Scripts that call `systemd-run` without `--user`, or that name their own `--slice` or `-p Slice=`, are passed through unchanged.
 
+## Computers
+
+A room's computer desktops join the room's slice. The computers daemon asks systemd to start each computer as its own scope below `dyna-room-<room>.slice`, with the per-computer memory throttle (`memory.high`, from `DYNA_COMPUTER_MEMORY_HIGH`) and `cpu.weight` as before. An anchor process holds the scope open while the computer runs; a stop or destroy kills the scope with `cgroup.kill`, and the browser shims join it exactly as before. Apps inside a computer carry `DYNA_ROOM_SLICE`, so daemons they start through the bridge stay in the room too. A machine without delegated room slices keeps every computer below the shared `dyna.slice` service, as before.
+
 ## When it is off
 
 Commands start unchanged when any of these is true:

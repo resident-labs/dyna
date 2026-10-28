@@ -266,7 +266,7 @@ func ComputerEnvironment(dir string, env []string) error {
 		}
 	}
 	var lines []string
-	for _, key := range []string{"PATH", "HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "DBUS_SESSION_BUS_ADDRESS", "DYNA_COMPUTERS_ENABLED", "DYNA_OWNER_WAYLAND_DISPLAY", "DYNA_OWNER_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DYNA_COMPUTER_MEMORY_HIGH"} {
+	for _, key := range []string{"PATH", "HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "DBUS_SESSION_BUS_ADDRESS", "DYNA_COMPUTERS_ENABLED", "DYNA_OWNER_WAYLAND_DISPLAY", "DYNA_OWNER_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DYNA_COMPUTER_MEMORY_HIGH", "DYNA_SLICE"} {
 		if value, ok := current[key]; ok {
 			if strings.ContainsAny(value, "\x00\r\n") {
 				return fmt.Errorf("computer environment %s contains a line break or NUL", key)

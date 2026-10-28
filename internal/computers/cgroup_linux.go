@@ -3,12 +3,19 @@
 package computers
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+
+	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/shellquote"
 )
 
 // The service root holds no processes after setup. Its daemon leaf and
@@ -17,6 +24,10 @@ const daemonCgroupLeaf = "daemon"
 const defaultComputerMemoryHigh = "2147483648"
 
 var computerGroups cgroupManager
+
+// cgroupMount is where the cgroup v2 hierarchy is mounted; tests point it at a
+// fake tree.
+var cgroupMount = "/sys/fs/cgroup"
 
 type cgroupManager struct {
 	root       string
@@ -108,7 +119,7 @@ func setupComputerCgroups() {
 	if unit != "dyna-computers.service" && !(strings.HasPrefix(unit, "dyna-computers-") && strings.HasSuffix(unit, ".service")) {
 		return
 	}
-	if err = computerGroups.setup(filepath.Join("/sys/fs/cgroup", path), os.Getpid(), os.Getenv("DYNA_COMPUTER_MEMORY_HIGH")); err != nil {
+	if err = computerGroups.setup(filepath.Join(cgroupMount, path), os.Getpid(), os.Getenv("DYNA_COMPUTER_MEMORY_HIGH")); err != nil {
 		fmt.Fprintf(os.Stderr, "computer resource controls unavailable; using tracked processes: %v\n", err)
 	}
 }
@@ -153,6 +164,243 @@ func cgroupMemoryKiB(path string) (int64, bool) {
 }
 
 func computerCgroup(id string) string { return computerGroups.computer(id) }
+
+// roomSliceDir returns the cgroup directory of a room's slice. The daemon's
+// own service sits directly below dyna.slice, so the room slices are its
+// siblings; a daemon outside dyna.slice has no room slice to join.
+func (m *cgroupManager) roomSliceDir(room string) string {
+	if m.root == "" {
+		return ""
+	}
+	shared := filepath.Dir(m.root)
+	if filepath.Base(shared) != "dyna.slice" {
+		return ""
+	}
+	return filepath.Join(shared, "dyna-room.slice", agentslice.RoomSlice(room))
+}
+
+// roomSliceSupport reports whether this machine can run room slices; tests
+// replace it while production asks agentslice.
+var roomSliceSupport = agentslice.RoomSupport
+
+// roomSlicesOn reports whether the daemon may place computers below room
+// slices: the owner's DYNA_SLICE=off keeps today's shared leaf, and so does a
+// machine without the delegated controllers.
+func roomSlicesOn() bool {
+	if strings.EqualFold(os.Getenv("DYNA_SLICE"), "off") {
+		return false
+	}
+	ok, _ := roomSliceSupport()
+	return ok
+}
+
+// underCgroup reports whether a cgroup path lies inside dir. An empty dir
+// contains nothing.
+func underCgroup(path, dir string) bool {
+	return dir != "" && strings.HasPrefix(path, dir+string(os.PathSeparator))
+}
+
+// startRoomScope starts one computer's scope below its room's slice and
+// returns the scope's cgroup. Production asks systemd to run an anchor
+// process there; tests replace it with a fake scope directory.
+var startRoomScope = systemdRoomScope
+
+// systemdRoomScope asks systemd to start an anchor process in a scope below
+// the room's slice and returns the scope's cgroup. systemd owns the scope,
+// so its control files stay put whatever else the room runs, which a
+// directory the daemon created inside systemd's slice could not promise:
+// systemd takes the slice's subtree_control back whenever its own units no
+// longer need it. The anchor holds the scope open for the computer's
+// processes and reports the scope's cgroup through the record the browser
+// shims read. On any failure the launcher is killed and reaped before the
+// function returns, so a late anchor can never publish an abandoned scope.
+func systemdRoomScope(ctx context.Context, id, room string) string {
+	root := computerGroups.roomSliceDir(room)
+	if root == "" {
+		return ""
+	}
+	record := filepath.Join(RuntimeDir(id), "cgroup")
+	tmp := record + ".tmp"
+	script := "p=$(grep '^0::' /proc/self/cgroup) && printf '%s\\n' \"" + cgroupMount + "${p#0::}\" > " + shellquote.Quote(tmp) + " && mv " + shellquote.Quote(tmp) + " " + shellquote.Quote(record) + " && exec sleep infinity"
+	cmd := exec.Command("/bin/sh", "-c", script)
+	// systemd-run needs the daemon's XDG_RUNTIME_DIR to reach the user manager.
+	cmd.Env = mergeEnvironment(os.Environ(), map[string]string{"DYNA_COMPUTER_PROCESS": id})
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	log, err := os.OpenFile(filepath.Join(Dir(id), "scope.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return ""
+	}
+	defer log.Close()
+	cmd.Stdout, cmd.Stderr = log, log
+	unit := agentslice.WrapRoom(cmd, "computer-"+id, room, "MemoryHigh="+computerGroups.memoryHigh, "CPUWeight=100")
+	if unit == "" {
+		return ""
+	}
+	// The record from an earlier scope satisfies the wait, so remove it first.
+	_ = os.Remove(record)
+	p, err := startTracked(cmd)
+	if err != nil {
+		return ""
+	}
+	fail := func() string {
+		p.stop()
+		agentslice.Stop(unit)
+		_ = os.Remove(record)
+		_ = os.Remove(tmp)
+		return ""
+	}
+	if waitPath(ctx, record, p) != nil {
+		return fail()
+	}
+	data, err := os.ReadFile(record)
+	if err != nil {
+		return fail()
+	}
+	scope := strings.TrimSpace(string(data))
+	if !underCgroup(scope, root) {
+		return fail()
+	}
+	return scope
+}
+
+// scopeControls asserts the per-computer controls on a room scope and proves
+// the daemon may move the computer's processes into it.
+func scopeControls(scope string) bool {
+	for _, limit := range []struct{ file, value string }{
+		{"memory.oom.group", "1"}, {"memory.high", computerGroups.memoryHigh},
+	} {
+		if writeCgroup(filepath.Join(scope, limit.file), limit.value) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// savedScope returns the cgroup a previous daemon life recorded, when that
+// scope still exists below the room's slice and still holds its anchor: a
+// scope systemd is tearing down reads populated 0 and must be replaced.
+func (s *supervisor) savedScope(id, root string) string {
+	data, err := os.ReadFile(filepath.Join(RuntimeDir(id), "cgroup"))
+	if err != nil {
+		return ""
+	}
+	scope := strings.TrimSpace(string(data))
+	if !underCgroup(scope, root) {
+		return ""
+	}
+	events, err := os.ReadFile(filepath.Join(scope, "cgroup.events"))
+	if err != nil || !strings.Contains(string(events), "populated 1") {
+		return ""
+	}
+	return scope
+}
+
+// roomScopeCgroup returns this computer's cgroup below its room's slice: a
+// scope an earlier daemon life left is adopted, and otherwise systemd starts
+// a new one. It returns "" when the room path is unavailable. A scope that
+// starts but fails validation is killed before the caller falls back, so its
+// anchor never lingers.
+func (s *supervisor) roomScopeCgroup(ctx context.Context, id, room string) string {
+	root := computerGroups.roomSliceDir(room)
+	if root == "" {
+		return ""
+	}
+	if scope := s.savedScope(id, root); scope != "" {
+		if scopeControls(scope) {
+			return scope
+		}
+		_ = writeCgroup(filepath.Join(scope, "cgroup.kill"), "1")
+	}
+	scope := startRoomScope(ctx, id, room)
+	if !underCgroup(scope, root) {
+		return ""
+	}
+	if !scopeControls(scope) {
+		_ = writeCgroup(filepath.Join(scope, "cgroup.kill"), "1")
+		return ""
+	}
+	return scope
+}
+
+// ensureCgroup gives the computer its cgroup before anything joins it: a
+// scope below the computer's room slice when room slices work here, else the
+// shared service leaf that caps every computer of every room together. The
+// desktop start, the browser launch preparation and the first connection of
+// an external client all call it, so none of them runs unlimited. A computer
+// keeps the cgroup it holds until its next stop: its processes cannot move
+// between cgroups safely, so a fallback leaf is never swapped for a scope
+// while the computer lives, and the next start retries the scope.
+func (s *supervisor) ensureCgroup(ctx context.Context) {
+	s.cgroupMu.Lock()
+	defer s.cgroupMu.Unlock()
+	s.mu.Lock()
+	id, room := s.meta.SessionID, s.meta.Room
+	held := s.cgroup
+	s.mu.Unlock()
+	if held != "" {
+		return
+	}
+	wantScope := room != "" && roomSlicesOn()
+	cgroup, slice := "", ""
+	if wantScope {
+		if scope := s.roomScopeCgroup(ctx, id, room); scope != "" {
+			cgroup, slice = scope, agentslice.RoomSlice(room)
+		}
+	}
+	if cgroup == "" {
+		cgroup = computerCgroup(id)
+	}
+	s.mu.Lock()
+	s.cgroup, s.roomSlice = cgroup, slice
+	s.mu.Unlock()
+	s.recordCgroup(cgroup)
+}
+
+// recordCgroup stores the computer's cgroup for the browser shims, which
+// join it from outside the daemon. The record is replaced atomically, so a
+// shim never reads a partial path and a crash never loses the only record.
+func (s *supervisor) recordCgroup(cgroup string) {
+	path := filepath.Join(RuntimeDir(s.meta.SessionID), "cgroup")
+	if cgroup == "" {
+		_ = os.Remove(path)
+		return
+	}
+	_ = fsutil.WriteFile(path, []byte(cgroup+"\n"), 0600, false)
+}
+
+// recordedRoomScope returns the room scope a computer's cgroup record names,
+// or "" when the record is missing or names anything else. It checks the
+// path's shape instead of a daemon's state, so the offline destroy path can
+// use it outside the computers daemon: dyna.slice/dyna-room.slice/
+// dyna-room-*.slice/dyna-computer-*.scope below the cgroup mount.
+func recordedRoomScope(id string) string {
+	data, err := os.ReadFile(filepath.Join(RuntimeDir(id), "cgroup"))
+	if err != nil {
+		return ""
+	}
+	scope := strings.TrimSpace(string(data))
+	if filepath.Clean(scope) != scope || !underCgroup(scope, cgroupMount) {
+		return ""
+	}
+	scopeName := filepath.Base(scope)
+	roomSlice := filepath.Base(filepath.Dir(scope))
+	sharedRoom := filepath.Dir(filepath.Dir(scope))
+	if !strings.HasPrefix(scopeName, "dyna-computer-") || !strings.HasSuffix(scopeName, ".scope") ||
+		!strings.HasPrefix(roomSlice, "dyna-room-") || !strings.HasSuffix(roomSlice, ".slice") ||
+		filepath.Base(sharedRoom) != "dyna-room.slice" || filepath.Base(filepath.Dir(sharedRoom)) != "dyna.slice" {
+		return ""
+	}
+	return scope
+}
+
+// killRecordedScope kills whatever the computer's recorded room scope still
+// holds. Destroy and cleanup call it before the record goes away, because the
+// anchor and any remaining processes outlive the daemon that started them.
+func killRecordedScope(id string) {
+	if scope := recordedRoomScope(id); scope != "" {
+		_ = writeCgroup(filepath.Join(scope, "cgroup.kill"), "1")
+	}
+}
 
 // computerPeerPID handles Chromium's GPU process opening the display socket.
 // Stop at the browser root, so an agent or shell never joins its computer.
@@ -200,7 +448,7 @@ func (s *supervisor) attachCgroup(pid int) {
 		return
 	}
 	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid)); err == nil {
-		if path := cgroupPath(string(data)); path != "" && filepath.Join("/sys/fs/cgroup", path) == s.cgroup {
+		if path := cgroupPath(string(data)); path != "" && filepath.Join(cgroupMount, path) == s.cgroup {
 			return
 		}
 	}
