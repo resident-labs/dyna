@@ -92,6 +92,10 @@ func (s *Store) metaSnapshot(id string) (*infoEntry, error) {
 	}
 	if entry.err != nil || entry.meta.Closed.IsZero() {
 		infoCache.Store(cacheKey, entry)
+	} else {
+		// A close can race with the write-side eviction or with an older open
+		// read. Never leave that earlier full snapshot behind.
+		infoCache.Delete(cacheKey)
 	}
 	return entry, entry.err
 }
