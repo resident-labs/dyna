@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,9 +14,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
+	"dyna-agent/internal/goals"
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/runstore"
@@ -65,6 +68,9 @@ type GCOptions struct {
 	// spent session cleanup's whole time budget. Sessions and running
 	// workflows are still read again before each removal.
 	history *runHistory
+	// beforeLock lets tests observe a removal worker that finished its parallel
+	// rechecks and waits for the removal lock; nil in production.
+	beforeLock func(path string)
 }
 
 // ManagedRoot is shared by session and workflow worktrees.
@@ -293,8 +299,14 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	}
 	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Head: head, Status: status, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
 	if err := Track(rec); err != nil {
-		// No user work exists yet. Roll back only the directory, never the branch.
-		gitOutput(ctx, main, "worktree", "remove", path)
+		// Delete only the branch we created, and only if Git removed the clean
+		// tree and the branch still points at the pinned commit.
+		if out, removeErr := gitOutput(ctx, main, "worktree", "remove", path); removeErr != nil {
+			return Record{}, errors.Join(err, fmt.Errorf("roll back worktree: %w: %s", removeErr, out))
+		}
+		if out, deleteErr := gitOutput(ctx, main, "update-ref", "-d", "refs/heads/"+branch, pinned); deleteErr != nil {
+			return Record{}, errors.Join(err, fmt.Errorf("roll back branch: %w: %s", deleteErr, out))
+		}
 		return Record{}, err
 	}
 	// Track assigns the port block, so return the stored record.
@@ -310,11 +322,26 @@ func SessionClosed(id string) (bool, error) {
 	if filepath.Base(id) != id || id == "." || id == "" {
 		return false, errors.New("invalid session id")
 	}
-	m, err := sessionlife.Read(runstore.SessionsDir(), id)
+	var m struct {
+		sessionlife.Snapshot
+		Room string `json:"room"`
+	}
+	if err := sessionlife.Load(runstore.SessionsDir(), id, &m); err != nil {
+		return false, err
+	}
+	if !m.IsClosed() || m.Room == "" {
+		return m.IsClosed(), nil
+	}
+	store := goals.DefaultStore()
+	held, err := store.OpenHeldBy(m.Room, id)
 	if err != nil {
 		return false, err
 	}
-	return m.IsClosed(), nil
+	items, err := store.OpenItemsAssignedTo(m.Room, id)
+	if err != nil {
+		return false, err
+	}
+	return len(held) == 0 && len(items) == 0, nil
 }
 
 func workflowClosed(id string) (bool, error) {
@@ -473,60 +500,94 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 		if opts != nil && ((opts.Session != "" && !ownedBy(t, opts.Session)) || (opts.Path != "" && t.Path != opts.Path) || (opts.Branch != "" && t.Branch != opts.Branch)) {
 			continue
 		}
-		if info, err := os.Lstat(t.Path); err != nil {
-			t.protected = "worktree is missing or unreadable"
-		} else {
-			// The directory's own mtime is a lower bound on the newest file
-			// activity. Recent unknown trees cannot be removal candidates yet.
-			t.touched = info.ModTime()
-			t.Age = max(time.Since(t.touched), 0)
-			_, status, _, e := Fingerprint(ctx, t.Path, t.head)
-			t.Dirty = status != ""
-			if status != "" {
-				t.DirtyFiles = strings.Split(status, "\n")
-			}
-			t.Ahead = -1
-			if defaultRef != "" {
-				if count, err := gitOutput(ctx, repo, "rev-list", "--count", t.head, "--not", defaultRef); err == nil {
-					t.Ahead, _ = strconv.Atoi(strings.TrimSpace(string(count)))
-				}
-			}
-			if e != nil {
-				t.protected = "cannot inspect git status: " + e.Error()
-				t.Dirty = true
-			}
-			if defaultRef != "" {
-				_, e = gitOutput(ctx, repo, "merge-base", "--is-ancestor", t.head, defaultRef)
-				t.Merged = e == nil
-			}
-			if usageNeeded(t, opts) {
-				size, touched, walkErr := treeUsage(ctx, t.Path)
-				t.Size, t.touched = size, touched
-				if walkErr != nil {
-					t.protected = "cannot inspect all worktree files: " + walkErr.Error()
-				}
-				// Git metadata lives outside the worktree; it records checkout and commit activity.
-				gitDir, gitErr := gitOutput(ctx, t.Path, "rev-parse", "--absolute-git-dir")
-				if gitErr != nil {
-					t.protected = "cannot inspect git metadata"
-				} else {
-					_, mt, e := treeUsage(ctx, strings.TrimSpace(string(gitDir)))
-					if e != nil {
-						t.protected = "cannot inspect git metadata"
-					}
-					if mt.After(t.touched) {
-						t.touched = mt
-					}
-				}
-				t.Age = time.Since(t.touched)
-				if t.Age < 0 {
-					t.Age = 0
-				}
-			}
-		}
 		trees = append(trees, t)
 	}
+	// Each tree needs several git calls and a file walk. They are independent,
+	// so run a bounded number at once; one slow tree must not serialize the rest.
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, scanParallelism)
+	for i := range trees {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			inspectTree(ctx, repo, defaultRef, opts, &trees[i])
+		}()
+	}
+	wg.Wait()
 	return trees, nil
+}
+
+// clone copies the cached history so a worker can extend it without a lock.
+func (h *runHistory) clone() *runHistory {
+	if h == nil {
+		return nil
+	}
+	c := &runHistory{read: maps.Clone(h.read), refs: make(map[string][]ownerRef, len(h.refs))}
+	for k, v := range h.refs {
+		c.refs[k] = slices.Clone(v)
+	}
+	return c
+}
+
+// scanParallelism bounds concurrent per-tree git and file inspection.
+const scanParallelism = 8
+
+// inspectTree fills in the git state and file activity of one tree.
+func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, tp *Tree) {
+	t := *tp
+	defer func() { *tp = t }()
+	if info, err := os.Lstat(t.Path); err != nil {
+		t.protected = "worktree is missing or unreadable"
+	} else {
+		// The directory's own mtime is a lower bound on the newest file
+		// activity. Recent unknown trees cannot be removal candidates yet.
+		t.touched = info.ModTime()
+		t.Age = max(time.Since(t.touched), 0)
+		_, status, _, e := Fingerprint(ctx, t.Path, t.head)
+		t.Dirty = status != ""
+		if status != "" {
+			t.DirtyFiles = strings.Split(status, "\n")
+		}
+		t.Ahead = -1
+		if defaultRef != "" {
+			if count, err := gitOutput(ctx, repo, "rev-list", "--count", t.head, "--not", defaultRef); err == nil {
+				t.Ahead, _ = strconv.Atoi(strings.TrimSpace(string(count)))
+			}
+		}
+		if e != nil {
+			t.protected = "cannot inspect git status: " + e.Error()
+			t.Dirty = true
+		}
+		if defaultRef != "" {
+			_, e = gitOutput(ctx, repo, "merge-base", "--is-ancestor", t.head, defaultRef)
+			t.Merged = e == nil
+		}
+		if usageNeeded(t, opts) {
+			size, touched, walkErr := treeUsage(ctx, t.Path)
+			t.Size, t.touched = size, touched
+			if walkErr != nil {
+				t.protected = "cannot inspect all worktree files: " + walkErr.Error()
+			}
+			// Git metadata lives outside the worktree; it records checkout and commit activity.
+			gitDir, gitErr := gitOutput(ctx, t.Path, "rev-parse", "--absolute-git-dir")
+			if gitErr != nil {
+				t.protected = "cannot inspect git metadata"
+			} else {
+				_, mt, e := treeUsage(ctx, strings.TrimSpace(string(gitDir)))
+				if e != nil {
+					t.protected = "cannot inspect git metadata"
+				}
+				if mt.After(t.touched) {
+					t.touched = mt
+				}
+			}
+			t.Age = time.Since(t.touched)
+			if t.Age < 0 {
+				t.Age = 0
+			}
+		}
+	}
 }
 
 // usageNeeded asks the same retention rule whether file activity can matter.
@@ -572,7 +633,7 @@ func treeUsage(ctx context.Context, path string) (int64, time.Time, error) {
 // remove rechecks ownership, file activity, status and ancestry, then removes
 // the tree or returns it kept with the reason. Sessions and running workflows
 // are read again; only ended runs' journal history comes from the first scan.
-func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error)) (out Tree) {
+func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func()) (out Tree) {
 	// Whichever check stops it, a tree kept only because time ran out is
 	// retried by the scheduled cleanup.
 	defer func() {
@@ -581,26 +642,41 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 			out.Reason = "cleanup ran out of time; the scheduled cleanup retries it"
 		}
 	}()
-	latest, e := scan(ctx, repo, &GCOptions{Path: t.Path, history: history})
-	if e != nil || len(latest) != 1 {
-		t.Action, t.Reason = "kept", "cannot recheck worktree before removal"
+	// recheck reads ownership, file activity, status, HEAD and process use
+	// again; it returns why the tree must stay, or "" when removal may go on.
+	recheck := func() string {
+		latest, e := scan(ctx, repo, &GCOptions{Path: t.Path, history: history})
+		if e != nil || len(latest) != 1 {
+			return "cannot recheck worktree before removal"
+		}
+		if fresh := decide(latest[0], closed); fresh.Action != "would remove" || fresh.head != t.head {
+			return "worktree changed during cleanup: " + fresh.Reason
+		}
+		// Git also checks for changes when removing the directory.
+		_, status, _, e := Fingerprint(ctx, t.Path, t.head)
+		head, e2 := gitOutput(ctx, t.Path, "rev-parse", "HEAD")
+		if e != nil || status != "" || e2 != nil || strings.TrimSpace(string(head)) != t.head {
+			return "worktree changed during cleanup"
+		}
+		if reason, e := processUse(ctx, t.Path); e != nil {
+			return "cannot check worktree process use: " + e.Error()
+		} else {
+			return reason
+		}
+	}
+	// The first pass runs in parallel and drops trees that already changed. A
+	// worker can then queue for the removal lock while its tree changes, so the
+	// whole recheck runs again once the lock is held, right before deletion.
+	if reason := recheck(); reason != "" {
+		t.Action, t.Reason = "kept", reason
 		return t
 	}
-	if fresh := decide(latest[0], closed); fresh.Action != "would remove" || fresh.head != t.head {
-		t.Action, t.Reason = "kept", "worktree changed during cleanup: "+fresh.Reason
-		return t
+	if beforeLock != nil {
+		beforeLock()
 	}
-	// Git also checks for changes when removing the directory.
-	_, status, _, e := Fingerprint(ctx, t.Path, t.head)
-	head, e2 := gitOutput(ctx, t.Path, "rev-parse", "HEAD")
-	if e != nil || status != "" || e2 != nil || strings.TrimSpace(string(head)) != t.head {
-		t.Action, t.Reason = "kept", "worktree changed during cleanup"
-		return t
-	}
-	if reason, e := processUse(ctx, t.Path); e != nil {
-		t.Action, t.Reason = "kept", "cannot check worktree process use: "+e.Error()
-		return t
-	} else if reason != "" {
+	removeMu.Lock()
+	defer removeMu.Unlock()
+	if reason := recheck(); reason != "" {
 		t.Action, t.Reason = "kept", reason
 		return t
 	}
@@ -614,6 +690,9 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 	}
 	return t
 }
+
+// removeMu serializes the final Git removal and registry update across workers.
+var removeMu sync.Mutex
 
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second
@@ -681,6 +760,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		closed = SessionClosed
 	}
 	result := make([]Tree, 0, len(trees))
+	var pending []int
 	for _, t := range trees {
 		if opts.Session != "" && !ownedBy(t, opts.Session) {
 			continue
@@ -690,10 +770,34 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		}
 		t = decide(t, closed)
 		if t.Action == "would remove" && !opts.DryRun {
-			t = remove(ctx, repo, t, opts.history, closed)
+			pending = append(pending, len(result))
 		}
 		result = append(result, t)
 	}
+	// Each removal rereads ownership, status and process use right before it
+	// removes its own tree, so rechecks of different trees can overlap. Workers
+	// keep their own copy of the run history because it is not safe to share.
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(scanParallelism, len(pending)) {
+		wg.Add(1)
+		history := opts.history.clone()
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				var beforeLock func()
+				if opts.beforeLock != nil {
+					beforeLock = func() { opts.beforeLock(result[i].Path) }
+				}
+				result[i] = remove(ctx, repo, result[i], history, closed, beforeLock)
+			}
+		}()
+	}
+	for _, i := range pending {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 	if !opts.DryRun {
 		// Prune only drops metadata of missing trees, takes milliseconds, and
 		// runs again on the next cleanup. A spent cleanup budget must not fail it.
@@ -785,7 +889,21 @@ func decide(t Tree, closed func(string) (bool, error)) Tree {
 				t.Reason, t.OwnerOpen = "cannot read owning session: "+e.Error(), false
 			}
 		}
-		for _, owner := range append(append([]ownerRef{}, t.inferred.Sessions...), t.inferred.Runs...) {
+		for _, owner := range t.inferred.Sessions {
+			if !owner.Closed {
+				t.Reason, t.OwnerOpen = "an inferred owner is still open", true
+				continue
+			}
+			ownerClosed, err := closed(owner.ID)
+			if err != nil {
+				t.Reason = "cannot read inferred session: " + err.Error()
+			} else if !ownerClosed {
+				t.Reason, t.OwnerOpen = "an inferred owner is still open", true
+			} else if !known {
+				known, isClosed = true, true
+			}
+		}
+		for _, owner := range t.inferred.Runs {
 			if !owner.Closed {
 				t.Reason, t.OwnerOpen = "an inferred owner is still open", true
 			} else if !known {
