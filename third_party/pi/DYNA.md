@@ -19,6 +19,10 @@ P6 makes `--session <id>` in RPC, JSON and print modes open a session from anoth
 
 P5 streams codemode script output (`packages/codemode/src/types.ts`, `src/runtime/execution.ts`, and `packages/coding-agent/src/extensions/codemode/execute.ts`): the sandbox reports each output item, and codemode partial results contain only the running header and a bounded preview of script output. Nested call previews stay off updates; the final tool result message keeps `nestedCalls` with full arguments. The pack version rises to `1.4.0-dyna.6` with `dynaFork: 6`. It lets Dyna delete the codemode `tool_execution_update` filter in `internal/workeroutput/pi.go`, so script output streams like other tool output.
 
+## Fork versions
+
+From F1 on, the version names one build: `1.4.0-dyna.<level>.<build>`, where `<build>` is the first twelve hex characters of the `third_party/pi` tree hash and `dynaFork` stays the level. Two PRs at one level can land side by side, because each build installs as its own version. Raise the level only when Dyna starts to depend on a new fork feature: then raise `piForkVersion`, `minimumPiForkLevel` and the `dynaFork` in `scripts/pi-pack.sh` together. A change that needs no new Pi feature keeps main's level. Dyna gates readiness on the level alone (`internal/harness/runtime/version_range.go`), never on build ordering. Release and self-update stamp the build hash into the binary (`piForkBuild`), and an unstamped development binary reads it from the tarball named by `DYNA_PI_TARBALL`. First use installs and selects in one step when the selected bundle is unusable, recording the replaced selection as the rollback target (`internal/harness/runtime/firstuse.go`).
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:
@@ -31,7 +35,7 @@ Keep the subtree commits in the Dyna history. Do not rebase or squash them away.
 
 ## Pack and install a development build
 
-Run `scripts/pi-pack.sh /absolute/path/pi-coding-agent-1.4.0-dyna.4.tgz`. The script hydrates the pinned model catalog, builds offline, and writes one tarball with all internal `@earendil-works/*` runtime packages bundled. npm treats `bundleDependencies` as complete, so the script also strips the bundled packages' own dependency lists and merges every third-party package they need into the top-level manifest, pinned to the versions the vendored lockfile resolved. Third-party dependencies still come from npm.
+Run `scripts/pi-pack.sh /absolute/path/pi-coding-agent.tgz`. The version inside the tarball is `1.4.0-dyna.<level>.<build>`. The script hydrates the pinned model catalog, builds offline, and writes one tarball with all internal `@earendil-works/*` runtime packages bundled. npm treats `bundleDependencies` as complete, so the script also strips the bundled packages' own dependency lists and merges every third-party package they need into the top-level manifest, pinned to the versions the vendored lockfile resolved. Third-party dependencies still come from npm.
 
 The script then verifies its own output: it installs the tarball into a temporary prefix the way Dyna does, compares the installed package set with the upstream npm package, runs `pi --version`, and executes one codemode script with no network. Set `PI_PACK_SKIP_BUILD=1` to reuse an existing install and build; the CI pi job does that.
 
