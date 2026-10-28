@@ -53,14 +53,22 @@ func (r *shellRunner) Start(_ context.Context, spec workflow.CommandSpec) (strin
 		// leaves the shell log, which then holds standard output only.
 		cmd = append([]string{"sh", "-c", `exec "$@" 2>"$0"`, spec.StderrPath}, cmd...)
 	}
-	env, err := r.environment(spec.Env)
+	runMeta, err := runstore.ReadMeta(r.run)
+	if err != nil {
+		return "", err
+	}
+	owner := runMeta.ParentSession
+	if owner == "" {
+		owner = runMeta.Session
+	}
+	env, err := r.environment(spec.Env, owner)
 	if err != nil {
 		return "", err
 	}
 	if len(env) > 0 {
 		cmd = append(append([]string{"env"}, env...), cmd...)
 	}
-	meta, err := r.store.StartJob(shells.StartOptions{Name: spec.Name, Cmd: cmd, Cwd: spec.Cwd, Owner: r.owner, Run: r.run, RoomID: r.roomID},
+	meta, err := r.store.StartJob(shells.StartOptions{Name: spec.Name, Cmd: cmd, Cwd: spec.Cwd, Owner: r.owner, WorkflowOwner: true, Run: r.run, RoomID: r.roomID},
 		time.Now().Add(commandHold), func(m shells.Meta) error { return shells.Spawn(r.exe, m.ID) })
 	if err != nil {
 		return "", err
@@ -71,7 +79,7 @@ func (r *shellRunner) Start(_ context.Context, spec workflow.CommandSpec) (strin
 // environment is the extra variables of a command. The shell inherits the
 // run's own environment; the temporary folder variables the run does not set
 // point at the owner's disk temporary folder, as for session shells.
-func (r *shellRunner) environment(extra []string) ([]string, error) {
+func (r *shellRunner) environment(extra []string, owner string) ([]string, error) {
 	temp := map[string]string{}
 	for _, name := range scratch.TempVars {
 		if v, ok := os.LookupEnv(name); ok {
@@ -83,7 +91,7 @@ func (r *shellRunner) environment(extra []string) ([]string, error) {
 			delete(temp, name)
 		}
 	}
-	if err := scratch.SetTemp(temp, r.owner); err != nil {
+	if err := scratch.SetTemp(temp, owner); err != nil {
 		return nil, fmt.Errorf("prepare temporary folder: %w", err)
 	}
 	env := append([]string(nil), extra...)
