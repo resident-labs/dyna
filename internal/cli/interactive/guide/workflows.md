@@ -47,10 +47,8 @@ Run `dyna profiles check` for installed binaries and output capabilities. Read `
 Scripts use JavaScript with top-level `await` and `return`; the return becomes the JSON result.
 They are not Node.js programs: no TypeScript, `require`, modules, filesystem, networking, or arbitrary environment access. Workers handle filesystem work, and `run()` runs commands.
 
-Each `agent()` call starts a leaf session: a regular agent session that cannot start subagents or runs. It has the same tools, instructions, and guides as any session. Dyna disables native delegation: Claude runs without the Agent tool.
-The run closes each agent session when its call resolves. Sessions of a run stay out of member lists and groups. Their results go to the run, not to a parent.
-A worker records progress with `dyna journal`; the run page shows the entries.
-To watch an agent, open its session from its row on the run page: it shows the same transcript as any session. To steer it, post `dyna post @run:<id>/agent:<n> "<message>"`; the session receives it like any other post. A run from before agents were sessions shows only the journal and the final result for each agent.
+Each `agent()` call starts a regular agent session that cannot start subagents or runs. Claude runs without the Agent tool. The run closes each session on resolution; sessions stay out of member lists and groups, and results go to the run. Workers record progress with `dyna journal`.
+Watch an agent by opening its session from the run page. Steer it with `dyna post @run:<id>/agent:<n> "<message>"`. Older runs show only the journal and final result.
 Read `dyna guide delegation` for persistent sessions and `dyna guide recovery` after provider failure.
 
 Optional metadata goes first:
@@ -69,7 +67,7 @@ export const meta = {
 
 ### `agent(prompt, opts?)`
 
-Use `run()` instead when a command can do the work deterministically. This includes polling for a file, a status, or a receipt. Use `agent()` when the step needs model judgment, not just waiting. Give waiting commands a timeout and handle failures.
+Use `run()` for deterministic work, including polling for files, statuses, or receipts. Use `agent()` for model judgment. Set timeouts and handle failures.
 
 Returns a promise for worker text or validated JSON. Options:
 
@@ -97,7 +95,7 @@ const gate = await run(['python3', 'bridge.py', 'landed', '--unit', unit], { lab
 await agent('Review the landing: ' + JSON.stringify(gate.json), { schema })
 ```
 
-For long-running workflows, read a changing manifest at each dispatch instead of loading it once at startup. For example, call `run()` to read the current manifest before choosing the next unit. The script owns this reload: Dyna does not automatically reload a workflow's variables or source.
+For long-running workflows, use `run()` to read a changing manifest at each dispatch. Dyna does not reload workflow variables or source automatically.
 
 ### `parallel(thunks)`
 
@@ -111,7 +109,7 @@ Awaited async factories and simple block-bodied factories also retain attributio
 
 ### `post(to, text, data?)`
 
-Synchronously stores and delivers a room post from the run, shown under the workflow's name. `to` is a mention or mention array; non-empty `text` has a 16 KiB limit. Resolution errors throw; check returned `error` and deliveries after storage. Keep bulk output in artifacts.
+Stores and delivers a room post synchronously under the workflow's name. `to` is a mention or array; non-empty `text` is limited to 16 KiB. Resolution errors throw; check returned `error` and deliveries. Keep bulk output in artifacts.
 Read `dyna guide posting` for mentions and delivery fields.
 
 Pass facts as `data` (object or array), or `post(to, { text, data })`; never inline JSON in `text`. The feed shows `data` as a collapsed key and value view. Recipients read it as a fenced JSON block after `text`; the limit counts it.
@@ -140,10 +138,7 @@ A child must not call `workflow()`. Siblings may run concurrently. Child agents 
 
 ## Workflow shape: parallel by default
 
-Name the work list before writing the script. Run independent calls in parallel; sequence calls only when later prompts need earlier results.
-`parallel()` has no item-count cap; concurrency limits queue calls rather than truncate inputs.
-Stream per-item stages. Use barriers only for cross-item decisions. Reduce cost with fewer calls or cheaper profiles.
-Partition implementation into disjoint file sets, then stream each writer into review and verification.
+Name the work list before writing the script. Run independent calls in parallel; sequence dependent calls. `parallel()` queues excess calls without truncating inputs. Stream per-item stages; use barriers for cross-item decisions. Reduce cost with fewer calls or cheaper profiles. Partition writers into disjoint file sets, then stream each into review and verification.
 
 ### Keep builds and tests out of the fan-out
 
