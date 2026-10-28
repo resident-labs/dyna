@@ -40,7 +40,13 @@ type Sample struct {
 }
 
 // Samples stores samples in the shared dyna.db of DataDir.
-type Samples struct{ DataDir string }
+type Samples struct {
+	DataDir string
+	// GPUs reads live GPU memory for an examination. Nil skips the GPU check,
+	// which keeps tests off the machine's real GPUs; the CLI installs
+	// ReadGPUs (D-352).
+	GPUs func() ([]GPUReading, string)
+}
 
 // Migrate brings the doctor's sample and report tables in dataDir's dyna.db
 // to this version. Only the engine calls it, at start (requirement 41).

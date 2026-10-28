@@ -29,7 +29,7 @@ func NewCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		res, err := doctor.Run{DataDir: store.DataDir(), Machine: machine, Target: a[0], Trigger: trigger(), If: cond, Cooldown: cooldown, Now: time.Now(), Post: post}.Do()
+		res, err := doctor.Run{DataDir: store.DataDir(), Machine: machine, Target: a[0], Trigger: trigger(), If: cond, Cooldown: cooldown, Now: time.Now(), Post: post, GPUs: doctor.ReadGPUs}.Do()
 		if !res.Ran {
 			return err
 		}

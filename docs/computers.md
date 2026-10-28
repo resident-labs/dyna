@@ -51,8 +51,24 @@ why a computer is unavailable. Go tests disable automatic registration by defaul
 Neither registration nor the daemon starter can start a daemon from a Go test binary. The daemon
 sets `DYNA_COMPUTERS_DAEMON=1` and cannot recursively start another daemon.
 
+`computers.renderNode` picks the GPU a computer renders on: `auto` (the default)
+or a `/dev/dri/renderD*` path. `auto` reads `/sys/class/drm` and skips every card
+with a connected monitor, so Dyna computers stay off the GPU that drives the
+owner's display when another GPU exists; otherwise it keeps the first render
+node. An invalid or missing path falls back to `auto`. The choice goes to labwc
+as `WLR_RENDER_DRM_DEVICE` and to apps as `DRI_PRIME` (Mesa, by PCI id) or, on the
+proprietary NVIDIA driver, `__GLX_VENDOR_LIBRARY_NAME=nvidia` and
+`__EGL_VENDOR_LIBRARY_FILENAMES`. Any values for those variables inherited from
+the owner are dropped first. `dyna computer status` shows the chosen node as
+`render_node`. The setting applies to computers started after the change; a
+running computer keeps its GPU and its apps follow it until it stops. When the kernel or driver exposes GPU memory
+cheaply (sysfs `mem_info_vram_*` for amdgpu, `nvidia-smi` when installed),
+`dyna doctor examine` reports a GPU that is nearly full, and says when it could
+not check GPU memory at all.
+
 Dyna injects `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_SESSION_TYPE=wayland`,
-`XDG_CURRENT_DESKTOP=labwc`, and a browser shim directory at the front of `PATH`.
+`XDG_CURRENT_DESKTOP=labwc`, a browser shim directory at the front of `PATH`,
+and the render-node variables of `computers.renderNode`.
 It preserves `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, and
 `HYPRLAND_INSTANCE_SIGNATURE`. It saves the owner's original displays in
 `DYNA_OWNER_WAYLAND_DISPLAY` and `DYNA_OWNER_DISPLAY`, for tools that deliberately
