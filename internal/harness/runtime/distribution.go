@@ -32,7 +32,7 @@ const (
 )
 
 // The release workflow stamps these variables with -X ldflags next to
-// main.version. Development builds leave them empty and use DYNA_PI_TARBALL.
+// main.version. Source builds stamp a local path and integrity.
 var (
 	piForkURL       string
 	piForkIntegrity string
@@ -40,11 +40,14 @@ var (
 )
 
 func piForkSource() string {
+	if path := os.Getenv(piForkTarballEnv); path != "" {
+		return path
+	}
 	if piForkURL != "" {
 		return piForkURL
 	}
-	if path := os.Getenv(piForkTarballEnv); path != "" {
-		return path
+	if piForkAsset != "" {
+		return piForkAsset
 	}
 	return "development Pi fork (" + piForkTarballEnv + " is not set)"
 }
