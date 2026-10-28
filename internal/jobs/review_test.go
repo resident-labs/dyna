@@ -368,3 +368,100 @@ func storedExec(svc *Service, query string, args ...any) error {
 	_, err = db.Exec(query, args...)
 	return err
 }
+
+// TestOwnerClaimsWhatAStandbyQueuedLater is the fail-first test for review
+// finding 1 of round 3: the owner already runs when a standby engine queues
+// a job, and the owner claims it without a restart, through its claim
+// interval. The tick channel stands in for the interval.
+func TestOwnerClaimsWhatAStandbyQueuedLater(t *testing.T) {
+	owner, _, ownerReporter, _ := newIdleService(t, func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
+		fmt.Fprintln(out, "ran")
+		return nil
+	})
+	tick := make(chan time.Time)
+	owner.after = func(time.Duration) <-chan time.Time { return tick }
+	owner.Start(t.Context())
+	defer owner.Stop()
+	standby, _, _, _ := newIdleService(t, blockingJob("never runs here"))
+	standby.Store = owner.Store
+	standby.Machines = owner.Machines
+	standby.NewExecutor = owner.NewExecutor
+	if _, err := standby.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}}); err != nil {
+		t.Fatal(err)
+	}
+	standby.Stop()
+	tick <- time.Now()
+	done := <-ownerReporter.finished
+	if done.State != StatePassed {
+		t.Fatalf("the owner ran the standby-queued job to %s, want passed", done.State)
+	}
+}
+
+// TestStandbyCancelStopsTheOwnersJob is the fail-first test for review
+// finding 3 of round 3: a standby engine cancels a job the owner runs. The
+// node process stops, the row keeps its cancelled end, and the finished
+// event is reported once.
+func TestStandbyCancelStopsTheOwnersJob(t *testing.T) {
+	// The job blocks until it is stopped, and its folder cleanup is the last
+	// node call of a finished run, so the test can see the run ended.
+	rmDone := make(chan struct{})
+	running := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			close(rmDone)
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "working")
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	owner, fake, ownerReporter, _ := newIdleService(t, running)
+	tick := make(chan time.Time)
+	owner.after = func(time.Duration) <-chan time.Time { return tick }
+	owner.Start(t.Context())
+	defer owner.Stop()
+	standby, _, _, _ := newIdleService(t, blockingJob("never runs here"))
+	standby.Store = owner.Store
+	standby.Machines = owner.Machines
+	standby.NewExecutor = owner.NewExecutor
+	job, err := standby.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	standby.Stop()
+	tick <- time.Now()
+	if started := <-ownerReporter.started; started.ID != job.ID {
+		t.Fatalf("started job %s, want %s", started.ID, job.ID)
+	}
+	standby2, _, standby2Reporter, _ := newIdleService(t, blockingJob("never runs here"))
+	standby2.Store = owner.Store
+	standby2.Machines = owner.Machines
+	standby2.NewExecutor = owner.NewExecutor
+	defer standby2.Stop()
+	if _, err := standby2.Cancel(t.Context(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The canceller reports the end once, as the one whose session submitted.
+	if event := <-standby2Reporter.finished; event.State != StateCancelled {
+		t.Fatalf("the canceller reported %s, want cancelled", event.State)
+	}
+	tick <- time.Now()
+	<-rmDone
+	// The owner stopped the node process and recorded the cancelled end
+	// without a second report.
+	select {
+	case event := <-ownerReporter.finished:
+		t.Fatalf("the owner reported %s too; the end is reported once", event.State)
+	default:
+	}
+	if fake.StopCount() == 0 {
+		t.Fatal("the node never saw a stop call")
+	}
+	row, err := owner.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != StateCancelled {
+		t.Fatalf("the stored row is %s, want cancelled", row.State)
+	}
+}
