@@ -50,6 +50,7 @@ not-state internal/computers/diagnostics.go clearFailedSetup 1 # removes a failu
 not-state internal/computers/store.go browserShims 2 # one computer's browser launch files: the Chromium wrapper, tool shims and profile folders
 not-state internal/computers/stream_linux.go wayVNCBackend.Command 1 # one computer's stream files
 not-state internal/computers/supervisor_linux.go newComputer 1 # one computer's folders and its cgroup runtime file; its registration lives in dyna.db
+not-state internal/computers/supervisor_linux.go supervisor.stop 1 # removes an empty fallback cgroup directory of the computer
 not-state internal/computers/supervisor_linux.go supervisor.cleanup 6 # removes one computer's process files: runtime folder, locks, browser sockets, profiles and cgroup
 not-state internal/computers/supervisor_linux.go supervisor.listenX11 6 # the X11 display's own lock files and sockets
 not-state internal/computers/supervisor_linux.go supervisor.record 1 # appends to the computer's append-only events.jsonl (rule r10); its status lives in dyna.db
