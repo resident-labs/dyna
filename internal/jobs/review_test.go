@@ -64,8 +64,8 @@ func TestCleanupRunsOnTheNode(t *testing.T) {
 		DataDir:  dir,
 		logf:     func(string, ...any) {},
 	}
-	// The folder is removed after the end is posted, so the test waits for the
-	// removal itself, not for the end.
+	// The folder is removed after the end is posted. Stop waits for every run,
+	// cleanup included, so the removal is read after it without blocking.
 	removals := make(chan string, 2)
 	svc.Start(t.Context())
 	fake := jobstest.NewFake(t, jobstest.Protocol{Start: StartScript, Poll: PollScript, Stop: StopScript}, func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
@@ -92,8 +92,14 @@ func TestCleanupRunsOnTheNode(t *testing.T) {
 	}
 	_ = job
 	<-reporter.finished
-	if where := <-removals; where != "remote" {
-		t.Fatalf("the job's folder was removed on the %s machine, want on the node", where)
+	svc.Stop()
+	select {
+	case where := <-removals:
+		if where != "remote" {
+			t.Fatalf("the job's folder was removed on the %s machine, want on the node", where)
+		}
+	default:
+		t.Fatal("the job's folder was never removed")
 	}
 }
 
