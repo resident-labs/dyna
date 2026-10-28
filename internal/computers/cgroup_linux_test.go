@@ -460,6 +460,41 @@ func TestRoomScopeWithoutControlsIsKilled(t *testing.T) {
 	}
 }
 
+// A computer that fell back to the service leaf keeps it while it lives,
+// because its processes cannot move; the scope is retried at the next start.
+func TestFallbackLeafIsKeptUntilTheNextStop(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	serviceRoot, roomRoot := roomSliceFixture(t, "roomlimits")
+	id := testSessionID(t, "fallback")
+	leaf := filepath.Join(serviceRoot, publicName(id))
+	for _, file := range []string{"memory.high", "memory.oom.group", "cpu.weight", "cgroup.kill"} {
+		putCgroupFile(t, leaf, file, "")
+	}
+	s, err := newComputer(t.Context(), id, "roomlimits", SupervisorOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	s.ensureCgroup(t.Context()) // the scope start fails: the leaf holds the computer
+	if s.cgroup != leaf {
+		t.Fatalf("cgroup = %q, want the leaf %q", s.cgroup, leaf)
+	}
+	scope := fakeScope(t, roomRoot, "dyna-computer-late.scope")
+	startRoomScope = func(context.Context, string, string) string { return scope }
+	s.ensureCgroup(t.Context()) // a later browser or client call must not split the computer
+	if s.cgroup != leaf || s.roomSlice != "" {
+		t.Fatalf("live computer moved: cgroup %q, room slice %q", s.cgroup, s.roomSlice)
+	}
+	s.mu.Lock()
+	_ = s.stop()
+	s.mu.Unlock()
+	s.ensureCgroup(t.Context())
+	if s.cgroup != scope {
+		t.Fatalf("restart cgroup = %q, want the scope %q", s.cgroup, scope)
+	}
+}
+
 // Stopping a computer takes its room scope down. Nothing may join the dead
 // scope afterwards: the record goes, and the next ensure asks for a new one.
 func TestStopForgetsTheRoomScope(t *testing.T) {

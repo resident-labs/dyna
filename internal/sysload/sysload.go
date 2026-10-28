@@ -271,7 +271,8 @@ func diff(prev, cur *reading, out *Load) {
 	out.Split = &split
 	byID := map[string]Group{}
 	for key := range cur.groups {
-		if !strings.HasSuffix(key, ".scope") {
+		// A room computer's scope is a computer, not an agent session.
+		if !strings.HasSuffix(key, ".scope") || strings.HasPrefix(key, roomComputerKey) {
 			continue
 		}
 		// A scope that is new counts as 0 before; one that left is not in cur.
