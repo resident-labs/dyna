@@ -779,7 +779,7 @@ test('a review result card shows all four results on feed and DM', () => {
     { payload: { ...base, kind: 'approve' as const }, wants: [/PR #542/, /approved/] },
     { payload: { ...base, kind: 'approve-fast' as const, fastLand: true }, wants: [/fast landing/, /approved/] },
     { payload: base, wants: [/changes requested/, /1 blocking/, /events\.go:42/] },
-    { payload: { ...base, kind: 'stop-early' as const, stopReason: 'superseded' as const, findings: [], blocking: 0, nits: 0 }, wants: [/stopped early/, /newer review replaced this one/] },
+    { payload: { ...base, kind: 'stop-early' as const, stopReason: 'superseded' as const, summary: '', findings: [], blocking: 0, nits: 0 }, wants: [/stopped early/, /newer review replaced this one/] },
   ]
   for (const surface of ['feed', 'dm'] as const) {
     for (const c of cases) {
@@ -797,6 +797,25 @@ test('a review result card shows all four results on feed and DM', () => {
       target.remove()
     }
   }
+})
+
+test('a too-large stop shows its reason once and names the next step', () => {
+  const base = web.reviewEvent({ kind: 'review', payload: fixtures['review/result'] })
+  assert.ok(base, 'the review result fixture is missing')
+  const payload = { ...base, kind: 'stop-early' as const, stopReason: 'too-large' as const, summary: 'The diff contains 72 generated preset files.', findings: [], blocking: 0, nits: 0 }
+  const post = postFor('review', 'result', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.ReviewResultCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  const reason = 'The diff contains 72 generated preset files.'
+  assert.equal(text.split(reason).length - 1, 1, text)
+  const stopReason = 'Stopped early: the change is too large to review.'
+  assert.equal(text.split(stopReason).length - 1, 1, text)
+  assert.match(text, /This PR cannot merge until it is split or root records a review\./)
+  web.unmount(mounted)
+  target.remove()
 })
 
 // renderMergeCard mounts the merge card and separates its visible summary
