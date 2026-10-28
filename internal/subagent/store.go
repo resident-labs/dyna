@@ -563,19 +563,17 @@ func (s *Store) lockSessionContext(ctx context.Context, id string) (func(), erro
 }
 
 // readMetaRecord decodes one atomic snapshot without assuming room membership.
-func (s *Store) readMetaRecord(id string) (Meta, []byte, error) {
+func (s *Store) readMetaRecord(id string) (Meta, error) {
 	entry, err := s.metaSnapshot(id)
 	if err != nil {
-		return Meta{}, nil, err
+		return Meta{}, err
 	}
-	m := cloneMeta(entry.meta)
-	b := entry.raw
-	return m, b, nil
+	return cloneMeta(entry.meta), nil
 }
 
 // ReadMeta loads session.json and requires a complete room stamp.
 func (s *Store) ReadMeta(id string) (Meta, error) {
-	m, _, err := s.readMetaRecord(id)
+	m, err := s.readMetaRecord(id)
 	if err != nil {
 		return Meta{}, err
 	}
