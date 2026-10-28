@@ -538,6 +538,10 @@ type ReplyTarget struct {
 // composer writes as @root, so the seat's holder can change. A post the owner
 // typed has no target: a reply to it keeps the draft's recipients.
 func replyTarget(m room.Message, roomName string, book avatarBook) *ReplyTarget {
+	if ev, ok := m.TurnResult(); ok && ev.SessionID != "" {
+		cur, _ := book.address(ev.SessionID)
+		return &ReplyTarget{Kind: ReplySession, ID: ev.SessionID, Address: cur}
+	}
 	if m.From == roomName || m.From == roomName+":"+room.RootAgent {
 		if m.Human {
 			return nil

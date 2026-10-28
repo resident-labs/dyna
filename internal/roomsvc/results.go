@@ -9,13 +9,14 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/turntext"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // MaxFeedResultKB caps the full result one feed row carries, so one giant
 // result cannot stall the page.
-const MaxFeedResultKB = 64
+const MaxFeedResultKB = turntext.MaxFeedResultKB
 
 // resultCacheEntries bounds retained full results to 256, or 16 MiB when
 // every result reaches MaxFeedResultKB.
@@ -81,6 +82,14 @@ func (s *Service) expandResult(p Post, book avatarBook) Post {
 	if r, ok := s.results.Get(p.ID); ok {
 		return withFull(p, r)
 	}
+	if ev, ok := p.TurnResult(); ok && ev.SessionID != "" {
+		if text, cut, ok := turntext.Render(s.sessions(), ev.SessionID, ev.Session, ev.Turn, string(ev.State)); ok {
+			r := fullResult{text: text, cut: cut, detail: &PostDetail{Kind: "session", ID: ev.SessionID, Turn: ev.Turn}}
+			s.results.Add(p.ID, r)
+			return withFull(p, r)
+		}
+		return p
+	}
 	// The writer is the session at this address whose turn p.Turn ended
 	// last before the post: a completion is posted right after its turn
 	// ends. Creation times are too coarse to tell a reused name apart.
@@ -125,34 +134,7 @@ func withFull(p Post, r fullResult) Post {
 // header as the stored post, then the result as text, or JSON in a fence,
 // or the error. It is clipped at MaxFeedResultKB with a note.
 func FullCompletionText(address string, turn int, kind string, result any, errText string) (string, bool) {
-	head := fmt.Sprintf("%s turn %d %s.", address, turn, kind)
-	var body string
-	switch v := result.(type) {
-	case nil:
-	case string:
-		body = strings.TrimSpace(v)
-	default:
-		b, err := json.MarshalIndent(v, "", "  ")
-		if err == nil {
-			body = "```json\n" + string(b) + "\n```"
-		}
-	}
-	text := head
-	if errText != "" {
-		text += " Error: " + strings.TrimSpace(errText)
-	}
-	if body != "" {
-		text += " Result:\n\n" + body
-	}
-	max := MaxFeedResultKB * 1024
-	if len(text) <= max {
-		return text, false
-	}
-	cut := strings.ToValidUTF8(text[:max], "")
-	if strings.Count(cut, "```")%2 == 1 {
-		cut += "\n```"
-	}
-	return cut + fmt.Sprintf("\n\n*Cut at %d KB. Open the transcript for more.*", MaxFeedResultKB), true
+	return turntext.FullCompletionText(address, turn, kind, result, errText)
 }
 
 // expandRun names a workflow run's completion by the run's name and shows
