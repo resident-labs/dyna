@@ -317,10 +317,12 @@ func packedForkTarball(t *testing.T, version string) string {
 	if err := os.MkdirAll(stage, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := map[string]any{
-		"name": piNPMPackage, "version": version, "dynaFork": minimumPiForkLevel,
-		"description": strings.Repeat("padded to a real packed size ", 200),
-	}
+	manifest := struct {
+		Name        string `json:"name"`
+		Version     string `json:"version"`
+		DynaFork    int    `json:"dynaFork"`
+		Description string `json:"description"`
+	}{piNPMPackage, version, minimumPiForkLevel, strings.Repeat("padded to a real packed size ", 200)}
 	raw, _ := json.Marshal(manifest)
 	if len(raw) <= 4096 {
 		t.Fatalf("test manifest is only %d bytes", len(raw))
