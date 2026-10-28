@@ -544,7 +544,7 @@ func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(home, "skills")); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(home, "mcp.json")
+	config := filepath.Join(home, "settings.json")
 	if err := os.Remove(config); err != nil {
 		t.Fatal(err)
 	}

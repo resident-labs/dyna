@@ -124,8 +124,6 @@ not-state internal/harness/runtime/generation_lifecycle.go publishGenerationFile
 not-state internal/harness/runtime/generation_lifecycle.go removeLegacyGlobalRules 1 # installed harness generations
 not-state internal/harness/runtime/native_files.go nativeFilesManager.Activate 1 # a harness CLI's own native files
 not-state internal/harness/runtime/owner_login_import.go Runtime.copyPersonalLogin 1 # copies the owner's login into a harness CLI's private home
-not-state internal/harness/runtime/pi_home.go copyPiModels 1 # copies the owner's shared Pi model definitions into one account home; a harness CLI's own config file
-not-state internal/harness/runtime/pi_home.go publishPiAccountHome 1 # a harness CLI's own agent-directory views; the account record and its selection live in dyna.db
 not-state internal/harness/runtime/preferences.go Runtime.ImportPreferences 2 # writes an immutable settings-layer blob; its index lives in dyna.db
 not-state internal/harness/runtime/probe.go BundleManager.Probe 1 # removes the throwaway probe scope and its private HOME
 not-state internal/harness/runtime/provider_keys.go lockPiAuth 1 # the Pi CLI's own lock protocol beside its auth.json

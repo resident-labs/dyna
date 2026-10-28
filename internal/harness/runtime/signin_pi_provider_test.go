@@ -34,7 +34,7 @@ func piAuthTypes(t *testing.T, home string) map[string]string {
 // only that provider's entry there. The shared login is left alone.
 func TestPiProviderSignInGivesEachProviderItsOwnAccount(t *testing.T) {
 	r := providerKeysRuntime(t)
-	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.6")
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.7")
 	ctx := context.Background()
 	if _, err := r.AddProviderKey(ctx, "pi", store.ProviderZAI, "", testProviderKey); err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 // is written.
 func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 	r := providerKeysRuntime(t)
-	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.6")
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.7")
 	ctx := context.Background()
 	target := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
 	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
@@ -178,7 +178,7 @@ func TestPiSignInAgainRefusesAnotherProvider(t *testing.T) {
 // account, which the sign-in never named.
 func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
 	r := providerKeysRuntime(t)
-	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.6")
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.7")
 	ctx := context.Background()
 	gone := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
 	other := seedPiAccount(t, r, "openai", `{"type":"api_key","key":"keep-b"}`)
@@ -213,7 +213,7 @@ func TestPiSignInAgainRefusesARemovedTarget(t *testing.T) {
 // serving turns that started before the split.
 func TestSplitPiAccountsGivesEachProviderItsOwnHome(t *testing.T) {
 	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0-dyna.6")
+	install(t, r.Bundles, "pi", "1.3.0-dyna.7")
 	ctx := context.Background()
 	legacy, err := r.Accounts.Create("pi", "Pi login")
 	if err != nil {
@@ -377,7 +377,7 @@ func hasHome(accounts []NativeAccount, id string) bool {
 // from either of them.
 func TestPiSplitKeepsEachSourcesCredentialAndRules(t *testing.T) {
 	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0-dyna.6")
+	install(t, r.Bundles, "pi", "1.3.0-dyna.7")
 	ctx := context.Background()
 	shared, err := r.Accounts.HarnessHome("pi")
 	if err != nil {
@@ -461,7 +461,7 @@ func TestPiSplitKeepsEachSourcesCredentialAndRules(t *testing.T) {
 // of its provider at the next start, and earlier accounts are not made twice.
 func TestPiSplitPicksUpACredentialAddedLater(t *testing.T) {
 	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0-dyna.6")
+	install(t, r.Bundles, "pi", "1.3.0-dyna.7")
 	ctx := context.Background()
 	shared, err := r.Accounts.HarnessHome("pi")
 	if err != nil {

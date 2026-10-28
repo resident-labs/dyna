@@ -466,12 +466,15 @@ func TestPiPrepareUsesTheActiveProviderAccountHome(t *testing.T) {
 	if next.Generation != pin.Generation {
 		t.Fatal("the account changed the immutable config generation")
 	}
-	// The account home holds the Dyna-managed part of Pi's agent directory, so
-	// the turn keeps its MCP servers and model definitions.
-	for _, name := range []string{"settings.json", "mcp.json"} {
-		if _, err = os.Lstat(filepath.Join(second.Home, name)); err != nil {
-			t.Fatalf("the account home lacks %s: %v", name, err)
+	// Dyna passes the Dyna-managed part of Pi's agent directory per invocation,
+	// so the account home keeps only its own login.
+	for _, name := range []string{"settings.json", "mcp.json", "models.json", ".dyna-generation"} {
+		if _, err = os.Lstat(filepath.Join(second.Home, name)); !os.IsNotExist(err) {
+			t.Fatalf("the account home gained %s", name)
 		}
+	}
+	if s := flagValue(resumed.ExtraArgs, "--settings"); filepath.Dir(s) != next.Generation {
+		t.Fatalf("the turn lost its generation settings: %q", s)
 	}
 	if raw, err := os.ReadFile(filepath.Join(second.Home, "auth.json")); err != nil || !strings.Contains(string(raw), "second") {
 		t.Fatalf("the account lost its own login: %s %v", raw, err)
