@@ -18,6 +18,7 @@ var Topics = []Topic{
 	{"workflows", "before you write a workflow"},
 	{"steering", "when a post arrives during your turn; replies, reports and silent turns"},
 	{"posting", "before you attach files, post a card, pin a post or start a build, test run or dev server"},
+	{"machines", "before you use another machine for builds or tests: run dyna machine list; use the SSH column as the exact user@host"},
 	{"git", "before you create a worktree, open, track, review or comment on a pull request, check CI, change merge policy, or manage hooks; also when a hook fails"},
 	{"computers", "before you start a GUI app, take a screenshot or send computer input"},
 	{"voice-agents", "to add speech or live voice to apps"},
