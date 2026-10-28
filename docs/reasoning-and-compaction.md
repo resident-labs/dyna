@@ -71,11 +71,21 @@ wizard's last step is the same editor.
 | `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 compacts 33K below the window, and the window must be 100K to 1M, so N is 67K to 967K. |
 | `pi` | none; Dyna runs `pi --mode rpc --session <id>` with `{"type":"compact"}` |
 
-Pi has no threshold setting, but it has a compact command. Its decoder reports `Record.ContextTokens`, the prompt size of
+For an explicit Pi profile threshold, Dyna uses Pi's compact command. Its decoder reports `Record.ContextTokens`, the prompt size of
 each model call. The session stores the last one, and before the next resumed
 turn `profile.CompactDue` decides whether Dyna runs the compact command first.
 The harness still does the compaction; Dyna only chooses when to ask. A failed
 compact command becomes a `compact_failed` session event, and the turn runs.
+
+Dyna also sets a default Pi native compaction target with `harness.compactAtTokens`.
+The default is 200000 tokens; 0 disables the default cap. Dyna generates model
+reserves for models in the selected account's Pi catalog on Pi 1.3.0 or later.
+Unknown models and unavailable catalogs keep Pi's native defaults. Pi reports
+rounded windows, so Dyna uses a conservative upper bound and may compact earlier.
+The generated model reserve takes precedence over an ordinary project-wide Pi
+reserve. A project model override takes precedence over Dyna's generated value.
+Existing pinned sessions keep their prior generation until a fresh start. Pi may
+also decline compaction when it cannot split the history.
 
 ## Rendering
 
