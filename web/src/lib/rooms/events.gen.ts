@@ -1180,10 +1180,10 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     type: "shell",
     renderer: "AlertCard",
     quiet: false,
-    wake: "root",
+    wake: "target",
     once: true,
-    audience: "room",
-    text: "A stopped shell has processes still running:",
+    audience: "session",
+    text: "Shell process cleanup did not finish:",
   },
   {
     family: "service",

@@ -69,7 +69,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyReview, Renderers: []string{"ReviewResultCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyPR, Renderers: []string{"PRCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilySession, Renderers: []string{"SessionNoteCard", "InstructionBatchCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeRootIfNeeded, WakeTarget}, Audiences: []Audience{AudienceSession, AudienceRoom}},
-	{Family: FamilyAlert, Renderers: []string{"AlertCard"}, Producers: []EventProducer{ProducerDoctor, ProducerEngine, ProducerShell}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyAlert, Renderers: []string{"AlertCard"}, Producers: []EventProducer{ProducerDoctor, ProducerEngine, ProducerShell}, Wakes: []WakeRule{WakeRoot, WakeTarget}, Audiences: []Audience{AudienceRoom, AudienceSession}},
 	{Family: FamilyService, Renderers: []string{"ServiceAlertCard", "ServiceWaitCard", "HelperOutcomeRow"}, Producers: []EventProducer{ProducerLibrarian, ProducerReviewer, ProducerHelper}, Wakes: []WakeRule{WakeRoot, WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyEngine, Renderers: []string{"EngineNoticeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyQuestion, Renderers: []string{"QuestionNoteCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
