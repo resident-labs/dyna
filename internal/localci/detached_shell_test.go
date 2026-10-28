@@ -145,8 +145,7 @@ func TestSetupRepeatedAfterAKeeperStartedSucceeds(t *testing.T) {
 	base := t.TempDir()
 	runDir := filepath.Join(base, "runs", "r")
 	active := filepath.Join(runDir, ".active")
-	cache := filepath.Join(base, "cache.git")
-	script := nodeSetupScript(base, cache, filepath.Join(runDir, "reports"), active, nil)
+	script := nodeSetupScript(base, filepath.Join(runDir, "reports"), active, nil)
 	t.Cleanup(func() {
 		_ = exec.Command("bash", "-c", removeRunDir(base, active)).Run()
 	})
