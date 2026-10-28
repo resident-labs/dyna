@@ -365,7 +365,14 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 	// SQLite may complete BEGIN before the driver reports cancellation.
 	// Roll it back even on that error, before returning the connection.
 	finish := context.WithoutCancel(ctx)
-	defer conn.ExecContext(finish, "ROLLBACK")
+	var began time.Time
+	var committed bool
+	defer func() {
+		conn.ExecContext(finish, "ROLLBACK")
+		if !began.IsZero() && !committed {
+			writeHold.record(now().Sub(began))
+		}
+	}()
 	err = retryBusy(begin, func() error { return beginImmediate(begin, conn) })
 	if err != nil {
 		return err
@@ -374,14 +381,20 @@ func transact(ctx context.Context, db *sql.DB, update func(*sql.Conn) error) err
 	if err := begin.Err(); err != nil {
 		return fmt.Errorf("database stayed busy: %w", err)
 	}
-	began := now()
+	began = now()
 	if err := update(conn); err != nil {
 		logSlowWrite(began.Sub(start), now().Sub(began), 0)
 		return err
 	}
 	committing := now()
 	_, err = conn.ExecContext(finish, "COMMIT")
-	logSlowWrite(began.Sub(start), committing.Sub(began), now().Sub(committing))
+	body, commit := committing.Sub(began), now().Sub(committing)
+	if err == nil {
+		writeHold.record(body + commit)
+		committed = true
+	}
+	commitDuration.record(commit)
+	logSlowWrite(began.Sub(start), body, commit)
 	return err
 }
 

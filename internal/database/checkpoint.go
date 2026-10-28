@@ -52,7 +52,10 @@ func KeepCheckpointed(ctx context.Context, dataDir string, ticks <-chan time.Tim
 		case <-ctx.Done():
 			return
 		case <-ticks:
-			if _, err := Checkpoint(ctx, db); err != nil && ctx.Err() == nil {
+			start := time.Now()
+			c, err := Checkpoint(ctx, db)
+			recordCheckpoint(time.Since(start), c, err)
+			if err != nil && ctx.Err() == nil {
 				logf("database: checkpoint: %v", err)
 			}
 		}
