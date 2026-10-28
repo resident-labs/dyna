@@ -43,8 +43,8 @@ func TestRemovePreservesOpenSessionWorktree(t *testing.T) {
 	}
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
 	result, err := Remove(ctx, []string{tree}, true)
-	if err != nil || result.Failure != "" {
-		t.Fatalf("remove: %+v, %v", result, err)
+	if err == nil && result.Failure == "" {
+		t.Fatalf("remove reported success: %+v", result)
 	}
 	if len(result.Lines) != 1 || !strings.Contains(result.Lines[0], "retained") {
 		t.Fatalf("lines: %+v", result.Lines)
