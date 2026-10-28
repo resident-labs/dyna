@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -157,6 +158,20 @@ func writeReviewDelta(ctx context.Context, repo, base, from, to, path string, ex
 	newBase, err := gitRead(ctx, repo, "merge-base", base, to)
 	if err != nil {
 		return false, fmt.Errorf("current review merge base: %w", err)
+	}
+	// The base-to-head exclusions miss a generated file that a later round
+	// reverted to its base contents: the revert itself belongs to the delta, so
+	// the delta's own ranges add their generated paths too. On an attribute
+	// error the delta keeps the exclusions already known.
+	ranges := [][2]string{{from, to}}
+	if oldBase != newBase {
+		ranges = [][2]string{{oldBase, from}, {newBase, to}}
+	}
+	excluded = slices.Clone(excluded)
+	for _, r := range ranges {
+		if _, deltaExcluded, e := generatedDiffFiles(ctx, repo, r[0], r[1]); e == nil {
+			excluded = append(excluded, deltaExcluded...)
+		}
 	}
 	if oldBase == newBase {
 		return writeTreeDiff(ctx, repo, from, to, path, excluded...)
