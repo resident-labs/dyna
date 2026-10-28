@@ -64,6 +64,7 @@ const fixtures: Record<string, EventPayload> = {
     name: 'hermeslab',
     path: '/var/tmp/dyna-local-ci/runs/old/web/node_modules',
     reason: 'permission denied',
+    lastSuccessMs: 1792771200000,
     atMs: 1792774800000,
   },
   'machine/scratch-freed': {
