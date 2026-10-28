@@ -72,9 +72,8 @@ wizard's last step is the same editor.
 | `pi` | Generated model reserve based on the profile target |
 
 Each profile sets its own target. A profile without a target leaves the
-harness default unchanged. Existing Pi and Claude Code profiles migrate once to 200,000 tokens, except
-profiles named `haiku` and `opus`, which migrate to 100,000 and 500,000 tokens.
-The migration replaces any previous target. Owners can change or clear it later.
+harness default unchanged. Existing profile targets remain unchanged. New profiles
+start at 200,000 tokens in the editor.
 For Claude Code, the generated launch setting overrides native Claude settings,
 including profile `--settings`.
 
