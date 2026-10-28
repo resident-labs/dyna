@@ -33,6 +33,8 @@ func TestSystemdRunShimJoinsTheRoomSlice(t *testing.T) {
 	}{
 		{"a user call joins the room slice", inRoom, []string{"--user", "--", "/bin/true", "prog"},
 			"--slice=" + slice + "\n--user\n--\n/bin/true\nprog\n"},
+		{"a degraded room still joins the shared slice", merged(append(env, "DYNA_ROOM_SLICE="+`dyna.slice`), out), []string{"--user", "/bin/true"},
+			"--slice=dyna.slice\n--user\n/bin/true\n"},
 		{"a unit name with a separate value still scans", inRoom, []string{"-u", "foo.service", "--user", "/bin/true"},
 			"--slice=" + slice + "\n-u\nfoo.service\n--user\n/bin/true\n"},
 		{"a description with a separate value still scans", inRoom, []string{"--description", "x y", "--user", "/bin/true"},
