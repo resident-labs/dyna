@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,45 +18,67 @@ import (
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	roomfixture "dyna-agent/internal/room/testfixture"
-	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/websvc"
 )
 
-func serveRoomCredential(t *testing.T, rec room.Record) *atomic.Int32 {
+type roomOperationCalls struct {
+	github atomic.Int32
+	push   atomic.Int32
+}
+
+func (c *roomOperationCalls) total() int32 {
+	return c.github.Load() + c.push.Load()
+}
+
+func serveRoomOperations(t *testing.T, rec room.Record) *roomOperationCalls {
 	t.Helper()
-	var calls atomic.Int32
-	bindings, err := websvc.Bind([]websvc.Binding{{Name: "GitHubCredential", Access: websvc.Read, Scope: websvc.ScopeOperate, Local: true,
-		Method: func(ctx context.Context, host, name string) (ghclient.Credential, error) {
-			calls.Add(1)
-			return ghclient.RoomCredential(ctx, rec, host, name)
-		},
-	}})
+	calls := &roomOperationCalls{}
+	bindings, err := websvc.Bind([]websvc.Binding{
+		{Name: "GitHubCommand", Access: websvc.Read, Scope: websvc.ScopeOperate, Local: true,
+			Method: func(ctx context.Context, request ghclient.CommandRequest) (ghclient.CommandResult, error) {
+				calls.github.Add(1)
+				return ghclient.RunSessionGitHub(ctx, rec, request)
+			}},
+		{Name: "GitPush", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true,
+			Method: func(ctx context.Context, request ghclient.CommandRequest) (ghclient.CommandResult, error) {
+				calls.push.Add(1)
+				return ghclient.RunSessionGitPush(ctx, rec, request)
+			}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	enginetest.Serve(t, store.DataDir(), bindings)
-	return &calls
+	return calls
 }
 
 func TestWorkerCredentialsStayInsideDyna(t *testing.T) {
-	var pushAuthenticated atomic.Bool
+	var pushAuthenticated, wrongRepoAuthenticated atomic.Bool
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		login, token, ok := r.BasicAuth()
 		if ok && login == "worker" && token == "worker-secret" {
-			pushAuthenticated.Store(true)
+			if strings.HasPrefix(r.URL.Path, "/other/") {
+				wrongRepoAuthenticated.Store(true)
+			} else {
+				pushAuthenticated.Store(true)
+			}
 		}
 		w.Header().Set("WWW-Authenticate", "Basic realm=git")
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
+	certificate := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(certificate, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ghclient.PushCAEnv, certificate)
 	host := strings.TrimPrefix(server.URL, "https://")
 	roomURL := server.URL + "/work/service.git"
 
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("EXPECT_WORKER_GH", "")
 	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "worker-credential"})
 	if err != nil {
 		t.Fatal(err)
@@ -66,8 +89,13 @@ func TestWorkerCredentialsStayInsideDyna(t *testing.T) {
 case "$1 $2" in
 "auth status") echo '{"hosts":{"%s":[{"login":"worker"}]}}';;
 "auth token") echo worker-secret;;
+"auth git-credential") h=; while IFS= read -r line; do case "$line" in host=*) h=${line#host=};; esac; done; printf 'protocol=https
+host=%%s
+username=worker
+password=worker-secret
+' "$h";;
 "api --hostname") echo '{"permissions":{"push":true}}';;
-"pr view") [ "$EXPECT_WORKER_GH" = 1 ] && [ -z "$GH_TOKEN" ] && exit 90; echo viewed;;
+"pr view") echo viewed;;
 esac
 `, host)
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0700); err != nil {
@@ -91,33 +119,38 @@ esac
 	if _, err := os.Stat(filepath.Join(config, "hosts.yml")); !os.IsNotExist(err) {
 		t.Fatal("worker gh can read a saved account")
 	}
-	credentialCalls := serveRoomCredential(t, rec)
+	operations := serveRoomOperations(t, rec)
 	env := append([]string{}, os.Environ()...)
 	for key, value := range session.Env {
 		env = append(env, key+"="+value)
 	}
-	env = append(env, mode.EnvRoomID+"="+rec.ID, "EXPECT_WORKER_GH=1", "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
-	credential := func(url string) (string, error) {
-		cmd := exec.Command("/usr/bin/git", "credential", "fill")
-		cmd.Dir = rec.Repo
-		cmd.Env = env
-		cmd.Stdin = strings.NewReader("url=" + url + "\n\n")
-		out, err := cmd.Output()
-		return string(out), err
+	env = append(env, mode.EnvRoomID+"="+rec.ID, "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	guardedGit := filepath.Join(scratch, "github-bin", "git")
+
+	beforeCredentials := operations.total()
+	for _, target := range []string{roomURL, server.URL + "/other/private.git"} {
+		credential := exec.Command(guardedGit, "credential", "fill")
+		credential.Dir = rec.Repo
+		credential.Env = env
+		credential.Stdin = strings.NewReader("url=" + target + "\n\n")
+		output, err := credential.Output()
+		if err == nil || strings.Contains(string(output), "password=") {
+			t.Fatal("worker read a credential through git")
+		}
 	}
-	out, err := credential(roomURL)
-	if err != nil {
-		t.Fatalf("room git credential failed: %v", err)
-	}
-	if !strings.Contains(out, "username=worker\n") || !strings.Contains(out, "password=worker-secret\n") {
-		t.Fatal("room git credential did not receive the selected account")
+	if operations.total() != beforeCredentials {
+		t.Fatal("a credential read reached an engine operation")
 	}
 
 	guarded := exec.Command(filepath.Join(scratch, "github-bin", "gh"), "pr", "view", "1")
 	guarded.Dir = rec.Repo
 	guarded.Env = env
-	if _, err := guarded.CombinedOutput(); err != nil {
-		t.Fatalf("guarded gh could not use the internal account: %v", err)
+	output, err := guarded.CombinedOutput()
+	if err != nil || !strings.Contains(string(output), "viewed") {
+		t.Fatalf("guarded gh could not use the engine account: %v", err)
+	}
+	if operations.github.Load() != 1 {
+		t.Fatal("guarded gh did not use the engine operation")
 	}
 
 	commit := exec.Command("/usr/bin/git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-q", "-m", "initial")
@@ -125,33 +158,19 @@ esac
 	if err := commit.Run(); err != nil {
 		t.Fatalf("create push commit: %v", err)
 	}
-	push := exec.Command("/usr/bin/git", "-c", "http.sslVerify=false", "push", "origin", "HEAD:main")
+	push := exec.Command(guardedGit, "push", "origin", "HEAD:main")
 	push.Dir = rec.Repo
 	push.Env = env
 	_ = push.Run()
-	if !pushAuthenticated.Load() {
-		t.Fatal("git push did not receive the room credential")
+	if !pushAuthenticated.Load() || operations.push.Load() != 1 {
+		t.Fatalf("engine git push did not receive the room credential (github=%d push=%d)", operations.github.Load(), operations.push.Load())
 	}
 
-	beforeRefused := credentialCalls.Load()
-	direct := exec.Command(binPath, "git-credential", "get")
-	direct.Env = env
-	direct.Stdin = strings.NewReader("protocol=https\nhost=" + host + "\npath=work/service.git\n\n")
-	output, err := direct.CombinedOutput()
-	if err != nil || len(output) != 0 {
-		t.Fatalf("non-git caller received a response or error: %v", err)
-	}
-
-	wrongEnv := append(env, "GIT_CONFIG_COUNT=0", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
-	wrong := exec.Command("/usr/bin/git", "-c", "credential.helper=", "-c", "credential.helper=!"+shellquote.Quote(binPath)+" git-credential", "credential", "fill")
-	wrong.Dir = rec.Repo
-	wrong.Env = wrongEnv
-	wrong.Stdin = strings.NewReader("url=" + server.URL + "/other/private.git\n\n")
-	output, err = wrong.Output()
-	if err == nil || strings.Contains(string(output), "password=") {
-		t.Fatal("wrong repository received a credential")
-	}
-	if credentialCalls.Load() != beforeRefused {
-		t.Fatal("a refused caller reached the engine credential")
+	wrongPush := exec.Command(guardedGit, "push", server.URL+"/other/private.git", "HEAD:main")
+	wrongPush.Dir = rec.Repo
+	wrongPush.Env = env
+	_ = wrongPush.Run()
+	if wrongRepoAuthenticated.Load() {
+		t.Fatal("wrong repository received the owner credential")
 	}
 }

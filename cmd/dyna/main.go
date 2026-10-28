@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"dyna-agent/internal/ghclient"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -78,19 +79,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, "dyna:", err)
 		os.Exit(2)
 	}
-	if filepath.Base(os.Args[0]) == "gh" && os.Getenv(ghclient.ReadOnlyEnv) != "" {
+	tool := filepath.Base(os.Args[0])
+	if (tool == "gh" || tool == "git") && os.Getenv(ghclient.ReadOnlyEnv) != "" {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		if err := ghclient.SessionCommand(ctx, os.Args[1:]); err != nil {
-			fmt.Fprintln(os.Stderr, "gh:", err)
-			os.Exit(1)
+		var err error
+		if tool == "gh" {
+			err = ghclient.SessionCommand(ctx, os.Args[1:])
+		} else {
+			err = ghclient.SessionGitCommand(ctx, os.Args[1:], home.LaunchEnv())
 		}
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "git-credential" {
-		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer cancel()
-		if err := ghclient.SessionCredential(ctx, os.Args[2:], os.Stdin, os.Stdout); err != nil {
+		if err != nil {
+			var exit interface{ ExitCode() int }
+			if errors.As(err, &exit) {
+				os.Exit(exit.ExitCode())
+			}
+			fmt.Fprintln(os.Stderr, tool+":", err)
 			os.Exit(1)
 		}
 		return

@@ -2,6 +2,7 @@ package ghclient
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +11,6 @@ import (
 	"testing"
 
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/shellquote"
 )
 
 // installFakeGH isolates executable lookup from the live session environment.
@@ -68,13 +68,12 @@ esac
 		if i == 1 && (target != "/real/dyna" || env[ReadOnlyEnv] != "1") {
 			t.Fatal("read-only room did not receive the gh guard")
 		}
-		helperKey := "credential.https://github.com/" + []string{"resident-labs/personal", "work/private"}[i] + ".helper"
-		helper := gitConfigValue(env, helperKey)
-		if i == 0 && helper != "!"+shellquote.Quote("/real/dyna")+" git-credential" {
-			t.Fatalf("write room git has no gh credential helper: %q", helper)
-		}
-		if i == 1 && helper != "" {
-			t.Fatal("read-only room git received a push credential helper")
+		// No room hands a credential helper to the worker: pushes carry their
+		// credentials behind the engine, so nothing here can answer git.
+		for key, value := range env {
+			if strings.HasPrefix(key, "GIT_CONFIG_KEY_") && strings.HasPrefix(value, "credential.") {
+				t.Fatalf("session git config installs a credential helper: %s=%s", value, gitConfigValue(env, value))
+			}
 		}
 		inherited := append([]string{}, os.Environ()...)
 		for k, v := range env {
@@ -117,11 +116,16 @@ esac
 		t.Setenv(key, value)
 	}
 	t.Setenv("DYNA_ROOM_ID", records[0].ID)
-	previousCredential := sessionCredential
-	sessionCredential = func(context.Context, repository) (Credential, error) {
-		return Credential{Login: "worker", Token: "worker-secret"}, nil
+	previousOperation := sessionOperationCall
+	var commands []string
+	sessionOperationCall = func(_ context.Context, method string, request CommandRequest) (CommandResult, error) {
+		if method != "GitHubCommand" {
+			return CommandResult{}, fmt.Errorf("unexpected operation %q", method)
+		}
+		commands = append(commands, strings.Join(request.Args, " "))
+		return CommandResult{}, nil
 	}
-	t.Cleanup(func() { sessionCredential = previousCredential })
+	t.Cleanup(func() { sessionOperationCall = previousOperation })
 	t.Chdir(records[0].Repo)
 	for _, args := range [][]string{
 		{"pr", "comment", "1", "--body", "not allowed"},
@@ -158,12 +162,9 @@ esac
 	if target != "/real/dyna" || session.Env[ReadOnlyEnv] != "worker" {
 		t.Fatalf("write room guard target=%q mode=%q", target, session.Env[ReadOnlyEnv])
 	}
-	raw, err := os.ReadFile(calls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "pr comment") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
-		t.Fatalf("refused command reached gh: %s", raw)
+	commandLog := strings.Join(commands, "\n")
+	if strings.Contains(commandLog, "pr comment") || strings.Contains(commandLog, "api repos/work/service/issues -X POST") {
+		t.Fatalf("refused command reached the engine: %s", commandLog)
 	}
 }
 
