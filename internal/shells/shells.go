@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -1108,7 +1109,7 @@ func (s *Store) launchedSupervisor(id string) int {
 
 // HandoffRunOwner serializes ownership moves with shell publication. A live
 // shell keeps its caller identity, so its owner cannot move until it exits.
-func (s *Store) HandoffRunOwner(ctx context.Context, id, from, to string) (bool, error) {
+func (s *Store) HandoffRunOwner(ctx context.Context, id, from, to string, handoffTrees func(context.Context, *sql.Conn, string, string) error) (bool, error) {
 	var moved bool
 	err := sessionlife.WithPublication(ctx, s.Root, "publication.lock", func() error {
 		jobs, err := s.loadAll("WHERE ended IS NULL")
@@ -1120,7 +1121,7 @@ func (s *Store) HandoffRunOwner(ctx context.Context, id, from, to string) (bool,
 				return fmt.Errorf("%w: workflow %s has an unresolved shell step %s; wait for it to finish or stop it with dyna shell stop %s, then retry", runstore.ErrHandoffUnsafe, id, job.ID, job.ID)
 			}
 		}
-		moved, err = runstore.HandoffOwner(id, from, to)
+		moved, err = runstore.HandoffOwner(id, from, to, handoffTrees)
 		return err
 	})
 	return moved, err

@@ -2,6 +2,7 @@ package shells
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -32,7 +33,8 @@ func TestWorkflowHandoffWaitsForShellAndUsesNewOwner(t *testing.T) {
 	meta := runstore.Meta{ID: id, Status: "running", Detached: true, Session: from, ParentSession: from, StartedAt: time.Now()}
 	runstoretest.Write(t, data, meta)
 	s := DefaultStore()
-	if _, err := s.HandoffRunOwner(context.Background(), id, from, to); !errors.Is(err, runstore.ErrHandoffUnsafe) {
+	noTrees := func(context.Context, *sql.Conn, string, string) error { return nil }
+	if _, err := s.HandoffRunOwner(context.Background(), id, from, to, noTrees); !errors.Is(err, runstore.ErrHandoffUnsafe) {
 		t.Fatalf("old coordinator: %v", err)
 	}
 	meta.OwnerHandoff = true
@@ -41,13 +43,13 @@ func TestWorkflowHandoffWaitsForShellAndUsesNewOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.HandoffRunOwner(context.Background(), id, from, to); !errors.Is(err, runstore.ErrHandoffUnsafe) {
+	if _, err := s.HandoffRunOwner(context.Background(), id, from, to, noTrees); !errors.Is(err, runstore.ErrHandoffUnsafe) {
 		t.Fatalf("active step: %v", err)
 	}
 	if err := s.saveExit(job, Exit{Ended: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := s.HandoffRunOwner(context.Background(), id, from, to)
+	moved, err := s.HandoffRunOwner(context.Background(), id, from, to, noTrees)
 	if err != nil || !moved {
 		t.Fatalf("handoff = %v, %v", moved, err)
 	}

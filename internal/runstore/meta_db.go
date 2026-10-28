@@ -478,7 +478,7 @@ var ErrHandoffUnsafe = errors.New("workflow handoff is not safe yet")
 
 // HandoffOwner moves a live run only if it still belongs to from. The
 // conditional update preserves concurrent completion and reassignment.
-func HandoffOwner(id, from, to string) (bool, error) {
+func HandoffOwner(id, from, to string, handoffTrees func(context.Context, *sql.Conn, string, string) error) (bool, error) {
 	if err := ValidateRunID(id); err != nil {
 		return false, err
 	}
@@ -510,8 +510,14 @@ func HandoffOwner(id, from, to string) (bool, error) {
 				return err
 			}
 			_, err = conn.ExecContext(ctx, `UPDATE runs SET session=?, body=json_set(body,'$.session',?,'$.parentSession',?), rev=? WHERE id=?`, to, to, to, rev, id)
-			moved = err == nil
-			return err
+			if err != nil {
+				return err
+			}
+			if err := handoffTrees(ctx, conn, id, to); err != nil {
+				return err
+			}
+			moved = true
+			return nil
 		})
 		return err
 	})

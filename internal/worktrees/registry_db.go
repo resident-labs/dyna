@@ -112,6 +112,12 @@ func decodeLegacyRecord(data []byte) (Record, error) {
 	return rec, nil
 }
 
+// HandoffRunTx moves registered trees in the run ownership transaction.
+func HandoffRunTx(ctx context.Context, conn *sql.Conn, runID, to string) error {
+	_, err := conn.ExecContext(ctx, `UPDATE worktree_records SET body=json_set(body,'$.session',?) WHERE run_id=?`, to, runID)
+	return err
+}
+
 // saveRecord inserts or replaces the record for its path.
 func saveRecord(ctx context.Context, conn *sql.Conn, rec Record) error {
 	body, err := json.Marshal(rec)

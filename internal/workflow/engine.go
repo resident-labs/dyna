@@ -698,8 +698,13 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 				worktreeRepo, _ = filepath.Abs(root)
 			}
 			owner := os.Getenv("DYNA_SESSION")
-			if e.opts.Run != nil && e.opts.Run.Meta.ParentSession != "" {
-				owner = e.opts.Run.Meta.ParentSession
+			if e.opts.Run != nil {
+				if e.opts.Run.Meta.OwnerHandoff {
+					// Track resolves the current owner in the registry transaction.
+					owner = ""
+				} else if e.opts.Run.Meta.ParentSession != "" {
+					owner = e.opts.Run.Meta.ParentSession
+				}
 			}
 			wt, baseCommit, cleanup, werr := worktrees.CreateForRun(actx, cwd, worktreeRetention, e.runID(), owner)
 			if werr != nil {

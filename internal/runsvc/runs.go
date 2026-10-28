@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/worktrees"
 	"dyna-agent/internal/worktreesvc"
@@ -57,7 +58,10 @@ func Transfer(ctx context.Context, id, target string) error {
 		if to.RoomID != m.RoomID || !to.Closed.IsZero() || to.Closing.Active() || to.RunOwned() {
 			return errors.New("target must be an open session in the run's room")
 		}
-		moved, err := shells.DefaultStore().HandoffRunOwner(ctx, id, owner, to.ID)
+		if err := worktrees.Migrate(store.DataDir()); err != nil {
+			return err
+		}
+		moved, err := shells.DefaultStore().HandoffRunOwner(ctx, id, owner, to.ID, worktrees.HandoffRunTx)
 		if err != nil {
 			return err
 		}
