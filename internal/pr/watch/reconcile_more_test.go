@@ -38,10 +38,12 @@ func TestReconcileKeepsBusyTurnsAndFillsOldestNeed(t *testing.T) {
 	if len(e.launches) != 3 {
 		t.Fatal("busy turns lost their capacity")
 	}
-	// A current-head verdict immediately frees capacity, even while its turn runs.
+	// A current-head verdict frees capacity, and the session closes once its
+	// turn ends; the verdict itself ended this turn (D-411).
 	if err := e.s.Store.update(func(st *State) error { st.Records[keys[0]].Verdict = "changes"; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	e.endReviewerTurn(ids[keys[0]])
 	st = dispatchReviewPool(t, e)
 	if st.Records[keys[3]].Reviewer == "" || e.reviewers[ids[keys[0]]].Status != subagent.StatusClosed {
 		t.Fatal("verdict did not free capacity")
@@ -134,6 +136,8 @@ func TestReviewOffClosesNonNeededSessions(t *testing.T) {
 	if err := e.s.SetReviewEnabled(e.author.RoomID, false); err != nil {
 		t.Fatal(err)
 	}
+	// The disabled room's reviewer finished its turn, so the pool closes it.
+	e.endReviewerTurn(old)
 	st = dispatchReviewPool(t, e)
 	facts, err := e.s.ReviewFacts(st)
 	if err != nil {

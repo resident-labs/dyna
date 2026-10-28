@@ -53,6 +53,12 @@ func TestExpeditedReviewGrantsKeepRunningWorkAndServeOldestNormal(t *testing.T) 
 		if err := e.s.Store.update(func(st *State) error { st.Records[want[i-1]].Verdict = "approve"; return nil }); err != nil {
 			t.Fatal(err)
 		}
+		// Each recorded verdict also ends that review turn, freeing the slot.
+		cur, err := e.s.Store.Get(want[i-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.endReviewerTurn(cur.Reviewer)
 		status, err := e.s.ReviewerStatus(e.author.RoomID)
 		if err != nil {
 			t.Fatal(err)

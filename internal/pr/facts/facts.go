@@ -56,6 +56,16 @@ func Busy(r state.Record, info subagent.Info, turn subagent.Turn) bool {
 		info.CurrentTurn > 0 && turn.N == info.CurrentTurn && turn.Status == subagent.TurnRunning && !turn.Done()
 }
 
+// TurnLive reports whether a reviewer session's own turn is queued or running,
+// whatever its record says. A record condition that hides the review from Busy
+// (a transient poll error, a failed CI read, a just-saved verdict) says nothing
+// about the turn, which may still be recording that verdict, so a caller must
+// not end the session while TurnLive holds (D-411).
+func TurnLive(info subagent.Info, turn subagent.Turn) bool {
+	return info.Role == "reviewer" && (info.Status == subagent.StatusRunning || info.Status == subagent.StatusQueued) &&
+		info.CurrentTurn > 0 && turn.N == info.CurrentTurn && !turn.Done()
+}
+
 // OpenOwnerFinding reports whether an owner comment still waits for an answer.
 // A comment stays open until the author replies fixed or wont-fix, or the owner resolves it.
 func OpenOwnerFinding(r state.Record) bool {
