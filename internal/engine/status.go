@@ -53,6 +53,9 @@ func Status(ctx context.Context, call func(context.Context, string, []any, any) 
 	return nil
 }
 
+// healthStarting marks an engine that serves Health while migrations run.
+const healthStarting = "starting"
+
 // healthPoll is how often WaitHealthy asks again while the engine starts.
 const healthPoll = 250 * time.Millisecond
 
@@ -81,10 +84,14 @@ func WaitHealthy(ctx context.Context, call func(context.Context, string, []any, 
 		err := call(callCtx, "Health", nil, &h)
 		cancel()
 		if err == nil {
-			if h.Status != "" {
+			if h.Status == healthStarting && !h.Ready {
+				// Migrations still run, but the listener is healthy. Keep waiting
+				// for the full API instead of calling this slow start a failure.
+			} else if h.Status != "" {
 				return fmt.Errorf("the engine is up, but %s", h.Status)
+			} else {
+				return nil
 			}
-			return nil
 		}
 		if pause(ctx, healthPoll) != nil {
 			return fmt.Errorf("the engine did not answer Health: %w", err)

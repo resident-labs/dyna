@@ -113,6 +113,10 @@ func TestWaitHealthyAfterARestart(t *testing.T) {
 		return nil
 	}
 	ctx := context.Background()
+	if err := WaitHealthy(ctx, answers(Health{Status: healthStarting}, Health{Ready: true}), pause); err != nil || pauses != 1 {
+		t.Fatalf("a migrating engine that becomes ready gave %v after %d pauses", err, pauses)
+	}
+	pauses = 0
 	if err := WaitHealthy(ctx, answers(engineclient.ErrNotRunning, engineclient.ErrNotRunning, Health{}), pause); err != nil || pauses != 2 {
 		t.Fatalf("an engine that comes up gave %v after %d pauses", err, pauses)
 	}
