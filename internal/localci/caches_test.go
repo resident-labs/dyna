@@ -48,7 +48,7 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 			}
 			node := Node{Name: "local", Slots: 1, Enabled: true}
 			cleaned := false
-			runner := Runner{Node: &node}
+			runner := Runner{DataDir: t.TempDir(), Node: &node}
 			legacy := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
 				script := strings.Join(args, " ")
 				switch {
