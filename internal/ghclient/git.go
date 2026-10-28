@@ -118,6 +118,12 @@ func runGit(ctx context.Context, ghBinary string, cmd *exec.Cmd, worker bool) er
 	for _, key := range headers {
 		config = append(config, [2]string{key, ""})
 	}
+	if worker {
+		// Only HTTPS may carry the push. This refuses every external transport a
+		// repository could enable (ext::, helpers, ssh, file) whatever its
+		// configuration says, because the environment list outranks it.
+		cmd.Env = append(cmd.Env, "GIT_ALLOW_PROTOCOL=https")
+	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
 	for i, entry := range config {
 		cmd.Env = append(cmd.Env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+entry[0], "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+entry[1])
