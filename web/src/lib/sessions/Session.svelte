@@ -379,7 +379,7 @@
   .err { color: var(--muted); padding: var(--s4) var(--s5); }
   .err { color: var(--coral); }
 
-  .log { position: relative; overflow-anchor: none; flex: 1; overflow-y: auto; padding: var(--s2) 0 var(--s4); }
+  .log { position: relative; overflow-anchor: none; flex: 1; min-width: 0; overflow-y: auto; padding: var(--s2) 0 var(--s4); }
   .older { margin: var(--s2) 0 0; font-size: var(--t-sm); color: var(--faint); text-align: center; }
   .older button { color: var(--ink-2); text-decoration: underline; padding: var(--s2); }
   .notice { color: var(--gold); padding: var(--s2) var(--s4); margin: 0; font-size: var(--t-ui); border-bottom: 1px solid var(--line-soft); }
@@ -399,7 +399,7 @@
   .panel-head small { display: block; font-weight: 400; font-size: var(--t-cap); color: var(--faint); }
   .panel-head .back { width: 24px; font-size: var(--t-head); }
   .panel-head button { color: var(--muted); width: 36px; height: 44px; }
-  .thread-log { position: relative; overflow-anchor: none; flex: 1; min-height: 80px; overflow-y: auto; padding-bottom: var(--s3); }
+  .thread-log { position: relative; overflow-anchor: none; flex: 1; min-width: 0; min-height: 80px; overflow-y: auto; padding-bottom: var(--s3); }
   .thread-list { flex: 1; overflow-y: auto; padding: var(--s2); }
   h3 { margin: 6px; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
   h3 small { margin-left: var(--s1); font-weight: 400; }
