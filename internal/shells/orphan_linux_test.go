@@ -2,6 +2,7 @@ package shells
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,6 +96,43 @@ func TestStopKillsUnstampedGroupMemberThatIgnoresSigterm(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireEnded(t, pid, func() { mustStop(t, id) })
+}
+
+func TestStopRunningJobKillsUnstampedGroupChild(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "ready")
+	if err := unix.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{Root: filepath.Join(dir, "shells")}
+	m, err := s.Create(StartOptions{Cwd: dir, Cmd: []string{"sh", "-c", `env -i /bin/sh -c 'trap "" TERM; echo $$ > "$1"; exec sleep 600' sh "$1" >/dev/null 2>&1 & wait`, "sh", fifo}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Supervise(context.Background(), m.ID) }()
+	f, err := os.Open(fifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewScanner(f)
+	if !r.Scan() {
+		t.Fatal("child did not report its PID")
+	}
+	pid, err := strconv.Atoi(r.Text())
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	requireEnded(t, pid, func() {
+		if _, err := s.Stop(m.ID, "agent"); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }
 
 // The anchor of a group may end and be reaped after the group is read. Its
