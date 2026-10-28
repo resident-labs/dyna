@@ -67,6 +67,10 @@ func TestMetadataReadsShareSnapshotAndSeeAtomicWrites(t *testing.T) {
 func TestClosedMetadataDoesNotStayCached(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	id := NewID()
+	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", SpawnBrief: "open snapshot"})
+	if _, err := s.ReadMeta(id); err != nil {
+		t.Fatal(err)
+	}
 	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", Closed: time.Now(), SpawnBrief: "retained history"})
 	if _, err := s.ReadMeta(id); err != nil {
 		t.Fatal(err)
