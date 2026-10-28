@@ -174,7 +174,7 @@ const engineStopGrace = 15 * time.Second
 // detached on the machines and keep running.
 func engineStopTimeout() time.Duration { return localci.StopWait + engineStopGrace }
 
-func engineUnit(binary string, noTunnel bool) string {
+func engineUnit(binary string, noTunnel bool, path string) string {
 	run := ` engine run --allow-agent`
 	if noTunnel {
 		run += " --no-tunnel"
@@ -186,7 +186,7 @@ Wants=network-online.target dyna-computers.service
 
 [Service]
 ExecStart=` + quote(binary) + run + `
-Restart=always
+` + pathLine(path) + `Restart=always
 RestartSec=3
 KillMode=process
 Delegate=yes
@@ -200,7 +200,7 @@ WantedBy=default.target
 `
 }
 
-func tunnelUnit(binary string) string {
+func tunnelUnit(binary, path string) string {
 	return `[Unit]
 Description=Dyna tunnel connector
 After=network-online.target
@@ -209,12 +209,22 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=` + quote(binary) + ` engine tunnel
-Restart=always
+` + pathLine(path) + `Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=default.target
 `
+}
+
+// pathLine carries the install environment's PATH into a unit, so the service
+// resolves tools the owner installed outside the service manager's default
+// PATH, such as a version-manager shim directory. An owner drop-in still wins.
+func pathLine(path string) string {
+	if path == "" {
+		return ""
+	}
+	return "Environment=" + quote("PATH="+path) + "\n"
 }
 
 func computersUnit(binary string) string {
@@ -280,6 +290,17 @@ func engineOptsOut(dir string) bool {
 	return err == nil && strings.Contains(string(body), "--no-tunnel")
 }
 
+// environmentPath reads the PATH of an install environment. The units carry it
+// so their services resolve the same tools the owner's shell does.
+func environmentPath(env []string) string {
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, "PATH="); ok {
+			return value
+		}
+	}
+	return ""
+}
+
 // Write writes the shared unit definitions without contacting systemd or enabling
 // units. The image build uses it before a user manager exists.
 func Write(o Options) error {
@@ -292,6 +313,9 @@ func Write(o Options) error {
 	if o.Dir == "" {
 		o.Dir = Dir()
 	}
+	if o.Environment == nil {
+		o.Environment = os.Environ()
+	}
 	if !o.NoTunnel && engineOptsOut(o.Dir) {
 		// Keep the choice an earlier install wrote, instead of rewriting it away.
 		o.NoTunnel = true
@@ -302,9 +326,10 @@ func Write(o Options) error {
 	if _, err := agentslice.WriteSlice(o.Dir); err != nil {
 		return err
 	}
-	units := map[string]string{Engine: engineUnit(o.Binary, o.NoTunnel), Computers: computersUnit(o.Binary)}
+	path := environmentPath(o.Environment)
+	units := map[string]string{Engine: engineUnit(o.Binary, o.NoTunnel, path), Computers: computersUnit(o.Binary)}
 	if !o.NoTunnel {
-		units[Tunnel] = tunnelUnit(o.Binary)
+		units[Tunnel] = tunnelUnit(o.Binary, path)
 	}
 	for name, text := range units {
 		if err := fsutil.WriteFile(filepath.Join(o.Dir, name), []byte(text), 0644, true); err != nil {
