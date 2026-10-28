@@ -29,6 +29,13 @@ function mentionize(html: string): string {
     }
     n.replaceWith(frag)
   }
+  // A table scrolls inside its own box, so a wide one never widens the post.
+  for (const table of doc.body.querySelectorAll('table')) {
+    const box = doc.createElement('div')
+    box.className = 'table-scroll'
+    table.replaceWith(box)
+    box.appendChild(table)
+  }
   // The parser always makes the wrapper div first, so it is the first element.
   const wrapper = doc.body.firstChild as HTMLElement
   return wrapper.innerHTML
