@@ -48,7 +48,7 @@ Scripts use JavaScript with top-level `await` and `return`; the return becomes t
 They are not Node.js programs: no TypeScript, `require`, modules, filesystem, networking, or arbitrary environment access. Workers handle filesystem work, and `run()` runs commands.
 
 Each `agent()` call starts a regular agent session that cannot start subagents or runs. Claude runs without the Agent tool. The run closes each session on resolution; sessions stay out of member lists and groups, and results go to the run. Workers record progress with `dyna journal`.
-Watch an agent by opening its session from the run page. Steer it with `dyna post @run:<id>/agent:<n> "<message>"`. Older runs show only the journal and final result.
+To watch an agent, open its session from its row on the run page. Steer it with `dyna post @run:<id>/agent:<n> "<message>"`. An older run shows only the journal and the final result.
 Read `dyna guide delegation` for persistent sessions and `dyna guide recovery` after provider failure.
 
 Optional metadata goes first:
