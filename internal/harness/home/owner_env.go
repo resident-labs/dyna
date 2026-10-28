@@ -20,8 +20,8 @@ const OwnerEnvKey = "DYNA_OWNER_ENV"
 var ownerRestoreKeys = append([]string{"HOME", "GIT_CONFIG_GLOBAL", "DYNA_BIN"}, xdgNames...)
 
 // bundleWriteCommands change the harness bundle store directly, in this
-// process or through the engine: install, rm, rollback, gc.
-var bundleWriteCommands = []string{"install", "rm", "rollback", "gc"}
+// process or through the engine: install, login, rm, rollback, gc.
+var bundleWriteCommands = []string{"install", "login", "rm", "rollback", "gc"}
 
 type ownerEnv struct {
 	// Scope is the native scope whose private roots Prepare set.
@@ -80,7 +80,7 @@ func RestoreOwner(args []string) error {
 			len(args) >= 2 && args[0] == "harness" && slices.Contains(bundleWriteCommands, args[1]) {
 			return fmt.Errorf("%s %s would write the owner's live bundle store from a shell with its own HOME or XDG_DATA_HOME; set DYNA_DATA_DIR to a scratch folder for tests, or unset the changed roots to act on the owner's store", args[0], args[1])
 		}
-		return keepOwnerData(args, record)
+		return keepOwnerData(args, record, callerRoots)
 	}
 	for _, key := range ownerRestoreKeys {
 		var err error
@@ -104,14 +104,26 @@ func RestoreOwner(args []string) error {
 	return os.Setenv("PATH", strings.Join(path, string(os.PathListSeparator)))
 }
 
-// keepOwnerData runs when the caller chose its own HOME or XDG roots, for
-// example a game helper that sets fresh ones before it runs dyna. The caller
-// keeps them, and so do its children. A dyna client command still needs the
+// keepOwnerData runs when the caller chose its own HOME or XDG roots
+// (callerRoots), for example a game helper that sets fresh ones before it runs
+// dyna. The caller keeps them, and so do its children. A caller that set a
+// HOME of its own while inheriting XDG_DATA_HOME — the harness's private root
+// or the owner's — loses that inherited root, so every command, `dyna engine
+// run` included, resolves the data folder under the caller's home instead of
+// the owner's live store (D-398). A dyna client command still needs the
 // owner's data folder to reach the engine, so it gets that through
 // store.DataDirEnv alone. `dyna engine run` may serve any folder the caller
 // picked, and a value the caller already set stays.
-func keepOwnerData(args []string, record ownerEnv) error {
-	if len(args) == 0 || args[0] == "engine" || os.Getenv(store.DataDirEnv) != "" {
+func keepOwnerData(args []string, record ownerEnv, callerRoots []string) error {
+	if os.Getenv(store.DataDirEnv) != "" {
+		return nil
+	}
+	if slices.Contains(callerRoots, "HOME") && !slices.Contains(callerRoots, "XDG_DATA_HOME") {
+		if err := os.Unsetenv("XDG_DATA_HOME"); err != nil {
+			return err
+		}
+	}
+	if len(args) == 0 || args[0] == "engine" {
 		return nil
 	}
 	data := record.Env["XDG_DATA_HOME"]
