@@ -46,12 +46,13 @@
     'subagent.maxDepth': 'Session nesting depth',
     'steering.maxToolWait': 'Interrupt a busy tool after',
     'harness.idleUnloadMinutes': 'Unload idle agent processes after (minutes)',
+    'harness.piCodeMode': 'Pi code mode (only or off)',
   }
   const groups = [
     { title: 'Voice', keys: ['voice.ducking', 'voice.agent'] },
     { title: 'Browser', keys: ['browser.path', 'browser.extraFlags', 'browser.useFlagsFile', 'browser.profileMode', 'browser.ownerProfile', 'browser.saveBack'] },
     { title: 'Cards and files', keys: ['content.maxCardBytes', 'content.maxFileBytes'] },
-    { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait', 'harness.idleUnloadMinutes'] },
+    { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait', 'harness.idleUnloadMinutes', 'harness.piCodeMode'] },
     { title: 'Services', keys: [...SERVICE_KEYS] },
     { title: 'Workflows', keys: ['worktrees.retention'] },
     { title: 'App', keys: ['updater.autoCheck'] },
