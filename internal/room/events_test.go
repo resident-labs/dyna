@@ -63,7 +63,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyCIHealth, Renderers: []string{"SlowTestCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyRule, Renderers: []string{"RuleCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyMerge, Renderers: []string{"MergeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeTarget, WakeRootIfNeeded}, Audiences: []Audience{AudienceRoom}},
-	{Family: FamilyMachine, Renderers: []string{"MachineDiskCard", "MachineCacheCard", "MachineScratchCard", "MachineLimitsCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRootIfNeeded, WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyMachine, Renderers: []string{"MachineDiskCard", "MachineCacheCard", "MachineScratchCard", "MachineLimitsCard", "RoomCapCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRootIfNeeded, WakeNever, WakeRoot}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyVoice, Renderers: []string{"VoiceSessionCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyCall, Renderers: []string{"CallCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyReview, Renderers: []string{"ReviewResultCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},

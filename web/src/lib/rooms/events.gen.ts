@@ -84,6 +84,9 @@ export type VoiceSessionState = "started" | "ended"
 // VoiceEndReason is a named string type of an event payload.
 export type VoiceEndReason = "input-closed" | "time-limit" | "idle" | "provider-closed" | "error" | "cancelled"
 
+// RoomCapKind is a named string type of an event payload.
+export type RoomCapKind = "memory.high" | "memory.max" | "pids.max"
+
 // MergePR is a struct of an event payload.
 export interface MergePR {
   number: number
@@ -123,6 +126,14 @@ export interface ReviewFinding {
   why: string
   fix: string
   patch?: string
+}
+
+// RoomCapTree is a struct of an event payload.
+export interface RoomCapTree {
+  command: string
+  pid: number
+  memory: number
+  count: number
 }
 
 // WorktreeEvent is the payload of the worktree/kept events.
@@ -263,6 +274,19 @@ export interface MachineScratchEvent {
 // MachineLimitsEvent is the payload of the machine/limits-off events.
 export interface MachineLimitsEvent {
   reason: string
+  atMs: number
+}
+
+// RoomCapEvent is the payload of the machine/room-cap events.
+export interface RoomCapEvent {
+  room: string
+  cap: RoomCapKind
+  current: number
+  limit: number
+  summary: string
+  topByMemory?: RoomCapTree[]
+  topByCount?: RoomCapTree[]
+  detail?: string
   atMs: number
 }
 
@@ -463,10 +487,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | MachineLimitsEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "limits-off" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -784,6 +808,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "Room limits are off: {reason}. This room shares the agent slice with every other room and has no process cap.",
+  },
+  {
+    family: "machine",
+    type: "room-cap",
+    renderer: "RoomCapCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "Room {room} is near its {cap} cap: {summary}.",
   },
   {
     family: "call",
@@ -1265,6 +1299,7 @@ const REVIEW_STOP_REASON: ReadonlySet<unknown> = new Set(["superseded", "duplica
 const CALL_STATE: ReadonlySet<unknown> = new Set(["joined", "declined", "withdrawn"])
 const VOICE_SESSION_STATE: ReadonlySet<unknown> = new Set(["started", "ended"])
 const VOICE_END_REASON: ReadonlySet<unknown> = new Set(["input-closed", "time-limit", "idle", "provider-closed", "error", "cancelled"])
+const ROOM_CAP_KIND: ReadonlySet<unknown> = new Set(["memory.high", "memory.max", "pids.max"])
 
 export function isMergePR(v: unknown): v is MergePR {
   return isRecord(v) &&
@@ -1325,6 +1360,18 @@ export function isReviewFinding(v: unknown): v is ReviewFinding {
 
 export function isReviewFindingList(v: unknown): v is ReviewFinding[] {
   return Array.isArray(v) && v.every((item: unknown) => isReviewFinding(item))
+}
+
+export function isRoomCapTree(v: unknown): v is RoomCapTree {
+  return isRecord(v) &&
+    typeof v.command === "string" &&
+    Number.isInteger(v.pid) &&
+    Number.isInteger(v.memory) &&
+    Number.isInteger(v.count)
+}
+
+export function isRoomCapTreeList(v: unknown): v is RoomCapTree[] {
+  return Array.isArray(v) && v.every((item: unknown) => isRoomCapTree(item))
 }
 
 export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
@@ -1465,6 +1512,19 @@ export function isMachineScratchEvent(v: unknown): v is MachineScratchEvent {
 export function isMachineLimitsEvent(v: unknown): v is MachineLimitsEvent {
   return isRecord(v) &&
     typeof v.reason === "string" &&
+    Number.isInteger(v.atMs)
+}
+
+export function isRoomCapEvent(v: unknown): v is RoomCapEvent {
+  return isRecord(v) &&
+    typeof v.room === "string" &&
+    ROOM_CAP_KIND.has(v.cap) &&
+    Number.isInteger(v.current) &&
+    Number.isInteger(v.limit) &&
+    typeof v.summary === "string" &&
+    (v.topByMemory === undefined || isRoomCapTreeList(v.topByMemory)) &&
+    (v.topByCount === undefined || isRoomCapTreeList(v.topByCount)) &&
+    (v.detail === undefined || typeof v.detail === "string") &&
     Number.isInteger(v.atMs)
 }
 
@@ -1695,6 +1755,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "machine" && type === "cache-repaired") return isMachineCacheEvent(v)
   if (family === "machine" && type === "scratch-freed") return isMachineScratchEvent(v)
   if (family === "machine" && type === "limits-off") return isMachineLimitsEvent(v)
+  if (family === "machine" && type === "room-cap") return isRoomCapEvent(v)
   if (family === "call" && type === "joined") return isCallEvent(v)
   if (family === "call" && type === "declined") return isCallEvent(v)
   if (family === "call" && type === "withdrawn") return isCallEvent(v)

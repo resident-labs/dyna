@@ -6,12 +6,15 @@ package automations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	accountservice "dyna-agent/internal/account/service"
+	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/doctoralert"
 	harnessruntime "dyna-agent/internal/harness/runtime"
@@ -23,6 +26,7 @@ import (
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/sysload"
 )
 
 // The automatic hooks of this release.
@@ -151,7 +155,9 @@ func accountUsagePass(accounts *accountservice.Service) func(context.Context, in
 }
 
 // doctorPass examines this machine under the doctor.condition setting, or the
-// default condition, and tells the root of each room with agents on it. A healthy pass writes nothing to the run log.
+// default condition, and tells the root of each room with agents on it. The
+// same pass reads each room's cgroup caps: a room whose work nears a cap
+// hears it once per crossing. A healthy pass writes nothing to the run log.
 func doctorPass(_ context.Context, _ int, log io.Writer) error {
 	host, err := os.Hostname()
 	if err != nil {
@@ -190,7 +196,32 @@ func doctorPass(_ context.Context, _ int, log io.Writer) error {
 		},
 		Send: func(n doctoralert.Note) error { return doctoralert.PostNote(rooms, n) },
 	}
-	return doctor.Pass{DataDir: dataDir, Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now(), GPUs: doctor.ReadGPUs, Alert: notifier.Alert, Clear: notifier.Recover}.Do(log)
+	err = doctor.Pass{DataDir: dataDir, Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now(), GPUs: doctor.ReadGPUs, Alert: notifier.Alert, Clear: notifier.Recover}.Do(log)
+	// A machine without the user manager's cgroup tree has no room slices, so
+	// the cap pass quietly stays off (r9: any distro, container or desktop).
+	if userRoot, ok := sysload.DynaSliceDir("/proc", "/sys/fs/cgroup"); ok {
+		caps := doctoralert.CapNotifier{
+			DataDir: dataDir,
+			Read: func() ([]doctor.RoomUse, error) {
+				// A slice of a room that no longer exists caps nothing worth a
+				// note, and an alert for it could not be posted at all.
+				var live []doctor.RoomUse
+				for _, use := range doctor.RoomCaps(userRoot) {
+					if _, err := rooms.Resolve(use.RoomID); err == nil {
+						live = append(live, use)
+					}
+				}
+				return live, nil
+			},
+			Trees: func(roomID string) doctor.CapTrees {
+				slice := filepath.Join(userRoot, "dyna.slice", "dyna-room.slice", agentslice.RoomSlice(roomID))
+				return doctor.TopTrees(slice, "/proc", doctoralert.CapTopTrees)
+			},
+			Send: func(n doctoralert.CapNote) error { return doctoralert.PostCapNote(rooms, n) },
+		}
+		err = errors.Join(err, caps.Alert())
+	}
+	return err
 }
 
 // logger writes a pass's log lines to the hook run log, one line each.

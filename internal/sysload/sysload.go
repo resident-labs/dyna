@@ -386,10 +386,12 @@ func (s *Sampler) meminfo() (total, used uint64, err error) {
 
 var userManager = regexp.MustCompile(`^user@\d+\.service$`)
 
-// userRoot finds the cgroup directory of the user manager that holds this
-// process, and reports whether it holds dyna.slice.
-func (s *Sampler) userRoot() (string, bool) {
-	b, err := os.ReadFile(filepath.Join(s.procRoot, "self", "cgroup"))
+// DynaSliceDir returns the cgroup directory that holds dyna.slice: the user
+// manager's tree, where the room slices live below dyna.slice/dyna-room.slice.
+// procRoot and cgroupRoot are the roots to read. The bool is false when
+// /proc/self/cgroup names no user manager, or the tree holds no dyna.slice.
+func DynaSliceDir(procRoot, cgroupRoot string) (string, bool) {
+	b, err := os.ReadFile(filepath.Join(procRoot, "self", "cgroup"))
 	if err != nil {
 		return "", false
 	}
@@ -398,7 +400,7 @@ func (s *Sampler) userRoot() (string, bool) {
 		parts := strings.Split(path, "/")
 		for i, p := range parts {
 			if userManager.MatchString(p) {
-				root := filepath.Join(s.cgroupRoot, filepath.Join(parts[:i+1]...))
+				root := filepath.Join(cgroupRoot, filepath.Join(parts[:i+1]...))
 				_, err := os.Stat(filepath.Join(root, "dyna.slice"))
 				return root, err == nil
 			}
@@ -406,6 +408,10 @@ func (s *Sampler) userRoot() (string, bool) {
 	}
 	return "", false
 }
+
+// userRoot finds the cgroup directory of the user manager that holds this
+// process, and reports whether it holds dyna.slice.
+func (s *Sampler) userRoot() (string, bool) { return DynaSliceDir(s.procRoot, s.cgroupRoot) }
 
 // readCgroups fills the cgroup counters of cur and the memory of out. It
 // reports whether every CPU counter that exists was read: a failed read must

@@ -72,6 +72,20 @@ const fixtures: Record<string, EventPayload> = {
     reason: 'systemd did not delegate the memory controller to this user',
     atMs: 1792774800000,
   },
+  'machine/room-cap': {
+    room: 'work',
+    cap: 'memory.max',
+    current: 9 * 1024 ** 3,
+    limit: 10 * 1024 ** 3,
+    summary: '9 GiB of 10 GiB',
+    topByMemory: [
+      { command: 'pi', pid: 4123, memory: 6 * 1024 ** 3, count: 24 },
+      { command: 'bash', pid: 4200, memory: 1200 * 1024 ** 2, count: 6 },
+    ],
+    topByCount: [{ command: 'pi', pid: 4123, memory: 6 * 1024 ** 3, count: 24 }],
+    detail: 'Biggest by memory:\npi (pid 4123): 6 GiB, 24 processes',
+    atMs: 1792774800000,
+  },
   'worktree/kept': {
     owner: 'session-1',
     path: '/home/a/.dyna-worktrees/dyna-4708ae0b/composer-tidy',
@@ -400,6 +414,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('floorBytes' in payload) return payload.name
   if ('caches' in payload) return payload.name
   if ('builds' in payload) return payload.name
+  if ('topByMemory' in payload) return payload.room
   if ('source' in payload) return payload.reportId ?? payload.remedy ?? payload.summary ?? payload.source
   if ('service' in payload && 'error' in payload) return payload.error
   if ('service' in payload) return payload.reason
