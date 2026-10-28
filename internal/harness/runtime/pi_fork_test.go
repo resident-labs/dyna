@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestFirstUseInstallsForkTarballOverNPMDefault(t *testing.T) {
+func TestForkInstallAndRollbackPreservesNPMDefault(t *testing.T) {
 	piTestHome(t)
 	m := manager(t)
 	old := install(t, m, "pi", "1.4.0")
@@ -47,12 +47,17 @@ func TestFirstUseInstallsForkTarballOverNPMDefault(t *testing.T) {
 		return os.WriteFile(filepath.Join(dir, "package.json"), manifest, 0600)
 	}
 	f := &FirstUse{Bundles: m, Latest: func(context.Context, string) (string, error) { return version, nil }}
-	b, installed, err := f.EnsureBundle(context.Background(), "pi", "")
-	if err != nil {
-		t.Fatal(err)
+	b, err := m.InstallAndSelect(context.Background(), "pi", version)
+	if err != nil || b.Version != version {
+		t.Fatalf("fork bundle = %+v, error = %v", b, err)
 	}
-	if !installed || b.Version != version {
-		t.Fatalf("fork bundle = %+v, installed = %v", b, installed)
+	rolled, err := m.Rollback(context.Background(), "pi")
+	if err != nil || rolled.Version != old.Version {
+		t.Fatalf("rollback = %+v, %v", rolled, err)
+	}
+	selected, installedAgain, err := f.EnsureBundle(context.Background(), "pi", "")
+	if err != nil || installedAgain || selected.Version != old.Version {
+		t.Fatalf("default after rollback = %+v, installed = %v, error = %v", selected, installedAgain, err)
 	}
 	pinned, err := m.Resolve("pi", old.Version)
 	if err != nil || pinned.Version != old.Version {
