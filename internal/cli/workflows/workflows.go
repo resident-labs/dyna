@@ -324,7 +324,7 @@ func NewRunsCommand() *cobra.Command {
 		},
 	}
 	list.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
-	list.Flags().StringVar(&session, "session", "", "only runs started from this session (DYNA_SESSION)")
+	list.Flags().StringVar(&session, "session", "", "only runs owned by this session (DYNA_SESSION)")
 	list.Flags().BoolVar(&listArchived, "archived", false, "list only archived runs")
 	list.Flags().BoolVar(&listAll, "all", false, "list live and archived runs")
 
@@ -381,6 +381,25 @@ func NewRunsCommand() *cobra.Command {
 			return nil
 		},
 	}
+
+	var transferTo string
+	transfer := &cobra.Command{
+		Use:   "transfer <run-id>",
+		Short: "Transfer a live workflow to another session",
+		Long:  "Transfer a live workflow to an open session in the same room. Attached workflows and older coordinators must finish before transfer. If a shell step is active, retry after it finishes.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, a []string) error {
+			if transferTo == "" {
+				return errors.New("--to is required")
+			}
+			if err := engineclient.New("").Call(c.Context(), "TransferRun", []any{a[0], transferTo}, nil); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "transferred %s to %s\n", a[0], transferTo)
+			return nil
+		},
+	}
+	transfer.Flags().StringVar(&transferTo, "to", "", "target session ID or address")
 
 	pause := &cobra.Command{
 		Use:   "pause <run-id>",
@@ -487,7 +506,7 @@ func NewRunsCommand() *cobra.Command {
 	}
 	graph.Flags().StringVar(&graphView, "view", "combined", "planned, actual, or combined")
 
-	cmd.AddCommand(list, show, graph, newOutputCommand(), cancel, pause, unpause, remove, clear,
+	cmd.AddCommand(list, show, graph, newOutputCommand(), cancel, transfer, pause, unpause, remove, clear,
 		newArchiveCommand(), newUnarchiveCommand())
 	return cmd
 }

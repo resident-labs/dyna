@@ -1451,7 +1451,7 @@ func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error)
 	}
 	ev.Steps, ev.Agents = runCounts(runID)
 	ev.Summary, ev.Detail = runResult(meta)
-	plan, err := s.prepareEventCompletion(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, true)
+	plan, err := s.prepareEventCompletion(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, meta.ParentSession == "")
 	if err != nil || plan == nil {
 		return Result{}, err
 	}

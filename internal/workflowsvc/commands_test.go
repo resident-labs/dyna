@@ -9,7 +9,7 @@ func TestShellRunnerEnvironmentKeepsRunAndScriptTempValues(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TMPDIR", "/run/set/by/the/run")
 	r := &shellRunner{owner: "ses_20261026-100000-aaaaaaaa"}
-	env, err := r.environment([]string{"TEMP=/from/script", "FOO=bar"})
+	env, err := r.environment([]string{"TEMP=/from/script", "FOO=bar"}, r.owner)
 	if err != nil {
 		t.Fatal(err)
 	}
