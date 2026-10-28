@@ -26,7 +26,8 @@ const schema = `CREATE TABLE IF NOT EXISTS account_repo_scopes (
 CREATE TABLE IF NOT EXISTS account_limits (
  account_id TEXT PRIMARY KEY,
  until INTEGER NOT NULL,
- stated INTEGER NOT NULL DEFAULT 0
+ stated INTEGER NOT NULL DEFAULT 0,
+ recorded_at INTEGER NOT NULL DEFAULT 0
 );`
 
 // Store reads and writes account_repo_scopes in one data directory.
@@ -50,13 +51,22 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account_repo_scopes.version", 3, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account_repo_scopes.version", 4, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if _, err := conn.ExecContext(ctx, schema); err != nil {
 			return err
 		}
 		if old == 2 {
-			_, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN stated INTEGER NOT NULL DEFAULT 0`)
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN stated INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+		if old == 2 || old == 3 {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE account_limits ADD COLUMN recorded_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+			// A reading must be newer than the migration to refute an old hold.
+			_, err := conn.ExecContext(ctx, `UPDATE account_limits SET recorded_at=? WHERE recorded_at=0`, time.Now().UnixNano())
 			return err
 		}
 		return nil
@@ -174,8 +184,8 @@ func (s *Store) mark(accountID string, until time.Time, stated bool) error {
 	defer cancel()
 	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx,
-			`INSERT INTO account_limits(account_id, until, stated) VALUES(?,?,?)
- ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, until=MAX(until, excluded.until)`, accountID, until.Unix(), stated)
+			`INSERT INTO account_limits(account_id, until, stated, recorded_at) VALUES(?,?,?,?)
+ ON CONFLICT(account_id) DO UPDATE SET stated=CASE WHEN excluded.until>=until THEN excluded.stated ELSE stated END, until=MAX(until, excluded.until), recorded_at=excluded.recorded_at`, accountID, until.Unix(), stated, time.Now().UnixNano())
 		return err
 	})
 }
@@ -217,6 +227,28 @@ func Forget(ctx context.Context, conn *sql.Conn, accountID string) error {
 		}
 	}
 	return nil
+}
+
+// LimitRecordedAt returns when each still-active limit recorded its failure.
+// A healthy usage reading must be newer to refute that failure.
+func (s *Store) LimitRecordedAt(now time.Time) (map[string]time.Time, error) {
+	rows, err := s.db.Query("SELECT account_id, recorded_at FROM account_limits WHERE until>?", now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	recorded := map[string]time.Time{}
+	for rows.Next() {
+		var id string
+		var nanos int64
+		if err := rows.Scan(&id, &nanos); err != nil {
+			return nil, err
+		}
+		if nanos > 0 {
+			recorded[id] = time.Unix(0, nanos)
+		}
+	}
+	return recorded, rows.Err()
 }
 
 // Limits returns each account's limit end that is still after now.
