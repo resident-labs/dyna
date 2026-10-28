@@ -494,6 +494,21 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
 	reattach := job.State == StateRunning
+	// A crash at the start boundary - the running row saved, the start event
+	// not yet posted, the unit not yet launched - leaves a reattached row
+	// that must launch fresh and post its start. A row whose start went out
+	// attaches to the unit the crashed engine launched.
+	launch := !reattach || !job.StartPosted
+	if reattach && launch {
+		// The row's start event was lost to the crash; post it now, before
+		// the fresh launch, and let the pre-poll save record it.
+		if s.Reporter != nil {
+			if err := s.Reporter.JobStarted(ctx, job); err != nil {
+				s.logger()("jobs: report started job %s: %v", job.ID, err)
+			}
+		}
+		job.StartPosted = true
+	}
 	if !reattach {
 		job.State = StateRunning
 		job.Started = s.Store.now()
@@ -517,6 +532,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 				s.logger()("jobs: report started job %s: %v", job.ID, err)
 			}
 		}
+		job.StartPosted = true
 		if s.onPrepared != nil {
 			s.onPrepared(job)
 		}
@@ -531,7 +547,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		return
 	}
 	flag := os.O_WRONLY | os.O_CREATE
-	if reattach {
+	if !launch {
 		flag |= os.O_APPEND
 	} else {
 		flag |= os.O_TRUNC
@@ -558,12 +574,12 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 			return
 		}
 	}
-	spec := RunSpec{ID: job.ID, Dir: path.Join(job.Dir, "detached"), Unit: job.Unit, Attach: reattach, Offset: job.LogBytes}
+	spec := RunSpec{ID: job.ID, Dir: path.Join(job.Dir, "detached"), Unit: job.Unit, Attach: !launch, Offset: job.LogBytes}
 	if !job.Host {
 		limits := resources.Scope(false)
 		spec.Limits = &limits
 	}
-	if !reattach {
+	if launch {
 		spec.Script = jobScript(machine, job, resources)
 		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
 			s.logger()("jobs: record started job %s: %v", job.ID, err)

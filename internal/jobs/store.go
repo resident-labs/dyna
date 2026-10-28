@@ -106,6 +106,10 @@ type Job struct {
 	// holds the executor, or the next one after a restart, stops the process
 	// and records the end.
 	CancelRequested bool
+	// StartPosted records that the job's start event went out. A restart at
+	// the boundary - the running row saved, the event not yet posted - reads
+	// it and posts the start before the job runs on.
+	StartPosted bool
 }
 
 // Topic is the hub topic a jobs-table write publishes under.
@@ -136,7 +140,8 @@ const schema = `CREATE TABLE jobs (
 	unit TEXT NOT NULL DEFAULT '',
 	log_bytes INTEGER NOT NULL DEFAULT 0,
 	note TEXT NOT NULL DEFAULT '',
-	cancel_requested INTEGER NOT NULL DEFAULT 0
+	cancel_requested INTEGER NOT NULL DEFAULT 0,
+	start_posted INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX jobs_open ON jobs(created_ms) WHERE state IN ('queued','running');`
 
@@ -399,28 +404,29 @@ func (s Store) RequestedRunning(ctx context.Context) ([]Job, error) {
 // upsertJob writes the whole row of one job.
 func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exit any, ms func(time.Time) int64) error {
 	command := string(encoded)
-	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested`,
-		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested))
+	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted`,
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested), boolInt(job.StartPosted))
 	return err
 }
 
-const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested"
+const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
 	var command string
 	var exit sql.NullInt64
-	var requested int
+	var requested, posted int
 	var host, timeout int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested, &posted); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
 	job.Host = host == 1
 	job.CancelRequested = requested == 1
+	job.StartPosted = posted == 1
 	if exit.Valid {
 		code := int(exit.Int64)
 		job.ExitCode = &code
