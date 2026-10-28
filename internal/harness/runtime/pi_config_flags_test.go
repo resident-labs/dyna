@@ -81,7 +81,10 @@ func firstHome(t *testing.T, r *Runtime) string {
 // The owner's shared models.json reaches a Pi process through --models-file;
 // without the flag Pi would read the account home, which Dyna no longer
 // manages.
-func TestPiConfigArgsJoinsSharedModelsFile(t *testing.T) {
+// piConfigArgs never passes the models file: the shared home owns that
+// switch per invocation, so a models.json that appears or disappears between
+// turns still reaches Pi (TestPiModelsFileFollowsTheSharedHomePerInvocation).
+func TestPiConfigArgsPointsAtGenerationFiles(t *testing.T) {
 	home := t.TempDir()
 	gen := filepath.Join(home, "gen-dir")
 	if err := os.MkdirAll(gen, 0700); err != nil {
@@ -97,15 +100,11 @@ func TestPiConfigArgsJoinsSharedModelsFile(t *testing.T) {
 	if m := flagValue(args, "--mcp-config"); m != filepath.Join(gen, "pi-mcp.json") {
 		t.Fatalf("mcp flag = %q", m)
 	}
-	if m := flagValue(args, "--models-file"); m != "" {
-		t.Fatalf("models flag without a shared file = %q", m)
-	}
 	if err := os.WriteFile(filepath.Join(home, "models.json"), []byte("{}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	args = piConfigArgs(home, filepath.Join(gen, "settings.json"))
-	if m := flagValue(args, "--models-file"); m != filepath.Join(home, "models.json") {
-		t.Fatalf("shared models file not joined: %q", m)
+	if m := flagValue(piConfigArgs(home, filepath.Join(gen, "settings.json")), "--models-file"); m != "" {
+		t.Fatalf("models flag = %q", m)
 	}
 }
 
@@ -136,5 +135,48 @@ func TestPiGenerationSettingsDisableOwnRetry(t *testing.T) {
 	}
 	if doc.Retry.Enabled == nil || *doc.Retry.Enabled {
 		t.Fatal("generation settings left Pi's own retry enabled")
+	}
+}
+
+// The owner's shared models.json joins the invocation, not the generation: a
+// generation keeps its saved argv while its inputs do not change, so a file
+// that appears or disappears later must still reach Pi.
+func TestPiModelsFileFollowsTheSharedHomePerInvocation(t *testing.T) {
+	r, p := runtimeFixture(t, "pi")
+	noInstalledDyna(t)
+	out, _, err := r.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := flagValue(out.ExtraArgs, "--models-file"); m != "" {
+		t.Fatalf("models flag without a shared file = %q", m)
+	}
+	sharedHome, err := r.Accounts.HarnessHome("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := filepath.Join(sharedHome, "models.json")
+	if err := os.MkdirAll(sharedHome, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(models, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = r.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := flagValue(out.ExtraArgs, "--models-file"); m != models {
+		t.Fatalf("shared models file not joined: %q", m)
+	}
+	if err := os.Remove(models); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = r.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := flagValue(out.ExtraArgs, "--models-file"); m != "" {
+		t.Fatalf("removed models file still passed: %q", m)
 	}
 }
