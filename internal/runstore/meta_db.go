@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/plan/ancestry"
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/workeroutput/projection"
@@ -470,6 +471,57 @@ func endRun(dir, id, status, errMsg string, ended time.Time) (Meta, bool, error)
 		return err
 	})
 	return meta, changed, err
+}
+
+// ErrHandoffUnsafe means that a live run cannot safely change owners yet.
+var ErrHandoffUnsafe = errors.New("workflow handoff is not safe yet")
+
+// HandoffOwner moves a live run only if it still belongs to from. The
+// conditional update preserves concurrent completion and reassignment.
+func HandoffOwner(id, from, to string, handoffTrees func(context.Context, *sql.Conn, string, string) error) (bool, error) {
+	if err := ValidateRunID(id); err != nil {
+		return false, err
+	}
+	var moved bool
+	err := sessionlife.WithSessionLocks(SessionsDir(), []string{to}, func() error {
+		_, err := changeMeta(RunDir(id), id, func(ctx context.Context, conn *sql.Conn) error {
+			meta, err := LoadStored(ctx, conn, id)
+			if err != nil {
+				return err
+			}
+			owner := meta.ParentSession
+			if owner == "" {
+				owner = meta.Session
+			}
+			if meta.Status != "running" || owner != from {
+				return nil
+			}
+			if !meta.Detached {
+				return fmt.Errorf("%w: workflow %s is attached to its caller; wait for it to finish before closing or transferring its owner", ErrHandoffUnsafe, id)
+			}
+			if !meta.OwnerHandoff {
+				return fmt.Errorf("%w: workflow %s uses an older coordinator; wait for it to finish before closing or transferring its owner", ErrHandoffUnsafe, id)
+			}
+			if err := sessionlife.ActivateTx(conn, SessionsDir(), to); err != nil {
+				return err
+			}
+			rev, err := nextRev(ctx, conn)
+			if err != nil {
+				return err
+			}
+			_, err = conn.ExecContext(ctx, `UPDATE runs SET session=?, body=json_set(body,'$.session',?,'$.parentSession',?), rev=? WHERE id=?`, to, to, to, rev, id)
+			if err != nil {
+				return err
+			}
+			if err := handoffTrees(ctx, conn, id, to); err != nil {
+				return err
+			}
+			moved = true
+			return nil
+		})
+		return err
+	})
+	return moved, err
 }
 
 // setPaused sets or clears a running run's paused field.
