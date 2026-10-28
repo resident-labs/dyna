@@ -78,7 +78,7 @@ func TestRemoveDefersWhenTimeRunsOut(t *testing.T) {
 	git(t, repo, "worktree", "add", "-b", "late", path, "origin/main")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	got := remove(ctx, repo, Tree{Path: path, Action: "would remove"}, &runHistory{}, func(string) (bool, error) { return true, nil })
+	got := remove(ctx, repo, Tree{Path: path, Action: "would remove"}, &runHistory{}, func(string) (bool, error) { return true, nil }, nil)
 	if got.Action != "kept" || !got.Deferred {
 		t.Fatalf("timed-out removal = %#v", got)
 	}
