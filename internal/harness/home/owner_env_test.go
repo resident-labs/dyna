@@ -82,8 +82,9 @@ func TestRestoreOwnerKeepsCallerRoots(t *testing.T) {
 	}
 }
 
-// A game helper sets fresh XDG roots, then runs a dyna client command. The
-// caller keeps its roots, but the client must still reach the owner's data.
+// A game helper sets fresh XDG_DATA_HOME and XDG_CONFIG_HOME, then runs a
+// dyna client command (D-237). The caller keeps its roots, but the client must
+// still reach the owner's data.
 func TestRestoreOwnerKeepsOwnerDataForClientsWithCallerRoots(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -99,18 +100,98 @@ func TestRestoreOwnerKeepsOwnerDataForClientsWithCallerRoots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fresh := filepath.Join(t.TempDir(), "fresh-data")
+			roots := t.TempDir()
+			freshData := filepath.Join(roots, "fresh-data")
+			freshConfig := filepath.Join(roots, "fresh-config")
 			setProcessEnv(t, merged(env, out))
-			t.Setenv("XDG_DATA_HOME", fresh)
+			t.Setenv("XDG_DATA_HOME", freshData)
+			t.Setenv("XDG_CONFIG_HOME", freshConfig)
 			if err := RestoreOwner(tc.args); err != nil {
 				t.Fatal(err)
 			}
-			if os.Getenv("XDG_DATA_HOME") != fresh {
-				t.Fatal("the caller's data root was replaced")
+			if os.Getenv("XDG_DATA_HOME") != freshData || os.Getenv("XDG_CONFIG_HOME") != freshConfig {
+				t.Fatal("the caller's roots were replaced")
 			}
 			got, set := os.LookupEnv(store.DataDirEnv)
 			if set != tc.want || tc.want && got != filepath.Join(owner, ".local", "share", "dyna") {
 				t.Fatalf("%s = %q, %v; want the owner's folder: %v", store.DataDirEnv, got, set, tc.want)
+			}
+		})
+	}
+}
+
+// A harness shell whose caller chose its own HOME or XDG_DATA_HOME never
+// writes the owner's live bundle store (D-398). Bundle-writing commands refuse
+// and name the two ways out; an explicit DYNA_DATA_DIR, other commands and
+// read-only harness commands pass.
+func TestRestoreOwnerRefusesBundleWritesWithCallerDataRoot(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string
+		dataDir bool
+		wantErr bool
+	}{
+		"install":                {[]string{"harness", "install", "pi"}, false, true},
+		"login":                  {[]string{"harness", "login", "pi"}, false, true},
+		"rm":                     {[]string{"harness", "rm", "pi", "--version", "1.0.0"}, false, true},
+		"rollback":               {[]string{"harness", "rollback", "pi"}, false, true},
+		"gc":                     {[]string{"harness", "gc"}, false, true},
+		"explicit DYNA_DATA_DIR": {[]string{"harness", "install", "pi"}, true, false},
+		"client command":         {[]string{"computer", "env"}, false, false},
+		"read-only harness":      {[]string{"harness", "list"}, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scope, _, env := fixture(t)
+			out, err := Prepare(scope, "", env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			roots := t.TempDir()
+			setProcessEnv(t, merged(env, out))
+			t.Setenv("HOME", filepath.Join(roots, "home"))
+			t.Setenv("XDG_DATA_HOME", filepath.Join(roots, "data"))
+			if tc.dataDir {
+				t.Setenv(store.DataDirEnv, filepath.Join(roots, "store"))
+			}
+			err = RestoreOwner(tc.args)
+			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "DYNA_DATA_DIR") || !strings.Contains(err.Error(), "scratch")) {
+				t.Fatalf("RestoreOwner(%v) = %v; want the bundle-write refusal", tc.args, err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("RestoreOwner(%v) = %v; want no refusal", tc.args, err)
+			}
+		})
+	}
+}
+
+// A caller-chosen HOME with an inherited XDG_DATA_HOME — the harness's
+// private root or the owner's — must not steer `dyna engine run` into the
+// owner's live store: the inherited root gives way and the data folder follows
+// the caller's home (D-398).
+func TestRestoreOwnerEngineFollowsCallerHome(t *testing.T) {
+	for name, tc := range map[string]struct{ ownerXDG bool }{
+		"private XDG_DATA_HOME inherited": {false},
+		"owner XDG_DATA_HOME inherited":   {true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scope, owner, env := fixture(t)
+			if tc.ownerXDG {
+				env = append(slices.Clone(env), "XDG_DATA_HOME="+filepath.Join(owner, ".local", "share"))
+			}
+			out, err := Prepare(scope, "", env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			callerHome := filepath.Join(t.TempDir(), "caller-home")
+			setProcessEnv(t, merged(env, out))
+			t.Setenv("HOME", callerHome)
+			if err := RestoreOwner([]string{"engine", "run"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := os.LookupEnv(store.DataDirEnv); ok {
+				t.Fatalf("%s set; want the data folder from the caller's home", store.DataDirEnv)
+			}
+			if got, want := store.DataDir(), filepath.Join(callerHome, ".local", "share", "dyna"); got != want {
+				t.Fatalf("data folder %q; want %q", got, want)
 			}
 		})
 	}
