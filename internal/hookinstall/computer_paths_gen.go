@@ -21,6 +21,7 @@ var computerCodePaths = []string{
 	"internal/database",
 	"internal/enginesocket",
 	"internal/fsutil",
+	"internal/gpu",
 	"internal/harness/home",
 	"internal/hub",
 	"internal/localci",
