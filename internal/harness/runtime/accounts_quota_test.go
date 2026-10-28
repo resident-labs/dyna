@@ -86,23 +86,28 @@ func TestQuotaHeldOutSkipsAccountsTheRepoRefuses(t *testing.T) {
 func TestQuotaHeldOutReleasesLimitWhenUsageHasQuotaLeft(t *testing.T) {
 	a := testAccounts(t)
 	account := signedPiAccount(t, &Runtime{Accounts: a}, store.ProviderZAI, "fixture-key")
-	now := time.Now().Truncate(time.Second)
 	scopes, err := a.scopes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	until := now.Add(time.Hour)
+	until := time.Now().Truncate(time.Second).Add(time.Hour)
+	used := 26.0
+	// This reading predates the failure and must not refute its hold.
+	setReading(t, a, account, &store.Observation{ObservedAt: time.Now(), Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
 	if err = scopes.MarkLimited(account.ID, until); err != nil {
 		t.Fatal(err)
 	}
-	used := 26.0
-	setReading(t, a, account, &store.Observation{ObservedAt: now, Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
-	if _, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", now); held {
-		t.Fatal("a usage reading with quota left did not release the failure hold")
+	if got, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", time.Now()); !held || !got.Equal(until) {
+		t.Fatalf("held = %v until %v with a pre-failure reading, want %v", held, got, until)
+	}
+	// A healthy reading captured after the failure releases the hold early.
+	setReading(t, a, account, &store.Observation{ObservedAt: time.Now(), Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
+	if _, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", time.Now()); held {
+		t.Fatal("a post-failure usage reading with quota left did not release the hold")
 	}
 	used = 100
-	setReading(t, a, account, &store.Observation{ObservedAt: now, Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
-	if got, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", now); !held || !got.Equal(until) {
+	setReading(t, a, account, &store.Observation{ObservedAt: time.Now(), Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
+	if got, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", time.Now()); !held || !got.Equal(until) {
 		t.Fatalf("held = %v until %v with a spent session window, want %v", held, got, until)
 	}
 }
