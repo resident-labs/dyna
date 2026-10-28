@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -867,16 +868,47 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	}
 	// The group leader can exit before a child that started a new session.
 	// The job stamp identifies those children without touching the supervisor.
-	_, _ = cleanup()
-	if pids := stampedSurvivors(id); len(pids) > 0 && in.RoomID != "" {
-		rooms := &room.Store{Root: filepath.Join(filepath.Dir(s.Root), "rooms")}
-		if rec, resolveErr := rooms.Resolve(in.RoomID); resolveErr == nil {
-			_, _ = rooms.PostEventInput(room.PostEventInput{
-				RoomID: rec.ID, Producer: room.ProducerShell, To: []string{rec.Name},
-				Event: room.AlertEvent{Source: room.AlertShell,
-					Summary: "A stopped shell still has running processes.",
-					Detail:  fmt.Sprintf("Shell %s has surviving stamped processes: %v", id, pids)},
-			})
+	_, cleanupErr := cleanup()
+	pids := stampedSurvivors(id)
+	if len(pids) > 0 {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("surviving stamped processes: %v", pids))
+	}
+	if cleanupErr != nil {
+		data := filepath.Dir(s.Root)
+		roomID := in.RoomID
+		var owner struct {
+			Name   string `json:"name"`
+			RoomID string `json:"roomId"`
+		}
+		if in.Owner != "" {
+			if ownerErr := sessionlife.Load(filepath.Join(data, "sessions"), in.Owner, &owner); ownerErr != nil {
+				logErr = errors.Join(logErr, ownerErr)
+			} else if roomID == "" {
+				roomID = owner.RoomID
+			}
+		}
+		if roomID == "" {
+			log.Printf("shell %s cleanup: %v", id, cleanupErr)
+			logErr = errors.Join(logErr, cleanupErr)
+		} else {
+			rooms := &room.Store{Root: filepath.Join(data, "rooms")}
+			rec, noticeErr := rooms.Resolve(roomID)
+			if noticeErr == nil {
+				to := rec.Name
+				if owner.Name != "" && owner.RoomID == rec.ID {
+					to += ":" + owner.Name
+				}
+				_, noticeErr = rooms.PostEventInput(room.PostEventInput{
+					RoomID: rec.ID, Producer: room.ProducerShell, To: []string{to},
+					Event: room.AlertEvent{Source: room.AlertShell,
+						Summary: "Shell process cleanup did not finish.",
+						Detail:  fmt.Sprintf("Shell %s cleanup: %v", id, cleanupErr)},
+				})
+			}
+			if noticeErr != nil {
+				log.Printf("shell %s cleanup: %v; notice: %v", id, cleanupErr, noticeErr)
+				logErr = errors.Join(logErr, cleanupErr, noticeErr)
+			}
 		}
 	}
 	in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
