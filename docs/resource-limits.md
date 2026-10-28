@@ -13,7 +13,7 @@ Agents need no flag. Shells, tests and builds that an agent starts stay in its t
 
 - Dyna writes `~/.config/systemd/user/dyna.slice` and one `dyna-room-<room>.slice` per room on first use and runs `systemctl --user daemon-reload`. To keep local edits, remove the `# Managed by Dyna` line. Dyna then leaves the file alone.
 - `systemd-cgtop /user.slice/user-$(id -u).slice/user@$(id -u).service/dyna.slice` shows live use per agent. Scopes are named `dyna-<session or run id>-<random>.scope`.
-- Dyna never stops a scope. A scope ends when its last process exits. A long-lived service, such as a daemon started from a turn, should start in its own unit with `systemd-run --user --unit=<name>`; the `systemd-run` bridge in the agent tool home adds `--slice="$DYNA_ROOM_SLICE"` to `--user` calls that name no slice of their own, so such daemons share the room's limits.
+- Dyna never stops an agent turn or workflow scope. That scope ends when its last process exits. A long-lived service, such as a daemon started from a turn, should start in its own unit with `systemd-run --user --unit=<name>`; the `systemd-run` bridge in the agent tool home adds `--slice="$DYNA_ROOM_SLICE"` to `--user` calls that name no slice of their own, so such daemons share the room's limits.
 
 ## The room slice in scripts
 
