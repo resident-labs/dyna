@@ -53,13 +53,19 @@ func (a *alerts) noPost(t *testing.T) {
 }
 
 // startTunnel runs RunTunnel with a saved token, a fake lookup the test
-// answers, a fake pause the test steps, and a connector that blocks until its
-// context ends. Cleanup cancels and waits for the loop.
-func startTunnel(t *testing.T, st *Store, look func(string) (string, error)) (step chan time.Time, started chan string) {
+// answers, and a fake pause that reports the loop is waiting and then blocks
+// until the test releases it, plus a connector that blocks until its context
+// ends. The pause report is the iteration barrier: receiving it proves the
+// lookup's whole branch (post, clear or start) finished, and the loop moves on
+// only when the test says so. Cleanup cancels and waits.
+func startTunnel(t *testing.T, st *Store, look func(string) (string, error)) (paused chan struct{}, step chan time.Time, started chan string) {
 	t.Helper()
-	step = make(chan time.Time, 4)
+	paused, step = make(chan struct{}, 8), make(chan time.Time, 8)
 	previousPause := connectorPause
-	connectorPause = func(time.Duration) <-chan time.Time { return step }
+	connectorPause = func(time.Duration) <-chan time.Time {
+		paused <- struct{}{}
+		return step
+	}
 	t.Cleanup(func() { connectorPause = previousPause })
 	previousLook := lookConnector
 	lookConnector = look
@@ -82,11 +88,13 @@ func startTunnel(t *testing.T, st *Store, look func(string) (string, error)) (st
 		cancel()
 		<-done
 	})
-	return step, started
+	return paused, step, started
 }
 
 // A missing connector posts one typed alert, does not post it again while it
 // stays missing, and clears it once the connector runs on the resolved path.
+// The pause report after each lookup proves the branch that could post has
+// finished, so the no-post assertion cannot race a late attempt.
 func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 	st, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -98,11 +106,10 @@ func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 	a := newAlerts()
 	a.install(t)
 
-	// calls synchronizes each lookup, so the assertion after the second call
-	// cannot race the branch that would post.
+	// calls synchronizes each lookup with the test.
 	calls := make(chan error, 4)
 	failures := make(chan error, 4)
-	step, started := startTunnel(t, st, func(string) (string, error) {
+	paused, step, started := startTunnel(t, st, func(string) (string, error) {
 		select {
 		case err := <-failures:
 			calls <- err
@@ -121,26 +128,33 @@ func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 	if alert := <-a.posted; alert[0] != "cloudflared" || alert[1] == "" {
 		t.Fatalf("alert = %v, want the binary and the searched PATH", alert)
 	}
+	<-paused
 	step <- time.Now()
-	// A still-missing connector does not alert again.
+	// A still-missing connector does not alert again: the pause report proves
+	// its branch ended without posting.
 	failures <- exec.ErrNotFound
 	if got := <-calls; got == nil {
 		t.Fatal("second lookup succeeded with a missing binary")
 	}
+	<-paused
 	a.noPost(t)
 	step <- time.Now()
-	// The binary appears: the alert clears and the connector starts.
+	// The binary appears: the alert clears and the connector starts. The clear
+	// sits after the last missing branch, so a late post cannot follow it.
 	if got := <-calls; got != nil {
 		t.Fatalf("third lookup failed: %v", got)
 	}
 	<-a.cleared
+	a.noPost(t)
 	if bin := <-started; bin != "/resolved/cloudflared" {
 		t.Fatalf("connector ran %q, want the resolved path", bin)
 	}
 }
 
 // A transient store failure must not suppress the alert: the next attempt
-// posts again, and only a delivered post stops the retries.
+// posts again, and only a delivered post stops the retries. The injected
+// failure is queued before the loop starts, so the first post must consume it
+// and cannot succeed by racing the queue.
 func TestTunnelRetriesAFailedAlertPost(t *testing.T) {
 	st, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -150,15 +164,32 @@ func TestTunnelRetriesAFailedAlertPost(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := newAlerts()
+	a.failPost <- errors.New("store busy")
 	a.install(t)
 
-	step, _ := startTunnel(t, st, func(string) (string, error) { return "", exec.ErrNotFound })
+	calls := make(chan error, 4)
+	paused, step, _ := startTunnel(t, st, func(string) (string, error) {
+		calls <- exec.ErrNotFound
+		return "", exec.ErrNotFound
+	})
 
-	a.failPost <- errors.New("store busy")
+	// The first post fails: the pause report proves its branch ended without
+	// delivering anything.
+	<-calls
+	<-paused
+	a.noPost(t)
 	step <- time.Now()
+	// The next attempt posts.
+	<-calls
 	if alert := <-a.posted; alert[0] != "cloudflared" {
 		t.Fatalf("the retry did not post: %v", alert)
 	}
+	<-paused
+	step <- time.Now()
+	// The delivered alert stops the retries.
+	<-calls
+	<-paused
+	a.noPost(t)
 }
 
 // A fresh process that finds the connector clears an alert an earlier process
@@ -174,7 +205,7 @@ func TestTunnelClearsAStaleAlertOnStartup(t *testing.T) {
 	a := newAlerts()
 	a.install(t)
 
-	_, started := startTunnel(t, st, func(string) (string, error) { return "/resolved/cloudflared", nil })
+	_, _, started := startTunnel(t, st, func(string) (string, error) { return "/resolved/cloudflared", nil })
 
 	<-a.cleared
 	a.noPost(t)
