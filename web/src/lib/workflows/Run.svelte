@@ -363,7 +363,7 @@
   .rhead { display: flex; align-items: center; gap: 10px; margin: 22px 0 8px; }
   .rhead h2 { margin: 0; flex: 1; }
   .raw { white-space: pre-wrap; overflow-wrap: anywhere; background: #19181b; border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 16px; font-size: 12.5px; max-height: 70vh; overflow: auto; margin: 0; }
-  .run { flex: 1; overflow-y: auto; padding: 20px 20px 32px; min-height: 0; min-width: 0; }
+  .run { flex: 1; overflow-y: auto; padding: 20px 20px 32px; min-height: 0; min-width: 0; container-type: inline-size; }
   .quiet { color: var(--faint); font-size: 13.5px; }
   .err { color: var(--coral); }
   .hero { background: var(--side); border: 1px solid var(--line-soft); border-radius: 14px; padding: 18px 20px 16px; }
@@ -372,9 +372,13 @@
   .title { display: flex; align-items: center; gap: 14px; }
   .tt { flex: 1; min-width: 0; }
   h1 { margin: 0; font-size: 22px; font-weight: 700; }
-  .tt p { margin: 2px 0 0; font-size: 12px; color: var(--faint); }
+  .tt p { margin: 2px 0 0; font-size: 12px; color: var(--faint); overflow-wrap: anywhere; }
+  @container (max-width: 600px) {
+    .title { flex-wrap: wrap; }
+    .tt { flex: 1 1 calc(100% - 44px); }
+  }
   .sans { font-family: var(--sans); font-size: 12.5px; }
-  .chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px; background: var(--raise); color: var(--muted); }
+  .chip { flex: none; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px; background: var(--raise); color: var(--muted); }
   .chip.running { color: var(--gold); background: rgba(230, 192, 123, 0.12); }
   .chip.ok { color: var(--sage); background: rgba(151, 201, 149, 0.12); }
   .chip.error, .chip.interrupted { color: var(--coral); background: rgba(239, 138, 128, 0.12); }

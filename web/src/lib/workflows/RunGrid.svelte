@@ -22,7 +22,8 @@
   const isPicked = (lane: string, col: number) => picked?.lane === lane && picked.col === col
 </script>
 
-<div class="grid" role="region" aria-label="Progress by lane and stage">
+<div class="grid-card">
+<div class="grid" role="region" aria-label="Progress by lane and stage" tabindex="0">
   <table>
     <thead>
       <tr>
@@ -60,9 +61,12 @@
     </tbody>
   </table>
 </div>
+</div>
 
 <style>
-  .grid { overflow-x: auto; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; margin: 18px 0 4px; }
+  .grid-card { position: relative; min-width: 0; margin: 18px 0 4px; }
+  .grid-card::after { content: ''; position: absolute; right: 1px; top: 1px; bottom: 12px; width: 18px; border-radius: 0 12px 12px 0; background: linear-gradient(to right, transparent, var(--side)); pointer-events: none; }
+  .grid { overflow-x: auto; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; }
   table { border-collapse: separate; border-spacing: 0; width: 100%; }
   th, td { padding: 4px 6px; text-align: left; white-space: nowrap; }
   thead th { font-size: 11px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; padding-top: 10px; }
