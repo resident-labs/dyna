@@ -17,22 +17,44 @@ func TestPrepareRunPersistsIntentWithoutStartingDesktop(t *testing.T) {
 	if _, err := client.Register(ctx, "test"); err != nil {
 		t.Fatal(err)
 	}
-	var meta Meta
-	if err := client.Call(ctx, Request{Op: "run.prepare", Status: " Checking the command "}, &meta); err != nil {
+	lease, err := client.PrepareRun(ctx, " Checking the command ")
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer lease.Close()
 	state, err := client.Status(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.SessionID != state.SessionID || state.State == StateRunning {
+	if lease.SessionID != state.SessionID || state.State == StateRunning {
 		t.Fatalf("run preparation started a desktop: %+v", state)
 	}
 	if state.LatestStatus == nil || state.LatestStatus.Text != "Checking the command" {
 		t.Fatalf("intent was not saved: %+v", state.LatestStatus)
 	}
-	if err := client.Call(ctx, Request{Op: "run.prepare"}, &meta); err == nil {
-		t.Fatal("run preparation accepted missing intent")
+	if state.Runs != 1 {
+		t.Fatalf("active commands = %d, want 1", state.Runs)
+	}
+	events, err := client.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "runs" && event.SessionID == lease.SessionID && event.Status != nil && event.Status.Runs == 0 {
+				var meta Meta
+				if err := client.Call(ctx, Request{Op: "run.prepare"}, &meta); err == nil {
+					t.Fatal("run preparation accepted missing intent")
+				}
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("run disconnect did not release its lease:", ctx.Err())
+		}
 	}
 }
 

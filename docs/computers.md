@@ -24,8 +24,9 @@ described below.
 
 A new build installs without stopping busy computers: the service restarts later.
 The service keeps starting new desktops on the running build while the restart
-waits. It restarts at the first moment no computer has an app open; a running
-desktop with no app, however recent its input, does not hold it back.
+waits. It restarts at the first moment no computer has an app open or a
+`dyna computer run` command active; a running desktop with neither, however
+recent its input, does not hold it back.
 `dyna computer list` shows "restart pending since <time>" while one waits.
 
 During the first upgrade, an active transient `dyna-computers.service` keeps

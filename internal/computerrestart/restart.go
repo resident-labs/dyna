@@ -12,12 +12,14 @@ import (
 )
 
 // Quiet is the one quiet check. It reads the same statuses that
-// "dyna computer list --all --json" shows. It returns "" when no running
-// computer has an app open, so a restart only ever stops idle desktops. Otherwise
-// it returns the reason. A computer with no app counts as quiet however recently
-// it had input.
+// "dyna computer list --all --json" shows. It returns "" when no computer has
+// a foreground command or a running computer has an app open. A desktop with
+// no app or command counts as quiet however recently it had input.
 func Quiet(list []computers.Status) string {
 	for _, st := range list {
+		if st.Runs > 0 {
+			return fmt.Sprintf("computer %s has %d foreground command(s) running", st.SessionID, st.Runs)
+		}
 		if st.State != computers.StateRunning && st.State != computers.StateStarting {
 			continue
 		}
