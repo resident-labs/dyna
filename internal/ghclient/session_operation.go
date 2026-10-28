@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"dyna-agent/internal/boundedio"
@@ -62,7 +63,8 @@ func RunSessionGitHub(ctx context.Context, rec room.Record, request CommandReque
 }
 
 // RunSessionGitPush runs only a clearly identified HTTPS push to a repository
-// in this room. Local reports that the worker's real git should handle it.
+// in this room, from an isolated repository the engine builds. Local reports
+// that the worker's real git should handle it, without a credential.
 func RunSessionGitPush(ctx context.Context, rec room.Record, request CommandRequest) (CommandResult, error) {
 	if err := validateCommandRequest(request); err != nil {
 		return CommandResult{}, err
@@ -71,13 +73,23 @@ func RunSessionGitPush(ctx context.Context, rec room.Record, request CommandRequ
 	if Access(ctx, rec) != ReadWrite {
 		return CommandResult{}, errors.New("GitHub writes are disabled: this room is read-only")
 	}
-	r, ok := sessionPushRepository(ctx, rec, request.Dir, request.Args)
+	plan := parseGitPush(request.Args)
+	if !plan.push || !plan.safe {
+		return CommandResult{Local: true}, nil
+	}
+	r, ok := sessionPushRepository(ctx, rec, request.Dir, plan)
+	if !ok {
+		return CommandResult{Local: true}, nil
+	}
+	// Targets resolve against the worker repository before the push; the push
+	// itself runs from a bare repository the engine owns, so no worker
+	// configuration is read between validation and execution.
+	targets, ok := planPushTargets(ctx, request.Dir, plan)
 	if !ok {
 		return CommandResult{Local: true}, nil
 	}
 	ctx = WithRepository(ctx, r.host, r.name)
-	cmd := Command(ctx, "git", request.Dir, request.Args...)
-	return captureSessionCommand(cmd, nil, func() error { return runGit(ctx, "", cmd, true) })
+	return runIsolatedPush(ctx, r, request.Dir, plan, targets)
 }
 
 func validateCommandRequest(request CommandRequest) error {
@@ -151,8 +163,8 @@ func sessionInput(in *os.File) ([]byte, error) {
 // SessionGitCommand mediates pushes and forwards every other Git command to
 // the real binary with the worker's original environment.
 func SessionGitCommand(ctx context.Context, args []string, launchEnv []string) error {
-	_, push, _ := parseGitPush(args)
-	if !push {
+	plan := parseGitPush(args)
+	if !plan.push {
 		return runLocalGit(ctx, args, launchEnv)
 	}
 	dir, err := os.Getwd()
@@ -179,11 +191,11 @@ func runLocalGit(ctx context.Context, args []string, env []string) error {
 	return cmd.Run()
 }
 
-func sessionPushRepository(ctx context.Context, rec room.Record, dir string, args []string) (repository, bool) {
-	remote, push, safe := parseGitPush(args)
-	if !push || !safe {
+func sessionPushRepository(ctx context.Context, rec room.Record, dir string, plan pushPlan) (repository, bool) {
+	if !plan.push || !plan.safe {
 		return repository{}, false
 	}
+	remote := plan.remote
 	if remote == "" {
 		remote = defaultPushRemote(ctx, dir)
 	}
@@ -270,76 +282,269 @@ func roomHTTPSRepository(ctx context.Context, rec room.Record, raw string) (repo
 	return r, matchesRepository(ctx, rec, r)
 }
 
+// pushPlan is the parsed form of a worker push: the flags an engine push
+// reproduces, the refspecs it carries, and whether the command may run with
+// engine credentials. Unknown or translated-away forms are never safe, so
+// they stay local, where the worker's git handles them without a credential.
+type pushPlan struct {
+	remote   string
+	push     bool
+	safe     bool
+	force    bool
+	dryRun   bool
+	atomic   bool
+	quiet    bool
+	delete   bool
+	refspecs []string
+	leases   []string
+	options  []string
+}
+
 // parseGitPush identifies a push and whether its arguments are safe to run
 // with engine credentials. Unknown forms stay local.
-func parseGitPush(args []string) (remote string, push, safe bool) {
-	safe = true
-	for len(args) > 0 {
-		arg := args[0]
-		switch arg {
-		case "-C", "--git-dir", "--work-tree":
-			if len(args) < 2 {
-				return "", false, false
+func parseGitPush(args []string) pushPlan {
+	plan := pushPlan{safe: true}
+	global := true
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if global {
+			switch {
+			case arg == "push":
+				plan.push = true
+				global = false
+			case arg == "-C" || arg == "--git-dir" || arg == "--work-tree":
+				// The engine validates the directory the guard runs in. A
+				// repository chosen on the command line can differ, so its
+				// configuration must never enter an engine push.
+				plan.safe = false
+				i++
+			case strings.HasPrefix(arg, "--git-dir=") || strings.HasPrefix(arg, "--work-tree=") ||
+				strings.HasPrefix(arg, "-C"):
+				plan.safe = false
+			case arg == "-c" || arg == "--config-env":
+				plan.safe = false
+				i++
+			case arg == "--no-pager" || arg == "--bare" || arg == "--no-replace-objects" ||
+				arg == "--literal-pathspecs":
+			default:
+				return pushPlan{}
 			}
-			args = args[2:]
-		case "-c", "--config-env":
-			if len(args) < 2 {
-				return "", false, false
+			continue
+		}
+		switch {
+		case arg == "--":
+			plan.refspecs = append(plan.refspecs, args[i+1:]...)
+			i = len(args)
+		case arg == "--repo" || arg == "-o" || arg == "--push-option":
+			if i+1 >= len(args) {
+				return pushPlan{push: true}
 			}
-			safe = false
-			args = args[2:]
-		case "--no-pager", "--bare", "--no-replace-objects", "--literal-pathspecs":
-			args = args[1:]
+			i++
+			if arg == "--repo" {
+				if plan.remote != "" {
+					return pushPlan{push: true, safe: false}
+				}
+				plan.remote = args[i]
+			} else {
+				plan.options = append(plan.options, args[i])
+			}
+		case strings.HasPrefix(arg, "--repo="):
+			if plan.remote != "" {
+				return pushPlan{push: true, safe: false}
+			}
+			plan.remote = strings.TrimPrefix(arg, "--repo=")
+		case strings.HasPrefix(arg, "--push-option="):
+			plan.options = append(plan.options, strings.TrimPrefix(arg, "--push-option="))
+		case strings.HasPrefix(arg, "-o") && len(arg) > 2:
+			plan.options = append(plan.options, arg[2:])
+		case arg == "--delete" || arg == "-d":
+			plan.delete = true
+		case arg == "--force" || arg == "-f":
+			plan.force = true
+		case arg == "--atomic":
+			plan.atomic = true
+		case arg == "--dry-run" || arg == "-n":
+			plan.dryRun = true
+		case arg == "--quiet" || arg == "-q":
+			plan.quiet = true
+		case strings.HasPrefix(arg, "--force-with-lease="):
+			lease := strings.TrimPrefix(arg, "--force-with-lease=")
+			if lease == "" {
+				return pushPlan{push: true, safe: false}
+			}
+			plan.leases = append(plan.leases, lease)
+		case arg == "--no-force-with-lease" || arg == "--force-if-includes" ||
+			arg == "--no-force-if-includes" || arg == "--thin" || arg == "--no-thin" ||
+			arg == "--verbose" || arg == "-v" || arg == "--progress" || arg == "--no-progress":
+		case arg == "--force-with-lease":
+			// A lease without its ref covers every pushed ref.
+			return pushPlan{push: true, safe: false}
+		case !strings.HasPrefix(arg, "-"):
+			if plan.remote == "" {
+				plan.remote = arg
+			} else {
+				plan.refspecs = append(plan.refspecs, arg)
+			}
 		default:
-			if strings.HasPrefix(arg, "--git-dir=") || strings.HasPrefix(arg, "--work-tree=") {
-				args = args[1:]
-				continue
-			}
-			if arg != "push" {
-				return "", false, false
-			}
-			args = args[1:]
-			goto pushArgs
+			return pushPlan{push: true, safe: false}
 		}
 	}
-	return "", false, false
+	return plan
+}
 
-pushArgs:
-	for len(args) > 0 {
-		arg := args[0]
-		switch arg {
-		case "--repo":
-			if len(args) < 2 {
-				return "", true, false
-			}
-			return args[1], true, safe
-		case "-o", "--push-option", "--receive-pack", "--exec":
-			if len(args) < 2 {
-				return "", true, false
-			}
-			args = args[2:]
-		case "--all", "--mirror", "--delete", "--tags", "--follow-tags", "--atomic",
-			"--dry-run", "-n", "--porcelain", "--force", "-f", "--force-if-includes",
-			"--no-force-if-includes", "--force-with-lease", "--no-force-with-lease",
-			"--set-upstream", "-u", "--quiet", "-q", "--verbose", "-v", "--progress",
-			"--no-progress", "--prune", "--no-verify", "--verify", "--signed", "--no-signed",
-			"--thin", "--no-thin":
-			args = args[1:]
-		default:
-			if strings.HasPrefix(arg, "--repo=") {
-				return strings.TrimPrefix(arg, "--repo="), true, safe
-			}
-			if strings.HasPrefix(arg, "--push-option=") || strings.HasPrefix(arg, "--receive-pack=") ||
-				strings.HasPrefix(arg, "--exec=") || strings.HasPrefix(arg, "--force-with-lease=") ||
-				strings.HasPrefix(arg, "--recurse-submodules=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2) {
-				args = args[1:]
-				continue
-			}
-			if strings.HasPrefix(arg, "-") {
-				return "", true, false
-			}
-			return arg, true, safe
+// pushTarget is one refspec of an engine push: the object the worker
+// repository holds and the full destination ref to create, move or delete.
+type pushTarget struct {
+	src    string
+	dst    string
+	delete bool
+	force  bool
+}
+
+// planPushTargets resolves a push plan against the worker repository: which
+// objects to send and which remote refs to update. Resolution only reads the
+// repository; the push itself runs elsewhere. A plan that does not resolve
+// stays local, where the worker's git reports the reason.
+func planPushTargets(ctx context.Context, dir string, plan pushPlan) ([]pushTarget, bool) {
+	var targets []pushTarget
+	add := func(spec string) bool {
+		force := strings.HasPrefix(spec, "+")
+		spec = strings.TrimPrefix(spec, "+")
+		if spec == "" || strings.Contains(spec, "*") {
+			return false
+		}
+		src, dst, hasDst := strings.Cut(spec, ":")
+		if !hasDst {
+			dst = src
+		}
+		if dst == "" || dst == "HEAD" {
+			return false
+		}
+		if plan.delete || src == "" {
+			targets = append(targets, pushTarget{dst: fullRef(dst), delete: true})
+			return true
+		}
+		sha, err := repoid.Git(ctx, dir, "rev-parse", "--verify", src)
+		if err != nil {
+			return false
+		}
+		targets = append(targets, pushTarget{src: sha, dst: fullRef(dst), force: force})
+		return true
+	}
+	for _, spec := range plan.refspecs {
+		if !add(spec) {
+			return nil, false
 		}
 	}
-	return "", true, safe
+	if len(targets) == 0 {
+		// No refspec pushes the current branch to the same name, or to its
+		// configured upstream branch when it tracks this remote.
+		branch, err := repoid.Git(ctx, dir, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			return nil, false
+		}
+		dst := fullRef(branch)
+		if remote, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".remote"); err == nil && remote == plan.remote {
+			if merge, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".merge"); err == nil && strings.HasPrefix(merge, "refs/") {
+				dst = merge
+			}
+		}
+		sha, err := repoid.Git(ctx, dir, "rev-parse", "--verify", "HEAD")
+		if err != nil {
+			return nil, false
+		}
+		targets = append(targets, pushTarget{src: sha, dst: dst})
+	}
+	return targets, true
+}
+
+func fullRef(ref string) string {
+	if strings.HasPrefix(ref, "refs/") {
+		return ref
+	}
+	return "refs/heads/" + ref
+}
+
+// resolveLease turns a lease into a ref:expectation pair, reading the worker
+// repository's remote-tracking ref so a lease without an expectation still
+// covers the same commit it would cover locally.
+func resolveLease(ctx context.Context, dir, remote, lease string) string {
+	ref, expect, has := strings.Cut(lease, ":")
+	full := fullRef(ref)
+	if has {
+		return full + ":" + expect
+	}
+	if tracking, err := repoid.Git(ctx, dir, "rev-parse", "--verify", "refs/remotes/"+remote+"/"+ref); err == nil {
+		return full + ":" + tracking
+	}
+	return full
+}
+
+// runIsolatedPush pushes resolved targets from a bare repository the engine
+// creates, which shares objects with the worker repository and holds nothing
+// else. Worker configuration is never read: URL rewrites, credential helpers
+// and hooks in the repository cannot change a push after validation.
+func runIsolatedPush(ctx context.Context, r repository, dir string, plan pushPlan, targets []pushTarget) (CommandResult, error) {
+	tmp, err := os.MkdirTemp("", "dyna-push-")
+	if err != nil {
+		return CommandResult{}, err
+	}
+	defer os.RemoveAll(tmp)
+	if _, err := repoid.Git(ctx, "", "init", "--bare", "-q", tmp); err != nil {
+		return CommandResult{}, err
+	}
+	common, err := repoid.Git(ctx, dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return CommandResult{}, err
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(dir, common)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "objects", "info"), 0o700); err != nil {
+		return CommandResult{}, err
+	}
+	alternates := []byte(filepath.Join(common, "objects") + "\n")
+	if err := os.WriteFile(filepath.Join(tmp, "objects", "info", "alternates"), alternates, 0o600); err != nil {
+		return CommandResult{}, err
+	}
+	for i, t := range targets {
+		if !t.delete {
+			if _, err := repoid.Git(ctx, tmp, "update-ref", "refs/dyna/"+strconv.Itoa(i), t.src); err != nil {
+				return CommandResult{}, err
+			}
+		}
+	}
+	args := []string{"push"}
+	if plan.force {
+		args = append(args, "--force")
+	}
+	if plan.atomic {
+		args = append(args, "--atomic")
+	}
+	if plan.dryRun {
+		args = append(args, "--dry-run")
+	}
+	if plan.quiet {
+		args = append(args, "--quiet")
+	}
+	for _, lease := range plan.leases {
+		args = append(args, "--force-with-lease="+resolveLease(ctx, dir, plan.remote, lease))
+	}
+	for _, option := range plan.options {
+		args = append(args, "-o", option)
+	}
+	args = append(args, "https://"+r.host+"/"+r.name+".git")
+	for i, t := range targets {
+		if t.delete {
+			args = append(args, ":"+t.dst)
+			continue
+		}
+		spec := "refs/dyna/" + strconv.Itoa(i) + ":" + t.dst
+		if t.force {
+			spec = "+" + spec
+		}
+		args = append(args, spec)
+	}
+	cmd := Command(ctx, "git", tmp, args...)
+	return captureSessionCommand(cmd, nil, func() error { return runGit(ctx, "", cmd, true) })
 }

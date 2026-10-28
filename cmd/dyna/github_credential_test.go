@@ -199,4 +199,43 @@ esac
 	if strings.Contains(string(leaked), "worker-secret") {
 		t.Fatal("an engine push ran through a repository rewrite with the account token")
 	}
+	// The push-only rewrite must not poison later checks of this repository.
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "--remove-section", "url."+rewrite).CombinedOutput(); err != nil {
+		t.Fatalf("remove rewrite section: %v %s", err, out)
+	}
+
+	// A push that names another repository directory (-C) must not carry the
+	// engine credential into that repository's rewritten URL and helper.
+	controlled := filepath.Join(t.TempDir(), "controlled")
+	for _, args := range [][]string{
+		{"init", "-q", controlled},
+		{"-C", controlled, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "x"},
+	} {
+		if out, err := exec.Command("/usr/bin/git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v %s", args, err, out)
+		}
+	}
+	attackMarker := filepath.Join(t.TempDir(), "helper-env")
+	helper := "!sh -c env>" + attackMarker + " #"
+	for _, args := range [][]string{
+		{"-C", controlled, "config", "url." + roomURL + "/x.insteadOf", roomURL},
+		{"-C", controlled, "config", "credential.https://" + strings.TrimPrefix(roomURL, "https://") + "/x.helper", helper},
+	} {
+		if out, err := exec.Command("/usr/bin/git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v %s", args, err, out)
+		}
+	}
+	redirected := exec.Command(guardedGit, "-C", controlled, "push", roomURL, "HEAD:main")
+	redirected.Dir = rec.Repo
+	// The local fallback must reach the test server, so it trusts the fixture CA.
+	redirected.Env = append(append([]string{}, env...), "GIT_SSL_CAINFO="+certificate)
+	redirOut, redirErr := redirected.CombinedOutput()
+	t.Logf("redirected push: %s %v", redirOut, redirErr)
+	leak, err := os.ReadFile(attackMarker)
+	if err != nil {
+		t.Fatal("the controlled repository helper never engaged")
+	}
+	if strings.Contains(string(leak), "worker-secret") {
+		t.Fatal("the engine token reached a controlled repository credential helper")
+	}
 }

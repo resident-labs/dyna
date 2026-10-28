@@ -123,6 +123,10 @@ func runGit(ctx context.Context, ghBinary string, cmd *exec.Cmd, worker bool) er
 		// repository could enable (ext::, helpers, ssh, file) whatever its
 		// configuration says, because the environment list outranks it.
 		cmd.Env = append(cmd.Env, "GIT_ALLOW_PROTOCOL=https")
+		// An engine push runs from its own bare repository, so trust no global
+		// or system configuration either: rewrites and helpers there must not
+		// reach a push that carries the account token.
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
 	for i, entry := range config {
