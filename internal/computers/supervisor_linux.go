@@ -78,6 +78,7 @@ type supervisor struct {
 	listeners                          []*net.UnixListener
 	relayConns                         map[*net.UnixConn]bool
 	apps                               map[int]string
+	appLaunches                        int
 	runs                               map[string]struct{}
 	tracked                            map[int]string
 	viewers                            map[string]string

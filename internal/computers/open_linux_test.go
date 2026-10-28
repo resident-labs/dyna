@@ -19,6 +19,48 @@ import (
 	"dyna-agent/internal/syswait"
 )
 
+func TestRestartAdmissionTracksAppLaunchInProgress(t *testing.T) {
+	id := recordTestID(t)
+	events := make(chan string, 2)
+	s := &supervisor{
+		meta: Meta{SessionID: id}, state: Status{SessionID: id, Control: ControlAgent},
+		inputGate: make(chan struct{}, 1),
+		emit: func(e Event) {
+			if e.Type == "launches" {
+				events <- e.Type
+			}
+		},
+	}
+	s.inputGate <- struct{}{} // Hold the launch before it can create a process.
+	d := &daemon{computers: map[string]*supervisor{id: s}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ended := make(chan error, 1)
+	request := Request{Status: "Checking launch admission", Command: []string{"true"}, TimeoutMS: 1000}
+	go func() {
+		_, err := d.openApp(ctx, s, request)
+		ended <- err
+	}()
+	select {
+	case <-events:
+	case <-ctx.Done():
+		t.Fatal("launch was not admitted:", ctx.Err())
+	}
+	if reason := d.beginRestart().Reason; !strings.Contains(reason, "app launch") {
+		t.Fatalf("in-progress launch did not defer restart: %q", reason)
+	}
+	cancel()
+	if err := <-ended; !errors.Is(err, context.Canceled) {
+		t.Fatalf("blocked launch error = %v", err)
+	}
+	<-events // The launch released its admission before returning.
+	if reason := d.beginRestart().Reason; reason != "" {
+		t.Fatalf("finished launch still blocked restart: %q", reason)
+	}
+	if _, err := d.openApp(context.Background(), s, request); err == nil || !strings.Contains(err.Error(), "restart is in progress") {
+		t.Fatalf("new app launch entered after restart admission closed: %v", err)
+	}
+}
+
 func TestOpenAppReportsExitAndLogWithoutAWindow(t *testing.T) {
 	base, _ := startTestDaemon(t)
 	ctx, cancel := context.WithTimeout(base, 3*time.Second)
