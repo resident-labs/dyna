@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +193,38 @@ func TestPiTransferKeepsTheSamePiSession(t *testing.T) {
 	}
 	if !resumed {
 		t.Fatalf("pi did not resume the same session with the new model:\n%s", log)
+	}
+}
+
+// A transfer must stop the session's retained harness process through the
+// session-host path. The process of the old profile otherwise keeps its
+// memory and holds its runtime bundle lease until a next turn replaces it or
+// the idle close reaps it (D-399).
+func TestTransferStopsTheSessionsHarnessProcesses(t *testing.T) {
+	path, logPath := installFakePiTurn(t)
+	old := piTestProfile("pi-old", "old/provider-model", path, logPath)
+	next := piTestProfile("pi-next", "new/provider-model", path, logPath)
+	e := newTestEnv(t, old, next)
+	now := time.Now()
+	e.m.TransferNow = func() time.Time { return now }
+	e.m.TransferLaunch = func(*Manager, string, string) error { return nil }
+	var stopped []string
+	e.m.HarnessStopper = func(_ context.Context, key string) error {
+		stopped = append(stopped, key)
+		return nil
+	}
+	info, _ := e.start("RESPOND: keep the decoder work", func(so *StartOptions) { so.Profile = "pi-old" })
+	info, first := e.wait(info.ID, 1)
+	persistFakePiSession(t, first.HarnessSession)
+	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "pi-next", WaitSeconds: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTransfer(t, e, state)
+	for _, want := range []string{"session/" + info.ID, info.ID} {
+		if !slices.Contains(stopped, want) {
+			t.Fatalf("transfer did not stop the harness processes of %s; stopped keys: %v", want, stopped)
+		}
 	}
 }
 

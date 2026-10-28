@@ -357,17 +357,17 @@ func TestGCKeepsNewestAndExactPinsAndNeverAccounts(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	var pinned []Bundle
+	var pinned []PinnedBundle
 	for _, h := range []string{"claude-code", "pi"} {
 		for _, v := range []string{"1.3.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"} {
 			b := install(t, m, h, v)
 			if v == "1.3.0" {
-				pinned = append(pinned, b)
+				pinned = append(pinned, PinnedBundle{Bundle: b})
 			}
 		}
 	}
 	// A malicious caller's directory is never used as a deletion target.
-	pinned = append(pinned, Bundle{Harness: "pi", Version: "2.0.0", Directory: accountRoot})
+	pinned = append(pinned, PinnedBundle{Bundle: Bundle{Harness: "pi", Version: "2.0.0", Directory: accountRoot}})
 	if err := m.Select("claude", "2.0.0"); err != nil {
 		t.Fatal(err)
 	}
