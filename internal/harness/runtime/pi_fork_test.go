@@ -190,7 +190,7 @@ func TestGCRemovesUnusableOldPiBundle(t *testing.T) {
 	piTestHome(t)
 	m := manager(t)
 	install(t, m, "pi", "1.5.0-dyna.4")
-	install(t, m, "pi", "1.4.0-dyna.4")
+	install(t, m, "pi", piForkVersion)
 	seedBundle(t, m.Root, "1.0.0")
 	if err := m.GC(nil); err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestGCRemovesUnusableOldPiBundle(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(m.Root, "pi", "1.0.0")); !os.IsNotExist(err) {
 		t.Fatal("GC kept an unusable old version")
 	}
-	if _, err := m.Resolve("pi", "1.4.0-dyna.4"); err != nil {
+	if _, err := m.Resolve("pi", piForkVersion); err != nil {
 		t.Fatal("GC removed a usable version", err)
 	}
 }
@@ -209,7 +209,7 @@ func TestPinnedUnusablePiBundleIsProtected(t *testing.T) {
 	piTestHome(t)
 	m := manager(t)
 	install(t, m, "pi", "1.5.0-dyna.4")
-	install(t, m, "pi", "1.4.0-dyna.4")
+	install(t, m, "pi", piForkVersion)
 	seedBundle(t, m.Root, "1.0.0")
 	var old Bundle
 	bundles, err := m.listHarness("pi", true)

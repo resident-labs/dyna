@@ -91,7 +91,7 @@ func TestInstallAndSelectRejectsUnsupportedReportedVersion(t *testing.T) {
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.4.0-dyna.4"); err == nil || !strings.Contains(err.Error(), "startup check") {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", piForkVersion); err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("mismatched update accepted: %v", err)
 	}
 	if got, err := m.Resolve("pi", ""); err != nil || got.Version != old.Version {
