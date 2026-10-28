@@ -64,19 +64,26 @@ func TestMetadataReadsShareSnapshotAndSeeAtomicWrites(t *testing.T) {
 	}
 }
 
-func TestClosedMetadataDoesNotStayCached(t *testing.T) {
+func TestClosedMetadataStaysCurrentAndShared(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	id := NewID()
+	decoded := 0
+	s.decodeMeta = func(b []byte, v any) error { decoded++; return json.Unmarshal(b, v) }
 	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", SpawnBrief: "open snapshot"})
 	if _, err := s.ReadMeta(id); err != nil {
 		t.Fatal(err)
 	}
-	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", Closed: time.Now(), SpawnBrief: "retained history"})
+	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", Closed: time.Now(), SpawnBrief: "closed snapshot"})
 	if _, err := s.ReadMeta(id); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := infoCache.Load(s.recordKey(id)); ok {
-		t.Fatal("a closed session's full metadata stayed in the open-session cache")
+	got, err := s.ReadMeta(id)
+	if err != nil || got.SpawnBrief != "closed snapshot" || decoded != 2 {
+		t.Fatalf("closed snapshot = %+v, decodes %d, %v; want current metadata decoded once", got, decoded, err)
+	}
+	value, ok := infoCache.Load(s.recordKey(id))
+	if !ok || value.(*infoEntry).meta.Closed.IsZero() {
+		t.Fatal("an open snapshot survived the close")
 	}
 }
 
