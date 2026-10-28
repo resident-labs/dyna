@@ -25,9 +25,9 @@ described below.
 A new build installs without stopping busy computers: the service restarts later.
 Each `dyna computer run` command holds a daemon lease until it exits. The service
 keeps starting new desktops on the running build while the restart waits. The
-final quiet check closes new command admission before systemd restarts the
-service. It restarts at the first moment no computer has an app open or command
-lease; a running desktop with neither, however recent its input, does not hold
+final quiet check closes new command and app launch admission before systemd
+restarts the service. It restarts at the first moment no computer has an app open
+or a command lease; a running desktop with neither, however recent its input, does not hold
 it back. `dyna computer list` shows "restart pending since <time>" while one waits.
 
 A daemon from before run leases cannot report legacy commands. The updater
