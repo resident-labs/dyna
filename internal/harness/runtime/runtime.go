@@ -279,8 +279,8 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	var gen harnessmgr.ConfigGeneration
 	if pin.Generation != "" {
 		gen, err = loadNativeGeneration(a.Harness, pin.Generation, lookup)
-		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home, privateEnv["DYNA_BIN"]) {
-			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs.
+		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home, privateEnv["DYNA_BIN"]) || (a.Harness == "pi" && pinnedPiCompactionDirty(pin.Generation)) {
+			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs, and pins whose settings still carry the compaction overrides Dyna once wrote.
 			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 		}
 	} else {
@@ -350,6 +350,37 @@ func pinnedGenerationUsable(harness, dir string, gen harnessmgr.ConfigGeneration
 		return harnesshome.Launches(gen.CLI)
 	}
 	return true
+}
+
+// pinnedPiCompactionDirty reports whether the pinned Pi settings still carry
+// the per-model compaction overrides an older Dyna generation wrote. Dyna
+// passes the trigger per invocation now, so it never writes compaction into a
+// generation; republishing such a pin would push its stale reserves onto every
+// session on the account and cap the invocation trigger below its target.
+// A missing settings file or an owner's own compaction settings that carry no
+// reserve override leaves the pin alone.
+// TODO: legacy/shim remove later — covers pins created before the trigger flag.
+func pinnedPiCompactionDirty(dir string) bool {
+	raw, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		return false
+	}
+	var doc struct {
+		Compaction struct {
+			ModelOverrides map[string]struct {
+				ReserveTokens *int `json:"reserveTokens"`
+			} `json:"modelOverrides"`
+		} `json:"compaction"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return false
+	}
+	for _, entry := range doc.Compaction.ModelOverrides {
+		if entry.ReserveTokens != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func privateGenerationRoots(env map[string]string, nativeHome string) bool {
