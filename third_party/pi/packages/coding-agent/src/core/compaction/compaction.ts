@@ -121,6 +121,8 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	/** Absolute trigger; unset keeps the reserve-based limit. */
+	triggerTokens?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -266,7 +268,9 @@ export function estimateProjectedContextTokens(
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
-	return contextTokens > contextWindow - settings.reserveTokens;
+	const limit = contextWindow - settings.reserveTokens;
+	const threshold = settings.triggerTokens !== undefined ? Math.min(settings.triggerTokens, limit) : limit;
+	return contextTokens > threshold;
 }
 
 // ============================================================================

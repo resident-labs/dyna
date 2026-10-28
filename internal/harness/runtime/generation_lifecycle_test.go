@@ -440,7 +440,7 @@ func TestGenerationLifecycleSelectionAndLeaseAreAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := r.generateLocked("claude-code", home, id, os.LookupEnv, nil)
+	g, err := r.generateLocked("claude-code", home, id, os.LookupEnv)
 	if err != nil {
 		unlock()
 		t.Fatal(err)
@@ -580,7 +580,7 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
 	addGenerationMCP(t, r, "pi", "tools")
 	fresh := buildGeneration(t, r, "pi", home, id)
-	_, inputs, err := r.captureGeneration("pi", home, id, os.LookupEnv, nil)
+	_, inputs, err := r.captureGeneration("pi", home, id, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
