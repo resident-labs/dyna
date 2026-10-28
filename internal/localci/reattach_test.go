@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"dyna-agent/internal/jobs"
+	"dyna-agent/internal/jobstest"
 	"time"
 )
 
@@ -75,13 +78,13 @@ func (f *reattachFixture) stopEngineDuringRun(t *testing.T) {
 	<-f.started
 	previous := EngineStopping()
 	MarkEngineStopping()
-	t.Cleanup(func() { engineStopping.Store(previous) })
+	t.Cleanup(func() { jobs.SetEngineStoppingForTest(previous) })
 	cancel()
 	if result := <-done; result.Cause != CauseEngineStop {
 		t.Fatalf("stopped run cause = %s, want %s", result.Cause, CauseEngineStop)
 	}
 	ClearEngineStopping()
-	if f.machine.stopCount() != 0 {
+	if f.machine.StopCount() != 0 {
 		t.Fatal("an engine stop stopped the check on the machine")
 	}
 }
@@ -100,7 +103,7 @@ func TestRestartedEngineReattachesToARunningCheck(t *testing.T) {
 	if result.Status != OutcomePassed || len(result.Checks) != 1 || result.Checks[0].Status != OutcomePassed {
 		t.Fatalf("result = %+v, want the check's own pass", result)
 	}
-	if got := len(f.machine.startCalls()); got != 1 {
+	if got := len(f.machine.StartCalls()); got != 1 {
 		t.Fatalf("check started %d times, want once", got)
 	}
 	if got := f.setups.Load(); got != 1 {
@@ -115,13 +118,13 @@ func TestRestartedEngineReattachesToARunningCheck(t *testing.T) {
 func TestRestartedEngineStartsAgainWhenTheCheckIsGone(t *testing.T) {
 	f := newReattachFixture(t)
 	f.stopEngineDuringRun(t)
-	f.machine.vanishAll()
+	f.machine.VanishAll()
 	close(f.release)
 	result, err := f.runner.Run(t.Context(), f.request)
 	if err != nil || result.Status != OutcomePassed {
 		t.Fatalf("fresh run = %s, %v", result.Status, err)
 	}
-	if got := len(f.machine.startCalls()); got != 2 {
+	if got := len(f.machine.StartCalls()); got != 2 {
 		t.Fatalf("check started %d times, want a new start", got)
 	}
 }
@@ -151,7 +154,7 @@ func TestConcurrentRunOfTheSameCommitLeavesTheLiveRunAlone(t *testing.T) {
 	if rows[0].RunID == rows[1].RunID || rows[0].orphaned() || rows[1].orphaned() {
 		t.Fatalf("the runs share a record or lost their owner: %+v", rows)
 	}
-	if got := f.machine.stopCount(); got != 0 {
+	if got := f.machine.StopCount(); got != 0 {
 		t.Fatalf("the second run stopped %d checks of the first", got)
 	}
 	close(f.release)
@@ -173,7 +176,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	var scripts []string
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 2, Enabled: true}}
 	machine := newFakeMachine(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
-		if script, _, ok := decodeNodeScript(name, args); ok && (strings.Contains(script, "worktree prune") || strings.Contains(script, "rm -rf --one-file-system")) {
+		if script, _, ok := jobstest.DecodeNodeScript(name, args); ok && (strings.Contains(script, "worktree prune") || strings.Contains(script, "rm -rf --one-file-system")) {
 			scripts = append(scripts, script)
 		}
 		return nil
@@ -183,8 +186,8 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	repo, sha := "/repo", strings.Repeat("a", 40)
 	runDir := cacheBase("pve") + "/runs/r1"
 	first, second := checks[0].id, checks[1].id
-	spec := func(id Suite) detachSpec {
-		return detachSpec{ID: id, Dir: detachedDir(runDir, id), Unit: checkUnit("r1", id), Script: "true"}
+	spec := func(id Suite) jobs.RunSpec {
+		return jobs.RunSpec{ID: string(id), Dir: detachedDir(runDir, id), Unit: checkUnit("r1", id), Script: "true"}
 	}
 	if err := store.saveAttachment(t.Context(), repo, sha, "pve", attachment{RunID: "r1", Checks: []Suite{first, second}}); err != nil {
 		t.Fatal(err)
@@ -197,7 +200,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Only the second check was launched.
-	if err := runner.startDetached(t.Context(), spec(second)); err != nil {
+	if err := runner.exec().StartDetached(t.Context(), spec(second)); err != nil {
 		t.Fatal(err)
 	}
 	att, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks)
@@ -209,7 +212,7 @@ func TestResumeRunHandlesUnlaunchedAndVanishedChecks(t *testing.T) {
 	if err := store.releaseAttachment(t.Context(), repo, sha, "pve", "r1"); err != nil {
 		t.Fatal(err)
 	}
-	machine.vanish(spec(second).Dir)
+	machine.Vanish(spec(second).Dir)
 	att, err = runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks)
 	if err != nil || att != nil {
 		t.Fatalf("resume = %+v, %v, want a fresh run", att, err)
@@ -286,7 +289,7 @@ func TestResumeRunKeepsTheRecordWhenTeardownFails(t *testing.T) {
 	var removals int
 	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "pve", SSH: "pip@pve", Slots: 1, Enabled: true}}
 	machine := newFakeMachine(t, func(_ context.Context, _ string, _ io.Reader, _, _ io.Writer, name string, args ...string) error {
-		script, _, _ := decodeNodeScript(name, args)
+		script, _, _ := jobstest.DecodeNodeScript(name, args)
 		switch {
 		case strings.Contains(script, "worktree prune"):
 			return exitError(t, 69)
@@ -305,7 +308,7 @@ func TestResumeRunKeepsTheRecordWhenTeardownFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The recorded check has no unit on the machine, so the run is unusable.
-	machine.vanish("none")
+	machine.Vanish("none")
 	if _, err := runner.resumeRun(t.Context(), store, repo, sha, "/cache", checks); err == nil {
 		t.Fatal("a failed teardown was not reported")
 	}

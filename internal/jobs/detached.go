@@ -1,4 +1,4 @@
-package localci
+package jobs
 
 import (
 	"bufio"
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,30 +26,30 @@ import (
 //
 // The check writes its log and exit.json in its own folder on the node. A call
 // that fails on the transport is retried, and the check is not affected: it
-// counts as lost only when the node stays unreachable for nodeLostBound, or when
+// counts as lost only when the node stays unreachable for NodeLostBound, or when
 // its unit is gone without an exit record.
 const (
-	// pollInterval is the least time between the end of one poll and the start of
+	// PollInterval is the least time between the end of one poll and the start of
 	// the next. A slow route paces itself: a poll that takes 20 seconds is
 	// followed by the next one right after the wait, never by a queue of polls.
-	pollInterval = 2 * time.Second
+	PollInterval = 2 * time.Second
 	// retryWait is the pause between two attempts of a call that failed on the
 	// transport. Each attempt is already bounded by the machine's connect timeout.
 	retryWait = 5 * time.Second
-	// nodeLostBound is how long a node may stay unreachable before the checks on
+	// NodeLostBound is how long a node may stay unreachable before the checks on
 	// it count as lost.
-	nodeLostBound = 3 * time.Minute
-	// stopTimeout bounds the call that stops a cancelled check.
-	stopTimeout = time.Minute
-	// callTimeout bounds one attempt of a short call: start, poll or stop. The
+	NodeLostBound = 3 * time.Minute
+	// StopTimeout bounds the call that stops a cancelled check.
+	StopTimeout = time.Minute
+	// CallTimeout bounds one attempt of a short call: start, poll or stop. The
 	// ssh client also gives up on a silent connection after about 45 seconds.
-	callTimeout = 2 * time.Minute
+	CallTimeout = 2 * time.Minute
 	// longCallTimeout bounds one attempt of a call that can run long, such as the
 	// node setup and the report copy.
 	longCallTimeout = 15 * time.Minute
 )
 
-// detachedStartScript runs on the node. It takes the check's folder, its unit
+// StartScript runs on the node. It takes the check's folder, its unit
 // name and the limits of its unit ($3 to $5, empty for none), and reads the
 // check's script from its input. A lock file serializes starts, and a start
 // that finds its check running or finished does nothing, so a retry never
@@ -69,7 +68,7 @@ const (
 // A transient unit survives the SSH session only when the user manager does, so
 // the script enables lingering first. Without a user manager, or without
 // lingering, the check starts under setsid and nohup and runs without a unit.
-const detachedStartScript = `set -eu
+const StartScript = `set -eu
 d=$1; unit=$2; cpu=$3; mem=$4; tasks=$5
 umask 077
 mkdir -p "$(dirname "$d")"
@@ -118,13 +117,13 @@ else
 fi
 `
 
-// detachedPollScript runs on the node. Its arguments are groups of three: a
+// PollScript runs on the node. Its arguments are groups of three: a
 // check's folder, its unit name and the offset of the log bytes the engine has.
 // For each group it prints one header line, the new log bytes, and a newline.
 // The state is read before the size, so a check that exited is reported with
 // its whole log. One poll returns at most 256 KiB of log per check, so a check
 // that prints a lot cannot make a poll on a slow route run for minutes.
-const detachedPollScript = `chunk=262144
+const PollScript = `chunk=262144
 while [ "$#" -ge 3 ]; do
   d=$1; unit=$2; off=$3; shift 3
   alive() { systemctl --user is-active --quiet "$unit" 2>/dev/null || { [ -s "$d/pid" ] && kill -0 "$(cat "$d/pid")" 2>/dev/null; }; }
@@ -143,9 +142,9 @@ while [ "$#" -ge 3 ]; do
 done
 `
 
-// detachedStopScript runs on the node. It takes the check's folder and its unit
+// StopScript runs on the node. It takes the check's folder and its unit
 // name, asks the check to stop, and kills what is left.
-const detachedStopScript = unitStoppedFunction + `d=$1; unit=$2
+const StopScript = UnitStoppedFunction + `d=$1; unit=$2
 timeout 20s systemctl --user stop "$unit" >/dev/null 2>&1 || true
 systemctl --user kill --signal=KILL "$unit" >/dev/null 2>&1 || true
 systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
@@ -162,78 +161,65 @@ elif command -v systemctl >/dev/null 2>&1; then
 fi
 `
 
-// unitStoppedFunction defines unit_stopped for a node script: it succeeds only
-// when the user manager answers and reports the unit inactive or failed. A query
-// that fails is not an answer, and a unit that is unknown is inactive.
-const unitStoppedFunction = `unit_stopped() { local s; s=$(timeout 10s systemctl --user show -p ActiveState --value "$1" 2>/dev/null) || return 2; case "$s" in inactive|failed) return 0 ;; *) return 1 ;; esac; }
+// UnitStoppedFunction defines unit_stopped for a node script: it succeeds
+// only when the user manager answers and reports the unit inactive or failed.
+// A query that fails is not an answer, and a unit that is unknown is inactive.
+const UnitStoppedFunction = `unit_stopped() { local s; s=$(timeout 10s systemctl --user show -p ActiveState --value "$1" 2>/dev/null) || return 2; case "$s" in inactive|failed) return 0 ;; *) return 1 ;; esac; }
 `
 
-// detachSpec is everything the node needs to run and find one check.
-type detachSpec struct {
+// RunSpec is everything the node needs to run and find one check.
+type RunSpec struct {
 	// ID is the check the unit belongs to.
-	ID Suite
+	ID string
 	// Attach follows a check that an earlier engine already started: nothing is
 	// launched, and the poll brings its whole log.
 	Attach bool
 	// Dir is the check's folder on the node.
 	Dir string
-	// Unit is the name of the check's systemd unit.
+	// Unit is the name of the job's systemd unit.
 	Unit string
-	// Script is the check's script.
+	// Script is the job's script.
 	Script string
-	// Limits bound the unit. A host check passes nil: it bounds its own command.
-	Limits *scopeLimits
+	// Limits bound the unit. A job that bounds its own command passes nil.
+	Limits *Limits
 }
 
-// checkUnit is the name of the systemd unit that holds a check's script. The
-// check's own scope, used by a host check and by the cleanup, has the same
-// base name with the type .scope.
-func checkUnit(runID string, id Suite) string {
-	return "dyna-ci-" + runID + "-" + string(id) + "-run.service"
-}
+// DetachedExit is a job that exited with a status on the node.
+type DetachedExit struct{ Code int }
 
-// detachedDir is the folder of a check's detached files in its run folder, so a
-// run's removal takes them too.
-func detachedDir(runDir string, id Suite) string {
-	return path.Join(runDir, string(id), "detached")
-}
+func (e *DetachedExit) Error() string { return fmt.Sprintf("job exited with status %d", e.Code) }
 
-// detachedExit is a check that exited with a status on the node.
-type detachedExit struct{ Code int }
-
-func (e *detachedExit) Error() string { return fmt.Sprintf("check exited with status %d", e.Code) }
-
-// nodeLostError is a check the engine can no longer follow: its node stayed
+// NodeLostError is a job the engine can no longer follow: its node stayed
 // unreachable, or its unit is gone and left no exit record.
-type nodeLostError struct {
-	node string
-	// gone is set when the node answered but the check has no unit and no exit
-	// record; otherwise the node did not answer for after.
-	gone  bool
-	after time.Duration
-	cause error
+type NodeLostError struct {
+	Node string
+	// Gone is set when the node answered but the job has no unit and no exit
+	// record; otherwise the node did not answer for After.
+	Gone  bool
+	After time.Duration
+	Cause error
 }
 
-func (e *nodeLostError) Error() string {
-	if e.gone {
-		return fmt.Sprintf("the check on CI machine %s ended without an exit record", e.node)
+func (e *NodeLostError) Error() string {
+	if e.Gone {
+		return fmt.Sprintf("the check on CI machine %s ended without an exit record", e.Node)
 	}
-	return fmt.Sprintf("CI machine %s was unreachable for %s: %v", e.node, e.after.Round(time.Second), e.cause)
+	return fmt.Sprintf("CI machine %s was unreachable for %s: %v", e.Node, e.After.Round(time.Second), e.Cause)
 }
 
-func (e *nodeLostError) Unwrap() error { return e.cause }
+func (e *NodeLostError) Unwrap() error { return e.Cause }
 
-// permanentError marks a failure that a retry cannot fix, such as a corrupt
+// PermanentError marks a failure that a retry cannot fix, such as a corrupt
 // archive that reached the engine whole.
-type permanentError struct{ err error }
+type PermanentError struct{ Err error }
 
-func (e *permanentError) Error() string { return e.err.Error() }
-func (e *permanentError) Unwrap() error { return e.err }
+func (e *PermanentError) Error() string { return e.Err.Error() }
+func (e *PermanentError) Unwrap() error { return e.Err }
 
-// commandExitStatus is the exit status err proves: a command's own, or a detached
+// CommandExitStatus is the exit status err proves: a command's own, or a detached
 // check's.
-func commandExitStatus(err error) (int, bool) {
-	var detached *detachedExit
+func CommandExitStatus(err error) (int, bool) {
+	var detached *DetachedExit
 	if errors.As(err, &detached) {
 		return detached.Code, true
 	}
@@ -244,16 +230,16 @@ func commandExitStatus(err error) (int, bool) {
 	return 0, false
 }
 
-func (r Runner) now() time.Time {
-	if r.clock != nil {
-		return r.clock()
+func (x Executor) now() time.Time {
+	if x.Clock != nil {
+		return x.Clock()
 	}
 	return time.Now()
 }
 
-func (r Runner) pause(ctx context.Context, d time.Duration) error {
-	if r.wait != nil {
-		return r.wait(ctx, d)
+func (x Executor) pause(ctx context.Context, d time.Duration) error {
+	if x.Wait != nil {
+		return x.Wait(ctx, d)
 	}
 	return sleepContext(ctx, d)
 }
@@ -261,75 +247,75 @@ func (r Runner) pause(ctx context.Context, d time.Duration) error {
 // transient reports a failure of the connection, which a retry may fix: ssh's own
 // exit 255, or a command that never ran. A local node has no connection, and a
 // script that exited with its own status is an answer.
-func (r Runner) transient(err error) bool {
-	if r.Node.SSH == "" {
+func (x Executor) transient(err error) bool {
+	if x.Node.SSH == "" {
 		return false
 	}
 	var exit *exec.ExitError
 	return !errors.As(err, &exit) || exit.ExitCode() == 255
 }
 
-// retry runs attempt again while it fails on the connection. Each attempt has
+// Retry runs attempt again while it fails on the connection. Each attempt has
 // its own timeout. It gives up when the node has been unreachable for
-// nodeLostBound, measured on the runner's clock, and a stopped context ends it
-// at once.
-func (r Runner) retry(ctx context.Context, timeout time.Duration, attempt func(context.Context) error) error {
+// NodeLostBound, measured on the executor's clock, and a stopped context ends
+// it at once.
+func (x Executor) Retry(ctx context.Context, timeout time.Duration, attempt func(context.Context) error) error {
 	var since time.Time
 	for {
 		// The unreachable window starts when the first failed attempt started, and
 		// later attempts and waits only get what is left of it, so the node counts
-		// as lost after nodeLostBound in all, not after that and one more attempt.
-		started := r.now()
+		// as lost after NodeLostBound in all, not after that and one more attempt.
+		started := x.now()
 		bound := timeout
 		if !since.IsZero() {
-			bound = min(timeout, max(nodeLostBound-started.Sub(since), time.Second))
+			bound = min(timeout, max(NodeLostBound-started.Sub(since), time.Second))
 		}
 		callCtx, cancel := context.WithTimeout(ctx, bound)
 		err := attempt(callCtx)
 		cancel()
-		var permanent *permanentError
-		if err == nil || ctx.Err() != nil || errors.As(err, &permanent) || !r.transient(err) {
+		var permanent *PermanentError
+		if err == nil || ctx.Err() != nil || errors.As(err, &permanent) || !x.transient(err) {
 			return err
 		}
 		if since.IsZero() {
 			since = started
 		}
-		now := r.now()
+		now := x.now()
 		after := now.Sub(since)
-		if after >= nodeLostBound {
-			return &nodeLostError{node: r.Node.Name, after: after, cause: err}
+		if after >= NodeLostBound {
+			return &NodeLostError{Node: x.Node.Name, After: after, Cause: err}
 		}
-		if waitErr := r.pause(ctx, min(retryWait, nodeLostBound-after)); waitErr != nil {
+		if waitErr := x.pause(ctx, min(retryWait, NodeLostBound-after)); waitErr != nil {
 			return errors.Join(err, waitErr)
 		}
 	}
 }
 
-// startDetached launches a check on the node. The launch is safe to repeat.
-func (r Runner) startDetached(ctx context.Context, spec detachSpec) error {
+// StartDetached launches a check on the node. The launch is safe to repeat.
+func (x Executor) StartDetached(ctx context.Context, spec RunSpec) error {
 	args := []string{spec.Dir, spec.Unit, "", "", ""}
 	if spec.Limits != nil {
 		args[2] = strconv.Itoa(spec.Limits.CPUs*100) + "%"
-		args[3] = systemdMemory(spec.Limits.MemoryMiB)
+		args[3] = SystemdMemory(spec.Limits.MemoryMiB)
 		args[4] = strconv.Itoa(spec.Limits.TasksMax)
 	}
-	return r.retry(ctx, callTimeout, func(ctx context.Context) error {
-		var stderr tailBuffer
-		if err := r.nodeExec(ctx, strings.NewReader(spec.Script), io.Discard, &stderr, detachedStartScript, args...); err != nil {
+	return x.Retry(ctx, CallTimeout, func(ctx context.Context) error {
+		var stderr TailBuffer
+		if err := x.NodeExec(ctx, strings.NewReader(spec.Script), io.Discard, &stderr, StartScript, args...); err != nil {
 			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
 		return nil
 	})
 }
 
-// stopDetached kills a check's unit, or its process group, on its own context so
+// StopDetached kills a check's unit, or its process group, on its own context so
 // a cancelled run still stops what it started.
-func (r Runner) stopDetached(ctx context.Context, spec detachSpec) error {
-	stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
+func (x Executor) StopDetached(ctx context.Context, spec RunSpec) error {
+	stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopTimeout)
 	defer cancel()
-	return r.retry(stop, callTimeout, func(ctx context.Context) error {
-		var stderr tailBuffer
-		if err := r.nodeExec(ctx, nil, io.Discard, &stderr, detachedStopScript, spec.Dir, spec.Unit); err != nil {
+	return x.Retry(stop, CallTimeout, func(ctx context.Context) error {
+		var stderr TailBuffer
+		if err := x.NodeExec(ctx, nil, io.Discard, &stderr, StopScript, spec.Dir, spec.Unit); err != nil {
 			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
 		return nil
@@ -338,32 +324,32 @@ func (r Runner) stopDetached(ctx context.Context, spec detachSpec) error {
 
 // watch is one running check the poller follows.
 type watch struct {
-	spec   detachSpec
+	spec   RunSpec
 	out    io.Writer
 	offset int64
 	done   chan error
 	closed bool
 }
 
-// detachedPoller follows every running check of one run on one node with a
-// single poll call at a time, so nine checks never open nine connections over a
-// route that takes seconds to dial.
-type detachedPoller struct {
-	r Runner
-	// started is told about each check once it is launched, so the caller can
+// Poller follows every running job of one node with a single poll call at a
+// time, so many jobs never open many connections over a route that takes
+// seconds to dial.
+type Poller struct {
+	x Executor
+	// Started is told about each job once it is launched, so the caller can
 	// record it for a restarted engine.
-	started func(detachSpec)
+	Started func(RunSpec)
 	mu      sync.Mutex
 	active  map[string]*watch
 	kick    chan struct{}
 	exited  chan struct{}
 }
 
-// newPoller starts the poller of a run. The returned function stops it and waits
+// NewPoller starts the poller of a run. The returned function stops it and waits
 // until its last poll has ended.
-func (r Runner) newPoller(ctx context.Context) (*detachedPoller, func()) {
+func (x Executor) NewPoller(ctx context.Context) (*Poller, func()) {
 	ctx, cancel := context.WithCancel(ctx)
-	p := &detachedPoller{r: r, active: map[string]*watch{}, kick: make(chan struct{}, 1), exited: make(chan struct{})}
+	p := &Poller{x: x, active: map[string]*watch{}, kick: make(chan struct{}, 1), exited: make(chan struct{})}
 	go func() {
 		defer close(p.exited)
 		p.loop(ctx)
@@ -376,20 +362,20 @@ func (r Runner) newPoller(ctx context.Context) (*detachedPoller, func()) {
 
 // Run starts a check on the node and follows it until it exits. It writes the
 // check's log to out as the polls bring it, and returns nil for exit status 0, a
-// *detachedExit for another status, and a *nodeLostError for a lost check. A
+// *DetachedExit for another status, and a *NodeLostError for a lost check. A
 // stopped context stops the check on the node and returns the context's error.
-func (p *detachedPoller) Run(ctx context.Context, spec detachSpec, out io.Writer) error {
+func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 	if !spec.Attach {
 		// The intent is recorded before the launch, so a restarted engine finds a
 		// check whose launch the engine stop cut off. A check that was never
 		// launched has no folder, and the restarted run starts it afresh.
-		if p.started != nil {
-			p.started(spec)
+		if p.Started != nil {
+			p.Started(spec)
 		}
-		if err := p.r.startDetached(ctx, spec); err != nil {
+		if err := p.x.StartDetached(ctx, spec); err != nil {
 			if ctx.Err() != nil {
 				if !EngineStopping() {
-					_ = p.r.stopDetached(ctx, spec)
+					_ = p.x.StopDetached(ctx, spec)
 				}
 				return ctx.Err()
 			}
@@ -412,7 +398,7 @@ func (p *detachedPoller) Run(ctx context.Context, spec detachSpec, out io.Writer
 		// An engine stop leaves the check running for the restarted engine.
 		if !EngineStopping() {
 			p.drain(ctx, w)
-			_ = p.r.stopDetached(ctx, spec)
+			_ = p.x.StopDetached(ctx, spec)
 		}
 		return ctx.Err()
 	}
@@ -421,28 +407,28 @@ func (p *detachedPoller) Run(ctx context.Context, spec detachSpec, out io.Writer
 // drain reads the log a stopped check wrote since the last poll, so the
 // evidence of a cancelled check still reaches its log file. It is one
 // best-effort call.
-func (p *detachedPoller) drain(ctx context.Context, w *watch) {
-	last, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
+func (p *Poller) drain(ctx context.Context, w *watch) {
+	last, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopTimeout)
 	defer cancel()
-	frames, err := p.r.pollNode(last, []*watch{w})
+	frames, err := p.x.pollNode(last, []*watch{w})
 	if err != nil {
 		return
 	}
 	if frame, ok := frames[w.spec.Dir]; ok {
-		_, _ = w.out.Write(frame.payload)
+		_, _ = w.out.Write(frame.Payload)
 	}
 }
 
 // release takes a check away from the poller. After it returns, the poller never
 // writes to the check's output again.
-func (p *detachedPoller) release(w *watch) {
+func (p *Poller) release(w *watch) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	w.closed = true
 	delete(p.active, w.spec.Dir)
 }
 
-func (p *detachedPoller) snapshot() []*watch {
+func (p *Poller) snapshot() []*watch {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	batch := make([]*watch, 0, len(p.active))
@@ -452,7 +438,7 @@ func (p *detachedPoller) snapshot() []*watch {
 	return batch
 }
 
-func (p *detachedPoller) loop(ctx context.Context) {
+func (p *Poller) loop(ctx context.Context) {
 	for {
 		batch := p.snapshot()
 		if len(batch) == 0 {
@@ -463,7 +449,7 @@ func (p *detachedPoller) loop(ctx context.Context) {
 				continue
 			}
 		}
-		frames, err := p.r.pollNode(ctx, batch)
+		frames, err := p.x.pollNode(ctx, batch)
 		if ctx.Err() != nil {
 			return
 		}
@@ -472,14 +458,14 @@ func (p *detachedPoller) loop(ctx context.Context) {
 		} else {
 			p.apply(batch, frames)
 		}
-		if p.r.pause(ctx, pollInterval) != nil {
+		if p.x.pause(ctx, PollInterval) != nil {
 			return
 		}
 	}
 }
 
 // failAll ends every polled check with err.
-func (p *detachedPoller) failAll(batch []*watch, err error) {
+func (p *Poller) failAll(batch []*watch, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, w := range batch {
@@ -490,7 +476,7 @@ func (p *detachedPoller) failAll(batch []*watch, err error) {
 }
 
 // finish ends a check with its result. The caller holds the poller's lock.
-func (p *detachedPoller) finish(w *watch, err error) {
+func (p *Poller) finish(w *watch, err error) {
 	w.closed = true
 	delete(p.active, w.spec.Dir)
 	w.done <- err
@@ -498,7 +484,7 @@ func (p *detachedPoller) finish(w *watch, err error) {
 
 // apply writes the new log bytes of each check and ends the checks that exited
 // or vanished once their whole log arrived.
-func (p *detachedPoller) apply(batch []*watch, frames map[string]pollFrame) {
+func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, w := range batch {
@@ -506,63 +492,75 @@ func (p *detachedPoller) apply(batch []*watch, frames map[string]pollFrame) {
 		if !ok || w.closed {
 			continue
 		}
-		if len(frame.payload) > 0 {
-			_, _ = w.out.Write(frame.payload)
-			w.offset += int64(len(frame.payload))
+		if len(frame.Payload) > 0 {
+			_, _ = w.out.Write(frame.Payload)
+			w.offset += int64(len(frame.Payload))
 		}
-		if w.offset < frame.size {
+		if w.offset < frame.Size {
 			continue
 		}
-		switch frame.state {
-		case pollExited:
-			if frame.code == 0 {
+		switch frame.State {
+		case StateExited:
+			if frame.Code == 0 {
 				p.finish(w, nil)
 			} else {
-				p.finish(w, &detachedExit{Code: frame.code})
+				p.finish(w, &DetachedExit{Code: frame.Code})
 			}
-		case pollGone, pollMissing:
+		case StateGone, StateMissing:
 			// A check that was launched has a folder. Without it, and without an
 			// exit record, nothing can say how the check ended.
-			p.finish(w, &nodeLostError{node: p.r.Node.Name, gone: true})
+			p.finish(w, &NodeLostError{Node: p.x.Node.Name, Gone: true})
 		}
 	}
 }
 
-type pollState string
+type State string
 
 const (
-	pollRunning pollState = "running"
-	pollExited  pollState = "exited"
-	pollGone    pollState = "gone"
-	// pollMissing is a check whose folder does not exist: it was never launched.
-	pollMissing pollState = "missing"
+	StateRunning State = "running"
+	StateExited  State = "exited"
+	StateGone    State = "gone"
+	// StateMissing is a check whose folder does not exist: it was never launched.
+	StateMissing State = "missing"
 )
 
-// pollFrame is what one poll learned about one check.
-type pollFrame struct {
-	state   pollState
-	code    int
-	size    int64
-	payload []byte
+// Frame is what one poll learned about one job.
+type Frame struct {
+	State   State
+	Code    int
+	Size    int64
+	Payload []byte
 }
 
 var pollHeader = regexp.MustCompile(`^DYNA_DETACH dir=(\S+) state=(running|exited|gone|missing) code=(-?[0-9]*) size=([0-9]+) bytes=([0-9]+)$`)
 
+// Poll asks the node about every job in specs with one call, and retries the
+// call when the connection fails. The offset of each job's log bytes comes
+// from offsets, keyed by the job's folder; a job with no entry is read from
+// the start.
+func (x Executor) Poll(ctx context.Context, specs []RunSpec, offsets map[string]int64) (map[string]Frame, error) {
+	batch := make([]*watch, 0, len(specs))
+	for _, spec := range specs {
+		batch = append(batch, &watch{spec: spec, offset: offsets[spec.Dir]})
+	}
+	return x.pollNode(ctx, batch)
+}
+
 // pollNode asks the node about every check in the batch with one call, and
 // retries the call when the connection fails.
-func (r Runner) pollNode(ctx context.Context, batch []*watch) (map[string]pollFrame, error) {
+func (x Executor) pollNode(ctx context.Context, batch []*watch) (map[string]Frame, error) {
 	var args []string
 	for _, w := range batch {
 		args = append(args, w.spec.Dir, w.spec.Unit, strconv.FormatInt(w.offset, 10))
 	}
-	var frames map[string]pollFrame
-	err := r.retry(ctx, callTimeout, func(ctx context.Context) error {
+	var frames map[string]Frame
+	err := x.Retry(ctx, CallTimeout, func(ctx context.Context) error {
 		var out bytes.Buffer
-		var stderr tailBuffer
-		if err := r.nodeExec(ctx, nil, &out, &stderr, detachedPollScript, args...); err != nil {
+		var stderr TailBuffer
+		if err := x.NodeExec(ctx, nil, &out, &stderr, PollScript, args...); err != nil {
 			return fmt.Errorf("%w: %s", err, stderr.String())
 		}
-		parsed, err := parsePoll(&out)
+		parsed, err := ParsePoll(&out)
 		if err != nil {
 			// A reply cut short is a failed connection, and the offsets stand.
 			return err
@@ -573,10 +571,10 @@ func (r Runner) pollNode(ctx context.Context, batch []*watch) (map[string]pollFr
 	return frames, err
 }
 
-// parsePoll reads the frames of one poll reply. A reply that does not parse
+// ParsePoll reads the frames of one poll reply. A reply that does not parse
 // whole is an error and advances nothing.
-func parsePoll(reply io.Reader) (map[string]pollFrame, error) {
-	frames := map[string]pollFrame{}
+func ParsePoll(reply io.Reader) (map[string]Frame, error) {
+	frames := map[string]Frame{}
 	in := bufio.NewReader(reply)
 	for {
 		line, err := in.ReadString('\n')
@@ -592,11 +590,11 @@ func parsePoll(reply io.Reader) (map[string]pollFrame, error) {
 		}
 		size, _ := strconv.ParseInt(match[4], 10, 64)
 		n, _ := strconv.Atoi(match[5])
-		frame := pollFrame{state: pollState(match[2]), size: size, payload: make([]byte, n)}
+		frame := Frame{State: State(match[2]), Size: size, Payload: make([]byte, n)}
 		if match[3] != "" {
-			frame.code, _ = strconv.Atoi(match[3])
+			frame.Code, _ = strconv.Atoi(match[3])
 		}
-		if _, err := io.ReadFull(in, frame.payload); err != nil {
+		if _, err := io.ReadFull(in, frame.Payload); err != nil {
 			return nil, fmt.Errorf("poll reply ended inside the log of %s: %w", match[1], err)
 		}
 		if end, err := in.ReadByte(); err != nil || end != '\n' {
