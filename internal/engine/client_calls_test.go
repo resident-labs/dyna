@@ -96,6 +96,7 @@ var dynamicCallSites = map[string][]string{
 	"internal/cli/rules/rules.go method":            {"AddRule", "EditRule", "RemoveRule"},
 	"internal/cli/subagent/consolidation.go method": {"ResumeSessionConsolidation", "CancelSessionConsolidation"},
 	"internal/cli/sync/operation.go method":         {"SyncRefresh"},
+	"internal/ghclient/session_operation.go method": {"GitHubCommand", "GitPush"},
 }
 
 // clientCallSite is one .Call( call in client source, with the text of its

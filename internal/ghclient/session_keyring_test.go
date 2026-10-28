@@ -29,7 +29,7 @@ func runRoomCommand(t *testing.T, repoDir, repo, token string) (login, out strin
 }
 
 // A managed shell cannot open the desktop keyring, so a saved login gives no
-// token there. The token the turn already holds must still serve Dyna's own
+// token there. The selected room account token must still serve Dyna's own
 // GitHub commands, and only when it is that saved account with access to the
 // room repository.
 func TestSessionServesCommandsWhenTheKeyringIsUnavailable(t *testing.T) {
@@ -59,12 +59,12 @@ esac
 	// The turn starts while the owner's keyring still answers, so the room
 	// account is proved and stored.
 	session, err := SessionEnvironment(context.Background(), records[0].ID, t.TempDir(), "/real/dyna", os.Environ())
-	if err != nil || session.Env["GH_TOKEN"] != "worker-secret" {
-		t.Fatalf("turn token=%q err=%v, want the saved account", session.Env["GH_TOKEN"], err)
+	if err != nil || session.Env["GH_TOKEN"] != "" {
+		t.Fatalf("turn host=%q err=%v, want the saved account inside Dyna", session.Env["GH_HOST"], err)
 	}
 
-	// The keyring is gone: the saved login gives no token, and only the token
-	// the turn carries can answer.
+	// The keyring is gone: the saved login gives no token, and only an
+	// explicitly supplied account token can answer.
 	t.Setenv("GH_KEYRING", "gone")
 
 	// The stored choice names the same account, so the login matches; the token

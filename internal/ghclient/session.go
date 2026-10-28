@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,12 +13,12 @@ import (
 
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/shellquote"
 )
 
 // ReadOnlyEnv marks the gh multicall guard and selects its session mode.
 const ReadOnlyEnv = "DYNA_GH_READ_ONLY"
 const BinaryEnv = "DYNA_GH_BINARY"
+const GitBinaryEnv = "DYNA_GIT_BINARY"
 
 type GuardMode string
 
@@ -34,8 +35,8 @@ type SessionEnv struct {
 	Notice string
 }
 
-// SessionEnvironment gives plain gh the room account without storing a token.
-// The token has the same trust level as credentials in the owner's shell.
+// SessionEnvironment gives guarded gh and git access to the room account.
+// Workers never receive the token or the owner's saved gh configuration.
 // The private scratch symlink selects the executable; it stores no runtime state.
 // GitHub tooling never fails the call: a rate limit, an unreachable API, a
 // missing CLI, or no usable sign-in starts the turn without GitHub commands,
@@ -45,7 +46,7 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	if err != nil {
 		return SessionEnv{}, err
 	}
-	out := map[string]string{"GH_TOKEN": "", "GITHUB_TOKEN": "", "GH_ENTERPRISE_TOKEN": "", "GITHUB_ENTERPRISE_TOKEN": "", "GH_REPO": ""}
+	out := map[string]string{"GH_TOKEN": "", "GITHUB_TOKEN": "", "GH_ENTERPRISE_TOKEN": "", "GITHUB_ENTERPRISE_TOKEN": "", "GH_REPO": "", GitBinaryEnv: ""}
 	cmd := Command(ctx, "", rec.Repo)
 	r := repositoryFor(ctx, cmd)
 	if r.name == "" {
@@ -55,43 +56,28 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	readOnly := Access(ctx, rec) != ReadWrite
 	// installed is false when gh is absent, so no account probe can succeed.
 	installed := filepath.IsAbs(cmd.Path) && isExecutable(cmd.Path)
-	notice, token := "", ""
-	// unavailable means this turn could not prove which account it may use.
-	unavailable := false
+	notice := ""
 	switch {
 	case !installed:
 		// The turn runs without GitHub commands, and one line says so.
-		notice, unavailable = missingCLINotice, true
+		notice = missingCLINotice
 	default:
-		_, token, err = selectAccount(ctx, cmd, r)
+		_, _, err = selectAccount(ctx, cmd, r)
 		if err != nil {
 			// A turn must run even while GitHub refuses requests, so a limit, an
 			// unreachable API, or no usable sign-in becomes one line for the agent.
 			var probe *accountProbeError
 			switch {
 			case errors.As(err, &probe) && probe.transient:
-				notice, token, unavailable = probeNotice(probe), "", true
+				notice = probeNotice(probe)
 			case errors.Is(err, ErrNoSignedInAccount):
-				notice, token, unavailable = noSignedInAccountNotice, "", true
+				notice = noSignedInAccountNotice
 			default:
 				return SessionEnv{}, err
 			}
 		}
 	}
-	tokenKey, fallbackKey := tokenEnvNames(r.host)
-	if token == "" && !unavailable {
-		// Token-only owner environments remain usable when gh has no saved accounts.
-		source := map[string]string{}
-		for _, entry := range inherited {
-			key, value, _ := strings.Cut(entry, "=")
-			source[key] = value
-		}
-		token = source[tokenKey]
-		if token == "" {
-			token = source[fallbackKey]
-		}
-	}
-	out[tokenKey], out["GH_HOST"] = token, r.host
+	out["GH_HOST"] = r.host
 	if !filepath.IsAbs(scratchDir) || !filepath.IsAbs(dynaBinary) {
 		return SessionEnv{}, fmt.Errorf("GitHub session tools require absolute scratch and binary paths")
 	}
@@ -108,28 +94,29 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	if err := os.MkdirAll(bin, 0700); err != nil {
 		return SessionEnv{}, err
 	}
-	next := filepath.Join(bin, "gh.next")
-	_ = os.Remove(next)
-	if err := os.Symlink(dynaBinary, next); err != nil {
-		return SessionEnv{}, err
-	}
-	if err := os.Rename(next, filepath.Join(bin, "gh")); err != nil {
-		return SessionEnv{}, err
-	}
-	out[BinaryEnv] = cmd.Path
-	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
-	if unavailable {
-		// The turn could not prove its account, so no other account may stand in:
-		// point the GitHub CLI at an empty configuration and give git no helper.
-		config := filepath.Join(bin, "config")
-		if err := os.MkdirAll(config, 0700); err != nil {
+	for _, name := range []string{"gh", "git"} {
+		next := filepath.Join(bin, name+".next")
+		_ = os.Remove(next)
+		if err := os.Symlink(dynaBinary, next); err != nil {
 			return SessionEnv{}, err
 		}
-		out["GH_CONFIG_DIR"] = config
+		if err := os.Rename(next, filepath.Join(bin, name)); err != nil {
+			return SessionEnv{}, err
+		}
 	}
-	// Read-only rooms get no helper; its keys still clear a parent's helper.
-	credentials := sessionCredentialHelper(r, cmd.Path)
-	if err := sessionGitConfig(ctx, rec, readOnly, credentials, !readOnly && token != "", values, out); err != nil {
+	gitBinary := values[GitBinaryEnv]
+	if !isExecutable(gitBinary) {
+		gitBinary, _ = exec.LookPath("git")
+	}
+	out[BinaryEnv], out[GitBinaryEnv] = cmd.Path, gitBinary
+	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
+	// Saved gh logins stay behind Dyna, never in the worker's configuration.
+	config := filepath.Join(bin, "config")
+	if err := os.MkdirAll(config, 0700); err != nil {
+		return SessionEnv{}, err
+	}
+	out["GH_CONFIG_DIR"] = config
+	if err := sessionGitConfig(ctx, rec, readOnly, values, out); err != nil {
 		return SessionEnv{}, err
 	}
 	return SessionEnv{Env: out, Notice: notice}, nil
@@ -160,19 +147,7 @@ func probeNotice(probe *accountProbeError) string {
 	return "GitHub is rate limited until " + probe.until.UTC().Format(time.RFC3339) + ", so GitHub commands may fail this turn; continue without them."
 }
 
-// sessionCredentialHelper lets plain git push to the room's repository with the
-// session's GH_TOKEN. The helper answers only for that repository's HTTPS URL,
-// and no token or configuration is saved to disk.
-func sessionCredentialHelper(r repository, ghPath string) [][2]string {
-	helper := "!" + shellquote.Quote(ghPath) + " auth git-credential"
-	return [][2]string{
-		{"credential.https://" + r.host + ".useHttpPath", "true"},
-		{"credential.https://" + r.host + "/" + r.name + ".helper", helper},
-		{"credential.https://" + r.host + "/" + r.name + ".git.helper", helper},
-	}
-}
-
-func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, credentials [][2]string, grant bool, inherited, out map[string]string) error {
+func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, inherited, out map[string]string) error {
 	count := 0
 	if raw := inherited["GIT_CONFIG_COUNT"]; raw != "" {
 		var err error
@@ -181,10 +156,6 @@ func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, crede
 			return fmt.Errorf("invalid inherited GIT_CONFIG_COUNT")
 		}
 	}
-	ownCredentialKeys := map[string]bool{}
-	for _, entry := range credentials {
-		ownCredentialKeys[entry[0]] = true
-	}
 	keys, values := []string{}, []string{}
 	for i := 0; i < count; i++ {
 		key := inherited[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
@@ -192,9 +163,8 @@ func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, crede
 		if key == "url."+blockedPushURL+".pushInsteadOf" {
 			continue
 		}
-		// A parent session's helper is replaced below, so it never accumulates
-		// and a read-only child does not keep its parent's push credentials.
-		if ownCredentialKeys[key] {
+		// No inherited credential helper enters a worker environment.
+		if strings.HasPrefix(key, "credential.") {
 			continue
 		}
 		if strings.HasPrefix(key, "remote.") && strings.HasSuffix(key, ".pushurl") {
@@ -226,11 +196,6 @@ func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, crede
 					keys, values = append(keys, "url."+blockedPushURL+".pushInsteadOf"), append(values, remote)
 				}
 			}
-		}
-	}
-	if grant {
-		for _, entry := range credentials {
-			keys, values = append(keys, entry[0]), append(values, entry[1])
 		}
 	}
 	for i, key := range keys {
