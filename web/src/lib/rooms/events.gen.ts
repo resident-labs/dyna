@@ -266,6 +266,7 @@ export interface MachineCacheCleanFailedEvent {
   name: string
   path: string
   reason: string
+  lastSuccessMs?: number
   atMs: number
 }
 
@@ -1522,6 +1523,7 @@ export function isMachineCacheCleanFailedEvent(v: unknown): v is MachineCacheCle
     typeof v.name === "string" &&
     typeof v.path === "string" &&
     typeof v.reason === "string" &&
+    (v.lastSuccessMs === undefined || Number.isInteger(v.lastSuccessMs)) &&
     Number.isInteger(v.atMs)
 }
 

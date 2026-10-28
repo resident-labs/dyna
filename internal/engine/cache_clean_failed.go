@@ -24,10 +24,11 @@ func cacheCleanFailedReporter(svc *notify.Service) localci.CacheCleanReporter {
 			return err
 		}
 		ev := room.MachineCacheCleanFailedEvent{
-			Name:   node.Name,
-			Path:   failure.Path,
-			Reason: failure.Reason,
-			AtMS:   int(time.Now().UnixMilli()),
+			Name:          node.Name,
+			Path:          failure.Path,
+			Reason:        failure.Reason,
+			LastSuccessMS: failure.LastSuccessMS,
+			AtMS:          int(time.Now().UnixMilli()),
 		}
 		var first error
 		for _, rec := range list {
