@@ -97,6 +97,8 @@ var nonStampKeys = map[string]string{
 	"DYNA_LAUNCH_GATE":                    "An inherited launch-gate file descriptor, unset at process start.",
 	"DYNA_GH_READ_ONLY":                   "The current tool's GitHub access policy.",
 	"DYNA_GH_BINARY":                      "The GitHub command path.",
+	"DYNA_GIT_BINARY":                     "The real Git binary behind the worker push guard.",
+	"DYNA_GH_PUSH_CA":                     "The PEM bundle engine-side worker Git pushes trust.",
 	"DYNA_SUBAGENT_LOCK_FD":               "A passed turn-lock file descriptor.",
 	"DYNA_AGENT_JOURNAL":                  "The append-only journal path.",
 	"DYNA_AGENT_JOURNAL_ROOT":             "The journal folder used by a workflow runner.",
