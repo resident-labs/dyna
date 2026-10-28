@@ -235,7 +235,11 @@ func (s *Service) FileIssue(ctx context.Context, roomRef string, in room.IssueIn
 		return room.Issue{}, err
 	}
 	in.Filer = by
-	if actor.Role == authority.Owner || actor.Room == r.ID {
+	// The caller's own room: the stored room of a session or root seat, or
+	// the room stamp of an owner process, which may carry the name. An owner
+	// without a stamp has no room of its own, so no filing is cross-room.
+	own := actor.Room
+	if own == "" || own == r.ID || own == r.Name {
 		return s.rooms().FileIssue(r.ID, in)
 	}
 	if err := authority.Check("issue file cross-room", actor, nil); err != nil {

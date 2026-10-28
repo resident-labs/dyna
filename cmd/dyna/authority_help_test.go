@@ -37,6 +37,10 @@ var serviceAuthorityActions = map[string]bool{
 	// library wake now is the --smells --now flags of `dyna library wake`, whose
 	// plain form any caller may run, so it has no command path of its own.
 	"library wake now": true,
+	// issue file cross-room is the --room form of `dyna issue` filing, whose
+	// plain form files in the caller's own room, so it has no command path of
+	// its own.
+	"issue file cross-room": true,
 }
 
 func TestAuthorityRulesResolveToCommands(t *testing.T) {
