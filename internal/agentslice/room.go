@@ -280,7 +280,7 @@ func checkRoomSupport() (bool, string) {
 	if !have["memory"] || !have["pids"] {
 		return false, "the cgroup has no " + missingController(have) + " controller"
 	}
-	userPath, ok := userManagerCgroup()
+	userPath, ok := userManagerCgroupAt(selfCgroupPath)
 	if !ok {
 		return false, "Dyna could not find the systemd user manager's cgroup"
 	}
@@ -310,12 +310,12 @@ func missingController(have map[string]bool) string {
 	return "pids"
 }
 
-// userManagerCgroup returns the cgroup path of the systemd user manager this
-// process runs under, whose subtree_control says which controllers the user
-// may use. The innermost user@.service ancestor wins, so a user manager
-// nested inside another reports its own delegation.
-func userManagerCgroup() (string, bool) {
-	raw, err := os.ReadFile(selfCgroupPath)
+// userManagerCgroupAt returns the cgroup path of the systemd user manager
+// that the given /proc/<pid>/cgroup file names, whose subtree_control says
+// which controllers the user may use. The innermost user@.service ancestor
+// wins, so a user manager nested inside another reports its own delegation.
+func userManagerCgroupAt(selfCgroup string) (string, bool) {
+	raw, err := os.ReadFile(selfCgroup)
 	if err != nil {
 		return "", false
 	}
@@ -336,6 +336,55 @@ func userManagerCgroup() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// RoomPids counts the processes of every room's slice on this machine: what
+// a room's own supervisors started under dyna-room-*.slice, which no Dyna
+// session scope holds and so no turn count sees. A machine without cgroup
+// v2, a user manager, or any room slice counts zero: callers degrade
+// quietly.
+func RoomPids() (byRoom map[string]int, total int) {
+	return RoomPidsAt(cgroupRoot, selfCgroupPath)
+}
+
+// RoomPidsAt counts the room slices of the cgroup v2 tree at root, keyed by
+// slice unit, and their sum, processes and threads together as pids.current
+// reports them. selfCgroup names the /proc/self/cgroup file that says which
+// user manager to look below; both paths are parameters so a caller can
+// inject a fake tree. Without a readable root, a user manager, or any room
+// slice it returns zero: callers degrade quietly.
+func RoomPidsAt(root, selfCgroup string) (byRoom map[string]int, total int) {
+	userPath, ok := userManagerCgroupAt(selfCgroup)
+	if !ok {
+		return nil, 0
+	}
+	// A room slice's name nests it below dyna-room.slice below the shared
+	// dyna.slice, so every room's cgroup sits in one directory.
+	dir := filepath.Join(root, userPath, Slice, "dyna-room.slice")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, 0 // no cgroup v2 root, or no room has a slice yet
+	}
+	byRoom = map[string]int{}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || !strings.HasPrefix(name, roomSlicePrefix) || !strings.HasSuffix(name, ".slice") {
+			continue
+		}
+		// A slice can vanish between the listing and the read, when its last
+		// process exits, so a room that cannot be read is skipped.
+		raw, err := os.ReadFile(filepath.Join(dir, name, "pids.current"))
+		if err != nil {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if err != nil {
+			continue
+		}
+		byRoom[name] = n
+		total += n
+	}
+	return byRoom, total
 }
 
 // totalMemory reads the machine's memory size once per process, in the kB
