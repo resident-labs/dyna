@@ -28,8 +28,8 @@ func TestBundleRemovalNamesTheHoldingSessionAndProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := manager(t)
-	old := install(t, manager, "pi", "1.3.0-dyna.2")
-	_ = install(t, manager, "pi", "2.0.0-dyna.2")
+	old := install(t, manager, "pi", "1.3.0-dyna.3")
+	_ = install(t, manager, "pi", "2.0.0-dyna.3")
 	ctx := context.Background()
 	recordtest.Write(t, filepath.Join(defaultstore.DataDir(), "sessions"), "ses_holder",
 		struct {

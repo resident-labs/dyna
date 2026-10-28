@@ -21,6 +21,8 @@ Run `/logout` and select a provider to remove its stored credential. This does n
 
 Environment variables are useful in CI and anywhere Pi should not store the key. Set the variable before starting Pi:
 
+Set `PI_NO_ENV_CREDENTIALS=1` to remove every built-in provider's inherited credential and endpoint variables at startup instead. Pi then takes credentials only from `auth.json` and `--api-key`. The cleanup happens before provider resolution and before Pi starts MCP servers or tools, so those child processes inherit the cleaned environment.
+
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 pi

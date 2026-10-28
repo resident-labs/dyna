@@ -13,6 +13,7 @@ export function kimiCodingProvider(): Provider<"openai-completions"> {
 			apiKey: envApiKeyAuth("Kimi API key", ["KIMI_API_KEY"]),
 			oauth: lazyOAuth({
 				name: "Kimi Code (subscription)",
+				envVars: ["KIMI_CODE_OAUTH_HOST", "KIMI_OAUTH_HOST"],
 				isSubscription: true,
 				loginLabel: "Sign in with Kimi Code",
 				load: loadKimiCodingOAuth,

@@ -12,6 +12,13 @@ const VERTEX_ADC_PATH = "~/.config/gcloud/application_default_credentials.json";
  */
 const vertexAuth: ApiKeyAuth = {
 	name: "Google Cloud credentials",
+	envVars: [
+		"GOOGLE_CLOUD_API_KEY",
+		"GOOGLE_APPLICATION_CREDENTIALS",
+		"GOOGLE_CLOUD_PROJECT",
+		"GCLOUD_PROJECT",
+		"GOOGLE_CLOUD_LOCATION",
+	],
 	login: async (interaction) => {
 		interaction.signal.throwIfAborted();
 		const method = await interaction.prompt({

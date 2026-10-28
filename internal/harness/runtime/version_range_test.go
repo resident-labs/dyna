@@ -15,7 +15,7 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 	for _, tc := range []struct{ harness, version, reason string }{
 		{"pi", "1.2.9", "Dyna's Pi fork"},
 		{"pi", "1.4.0", "Dyna's Pi fork"},
-		{"pi", "1.4.0-dyna.1", "Dyna's Pi fork"},
+		{"pi", "1.4.0-dyna.2", "Dyna's Pi fork"},
 	} {
 		_, err := m.Install(context.Background(), tc.harness, tc.version)
 		if err == nil || !strings.Contains(err.Error(), tc.reason) {
@@ -42,7 +42,7 @@ func TestPiForkVersionSatisfiesUpstreamMinimum(t *testing.T) {
 	if ok, reason := supportedVersionRange("pi", "1.4.0"); ok {
 		t.Fatalf("upstream npm Pi accepted: %s", reason)
 	}
-	if versionAtLeast("1.2.9-dyna.2", "1.3.0") {
+	if versionAtLeast("1.2.9-dyna.3", "1.3.0") {
 		t.Fatal("Dyna suffix raised an older upstream base version")
 	}
 }
