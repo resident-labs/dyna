@@ -51,7 +51,7 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 	dynaFork := 0
 	if spec != "" && spec == os.Getenv(piForkTarballEnv) {
 		version = piForkVersion
-		dynaFork = 1
+		dynaFork = minimumPiForkLevel
 	}
 	dir := filepath.Join(root, "lib/node_modules", pkg)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -101,7 +101,7 @@ func install(t *testing.T, m *BundleManager, h, v string) Bundle {
 }
 func TestBundleInstallResolveAndSelection(t *testing.T) {
 	m := manager(t)
-	for _, h := range []string{"claude", "pi"} {
+	for _, h := range []string{"claude"} {
 		old := install(t, m, h, "1.3.0")
 		latest := install(t, m, h, "1.10.0")
 		got, err := m.Resolve(h, "")
@@ -135,12 +135,12 @@ func TestBundleInstallResolveAndSelection(t *testing.T) {
 		}
 	}
 	bundles, err := m.List()
-	if err != nil || len(bundles) != 4 {
+	if err != nil || len(bundles) != 2 {
 		t.Fatalf("list: %d %v", len(bundles), err)
 	}
 	m.Run = func(context.Context, []string, []string) error { t.Fatal("reinstalled completed bundle"); return nil }
-	install(t, m, "pi", "1.10.0")
-	if _, err := m.Resolve("pi", "9.0.0"); err == nil {
+	install(t, m, "claude", "1.10.0")
+	if _, err := m.Resolve("claude", "9.0.0"); err == nil {
 		t.Fatal("missing pin resolved")
 	}
 }
@@ -172,7 +172,7 @@ func TestInstallPrivateEnvironment(t *testing.T) {
 		}
 		return fixtureInstall(ctx, args, env)
 	}
-	install(t, m, "pi", "1.3.0+fixture")
+	install(t, m, "claude", "1.3.0+fixture")
 }
 func TestRejectInvalidHarnessAndVersion(t *testing.T) {
 	m := manager(t)
@@ -197,7 +197,7 @@ func TestInstallFailureDoesNotPublishOrLeak(t *testing.T) {
 		}
 		return errors.New("https://user:fixture-secret@registry")
 	}
-	_, err := m.Install(context.Background(), "pi", "1.3.0")
+	_, err := m.Install(context.Background(), "claude", "1.3.0")
 	if err == nil || strings.Contains(err.Error(), "fixture-secret") {
 		t.Fatalf("unsafe error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestInstallFailureDoesNotPublishOrLeak(t *testing.T) {
 	if err != nil || len(bundles) != 0 {
 		t.Fatalf("partial bundles: %v %v", bundles, err)
 	}
-	entries, _ := os.ReadDir(filepath.Join(m.Root, "pi"))
+	entries, _ := os.ReadDir(filepath.Join(m.Root, "claude-code"))
 	if len(entries) != 0 {
 		t.Fatal("staging retained")
 	}
@@ -228,7 +228,7 @@ func TestRejectEscapingPathsAndTampering(t *testing.T) {
 				if err := os.MkdirAll(m.Root, 0700); err != nil {
 					t.Fatal(err)
 				}
-				link := filepath.Join(m.Root, "pi")
+				link := filepath.Join(m.Root, "claude-code")
 				if attack == "lock" {
 					link = filepath.Join(m.Root, ".install.lock")
 				}
@@ -245,8 +245,8 @@ func TestRejectEscapingPathsAndTampering(t *testing.T) {
 					return err
 				}
 				if attack == "executable" {
-					_ = os.Remove(filepath.Join(args[4], "bin/pi"))
-					return os.Symlink(sentinel, filepath.Join(args[4], "bin/pi"))
+					_ = os.Remove(filepath.Join(args[4], "bin/claude"))
+					return os.Symlink(sentinel, filepath.Join(args[4], "bin/claude"))
 				}
 				if attack == "other-link" {
 					return os.Symlink(outside, filepath.Join(args[4], "escape"))
@@ -256,7 +256,7 @@ func TestRejectEscapingPathsAndTampering(t *testing.T) {
 				}
 				return nil
 			}
-			b, err := m.Install(context.Background(), "pi", "1.3.0")
+			b, err := m.Install(context.Background(), "claude", "1.3.0")
 			if attack == "manifest-path" || attack == "modified-hash" {
 				if err != nil {
 					t.Fatal(err)
@@ -278,7 +278,7 @@ func TestRejectEscapingPathsAndTampering(t *testing.T) {
 					_ = os.Chmod(path, 0700)
 					_ = os.WriteFile(path, []byte("changed"), 0700)
 				}
-				_, err = m.Resolve("pi", "1.3.0")
+				_, err = m.Resolve("claude", "1.3.0")
 			}
 			if err == nil {
 				t.Fatal("unsafe bundle accepted")
@@ -310,10 +310,10 @@ func TestConcurrentInstallsSerializeAndReadersSeeCompleteBundles(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
 	wg.Add(1)
-	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "pi", "1.3.0"); errs <- err }()
+	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "claude", "1.3.0"); errs <- err }()
 	<-entered
 	wg.Add(2)
-	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "pi", "1.3.0"); errs <- err }()
+	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "claude", "1.3.0"); errs <- err }()
 	go func() {
 		defer wg.Done()
 		bundles, err := m.List()
@@ -343,7 +343,7 @@ func TestInstallLockCancellation(t *testing.T) {
 	defer unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := m.Install(ctx, "pi", "1.3.0"); err == nil {
+	if _, err := m.Install(ctx, "claude", "1.3.0"); err == nil {
 		t.Fatal("lock wait ignored cancellation")
 	}
 }
@@ -358,7 +358,7 @@ func TestGCKeepsNewestAndExactPinsAndNeverAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pinned []PinnedBundle
-	for _, h := range []string{"claude-code", "pi"} {
+	for _, h := range []string{"claude-code"} {
 		for _, v := range []string{"1.3.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"} {
 			b := install(t, m, h, v)
 			if v == "1.3.0" {
@@ -378,7 +378,7 @@ func TestGCKeepsNewestAndExactPinsAndNeverAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundles) != 8 {
+	if len(bundles) != 4 {
 		t.Fatalf("kept %d bundles: %+v", len(bundles), bundles)
 	}
 	for _, b := range bundles {
@@ -407,25 +407,25 @@ func TestInstallOfOneHarnessDoesNotBlockAnother(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	m.Run = func(ctx context.Context, args, env []string) error {
-		if strings.HasPrefix(args[len(args)-1], "@anthropic-ai/") {
+		if args[len(args)-1] == os.Getenv(piForkTarballEnv) {
 			close(entered)
 			<-release
 		}
 		return fixtureInstall(ctx, args, env)
 	}
-	claude := make(chan error, 1)
-	go func() { _, err := m.Install(context.Background(), "claude", "1.0.0"); claude <- err }()
+	pi := make(chan error, 1)
+	go func() { _, err := m.Install(context.Background(), "pi", piForkVersion); pi <- err }()
 	<-entered
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if _, err := m.Install(ctx, "pi", "2.0.0"); err != nil {
-		t.Fatalf("pi waited for the claude download: %v", err)
+	if _, err := m.Install(ctx, "claude", "2.0.0"); err != nil {
+		t.Fatalf("claude waited for the pi download: %v", err)
 	}
-	if _, err := m.LeaseManaged(ctx, Bundle{Harness: "pi", Version: "2.0.0"}); err != nil {
-		t.Fatalf("lease waited for the claude download: %v", err)
+	if _, err := m.LeaseManaged(ctx, Bundle{Harness: "claude-code", Version: "2.0.0"}); err != nil {
+		t.Fatalf("lease waited for the pi download: %v", err)
 	}
 	close(release)
-	if err := <-claude; err != nil {
+	if err := <-pi; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -452,7 +452,7 @@ func TestInstallsOfOneHarnessSerialize(t *testing.T) {
 		var wg sync.WaitGroup
 		for _, v := range []string{"1.3.0", "2.0.0"} {
 			wg.Go(func() {
-				if _, err := m.Install(context.Background(), "pi", v); err != nil {
+				if _, err := m.Install(context.Background(), "claude", v); err != nil {
 					t.Error(err)
 				}
 			})
@@ -484,12 +484,12 @@ func TestIntegrityFallbackAndMissingMetadata(t *testing.T) {
 					return err
 				}
 				if withIntegrity {
-					data := []byte(`{"name":"` + piNPMPackage + `","version":"1.3.0","_integrity":"sha512-Zml4dHVyZQ=="}`)
-					return os.WriteFile(filepath.Join(args[4], "lib/node_modules", piNPMPackage, "package.json"), data, 0600)
+					data := []byte(`{"name":"@anthropic-ai/claude-code","version":"1.3.0","_integrity":"sha512-Zml4dHVyZQ=="}`)
+					return os.WriteFile(filepath.Join(args[4], "lib/node_modules", "@anthropic-ai/claude-code", "package.json"), data, 0600)
 				}
 				return nil
 			}
-			b := install(t, m, "pi", "1.3.0")
+			b := install(t, m, "claude", "1.3.0")
 			data, err := os.ReadFile(filepath.Join(b.Directory, "bundle.json"))
 			if err != nil {
 				t.Fatal(err)
@@ -514,7 +514,7 @@ func TestGCRejectsHarnessLinkToAccounts(t *testing.T) {
 	if err := os.MkdirAll(m.Root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(accounts, filepath.Join(m.Root, "pi")); err != nil {
+	if err := os.Symlink(accounts, filepath.Join(m.Root, "claude-code")); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.GC(nil); err == nil {
@@ -535,16 +535,16 @@ func TestNewBundleManagerUsesDataRoot(t *testing.T) {
 
 func TestSelectionNeverReadsOutsideBundleRoot(t *testing.T) {
 	m := manager(t)
-	install(t, m, "pi", "1.3.0")
-	latest := install(t, m, "pi", "2.0.0")
+	install(t, m, "claude", "1.3.0")
+	latest := install(t, m, "claude", "2.0.0")
 	outside := filepath.Join(t.TempDir(), "credential")
 	if err := os.WriteFile(outside, []byte("1.3.0"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(m.Root, ".pi-selected")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(m.Root, ".claude-code-selected")); err != nil {
 		t.Fatal(err)
 	}
-	got, err := m.Resolve("pi", "")
+	got, err := m.Resolve("claude", "")
 	if err != nil || got != latest {
 		t.Fatalf("followed outside selection: %+v %v", got, err)
 	}
@@ -588,7 +588,7 @@ func TestClaudeBundleUsesNativeBinaryWhenScriptsAreBlocked(t *testing.T) {
 // stopped every harness.
 func TestResolveReadsOnlyTheRequestedHarness(t *testing.T) {
 	m := manager(t)
-	pi := install(t, m, "pi", "1.3.0")
+	pi := install(t, m, "pi", piForkVersion)
 	claude := install(t, m, "claude", "1.0.0")
 	manifest := filepath.Join(claude.Directory, "bundle.json")
 	if err := os.Chmod(claude.Directory, 0700); err != nil {
@@ -622,8 +622,8 @@ func TestResolveReadsOnlyTheRequestedHarness(t *testing.T) {
 // modification time are restored: the change time still moves.
 func TestResolveRejectsModifiedExecutableWithRestoredMtime(t *testing.T) {
 	m := manager(t)
-	b := install(t, m, "pi", "1.3.0")
-	if _, err := m.Resolve("pi", ""); err != nil {
+	b := install(t, m, "claude", "1.3.0")
+	if _, err := m.Resolve("claude", ""); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(b.Executable)
@@ -647,7 +647,7 @@ func TestResolveRejectsModifiedExecutableWithRestoredMtime(t *testing.T) {
 	if err := os.Chtimes(b.Executable, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Resolve("pi", ""); err == nil {
+	if _, err := m.Resolve("claude", ""); err == nil {
 		t.Fatal("modified executable accepted after restoring its modification time")
 	}
 }
@@ -655,8 +655,8 @@ func TestResolveRejectsModifiedExecutableWithRestoredMtime(t *testing.T) {
 func TestNPMInstallRejectsMismatchedRegistryReceipt(t *testing.T) {
 	for _, body := range []string{
 		recommendedMetadata("@example/other", "1.0.0"),
-		recommendedMetadata(piNPMPackage, "1.1.1"),
-		`{"name":"` + piNPMPackage + `","version":"1.3.0","dist":{"integrity":"sha512-bad"}}`,
+		recommendedMetadata("@anthropic-ai/claude-code", "1.1.1"),
+		`{"name":"@anthropic-ai/claude-code","version":"1.3.0","dist":{"integrity":"sha512-bad"}}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			m := manager(t)
@@ -674,7 +674,7 @@ func TestNPMInstallRejectsMismatchedRegistryReceipt(t *testing.T) {
 				}
 				return os.Remove(filepath.Join(args[4], "package-lock.json"))
 			}
-			if _, err := m.Install(context.Background(), "pi", "1.3.0"); err == nil {
+			if _, err := m.Install(context.Background(), "claude", "1.3.0"); err == nil {
 				t.Fatal("published a bundle with an unverified registry receipt")
 			}
 			bundles, err := m.List()

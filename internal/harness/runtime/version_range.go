@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -14,10 +15,10 @@ import (
 func supportedVersionRange(harness, version string) (bool, string) {
 	switch harness {
 	case "pi":
-		if versionAtLeast(version, "1.3.0") {
+		if piForkLevel(version) >= minimumPiForkLevel {
 			return true, ""
 		}
-		return false, "Dyna supports Pi 1.3.0 or later for model compaction reserves."
+		return false, "Dyna supports Pi " + piForkVersion + " or later of Dyna's Pi fork; upstream npm Pi and older forks lack features Dyna needs. Update Pi from Dyna's Harnesses page."
 	case "kimi-code":
 		if versionAtLeast(version, "2.3.1") {
 			return true, ""
@@ -25,6 +26,21 @@ func supportedVersionRange(harness, version string) (bool, string) {
 		return false, "Dyna supports Kimi Code 2.3.1 or later."
 	}
 	return true, ""
+}
+
+// piForkLevel reads the Dyna fork level from a version like 1.4.0-dyna.2.
+// It returns 0 for every other version, including upstream npm Pi, whose
+// releases carry no fork features.
+func piForkLevel(version string) int {
+	_, suffix, ok := strings.Cut(version, "-dyna.")
+	if !ok {
+		return 0
+	}
+	level, err := strconv.Atoi(suffix)
+	if err != nil || level < 1 {
+		return 0
+	}
+	return level
 }
 
 // versionAtLeast compares exact versions. Semantic versions compare by

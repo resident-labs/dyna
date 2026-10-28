@@ -105,20 +105,20 @@ func TestRecommendedVersionsExactMetadataMismatch(t *testing.T) {
 			calls := 0
 			r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
 				calls++
-				body := recommendedMetadata(piNPMPackage, "1.3.0")
+				body := recommendedMetadata("@anthropic-ai/claude-code", "1.3.0")
 				if calls == 2 {
 					if !strings.HasSuffix(req.URL.Path, "/1.3.0") {
 						t.Fatalf("wrong exact source: %s", req.URL)
 					}
 					if change == "version" {
-						body = recommendedMetadata(piNPMPackage, "1.1.1")
+						body = recommendedMetadata("@anthropic-ai/claude-code", "1.1.1")
 					} else {
 						body = strings.ReplaceAll(body, base64.StdEncoding.EncodeToString(make([]byte, 64)), base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 64))))
 					}
 				}
 				return recommendedResponse(200, body), nil
 			})}
-			a, _ := Adapter("pi")
+			a, _ := Adapter("claude-code")
 			v, reason := r.npmVersion(context.Background(), a, "https://registry.npmjs.org/example/latest")
 			if v != "" || reason == "" || calls != 2 {
 				t.Fatalf("mismatched metadata accepted: %q, %q, %d requests", v, reason, calls)
