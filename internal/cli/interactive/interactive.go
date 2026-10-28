@@ -3,8 +3,6 @@ package interactive
 import (
 	"embed"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	"dyna-agent/internal/authority"
@@ -12,7 +10,6 @@ import (
 	"dyna-agent/internal/guidance"
 	"dyna-agent/internal/mode"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/spf13/cobra"
 )
 
@@ -109,31 +106,18 @@ func NewGuideCommand() *cobra.Command {
 			if len(chosen) == 1 {
 				doc = harnessDocument(chosen[0])
 			}
-			if plain || !isTTY(c.OutOrStdout()) {
-				fmt.Fprint(c.OutOrStdout(), doc)
-				return nil
-			}
-			out, err := glamour.Render(doc, "auto")
-			if err != nil {
-				fmt.Fprint(c.OutOrStdout(), doc)
-				return nil
-			}
-			fmt.Fprint(c.OutOrStdout(), out)
-			return nil
+			_, err = fmt.Fprint(c.OutOrStdout(), doc)
+			return err
 		},
 	}
-	cmd.Flags().BoolVar(&plain, "plain", false, "raw markdown (default when piped)")
+	// Guide output is raw markdown on every writer. The dyna binary re-execs
+	// itself as helper processes (processguard, sessionhost), and a terminal
+	// markdown renderer such as glamour would pull syntax lexers and styles
+	// into every helper's package init. --plain stays so existing callers
+	// keep working; it no longer changes anything.
+	cmd.Flags().BoolVar(&plain, "plain", false, "no-op: guide always prints raw markdown")
 	for _, name := range guideHarnesses {
 		harness[name] = cmd.Flags().Bool(name, false, "external-orchestration: the watcher recipe for "+name)
 	}
 	return cmd
-}
-
-func isTTY(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
