@@ -145,6 +145,9 @@ func TestWriteRoomSliceManagedHeaderRule(t *testing.T) {
 // its scripts which slice they run in; a launch without a room keeps the
 // shared agent slice and exports nothing.
 func TestWrapRoomUsesTheRoomSlice(t *testing.T) {
+	// A test run inside a room slice inherits DYNA_ROOM_SLICE; the roomless
+	// launch below must start from a clean environment.
+	t.Setenv(mode.EnvRoomSlice, "")
 	config, calls := fakeManager(t)
 	fakeCgroups(t, "cpuset cpu io memory pids\n", "cpu memory pids\n", 33554432)
 
