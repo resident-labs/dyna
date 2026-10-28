@@ -28,9 +28,9 @@ func TestDoctorResolvesThePiProviderFromTheProfileModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundles := manager(t)
-	install(t, bundles, "pi", "1.4.0")
+	install(t, bundles, "pi", piForkVersion)
 	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(t.TempDir(), "generations")}
-	d := r.Doctor(context.Background(), profile.Profile{Name: "pi-zai", Harness: "pi", Model: "zai/glm-5.3", RuntimeVersion: "1.4.0"})
+	d := r.Doctor(context.Background(), profile.Profile{Name: "pi-zai", Harness: "pi", Model: "zai/glm-5.3", RuntimeVersion: piForkVersion})
 	if d.AccountID != captured.ID {
 		t.Fatalf("Doctor account = %q, want %q (%+v)", d.AccountID, captured.ID, d)
 	}

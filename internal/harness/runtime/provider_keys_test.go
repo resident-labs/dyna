@@ -142,7 +142,7 @@ func TestPiAuthLockReportsAStaleLockItCannotRemove(t *testing.T) {
 
 func TestPiProviderKeyCreatesAndActivatesAnAccount(t *testing.T) {
 	r := providerKeysRuntime(t)
-	install(t, r.Bundles, "pi", "1.3.0")
+	install(t, r.Bundles, "pi", "1.3.0-dyna.2")
 	ctx := context.Background()
 	if _, found, err := r.piAccountForProvider(ctx, store.ProviderZAI); err != nil || found {
 		t.Fatalf("fresh install already has a zai account: %+v %v", found, err)
