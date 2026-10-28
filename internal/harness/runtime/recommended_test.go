@@ -55,8 +55,11 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 		t.Fatalf("got %d adapters", len(got))
 	}
 	sort.Strings(packages)
-	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code", piNPMPackage}) {
+	if !reflect.DeepEqual(packages, []string{"@anthropic-ai/claude-code"}) {
 		t.Fatalf("incorrect adapter packages: %v", packages)
+	}
+	if got[1].Harness != "pi" || got[1].Version != piForkVersion {
+		t.Fatalf("Pi did not resolve the local fork: %+v", got[1])
 	}
 	for i, v := range got {
 		if i > 0 && got[i-1].Harness >= v.Harness {
@@ -129,6 +132,12 @@ func TestRecommendedVersionsOfflineAndUnsupported(t *testing.T) {
 		return nil, errors.New("secret transport details")
 	})}
 	for _, v := range r.RecommendedVersions(context.Background()) {
+		if v.Harness == "pi" {
+			if v.Status != "resolved" || v.Version != piForkVersion {
+				t.Fatalf("offline fork result: %+v", v)
+			}
+			continue
+		}
 		if v.Version != "" || v.Reason == "" || strings.Contains(v.Reason, "secret") {
 			t.Fatalf("bad offline result: %+v", v)
 		}
@@ -152,7 +161,7 @@ func TestRecommendedVersionsCancellation(t *testing.T) {
 		t.Fatal("cancellation removed per-harness results")
 	}
 	for _, v := range got {
-		if v.Status == "resolved" {
+		if v.Harness != "pi" && v.Status == "resolved" {
 			t.Fatalf("resolved cancelled request: %+v", v)
 		}
 	}
@@ -176,67 +185,35 @@ func TestRecommendedVersionsCache(t *testing.T) {
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	first := r.RecommendedVersions(context.Background())
-	if calls != 4 {
+	if calls != 2 {
 		t.Fatalf("first lookup made %d requests", calls)
 	}
 	offline = true
 	now = now.Add(6*time.Hour - time.Second)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 4 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 2 {
 		t.Fatalf("fresh cache missed: %d requests, %+v", calls, got)
 	}
 	now = now.Add(time.Second)
 	for _, v := range r.RecommendedVersions(context.Background()) {
-		if v.Status == "resolved" || (v.Harness == "pi" && v.Reason == "") {
+		if v.Harness != "pi" && v.Status == "resolved" {
 			t.Fatalf("expired result reused: %+v", v)
 		}
 	}
-	if calls != 6 {
+	if calls != 3 {
 		t.Fatalf("expired cache made %d requests", calls)
 	}
 	offline = false
 	for _, v := range r.RecommendedVersions(context.Background()) {
-		if v.Status == "resolved" {
+		if v.Harness != "pi" && v.Status == "resolved" {
 			t.Fatalf("failure cache reused stale success: %+v", v)
 		}
 	}
-	if calls != 6 {
+	if calls != 3 {
 		t.Fatalf("failure cache missed: %d requests", calls)
 	}
 	now = now.Add(time.Minute)
-	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 10 {
+	if got := r.RecommendedVersions(context.Background()); !reflect.DeepEqual(got, first) || calls != 5 {
 		t.Fatalf("expired failure cache did not recover: %d requests, %+v", calls, got)
-	}
-}
-
-// One slow vendor must not consume the budget before other vendors start.
-func TestRecommendedSourcesRunIndependently(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	started := make(chan string, 5)
-	r := RecommendedVersionResolver{GOOS: "linux", GOARCH: "amd64", HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
-		if strings.HasSuffix(req.URL.Path, "/latest") {
-			started <- req.URL.String()
-		}
-		<-req.Context().Done()
-		return nil, req.Context().Err()
-	})}
-	done := make(chan []RecommendedVersion, 1)
-	go func() { done <- r.RecommendedVersions(ctx) }()
-	deadline := time.NewTimer(time.Second)
-	defer deadline.Stop()
-	// Every source makes a request.
-	for range 2 {
-		select {
-		case <-started:
-		case <-deadline.C:
-			cancel()
-			<-done
-			t.Fatal("one vendor blocked other sources")
-		}
-	}
-	cancel()
-	if len(<-done) != 2 {
-		t.Fatal("lost per-harness results")
 	}
 }
 

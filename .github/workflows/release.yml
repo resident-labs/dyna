@@ -26,10 +26,10 @@ jobs:
       - name: Install release tools
         run: |
           apt-get update -qq
-          apt-get install -y -qq gh shellcheck
+          apt-get install -y -qq gh shellcheck curl
       - name: Check release tools
         run: |
-          for tool in bash git go gcc gh shellcheck sha256sum; do
+          for tool in bash git go gcc gh shellcheck curl sha256sum; do
             command -v "$tool"
           done
       - uses: actions/checkout@v6
@@ -67,6 +67,16 @@ jobs:
           npm ci
           npm run build
 
+      - name: Build the Pi fork tarball
+        id: pi-fork
+        run: |
+          set -euo pipefail
+          tarball="dist/earendil-works-pi-coding-agent-1.4.0-dyna.1.tgz"
+          scripts/pi-pack.sh "$tarball"
+          integrity=$(node -e 'const crypto=require("crypto"),fs=require("fs");process.stdout.write("sha512-"+crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64"))' "$tarball")
+          echo "asset=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+
       - name: Verify source
         run: |
           go mod verify
@@ -80,7 +90,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           version="$GITHUB_REF_NAME"
-          ldflags="-s -w -X main.version=$version"
+          pi_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${version}/${{ steps.pi-fork.outputs.asset }}"
+          ldflags="-s -w -X main.version=$version -X dyna-agent/internal/harness/runtime.piForkURL=$pi_url -X dyna-agent/internal/harness/runtime.piForkIntegrity=${{ steps.pi-fork.outputs.integrity }} -X dyna-agent/internal/harness/runtime.piForkAsset=${{ steps.pi-fork.outputs.asset }}"
           while IFS=/ read -r goos goarch; do
             name="dyna_${goos}_${goarch}"
             echo "building $name"
