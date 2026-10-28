@@ -7,6 +7,7 @@ import (
 	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/worktrees"
 )
 
 func TestRunCompletionTargetsCurrentOwnerOnce(t *testing.T) {
@@ -17,7 +18,10 @@ func TestRunCompletionTargetsCurrentOwnerOnce(t *testing.T) {
 	run := e.newRun("wf_handoff", rec, &original)
 	run.Meta.Detached = true
 	runstoretest.Write(t, store.DataDir(), run.Meta)
-	moved, err := shells.DefaultStore().HandoffRunOwner(e.ctx, run.Meta.ID, original.ID, next.ID)
+	if err := worktrees.Migrate(store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := shells.DefaultStore().HandoffRunOwner(e.ctx, run.Meta.ID, original.ID, next.ID, worktrees.HandoffRunTx)
 	if err != nil || !moved {
 		t.Fatalf("handoff = %v, %v", moved, err)
 	}
