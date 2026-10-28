@@ -402,13 +402,14 @@ func TestExplicitBadRecipientsRejectGroupMembersSkip(t *testing.T) {
 	if msgs, _ := f.svc.Rooms.Messages(f.a.ID); len(msgs) != 0 {
 		t.Fatalf("stored after a resolution error: %#v", msgs)
 	}
-	// Closed explicit name: no open session has it.
+	// A closed top-level session routes to the root seat.
 	f.doneGoal(f.crc)
 	if _, err := f.mgr.CloseWithOptions(f.ctx, f.crc.ID, subagent.CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Post(f.ctx, PostInput{Sender: lead, Mentions: []string{"@crc"}, Text: "x"}); err == nil || !strings.Contains(err.Error(), "no open session") {
-		t.Fatalf("closed err = %v", err)
+	closedPost, err := f.svc.Post(f.ctx, PostInput{Sender: lead, Mentions: []string{"@crc"}, Text: "x"})
+	if err != nil || !reflect.DeepEqual(closedPost.Message.To, []string{f.a.Name}) {
+		t.Fatalf("closed post = %+v, %v", closedPost.Message, err)
 	}
 	// In a group the same member is skipped, and the post goes through.
 	res, err := f.svc.Post(f.ctx, PostInput{Sender: lead, Mentions: []string{"@children"}, Text: "gate changed"})

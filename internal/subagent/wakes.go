@@ -35,6 +35,18 @@ func (m *Manager) tickSessions(ctx context.Context, targets []string) ([]string,
 		}
 	} else {
 		for _, ref := range targets {
+			original, err := m.store().ResolveSnapshot(ref)
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if original.Status == StatusClosed && original.ConsumedBy == "" {
+				if err := m.forwardClosedInbox(ctx, original); err != nil {
+					return nil, err
+				}
+			}
 			meta, err := m.store().deliveryMeta(ref)
 			if errors.Is(err, ErrNotFound) {
 				continue // The recipient was removed after the event.

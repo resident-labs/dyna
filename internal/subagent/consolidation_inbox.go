@@ -347,7 +347,39 @@ func (s *Store) deliveryMeta(ref string) (Meta, error) {
 	if err != nil {
 		return meta, err
 	}
-	return s.consumedTarget(meta)
+	seen := map[string]bool{}
+	roomID := meta.RoomID
+	for {
+		if seen[meta.ID] {
+			return Meta{}, errors.New("delivery redirect cycle")
+		}
+		seen[meta.ID] = true
+		switch {
+		case meta.ConsumedBy != "":
+			meta, err = s.ReadMeta(meta.ConsumedBy)
+		case (!meta.Closed.IsZero() || meta.Closing.Active()) && meta.ParentSession != "":
+			meta, err = s.ReadMeta(meta.ParentSession)
+		case (!meta.Closed.IsZero() || meta.Closing.Active()) && meta.Role != RoleRoot:
+			roots, err := s.roomMeta(roomID, false)
+			if err != nil {
+				return Meta{}, err
+			}
+			for _, root := range roots {
+				if root.Role == RoleRoot && !root.Closing.Active() {
+					return root, nil
+				}
+			}
+			return meta, nil
+		default:
+			return meta, nil
+		}
+		if err != nil {
+			return Meta{}, err
+		}
+		if meta.RoomID != roomID {
+			return Meta{}, errors.New("cross-room delivery redirect")
+		}
+	}
 }
 
 // consumedTarget follows the consolidation redirects from meta to the session

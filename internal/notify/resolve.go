@@ -298,7 +298,7 @@ func (r *resolver) member(roomName, name string) (subagent.Info, bool, error) {
 		return subagent.Info{}, false, err
 	}
 	for _, info := range all {
-		if info.Room == roomName && info.EffectiveName() == name && info.ConsumedBy != "" {
+		if info.Room == roomName && info.EffectiveName() == name && !info.Closed.IsZero() {
 			var target subagent.Info
 			var err error
 			if r.readOnly {
@@ -318,6 +318,13 @@ func (r *resolver) self(info subagent.Info) bool {
 
 // named checks an explicitly named session. Any problem rejects the post.
 func (r *resolver) named(tok string, info subagent.Info) (recipient, error) {
+	if info.Status == subagent.StatusClosed || info.Role == subagent.RoleRoot {
+		rec, err := r.room(info.Room)
+		if err != nil {
+			return recipient{}, err
+		}
+		return recipient{kind: toOwner, addr: rec.Name, rec: rec}, nil
+	}
 	if r.self(info) && !r.allowSelf {
 		return recipient{}, fmt.Errorf("%s is you; a post cannot mention its sender", tok)
 	}

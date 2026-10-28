@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -50,7 +51,8 @@ func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Re
 	// request always does; the engine's own events wait for the root that reads
 	// them, as they did.
 	sessionPost := msg.SessionIDs[msg.From] != ""
-	if !room.OwnerRequest(msg, rec.Name) && !direct && !(sessionPost && seat.Mode == room.DeliveryWake) {
+	handoff := msg.From == room.EngineSender && msg.Forward != nil && msg.NeedsRoot
+	if !room.OwnerRequest(msg, rec.Name) && !direct && !handoff && !(sessionPost && seat.Mode == room.DeliveryWake) {
 		return Delivery{}, false
 	}
 	if ok {
@@ -69,6 +71,19 @@ func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Re
 		return s.deliver(msg, recipient{kind: toSession, addr: addr, rec: cur, session: started}), true
 	}
 	return Delivery{To: addr, Delivery: "root-started", Turn: 1}, true
+}
+
+// DeliverClosedForward routes a close-handoff forward through the root seat.
+func (s *Service) DeliverClosedForward(ctx context.Context, msg room.Message) error {
+	rec, err := s.Rooms.Resolve(msg.RoomID)
+	if err != nil {
+		return err
+	}
+	delivery, handled := s.deliverRoot(ctx, msg, rec)
+	if handled && delivery.Error != "" {
+		return errors.New(delivery.Error)
+	}
+	return nil
 }
 
 // SeatAttach is what attaching an external orchestrator did.
