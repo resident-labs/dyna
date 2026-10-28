@@ -69,6 +69,45 @@ func TestIssueCrossRoomFiling(t *testing.T) {
 	}
 }
 
+// D-401: the note rule binds every cross-room filing, the owner's too.
+func TestIssueOwnerCrossRoomNote(t *testing.T) {
+	f := newIssueFixture(t)
+	rooms, r, svc := f.rooms, f.rec, f.svc
+	other, err := rooms.Create(room.CreateInput{Name: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A room-stamped owner process: no mode, no session.
+	t.Setenv(mode.EnvRoom, r.Name)
+	t.Setenv(mode.EnvRoomID, r.ID)
+	run := func(args ...string) (string, error) {
+		c := Command(Options{Service: func() *roomsvc.Service { return svc }})
+		b := &bytes.Buffer{}
+		c.SetOut(b)
+		c.SetErr(b)
+		c.SilenceUsage = true
+		c.SetArgs(args)
+		err := c.Execute()
+		return b.String(), err
+	}
+	// The owner's own room keeps any note, including a placeholder.
+	if _, err = run("--room", r.Name, "Own room bug", "--note", "x"); err != nil {
+		t.Fatalf("owner could not file in its own room: %v", err)
+	}
+	// Another room refuses a missing note, the owner's too.
+	if _, err = run("--room", other.Name, "Owner bug"); err == nil {
+		t.Fatal("owner filed in another room without a note")
+	}
+	raw, err := run("--room", other.Name, "Owner bug", "--note", "the relay drops the pairing after a reboot", "--json")
+	if err != nil {
+		t.Fatalf("owner could not file in another room with a real note: %v", err)
+	}
+	var foreign room.Issue
+	if err = json.Unmarshal([]byte(raw), &foreign); err != nil || foreign.Filer != other.Name || foreign.Title != "Owner bug" {
+		t.Fatalf("issue filed in another room: %s %v", raw, err)
+	}
+}
+
 func TestIssueCommands(t *testing.T) {
 	f := newIssueFixture(t)
 	r, svc := f.rec, f.svc
