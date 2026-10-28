@@ -103,7 +103,7 @@ var nonStampKeys = map[string]string{
 	"DYNA_ARCHIVE_DIR":                    "The archive output folder.",
 	"DYNA_PROFILE_CHECK_OK":               "A probe output sentinel, not an environment variable.",
 	"DYNA_SHELL_JOB":                      "The current managed shell job, not the Dyna caller.",
-	"DYNA_DETACH":                          "The detached-check protocol header marker, not a caller stamp.",
+	"DYNA_DETACH":                         "The detached-check protocol header marker, not a caller stamp.",
 	"DYNA_SHELL_LAUNCH_GATE":              "The descriptor on which a shell supervisor waits for its launcher before it starts its command; not a Dyna caller.",
 	"DYNA_COMPUTERS_DAEMON":               "A computer service marker, not a caller stamp.",
 	"DYNA_JOURNAL_IDLE":                   "A harness idle-notification setting.",
