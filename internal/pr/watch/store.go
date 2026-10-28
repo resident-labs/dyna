@@ -62,11 +62,11 @@ func (s *Store) updateRecords(keys []string, fn func(*State) error) error {
 	return storeUpdateResult(state.UpdateRecords(context.Background(), s.Root, keys, finishStoreUpdate(fn)))
 }
 
-// updateRecordOrAll decides the callback's scope under the PR lock, before it
+// updateRecordsOrAll decides the callback's scope under the PR lock, before it
 // changes anything. Rare cross-record work keeps the generic isolated input.
-func (s *Store) updateRecordOrAll(key string, needsAll func(*State) bool, fn func(*State) error) error {
+func (s *Store) updateRecordsOrAll(keys []string, needsAll func(*State) bool, fn func(*State) error) error {
 	errAllRecords := errors.New("PR update needs all records")
-	err := s.updateRecords([]string{key}, func(st *State) error {
+	err := s.updateRecords(keys, func(st *State) error {
 		if needsAll(st) {
 			return errAllRecords
 		}
@@ -77,6 +77,10 @@ func (s *Store) updateRecordOrAll(key string, needsAll func(*State) bool, fn fun
 		return s.update(fn)
 	}
 	return err
+}
+
+func (s *Store) updateRecordOrAll(key string, needsAll func(*State) bool, fn func(*State) error) error {
+	return s.updateRecordsOrAll([]string{key}, needsAll, fn)
 }
 
 func finishStoreUpdate(fn func(*State) error) func(*State) error {
