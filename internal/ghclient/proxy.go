@@ -8,9 +8,19 @@ import (
 
 // SessionCommand runs the gh multicall guard through the shared room policy.
 func SessionCommand(ctx context.Context, args []string) error {
+	mode := GuardMode(os.Getenv(ReadOnlyEnv))
+	switch mode {
+	case GuardReadOnly:
+	case GuardWorker:
+		if err := checkWorkerPolicy(args); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("invalid GitHub guard mode")
+	}
 	binary := os.Getenv(BinaryEnv)
 	if !isExecutable(binary) {
-		return fmt.Errorf("the read-only GitHub guard has no real gh binary")
+		return fmt.Errorf("the GitHub guard has no real gh binary")
 	}
 	dir, err := os.Getwd()
 	if err != nil {
