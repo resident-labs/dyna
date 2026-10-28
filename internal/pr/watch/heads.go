@@ -479,8 +479,13 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	}
 	for _, r := range records {
 		keys = append(keys, r.Key)
+		// Readiness reads dependency state even when a dependency is not in the
+		// head batch. Include it so a merged dependency cannot disappear.
+		keys = append(keys, r.Dependencies...)
 	}
-	saveErr := s.Store.updateRecords(keys, func(current *State) error {
+	saveErr := s.Store.updateRecordsOrAll(keys, func(current *State) bool {
+		return ratesNeedAllRecords(current, rates, s.now())
+	}, func(current *State) error {
 		for key, probe := range heads {
 			if r := current.Records[key]; r != nil && probe.Account != "" {
 				r.QuotaAccount = probe.Account
