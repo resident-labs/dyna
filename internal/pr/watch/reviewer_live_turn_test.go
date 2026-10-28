@@ -3,6 +3,7 @@ package watch
 import (
 	"testing"
 
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/subagent"
 )
 
@@ -53,5 +54,36 @@ func TestPoolKeepsReviewerWhoseTurnStillRuns(t *testing.T) {
 	}
 	if r := st.Records[keys[0]]; r.Reviewer == id || r.Reviewer == "" || len(e.launches) != launches+1 {
 		t.Fatalf("missing verdict did not reassign at once: reviewer %q launches %d", r.Reviewer, len(e.launches))
+	}
+}
+
+// A preserved live turn that Busy no longer sees (verdict saved, record error,
+// moved head) still runs on its profile, so it must hold review capacity until
+// its turn ends; otherwise the pool launches past the cap or double-reviews a
+// moved head (D-411).
+func TestPreservedLiveTurnHoldsCapacity(t *testing.T) {
+	e, keys := readyReviewPool(t, 2)
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) {
+		return []profile.Profile{{Name: "judge", MaxConcurrent: 1}}, nil
+	}
+	st := dispatchReviewPool(t, e)
+	first := *st.Records[keys[0]]
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[keys[0]].Verdict = "approve"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st = dispatchReviewPool(t, e)
+	if st.Records[keys[1]].Reviewer != "" || len(e.launches) != 1 {
+		t.Fatal("non-busy live turn did not hold review capacity")
+	}
+	if e.reviewers[first.Reviewer].Status != subagent.StatusRunning {
+		t.Fatal("verdict-holding reviewer closed before its turn ended")
+	}
+	e.endReviewerTurn(first.Reviewer)
+	st = dispatchReviewPool(t, e)
+	if st.Records[keys[1]].Reviewer == "" || len(e.launches) != 2 {
+		t.Fatal("capacity did not free once the turn ended")
 	}
 }
