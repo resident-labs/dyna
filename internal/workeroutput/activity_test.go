@@ -105,7 +105,7 @@ func TestLastActivityStepKindAndSteerable(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		line  string
-		step  string
+		step  StepKind
 		steer bool
 	}{
 		{"dyna shell run", `{"v":1,"kind":"tool","name":"mcp__dyna__shell","state":"started","id":"t1","ts":1000,"input":"{\"command\":\"sleep 60\",\"description\":\"Wait a minute\"}"}`, StepRun, true},
