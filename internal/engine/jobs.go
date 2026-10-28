@@ -111,6 +111,8 @@ type runJobInput struct {
 	CPUs    int      `json:"cpus"`
 	Memory  string   `json:"memory"`
 	Timeout int      `json:"timeoutSec"`
+	// Artifacts are paths of the job's work folder to keep after it ends.
+	Artifacts []string `json:"artifacts"`
 }
 
 func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) {
@@ -122,6 +124,7 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		Node: in.Node, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second,
+		Artifacts: in.Artifacts,
 	}
 	if actor.Room != "" {
 		input.RoomID = actor.Room
