@@ -101,20 +101,28 @@ func (r *Runtime) generationLock(ctx context.Context) (func(), error) {
 }
 
 func (r *Runtime) generate(h, home, account string, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
+	var bundle Bundle
+	if r.Bundles != nil {
+		bundle, _ = r.Bundles.Resolve(h, "")
+	}
+	var reserves map[string]int64
+	var err error
+	if canonicalRuntimeID(h) == "pi" {
+		reserves, err = r.piGenerationReserves(context.Background(), home, account, bundle)
+		if err != nil {
+			return harnessmgr.ConfigGeneration{}, err
+		}
+	}
 	unlock, err := r.generationLock(context.Background())
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
 	defer unlock()
-	var bundle Bundle
-	if r.Bundles != nil {
-		bundle, _ = r.Bundles.Resolve(h, "")
-	}
-	return r.generateLocked(h, home, account, lookup, bundle)
+	return r.generateLocked(h, home, account, lookup, reserves)
 }
 
 // captureGeneration reads the catalog and preferences into one digest input.
-func (r *Runtime) captureGeneration(h, home, account string, lookup func(string) (string, bool), bundle Bundle) (harnessmgr.HarnessConfig, generationInputs, error) {
+func (r *Runtime) captureGeneration(h, home, account string, lookup func(string) (string, bool), reserves map[string]int64) (harnessmgr.HarnessConfig, generationInputs, error) {
 	empty := harnessmgr.HarnessConfig{}
 	a, err := Adapter(h)
 	if err != nil {
@@ -134,12 +142,7 @@ func (r *Runtime) captureGeneration(h, home, account string, lookup func(string)
 	}
 	snapshot := harnessmgr.HarnessConfig{MCP: []harnessmgr.ManagedMCP{}, Skills: []harnessmgr.ManagedSkill{}}
 	inputs := generationInputs{Version: generationInputsVersion, NativeFeatures: nativeFeaturePolicies[h], Harness: h, Home: home, Format: a.ConfigFormat, MCPKey: a.MCPKey, ConfigFile: a.ConfigFile, PartialReasons: a.PartialReasons, Preferences: prefs}
-	if h == "pi" {
-		inputs.PiCompactionReserves, err = r.piGenerationReserves(home, account, bundle)
-		if err != nil {
-			return empty, inputs, err
-		}
-	}
+	inputs.PiCompactionReserves = reserves
 	if a.NativeEnv != nil {
 		inputs.NativeEnv = a.NativeEnv(home)
 	}
@@ -201,7 +204,7 @@ func generationDigest(inputs generationInputs) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (string, bool), bundle Bundle) (harnessmgr.ConfigGeneration, error) {
+func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (string, bool), reserves map[string]int64) (harnessmgr.ConfigGeneration, error) {
 	h = canonicalRuntimeID(h)
 	ownerHome, _ := os.UserHomeDir()
 	if home == "/" || home == ownerHome || home == r.Config.Home || safeAccountPath(home) != nil || checkedDir(home, false) != nil || inside(home, r.Generations) || inside(r.Generations, home) {
@@ -214,7 +217,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if err := r.EnsureCatalog(); err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
-	snapshot, inputs, err := r.captureGeneration(h, home, account, lookup, bundle)
+	snapshot, inputs, err := r.captureGeneration(h, home, account, lookup, reserves)
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
