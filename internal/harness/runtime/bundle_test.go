@@ -88,7 +88,7 @@ func install(t *testing.T, m *BundleManager, h, v string) Bundle {
 func TestBundleInstallResolveAndSelection(t *testing.T) {
 	m := manager(t)
 	for _, h := range []string{"claude", "pi"} {
-		old := install(t, m, h, "1.1.0")
+		old := install(t, m, h, "1.3.0")
 		latest := install(t, m, h, "1.10.0")
 		got, err := m.Resolve(h, "")
 		if err != nil || got != latest {
@@ -158,7 +158,7 @@ func TestInstallPrivateEnvironment(t *testing.T) {
 		}
 		return fixtureInstall(ctx, args, env)
 	}
-	install(t, m, "pi", "1.1.0+fixture")
+	install(t, m, "pi", "1.3.0+fixture")
 }
 func TestRejectInvalidHarnessAndVersion(t *testing.T) {
 	m := manager(t)
@@ -183,7 +183,7 @@ func TestInstallFailureDoesNotPublishOrLeak(t *testing.T) {
 		}
 		return errors.New("https://user:fixture-secret@registry")
 	}
-	_, err := m.Install(context.Background(), "pi", "1.1.0")
+	_, err := m.Install(context.Background(), "pi", "1.3.0")
 	if err == nil || strings.Contains(err.Error(), "fixture-secret") {
 		t.Fatalf("unsafe error: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRejectEscapingPathsAndTampering(t *testing.T) {
 				}
 				return nil
 			}
-			b, err := m.Install(context.Background(), "pi", "1.1.0")
+			b, err := m.Install(context.Background(), "pi", "1.3.0")
 			if attack == "manifest-path" || attack == "modified-hash" {
 				if err != nil {
 					t.Fatal(err)
@@ -264,7 +264,7 @@ func TestRejectEscapingPathsAndTampering(t *testing.T) {
 					_ = os.Chmod(path, 0700)
 					_ = os.WriteFile(path, []byte("changed"), 0700)
 				}
-				_, err = m.Resolve("pi", "1.1.0")
+				_, err = m.Resolve("pi", "1.3.0")
 			}
 			if err == nil {
 				t.Fatal("unsafe bundle accepted")
@@ -296,10 +296,10 @@ func TestConcurrentInstallsSerializeAndReadersSeeCompleteBundles(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
 	wg.Add(1)
-	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "pi", "1.1.0"); errs <- err }()
+	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "pi", "1.3.0"); errs <- err }()
 	<-entered
 	wg.Add(2)
-	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "pi", "1.1.0"); errs <- err }()
+	go func() { defer wg.Done(); _, err := m.Install(context.Background(), "pi", "1.3.0"); errs <- err }()
 	go func() {
 		defer wg.Done()
 		bundles, err := m.List()
@@ -329,7 +329,7 @@ func TestInstallLockCancellation(t *testing.T) {
 	defer unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := m.Install(ctx, "pi", "1.1.0"); err == nil {
+	if _, err := m.Install(ctx, "pi", "1.3.0"); err == nil {
 		t.Fatal("lock wait ignored cancellation")
 	}
 }
@@ -345,9 +345,9 @@ func TestGCKeepsNewestAndExactPinsAndNeverAccounts(t *testing.T) {
 	}
 	var pinned []Bundle
 	for _, h := range []string{"claude-code", "pi"} {
-		for _, v := range []string{"1.1.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"} {
+		for _, v := range []string{"1.3.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"} {
 			b := install(t, m, h, v)
-			if v == "1.1.0" {
+			if v == "1.3.0" {
 				pinned = append(pinned, b)
 			}
 		}
@@ -436,7 +436,7 @@ func TestInstallsOfOneHarnessSerialize(t *testing.T) {
 			return fixtureInstall(ctx, args, env)
 		}
 		var wg sync.WaitGroup
-		for _, v := range []string{"1.1.0", "2.0.0"} {
+		for _, v := range []string{"1.3.0", "2.0.0"} {
 			wg.Go(func() {
 				if _, err := m.Install(context.Background(), "pi", v); err != nil {
 					t.Error(err)
@@ -470,12 +470,12 @@ func TestIntegrityFallbackAndMissingMetadata(t *testing.T) {
 					return err
 				}
 				if withIntegrity {
-					data := []byte(`{"name":"` + piNPMPackage + `","version":"1.1.0","_integrity":"sha512-Zml4dHVyZQ=="}`)
+					data := []byte(`{"name":"` + piNPMPackage + `","version":"1.3.0","_integrity":"sha512-Zml4dHVyZQ=="}`)
 					return os.WriteFile(filepath.Join(args[4], "lib/node_modules", piNPMPackage, "package.json"), data, 0600)
 				}
 				return nil
 			}
-			b := install(t, m, "pi", "1.1.0")
+			b := install(t, m, "pi", "1.3.0")
 			data, err := os.ReadFile(filepath.Join(b.Directory, "bundle.json"))
 			if err != nil {
 				t.Fatal(err)
@@ -521,10 +521,10 @@ func TestNewBundleManagerUsesDataRoot(t *testing.T) {
 
 func TestSelectionNeverReadsOutsideBundleRoot(t *testing.T) {
 	m := manager(t)
-	install(t, m, "pi", "1.1.0")
+	install(t, m, "pi", "1.3.0")
 	latest := install(t, m, "pi", "2.0.0")
 	outside := filepath.Join(t.TempDir(), "credential")
-	if err := os.WriteFile(outside, []byte("1.1.0"), 0600); err != nil {
+	if err := os.WriteFile(outside, []byte("1.3.0"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(m.Root, ".pi-selected")); err != nil {
@@ -538,7 +538,7 @@ func TestSelectionNeverReadsOutsideBundleRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(outside)
-	if err != nil || string(data) != "1.1.0" {
+	if err != nil || string(data) != "1.3.0" {
 		t.Fatal("outside selection changed")
 	}
 }
@@ -574,7 +574,7 @@ func TestClaudeBundleUsesNativeBinaryWhenScriptsAreBlocked(t *testing.T) {
 // stopped every harness.
 func TestResolveReadsOnlyTheRequestedHarness(t *testing.T) {
 	m := manager(t)
-	pi := install(t, m, "pi", "1.1.0")
+	pi := install(t, m, "pi", "1.3.0")
 	claude := install(t, m, "claude", "1.0.0")
 	manifest := filepath.Join(claude.Directory, "bundle.json")
 	if err := os.Chmod(claude.Directory, 0700); err != nil {
@@ -608,7 +608,7 @@ func TestResolveReadsOnlyTheRequestedHarness(t *testing.T) {
 // modification time are restored: the change time still moves.
 func TestResolveRejectsModifiedExecutableWithRestoredMtime(t *testing.T) {
 	m := manager(t)
-	b := install(t, m, "pi", "1.1.0")
+	b := install(t, m, "pi", "1.3.0")
 	if _, err := m.Resolve("pi", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestNPMInstallRejectsMismatchedRegistryReceipt(t *testing.T) {
 	for _, body := range []string{
 		recommendedMetadata("@example/other", "1.0.0"),
 		recommendedMetadata(piNPMPackage, "1.1.1"),
-		`{"name":"` + piNPMPackage + `","version":"1.1.0","dist":{"integrity":"sha512-bad"}}`,
+		`{"name":"` + piNPMPackage + `","version":"1.3.0","dist":{"integrity":"sha512-bad"}}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			m := manager(t)
@@ -660,7 +660,7 @@ func TestNPMInstallRejectsMismatchedRegistryReceipt(t *testing.T) {
 				}
 				return os.Remove(filepath.Join(args[4], "package-lock.json"))
 			}
-			if _, err := m.Install(context.Background(), "pi", "1.1.0"); err == nil {
+			if _, err := m.Install(context.Background(), "pi", "1.3.0"); err == nil {
 				t.Fatal("published a bundle with an unverified registry receipt")
 			}
 			bundles, err := m.List()

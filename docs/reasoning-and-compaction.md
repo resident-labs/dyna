@@ -80,7 +80,7 @@ including profile `--settings`.
 For Pi, Dyna generates native model reserves from profile targets. When profiles
 share a model, Dyna uses the smallest target. Pi reports rounded windows, so
 compaction may start earlier. Unknown models and unavailable catalogs keep Pi's
-native defaults. Pi versions before 1.3.0 keep their native defaults. A project model override takes precedence over Dyna's generated
+native defaults. Dyna supports Pi 1.3.0 and later. A project model override takes precedence over Dyna's generated
 value. Existing pinned sessions keep their prior generation until a fresh start.
 Pi may decline compaction when it cannot split the history.
 

@@ -55,7 +55,7 @@ func runtimeFixture(t *testing.T, h string) (*Runtime, profile.Profile) {
 // fixtureVersion is the oldest version the harness's verified recipe accepts.
 func fixtureVersion(h string) string {
 	if h == "pi" {
-		return "1.1.0"
+		return "1.3.0"
 	}
 	return "1.0.0"
 }
@@ -373,14 +373,14 @@ func TestPrepareIgnoresStoredSystemRuntime(t *testing.T) {
 	// first-use installation have separate integration coverage.
 	r, _ := runtimeFixture(t, "pi")
 	var stored profile.Profile
-	if err := json.Unmarshal([]byte(`{"name":"old","harness":"pi","model":"zai/glm-5.3","runtime":"system","runtimeVersion":"1.1.0"}`), &stored); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"old","harness":"pi","model":"zai/glm-5.3","runtime":"system","runtimeVersion":"1.3.0"}`), &stored); err != nil {
 		t.Fatal(err)
 	}
 	selected, pin, err := r.Prepare(context.Background(), stored, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin.Bundle.Version != "1.1.0" || selected.RuntimeExecutable != pin.Bundle.Executable {
+	if pin.Bundle.Version != "1.3.0" || selected.RuntimeExecutable != pin.Bundle.Executable {
 		t.Fatalf("a stored system runtime must run Dyna-managed: %#v", pin.Bundle)
 	}
 }
