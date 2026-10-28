@@ -936,7 +936,7 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	gate, gateWriter, err := os.Pipe()
@@ -992,7 +992,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	gate, gateWriter, err := os.Pipe()
@@ -1297,7 +1297,7 @@ func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen str
 	t.Helper()
 	dir := t.TempDir()
 	fakeNodeTools(t, dir)
-	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	record := filepath.Join(dir, "seen-tmpdir")
@@ -1408,7 +1408,7 @@ func TestHostCheckDoesNotStartWithoutItsTempFolder(t *testing.T) {
 	ran := filepath.Join(dir, "ran")
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true, inner: "touch " + ran}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1, CheckTmp: filepath.Join(blocker, "sub")}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
