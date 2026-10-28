@@ -48,7 +48,7 @@ func (s *supervisor) openApp(ctx context.Context, r Request) (Opened, error) {
 	}
 	before := append([]App{}, s.state.Apps...)
 	s.mu.Unlock()
-	env, err := Environment(s.meta, os.Environ())
+	env, err := buildEnvironment(s.meta, os.Environ(), gpuEnvValues(s.desktopGPU))
 	if err != nil {
 		return Opened{}, err
 	}

@@ -437,6 +437,7 @@ func (s *supervisor) start() error {
 		s.privateWayland, s.privateDisplay = desktop.wayland, desktop.display
 		s.state.Renderer = desktop.renderer
 		s.state.RenderNode = desktop.gpu.Node
+		s.state.RenderEnv = gpuEnvValues(desktop.gpu)
 		s.desktopGPU = desktop.gpu
 		s.state.RefreshHz = idleRefreshHz
 		s.state.State = StateRunning

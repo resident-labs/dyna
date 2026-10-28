@@ -102,3 +102,50 @@ func TestPickRenderGPUBypassesDisplayCard(t *testing.T) {
 		t.Fatalf("all-display fallback chose %+v; want renderD128", gpu)
 	}
 }
+
+// A running desktop keeps the GPU it started on: apps must not follow a
+// settings change made after startup, and an owner's stale DRI_PRIME must not
+// pull them onto another GPU (D-352 review).
+func TestAppsFollowTheRunningDesktopGPU(t *testing.T) {
+	class := t.TempDir()
+	writeGPU(t, class, "card0", "renderD128", "0000:01:00.0", "0x10de", map[string]string{"DP-1": "connected"})
+	writeGPU(t, class, "card1", "renderD129", "0000:02:00.0", "0x1002", nil)
+	old := sysfsDRMClass
+	sysfsDRMClass = class
+	t.Cleanup(func() { sysfsDRMClass = old })
+
+	// auto would pick renderD129; the desktop runs on the NVIDIA node with
+	// the variables it resolved at start, and apps keep them.
+	env := gpuEnvForStatus(Status{State: StateRunning, RenderNode: "/dev/dri/renderD128", RenderEnv: map[string]string{"__GLX_VENDOR_LIBRARY_NAME": "nvidia"}})
+	if env["__GLX_VENDOR_LIBRARY_NAME"] != "nvidia" {
+		t.Fatalf("running desktop resolved to %v; want its own GLVND variables", env)
+	}
+	// An older daemon without stored variables still resolves by node.
+	if env := gpuEnvForStatus(Status{State: StateRunning, RenderNode: "/dev/dri/renderD128"}); env["__GLX_VENDOR_LIBRARY_NAME"] != "nvidia" {
+		t.Fatalf("node-only status resolved to %v; want the NVIDIA GLVND pin", env)
+	}
+	// A stale owner DRI_PRIME is dropped, never merged.
+	merged := gpuAppEnvironment([]string{"DRI_PRIME=pci-0000_09_09_0", "HOME=/root"}, gpuByNode("/dev/dri/renderD128"))
+	var prime, glx, home string
+	for _, line := range merged {
+		switch line {
+		case "DRI_PRIME=pci-0000_09_09_0":
+			prime = line
+		case "__GLX_VENDOR_LIBRARY_NAME=nvidia":
+			glx = line
+		case "HOME=/root":
+			home = line
+		}
+	}
+	if prime != "" {
+		t.Fatalf("a stale owner DRI_PRIME survived: %q", prime)
+	}
+	if glx == "" || home == "" {
+		t.Fatalf("merged env = %v; want the GLVND pin and unrelated variables kept", merged)
+	}
+
+	// Once the desktop stops, the next start's choice applies again.
+	if env := gpuEnvForStatus(Status{State: StateIdleStopped}); env["DRI_PRIME"] != "pci-0000_02_00_0" {
+		t.Fatalf("stopped computer resolved to %v; want the auto choice's DRI_PRIME", env)
+	}
+}
