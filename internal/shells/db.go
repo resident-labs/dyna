@@ -115,12 +115,16 @@ func (s *Store) db() (*sql.DB, error) {
 	if pause == nil {
 		pause = time.Sleep
 	}
+	retry := s.schemaRetry
+	if retry == nil {
+		retry = func(err error) bool { return database.IsUpdatingSchema(err, "shells.version") }
+	}
 	for attempt := 0; ; attempt++ {
 		err = database.Migrate(db, "shells.version", schemaVersion, apply)
 		if err == nil {
 			break
 		}
-		if database.OwnsSchema() || !database.IsOlderSchema(err, "shells.version") || attempt == 120 {
+		if database.OwnsSchema() || !retry(err) || attempt == 120 {
 			return nil, err
 		}
 		pause(time.Second)
