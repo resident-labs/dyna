@@ -68,8 +68,10 @@ wizard's last step is the same editor.
 
 | Harness | Native setting |
 | --- | --- |
-| `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 compacts 33K below the window, and the window must be 100K to 1M, so N is 67K to 967K. |
+| `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 showed a 33K compaction buffer, and the window must be 100K to 1M, so N is 67K to 967K. The buffer is not yet verified on 2.1.304. |
 | `pi` | none; Dyna runs `pi --mode rpc --session <id>` with `{"type":"compact"}` |
+
+For Claude Code profiles without an explicit threshold, Dyna uses the owner setting `harness.compactAtTokens` (200,000 by default). Dyna clamps this default to Claude's 67,000–967,000 token range. The generated launch setting overrides native Claude settings, including profile `--settings`. Set `harness.compactAtTokens` to `0` to leave native settings unchanged. An explicit profile threshold takes precedence over the owner setting.
 
 For an explicit Pi profile threshold, Dyna uses Pi's compact command. Its decoder reports `Record.ContextTokens`, the prompt size of
 each model call. The session stores the last one, and before the next resumed
