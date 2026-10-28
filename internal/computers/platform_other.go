@@ -20,3 +20,15 @@ func LaunchChromium(ctx context.Context, id string, args []string) error {
 }
 
 func ProcessStart(pid int) (string, bool) { return "", false }
+
+// renderGPU mirrors the Linux render-node choice for cross-platform files.
+type renderGPU struct {
+	Node, PCI, Driver string
+	Vendor            uint32
+}
+
+// configuredRenderGPU is the no-GPU answer on systems without Dyna computers.
+func configuredRenderGPU() renderGPU { return renderGPU{} }
+
+// gpuAppEnvironment leaves the environment unchanged off Linux.
+func gpuAppEnvironment(base []string, _ renderGPU) []string { return base }

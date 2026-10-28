@@ -159,6 +159,9 @@ func Environment(m Meta, base []string) ([]string, error) {
 		ownerBus = envValue(base, "DBUS_SESSION_BUS_ADDRESS")
 	}
 	env := mergeEnvironment(base, map[string]string{OwnerBusKey: ownerBus, "DYNA_OWNER_WAYLAND_DISPLAY": ownerWayland, "DYNA_OWNER_DISPLAY": ownerDisplay, "WAYLAND_DISPLAY": m.WaylandDisplay, "DISPLAY": m.Display, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "PATH": shim + string(os.PathListSeparator) + envValue(base, "PATH")})
+	// Apps in the computer render on the configured render node, off the
+	// owner's display GPU by default (D-352).
+	env = gpuAppEnvironment(env, configuredRenderGPU())
 	// Every launch path that builds an app's environment here (open, run, env,
 	// the browser) points it at the computer's own session bus.
 	env = mergeEnvironment(env, privateBusEnvironment(m.SessionID))

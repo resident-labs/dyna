@@ -43,26 +43,31 @@ type desktopStart struct {
 type desktop struct {
 	process                    *process
 	wayland, display, renderer string
+	// gpu is the render node the desktop and its apps use; empty for the
+	// pixman software renderer (D-352).
+	gpu renderGPU
 	// bus is the computer's own session bus, and busAddress its address. Both
 	// are empty when dbus-daemon is missing or failed; apps then use the host bus.
 	bus        *process
 	busAddress string
 }
 type supervisor struct {
-	mu                             sync.Mutex
-	rec                            *recording
-	lastRec                        Recording
-	browserMu                      sync.Mutex
-	starting                       *desktopStart
-	startOutput                    time.Duration // injected start budget; see startOutputBudget
-	captureMu                      sync.Mutex
-	inputGate                      chan struct{}
-	keyboard                       *virtualKeyboard
-	meta                           Meta
-	state                          Status
-	ctx                            context.Context
-	cancel                         context.CancelFunc
-	compositor, stream             *process
+	mu                 sync.Mutex
+	rec                *recording
+	lastRec            Recording
+	browserMu          sync.Mutex
+	starting           *desktopStart
+	startOutput        time.Duration // injected start budget; see startOutputBudget
+	captureMu          sync.Mutex
+	inputGate          chan struct{}
+	keyboard           *virtualKeyboard
+	meta               Meta
+	state              Status
+	ctx                context.Context
+	cancel             context.CancelFunc
+	compositor, stream *process
+	// desktopGPU is the render node the running desktop started on (D-352).
+	desktopGPU                     renderGPU
 	bus                            *process // the computer's own D-Bus session bus
 	busAddress                     string
 	privateWayland, privateDisplay string
@@ -361,7 +366,10 @@ func (s *supervisor) desktopEnv() []string {
 	if s.busAddress != "" {
 		values["DBUS_SESSION_BUS_ADDRESS"] = s.busAddress
 	}
-	return mergeEnvironment(os.Environ(), values)
+	env := mergeEnvironment(os.Environ(), values)
+	// Apps render on the node this desktop started on; the settings value can
+	// change while a desktop runs, and a running desktop must not mix GPUs.
+	return gpuAppEnvironment(env, s.desktopGPU)
 }
 
 // start shares one startup attempt among this computer's first connections.
@@ -428,6 +436,8 @@ func (s *supervisor) start() error {
 		s.keyboard = keyboard
 		s.privateWayland, s.privateDisplay = desktop.wayland, desktop.display
 		s.state.Renderer = desktop.renderer
+		s.state.RenderNode = desktop.gpu.Node
+		s.desktopGPU = desktop.gpu
 		s.state.RefreshHz = idleRefreshHz
 		s.state.State = StateRunning
 		s.state.StartedAt = time.Now()
@@ -467,17 +477,21 @@ func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desk
 		return nil, err
 	}
 	renderers := []string{"pixman"}
-	nodes, _ := filepath.Glob("/dev/dri/renderD*")
-	if len(nodes) > 0 {
+	// The render node comes from computers.renderNode, which by default keeps
+	// Dyna computers off the GPU that drives the owner's display (D-352).
+	gpu := configuredRenderGPU()
+	if gpu.Node != "" {
 		renderers = []string{"gles2", "pixman"}
 	}
 	for _, renderer := range renderers {
 		_ = os.Remove(ready)
 		values := map[string]string{"PATH": childBin + ":" + os.Getenv("PATH"), "WAYLAND_DISPLAY": "", "DISPLAY": "", "WLR_BACKENDS": "headless", "WLR_HEADLESS_OUTPUTS": "1", "WLR_LIBINPUT_NO_DEVICES": "1", "WLR_RENDERER": renderer, "XDG_CURRENT_DESKTOP": "labwc", "XDG_SESSION_TYPE": "wayland", "DYNA_COMPUTER_PROCESS": s.meta.SessionID}
 		if renderer == "gles2" {
-			values["WLR_RENDER_DRM_DEVICE"] = nodes[0]
+			values["WLR_RENDER_DRM_DEVICE"] = gpu.Node
 		}
 		env := mergeEnvironment(os.Environ(), values)
+		// The desktop's own children, such as XWayland, inherit the GPU choice.
+		env = gpuAppEnvironment(env, gpu)
 		p, err := startProcess(env, filepath.Join(Dir(s.meta.SessionID), "labwc.log"), "labwc", "-C", config, "-s", shellquote.Quote(script))
 		if err != nil {
 			return nil, err
@@ -508,7 +522,7 @@ func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desk
 			}
 			continue
 		}
-		d := &desktop{process: p, wayland: lines[0], display: lines[1], renderer: renderer}
+		d := &desktop{process: p, wayland: lines[0], display: lines[1], renderer: renderer, gpu: gpu}
 		env = mergeEnvironment(env, map[string]string{"WAYLAND_DISPLAY": d.wayland, "DISPLAY": d.display})
 		if err := s.sizeNewDesktop(ctx, env, width, height); err != nil {
 			p.stop()
@@ -671,6 +685,7 @@ func (s *supervisor) stop() error {
 	s.bus, s.busAddress = nil, ""
 	s.compositor.stop()
 	s.compositor = nil
+	s.desktopGPU = renderGPU{}
 	// A stopped computer has no desktop: forget its display names, so nothing
 	// dials a socket the next desktop will not reuse.
 	s.privateWayland, s.privateDisplay = "", ""
@@ -956,7 +971,7 @@ func (s *supervisor) startStream() error {
 	}
 	socket := filepath.Join(RuntimeDir(s.meta.SessionID), "rfb.sock")
 	_ = os.Remove(socket)
-	args, offer, err := s.streamBackend.Command(s.ctx, StreamOptions{Socket: socket, ConfigDir: filepath.Join(Dir(s.meta.SessionID), "config")})
+	args, offer, err := s.streamBackend.Command(s.ctx, StreamOptions{Socket: socket, ConfigDir: filepath.Join(Dir(s.meta.SessionID), "config"), RenderNode: s.desktopGPU.Node})
 	if err != nil {
 		return err
 	}
@@ -996,14 +1011,13 @@ func (s *supervisor) stopStream() {
 	s.state.Stream = Stream{}
 	_ = os.Remove(filepath.Join(RuntimeDir(s.meta.SessionID), "rfb.sock"))
 }
-func vaapiWorks(ctx context.Context) bool {
+func vaapiWorks(ctx context.Context, node string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	nodes, _ := filepath.Glob("/dev/dri/renderD*")
-	if len(nodes) == 0 {
+	if node == "" {
 		return false
 	}
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-vaapi_device", nodes[0], "-f", "lavfi", "-i", "color=size=64x64:rate=1", "-vf", "format=nv12,hwupload", "-frames:v", "1", "-c:v", "h264_vaapi", "-f", "null", "-")
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-vaapi_device", node, "-f", "lavfi", "-i", "color=size=64x64:rate=1", "-vf", "format=nv12,hwupload", "-frames:v", "1", "-c:v", "h264_vaapi", "-f", "null", "-")
 	return runOwned(cmd) == nil
 }
 
