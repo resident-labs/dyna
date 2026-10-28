@@ -58,6 +58,13 @@ func (s *Service) MergeFix(ctx context.Context, key string) error {
 	if _, err := s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rm.ID, FreshID: true, Event: ev, To: []string{rm.Name}, RoomService: true, NeedsRoot: needsRoot}); err != nil {
 		return fmt.Errorf("record repair merge requester: %w", err)
 	}
+	// The reviewer-requirement gate spans the final checks and the publication,
+	// so a requirement cannot land between them.
+	gate, err := s.requirementLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer gate()
 	current, children, ready, err := s.prepareMerge(ctx, r)
 	if err != nil {
 		return err
