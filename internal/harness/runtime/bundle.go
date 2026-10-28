@@ -240,10 +240,13 @@ var errBundleUnusable = errors.New("bundle cannot be used")
 // read returns a verified published bundle. A bundle whose version Dyna's
 // verified recipes no longer support, or without the files its adapter
 // requires, comes back with errBundleUnusable, so Resolve, Select, Rollback,
-// Lease and install reuse all refuse it and name the reason.
+// Lease and install reuse all refuse it and name the reason. The manifest
+// data stays on the bundle so cleanup can still remove it and protect the
+// leases and pins of sessions that hold an old version.
 func (m *BundleManager) read(h, v string) (Bundle, error) {
 	if ok, reason := supportedVersionRange(h, v); !ok {
-		return Bundle{}, fmt.Errorf("%w: %s %s is not supported: %s", errBundleUnusable, h, v, reason)
+		b, _ := m.readManifest(h, v)
+		return b, fmt.Errorf("%w: %s %s is not supported: %s", errBundleUnusable, h, v, reason)
 	}
 	b, err := m.readManifest(h, v)
 	if err != nil {
