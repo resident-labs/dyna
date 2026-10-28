@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	harnessmgr "dyna-agent/internal/harness/config"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/shellmcp"
 )
 
@@ -38,7 +39,7 @@ func TestPiMCPTimeoutAndExposure(t *testing.T) {
 	if err := r.Config.AddMCP(owner, slow); err != nil {
 		t.Fatal(err)
 	}
-	g := buildGeneration(t, r, "pi", home, id)
+	g := buildGeneration(t, r, "pi", home, id, profile.Profile{})
 	raw, err := os.ReadFile(filepath.Join(g.Directory, "pi-mcp.json"))
 	if err != nil {
 		t.Fatal(err)

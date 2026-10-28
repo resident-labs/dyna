@@ -8,6 +8,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness/config"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/store"
 )
 
@@ -32,7 +33,7 @@ func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
 			if err := r.Config.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), config.ManagedMCP{Name: "tools", MCPDefinition: config.MCPDefinition{Command: "node", Args: []string{"tools.js"}, EnvKeys: []string{"MCP_TOKEN"}}, EnabledHarnesses: []string{h}}); err != nil {
 				t.Fatal(err)
 			}
-			gen, err := r.generate(h, home, n.ID, func(key string) (string, bool) { return "secret-reference-canary", key == "MCP_TOKEN" })
+			gen, err := r.generate(h, home, n.ID, func(key string) (string, bool) { return "secret-reference-canary", key == "MCP_TOKEN" }, profile.Profile{})
 			if err != nil {
 				t.Fatal(err)
 			}

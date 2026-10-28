@@ -11,27 +11,33 @@ import (
 	"dyna-agent/internal/store"
 )
 
-// The profile models run on derived metadata and are absent from every model
-// list, so per-model discovery never covers them. Each profile's target must
-// still reach its own model through a modelOverrides trigger.
-func TestPiGenerationWritesCompactionTrigger(t *testing.T) {
-	r, home, id := generationFixture(t, "pi")
+// competingProfiles writes other Pi profiles that must not reach the active
+// profile's generation: a smaller target and an unset target on a shared
+// model.
+func competingProfiles(t *testing.T) {
+	t.Helper()
 	path := profile.DefaultPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.WriteJSON(path, map[string]any{"profiles": []map[string]any{{
-		"name": "terra", "harness": "pi", "model": "openai-codex/gpt-6.1-terra",
+		"name": "small", "harness": "pi", "model": "shared/model",
 		"compact": map[string]any{"tokens": 200000},
 	}, {
-		"name": "fast", "harness": "pi", "model": "anthropic/claude-haiku",
-		"compact": map[string]any{"tokens": 120000},
-	}, {
-		"name": "plain", "harness": "pi", "model": "google/gemini-pro",
+		"name": "bare", "harness": "pi", "model": "shared/model",
 	}}}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	g := buildGeneration(t, r, "pi", home, id)
+}
+
+// The active profile's target reaches its whole model chain, fallbacks
+// included, and no other profile's smaller or unset target on a shared model
+// changes it. The chain model is absent from every model list.
+func TestPiGenerationScopesTriggerToActiveProfile(t *testing.T) {
+	competingProfiles(t)
+	active := profile.Profile{Name: "active", Harness: profile.HarnessPi, Model: "shared/model", Models: []string{"shared/model", "openai-codex/gpt-6.1-terra"}, Compact: &profile.Compact{Tokens: 300000}}
+	r, home, id := generationFixture(t, "pi")
+	g := buildGeneration(t, r, "pi", home, id, active)
 	raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -46,15 +52,39 @@ func TestPiGenerationWritesCompactionTrigger(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int64{"openai-codex/gpt-6.1-terra": 200000, "anthropic/claude-haiku": 120000}
+	want := map[string]int64{"shared/model": 300000, "openai-codex/gpt-6.1-terra": 300000}
 	if len(got.Compaction.ModelOverrides) != len(want) {
-		t.Fatalf("modelOverrides = %v, want exactly %v (a profile without a target adds none)", got.Compaction.ModelOverrides, want)
+		t.Fatalf("modelOverrides = %v, want exactly %v", got.Compaction.ModelOverrides, want)
 	}
 	for model, target := range want {
 		entry, ok := got.Compaction.ModelOverrides[model]
 		if !ok || entry.TriggerTokens != target {
 			t.Fatalf("modelOverrides[%s] = %+v, want triggerTokens %d", model, entry, target)
 		}
+	}
+}
+
+// A profile without a target gets no trigger, even when another profile set
+// a smaller target on the same model.
+func TestPiGenerationNoTriggerWithoutTarget(t *testing.T) {
+	competingProfiles(t)
+	active := profile.Profile{Name: "bare", Harness: profile.HarnessPi, Model: "shared/model"}
+	r, home, id := generationFixture(t, "pi")
+	g := buildGeneration(t, r, "pi", home, id, active)
+	raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Compaction struct {
+			ModelOverrides map[string]json.RawMessage `json:"modelOverrides"`
+		} `json:"compaction"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Compaction.ModelOverrides) != 0 {
+		t.Fatalf("modelOverrides = %v, want none for a profile without a target", got.Compaction.ModelOverrides)
 	}
 }
 
