@@ -35,6 +35,8 @@ func TestIdleVerdictReleasesAttachedReviewer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The verdict ended the reviewer's turn, so the pool may close it (D-411).
+	e.endReviewerTurn(first.Reviewer)
 	st = dispatchReviewPool(t, e)
 	if closed != 1 || e.reviewers[first.Reviewer].Status != subagent.StatusClosed {
 		t.Fatal("idle reviewer retained the completed round")
@@ -59,6 +61,8 @@ func TestIdleVerdictReleasesAttachedReviewer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The second verdict also ended its turn, freeing the capped slot (D-411).
+	e.endReviewerTurn(st.Records[keys[1]].Reviewer)
 	e.setPullHead(17, strings.Repeat("b", 40))
 	st = dispatchReviewPool(t, e)
 	if got := st.Records[first.Key]; got.Reviewer == "" || got.Reviewer == first.Reviewer || got.RoundHead != got.Head {

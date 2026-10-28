@@ -66,6 +66,8 @@ func TestReviewerQueueReusesSessionAndReplacesHead(t *testing.T) {
 	if err := e.s.Store.update(func(st *State) error { st.Records[r.Key].Verdict = "approve"; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	// The verdict ends PR 17's review turn, so its slot frees (D-411).
+	e.endReviewerTurn(status.Reviewers[0].Session.ID)
 	if err := e.s.dispatchAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}

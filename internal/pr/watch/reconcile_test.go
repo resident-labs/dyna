@@ -45,23 +45,29 @@ func TestReconcileReleasesNonBusyReviewersInOnePass(t *testing.T) {
 			next := keys[0]
 			if err := e.s.Store.update(func(st *State) error {
 				r := st.Records[keys[0]]
+				// Each concluded round also ends its turn: a live turn keeps
+				// its session open, whatever the record says (D-411).
 				switch kind {
 				case "idle without verdict":
 					states[old] = subagent.StatusIdle
 					turns[old] = subagent.TurnOK
 				case "verdict holder":
 					r.Verdict = "approve"
+					turns[old] = subagent.TurnOK
 					next = keys[1]
 				case "merged PR":
 					r.State = "merged"
 					r.Watching = false
+					turns[old] = subagent.TurnOK
 					next = keys[1]
 				case "moved head":
 					r.Head = strings.Repeat("b", 40)
+					turns[old] = subagent.TurnOK
 				case "dead process":
 					states[old] = subagent.StatusIdle
 				case "failed CI":
 					r.CI = "failed"
+					turns[old] = subagent.TurnOK
 					next = keys[1]
 				}
 				return nil

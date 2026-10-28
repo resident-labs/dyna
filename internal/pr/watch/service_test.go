@@ -274,7 +274,13 @@ type testEnv struct {
 	sent        []Notice
 	launches    []string
 	reviewers   map[string]subagent.Info
+	endedTurns  map[string]bool
 }
+
+// endReviewerTurn marks a fake reviewer's turn terminal. A concluded round
+// ends its turn before the pool may close the session; a live turn always
+// stays open, whatever its record says (D-411).
+func (e *testEnv) endReviewerTurn(id string) { e.endedTurns[id] = true }
 
 // setPullHead gives one PR a distinct remote head in a multi-PR fixture.
 func (e *testEnv) setPullHead(number int, head string) {
@@ -362,7 +368,7 @@ func newEnv(t *testing.T) *testEnv {
 		}
 		return nil
 	}
-	e.reviewers = map[string]subagent.Info{}
+	e.reviewers, e.endedTurns = map[string]subagent.Info{}, map[string]bool{}
 	e.s.ReviewerProfiles = func() ([]profile.Profile, error) {
 		return []profile.Profile{{Name: "judge", Taste: 7, Cost: 8, Intelligence: 9}, {Name: "reviewer", Taste: 5, Cost: 5}, {Name: "mock", Taste: 4, Cost: 4}}, nil
 	}
@@ -371,7 +377,11 @@ func newEnv(t *testing.T) *testEnv {
 		if !ok {
 			return info, subagent.Turn{}, fmt.Errorf("session missing")
 		}
-		return info, subagent.Turn{N: 1, Status: subagent.TurnRunning}, nil
+		status := subagent.TurnRunning
+		if e.endedTurns[id] {
+			status = subagent.TurnOK
+		}
+		return info, subagent.Turn{N: 1, Status: status}, nil
 	}
 	e.s.Deliver = func(_ context.Context, _ Record, n Notice) (string, error) {
 		e.sent = append(e.sent, n)

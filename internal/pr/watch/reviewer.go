@@ -416,7 +416,18 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 func (f ReviewFacts) Queue(roomID string) []*Record {
 	queue, blocked := []*Record{}, []*Record{}
 	for _, r := range f.Need {
-		if (roomID == "" || r.RoomID == roomID) && f.Busy[r.Key].Info.ID == "" {
+		if roomID != "" && r.RoomID != roomID {
+			continue
+		}
+		// A record whose assigned reviewer still has a live turn is not
+		// queueable, whatever head that turn reviews: with spare capacity a
+		// moved head must not start a second reviewer while the first runs
+		// (D-411). Busy turns are live too, so this covers them.
+		live, ok := f.Sessions[r.Reviewer]
+		if ok && prfacts.TurnLive(live.Info, live.Turn) {
+			continue
+		}
+		if f.Busy[r.Key].Info.ID == "" {
 			if dependencyWaiting(f.State, *r) {
 				blocked = append(blocked, r)
 			} else {
@@ -690,13 +701,20 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 	if err != nil {
 		return err
 	}
+	// busyIDs holds every reviewer in this room whose own turn is queued or
+	// running, busy or not: a live turn may still record its verdict, so record
+	// state alone neither closes the session nor frees capacity (D-411). A
+	// transient poll error once hid running reviews from Busy; the close then
+	// stopped a verdict shell mid-command, and a non-busy live turn could push
+	// the pool past its profile cap or double-review a moved head.
 	busyIDs := map[string]bool{}
 	busy := 0
-	for _, live := range facts.Busy {
-		if live.Info.RoomID == roomID {
-			busyIDs[live.Info.ID] = true
-			busy++
+	for id, live := range facts.Sessions {
+		if live.Info.RoomID != roomID || !prfacts.TurnLive(live.Info, live.Turn) {
+			continue
 		}
+		busyIDs[id] = true
+		busy++
 	}
 	failures := st.Reviewers[roomID].FailedProfiles
 	retired := map[string]bool{}

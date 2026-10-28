@@ -48,6 +48,8 @@ func TestPausedRoomHasNoReviewNeed(t *testing.T) {
 	if _, err := rooms.SetSessionsPaused(context.Background(), rec.ID, true); err != nil {
 		t.Fatal(err)
 	}
+	// The paused room's reviewer finished its turn, so the pool closes it.
+	e.endReviewerTurn(id)
 	st = dispatchReviewPool(t, e)
 	facts, err = e.s.ReviewFacts(st)
 	if err != nil {
