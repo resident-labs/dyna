@@ -78,6 +78,7 @@ type supervisor struct {
 	listeners                          []*net.UnixListener
 	relayConns                         map[*net.UnixConn]bool
 	apps                               map[int]string
+	runs                               map[string]struct{}
 	tracked                            map[int]string
 	viewers                            map[string]string
 	humanViewer                        string
@@ -104,7 +105,7 @@ func newComputer(ctx context.Context, id, room string, options SupervisorOptions
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &supervisor{inputGate: make(chan struct{}, 1), ctx: ctx, cancel: cancel, apps: map[int]string{}, viewers: map[string]string{}, relayConns: map[*net.UnixConn]bool{}, x11Conns: map[*net.UnixConn]bool{}, lastActivity: time.Now(), monitorWake: make(chan struct{}, 1), idleAfter: options.IdleAfter, viewGrace: options.ViewGrace, monitorEvery: options.MonitorEvery, emit: emit}
+	s := &supervisor{inputGate: make(chan struct{}, 1), ctx: ctx, cancel: cancel, apps: map[int]string{}, runs: map[string]struct{}{}, viewers: map[string]string{}, relayConns: map[*net.UnixConn]bool{}, x11Conns: map[*net.UnixConn]bool{}, lastActivity: time.Now(), monitorWake: make(chan struct{}, 1), idleAfter: options.IdleAfter, viewGrace: options.ViewGrace, monitorEvery: options.MonitorEvery, emit: emit}
 	if s.idleAfter == 0 {
 		s.idleAfter = 10 * time.Minute
 	}

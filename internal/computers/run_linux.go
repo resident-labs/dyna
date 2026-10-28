@@ -14,6 +14,7 @@ func (s *supervisor) prepareRun(ctx context.Context, r Request) (Meta, error) {
 	if err != nil {
 		return Meta{}, err
 	}
+	leaseCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	select {
@@ -28,7 +29,20 @@ func (s *supervisor) prepareRun(ctx context.Context, r Request) (Meta, error) {
 	if _, _, _, _, _, err := s.agentTarget(ctx); err != nil {
 		return Meta{}, err
 	}
+	connection := ConnectionID(leaseCtx)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.meta, nil
+	s.runs[connection] = struct{}{}
+	s.state.Runs = len(s.runs)
+	meta := s.meta
+	s.record("runs", nil)
+	s.mu.Unlock()
+	go func() {
+		<-leaseCtx.Done()
+		s.mu.Lock()
+		delete(s.runs, connection)
+		s.state.Runs = len(s.runs)
+		s.record("runs", nil)
+		s.mu.Unlock()
+	}()
+	return meta, nil
 }

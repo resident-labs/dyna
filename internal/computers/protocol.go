@@ -74,6 +74,8 @@ type Status struct {
 	StreamRSSKiB   int64             `json:"stream_rss_kib"`
 	Reason         string            `json:"reason,omitempty"`
 	Recording      bool              `json:"recording,omitempty"`
+	// Runs counts foreground computer run commands holding a lease.
+	Runs int `json:"runs,omitempty"`
 	// Keep stops the idle timeout from stopping the computer. It is stored
 	// with the computer and survives a service restart.
 	Keep bool `json:"keep,omitempty"`

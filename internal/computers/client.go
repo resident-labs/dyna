@@ -158,6 +158,29 @@ func (c *Client) Act(ctx context.Context, actions []Action, timeout time.Duratio
 	return
 }
 
+// RunLease owns the control connection that marks a foreground command as
+// active. Closing it lets a deferred computer service restart continue.
+type RunLease struct {
+	Meta
+	conn *connection
+}
+
+// PrepareRun records the command intent and holds its run lease until Close.
+// The daemon also releases the lease if the client disconnects.
+func (c *Client) PrepareRun(ctx context.Context, status string) (*RunLease, error) {
+	conn, err := c.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var meta Meta
+	if err = conn.call(ctx, Request{Session: c.Session, Op: "run.prepare", Status: status}, &meta); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &RunLease{Meta: meta, conn: conn}, nil
+}
+func (r *RunLease) Close() error { return r.conn.Close() }
+
 // ViewLease owns the control connection that keeps a viewer alive. Close it on
 // WebSocket disconnect. The daemon releases human control on EOF automatically.
 type ViewLease struct {
