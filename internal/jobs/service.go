@@ -130,6 +130,8 @@ type Input struct {
 	CPUs    int
 	Memory  string
 	Timeout time.Duration
+	// Artifacts are paths in the job's work folder to keep after it ends.
+	Artifacts []string
 }
 
 // Submit stores a queued job and starts it. The job runs detached, so Submit
@@ -140,6 +142,11 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	if in.Host && in.Image != "" {
 		return Job{}, errors.New("a job runs either on the host or in an image, not both")
+	}
+	for _, p := range in.Artifacts {
+		if err := checkArtifact(p); err != nil {
+			return Job{}, err
+		}
 	}
 	machine, err := s.machine(ctx, in.Node)
 	if err != nil {
@@ -164,7 +171,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	job := Job{
 		ID: id, RoomID: in.RoomID, Session: in.Session, Node: machine.Name,
 		Command: in.Command, Host: host, Image: in.Image,
-		CPUs: in.CPUs, Timeout: in.Timeout,
+		CPUs: in.CPUs, Timeout: in.Timeout, Artifacts: in.Artifacts,
 		State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
 	}
@@ -683,15 +690,39 @@ func (s *Service) finish(job *Job, err error) {
 		state, exit = classify(err)
 		job.Note = err.Error()
 	}
-	if row, readErr := s.Store.Get(context.Background(), job.ID); readErr == nil && row.CancelRequested {
-		// A cancellation asked for the job; whatever ended the run, the
-		// recorded end is the cancelled one.
-		state, exit, job.Note = StateCancelled, nil, "cancelled"
+	// The launch mark is written to the row, not to this copy, so the row
+	// says whether the node ever ran the job.
+	launched := job.Launched
+	if row, readErr := s.Store.Get(context.Background(), job.ID); readErr == nil {
+		launched = launched || row.Launched
+		if row.CancelRequested {
+			// A cancellation asked for the job; whatever ended the run, the
+			// recorded end is the cancelled one.
+			state, exit, job.Note = StateCancelled, nil, "cancelled"
+		}
 	}
 	job.State = state
 	job.ExitCode = exit
 	job.Ended = s.Store.now()
 	ctx := context.Background()
+	// The artifacts come back before the end is recorded and posted, so the
+	// woken submitter can fetch them, and before the folder is removed. A copy
+	// that fails is noted on the job; it does not change the job's result.
+	if len(job.Artifacts) > 0 && launched && job.Dir != "" && !EngineStopping() {
+		note, err := "", error(nil)
+		if machine, e := s.Machines.Get(ctx, job.Node); e != nil {
+			err = e
+		} else {
+			conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
+			note, err = copyArtifacts(ctx, s.executor(conn), *job, ArtifactDir(job.LogPath))
+		}
+		if err != nil {
+			note = "artifacts: " + err.Error()
+		}
+		if note != "" {
+			job.Note = strings.TrimPrefix(job.Note+"; "+note, "; ")
+		}
+	}
 	// The end is a conditional write: another engine may have cancelled the
 	// row while this one held the executor. The row's own terminal state and
 	// report then stay, and this engine stops the node process quietly.
@@ -776,6 +807,10 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 	if job.SHA != "" {
 		cache := path.Join(base, RepoKey(job.Repo)+".git")
 		inner += "flock " + q(cache+".worktrees.lock") + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(job.SHA) + " && "
+	} else {
+		// A job with no source still gets its own work folder, so its outputs
+		// have one place to live and --artifact paths one root.
+		inner += "mkdir -p " + q(work) + "; "
 	}
 	// Each word is quoted on its own, so the shell that runs the script builds
 	// exactly the argv the submitter passed: no boundary moves, no
@@ -795,19 +830,15 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 			docker = "docker=(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
 		}
 		inner += docker + "; "
-		mount := ""
-		if job.SHA != "" {
-			// The checkout lives on the node, so the container mounts it and
-			// works there, exactly as a CI check container does.
-			mount = " -v " + q(work+":/workspace") + " -w /workspace"
-		}
+		// The work folder lives on the node, so the container mounts it and
+		// works there, exactly as a CI check container does, and what the job
+		// writes there stays for its artifacts.
+		mount := " -v " + q(work+":/workspace") + " -w /workspace"
 		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
 			" --pids-limit=512" + mount + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {
-		if job.SHA != "" {
-			inner += "cd " + q(work) + "; "
-		}
+		inner += "cd " + q(work) + "; "
 		inner += "timeout --foreground --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s bash -o pipefail -c " + q(command)
 	}
 	slots := machine.CISlots
