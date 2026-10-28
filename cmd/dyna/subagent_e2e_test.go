@@ -1045,10 +1045,9 @@ func TestSubagentCLILifecycleEndToEnd(t *testing.T) {
 		if out := must("subagent", "list", "--all"); !strings.Contains(out, id) || !strings.Contains(out, "closed") {
 			t.Fatalf("list --all = %q", out)
 		}
-		// Messaging a closed session is refused: addresses resolve only while
-		// the session is open, so the send finds no live recipient.
-		if _, stderr, err := run("post", "@"+addr, "more"); err == nil || !strings.Contains(stderr, "no open session named") {
-			t.Fatalf("msg to closed session: %v %s", err, stderr)
+		// A closed top-level session routes new posts to the root seat.
+		if out := must("post", "@"+addr, "more"); !strings.Contains(out, "work: room") {
+			t.Fatalf("post to closed session = %q; want root seat delivery", out)
 		}
 	})
 
