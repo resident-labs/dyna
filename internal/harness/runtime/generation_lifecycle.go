@@ -24,6 +24,7 @@ import (
 	harnesshome "dyna-agent/internal/harness/home"
 	"dyna-agent/internal/harness/runtime/genstate"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellmcp"
 )
 
@@ -136,6 +137,16 @@ func (r *Runtime) captureGeneration(h, home, account string, lookup func(string)
 		prefs = nil
 	}
 	prefs = nativeFeaturePreferences(h, prefs)
+	if h == "pi" {
+		owner, err := settings.Load("")
+		if err != nil {
+			return empty, generationInputs{}, err
+		}
+		if owner.PiCodeMode == "only" {
+			prefs["defaultTools"] = []string{"+codemode"}
+			prefs["codemode.mode"] = "only"
+		}
+	}
 	c, err := r.Config.Read()
 	if err != nil {
 		return empty, generationInputs{}, err
