@@ -327,6 +327,22 @@ func TestSweepDoesNotStopShellWithUnreadableOwnerEvidence(t *testing.T) {
 	}
 }
 
+func TestStopKillsStampedDescendantsAfterGrace(t *testing.T) {
+	storetest.ClearStamp(t)
+	var waited time.Duration
+	var cleaned string
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells"), pause: func(d time.Duration) { waited += d }}
+	meta := runningShell(t, s, "", false)
+	s.stopJobProcesses = func(id string) (bool, error) {
+		cleaned = id
+		return true, fmt.Errorf("survivor")
+	}
+	_, err := s.Stop(meta.ID, "owner")
+	if waited < 100*time.Millisecond || cleaned != meta.ID || err == nil || !strings.Contains(err.Error(), "survivor") {
+		t.Fatalf("grace = %v, cleaned = %q, error = %v", waited, cleaned, err)
+	}
+}
+
 func TestStopStillSignalsWhenLogIsMissing(t *testing.T) {
 	storetest.ClearStamp(t)
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}

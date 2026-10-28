@@ -138,6 +138,8 @@ type Store struct {
 	// recorded the process. A test waits on it instead of sampling the
 	// job's status, so no timer decides when the job is running.
 	OnStarted func(pid int)
+	// stopJobProcesses replaces stamped-process cleanup in tests.
+	stopJobProcesses func(string) (bool, error)
 }
 
 // processStartTime reads pid's start time, or 0 when this system has none. A
@@ -842,8 +844,12 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	// A log failure must not leave the process running.
 	logErr := errors.Join(s.markStopped(id, by), s.logStop(id, "stop requested; sending SIGTERM to the process group"))
 	_ = syscall.Kill(-in.Pid, syscall.SIGTERM)
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
 	for i := 0; i < 50; i++ {
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		if syscall.Kill(in.Pid, 0) != nil {
 			break
 		}
@@ -852,6 +858,14 @@ func (s *Store) Stop(id, by string) (Info, error) {
 		logErr = errors.Join(logErr, s.logStop(id, "shell did not stop within 5 seconds; sending SIGKILL"))
 		_ = syscall.Kill(-in.Pid, syscall.SIGKILL)
 	}
+	// The group leader can exit before a child that started a new session.
+	// The job stamp identifies those children without touching the supervisor.
+	stop := s.stopJobProcesses
+	if stop == nil {
+		stop = stopOrphans
+	}
+	_, cleanupErr := stop(id)
+	logErr = errors.Join(logErr, cleanupErr)
 	in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
 	return in, errors.Join(logErr, err)
 }
