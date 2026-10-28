@@ -323,9 +323,15 @@ func (m *BundleManager) installCandidate(ctx context.Context, harness, version s
 	}
 	// An unstamped binary names only the fork level; the tarball it installs
 	// carries the exact build. Resolve the build now, so the bundle publishes
-	// and resolves under the version its manifest really has.
+	// and resolves under the version its manifest really has. A source build
+	// made by an older self-update stamps the local tarball but not its build
+	// (D-417), so read the build from that tarball too.
 	if a, aerr := Adapter(h); aerr == nil && a.distribution == distributionFork && version == piForkVersion && piForkBuild == "" {
-		if build, ok := forkTarballVersion(os.Getenv(piForkTarballEnv)); ok {
+		tarball := os.Getenv(piForkTarballEnv)
+		if tarball == "" && piForkURL == "" {
+			tarball = piForkAsset
+		}
+		if build, ok := forkTarballVersion(tarball); ok {
 			version = build
 		}
 	}
