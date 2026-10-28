@@ -25,6 +25,7 @@ import (
 	"dyna-agent/internal/harness/runtime/genstate"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
@@ -87,6 +88,7 @@ var migrations = []func(dataDir string) error{
 	// runtime queries at cleanup.
 	genstate.Migrate,
 	lanesync.Migrate,
+	jobs.Migrate,
 	librarianstate.Migrate,
 	library.Migrate,
 	localci.Migrate,

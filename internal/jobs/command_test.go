@@ -72,4 +72,3 @@ func TestRunAndReapKillsTheGroupOfALeftoverChild(t *testing.T) {
 		t.Fatalf("a failed command reaped groups %v", killed)
 	}
 }
-

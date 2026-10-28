@@ -26,6 +26,7 @@ import (
 	"dyna-agent/internal/cli/goal"
 	"dyna-agent/internal/cli/interactive"
 	cliissue "dyna-agent/internal/cli/issue"
+	clijob "dyna-agent/internal/cli/job"
 	"dyna-agent/internal/cli/journal"
 	clilibrary "dyna-agent/internal/cli/library"
 	"dyna-agent/internal/cli/machine"
@@ -158,6 +159,7 @@ func newRootCommand() *cobra.Command {
 		shell.NewCommand(),
 		computer.NewCommand(),
 		machine.NewCommand(),
+		clijob.NewCommand(),
 		computer.NewBrowserCommand(),
 		computer.NewDaemonCommand(),
 		clilibrary.NewCommand(),

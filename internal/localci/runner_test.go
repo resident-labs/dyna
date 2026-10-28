@@ -305,4 +305,3 @@ func TestAdmissionAcceptsResultPublishedBeforeKeeperExit(t *testing.T) {
 		t.Fatalf("completed keeper result was rejected: %v: %s", err, output)
 	}
 }
-

@@ -1,0 +1,582 @@
+package jobs
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"dyna-agent/internal/machines"
+	"dyna-agent/internal/shellquote"
+)
+
+// DefaultTimeout bounds a job that asked for none.
+const DefaultTimeout = 30 * time.Minute
+
+// MachineSource resolves the registered machine a job runs on. machines.Store
+// satisfies it.
+type MachineSource interface {
+	Get(ctx context.Context, name string) (machines.Machine, error)
+	GetLocal(ctx context.Context) (machines.Machine, error)
+}
+
+// Reporter posts a job's typed events. The engine implements it with the room
+// event contract; tests record the calls.
+type Reporter interface {
+	// JobStarted reports a job that began to run.
+	JobStarted(ctx context.Context, job Job) error
+	// JobFinished reports a job that reached a final state.
+	JobFinished(ctx context.Context, job Job) error
+}
+
+// NodeBase names the one directory a node keeps on its machine. Local CI and
+// jobs share it, so a node's CI slots bound both. The user ID is the
+// controller's, not the SSH account's.
+func NodeBase(node string) string {
+	return fmt.Sprintf("/var/tmp/dyna-local-ci-%d/%s", os.Getuid(), node)
+}
+
+// RepoKey is the stable folder name of a repository's cache on a node.
+func RepoKey(repo string) string {
+	sum := sha256.Sum256([]byte(repo))
+	return hex.EncodeToString(sum[:16])
+}
+
+// Service runs the jobs of one engine. A job is detached on its node: it
+// survives the end of the session that submitted it and an engine restart,
+// which reattaches through the stored folder and unit.
+type Service struct {
+	Store    Store
+	Machines MachineSource
+	Reporter Reporter
+	// DataDir is the engine's data folder, where job logs live.
+	DataDir string
+	// NewExecutor builds the executor of a node. Tests replace it.
+	NewExecutor func(Conn) Executor
+	// logf logs the service's own errors. Nil uses the standard logger.
+	logf func(string, ...any)
+	// onRun tells a test that the service began to run a job, synchronously.
+	onRun func(Job)
+
+	mu      sync.Mutex
+	pollers map[string]*Poller
+	stops   map[string]func()
+	stopped bool
+}
+
+func (s *Service) logger() func(string, ...any) {
+	if s.logf != nil {
+		return s.logf
+	}
+	return log.Printf
+}
+
+func (s *Service) dataDir() string {
+	if s.DataDir != "" {
+		return s.DataDir
+	}
+	return defaultDataDir()
+}
+
+func (s *Service) executor(conn Conn) Executor {
+	if s.NewExecutor != nil {
+		return s.NewExecutor(conn)
+	}
+	return Executor{Node: conn}
+}
+
+// Input is one job to submit.
+type Input struct {
+	RoomID  string
+	Session string
+	// Node names the registered machine. Empty means the local node.
+	Node    string
+	Command []string
+	// Repo is a local repository path and Ref the commit to check out. Both
+	// empty runs the command with no source.
+	Repo string
+	Ref  string
+	Host bool
+	// Image runs the command in this container image; Host must be false.
+	Image   string
+	CPUs    int
+	Memory  string
+	Timeout time.Duration
+}
+
+// Submit stores a queued job and starts it. The job runs detached, so Submit
+// returns as soon as the row is stored.
+func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
+	if len(in.Command) == 0 {
+		return Job{}, errors.New("a job needs a command")
+	}
+	if in.Host && in.Image != "" {
+		return Job{}, errors.New("a job runs either on the host or in an image, not both")
+	}
+	machine, err := s.machine(ctx, in.Node)
+	if err != nil {
+		return Job{}, err
+	}
+	if !machine.Enabled {
+		return Job{}, fmt.Errorf("machine %s is disabled", machine.Name)
+	}
+	// Host execution on another machine runs the submitter's words there, so
+	// it needs the machine's host grant, exactly as a host CI check does. The
+	// local node is the machine the submitter already works on, so it needs no
+	// grant: a one-machine owner runs jobs with no setup.
+	if in.Host && machine.SSH != "" && !machine.HostChecksAllowed(in.RoomID) {
+		return Job{}, fmt.Errorf("machine %s allows host jobs only with a host-check grant; the owner or the room root allows them with: dyna machine edit %s --allow-host-checks", machine.Name, machine.Name)
+	}
+	id, err := s.Store.NewID()
+	if err != nil {
+		return Job{}, err
+	}
+	job := Job{
+		ID: id, RoomID: in.RoomID, Session: in.Session, Node: machine.Name,
+		Command: in.Command, Host: in.Host, Image: in.Image,
+		CPUs: in.CPUs, Timeout: in.Timeout,
+		State: StateQueued, Created: s.Store.now(),
+		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
+	}
+	if in.Memory != "" {
+		mib, err := ParseMemory(in.Memory)
+		if err != nil {
+			return Job{}, err
+		}
+		job.MemoryMiB = mib
+	}
+	if job.Timeout <= 0 {
+		job.Timeout = DefaultTimeout
+	}
+	if in.Repo != "" || in.Ref != "" {
+		repo, sha, err := s.resolveCommit(ctx, in.Repo, in.Ref)
+		if err != nil {
+			return Job{}, err
+		}
+		job.Repo, job.SHA = repo, sha
+	}
+	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
+		return Job{}, err
+	}
+	if err := s.Store.Save(ctx, job); err != nil {
+		return Job{}, err
+	}
+	s.start(job)
+	return job, nil
+}
+
+// ParseMemory reads a memory request such as 512m, 16g or 4096 (MiB).
+func ParseMemory(request string) (int64, error) {
+	request = strings.TrimSpace(strings.ToLower(request))
+	if request == "" {
+		return 0, errors.New("a memory request is empty")
+	}
+	unit := request[len(request)-1]
+	size := request
+	mult := int64(1)
+	switch unit {
+	case 'g':
+		mult = 1024
+		size = request[:len(request)-1]
+	case 'm':
+		size = request[:len(request)-1]
+	}
+	value, err := strconv.ParseInt(size, 10, 64)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("memory request %q is not a size such as 16g or 512m", request)
+	}
+	return value * mult, nil
+}
+
+// machine resolves the node a job runs on. Empty means the local node.
+func (s *Service) machine(ctx context.Context, name string) (machines.Machine, error) {
+	if name == "" {
+		return s.Machines.GetLocal(ctx)
+	}
+	machine, err := s.Machines.Get(ctx, name)
+	if errors.Is(err, os.ErrNotExist) {
+		return machine, fmt.Errorf("no machine named %s is registered", name)
+	}
+	return machine, err
+}
+
+// resolveCommit reads the exact commit the job checks out. It returns the
+// repository's common directory, which keys the node's cache.
+func (s *Service) resolveCommit(ctx context.Context, repo, ref string) (string, string, error) {
+	if repo == "" {
+		return "", "", errors.New("a job with a commit needs the repository path")
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		return "", "", err
+	}
+	x := s.executor(Conn{})
+	var out strings.Builder
+	if err := x.Run(ctx, abs, &out, "git", "rev-parse", "--verify", "--end-of-options", ref+"^{commit}"); err != nil {
+		return "", "", fmt.Errorf("resolve commit: %w: %s", err, out.String())
+	}
+	sha := strings.TrimSpace(out.String())
+	if len(sha) < 40 || strings.ContainsAny(sha, " /") {
+		return "", "", fmt.Errorf("git returned an invalid commit SHA %q", sha)
+	}
+	out.Reset()
+	if err := x.Run(ctx, abs, &out, "git", "rev-parse", "--path-format=absolute", "--git-common-dir"); err != nil {
+		return "", "", fmt.Errorf("resolve repository: %w: %s", err, out.String())
+	}
+	return strings.TrimSpace(out.String()), sha, nil
+}
+
+// Start begins every queued job and reattaches to the running ones an earlier
+// engine left on the nodes. The engine calls it once, at start.
+func (s *Service) Start(ctx context.Context) {
+	queued, err := s.Store.ClaimQueued(ctx)
+	if err != nil {
+		s.logger()("jobs: read queued jobs: %v", err)
+	}
+	for _, job := range queued {
+		s.start(job)
+	}
+	running, err := s.Store.Running(ctx)
+	if err != nil {
+		s.logger()("jobs: read running jobs: %v", err)
+	}
+	for _, job := range running {
+		s.start(job)
+	}
+}
+
+// Cancel stops a queued or running job. A queued job never starts.
+func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
+	job, err := s.Store.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if job.State.Finished() {
+		return job, nil
+	}
+	s.mu.Lock()
+	stop := s.stops["job:"+id]
+	s.mu.Unlock()
+	if stop != nil {
+		stop()
+		return s.Store.Get(ctx, id)
+	}
+	// No live executor owns it: a queued row, or a running one this engine has
+	// not picked up. Mark it cancelled; the worker of a queued row skips it.
+	job.State = StateCancelled
+	job.Ended = s.Store.now()
+	if err := s.Store.Save(ctx, job); err != nil {
+		return Job{}, err
+	}
+	if s.Reporter != nil && !job.Started.IsZero() {
+		if err := s.Reporter.JobFinished(ctx, job); err != nil {
+			s.logger()("jobs: report cancelled job %s: %v", job.ID, err)
+		}
+	}
+	return job, nil
+}
+
+// Stop ends the service: it stops polling and cancels the engine-side waits.
+// The jobs keep running on their nodes, and the restarted engine reattaches.
+func (s *Service) Stop() {
+	s.mu.Lock()
+	s.stopped = true
+	stops := s.stops
+	s.stops = nil
+	s.mu.Unlock()
+	for _, stop := range stops {
+		if stop != nil {
+			stop()
+		}
+	}
+}
+
+// poller returns the one poller of a node, so every job on it shares one poll
+// call. It returns nil when the service has stopped.
+func (s *Service) poller(conn Conn) *Poller {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return nil
+	}
+	if s.pollers == nil {
+		s.pollers = map[string]*Poller{}
+	}
+	if s.stops == nil {
+		s.stops = map[string]func(){}
+	}
+	if p := s.pollers[conn.Name]; p != nil {
+		return p
+	}
+	x := s.executor(conn)
+	p, stop := x.NewPoller(context.Background())
+	s.pollers[conn.Name] = p
+	s.stops["poller:"+conn.Name] = stop
+	return p
+}
+
+// start runs one job on its node. It returns at once; the work happens in its
+// own goroutine. The job's cancel is registered before the goroutine starts,
+// so a cancel that races the start still reaches it. A job this process
+// already runs is not started twice.
+func (s *Service) start(job Job) {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	if s.stops == nil {
+		s.stops = map[string]func(){}
+	}
+	if _, running := s.stops["job:"+job.ID]; running {
+		s.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.stops["job:"+job.ID] = cancel
+	s.mu.Unlock()
+	go s.run(job, ctx, cancel)
+}
+
+// run executes one job from submission or reattach to its recorded end.
+func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
+	defer cancel()
+	if s.onRun != nil {
+		s.onRun(job)
+	}
+	defer func() {
+		s.mu.Lock()
+		delete(s.stops, "job:"+job.ID)
+		s.mu.Unlock()
+	}()
+
+	machine, err := s.Machines.Get(context.Background(), job.Node)
+	if err != nil {
+		s.finish(job, nil, err)
+		return
+	}
+	conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
+	reattach := job.State == StateRunning
+	if !reattach {
+		job.State = StateRunning
+		job.Started = s.Store.now()
+	}
+	job.Dir = path.Join(NodeBase(machine.Name), "jobs", job.ID)
+	job.Unit = "dyna-job-" + job.ID + ".service"
+	resources := ClampResources(job.Host, job.CPUs, job.MemoryMiB, machineFacts(machine))
+	job.Note = resources.Note
+
+	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
+		s.finish(job, nil, err)
+		return
+	}
+	flag := os.O_WRONLY | os.O_CREATE
+	if reattach {
+		flag |= os.O_APPEND
+	} else {
+		flag |= os.O_TRUNC
+	}
+	logFile, err := os.OpenFile(job.LogPath, flag, 0o600)
+	if err != nil {
+		s.finish(job, nil, err)
+		return
+	}
+	defer logFile.Close()
+	logWriter := &logStore{store: &s.Store, job: &job, file: logFile}
+
+	x := s.executor(conn)
+	if !reattach && job.SHA != "" {
+		cache := path.Join(NodeBase(machine.Name), RepoKey(job.Repo)+".git")
+		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA); err != nil {
+			s.finish(job, logWriter, err)
+			return
+		}
+	}
+	spec := RunSpec{ID: job.ID, Dir: path.Join(job.Dir, "detached"), Unit: job.Unit, Attach: reattach, Offset: job.LogBytes}
+	if !job.Host {
+		limits := resources.Scope(false)
+		spec.Limits = &limits
+	}
+	if !reattach {
+		spec.Script = jobScript(machine, job, resources)
+		if err := s.Store.Save(ctx, job); err != nil {
+			s.logger()("jobs: record started job %s: %v", job.ID, err)
+		}
+		if s.Reporter != nil {
+			if err := s.Reporter.JobStarted(ctx, job); err != nil {
+				s.logger()("jobs: report started job %s: %v", job.ID, err)
+			}
+		}
+	}
+
+	poller := s.poller(conn)
+	if poller == nil {
+		return
+	}
+	// The node enforces the deadline itself; the engine allows the queue wait
+	// and a slow route on top before it stops following the job.
+	var timeoutCancel context.CancelFunc
+	runCtx, timeoutCancel := context.WithTimeout(ctx, job.Timeout+AdmissionWait+2*time.Minute)
+	defer timeoutCancel()
+	runErr := poller.Run(runCtx, spec, logWriter)
+	if runErr != nil && errors.Is(runErr, context.Canceled) && EngineStopping() {
+		// The engine is stopping: the job keeps running on its node and the
+		// restarted engine reattaches through this row.
+		_ = s.Store.Save(context.WithoutCancel(ctx), job)
+		return
+	}
+	if runErr != nil && !job.State.Finished() {
+		s.stopUnit(x, spec)
+	}
+	s.finish(job, logWriter, runErr)
+}
+
+// stopUnit asks the node to stop the job's unit, best effort.
+func (s *Service) stopUnit(x Executor, spec RunSpec) {
+	stopCtx, cancel := context.WithTimeout(context.Background(), StopTimeout)
+	defer cancel()
+	_ = x.StopDetached(stopCtx, spec)
+}
+
+// classify names the state a job ended in from its run error.
+func classify(err error) (State, *int) {
+	switch {
+	case err == nil:
+		return StatePassed, ptr(0)
+	case errors.Is(err, context.DeadlineExceeded):
+		return StateTimedOut, nil
+	case errors.Is(err, context.Canceled):
+		return StateCancelled, nil
+	}
+	var exit *DetachedExit
+	if errors.As(err, &exit) {
+		switch {
+		case exit.Code == 0:
+			return StatePassed, ptr(0)
+		case exit.Code == 124:
+			return StateTimedOut, ptr(124)
+		}
+		return StateFailed, ptr(exit.Code)
+	}
+	var lost *NodeLostError
+	if errors.As(err, &lost) {
+		return StateLost, nil
+	}
+	return StateFailed, nil
+}
+
+func ptr(code int) *int { return &code }
+
+// finish records a job's end and reports it. The job's folder on the node,
+// its checkout included, is removed at the end: a fresh job gets a fresh
+// folder.
+func (s *Service) finish(job Job, log *logStore, err error) {
+	state, exit := StateFailed, (*int)(nil)
+	if err == nil {
+		state, exit = StatePassed, ptr(0)
+	} else {
+		state, exit = classify(err)
+		job.Note = err.Error()
+	}
+	job.State = state
+	job.ExitCode = exit
+	job.Ended = s.Store.now()
+	ctx := context.Background()
+	if log != nil {
+		log.flush()
+	}
+	if err := s.Store.Save(ctx, job); err != nil {
+		s.logger()("jobs: record finished job %s: %v", job.ID, err)
+	}
+	if s.Reporter != nil {
+		if err := s.Reporter.JobFinished(ctx, job); err != nil {
+			s.logger()("jobs: report finished job %s: %v", job.ID, err)
+		}
+	}
+	if job.Dir != "" && !EngineStopping() {
+		x := s.executor(Conn{Name: job.Node})
+		removeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		var out TailBuffer
+		if e := x.NodeCommand(removeCtx, &out, &out, "rm -rf -- "+shellquote.Quote(job.Dir)); e != nil {
+			s.logger()("jobs: remove the folder of job %s on %s: %v: %s", job.ID, job.Node, e, out.String())
+		}
+	}
+}
+
+// machineFacts reads a machine's clamp facts. A machine with no CI slots
+// still runs one job at a time, so the slot floor is one.
+func machineFacts(m machines.Machine) Facts {
+	slots := m.CISlots
+	if slots < 1 {
+		slots = 1
+	}
+	return Facts{Slots: slots, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal}
+}
+
+// logStore streams a job's log to its file and records the stored size, so a
+// restarted engine appends instead of rewriting.
+type logStore struct {
+	store *Store
+	job   *Job
+	file  *os.File
+}
+
+func (l *logStore) Write(p []byte) (int, error) {
+	n, err := l.file.Write(p)
+	l.job.LogBytes += int64(n)
+	return n, err
+}
+
+// flush records the stored log size.
+func (l *logStore) flush() {
+	_ = l.store.Save(context.Background(), *l.job)
+}
+
+// jobScript is the script a job runs on its node: it takes a CI slot, checks
+// out the commit when the job has one, and runs the command under the job's
+// deadline.
+func jobScript(machine machines.Machine, job Job, resources Resources) string {
+	q := shellquote.Quote
+	base := NodeBase(machine.Name)
+	work := path.Join(job.Dir, "work")
+	seconds := int64((job.Timeout + time.Second - 1) / time.Second)
+	inner := "set -euo pipefail; mkdir -p " + q(path.Dir(work)) + "; "
+	if job.SHA != "" {
+		cache := path.Join(base, RepoKey(job.Repo)+".git")
+		inner += "flock " + q(cache+".worktrees.lock") + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(job.SHA) + " && "
+	}
+	command := strings.Join(job.Command, " ")
+	if job.Image != "" {
+		docker := "(docker)"
+		if machine.SSH == "" {
+			docker = "(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
+		}
+		inner += docker + "; "
+		if job.SHA != "" {
+			inner += "cd " + q(work) + "; "
+		}
+		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --cpus=" + strconv.Itoa(resources.CPUs) +
+			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
+			" --pids-limit=512 " + q(job.Image) + " bash -o pipefail -c " + q(command)
+	} else {
+		if job.SHA != "" {
+			inner += "cd " + q(work) + "; "
+		}
+		inner += "timeout --foreground --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s bash -o pipefail -c " + q(command)
+	}
+	slots := machine.CISlots
+	if slots < 1 {
+		slots = 1
+	}
+	return SlotScript(base, slots, 0, path.Join(job.Dir, ".active"), job.Timeout+AdmissionWait, inner)
+}

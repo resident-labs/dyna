@@ -171,9 +171,12 @@ const UnitStoppedFunction = `unit_stopped() { local s; s=$(timeout 10s systemctl
 type RunSpec struct {
 	// ID is the check the unit belongs to.
 	ID string
-	// Attach follows a check that an earlier engine already started: nothing is
-	// launched, and the poll brings its whole log.
+	// Attach follows a job that an earlier engine already started: nothing is
+	// launched, and the poll continues at Offset.
 	Attach bool
+	// Offset is where an attached job's log continues; a launched job starts
+	// at 0.
+	Offset int64
 	// Dir is the check's folder on the node.
 	Dir string
 	// Unit is the name of the job's systemd unit.
@@ -382,7 +385,7 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 			return fmt.Errorf("start check: %w", err)
 		}
 	}
-	w := &watch{spec: spec, out: out, done: make(chan error, 1)}
+	w := &watch{spec: spec, out: out, offset: spec.Offset, done: make(chan error, 1)}
 	p.mu.Lock()
 	p.active[spec.Dir] = w
 	p.mu.Unlock()
@@ -499,14 +502,14 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 		if w.offset < frame.Size {
 			continue
 		}
-		switch frame.State {
-		case StateExited:
+		switch frame.Unit {
+		case UnitExited:
 			if frame.Code == 0 {
 				p.finish(w, nil)
 			} else {
 				p.finish(w, &DetachedExit{Code: frame.Code})
 			}
-		case StateGone, StateMissing:
+		case UnitGone, UnitMissing:
 			// A check that was launched has a folder. Without it, and without an
 			// exit record, nothing can say how the check ended.
 			p.finish(w, &NodeLostError{Node: p.x.Node.Name, Gone: true})
@@ -514,19 +517,19 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 	}
 }
 
-type State string
+type UnitState string
 
 const (
-	StateRunning State = "running"
-	StateExited  State = "exited"
-	StateGone    State = "gone"
+	UnitRunning UnitState = "running"
+	UnitExited  UnitState = "exited"
+	UnitGone    UnitState = "gone"
 	// StateMissing is a check whose folder does not exist: it was never launched.
-	StateMissing State = "missing"
+	UnitMissing UnitState = "missing"
 )
 
 // Frame is what one poll learned about one job.
 type Frame struct {
-	State   State
+	Unit    UnitState
 	Code    int
 	Size    int64
 	Payload []byte
@@ -590,7 +593,7 @@ func ParsePoll(reply io.Reader) (map[string]Frame, error) {
 		}
 		size, _ := strconv.ParseInt(match[4], 10, 64)
 		n, _ := strconv.Atoi(match[5])
-		frame := Frame{State: State(match[2]), Size: size, Payload: make([]byte, n)}
+		frame := Frame{Unit: UnitState(match[2]), Size: size, Payload: make([]byte, n)}
 		if match[3] != "" {
 			frame.Code, _ = strconv.Atoi(match[3])
 		}
