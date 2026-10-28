@@ -510,56 +510,9 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		}
 		return s.advanceMergeTrial(ctx, repo, b)
 	case state.MergeTrialPhasePublishing:
-		if st.RepositoryFacts[repo].Head != b.Head {
-			ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
-			if err != nil {
-				return err
-			}
-			logs := ci.Logs
-			flaky := flakyPublicationAllowed(ctx, logs)
-			if ci.Status == VerdictFailed && !flaky {
-				// Record the prefix before it is reset to the full batch.
-				s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, logs)
-				if len(b.StackChanges) > 0 {
-					for i := range b.Stacks {
-						if b.Stacks[i].Branch == b.Branch {
-							b.Stacks[i].Phase, b.Stacks[i].Logs = state.MergeTrialPhaseFailed, logs
-						}
-					}
-					b.Changes, b.Branch, b.Head = b.StackChanges, b.RootBranch, b.OriginalHead
-					b.Phase, b.Reason = state.MergeTrialPhaseStacking, "selected prefix CI changed; choosing a passing prefix"
-					b.Failure = nil
-				} else {
-					b.Phase, b.Reason, b.Logs = state.MergeTrialPhaseFailed, "batch trial failed; waiting for root", logs
-				}
-				if !b.Bisect {
-					return s.stopMergeBatch(ctx, repo, *r, b, ci)
-				}
-				return s.saveMergeTrial(repo, b)
-			}
-			if ci.Status != VerdictPassed && !flaky {
-				b.Reason = ci.Reason
-				return s.saveMergeTrial(repo, b)
-			}
-
-			for _, change := range b.Changes {
-				member := *st.Records[change.Key]
-				if member.Head != change.Head {
-					return s.discardMergeTrial(ctx, repo, *r, b)
-				}
-				if _, ready, err := s.mergeReady(ctx, member); err != nil {
-					return err
-				} else if !ready {
-					return s.discardMergeTrial(ctx, repo, *r, b)
-				}
-			}
-		}
-		if err := client.Publish(ctx, batch, b.Head); err != nil {
-			if errors.Is(err, trial.ErrMainMoved) {
-				return s.discardMergeTrial(ctx, repo, *r, b)
-			}
-			b.Reason = err.Error()
-			return errors.Join(err, s.saveMergeTrial(repo, b))
+		published, err := s.publishTrialBatch(ctx, st, repo, r, &b, batch, client)
+		if err != nil || !published {
+			return err
 		}
 		s.noteMergeHistory(st, repo, b, "publish", "published", b.Head, "")
 		landed := mergeTrialEvent(st, b, room.MergeLanded)
@@ -613,6 +566,71 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 	default:
 		return fmt.Errorf("unknown merge trial phase %q", b.Phase)
 	}
+}
+
+// publishTrialBatch revalidates a publishing trial batch and publishes it.
+// The reviewer-requirement gate spans the members' final readiness checks and
+// the publication: a requirement write either lands before those checks read
+// the record, or waits until the batch is published, so no batch publishes
+// with a requirement it was not checked against (D-409).
+func (s *Service) publishTrialBatch(ctx context.Context, st State, repo string, r *Record, b *state.MergeTrial, batch trial.Batch, client trial.Client) (bool, error) {
+	unlock, err := s.requirementLock(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	if st.RepositoryFacts[repo].Head != b.Head {
+		ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
+		if err != nil {
+			return false, err
+		}
+		logs := ci.Logs
+		flaky := flakyPublicationAllowed(ctx, logs)
+		if ci.Status == VerdictFailed && !flaky {
+			// Record the prefix before it is reset to the full batch.
+			s.noteMergeHistory(st, repo, *b, "trial", "failed", b.Head, logs)
+			if len(b.StackChanges) > 0 {
+				for i := range b.Stacks {
+					if b.Stacks[i].Branch == b.Branch {
+						b.Stacks[i].Phase, b.Stacks[i].Logs = state.MergeTrialPhaseFailed, logs
+					}
+				}
+				b.Changes, b.Branch, b.Head = b.StackChanges, b.RootBranch, b.OriginalHead
+				b.Phase, b.Reason = state.MergeTrialPhaseStacking, "selected prefix CI changed; choosing a passing prefix"
+				b.Failure = nil
+			} else {
+				b.Phase, b.Reason, b.Logs = state.MergeTrialPhaseFailed, "batch trial failed; waiting for root", logs
+			}
+			if !b.Bisect {
+				return false, s.stopMergeBatch(ctx, repo, *r, *b, ci)
+			}
+			return false, s.saveMergeTrial(repo, *b)
+		}
+		if ci.Status != VerdictPassed && !flaky {
+			b.Reason = ci.Reason
+			return false, s.saveMergeTrial(repo, *b)
+		}
+
+		for _, change := range b.Changes {
+			member := *st.Records[change.Key]
+			if member.Head != change.Head {
+				return false, s.discardMergeTrial(ctx, repo, *r, *b)
+			}
+			if _, ready, err := s.mergeReady(ctx, member); err != nil {
+				return false, err
+			} else if !ready {
+				return false, s.discardMergeTrial(ctx, repo, *r, *b)
+			}
+		}
+	}
+	if err := client.Publish(ctx, batch, b.Head); err != nil {
+		if errors.Is(err, trial.ErrMainMoved) {
+			return false, s.discardMergeTrial(ctx, repo, *r, *b)
+		}
+		b.Reason = err.Error()
+		return false, errors.Join(err, s.saveMergeTrial(repo, *b))
+	}
+	return true, nil
 }
 
 // trialCI is what the steward observed about a merge trial's CI: its status,

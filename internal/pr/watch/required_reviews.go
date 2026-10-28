@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -10,13 +11,14 @@ import (
 
 // RequireReviewers adds canonical session IDs without removing prior requirements.
 // The checked author and room bind the write to the record that was authorized.
-// It takes the merge publication lock, so a requirement cannot land between a
-// batch member's final readiness check and its publication.
+// It takes the reviewer-requirement lock, which a publisher holds only across
+// a batch's final readiness check and its publication: a requirement cannot
+// land between them, and the write does not wait out whole merge ticks (D-409).
 func (s *Service) RequireReviewers(key, author, roomID string, reviewers []string) error {
 	if len(reviewers) == 0 || len(reviewers) > 20 {
 		return fmt.Errorf("require between 1 and 20 reviewers")
 	}
-	unlock, err := s.mergeLock()
+	unlock, err := s.requirementLock(context.Background())
 	if err != nil {
 		return err
 	}
@@ -57,14 +59,14 @@ func (s *Service) RequireReviewers(key, author, roomID string, reviewers []strin
 // blocking the change. It works for any requirement, including one whose session
 // is closed or gone: closing a session normally releases its own requirement,
 // and this is the manual path for every other case. The checked author and room
-// bind the write to the record that was authorized. It takes the merge
-// publication lock, so a release cannot land between a batch member's final
-// readiness check and its publication.
+// bind the write to the record that was authorized. It takes the same
+// reviewer-requirement lock as RequireReviewers, so a release cannot land
+// between a batch's final readiness check and its publication either.
 func (s *Service) ReleaseReviewers(key, author, roomID string, reviewers []string) error {
 	if len(reviewers) == 0 || len(reviewers) > 20 {
 		return fmt.Errorf("release between 1 and 20 reviewers")
 	}
-	unlock, err := s.mergeLock()
+	unlock, err := s.requirementLock(context.Background())
 	if err != nil {
 		return err
 	}
