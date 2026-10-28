@@ -4,6 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${DYNA_SCRATCH:?Run QA from a Dyna session}"
 dyna=${DYNA_BIN:-dyna}
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+  exec env DYNA_QA_READY=1 go run ./scripts/qa-branch.go "$@"
+fi
 child= build_dir= qa_started=false
 cleanup() {
   local result=$?

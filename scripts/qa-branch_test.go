@@ -12,6 +12,43 @@ import (
 	"testing"
 )
 
+func TestParseQASteps(t *testing.T) {
+	steps, err := parseQASteps(strings.NewReader(`[
+		{"viewport":{"width":1280,"height":800}},
+		{"goto":"/rooms"},
+		{"click":"button.new-room"},
+		{"type":{"selector":"input[name=name]","text":"QA"}},
+		{"waitFor":"text=QA"},
+		{"screenshot":"/tmp/qa.png"}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 6 || steps[0].Viewport == nil || steps[0].Viewport.Width != 1280 || steps[0].Viewport.Height != 800 ||
+		steps[1].Goto == nil || *steps[1].Goto != "/rooms" ||
+		steps[2].Click == nil || *steps[2].Click != "button.new-room" ||
+		steps[3].Type == nil || steps[3].Type.Selector != "input[name=name]" || steps[3].Type.Text != "QA" ||
+		steps[4].WaitFor == nil || *steps[4].WaitFor != "text=QA" ||
+		steps[5].Screenshot == nil || *steps[5].Screenshot != "/tmp/qa.png" {
+		t.Fatalf("unexpected steps: %#v", steps)
+	}
+	for name, input := range map[string]string{
+		"empty list":       `[]`,
+		"no action":        `[{}]`,
+		"multiple actions": `[{"goto":"/","screenshot":"qa.png"}]`,
+		"bad viewport":     `[{"viewport":{"width":0,"height":800}}]`,
+		"empty selector":   `[{"click":""}]`,
+		"unknown field":    `[{"delay":1}]`,
+		"trailing value":   `[{"goto":"/"}] []`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseQASteps(strings.NewReader(input)); err == nil {
+				t.Fatalf("accepted %s", input)
+			}
+		})
+	}
+}
+
 func TestQAWebDirRequiresBuiltIndex(t *testing.T) {
 	if _, err := qaWebDir(""); err == nil {
 		t.Fatal("accepted missing directory")
@@ -62,7 +99,7 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, err := json.Marshal(map[string]any{
-		"Endpoint": "test-endpoint", "Module": module, "Web": dir,
+		"Endpoint": "ws://127.0.0.1:123/devtools/browser/test", "Module": module, "Web": dir,
 		"ReadMethods": engine.ReadOnlyWebMethods(),
 	})
 	if err != nil {
@@ -108,6 +145,14 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	out := strings.Join(printed, "\n")
 	if !strings.Contains(out, "QA policy checks passed: 29") {
 		t.Fatalf("missing policy checks: %s", out)
+	}
+	for _, want := range []string{
+		"QA page CDP target: qa-target",
+		"QA page CDP websocket: ws://127.0.0.1:123/devtools/page/qa-target",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q: %s", want, out)
+		}
 	}
 	// A control that needs a write, a socket or a newer server never appears in
 	// this tab, and the banner must say so before an agent blames the branch.
@@ -159,6 +204,105 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	if strings.Contains(out, "not-logged") {
 		t.Fatal("controller logged a credential")
 	}
+}
+
+func TestQABrowserControllerRunsStepsAndReportsFailures(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is unavailable")
+	}
+	module, err := filepath.Abs("testdata/browser_qa_steps_fake.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("actions", func(t *testing.T) {
+		screenshot := filepath.Join(t.TempDir(), "steps.png")
+		encodedPath, err := json.Marshal(screenshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := runQAStepsController(t, node, module, `[
+			{"viewport":{"width":1280,"height":800}},
+			{"goto":"/rooms"},
+			{"click":"button.save"},
+			{"type":{"selector":"input[name=name]","text":"QA"}},
+			{"waitFor":"text=Ready"},
+			{"screenshot":`+string(encodedPath)+`}
+		]`)
+		if err != nil {
+			t.Fatalf("QA steps: %v\n%s", err, out)
+		}
+		for _, want := range []string{
+			"QA fake viewport: 1280x800",
+			"QA fake goto: http://127.0.0.1:7457/rooms",
+			"QA fake click: button.save",
+			"QA fake type: input[name=name] <= QA",
+			"QA fake waitFor: text=Ready",
+			"QA fake screenshot: " + screenshot,
+			"QA steps complete.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%s", want, out)
+			}
+		}
+		if body, err := os.ReadFile(screenshot); err != nil || string(body) != "PNG" {
+			t.Errorf("step screenshot = %q, %v", body, err)
+		}
+	})
+
+	t.Run("failure diagnostics", func(t *testing.T) {
+		out, err := runQAStepsController(t, node, module, `[
+			{"waitFor":"body"},
+			{"goto":"https://evil.test/"}
+		]`)
+		if err == nil {
+			t.Fatalf("cross-origin goto succeeded:\n%s", out)
+		}
+		for _, want := range []string{
+			"QA step 2 failed: goto must stay on http://127.0.0.1:7457",
+			"QA blocked nothing yet.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%s", want, out)
+			}
+		}
+		reportPath := ""
+		for _, line := range strings.Split(out, "\n") {
+			if value, ok := strings.CutPrefix(line, "QA page screenshot: "); ok {
+				reportPath = value
+			}
+		}
+		if reportPath == "" {
+			t.Fatalf("failure saved no diagnostic screenshot:\n%s", out)
+		}
+		if body, err := os.ReadFile(reportPath); err != nil || string(body) != "PNG" {
+			t.Errorf("diagnostic screenshot = %q, %v", body, err)
+		}
+	})
+}
+
+func runQAStepsController(t *testing.T, node, module, rawSteps string) (string, error) {
+	t.Helper()
+	steps, err := parseQASteps(strings.NewReader(rawSteps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(struct {
+		Endpoint    string
+		Module      string
+		Web         string
+		ReadMethods []string
+		Steps       []qaStep
+	}{"ws://127.0.0.1:123/devtools/browser/test", module, t.TempDir(), engine.ReadOnlyWebMethods(), steps})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", browserQAScript)
+	cmd.Env = append(os.Environ(), "DYNA_SCRATCH="+t.TempDir())
+	cmd.Stdin = bytes.NewReader(config)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func TestBrowserConnectionUsesManagedModule(t *testing.T) {

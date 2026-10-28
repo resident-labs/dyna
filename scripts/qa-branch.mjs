@@ -139,11 +139,48 @@ page.once('close', stopped);
 browser.once('disconnected', stopped);
 try {
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
-  console.log('Read-only QA tab ready at ' + origin + '. Keep this command running; press Ctrl+C to close it.');
+  const cdp = await context.newCDPSession(page);
+  const { targetInfo } = await cdp.send('Target.getTargetInfo');
+  await cdp.detach();
+  const pageSocket = new URL(config.Endpoint);
+  pageSocket.pathname = '/devtools/page/' + targetInfo.targetId;
+  pageSocket.search = '';
+  pageSocket.hash = '';
+  console.log('QA page CDP target: ' + targetInfo.targetId);
+  console.log('QA page CDP websocket: ' + pageSocket.href);
+  console.log('Read-only QA tab ready at ' + origin + '.');
   console.log('Read-only QA cannot show settings writes, live streams that need a WebSocket (the computer viewer and voice calls), or server fields newer than the installed engine.');
   console.log('The computer stream stays closed in this tab: its socket relays desktop input, so QA is not read-only with it open. Check the viewer with dyna browser against the app the engine serves.');
   console.log('When a step times out, call globalThis.dynaQAReport() in the QA page: it lists every blocked request kind with its count and saves a screenshot to the path it returns.');
-  await done;
+  if (config.Steps) {
+    for (const [index, step] of config.Steps.entries()) {
+      try {
+        if (step.viewport) {
+          await page.setViewportSize(step.viewport);
+        } else if (step.goto !== undefined) {
+          const url = new URL(step.goto, origin);
+          if (url.origin !== origin) throw new Error('goto must stay on ' + origin);
+          await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+        } else if (step.click !== undefined) {
+          await page.locator(step.click).click();
+        } else if (step.type) {
+          await page.locator(step.type.selector).pressSequentially(step.type.text);
+        } else if (step.waitFor !== undefined) {
+          await page.locator(step.waitFor).waitFor();
+        } else if (step.screenshot !== undefined) {
+          await page.screenshot({ path: step.screenshot });
+          console.log('QA page screenshot: ' + step.screenshot);
+        }
+      } catch (error) {
+        await report();
+        throw new Error('QA step ' + (index + 1) + ' failed: ' + error.message, { cause: error });
+      }
+    }
+    console.log('QA steps complete.');
+  } else {
+    console.log('Keep this command running; press Ctrl+C to close the QA tab.');
+    await done;
+  }
 } finally {
   // Ignore route callbacks that fail while their context is shutting down.
   await context.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});

@@ -13,6 +13,16 @@ const cookieStarted = Promise.withResolvers();
 const cookieFinished = Promise.withResolvers();
 let closeWithPendingCookie = false;
 const context = {
+  async newCDPSession(page) {
+    assert.ok(page);
+    return {
+      async send(method) {
+        assert.equal(method, 'Target.getTargetInfo');
+        return { targetInfo: { targetId: 'qa-target' } };
+      },
+      async detach() {},
+    };
+  },
   async addCookies(cookies) {
     assert.equal(cookies[0].name, 'paired');
     if (closeWithPendingCookie) {
@@ -141,7 +151,7 @@ const context = {
 };
 export const chromium = {
   async connectOverCDP(endpoint) {
-    assert.equal(endpoint, 'test-endpoint');
+    assert.equal(endpoint, 'ws://127.0.0.1:123/devtools/browser/test');
     return {
       contexts: () => [{
         cookies: async () => [{ name: 'paired', value: 'not-logged' }],
