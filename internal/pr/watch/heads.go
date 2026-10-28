@@ -473,7 +473,14 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	gh.requests = &requestCache{rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
 	heads, rates, readErr := gh.readHeads(ctx, records)
 	recheckErr := s.recheckCancelledMainCI(ctx, gh, records, localRepos, heads)
-	saveErr := s.Store.update(func(current *State) error {
+	keys := make([]string, 0, len(heads)+len(records))
+	for key := range heads {
+		keys = append(keys, key)
+	}
+	for _, r := range records {
+		keys = append(keys, r.Key)
+	}
+	saveErr := s.Store.updateRecords(keys, func(current *State) error {
 		for key, probe := range heads {
 			if r := current.Records[key]; r != nil && probe.Account != "" {
 				r.QuotaAccount = probe.Account

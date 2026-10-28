@@ -2,6 +2,7 @@ package view
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,5 +38,18 @@ func TestChangeRowsPublishOnlyContentChanges(t *testing.T) {
 	}
 	if events := sync(row); len(events) != 0 {
 		t.Fatalf("an unchanged row published %d events", len(events))
+	}
+}
+
+func TestProjectionSharesVersionBetweenListTypes(t *testing.T) {
+	p := &projection{versions: map[string]string{}}
+	row := ChangeView{Key: "pr", CI: "failed", Checked: time.Unix(100, 0).UTC()}
+	first := p.publishedRows("prs", "room", []ChangeView{row}, map[string]bool{"pr": true})
+	second := p.publishedRows("changes", "room", []ChangeView{row}, map[string]bool{"pr": true})
+	if len(p.versions) != 1 || first[0].Version != second[0].Version {
+		t.Fatalf("row version was not shared: %d cached versions", len(p.versions))
+	}
+	if !strings.Contains(first[0].Version, "0001-01-01") {
+		t.Fatal("the current poll timestamp entered the version used for change detection")
 	}
 }
