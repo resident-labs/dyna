@@ -59,18 +59,36 @@ func TestSlowWriteLogsItsPartsAndHolder(t *testing.T) {
 	}
 }
 
-// A read transaction held over 1 s is logged too, so a reader that holds an
-// old snapshot shows up.
-func TestSlowReadIsLogged(t *testing.T) {
+// A slow read names its BEGIN wait, body and COMMIT. The wait counts toward
+// the existing 1 s threshold, and a read at that threshold is not logged.
+func TestSlowReadLogsItsParts(t *testing.T) {
 	db, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := stepClock(t, 1100*time.Millisecond)
-	if err := Read(context.Background(), db, func(*sql.Tx) error { return nil }); err != nil {
-		t.Fatal(err)
+	lines := stepClock(t, 0)
+	read := func(wait, body, commit time.Duration) {
+		start := time.Unix(0, 0)
+		times := []time.Time{start, start.Add(wait), start.Add(wait + body), start.Add(wait + body + commit)}
+		now = func() time.Time {
+			next := times[0]
+			times = times[1:]
+			return next
+		}
+		if err := Read(context.Background(), db, func(*sql.Tx) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if len(*lines) != 1 || !strings.Contains((*lines)[0], "slow read held 1.1s") {
+	read(200*time.Millisecond, 300*time.Millisecond, 600*time.Millisecond)
+	if len(*lines) != 1 {
 		t.Fatalf("a 1.1 s read logged %q, want one slow read line", *lines)
+	}
+	want := "slow read held 1.1s (body 300ms, commit 600ms) after waiting 200ms for BEGIN"
+	if !strings.Contains((*lines)[0], want) {
+		t.Fatalf("line %q lacks %q", (*lines)[0], want)
+	}
+	read(200*time.Millisecond, 300*time.Millisecond, 500*time.Millisecond)
+	if len(*lines) != 1 {
+		t.Fatalf("a 1 s read was logged: %q", *lines)
 	}
 }
