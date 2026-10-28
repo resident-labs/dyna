@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
@@ -212,10 +213,44 @@ func (s *Service) ExportIssue(ctx context.Context, roomRef, id string) (room.Iss
 	return s.TriageIssue(ctx, roomRef, id, "export", "", "")
 }
 
-// issueCaller is the caller of an issue change. The engine verifies the callers
-// that reach it; a session's own process states only its ID, so its stored role
-// and room decide, as no address it can type ever does.
-func (s *Service) issueCaller(ctx context.Context, roomID string) (authority.Actor, error) {
+// minCrossRoomNote is the shortest note an issue filed in another room
+// accepts: the note must say what happened and how to reproduce it (D-401).
+const minCrossRoomNote = 20
+
+// FileIssue files a quiet issue for the caller on ctx. The caller's own room
+// keeps the filing rules of D-111. Another room accepts only the owner or a
+// room's root, and the note must explain the problem: a worker reports the
+// problem to its own root instead (D-401).
+func (s *Service) FileIssue(ctx context.Context, roomRef string, in room.IssueInput) (room.Issue, error) {
+	r, err := s.rooms().ResolveQuietWrite(roomRef)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	actor, err := s.storedActor(ctx)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	by, err := s.issueAddress(actor, r)
+	if err != nil {
+		return room.Issue{}, err
+	}
+	in.Filer = by
+	if actor.Role == authority.Owner || actor.Room == r.ID {
+		return s.rooms().FileIssue(r.ID, in)
+	}
+	if err := authority.Check("issue file cross-room", actor, nil); err != nil {
+		return room.Issue{}, err
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(in.Note)) < minCrossRoomNote {
+		return room.Issue{}, fmt.Errorf("an issue in another room needs a note of at least %d characters that says what happened and how to reproduce it", minCrossRoomNote)
+	}
+	return s.rooms().FileQuietIssue(r.ID, in)
+}
+
+// storedActor is the caller behind an issue command. The engine verifies the
+// callers that reach it; a session's own process states only its ID, so its
+// stored role and room decide, as no address it can type ever does.
+func (s *Service) storedActor(ctx context.Context) (authority.Actor, error) {
 	actor := authority.Of(ctx)
 	if _, verified := authority.ContextActor(ctx); !verified && actor.Role == authority.Session {
 		stored, err := s.sessions().SessionActor(actor.Session)
@@ -223,6 +258,16 @@ func (s *Service) issueCaller(ctx context.Context, roomID string) (authority.Act
 			return authority.Actor{}, err
 		}
 		actor = stored
+	}
+	return actor, nil
+}
+
+// issueCaller is the caller of an issue change, confined to the room it acts
+// in.
+func (s *Service) issueCaller(ctx context.Context, roomID string) (authority.Actor, error) {
+	actor, err := s.storedActor(ctx)
+	if err != nil {
+		return authority.Actor{}, err
 	}
 	return authority.ActorIn(authority.WithActor(ctx, actor), roomID)
 }
