@@ -154,8 +154,9 @@ func matchesRepository(ctx context.Context, rec room.Record, r repository) bool 
 }
 
 var mutation = regexp.MustCompile(`\bmutation\b`)
+var errAgentGitHubWrite = errors.New("GitHub writes are not allowed for agents; post in the room with dyna post instead")
 
-func isRead(args []string) bool {
+func commandArgs(args []string) []string {
 	for len(args) > 0 {
 		if (args[0] == "--repo" || args[0] == "-R") && len(args) > 1 {
 			args = args[2:]
@@ -167,6 +168,11 @@ func isRead(args []string) bool {
 		}
 		break
 	}
+	return args
+}
+
+func isRead(args []string) bool {
+	args = commandArgs(args)
 	if len(args) == 0 {
 		return false
 	}
@@ -359,6 +365,20 @@ func fetchPublicRepo(ctx context.Context, r repository) bool {
 		Private bool `json:"private"`
 	}
 	return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) == nil && !body.Private
+}
+
+func checkWorkerPolicy(args []string) error {
+	args = commandArgs(args)
+	if isRead(args) {
+		return nil
+	}
+	if len(args) >= 2 && args[0] == "pr" {
+		switch args[1] {
+		case "create", "edit", "ready":
+			return nil
+		}
+	}
+	return errAgentGitHubWrite
 }
 
 func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string) error {
