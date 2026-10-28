@@ -180,6 +180,9 @@ func sessionItem(it transcript.Item) Item {
 		if it.Tool.Failed {
 			item.Command, item.Output, item.Exit = tail(it.Tool.Detail, maxFailedCommand), tail(ansi.Strip(it.Tool.Output), maxFailedOutput), it.Tool.Exit
 		}
+		if it.Tool.Name == "codemode" {
+			item.Label, item.Command = "Code", it.Tool.Detail
+		}
 	case transcript.Thought:
 		item.Aside = transcript.ThoughtAside(it)
 	case transcript.Compaction:
