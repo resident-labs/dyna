@@ -36,6 +36,8 @@
   let tone = $derived(kind === 'approve-fast' || kind === 'approve' ? 'sage' : kind === 'stop-early' ? '' : (counts[0] ?? 0) > 0 ? 'coral' : 'gold')
   let title = $derived(payload?.label ?? 'Reviewer result')
   let reason = $derived(payload?.stopReason ? (stopWords[payload.stopReason] ?? payload.stopReason) : '')
+  let reviewerReason = $derived(payload?.summary?.trim() ?? '')
+  let nextStep = $derived(kind === 'stop-early' && payload?.stopReason === 'too-large' ? (payload.number ? 'This PR' : 'This change') + ' cannot merge until it is split or root records a review.' : '')
   let showAll = $state(false)
   let shown = $derived(showAll ? findings : findings.slice(0, 3))
 </script>
@@ -52,7 +54,8 @@
   {#snippet detail()}
   <div class="body">
     {#if payload}
-      {#if kind === 'stop-early' && reason}<p class="reason">Stopped early: {reason}.</p>{/if}
+      {#if kind === 'stop-early' && reviewerReason && reviewerReason !== `Stopped early: ${reason}.`}<p class="reason">{reviewerReason}</p>{/if}
+      {#if nextStep}<p class="reason">{nextStep}</p>{/if}
       {#if findings.length}
         <div class="counts">
           {#if counts[0]}<Chip tone="coral">{counts[0]} blocking</Chip>{/if}
