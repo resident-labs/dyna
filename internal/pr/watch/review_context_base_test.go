@@ -104,3 +104,73 @@ func TestReviewInputUsesCurrentBaseAndAssignedHeadChecks(t *testing.T) {
 		t.Fatalf("checks = %+v, want the pending check read for the assigned head", input.GitHubChecks)
 	}
 }
+
+func TestReviewInputOmitsGeneratedFiles(t *testing.T) {
+	e := newEnv(t)
+	repo := t.TempDir()
+	testGit(t, repo, "init", "-q", "-b", "main")
+	testGit(t, repo, "config", "user.name", "test")
+	testGit(t, repo, "config", "user.email", "test@example.com")
+	testCommit(t, repo, "base.txt", "base\n", "base")
+	base := testGit(t, repo, "rev-parse", "HEAD")
+	testGit(t, repo, "checkout", "-q", "-b", "feature")
+	if err := os.MkdirAll(filepath.Join(repo, "generated"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	testCommit(t, repo, ".gitattributes", "generated/** linguist-generated\nmanual.txt -diff\nplain.txt linguist-generated=false\n", "mark generated files")
+	testCommit(t, repo, "generated/one.txt", "one\ntwo\nthree\n", "add generated preset")
+	testCommit(t, repo, "manual.txt", "manual\nlines\n", "add generated manual")
+	testCommit(t, repo, "plain.txt", "plain\n", "add reviewed source")
+	head := testGit(t, repo, "rev-parse", "HEAD")
+	// Attributes must come from the assigned head, not the current checkout.
+	testGit(t, repo, "checkout", "-q", "main")
+	r := Record{Kind: "local", Key: "local-generated", Repo: "local", RepoPath: repo, Base: base, Head: head, Round: 1}
+	task, err := e.s.prepareReviewTask(context.Background(), r, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(filepath.Join(e.s.Store.Root, "review-inputs", "*", "*.json"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("context paths: %+v, %v", paths, err)
+	}
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input struct {
+		DiffPath       string `json:"diffPath"`
+		DiffStat       string `json:"diffStat"`
+		GeneratedFiles []struct {
+			Path    string `json:"path"`
+			Added   int    `json:"added"`
+			Deleted int    `json:"deleted"`
+		} `json:"generatedFiles"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.GeneratedFiles) != 2 {
+		t.Fatalf("generated files = %+v, want two entries with line counts", input.GeneratedFiles)
+	}
+	if got := input.GeneratedFiles[0]; got.Path != "generated/one.txt" || got.Added != 3 || got.Deleted != 0 {
+		t.Fatalf("first generated file = %+v", got)
+	}
+	if got := input.GeneratedFiles[1]; got.Path != "manual.txt" || got.Added != 2 || got.Deleted != 0 {
+		t.Fatalf("second generated file = %+v", got)
+	}
+	patch, err := os.ReadFile(input.DiffPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"generated/one.txt", "manual.txt"} {
+		if strings.Contains(string(patch), "diff --git a/"+path+" ") || strings.Contains(input.DiffStat, path) {
+			t.Errorf("generated path %q remains in reviewer diff or stat", path)
+		}
+	}
+	if !strings.Contains(string(patch), "plain.txt") || !strings.Contains(input.DiffStat, "plain.txt") {
+		t.Errorf("linguist-generated=false file was omitted: %s", patch)
+	}
+	if !strings.Contains(task, "generated files") || !strings.Contains(task, "line counts") {
+		t.Errorf("task does not explain omitted generated files: %s", task)
+	}
+}
