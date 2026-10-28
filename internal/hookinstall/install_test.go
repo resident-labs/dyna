@@ -235,7 +235,7 @@ func TestInstallPreservesStateAndBackups(t *testing.T) {
 	for name, want := range map[string]string{"dyna": "new dyna", "dyna-desktop": "new desktop"} {
 		target := filepath.Join(j.Config.Bin, name)
 		b, err := os.ReadFile(target)
-		if err != nil || string(b) != want {
+		if err != nil || !strings.HasPrefix(string(b), want) {
 			t.Fatalf("binary %s: %s %v", name, b, err)
 		}
 		backups, _ := filepath.Glob(target + ".bak-*")
@@ -674,5 +674,35 @@ func TestPiForkPackCache(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("pack calls = %d, want 1", count)
+	}
+}
+
+func TestPiPruneKeepsCurrentAndBackupAssets(t *testing.T) {
+	dir := t.TempDir()
+	bin := t.TempDir()
+	var paths []string
+	for i := 0; i < 4; i++ {
+		p := filepath.Join(dir, strings.Repeat(fmt.Sprint(i), 64)+".tgz")
+		if err := os.WriteFile(p, []byte("asset"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	for i, name := range []string{"dyna", "dyna.bak-old"} {
+		p := filepath.Join(bin, name)
+		if err := os.WriteFile(p, []byte("binary"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := stampPiAsset(p, paths[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := prunePiAssets(dir, bin); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range paths[:2] {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("removed referenced asset %s: %v", p, err)
+		}
 	}
 }

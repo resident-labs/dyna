@@ -24,7 +24,7 @@ Run `scripts/pi-pack.sh /absolute/path/pi-coding-agent-1.4.0-dyna.1.tgz`. The sc
 
 The script then verifies its own output: it installs the tarball into a temporary prefix the way Dyna does, compares the installed package set with the upstream npm package, runs `pi --version`, and executes one codemode script with no network. Set `PI_PACK_SKIP_BUILD=1` to reuse an existing install and build; the CI pi job does that.
 
-Self-update caches the tarball under `<data dir>/pi-fork/` by source tree and build script hashes. It stamps the local path and SHA-512 integrity into the binary and keeps the two most recently used tarballs. Release binaries use a stamped GitHub release asset URL and integrity. For QA, set `DYNA_PI_TARBALL` to an absolute path to override either source. An unstamped development binary needs this override.
+Self-update caches the tarball under `<data dir>/pi-fork/` by source tree and build script hashes. It stamps the local path and SHA-512 integrity into the binary and keeps at least two tarballs. It also keeps every tarball referenced by the installed binary or its retained backups. Release binaries use a stamped GitHub release asset URL and integrity. For QA, set `DYNA_PI_TARBALL` to an absolute path to override either source. An unstamped development binary needs this override.
 
 ## Review
 
