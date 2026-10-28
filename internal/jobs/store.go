@@ -209,7 +209,12 @@ func (s Store) Save(ctx context.Context, job Job) error {
 	if err != nil {
 		return err
 	}
-	command := "[" + strings.Join(quoteAll(job.Command), ",") + "]"
+	// The command is a JSON array, so every byte of a word round-trips.
+	encoded, err := json.Marshal(job.Command)
+	if err != nil {
+		return err
+	}
+	command := string(encoded)
 	var exit any
 	if job.ExitCode != nil {
 		exit = *job.ExitCode
@@ -227,15 +232,6 @@ ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session
 			job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note)
 		return err
 	})
-}
-
-// quoteAll writes every command word as a JSON string.
-func quoteAll(words []string) []string {
-	out := make([]string, 0, len(words))
-	for _, w := range words {
-		out = append(out, fmt.Sprintf("%q", w))
-	}
-	return out
 }
 
 const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note"

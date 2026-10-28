@@ -1,3 +1,4 @@
+not-state internal/jobs/service.go Service.run 1 # the job's log file is an output blob that streams outside SQLite, like a CI report
 # Direct state writes outside internal/state. TestStateWritesGoThroughHelper fails on
 # any write that is not listed here, and on a line whose count is now too high.
 # Format: <violation|not-state> <file> <func> <count> [# reason]

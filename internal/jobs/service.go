@@ -363,7 +363,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 
 	machine, err := s.Machines.Get(context.Background(), job.Node)
 	if err != nil {
-		s.finish(job, nil, err)
+		s.finish(&job, err)
 		return
 	}
 	conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
@@ -378,7 +378,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	job.Note = resources.Note
 
 	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
-		s.finish(job, nil, err)
+		s.finish(&job, err)
 		return
 	}
 	flag := os.O_WRONLY | os.O_CREATE
@@ -389,17 +389,17 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	logFile, err := os.OpenFile(job.LogPath, flag, 0o600)
 	if err != nil {
-		s.finish(job, nil, err)
+		s.finish(&job, err)
 		return
 	}
 	defer logFile.Close()
-	logWriter := &logStore{store: &s.Store, job: &job, file: logFile}
+	logWriter := &logStore{job: &job, file: logFile}
 
 	x := s.executor(conn)
 	if !reattach && job.SHA != "" {
 		cache := path.Join(NodeBase(machine.Name), RepoKey(job.Repo)+".git")
 		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA); err != nil {
-			s.finish(job, logWriter, err)
+			s.finish(&job, err)
 			return
 		}
 	}
@@ -439,7 +439,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if runErr != nil && !job.State.Finished() {
 		s.stopUnit(x, spec)
 	}
-	s.finish(job, logWriter, runErr)
+	s.finish(&job, runErr)
 }
 
 // stopUnit asks the node to stop the job's unit, best effort.
@@ -478,10 +478,11 @@ func classify(err error) (State, *int) {
 
 func ptr(code int) *int { return &code }
 
-// finish records a job's end and reports it. The job's folder on the node,
-// its checkout included, is removed at the end: a fresh job gets a fresh
-// folder.
-func (s *Service) finish(job Job, log *logStore, err error) {
+// finish records a job end and reports it, through the live job so the
+// stored row keeps the log offset the run reached. The job folder on the
+// node, its checkout included, is removed at the end through the machine
+// connection: a fresh job gets a fresh folder.
+func (s *Service) finish(job *Job, err error) {
 	state, exit := StateFailed, (*int)(nil)
 	if err == nil {
 		state, exit = StatePassed, ptr(0)
@@ -493,19 +494,22 @@ func (s *Service) finish(job Job, log *logStore, err error) {
 	job.ExitCode = exit
 	job.Ended = s.Store.now()
 	ctx := context.Background()
-	if log != nil {
-		log.flush()
-	}
-	if err := s.Store.Save(ctx, job); err != nil {
+	if err := s.Store.Save(ctx, *job); err != nil {
 		s.logger()("jobs: record finished job %s: %v", job.ID, err)
 	}
 	if s.Reporter != nil {
-		if err := s.Reporter.JobFinished(ctx, job); err != nil {
+		if err := s.Reporter.JobFinished(ctx, *job); err != nil {
 			s.logger()("jobs: report finished job %s: %v", job.ID, err)
 		}
 	}
 	if job.Dir != "" && !EngineStopping() {
-		x := s.executor(Conn{Name: job.Node})
+		machine, err := s.Machines.Get(ctx, job.Node)
+		if err != nil {
+			s.logger()("jobs: remove the folder of job %s: resolve machine %s: %v", job.ID, job.Node, err)
+			return
+		}
+		conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
+		x := s.executor(conn)
 		removeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 		var out TailBuffer
@@ -525,23 +529,17 @@ func machineFacts(m machines.Machine) Facts {
 	return Facts{Slots: slots, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal}
 }
 
-// logStore streams a job's log to its file and records the stored size, so a
-// restarted engine appends instead of rewriting.
+// logStore streams a job log to its file and tracks the stored size on the
+// live job, so a save keeps the offset the run reached.
 type logStore struct {
-	store *Store
-	job   *Job
-	file  *os.File
+	job  *Job
+	file *os.File
 }
 
 func (l *logStore) Write(p []byte) (int, error) {
 	n, err := l.file.Write(p)
 	l.job.LogBytes += int64(n)
 	return n, err
-}
-
-// flush records the stored log size.
-func (l *logStore) flush() {
-	_ = l.store.Save(context.Background(), *l.job)
 }
 
 // jobScript is the script a job runs on its node: it takes a CI slot, checks
@@ -564,12 +562,15 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 			docker = "(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
 		}
 		inner += docker + "; "
+		mount := ""
 		if job.SHA != "" {
-			inner += "cd " + q(work) + "; "
+			// The checkout lives on the node, so the container mounts it and
+			// works there, exactly as a CI check container does.
+			mount = " -v " + q(work+":/workspace") + " -w /workspace"
 		}
 		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
-			" --pids-limit=512 " + q(job.Image) + " bash -o pipefail -c " + q(command)
+			" --pids-limit=512" + mount + " " + q(job.Image) + " bash -o pipefail -c " + q(command)
 	} else {
 		if job.SHA != "" {
 			inner += "cd " + q(work) + "; "
