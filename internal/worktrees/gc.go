@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"dyna-agent/internal/goals"
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/runstore"
@@ -320,11 +321,26 @@ func SessionClosed(id string) (bool, error) {
 	if filepath.Base(id) != id || id == "." || id == "" {
 		return false, errors.New("invalid session id")
 	}
-	m, err := sessionlife.Read(runstore.SessionsDir(), id)
+	var m struct {
+		sessionlife.Snapshot
+		Room string `json:"room"`
+	}
+	if err := sessionlife.Load(runstore.SessionsDir(), id, &m); err != nil {
+		return false, err
+	}
+	if !m.IsClosed() || m.Room == "" {
+		return m.IsClosed(), nil
+	}
+	store := goals.DefaultStore()
+	held, err := store.OpenHeldBy(m.Room, id)
 	if err != nil {
 		return false, err
 	}
-	return m.IsClosed(), nil
+	items, err := store.OpenItemsAssignedTo(m.Room, id)
+	if err != nil {
+		return false, err
+	}
+	return len(held) == 0 && len(items) == 0, nil
 }
 
 func workflowClosed(id string) (bool, error) {
@@ -859,7 +875,21 @@ func decide(t Tree, closed func(string) (bool, error)) Tree {
 				t.Reason, t.OwnerOpen = "cannot read owning session: "+e.Error(), false
 			}
 		}
-		for _, owner := range append(append([]ownerRef{}, t.inferred.Sessions...), t.inferred.Runs...) {
+		for _, owner := range t.inferred.Sessions {
+			if !owner.Closed {
+				t.Reason, t.OwnerOpen = "an inferred owner is still open", true
+				continue
+			}
+			ownerClosed, err := closed(owner.ID)
+			if err != nil {
+				t.Reason = "cannot read inferred session: " + err.Error()
+			} else if !ownerClosed {
+				t.Reason, t.OwnerOpen = "an inferred owner is still open", true
+			} else if !known {
+				known, isClosed = true, true
+			}
+		}
+		for _, owner := range t.inferred.Runs {
 			if !owner.Closed {
 				t.Reason, t.OwnerOpen = "an inferred owner is still open", true
 			} else if !known {

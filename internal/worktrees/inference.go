@@ -26,6 +26,32 @@ type inferredOwners struct {
 	Runs     []ownerRef
 }
 
+// SessionProtected checks registered and inferred session ownership before pruning.
+// An incomplete ownership scan is an error, not permission to remove a tree.
+func SessionProtected(ctx context.Context, rec Record) (bool, error) {
+	owners, err := inferOwners(ctx, []string{rec.Path}, nil)
+	if err != nil {
+		return false, err
+	}
+	ids := make(map[string]bool)
+	if rec.Session != "" {
+		ids[rec.Session] = true
+	}
+	for _, owner := range owners[rec.Path].Sessions {
+		ids[owner.ID] = true
+	}
+	for id := range ids {
+		closed, err := SessionClosed(id)
+		if err != nil {
+			return false, err
+		}
+		if !closed {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // inferOwners reads historical ownership without changing stores or worktrees.
 // An error means that ownership is incomplete; callers must keep the trees.
 // runHistory caches completed directory sets. The first terminal transition
