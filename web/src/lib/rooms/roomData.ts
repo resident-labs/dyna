@@ -62,6 +62,17 @@ export function createRoomData(host: unknown, hooks: RoomDataHooks) {
       hooks.choices(choices ?? [])
     } catch { /* Keep the current suggestions until the next refresh. */ }
   }) }
+  function loadMembers() { return reload('members', async (current) => {
+    const { room, visit } = hooks.current(), request = ++membersRequest
+    if (!alive || !room) return
+    try {
+      const members = await api.members(room, true)
+      if (!current() || !selected(room, visit) || request !== membersRequest) return
+      roster = rosterKey(members ?? [])
+      hooks.members(members ?? [])
+      await loadMentions()
+    } catch { /* Keep the current list and selection until a later refresh. */ }
+  }) }
   return {
     loadMentions,
     loadUnread() { return reload('unread', async (current) => {
@@ -89,17 +100,7 @@ export function createRoomData(host: unknown, hooks: RoomDataHooks) {
         if (current() && alive && request === roomsRequest) hooks.rooms?.(rooms ?? [])
       } catch (e) { if (current() && alive && request === roomsRequest) hooks.error?.(String(e)) }
     }) },
-    loadMembers() { return reload('members', async (current) => {
-      const { room, visit } = hooks.current(), request = ++membersRequest
-      if (!alive || !room) return
-      try {
-        const members = await api.members(room, true)
-        if (!current() || !selected(room, visit) || request !== membersRequest) return
-        roster = rosterKey(members ?? [])
-        hooks.members(members ?? [])
-        await loadMentions()
-      } catch { /* Keep the current list and selection until a later refresh. */ }
-    }) },
+    loadMembers,
     async open(keep = 0, initial = false) {
       const { room, visit } = hooks.current(), request = ++openRequest
       if (!alive || !room) return false
@@ -109,6 +110,8 @@ export function createRoomData(host: unknown, hooks: RoomDataHooks) {
         roster = rosterKey(opened.members ?? [])
         loadedChoices = roster
         hooks.opened?.(opened, initial)
+        // Advisory responsibility counts arrive separately from the first screen.
+        void loadMembers()
         return true
       } catch (e) {
         if (selected(room, visit) && request === openRequest) hooks.error?.(String(e))

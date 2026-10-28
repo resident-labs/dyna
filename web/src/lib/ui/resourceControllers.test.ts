@@ -92,6 +92,18 @@ test('room member bursts use a trailing refresh and reject old visits', async ()
   controller.destroy()
 })
 
+test('room opens before advisory member counts arrive', async () => {
+  const s = hooks(), counts = deferred<Member[]>()
+  const controller = createRoomData({ openRoom: async () => ({ members: [member('one')] }), members: () => counts.promise, mentions: async () => [] }, s.h)
+  assert.equal(await controller.open(), true)
+  assert.equal(s.updates.filter((u) => u.name === 'opened').length, 1)
+  assert.equal(s.updates.filter((u) => u.name === 'members').length, 0)
+  counts.resolve([member('one')])
+  await new Promise(setImmediate)
+  assert.equal(s.updates.filter((u) => u.name === 'members').length, 1)
+  controller.destroy()
+})
+
 test('room open errors and room lists cannot update a destroyed app', async () => {
   const s = hooks(), opened = deferred(), rooms = deferred()
   const controller = createRoomData({ openRoom: () => opened.promise, rooms: () => rooms.promise }, s.h)
