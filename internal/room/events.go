@@ -499,24 +499,19 @@ func decodeEventPayload(raw []byte, out any) error {
 	return decoder.Decode(out)
 }
 
-// PR returns the payload of a PR event. It decodes the stored bytes strictly,
-// so an unknown field is a failed read rather than a silent mismatch.
+// PR returns the payload of a PR event.
 func (m Message) PR() (PREvent, bool) {
 	if m.Kind != string(FamilyPR) || len(m.Payload.raw) == 0 {
 		return PREvent{}, false
 	}
 	var ev PREvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Type == "" {
 		return PREvent{}, false
 	}
 	return ev, true
 }
 
-// Hook returns the payload of a hook run event, of either type. It decodes the
-// stored bytes strictly, so an unknown field is a failed read rather than a
-// silent mismatch.
+// Hook returns the payload of a hook run event, of either type.
 func (m Message) Hook() (HookEvent, bool) {
 	if m.Kind != string(FamilyHook) || len(m.Payload.raw) == 0 {
 		return HookEvent{}, false
@@ -525,9 +520,7 @@ func (m Message) Hook() (HookEvent, bool) {
 		return HookEvent{}, false
 	}
 	var ev HookEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return HookEvent{}, false
 	}
 	return ev, true
@@ -539,9 +532,7 @@ func (m Message) Issue() (IssueEvent, bool) {
 		return IssueEvent{}, false
 	}
 	var ev IssueEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Type == "" {
 		return IssueEvent{}, false
 	}
 	return ev, true
@@ -553,9 +544,7 @@ func (m Message) Goal() (GoalEvent, bool) {
 		return GoalEvent{}, false
 	}
 	var ev GoalEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Type == "" {
 		return GoalEvent{}, false
 	}
 	return ev, true
@@ -567,9 +556,7 @@ func (m Message) Checkin() (CheckinEvent, bool) {
 		return CheckinEvent{}, false
 	}
 	var ev CheckinEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return CheckinEvent{}, false
 	}
 	return ev, true
@@ -581,9 +568,7 @@ func (m Message) SlowTest() (SlowTestEvent, bool) {
 		return SlowTestEvent{}, false
 	}
 	var ev SlowTestEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return SlowTestEvent{}, false
 	}
 	return ev, true
@@ -595,9 +580,7 @@ func (m Message) Rule() (RuleEvent, bool) {
 		return RuleEvent{}, false
 	}
 	var ev RuleEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return RuleEvent{}, false
 	}
 	return ev, true
@@ -620,48 +603,37 @@ func (m Message) EngineEvent() bool {
 	return ok
 }
 
-// Worktree returns the payload of a kept-worktree event. It decodes the stored
-// bytes strictly, so an unknown field is a failed read rather than a silent
-// mismatch.
+// Worktree returns the payload of a kept-worktree event.
 func (m Message) Worktree() (WorktreeEvent, bool) {
 	if m.Kind != string(FamilyWorktree) || m.Notice.Kind != string(TypeKept) || len(m.Payload.raw) == 0 {
 		return WorktreeEvent{}, false
 	}
 	var ev WorktreeEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return WorktreeEvent{}, false
 	}
 	return ev, true
 }
 
-// Merge returns the payload of a merge trial event. It decodes the stored bytes
-// strictly, so an unknown field is a failed read rather than a silent mismatch.
+// Merge returns the payload of a merge trial event.
 func (m Message) Merge() (MergeEvent, bool) {
 	if m.Kind != string(FamilyMerge) || m.Notice.Kind == string(MergeDecision) || len(m.Payload.raw) == 0 {
 		return MergeEvent{}, false
 	}
 	var ev MergeEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Type == "" {
 		return MergeEvent{}, false
 	}
 	return ev, true
 }
 
-// MergeDecision returns the payload of a recorded merge decision. It decodes the
-// stored bytes strictly, so an unknown field is a failed read rather than a
-// silent mismatch.
+// MergeDecision returns the payload of a recorded merge decision.
 func (m Message) MergeDecision() (MergeDecisionEvent, bool) {
 	if m.Kind != string(FamilyMerge) || m.Notice.Kind != string(MergeDecision) || len(m.Payload.raw) == 0 {
 		return MergeDecisionEvent{}, false
 	}
 	var ev MergeDecisionEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return MergeDecisionEvent{}, false
 	}
 	return ev, true
@@ -680,56 +652,43 @@ func (m Message) Review() (ReviewEvent, bool) {
 		Area string `json:"area"`
 		Note string `json:"note"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Kind == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Kind == "" {
 		return ReviewEvent{}, false
 	}
 	return ev.ReviewEvent, true
 }
 
-// Machine returns the payload of a low-disk machine event. It decodes the
-// stored bytes strictly, so an unknown field is a failed read rather than a
-// silent mismatch.
+// Machine returns the payload of a low-disk machine event.
 func (m Message) Machine() (MachineEvent, bool) {
 	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeLowDisk) || len(m.Payload.raw) == 0 {
 		return MachineEvent{}, false
 	}
 	var ev MachineEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return MachineEvent{}, false
 	}
 	return ev, true
 }
 
-// MachineCache returns the payload of a cache-repair machine event. It decodes
-// the stored bytes strictly, so an unknown field is a failed read rather than
-// a silent mismatch.
+// MachineCache returns the payload of a cache-repair machine event.
 func (m Message) MachineCache() (MachineCacheEvent, bool) {
 	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeCacheRepaired) || len(m.Payload.raw) == 0 {
 		return MachineCacheEvent{}, false
 	}
 	var ev MachineCacheEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return MachineCacheEvent{}, false
 	}
 	return ev, true
 }
 
-// MachineCacheCleanFailed returns the payload of a failed cache cleanup. It
-// decodes the stored bytes strictly, so a card never reads an unknown payload.
+// MachineCacheCleanFailed returns the payload of a failed cache cleanup.
 func (m Message) MachineCacheCleanFailed() (MachineCacheCleanFailedEvent, bool) {
 	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeCacheCleanFailed) || len(m.Payload.raw) == 0 {
 		return MachineCacheCleanFailedEvent{}, false
 	}
 	var ev MachineCacheCleanFailedEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return MachineCacheCleanFailedEvent{}, false
 	}
 	return ev, true
@@ -741,9 +700,7 @@ func (m Message) Session() (SessionEvent, bool) {
 		return SessionEvent{}, false
 	}
 	var ev SessionEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Type == "" {
 		return SessionEvent{}, false
 	}
 	return ev, true
@@ -755,9 +712,7 @@ func (m Message) InstructionBatch() (InstructionBatchEvent, bool) {
 		return InstructionBatchEvent{}, false
 	}
 	var ev InstructionBatchEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || len(ev.Sections) == 0 || len(ev.Sessions) == 0 || len(ev.Notes) == 0 {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || len(ev.Sections) == 0 || len(ev.Sessions) == 0 || len(ev.Notes) == 0 {
 		return InstructionBatchEvent{}, false
 	}
 	return ev, true
@@ -785,9 +740,7 @@ func (m Message) Alert() (AlertEvent, bool) {
 		return AlertEvent{}, false
 	}
 	var ev AlertEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Source == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Source == "" {
 		return AlertEvent{}, false
 	}
 	return ev, true
@@ -799,9 +752,7 @@ func (m Message) ServiceFailed() (ServiceFailedEvent, bool) {
 		return ServiceFailedEvent{}, false
 	}
 	var ev ServiceFailedEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Service == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Service == "" {
 		return ServiceFailedEvent{}, false
 	}
 	return ev, true
@@ -813,9 +764,7 @@ func (m Message) ServiceWait() (ServiceWaitEvent, bool) {
 		return ServiceWaitEvent{}, false
 	}
 	var ev ServiceWaitEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Service == "" || ev.Profile == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Service == "" || ev.Profile == "" {
 		return ServiceWaitEvent{}, false
 	}
 	return ev, true
@@ -827,9 +776,7 @@ func (m Message) HelperOutcome() (HelperOutcomeEvent, bool) {
 		return HelperOutcomeEvent{}, false
 	}
 	var ev HelperOutcomeEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Reason == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Reason == "" {
 		return HelperOutcomeEvent{}, false
 	}
 	return ev, true
@@ -841,25 +788,19 @@ func (m Message) Engine() (EngineEvent, bool) {
 		return EngineEvent{}, false
 	}
 	var ev EngineEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil {
 		return EngineEvent{}, false
 	}
 	return ev, true
 }
 
-// Call returns the payload of an answer to a call request. It decodes the
-// stored bytes strictly, so an unknown field is a failed read rather than a
-// silent mismatch.
+// Call returns the payload of an answer to a call request.
 func (m Message) Call() (CallEvent, bool) {
 	if m.Kind != string(FamilyCall) || len(m.Payload.raw) == 0 {
 		return CallEvent{}, false
 	}
 	var ev CallEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.Call == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Call == "" {
 		return CallEvent{}, false
 	}
 	return ev, true
@@ -907,9 +848,7 @@ func (m Message) Question() (QuestionEvent, bool) {
 		return QuestionEvent{}, false
 	}
 	var ev QuestionEvent
-	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&ev); err != nil || ev.QuestionID == "" {
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.QuestionID == "" {
 		return QuestionEvent{}, false
 	}
 	return ev, true
