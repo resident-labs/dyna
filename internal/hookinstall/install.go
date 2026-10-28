@@ -170,11 +170,11 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 			return err
 		}
 	}
-	piPath, piIntegrity, err := d.packPiFork(ctx, head)
+	piPath, piIntegrity, piBuild, err := d.packPiFork(ctx, head)
 	if err != nil {
 		return err
 	}
-	flags := "-X dyna-agent/internal/cli/version.buildRevision=" + head + " -X " + strconv.Quote("dyna-agent/internal/harness/runtime.piForkAsset="+piPath) + " -X dyna-agent/internal/harness/runtime.piForkIntegrity=" + piIntegrity
+	flags := "-X dyna-agent/internal/cli/version.buildRevision=" + head + " -X " + strconv.Quote("dyna-agent/internal/harness/runtime.piForkAsset="+piPath) + " -X dyna-agent/internal/harness/runtime.piForkIntegrity=" + piIntegrity + " -X dyna-agent/internal/harness/runtime.piForkBuild=" + piBuild
 	if _, err = d.run(ctx, c.Build, "nice", "-n", "10", "go", "build", "-p", "2", "-ldflags", flags, "-o", filepath.Join(temp, "dyna"), "./cmd/dyna"); err != nil {
 		return err
 	}
@@ -321,54 +321,58 @@ func pruneBackups(dir, name string) error {
 	return nil
 }
 
-// packPiFork caches the exact source inputs used by the pack script.
-func (d driver) packPiFork(ctx context.Context, head string) (string, string, error) {
+// packPiFork caches the exact source inputs used by the pack script. It also
+// returns the fork build id — the first twelve hex characters of the
+// third_party/pi tree hash — so the built binary names the exact version it
+// installs.
+func (d driver) packPiFork(ctx context.Context, head string) (string, string, string, error) {
 	var inputs []string
 	for _, path := range []string{"third_party/pi", "scripts/pi-pack.sh", "scripts/pi-hydrate.sh"} {
 		value, err := d.run(ctx, d.config.Build, "/usr/bin/git", "-C", d.config.Build, "rev-parse", head+":"+path)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		if !shaPattern.MatchString(value) {
-			return "", "", fmt.Errorf("invalid Git object ID for %s", path)
+			return "", "", "", fmt.Errorf("invalid Git object ID for %s", path)
 		}
 		inputs = append(inputs, value)
 	}
+	build := inputs[0][:12]
 	sum := sha256.Sum256([]byte(strings.Join(inputs, "\n")))
 	dir := filepath.Join(store.DataDir(), "pi-fork")
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	dir, err := filepath.Abs(dir)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".tgz")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		tmp, err := os.CreateTemp(dir, ".pack-*.tgz")
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		name := tmp.Name()
 		if err := tmp.Close(); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		defer os.Remove(name)
 		if _, err := d.run(ctx, d.config.Build, "nice", "-n", "10", "scripts/pi-pack.sh", name); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		if err := os.Rename(name, path); err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 	} else if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	digest := sha512.Sum512(data)
-	return path, "sha512-" + base64.StdEncoding.EncodeToString(digest[:]), nil
+	return path, "sha512-" + base64.StdEncoding.EncodeToString(digest[:]), build, nil
 }
 
 // A fixed trailer ties each source-built binary and its backups to its asset.

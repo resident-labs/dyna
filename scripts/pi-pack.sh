@@ -9,7 +9,11 @@ if [ "$#" -ne 1 ]; then
 fi
 repo_root=$(git rev-parse --show-toplevel)
 vendor="$repo_root/third_party/pi"
-version="1.4.0-dyna.6"
+# The version names one build: the fork level plus the first twelve hex
+# characters of the third_party/pi tree hash, so two builds at one level never
+# collide. The package manifest's dynaFork stays the level alone.
+fork_tree=$(git -C "$repo_root" rev-parse "HEAD:third_party/pi")
+version="1.4.0-dyna.6.${fork_tree:0:12}"
 output=$1
 if [[ "$output" != /* ]]; then
   output="$repo_root/$output"

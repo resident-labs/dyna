@@ -647,6 +647,10 @@ func TestInstallStampsKnownCommitInExistingBuild(t *testing.T) {
 			if !strings.Contains(command, "-ldflags -X dyna-agent/internal/cli/version.buildRevision="+testSHA) {
 				t.Fatalf("build does not stamp the installed commit: %s", command)
 			}
+			// The built binary must name the exact fork build it installs.
+			if !strings.Contains(command, "-X dyna-agent/internal/harness/runtime.piForkBuild=") {
+				t.Fatalf("build does not stamp the fork build: %s", command)
+			}
 		}
 	}
 	if builds != 1 {
@@ -659,13 +663,13 @@ func TestPiForkPackCache(t *testing.T) {
 	var calls []string
 	s.Exec = fakeInstaller(t, j, "main", "", &calls)
 	d := driver{s, j.Config, io.Discard}
-	first, integrity, err := d.packPiFork(context.Background(), testSHA)
+	first, integrity, build, err := d.packPiFork(context.Background(), testSHA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, again, err := d.packPiFork(context.Background(), testSHA)
-	if err != nil || first != second || integrity != again {
-		t.Fatalf("cache: %q %q %v", second, again, err)
+	second, again, rebuild, err := d.packPiFork(context.Background(), testSHA)
+	if err != nil || first != second || integrity != again || build != rebuild {
+		t.Fatalf("cache: %q %q %q %v", second, again, rebuild, err)
 	}
 	count := 0
 	for _, call := range calls {

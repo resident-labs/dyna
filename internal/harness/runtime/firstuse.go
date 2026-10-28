@@ -119,6 +119,17 @@ func (f *FirstUse) install(ctx context.Context, a RuntimeAdapter, version string
 		if version, err = f.LatestVersion(ctx, a.Harness); err != nil {
 			return Bundle{}, false, err
 		}
+		if f.Progress != nil {
+			f.Progress(a.Harness, version)
+		}
+		// The default the caller could not resolve must not stay selected:
+		// install and select in one step, so the replaced selection is
+		// recorded as the rollback target.
+		b, err := f.Bundles.InstallAndSelect(ctx, a.Harness, version)
+		if err != nil {
+			return Bundle{}, false, fmt.Errorf("cannot install %s %s: %w. Check the internet connection and try again", a.Binary, version, err)
+		}
+		return b, true, nil
 	}
 	if f.Progress != nil {
 		f.Progress(a.Harness, version)

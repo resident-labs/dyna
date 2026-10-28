@@ -28,16 +28,21 @@ func supportedVersionRange(harness, version string) (bool, string) {
 	return true, ""
 }
 
-// piForkLevel reads the Dyna fork level from a version like 1.4.0-dyna.3.
-// It returns 0 for every other version, including upstream npm Pi, whose
-// releases carry no fork features.
+// piForkLevel reads the Dyna fork level from a version like 1.4.0-dyna.3 or
+// a fork build like 1.4.0-dyna.5.0123456789ab, where the level is followed by
+// the build hash of its Pi tree. It returns 0 for every other version,
+// including upstream npm Pi, whose releases carry no fork features.
 func piForkLevel(version string) int {
 	_, suffix, ok := strings.Cut(version, "-dyna.")
 	if !ok {
 		return 0
 	}
-	level, err := strconv.Atoi(suffix)
+	digits, build, hasBuild := strings.Cut(suffix, ".")
+	level, err := strconv.Atoi(digits)
 	if err != nil || level < 1 {
+		return 0
+	}
+	if hasBuild && !isForkBuildHash(build) {
 		return 0
 	}
 	return level

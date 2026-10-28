@@ -32,6 +32,25 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 	}
 }
 
+// A fork build carries its Pi tree hash after the level, so two builds at
+// one level stay distinct. The gate reads the level before the hash, and the
+// hash must be exactly twelve hex characters.
+func TestPiForkLevelParsesBuildHash(t *testing.T) {
+	build := piForkVersion + ".0123456789ab"
+	if level := piForkLevel(build); level != minimumPiForkLevel {
+		t.Fatalf("piForkLevel(%q) = %d, want %d", build, level, minimumPiForkLevel)
+	}
+	if ok, reason := supportedVersionRange("pi", build); !ok {
+		t.Fatalf("build of the required level refused: %s", reason)
+	}
+	if ok, _ := supportedVersionRange("pi", "1.4.0-dyna.4.0123456789ab"); ok {
+		t.Fatal("build below the required level accepted")
+	}
+	if piForkLevel(piForkVersion+".0123456789z") != 0 {
+		t.Fatal("non-hex build id accepted as a fork level")
+	}
+}
+
 func TestPiForkVersionSatisfiesUpstreamMinimum(t *testing.T) {
 	if !versionAtLeast(piForkVersion, "1.4.0") {
 		t.Fatal("Dyna prerelease sorts below its upstream base version")
