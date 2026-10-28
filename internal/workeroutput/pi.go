@@ -165,6 +165,10 @@ func decodePi(line []byte) Record {
 				r.Events = nil
 			}
 			for _, call := range result.Details.Calls {
+				// Pi shares this placeholder across concurrent running calls.
+				if strings.HasSuffix(call.ID, "/?") || call.ID == "" {
+					continue
+				}
 				callState := "updated"
 				switch call.Status {
 				case "ok":
