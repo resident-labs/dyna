@@ -2,7 +2,6 @@ package worktrees
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -143,46 +142,30 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 		}
 	} else {
 		var decoded []sessionOwner
-		visitSession := func(name string, raw []byte, err error) error {
-			var meta struct {
-				sessionlife.Snapshot
-				Name, Room, Dir string
-				Service         bool
-			}
-			if err == nil {
-				err = json.Unmarshal(raw, &meta)
-			}
-			if err != nil {
-				return fmt.Errorf("invalid ownership metadata %s: %w", name, err)
-			}
-			if meta.ID != "" && meta.ID != name {
-				return errors.New("ownership metadata ID does not match directory")
-			}
-			meta.ID = name
-			// A service runs from a shared directory and never owns a tree.
-			if meta.Service {
-				return nil
-			}
-			address := meta.ID
-			if meta.Room != "" && meta.Name != "" {
-				address = meta.Room + ":" + meta.Name
-			}
-			ref := ownerRef{ID: meta.ID, Address: address, Closed: meta.IsClosed()}
-			if meta.Dir != "" {
-				decoded = append(decoded, sessionOwner{dir: meta.Dir, ref: ref})
-			}
-			return match(meta.Dir, ref, true)
-		}
 		// Every record, closed ones too: a closed owner still proves ownership.
-		if err := sessionlife.Each(runstore.SessionsDir(), false, func(name string, raw []byte, err error) error {
+		// Owners reads typed ownership columns instead of the legacy path that
+		// decoded every record's meta; a record that drifted from its columns
+		// is an error, so cleanup keeps the trees.
+		err := sessionlife.Owners(runstore.SessionsDir(), func(row sessionlife.OwnerRow) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := visitSession(name, raw, err); err != nil {
-				return fmt.Errorf("ownership entry %s: %w", name, err)
+			// A service runs from a shared directory and never owns a tree.
+			if row.Service {
+				return nil
+			}
+			address := row.ID
+			if row.Room != "" && row.Name != "" {
+				address = row.Room + ":" + row.Name
+			}
+			ref := ownerRef{ID: row.ID, Address: address, Closed: row.Closed}
+			if row.Dir != "" {
+				decoded = append(decoded, sessionOwner{dir: row.Dir, ref: ref})
+				return match(row.Dir, ref, true)
 			}
 			return nil
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, fmt.Errorf("infer session owners: %w", err)
 		}
 		if history != nil {
