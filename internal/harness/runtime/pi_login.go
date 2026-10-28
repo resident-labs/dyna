@@ -142,7 +142,7 @@ func (a *Accounts) piLogin(ctx context.Context, provider store.Provider, roomID,
 	if id == "" || id == account.Identity {
 		return "", nil, native.ErrNotSignedIn
 	}
-	entries, err := piEditAuth(ctx, account.Home, nil)
+	entries, err := a.piEditAuth(ctx, account.Home, nil)
 	if err != nil {
 		return "", nil, err
 	}

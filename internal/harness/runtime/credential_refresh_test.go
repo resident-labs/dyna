@@ -353,8 +353,9 @@ func TestChatGPTGrantReturnsTheRenewedToken(t *testing.T) {
 		writePiGrants(t, n, map[string]piAuthFixture{"openai-codex": {Type: "oauth", Access: "fresh-access", Refresh: "grant", Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "workspace"}})
 		return nil
 	}
-	// The managed Pi copy is only named to the renewal, which the runner stands in for.
-	a.PiExecutable = func() (string, error) { return "/fake/pi/bin/pi", nil }
+	// The managed Pi copy is only named to the renewal, which the runner stands
+	// for; the read of the renewed file goes through the auth commands.
+	installFakePiAuth(t, a)
 	// A reader that regressed to the draining refresh would take this gate and
 	// wait behind the lease held below. Failing at once keeps that regression a
 	// fast, deterministic failure instead of a hung test.

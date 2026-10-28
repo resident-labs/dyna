@@ -1,16 +1,20 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
-	"time"
 
 	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/mode"
 )
 
 // errProviderKeys is the refusal of a harness that keeps no API keys.
@@ -19,117 +23,8 @@ var errProviderKeys = errors.New("This harness does not take provider API keys."
 const maxProviderKey = 8 << 10
 
 // piKeysMu serializes Dyna's own Pi key edits, so two edits of one account
-// never take two concurrent writes in different orders.
+// never apply two command sequences in different orders.
 var piKeysMu sync.Mutex
-
-const piAuthStale = 30 * time.Second
-
-var (
-	piNow  = time.Now
-	piBeat = 2 * time.Second
-	// piBeatDone runs after each renewal; tests wait on it.
-	piBeatDone func()
-)
-
-// piLock is Pi's own auth lock (proper-lockfile: an exclusive "<file>.lock"
-// directory), so an edit here cannot interleave with Pi's login or token refresh.
-type piLock struct {
-	path string
-	mu   sync.Mutex
-	lost bool // a renewal failed or the lock changed hands
-	info os.FileInfo
-	stop chan struct{}
-	done chan struct{}
-}
-
-func lockPiAuth(ctx context.Context, path string) (*piLock, error) {
-	lock := path + ".lock"
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, errors.New("Pi is using its login file. Try again in a moment.")
-		}
-		err := os.Mkdir(lock, 0700)
-		if err == nil {
-			info, statErr := os.Stat(lock)
-			if statErr != nil {
-				return nil, errors.New("Pi's login file could not be locked.")
-			}
-			l := &piLock{path: lock, info: info, stop: make(chan struct{}), done: make(chan struct{})}
-			go l.renew()
-			return l, nil
-		}
-		if !os.IsExist(err) {
-			return nil, errors.New("Pi's login file could not be locked.")
-		}
-		if info, statErr := os.Stat(lock); statErr == nil && piNow().Sub(info.ModTime()) > piAuthStale {
-			if rmErr := os.Remove(lock); rmErr != nil && !os.IsNotExist(rmErr) {
-				return nil, errors.New("Pi's old lock on its login file could not be removed.")
-			}
-			continue
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-}
-
-func (l *piLock) renew() {
-	defer close(l.done)
-	ticker := time.NewTicker(piBeat)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-l.stop:
-			return
-		case <-ticker.C:
-			l.mu.Lock()
-			l.lost = l.lost || !l.renewOnce()
-			l.mu.Unlock()
-			if piBeatDone != nil {
-				piBeatDone()
-			}
-		}
-	}
-}
-
-func (l *piLock) renewOnce() bool {
-	if !l.owned() {
-		return false
-	}
-	now := piNow()
-	if os.Chtimes(l.path, now, now) != nil {
-		return false
-	}
-	info, err := os.Stat(l.path)
-	if err != nil {
-		return false
-	}
-	l.info = info
-	return true
-}
-
-// owned reports whether the lock is still the directory Dyna made and renewed.
-// A directory Pi replaced or touched is not ours.
-func (l *piLock) owned() bool {
-	info, err := os.Stat(l.path)
-	return err == nil && os.SameFile(info, l.info) && info.ModTime().Equal(l.info.ModTime())
-}
-
-func (l *piLock) held() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return !l.lost && l.owned()
-}
-
-// release stops the renewal and removes the lock only while it is still ours.
-func (l *piLock) release() {
-	close(l.stop)
-	<-l.done
-	if l.held() {
-		os.Remove(l.path)
-	}
-}
 
 // piAuthEdit changes the provider entries of one auth.json. A nil edit only reads.
 type piAuthEdit func(entries map[string]json.RawMessage)
@@ -141,46 +36,72 @@ func piAPIKeyEdit(provider, key string) piAuthEdit {
 	return func(entries map[string]json.RawMessage) { entries[provider] = entry }
 }
 
-// piEditAuth applies edit to home's auth.json under Pi's own lock and returns
-// the entries as they stand afterwards.
-func piEditAuth(ctx context.Context, home string, edit piAuthEdit) (map[string]json.RawMessage, error) {
-	path := filepath.Join(home, "auth.json")
-	if err := os.MkdirAll(home, 0700); err != nil {
-		return nil, errors.New("Pi's private home is not available.")
+// piAuthRunner runs one auth command of Dyna's own Pi copy for one account
+// home. Tests replace it.
+var piAuthRunner = runPiAuthCommand
+
+// runPiAuthCommand runs executable's auth subcommand with Pi's private
+// environment, argv and stdin, and returns its stdout. It never passes secrets
+// through argv.
+func runPiAuthCommand(ctx context.Context, executable, home string, argv []string, stdin []byte) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, executable, argv...)
+	cmd.Env = append(envWithout(os.Environ(), mode.EnvSession, mode.EnvMode, mode.EnvRoom, mode.EnvDepth),
+		"PI_CODING_AGENT_DIR="+home,
+	)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	unlock, err := lockPiAuth(ctx, path)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return nil, errors.New("Pi's login file could not be updated.")
+	}
+	return stdout.Bytes(), nil
+}
+
+// piEditAuth reads and edits one Pi home's login file through Pi's own auth
+// commands, so every write takes Pi's lock and races no login or token refresh.
+// It lists the current entries, applies edit in memory, and then sets each
+// changed entry and removes each dropped one. A nil edit only reads.
+func (a *Accounts) piEditAuth(ctx context.Context, home string, edit piAuthEdit) (map[string]json.RawMessage, error) {
+	executable, err := a.piExecutable()
 	if err != nil {
 		return nil, err
 	}
-	defer unlock.release()
-	if err := checkPrivateAccountFile(path, true); err != nil {
+	out, err := piAuthRunner(ctx, executable, home, []string{"auth", "list", "--json"}, nil)
+	if err != nil {
 		return nil, err
 	}
 	entries := map[string]json.RawMessage{}
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		// A JSON null decodes without error but leaves a nil map.
-		if len(raw) > 4<<20 || json.Unmarshal(raw, &entries) != nil || entries == nil {
-			return nil, errors.New("Pi's login file is not valid JSON.")
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, errors.New("Pi's login file could not be read.")
+	if json.Unmarshal(out, &entries) != nil || entries == nil {
+		return nil, errors.New("Pi's login file is not valid JSON.")
 	}
 	if edit == nil {
 		return entries, nil
 	}
-	edit(entries)
-	// Checked again just before the rename: a lock lost during the write keeps Pi's file.
-	lost := func() error {
-		if unlock.held() {
-			return nil
+	next := maps.Clone(entries)
+	edit(next)
+	for _, id := range slices.Sorted(maps.Keys(entries)) {
+		if entry, wanted := next[id]; !wanted {
+			if _, err := piAuthRunner(ctx, executable, home, []string{"auth", "remove", "--provider", id}, nil); err != nil {
+				return nil, err
+			}
+		} else if !bytes.Equal(entry, entries[id]) {
+			if _, err := piAuthRunner(ctx, executable, home, []string{"auth", "set", "--provider", id}, entry); err != nil {
+				return nil, err
+			}
 		}
-		return errors.New("Pi's login file lock was lost. Try again.")
 	}
-	if err := writePrivateAccountJSONChecked(path, entries, lost); err != nil {
-		return nil, err
+	for _, id := range slices.Sorted(maps.Keys(next)) {
+		if _, existed := entries[id]; existed {
+			continue
+		}
+		if _, err := piAuthRunner(ctx, executable, home, []string{"auth", "set", "--provider", id}, next[id]); err != nil {
+			return nil, err
+		}
 	}
-	return entries, nil
+	return next, nil
 }
 
 // lockPiAccounts holds the first lock of an account switch or native login, so
@@ -204,9 +125,10 @@ func (a *Runtime) lockPiAccounts(ctx context.Context) (func(), error) {
 func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount, edit piAuthEdit) error {
 	file := filepath.Join(account.Home, "auth.json")
 	before, readErr := os.ReadFile(file)
-	// restore puts the account file back and reports a failure to do so.
+	// restore puts the account's login back and reports a failure to do so.
+	// It runs on a fresh context, so a cause that canceled ctx still restores.
 	restore := func(cause error) error {
-		err := restorePiAuth(file, before, readErr == nil, nil)
+		err := a.Accounts.restorePiAuth(context.Background(), account.Home, before, readErr == nil)
 		if err == nil {
 			_, err = a.Accounts.Capture(context.Background(), account.ID, "")
 		}
@@ -215,7 +137,7 @@ func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount
 		}
 		return cause
 	}
-	if _, err := piEditAuth(ctx, account.Home, edit); err != nil {
+	if _, err := a.Accounts.piEditAuth(ctx, account.Home, edit); err != nil {
 		return err
 	}
 	captured, err := a.Accounts.Capture(ctx, account.ID, "")
@@ -229,54 +151,17 @@ func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount
 	return a.Accounts.setActiveAccount(captured)
 }
 
-// restorePiAuth puts back the file's earlier content, or removes it when it did
-// not exist. It takes Pi's lock and keeps it to the commit, like any other edit.
-// beforeCommit runs just before the commit; tests use it.
-func restorePiAuth(file string, before []byte, existed bool, beforeCommit func()) error {
-	unlock, err := lockPiAuth(context.Background(), file)
-	if err != nil {
-		return err
+// restorePiAuth puts the earlier entries back through Pi's own auth commands,
+// or empties the login when it did not exist, so a failed record leaves the
+// account's sign-in as it was.
+func (a *Accounts) restorePiAuth(ctx context.Context, home string, before []byte, existed bool) error {
+	entries := map[string]json.RawMessage{}
+	if existed && (len(before) == 0 || json.Unmarshal(before, &entries) != nil || entries == nil) {
+		return errors.New("Pi's saved login could not be restored. Add or remove the key again.")
 	}
-	defer unlock.release()
-	check := func() error {
-		if beforeCommit != nil {
-			beforeCommit()
-		}
-		if unlock.held() {
-			return nil
-		}
-		return errors.New("Pi's login file lock was lost.")
-	}
-	if existed {
-		if err = writePrivateAccountJSONChecked(file, json.RawMessage(before), check); err != nil {
-			// The checked writer drops its temporary file on a refused commit, so
-			// keep the saved credentials in a private recovery file.
-			if keepPiRecovery(file, before) != nil {
-				return errors.Join(err, errors.New("The saved login could not be kept."))
-			}
-		}
-		return err
-	}
-	if err = check(); err != nil {
-		return err
-	}
-	if err = os.Remove(file); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
-// keepPiRecovery saves data in a new private file next to file. The name is
-// unique and created exclusively, so it never replaces earlier recovery data or
-// follows a link, and the mode is 0600.
-func keepPiRecovery(file string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(file), filepath.Base(file)+".recovery-*")
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(data)
-	if e := f.Close(); err == nil {
-		err = e
-	}
+	_, err := a.piEditAuth(ctx, home, func(current map[string]json.RawMessage) {
+		clear(current)
+		maps.Copy(current, entries)
+	})
 	return err
 }

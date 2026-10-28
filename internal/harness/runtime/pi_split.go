@@ -29,9 +29,11 @@ func piEntryKind(entry json.RawMessage) store.Kind {
 }
 
 // writePiAccountAuth replaces a Pi account's login with exactly the entries
-// given, under Pi's own lock. A provider that is not named leaves the file.
-func writePiAccountAuth(ctx context.Context, account NativeAccount, entries map[string]json.RawMessage) error {
-	_, err := piEditAuth(ctx, account.Home, func(current map[string]json.RawMessage) {
+// given, through Pi's own auth commands. A provider that is not named leaves the file.
+func (r *Runtime) writePiAccountAuth(ctx context.Context, account NativeAccount, entries map[string]json.RawMessage) error {
+	piKeysMu.Lock()
+	defer piKeysMu.Unlock()
+	_, err := r.Accounts.piEditAuth(ctx, account.Home, func(current map[string]json.RawMessage) {
 		clear(current)
 		for id, entry := range entries {
 			current[id] = entry
@@ -41,8 +43,8 @@ func writePiAccountAuth(ctx context.Context, account NativeAccount, entries map[
 }
 
 // piAccountHolds reports whether an account home already holds the entry of id.
-func piAccountHolds(account NativeAccount, id string) bool {
-	_, held := piSavedEntries(context.Background(), account.Home)[id]
+func (a *Accounts) piAccountHolds(account NativeAccount, id string) bool {
+	_, held := a.piSavedEntries(context.Background(), account.Home)[id]
 	return held
 }
 
@@ -113,7 +115,7 @@ func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]
 				continue
 			}
 		}
-		if err := writePiAccountAuth(ctx, account, map[string]json.RawMessage{id: entries[id]}); err != nil {
+		if err := a.writePiAccountAuth(ctx, account, map[string]json.RawMessage{id: entries[id]}); err != nil {
 			firstErr = errors.Join(firstErr, err)
 			continue
 		}
@@ -148,7 +150,7 @@ func (a *Runtime) saveTargetedPiEntry(ctx context.Context, entries map[string]js
 	if entry == nil {
 		return nil, fmt.Errorf("This sign-in saved no %s credential. Sign in again and choose %s.", target.Provider, target.Provider)
 	}
-	if err := writePiAccountAuth(ctx, target, map[string]json.RawMessage{entryID: entry}); err != nil {
+	if err := a.writePiAccountAuth(ctx, target, map[string]json.RawMessage{entryID: entry}); err != nil {
 		return nil, err
 	}
 	captured, err := a.Accounts.Capture(ctx, target.ID, "")
@@ -216,7 +218,7 @@ func (r *Runtime) SplitPiAccounts(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	sharedEntries, err := piEditAuth(ctx, shared, nil)
+	sharedEntries, err := r.Accounts.piEditAuth(ctx, shared, nil)
 	if err != nil {
 		log.Printf("pi accounts: the shared login could not be read: %v", err)
 		return
@@ -249,7 +251,7 @@ func (r *Runtime) planPiSplit(ctx context.Context) ([]store.PiSplitSource, error
 	if err != nil {
 		return nil, err
 	}
-	sharedEntries, err := piEditAuth(ctx, shared, nil)
+	sharedEntries, err := r.Accounts.piEditAuth(ctx, shared, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +262,7 @@ func (r *Runtime) planPiSplit(ctx context.Context) ([]store.PiSplitSource, error
 			continue
 		}
 		entries := map[string]json.RawMessage{}
-		for id, entry := range piSavedEntries(ctx, n.Home) {
+		for id, entry := range r.Accounts.piSavedEntries(ctx, n.Home) {
 			entries[id] = entry
 			owned[id] = true
 		}
@@ -333,7 +335,7 @@ func (r *Runtime) splitPiSource(ctx context.Context, source store.PiSplitSource,
 	var pending []string
 	for _, id := range source.Entries {
 		key := store.PiSplitKey{Source: source.Account, Provider: id}
-		entry := piSplitEntry(ctx, source.Home, shared, id)
+		entry := r.piSplitEntry(ctx, source.Home, shared, id)
 		if entry == nil {
 			if err := db.ClearPiSplitDone(ctx, key); err != nil {
 				return err
@@ -372,7 +374,7 @@ func (r *Runtime) splitPiSource(ctx context.Context, source store.PiSplitSource,
 	}
 	for i, id := range pending {
 		key := store.PiSplitKey{Source: source.Account, Provider: id}
-		entry := piSplitEntry(ctx, source.Home, shared, id)
+		entry := r.piSplitEntry(ctx, source.Home, shared, id)
 		if entry == nil {
 			continue
 		}
@@ -408,7 +410,7 @@ func (r *Runtime) splitPiSource(ctx context.Context, source store.PiSplitSource,
 // and makes it active when the source was the selected account or the provider
 // has no selection yet. Every step is safe to repeat.
 func (r *Runtime) finishPiSplitEntry(ctx context.Context, source store.PiSplitSource, account NativeAccount, id string, entry json.RawMessage, activeLegacy string) error {
-	if err := writePiAccountAuth(ctx, account, map[string]json.RawMessage{id: entry}); err != nil {
+	if err := r.writePiAccountAuth(ctx, account, map[string]json.RawMessage{id: entry}); err != nil {
 		return err
 	}
 	if err := r.Accounts.SetRepos(account.ID, source.Repos); err != nil {
@@ -429,8 +431,8 @@ func (r *Runtime) finishPiSplitEntry(ctx context.Context, source store.PiSplitSo
 // login first: that entry belongs to that account and its repository rules. Only
 // a provider the source's own home lacks comes from the shared login it used to
 // run from.
-func piSplitEntry(ctx context.Context, home string, shared map[string]json.RawMessage, id string) json.RawMessage {
-	if entry, held := piSavedEntries(ctx, home)[id]; held {
+func (r *Runtime) piSplitEntry(ctx context.Context, home string, shared map[string]json.RawMessage, id string) json.RawMessage {
+	if entry, held := r.Accounts.piSavedEntries(ctx, home)[id]; held {
 		return entry
 	}
 	if entry, held := piSnapshotEntries(home)[id]; held {
@@ -443,8 +445,8 @@ func piSplitEntry(ctx context.Context, home string, shared map[string]json.RawMe
 }
 
 // piSavedEntries reads the provider entries an account home still holds.
-func piSavedEntries(ctx context.Context, home string) map[string]json.RawMessage {
-	entries, err := piEditAuth(ctx, home, nil)
+func (a *Accounts) piSavedEntries(ctx context.Context, home string) map[string]json.RawMessage {
+	entries, err := a.piEditAuth(ctx, home, nil)
 	if err == nil {
 		return entries
 	}

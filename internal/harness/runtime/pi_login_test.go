@@ -17,6 +17,7 @@ import (
 // account active, as a finished sign-in does.
 func seedPiLogin(t *testing.T, accounts *Accounts, piID, entry string, kind store.Kind) NativeAccount {
 	t.Helper()
+	installFakePiAuth(t, accounts)
 	account, err := accounts.CreateProvider("pi", piProvider(piID), kind, piID+" login")
 	if err != nil {
 		t.Fatal(err)
@@ -44,11 +45,15 @@ func futureGrant(access, account string) string {
 // renews nothing while the grant is fresh.
 func TestChatGPTGrantReadsAFreshSignIn(t *testing.T) {
 	accounts := testAccounts(t)
-	accounts.PiExecutable = func() (string, error) {
-		t.Fatal("a fresh grant was renewed")
-		return "", nil
-	}
 	seedPiLogin(t, accounts, "openai-codex", futureGrant("access-token", "workspace"), store.KindOAuth)
+	// The read runs on the seed's fake auth runner; a renewal would take this
+	// runner, so a fresh grant must never reach it.
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(context.Context, string, string, string) error {
+		t.Error("a fresh grant was renewed")
+		return errors.New("a fresh grant was renewed")
+	}
 	grant, err := accounts.ChatGPTGrant(t.Context(), "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -70,10 +75,24 @@ func TestChatGPTGrantWithoutASignInIsNotSignedIn(t *testing.T) {
 // cannot run is a typed failure, never a stale token.
 func TestChatGPTGrantRenewsADueSignIn(t *testing.T) {
 	accounts := testAccounts(t)
-	accounts.PiExecutable = func() (string, error) { return "", ErrPiMissing }
 	seedPiLogin(t, accounts, "openai-codex", `{"type":"oauth","access":"old-token","refresh":"refresh-token","expires":1,"accountId":"workspace"}`, store.KindOAuth)
-	if _, err := accounts.ChatGPTGrant(t.Context(), "", ""); !errors.Is(err, ErrGrantExpired) || !errors.Is(err, ErrPiMissing) {
-		t.Fatalf("err = %v, want the due grant reported as expired because Pi is missing", err)
+	previous := piRenewRunner
+	t.Cleanup(func() { piRenewRunner = previous })
+	piRenewRunner = func(context.Context, string, string, string) error { return errors.New("the renewal failed") }
+	if _, err := accounts.ChatGPTGrant(t.Context(), "", ""); !errors.Is(err, ErrGrantExpired) {
+		t.Fatalf("err = %v, want the due grant reported as expired when its renewal fails", err)
+	}
+}
+
+// Pi reads its own login file through its auth commands, so a missing Pi copy
+// is a typed failure, never a stale token or a plain file error.
+func TestChatGPTGrantWithoutPiIsTyped(t *testing.T) {
+	accounts := testAccounts(t)
+	seedPiLogin(t, accounts, "openai-codex", futureGrant("access-token", "workspace"), store.KindOAuth)
+	// Set after the seed, whose fake auth runner names its own Pi copy.
+	accounts.PiExecutable = func() (string, error) { return "", ErrPiMissing }
+	if _, err := accounts.ChatGPTGrant(t.Context(), "", ""); !errors.Is(err, ErrPiMissing) {
+		t.Fatalf("err = %v, want the missing Pi copy reported as typed", err)
 	}
 }
 
