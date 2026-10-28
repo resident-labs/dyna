@@ -273,7 +273,7 @@ func TestEngineUnitBoundsMemory(t *testing.T) {
 	if !strings.Contains(string(body), `Environment="GOMEMLIMIT=4GiB"`) {
 		t.Fatalf("the engine has no soft Go memory limit:\n%s", body)
 	}
-	if !strings.Contains(string(body), "MemoryHigh=8GiB") {
+	if !strings.Contains(string(body), "MemoryHigh=8589934592") {
 		t.Fatalf("the engine has no page-cache and process memory bound:\n%s", body)
 	}
 }
