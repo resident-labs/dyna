@@ -60,6 +60,8 @@ jobs:
       # hooks, and the build and tests need no dependency install scripts.
       - name: Install Pi dependencies
         run: npm ci --ignore-scripts
+      - name: Hydrate generated model data
+        run: npm run hydrate:model-data
       - name: Build Pi without live catalog updates
         run: npm run build:offline
       - name: Test coding-agent configuration
