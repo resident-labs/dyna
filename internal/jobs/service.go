@@ -433,7 +433,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if runErr != nil && errors.Is(runErr, context.Canceled) && EngineStopping() {
 		// The engine is stopping: the job keeps running on its node and the
 		// restarted engine reattaches through this row.
-		_ = s.Store.Save(context.WithoutCancel(ctx), job)
+		_ = s.Store.Save(context.WithoutCancel(ctx), logWriter.snapshot())
 		return
 	}
 	if runErr != nil && !job.State.Finished() {
@@ -531,15 +531,29 @@ func machineFacts(m machines.Machine) Facts {
 
 // logStore streams a job log to its file and tracks the stored size on the
 // live job, so a save keeps the offset the run reached.
+// logStore streams a job log to its file and tracks the stored size on the
+// live job, so a save keeps the offset the run reached. The lock makes the
+// file bytes and the tracked offset one unit: a save through snapshot never
+// records an offset that a poll write has not reached the file with yet.
 type logStore struct {
+	mu   sync.Mutex
 	job  *Job
 	file *os.File
 }
 
 func (l *logStore) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	n, err := l.file.Write(p)
 	l.job.LogBytes += int64(n)
 	return n, err
+}
+
+// snapshot copies the live job once no poll write is in flight.
+func (l *logStore) snapshot() Job {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return *l.job
 }
 
 // jobScript is the script a job runs on its node: it takes a CI slot, checks
