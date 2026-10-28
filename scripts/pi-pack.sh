@@ -200,9 +200,13 @@ if (listed.status !== 0) {
   process.exit(1);
 }
 const entries = JSON.parse(listed.stdout);
-if (!Array.isArray(entries) || entries.length === 0) {
+if (!Array.isArray(entries)) {
   console.error("pi --list-models --json did not print a JSON array");
   process.exit(1);
+}
+// With no signed-in provider the catalog is empty; [] is the contract.
+if (entries.length === 0) {
+  console.log("pi --list-models --json printed an empty catalog (no provider credentials)");
 }
 for (const entry of entries) {
   if (
