@@ -122,11 +122,14 @@
     limitBusy = { ...limitBusy, [field]: true }
     limitError = { ...limitError, [field]: '' }
     try {
-      await api.setRoomLimit(target, field, value)
+      const res = await api.setRoomLimit(target, field, value)
       const saved = { ...limits }
       saved[field] = value
       limits = saved
       onlimit(target, field, value)
+      // The saved value is what the room keeps; a live-apply failure is a
+      // warning on the kept value, not a failed save.
+      if (res.applyWarning) limitError = { ...limitError, [field]: res.applyWarning }
     } catch (e) {
       if (room.id === target) {
         const stored = { ...limits }

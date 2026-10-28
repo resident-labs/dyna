@@ -1,6 +1,8 @@
 package agentslice
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -225,6 +227,107 @@ func TestRoomSliceUsesTheRoomsSavedLimits(t *testing.T) {
 	}
 }
 
+// The room lock holds one room's slice work: a second writer of the same
+// room cannot enter while the first holds it, and another room's lock stays
+// free.
+func TestLockRoomHoldsEachRoomsWork(t *testing.T) {
+	unlock := lockRoom("room-limits")
+	defer unlock()
+	if roomMutex("room-limits").TryLock() {
+		t.Fatal("a second writer of the same room entered while the first held it")
+	}
+	other := roomMutex("other-room")
+	if !other.TryLock() {
+		t.Fatal("another room's lock was held")
+	}
+	other.Unlock()
+}
+
+// Two limit changes for one room serialize: the second reads the setting and
+// moves the live slice only after the first finished, so a slower first
+// change cannot put its older limits back on top.
+func TestApplyRoomLimitsRunsOneRoomAtATime(t *testing.T) {
+	_, calls := fakeManager(t)
+	fakeCgroups(t, "cpuset cpu io memory pids\n", "cpu memory pids\n", 33554432)
+	saved := RoomLimitsSetting{TasksMax: RoomLimitOverride{Value: 100}}
+	old := RoomLimitsLookup
+	RoomLimitsLookup = func(string) (RoomLimitsSetting, bool) { return saved, true }
+	t.Cleanup(func() { RoomLimitsLookup = old })
+
+	// The events, in the order they happen: every read of the setting and
+	// every finished live move. set-property parks until the test releases it,
+	// so the test decides when the first change's move completes.
+	events := make(chan string, 8)
+	release := make(chan struct{})
+	oldRun := runCommand
+	runCommand = func(ctx context.Context, name string, args ...string) error {
+		if len(args) > 1 && args[1] == "set-property" {
+			<-release
+			err := oldRun(ctx, name, args...)
+			events <- "applied " + strings.TrimPrefix(args[len(args)-1], "TasksMax=")
+			return err
+		}
+		return oldRun(ctx, name, args...)
+	}
+	t.Cleanup(func() { runCommand = oldRun })
+	oldLookup := RoomLimitsLookup
+	RoomLimitsLookup = func(roomID string) (RoomLimitsSetting, bool) {
+		setting, ok := oldLookup(roomID)
+		events <- fmt.Sprintf("read %d", setting.TasksMax.Value)
+		return setting, ok
+	}
+
+	apply := func() chan error {
+		done := make(chan error)
+		go func() { done <- ApplyRoomLimits("room-limits") }()
+		return done
+	}
+	first := apply()
+	if got := <-events; got != "read 100" {
+		t.Fatalf("first event = %q, want the first change's read", got)
+	}
+	saved = RoomLimitsSetting{TasksMax: RoomLimitOverride{Value: 200}}
+	second := apply()
+	release <- struct{}{} // the first change's live move completes
+	for i, expect := range []string{"applied 100", "read 200"} {
+		if got := <-events; got != expect {
+			t.Fatalf("event %d = %q, want %q: the second change did not wait for the first", i, got, expect)
+		}
+	}
+	release <- struct{}{} // the second change's live move completes
+	if got := <-events; got != "applied 200" {
+		t.Fatalf("last event = %q, want the second change's apply", got)
+	}
+	if err := <-first; err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	last := (*calls)[len(*calls)-1]
+	if !strings.Contains(last, "TasksMax=200") {
+		t.Fatalf("the older change applied last: %q", last)
+	}
+}
+
+// A failing live move is an error, so the caller can say the saved limit did
+// not reach the running slice.
+func TestApplyRoomLimitsReportsALiveApplyFailure(t *testing.T) {
+	fakeManager(t)
+	fakeCgroups(t, "cpuset cpu io memory pids\n", "cpu memory pids\n", 33554432)
+	old := runCommand
+	runCommand = func(ctx context.Context, name string, args ...string) error {
+		if len(args) > 1 && args[1] == "set-property" {
+			return errors.New("systemd refused")
+		}
+		return old(ctx, name, args...)
+	}
+	t.Cleanup(func() { runCommand = old })
+	if err := ApplyRoomLimits("room-limits"); err == nil || !strings.Contains(err.Error(), "systemd refused") {
+		t.Fatalf("apply err = %v, want the set-property failure", err)
+	}
+}
+
 // Without the delegated controllers, room launches stay in the shared slice,
 // still tell their scripts which slice that is, and one notice per room says
 // why: a second room hears its own notice, and a repeat launch stays quiet.
@@ -327,10 +430,14 @@ func TestRoomPidsOutsideAUserManagerCountsZero(t *testing.T) {
 
 func envOf(cmd *exec.Cmd, key string) string {
 	prefix := key + "="
+	// The last entry wins: WrapRoom appends what it exports after any value
+	// this process inherited, and a session launched in a room slice inherits
+	// one from its own engine.
+	value := ""
 	for _, entry := range cmd.Environ() {
 		if strings.HasPrefix(entry, prefix) {
-			return strings.TrimPrefix(entry, prefix)
+			value = strings.TrimPrefix(entry, prefix)
 		}
 	}
-	return ""
+	return value
 }
