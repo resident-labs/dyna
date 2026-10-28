@@ -199,6 +199,52 @@ func TestLargeSessionTurnsImportAndRead(t *testing.T) {
 	t.Logf("%d turns: first read with imports %v, full read %v", turns, imported, time.Since(start))
 }
 
+func TestTurnRange(t *testing.T) {
+	s, id := turnStore(t)
+	recordtest.Write(t, s.Root, id, Meta{ID: id, Name: "range", RoomID: "room", Room: "room", Turns: 5})
+	for n := 1; n <= 5; n++ {
+		if err := s.writeTurn(id, Turn{N: n, Status: TurnOK, Prompt: strconv.Itoa(n)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		first, last int
+		want        string
+	}{
+		{2, 4, "234"},
+		{4, 5, "45"},
+		{5, 5, "5"},
+	} {
+		turns, err := s.TurnRange(id, tc.first, tc.last)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		for _, turn := range turns {
+			got += turn.Prompt
+		}
+		if got != tc.want {
+			t.Fatalf("TurnRange(%d, %d) prompts = %q, want %q", tc.first, tc.last, got, tc.want)
+		}
+	}
+	for _, bounds := range [][2]int{{0, 1}, {3, 2}} {
+		if _, err := s.TurnRange(id, bounds[0], bounds[1]); err == nil {
+			t.Fatalf("TurnRange(%d, %d) accepted invalid bounds", bounds[0], bounds[1])
+		}
+	}
+	db, err := s.turnsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("DELETE FROM session_turns WHERE session = ? AND n = 3", id); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := s.TurnRange(id, 2, 4)
+	if err != nil || len(turns) != 3 || turns[1].Status != TurnUnreadable || turns[1].N != 3 {
+		t.Fatalf("range with a missing row = %+v, %v", turns, err)
+	}
+}
+
 // An update changes only the canonical row, even beside a foreign turn file.
 func TestTurnUpdateKeepsTheCanonicalStatus(t *testing.T) {
 	s, id := turnStore(t)
