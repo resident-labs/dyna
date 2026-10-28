@@ -16,7 +16,7 @@ import (
 func transferCommand(newManager func() *subagent.Manager) *cobra.Command {
 	var opts subagent.TransferOptions
 	var asJSON bool
-	cmd := &cobra.Command{Use: "transfer <session> --profile <profile> [--model <model>]", Short: "Transfer to a fresh model conversation while preserving the Dyna session", Long: `Ask the current model for a written handoff, then start a fresh native conversation
+	cmd := &cobra.Command{Use: "transfer <session> [--profile <profile>] [--fresh] [--model <model>]", Short: "Transfer to a fresh model conversation while preserving the Dyna session", Long: `Ask the current model for a written handoff, then start a fresh native conversation
 with the chosen profile and optional model. The Dyna session ID, address,
 hierarchy, children, files, history and tracked PR ownership stay the same.
 The new model receives a full charter, the handoff or transcript fallback,
@@ -46,11 +46,13 @@ without end. Status and cancel are durable; repeating the same
 request while it runs recovers a dead coordinator without creating another
 replacement. Naming the profile and model the session already runs starts
 another conversation in the same session instead.
+Use --fresh to drop the runtime pin and start a new conversation with a handoff.
+Without --profile, --fresh uses the session’s current profile.
 Use --retry after a failed or cancelled attempt. Replacement startup has a
 60-second output deadline. Startup failure restores the prior profile and
 native resume ID; it keeps the failed turn readable. Cancel is available
 while waiting, before the old turn stops.`, Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
-		if opts.Profile == "" {
+		if opts.Profile == "" && !opts.Fresh {
 			return errors.New("--profile is required; run dyna profiles list")
 		}
 		info, err := newManager().Store.ResolveSnapshot(args[0])
@@ -67,7 +69,8 @@ while waiting, before the old turn stops.`, Args: cobra.ExactArgs(1), RunE: func
 		fmt.Fprintf(c.OutOrStdout(), "transfer %s: %s → %s (%s); inspect with `dyna subagent transfer status %s`\n", t.ID, t.PreviousProfile, t.Profile, t.Phase, t.Session)
 		return nil
 	}}
-	cmd.Flags().StringVar(&opts.Profile, "profile", "", "target profile (required)")
+	cmd.Flags().StringVar(&opts.Profile, "profile", "", "target profile (required unless --fresh)")
+	cmd.Flags().BoolVar(&opts.Fresh, "fresh", false, "start a new conversation on current runtime settings")
 	cmd.Flags().StringVar(&opts.Model, "model", "", "model override (default: the profile's model)")
 	cmd.Flags().IntVar(&opts.WaitSeconds, "wait-seconds", 30, "seconds to wait for a written handoff (0 to 120)")
 	cmd.Flags().BoolVar(&opts.Retry, "retry", false, "retry a failed or cancelled transfer")
