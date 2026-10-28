@@ -263,6 +263,13 @@ func (s *Service) emitMemberItems(sessions []subagent.Info, records []room.Recor
 			forced[event.RoomID+"\x00"+event.Change.ID] = event.Change
 		}
 	}
+	type roomRebuild struct {
+		roomID, owner string
+		items         []Member
+		start         int
+	}
+	var rebuilds []roomRebuild
+	var allItems []Member
 	present := map[string]bool{}
 	for _, rec := range records {
 		present[rec.ID] = true
@@ -281,12 +288,18 @@ func (s *Service) emitMemberItems(sessions []subagent.Info, records []room.Recor
 			} else {
 				items = s.membersOf(rec, sessions, "", true)
 			}
-			// A streamed row keeps its count, so patching one into the list
-			// does not drop it. A goal, question, PR, shell or run change
-			// reloads the list, which reads the counts again.
-			s.countResponsibilities(items, sessions)
-			state.rooms[rec.ID] = memberRoom{owner: owner, items: items}
+			start := len(allItems)
+			allItems = append(allItems, items...)
+			rebuilds = append(rebuilds, roomRebuild{roomID: rec.ID, owner: owner, items: items, start: start})
 		}
+	}
+	// Count every affected room in one responsibility-count call. A streamed row
+	// keeps its count, so patching one into the list does not drop it. A goal, question,
+	// PR, shell or run change reloads the list, which reads the counts again.
+	s.countResponsibilities(allItems, sessions)
+	for _, rebuilt := range rebuilds {
+		copy(rebuilt.items, allItems[rebuilt.start:rebuilt.start+len(rebuilt.items)])
+		state.rooms[rebuilt.roomID] = memberRoom{owner: rebuilt.owner, items: rebuilt.items}
 	}
 	changed := len(affected) > 0
 	for roomID := range state.rooms {

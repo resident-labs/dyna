@@ -1,6 +1,12 @@
 package roomsvc
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/subagent"
+)
 
 // row finds a member by session ID.
 func row(members []Member, id string) Member {
@@ -10,6 +16,39 @@ func row(members []Member, id string) Member {
 		}
 	}
 	return Member{}
+}
+
+func TestRosterRebuildBatchesResponsibilityCounts(t *testing.T) {
+	e := newEnv(t)
+	firstRoom := e.room("batch-counts-a")
+	secondRoom := e.room("batch-counts-b")
+	first := e.start(firstRoom, "first", nil)
+	second := e.start(secondRoom, "second", nil)
+
+	calls := 0
+	read := responsibilityCounts
+	responsibilityCounts = func(manager *subagent.Manager, ctx context.Context, infos []subagent.Info) (map[string]map[string]int, error) {
+		calls++
+		if len(infos) != 2 {
+			t.Errorf("one count pass received %d sessions, want 2", len(infos))
+		}
+		return read(manager, ctx, infos)
+	}
+	t.Cleanup(func() { responsibilityCounts = read })
+
+	watch := newMemberWatch()
+	e.svc.scanMembers([]subagent.Info{first, second}, []room.Record{firstRoom, secondRoom}, watch, nil, true, func(Event) {})
+	if calls != 1 {
+		t.Fatalf("two-room roster rebuild used %d responsibility count passes, want 1", calls)
+	}
+	for _, item := range []struct {
+		room room.Record
+		info subagent.Info
+	}{{firstRoom, first}, {secondRoom, second}} {
+		if got := row(watch.rooms[item.room.ID].items, item.info.ID).Responsibilities["goal"]; got != 1 {
+			t.Errorf("%s counts %v goals, want 1", item.info.Address(), got)
+		}
+	}
 }
 
 // A member row shows what stops its session from finishing: the owner row keeps
