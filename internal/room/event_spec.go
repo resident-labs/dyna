@@ -345,6 +345,18 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Machine {name} freed scratch space: {summary}.",
 	},
+	// A machine that cannot run one slice per room tells each room once per
+	// cause: the room's work then shares the agent slice with no process cap.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeLimitsOff,
+		Renderer: "MachineLimitsCard",
+		Payload:  reflect.TypeOf(MachineLimitsEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Room limits are off: {reason}. This room shares the agent slice with every other room and has no process cap.",
+	},
 	// The owner's answer to a call request is a fact of the room: root asked for
 	// the call and stops waiting when it reads the answer.
 	{

@@ -19,6 +19,7 @@ const (
 	EnvDepth       = "DYNA_DEPTH"        // subagent mode: this session's depth (top level = 1)
 	EnvRoomID      = "DYNA_ROOM_ID"      // stamped work: canonical room id
 	EnvRoom        = "DYNA_ROOM"         // stamped work: readable room name
+	EnvRoomSlice   = "DYNA_ROOM_SLICE"   // stamped work: the room's systemd slice unit
 	EnvAddress     = "DYNA_ADDRESS"      // stamped session: <room>:<name> address
 	EnvRunID       = "DYNA_RUN_ID"       // workflow script: owning run
 	EnvRunDetached = "DYNA_RUN_DETACHED" // workflow script: detached runner

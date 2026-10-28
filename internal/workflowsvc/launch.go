@@ -122,7 +122,9 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	cmd.Env = append(cmd.Env, "DYNA_RUN_ID="+id, "DYNA_RUN_DETACHED="+detached)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	// A workflow run acts as authority's worker role, never as a session.
-	record := callerid.Launch{DataDir: store.DataDir(), Name: id, Actor: callerid.Identity{Kind: callerid.Worker, Run: id}, Launcher: "workflow"}
+	// The run's environment carries the room it was started in, so the worker
+	// lands in that room's slice.
+	record := callerid.Launch{DataDir: store.DataDir(), Name: id, Actor: callerid.Identity{Kind: callerid.Worker, Run: id}, Launcher: "workflow", Room: envValue(cmd.Env, mode.EnvRoomID)}
 	runEnv := cmd.Env
 	started, ended := make(chan error, 1), make(chan error, 1)
 	go func() {
