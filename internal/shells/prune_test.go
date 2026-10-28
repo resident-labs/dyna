@@ -3,9 +3,49 @@ package shells
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/database"
 )
+
+func TestPruneIndexUpgrade(t *testing.T) {
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
+	db, err := s.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP INDEX shell_jobs_prune; UPDATE meta SET value='5' WHERE key='shells.version'`); err != nil {
+		t.Fatal(err)
+	}
+	database.Close(filepath.Dir(s.Root))
+	db, err = s.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(filepath.Dir(s.Root)) })
+	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT id FROM shell_jobs WHERE ended IS NOT NULL AND ended<? AND keep=0 LIMIT ?`, "2026-10-25T00:00:00Z", 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		found = found || strings.Contains(detail, "USING INDEX shell_jobs_prune")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("prune query does not use the index after upgrade")
+	}
+}
 
 func TestPruneEndedRemovesOnlyOldEndedUnkeptJobsInBatches(t *testing.T) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
