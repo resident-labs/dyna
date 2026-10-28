@@ -80,6 +80,21 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	}
 }
 
+// TestCacheCleanCommandUsesCustomLocalRuntime passes a rootless local socket
+// to the fallback. The default local Docker socket keeps the existing ambient
+// Docker-then-sudo selection instead.
+func TestCacheCleanCommandUsesCustomLocalRuntime(t *testing.T) {
+	socket := "unix:///run/user/1000/podman/podman.sock"
+	command := cacheCleanCommand(Node{Name: "local", ContainerSocket: socket}, true, ciCacheCleanAge)
+	if !strings.Contains(command, "DOCKER_HOST="+shellquote.Quote(socket)) {
+		t.Fatalf("cleanup ignored the custom local runtime: %s", command)
+	}
+	plain := cacheCleanCommand(Node{Name: "local", ContainerSocket: machines.DefaultContainerSocket}, true, ciCacheCleanAge)
+	if strings.Contains(plain, "DOCKER_HOST=") {
+		t.Fatalf("default local Docker no longer uses ambient selection: %s", plain)
+	}
+}
+
 // runCacheClean runs the embedded script itself, with the roots a test chooses.
 func runCacheClean(t *testing.T, roots string, dryRun bool, env ...string) ([]byte, error) {
 	t.Helper()
@@ -913,7 +928,7 @@ func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 		cleaned = append(cleaned, node.Name)
 		return CacheCleanResult{Node: node.Name, FreedBytes: 1 << 20}, nil
 	}
-	next, err := cleanCachesTick(t.Context(), dir, func() time.Time { return at }, clean)
+	next, err := cleanCachesTick(t.Context(), dir, func() time.Time { return at }, clean, nil)
 	if err != nil || !next.IsZero() || len(cleaned) != 0 {
 		t.Fatalf("empty startup: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
@@ -922,13 +937,59 @@ func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at }, clean)
+	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at }, clean, nil)
 	if err != nil || len(cleaned) != 1 || cleaned[0] != "node-a" || !next.Equal(at.Add(cacheCleanEvery)) {
 		t.Fatalf("enabled machine: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
 	cleaned = nil
-	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(30 * time.Minute) }, clean)
+	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(30 * time.Minute) }, clean, nil)
 	if err != nil || len(cleaned) != 0 || !next.Equal(at.Add(cacheCleanEvery)) {
 		t.Fatalf("second pass: next=%v err=%v cleaned=%v", next, err, cleaned)
+	}
+}
+
+// TestCacheCleanFailureGenerationChangesAfterSuccess walks one machine through
+// failure, an hourly retry, success, and an identical later failure. Failed
+// retries keep one generation; the successful pass starts the next one.
+func TestCacheCleanFailureGenerationChangesAfterSuccess(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := (machines.Store{DataDir: dir}).Save(t.Context(), machines.Machine{
+		Name: "node-a", SSH: "pip@node-a", Roles: []machines.Role{machines.RoleCI}, CISlots: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cleanCalls := 0
+	failure := &CacheCleanError{Node: "node-a", Path: "/var/tmp/dyna-local-ci/runs/old", Reason: "permission denied"}
+	clean := func(_ context.Context, node Node) (CacheCleanResult, error) {
+		cleanCalls++
+		if cleanCalls == 3 {
+			return CacheCleanResult{Node: node.Name}, nil
+		}
+		return CacheCleanResult{Node: node.Name}, failure
+	}
+	var generations []int64
+	report := func(_ context.Context, _ Node, failure CacheCleanError) error {
+		generations = append(generations, failure.LastSuccessMS)
+		return nil
+	}
+	passes := []time.Time{at, at.Add(time.Hour), at.Add(2 * time.Hour), at.Add(3 * time.Hour)}
+	for i, passAt := range passes {
+		_, err := cleanCachesTick(t.Context(), dir, func() time.Time { return passAt }, clean, report)
+		if i == 2 && err != nil {
+			t.Fatalf("successful pass: %v", err)
+		}
+		if i != 2 && err == nil {
+			t.Fatalf("failed pass %d returned no error", i+1)
+		}
+	}
+	if cleanCalls != 4 || len(generations) != 3 {
+		t.Fatalf("clean calls = %d, reports = %d, want four and three", cleanCalls, len(generations))
+	}
+	if generations[0] != 0 || generations[1] != 0 {
+		t.Fatalf("hourly retry changed its generation: %v", generations)
+	}
+	if want := passes[2].UnixMilli(); generations[2] != want {
+		t.Fatalf("later failure generation = %d, want last success %d", generations[2], want)
 	}
 }

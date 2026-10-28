@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 )
@@ -189,9 +190,9 @@ func cacheCleanCommand(node Node, dryRun bool, age time.Duration) string {
 		" DYNA_CI_CLEAN_RUN_AGE_MIN=" + strconv.FormatInt(int64(ciRunCleanAge/time.Minute), 10) +
 		" DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(cacheBase(node.Name)+" "+legacyCacheDir) +
 		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
-	// A remote cleanup uses the runtime socket that its workflow jobs use. The
-	// local runner keeps its existing Docker-then-sudo selection instead.
-	if node.SSH != "" && node.ContainerSocket != "" {
+	// Cleanup uses a custom runtime socket on every machine, just as workflow
+	// jobs do. Default local Docker keeps its ambient Docker-then-sudo selection.
+	if node.ContainerSocket != "" && (node.SSH != "" || node.ContainerSocket != machines.DefaultContainerSocket) {
 		command = "DOCKER_HOST=" + shellquote.Quote(node.ContainerSocket) + " " + command
 	}
 	return command
@@ -203,7 +204,10 @@ type CacheCleanError struct {
 	Node   string
 	Path   string
 	Reason string
-	cause  error
+	// LastSuccessMS identifies the continuous failure period. Failed retries
+	// keep it; a successful cleanup starts the next period.
+	LastSuccessMS int64
+	cause         error
 }
 
 func (e *CacheCleanError) Error() string {

@@ -29,10 +29,6 @@ func CleanCachesTick(ctx context.Context, dataDir string, report ScratchReporter
 	return cleanCachesTick(ctx, dataDir, time.Now, func(ctx context.Context, node Node) (CacheCleanResult, error) {
 		runner := Runner{DataDir: dataDir}
 		cleaned, err := runner.CleanCaches(ctx, node, false)
-		if err != nil && reportFailure != nil {
-			reportErr := reportFailure(ctx, node, cacheCleanFailure(node, err))
-			err = errors.Join(err, reportErr)
-		}
 		swept, scratchErr := sweepNodeScratch(ctx, runner, node, time.Now())
 		if report != nil && swept.FreedBytes > 0 {
 			scratchErr = errors.Join(scratchErr, report(ctx, node, swept))
@@ -43,10 +39,10 @@ func CleanCachesTick(ctx context.Context, dataDir string, report ScratchReporter
 			log.Printf("local CI %s: scratch sweep: %v", node.Name, scratchErr)
 		}
 		return cleaned, err
-	})
+	}, reportFailure)
 }
 
-func cleanCachesTick(ctx context.Context, dataDir string, now func() time.Time, clean func(context.Context, Node) (CacheCleanResult, error)) (time.Time, error) {
+func cleanCachesTick(ctx context.Context, dataDir string, now func() time.Time, clean func(context.Context, Node) (CacheCleanResult, error), reportFailure CacheCleanReporter) (time.Time, error) {
 	store := Store{DataDir: dataDir}
 	nodes, err := store.Nodes(ctx)
 	if err != nil {
@@ -76,6 +72,13 @@ func cleanCachesTick(ctx context.Context, dataDir string, now func() time.Time, 
 		}
 		cleaned, err := clean(ctx, node)
 		if err != nil {
+			if reportFailure != nil {
+				failure := cacheCleanFailure(node, err)
+				if !last.IsZero() {
+					failure.LastSuccessMS = last.UnixMilli()
+				}
+				err = errors.Join(err, reportFailure(ctx, node, failure))
+			}
 			errs = append(errs, err)
 			soonest(at.Add(cacheCleanRetry))
 			continue

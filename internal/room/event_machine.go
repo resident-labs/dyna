@@ -65,6 +65,9 @@ type MachineCacheCleanFailedEvent struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+	// LastSuccessMS is the last successful cleanup before this failure period,
+	// in milliseconds since the Unix epoch. Zero means no successful cleanup.
+	LastSuccessMS int64 `json:"lastSuccessMs,omitempty"`
 	// AtMS is when Dyna first observed this failure, in milliseconds since the
 	// Unix epoch.
 	AtMS int `json:"atMs"`
@@ -76,9 +79,10 @@ func (MachineCacheCleanFailedEvent) eventType() EventType     { return TypeCache
 // eventSubject folds cleanup failures with the machine's other cache facts.
 func (m MachineCacheCleanFailedEvent) eventSubject() string { return m.Name }
 
-// eventDedupe keeps an hourly retry of the same failure from posting again.
+// eventDedupe keeps hourly retries of one continuous failure together. A
+// success changes the generation, so an identical later incident posts again.
 func (m MachineCacheCleanFailedEvent) eventDedupe() string {
-	return m.Path + "\x00" + m.Reason
+	return strconv.FormatInt(m.LastSuccessMS, 10) + "\x00" + m.Path + "\x00" + m.Reason
 }
 
 // MachineScratchEvent tells a room what a sweep of a machine's scratch folders
