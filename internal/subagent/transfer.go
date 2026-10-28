@@ -152,6 +152,9 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		}
 		if opts.Profile == "" && opts.Fresh {
 			opts.Profile = meta.Profile
+			if opts.Model == "" {
+				opts.Model = meta.Model
+			}
 		}
 		p, ok := ps.Get(opts.Profile)
 		if !ok || p.Disabled {
