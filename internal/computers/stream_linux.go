@@ -13,7 +13,7 @@ import (
 type StreamBackend interface {
 	Command(context.Context, StreamOptions) ([]string, Stream, error)
 }
-type StreamOptions struct{ Socket, ConfigDir string }
+type StreamOptions struct{ Socket, ConfigDir, RenderNode string }
 type wayVNCBackend struct{}
 
 func (wayVNCBackend) Command(ctx context.Context, opts StreamOptions) ([]string, Stream, error) {
@@ -24,7 +24,7 @@ func (wayVNCBackend) Command(ctx context.Context, opts StreamOptions) ([]string,
 	if err := os.WriteFile(config, []byte("enable_auth=false\n"), 0600); err != nil {
 		return nil, Stream{}, err
 	}
-	gpu := vaapiWorks(ctx)
+	gpu := vaapiWorks(ctx, opts.RenderNode)
 	args := []string{"wayvnc", "-C", config, "--unix-socket", "--disable-resizing", "--max-fps", "30", "-S", filepath.Join(filepath.Dir(opts.Socket), "ctl.sock")}
 	state := Stream{Running: true, Codec: "negotiated (H.264/Tight/ZRLE)", Encoder: "software"}
 	if gpu {

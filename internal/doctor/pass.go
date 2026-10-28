@@ -16,6 +16,9 @@ const DefaultCooldown = 30 * time.Minute
 type Pass struct {
 	DataDir  string
 	Machines []string
+	// GPUs reads live GPU memory during each examination; nil skips the GPU
+	// check (D-352).
+	GPUs func() ([]GPUReading, string)
 	// If is the condition text, such as the hook recipe's DoctorCondition. It
 	// holds every threshold, so the doctor has no limit of its own to start.
 	If       string
@@ -38,7 +41,7 @@ type Pass struct {
 func (p Pass) Do(log io.Writer) error {
 	var errs []error
 	for _, machine := range p.Machines {
-		res, err := Run{DataDir: p.DataDir, Machine: machine, Target: "machine", Trigger: "hook schedule", If: p.If, Cooldown: p.Cooldown, Now: p.Now, Post: p.Post}.Do()
+		res, err := Run{DataDir: p.DataDir, Machine: machine, Target: "machine", Trigger: "hook schedule", If: p.If, Cooldown: p.Cooldown, Now: p.Now, Post: p.Post, GPUs: p.GPUs}.Do()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", machine, err))
 		}
