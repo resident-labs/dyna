@@ -116,12 +116,15 @@ type Job struct {
 	// relaunches on the next engine instead of attaching to a unit that
 	// never was.
 	Launched bool
+	// Artifacts are paths in the job's work folder that the engine copies
+	// back when the job ends, before the folder is removed.
+	Artifacts []string
 }
 
 // Topic is the hub topic a jobs-table write publishes under.
 const Topic = "jobs"
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 const schema = `CREATE TABLE jobs (
 	id TEXT PRIMARY KEY,
@@ -148,7 +151,8 @@ const schema = `CREATE TABLE jobs (
 	note TEXT NOT NULL DEFAULT '',
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	start_posted INTEGER NOT NULL DEFAULT 0,
-	launched INTEGER NOT NULL DEFAULT 0
+	launched INTEGER NOT NULL DEFAULT 0,
+	artifacts TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX jobs_open ON jobs(created_ms) WHERE state IN ('queued','running');`
 
@@ -179,6 +183,10 @@ func (s Store) db() (*sql.DB, error) {
 	apply := func(conn *sql.Conn, old int) error {
 		if old == 0 {
 			_, err := conn.ExecContext(context.Background(), schema)
+			return err
+		}
+		if old < 2 {
+			_, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN artifacts TEXT NOT NULL DEFAULT '[]'")
 			return err
 		}
 		return nil
@@ -426,23 +434,27 @@ func (s Store) RequestedRunning(ctx context.Context) ([]Job, error) {
 // upsertJob writes the whole row of one job.
 func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exit any, ms func(time.Time) int64) error {
 	command := string(encoded)
-	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted,launched)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched`,
-		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched))
+	artifacts, err := json.Marshal(job.Artifacts)
+	if err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted,launched,artifacts)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched, artifacts=excluded.artifacts`,
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched), string(artifacts))
 	return err
 }
 
-const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted,launched"
+const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted,launched,artifacts"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
-	var command string
+	var command, artifacts string
 	var exit sql.NullInt64
 	var requested, posted, launched int
 	var host, timeout int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested, &posted, &launched); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested, &posted, &launched, &artifacts); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
@@ -466,6 +478,9 @@ func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 		return job, err
 	}
 	job.Command = words
+	if err := json.Unmarshal([]byte(artifacts), &job.Artifacts); err != nil {
+		return job, fmt.Errorf("job artifacts %q: %w", artifacts, err)
+	}
 	return job, nil
 }
 
