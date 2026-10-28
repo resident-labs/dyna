@@ -62,6 +62,50 @@ func escapeUnit(id string) string {
 	return b.String()
 }
 
+// RoomIDFromSlice returns the room id whose slice has this name, so a reader
+// of the cgroup tree maps each room slice back to its room. The bool is false
+// when the name is no room slice: a wrong prefix or suffix, an empty id, a
+// malformed escape, or bytes that do not round-trip through RoomSlice.
+func RoomIDFromSlice(slice string) (string, bool) {
+	rest, ok := strings.CutPrefix(slice, roomSlicePrefix)
+	if !ok {
+		return "", false
+	}
+	rest, ok = strings.CutSuffix(rest, ".slice")
+	if !ok || rest == "" {
+		return "", false
+	}
+	id, ok := unescapeUnit(rest)
+	if !ok || RoomSlice(id) != slice {
+		return "", false
+	}
+	return id, true
+}
+
+// unescapeUnit reverses escapeUnit: every \xNN becomes its byte again. It
+// reports false on a malformed escape, such as a lone backslash or a hex
+// digit that is not one.
+func unescapeUnit(escaped string) (string, bool) {
+	var b strings.Builder
+	for i := 0; i < len(escaped); {
+		if escaped[i] != '\\' {
+			b.WriteByte(escaped[i])
+			i++
+			continue
+		}
+		if i+4 > len(escaped) || escaped[i+1] != 'x' {
+			return "", false
+		}
+		v, err := strconv.ParseUint(escaped[i+2:i+4], 16, 8)
+		if err != nil {
+			return "", false
+		}
+		b.WriteByte(byte(v))
+		i += 4
+	}
+	return b.String(), true
+}
+
 // RoomLimits are the kernel limits one room's work runs under. Zero values
 // are left out of the unit file, so a caller can scale just some of them.
 type RoomLimits struct {
