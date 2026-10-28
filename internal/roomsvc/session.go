@@ -684,12 +684,6 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 	hookVersion := ""
 	syncVersion := ""
 	first := true
-	liveEmit := func(ev Event) {
-		if ev.Kind == "members" || ev.Kind == "rooms" {
-			prVersion = ""
-		}
-		emit(ev)
-	}
 	scanStores := func() {
 		s.scanChangedPosts(offsets, emit)
 		for topic := range s.takeStoreTopics() {
@@ -711,7 +705,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		// TODO: legacy/shim remove later — fallback scans detect external writers until all mutations run in this engine.
 		s.scanSync(&syncVersion, first, emit)
 		s.scanHookSpool(&hookVersion, first, emit)
-		s.scan(offsets, &roomSig, memberSig, pinSig, first, liveEmit)
+		s.scan(offsets, &roomSig, memberSig, pinSig, first, emit)
 		s.scanQuestions(questionSig, &questionVersion, first, emit)
 		s.scanCallRequests(callRequestSig, &callRequestVersion, first, emit)
 		s.scanNotices(&noticeVersion, first, emit)
@@ -728,7 +722,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		if s.AfterFirstScan != nil {
 			s.AfterFirstScan()
 		}
-		if !s.waitTick(ctx, tick.C, func() { s.scanPRs(prSig, prWork, &prVersion, false, emit) }, func() { s.scanDirtyMembers(memberSig, liveEmit) }, func() { scanCoordinators(s.takeCoordinatorHints()) }, func() { s.scanCallRequests(callRequestSig, &callRequestVersion, false, emit) }, scanStores) {
+		if !s.waitTick(ctx, tick.C, func() { s.scanPRs(prSig, prWork, &prVersion, false, emit) }, func() { s.scanDirtyMembers(memberSig, emit) }, func() { scanCoordinators(s.takeCoordinatorHints()) }, func() { s.scanCallRequests(callRequestSig, &callRequestVersion, false, emit) }, scanStores) {
 			return
 		}
 	}
