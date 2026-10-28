@@ -17,7 +17,7 @@ version="1.4.0-dyna.7.${fork_tree:0:12}"
 # The build name comes from the committed tree, but the tarball packs the
 # working files: uncommitted Pi changes would ship under a stale build name
 # and collide with the real build of that tree. Refuse them.
-if [ -n "$(git -C "$repo_root" status --porcelain -- third_party/pi)" ]; then
+if [ -n "$(git -C "$repo_root" status --porcelain --untracked-files=all -- third_party/pi)" ]; then
   echo "pi-pack: third_party/pi has uncommitted changes; commit them so the build name matches the packed tree" >&2
   exit 1
 fi

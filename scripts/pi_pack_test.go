@@ -37,6 +37,9 @@ func TestPiPackRefusesUncommittedPiChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	run("init", "-q")
+	// Git can hide untracked files by configuration; the guard must not
+	// depend on it.
+	run("config", "status.showUntrackedFiles", "no")
 	run("add", "-A")
 	run("commit", "-q", "-m", "pi")
 	if err := os.WriteFile(filepath.Join(piDir, "local.ts"), []byte("dirty\\n"), 0600); err != nil {
