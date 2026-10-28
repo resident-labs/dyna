@@ -32,7 +32,6 @@ not-state internal/computers/browser_profile_linux.go withBrowserMaster 1 # one 
 not-state internal/computers/cgroup_linux.go cgroupManager.computer 2 # cgroup control files
 not-state internal/computers/cgroup_linux.go supervisor.killCgroup 3 # cgroup control files
 not-state internal/computers/cgroup_linux.go writeCgroup 1 # cgroup control files
-not-state internal/computers/cgroup_linux.go supervisor.ensureCgroup 1 # cgroup record file in the computer's runtime directory
 not-state internal/computers/cgroup_linux.go supervisor.recordCgroup 2 # cgroup record file in the computer's runtime directory
 not-state internal/computers/cgroup_linux.go systemdRoomScope 4 # cgroup record file and scope log in the computer's directories
 not-state internal/computers/child_shims_linux.go supervisor.childShims 1 # one computer's tool shims

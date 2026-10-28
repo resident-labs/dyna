@@ -713,7 +713,13 @@ func (s *supervisor) stop() error {
 	s.state.Apps = []App{}
 	// killCgroup took the room scope down with its anchor; the next start
 	// asks systemd for a new one, and nothing may join the dead one meanwhile.
-	if s.roomSlice != "" {
+	// A fallback leaf of a computer that could use a scope is dropped the same
+	// way, so the next start retries the scope; the leaf is empty after the
+	// kill, or stays for the next fallback to reuse.
+	if s.roomSlice != "" || (s.cgroup != "" && s.meta.Room != "" && roomSlicesOn()) {
+		if s.roomSlice == "" {
+			_ = os.Remove(s.cgroup)
+		}
 		s.cgroup, s.roomSlice = "", ""
 		s.recordCgroup("")
 	}

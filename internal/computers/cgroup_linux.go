@@ -326,19 +326,21 @@ func (s *supervisor) roomScopeCgroup(ctx context.Context, id, room string) strin
 // scope below the computer's room slice when room slices work here, else the
 // shared service leaf that caps every computer of every room together. The
 // desktop start, the browser launch preparation and the first connection of
-// an external client all call it, so none of them runs unlimited. A scope the
-// computer already holds, or a computer that never uses one, returns at once.
+// an external client all call it, so none of them runs unlimited. A computer
+// keeps the cgroup it holds until its next stop: its processes cannot move
+// between cgroups safely, so a fallback leaf is never swapped for a scope
+// while the computer lives, and the next start retries the scope.
 func (s *supervisor) ensureCgroup(ctx context.Context) {
 	s.cgroupMu.Lock()
 	defer s.cgroupMu.Unlock()
 	s.mu.Lock()
 	id, room := s.meta.SessionID, s.meta.Room
-	held, scoped := s.cgroup, s.roomSlice != ""
+	held := s.cgroup
 	s.mu.Unlock()
-	wantScope := room != "" && roomSlicesOn()
-	if held != "" && (scoped || !wantScope) {
+	if held != "" {
 		return
 	}
+	wantScope := room != "" && roomSlicesOn()
 	cgroup, slice := "", ""
 	if wantScope {
 		if scope := s.roomScopeCgroup(ctx, id, room); scope != "" {
@@ -352,11 +354,6 @@ func (s *supervisor) ensureCgroup(ctx context.Context) {
 	s.cgroup, s.roomSlice = cgroup, slice
 	s.mu.Unlock()
 	s.recordCgroup(cgroup)
-	// A fallback leaf from an earlier attempt is empty by now; drop it so a
-	// later room scope does not accumulate leaves below the service.
-	if held != "" && held != cgroup && underCgroup(held, computerGroups.root) {
-		_ = os.Remove(held)
-	}
 }
 
 // recordCgroup stores the computer's cgroup for the browser shims, which
