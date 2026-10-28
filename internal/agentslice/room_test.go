@@ -349,6 +349,24 @@ func TestApplyRoomLimitsReportsALiveApplyFailure(t *testing.T) {
 // Without the delegated controllers, room launches stay in the shared slice,
 // still tell their scripts which slice that is, and one notice per room says
 // why: a second room hears its own notice, and a repeat launch stays quiet.
+// A caller that keeps a long-running cgroup in the scope, such as the
+// computers daemon's per-computer scope, passes its resource properties
+// through to the unit systemd starts.
+func TestWrapRoomPassesScopeProperties(t *testing.T) {
+	fakeManager(t)
+	fakeCgroups(t, "cpuset cpu io memory pids\n", "cpu memory pids\n", 33554432)
+	cmd := exec.Command("/bin/true")
+	if WrapRoom(cmd, "computer-x", "room-limits", "MemoryHigh=2147483648", "CPUWeight=100") == "" {
+		t.Fatal("WrapRoom did not wrap")
+	}
+	args := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"--property=MemoryHigh=2147483648", "--property=CPUWeight=100"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("args %q missing %q", args, want)
+		}
+	}
+}
+
 func TestWrapRoomDegradesWithoutControllers(t *testing.T) {
 	fakeManager(t)
 	root := fakeCgroups(t, "cpuset cpu io\n", "", 33554432) // no memory, no pids
