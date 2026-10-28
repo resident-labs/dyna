@@ -34,6 +34,7 @@ import (
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
@@ -1211,6 +1212,22 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		return info, keptForWork("the session has an active or held turn")
 	}
 	if info.Status == StatusRunning || info.Status == StatusQueued {
+		// Stopping a turn also stops its attached workflow. Refuse before the
+		// stop, so the later handoff check cannot arrive after the damage.
+		runs, err := m.runOwned(map[string]Info{info.ID: info})
+		if err != nil {
+			return info, err
+		}
+		for _, item := range runs {
+			meta, err := runstore.ReadMeta(item.r.ID)
+			if err != nil {
+				return info, err
+			}
+			if !meta.Detached {
+				err := fmt.Errorf("%w: workflow %s is attached to its caller; wait for it to finish before closing its owner", runstore.ErrHandoffUnsafe, meta.ID)
+				return info, newCloseRefusal(err.Error(), err, CloseReasonResponsibilities, []CloseAction{CloseActionRetry}, []Responsibility{item.r})
+			}
+		}
 		if m.checkpoint != nil {
 			m.checkpoint("close-before-stop")
 		}
@@ -1250,6 +1267,10 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	}
 	summary, err := m.handoffClose(ctx, info, heir)
 	if err != nil {
+		if errors.Is(err, runstore.ErrHandoffUnsafe) {
+			items, _ := m.Responsibilities(ctx, info)
+			return info, newCloseRefusal(err.Error(), err, CloseReasonResponsibilities, []CloseAction{CloseActionRetry}, items)
+		}
 		if errors.Is(err, errGoalNeedsRoot) {
 			items, _ := m.Responsibilities(ctx, info)
 			return info, newCloseRefusal(err.Error(), err, CloseReasonGoalNeedsAgent, []CloseAction{CloseActionRetry}, items)

@@ -227,7 +227,9 @@ type Meta struct {
 	RoomID        string `json:"roomId,omitempty"`
 	Room          string `json:"room,omitempty"`
 	Detached      bool   `json:"detached,omitempty"`
-	Pid           int    `json:"pid,omitempty"`
+	// OwnerHandoff marks coordinators that resolve the current owner for each shell step.
+	OwnerHandoff bool `json:"ownerHandoff,omitempty"`
+	Pid          int  `json:"pid,omitempty"`
 	// PidStart is the process start time (clock ticks after boot) that tells
 	// this run's process from a later one the kernel gives the same PID.
 	PidStart  uint64    `json:"pidStart,omitempty"`
@@ -356,7 +358,7 @@ func create(name, scriptSrc string, args any) (*Run, error) {
 	if err := validateRunID(id); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
-	r := &Run{Meta: Meta{ID: id, Name: name, Status: "running", Build: callspec.Build, Pid: os.Getpid(), Args: args, StartedAt: time.Now()}}
+	r := &Run{Meta: Meta{ID: id, Name: name, Status: "running", OwnerHandoff: true, Build: callspec.Build, Pid: os.Getpid(), Args: args, StartedAt: time.Now()}}
 	// A run reports and ends itself, so its own start time lets a later check
 	// tell it from a process that reuses the PID. A system without /proc keeps
 	// zero and the plain PID probe.
