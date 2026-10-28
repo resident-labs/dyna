@@ -51,6 +51,15 @@ func restoreGenerationHome(h, dir string, generation harnessmgr.ConfigGeneration
 
 // materializeNative writes a captured catalog to staging. All retained references
 // use published. Shared-home publication happens only after the atomic rename.
+// piRetrySettings turns Pi's own turn retry off in a generation's settings:
+// its retry edits the failed turn out of the context and reruns it, which lets
+// the model continue from an assistant message and invent the next user
+// message. Dyna's failure recovery resumes the session with a user message and
+// backs off.
+type piRetrySettings struct {
+	Enabled bool `json:"enabled"`
+}
+
 func materializeNative(h, home, dir, published, cli string, c harnessmgr.HarnessConfig, prefs map[string]any, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
 	a, err := Adapter(h)
 	if err != nil {
@@ -127,6 +136,13 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 	if a.MCPKey != "" {
 		root[a.MCPKey] = servers
 	}
+	if h == "pi" {
+		// Pi's own retry edits the failed turn out of the context and reruns it,
+		// which lets the model continue from an assistant message and invent the
+		// next user message. Dyna's failure recovery resumes the session with a
+		// user message and backs off, so Pi must not retry by itself.
+		root["retry"] = piRetrySettings{}
+	}
 	var raw []byte
 	if a.ConfigFormat == "toml" {
 		raw, err = toml.Marshal(root)
@@ -162,7 +178,8 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 		g.Env[k] = v
 	}
 	if a.ConfigArgs != nil {
-		// Adapters construct paths from the published generation.
+		// Adapters construct paths from the published generation; Pi passes its
+		// own settings and MCP files per process through its config file flags.
 		g.Args = a.ConfigArgs(home, filepath.Join(published, filepath.Base(file)))
 	}
 	if h == "pi" {

@@ -13,7 +13,7 @@ vendor="$repo_root/third_party/pi"
 # characters of the third_party/pi tree hash, so two builds at one level never
 # collide. The package manifest's dynaFork stays the level alone.
 fork_tree=$(git -C "$repo_root" rev-parse "HEAD:third_party/pi")
-version="1.4.0-dyna.6.${fork_tree:0:12}"
+version="1.4.0-dyna.7.${fork_tree:0:12}"
 output=$1
 if [[ "$output" != /* ]]; then
   output="$repo_root/$output"
@@ -104,7 +104,7 @@ for (const file of files) {
   const path = join(stage, file);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   manifest.version = version;
-  manifest.dynaFork = 6;
+  manifest.dynaFork = 7;
   if (file !== "package.json") {
     // Match how upstream publishes its internal packages: no dependencies of
     // their own. npm treats bundleDependencies as complete and never installs
@@ -164,6 +164,15 @@ verify_install() {
 }
 verify_install "$fork_prefix" "$output"
 verify_install "$npm_prefix" "@earendil-works/pi-coding-agent@$base"
+# Smoke-test the per-process config file flags: each must point the CLI at an
+# existing file, and a missing one must fail startup with an error.
+printf '{"defaultProvider":"zai"}\n' >"$tmp/verify-settings.json"
+"$fork_prefix/bin/pi" --settings "$tmp/verify-settings.json" --mcp-config "$tmp/verify-settings.json" --models-file "$tmp/verify-settings.json" --help >/dev/null
+if "$fork_prefix/bin/pi" --settings "$tmp/missing-settings.json" --help >/dev/null 2>"$tmp/verify-flag-error"; then
+  echo "pi accepted --settings with a missing file" >&2
+  exit 1
+fi
+grep -q "requires an existing file" "$tmp/verify-flag-error"
 node --input-type=module - "$fork_prefix" "$npm_prefix" "$version" <<'EOF'
 import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";

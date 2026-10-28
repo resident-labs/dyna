@@ -304,13 +304,10 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	}
 	applyNativeFeatureEnvironment(a.Harness, env)
 	// A harness that keeps credentials per account reads them from that
-	// account's own home. Pi reads its whole agent directory there, so Dyna
-	// publishes the generation's settings and MCP servers first. Session
-	// history stays in the shared harness home.
+	// account's own home. Pi reads settings, MCP servers and models through
+	// per-process flags from the generation, so its account home holds only the
+	// login, and session history stays in the shared harness home.
 	if a.Harness == "pi" {
-		if err := publishPiAccountHome(gen.Directory, home, active.Home); err != nil {
-			return p, pin, err
-		}
 		env[piAgentDirKey] = active.Home
 	}
 	if pinsCredentials(a.Harness) {

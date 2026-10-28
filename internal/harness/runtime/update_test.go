@@ -17,7 +17,7 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 	m := a.Bundles
 	t.Cleanup(func() { _ = removeBundle(m.Root) })
 	m.Run = fixtureInstall
-	old := install(t, m, "pi", "1.3.0-dyna.6")
+	old := install(t, m, "pi", "1.3.0-dyna.7")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 	done := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go func() { _, err := a.InstallPrivateRuntime(ctx, "pi", "2.0.0-dyna.6"); done <- err }()
+	go func() { _, err := a.InstallPrivateRuntime(ctx, "pi", "2.0.0-dyna.7"); done <- err }()
 	select {
 	case <-started:
 	case <-ctx.Done():
@@ -58,7 +58,7 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 	if err != nil || got != old {
 		t.Fatal("selection changed during download", got, err)
 	}
-	if _, err := m.Resolve("pi", "2.0.0-dyna.6"); err == nil {
+	if _, err := m.Resolve("pi", "2.0.0-dyna.7"); err == nil {
 		t.Fatal("partial bundle was published")
 	}
 	close(finish)
@@ -74,11 +74,11 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 		t.Fatal("failed download left staging files", entries, err)
 	}
 	m.Run = fixtureInstall
-	snapshot, err := a.InstallPrivateRuntime(context.Background(), "pi", "2.0.0-dyna.6")
+	snapshot, err := a.InstallPrivateRuntime(context.Background(), "pi", "2.0.0-dyna.7")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.SelectedVersions["pi"] != "2.0.0-dyna.6" {
+	if snapshot.SelectedVersions["pi"] != "2.0.0-dyna.7" {
 		t.Fatal("update did not select installed version", snapshot.SelectedVersions)
 	}
 	got, err = m.Resolve("pi", old.Version)
