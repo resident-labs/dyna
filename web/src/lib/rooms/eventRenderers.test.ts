@@ -60,6 +60,12 @@ const fixtures: Record<string, EventPayload> = {
     summary: 'Go build cache and Go module cache',
     atMs: 1792774800000,
   },
+  'machine/cache-clean-failed': {
+    name: 'hermeslab',
+    path: '/var/tmp/dyna-local-ci/runs/old/web/node_modules',
+    reason: 'permission denied',
+    atMs: 1792774800000,
+  },
   'machine/scratch-freed': {
     name: 'hermeslab',
     folders: 2,

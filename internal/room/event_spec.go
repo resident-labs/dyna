@@ -333,6 +333,17 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
 	},
+	// A failed cache cleanup names one path and one bounded reason. An hourly
+	// retry of the same failure reuses this post instead of adding another.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeCacheCleanFailed,
+		Renderer: "MachineCacheCleanCard",
+		Payload:  reflect.TypeOf(MachineCacheCleanFailedEvent{}),
+		Wake:     WakeRootIfNeeded,
+		Once:     true,
+		Text:     "Machine {name} could not clean CI cache path {path}: {reason}.",
+	},
 	// A sweep of a machine's scratch folders that freed space posts one quiet
 	// machine fact, so rooms that use the machine see what went and why.
 	{
