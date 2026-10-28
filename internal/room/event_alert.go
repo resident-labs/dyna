@@ -11,10 +11,12 @@ const (
 	AlertEngine AlertSource = "engine"
 	// AlertConsolidation is a session consolidation that paused with an error.
 	AlertConsolidation AlertSource = "consolidation"
+	// AlertShell reports processes that survived a shell stop.
+	AlertShell AlertSource = "shell"
 )
 
 // alertSources lists every alert source the web needs as a union type.
-var alertSources = []AlertSource{AlertDoctor, AlertEngine, AlertConsolidation}
+var alertSources = []AlertSource{AlertDoctor, AlertEngine, AlertConsolidation, AlertShell}
 
 // AlertSeverity is how urgent one finding of an alert is. A doctor ranks its
 // causes, so its first finding is the one to act on now.
