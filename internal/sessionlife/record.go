@@ -29,7 +29,9 @@ import (
 // its cached copy is current. session_records_closed covers the listing
 // queries (every version, or open ones only), so they never read the wide
 // meta rows. session_records_effective_name covers a lookup by address or
-// name, which must not read every record either.
+// name, which must not read every record either. dir, service, meta_id and
+// meta_digest are the ownership projection Owners reads, so worktree
+// ownership inference never decodes every record either.
 const recordSchema = `CREATE TABLE IF NOT EXISTS session_records (
   id TEXT PRIMARY KEY,
   revision INTEGER NOT NULL,
@@ -42,7 +44,11 @@ const recordSchema = `CREATE TABLE IF NOT EXISTS session_records (
   created_ns INTEGER NOT NULL,
   activity_ms INTEGER NOT NULL,
   history_only INTEGER NOT NULL DEFAULT 0,
-  meta TEXT NOT NULL
+  meta TEXT NOT NULL,
+  dir TEXT NOT NULL DEFAULT '',
+  service INTEGER NOT NULL DEFAULT 0,
+  meta_id TEXT NOT NULL DEFAULT '',
+  meta_digest TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS session_records_room ON session_records(room_id, closed);
 CREATE UNIQUE INDEX IF NOT EXISTS session_records_revision ON session_records(revision);
@@ -97,10 +103,16 @@ func records(sessions string) (*sql.DB, error) {
 		return nil, err
 	}
 	// Version 2 adds session_records_closed, version 3
-	// session_records_effective_name; the schema is idempotent.
-	err = database.Migrate(db, "sessions.records", 3, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), recordSchema)
-		return err
+	// session_records_effective_name, and version 4 the ownership columns
+	// with their one-time import; the schema is idempotent.
+	err = database.Migrate(db, "sessions.records", 4, func(conn *sql.Conn, old int) error {
+		if _, err := conn.ExecContext(context.Background(), recordSchema); err != nil {
+			return err
+		}
+		if old > 0 && old < 4 {
+			return backfillOwnerColumns(context.Background(), conn)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -325,12 +337,13 @@ func SaveTx(conn *sql.Conn, id string, v any) error {
 	if !isObject(raw) || len(raw) > recordLimit {
 		return fmt.Errorf("%w: session %s record is not a JSON object under %d bytes", ErrRecord, id, recordLimit)
 	}
-	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta")
+	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest")
 }
 
 // recordColumns are the record fields copied into columns.
 type recordColumns struct {
 	Snapshot
+	ID            string    `json:"id"`
 	RoomID        string    `json:"roomId"`
 	Room          string    `json:"room"`
 	Name          string    `json:"name"`
@@ -338,6 +351,8 @@ type recordColumns struct {
 	ParentSession string    `json:"parentSession"`
 	Created       time.Time `json:"created"`
 	LastActivity  time.Time `json:"lastActivity"`
+	Dir           string    `json:"dir"`
+	Service       bool      `json:"service"`
 }
 
 func writeRow(conn *sql.Conn, id string, raw []byte, conflict string) error {
@@ -353,9 +368,13 @@ func writeRow(conn *sql.Conn, id string, raw []byte, conflict string) error {
 	if !c.Created.IsZero() {
 		created = c.Created.UnixNano()
 	}
-	_, err := conn.ExecContext(context.Background(), `INSERT INTO session_records(id, revision, room_id, room, name, status, closed, parent, created_ns, activity_ms, history_only, meta)
-VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `+conflict,
-		id, c.RoomID, c.Room, c.Name, c.Status, closed, c.ParentSession, created, c.LastActivity.UnixMilli(), c.HistoryOnly, string(raw))
+	service := 0
+	if c.Service {
+		service = 1
+	}
+	_, err := conn.ExecContext(context.Background(), `INSERT INTO session_records(id, revision, room_id, room, name, status, closed, parent, created_ns, activity_ms, history_only, meta, dir, service, meta_id, meta_digest)
+VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `+conflict,
+		id, c.RoomID, c.Room, c.Name, c.Status, closed, c.ParentSession, created, c.LastActivity.UnixMilli(), c.HistoryOnly, string(raw), c.Dir, service, c.ID, ownerDigest(raw))
 	return err
 }
 
