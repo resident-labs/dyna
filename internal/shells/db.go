@@ -16,7 +16,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 const schema = `CREATE TABLE shell_jobs (
 	id TEXT PRIMARY KEY,
@@ -93,6 +93,11 @@ func (s *Store) db() (*sql.DB, error) {
 		}
 		if old < 5 {
 			if _, err := conn.ExecContext(ctx, schemaV5); err != nil {
+				return err
+			}
+		}
+		if old < 6 {
+			if _, err := conn.ExecContext(ctx, `CREATE INDEX shell_jobs_prune ON shell_jobs(ended) WHERE keep=0 AND ended IS NOT NULL`); err != nil {
 				return err
 			}
 		}
