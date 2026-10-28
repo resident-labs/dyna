@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -293,8 +294,14 @@ func NewFor(ctx context.Context, repo, branch, base, session, runID string) (Rec
 	}
 	rec := Record{Path: path, Repo: main, Branch: branch, Base: base, Head: head, Status: status, Session: session, RunID: runID, CreatedAt: time.Now().UTC()}
 	if err := Track(rec); err != nil {
-		// No user work exists yet. Roll back only the directory, never the branch.
-		gitOutput(ctx, main, "worktree", "remove", path)
+		// Delete only the branch we created, and only if Git removed the clean
+		// tree and the branch still points at the pinned commit.
+		if out, removeErr := gitOutput(ctx, main, "worktree", "remove", path); removeErr != nil {
+			return Record{}, errors.Join(err, fmt.Errorf("roll back worktree: %w: %s", removeErr, out))
+		}
+		if out, deleteErr := gitOutput(ctx, main, "update-ref", "-d", "refs/heads/"+branch, pinned); deleteErr != nil {
+			return Record{}, errors.Join(err, fmt.Errorf("roll back branch: %w: %s", deleteErr, out))
+		}
 		return Record{}, err
 	}
 	// Track assigns the port block, so return the stored record.
@@ -473,6 +480,32 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 		if opts != nil && ((opts.Session != "" && !ownedBy(t, opts.Session)) || (opts.Path != "" && t.Path != opts.Path) || (opts.Branch != "" && t.Branch != opts.Branch)) {
 			continue
 		}
+		trees = append(trees, t)
+	}
+	// Each tree needs several git calls and a file walk. They are independent,
+	// so run a bounded number at once; one slow tree must not serialize the rest.
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, scanParallelism)
+	for i := range trees {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			inspectTree(ctx, repo, defaultRef, opts, &trees[i])
+		}()
+	}
+	wg.Wait()
+	return trees, nil
+}
+
+// scanParallelism bounds concurrent per-tree git and file inspection.
+const scanParallelism = 8
+
+// inspectTree fills in the git state and file activity of one tree.
+func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, tp *Tree) {
+	t := *tp
+	defer func() { *tp = t }()
+	{
 		if info, err := os.Lstat(t.Path); err != nil {
 			t.protected = "worktree is missing or unreadable"
 		} else {
@@ -524,9 +557,7 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 				}
 			}
 		}
-		trees = append(trees, t)
 	}
-	return trees, nil
 }
 
 // usageNeeded asks the same retention rule whether file activity can matter.
