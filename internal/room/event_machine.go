@@ -59,6 +59,28 @@ func (m MachineCacheEvent) eventSubject() string { return m.Name }
 // same repair posts once.
 func (m MachineCacheEvent) eventDedupe() string { return strconv.Itoa(m.AtMS) }
 
+// MachineCacheCleanFailedEvent tells a room that Dyna could not remove one
+// managed CI path. Reason is one bounded line, not the runtime's output flood.
+type MachineCacheCleanFailedEvent struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	// AtMS is when Dyna first observed this failure, in milliseconds since the
+	// Unix epoch.
+	AtMS int `json:"atMs"`
+}
+
+func (MachineCacheCleanFailedEvent) eventFamily() EventFamily { return FamilyMachine }
+func (MachineCacheCleanFailedEvent) eventType() EventType     { return TypeCacheCleanFailed }
+
+// eventSubject folds cleanup failures with the machine's other cache facts.
+func (m MachineCacheCleanFailedEvent) eventSubject() string { return m.Name }
+
+// eventDedupe keeps an hourly retry of the same failure from posting again.
+func (m MachineCacheCleanFailedEvent) eventDedupe() string {
+	return m.Path + "\x00" + m.Reason
+}
+
 // MachineScratchEvent tells a room what a sweep of a machine's scratch folders
 // freed. It carries counts and sizes, never a path, which belongs to the
 // machine and not the room.

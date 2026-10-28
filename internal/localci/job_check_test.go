@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -197,7 +198,8 @@ func TestJobCheckRunsItsWorkflowJobThroughAct(t *testing.T) {
 	for _, want := range []string{"pull_request", "-W", filepath.Join(dir, "go-static", "workflow.yml"), "-j", "go-shard", "--matrix", "shard:7", "--rm",
 		"-P", "ubuntu-latest=catthehacker/ubuntu:act-22.04", "--cache-server-path", "--artifact-server-path",
 		"--artifact-server-port", "--container-daemon-socket", "-",
-		"--container-options", "--cpus 4", "--memory 8192m", "--label dyna.run=run-7", "--label dyna.check=go-static"} {
+		"--container-options", "--cpus 4", "--memory 8192m", "--label dyna.run=run-7", "--label dyna.check=go-static",
+		"--user " + strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid())} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("act args %q miss %q", args, want)
 		}

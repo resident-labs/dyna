@@ -167,6 +167,8 @@ The job runs as a `pull_request` event for the revision, with the pull
 request's base commit in the event payload. Dyna's own environment does not
 reach the job containers: `act` runs with a fixed `PATH`, its own home and an
 empty environment file, and jobs cannot use the machine's container socket.
+Each job container runs as the node user's numeric UID and GID, so files it
+writes on mounted folders belong to that user on the node.
 
 A workflow job needs the machine's host-check grant, because the workflow
 chooses the containers and their options. See [Host checks](#host-checks).
@@ -257,7 +259,9 @@ and `caches` are reserved for runner state.
 
 Cache directories remain owned and locked by Dyna under its separate `caches/`
 directory. The runner refuses unsafe symbolic links before mounting them. Every
-cache has age cleanup and a size cap.
+cache has age cleanup and a size cap. If a root-owned tree defeats the host
+cleanup, Dyna retries that tree through a throwaway container on the same
+runtime. A failed cleanup posts one machine notice with its path and reason.
 
 A cache folder is shared by every run on the node, including runs of other
 commits at the same time, so it must hold only what can be shared: a check that
