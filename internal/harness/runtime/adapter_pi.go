@@ -1,9 +1,6 @@
 package runtime
 
-import (
-	"os"
-	"path/filepath"
-)
+import "path/filepath"
 
 // piNPMPackage is the official Pi 1.1+ package name. Dyna packages its own
 // fork under this name; older pinned bundles can still use the npm release.
@@ -56,19 +53,14 @@ func piNativeEnv(home string) map[string]string {
 // piConfigArgs pins sessions into the private home and points Pi at the
 // generation's own config files. Pi reads one agent directory, so these flags
 // keep each generation's settings and MCP servers per process; the account
-// home holds only the login. --session-dir takes precedence over the
-// sessionDir setting and environment, and the models flag joins the owner's
-// shared definitions when they exist.
+// home holds only the login, and --session-dir takes precedence over the
+// sessionDir setting and environment.
 func piConfigArgs(home, file string) []string {
-	args := []string{
+	return []string{
 		"--session-dir", filepath.Join(home, "sessions"),
 		"--settings", file,
 		"--mcp-config", filepath.Join(filepath.Dir(file), "pi-mcp.json"),
 	}
-	if _, err := os.Stat(filepath.Join(home, "models.json")); err == nil {
-		args = append(args, "--models-file", filepath.Join(home, "models.json"))
-	}
-	return args
 }
 
 // piLoginArgs returns a complete argv for the interactive sign-in flow. Pi has
