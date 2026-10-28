@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,7 @@ import (
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/harness/home"
 	"dyna-agent/internal/procident"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
@@ -138,6 +140,8 @@ type Store struct {
 	// recorded the process. A test waits on it instead of sampling the
 	// job's status, so no timer decides when the job is running.
 	OnStarted func(pid int)
+	// stopJobProcesses replaces stamped-process cleanup in tests.
+	stopJobProcesses func(string) (bool, error)
 }
 
 // processStartTime reads pid's start time, or 0 when this system has none. A
@@ -841,9 +845,19 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	}
 	// A log failure must not leave the process running.
 	logErr := errors.Join(s.markStopped(id, by), s.logStop(id, "stop requested; sending SIGTERM to the process group"))
+	var cleanup func() (bool, error)
+	if s.stopJobProcesses != nil {
+		cleanup = func() (bool, error) { return s.stopJobProcesses(id) }
+	} else {
+		cleanup = captureJobProcesses(id)
+	}
 	_ = syscall.Kill(-in.Pid, syscall.SIGTERM)
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
 	for i := 0; i < 50; i++ {
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		if syscall.Kill(in.Pid, 0) != nil {
 			break
 		}
@@ -851,6 +865,51 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	if syscall.Kill(in.Pid, 0) == nil {
 		logErr = errors.Join(logErr, s.logStop(id, "shell did not stop within 5 seconds; sending SIGKILL"))
 		_ = syscall.Kill(-in.Pid, syscall.SIGKILL)
+	}
+	// The group leader can exit before a child that started a new session.
+	// The job stamp identifies those children without touching the supervisor.
+	_, cleanupErr := cleanup()
+	pids := stampedSurvivors(id)
+	if len(pids) > 0 {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("surviving stamped processes: %v", pids))
+	}
+	if cleanupErr != nil {
+		data := filepath.Dir(s.Root)
+		roomID := in.RoomID
+		var owner struct {
+			Name   string `json:"name"`
+			RoomID string `json:"roomId"`
+		}
+		if in.Owner != "" {
+			if ownerErr := sessionlife.Load(filepath.Join(data, "sessions"), in.Owner, &owner); ownerErr != nil {
+				logErr = errors.Join(logErr, ownerErr)
+			} else if roomID == "" {
+				roomID = owner.RoomID
+			}
+		}
+		if roomID == "" {
+			log.Printf("shell %s cleanup: %v", id, cleanupErr)
+			logErr = errors.Join(logErr, cleanupErr)
+		} else {
+			rooms := &room.Store{Root: filepath.Join(data, "rooms")}
+			rec, noticeErr := rooms.Resolve(roomID)
+			if noticeErr == nil {
+				to := rec.Name
+				if owner.Name != "" && owner.RoomID == rec.ID {
+					to += ":" + owner.Name
+				}
+				_, noticeErr = rooms.PostEventInput(room.PostEventInput{
+					RoomID: rec.ID, Producer: room.ProducerShell, To: []string{to},
+					Event: room.AlertEvent{Source: room.AlertShell,
+						Summary: "Shell process cleanup did not finish.",
+						Detail:  fmt.Sprintf("Shell %s cleanup: %v", id, cleanupErr)},
+				})
+			}
+			if noticeErr != nil {
+				log.Printf("shell %s cleanup: %v; notice: %v", id, cleanupErr, noticeErr)
+				logErr = errors.Join(logErr, cleanupErr, noticeErr)
+			}
+		}
 	}
 	in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
 	return in, errors.Join(logErr, err)

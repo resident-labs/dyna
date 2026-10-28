@@ -31,7 +31,7 @@ export type AccountReason = "usage-limit" | "fallback"
 export type InstructionAction = "items" | "body" | "removed"
 
 // AlertSource is a named string type of an event payload.
-export type AlertSource = "doctor" | "engine" | "consolidation"
+export type AlertSource = "doctor" | "engine" | "consolidation" | "shell"
 
 // AlertSeverity is a named string type of an event payload.
 export type AlertSeverity = "warning" | "critical"
@@ -383,7 +383,7 @@ export interface InstructionBatchEvent {
   notes: string[]
 }
 
-// AlertEvent is the payload of the alert/doctor and alert/engine and alert/consolidation events.
+// AlertEvent is the payload of the alert/doctor and alert/engine and alert/consolidation and alert/shell events.
 export interface AlertEvent {
   source: AlertSource
   reportId?: string
@@ -506,7 +506,7 @@ export interface TurnEvent {
 export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "shell" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1176,6 +1176,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "A session consolidation paused with an error:",
   },
   {
+    family: "alert",
+    type: "shell",
+    renderer: "AlertCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "session",
+    text: "Shell process cleanup did not finish:",
+  },
+  {
     family: "service",
     type: "failed",
     renderer: "ServiceAlertCard",
@@ -1317,7 +1327,7 @@ const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"
 const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned", "transfer-request", "computer-reminder"])
 const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
 const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
-const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine", "consolidation"])
+const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine", "consolidation", "shell"])
 const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
 const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
@@ -1842,6 +1852,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "alert" && type === "doctor") return isAlertEvent(v)
   if (family === "alert" && type === "engine") return isAlertEvent(v)
   if (family === "alert" && type === "consolidation") return isAlertEvent(v)
+  if (family === "alert" && type === "shell") return isAlertEvent(v)
   if (family === "service" && type === "failed") return isServiceFailedEvent(v)
   if (family === "service" && type === "waiting") return isServiceWaitEvent(v)
   if (family === "service" && type === "helper-outcome") return isHelperOutcomeEvent(v)
