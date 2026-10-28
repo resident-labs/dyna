@@ -51,7 +51,7 @@ func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Re
 	// request always does; the engine's own events wait for the root that reads
 	// them, as they did.
 	sessionPost := msg.SessionIDs[msg.From] != ""
-	handoff := msg.From == room.EngineSender && msg.Forward != nil && msg.NeedsRoot
+	handoff := msg.From == room.EngineSender && msg.Forward != nil && msg.NeedsRoot && msg.Wake
 	if !room.OwnerRequest(msg, rec.Name) && !direct && !handoff && !(sessionPost && seat.Mode == room.DeliveryWake) {
 		return Delivery{}, false
 	}

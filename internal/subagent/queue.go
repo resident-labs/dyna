@@ -125,14 +125,21 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 		}
 		return nil
 	})
+	if err != nil {
+		return out, err
+	}
+	forwarded, err := s.forwardedPosts(info.ID)
+	if err != nil {
+		return nil, err
+	}
 	markForwarded := func() {
 		for i := range out {
-			if id := info.ForwardedPosts[out[i].ID]; id != "" {
+			if id := forwarded[out[i].ID]; id != "" {
 				out[i].State, out[i].Cancellable, out[i].ForwardedTo = QueueForwarded, false, id
 			}
 		}
 	}
-	if err != nil || len(info.InheritedInboxes) == 0 {
+	if len(info.InheritedInboxes) == 0 {
 		markForwarded()
 		return out, err
 	}

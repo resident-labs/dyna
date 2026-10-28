@@ -71,6 +71,9 @@ func Migrate(dataDir string) error {
 	if err := s.migrateOutputProjection(); err != nil {
 		return err
 	}
+	if _, err := s.forwardedDB(); err != nil {
+		return err
+	}
 	return migrateQueues(dataDir)
 }
 

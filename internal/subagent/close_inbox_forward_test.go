@@ -33,7 +33,7 @@ func TestCloseForwardsPendingPostsOnce(t *testing.T) {
 			if err != nil || len(queue) != 1 || queue[0].State != QueueForwarded {
 				t.Fatalf("source queue = %+v, %v", queue, err)
 			}
-			id := closed.ForwardedPosts[original.ID]
+			id := queue[0].ForwardedTo
 			if queue[0].ForwardedTo != id {
 				t.Fatalf("forward receipt = %+v", queue[0])
 			}
@@ -68,9 +68,9 @@ func TestCloseForwardsPendingPostsOnce(t *testing.T) {
 			if err := e.m.TickSessionTargets(e.ctx, []string{source.ID}); err != nil {
 				t.Fatal(err)
 			}
-			closed, err = e.m.Store.Info(source.ID)
-			if err != nil || closed.ForwardedPosts[late.ID] == "" {
-				t.Fatalf("late post not forwarded: %+v %v", closed.Meta, err)
+			receipts, err := e.m.Store.forwardedPosts(source.ID)
+			if err != nil || receipts[late.ID] == "" {
+				t.Fatalf("late post not forwarded: %+v %v", receipts, err)
 			}
 		})
 	}
