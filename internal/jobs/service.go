@@ -325,9 +325,9 @@ func (s *Service) Start(ctx context.Context) {
 // another engine queues while the owner runs reaches it within one interval.
 const claimEvery = 5 * time.Second
 
-// stopCancelled stops the running jobs another engine cancelled: their rows
-// say cancelled while this engine still holds the executor, so the node
-// process must stop and the row keeps its cancelled state.
+// stopCancelled stops the jobs a cancellation asked for while this engine
+// still holds the executor: the request stands in the row, so a restart that
+// reattached the job recovers it here too.
 func (s *Service) stopCancelled(ctx context.Context) {
 	s.mu.Lock()
 	stops := make(map[string]func(), len(s.stops))
@@ -342,7 +342,7 @@ func (s *Service) stopCancelled(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		if row.State == StateCancelled {
+		if row.CancelRequested && !row.State.Finished() {
 			stop()
 		}
 	}
@@ -369,14 +369,20 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 		return s.Store.Get(ctx, id)
 	}
 	// No live executor owns it: a queued row, or a running one this engine has
-	// not picked up. The row ends inside one transaction that works on the row
-	// as it lies: a start recorded in the meantime keeps its metadata. The
-	// canceller posts no event: the engine that runs the job posted its start
-	// and posts its end, so a terminal event can never precede a start or
-	// follow it out of order. The worker of a queued row skips it.
-	row, _, err := s.Store.Cancel(ctx, id, s.Store.now())
+	// not picked up. A job that never started ends here and the canceller
+	// reports its end, the only event the job will ever have: the session
+	// that submitted it never polls. A started job keeps running in the row
+	// with a standing cancellation request; the engine that runs it - or the
+	// next one, after a restart - stops the process and reports the end, so a
+	// terminal event can never precede a start or follow it out of order.
+	row, won, err := s.Store.Cancel(ctx, id, s.Store.now())
 	if err != nil {
 		return Job{}, err
+	}
+	if won && row.State == StateCancelled && s.Reporter != nil {
+		if err := s.Reporter.JobFinished(ctx, row); err != nil {
+			s.logger()("jobs: report cancelled job %s: %v", row.ID, err)
+		}
 	}
 	return row, nil
 }
@@ -469,9 +475,11 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		s.mu.Unlock()
 	}()
 
+	// A reattached row had its start posted by the run before the restart.
+	postedStart := job.State == StateRunning
 	machine, err := s.Machines.Get(context.Background(), job.Node)
 	if err != nil {
-		s.finish(&job, err)
+		s.finish(&job, err, postedStart)
 		return
 	}
 	conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
@@ -485,11 +493,22 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
 			s.logger()("jobs: record started job %s: %v", job.ID, err)
 		} else if !won {
+			// The canceller ended the row before this run recorded its start; it
+			// reports the end, so this run stays quiet.
 			if s.onAbandoned != nil {
 				s.onAbandoned(job)
 			}
 			return
-		} else if s.onPrepared != nil {
+		}
+		// The start goes out with the durable transition, before any node work
+		// can fail: whatever ends the job later, its end follows its start.
+		postedStart = true
+		if s.Reporter != nil {
+			if err := s.Reporter.JobStarted(ctx, job); err != nil {
+				s.logger()("jobs: report started job %s: %v", job.ID, err)
+			}
+		}
+		if s.onPrepared != nil {
 			s.onPrepared(job)
 		}
 	}
@@ -499,7 +518,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	job.Note = resources.Note
 
 	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
-		s.finish(&job, err)
+		s.finish(&job, err, postedStart)
 		return
 	}
 	flag := os.O_WRONLY | os.O_CREATE
@@ -510,7 +529,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	logFile, err := os.OpenFile(job.LogPath, flag, 0o600)
 	if err != nil {
-		s.finish(&job, err)
+		s.finish(&job, err, postedStart)
 		return
 	}
 	defer logFile.Close()
@@ -526,7 +545,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if !reattach && job.SHA != "" {
 		cache := path.Join(NodeBase(machine.Name), RepoKey(job.Repo)+".git")
 		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA); err != nil {
-			s.finish(&job, err)
+			s.finish(&job, err, postedStart)
 			return
 		}
 	}
@@ -540,16 +559,19 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
 			s.logger()("jobs: record started job %s: %v", job.ID, err)
 		} else if !won {
-			// A cancel landed while the run prepared; the row keeps its end.
+			// The row ended elsewhere while the run prepared. This run posted
+			// the start, so it reports the end through finish, which adopts
+			// the row's own terminal state.
 			if s.onAbandoned != nil {
 				s.onAbandoned(job)
 			}
+			s.finish(&job, nil, postedStart)
 			return
-		}
-		if s.Reporter != nil {
-			if err := s.Reporter.JobStarted(ctx, job); err != nil {
-				s.logger()("jobs: report started job %s: %v", job.ID, err)
-			}
+		} else if fresh, err := s.Store.Get(ctx, job.ID); err == nil && fresh.CancelRequested {
+			// A cancellation asked for the job while the run prepared. The
+			// node never sees it; the end follows the start already posted.
+			s.finish(&job, context.Canceled, postedStart)
+			return
 		}
 	}
 
@@ -573,7 +595,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if runErr != nil && !job.State.Finished() {
 		s.stopUnit(x, spec)
 	}
-	s.finish(&job, runErr)
+	s.finish(&job, runErr, postedStart)
 }
 
 // stopUnit asks the node to stop the job's unit, best effort.
@@ -616,13 +638,18 @@ func ptr(code int) *int { return &code }
 // stored row keeps the log offset the run reached. The job folder on the
 // node, its checkout included, is removed at the end through the machine
 // connection: a fresh job gets a fresh folder.
-func (s *Service) finish(job *Job, err error) {
+func (s *Service) finish(job *Job, err error, postedStart bool) {
 	state, exit := StateFailed, (*int)(nil)
 	if err == nil {
 		state, exit = StatePassed, ptr(0)
 	} else {
 		state, exit = classify(err)
 		job.Note = err.Error()
+	}
+	if row, readErr := s.Store.Get(context.Background(), job.ID); readErr == nil && row.CancelRequested {
+		// A cancellation asked for the job; whatever ended the run, the
+		// recorded end is the cancelled one.
+		state, exit, job.Note = StateCancelled, nil, "cancelled"
 	}
 	job.State = state
 	job.ExitCode = exit
@@ -636,13 +663,14 @@ func (s *Service) finish(job *Job, err error) {
 		s.logger()("jobs: record finished job %s: %v", job.ID, err)
 	}
 	if !won {
-		// The row ended elsewhere, almost always a cancellation this engine's
-		// tick then stopped. This run owns the job's events — it posted the
-		// start, or reattached the row whose owner did — so it posts the end
-		// too, after the start, exactly once.
+		// The row ended elsewhere, almost always the cancellation this
+		// engine's tick stopped. This run posts the end only when it posted
+		// the start: then its end follows its start, exactly once. A run
+		// that never posted a start leaves the end to the canceller.
 		job.State, job.ExitCode, job.Ended = row.State, row.ExitCode, row.Ended
+		postedStart = false
 	}
-	if s.Reporter != nil {
+	if s.Reporter != nil && postedStart {
 		if err := s.Reporter.JobFinished(ctx, *job); err != nil {
 			s.logger()("jobs: report finished job %s: %v", job.ID, err)
 		}
