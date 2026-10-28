@@ -49,16 +49,20 @@ func TestWorkerInputsUseFactsWithoutSelfWaking(t *testing.T) {
 // other records of the room keep theirs, so a busy room is not marshaled whole
 // for each write.
 func TestWorkerInputsRebuildOnlyWrittenRecords(t *testing.T) {
-	a := &watch.Record{Key: "a", RoomID: "room", Head: "a1", State: "open"}
+	a := &watch.Record{Key: "a", RoomID: "room", Head: "a1", State: "open", Summary: strings.Repeat("large worker input ", 100)}
 	b := &watch.Record{Key: "b", RoomID: "room", Head: "b1", State: "open"}
 	st := watch.State{Records: map[string]*watch.Record{"a": a, "b": b}}
 	records := []*watch.Record{b, a}
 	memo := map[string]string{}
 	all := func(string) bool { return true }
 	baseline := prWorkerInputs(st, "room", records, memo, all)
+	if got := len(memo[inputPrefix+"a"]); got != 64 {
+		t.Fatalf("one record's memo retained %d bytes; want a fixed-size SHA-256 digest", got)
+	}
+	aDigest, bDigest := memo[inputPrefix+"a"], memo[inputPrefix+"b"]
 	a.Head, b.Head = "a2", "b2"
-	if got := prWorkerInputs(st, "room", records, memo, func(key string) bool { return key == "a" }); got == baseline || !strings.Contains(got, `"b1"`) || strings.Contains(got, `"a1"`) {
-		t.Fatalf("only the written record should change:\n%s", got)
+	if got := prWorkerInputs(st, "room", records, memo, func(key string) bool { return key == "a" }); got == baseline || memo[inputPrefix+"a"] == aDigest || memo[inputPrefix+"b"] != bDigest {
+		t.Fatal("only the written record's digest should change")
 	}
 	if got := prWorkerInputs(st, "room", records, nil, nil); got != prWorkerInputs(st, "room", records, memo, all) {
 		t.Fatalf("a memo changed the text:\n%s", got)
