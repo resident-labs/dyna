@@ -58,24 +58,31 @@ func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...
 		bin = "cloudflared"
 	}
 	wait := 5 * time.Second
-	missing := false
+	// delivered says this process posted the missing-connector alert, and
+	// cleared says it proved no stale alert remains. Both start unset, so a
+	// restart re-clears an alert an earlier process left behind, and only a
+	// successful post or clear moves the state: a failed one retries on the
+	// next attempt instead of suppressing the alert forever.
+	delivered, cleared := false, false
 	for ctx.Err() == nil {
 		token, err := os.ReadFile(st.TunnelTokenPath())
 		if err != nil {
 			logf("connect: no tunnel token yet; the tunnel waits for the relay")
 		} else if resolved, lookErr := lookConnector(bin); lookErr != nil {
-			if !missing {
-				missing = true
+			if !delivered {
 				logf("connect: %s is not on PATH; the tunnel waits for it to be installed", bin)
 				if err := postTunnelAlert(bin, os.Getenv("PATH")); err != nil {
 					logf("connect: report the missing connector: %v", err)
+				} else {
+					delivered = true
 				}
 			}
 		} else {
-			if missing {
-				missing = false
+			if delivered || !cleared {
 				if err := clearTunnelAlert(); err != nil {
 					logf("connect: clear the missing-connector alert: %v", err)
+				} else {
+					cleared, delivered = true, false
 				}
 			}
 			start := time.Now()
