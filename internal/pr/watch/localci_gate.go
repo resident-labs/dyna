@@ -473,11 +473,7 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		// run to supply the names the base definition requires. Only a trial head
 		// must cover them; the hosted provider decides a pull request head.
 		if trial && plan.required != nil {
-			for _, name := range plan.required.RequiredChecks(plan.suites) {
-				if !slices.Contains(required, string(name)) {
-					required = append(required, string(name))
-				}
-			}
+			required = trialRequiredChecks(policy, plan)
 		}
 		missing := missingRequiredCIChecks(required, result, snap)
 		if len(missing) > 0 {
@@ -493,6 +489,20 @@ func (s *Service) registeredLocalObservation(r Record, snap Snapshot, policy Cha
 		observation.Reason = localFailure
 	}
 	return observation
+}
+
+// trialRequiredChecks names the checks a trial head must show before any
+// provider releases it: the room's required checks plus the base definition's
+// required checks over the trial suites. Hosted CI that reports none of a name
+// cannot settle such a head, because this gate keeps waiting for it.
+func trialRequiredChecks(policy ChangePolicy, plan localCIPlan) []string {
+	required := append([]string(nil), policy.RequiredChecks...)
+	for _, name := range plan.required.RequiredChecks(plan.suites) {
+		if !slices.Contains(required, string(name)) {
+			required = append(required, string(name))
+		}
+	}
+	return required
 }
 
 // liveLocalCIRun is the local run now executing for a record's head, if any.
