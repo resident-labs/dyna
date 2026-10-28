@@ -111,6 +111,20 @@ func TestMigrateRefusesANewerSchema(t *testing.T) {
 	}
 }
 
+func TestUninitializedStoreIsNotAnUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrates.Store(false)
+	t.Cleanup(func() { migrates.Store(true); _ = Close(dir) })
+	err = Migrate(db, "shells.version", 6, func(*sql.Conn, int) error { t.Fatal("migration ran"); return nil })
+	if err == nil || IsUpdatingSchema(err, "shells.version") {
+		t.Fatalf("uninitialized schema error = %v; want an immediate failure", err)
+	}
+}
+
 // Outside the engine, a store at an old version fails clearly and nothing is
 // written: no migration, no new dyna.db and no meta table (requirement 41).
 func TestOnlyTheEngineMigrates(t *testing.T) {
