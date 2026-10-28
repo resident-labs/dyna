@@ -39,13 +39,12 @@ func TestMembersCountWhatStopsAnOpenSession(t *testing.T) {
 		t.Fatalf("the lead counts %v children, want 1", got)
 	}
 
-	// Open fills the same counts as Members, so a room's first screen and its
-	// later member reloads agree.
+	// Open leaves advisory counts to the subsequent Members request.
 	opened, err := e.svc.Open(rec.ID, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := row(opened.Members, lead.ID).Responsibilities, row(fresh, lead.ID).Responsibilities; len(got) != len(want) || got["child"] != want["child"] {
-		t.Fatalf("Open counts %v, Members counts %v", got, want)
+	if got := row(opened.Members, lead.ID).Responsibilities; len(got) != 0 {
+		t.Fatalf("Open computed advisory counts: %v", got)
 	}
 }
