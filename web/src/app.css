@@ -139,7 +139,7 @@ code, pre, .mono { font-family: var(--mono); font-size: 0.86em; font-variant-lig
 .bg-6 { --h: var(--hue-6); } .bg-7 { --h: var(--hue-7); }
 
 /* Rendered markdown inside posts and transcripts. */
-.prose { color: var(--ink-2); overflow-wrap: anywhere; }
+.prose { color: var(--ink-2); overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 .prose > :first-child { margin-top: 0; }
 .prose > :last-child { margin-bottom: 0; }
 .prose p { margin: 0 0 0.5em; }
@@ -171,6 +171,7 @@ code, pre, .mono { font-family: var(--mono); font-size: 0.86em; font-variant-lig
   border-radius: 6px;
   padding: 10px var(--s3);
   overflow-x: auto;
+  max-width: 100%;
   margin: 0.4em 0 0.6em;
 }
 .prose pre code { background: none; border: 0; padding: 0; font-size: 0.84em; }
@@ -180,7 +181,8 @@ code, pre, .mono { font-family: var(--mono); font-size: 0.86em; font-variant-lig
   border-left: 3px solid var(--line);
   color: var(--muted);
 }
-.prose table { border-collapse: collapse; margin: 0.4em 0; font-size: 0.93em; }
+.prose .table-scroll { max-width: 100%; overflow-x: auto; margin: 0.4em 0; }
+.prose table { border-collapse: collapse; font-size: 0.93em; }
 .prose th, .prose td { border: 1px solid var(--line); padding: 3px var(--s2); text-align: left; }
 .prose th { color: var(--ink); font-weight: 600; }
 .prose hr { border: 0; border-top: 1px solid var(--line); margin: 0.8em 0; }
