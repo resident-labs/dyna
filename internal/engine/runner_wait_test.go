@@ -30,7 +30,7 @@ func TestRunnerWaitInputIsReadOnlyAndNotRecovered(t *testing.T) {
 	if runnerCalls()[wait.Name] {
 		t.Fatal("read-only wait entered the runner mutation recovery table")
 	}
-	spool, err := newRunnerSpool(t.TempDir(), func() *subagent.Manager { return nil }, nil, t.Logf)
+	spool, err := newRunnerSpool(t.TempDir(), func() *subagent.Manager { return nil }, nil, t.Logf, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

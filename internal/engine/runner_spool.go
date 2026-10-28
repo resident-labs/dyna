@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/notify"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
@@ -61,7 +62,7 @@ var errSpoolOwnerGone = errors.New("the run that owns this spool was deleted")
 // name survives a crash. Tests replace it to observe the ordering.
 var syncDir = fsutil.SyncDir
 
-func newRunnerSpool(dataDir string, sessions func() *subagent.Manager, w *state.Writer, logf func(string, ...any)) (*runnerSpool, error) {
+func newRunnerSpool(dataDir string, sessions func() *subagent.Manager, w *state.Writer, logf func(string, ...any), notices *notify.Service) (*runnerSpool, error) {
 	// The spool's own copy of the runner table is engine-internal and never
 	// served, so it drops the socket-only check: a drain runs at engine start
 	// and at a runner's exit, with no socket caller.
@@ -91,7 +92,7 @@ func newRunnerSpool(dataDir string, sessions func() *subagent.Manager, w *state.
 		},
 	}}
 	bindings = append(bindings, receiptBindings...)
-	bindings = append(bindings, runDirectoriesRecoveryBinding(w), runFinishRecoveryBinding(w))
+	bindings = append(bindings, runDirectoriesRecoveryBinding(w), runFinishRecoveryBinding(w, notices))
 	for i := range bindings {
 		bindings[i].Local = false
 	}

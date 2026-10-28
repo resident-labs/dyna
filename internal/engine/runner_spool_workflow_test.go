@@ -186,7 +186,7 @@ func TestWorkflowSpoolNeverExecutesSessionMethods(t *testing.T) {
 	s, err = newRunnerSpool(f.dir, func() *subagent.Manager {
 		t.Error("run recovery entered a session method")
 		return m
-	}, state.For(f.db), t.Logf)
+	}, state.For(f.db), t.Logf, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +590,7 @@ func TestWorkflowSpoolRetirementSyncsBeforeSuccess(t *testing.T) {
 	if err != nil || len(frozen) != 1 {
 		t.Fatalf("frozen file after the failed sync = %v %v", frozen, err)
 	}
-	again, err := newRunnerSpool(f.dir, func() *subagent.Manager { return m }, state.For(f.db), t.Logf)
+	again, err := newRunnerSpool(f.dir, func() *subagent.Manager { return m }, state.For(f.db), t.Logf, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

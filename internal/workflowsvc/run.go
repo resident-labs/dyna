@@ -143,10 +143,14 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	}
 	_ = runstore.SetPaused(run.Meta.ID, false)
 	status := "ok"
+	stopped := workflow.StoppedForUpdate(err)
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case stopped:
+			status = runstore.StatusInterrupted
+		case ctx.Err() != nil:
 			status = "canceled"
-		} else {
+		default:
 			status = "error"
 		}
 	}
@@ -162,7 +166,9 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 		status = "error"
 	}
 	run.Append(runstore.Event{T: "run_end", Status: status, DurMs: duration.Milliseconds()})
-	if finished && run.Meta.Detached {
+	// The engine reports an update interruption because this runner may no
+	// longer be able to read the database after the update.
+	if finished && run.Meta.RoomID != "" && !stopped {
 		if _, nerr := notify.Default().CompleteRun(context.Background(), run.Meta.ID); nerr != nil {
 			warning("completion message: " + nerr.Error())
 		}

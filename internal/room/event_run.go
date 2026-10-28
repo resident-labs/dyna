@@ -1,6 +1,6 @@
 package room
 
-// RunState is how a detached workflow run ended.
+// RunState is how a workflow run ended.
 type RunState string
 
 // Run states.
@@ -8,12 +8,14 @@ const (
 	RunCompleted RunState = "completed"
 	RunFailed    RunState = "failed"
 	RunStopped   RunState = "stopped"
+	// RunInterrupted is a run that a Dyna update broke or stopped (D-402).
+	RunInterrupted RunState = "interrupted"
 )
 
 // runStates lists every run state the web needs as a union type.
-var runStates = []RunState{RunCompleted, RunFailed, RunStopped}
+var runStates = []RunState{RunCompleted, RunFailed, RunStopped, RunInterrupted}
 
-// RunEvent is the result of a detached workflow run: the facts its card
+// RunEvent is the result of a workflow run: the facts its card
 // shows, so the card never reads the post text.
 type RunEvent struct {
 	// RunID is the workflow's run ID: the card's key and the way to its view.

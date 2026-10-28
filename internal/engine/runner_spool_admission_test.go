@@ -35,7 +35,7 @@ func admissionSpool(t *testing.T, f *admissionFixture) *runnerSpool {
 	if err := os.MkdirAll(filepath.Join(m.Store.Root, meta.ID, "turns"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	s, err := newRunnerSpool(f.dir, func() *subagent.Manager { return f.s.rooms.Notify.Sessions }, state.For(f.db), t.Logf)
+	s, err := newRunnerSpool(f.dir, func() *subagent.Manager { return f.s.rooms.Notify.Sessions }, state.For(f.db), t.Logf, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

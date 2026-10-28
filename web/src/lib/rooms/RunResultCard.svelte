@@ -14,8 +14,8 @@
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
-  const stateWords: Record<RunState, string> = { completed: 'done', failed: 'failed', stopped: 'stopped' }
-  const stateTone: Record<RunState, string> = { completed: 'sage', failed: 'coral', stopped: 'gold' }
+  const stateWords: Record<RunState, string> = { completed: 'done', failed: 'failed', stopped: 'stopped', interrupted: 'interrupted' }
+  const stateTone: Record<RunState, string> = { completed: 'sage', failed: 'coral', stopped: 'gold', interrupted: 'gold' }
 
   let payload = $derived(runEvent(post))
   let state = $derived<RunState>(payload?.state ?? 'completed')
