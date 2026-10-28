@@ -223,10 +223,10 @@ func (r *resolver) token(tok string) ([]recipient, []Skip, error) {
 			// A bare name is a member of the sender's room when one is open
 			// there; otherwise it names a room, meaning that room's owner.
 			if r.snd.Room != "" {
-				if info, ok, err := r.member(r.snd.Room, local); err != nil {
+				if m, ok, err := r.member(r.snd.Room, local); err != nil {
 					return nil, nil, err
 				} else if ok {
-					rc, err := r.named(tok, info)
+					rc, err := r.named(tok, m)
 					return []recipient{rc}, nil, err
 				}
 			}
@@ -268,34 +268,42 @@ func (r *resolver) token(tok string) ([]recipient, []Skip, error) {
 	if err := room.ValidateAgent(local); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", tok, err)
 	}
-	info, ok, err := r.member(rec.Name, local)
+	m, ok, err := r.member(rec.Name, local)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !ok {
 		return nil, nil, fmt.Errorf("%s: no open session named %q in room %s", tok, local, rec.Name)
 	}
-	rc, err := r.named(tok, info)
+	rc, err := r.named(tok, m)
 	if err != nil {
 		return nil, nil, err
 	}
 	return []recipient{rc}, nil, nil
 }
 
-func (r *resolver) member(roomName, name string) (subagent.Info, bool, error) {
+// memberMatch is one room member a mention name resolves to. closedName marks
+// a match on a closed session's name: info is that session's delivery target,
+// the heir the delivery routing picked.
+type memberMatch struct {
+	info       subagent.Info
+	closedName bool
+}
+
+func (r *resolver) member(roomName, name string) (memberMatch, bool, error) {
 	sessions, err := r.open()
 	if err != nil {
-		return subagent.Info{}, false, err
+		return memberMatch{}, false, err
 	}
 	for _, info := range sessions {
 		if info.Room == roomName && info.EffectiveName() == name {
-			return info, true, nil
+			return memberMatch{info: info}, true, nil
 		}
 	}
 	// Closed consumed names remain delivery aliases; exact archive reads still use Resolve.
 	all, err := r.list(true)
 	if err != nil {
-		return subagent.Info{}, false, err
+		return memberMatch{}, false, err
 	}
 	for _, info := range all {
 		if info.Room == roomName && info.EffectiveName() == name && !info.Closed.IsZero() {
@@ -306,10 +314,10 @@ func (r *resolver) member(roomName, name string) (subagent.Info, bool, error) {
 			} else {
 				target, err = r.s.sessionStore().DeliveryTarget(info.ID)
 			}
-			return target, err == nil, err
+			return memberMatch{info: target, closedName: true}, err == nil, err
 		}
 	}
-	return subagent.Info{}, false, nil
+	return memberMatch{}, false, nil
 }
 
 func (r *resolver) self(info subagent.Info) bool {
@@ -317,7 +325,8 @@ func (r *resolver) self(info subagent.Info) bool {
 }
 
 // named checks an explicitly named session. Any problem rejects the post.
-func (r *resolver) named(tok string, info subagent.Info) (recipient, error) {
+func (r *resolver) named(tok string, m memberMatch) (recipient, error) {
+	info := m.info
 	if info.Status == subagent.StatusClosed || info.Role == subagent.RoleRoot {
 		rec, err := r.room(info.Room)
 		if err != nil {
@@ -326,6 +335,11 @@ func (r *resolver) named(tok string, info subagent.Info) (recipient, error) {
 		return recipient{kind: toOwner, addr: rec.Name, rec: rec}, nil
 	}
 	if r.self(info) && !r.allowSelf {
+		// The name matched a closed session whose heir is the sender, its
+		// parent. Explain the heir routing, not a bare self-mention.
+		if m.closedName {
+			return recipient{}, fmt.Errorf("%s is closed; its work passed to you (%s). Start a new session with dyna subagent start, or post elsewhere.", tok, info.Address())
+		}
 		return recipient{}, fmt.Errorf("%s is you; a post cannot mention its sender", tok)
 	}
 	if why := takesPost(info); why != "" {
