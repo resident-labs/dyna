@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,84 @@ import (
 // unlink stops it, and the same token leaves it alone. The decision is pure, and
 // the loop test uses fake ticks and a fake child, so neither has a clock, a
 // process or a timeout.
+func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
+	st, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveTunnelToken("first"); err != nil {
+		t.Fatal(err)
+	}
+
+	step := make(chan time.Time, 4)
+	previousPause := connectorPause
+	connectorPause = func(time.Duration) <-chan time.Time { return step }
+	t.Cleanup(func() { connectorPause = previousPause })
+
+	lookErrs := make(chan error, 4)
+	previousLook := lookConnector
+	lookConnector = func(string) (string, error) {
+		select {
+		case err := <-lookErrs:
+			return "", err
+		default:
+			return "/resolved/cloudflared", nil
+		}
+	}
+	t.Cleanup(func() { lookConnector = previousLook })
+
+	type alert struct{ binary, path string }
+	alerts := make(chan alert, 4)
+	clears := make(chan struct{}, 4)
+	previousPost, previousClear := postTunnelAlert, clearTunnelAlert
+	postTunnelAlert = func(binary, path string) error { alerts <- alert{binary, path}; return nil }
+	clearTunnelAlert = func() error { clears <- struct{}{}; return nil }
+	t.Cleanup(func() { postTunnelAlert, clearTunnelAlert = previousPost, previousClear })
+
+	started := make(chan struct{}, 4)
+	previousRun := runConnector
+	runConnector = func(ctx context.Context, _ *Store, bin string) error {
+		if bin != "/resolved/cloudflared" {
+			t.Errorf("connector ran %q, want the resolved path", bin)
+		}
+		started <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { runConnector = previousRun })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		RunTunnel(ctx, st, "cloudflared", func(string, ...any) {})
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// The token is there but the binary is not: one typed alert, no child, and
+	// the wait continues instead of retrying silently.
+	lookErrs <- exec.ErrNotFound
+	if a := <-alerts; a.binary != "cloudflared" || a.path == "" {
+		t.Fatalf("alert = %+v, want the binary and the searched PATH", a)
+	}
+	step <- time.Now()
+	lookErrs <- exec.ErrNotFound
+	select {
+	case a := <-alerts:
+		t.Fatalf("a still-missing connector alerted again: %+v", a)
+	case <-started:
+		t.Fatal("the tunnel started a missing connector")
+	case <-time.After(50 * time.Millisecond):
+	}
+	// The binary appears: the alert clears and the connector starts.
+	step <- time.Now()
+	<-clears
+	<-started
+}
+
 func TestCredentialDiffersOnlyOnChange(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -53,6 +132,15 @@ func TestTunnelFollowsItsCredential(t *testing.T) {
 	t.Cleanup(func() { tokenTicks = previousTicks })
 
 	events := make(chan string, 8)
+	previousLook := lookConnector
+	lookConnector = func(string) (string, error) { return "resolved", nil }
+	t.Cleanup(func() { lookConnector = previousLook })
+
+	previousPost, previousClear := postTunnelAlert, clearTunnelAlert
+	postTunnelAlert = func(string, string) error { return nil }
+	clearTunnelAlert = func() error { return nil }
+	t.Cleanup(func() { postTunnelAlert, clearTunnelAlert = previousPost, previousClear })
+
 	previousRun := runConnector
 	runConnector = func(ctx context.Context, _ *Store, _ string) error {
 		events <- "start"

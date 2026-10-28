@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/notices"
 )
 
 // tokenWatchInterval is how often the connector checks its credential. A new
@@ -23,6 +24,20 @@ var tokenWatchInterval = 2 * time.Second
 
 // runConnector runs one cloudflared attempt. A test replaces it with a fake child.
 var runConnector = runOnce
+
+// lookConnector resolves the connector binary. A test replaces it with an
+// immediate answer, so no test searches a real PATH.
+var lookConnector = exec.LookPath
+
+// connectorPause is the clock the loop waits on between attempts. A test
+// replaces it with a channel it sends itself, so no test waits for a clock.
+var connectorPause = time.After
+
+// postTunnelAlert reports one missing connector as a typed owner notice, and
+// clearTunnelAlert removes it when the connector runs again. RunTunnel calls
+// each once per transition. Tests replace them.
+var postTunnelAlert = postMissingConnectorNotice
+var clearTunnelAlert = clearMissingConnectorNotice
 
 // tokenTicks is the source of credential checks. A test replaces it with ticks
 // it sends itself, so no test waits for a clock.
@@ -35,23 +50,40 @@ var tokenTicks = func() (<-chan time.Time, func()) {
 // starts it again with backoff when it exits. The token goes in by file
 // (--token-file), never on the command line, so ps does not show it. A changed
 // or removed token stops the child, so the next attempt uses the new link or
-// waits for one. cloudflared's own output goes to <connect dir>/cloudflared.log.
+// waits for one. A connector binary that is not on PATH posts one typed owner
+// notice and keeps waiting, instead of retrying silently forever. cloudflared's
+// own output goes to <connect dir>/cloudflared.log.
 func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...any)) {
 	if bin == "" {
 		bin = "cloudflared"
 	}
 	wait := 5 * time.Second
+	missing := false
 	for ctx.Err() == nil {
 		token, err := os.ReadFile(st.TunnelTokenPath())
 		if err != nil {
 			logf("connect: no tunnel token yet; the tunnel waits for the relay")
+		} else if resolved, lookErr := lookConnector(bin); lookErr != nil {
+			if !missing {
+				missing = true
+				logf("connect: %s is not on PATH; the tunnel waits for it to be installed", bin)
+				if err := postTunnelAlert(bin, os.Getenv("PATH")); err != nil {
+					logf("connect: report the missing connector: %v", err)
+				}
+			}
 		} else {
+			if missing {
+				missing = false
+				if err := clearTunnelAlert(); err != nil {
+					logf("connect: clear the missing-connector alert: %v", err)
+				}
+			}
 			start := time.Now()
 			runCtx, stop := context.WithCancel(ctx)
 			changed := make(chan struct{}, 1)
 			ticks, stopTicks := tokenTicks()
 			go watchTunnelToken(runCtx, st.TunnelTokenPath(), token, ticks, stop, changed, logf)
-			err := runConnector(runCtx, st, bin)
+			err := runConnector(runCtx, st, resolved)
 			stopTicks()
 			stop()
 			if ctx.Err() != nil {
@@ -71,7 +103,7 @@ func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
+		case <-connectorPause(wait):
 		}
 		wait = min(wait*2, time.Minute)
 	}
@@ -110,6 +142,29 @@ func watchTunnelToken(ctx context.Context, path string, seen []byte, ticks <-cha
 		stop()
 		return
 	}
+}
+
+// missingConnectorKey is the owner notice for a connector that is not on
+// PATH. One key, so a still-missing binary replaces its own alert instead of
+// stacking one per retry.
+const missingConnectorKey = "tunnel:connector-missing"
+
+// postMissingConnectorNotice reports the missing connector with the binary it
+// tried and the PATH it searched, so the owner sees where to install it.
+func postMissingConnectorNotice(binary, path string) error {
+	_, err := notices.DefaultStore().Post(notices.Notice{
+		Key:      missingConnectorKey,
+		Kind:     notices.KindTunnel,
+		Severity: notices.SeverityError,
+		Tunnel:   &notices.TunnelFacts{Binary: binary, Path: path},
+	})
+	return err
+}
+
+// clearMissingConnectorNotice removes the missing-connector alert when the
+// connector runs again.
+func clearMissingConnectorNotice() error {
+	return notices.DefaultStore().DismissKey(missingConnectorKey)
 }
 
 func runOnce(ctx context.Context, st *Store, bin string) error {

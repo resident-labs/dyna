@@ -241,6 +241,26 @@ func TestWriteInstallsTheTunnelUnit(t *testing.T) {
 	}
 }
 
+// The units carry the install environment's PATH, so the connector and the
+// engine resolve tools the owner installed outside the service manager's
+// default PATH, such as mise shims or ~/.local/bin (D-351).
+func TestWriteCarriesTheInstallPathIntoTheUnits(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(Options{Binary: "/opt/dyna/bin/dyna", Dir: dir, Environment: []string{"HOME=/home/o", "PATH=/home/o/.local/share/mise/shims:/home/o/.local/bin:/usr/bin:/bin"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{Tunnel, Engine} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `Environment="PATH=/home/o/.local/share/mise/shims:/home/o/.local/bin:/usr/bin:/bin"`
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("%s lacks the install PATH %q:\n%s", name, want, body)
+		}
+	}
+}
+
 // An engine that opted out of the tunnel gets no connector: no unit file, no
 // enable link, and an earlier connector is stopped.
 func TestInstallHonoursTheTunnelOptOut(t *testing.T) {

@@ -98,7 +98,7 @@ export interface HookRunLog {
 // a card shows are typed per kind: a disk notice carries disk, a provider
 // notice carries provider and a sync notice carries sync. text is the stored
 // line of a notice saved before the typed facts and stays empty on a new one.
-export type NoticeKind = 'disk' | 'provider' | 'sync'
+export type NoticeKind = 'disk' | 'provider' | 'sync' | 'tunnel'
 export type NoticeSeverity = 'warn' | 'error'
 export interface DiskPath {
   path: string
@@ -120,6 +120,10 @@ export interface SyncFacts {
   other?: string
   rewritten?: boolean
 }
+export interface TunnelFacts {
+  binary: string
+  path: string
+}
 export interface Notice {
   id: string
   key: string
@@ -128,6 +132,7 @@ export interface Notice {
   disk?: DiskFacts
   provider?: ProviderFacts
   sync?: SyncFacts
+  tunnel?: TunnelFacts
   command?: string
   at: string
   text?: string
