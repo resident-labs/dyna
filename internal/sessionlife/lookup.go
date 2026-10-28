@@ -10,6 +10,21 @@ import "context"
 // parts of the index that serve it, once every retained session has a name
 const effectiveName = `CASE WHEN name <> '' THEN name ELSE 'agent-' || substr(id, -8) END`
 
+// DeliveryAddress returns the room and session address used by delivery rows.
+// It reads only indexed columns, never the wide metadata JSON.
+func DeliveryAddress(sessions, id string) (roomID, address string, err error) {
+	if err := checkID(id); err != nil {
+		return "", "", err
+	}
+	db, ok, err := readable(sessions)
+	if err != nil || !ok {
+		return "", "", err
+	}
+	var room, name string
+	err = db.QueryRowContext(context.Background(), "SELECT room_id, room, "+effectiveName+" FROM session_records WHERE id = ?", id).Scan(&roomID, &room, &name)
+	return roomID, room + ":" + name, err
+}
+
 // Lookup returns the IDs of the session records that answer to name, newest
 // created first, whether the name is stored or generated for an unnamed
 // session. A non-empty room limits the answer to that room, so one call looks

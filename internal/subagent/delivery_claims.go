@@ -139,8 +139,8 @@ func (s *Store) markPostsDelivered(ctx context.Context, rooms *room.Store, meta 
 
 // deliverySignature is the newest write of this session's delivery rows, which
 // changes when a claim, cancellation or dismissal does.
-func (s *Store) deliverySignature(meta Meta) string {
-	signature, err := s.deliveryRooms().DeliverySignature(meta.RoomID, room.DeliveryKeys(meta.ID, meta.Address()))
+func (s *Store) deliverySignature(id, roomID, address string) string {
+	signature, err := s.deliveryRooms().DeliverySignature(roomID, room.DeliveryKeys(id, address))
 	if err != nil || signature == 0 {
 		return ""
 	}
