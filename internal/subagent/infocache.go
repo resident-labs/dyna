@@ -36,6 +36,12 @@ type infoEntry struct {
 var infoCache sync.Map
 var metaMu sync.Mutex
 
+func init() {
+	sessionlife.AfterDelete = func(sessions, id string) {
+		infoCache.Delete(filepath.Join(sessions, id))
+	}
+}
+
 // recordKey names session id's record in infoCache.
 func (s *Store) recordKey(id string) string { return filepath.Join(s.root(), id) }
 

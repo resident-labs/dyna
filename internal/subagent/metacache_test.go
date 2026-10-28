@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/sessionlife/recordtest"
 )
 
@@ -84,6 +85,12 @@ func TestClosedMetadataStaysCurrentAndShared(t *testing.T) {
 	value, ok := infoCache.Load(s.recordKey(id))
 	if !ok || value.(*infoEntry).meta.Closed.IsZero() {
 		t.Fatal("an open snapshot survived the close")
+	}
+	if err := sessionlife.Delete(s.Root, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := infoCache.Load(s.recordKey(id)); ok {
+		t.Fatal("production record deletion left the closed snapshot cached")
 	}
 }
 
