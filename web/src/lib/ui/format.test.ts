@@ -6,7 +6,7 @@ import DOMPurify from 'dompurify'
 // makes while it renders text: a parser and a sanitizer.
 class FakeDOMParser {
   parseFromString(html: string): unknown {
-    return { body: { firstChild: { innerHTML: html.replace(/^<div>|<\/div>$/g, '') } }, createTreeWalker: () => ({ nextNode: () => false }) }
+    return { body: { firstChild: { innerHTML: html.replace(/^<div>|<\/div>$/g, '') }, querySelectorAll: () => [] }, createTreeWalker: () => ({ nextNode: () => false }) }
   }
 }
 
