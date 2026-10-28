@@ -87,12 +87,48 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 	result := Result{Kept: map[string]int{}, Pruned: map[string]Pruned{}}
+	errs := []error{}
+	// Run SQLite retention before filesystem sweeps. Those sweeps used to spend
+	// the whole shared deadline first, so later retention never ran.
+	if opts.Session == "" {
+		now := opts.Now
+		if now.IsZero() {
+			now = time.Now()
+		}
+		// PR state removes closed records 14 days after close on each write;
+		// the pass reports how many it removed since the last pass.
+		if n, err := state.TakePruned(state.Root(store.DataDir())); err != nil {
+			errs = append(errs, err)
+		} else {
+			result.add("closed PR records", Pruned{Items: n})
+		}
+		if n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now); err != nil {
+			errs = append(errs, fmt.Errorf("delivered PR notices: %w", err))
+		} else {
+			result.add("delivered PR notices", Pruned{Items: n})
+		}
+		if n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now); err != nil {
+			errs = append(errs, fmt.Errorf("shell job rows: %w", err))
+		} else {
+			result.add("shell job rows", Pruned{Items: n})
+		}
+		if n, err := pruneLocalCIResults(ctx, store.DataDir(), now); err != nil {
+			errs = append(errs, fmt.Errorf("local CI results: %w", err))
+		} else {
+			result.add("local CI results", Pruned{Items: n})
+		}
+		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); err != nil {
+			errs = append(errs, fmt.Errorf("CI health rows: %w", err))
+		} else {
+			result.add("CI health rows", Pruned{Items: n})
+		}
+	}
 	repos := opts.Repos
 	var discoveryErr error
 	if repos == nil {
 		repos, discoveryErr = discover(ctx, opts.Session)
 	}
-	errs := []error{discoveryErr, cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})}
+	errs = append(errs, discoveryErr, cleanWorktrees(ctx, &result, repos, worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed}))
 	cleaned, scratchErr := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
 	result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
 	for _, kept := range cleaned.Kept {
@@ -134,33 +170,6 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 			errs = append(errs, sweepWithDryPass(ctx, &result, "stale disk temp folders", diskTempRetention, func(dry bool) (Pruned, error) {
 				return sweepDiskTemp(now, root, processAlive, dry)
 			}))
-		}
-		// PR state removes closed records 14 days after close on each write;
-		// the pass reports how many it removed since the last pass.
-		if n, err := state.TakePruned(state.Root(store.DataDir())); err != nil {
-			errs = append(errs, err)
-		} else {
-			result.add("closed PR records", Pruned{Items: n})
-		}
-		if n, err := state.PruneDoneNotices(ctx, state.Root(store.DataDir()), now); err != nil {
-			errs = append(errs, fmt.Errorf("delivered PR notices: %w", err))
-		} else {
-			result.add("delivered PR notices", Pruned{Items: n})
-		}
-		if n, err := pruneShellJobs(ctx, &shells.Store{Root: filepath.Join(store.DataDir(), "shells")}, now); err != nil {
-			errs = append(errs, fmt.Errorf("shell job rows: %w", err))
-		} else {
-			result.add("shell job rows", Pruned{Items: n})
-		}
-		if n, err := pruneLocalCIResults(ctx, store.DataDir(), now); err != nil {
-			errs = append(errs, fmt.Errorf("local CI results: %w", err))
-		} else {
-			result.add("local CI results", Pruned{Items: n})
-		}
-		if n, err := (cihealth.Store{DataDir: store.DataDir()}).Prune(ctx, now); err != nil {
-			errs = append(errs, fmt.Errorf("CI health rows: %w", err))
-		} else {
-			result.add("CI health rows", Pruned{Items: n})
 		}
 	}
 	return result, errors.Join(errs...)

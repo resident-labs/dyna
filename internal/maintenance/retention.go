@@ -364,17 +364,23 @@ func sweepRejectedSpools(ctx context.Context, dir string, now time.Time, dry boo
 	return freed, errors.Join(errs...)
 }
 
+// shellJobBatchesPerPass bounds one pass at 10,000 rows. The next pass resumes
+// with the oldest remaining rows, so a large backlog cannot take the whole
+// maintenance deadline.
+const shellJobBatchesPerPass = 20
+
 // pruneShellJobs deletes ended shell job rows older than shellJobRetention in
-// batches, one short write each, until none are left or ctx ends.
+// bounded batches, one short write each. A later pass resumes the remainder.
 func pruneShellJobs(ctx context.Context, shs *shells.Store, now time.Time) (int, error) {
 	total := 0
-	for {
+	for range shellJobBatchesPerPass {
 		n, err := shs.PruneEnded(ctx, now.Add(-shellJobRetention), shells.PruneBatch)
 		total += n
 		if err != nil || n < shells.PruneBatch || ctx.Err() != nil {
 			return total, err
 		}
 	}
+	return total, nil
 }
 
 // liveCommits lists the commits whose local CI result must stay: the heads and
