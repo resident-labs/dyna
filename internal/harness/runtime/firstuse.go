@@ -39,17 +39,7 @@ func (f *FirstUse) EnsureBundle(ctx context.Context, harness, version string) (B
 		return Bundle{}, false, err
 	}
 	if b, err := f.Bundles.Resolve(a.Harness, version); err == nil {
-		if version != "" || a.distribution != distributionFork {
-			return b, false, nil
-		}
-		// An existing npm Pi bundle remains valid for explicit session pins.
-		// Default turns move to the current fork instead of resolving the old
-		// npm default forever.
-		latest, latestErr := f.LatestVersion(ctx, a.Harness)
-		if latestErr != nil || latest == b.Version {
-			return b, false, nil
-		}
-		version = latest
+		return b, false, nil
 	}
 	key := f.Bundles.Root + "\x00" + a.Harness + "\x00" + version
 	firstUseMu.Lock()
@@ -133,12 +123,7 @@ func (f *FirstUse) install(ctx context.Context, a RuntimeAdapter, version string
 	if f.Progress != nil {
 		f.Progress(a.Harness, version)
 	}
-	var b Bundle
-	if a.distribution == distributionFork && version == piForkVersion {
-		b, err = f.Bundles.InstallAndSelect(ctx, a.Harness, version)
-	} else {
-		b, err = f.Bundles.Install(ctx, a.Harness, version)
-	}
+	b, err := f.Bundles.Install(ctx, a.Harness, version)
 	if err != nil {
 		return Bundle{}, false, fmt.Errorf("cannot install %s %s: %w. Check the internet connection and try again", a.Binary, version, err)
 	}
