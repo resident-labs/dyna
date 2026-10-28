@@ -182,6 +182,49 @@ func TestWrapRoomUsesTheRoomSlice(t *testing.T) {
 	}
 }
 
+// A room's saved limits reach its slice: the launch path writes them into
+// the unit file, off leaves a limit line out, and a later change applies
+// live with one set-property call.
+func TestRoomSliceUsesTheRoomsSavedLimits(t *testing.T) {
+	config, calls := fakeManager(t)
+	fakeCgroups(t, "cpuset cpu io memory pids\n", "cpu memory pids\n", 33554432) // 32 GiB
+	saved := RoomLimitsSetting{MemoryHigh: RoomLimitOverride{Value: 2 << 30}, MemoryMax: RoomLimitOverride{Off: true}}
+	old := RoomLimitsLookup
+	RoomLimitsLookup = func(roomID string) (RoomLimitsSetting, bool) { return saved, roomID == "room-limits" }
+	t.Cleanup(func() { RoomLimitsLookup = old })
+
+	WrapRoom(exec.Command("/bin/true"), "x", "room-limits")
+	readUnit := func() string {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(config, "systemd", "user", RoomSlice("room-limits")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	unit := readUnit()
+	for _, want := range []string{"MemoryHigh=2147483648", "TasksMax=8192"} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("room unit %q missing %q", unit, want)
+		}
+	}
+	if strings.Contains(unit, "MemoryMax=") {
+		t.Fatalf("room unit %q has a MemoryMax line the off limit removed", unit)
+	}
+
+	saved.TasksMax = RoomLimitOverride{Value: 512}
+	if err := ApplyRoomLimits("room-limits"); err != nil {
+		t.Fatalf("apply live: %v", err)
+	}
+	if raw := readUnit(); !strings.Contains(raw, "TasksMax=512") {
+		t.Fatalf("room unit after the change = %q, want TasksMax=512", raw)
+	}
+	want := "systemctl --user set-property --runtime " + RoomSlice("room-limits") + " MemoryHigh=2147483648 MemoryMax=infinity TasksMax=512"
+	if len(*calls) != 3 || (*calls)[1] != "systemctl --user daemon-reload" || (*calls)[2] != want {
+		t.Fatalf("calls = %q, want a launch reload, a change reload and %q", *calls, want)
+	}
+}
+
 // Without the delegated controllers, room launches stay in the shared slice,
 // still tell their scripts which slice that is, and one notice per room says
 // why: a second room hears its own notice, and a repeat launch stays quiet.
