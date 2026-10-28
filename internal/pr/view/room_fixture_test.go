@@ -16,13 +16,13 @@ import (
 )
 
 type env struct {
-	t   *testing.T
+	t   testing.TB
 	svc *roomsvc.Service
 	mgr *subagent.Manager
 	ctx context.Context
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t testing.TB) *env {
 	t.Helper()
 	storetest.Isolate(t)
 	t.Setenv(runstore.AgentJournalRootEnv, "")

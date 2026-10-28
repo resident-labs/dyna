@@ -8,7 +8,7 @@ import (
 )
 
 // CountRows counts the rows Scan builds until the test ends.
-func CountRows(t *testing.T) *int {
+func CountRows(t testing.TB) *int {
 	n := new(int)
 	old := buildRow
 	buildRow = func(facts watch.ReviewFacts, r watch.Record) ChangeView { *n++; return old(facts, r) }
@@ -44,7 +44,7 @@ func CountChangedKeyQueries(t *testing.T) *int {
 }
 
 // CountProjectionFacts counts actual live reviewer observations.
-func CountProjectionFacts(t *testing.T) *int {
+func CountProjectionFacts(t testing.TB) *int {
 	n := new(int)
 	read := projectionFacts
 	projectionFacts = func(service *watch.Service, st watch.State) (watch.ReviewFacts, error) {
