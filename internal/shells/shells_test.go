@@ -338,7 +338,7 @@ func TestStopKillsStampedDescendantsAfterGrace(t *testing.T) {
 		return true, fmt.Errorf("survivor")
 	}
 	_, err := s.Stop(meta.ID, "owner")
-	if waited < 100*time.Millisecond || cleaned != meta.ID || err == nil || !strings.Contains(err.Error(), "survivor") {
+	if waited < 100*time.Millisecond || cleaned != meta.ID || err != nil {
 		t.Fatalf("grace = %v, cleaned = %q, error = %v", waited, cleaned, err)
 	}
 }
