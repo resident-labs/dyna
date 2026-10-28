@@ -775,10 +775,9 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				return ErrClosed
 			}
 			startup := now.Add(startupLimit)
-			if profile.CompactDue(chosen, meta.ContextTokens) {
-				// Dyna's own compact command runs before the first request on the
-				// resumed session. Give it a second window so a large history is
-				// not mistaken for a stalled model.
+			if profile.CompactDue(chosen, meta.ContextTokens) || (chosen.Harness == profile.HarnessPi && chosen.Compact != nil && meta.ContextTokens >= chosen.Compact.Tokens) {
+				// Pi may compact before or during the first request. Give a large
+				// history a second window before treating the model as stalled.
 				startup = now.Add(2 * startupLimit)
 			}
 			t.Phase, t.Turn, t.StartupDeadline = "starting", meta.Turns+1, startup

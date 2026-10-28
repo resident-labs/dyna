@@ -12,10 +12,10 @@ import (
 func supportedVersionRange(harness, version string) (bool, string) {
 	switch harness {
 	case "pi":
-		if versionAtLeast(version, "1.1.0") {
+		if versionAtLeast(version, "1.3.0") {
 			return true, ""
 		}
-		return false, "The " + piNPMPackage + " package starts at Pi 1.1.0."
+		return false, "Dyna supports Pi 1.3.0 or later for model compaction reserves."
 	case "kimi-code":
 		if versionAtLeast(version, "2.3.1") {
 			return true, ""

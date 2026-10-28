@@ -214,7 +214,7 @@
             <label>Reasoning effort<select value={knob.effort} onchange={(e) => pickEffort(e.currentTarget.value)}><option value="">Harness default{defaultEffort ? ` (${defaultEffort.label || defaultEffort.id})` : ''}</option>{#each knob.model.efforts as e (e.id)}<option value={e.id}>{e.label || e.id}</option>{/each}</select></label>
           {/if}
           <label>Compact at (tokens)<input type="number" min={rule?.min || 1} max={compactMax || undefined} value={p.compact?.tokens ?? ''} placeholder="Harness default" disabled={!!compactOff} oninput={(e) => (p.compact = compactFor(rule, windows, Math.round(+e.currentTarget.value)))} />
-            <span class="field-hint">{compactHint(rule, compactOff, compactMax)}</span></label>
+            <span class="field-hint">{compactHint(rule, compactOff, compactMax, p.harness)}</span></label>
         </div>
       {/if}
 {/snippet}

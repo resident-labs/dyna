@@ -105,18 +105,17 @@
       if (catalogGate.current(ticket)) catalogBusy = false
     }
   }
-  // Another model or harness has other efforts and context window, so drop the
-  // catalog's effort args and the compact field from both drafts before the
-  // choice changes. The profile editor sets them again.
-  function forgetKnobs() {
+  // Effort arguments belong to the old catalog. Keep the compact target when
+  // changing models; reset it only when changing harnesses.
+  function forgetKnobs(newHarness = '') {
     const known = (catalog?.models ?? []).flatMap(m => m.efforts ?? [])
-    if (profileDraft) profileDraft = { ...profileDraft, compact: null, extraArgs: withEffort(profileDraft.extraArgs ?? [], known, null) }
+    if (profileDraft) profileDraft = { ...profileDraft, compact: newHarness ? blankProfile(newHarness).compact : profileDraft.compact, extraArgs: withEffort(profileDraft.extraArgs ?? [], known, null) }
     if (editorDraft) editorDraft = { ...editorDraft, args: withEffort(lines(editorDraft.args ?? ''), known, null).join('\n') }
     exactId = ''
   }
   function chooseHarness(id: string) {
     if (profileDraft && id === harness) { step = 1; focusHeading(); return }
-    if (id !== harness) forgetKnobs()
+    if (id !== harness) forgetKnobs(id)
     catalogGate.invalidate()
     if (id !== harness) connectionId = ''
     harness = id
@@ -151,7 +150,7 @@
     const allModels = normalizeModels(primaryId, [primaryId, ...fallbackModels.map(fallbackId)])
     // The editor keeps its own argument text after a return.
     const extraArgs = editorDraft ? lines(editorDraft.args ?? '') : profileDraft?.extraArgs ?? []
-    profileDraft = { ...(profileDraft ?? blankProfile()), harness, model: allModels[0] || '', models: allModels, extraArgs }
+    profileDraft = { ...(profileDraft ?? blankProfile(harness)), harness, model: allModels[0] || '', models: allModels, extraArgs }
     editorProfile = profileDraft
   }
   function returnToStep(value: number, draft: EditorDraft) {
@@ -160,7 +159,7 @@
     // them before showing earlier steps so reopening cannot restore old values.
     if (harness !== profileDraft.harness) {
       editorDraft = draft
-      forgetKnobs()
+      forgetKnobs(profileDraft.harness)
       draft = editorDraft
       catalogGate.invalidate()
       connectionId = ''

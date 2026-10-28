@@ -327,3 +327,16 @@ func TestAddAcceptsPinnedVersionWithoutBundle(t *testing.T) {
 	health.HarnessReady = harnessruntime.HarnessReady
 	runProfilesCommand(t, "add", "--name", "pinned", "--harness", "pi", "--runtime-version", "1.3.0")
 }
+
+func TestProfilesAddCompact(t *testing.T) {
+	isolateProfiles(t)
+	runProfilesCommand(t, "add", "--name", "compact", "--harness", "pi", "--compact", "100000")
+	store, err := profile.Load(profile.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := store.Get("compact")
+	if !ok || p.Compact == nil || p.Compact.Tokens != 100000 {
+		t.Fatalf("saved profile = %+v", p)
+	}
+}

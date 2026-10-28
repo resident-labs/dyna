@@ -22,7 +22,7 @@ func TestPrivateBundleRemovalProtectsPinsAndAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := manager(t)
-	old := install(t, manager, "pi", "1.1.0")
+	old := install(t, manager, "pi", "1.3.0")
 	_ = install(t, manager, "pi", "2.0.0")
 	_ = install(t, manager, "pi", "3.0.0")
 	ctx := context.Background()
@@ -59,14 +59,14 @@ func TestPrivateBundleRemovalProtectsPinsAndAccounts(t *testing.T) {
 func TestSelectedProfileVersionsProtectBundlesWithoutRewritingProfiles(t *testing.T) {
 	testAccounts(t)
 	manager := manager(t)
-	old := install(t, manager, "pi", "1.1.0")
+	old := install(t, manager, "pi", "1.3.0")
 	_ = install(t, manager, "pi", "2.0.0")
 	_ = install(t, manager, "pi", "3.0.0")
 	path := profile.DefaultPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteJSON(path, map[string]any{"profiles": []map[string]string{{"name": "selected", "runtime": "dyna", "harness": "pi", "runtimeVersion": "1.1.0"}}}, 0600); err != nil {
+	if err := store.WriteJSON(path, map[string]any{"profiles": []map[string]string{{"name": "selected", "runtime": "dyna", "harness": "pi", "runtimeVersion": "1.3.0"}}}, 0600); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(path)
@@ -89,7 +89,7 @@ func TestSelectedProfileVersionsProtectBundlesWithoutRewritingProfiles(t *testin
 func TestUninstallRemovesEveryCopySoNoOlderOneTakesOver(t *testing.T) {
 	testAccounts(t)
 	manager := manager(t)
-	old := install(t, manager, "pi", "1.1.0")
+	old := install(t, manager, "pi", "1.3.0")
 	selected := install(t, manager, "pi", "2.0.0")
 	other := install(t, manager, "claude", "1.0.0")
 	if err := manager.Select("pi", selected.Version); err != nil {
