@@ -261,7 +261,7 @@ func TestWriteCarriesTheInstallPathIntoTheUnits(t *testing.T) {
 	}
 }
 
-func TestEngineUnitBoundsGoMemory(t *testing.T) {
+func TestEngineUnitBoundsMemory(t *testing.T) {
 	dir := t.TempDir()
 	if err := Write(Options{Binary: "/opt/dyna/bin/dyna", Dir: dir}); err != nil {
 		t.Fatal(err)
@@ -272,6 +272,9 @@ func TestEngineUnitBoundsGoMemory(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `Environment="GOMEMLIMIT=4GiB"`) {
 		t.Fatalf("the engine has no soft Go memory limit:\n%s", body)
+	}
+	if !strings.Contains(string(body), "MemoryHigh=8GiB") {
+		t.Fatalf("the engine has no page-cache and process memory bound:\n%s", body)
 	}
 }
 
