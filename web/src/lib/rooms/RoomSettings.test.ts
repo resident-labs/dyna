@@ -58,12 +58,15 @@ test('each section shows its moved controls in one shared layout', async () => {
     // No pause state yet: the switch waits for the host.
     assert.match(show('general'), /aria-label="Pause agents" disabled/)
     const root = show('general', {
-      room: { ...room, rootProfile: 'chosen', checkIn: 'off' },
+      room: { ...room, rootProfile: 'chosen', checkIn: 'off', limits: { memoryHigh: '2G', tasksMax: 'off' } },
       profiles: [{ name: 'chosen', harness: 'mock' }, { name: 'opus', harness: 'claude-code' }],
     })
     assert.match(root, /aria-label="Root profile"/)
     assert.match(text(root), /Root profile .*Global default .*chosen .*opus/)
     assert.match(root, /aria-label="Parent check-ins"[^>]*value="off"/)
+    assert.match(root, /aria-label="Memory high"[^>]*value="2G"/)
+    assert.match(root, /aria-label="Memory max"[^>]*placeholder="default"/) // the placeholder shows while empty
+    assert.match(root, /aria-label="Tasks"[^>]*value="off"/)
     assert.doesNotMatch(show('general'), /value="off"/) // no setting: the field starts empty
 
     const review = text(show('review', { reviewer: { enabled: true } }))
@@ -108,6 +111,7 @@ interface PageFns {
   loadPublishing(): Promise<void>
   savePublishing(): Promise<void>
   saveCheckIn(): Promise<void>
+  saveLimit(field: string): Promise<void>
   fill(): void
   formOf(...args: unknown[]): unknown
   policyRequest(...args: unknown[]): unknown
@@ -132,10 +136,13 @@ interface PageState {
   checkIn: string
   checkInBusy: boolean
   checkInError: string
+  limits: Record<string, string>
+  limitBusy: Record<string, boolean>
+  limitError: Record<string, string>
 }
 
 function page<K extends keyof PageFns>(api: object, names: readonly K[], extra: Record<string, unknown> = {}): PageState & Pick<PageFns, K> {
-  const state: PageState = { roomId: 'r', policy: null, form: null, busy: false, dirty: true, error: '', saved: false, reviewPublishing: 'local', githubAccess: 'read-only', mergeMaxParallel: 3, publishError: '', checkIn: 'off', checkInBusy: false, checkInError: '' }
+  const state: PageState = { roomId: 'r', policy: null, form: null, busy: false, dirty: true, error: '', saved: false, reviewPublishing: 'local', githubAccess: 'read-only', mergeMaxParallel: 3, publishError: '', checkIn: 'off', checkInBusy: false, checkInError: '', limits: {}, limitBusy: {}, limitError: {} }
   const context = Object.assign({ api, $state: (value: unknown) => value, normalizePolicy, budgetForm, checksText, saveRoomPolicy, errorText, onreviewer: async () => {}, prSettings: null, ...extra }, state)
   vm.createContext(context)
   vm.runInContext(stripTypes(handlers([...names, 'formOf', 'policyRequest', 'policyRoom', 'policyLoading', 'saveAfterPolicy', 'reviewerBusy'])), context)
@@ -393,4 +400,31 @@ test('the parent check-in field saves its value and restores the stored one afte
  await c.saveCheckIn()
  assert.equal(c.checkIn, '30m') // the stored value comes back
  assert.match(c.checkInError, /interval must be a duration/)
+})
+
+test('the limit fields save their values, keep them on a live-apply warning, and restore the stored ones after a failed write', async () => {
+ let fail = false
+ let warn = false
+ const saved: string[] = []
+ const pageRoom = { id: 'r', limits: { memoryHigh: '2G' } as Record<string, string> }
+ const c = page({ setRoomLimit: async (_room: string, field: string, value: string) => {
+   if (fail) throw new Error('memory high must be a size such as 2G')
+   pageRoom.limits[field] = value
+   return warn ? { applyWarning: 'the live slice did not pick it up' } : {}
+ } }, ['saveLimit'] as const, { room: pageRoom, onlimit: (_id: string, field: string, value: string) => { saved.push(field + '=' + value); pageRoom.limits[field] = value } })
+ c.limits.memoryHigh = ' 4G '
+ await c.saveLimit('memoryHigh')
+ assert.equal(pageRoom.limits.memoryHigh, '4G') // trimmed before it is sent
+ assert.deepEqual(saved, ['memoryHigh=4G'])
+ warn = true
+ c.limits.tasksMax = '512'
+ await c.saveLimit('tasksMax')
+ assert.equal(c.limits.tasksMax, '512') // the saved value stays
+ assert.equal(pageRoom.limits.tasksMax, '512')
+ assert.match(c.limitError.tasksMax ?? '', /live slice did not pick it up/)
+ fail = true
+ c.limits.memoryMax = 'nonsense'
+ await c.saveLimit('memoryMax')
+ assert.equal(c.limits.memoryMax, '') // the stored value comes back
+ assert.match(c.limitError.memoryMax ?? '', /must be a size/)
 })

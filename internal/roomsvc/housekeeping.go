@@ -2,10 +2,11 @@ package roomsvc
 
 import (
 	"context"
-	"dyna-agent/internal/authority"
 	"fmt"
 	"strings"
 
+	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/shells"
@@ -44,6 +45,41 @@ func (s *Service) SetRoomCheckIn(ctx context.Context, ref, value string) error {
 	}
 	_, err = s.rooms().SetCheckIn(ctx, ref, setting)
 	return err
+}
+
+// SetRoomLimitResult is the answer to a saved limit: ApplyWarning names why
+// the live slice did not pick the saved limit up, empty when it did. The
+// saved value is the source of truth: later launches and applies use it even
+// when the live move failed, so a failed apply is not an error.
+type SetRoomLimitResult struct {
+	ApplyWarning string `json:"applyWarning,omitempty"`
+}
+
+// SetRoomLimit stores one of a room's resource limits: a size such as 2G for
+// memory, a count such as 512 for tasks, off to remove that limit, or default
+// to use the machine default. Only the owner and the room's root may change
+// it, like every room setting. The saved limit is what later launches use;
+// this call also applies it live and reports a warning when that failed.
+func (s *Service) SetRoomLimit(ctx context.Context, ref, field, value string) (SetRoomLimitResult, error) {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return SetRoomLimitResult{}, err
+	}
+	f, err := room.ParseLimitField(field)
+	if err != nil {
+		return SetRoomLimitResult{}, err
+	}
+	limit, err := f.Parse(value)
+	if err != nil {
+		return SetRoomLimitResult{}, err
+	}
+	rec, err := s.rooms().SetLimit(ctx, ref, f, limit)
+	if err != nil {
+		return SetRoomLimitResult{}, err
+	}
+	if err := agentslice.ApplyRoomLimits(rec.ID); err != nil {
+		return SetRoomLimitResult{ApplyWarning: "the room keeps the limit; the live slice did not pick it up: " + err.Error()}, nil
+	}
+	return SetRoomLimitResult{}, nil
 }
 
 // AddRoomRepo registers another repository whose checkouts the room accepts
