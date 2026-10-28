@@ -132,6 +132,9 @@ esac
 		{"pr", "edit", "1", "--title", "test"},
 		{"pr", "ready", "1"},
 		{"pr", "view", "1"},
+		{"search", "issues", "--repo", "work/service", "duplicate"},
+		{"release", "view", "v1.0.0"},
+		{"repo", "list"},
 	} {
 		if err := SessionCommand(context.Background(), args); err != nil {
 			t.Fatalf("guard refused %q: %v", args, err)
