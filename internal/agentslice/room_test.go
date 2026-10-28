@@ -270,6 +270,18 @@ func TestRoomSupportRefusesOutsideAUserManager(t *testing.T) {
 	}
 }
 
+// Outside a user manager there are no room slices to count, and counting
+// still succeeds with zero.
+func TestRoomPidsOutsideAUserManagerCountsZero(t *testing.T) {
+	self := t.TempDir()
+	if err := os.WriteFile(filepath.Join(self, "self"), []byte("0::/machine.slice/machine-1.scope\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if byRoom, total := RoomPidsAt(t.TempDir(), filepath.Join(self, "self")); byRoom != nil || total != 0 {
+		t.Fatalf("room pids = %v, %d; want none outside a user manager", byRoom, total)
+	}
+}
+
 func envOf(cmd *exec.Cmd, key string) string {
 	prefix := key + "="
 	for _, entry := range cmd.Environ() {
