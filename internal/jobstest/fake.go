@@ -39,12 +39,13 @@ type Fake struct {
 	legacy RunFunc
 	proto  Protocol
 
-	mu     sync.Mutex
-	procs  map[string]*fakeProc
-	starts []Start
-	polls  int
-	stops  int
-	now    time.Time
+	mu      sync.Mutex
+	procs   map[string]*fakeProc
+	folders map[string]bool
+	starts  []Start
+	polls   int
+	stops   int
+	now     time.Time
 	// Down makes every call fail like a dropped connection while it returns
 	// true.
 	Down func() bool
@@ -66,7 +67,7 @@ type Start struct {
 // NewFake makes a fake node whose jobs run legacy.
 func NewFake(t *testing.T, protocol Protocol, legacy RunFunc) *Fake {
 	t.Helper()
-	return &Fake{t: t, proto: protocol, legacy: legacy, procs: map[string]*fakeProc{}, now: time.Unix(1_000_000, 0)}
+	return &Fake{t: t, proto: protocol, legacy: legacy, procs: map[string]*fakeProc{}, folders: map[string]bool{}, now: time.Unix(1_000_000, 0)}
 }
 
 // CommandFunc is the command runner that talks to the fake.
@@ -168,6 +169,15 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 	return nil
 }
 
+// Mkdir records that a start created a job folder without ever starting
+// its unit, as a start process that died between the two does. A poll of
+// such a folder reports gone: the folder is there, the unit is not.
+func (m *Fake) Mkdir(dir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.folders[dir] = true
+}
+
 // VanishAll makes every unit disappear without an exit record, as a machine
 // that rebooted does.
 func (m *Fake) VanishAll() {
@@ -223,7 +233,11 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 		}
 		proc := m.procs[dir]
 		if proc == nil {
-			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=missing code= size=0 bytes=0\n\n", dir)
+			state := "missing"
+			if m.folders[dir] {
+				state = "gone"
+			}
+			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 bytes=0\n\n", dir, state)
 			continue
 		}
 		state, code := "running", ""

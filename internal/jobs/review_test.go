@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -966,5 +967,63 @@ func TestARecoveredLaunchPushesItsCommit(t *testing.T) {
 	}
 	if want := sha + ":refs/dyna/ci/" + sha; pushRefspec != want {
 		t.Fatalf("the recovered launch pushed %q, want %q", pushRefspec, want)
+	}
+}
+
+// TestARestartInsideTheStartRelaunches is the fail-first test for the
+// round-11 review: the engine or the node-side start dies after the start
+// made the job folder but before the unit ran. The folder is there, the
+// unit is not, so a poll reports gone and the job looks lost. The row
+// records that the node never accepted the unit - launched stays unset -
+// and the restarted engine relaunches the job instead: one launch, one
+// passed end, no second start for a start that already went out.
+func TestARestartInsideTheStartRelaunches(t *testing.T) {
+	onNode := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "ran")
+		onNode <- struct{}{}
+		return nil
+	}
+	dead, fake, _, _ := newIdleService(t, legacy)
+	dir := dead.DataDir
+	started := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
+	job := Job{ID: "job_inside_start", RoomID: "dyna", Node: "here", Command: []string{"echo", "hi"}, State: StateRunning, Started: started, StartPosted: true, Timeout: time.Minute, Created: started.Add(-time.Minute), LogPath: filepath.Join(dir, "jobs", "job_inside_start", "log"), Dir: NodeBase("here") + "/jobs/job_inside_start", Unit: "dyna-job-job_inside_start.service"}
+	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
+		t.Fatal(err)
+	}
+	if err := dead.Store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	// The interrupted start left a folder the unit never ran in.
+	fake.Mkdir(path.Join(job.Dir, "detached"))
+	next, _, nextReporter, _ := newIdleService(t, legacy)
+	next.Store = dead.Store
+	next.Machines = dead.Machines
+	next.NewExecutor = dead.NewExecutor
+	next.Start(t.Context())
+	defer next.Stop()
+	<-onNode
+	end := <-nextReporter.finished
+	if end.State != StatePassed {
+		t.Fatalf("the job ended %s, want passed: a folder without a unit is an interrupted start, not a lost job", end.State)
+	}
+	select {
+	case start := <-nextReporter.started:
+		t.Fatalf("a second start for %s arrived; the row already says the start went out", start.ID)
+	default:
+	}
+	if n := len(fake.StartCalls()); n != 1 {
+		t.Fatalf("the node saw %d launch(es), want one fresh launch", n)
+	}
+	row, err := next.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != StatePassed || !row.Launched {
+		t.Fatalf("the row is %s with launched=%v, want passed with the launch recorded", row.State, row.Launched)
 	}
 }

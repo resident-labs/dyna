@@ -494,16 +494,14 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
 	reattach := job.State == StateRunning
-	// A crash at the start boundary - the running row saved, the start event
-	// not yet posted, the unit not yet launched - leaves a reattached row
-	// that must launch fresh and post its start. A row whose start went out
-	// attaches to the unit the crashed engine launched; a row whose start
-	// went out but whose unit never appeared - the crash fell between the
-	// record and the launch - is relaunched below, when the attach finds no
-	// folder on the node. The node's folder is the launch record: every
-	// started unit has one.
-	launch := !reattach || !job.StartPosted
-	if reattach && launch {
+	// A running row relaunches when the crashed engine never completed the
+	// launch: either the start event is missing - the crash fell before it -
+	// or the node never accepted the unit - the crash, or a node-side death,
+	// fell inside the start, after the folder was made but before the unit
+	// ran. A row whose start went out and whose unit was accepted attaches:
+	// relaunching that would run the job twice.
+	launch := !reattach || !job.StartPosted || !job.Launched
+	if reattach && launch && !job.StartPosted {
 		// The row's start event was lost to the crash; post it now, before
 		// the fresh launch, and let the pre-poll save record it.
 		if s.Reporter != nil {
@@ -585,6 +583,14 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	if launch {
 		spec.Script = jobScript(machine, job, resources)
+		if reattach {
+			// The crashed engine may have died after the node accepted the unit
+			// but before it recorded that: the unit can be starting under the
+			// same name this launch uses. Stop anything there first, best
+			// effort - a unit that never was stops as a no-op - so the fresh
+			// launch is the only one.
+			s.stopUnit(x, spec)
+		}
 		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
 			s.logger()("jobs: record started job %s: %v", job.ID, err)
 		} else if !won {
@@ -608,27 +614,17 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if poller == nil {
 		return
 	}
+	// The record that the node accepted the unit is one conditional column
+	// write the moment the start call returns, so no stale whole-row save can
+	// undo it and no restart mistakes a completed launch for an interrupted
+	// one.
+	poller.Launched = func(RunSpec) { s.Store.MarkLaunched(context.WithoutCancel(ctx), job.ID) }
 	// The node enforces the deadline itself; the engine allows the queue wait
 	// and a slow route on top before it stops following the job.
 	var timeoutCancel context.CancelFunc
 	runCtx, timeoutCancel := context.WithTimeout(ctx, job.Timeout+AdmissionWait+2*time.Minute)
 	defer timeoutCancel()
 	runErr := poller.Run(runCtx, spec, logWriter)
-	var lost *NodeLostError
-	if errors.As(runErr, &lost) && lost.Missing {
-		// The row says the start went out, but the node has no folder for the
-		// job: the engine that recorded the start crashed before it launched
-		// the unit. Every started unit has a folder, so the launch is
-		// idempotent node-side and this run launches the job now. A
-		// cancellation that landed meanwhile keeps its end.
-		if fresh, err := s.Store.Get(ctx, job.ID); err == nil && fresh.CancelRequested {
-			s.finish(&job, nil)
-			return
-		}
-		spec.Attach = false
-		spec.Script = jobScript(machine, job, resources)
-		runErr = poller.Run(runCtx, spec, logWriter)
-	}
 	if runErr != nil && errors.Is(runErr, context.Canceled) && EngineStopping() {
 		// The engine is stopping: the job keeps running on its node and the
 		// restarted engine reattaches through this row. The offset write is
