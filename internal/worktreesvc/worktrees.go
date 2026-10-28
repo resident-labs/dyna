@@ -116,6 +116,16 @@ func Remove(ctx context.Context, names []string, force bool) (RemoveResult, erro
 			errs = append(errs, err)
 			continue
 		}
+		protected, protectErr := worktrees.SessionProtected(ctx, rec)
+		if protectErr != nil {
+			errs = append(errs, fmt.Errorf("check ownership of %s: %w", rec.Path, protectErr))
+			result.Lines = append(result.Lines, fmt.Sprintf("retained %s (ownership check failed)", rec.Path))
+			continue
+		}
+		if protected {
+			result.Lines = append(result.Lines, fmt.Sprintf("retained %s (open session working directory)", rec.Path))
+			continue
+		}
 		state, err := worktrees.Inspect(rec)
 		if err != nil {
 			if !force {
