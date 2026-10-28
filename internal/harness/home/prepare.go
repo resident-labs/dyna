@@ -424,21 +424,25 @@ if [ -n "${DYNA_ROOM_SLICE:-}" ]; then
 	user=
 	chosen=
 	# Only leading options count: "--" or the first plain word starts the
-	# command, so a slice named later is the command's own argument.
+	# command, so a slice named later is the command's own argument. Options
+	# whose value follows as the next word (systemd-run --help lists them)
+	# consume that word, so a value never looks like the start of the command.
 	scan() {
 		while [ $# -gt 0 ]; do
 			case "$1" in
 				--) break ;;
-				-*) ;;
-				*) break ;;
-			esac
-			case "$1" in
 				--user) user=1 ;;
-				--slice|--slice=*|-pSlice=*|--property=Slice=*) chosen=1 ;;
-				-p|--property)
+				--slice-inherit|--slice|--slice=*|-pSlice=*|--property=Slice=*) chosen=1 ;;
+				-u|--unit|-p|--property|--description|--service-type|--uid|--gid|--nice|--working-directory|--root-directory|-E|--setenv|--job-mode|--background|--output|--json|--expand-environment|--path-property|--socket-property|--timer-property|--on-active|--on-boot|--on-startup|--on-unit-active|--on-unit-inactive|--on-calendar|-H|--host|-M|--machine|-C|--capsule)
 					shift
 					case "${1-}" in Slice=*) chosen=1 ;; esac
 					;;
+				# Attached values carry their own, including -pSlice=… above.
+				--*=*|-u*|-p*|-E*|-H*|-M*|-C*) ;;
+				# Any other option, including combined shorts such as -qq.
+				-*) ;;
+				# The first plain word starts the command.
+				*) break ;;
 			esac
 			[ $# -gt 0 ] && shift
 		done
