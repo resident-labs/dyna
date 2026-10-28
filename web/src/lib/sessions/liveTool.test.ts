@@ -2,16 +2,27 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import type { Plugin } from 'esbuild'
 import { domNames, installDom, load } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
 
 const format = readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8')
 
+// This fixture has only turn and timeline rows. Keep their real components,
+// but do not compile the large renderers used only by the other row types.
+const transcriptStubs: Plugin = {
+  name: 'unused-transcript-rows',
+  setup(builder) {
+    builder.onLoad({ filter: /[/\\](?:DmMessage|ReferenceRow|ThreadChip|VoiceRelay|SystemNote|CompactionDivider|UnknownEventRow)\.svelte$/ }, () => ({ contents: 'export default function Unused() {}', loader: 'js' }))
+    builder.onLoad({ filter: /[/\\]eventRenderers\.ts$/ }, () => ({ contents: 'export const rendererFor = () => null', loader: 'js' }))
+  },
+}
+
 // Mounts a component with the real format helpers and returns its text.
-async function render(component: string, props: object) {
+async function render(component: string, props: object, plugins: Plugin[] = []) {
   const dom = installDom()
   Reflect.set(globalThis, 'HTMLMediaElement', dom.window.HTMLMediaElement)
-  const { dir, default: C, mount, unmount, flushSync } = await load({ component, format })
+  const { dir, default: C, mount, unmount, flushSync } = await load({ component, format, plugins })
   let app
   try {
     flushSync(() => { app = mount(C, { target: need(document.getElementById('app'), '#app'), props }) })
@@ -36,7 +47,7 @@ test('the session view shows the current call from the live activity, not the fi
     { kind: 'timeline', key: 'timeline:1', ts: started, turn: { n: 1, started, status: 'running' }, steps: [{ kind: 'tool', key: 'tool:1', tool: 'read', target: 'old.go', ts: started }] },
   ] }
   const member = { name: 'root', hue: 1, state: 'live', address: 'repo:root', doing: { text: 'Read: new.go', since: now - 45000 } }
-  const html = await render('../sessions/DmRows', { dm, member, room: { name: 'repo' }, members: [] })
+  const html = await render('../sessions/DmRows', { dm, member, room: { name: 'repo' }, members: [] }, [transcriptStubs])
   assert.match(html, /class="doing[^"]*long[^"]*"[^>]*>Read: new\.go · 45s</)
   assert.doesNotMatch(html, /old\.go · 10m/)
 })
