@@ -57,7 +57,7 @@ func TestAJobCopiesItsArtifactsBeforeItsEnd(t *testing.T) {
 		for i, arg := range args {
 			if strings.Contains(arg, "keep=()") {
 				copied <- args[i+2:]
-				fmt.Fprintln(stderr, "out.bin")
+				fmt.Fprintln(stderr, "missing\tout.bin")
 				return nil
 			}
 		}
@@ -79,5 +79,35 @@ func TestAJobCopiesItsArtifactsBeforeItsEnd(t *testing.T) {
 	}
 	if finished.State != StatePassed || !strings.Contains(finished.Note, "artifacts not found: out.bin") {
 		t.Fatalf("finished job = %s %q, want passed with the missing artifact named", finished.State, finished.Note)
+	}
+}
+
+// A job cannot reach outside its work folder through a symlink it made: a
+// path whose real location escapes the folder is refused and named, and
+// nothing from outside is copied.
+func TestAnArtifactCannotEscapeThroughASymlink(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jobDir := t.TempDir()
+	work := filepath.Join(jobDir, "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(work, "link")); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "artifacts")
+	job := Job{Dir: jobDir, Artifacts: []string{"link/secret", "link"}}
+	note, err := copyArtifacts(t.Context(), Executor{Node: Conn{Name: "here"}}, job, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "link", "secret")); err == nil {
+		t.Fatal("a file outside the work folder was copied through a symlink")
+	}
+	if !strings.Contains(note, "outside the work folder: link/secret, link") {
+		t.Fatalf("note = %q, want it to name the refused path", note)
 	}
 }
