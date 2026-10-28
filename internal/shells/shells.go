@@ -843,6 +843,12 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	}
 	// A log failure must not leave the process running.
 	logErr := errors.Join(s.markStopped(id, by), s.logStop(id, "stop requested; sending SIGTERM to the process group"))
+	var cleanup func() (bool, error)
+	if s.stopJobProcesses != nil {
+		cleanup = func() (bool, error) { return s.stopJobProcesses(id) }
+	} else {
+		cleanup = captureJobProcesses(id)
+	}
 	_ = syscall.Kill(-in.Pid, syscall.SIGTERM)
 	pause := s.pause
 	if pause == nil {
@@ -860,11 +866,7 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	}
 	// The group leader can exit before a child that started a new session.
 	// The job stamp identifies those children without touching the supervisor.
-	stop := s.stopJobProcesses
-	if stop == nil {
-		stop = stopOrphans
-	}
-	_, cleanupErr := stop(id)
+	_, cleanupErr := cleanup()
 	logErr = errors.Join(logErr, cleanupErr)
 	in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
 	return in, errors.Join(logErr, err)
