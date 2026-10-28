@@ -11,7 +11,6 @@ import (
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/scratch"
-	"dyna-agent/internal/settings"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -668,16 +667,6 @@ const (
 // The deferred result.Model read and the deferred cleanups run in the original
 // order: stopSteering, then the invocation cleanup, then result.Model.
 func runJournaledState(ctx context.Context, p profile.Profile, prompt, cwd string, allowRecovery bool, nudgeDelay time.Duration, journal JournalOptions, steeringOpts SteeringOptions, session SessionOptions, exec ExecutionOptions, state *runState, accountID string) (result Result, runErr error) {
-	if p.Harness == profile.HarnessClaudeCode && p.Compact == nil {
-		v, err := settings.Load("")
-		if err != nil {
-			return Result{}, err
-		}
-		if v.HarnessCompactAtTokens > 0 {
-			rule := profile.CompactRuleFor(p.Harness)
-			p.Compact = &profile.Compact{Tokens: max(rule.Min, min(rule.Max, v.HarnessCompactAtTokens))}
-		}
-	}
 	p.NormalizeModels()
 	selected, candidates := SelectHealthyModel(p, cooldownNow())
 	p.Model = selected
@@ -807,7 +796,8 @@ func (r *journaledRun) compactBeforeTurn() error {
 			return fmt.Errorf("worker %s cannot resume harness session %s: %w", r.p.Name, r.session.ResumeID, err)
 		}
 	}
-	if r.inv.compact != nil && profile.CompactDue(r.p, r.session.ContextTokens) {
+	if r.inv.compact != nil && (profile.CompactDue(r.p, r.session.ContextTokens) ||
+		(r.p.Harness == profile.HarnessPi && r.p.Env["DYNA_PI_LEGACY_COMPACT"] == "1" && r.p.Compact != nil && r.session.ContextTokens >= r.p.Compact.Tokens)) {
 		completed, err := runCompaction(r.ctx, r.p, r.cwd, r.inv.compact(r.session.ResumeID), r.steering, r.exec, r.admitNativeAttempt)
 		if isNativeAdmissionError(err) {
 			return err
