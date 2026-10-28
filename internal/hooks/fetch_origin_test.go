@@ -13,14 +13,15 @@ import (
 	"testing"
 )
 
-// fetchRepo builds a Git repository with the given origin URL.
+// fetchRepo builds a Git repository with the given origin URL. No commit is
+// created: every test's fetch fails before it could read one, and a commit
+// would need an identity CI runners do not have.
 func fetchRepo(t *testing.T, origin string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "-q", "--initial-branch=main", dir},
 		{"-C", dir, "remote", "add", "origin", origin},
-		{"-C", dir, "commit", "--allow-empty", "-m", "base"},
 	} {
 		out, err := exec.Command("/usr/bin/git", args...).CombinedOutput()
 		if err != nil {
