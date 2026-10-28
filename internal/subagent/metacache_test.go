@@ -13,7 +13,7 @@ import (
 func TestMetadataReadsShareSnapshotAndSeeAtomicWrites(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	id := NewID()
-	m := Meta{ID: id, Name: "first", RoomID: "room", Room: "room", Closed: time.Now(), ClosedPosts: map[string]bool{"post": true}, InheritedInboxes: []InheritedInbox{{PendingIDs: []string{"pending"}}}}
+	m := Meta{ID: id, Name: "first", RoomID: "room", Room: "room", ClosedPosts: map[string]bool{"post": true}, InheritedInboxes: []InheritedInbox{{PendingIDs: []string{"pending"}}}}
 	write := func() {
 		t.Helper()
 		recordtest.Write(t, s.Root, id, m)
@@ -42,7 +42,7 @@ func TestMetadataReadsShareSnapshotAndSeeAtomicWrites(t *testing.T) {
 		t.Fatalf("returned value changed cache: %+v, %v", got, err)
 	}
 	// Two quick writes of the same size must still invalidate the snapshot,
-	// including a closed session's display data.
+	// including the session's display data.
 	for _, name := range []string{"other", "final"} {
 		m.Name = name
 		write()
@@ -61,6 +61,22 @@ func TestMetadataReadsShareSnapshotAndSeeAtomicWrites(t *testing.T) {
 	recordtest.Remove(t, s.Root, id)
 	if _, err := s.ReadMeta(id); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted metadata: %v", err)
+	}
+}
+
+func TestClosedMetadataDoesNotStayCached(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	id := NewID()
+	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", SpawnBrief: "open snapshot"})
+	if _, err := s.ReadMeta(id); err != nil {
+		t.Fatal(err)
+	}
+	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", Closed: time.Now(), SpawnBrief: "retained history"})
+	if _, err := s.ReadMeta(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := infoCache.Load(s.recordKey(id)); ok {
+		t.Fatal("a closed session's full metadata stayed in the open-session cache")
 	}
 }
 

@@ -74,7 +74,7 @@ func (s *Store) cachedClosed(id string) bool {
 // readRoomMeta distinguishes unassigned history from damaged room evidence.
 // It never invents membership or rewrites the original record.
 func (s *Store) readRoomMeta(id string) (Meta, bool, error) {
-	meta, _, err := s.readMetaRecord(id)
+	meta, err := s.readMetaRecord(id)
 	if err != nil {
 		return Meta{}, false, err
 	}
