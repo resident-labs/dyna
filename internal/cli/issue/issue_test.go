@@ -108,6 +108,33 @@ func TestIssueOwnerCrossRoomNote(t *testing.T) {
 	}
 }
 
+// D-401: a caller with no room, such as an unstamped workflow worker, files
+// nowhere; only the owner files without a room.
+func TestIssueUnstampedWorkerFiling(t *testing.T) {
+	f := newIssueFixture(t)
+	rooms, r, svc := f.rooms, f.rec, f.svc
+	other, err := rooms.Create(room.CreateInput{Name: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(mode.EnvWorkerRun, "run_20261028-000001-aaaaaaaa")
+	run := func(args ...string) (string, error) {
+		c := Command(Options{Service: func() *roomsvc.Service { return svc }})
+		b := &bytes.Buffer{}
+		c.SetOut(b)
+		c.SetErr(b)
+		c.SilenceUsage = true
+		c.SetArgs(args)
+		err := c.Execute()
+		return b.String(), err
+	}
+	for _, target := range []string{other.Name, r.Name} {
+		if _, err = run("--room", target, "Worker bug", "--note", "a full note that explains the whole problem"); err == nil {
+			t.Fatalf("unstamped worker filed an issue in %s", target)
+		}
+	}
+}
+
 func TestIssueCommands(t *testing.T) {
 	f := newIssueFixture(t)
 	r, svc := f.rec, f.svc
