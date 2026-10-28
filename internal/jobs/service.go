@@ -66,6 +66,12 @@ type Service struct {
 	logf func(string, ...any)
 	// onRun tells a test that the service began to run a job, synchronously.
 	onRun func(Job)
+	// ClaimEvery is how often a started service re-reads the job table for
+	// work another engine queued or cancelled. The default is claimEvery.
+	ClaimEvery time.Duration
+	// after waits one claim interval; tests replace it with a channel they
+	// control. Nil uses time.After.
+	after func(time.Duration) <-chan time.Time
 
 	mu      sync.Mutex
 	pollers map[string]*Poller
@@ -74,7 +80,10 @@ type Service struct {
 	// wake tells the claim loop that a job was queued. It is nil until the
 	// owner starts the service, so a standby engine only queues.
 	wake chan struct{}
-	wg   sync.WaitGroup
+	// halt ends the claim loop; claimDone closes when it has ended.
+	halt      chan struct{}
+	claimDone chan struct{}
+	wg        sync.WaitGroup
 }
 
 func (s *Service) logger() func(string, ...any) {
@@ -255,12 +264,16 @@ func (s *Service) resolveCommit(ctx context.Context, repo, ref string) (string, 
 // engine left on the nodes. The engine calls it once, at start.
 func (s *Service) Start(ctx context.Context) {
 	s.mu.Lock()
-	if s.stopped {
+	if s.stopped || s.claimDone != nil {
 		s.mu.Unlock()
 		return
 	}
 	wake := make(chan struct{}, 1)
 	s.wake = wake
+	halt := make(chan struct{})
+	s.halt = halt
+	done := make(chan struct{})
+	s.claimDone = done
 	s.mu.Unlock()
 	s.claim(ctx)
 	running, err := s.Store.Running(ctx)
@@ -270,22 +283,63 @@ func (s *Service) Start(ctx context.Context) {
 	for _, job := range running {
 		s.start(job)
 	}
+	after := s.after
+	if after == nil {
+		after = time.After
+	}
+	interval := s.ClaimEvery
+	if interval <= 0 {
+		interval = claimEvery
+	}
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-halt:
+				return
 			case <-wake:
-				s.mu.Lock()
-				stopped := s.stopped
-				s.mu.Unlock()
-				if stopped {
-					return
-				}
-				s.claim(context.WithoutCancel(ctx))
+			case <-after(interval):
 			}
+			s.mu.Lock()
+			stopped := s.stopped
+			s.mu.Unlock()
+			if stopped {
+				return
+			}
+			workCtx := context.WithoutCancel(ctx)
+			s.claim(workCtx)
+			s.stopCancelled(workCtx)
 		}
 	}()
+}
+
+// claimEvery is how often a started service re-reads the job table. A job
+// another engine queues while the owner runs reaches it within one interval.
+const claimEvery = 5 * time.Second
+
+// stopCancelled stops the running jobs another engine cancelled: their rows
+// say cancelled while this engine still holds the executor, so the node
+// process must stop and the row keeps its cancelled state.
+func (s *Service) stopCancelled(ctx context.Context) {
+	s.mu.Lock()
+	stops := make(map[string]func(), len(s.stops))
+	for key, stop := range s.stops {
+		if id, ok := strings.CutPrefix(key, "job:"); ok {
+			stops[id] = stop
+		}
+	}
+	s.mu.Unlock()
+	for id, stop := range stops {
+		row, err := s.Store.Get(ctx, id)
+		if err != nil {
+			continue
+		}
+		if row.State == StateCancelled {
+			stop()
+		}
+	}
 }
 
 // claim starts every queued job, oldest first.
@@ -337,11 +391,20 @@ func (s *Service) Stop() {
 	s.stopped = true
 	stops := s.stops
 	s.stops = nil
+	halt := s.halt
+	s.halt = nil
+	done := s.claimDone
 	s.mu.Unlock()
 	for _, stop := range stops {
 		if stop != nil {
 			stop()
 		}
+	}
+	if halt != nil {
+		close(halt)
+	}
+	if done != nil {
+		<-done
 	}
 	s.wg.Wait()
 }
@@ -389,8 +452,10 @@ func (s *Service) start(job Job) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.stops["job:"+job.ID] = cancel
-	s.mu.Unlock()
+	// The wait group grows under the mutex that Stop also takes, so Stop can
+	// never pass its Wait between this registration and the goroutine.
 	s.wg.Add(1)
+	s.mu.Unlock()
 	go s.run(job, ctx, cancel)
 }
 
@@ -546,10 +611,18 @@ func (s *Service) finish(job *Job, err error) {
 	job.ExitCode = exit
 	job.Ended = s.Store.now()
 	ctx := context.Background()
+	// Another engine may have cancelled the row while this one held the
+	// executor. Its terminal state stays, and its report already went out,
+	// so this engine stops the node process and records that same end.
+	adopted := false
+	if cur, err := s.Store.Get(ctx, job.ID); err == nil && cur.State.Finished() {
+		job.State, job.ExitCode, job.Ended = cur.State, cur.ExitCode, cur.Ended
+		adopted = true
+	}
 	if err := s.Store.Save(ctx, *job); err != nil {
 		s.logger()("jobs: record finished job %s: %v", job.ID, err)
 	}
-	if s.Reporter != nil {
+	if s.Reporter != nil && !adopted {
 		if err := s.Reporter.JobFinished(ctx, *job); err != nil {
 			s.logger()("jobs: report finished job %s: %v", job.ID, err)
 		}
@@ -581,8 +654,6 @@ func machineFacts(m machines.Machine) Facts {
 	return Facts{Slots: slots, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal}
 }
 
-// logStore streams a job log to its file and tracks the stored size on the
-// live job, so a save keeps the offset the run reached.
 // logStore streams a job log to its file and tracks the stored size on the
 // live job, so a save keeps the offset the run reached. The lock makes the
 // file bytes and the tracked offset one unit: a save through snapshot never
