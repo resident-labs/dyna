@@ -28,6 +28,10 @@ type fakeCommands struct {
 	hold     chan struct{}
 	started  chan string
 	next     func(spec CommandSpec) (CommandExit, string)
+	// startErr, when set, fails Start: the command never runs.
+	startErr error
+	// attempts counts Start calls, including ones that startErr refused.
+	attempts int
 }
 
 func newFakeCommands() *fakeCommands {
@@ -37,6 +41,10 @@ func newFakeCommands() *fakeCommands {
 func (f *fakeCommands) Start(_ context.Context, spec CommandSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.attempts++
+	if f.startErr != nil {
+		return "", f.startErr
+	}
 	f.specs = append(f.specs, spec)
 	id := fmt.Sprintf("sh_%d", len(f.specs))
 	exit, out := CommandExit{LogPath: "/logs/" + id}, ""

@@ -49,7 +49,7 @@ export type TerminalVerdict = "done" | "failed" | "declined" | "denied" | "withd
 export type ShellState = "completed" | "failed" | "stopped"
 
 // RunState is a named string type of an event payload.
-export type RunState = "completed" | "failed" | "stopped"
+export type RunState = "completed" | "failed" | "stopped" | "interrupted"
 
 // TurnState is a named string type of an event payload.
 export type TurnState = "completed" | "failed" | "stopped"
@@ -1333,7 +1333,7 @@ const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "he
 const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
 const TERMINAL_VERDICT: ReadonlySet<unknown> = new Set(["done", "failed", "declined", "denied", "withdrawn"])
 const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
-const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
+const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped", "interrupted"])
 const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])

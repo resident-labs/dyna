@@ -41,7 +41,7 @@ func spoolFixture(t *testing.T) (*runnerSpool, *subagent.Manager) {
 	sessions := filepath.Join(dataDir, "sessions")
 	recordtest.Write(t, sessions, spoolSession, subagent.Meta{ID: spoolSession, Name: "runner", RoomID: "room_20261021-000000-00000001", Room: "work", Turns: 1})
 	m := &subagent.Manager{Store: &subagent.Store{Root: sessions}}
-	s, err := newRunnerSpool(dataDir, func() *subagent.Manager { return m }, state.For(db), t.Logf)
+	s, err := newRunnerSpool(dataDir, func() *subagent.Manager { return m }, state.For(db), t.Logf, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

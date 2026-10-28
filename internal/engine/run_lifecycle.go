@@ -13,6 +13,7 @@ import (
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/notify"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
@@ -21,9 +22,13 @@ import (
 
 // RunLifecycleBindings exposes the production coordinator handlers to the
 // engine and isolated workflow fixtures. Each write requires its own run.
-func RunLifecycleBindings() []websvc.Binding {
+func RunLifecycleBindings() []websvc.Binding { return runLifecycleBindings(nil) }
+
+func runLifecycleBindings(notices *notify.Service) []websvc.Binding {
 	return []websvc.Binding{
-		{Name: "FinishRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: finishRun},
+		{Name: "FinishRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: func(ctx context.Context, in callspec.RunFinish) (runstore.Meta, error) {
+			return finishRun(ctx, in, notices)
+		}},
 		{Name: "AddRunDirectories", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: addRunDirectories},
 	}
 }
@@ -102,7 +107,7 @@ func runDirectoriesRecoveryBinding(w *state.Writer) websvc.Binding {
 	}}
 }
 
-func finishRun(ctx context.Context, in callspec.RunFinish) (runstore.Meta, error) {
+func finishRun(ctx context.Context, in callspec.RunFinish, notices *notify.Service) (runstore.Meta, error) {
 	if err := checkRunCoordinator(ctx, in.Run); err != nil {
 		return runstore.Meta{}, err
 	}
@@ -110,7 +115,7 @@ func finishRun(ctx context.Context, in callspec.RunFinish) (runstore.Meta, error
 	if err != nil {
 		return runstore.Meta{}, err
 	}
-	return writeRunFinish(ctx, state.For(db), in)
+	return writeRunFinish(ctx, state.For(db), in, notices)
 }
 
 // runLifecycleEvent admits only the authenticated actor. Recovery supplies
@@ -215,7 +220,7 @@ func settleInterrupted(ctx context.Context, w *state.Writer, in callspec.RunFini
 	return in, nil
 }
 
-func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish) (runstore.Meta, error) {
+func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish, notices *notify.Service) (runstore.Meta, error) {
 	event, err := runLifecycleEvent(ctx, w, in.Run)
 	if err != nil {
 		return runstore.Meta{}, err
@@ -225,14 +230,20 @@ func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish)
 		return runstore.Meta{}, err
 	}
 	var meta runstore.Meta
+	var changed bool
 	err = w.Write(ctx, event, func(conn *sql.Conn) error {
 		if err := checkRunEvent(ctx, conn, event); err != nil {
 			return err
 		}
 		var err error
-		meta, _, err = runstore.FinishWithDirectoriesTx(ctx, conn, in.Run, in.Status, in.Error, in.EndedAt, in.DirectoriesComplete)
+		meta, changed, err = runstore.FinishWithDirectoriesTx(ctx, conn, in.Run, in.Status, in.Error, in.EndedAt, in.DirectoriesComplete)
 		if err != nil {
 			return err
+		}
+		if changed && meta.Status == runstore.StatusInterrupted {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO run_update_notices(run) VALUES(?)", meta.ID); err != nil {
+				return err
+			}
 		}
 		raw, err := json.Marshal(meta)
 		if err != nil {
@@ -240,11 +251,14 @@ func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish)
 		}
 		return w.FinishRequestIn(ctx, conn, "FinishRun", raw)
 	})
+	if err == nil && changed && meta.Status == runstore.StatusInterrupted && notices != nil {
+		reportUpdateNotice(context.Background(), w, notices, meta.ID)
+	}
 	return meta, err
 }
 
-func runFinishRecoveryBinding(w *state.Writer) websvc.Binding {
+func runFinishRecoveryBinding(w *state.Writer, notices *notify.Service) websvc.Binding {
 	return websvc.Binding{Name: "FinishRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, in callspec.RunFinish) (runstore.Meta, error) {
-		return writeRunFinish(ctx, w, in)
+		return writeRunFinish(ctx, w, in, notices)
 	}}
 }
