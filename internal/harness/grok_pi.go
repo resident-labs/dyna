@@ -10,7 +10,7 @@ import (
 )
 
 func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv invocation, err error) {
-	if hasAnyOption(p.ExtraArgs, "--mode", "--print", "-p", "--model", "--session", "--session-id", "--no-session", "--resume", "-r", "--continue", "-c", "--fork", "--export", "--compaction-trigger-tokens") {
+	if hasAnyOption(p.ExtraArgs, "--mode", "--print", "-p", "--model", "--session", "--session-id", "--no-session", "--resume", "-r", "--continue", "-c", "--fork", "--export", "--compaction-trigger-tokens", "--settings", "--mcp-config", "--models-file") {
 		return inv, fmt.Errorf("pi extraArgs conflict with reserved headless output, model, prompt, or session options")
 	}
 	id, err := newSessionID()

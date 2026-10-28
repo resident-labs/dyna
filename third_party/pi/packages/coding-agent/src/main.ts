@@ -34,7 +34,7 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, setAgentFileOverrides, type AgentFileOverrides, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -70,6 +70,7 @@ import { initTheme, setThemeJsonValidator, stopThemeWatcher } from "./modes/inte
 import { validateThemeJson } from "./modes/interactive/theme/theme-schema.ts";
 import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
+import { existsSync } from "node:fs";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
@@ -311,6 +312,27 @@ function validateForkFlags(parsed: Args): void {
 		console.error(chalk.red(`Error: --fork cannot be combined with ${conflictingFlags.join(", ")}`));
 		process.exit(1);
 	}
+}
+
+// --settings, --mcp-config and --models-file each replace one agent-directory
+// file for this process. A path that does not exist is a startup error, so a
+// typo cannot silently fall back to the agent directory's own file.
+function applyAgentFileOverrides(parsed: Args): void {
+	const overrides: AgentFileOverrides = {};
+	for (const [flag, value, key] of [
+		["--settings", parsed.settings, "settings"],
+		["--mcp-config", parsed.mcpConfig, "mcpConfig"],
+		["--models-file", parsed.modelsFile, "models"],
+	] as const) {
+		if (value === undefined) continue;
+		const resolved = resolvePath(value);
+		if (!existsSync(resolved)) {
+			console.error(chalk.red(`Error: ${flag} requires an existing file: ${value}`));
+			process.exit(1);
+		}
+		overrides[key] = resolved;
+	}
+	setAgentFileOverrides(overrides);
 }
 
 function validateSessionIdFlags(parsed: Args): void {
@@ -676,6 +698,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
+	applyAgentFileOverrides(parsed);
 
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
