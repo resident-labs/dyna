@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/profile"
@@ -85,5 +86,43 @@ func TestPreservedLiveTurnHoldsCapacity(t *testing.T) {
 	st = dispatchReviewPool(t, e)
 	if st.Records[keys[1]].Reviewer == "" || len(e.launches) != 2 {
 		t.Fatal("capacity did not free once the turn ended")
+	}
+}
+
+// A head that moves while its reviewer's turn still runs must not re-enter the
+// queue: with spare capacity the pool would start a second reviewer for the
+// same record while the first still runs. The record queues once the turn ends
+// and the stale reviewer closes (D-411).
+func TestMovedHeadWaitsForLiveTurnBeforeReplacement(t *testing.T) {
+	e, keys := readyReviewPool(t, 1)
+	e.s.ReviewerProfiles = func() ([]profile.Profile, error) {
+		return []profile.Profile{{Name: "judge", MaxConcurrent: 2}}, nil
+	}
+	st := dispatchReviewPool(t, e)
+	id := st.Records[keys[0]].Reviewer
+	newHead := strings.Repeat("c", 40)
+	if err := e.s.Store.update(func(st *State) error {
+		st.Records[keys[0]].Head = newHead
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.setPullHead(17, newHead)
+	st = dispatchReviewPool(t, e)
+	if len(e.launches) != 1 {
+		t.Fatalf("moved head started a second reviewer while the first still runs: %d launches", len(e.launches))
+	}
+	if got := e.reviewers[id].Status; got != subagent.StatusRunning {
+		t.Fatalf("pool closed the running reviewer: %q", got)
+	}
+	// The turn ends, so the pool closes the stale reviewer and re-reviews.
+	e.endReviewerTurn(id)
+	st = dispatchReviewPool(t, e)
+	if got := e.reviewers[id].Status; got != subagent.StatusClosed {
+		t.Fatal("stale reviewer stayed open after its turn ended")
+	}
+	r := st.Records[keys[0]]
+	if r.Reviewer == id || r.Reviewer == "" || r.RoundHead != newHead || len(e.launches) != 2 {
+		t.Fatalf("new head did not get a fresh reviewer: %+v launches %d", r, len(e.launches))
 	}
 }

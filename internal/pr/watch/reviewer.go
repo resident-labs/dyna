@@ -416,7 +416,18 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 func (f ReviewFacts) Queue(roomID string) []*Record {
 	queue, blocked := []*Record{}, []*Record{}
 	for _, r := range f.Need {
-		if (roomID == "" || r.RoomID == roomID) && f.Busy[r.Key].Info.ID == "" {
+		if roomID != "" && r.RoomID != roomID {
+			continue
+		}
+		// A record whose assigned reviewer still has a live turn is not
+		// queueable, whatever head that turn reviews: with spare capacity a
+		// moved head must not start a second reviewer while the first runs
+		// (D-411). Busy turns are live too, so this covers them.
+		live, ok := f.Sessions[r.Reviewer]
+		if ok && prfacts.TurnLive(live.Info, live.Turn) {
+			continue
+		}
+		if f.Busy[r.Key].Info.ID == "" {
 			if dependencyWaiting(f.State, *r) {
 				blocked = append(blocked, r)
 			} else {
