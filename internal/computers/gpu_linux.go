@@ -42,10 +42,13 @@ type renderGPU struct {
 
 // pickRenderGPU resolves the computers.renderNode setting against one
 // /sys/class/drm directory. The value "auto", an empty value, or a path that
-// is not an existing render node picks the first node whose card has no
+// names no listed render node picks the first node whose card has no
 // connected connector, so it drives no display; when every card drives one,
 // or no card is known, the first node stays, the behavior before D-352.
-// An existing /dev/dri/renderD<digits> path wins over auto.
+// A path that names a listed /dev/dri/renderD<digits> node wins over auto,
+// whatever card it belongs to. Only the listing decides: the same sysfs tree
+// that startDesktop will render from, with no look at /dev/dri, so a stale
+// setting on a machine whose nodes were renumbered falls back to auto.
 func pickRenderGPU(setting, class string) (renderGPU, bool) {
 	setting = strings.TrimSpace(setting)
 	gpus := listRenderGPUs(class)
@@ -53,14 +56,10 @@ func pickRenderGPU(setting, class string) (renderGPU, bool) {
 		return renderGPU{}, false
 	}
 	if name := filepath.Base(setting); strings.HasPrefix(setting, "/dev/dri/") && isRenderNodeName(name) {
-		if stat, err := os.Stat(setting); err == nil && !stat.IsDir() {
-			for _, gpu := range gpus {
-				if strings.HasSuffix(gpu.Node, name) || gpu.Node == setting {
-					return gpu, true
-				}
+		for _, gpu := range gpus {
+			if filepath.Base(gpu.Node) == name || gpu.Node == setting {
+				return gpu, true
 			}
-			// The node exists on /dev/dri but sysfs did not list it.
-			return renderGPU{Node: setting}, true
 		}
 	}
 	display := displayCards(class)
