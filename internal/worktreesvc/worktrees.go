@@ -180,6 +180,14 @@ func Prune(ctx context.Context, age time.Duration, force, dryRun bool) (PruneRes
 		if now.Sub(rec.RetainedAt) < age && !runMissing {
 			continue
 		}
+		protected, protectErr := worktrees.SessionProtected(ctx, rec)
+		if protectErr != nil || protected {
+			if protectErr != nil {
+				errs = append(errs, fmt.Errorf("check ownership of %s: %w", rec.Path, protectErr))
+			}
+			result.Decisions = append(result.Decisions, PruneDecision{Path: rec.Path, RunID: rec.RunID, State: "session protected", Action: worktrees.ActionSkipped})
+			continue
+		}
 		state, err := worktrees.Inspect(rec)
 		if err != nil {
 			if !force {
@@ -195,6 +203,14 @@ func Prune(ctx context.Context, age time.Duration, force, dryRun bool) (PruneRes
 		}
 		result.Decisions = append(result.Decisions, PruneDecision{Path: rec.Path, RunID: rec.RunID, State: state, Action: action})
 		if dryRun || action == worktrees.ActionSkipped {
+			continue
+		}
+		protected, protectErr = worktrees.SessionProtected(ctx, rec)
+		if protectErr != nil || protected {
+			if protectErr != nil {
+				errs = append(errs, fmt.Errorf("recheck ownership of %s: %w", rec.Path, protectErr))
+			}
+			result.Decisions[len(result.Decisions)-1].Action = worktrees.ActionSkipped
 			continue
 		}
 		if err := worktrees.Remove(rec, force); err != nil {
