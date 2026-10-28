@@ -398,9 +398,10 @@ func TestOwnerClaimsWhatAStandbyQueuedLater(t *testing.T) {
 }
 
 // TestStandbyCancelStopsTheOwnersJob is the fail-first test for review
-// finding 3 of round 3: a standby engine cancels a job the owner runs. The
-// node process stops, the row keeps its cancelled end, and the finished
-// event is reported once.
+// finding 3 of round 3 and the round-6 event order: a standby engine cancels
+// a job the owner runs. The node process stops, the row keeps its cancelled
+// end, and the owner alone reports the events, in order: one start, then one
+// cancelled end. The canceller posts nothing.
 func TestStandbyCancelStopsTheOwnersJob(t *testing.T) {
 	// The job blocks until it is stopped, and its folder cleanup is the last
 	// node call of a finished run, so the test can see the run ended.
@@ -441,17 +442,22 @@ func TestStandbyCancelStopsTheOwnersJob(t *testing.T) {
 	if _, err := standby2.Cancel(t.Context(), job.ID); err != nil {
 		t.Fatal(err)
 	}
-	// The canceller reports the end once, as the one whose session submitted.
-	if event := <-standby2Reporter.finished; event.State != StateCancelled {
-		t.Fatalf("the canceller reported %s, want cancelled", event.State)
+	// The canceller posts nothing; the owner owns the job's events.
+	select {
+	case event := <-standby2Reporter.finished:
+		t.Fatalf("the canceller posted %s; the owner owns the events", event.State)
+	default:
 	}
 	tick <- time.Now()
 	<-rmDone
-	// The owner stopped the node process and recorded the cancelled end
-	// without a second report.
+	// The owner stopped the node process and reports the end, once, after
+	// the start it already posted.
+	if event := <-ownerReporter.finished; event.State != StateCancelled {
+		t.Fatalf("the owner reported %s, want cancelled", event.State)
+	}
 	select {
 	case event := <-ownerReporter.finished:
-		t.Fatalf("the owner reported %s too; the end is reported once", event.State)
+		t.Fatalf("a second end %s arrived; the end is reported once", event.State)
 	default:
 	}
 	if fake.StopCount() == 0 {
@@ -627,4 +633,145 @@ func TestACancelAfterTheStartKeepsTheRunsRecord(t *testing.T) {
 	if stored.State != StateCancelled || stored.Started.IsZero() || stored.Dir == "" || stored.Unit == "" {
 		t.Fatalf("the stored row lost its run record: state=%s started=%v dir=%q unit=%q", stored.State, stored.Started, stored.Dir, stored.Unit)
 	}
+}
+
+// TestACancelDuringTheRunsPreparePostsNothing is the fail-first test for
+// the round-6 review, first interleaving: a standby cancels after the owner
+// recorded the start in the table but before the owner posts the start
+// event. Nobody posts anything — no end without a start — the run abandons
+// the job, and the node never sees it. The prepare hook places the cancel
+// exactly in that window.
+func TestACancelDuringTheRunsPreparePostsNothing(t *testing.T) {
+	owner, fake, ownerReporter, _ := newIdleService(t, blockingJob("never runs"))
+	cancelled := make(chan struct{})
+	abandoned := make(chan struct{})
+	owner.onPrepared = func(job Job) {
+		standby, _, standbyReporter, _ := newIdleService(t, blockingJob("never runs"))
+		standby.Store = owner.Store
+		standby.Machines = owner.Machines
+		standby.NewExecutor = owner.NewExecutor
+		if _, err := standby.Cancel(t.Context(), job.ID); err != nil {
+			t.Errorf("cancel: %v", err)
+		}
+		standby.Stop()
+		select {
+		case event := <-standbyReporter.finished:
+			t.Errorf("the canceller posted %s with no start posted", event.State)
+		default:
+		}
+		close(cancelled)
+	}
+	owner.onAbandoned = func(Job) { close(abandoned) }
+	owner.Start(t.Context())
+	if _, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}}); err != nil {
+		t.Fatal(err)
+	}
+	<-cancelled
+	<-abandoned
+	owner.Stop()
+	if n := len(fake.StartCalls()); n != 0 {
+		t.Fatalf("the node started %d job(s) after the cancel", n)
+	}
+	select {
+	case event := <-ownerReporter.finished:
+		t.Fatalf("an end %s was posted with no start posted", event.State)
+	default:
+	}
+	select {
+	case start := <-ownerReporter.started:
+		t.Fatalf("a start of %s was posted after the cancel", start.ID)
+	default:
+	}
+	row, err := owner.Store.List(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(row) != 1 || row[0].State != StateCancelled {
+		t.Fatalf("the jobs are %v, want one cancelled row", row)
+	}
+}
+
+// gateReporter holds the start event of one job until the test releases it,
+// so a cancel can land between the owner's started write and its start post.
+type gateReporter struct {
+	inner    Reporter
+	hold     chan struct{}
+	release  chan struct{}
+	heldOnce bool
+}
+
+func (g *gateReporter) JobStarted(ctx context.Context, job Job) error {
+	if !g.heldOnce {
+		g.heldOnce = true
+		close(g.hold)
+		<-g.release
+	}
+	return g.inner.JobStarted(ctx, job)
+}
+
+func (g *gateReporter) JobFinished(ctx context.Context, job Job) error {
+	return g.inner.JobFinished(ctx, job)
+}
+
+// TestAStartIsPostedBeforeItsCancelledEndWhenCancelRacesThePost is the
+// fail-first test for the round-6 review, second interleaving: a standby
+// cancels after the owner saved the running row but before the owner posts
+// the start event. The start is still posted first and the end after it,
+// both by the owner; the canceller posts nothing.
+func TestAStartIsPostedBeforeItsCancelledEndWhenCancelRacesThePost(t *testing.T) {
+	owner, _, ownerReporter, _ := newIdleService(t, blockingJob("working"))
+	gate := &gateReporter{inner: ownerReporter, hold: make(chan struct{}), release: make(chan struct{})}
+	owner.Reporter = gate
+	tick := make(chan time.Time)
+	owner.after = func(time.Duration) <-chan time.Time { return tick }
+	owner.Start(t.Context())
+	defer owner.Stop()
+	standby, _, standbyReporter, _ := newIdleService(t, blockingJob("never runs"))
+	standby.Store = owner.Store
+	standby.Machines = owner.Machines
+	standby.NewExecutor = owner.NewExecutor
+	job, err := standby.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	standby.Stop()
+	tick <- time.Now()
+	// The owner saved the running row and is about to post the start; the
+	// standby cancels inside that window.
+	<-gate.hold
+	if _, err := standby2Cancel(t, owner, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-standbyReporter.finished:
+		t.Fatalf("the canceller posted %s; the owner owns the events", event.State)
+	default:
+	}
+	close(gate.release)
+	started := <-ownerReporter.started
+	if started.ID != job.ID {
+		t.Fatalf("started job %s, want %s", started.ID, job.ID)
+	}
+	// The claim tick stops the node process; the end follows the start.
+	tick <- time.Now()
+	finished := <-ownerReporter.finished
+	if finished.State != StateCancelled {
+		t.Fatalf("the job ended %s, want cancelled", finished.State)
+	}
+	select {
+	case event := <-ownerReporter.finished:
+		t.Fatalf("a second end %s arrived; the end is reported once", event.State)
+	default:
+	}
+}
+
+// standby2Cancel cancels from a fresh standby service that shares the store.
+func standby2Cancel(t *testing.T, owner *Service, id string) (Job, error) {
+	t.Helper()
+	standby, _, _, _ := newIdleService(t, blockingJob("never runs"))
+	standby.Store = owner.Store
+	standby.Machines = owner.Machines
+	standby.NewExecutor = owner.NewExecutor
+	defer standby.Stop()
+	return standby.Cancel(t.Context(), id)
 }
