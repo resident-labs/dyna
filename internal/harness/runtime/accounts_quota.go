@@ -98,21 +98,10 @@ func readingHasQuotaLeft(o *store.Observation, failedAt, now time.Time) bool {
 	return true
 }
 
-// readingOutOfQuota reports that a saved usage reading has no quota left, using
-// the same rule as chooseUsage. A missing reading, or one with no weekly
-// window, is pickable. The time is the earliest reset the reading names.
+// readingOutOfQuota applies the shared eligibility decision and returns the
+// earliest future reset named by an ineligible reading.
 func readingOutOfQuota(o *store.Observation, now time.Time) (time.Time, bool) {
-	if o == nil || store.WeeklyWindow(o) == nil {
-		return time.Time{}, false
-	}
-	blocked := o.Unavailable || (o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now))
-	if w := store.SessionWindow(o); !blocked && w != nil && w.UsedPercent != nil && *w.UsedPercent >= store.NearCapUsedPercent {
-		blocked = true
-	}
-	if w := store.WeeklyWindow(o); !blocked && w.UsedPercent != nil && *w.UsedPercent >= store.NearCapUsedPercent {
-		blocked = true
-	}
-	if !blocked {
+	if store.DecideUsage(o, now).Eligible {
 		return time.Time{}, false
 	}
 	at := time.Time{}
