@@ -4,7 +4,7 @@ import { FileAuthStorageBackend } from "../core/auth-storage.ts";
 import { stripBom } from "../utils/text.ts";
 import type { Args } from "./args.ts";
 
-export type AuthCommandKind = "check" | "api_key" | "bearer_token" | "list" | "set" | "remove";
+export type AuthCommandKind = "check" | "api_key" | "bearer_token" | "list" | "set" | "remove" | "apply";
 
 export interface AuthCommand {
 	kind: AuthCommandKind;
@@ -25,6 +25,7 @@ const AUTH_COMMAND_USAGE: Record<AuthCommandKind, string> = {
 	list: `${APP_NAME} auth list [--json]`,
 	set: `${APP_NAME} auth set --provider <provider>`,
 	remove: `${APP_NAME} auth remove --provider <provider>`,
+	apply: `${APP_NAME} auth apply`,
 };
 
 export function getAuthCommandName(kind: AuthCommandKind): string {
@@ -33,7 +34,8 @@ export function getAuthCommandName(kind: AuthCommandKind): string {
 	if (kind === "bearer_token") return "auth print-bearer-token";
 	if (kind === "list") return "auth list";
 	if (kind === "set") return "auth set";
-	return "auth remove";
+	if (kind === "remove") return "auth remove";
+	return "auth apply";
 }
 
 export function getAuthCommandUsage(kind: AuthCommandKind): string {
@@ -55,10 +57,11 @@ export function printAuthCommandHelp(): void {
   pi auth list [--json]
   pi auth set --provider <provider>
   pi auth remove --provider <provider>
+  pi auth apply
 
 Auth commands require at least one of --provider or --model. Checks refresh expired OAuth credentials by default; --no-refresh prevents this. --credentials emits the credential, or includes it in JSON output.
 
-Auth storage commands read and write the login file under its own lock: list prints the stored providers (--json prints the entries), set stores one entry read as JSON from stdin, remove drops one provider (a missing entry is not an error).`);
+Auth storage commands read and write the login file under its own lock: list prints the stored providers (--json prints the entries), set stores one entry read as JSON from stdin, remove drops one provider (a missing entry is not an error), apply performs a whole edit of one JSON object on stdin under one lock: an optional "set" object of entries, an optional "remove" array of provider ids, and an optional "expect" object that makes the command refuse unless the file still holds exactly it; apply prints the resulting entries as one JSON object.`);
 }
 
 export function parseAuthCommand(args: string[]): AuthCommand | undefined {
@@ -77,7 +80,9 @@ export function parseAuthCommand(args: string[]): AuthCommand | undefined {
 							? "set"
 							: args[1] === "remove"
 								? "remove"
-								: undefined;
+								: args[1] === "apply"
+									? "apply"
+									: undefined;
 	if (!kind) {
 		throw new AuthCommandError(
 			`Unknown auth command "${args[1] ?? ""}". Use "${APP_NAME} auth help" for the supported commands.`,
@@ -151,6 +156,55 @@ function parseAuthEntries(current: string | undefined): Record<string, unknown> 
 	return parsed as Record<string, unknown>;
 }
 
+/** One whole-file edit of the login file, read as JSON from apply's stdin. */
+type AuthApplyEdit = {
+	set?: Record<string, unknown>;
+	remove?: string[];
+	expect?: Record<string, unknown>;
+};
+
+function parseAuthApplyEdit(stdin: string | undefined): AuthApplyEdit {
+	let parsed: unknown;
+	try {
+		if (stdin === undefined) throw new Error();
+		parsed = JSON.parse(stripBom(stdin));
+	} catch {
+		throw new AuthCommandError("auth apply requires one JSON edit object on stdin.");
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new AuthCommandError("auth apply requires one JSON object on stdin.");
+	}
+	const edit = parsed as AuthApplyEdit;
+	if (edit.set !== undefined && (typeof edit.set !== "object" || edit.set === null || Array.isArray(edit.set))) {
+		throw new AuthCommandError("auth apply \"set\" must be one object of entries.");
+	}
+	if (edit.remove !== undefined) {
+		if (!Array.isArray(edit.remove) || edit.remove.some((id) => typeof id !== "string")) {
+			throw new AuthCommandError("auth apply \"remove\" must be one array of provider ids.");
+		}
+	}
+	if (edit.expect !== undefined && (typeof edit.expect !== "object" || edit.expect === null || Array.isArray(edit.expect))) {
+		throw new AuthCommandError("auth apply \"expect\" must be one object of entries.");
+	}
+	return edit;
+}
+
+function applyAuthEdit(entries: Record<string, unknown>, edit: AuthApplyEdit): Record<string, unknown> {
+	for (const id of edit.remove ?? []) delete entries[id];
+	for (const [id, entry] of Object.entries(edit.set ?? {})) entries[id] = entry;
+	return entries;
+}
+
+/** Reports whether two JSON values hold the same content: apply's expect check. */
+function sameJsonValues(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	const keys = Object.keys(a as object);
+	if (keys.length !== Object.keys(b as object).length) return false;
+	return keys.every((key) => key in (b as object) && sameJsonValues((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+}
+
 /**
  * Runs the auth storage commands: list prints the stored providers, set stores
  * one entry read as JSON from stdin, remove drops one provider. Every command
@@ -168,6 +222,19 @@ export async function runAuthStorageCommand(
 		} else {
 			for (const entry of Object.keys(entries).sort()) console.log(entry);
 		}
+		return;
+	}
+	if (command.kind === "apply") {
+		const edit = parseAuthApplyEdit(stdin);
+		const result = await backend.withLockAsync(async (current) => {
+			const entries = parseAuthEntries(current);
+			if (edit.expect !== undefined && !sameJsonValues(entries, edit.expect)) {
+				throw new AuthCommandError("The login file changed since it was read.");
+			}
+			const next = applyAuthEdit(entries, edit);
+			return { result: next, next: JSON.stringify(next, null, 2) };
+		});
+		console.log(JSON.stringify(result));
 		return;
 	}
 	const provider = command.provider;
