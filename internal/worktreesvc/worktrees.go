@@ -123,6 +123,7 @@ func Remove(ctx context.Context, names []string, force bool) (RemoveResult, erro
 			continue
 		}
 		if protected {
+			errs = append(errs, fmt.Errorf("worktree %s is an open session's working directory; close the session first", rec.Path))
 			result.Lines = append(result.Lines, fmt.Sprintf("retained %s (open session working directory)", rec.Path))
 			continue
 		}
