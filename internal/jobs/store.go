@@ -214,7 +214,6 @@ func (s Store) Save(ctx context.Context, job Job) error {
 	if err != nil {
 		return err
 	}
-	command := string(encoded)
 	var exit any
 	if job.ExitCode != nil {
 		exit = *job.ExitCode
@@ -226,12 +225,63 @@ func (s Store) Save(ctx context.Context, job Job) error {
 		return t.UnixMilli()
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note)
+		return upsertJob(ctx, conn, job, encoded, exit, ms)
+	})
+}
+
+// SaveOpen writes job the way Save does, inside one transaction that reads
+// the row first: a row that already reached a terminal state keeps it and
+// wins, so a late cancel is never overwritten by a concurrent start or
+// finish. It returns the row that holds after the call and whether job's own
+// write went through.
+func (s Store) SaveOpen(ctx context.Context, job Job) (Job, bool, error) {
+	db, err := s.db()
+	if err != nil {
+		return job, false, err
+	}
+	encoded, err := json.Marshal(job.Command)
+	if err != nil {
+		return job, false, err
+	}
+	var exit any
+	if job.ExitCode != nil {
+		exit = *job.ExitCode
+	}
+	ms := func(t time.Time) int64 {
+		if t.IsZero() {
+			return 0
+		}
+		return t.UnixMilli()
+	}
+	winner, won := job, false
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
+		row := conn.QueryRowContext(ctx, "SELECT "+columns+" FROM jobs WHERE id=?", job.ID)
+		current, err := scanJob(row)
+		if errors.Is(err, sql.ErrNoRows) {
+			won = true // the row is new; the write below creates it
+			return upsertJob(ctx, conn, job, encoded, exit, ms)
+		}
+		if err != nil {
+			return err
+		}
+		if current.State.Finished() {
+			winner = current
+			return nil
+		}
+		won = true
+		return upsertJob(ctx, conn, job, encoded, exit, ms)
+	})
+	return winner, won, err
+}
+
+// upsertJob writes the whole row of one job.
+func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exit any, ms func(time.Time) int64) error {
+	command := string(encoded)
+	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note`,
-			job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note)
-		return err
-	})
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note)
+	return err
 }
 
 const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note"

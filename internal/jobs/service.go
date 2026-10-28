@@ -66,6 +66,9 @@ type Service struct {
 	logf func(string, ...any)
 	// onRun tells a test that the service began to run a job, synchronously.
 	onRun func(Job)
+	// onAbandoned tells a test that a run gave a job up because the row had
+	// ended elsewhere, synchronously.
+	onAbandoned func(Job)
 	// ClaimEvery is how often a started service re-reads the job table for
 	// work another engine queued or cancelled. The default is claimEvery.
 	ClaimEvery time.Duration
@@ -371,10 +374,16 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 	}
 	// No live executor owns it: a queued row, or a running one this engine has
 	// not picked up. Mark it cancelled; the worker of a queued row skips it.
+	// The write is conditional: a row that ended in the meantime keeps its
+	// own end and its own report.
 	job.State = StateCancelled
 	job.Ended = s.Store.now()
-	if err := s.Store.Save(ctx, job); err != nil {
+	row, won, err := s.Store.SaveOpen(ctx, job)
+	if err != nil {
 		return Job{}, err
+	}
+	if !won {
+		return row, nil
 	}
 	if s.Reporter != nil && !job.Started.IsZero() {
 		if err := s.Reporter.JobFinished(ctx, job); err != nil {
@@ -482,6 +491,17 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if !reattach {
 		job.State = StateRunning
 		job.Started = s.Store.now()
+		// The transition to running is conditional: a cancel that reached the
+		// row between the claim and this write wins, the node never sees the
+		// job, and the canceller's own report stands.
+		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
+			s.logger()("jobs: record started job %s: %v", job.ID, err)
+		} else if !won {
+			if s.onAbandoned != nil {
+				s.onAbandoned(job)
+			}
+			return
+		}
 	}
 	job.Dir = path.Join(NodeBase(machine.Name), "jobs", job.ID)
 	job.Unit = "dyna-job-" + job.ID + ".service"
@@ -527,8 +547,14 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	if !reattach {
 		spec.Script = jobScript(machine, job, resources)
-		if err := s.Store.Save(ctx, job); err != nil {
+		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
 			s.logger()("jobs: record started job %s: %v", job.ID, err)
+		} else if !won {
+			// A cancel landed while the run prepared; the row keeps its end.
+			if s.onAbandoned != nil {
+				s.onAbandoned(job)
+			}
+			return
 		}
 		if s.Reporter != nil {
 			if err := s.Reporter.JobStarted(ctx, job); err != nil {
@@ -549,8 +575,9 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	runErr := poller.Run(runCtx, spec, logWriter)
 	if runErr != nil && errors.Is(runErr, context.Canceled) && EngineStopping() {
 		// The engine is stopping: the job keeps running on its node and the
-		// restarted engine reattaches through this row.
-		_ = s.Store.Save(context.WithoutCancel(ctx), logWriter.snapshot())
+		// restarted engine reattaches through this row. The offset write is
+		// conditional too, so it cannot revive a row another engine ended.
+		_, _, _ = s.Store.SaveOpen(context.WithoutCancel(ctx), logWriter.snapshot())
 		return
 	}
 	if runErr != nil && !job.State.Finished() {
@@ -611,20 +638,20 @@ func (s *Service) finish(job *Job, err error) {
 	job.ExitCode = exit
 	job.Ended = s.Store.now()
 	ctx := context.Background()
-	// Another engine may have cancelled the row while this one held the
-	// executor. Its terminal state stays, and its report already went out,
-	// so this engine stops the node process and records that same end.
-	adopted := false
-	if cur, err := s.Store.Get(ctx, job.ID); err == nil && cur.State.Finished() {
-		job.State, job.ExitCode, job.Ended = cur.State, cur.ExitCode, cur.Ended
-		adopted = true
-	}
-	if err := s.Store.Save(ctx, *job); err != nil {
+	// The end is a conditional write: another engine may have cancelled the
+	// row while this one held the executor. The row's own terminal state and
+	// report then stay, and this engine stops the node process quietly.
+	row, won, err := s.Store.SaveOpen(ctx, *job)
+	if err != nil {
 		s.logger()("jobs: record finished job %s: %v", job.ID, err)
 	}
-	if s.Reporter != nil && !adopted {
-		if err := s.Reporter.JobFinished(ctx, *job); err != nil {
-			s.logger()("jobs: report finished job %s: %v", job.ID, err)
+	if !won {
+		job.State, job.ExitCode, job.Ended = row.State, row.ExitCode, row.Ended
+	} else {
+		if s.Reporter != nil {
+			if err := s.Reporter.JobFinished(ctx, *job); err != nil {
+				s.logger()("jobs: report finished job %s: %v", job.ID, err)
+			}
 		}
 	}
 	if job.Dir != "" && !EngineStopping() {
