@@ -117,6 +117,12 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	for name, target := range resolved {
 		files["bin/"+name] = []byte(bridge(owner, target, name == "dyna"))
 	}
+	// The systemd-run shim is always installed when the owner PATH names a
+	// real one, so a room's own user units join the room slice. A machine
+	// without systemd-run skips it silently: Prepare must not fail there.
+	if target, err := resolve("systemd-run", path); err == nil {
+		files["bin/systemd-run"] = []byte(systemdRunBridge(target))
+	}
 	publication, err := publish(bridgeRoot, files)
 	if err != nil {
 		return nil, err
@@ -400,6 +406,58 @@ func bridge(owner map[string]string, target string, isDyna bool) string {
 	}
 	fmt.Fprintf(&script, "exec %s \"$@\"\n", shellquote.Quote(target))
 	return script.String()
+}
+
+// systemdRunBridge wraps the owner's systemd-run for a room's scripts. A
+// process Dyna launched carries DYNA_ROOM_SLICE; when such a process calls
+// systemd-run --user and chose no slice of its own, the shim adds
+// --slice="$DYNA_ROOM_SLICE" so the unit it starts shares the room's memory
+// and process limits. Calls without --user, calls that name a slice, and
+// calls from processes without the variable pass through unchanged, with
+// every argument quoted exactly as given. A --scope call gets the slice too:
+// --scope and --slice work together, and a scope otherwise lands next to the
+// caller's own unit instead of the room's.
+func systemdRunBridge(target string) string {
+	real := shellquote.Quote(target)
+	script := strings.ReplaceAll(`inject=
+if [ -n "${DYNA_ROOM_SLICE:-}" ]; then
+	user=
+	chosen=
+	# Only leading options count: "--" or the first plain word starts the
+	# command, so a slice named later is the command's own argument. Options
+	# whose value follows as the next word (systemd-run --help lists them)
+	# consume that word, so a value never looks like the start of the command.
+	scan() {
+		while [ $# -gt 0 ]; do
+			case "$1" in
+				--) break ;;
+				--user) user=1 ;;
+				--slice-inherit|--slice|--slice=*|-pSlice=*|--property=Slice=*) chosen=1 ;;
+				-u|--unit|-p|--property|--description|--service-type|--uid|--gid|--nice|--working-directory|--root-directory|-E|--setenv|--job-mode|--background|--output|--json|--expand-environment|--path-property|--socket-property|--timer-property|--on-active|--on-boot|--on-startup|--on-unit-active|--on-unit-inactive|--on-calendar|-H|--host|-M|--machine|-C|--capsule)
+					shift
+					case "${1-}" in Slice=*) chosen=1 ;; esac
+					;;
+				# Attached values carry their own, including -pSlice=… above.
+				--*=*|-u*|-p*|-E*|-H*|-M*|-C*) ;;
+				# Any other option, including combined shorts such as -qq.
+				-*) ;;
+				# The first plain word starts the command.
+				*) break ;;
+			esac
+			[ $# -gt 0 ] && shift
+		done
+	}
+	scan "$@"
+	if [ -n "$user" ] && [ -z "$chosen" ]; then
+		inject=1
+	fi
+fi
+if [ -n "$inject" ]; then
+	exec TARGET --slice="$DYNA_ROOM_SLICE" "$@"
+fi
+exec TARGET "$@"
+`, "TARGET", real)
+	return "#!/bin/sh\n" + script
 }
 
 func gitConfigHeader(published string) string {

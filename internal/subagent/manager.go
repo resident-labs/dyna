@@ -1356,7 +1356,11 @@ func (ExecSpawner) Spawn(m *Manager, id string, turn int, lock *os.File) error {
 	cmd.Env = append(childenv.WithoutLocks(os.Environ()), TurnLockFDEnv+"=3")
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	launch := callerid.Launch{DataDir: filepath.Dir(m.store().root()), Name: id, Actor: callerid.Identity{Kind: callerid.Session, Session: id}, Launcher: "turn"}
+	meta, err := m.store().ReadMeta(id)
+	if err != nil {
+		return err
+	}
+	launch := callerid.Launch{DataDir: filepath.Dir(m.store().root()), Name: id, Actor: callerid.Identity{Kind: callerid.Session, Session: id}, Launcher: "turn", Room: meta.RoomID}
 	if err := callerid.Start(context.Background(), cmd, launch); err != nil {
 		return err
 	}
