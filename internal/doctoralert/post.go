@@ -16,29 +16,23 @@ func PostNote(rooms *room.Store, n Note) error {
 	if err != nil {
 		return err
 	}
-	event := room.AlertEvent{Source: room.AlertDoctor, Trigger: "hook schedule", Summary: n.Report.Summary, Detail: n.Advice()}
+	event := AlertEvent(n.Report)
+	event.Trigger = "hook schedule"
+	event.Detail = n.Advice()
 	if n.Recovered {
 		event.Summary = n.Machine + " is healthy again"
 		event.ReportID = fmt.Sprintf("recovered-%s-%s", n.Machine, rec.ID)
+		event.Findings = nil
+		event.NextCommand = ""
 	} else {
-		event.ReportID = fmt.Sprint(n.Report.ID)
 		event.Detail += "\n\n" + n.Report.Text()
 		for i, f := range n.Report.Findings {
-			severity := room.AlertWarning
-			if i == 0 {
-				severity = room.AlertCritical
-			}
-			cause := f.Evidence
 			if f.Kind == doctor.GroupOutside && len(n.Outside) > 0 {
 				lines := make([]string, len(n.Outside))
 				for j, o := range n.Outside {
 					lines[j] = o.Text()
 				}
-				cause += ". The biggest programs outside Dyna: " + strings.Join(lines, "; ")
-			}
-			event.Findings = append(event.Findings, room.AlertFinding{Severity: severity, Title: f.Cause, Cause: cause})
-			if event.NextCommand == "" {
-				event.NextCommand = f.Command
+				event.Findings[i].Cause += ". The biggest programs outside Dyna: " + strings.Join(lines, "; ")
 			}
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/doctor"
+	"dyna-agent/internal/doctoralert"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/store"
@@ -128,33 +129,9 @@ func post(r doctor.Report) error {
 // its command is the card's next step. The full report text stays the agent's
 // evidence.
 func postReport(rooms *room.Store, rec room.Record, r doctor.Report) (room.Message, error) {
-	findings := make([]room.AlertFinding, len(r.Findings))
-	for i, f := range r.Findings {
-		severity := room.AlertWarning
-		if i == 0 {
-			severity = room.AlertCritical
-		}
-		findings[i] = room.AlertFinding{Severity: severity, Title: f.Cause, Cause: f.Evidence}
-	}
-	next := ""
-	for _, f := range r.Findings {
-		if f.Command != "" {
-			next = f.Command
-			break
-		}
-	}
-	event := room.AlertEvent{
-		Source:      room.AlertDoctor,
-		ReportID:    strconv.FormatInt(r.ID, 10),
-		Trigger:     r.Trigger,
-		Summary:     r.Summary,
-		Findings:    findings,
-		NextCommand: next,
-		Detail:      r.Text(),
-	}
 	return rooms.PostEventInput(room.PostEventInput{
 		RoomID:   rec.ID,
-		Event:    event,
+		Event:    doctoralert.AlertEvent(r),
 		Producer: room.ProducerDoctor,
 		To:       []string{rec.Name + ":" + room.RootAgent},
 	})
