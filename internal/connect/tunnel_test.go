@@ -93,8 +93,10 @@ func startTunnel(t *testing.T, st *Store, look func(string) (string, error)) (pa
 
 // A missing connector posts one typed alert, does not post it again while it
 // stays missing, and clears it once the connector runs on the resolved path.
-// The pause report after each lookup proves the branch that could post has
-// finished, so the no-post assertion cannot race a late attempt.
+// The scripted lookup hands every lookup its outcome only when the test feeds
+// it, so no lookup can run ahead of its queued outcome, and the pause report
+// after each lookup proves the branch that could post has finished, so the
+// no-post assertion cannot race a late attempt.
 func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 	st, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -106,22 +108,22 @@ func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 	a := newAlerts()
 	a.install(t)
 
-	// calls synchronizes each lookup with the test.
+	// calls synchronizes each lookup with the test, and script gives every
+	// lookup its outcome: the lookup blocks until the script feeds it, so a
+	// lookup cannot run ahead of its outcome and succeed by racing it.
 	calls := make(chan error, 4)
-	failures := make(chan error, 4)
+	script := make(chan error, 4)
 	paused, step, started := startTunnel(t, st, func(string) (string, error) {
-		select {
-		case err := <-failures:
-			calls <- err
+		err := <-script
+		calls <- err
+		if err != nil {
 			return "", err
-		default:
-			calls <- nil
-			return "/resolved/cloudflared", nil
 		}
+		return "/resolved/cloudflared", nil
 	})
 
 	// The token is there but the binary is not: one typed alert, no child.
-	failures <- exec.ErrNotFound
+	script <- exec.ErrNotFound
 	if got := <-calls; got == nil {
 		t.Fatal("first lookup succeeded with a missing binary")
 	}
@@ -130,18 +132,19 @@ func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 	}
 	<-paused
 	// A still-missing connector does not alert again: the pause report proves
-	// its branch ended without posting. The failure is queued before the step
-	// releases the iteration, so the lookup cannot race past it.
-	failures <- exec.ErrNotFound
+	// its branch ended without posting. The second failure is queued before
+	// the step releases the iteration, so the lookup cannot race past it.
+	script <- exec.ErrNotFound
 	step <- time.Now()
 	if got := <-calls; got == nil {
 		t.Fatal("second lookup succeeded with a missing binary")
 	}
 	<-paused
 	a.noPost(t)
-	step <- time.Now()
 	// The binary appears: the alert clears and the connector starts. The clear
 	// sits after the last missing branch, so a late post cannot follow it.
+	script <- nil
+	step <- time.Now()
 	if got := <-calls; got != nil {
 		t.Fatalf("third lookup failed: %v", got)
 	}
