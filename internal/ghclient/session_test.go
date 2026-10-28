@@ -123,6 +123,7 @@ esac
 		{"pr", "comment", "1", "--body", "not allowed"},
 		{"api", "repos/work/service/issues", "-X", "POST"},
 		{"codespace", "ports", "visibility", "8000:public"},
+		{"codespace", "ports", "--codespace", "NAME", "visibility", "8000:public"},
 	} {
 		if err := SessionCommand(context.Background(), args); err == nil || !strings.Contains(err.Error(), "post in the room with dyna post instead") {
 			t.Fatalf("guard allowed %q: %v", args, err)
@@ -140,6 +141,7 @@ esac
 		{"workflow", "view", "ci.yml"},
 		{"label", "list"},
 		{"codespace", "ports"},
+		{"codespace", "ports", "--codespace", "NAME", "--json", "sourcePort,visibility"},
 	} {
 		if err := SessionCommand(context.Background(), args); err != nil {
 			t.Fatalf("guard refused %q: %v", args, err)
