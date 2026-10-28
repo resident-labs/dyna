@@ -84,33 +84,60 @@ func TestRestoreOwnerKeepsCallerRoots(t *testing.T) {
 
 // A harness shell that picks its own data roots never writes the owner's
 // live store (D-398). A QA command with scratch HOME and XDG_DATA_HOME keeps
-// them, and DYNA_DATA_DIR stays unset, so the data folder resolves from the
-// caller's roots alone.
+// them, DYNA_DATA_DIR stays unset, and the resolved data folder follows the
+// caller's roots: a chosen XDG_DATA_HOME rules, and a chosen HOME drops an
+// inherited XDG_DATA_HOME, whether the harness's private root or the owner's.
 func TestRestoreOwnerKeepsCallerDataRoot(t *testing.T) {
-	for name, tc := range map[string]struct{ home, data bool }{
-		"HOME and XDG_DATA_HOME": {home: true, data: true},
-		"HOME only":              {home: true},
-		"XDG_DATA_HOME only":     {data: true},
+	type xdgChoice int
+	const (
+		xdgLeft xdgChoice = iota
+		xdgCaller
+		xdgOwner
+	)
+	for name, tc := range map[string]struct {
+		home bool
+		xdg  xdgChoice
+	}{
+		"HOME and XDG_DATA_HOME":              {home: true, xdg: xdgCaller},
+		"HOME only":                           {home: true, xdg: xdgLeft},
+		"HOME with the owner's XDG_DATA_HOME": {home: true, xdg: xdgOwner},
+		"XDG_DATA_HOME only":                  {xdg: xdgCaller},
 	} {
 		t.Run(name, func(t *testing.T) {
-			scope, _, env := fixture(t)
+			scope, owner, env := fixture(t)
+			// The owner has a data root of its own, so an inherited owner
+			// value is distinct from both the private root and a caller's.
+			ownerData := filepath.Join(owner, ".local", "share")
+			env = append(slices.Clone(env), "XDG_DATA_HOME="+ownerData)
 			out, err := Prepare(scope, "", env)
 			if err != nil {
 				t.Fatal(err)
 			}
 			roots := t.TempDir()
+			home := filepath.Join(roots, "home")
+			fresh := filepath.Join(roots, "data")
 			setProcessEnv(t, merged(env, out))
 			if tc.home {
-				t.Setenv("HOME", filepath.Join(roots, "home"))
+				t.Setenv("HOME", home)
 			}
-			if tc.data {
-				t.Setenv("XDG_DATA_HOME", filepath.Join(roots, "data"))
+			switch tc.xdg {
+			case xdgCaller:
+				t.Setenv("XDG_DATA_HOME", fresh)
+			case xdgOwner:
+				t.Setenv("XDG_DATA_HOME", ownerData)
 			}
 			if err := RestoreOwner([]string{"harness", "install", "pi"}); err != nil {
 				t.Fatal(err)
 			}
 			if value, ok := os.LookupEnv(store.DataDirEnv); ok {
 				t.Fatalf("%s = %q; want unset so the caller's data root rules", store.DataDirEnv, value)
+			}
+			want := filepath.Join(home, ".local", "share", "dyna")
+			if tc.xdg == xdgCaller {
+				want = filepath.Join(fresh, "dyna")
+			}
+			if got := store.DataDir(); got != want {
+				t.Fatalf("data folder %q; want %q from the caller's roots", got, want)
 			}
 		})
 	}
