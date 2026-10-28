@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,6 +124,12 @@ func fakeInstaller(t *testing.T, j Job, branch, fail string, calls *[]string, de
 		if strings.Contains(command, "symbolic-ref") && strings.Contains(command, "refs/remotes/origin/HEAD") {
 			fmt.Fprintln(p.Output, "refs/remotes/origin/"+def)
 		}
+		if len(p.Args) > 4 && p.Args[3] == "rev-parse" && strings.Contains(p.Args[4], ":") {
+			fmt.Fprintln(p.Output, testSHA)
+		}
+		if len(p.Args) > 3 && p.Args[3] == "scripts/pi-pack.sh" {
+			return os.WriteFile(p.Args[len(p.Args)-1], []byte("tarball"), 0600)
+		}
 		if strings.Contains(command, "rev-parse origin/") {
 			fmt.Fprintln(p.Output, testSHA)
 		}
@@ -228,7 +235,7 @@ func TestInstallPreservesStateAndBackups(t *testing.T) {
 	for name, want := range map[string]string{"dyna": "new dyna", "dyna-desktop": "new desktop"} {
 		target := filepath.Join(j.Config.Bin, name)
 		b, err := os.ReadFile(target)
-		if err != nil || string(b) != want {
+		if err != nil || !strings.HasPrefix(string(b), want) {
 			t.Fatalf("binary %s: %s %v", name, b, err)
 		}
 		backups, _ := filepath.Glob(target + ".bak-*")
@@ -643,5 +650,59 @@ func TestInstallStampsKnownCommitInExistingBuild(t *testing.T) {
 	}
 	if builds != 1 {
 		t.Fatalf("build count = %d, want 1", builds)
+	}
+}
+
+func TestPiForkPackCache(t *testing.T) {
+	s, j := fixture(t)
+	var calls []string
+	s.Exec = fakeInstaller(t, j, "main", "", &calls)
+	d := driver{s, j.Config, io.Discard}
+	first, integrity, err := d.packPiFork(context.Background(), testSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, again, err := d.packPiFork(context.Background(), testSHA)
+	if err != nil || first != second || integrity != again {
+		t.Fatalf("cache: %q %q %v", second, again, err)
+	}
+	count := 0
+	for _, call := range calls {
+		if strings.Contains(call, "nice -n 10 scripts/pi-pack.sh") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("pack calls = %d, want 1", count)
+	}
+}
+
+func TestPiPruneKeepsCurrentAndBackupAssets(t *testing.T) {
+	dir := t.TempDir()
+	bin := t.TempDir()
+	var paths []string
+	for i := 0; i < 4; i++ {
+		p := filepath.Join(dir, strings.Repeat(fmt.Sprint(i), 64)+".tgz")
+		if err := os.WriteFile(p, []byte("asset"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	for i, name := range []string{"dyna", "dyna.bak-old"} {
+		p := filepath.Join(bin, name)
+		if err := os.WriteFile(p, []byte("binary"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := stampPiAsset(p, paths[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := prunePiAssets(dir, bin); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range paths[:2] {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("removed referenced asset %s: %v", p, err)
+		}
 	}
 }

@@ -77,3 +77,34 @@ func TestForkInstallAndRollbackPreservesNPMDefault(t *testing.T) {
 		t.Fatalf("integrity = %q, want %q", manifest.Integrity, integrity)
 	}
 }
+
+func TestPiForkStampedLocalIntegrity(t *testing.T) {
+	piTestHome(t)
+	t.Setenv(piForkTarballEnv, "")
+	path := filepath.Join(t.TempDir(), "fork.tgz")
+	data := []byte("fixture")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldURL, oldAsset, oldIntegrity := piForkURL, piForkAsset, piForkIntegrity
+	t.Cleanup(func() { piForkURL, piForkAsset, piForkIntegrity = oldURL, oldAsset, oldIntegrity })
+	sum := sha512.Sum512(data)
+	piForkURL, piForkAsset, piForkIntegrity = "", path, "sha512-"+base64.StdEncoding.EncodeToString(sum[:])
+	m := manager(t)
+	t.Setenv(piForkTarballEnv, "")
+	a, _ := Adapter("pi")
+	m.Run = func(_ context.Context, args, env []string) error {
+		dir := filepath.Join(args[4], "lib/node_modules", piNPMPackage)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"@earendil-works/pi-coding-agent","version":"1.4.0-dyna.1","dynaFork":1}`), 0600)
+	}
+	if _, err := installPiForkNPM(context.Background(), m, t.TempDir(), nil, a); err != nil {
+		t.Fatal(err)
+	}
+	piForkIntegrity = "sha512-" + base64.StdEncoding.EncodeToString(make([]byte, 64))
+	if _, err := installPiForkNPM(context.Background(), m, t.TempDir(), nil, a); err == nil {
+		t.Fatal("accepted wrong integrity")
+	}
+}

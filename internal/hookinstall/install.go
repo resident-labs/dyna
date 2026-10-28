@@ -3,17 +3,23 @@ package hookinstall
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/store"
 )
 
 type driver struct {
@@ -164,7 +170,15 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 			return err
 		}
 	}
-	if _, err = d.run(ctx, c.Build, "nice", "-n", "10", "go", "build", "-p", "2", "-ldflags", "-X dyna-agent/internal/cli/version.buildRevision="+head, "-o", filepath.Join(temp, "dyna"), "./cmd/dyna"); err != nil {
+	piPath, piIntegrity, err := d.packPiFork(ctx, head)
+	if err != nil {
+		return err
+	}
+	flags := "-X dyna-agent/internal/cli/version.buildRevision=" + head + " -X " + strconv.Quote("dyna-agent/internal/harness/runtime.piForkAsset="+piPath) + " -X dyna-agent/internal/harness/runtime.piForkIntegrity=" + piIntegrity
+	if _, err = d.run(ctx, c.Build, "nice", "-n", "10", "go", "build", "-p", "2", "-ldflags", flags, "-o", filepath.Join(temp, "dyna"), "./cmd/dyna"); err != nil {
+		return err
+	}
+	if err = stampPiAsset(filepath.Join(temp, "dyna"), piPath); err != nil {
 		return err
 	}
 	if _, err = d.run(ctx, filepath.Join(c.Build, "desktop"), "nice", "-n", "10", "./build.sh", filepath.Join(temp, "dyna-desktop")); err != nil {
@@ -209,6 +223,9 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 	}
 	if err = d.restartServer(ctx, filepath.Join(c.Bin, "dyna"), restartComputers); err != nil {
+		return err
+	}
+	if err = prunePiAssets(filepath.Dir(piPath), c.Bin); err != nil {
 		return err
 	}
 	state.Installed = head
@@ -298,6 +315,156 @@ func pruneBackups(dir, name string) error {
 	})
 	for i := 5; i < len(files); i++ {
 		if err = os.Remove(files[i].path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// packPiFork caches the exact source inputs used by the pack script.
+func (d driver) packPiFork(ctx context.Context, head string) (string, string, error) {
+	var inputs []string
+	for _, path := range []string{"third_party/pi", "scripts/pi-pack.sh", "scripts/pi-hydrate.sh"} {
+		value, err := d.run(ctx, d.config.Build, "/usr/bin/git", "-C", d.config.Build, "rev-parse", head+":"+path)
+		if err != nil {
+			return "", "", err
+		}
+		if !shaPattern.MatchString(value) {
+			return "", "", fmt.Errorf("invalid Git object ID for %s", path)
+		}
+		inputs = append(inputs, value)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(inputs, "\n")))
+	dir := filepath.Join(store.DataDir(), "pi-fork")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", "", err
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", err
+	}
+	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".tgz")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		tmp, err := os.CreateTemp(dir, ".pack-*.tgz")
+		if err != nil {
+			return "", "", err
+		}
+		name := tmp.Name()
+		if err := tmp.Close(); err != nil {
+			return "", "", err
+		}
+		defer os.Remove(name)
+		if _, err := d.run(ctx, d.config.Build, "nice", "-n", "10", "scripts/pi-pack.sh", name); err != nil {
+			return "", "", err
+		}
+		if err := os.Rename(name, path); err != nil {
+			return "", "", err
+		}
+	} else if err != nil {
+		return "", "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", err
+	}
+	digest := sha512.Sum512(data)
+	return path, "sha512-" + base64.StdEncoding.EncodeToString(digest[:]), nil
+}
+
+// A fixed trailer ties each source-built binary and its backups to its asset.
+// It does not change the executable image. Release binaries have no trailer.
+const piAssetTrailer = "\ndyna-pi-fork:"
+
+func stampPiAsset(binary, asset string) error {
+	name := filepath.Base(asset)
+	if len(name) != 68 || !strings.HasSuffix(name, ".tgz") {
+		return fmt.Errorf("invalid Pi asset name")
+	}
+	f, err := os.OpenFile(binary, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(piAssetTrailer + name[:64] + "\n")
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
+// Keep all assets referenced by the current binary or retained backups. Keep
+// two recent assets as well when fewer than two are referenced.
+func prunePiAssets(dir, bin string) error {
+	binaries, err := filepath.Glob(filepath.Join(bin, "dyna.bak-*"))
+	if err != nil {
+		return err
+	}
+	binaries = append(binaries, filepath.Join(bin, "dyna"))
+	keep := make(map[string]bool)
+	for _, binary := range binaries {
+		f, err := os.Open(binary)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		size := int64(len(piAssetTrailer) + 64 + 1)
+		data := make([]byte, size)
+		info, statErr := f.Stat()
+		if statErr != nil {
+			f.Close()
+			return statErr
+		}
+		if info.Size() < size {
+			f.Close()
+			continue
+		}
+		_, err = f.ReadAt(data, info.Size()-size)
+		closeErr := f.Close()
+		if closeErr != nil {
+			return closeErr
+		}
+		if err != nil {
+			continue
+		}
+		value := string(data)
+		if !strings.HasPrefix(value, piAssetTrailer) || value[len(value)-1] != '\n' {
+			continue
+		}
+		hash := value[len(piAssetTrailer) : len(value)-1]
+		if len(hash) != 64 || strings.Trim(hash, "0123456789abcdef") != "" {
+			continue
+		}
+		keep[filepath.Join(dir, hash+".tgz")] = true
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "*.tgz"))
+	if err != nil {
+		return err
+	}
+	type asset struct {
+		path     string
+		modified time.Time
+	}
+	var assets []asset
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		assets = append(assets, asset{path, info.ModTime()})
+	}
+	sort.Slice(assets, func(i, j int) bool { return assets[i].modified.After(assets[j].modified) })
+	count := len(keep)
+	for _, a := range assets {
+		if keep[a.path] {
+			continue
+		}
+		if count < 2 {
+			count++
+			continue
+		}
+		if err := os.Remove(a.path); err != nil {
 			return err
 		}
 	}
