@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+var sessionCredential credentialSource = engineCredential
+
 // SessionCommand runs the gh multicall guard through the shared room policy.
 func SessionCommand(ctx context.Context, args []string) error {
 	mode := GuardMode(os.Getenv(ReadOnlyEnv))
@@ -31,5 +33,5 @@ func SessionCommand(ctx context.Context, args []string) error {
 	}
 	cmd := Command(ctx, binary, dir, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return Run(ctx, cmd)
+	return runWithAccount(ctx, cmd, nil, sessionCredential)
 }
