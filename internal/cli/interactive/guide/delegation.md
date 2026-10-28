@@ -77,7 +77,7 @@ Stored hierarchy controls parent selectors and depth, even when `DYNA_DEPTH` pre
 | `DYNA_MODE` | `subagent` | `subagent` |
 | `DYNA_SESSION`, `DYNA_DEPTH` | session ID, launch depth | session ID, launch depth |
 | `DYNA_ROOM`, `DYNA_ROOM_ID` | room name and ID | room name and ID |
-| `DYNA_ROOM_SLICE` | the room's systemd slice unit, when room limits are on | the room's systemd slice unit, when room limits are on |
+| `DYNA_ROOM_SLICE` | the slice the room runs in: the room's own when limits are on, `dyna.slice` when they are off | the slice the room runs in: the room's own when limits are on, `dyna.slice` when they are off |
 | `DYNA_ADDRESS` | `<room>:<name>` | `<room>:<name>` |
 | `DYNA_WORKER_RUN` | not set | run ID |
 | `DYNA_AGENT_JOURNAL` | not set | journal path |

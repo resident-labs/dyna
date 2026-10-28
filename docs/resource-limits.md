@@ -30,6 +30,6 @@ Commands start unchanged when any of these is true:
 - `systemd-run` is not installed.
 - The process is a Go test binary.
 
-A Linux machine that has cgroup v2 but no `memory` and `pids` controllers delegated to the user still starts every process, but each room then shares the one `dyna.slice` with no process cap of its own. Dyna posts one `Room limits are off` notice to the room so nobody has to guess why.
+A Linux machine that has cgroup v2 but no `memory` and `pids` controllers delegated to the user still starts every process, but each room then shares the one `dyna.slice` with no process cap of its own; `DYNA_ROOM_SLICE` names `dyna.slice` there, so a room's daemons stay under the shared caps. Dyna posts one `Room limits are off` notice to the room so nobody has to guess why.
 
 Code: `internal/agentslice`.

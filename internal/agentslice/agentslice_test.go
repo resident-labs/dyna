@@ -46,14 +46,20 @@ func fakeManager(t *testing.T) (config string, calls *[]string) {
 	roomSliceMu.Lock()
 	roomSliceDone = map[string]bool{}
 	roomSliceMu.Unlock()
-	noticeOnce, supportOnce, memOnce = sync.Once{}, sync.Once{}, sync.Once{}
+	roomNoticeMu.Lock()
+	roomNoticed = map[string]bool{}
+	roomNoticeMu.Unlock()
+	supportOnce, memOnce = sync.Once{}, sync.Once{}
 	t.Cleanup(func() {
 		lookPath, runCommand, runCommandOutput = oldLook, oldRun, oldOutput
 		sliceOnce, noExpandOnce, noExpand = sync.Once{}, sync.Once{}, ""
 		roomSliceMu.Lock()
 		roomSliceDone = map[string]bool{}
 		roomSliceMu.Unlock()
-		noticeOnce, supportOnce, memOnce = sync.Once{}, sync.Once{}, sync.Once{}
+		roomNoticeMu.Lock()
+		roomNoticed = map[string]bool{}
+		roomNoticeMu.Unlock()
+		supportOnce, memOnce = sync.Once{}, sync.Once{}
 	})
 	return config, &got
 }
