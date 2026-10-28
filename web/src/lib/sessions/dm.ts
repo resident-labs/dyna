@@ -24,7 +24,7 @@ export interface Receipt {
 
 interface ReceiptProjection {
   include: boolean
-  delivery?: 'queued' | 'delivered'
+  delivery?: 'queued' | 'delivered' | 'forwarded'
 }
 
 // Every QueueState needs a receipt projection. The helper's undefined return
@@ -33,6 +33,7 @@ const receiptProjections: Record<QueueState, ReceiptProjection> = {
   waiting: { include: true, delivery: 'queued' },
   delivering: { include: true, delivery: 'delivered' },
   delivered: { include: true },
+  forwarded: { include: true, delivery: 'forwarded' },
   cancelled: { include: false },
   dismissed: { include: false },
 }

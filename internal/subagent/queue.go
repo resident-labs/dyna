@@ -15,6 +15,7 @@ const (
 	QueueWaiting    QueueState = "waiting"
 	QueueDelivering QueueState = "delivering"
 	QueueDelivered  QueueState = "delivered"
+	QueueForwarded  QueueState = "forwarded"
 	QueueCancelled  QueueState = "cancelled"
 	QueueDismissed  QueueState = "dismissed"
 )
@@ -60,6 +61,7 @@ type QueueItem struct {
 	Turn        int           `json:"turn"`
 	State       QueueState    `json:"state"`
 	Cancellable bool          `json:"cancellable"`
+	ForwardedTo string        `json:"forwardedTo,omitempty"`
 }
 
 func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error) {
@@ -123,7 +125,15 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 		}
 		return nil
 	})
+	markForwarded := func() {
+		for i := range out {
+			if id := info.ForwardedPosts[out[i].ID]; id != "" {
+				out[i].State, out[i].Cancellable, out[i].ForwardedTo = QueueForwarded, false, id
+			}
+		}
+	}
 	if err != nil || len(info.InheritedInboxes) == 0 {
+		markForwarded()
 		return out, err
 	}
 	index := map[string]int{}
@@ -190,6 +200,7 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 			out[i].State, out[i].Cancellable = QueueDismissed, false
 		}
 	}
+	markForwarded()
 	return out, nil
 }
 
