@@ -80,7 +80,7 @@ func migrateHistory(db *sql.DB) error {
 			if err != nil {
 				return err
 			}
-			if err := writeRow(conn, r.id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, history_only=excluded.history_only, meta=excluded.meta"); err != nil {
+			if err := writeRow(conn, r.id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, history_only=excluded.history_only, meta=excluded.meta, dir=excluded.dir, service=excluded.service, meta_id=excluded.meta_id, meta_digest=excluded.meta_digest"); err != nil {
 				return err
 			}
 		}
