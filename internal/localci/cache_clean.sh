@@ -113,7 +113,36 @@ fi
 freed_kb=0
 size_of() { du -sxk -- "$1" 2>/dev/null | awk 'NR == 1 {print $1}'; }
 
+# container_remove PATH: remove PATH through the machine's container runtime.
+# The container is root because the host user already failed to remove the
+# tree. Its mount names only PATH's parent, and GNU rm keeps the same
+# one-file-system guard as the host attempt.
+container_remove() {
+  local path=$1 parent name output
+  local -a docker
+  parent=${path%/*}
+  name=${path##*/}
+  docker=(docker)
+  if [ -n "${DOCKER_HOST:-}" ]; then
+    command -v docker >/dev/null 2>&1 || docker=(podman)
+    export DOCKER_HOST
+  elif ! docker info >/dev/null 2>&1; then
+    docker=(sudo -n docker)
+  fi
+  output=$("${docker[@]}" run --rm --network none --user 0:0 \
+    -v "$parent:/dyna-ci-clean" "${DYNA_CI_CLEAN_IMAGE:-debian:12-slim}" \
+    rm -rf --one-file-system -- "/dyna-ci-clean/$name" 2>&1) && return 0
+  output=${output//$'\r'/ }
+  output=${output//$'\n'/ }
+  output=${output//$'\t'/ }
+  [ -n "$output" ] || output="the container runtime could not remove it"
+  printf 'DYNA_CI_CACHE_CLEAN_ERROR\t%s\t%s\n' "$path" "${output:0:300}" >&2
+  return 1
+}
+
 # remove PATH: report PATH and its size, then delete it unless this is a dry run.
+# A tree left by a root container can defeat the host rm. Retry that tree in a
+# throwaway container, and keep both attempts' raw output out of the run log.
 remove() {
   local path=$1 kb
   [ -e "$path" ] || [ -L "$path" ] || return 0
@@ -124,10 +153,11 @@ remove() {
   kb=$(size_of "$path")
   case "$kb" in '' | *[!0-9]*) kb=0 ;; esac
   if [ "$dry" = 0 ]; then
-    rm -rf --one-file-system -- "$path" || {
-      echo "dyna-ci-clean: cannot remove $path" >&2
-      return 1
-    }
+    if ! rm -rf --one-file-system -- "$path" 2>/dev/null; then
+      if [ -e "$path" ] || [ -L "$path" ]; then
+        container_remove "$path" || return 1
+      fi
+    fi
   fi
   printf 'DYNA_CI_CACHE_CLEAN_ITEM %s %s\n' "$kb" "$path"
   freed_kb=$((freed_kb + kb))
@@ -151,13 +181,14 @@ live_run() {
 
 # prune_runs BASE: the run directories that no live run holds and that are old.
 prune_runs() {
-  local run
+  local run failed=0
   for run in "$1"/runs/*; do
     [ -d "$run" ] && [ ! -L "$run" ] || continue
     live_run "$run" && continue
     older "$run" "$run_age_min" || continue
-    remove "$run"
+    remove "$run" || failed=1
   done
+  return "$failed"
 }
 
 # cap_kb NAME: the size cap of one cache in KiB. The defaults bound the
@@ -291,15 +322,16 @@ trim_caches() {
 # prune_tree BASE: the finished runs and the diagnostics of old runs, then the
 # old cache entries, which the cache lock keeps away from a live run.
 prune_tree() {
-  local path
+  local path failed=0
   [ -d "$1" ] && [ ! -L "$1" ] || return 0
-  prune_runs "$1"
+  prune_runs "$1" || failed=1
   for path in "$1"/diagnostics/*; do
     [ -d "$path" ] && [ ! -L "$path" ] || continue
     older "$path" || continue
-    remove "$path"
+    remove "$path" || failed=1
   done
-  trim_caches "$1"
+  trim_caches "$1" || failed=1
+  return "$failed"
 }
 
 failed=0
@@ -322,7 +354,7 @@ for base in "${bases[@]}"; do
     esac
     live_run "$path" && continue
     older "$path" "$run_age_min" || continue
-    remove "$path"
+    remove "$path" || failed=1
   done
 done
 

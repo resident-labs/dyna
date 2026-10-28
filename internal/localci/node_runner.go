@@ -1538,7 +1538,9 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			// act mounts the host's container socket into job containers by default.
 			// A repository's workflow must not reach the host's runtime through it.
 			" --container-daemon-socket -" +
-			" --container-options " + q(actContainerOptions(check, runID)) + " || check_status=$?; "
+			// Expand the identity on the node, before act parses the options. A
+			// literal command substitution would reach Docker unchanged.
+			" --container-options " + q(actContainerOptions(check, runID)+" --user ") + `"$(id -u):$(id -g)"` + " || check_status=$?; "
 		// --rm covers the normal case; a cancelled job can leave containers, so the
 		// labels remove exactly this check's, never a sibling check's.
 		setup += `"${docker[@]}" ps -aq --filter ` + q("label="+label) + " --filter " + q("label=dyna.check="+string(check.id)) + ` | xargs -r "${docker[@]}" rm -f >/dev/null 2>&1 || true; `

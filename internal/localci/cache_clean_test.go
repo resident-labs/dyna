@@ -22,7 +22,7 @@ import (
 // directories, name the controller's directory rather than the account it is
 // sent under, and select by age with one xdev find per tree.
 func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
-	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
+	command := cacheCleanCommand(Node{Name: "hermeslab"}, true, ciCacheCleanAge)
 	for _, keep := range []string{
 		"-xdev", `-maxdepth 0 -mmin +"$age" ! -type l`, "rm -rf --one-file-system",
 		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=120", "flock -n \"$1/.active\" true", `exec 8>>"$base/caches.lock"`, "flock -n 8",
@@ -99,6 +99,70 @@ func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string, env
 	command := prefix + "DYNA_CI_CLEAN_DRY=" + dry + " DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(roots) +
 		" bash -o pipefail -c " + shellquote.Quote(body)
 	return exec.Command("bash", "-c", command).CombinedOutput()
+}
+
+// TestCacheCleanUsesRuntimeWhenHostRemovalFails reproduces a run folder whose
+// contents the node user cannot remove. The cleanup mounts its parent in a
+// throwaway container and removes it there, without returning rm's error flood.
+func TestCacheCleanUsesRuntimeWhenHostRemovalFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-container", os.Getpid()))
+	t.Cleanup(func() { os.RemoveAll(base) })
+	runDir := filepath.Join(base, "runs", "old")
+	if err := os.MkdirAll(filepath.Join(runDir, "web", "node_modules"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	if err := os.Chtimes(runDir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	realRM, err := exec.LookPath("rm")
+	if err != nil {
+		t.Skipf("rm is unavailable: %v", err)
+	}
+	bin := t.TempDir()
+	fakeRM := "#!/bin/sh\n" +
+		"if [ \"$1\" = -rf ]; then echo 'rm: cannot remove web/node_modules: Permission denied' >&2; exit 1; fi\n" +
+		"exec \"$REAL_RM\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "rm"), []byte(fakeRM), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	args := filepath.Join(t.TempDir(), "docker-args")
+	fakeDocker := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" >> \"$DOCKER_ARGS\"\n" +
+		"[ \"$1\" = run ] || exit 0\n" +
+		"mount=; last=\n" +
+		"while [ $# -gt 0 ]; do case \"$1\" in -v) mount=$2; shift 2 ;; *) last=$1; shift ;; esac; done\n" +
+		"parent=${mount%:/dyna-ci-clean}\n" +
+		"exec \"$REAL_RM\" -rf --one-file-system -- \"$parent/${last#/dyna-ci-clean/}\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(fakeDocker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCacheClean(t, base, false,
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"REAL_RM="+realRM,
+		"DOCKER_ARGS="+args)
+	if err != nil {
+		t.Fatalf("container fallback failed: %v: %s", err, out)
+	}
+	if strings.Contains(string(out), "Permission denied") {
+		t.Fatalf("a successful fallback returned the host rm failure: %s", out)
+	}
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+		t.Fatalf("the runtime left the old run folder behind: %v: %s", err, out)
+	}
+	data, err := os.ReadFile(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"run", "--rm", "--network", "none", "debian:12-slim", "--one-file-system",
+		filepath.Join(base, "runs") + ":/dyna-ci-clean", "/dyna-ci-clean/old"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("runtime args %q miss %q", data, want)
+		}
+	}
 }
 
 // TestRunKeeperExitRemovesItsFolder covers a teardown interrupted just after
@@ -476,13 +540,20 @@ func TestCacheCleanFailsWhenATrimCannotRemove(t *testing.T) {
 	if err := os.Chmod(filepath.Dir(unit), 0o555); err != nil {
 		t.Fatal(err)
 	}
-	out, err := runCacheClean(t, base, false, "DYNA_CI_CACHE_CAP_KB=1")
+	// The host cannot unlink the unit. Make the container fallback fail too,
+	// so the cleanup still has to return its one structured failure.
+	bin := t.TempDir()
+	fakeDocker := "#!/bin/sh\n[ \"$1\" = info ] && exit 0\necho 'permission denied' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(fakeDocker), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCacheClean(t, base, false, "DYNA_CI_CACHE_CAP_KB=1", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		t.Fatalf("cleanup reported success after a failed trim: %v: %s", err, out)
 	}
-	if !strings.Contains(string(out), "cannot remove") || !strings.Contains(string(out), unit) {
-		t.Fatalf("cleanup did not name the unit it could not remove: %s", out)
+	if !strings.Contains(string(out), "DYNA_CI_CACHE_CLEAN_ERROR") || !strings.Contains(string(out), unit) || !strings.Contains(string(out), "permission denied") {
+		t.Fatalf("cleanup did not name the unit and reason it could not remove: %s", out)
 	}
 	if strings.Contains(string(out), "FREED_KB=") {
 		t.Fatalf("cleanup printed a success total after a failure: %s", out)

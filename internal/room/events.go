@@ -133,6 +133,8 @@ const (
 	// TypeCacheRepaired is a run that switched linked managed cache paths back
 	// to real directories.
 	TypeCacheRepaired EventType = "cache-repaired"
+	// TypeCacheCleanFailed is a managed CI path that cleanup could not remove.
+	TypeCacheCleanFailed EventType = "cache-clean-failed"
 	// TypeScratchFreed is a sweep that freed scratch space on a machine.
 	TypeScratchFreed EventType = "scratch-freed"
 	// TypeLimitsOff is the machine telling a room it cannot give each room
@@ -421,6 +423,10 @@ func eventID(ev Event) string {
 	return fmt.Sprintf("msg_%x", sum[:8])
 }
 
+// EventID returns the stable post ID of ev. A notify caller passes it through
+// when repeated observations of one event must reuse their original post.
+func EventID(ev Event) string { return eventID(ev) }
+
 // Shell returns the payload of a shell result: the facts its row shows.
 func (m Message) Shell() (ShellEvent, bool) {
 	if m.Kind != string(FamilyShell) || m.Notice.Kind != string(TypeResult) || len(m.Payload.raw) == 0 {
@@ -688,6 +694,21 @@ func (m Message) MachineCache() (MachineCacheEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return MachineCacheEvent{}, false
+	}
+	return ev, true
+}
+
+// MachineCacheCleanFailed returns the payload of a failed cache cleanup. It
+// decodes the stored bytes strictly, so a card never reads an unknown payload.
+func (m Message) MachineCacheCleanFailed() (MachineCacheCleanFailedEvent, bool) {
+	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeCacheCleanFailed) || len(m.Payload.raw) == 0 {
+		return MachineCacheCleanFailedEvent{}, false
+	}
+	var ev MachineCacheCleanFailedEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return MachineCacheCleanFailedEvent{}, false
 	}
 	return ev, true
 }

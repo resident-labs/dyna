@@ -179,16 +179,86 @@ type CacheCleanResult struct {
 
 // cacheCleanCommand is the one shell command a run sends to a CI machine. The
 // script checks the allow-list itself, so a bad root stops it there.
-func cacheCleanCommand(node string, dryRun bool, age time.Duration) string {
+func cacheCleanCommand(node Node, dryRun bool, age time.Duration) string {
 	dry := "0"
 	if dryRun {
 		dry = "1"
 	}
-	return "DYNA_CI_CLEAN_DRY=" + dry +
+	command := "DYNA_CI_CLEAN_DRY=" + dry +
 		" DYNA_CI_CLEAN_AGE_MIN=" + strconv.FormatInt(int64(age/time.Minute), 10) +
 		" DYNA_CI_CLEAN_RUN_AGE_MIN=" + strconv.FormatInt(int64(ciRunCleanAge/time.Minute), 10) +
-		" DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(cacheBase(node)+" "+legacyCacheDir) +
+		" DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(cacheBase(node.Name)+" "+legacyCacheDir) +
 		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
+	// A remote cleanup uses the runtime socket that its workflow jobs use. The
+	// local runner keeps its existing Docker-then-sudo selection instead.
+	if node.SSH != "" && node.ContainerSocket != "" {
+		command = "DOCKER_HOST=" + shellquote.Quote(node.ContainerSocket) + " " + command
+	}
+	return command
+}
+
+// CacheCleanError is one cleanup failure with a bounded, single-line reason.
+// Path names the tree that could not go, never the many files below it.
+type CacheCleanError struct {
+	Node   string
+	Path   string
+	Reason string
+	cause  error
+}
+
+func (e *CacheCleanError) Error() string {
+	return fmt.Sprintf("clean %s caches: %s: %s", e.Node, e.Path, e.Reason)
+}
+
+// Unwrap keeps the command failure available to the worker's deadline checks.
+func (e *CacheCleanError) Unwrap() error { return e.cause }
+
+const cacheCleanErrorPrefix = "DYNA_CI_CACHE_CLEAN_ERROR\t"
+
+// newCacheCleanError reads the script's structured failure. Older or external
+// failures still become one bounded reason at the machine's cache base.
+func newCacheCleanError(node string, cause error, stderr string) *CacheCleanError {
+	failure := &CacheCleanError{Node: node, Path: cacheBase(node), cause: cause}
+	for _, line := range strings.Split(stderr, "\n") {
+		rest, ok := strings.CutPrefix(line, cacheCleanErrorPrefix)
+		if !ok {
+			continue
+		}
+		path, reason, ok := strings.Cut(rest, "\t")
+		if ok && path != "" {
+			failure.Path = path
+			failure.Reason = cacheCleanReason(reason)
+			if failure.Reason == "" {
+				failure.Reason = cacheCleanReason(cause.Error())
+			}
+			return failure
+		}
+	}
+	failure.Reason = cacheCleanReason(stderr)
+	if failure.Reason == "" {
+		failure.Reason = cacheCleanReason(cause.Error())
+	}
+	return failure
+}
+
+// cacheCleanReason makes remote output safe for one log line and one notice.
+func cacheCleanReason(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	const limit = 300
+	if len([]rune(text)) > limit {
+		return string([]rune(text)[:limit-3]) + "..."
+	}
+	return text
+}
+
+// cacheCleanFailure preserves the structured error from CleanCaches. An
+// injected or older cleaner can still return an ordinary error.
+func cacheCleanFailure(node Node, err error) CacheCleanError {
+	var failure *CacheCleanError
+	if errors.As(err, &failure) {
+		return *failure
+	}
+	return CacheCleanError{Node: node.Name, Path: cacheBase(node.Name), Reason: cacheCleanReason(err.Error())}
 }
 
 // CleanCaches removes Dyna's CI caches and finished run directories on node.
@@ -205,8 +275,8 @@ func (r Runner) CleanCaches(ctx context.Context, node Node, dryRun bool) (CacheC
 	var out, stderr tailBuffer
 	nodeRunner := r
 	nodeRunner.Node = &node
-	if err := nodeRunner.nodeCommand(ctx, &out, &stderr, cacheCleanCommand(node.Name, dryRun, ciCacheCleanAge)); err != nil {
-		return result, fmt.Errorf("clean %s caches: %w: %s", node.Name, err, stderr.String())
+	if err := nodeRunner.nodeCommand(ctx, &out, &stderr, cacheCleanCommand(node, dryRun, ciCacheCleanAge)); err != nil {
+		return result, newCacheCleanError(node.Name, err, stderr.String())
 	}
 	result.Paths, result.FreedBytes = parseCacheClean(out.String())
 	return result, nil

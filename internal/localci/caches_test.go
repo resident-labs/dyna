@@ -71,6 +71,31 @@ func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 	}
 }
 
+// TestCleanCachesReturnsOneBoundedFailure checks the public cleanup boundary:
+// the caller gets the managed path and one reason, not rm's output flood.
+func TestCleanCachesReturnsOneBoundedFailure(t *testing.T) {
+	node := Node{Name: "local", Slots: 1, Enabled: true}
+	runner := Runner{Node: &node}
+	path := "/var/tmp/dyna-local-ci/runs/old/web/node_modules"
+	legacy := func(_ context.Context, _ string, _ io.Reader, _, stderr io.Writer, _ string, _ ...string) error {
+		fmt.Fprintf(stderr, "DYNA_CI_CACHE_CLEAN_ERROR\t%s\tpermission denied\n", path)
+		fmt.Fprint(stderr, "rm: cannot remove every child: Permission denied\n")
+		return errors.New("exit status 1")
+	}
+	newFakeMachine(t, legacy).attach(&runner)
+	_, err := runner.CleanCaches(t.Context(), node, false)
+	var failure *CacheCleanError
+	if !errors.As(err, &failure) {
+		t.Fatalf("cleanup error = %v, want CacheCleanError", err)
+	}
+	if failure.Path != path || failure.Reason != "permission denied" {
+		t.Fatalf("cleanup failure = %+v", failure)
+	}
+	if strings.Contains(err.Error(), "every child") || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("cleanup error returned raw output: %q", err)
+	}
+}
+
 // TestCacheRepairPreservesLinkedCaches checks the prepare stage of a run on a
 // temporary base. A go-build link that resolves outside the base waits for the
 // run that holds the shared cache lock, then becomes a real empty directory

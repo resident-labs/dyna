@@ -261,6 +261,14 @@ export interface MachineCacheEvent {
   atMs: number
 }
 
+// MachineCacheCleanFailedEvent is the payload of the machine/cache-clean-failed events.
+export interface MachineCacheCleanFailedEvent {
+  name: string
+  path: string
+  reason: string
+  atMs: number
+}
+
 // MachineScratchEvent is the payload of the machine/scratch-freed events.
 export interface MachineScratchEvent {
   name: string
@@ -487,10 +495,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -788,6 +796,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
+  },
+  {
+    family: "machine",
+    type: "cache-clean-failed",
+    renderer: "MachineCacheCleanCard",
+    quiet: false,
+    wake: "root-if-needed",
+    once: true,
+    audience: "room",
+    text: "Machine {name} could not clean CI cache path {path}: {reason}.",
   },
   {
     family: "machine",
@@ -1499,6 +1517,14 @@ export function isMachineCacheEvent(v: unknown): v is MachineCacheEvent {
     Number.isInteger(v.atMs)
 }
 
+export function isMachineCacheCleanFailedEvent(v: unknown): v is MachineCacheCleanFailedEvent {
+  return isRecord(v) &&
+    typeof v.name === "string" &&
+    typeof v.path === "string" &&
+    typeof v.reason === "string" &&
+    Number.isInteger(v.atMs)
+}
+
 export function isMachineScratchEvent(v: unknown): v is MachineScratchEvent {
   return isRecord(v) &&
     typeof v.name === "string" &&
@@ -1753,6 +1779,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "merge" && type === "fix-requested") return isMergeEvent(v)
   if (family === "machine" && type === "low-disk") return isMachineEvent(v)
   if (family === "machine" && type === "cache-repaired") return isMachineCacheEvent(v)
+  if (family === "machine" && type === "cache-clean-failed") return isMachineCacheCleanFailedEvent(v)
   if (family === "machine" && type === "scratch-freed") return isMachineScratchEvent(v)
   if (family === "machine" && type === "limits-off") return isMachineLimitsEvent(v)
   if (family === "machine" && type === "room-cap") return isRoomCapEvent(v)

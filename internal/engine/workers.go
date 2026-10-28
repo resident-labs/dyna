@@ -434,7 +434,7 @@ func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *w
 			return probeMachines(ctx, load, machineDiskAlerter{notify: rooms.Notify})
 		},
 		caches: func(ctx context.Context) (time.Time, error) {
-			return localci.CleanCachesTick(ctx, store.DataDir(), scratchFreedReporter(rooms.Notify))
+			return localci.CleanCachesTick(ctx, store.DataDir(), scratchFreedReporter(rooms.Notify), cacheCleanFailedReporter(rooms.Notify))
 		},
 		fetch: func(ctx context.Context) (time.Time, error) { return syncer.Tick(ctx, time.Now()) },
 		instructions: func(ctx context.Context) (time.Time, error) {

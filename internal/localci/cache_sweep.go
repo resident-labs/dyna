@@ -18,14 +18,21 @@ const cacheCleanEvery = time.Hour
 // cacheCleanRetry is how soon a failed cleanup is tried again.
 const cacheCleanRetry = time.Hour
 
+// CacheCleanReporter posts one bounded failure for a machine's cleanup pass.
+type CacheCleanReporter func(context.Context, Node, CacheCleanError) error
+
 // CleanCachesTick cleans the caches of every enabled CI machine that has no
 // cleanup in the last hour, and returns when the next cleanup is due. A machine
 // change wakes the worker, so a machine enabled later gets its own deadline.
 // The same pass sweeps the machine's scratch folders and reports what it freed.
-func CleanCachesTick(ctx context.Context, dataDir string, report ScratchReporter) (time.Time, error) {
+func CleanCachesTick(ctx context.Context, dataDir string, report ScratchReporter, reportFailure CacheCleanReporter) (time.Time, error) {
 	return cleanCachesTick(ctx, dataDir, time.Now, func(ctx context.Context, node Node) (CacheCleanResult, error) {
 		runner := Runner{DataDir: dataDir}
 		cleaned, err := runner.CleanCaches(ctx, node, false)
+		if err != nil && reportFailure != nil {
+			reportErr := reportFailure(ctx, node, cacheCleanFailure(node, err))
+			err = errors.Join(err, reportErr)
+		}
 		swept, scratchErr := sweepNodeScratch(ctx, runner, node, time.Now())
 		if report != nil && swept.FreedBytes > 0 {
 			scratchErr = errors.Join(scratchErr, report(ctx, node, swept))
