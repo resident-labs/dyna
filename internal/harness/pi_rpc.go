@@ -252,10 +252,10 @@ func piSessionIdentity(selector string) string {
 	return selector
 }
 
-// piSessionKey keys the registry by session id and the home that stores it:
-// --session-dir (or the agent dir) differs per account, so the same id in
-// two homes is two sessions.
-func piSessionKey(argv, env []string) string {
+// piSessionHome names the home that stores the conversation: --session-dir
+// (or the agent dir) differs per account, so the same conversation in two
+// homes is two sessions.
+func piSessionHome(argv, env []string) string {
 	home := piOptionValue(argv, "--session-dir")
 	if home == "" {
 		home = environmentValue(env, "PI_CODING_AGENT_SESSION_DIR")
@@ -263,7 +263,16 @@ func piSessionKey(argv, env []string) string {
 	if home == "" {
 		home = environmentValue(env, "PI_CODING_AGENT_DIR")
 	}
-	return piSessionIdentity(piSessionArg(argv)) + "\x00" + home
+	return home
+}
+
+// piLaunchKey scopes the caller's session key to the home that stores the
+// conversation. The key must stay the caller's identity, never a native
+// protocol id: session close, transfer and idle relief find a session's
+// child by that key, and a native id leaves the child running under its host
+// with its memory and its runtime bundle lease (D-399).
+func piLaunchKey(caller string, argv, env []string) string {
+	return caller + "\x00" + piSessionHome(argv, env)
 }
 
 // piLaunchFingerprint identifies a process's launch identity: executable,
@@ -285,17 +294,41 @@ func piLaunchFingerprint(executable string, env, argv []string) string {
 	return sessionLaunchFingerprint(executable, env, joined)
 }
 
+// piSessionLaunch builds the host launch for one Pi turn. An anonymous run
+// with no Dyna identity keys by its native conversation id, the one stable
+// id it has; a session's turn keys by the session, so its close and transfer
+// stop the child. The native conversation id rides the fingerprint, so a
+// fresh conversation and a resume of the same one share a child, while two
+// conversations of one session replace it instead of reusing each other's.
+func piSessionLaunch(p profile.Profile, cwd string, spec commandSpec, execution ExecutionOptions) (sessionhost.Launch, error) {
+	launch, err := nativeSessionLaunch(p, cwd, spec, execution)
+	if err != nil {
+		return sessionhost.Launch{}, err
+	}
+	caller := piLaunchCaller(p, execution, spec)
+	launch.Key = piLaunchKey(caller, spec.argv, launch.Env)
+	launch.Fingerprint = piSessionIdentity(piSessionArg(spec.argv)) + "\x00" + piLaunchFingerprint(launch.Argv[0], launch.Env, spec.argv) + "\x00" + cwd
+	return launch, nil
+}
+
+// piLaunchCaller names the launch's caller: the session or run that runs the
+// turn, or the native conversation when no Dyna identity exists.
+func piLaunchCaller(p profile.Profile, execution ExecutionOptions, spec commandSpec) string {
+	if key := sessionKey(p, execution); key != "" {
+		return key
+	}
+	return piSessionIdentity(piSessionArg(spec.argv))
+}
+
 // piSessionProcessFor attaches the Pi codec to the shared process host.
 func piSessionProcessFor(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, execution ExecutionOptions) (sessionhost.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	launch, err := nativeSessionLaunch(p, cwd, spec, execution)
+	launch, err := piSessionLaunch(p, cwd, spec, execution)
 	if err != nil {
 		return nil, err
 	}
-	launch.Key = piSessionKey(spec.argv, launch.Env)
-	launch.Fingerprint = piLaunchFingerprint(launch.Argv[0], launch.Env, spec.argv) + "\x00" + cwd
 	return nativeSessionHost.Session(ctx, launch)
 }
 

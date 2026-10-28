@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/harness/fakeruntime"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/profile"
@@ -501,10 +503,10 @@ func TestPiLaunchFingerprintIgnoresSessionSelector(t *testing.T) {
 	if got := piLaunchFingerprint("/pi", append(append([]string(nil), env...), "NEW=1"), fresh); got == base {
 		t.Fatal("environment change kept the fingerprint")
 	}
-	if piSessionKey(fresh, env) != piSessionKey(resume, env) {
+	if piLaunchKey("session/s", fresh, env) != piLaunchKey("session/s", resume, env) {
 		t.Fatal("fresh and resume sessions keyed differently")
 	}
-	if piSessionKey(fresh, []string{"PI_CODING_AGENT_DIR=/b", "PATH=/bin"}) == piSessionKey(fresh, env) {
+	if piLaunchKey("session/s", fresh, []string{"PI_CODING_AGENT_DIR=/b", "PATH=/bin"}) == piLaunchKey("session/s", fresh, env) {
 		t.Fatal("two homes keyed the same session")
 	}
 }
@@ -552,24 +554,54 @@ func TestPiModelChangeRestartsTheSessionProcess(t *testing.T) {
 	}
 }
 
-// A resume by session file and a fresh launch by id name one session. The
-// registry key must stay the id, not the CLI selector, or a resume starts a
-// second Pi process and leaves the first one and its MCP connections alive.
-func TestPiSessionKeyTreatsASessionPathAsItsID(t *testing.T) {
+// A launch must key its host entry by the Dyna session that runs it, never
+// by the native Pi session id: close, transfer and idle relief stop a
+// session's child through its caller key, and a native id leaves the process
+// alive under its host with its memory and bundle lease (D-399). The native
+// id rides the fingerprint instead, so a second conversation of the same
+// session still replaces the child instead of reusing the first one's.
+func TestPiLaunchKeysByCallerSessionNotNativeID(t *testing.T) {
+	logPath := installFakePi(t, false)
+	p := fakePiProfile(logPath, false)
+	var cleanup func()
+	p, _, cleanup, err := fakeruntime.Prepare(context.Background(), p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	cwd := t.TempDir()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "2026-10-25T10-00-00-000Z_one.jsonl")
 	if err := os.WriteFile(path, []byte(`{"type":"session","version":3,"id":"one","cwd":"/work"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"PATH=/bin"}
-	fresh := []string{"pi", "--mode", "rpc", "--model", "m", "--session-id", "one", "--session-dir", dir}
-	resumed := []string{"pi", "--mode", "rpc", "--model", "m", "--session", path, "--session-dir", dir}
-	if got, want := piSessionKey(resumed, env), piSessionKey(fresh, env); got != want {
-		t.Fatalf("resume key %q differs from fresh key %q", got, want)
+	exec := ExecutionOptions{Execution: callspec.ExecutionRef{Session: "ses_keytest"}}
+	launch := func(argv []string) sessionhost.Launch {
+		t.Helper()
+		l, err := piSessionLaunch(p, cwd, commandSpec{argv: argv}, exec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
 	}
-	compact := []string{"pi", "--mode", "rpc", "--session", path, "--session-dir", dir}
-	if got, want := piSessionKey(compact, env), piSessionKey(fresh, env); got != want {
-		t.Fatalf("compact key %q differs from fresh key %q", got, want)
+	fresh := launch([]string{"pi", "--mode", "rpc", "--model", "m", "--session-id", "one", "--session-dir", dir})
+	if got, want := fresh.Key, "session/ses_keytest\x00"+dir; got != want {
+		t.Fatalf("launch key %q is not the caller session key %q", got, want)
+	}
+	resumed := launch([]string{"pi", "--mode", "rpc", "--model", "m", "--session", path, "--session-dir", dir})
+	if resumed.Key != fresh.Key || resumed.Fingerprint != fresh.Fingerprint {
+		t.Fatal("a resumed conversation keyed or fingerprinted differently than a fresh one")
+	}
+	other := launch([]string{"pi", "--mode", "rpc", "--model", "m", "--session-id", "two", "--session-dir", dir})
+	if other.Key != fresh.Key {
+		t.Fatalf("a second conversation of one session keyed its own entry: %q", other.Key)
+	}
+	if other.Fingerprint == fresh.Fingerprint {
+		t.Fatal("a second conversation of one session reused the first conversation's child")
+	}
+	otherHome := launch([]string{"pi", "--mode", "rpc", "--model", "m", "--session-id", "one", "--session-dir", dir + "-b"})
+	if otherHome.Key == fresh.Key {
+		t.Fatal("two homes keyed the same session")
 	}
 }
 

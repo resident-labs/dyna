@@ -39,7 +39,7 @@ func TestPrivateBundleRemovalProtectsPinsAndAccounts(t *testing.T) {
 	if err = lease.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err = manager.Remove(ctx, "pi", old.Version, []Bundle{old}, true); err == nil {
+	if err = manager.Remove(ctx, "pi", old.Version, []PinnedBundle{{Bundle: old}}, true); err == nil {
 		t.Fatal("pinned bundle removed")
 	}
 	if err = manager.Remove(ctx, "pi", "../../accounts", nil, true); err == nil {
@@ -99,7 +99,7 @@ func TestUninstallRemovesEveryCopySoNoOlderOneTakesOver(t *testing.T) {
 	if err := manager.Uninstall(ctx, "pi", nil, false); err == nil {
 		t.Fatal("uninstalled without confirmation")
 	}
-	if err := manager.Uninstall(ctx, "pi", []Bundle{old}, true); err == nil {
+	if err := manager.Uninstall(ctx, "pi", []PinnedBundle{{Bundle: old}}, true); err == nil {
 		t.Fatal("uninstalled a pinned copy")
 	}
 	if err := manager.Uninstall(ctx, "pi", nil, true); err != nil {

@@ -18,24 +18,26 @@ import (
 // All native protocol adapters attach through one host.
 var nativeSessionHost = sessionhost.Default()
 
-// sessionKey names the caller, independent of a protocol's native session id.
-func sessionKey(p profile.Profile, execution ExecutionOptions) (string, error) {
+// sessionKey names the caller, independent of a protocol's native session
+// id. It reports an empty key when no Dyna identity exists, so a protocol
+// adapter can key by its own stable native id instead.
+func sessionKey(p profile.Profile, execution ExecutionOptions) string {
 	if execution.SessionKey != "" {
-		return execution.SessionKey, nil
+		return execution.SessionKey
 	}
 	if execution.Execution.Session != "" {
-		return "session/" + execution.Execution.Session, nil
+		return "session/" + execution.Execution.Session
 	}
 	if execution.Execution.Run != "" {
-		return fmt.Sprintf("run/%s/%d", execution.Execution.Run, execution.Execution.Agent), nil
+		return fmt.Sprintf("run/%s/%d", execution.Execution.Run, execution.Execution.Agent)
 	}
 	if key := p.Env["DYNA_SESSION"]; key != "" {
-		return key, nil
+		return key
 	}
 	if key := os.Getenv("DYNA_SESSION"); key != "" {
-		return key, nil
+		return key
 	}
-	return newSessionID()
+	return ""
 }
 
 // nativeSessionLaunch resolves the same command and runtime protection used
@@ -44,9 +46,13 @@ func nativeSessionLaunch(p profile.Profile, cwd string, spec commandSpec, execut
 	if err := validateWorkingDirectory(cwd); err != nil {
 		return sessionhost.Launch{}, err
 	}
-	key, err := sessionKey(p, execution)
-	if err != nil {
-		return sessionhost.Launch{}, err
+	key := sessionKey(p, execution)
+	if key == "" {
+		id, err := newSessionID()
+		if err != nil {
+			return sessionhost.Launch{}, err
+		}
+		key = id
 	}
 	cmd, err := harnessCommand(context.Background(), p, cwd, spec.argv, execution)
 	if err != nil {
