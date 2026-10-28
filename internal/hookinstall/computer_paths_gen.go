@@ -27,6 +27,7 @@ var computerCodePaths = []string{
 	"internal/machines",
 	"internal/mode",
 	"internal/plan/ancestry",
+	"internal/proc",
 	"internal/processguard",
 	"internal/procident",
 	"internal/profile",
