@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/gpu"
 )
 
 // GPU memory near exhaustion killed this machine's desktop once (D-352): the
@@ -37,14 +39,14 @@ const sysfsDRMClass = "/sys/class/drm"
 // GPU with no readable source is left out. The note explains why GPU memory
 // was not checked at all, and is empty when it was.
 func readGPUs() (readings []GPUReading, note string) {
-	cards := gpuCards(sysfsDRMClass)
+	cards := gpu.Read(sysfsDRMClass).Cards
 	for _, card := range cards {
-		used, uok := readUint(filepath.Join(sysfsDRMClass, card, "device", "mem_info_vram_used"))
-		total, tok := readUint(filepath.Join(sysfsDRMClass, card, "device", "mem_info_vram_total"))
+		used, uok := readUint(filepath.Join(sysfsDRMClass, card.Name, "device", "mem_info_vram_used"))
+		total, tok := readUint(filepath.Join(sysfsDRMClass, card.Name, "device", "mem_info_vram_total"))
 		if !uok || !tok || total == 0 {
 			continue
 		}
-		readings = append(readings, GPUReading{GPU: card + " (" + gpuDriver(sysfsDRMClass, card) + ")", Used: used, Total: total})
+		readings = append(readings, GPUReading{GPU: card.Name + " (" + card.Driver + ")", Used: used, Total: total})
 	}
 	if len(cards) > 0 {
 		nvidia := nvidiaSmiMemory()
@@ -56,37 +58,6 @@ func readGPUs() (readings []GPUReading, note string) {
 		note = "GPU memory not checked (no sysfs mem_info_vram or nvidia-smi)"
 	}
 	return readings, note
-}
-
-// gpuCards lists the card entries of a /sys/class/drm directory, skipping
-// connector entries such as card1-DP-1.
-func gpuCards(class string) []string {
-	entries, err := os.ReadDir(class)
-	if err != nil {
-		return nil
-	}
-	var cards []string
-	for _, e := range entries {
-		name := e.Name()
-		digits := strings.TrimPrefix(name, "card")
-		if digits == name {
-			continue
-		}
-		if _, err := strconv.Atoi(digits); err != nil {
-			continue
-		}
-		cards = append(cards, name)
-	}
-	return cards
-}
-
-// gpuDriver names the kernel driver bound to a card; empty when unbound.
-func gpuDriver(class, card string) string {
-	driver, err := os.Readlink(filepath.Join(class, card, "device", "driver"))
-	if err != nil {
-		return ""
-	}
-	return filepath.Base(driver)
 }
 
 func readUint(path string) (uint64, bool) {
