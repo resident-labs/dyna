@@ -187,7 +187,8 @@ Wants=network-online.target dyna-computers.service
 
 [Service]
 ExecStart=` + quote(binary) + run + `
-` + pathLine(path) + `Restart=always
+` + pathLine(path) + `Environment="GOMEMLIMIT=4GiB"
+Restart=always
 RestartSec=3
 KillMode=process
 Delegate=yes
