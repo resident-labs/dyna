@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/authority"
@@ -15,6 +16,11 @@ func TestHealthServesWhileMigrationBlocks(t *testing.T) {
 	restoreAuthority()
 	t.Cleanup(restoreAuthority)
 	storetest.DataDir(t)
+	runtimeDir, err := filepath.Abs(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	savedMigration, savedReady := migrateStores, fullAPIReady
 	t.Cleanup(func() { migrateStores, fullAPIReady = savedMigration, savedReady })
 	migrationStarted := make(chan struct{})
