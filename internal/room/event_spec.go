@@ -1002,12 +1002,3 @@ func enumValues[T ~string](values []T) []string {
 	}
 	return out
 }
-
-// mergeStepValues lists the merge steps for the generated web union.
-func mergeStepValues() []string {
-	values := make([]string, len(mergeSteps))
-	for i, step := range mergeSteps {
-		values[i] = string(step)
-	}
-	return values
-}
