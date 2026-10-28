@@ -68,6 +68,10 @@ const fixtures: Record<string, EventPayload> = {
     summary: '40.0 GiB freed: 2 idle folders and 3 build outputs removed',
     atMs: 1792774800000,
   },
+  'machine/limits-off': {
+    reason: 'systemd did not delegate the memory controller to this user',
+    atMs: 1792774800000,
+  },
   'worktree/kept': {
     owner: 'session-1',
     path: '/home/a/.dyna-worktrees/dyna-4708ae0b/composer-tidy',
@@ -417,6 +421,9 @@ function fixtureTip(payload: EventPayload): string {
     return payload.session
   }
   if ('verdict' in payload) return payload.detail || payload.verdict
+  // A worktree payload shows its detail over its reason kind, so a card that
+  // names only the kind fails.
+  if ('detail' in payload && payload.detail) return payload.detail
   if ('reason' in payload) return payload.reason
   return String(payload)
 }
