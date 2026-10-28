@@ -759,14 +759,26 @@ func (s *Store) Turns(id string) ([]Turn, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.turnRange(id, 1, m.Turns)
+}
+
+// TurnRange lists turns first through last, inclusive, from one database snapshot.
+func (s *Store) TurnRange(id string, first, last int) ([]Turn, error) {
+	if first < 1 || last < first {
+		return nil, fmt.Errorf("invalid turn range %d through %d", first, last)
+	}
+	return s.turnRange(id, first, last)
+}
+
+func (s *Store) turnRange(id string, first, last int) ([]Turn, error) {
 	db, err := s.turnsDB()
 	if err != nil {
 		return nil, err
 	}
 	ctx := context.Background()
-	turns := make([]Turn, 0, m.Turns)
+	turns := make([]Turn, 0, max(0, last-first+1))
 	err = state.For(db).Read(ctx, func(r state.Reader) error {
-		for n := 1; n <= m.Turns; n++ {
+		for n := first; n <= last; n++ {
 			var turn Turn
 			raw, _, err := resolvedTurn(ctx, r, id, n)
 			if errors.Is(err, sql.ErrNoRows) {
