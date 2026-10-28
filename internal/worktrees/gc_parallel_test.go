@@ -95,3 +95,22 @@ func TestGCRechecksOwnerAfterQueueing(t *testing.T) {
 		t.Fatalf("tree of a reactivated owner was removed: %v; decisions: %#v", err, trees)
 	}
 }
+
+// A commit made while a worker waits for the removal lock must keep the tree.
+func TestGCRechecksHeadAfterQueueing(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "dyna/queued-head", "owner")
+	ageGCTree(t, path)
+	trees, err := GC(context.Background(), repo, GCOptions{
+		OwnerClosed: func(string) (bool, error) { return true, nil },
+		beforeLock: func(p string) {
+			git(t, p, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "late work")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("tree that gained a commit was removed: %v; decisions: %#v", err, trees)
+	}
+}
