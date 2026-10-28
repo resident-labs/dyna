@@ -357,7 +357,15 @@ export function isMember(v: unknown): v is Member {
 // engine sets room, session-queued, worker-steered, root-started or failed
 // today, so a new value must not make a stored post look unsent.
 function isDelivery(v: unknown): v is Delivery {
-  return isRecord(v) && isString(v.to) && isString(v.delivery) && optional(v.turn, isNumber) && optional(v.pointer, isBoolean) && optional(v.error, isString)
+  return (
+    isRecord(v) &&
+    isString(v.to) &&
+    isString(v.delivery) &&
+    optional(v.turn, isNumber) &&
+    optional(v.pointer, isBoolean) &&
+    optional(v.voiceCall, isBoolean) &&
+    optional(v.error, isString)
+  )
 }
 
 const isDeliveries = arrayOf(isDelivery)
