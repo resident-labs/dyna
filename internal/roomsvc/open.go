@@ -34,7 +34,6 @@ func (s *Service) Open(ref string, tail int, withClosed bool) (Opened, error) {
 	if !withClosed {
 		out.Members = s.membersOf(rec, all, rev, false)
 	}
-	s.countResponsibilities(out.Members, all)
 	// Choices complete open sessions only, whatever the member list shows.
 	open := out.Members
 	if withClosed {
