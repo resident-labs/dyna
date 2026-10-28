@@ -85,8 +85,9 @@ func TestRestoreOwnerKeepsCallerRoots(t *testing.T) {
 // A harness shell that picks its own data roots never writes the owner's
 // live store (D-398). A QA command with scratch HOME and XDG_DATA_HOME keeps
 // them, DYNA_DATA_DIR stays unset, and the resolved data folder follows the
-// caller's roots: a chosen XDG_DATA_HOME rules, and a chosen HOME drops an
-// inherited XDG_DATA_HOME, whether the harness's private root or the owner's.
+// caller's roots, for `dyna engine run` as for any command: a chosen
+// XDG_DATA_HOME rules, and a chosen HOME drops an inherited XDG_DATA_HOME,
+// whether the harness's private root or the owner's.
 func TestRestoreOwnerKeepsCallerDataRoot(t *testing.T) {
 	type xdgChoice int
 	const (
@@ -95,13 +96,16 @@ func TestRestoreOwnerKeepsCallerDataRoot(t *testing.T) {
 		xdgOwner
 	)
 	for name, tc := range map[string]struct {
-		home bool
-		xdg  xdgChoice
+		home   bool
+		xdg    xdgChoice
+		engine bool
 	}{
-		"HOME and XDG_DATA_HOME":              {home: true, xdg: xdgCaller},
-		"HOME only":                           {home: true, xdg: xdgLeft},
-		"HOME with the owner's XDG_DATA_HOME": {home: true, xdg: xdgOwner},
-		"XDG_DATA_HOME only":                  {xdg: xdgCaller},
+		"HOME and XDG_DATA_HOME":                     {home: true, xdg: xdgCaller},
+		"HOME only":                                  {home: true, xdg: xdgLeft},
+		"HOME with the owner's XDG_DATA_HOME":        {home: true, xdg: xdgOwner},
+		"XDG_DATA_HOME only":                         {xdg: xdgCaller},
+		"engine run, HOME only":                      {home: true, xdg: xdgLeft, engine: true},
+		"engine run, HOME with the owner's XDG data": {home: true, xdg: xdgOwner, engine: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			scope, owner, env := fixture(t)
@@ -126,7 +130,11 @@ func TestRestoreOwnerKeepsCallerDataRoot(t *testing.T) {
 			case xdgOwner:
 				t.Setenv("XDG_DATA_HOME", ownerData)
 			}
-			if err := RestoreOwner([]string{"harness", "install", "pi"}); err != nil {
+			args := []string{"harness", "install", "pi"}
+			if tc.engine {
+				args = []string{"engine", "run"}
+			}
+			if err := RestoreOwner(args); err != nil {
 				t.Fatal(err)
 			}
 			if value, ok := os.LookupEnv(store.DataDirEnv); ok {
