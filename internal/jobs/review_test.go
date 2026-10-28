@@ -715,3 +715,142 @@ func TestACancelledRequestSurvivesAnOwnerRestart(t *testing.T) {
 		t.Fatalf("the row is %s with started=%v, want cancelled with its start kept", final.State, final.Started)
 	}
 }
+
+// TestAStaleSaveKeepsTheCancellationRequest is the fail-first test for the
+// round-9 review, first finding: every whole-row write - a claimed job
+// saving its start, a poll saving its offset - carries a stale copy, and
+// none of them may drop a cancellation that landed in between: the upsert
+// keeps the standing request of the row it overwrites.
+func TestAStaleSaveKeepsTheCancellationRequest(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	job := Job{ID: "job_stale_save", RoomID: "dyna", Node: "here", Command: []string{"true"}, State: StateRunning, Created: time.Now(), LogPath: filepath.Join(t.TempDir(), "log")}
+	if err := store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RequestCancel(t.Context(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A stale copy from before the request saves over the row, twice: once
+	// as the run started write, once as a poll offset write.
+	stale := job
+	stale.Note = "poll write"
+	if _, _, err := store.SaveOpen(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	row, err := store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !row.CancelRequested {
+		t.Fatal("a stale whole-row save cleared the standing cancellation request")
+	}
+	if row.Note != "poll write" {
+		t.Fatalf("note = %q, want the stale save content", row.Note)
+	}
+}
+
+// TestACancelBetweenTheClaimAndTheStartStillEndsTheJob covers the first
+// finding service-level interleaving: a cancellation lands after the
+// claim read the row but before the run records its start. The stale
+// started write keeps the request, the run sees it before the node works,
+// and the job ends cancelled, after its start, exactly once.
+func TestACancelBetweenTheClaimAndTheStartStillEndsTheJob(t *testing.T) {
+	owner, fake, ownerReporter, runStarted := newIdleService(t, blockingJob("never runs"))
+	cancelled := make(chan struct{})
+	owner.onRun = func(job Job) {
+		runStarted <- job
+		standby, _, standbyReporter, _ := newIdleService(t, blockingJob("never runs"))
+		standby.Store = owner.Store
+		standby.Machines = owner.Machines
+		standby.NewExecutor = owner.NewExecutor
+		if _, err := standby.Cancel(t.Context(), job.ID); err != nil {
+			t.Errorf("cancel: %v", err)
+		}
+		standby.Stop()
+		select {
+		case event := <-standbyReporter.finished:
+			t.Errorf("the canceller posted %s; the owner owns the events", event.State)
+		default:
+		}
+		close(cancelled)
+	}
+	owner.Start(t.Context())
+	if _, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}}); err != nil {
+		t.Fatal(err)
+	}
+	<-cancelled
+	start := <-ownerReporter.started
+	end := <-ownerReporter.finished
+	owner.Stop()
+	if start.ID != end.ID {
+		t.Fatalf("start %s and end %s name different jobs", start.ID, end.ID)
+	}
+	if end.State != StateCancelled {
+		t.Fatalf("the job ended %s, want cancelled", end.State)
+	}
+	select {
+	case extra := <-ownerReporter.finished:
+		t.Fatalf("a second end %s arrived; the end is reported once", extra.State)
+	default:
+	}
+	if n := len(fake.StartCalls()); n != 0 {
+		t.Fatalf("the node started %d job(s), want none", n)
+	}
+}
+
+// TestARestartAtAStartNeverPostedLaunchesAndPosts is the fail-first test
+// for the round-9 review, second finding: an engine crashes after it saved
+// the running row but before it posted the start or launched the unit. The
+// next engine reads the row, posts the missing start, launches the job
+// fresh, and reports its one end.
+func TestARestartAtAStartNeverPostedLaunchesAndPosts(t *testing.T) {
+	onNode := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "ran")
+		onNode <- struct{}{}
+		return nil
+	}
+	dead, fake, _, _ := newIdleService(t, legacy)
+	dir := dead.DataDir
+	started := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
+	job := Job{ID: "job_boundary", RoomID: "dyna", Node: "here", Command: []string{"echo", "hi"}, State: StateRunning, Started: started, Timeout: time.Minute, Created: started.Add(-time.Minute), LogPath: filepath.Join(dir, "jobs", "job_boundary", "log"), Dir: NodeBase("here") + "/jobs/job_boundary", Unit: "dyna-job-job_boundary.service"}
+	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
+		t.Fatal(err)
+	}
+	if err := dead.Store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	// The row says running with no start posted: the crash boundary.
+	next, _, nextReporter, _ := newIdleService(t, legacy)
+	next.Store = dead.Store
+	next.Machines = dead.Machines
+	next.NewExecutor = dead.NewExecutor
+	next.Start(t.Context())
+	defer next.Stop()
+	start := <-nextReporter.started
+	if start.ID != job.ID {
+		t.Fatalf("started %s, want %s", start.ID, job.ID)
+	}
+	<-onNode
+	end := <-nextReporter.finished
+	if end.State != StatePassed {
+		t.Fatalf("the job ended %s, want passed", end.State)
+	}
+	if n := len(fake.StartCalls()); n != 1 {
+		t.Fatalf("the node saw %d start(s), want one fresh launch", n)
+	}
+	row, err := next.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != StatePassed || !row.StartPosted {
+		t.Fatalf("the row is %s with start_posted=%v, want passed with the start recorded", row.State, row.StartPosted)
+	}
+}
