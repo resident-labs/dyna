@@ -131,6 +131,7 @@ var nonStampKeys = map[string]string{
 	"DYNA_SLICE":                          "The resource cgroup slice, not a Dyna caller identity.",
 	"DYNA_ROOM_SLICE":                     "The room's resource slice unit, not a Dyna caller identity.",
 	"DYNA_BIN":                            "The path to the Dyna executable.",
+	"DYNA_CI_CACHE_CLEAN_ERROR":           "A cache cleanup output marker, not an environment variable or caller stamp.",
 }
 
 // Hook event fields and generated MCP bridge keys describe a child command;
