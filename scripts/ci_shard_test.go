@@ -9,10 +9,11 @@ import (
 	"testing"
 )
 
-// TestShardMapCoversEveryPackageOnce pins the two properties a shard map must
-// keep: every package is tested, and no package is tested twice. Only the
-// packages the map splits across two shards (CI_SLICE) may appear twice. A
-// balanced map that loses a package would show up as fewer tests, not a failure.
+// TestShardMapCoversEveryPackageOnce pins the properties a shard map must
+// keep: every package is tested, heavy packages keep their measured assignments,
+// and no other package is repeated. Only the package the map splits across three
+// shards (CI_SLICE) may appear three times. A balanced map that loses a package
+// would show up as fewer tests, not a failure.
 func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 	packages := []string{
 		"dyna-agent/cmd/dyna",
@@ -25,12 +26,13 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 		"dyna-agent/internal/pr/watch",
 		"dyna-agent/internal/roomsvc",
 		"dyna-agent/internal/subagent",
+		"dyna-agent/internal/visual",
 		"dyna-agent/internal/workflow",
 		"dyna-agent/internal/zzz-small",
 	}
 	shards := map[string][]string{}
-	for i := 0; i < 8; i++ {
-		for _, pkg := range shardPackages(t, i, 8, packages) {
+	for i := 0; i < 9; i++ {
+		for _, pkg := range shardPackages(t, i, 9, packages) {
 			shards[pkg] = append(shards[pkg], fmt.Sprint(i))
 		}
 	}
@@ -40,10 +42,13 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 			t.Fatalf("%s is on no shard", pkg)
 		}
 		if pkg == "dyna-agent/internal/pr/watch" {
-			if strings.Join(got, ",") != "0,7" {
-				t.Fatalf("the only sliced package is on shards %v, want 0,7", got)
+			if strings.Join(got, ",") != "0,7,8" {
+				t.Fatalf("the only sliced package is on shards %v, want 0,7,8", got)
 			}
 			continue
+		}
+		if pkg == "dyna-agent/internal/visual" && strings.Join(got, ",") != "3" {
+			t.Fatalf("internal/visual is on shards %v, want 3", got)
 		}
 		if len(got) != 1 {
 			t.Fatalf("%s is on shards %v, want exactly one", pkg, got)
