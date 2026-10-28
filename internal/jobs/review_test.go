@@ -64,8 +64,9 @@ func TestCleanupRunsOnTheNode(t *testing.T) {
 		DataDir:  dir,
 		logf:     func(string, ...any) {},
 	}
-	var mu chanMutex
-	var localRemovals, remoteRemovals int
+	// The folder is removed after the end is posted, so the test waits for the
+	// removal itself, not for the end.
+	removals := make(chan string, 2)
 	svc.Start(t.Context())
 	fake := jobstest.NewFake(t, jobstest.Protocol{Start: StartScript, Poll: PollScript, Stop: StopScript}, func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		joined := name + " " + strings.Join(args, " ")
@@ -73,12 +74,10 @@ func TestCleanupRunsOnTheNode(t *testing.T) {
 			fmt.Fprintln(out, "ran")
 			return nil
 		}
-		mu.lock()
-		defer mu.unlock()
 		if name == "ssh" {
-			remoteRemovals++
+			removals <- "remote"
 		} else {
-			localRemovals++
+			removals <- "local"
 		}
 		return nil
 	})
@@ -93,23 +92,10 @@ func TestCleanupRunsOnTheNode(t *testing.T) {
 	}
 	_ = job
 	<-reporter.finished
-	mu.lock()
-	defer mu.unlock()
-	if localRemovals != 0 || remoteRemovals != 1 {
-		t.Fatalf("folder removals: %d local, %d remote; want 0 local and 1 on the node", localRemovals, remoteRemovals)
+	if where := <-removals; where != "remote" {
+		t.Fatalf("the job's folder was removed on the %s machine, want on the node", where)
 	}
 }
-
-type chanMutex struct{ ch chan struct{} }
-
-func (m *chanMutex) lock() {
-	if m.ch == nil {
-		m.ch = make(chan struct{}, 1)
-	}
-	m.ch <- struct{}{}
-}
-
-func (m *chanMutex) unlock() { <-m.ch }
 
 // TestLogOffsetSurvivesEngineStop is the fail-first test for review finding
 // 3: the row's stored log offset after an engine stop matches the log written
