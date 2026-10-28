@@ -394,24 +394,26 @@ func showCommand(newManager func() *subagent.Manager) *cobra.Command {
 			if info.ParentSession != "" {
 				fmt.Fprintf(w, " under %s", info.ParentSession)
 			}
-			turns, err := store.Turns(info.ID)
-			if err != nil {
-				return err
-			}
-			usageUnavailable := info.Usage.Total() == 0
-			completed := false
-			for _, turn := range turns {
-				if !turn.Done() {
-					continue
+			usageUnavailable := false
+			if info.Usage.Total() == 0 {
+				turns, err := store.Turns(info.ID)
+				if err != nil {
+					return err
 				}
-				completed = true
-				n := turn.UsageNormalization
-				if n.Version == 0 || n.Input != "unknown" || n.CachedInput != "unknown" || n.Output != "unknown" {
-					usageUnavailable = false
-					break
+				completed, measured := false, false
+				for _, turn := range turns {
+					if !turn.Done() {
+						continue
+					}
+					completed = true
+					n := turn.UsageNormalization
+					if n.Version == 0 || n.Input != "unknown" || n.CachedInput != "unknown" || n.Output != "unknown" {
+						measured = true
+						break
+					}
 				}
+				usageUnavailable = completed && !measured
 			}
-			usageUnavailable = usageUnavailable && completed
 			fmt.Fprintf(w, " · %d turn%s", info.Turns, plural(info.Turns))
 			if usageUnavailable {
 				fmt.Fprint(w, " · usage unavailable")
@@ -497,14 +499,12 @@ func outputCommand(newManager func() *subagent.Manager) *cobra.Command {
 				return copyRange(c.OutOrStdout(), path, t.RawStart, t.RawEnd)
 			}
 			if conv {
-				sess, err := transcript.NewLoader(store).Load(info.ID, 0)
+				sess, err := transcript.NewLoader(store).LoadTurn(info.ID, n)
 				if err != nil {
 					return err
 				}
 				for _, ct := range sess.Turns {
-					if ct.N == n {
-						transcript.WriteTurn(c.OutOrStdout(), ct, transcript.PlainOptions{Agent: info.Profile})
-					}
+					transcript.WriteTurn(c.OutOrStdout(), ct, transcript.PlainOptions{Agent: info.Profile})
 				}
 				return nil
 			}
