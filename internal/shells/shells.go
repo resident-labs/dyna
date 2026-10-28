@@ -936,7 +936,7 @@ func StartSupervisor(exe, id string) error {
 	cmd.ExtraFiles = []*os.File{gateRead}
 	cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%d", launchGateEnv, 3))
 	if sessionlife.IsSessionID(m.Owner) {
-		err = callerid.Start(context.Background(), childenv.Clean(cmd), callerid.Launch{DataDir: store.DataDir(), Name: m.Owner, Actor: callerid.Identity{Kind: callerid.Session, Session: m.Owner}, Launcher: "shell"})
+		err = callerid.Start(context.Background(), childenv.Clean(cmd), callerid.Launch{DataDir: store.DataDir(), Name: m.Owner, Actor: callerid.Identity{Kind: callerid.Session, Session: m.Owner}, Launcher: "shell", Room: m.RoomID})
 	} else {
 		err = childenv.Clean(cmd).Start()
 	}

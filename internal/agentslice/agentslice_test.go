@@ -43,9 +43,23 @@ func fakeManager(t *testing.T) (config string, calls *[]string) {
 		return []byte("systemd 262 (262-1-arch)\n"), nil
 	}
 	sliceOnce, noExpandOnce, noExpand = sync.Once{}, sync.Once{}, ""
+	roomSliceMu.Lock()
+	roomSliceDone = map[string]bool{}
+	roomSliceMu.Unlock()
+	roomNoticeMu.Lock()
+	roomNoticed = map[string]bool{}
+	roomNoticeMu.Unlock()
+	supportOnce, memOnce = sync.Once{}, sync.Once{}
 	t.Cleanup(func() {
 		lookPath, runCommand, runCommandOutput = oldLook, oldRun, oldOutput
 		sliceOnce, noExpandOnce, noExpand = sync.Once{}, sync.Once{}, ""
+		roomSliceMu.Lock()
+		roomSliceDone = map[string]bool{}
+		roomSliceMu.Unlock()
+		roomNoticeMu.Lock()
+		roomNoticed = map[string]bool{}
+		roomNoticeMu.Unlock()
+		supportOnce, memOnce = sync.Once{}, sync.Once{}
 	})
 	return config, &got
 }

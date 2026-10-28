@@ -77,10 +77,18 @@ Stored hierarchy controls parent selectors and depth, even when `DYNA_DEPTH` pre
 | `DYNA_MODE` | `subagent` | `subagent` |
 | `DYNA_SESSION`, `DYNA_DEPTH` | session ID, launch depth | session ID, launch depth |
 | `DYNA_ROOM`, `DYNA_ROOM_ID` | room name and ID | room name and ID |
+| `DYNA_ROOM_SLICE` | the slice the room runs in: the room's own when limits are on, `dyna.slice` when they are off | the slice the room runs in: the room's own when limits are on, `dyna.slice` when they are off |
 | `DYNA_ADDRESS` | `<room>:<name>` | `<room>:<name>` |
 | `DYNA_WORKER_RUN` | not set | run ID |
 | `DYNA_AGENT_JOURNAL` | not set | journal path |
 | `DYNA_BIN` | Dyna binary | Dyna binary |
+
+Every process you start, including shells and builds, runs in your room's
+slice, so its memory and process count cannot take the machine down.
+`DYNA_ROOM_SLICE` names that slice. Start a long-lived daemon with
+`systemd-run --user --unit=<name> <command>`; the `systemd-run` on your PATH
+adds `--slice="$DYNA_ROOM_SLICE"` itself, unless the call names a slice. A
+daemon or supervisor started any other way runs outside the room's limits.
 
 ## Questions
 
