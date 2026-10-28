@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -109,6 +110,42 @@ func TestQuotaHeldOutReleasesLimitWhenUsageHasQuotaLeft(t *testing.T) {
 	setReading(t, a, account, &store.Observation{ObservedAt: time.Now(), Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
 	if got, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", time.Now()); !held || !got.Equal(until) {
 		t.Fatalf("held = %v until %v with a spent session window, want %v", held, got, until)
+	}
+}
+
+// Profile ranking and account selection must apply the same eligibility
+// decision when a reading cannot be ranked or has no weekly window.
+func TestQuotaHeldOutAndChooseUsageShareEligibility(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	until := now.Add(time.Hour)
+	for _, tc := range []struct {
+		name     string
+		reading  *store.Observation
+		eligible bool
+	}{
+		{
+			name:     "missing weekly percentage",
+			reading:  &store.Observation{Windows: []store.Window{{ID: "seven_day"}}},
+			eligible: true,
+		},
+		{
+			name:     "active rate limit without weekly window",
+			reading:  &store.Observation{RateLimitedUntil: &until},
+			eligible: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := testAccounts(t)
+			account := signedClaude(t, a, "account", "aaaaaaaa-bbbb-cccc-dddd-000000000001")
+			setReading(t, a, account, tc.reading)
+			fixtureUsageEndpoint(t, nil)
+
+			_, held := a.QuotaHeldOut("claude-code", store.ProviderAnthropic, "", now)
+			chosen, _, _ := a.chooseUsage(context.Background(), []NativeAccount{account}, time.Time{}, "", now)
+			if held == tc.eligible || (chosen != nil) != tc.eligible {
+				t.Fatalf("held = %v, chosen = %v; want eligible = %v from both decisions", held, chosen != nil, tc.eligible)
+			}
+		})
 	}
 }
 
