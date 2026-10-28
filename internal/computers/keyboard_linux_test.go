@@ -217,6 +217,27 @@ func TestShortcutWaitFailsOpen(t *testing.T) {
 	}
 }
 
+type chordKeyboard struct{ recorder }
+
+func (k *chordKeyboard) activate() error                        { return nil }
+func (k *chordKeyboard) typeText(context.Context, string) error { return nil }
+
+func TestKeypressChordPacesModifiersBeforeLaterKeys(t *testing.T) {
+	keyboard := &chordKeyboard{}
+	input := newGuardedInput(keyboard)
+	input.setKeys(keyboard)
+	actions := parseActions(t, `[{"type":"keypress","keys":["CTRL","t"]},{"type":"keypress","keys":["z"]}]`)
+	for _, action := range actions {
+		if err := executeActionPaced(context.Background(), action, input, keyboard, keyboard.wait); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "wait 50ms|key CTRL down|wait 50ms|key t down|wait 150ms|key t up|key CTRL up|wait 50ms|key z down|wait 150ms|key z up"
+	if got := strings.Join(keyboard.log, "|"); got != want {
+		t.Fatalf("events = %s, want %s", got, want)
+	}
+}
+
 // key_down with SHIFT and a non-ASCII letter presses its uppercase form, so the
 // map must hold that form, as it does for keypress.
 func TestKeyboardMapCoversShiftedKeysOfKeyDown(t *testing.T) {

@@ -337,18 +337,32 @@ func isShortcut(a Action) bool {
 	return modified && ordinary
 }
 
-func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *virtualKeyboard) (err error) {
+type actionKeyboard interface {
+	keyDevice
+	activate() error
+	typeText(context.Context, string) error
+}
+
+func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *virtualKeyboard) error {
+	return executeActionPaced(ctx, a, p, keyboard, inputPause)
+}
+
+const chordModifierPause = 50 * time.Millisecond
+
+func executeActionPaced(ctx context.Context, a Action, p *guardedInput, keyboard actionKeyboard, wait func(context.Context, time.Duration) error) (err error) {
 	kind := actionType(a)
 	keys := actionKeys(a)
 	if kind == "keypress" || kind == "key_down" || kind == "key_up" || kind == "type" || len(keys) > 0 {
 		if err := keyboard.activate(); err != nil {
 			return err
 		}
-		if err := inputPause(ctx, 50*time.Millisecond); err != nil {
+		if err := wait(ctx, 50*time.Millisecond); err != nil {
 			return err
 		}
 	}
-	// Release keys on cancellation and pointer failures as well as success.
+	// Release ordinary keys before modifiers on cancellation and pointer
+	// failures as well as success. Each real device send finishes a Wayland
+	// roundtrip, so the released state is synchronized before the next action.
 	var pressed []string
 	defer func() {
 		for i := len(pressed) - 1; i >= 0; i-- {
@@ -362,7 +376,31 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 	if kind == "key_down" || kind == "key_up" {
 		press = nil
 	}
-	for _, key := range press {
+	modifiers := 0
+	if kind == "keypress" {
+		// A chord presses every modifier before its ordinary keys. The device's
+		// modifier press includes a Wayland roundtrip before the pause.
+		ordered := make([]string, 0, len(press))
+		for _, key := range press {
+			if keyboardModifier(key) != 0 {
+				ordered = append(ordered, key)
+			}
+		}
+		modifiers = len(ordered)
+		for _, key := range press {
+			if keyboardModifier(key) == 0 {
+				ordered = append(ordered, key)
+			}
+		}
+		press = ordered
+	}
+	for i, key := range press {
+		if modifiers > 0 && i == modifiers {
+			// Let the client consume wl_keyboard.modifiers before the key event.
+			if err := wait(ctx, chordModifierPause); err != nil {
+				return err
+			}
+		}
 		owned, err := p.press(key)
 		if err != nil {
 			return err
@@ -372,7 +410,7 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 		}
 	}
 	if kind != "keypress" && len(press) > 0 {
-		if err := inputPause(ctx, 50*time.Millisecond); err != nil {
+		if err := wait(ctx, 50*time.Millisecond); err != nil {
 			return err
 		}
 	}
@@ -409,7 +447,7 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 		if err != nil {
 			return err
 		}
-		return dragPath(ctx, p, path, step, paced, inputPause)
+		return dragPath(ctx, p, path, step, paced, wait)
 	case "pointer_down", "pointer_up":
 		return pointerButtonAction(p, a)
 	case "scroll":
@@ -426,7 +464,7 @@ func executeAction(ctx context.Context, a Action, p *guardedInput, keyboard *vir
 		if err != nil {
 			return err
 		}
-		return inputPause(ctx, hold)
+		return wait(ctx, hold)
 	case "key_down":
 		// The keys stay held, tracked by the guard, until key_up, a takeover or
 		// the end of the batch.
