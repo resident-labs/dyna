@@ -160,6 +160,11 @@ func Track(rec Record) error {
 				// checks the chosen block again against current registry records.
 				port, err = allocatePort(safe, records, portFree)
 				if err != nil {
+					// The pool is full. Free one block from a tree that is safe to
+					// drop, then allocate again from the committed records.
+					if reclaimPortBlock(ctx, db, records, safe) {
+						continue
+					}
 					return fmt.Errorf("allocate worktree port: %w", err)
 				}
 			}

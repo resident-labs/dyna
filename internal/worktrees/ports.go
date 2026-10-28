@@ -1,12 +1,24 @@
 package worktrees
 
 import (
+	"bytes"
+	"cmp"
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"io/fs"
 	"net"
+	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
+
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/state"
 )
 
 const (
@@ -49,6 +61,103 @@ func blockFree(start int, isFree func(int) bool) bool {
 		}
 	}
 	return true
+}
+
+// reclaimPortBlock frees one port block when the pool is full. A record whose
+// directory is proven absent is deleted. Otherwise the oldest record whose tree
+// is clean, merged and has a closed owner, and whose block is free of sockets,
+// only loses its port; the tree stays. Cleanup rules run once per repository,
+// so the cost does not grow with the number of trees. Every change compares
+// the record read earlier, so a record that another caller replaced meanwhile
+// is left alone. It reports whether a block was freed.
+func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except string) bool {
+	var held []Record
+	freed := false
+	for _, rec := range records {
+		if rec.Port == 0 || rec.Path == except {
+			continue
+		}
+		if _, err := os.Lstat(rec.Path); errors.Is(err, fs.ErrNotExist) {
+			// Only a proven absent path counts; any other error is uncertain.
+			if ok, err := releaseRecord(ctx, db, rec, true); err == nil && ok {
+				freed = true
+			}
+			continue
+		}
+		held = append(held, rec)
+	}
+	if freed {
+		return true
+	}
+	slices.SortFunc(held, func(a, b Record) int {
+		return cmp.Or(a.RetainedAt.Compare(b.RetainedAt), a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.Path, b.Path))
+	})
+	reclaimable := map[string]map[string]bool{}
+	for _, rec := range held {
+		if rec.Repo == "" || !blockFree(rec.Port, portFree) {
+			continue
+		}
+		paths, seen := reclaimable[rec.Repo]
+		if !seen {
+			paths = reclaimablePaths(ctx, rec.Repo)
+			reclaimable[rec.Repo] = paths
+		}
+		if !paths[filepath.Clean(rec.Path)] {
+			continue
+		}
+		if ok, err := releaseRecord(ctx, db, rec, false); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseRecord deletes orig, or clears its port, in one transaction. It does
+// nothing and reports false when the stored record no longer equals orig.
+func releaseRecord(ctx context.Context, db *sql.DB, orig Record, remove bool) (bool, error) {
+	want, err := json.Marshal(orig)
+	if err != nil {
+		return false, err
+	}
+	released := false
+	// Worktree records have no change-bus consumer.
+	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		current, err := loadRecords(ctx, conn, "WHERE path=?", orig.Path)
+		if err != nil || len(current) != 1 {
+			return err
+		}
+		have, err := json.Marshal(current[0])
+		if err != nil || !bytes.Equal(have, want) {
+			return err
+		}
+		if remove {
+			_, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, orig.Path)
+		} else {
+			cleared := orig
+			cleared.Port = 0
+			err = saveRecord(ctx, conn, cleared)
+		}
+		released = err == nil
+		return err
+	})
+	return released, err
+}
+
+// reclaimablePaths applies cleanup's keep rules to every tree of repo with one
+// scan, without fetching or removing anything. It returns the cleaned paths of
+// the trees cleanup would remove; an uncertain scan returns none. Tests replace it.
+var reclaimablePaths = func(ctx context.Context, repo string) map[string]bool {
+	trees, err := scan(ctx, repo, &GCOptions{history: &runHistory{}})
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, t := range trees {
+		if decide(t, SessionClosed).Action == "would remove" {
+			out[filepath.Clean(t.Path)] = true
+		}
+	}
+	return out
 }
 
 // portFree decides whether a port is free. Tests replace it to force a busy host.

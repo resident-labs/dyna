@@ -26,6 +26,32 @@ type inferredOwners struct {
 	Runs     []ownerRef
 }
 
+// SessionProtected checks registered and inferred session ownership before pruning.
+// An incomplete ownership scan is an error, not permission to remove a tree.
+func SessionProtected(ctx context.Context, rec Record) (bool, error) {
+	owners, err := inferOwners(ctx, []string{rec.Path}, nil)
+	if err != nil {
+		return false, err
+	}
+	ids := make(map[string]bool)
+	if rec.Session != "" {
+		ids[rec.Session] = true
+	}
+	for _, owner := range owners[rec.Path].Sessions {
+		ids[owner.ID] = true
+	}
+	for id := range ids {
+		closed, err := SessionClosed(id)
+		if err != nil {
+			return false, err
+		}
+		if !closed {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // inferOwners reads historical ownership without changing stores or worktrees.
 // An error means that ownership is incomplete; callers must keep the trees.
 // runHistory caches completed directory sets. The first terminal transition
@@ -91,6 +117,7 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 		var meta struct {
 			sessionlife.Snapshot
 			Name, Room, Dir string
+			Service         bool
 		}
 		if err == nil {
 			err = json.Unmarshal(raw, &meta)
@@ -102,6 +129,10 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 			return errors.New("ownership metadata ID does not match directory")
 		}
 		meta.ID = name
+		// A service runs from a shared directory and never owns a tree.
+		if meta.Service {
+			return nil
+		}
 		address := meta.ID
 		if meta.Room != "" && meta.Name != "" {
 			address = meta.Room + ":" + meta.Name
@@ -148,8 +179,11 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 			return err
 		}
 		if !found || !set.Complete {
-			// Unknown directories cannot prove that any candidate tree is unused.
-			ref.Closed = false
+			// A finished run no longer uses any tree, even if its directories are unknown.
+			if ref.Closed {
+				return nil
+			}
+			// Unknown directories of an active or unknown run cannot prove that any tree is unused.
 			for key, item := range owners {
 				item.Runs = inferenceAddOwner(item.Runs, ref)
 				owners[key] = item
