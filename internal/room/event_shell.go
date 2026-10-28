@@ -45,3 +45,15 @@ func (s ShellEvent) eventSubject() string   { return s.ShellID }
 // eventDedupe keys one result per job, so a second notice of the same job
 // posts nothing.
 func (s ShellEvent) eventDedupe() string { return s.ShellID }
+
+// ShellSilenceEvent reports an unchanged output log, not a deadlock.
+type ShellSilenceEvent struct {
+	ShellID string `json:"shellId"`
+	Label   string `json:"label"`
+	Minutes int    `json:"minutes"`
+}
+
+func (ShellSilenceEvent) eventFamily() EventFamily { return FamilyShell }
+func (ShellSilenceEvent) eventType() EventType     { return TypeShellSilence }
+func (s ShellSilenceEvent) eventSubject() string   { return s.ShellID }
+func (s ShellSilenceEvent) eventDedupe() string    { return s.ShellID }

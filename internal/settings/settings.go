@@ -25,6 +25,7 @@ const (
 
 	KeyPRTrustedBots         = "pr.trustedBots"
 	KeyLocalLaneRepos        = "lane.local.repos"
+	KeyShellSilenceMinutes   = "shells.silenceMinutes"
 	KeyComputersEnabled      = "computers.enabled"
 	KeyComputersReminder     = "computers.reminderMinutes"
 	KeyComputersRenderNode   = "computers.renderNode"
@@ -58,6 +59,7 @@ const (
 	DefaultSubagentMaxDepth               = 3
 	DefaultSteeringToolWait               = 120 * time.Second
 	DefaultIdleUnloadMinutes              = 10
+	DefaultShellSilenceMinutes            = 30
 	DefaultComputersReminderMinutes       = 2
 	DefaultComputersRenderNode            = "auto"
 	DefaultWorktreesMinFreeBytes    int64 = 10 << 30
@@ -86,6 +88,7 @@ type Values struct {
 	BrowserProfileMode  string
 	BrowserOwnerProfile string
 	BrowserSaveBack     bool
+	ShellSilenceMinutes int
 	ComputersEnabled    bool
 	// ComputersReminderMinutes is how often an open computer reminds its
 	// session to look at the screen; zero turns the reminder off.
@@ -142,6 +145,7 @@ func Defaults() Values {
 		BrowserProfileMode:       "shared",
 		BrowserOwnerProfile:      "Default",
 		BrowserSaveBack:          true,
+		ShellSilenceMinutes:      DefaultShellSilenceMinutes,
 		ComputersEnabled:         true,
 		ComputersReminderMinutes: DefaultComputersReminderMinutes,
 		ComputersRenderNode:      DefaultComputersRenderNode,
@@ -227,6 +231,12 @@ func Load(path string) (Values, error) {
 			if err := v.Set(KeyLocalCIRemote, value); err != nil {
 				return Values{}, err
 			}
+		}
+	}
+	if shell, ok := raw["shells"].(map[string]any); ok {
+		if n, ok := asInt(shell["silenceMinutes"]); ok && n >= 0 {
+			v.ShellSilenceMinutes = n
+			v.fromFile[KeyShellSilenceMinutes] = true
 		}
 	}
 	if computers, ok := raw["computers"].(map[string]any); ok {
@@ -475,6 +485,13 @@ func (v *Values) Set(key, value string) error {
 		v.fromFile[key] = true
 	case KeyBrowserPath, KeyBrowserExtraFlags, KeyBrowserUseFlagsFile, KeyBrowserProfileMode, KeyBrowserOwnerProfile, KeyBrowserSaveBack:
 		return v.setBrowser(key, value)
+	case KeyShellSilenceMinutes:
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s must be a whole number of minutes, 0 or more", key)
+		}
+		v.ShellSilenceMinutes = n
+		v.fromFile[key] = true
 	case KeyComputersEnabled:
 		b, err := parseBool(value)
 		if err != nil {
@@ -620,6 +637,9 @@ func (v Values) Save() error {
 	localci := nested(raw, "localci")
 	localci["remote"] = v.LocalCIRemote
 	raw["localci"] = localci
+	shell := nested(raw, "shells")
+	shell["silenceMinutes"] = v.ShellSilenceMinutes
+	raw["shells"] = shell
 	computers := nested(raw, "computers")
 	computers["enabled"] = v.ComputersEnabled
 	computers["reminderMinutes"] = v.ComputersReminderMinutes
