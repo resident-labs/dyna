@@ -38,18 +38,17 @@ const (
 	KeySubagentMaxDepth      = "subagent.maxDepth"
 	KeySteeringToolWait      = "steering.maxToolWait"
 	KeyIdleUnloadMinutes     = "harness.idleUnloadMinutes"
-
-	KeyPiCodeMode     = "harness.piCodeMode"
-	KeyMaxCardBytes   = "content.maxCardBytes"
-	KeyMaxFileBytes   = "content.maxFileBytes"
-	KeyCIDiskFloorGB  = "machines.ciDiskFloorGB"
-	SourceDefault     = "default"
-	SourceFile        = "file"
-	SourceEnv         = "env"
-	LiveRestart       = "restart"
-	LiveNextOpen      = "next-open"
-	LiveStored        = "stored"
-	LiveNextOperation = "next-operation"
+	KeyPiCodeMode            = "harness.piCodeMode"
+	KeyMaxCardBytes          = "content.maxCardBytes"
+	KeyMaxFileBytes          = "content.maxFileBytes"
+	KeyCIDiskFloorGB         = "machines.ciDiskFloorGB"
+	SourceDefault            = "default"
+	SourceFile               = "file"
+	SourceEnv                = "env"
+	LiveRestart              = "restart"
+	LiveNextOpen             = "next-open"
+	LiveStored               = "stored"
+	LiveNextOperation        = "next-operation"
 
 	WorktreesRetentionChanged = "changed"
 	WorktreesRetentionAll     = "all"
@@ -58,10 +57,9 @@ const (
 
 // Defaults for the subagent and steering keys.
 const (
-	DefaultSubagentMaxDepth  = 3
-	DefaultSteeringToolWait  = 120 * time.Second
-	DefaultIdleUnloadMinutes = 10
-
+	DefaultSubagentMaxDepth               = 3
+	DefaultSteeringToolWait               = 120 * time.Second
+	DefaultIdleUnloadMinutes              = 10
 	DefaultShellSilenceMinutes            = 30
 	DefaultComputersReminderMinutes       = 2
 	DefaultComputersRenderNode            = "auto"
@@ -168,12 +166,11 @@ func Defaults() Values {
 		SubagentMaxDepth:         DefaultSubagentMaxDepth,
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
-
-		PiCodeMode:    "only",
-		VoiceProvider: "openai",
-		VoiceAgent:    true,
-		Extra:         map[string]any{},
-		fromFile:      map[string]bool{},
+		PiCodeMode:               "only",
+		VoiceProvider:            "openai",
+		VoiceAgent:               true,
+		Extra:                    map[string]any{},
+		fromFile:                 map[string]bool{},
 	}
 }
 

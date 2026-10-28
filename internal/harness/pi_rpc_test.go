@@ -451,50 +451,6 @@ func TestPiCancelAbortsTheRPCRun(t *testing.T) {
 	}
 }
 
-// TestPiCompactRunsOnTheSessionProcess compacts a due session over its
-// long-lived process instead of a second pi invocation.
-func TestLegacyPiCompactRunsOnTheSessionProcess(t *testing.T) {
-	logPath := installFakePi(t, false)
-	p := fakePiProfile(logPath, false)
-	p.Compact = &profile.Compact{Tokens: 1}
-	p.Env["DYNA_PI_LEGACY_COMPACT"] = "1"
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	workDir := t.TempDir()
-	var sessionID string
-	var compactions int
-	r1, err := RunWithOptions(ctx, p, "grow the context", workDir, false, JournalOptions{}, SteeringOptions{}, SessionOptions{
-		OnSession: func(id string) { sessionID = id },
-	}, ExecutionOptions{})
-	if err != nil {
-		t.Fatalf("first turn: %v", err)
-	}
-	if r1.ContextTokens != 10 {
-		t.Fatalf("first context tokens = %d", r1.ContextTokens)
-	}
-	r2, err := RunWithOptions(ctx, p, "after compaction", workDir, false, JournalOptions{}, SteeringOptions{}, SessionOptions{
-		ResumeID:      sessionID,
-		ContextTokens: r1.ContextTokens,
-		OnCompaction:  func() { compactions++ },
-	}, ExecutionOptions{})
-	if err != nil {
-		t.Fatalf("second turn: %v", err)
-	}
-	if r2.Output != "done: after compaction" {
-		t.Fatalf("second output = %q", r2.Output)
-	}
-	log := readTestFile(t, logPath)
-	if !strings.Contains(log, "COMPACT") {
-		t.Fatalf("compact command never reached the session process:\n%s", log)
-	}
-	if got := strings.Count(log, "SPAWN "); got != 1 {
-		t.Fatalf("compaction spawned another pi process; SPAWN count = %d:\n%s", got, log)
-	}
-	if compactions == 0 {
-		t.Fatal("OnCompaction never ran")
-	}
-}
-
 // TestPiInvocationSendsRPCCommands checks the launcher: rpc mode, the
 // prompt off the argv, and a preassigned session id.
 func TestPiInvocationSendsRPCCommands(t *testing.T) {
