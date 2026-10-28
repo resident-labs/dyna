@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/gitsvc"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
@@ -33,6 +34,7 @@ import (
 type services struct {
 	devices   *devicesvc.Service
 	files     *filesvc.Service
+	jobs      *jobs.Service
 	git       *gitsvc.Service
 	rooms     *roomsvc.Service
 	terminals *terminalsvc.Service
@@ -133,6 +135,13 @@ func bindings(s services) []websvc.Binding {
 		// Changing a machine's roles or route retargets the engine's work, so
 		// the write needs the admin scope, like other settings.
 		{Name: "SaveMachine", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.SaveMachine},
+		// A job runs the caller's own work on a node, detached, so submitting
+		// and cancelling are operate calls; reading jobs and logs is a read.
+		{Name: "RunJob", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.runJob},
+		{Name: "CancelJob", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.cancelJob},
+		{Name: "JobShow", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.jobShow},
+		{Name: "JobList", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.jobList},
+		{Name: "JobLogs", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.jobLogs},
 		// A probe reads the machine now and stores what it found. It writes
 		// only the probe fields, and it spends one SSH connection, so it needs
 		// the admin scope too.

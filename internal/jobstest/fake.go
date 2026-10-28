@@ -18,7 +18,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
 )
 
 // Fake is a node for a test. Calls that are not part of the detached protocol,
@@ -38,7 +37,7 @@ type Protocol struct{ Start, Poll, Stop string }
 type Fake struct {
 	t      *testing.T
 	legacy RunFunc
-	proto Protocol
+	proto  Protocol
 
 	mu     sync.Mutex
 	procs  map[string]*fakeProc
@@ -52,10 +51,10 @@ type Fake struct {
 }
 
 type fakeProc struct {
-	log     []byte
-	exited  bool
-	code    int
-	cancel  context.CancelFunc
+	log      []byte
+	exited   bool
+	code     int
+	cancel   context.CancelFunc
 	vanished bool
 }
 
