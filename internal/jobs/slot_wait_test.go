@@ -65,3 +65,22 @@ func TestJobScriptRunsItsCommand(t *testing.T) {
 		t.Fatalf("job script = %q, %v; want the command's output and exit 0", out, err)
 	}
 }
+
+// A container job hands its command to the container runtime: the script
+// calls docker run with the image and the command, not docker alone.
+func TestContainerJobScriptRunsDocker(t *testing.T) {
+	machine := machines.Machine{Name: "jobs-test-" + filepath.Base(t.TempDir())}
+	t.Cleanup(func() { os.RemoveAll(NodeBase(machine.Name)) })
+	bin := t.TempDir()
+	fake := "#!/bin/sh\n[ \"$1\" = info ] && exit 0\necho \"docker $*\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	job := Job{Dir: t.TempDir(), Command: []string{"echo", "hi"}, Image: "alpine:3", Timeout: 10 * time.Second}
+	cmd := exec.Command("bash", "-c", jobScript(machine, job, Resources{CPUs: 1, MemoryMiB: 512}))
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(out)), "docker run ") || !strings.Contains(string(out), " alpine:3 ") {
+		t.Fatalf("container job script = %q, %v; want one docker run of alpine:3", out, err)
+	}
+}
