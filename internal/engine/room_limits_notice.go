@@ -31,6 +31,31 @@ func wireRoomLimitsNotice(ctx context.Context, svc *notify.Service) {
 	}
 }
 
+// wireRoomLimitsLookup teaches agentslice each room's saved limits, so the
+// launch path writes them into the room's slice without agentslice reading
+// the room store. A missing room keeps the machine defaults.
+func wireRoomLimitsLookup(store *room.Store) {
+	if store == nil {
+		return
+	}
+	agentslice.RoomLimitsLookup = func(roomID string) (agentslice.RoomLimitsSetting, bool) {
+		rec, err := store.Resolve(roomID)
+		if err != nil {
+			return agentslice.RoomLimitsSetting{}, false
+		}
+		return agentslice.RoomLimitsSetting{
+			MemoryHigh: limitOverride(rec.Limits.MemoryHigh),
+			MemoryMax:  limitOverride(rec.Limits.MemoryMax),
+			TasksMax:   limitOverride(rec.Limits.TasksMax),
+		}, true
+	}
+}
+
+// limitOverride is the room record's limit as agentslice reads it.
+func limitOverride(l room.Limit) agentslice.RoomLimitOverride {
+	return agentslice.RoomLimitOverride{Off: l.Off, Value: l.Value}
+}
+
 // postRoomLimitsNotice stores the machine's limits-off event in the room that
 // hit the limit. It is quiet: no session is woken, and the card explains what
 // the room lost and why. The event's Once rule keeps one card per room and

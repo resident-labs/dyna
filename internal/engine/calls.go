@@ -384,6 +384,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "RenameRoom", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.RenameRoom},
 		{Name: "SetRoomRootProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetRoomRootProfile},
 		{Name: "SetRoomCheckIn", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetRoomCheckIn},
+		{Name: "SetRoomLimit", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetRoomLimit},
 		{Name: "AddRoomRepo", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.AddRoomRepo},
 		{Name: "RemoveRoomRepo", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.RemoveRoomRepo},
 		{Name: "DeleteRoom", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.DeleteRoom},

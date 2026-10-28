@@ -2,10 +2,11 @@ package roomsvc
 
 import (
 	"context"
-	"dyna-agent/internal/authority"
 	"fmt"
 	"strings"
 
+	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/shells"
@@ -44,6 +45,33 @@ func (s *Service) SetRoomCheckIn(ctx context.Context, ref, value string) error {
 	}
 	_, err = s.rooms().SetCheckIn(ctx, ref, setting)
 	return err
+}
+
+// SetRoomLimit stores one of a room's resource limits: a size such as 2G for
+// memory, a count such as 512 for tasks, off to remove that limit, or default
+// to use the machine default. Only the owner and the room's root may change
+// it, like every room setting. The room's slice picks the saved limit up on
+// its next write; this call also applies it live.
+func (s *Service) SetRoomLimit(ctx context.Context, ref, field, value string) error {
+	if err := s.authorizeRoomEdit(ctx, ref); err != nil {
+		return err
+	}
+	f, err := room.ParseLimitField(field)
+	if err != nil {
+		return err
+	}
+	limit, err := f.Parse(value)
+	if err != nil {
+		return err
+	}
+	rec, err := s.rooms().SetLimit(ctx, ref, f, limit)
+	if err != nil {
+		return err
+	}
+	if err := agentslice.ApplyRoomLimits(rec.ID); err != nil {
+		return fmt.Errorf("the limit was saved but not applied live: %w", err)
+	}
+	return nil
 }
 
 // AddRoomRepo registers another repository whose checkouts the room accepts
