@@ -443,6 +443,11 @@ func (s *Service) poller(conn Conn) *Poller {
 	}
 	x := s.executor(conn)
 	p, stop := x.NewPoller(context.Background())
+	// The poller is one per node and shared by every job on it, so its
+	// callbacks are set here, once, under the service lock - never per run,
+	// where one job would overwrite another's callback and race the loop.
+	// The launch record names the job the node accepted, from the spec.
+	p.Launched = func(spec RunSpec) { s.Store.MarkLaunched(context.Background(), spec.ID) }
 	s.pollers[conn.Name] = p
 	s.stops["poller:"+conn.Name] = stop
 	return p
@@ -583,14 +588,11 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	if launch {
 		spec.Script = jobScript(machine, job, resources)
-		if reattach {
-			// The crashed engine may have died after the node accepted the unit
-			// but before it recorded that: the unit can be starting under the
-			// same name this launch uses. Stop anything there first, best
-			// effort - a unit that never was stops as a no-op - so the fresh
-			// launch is the only one.
-			s.stopUnit(x, spec)
-		}
+		// A recovered launch of a unit the node already accepted - the engine
+		// died between the unit starting and the launch record - starts
+		// nothing: the node's start is locked and idempotent, and an active
+		// unit or an exit record makes it return at once. The run follows the
+		// unit that is already there; stopping it would kill work that ran.
 		if _, won, err := s.Store.SaveOpen(ctx, job); err != nil {
 			s.logger()("jobs: record started job %s: %v", job.ID, err)
 		} else if !won {
@@ -614,11 +616,6 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if poller == nil {
 		return
 	}
-	// The record that the node accepted the unit is one conditional column
-	// write the moment the start call returns, so no stale whole-row save can
-	// undo it and no restart mistakes a completed launch for an interrupted
-	// one.
-	poller.Launched = func(RunSpec) { s.Store.MarkLaunched(context.WithoutCancel(ctx), job.ID) }
 	// The node enforces the deadline itself; the engine allows the queue wait
 	// and a slow route on top before it stops following the job.
 	var timeoutCancel context.CancelFunc

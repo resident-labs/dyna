@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,26 +304,26 @@ func TestReattachRecoversTheOffsetFromTheLogFile(t *testing.T) {
 	base := Command(fake.CommandFunc())
 	svc.NewExecutor = func(conn Conn) Executor {
 		x := Executor{Node: conn}
-		x.Command = func(ctx context.Context, dir string, in io.Reader, out, errw io.Writer, name string, args ...string) error {
-			if script, _, ok := jobstest.DecodeNodeScript(name, args); ok && script == PollScript {
-				// The poll after the one that carried the line proves the
-				// line reached the engine's log file.
-				select {
-				case delivered <- struct{}{}:
-				default:
-				}
-			}
-			return base(ctx, dir, in, out, errw, name, args...)
-		}
+		x.Command = base
 		x.Wait, x.Clock = fake.WaitFunc(), fake.ClockFunc()
 		return x
 	}
 	svc.Start(t.Context())
+	// The signal follows the write of the polled bytes, not the poll request:
+	// a poll that has only been asked for proves nothing. Set before anything
+	// can run: the service is idle until the submit below wakes it.
+	if p := svc.poller(Conn{Name: "here"}); p != nil {
+		p.applied = func(string) {
+			select {
+			case delivered <- struct{}{}:
+			default:
+			}
+		}
+	}
 	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-delivered
 	<-delivered
 	SetEngineStoppingForTest(true)
 	svc.Stop()
@@ -1025,5 +1026,147 @@ func TestARestartInsideTheStartRelaunches(t *testing.T) {
 	}
 	if row.State != StatePassed || !row.Launched {
 		t.Fatalf("the row is %s with launched=%v, want passed with the launch recorded", row.State, row.Launched)
+	}
+}
+
+// TestARecoveryKeepsAUnitTheNodeAlreadyAccepted is the fail-first test
+// for the round-12 review, first finding: the engine dies after the node
+// accepted the unit but before it recorded the launch. The recovery must
+// not stop that unit - its work already began, and stopping it to start
+// again runs the side effects twice. The node's start is idempotent, so
+// the recovered run starts nothing and follows the unit that is there.
+func TestARecoveryKeepsAUnitTheNodeAlreadyAccepted(t *testing.T) {
+	var runs atomic.Int32
+	began := make(chan struct{}, 4)
+	killed := make(chan struct{}, 1)
+	release := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.HasPrefix(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		runs.Add(1)
+		select {
+		case began <- struct{}{}:
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			select {
+			case killed <- struct{}{}:
+			default:
+			}
+			return ctx.Err()
+		case <-release:
+			fmt.Fprintln(out, "accepted and finished")
+			return nil
+		}
+	}
+	owner, _, _, _ := newIdleService(t, legacy)
+	owner.Start(t.Context())
+	submitted, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-began
+	// The engine dies with the unit running on the node.
+	SetEngineStoppingForTest(true)
+	owner.Stop()
+	SetEngineStoppingForTest(false)
+	row, err := owner.Store.Get(t.Context(), submitted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The next engine reads the row as the crash left it: the start went
+	// out, the node accepted the unit, but the launch record never landed.
+	next, _, nextReporter, _ := newIdleService(t, legacy)
+	next.Store = Store{DataDir: t.TempDir()}
+	next.Machines = owner.Machines
+	next.NewExecutor = owner.NewExecutor
+	crashed := row
+	crashed.Launched = false
+	if err := next.Store.Save(t.Context(), crashed); err != nil {
+		t.Fatal(err)
+	}
+	// The recovery's start attempt is past every decision that could stop
+	// the unit, on any version of the recovery: wait for it before the job
+	// may finish. Set while the service is still idle.
+	started := make(chan struct{}, 1)
+	p := next.poller(Conn{Name: "here"})
+	markLaunched := p.Launched
+	p.Launched = func(spec RunSpec) {
+		if markLaunched != nil {
+			markLaunched(spec)
+		}
+		started <- struct{}{}
+	}
+	next.Start(t.Context())
+	defer next.Stop()
+	select {
+	case <-started:
+		close(release)
+	case <-killed:
+		// A recovery that stops the unit it was meant to keep: the end
+		// that follows names the wrong it did.
+	}
+	end := <-nextReporter.finished
+	if end.State != StatePassed {
+		t.Fatalf("the job ended %s, want passed: the recovery must keep the unit the node already accepted", end.State)
+	}
+	select {
+	case start := <-nextReporter.started:
+		t.Fatalf("a second start for %s arrived; the row already says the start went out", start.ID)
+	default:
+	}
+	if n := runs.Load(); n != 1 {
+		t.Fatalf("the job script ran %d time(s), want once", n)
+	}
+	final, err := next.Store.Get(t.Context(), crashed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != StatePassed || !final.Launched {
+		t.Fatalf("the row is %s with launched=%v, want passed with the launch recorded", final.State, final.Launched)
+	}
+}
+
+// TestASharedPollerMarksEachLaunchedJob covers the round-12 review, second
+// finding: one poller serves every job on a node, and its launch callback
+// is one shared closure. Two jobs launched together must each mark their
+// own row, not the row the last setter captured.
+func TestASharedPollerMarksEachLaunchedJob(t *testing.T) {
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.HasPrefix(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "ran")
+		return nil
+	}
+	svc, _, reporter, _ := newService(t, legacy)
+	first, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"false"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ends := map[string]Job{}
+	for range 2 {
+		event := <-reporter.finished
+		ends[event.ID] = event
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		row, err := svc.Store.Get(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !row.Launched {
+			t.Fatalf("job %s ended %s with launched=false; the shared callback marked the wrong row", id, row.State)
+		}
+		if row.State != ends[id].State {
+			t.Fatalf("job %s row is %s, want the reported %s", id, row.State, ends[id].State)
+		}
 	}
 }
