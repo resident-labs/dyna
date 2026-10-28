@@ -1087,9 +1087,15 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 		// is gone.
 		if check.host || unknown {
 			scope := q(name + ".scope")
+			// A scope the user manager already reports down needs no forced stop, so
+			// the query comes first and the stop and kill are skipped for it. An
+			// active or restarted scope, or one whose state cannot be read, takes
+			// the forced stop and the confirmation after it, exactly as before.
+			script += "if unit_stopped " + scope + "; then :; else "
 			script += "timeout 10s systemctl --user stop " + scope + " >/dev/null 2>&1 || true; "
 			script += "systemctl --user kill --signal=KILL " + scope + " >/dev/null 2>&1 || true; "
 			script += "if command -v systemctl >/dev/null 2>&1; then unit_stopped " + scope + " || { echo 'check scope is not confirmed stopped' >&2; exit 69; }; fi; "
+			script += "fi; "
 		}
 		// The check's detached unit goes last: a check that ended on its own has
 		// nothing left to stop, and one that a lost poll left behind dies here. A
