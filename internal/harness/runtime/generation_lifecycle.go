@@ -78,7 +78,7 @@ type generationInputs struct {
 	PartialReasons                                 []string
 	MCP                                            []harnessmgr.ManagedMCP
 	Preferences                                    map[string]any
-	PiCompactionTriggerTokens                      int64
+	PiCompactionTriggers                           map[string]int64
 }
 
 func (r *Runtime) generationLock(ctx context.Context) (func(), error) {
@@ -142,7 +142,7 @@ func (r *Runtime) captureGeneration(h, home, account string, lookup func(string)
 	}
 	snapshot := harnessmgr.HarnessConfig{MCP: []harnessmgr.ManagedMCP{}, Skills: []harnessmgr.ManagedSkill{}}
 	inputs := generationInputs{Version: generationInputsVersion, NativeFeatures: nativeFeaturePolicies[h], Harness: h, Home: home, Format: a.ConfigFormat, MCPKey: a.MCPKey, ConfigFile: a.ConfigFile, PartialReasons: a.PartialReasons, Preferences: prefs}
-	inputs.PiCompactionTriggerTokens = piProfileTriggerTokens(h)
+	inputs.PiCompactionTriggers = piProfileTriggers(h)
 	if a.NativeEnv != nil {
 		inputs.NativeEnv = a.NativeEnv(home)
 	}
@@ -195,27 +195,31 @@ func (r *Runtime) captureGeneration(h, home, account string, lookup func(string)
 	return snapshot, inputs, nil
 }
 
-// piProfileTriggerTokens returns the smallest compaction target across Pi
-// profiles, or 0 when none sets one. The global trigger covers every model
-// of the generation, including models absent from the account's model list.
-func piProfileTriggerTokens(h string) int64 {
+// piProfileTriggers maps each Pi profile model to the smallest compaction
+// target among the profiles that use it, or empty when none sets one. The
+// per-model triggers cover models absent from the account's model list,
+// without model discovery, and never touch profiles without a target.
+func piProfileTriggers(h string) map[string]int64 {
 	if canonicalRuntimeID(h) != "pi" {
-		return 0
+		return nil
 	}
 	registry, err := profile.ReadConfig(profile.DefaultPath())
 	if err != nil {
-		return 0
+		return nil
 	}
-	var trigger int64
+	var triggers map[string]int64
 	for _, p := range registry.Store.Profiles {
 		if p.Harness != profile.HarnessPi || p.Compact == nil || p.Compact.Tokens <= 0 {
 			continue
 		}
-		if trigger == 0 || p.Compact.Tokens < trigger {
-			trigger = p.Compact.Tokens
+		if prior, ok := triggers[p.Model]; !ok || p.Compact.Tokens < prior {
+			if triggers == nil {
+				triggers = map[string]int64{}
+			}
+			triggers[p.Model] = p.Compact.Tokens
 		}
 	}
-	return trigger
+	return triggers
 }
 
 func generationDigest(inputs generationInputs) (string, error) {
@@ -283,7 +287,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if h == "claude-code" {
 		g, err = r.Config.GenerateSnapshotAt(h, home, staging, published, snapshot, resolvedLookup, inputs.Preferences)
 	} else {
-		g, err = materializeNative(h, home, staging, published, inputs.CLI, snapshot, inputs.Preferences, inputs.PiCompactionTriggerTokens, resolvedLookup)
+		g, err = materializeNative(h, home, staging, published, inputs.CLI, snapshot, inputs.Preferences, inputs.PiCompactionTriggers, resolvedLookup)
 	}
 	if err != nil {
 		return g, err
