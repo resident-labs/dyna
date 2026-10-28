@@ -47,6 +47,8 @@ const (
 	ProducerHelper EventProducer = "helper"
 	// ProducerShell is the supervisor that watches a detached shell job.
 	ProducerShell EventProducer = "shell"
+	// ProducerJobs is the engine service that runs detached jobs on nodes.
+	ProducerJobs EventProducer = "jobs"
 	// ProducerWorkflow is the workflow runtime that ran a detached run.
 	ProducerWorkflow EventProducer = "workflow"
 )
@@ -85,6 +87,8 @@ const (
 
 	// The shell family reports how a detached shell job ended.
 	FamilyShell EventFamily = "shell"
+	// The job family reports the life of a detached job on a node.
+	FamilyJob EventFamily = "job"
 	// The run family reports how a detached workflow run ended.
 	FamilyRun EventFamily = "run"
 	// The turn family reports how a session turn ended.
@@ -118,6 +122,8 @@ const (
 	TypeRequest     EventType   = "request"
 	TypeRequestDone EventType   = "request.done"
 
+	// TypeJobFinished is the end of a detached job.
+	TypeJobFinished EventType = "finished"
 	// TypeSummary tells a check-in apart from any other event of its family.
 	TypeSummary      EventType = "summary"
 	TypeShellSilence EventType = "output-silence"
@@ -436,6 +442,21 @@ func (m Message) Shell() (ShellEvent, bool) {
 	var ev ShellEvent
 	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.ShellID == "" {
 		return ShellEvent{}, false
+	}
+	return ev, true
+}
+
+// Job returns the payload of a job event, started or finished.
+func (m Message) Job() (JobEvent, bool) {
+	if m.Kind != string(FamilyJob) || len(m.Payload.raw) == 0 {
+		return JobEvent{}, false
+	}
+	if m.Notice.Kind != string(TypeStarted) && m.Notice.Kind != string(TypeJobFinished) {
+		return JobEvent{}, false
+	}
+	var ev JobEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.JobID == "" {
+		return JobEvent{}, false
 	}
 	return ev, true
 }

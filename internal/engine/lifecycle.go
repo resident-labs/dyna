@@ -11,6 +11,7 @@ import (
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
 	storepkg "dyna-agent/internal/store"
@@ -18,7 +19,7 @@ import (
 	"dyna-agent/internal/sysload"
 )
 
-func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Service, load *sysload.Sampler, readOnly bool, signals *workerSignals, t *timers, events *hub.Hub, hookService hooks.Service, started time.Time, emit func(roomsvc.Event)) <-chan struct{} {
+func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Service, load *sysload.Sampler, readOnly bool, signals *workerSignals, t *timers, events *hub.Hub, hookService hooks.Service, started time.Time, jobs *jobs.Service, emit func(roomsvc.Event)) <-chan struct{} {
 	watch := ctx
 	done := make(chan struct{})
 	go func() {
@@ -77,7 +78,7 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		if !readOnly {
 			go func() {
 				defer close(workersDone)
-				runWorkers(watch, rooms, signals, t, load, events, hookService, started)
+				runWorkers(watch, rooms, signals, t, load, events, hookService, started, jobs)
 			}()
 		} else {
 			close(workersDone)

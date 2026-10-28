@@ -15,6 +15,7 @@ import (
 
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
@@ -331,6 +332,9 @@ type workers struct {
 	// the engine that owns the worker lock runs it, so a second engine on the
 	// same store cannot fail the first engine's live runs.
 	settle func(context.Context) error
+	// jobsStart begins the job service under the worker lock: only the owning
+	// engine runs jobs and reattaches to the running ones.
+	jobsStart func()
 	// hookSchedule is the hook runner's own clock: it finishes install
 	// receipts, ticks each repository's schedule and the global built-ins once
 	// a minute. It runs under the worker lock with the other workers.
@@ -663,6 +667,11 @@ func runOwned(ctx context.Context, root string, w workers, signals *workerSignal
 			report("settle hook runs", err)
 		}
 	}
+	// Only the owning engine starts jobs, so a standby engine never double-runs
+	// one.
+	if w.jobsStart != nil {
+		w.jobsStart()
+	}
 	w.run(ctx, signals, t, report)
 	return true, nil
 }
@@ -683,11 +692,28 @@ var settleHookRuns = settleFromStart
 // restarted engine reattaches. A run still polling then is reported.
 const localCIStop = localci.StopWait
 
-func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) {
+func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time, jobsService *jobs.Service) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
 	workerSet := engineWorkers(ctx, rooms, signals, load, events, hookService, started)
+	workerSet.jobsStart = func() {
+		if jobsService != nil {
+			jobsService.Start(ctx)
+		}
+	}
+	jobsStop := func() {
+		if jobsService != nil {
+			jobsService.Stop()
+		}
+	}
+	stopped := workerSet.onStop
+	workerSet.onStop = func() {
+		jobsStop()
+		if stopped != nil {
+			stopped()
+		}
+	}
 	if events != nil {
 		ch, _, stop := events.Subscribe()
 		go func() {

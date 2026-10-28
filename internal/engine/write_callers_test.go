@@ -28,6 +28,8 @@ var handlerCallerChecks = map[string]string{
 	"AddGlobalHook":               "actor(ctx) resolves the author; hooks.AddGlobal checks git hooks add with authority.Of(ctx).",
 	"AddLibraryEntry":             "libraryStore passes mutationActor to library authority checks.",
 	"AnswerQuestion":              "postSender resolves the caller before answering the question.",
+	"CancelJob":                   "Checks authority.Of(ctx): the owner, the submitting session or the job room's root.",
+	"RunJob":                      "Records the submitting session and room from authority.Of(ctx); events wake only that session.",
 	"ApplyRunWorktreeDisposition": "worktreesvc.caller checks authority.Of(ctx).",
 	"AskQuestion":                 "questionSender resolves the caller before creating the question.",
 	"BulkSessionAction":           "Each action passes ctx into the session manager authority guards.",
