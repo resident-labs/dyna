@@ -64,6 +64,19 @@ describe("listModels --json", () => {
 		// xhigh and max exist only where the catalog maps them.
 	});
 
+	test("prints an empty array when no model is available", async () => {
+		const runtime = runtimeWith([]);
+		const lines: string[] = [];
+		const original = console.log;
+		console.log = (line: string) => lines.push(line);
+		try {
+			await listModels(runtime, undefined, undefined, true);
+		} finally {
+			console.log = original;
+		}
+		expect(lines).toEqual(["[]"]);
+	});
+
 	test("prints an empty array when the search matches nothing", async () => {
 		const runtime = runtimeWith([
 			{ provider: "anthropic", id: "claude-fable-5", name: "Claude Fable 5", contextWindow: 200000, maxTokens: 64000, reasoning: false },
