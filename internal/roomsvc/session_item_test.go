@@ -9,6 +9,21 @@ import (
 	"dyna-agent/internal/workeroutput"
 )
 
+func TestSessionItemShowsCodemodeScript(t *testing.T) {
+	events := []workeroutput.Event{
+		{Kind: "tool", ID: "c", Name: "codemode", State: "started", Input: `{"code":"const x = 1;\ntext(x);"}`},
+		{Kind: "tool", ID: "c", Name: "codemode", State: "completed"},
+	}
+	items, _ := transcript.FromEvents(events)
+	if len(items) != 1 {
+		t.Fatalf("items = %+v", items)
+	}
+	got := sessionItem(items[0])
+	if got.Label != "Code" || got.Command != "const x = 1;\ntext(x);" || !got.Done {
+		t.Fatalf("item = %+v", got)
+	}
+}
+
 // A compaction reaches the web as its own typed item with what it reported.
 func TestSessionItemCarriesCompaction(t *testing.T) {
 	events := []workeroutput.Event{
