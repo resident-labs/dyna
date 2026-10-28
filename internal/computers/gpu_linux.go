@@ -6,10 +6,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
+	"dyna-agent/internal/gpu"
 	"dyna-agent/internal/settings"
 )
 
@@ -29,18 +29,7 @@ const nvidiaVendor = 0x10de
 // nvidiaEGLVendorFile is glvnd's standard NVIDIA EGL vendor manifest.
 const nvidiaEGLVendorFile = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json"
 
-// renderGPU is one render node and what apps need to use it.
-type renderGPU struct {
-	// Node is the device path, /dev/dri/renderD128.
-	Node string
-	// PCI is the Mesa DRI_PRIME target such as pci-0000_02_00_0; empty when
-	// the bus address is unknown.
-	PCI string
-	// Vendor is the PCI vendor id: 0x1002 AMD, 0x10de NVIDIA, 0x8086 Intel.
-	Vendor uint32
-	// Driver is the bound kernel driver name; empty when unbound.
-	Driver string
-}
+type renderGPU = gpu.RenderNode
 
 // pickRenderGPU resolves the computers.renderNode setting against one
 // /sys/class/drm directory. The value "auto", an empty value, or a path that
@@ -53,7 +42,8 @@ type renderGPU struct {
 // setting on a machine whose nodes were renumbered falls back to auto.
 func pickRenderGPU(setting, class string) (renderGPU, bool) {
 	setting = strings.TrimSpace(setting)
-	gpus := listRenderGPUs(class)
+	inventory := gpu.Read(class)
+	gpus := inventory.RenderNodes
 	if len(gpus) == 0 {
 		return renderGPU{}, false
 	}
@@ -64,45 +54,13 @@ func pickRenderGPU(setting, class string) (renderGPU, bool) {
 			}
 		}
 	}
-	display := displayCards(class)
+	display := displayCards(class, inventory.Cards)
 	for _, gpu := range gpus {
-		if !display[cardOfNode(gpu, class)] {
+		if !display[gpu.Card] {
 			return gpu, true
 		}
 	}
 	return gpus[0], true
-}
-
-// listRenderGPUs reads the render nodes of a /sys/class/drm directory,
-// ordered by node number.
-func listRenderGPUs(class string) []renderGPU {
-	entries, err := os.ReadDir(class)
-	if err != nil {
-		return nil
-	}
-	var gpus []renderGPU
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "renderD") || !isRenderNodeName(name) {
-			continue
-		}
-		dev := filepath.Join(class, name, "device")
-		gpu := renderGPU{Node: filepath.Join("/dev/dri", name)}
-		if target, err := filepath.EvalSymlinks(dev); err == nil {
-			gpu.PCI = driPrimeID(filepath.Base(target))
-		}
-		gpu.Vendor = readVendorID(filepath.Join(dev, "vendor"))
-		if driver, err := os.Readlink(filepath.Join(dev, "driver")); err == nil {
-			gpu.Driver = filepath.Base(driver)
-		}
-		gpus = append(gpus, gpu)
-	}
-	sort.Slice(gpus, func(i, j int) bool {
-		mi, _ := strconv.Atoi(strings.TrimPrefix(gpus[i].Node, "renderD"))
-		mj, _ := strconv.Atoi(strings.TrimPrefix(gpus[j].Node, "renderD"))
-		return mi < mj
-	})
-	return gpus
 }
 
 // isRenderNodeName reports whether name is a render node entry such as
@@ -116,85 +74,29 @@ func isRenderNodeName(name string) bool {
 	return err == nil
 }
 
-// driPrimeID turns a PCI address such as 0000:02:00.0 into the DRI_PRIME
-// target Mesa names, pci-0000_02_00_0. An empty answer leaves DRI_PRIME unset.
-func driPrimeID(address string) string {
-	if address == "" {
-		return ""
-	}
-	return "pci-" + strings.NewReplacer(":", "_", ".", "_").Replace(address)
-}
-
-// readVendorID reads a sysfs vendor file such as "0x1002\n".
-func readVendorID(path string) uint32 {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	v, err := strconv.ParseUint(strings.TrimSpace(string(b)), 0, 32)
-	if err != nil {
-		return 0
-	}
-	return uint32(v)
-}
-
 // displayCards maps each card name of a /sys/class/drm directory that has a
 // connector with a monitor connected. A connected connector is the cheap
 // kernel signal that the card can drive the owner's display; the enabled
 // state flips when the display sleeps, so it is not used.
-func displayCards(class string) map[string]bool {
+func displayCards(class string, cards []gpu.Card) map[string]bool {
 	entries, err := os.ReadDir(class)
 	if err != nil {
 		return nil
 	}
 	display := map[string]bool{}
-	for _, e := range entries {
-		name := e.Name()
-		card, _, found := strings.Cut(name, "-")
-		if !found || !isCardName(card) {
-			continue
+	for _, card := range cards {
+		prefix := card.Name + "-"
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), prefix) {
+				continue
+			}
+			status, err := os.ReadFile(filepath.Join(class, entry.Name(), "status"))
+			if err == nil && strings.TrimSpace(string(status)) == "connected" {
+				display[card.Name] = true
+			}
 		}
-		b, err := os.ReadFile(filepath.Join(class, name, "status"))
-		if err != nil || strings.TrimSpace(string(b)) != "connected" {
-			continue
-		}
-		display[card] = true
 	}
 	return display
-}
-
-// isCardName reports whether name is a card entry such as card1, not a
-// connector such as card1-DP-1.
-func isCardName(name string) bool {
-	digits := strings.TrimPrefix(name, "card")
-	if digits == name {
-		return false
-	}
-	_, err := strconv.Atoi(digits)
-	return err == nil
-}
-
-// cardOfNode names the card a render node belongs to, by the PCI device they
-// share; empty when sysfs does not say.
-func cardOfNode(gpu renderGPU, class string) string {
-	nodeDev, err := filepath.EvalSymlinks(filepath.Join(class, filepath.Base(gpu.Node), "device"))
-	if err != nil {
-		return ""
-	}
-	entries, err := os.ReadDir(class)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		card := e.Name()
-		if !isCardName(card) {
-			continue
-		}
-		if dev, err := filepath.EvalSymlinks(filepath.Join(class, card, "device")); err == nil && dev == nodeDev {
-			return card
-		}
-	}
-	return ""
 }
 
 // configuredRenderGPU resolves the computers.renderNode setting against the
@@ -214,7 +116,8 @@ func configuredRenderGPU() renderGPU {
 // path is all that remains.
 func gpuByNode(node string) renderGPU {
 	if name := filepath.Base(node); isRenderNodeName(name) {
-		for _, gpu := range listRenderGPUs(sysfsDRMClass) {
+		nodes := gpu.Read(sysfsDRMClass).RenderNodes
+		for _, gpu := range nodes {
 			if filepath.Base(gpu.Node) == name {
 				return gpu
 			}
