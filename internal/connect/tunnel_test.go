@@ -129,10 +129,11 @@ func TestTunnelAlertsOnceWhenTheConnectorIsMissing(t *testing.T) {
 		t.Fatalf("alert = %v, want the binary and the searched PATH", alert)
 	}
 	<-paused
-	step <- time.Now()
 	// A still-missing connector does not alert again: the pause report proves
-	// its branch ended without posting.
+	// its branch ended without posting. The failure is queued before the step
+	// releases the iteration, so the lookup cannot race past it.
 	failures <- exec.ErrNotFound
+	step <- time.Now()
 	if got := <-calls; got == nil {
 		t.Fatal("second lookup succeeded with a missing binary")
 	}
