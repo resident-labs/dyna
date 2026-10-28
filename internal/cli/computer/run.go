@@ -40,10 +40,12 @@ func newRunCommand() *cobra.Command {
 		if _, err := computers.Ensure(ctx, id, room); err != nil {
 			return err
 		}
-		var meta computers.Meta
-		if err := computers.NewClient(id).Call(ctx, computers.Request{Op: "run.prepare", Status: status}, &meta); err != nil {
+		lease, err := computers.NewClient(id).PrepareRun(ctx, status)
+		if err != nil {
 			return err
 		}
+		defer lease.Close()
+		meta := lease.Meta
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 		restore := configureForeground(cmd, tty, c.InOrStdin())
 		cmd.Dir = cwd

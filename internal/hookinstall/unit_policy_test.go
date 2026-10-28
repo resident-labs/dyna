@@ -40,7 +40,8 @@ func TestSelfUpdateUsesNewBinaryServicePolicy(t *testing.T) {
 					// Stand in for the new executable's userservices implementation.
 					return userservices.Install(ctx, userservices.Options{
 						Binary: binary, Dir: j.Config.Units, RestartComputers: restartComputers,
-						Environment: p.Env, Run: func(_ context.Context, args ...string) (string, error) {
+						AttemptRestart: func(context.Context) (string, error) { return "", nil },
+						Environment:    p.Env, Run: func(_ context.Context, args ...string) (string, error) {
 							systemctl = append(systemctl, strings.Join(args, " "))
 							return "", nil
 						},
