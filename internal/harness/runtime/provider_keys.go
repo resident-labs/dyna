@@ -61,9 +61,9 @@ func runPiAuthCommand(ctx context.Context, executable, home string, argv []strin
 }
 
 // piEditAuth reads and edits one Pi home's login file through Pi's own auth
-// commands, so every write takes Pi's lock and races no login or token refresh.
-// It lists the current entries, applies edit in memory, and then sets each
-// changed entry and removes each dropped one. A nil edit only reads.
+// commands, so the whole edit takes Pi's lock once and races no login or token
+// refresh. It lists the current entries, applies edit in memory, and applies
+// the whole result with one auth apply command. A nil edit only reads.
 func (a *Accounts) piEditAuth(ctx context.Context, home string, edit piAuthEdit) (map[string]json.RawMessage, error) {
 	executable, err := a.piExecutable()
 	if err != nil {
@@ -82,26 +82,60 @@ func (a *Accounts) piEditAuth(ctx context.Context, home string, edit piAuthEdit)
 	}
 	next := maps.Clone(entries)
 	edit(next)
-	for _, id := range slices.Sorted(maps.Keys(entries)) {
+	return a.piApplyAuth(ctx, executable, home, entries, next, nil)
+}
+
+// piApplyAuth performs one whole edit with Pi's own auth apply command, which
+// reads the file, checks expect when it is set, and writes the result under
+// one lock, so no concurrent writer can run between the read and the write and
+// no failure can leave half of the edit. The command sets each entry that
+// changed against current and removes each dropped one, so it keeps entries
+// another process added after the list; expect, when not nil, must still be
+// the file's exact content or the command refuses and writes nothing. It
+// returns the entries as the file holds them now.
+func (a *Accounts) piApplyAuth(ctx context.Context, executable, home string, current, next, expect map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	op := struct {
+		Set    map[string]json.RawMessage  `json:"set,omitempty"`
+		Remove []string                    `json:"remove,omitempty"`
+		Expect *map[string]json.RawMessage `json:"expect,omitempty"`
+	}{}
+	if expect != nil {
+		op.Expect = &expect
+	}
+	for _, id := range slices.Sorted(maps.Keys(current)) {
 		if entry, wanted := next[id]; !wanted {
-			if _, err := piAuthRunner(ctx, executable, home, []string{"auth", "remove", "--provider", id}, nil); err != nil {
-				return nil, err
+			op.Remove = append(op.Remove, id)
+		} else if !bytes.Equal(entry, current[id]) {
+			if op.Set == nil {
+				op.Set = map[string]json.RawMessage{}
 			}
-		} else if !bytes.Equal(entry, entries[id]) {
-			if _, err := piAuthRunner(ctx, executable, home, []string{"auth", "set", "--provider", id}, entry); err != nil {
-				return nil, err
-			}
+			op.Set[id] = entry
 		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(next)) {
-		if _, existed := entries[id]; existed {
-			continue
-		}
-		if _, err := piAuthRunner(ctx, executable, home, []string{"auth", "set", "--provider", id}, next[id]); err != nil {
-			return nil, err
+		if _, existed := current[id]; !existed {
+			if op.Set == nil {
+				op.Set = map[string]json.RawMessage{}
+			}
+			op.Set[id] = next[id]
 		}
 	}
-	return next, nil
+	if op.Set == nil && op.Remove == nil {
+		return next, nil
+	}
+	body, err := json.Marshal(op)
+	if err != nil {
+		return nil, err
+	}
+	out, err := piAuthRunner(ctx, executable, home, []string{"auth", "apply"}, body)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]json.RawMessage{}
+	if json.Unmarshal(out, &result) != nil || result == nil {
+		return nil, errors.New("Pi's login file is not valid JSON.")
+	}
+	return result, nil
 }
 
 // lockPiAccounts holds the first lock of an account switch or native login, so
@@ -125,10 +159,16 @@ func (a *Runtime) lockPiAccounts(ctx context.Context) (func(), error) {
 func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount, edit piAuthEdit) error {
 	file := filepath.Join(account.Home, "auth.json")
 	before, readErr := os.ReadFile(file)
+	written, err := a.Accounts.piEditAuth(ctx, account.Home, edit)
+	if err != nil {
+		return err
+	}
 	// restore puts the account's login back and reports a failure to do so.
-	// It runs on a fresh context, so a cause that canceled ctx still restores.
+	// It runs on a fresh context, so a cause that canceled ctx still restores,
+	// and it refuses unless the login still holds what the edit wrote, so it
+	// never replaces a login another process wrote in the meantime.
 	restore := func(cause error) error {
-		err := a.Accounts.restorePiAuth(context.Background(), account.Home, before, readErr == nil)
+		err := a.Accounts.restorePiAuth(context.Background(), account.Home, before, readErr == nil, written)
 		if err == nil {
 			_, err = a.Accounts.Capture(context.Background(), account.ID, "")
 		}
@@ -136,9 +176,6 @@ func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount
 			return errors.Join(cause, errors.New("Pi's saved login could not be restored. Add or remove the key again."))
 		}
 		return cause
-	}
-	if _, err := a.Accounts.piEditAuth(ctx, account.Home, edit); err != nil {
-		return err
 	}
 	captured, err := a.Accounts.Capture(ctx, account.ID, "")
 	if err != nil {
@@ -153,15 +190,23 @@ func (a *Runtime) writePiAccountLogin(ctx context.Context, account NativeAccount
 
 // restorePiAuth puts the earlier entries back through Pi's own auth commands,
 // or empties the login when it did not exist, so a failed record leaves the
-// account's sign-in as it was.
-func (a *Accounts) restorePiAuth(ctx context.Context, home string, before []byte, existed bool) error {
+// account's sign-in as it was. expect is the state the failed edit wrote: the
+// restore refuses unless the login still holds exactly it, so it never
+// overwrites an entry another writer, such as a token refresh, replaced in
+// the meantime.
+func (a *Accounts) restorePiAuth(ctx context.Context, home string, before []byte, existed bool, expect map[string]json.RawMessage) error {
 	entries := map[string]json.RawMessage{}
 	if existed && (len(before) == 0 || json.Unmarshal(before, &entries) != nil || entries == nil) {
 		return errors.New("Pi's saved login could not be restored. Add or remove the key again.")
 	}
-	_, err := a.piEditAuth(ctx, home, func(current map[string]json.RawMessage) {
-		clear(current)
-		maps.Copy(current, entries)
-	})
+	executable, err := a.piExecutable()
+	if err != nil {
+		return err
+	}
+	current := expect
+	if current == nil {
+		current = map[string]json.RawMessage{}
+	}
+	_, err = a.piApplyAuth(ctx, executable, home, current, entries, expect)
 	return err
 }
