@@ -112,8 +112,8 @@ esac
 `, reset.Unix()))
 	inherited := withoutTokens(os.Environ())
 	session, err := SessionEnvironment(context.Background(), records[0].ID, t.TempDir(), "/real/dyna", inherited)
-	if err != nil || session.Env["GH_TOKEN"] != "worker-secret" {
-		t.Fatalf("first turn host=%q err=%v, want the proved account", session.Env["GH_HOST"], err)
+	if err != nil || session.Env["GH_TOKEN"] != "" {
+		t.Fatalf("first turn host=%q err=%v, want the proved account inside Dyna", session.Env["GH_HOST"], err)
 	}
 
 	// The proof expires, and GitHub then denies the account this repository.

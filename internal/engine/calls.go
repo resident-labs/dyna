@@ -114,6 +114,7 @@ func bindings(s services) []websvc.Binding {
 		s.admissionBinding(),
 		s.claudeUsageBinding(),
 		s.webSearchBinding(),
+		s.gitHubCredentialBinding(),
 		{Name: "EnableLibrarian", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.enableLibrarian},
 		{Name: "DisableLibrarian", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.disableLibrarian},
 		{Name: "WakeLibrarian", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.wakeLibrarian},

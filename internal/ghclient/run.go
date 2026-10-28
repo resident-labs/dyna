@@ -35,8 +35,14 @@ func Run(ctx context.Context, cmd *exec.Cmd) error {
 	return RunWithAccount(ctx, cmd, nil)
 }
 
+type credentialSource func(context.Context, repository) (Credential, error)
+
 // RunWithAccount checks the selected identity before executing the API request.
 func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) error) error {
+	return runWithAccount(ctx, cmd, before, nil)
+}
+
+func runWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) error, source credentialSource) error {
 	r := repositoryFor(ctx, cmd)
 	if err := checkPolicy(ctx, cmd.Dir, r, cmd.Args[1:]); err != nil {
 		// A REST read of a public repository outside every room needs no room
@@ -50,7 +56,13 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 	token, login := "", ""
 	if r.name != "" {
 		var err error
-		login, token, err = selectAccount(ctx, cmd, r)
+		if source == nil {
+			login, token, err = selectAccount(ctx, cmd, r)
+		} else {
+			var credential Credential
+			credential, err = source(ctx, r)
+			login, token = credential.Login, credential.Token
+		}
 		if err != nil {
 			return err
 		}
