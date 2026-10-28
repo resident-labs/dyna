@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -80,6 +81,27 @@ func RoomIDFromSlice(slice string) (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+// RoomID is a canonical room identity decoded from Dyna's launch layout.
+type RoomID string
+
+// RoomIDFromCgroup returns the room id that owns a unified cgroup v2 path.
+// Only the canonical room slice below dyna.slice establishes ownership; a
+// room-shaped unit elsewhere, a relative or non-clean path, and a malformed
+// slice name establish none.
+func RoomIDFromCgroup(cgroup string) (RoomID, bool) {
+	if cgroup == "" || cgroup[0] != '/' || path.Clean(cgroup) != cgroup {
+		return "", false
+	}
+	units := strings.Split(strings.TrimPrefix(cgroup, "/"), "/")
+	for i := 0; i+2 < len(units); i++ {
+		if units[i] == Slice && units[i+1] == "dyna-room.slice" {
+			id, ok := RoomIDFromSlice(units[i+2])
+			return RoomID(id), ok
+		}
+	}
+	return "", false
 }
 
 // unescapeUnit reverses escapeUnit: every \xNN becomes its byte again. It

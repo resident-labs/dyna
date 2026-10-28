@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/proc"
 )
 
@@ -25,6 +26,9 @@ const clockTicks = 100
 // unit it runs in and its command.
 type Process struct {
 	Command string
+	// RoomID is the canonical room identity decoded from the process cgroup.
+	// It is empty when no canonical room slice owns the process.
+	RoomID agentslice.RoomID
 	// Unit is the systemd unit (a scope or service) that holds the processes,
 	// such as "horizon-swarm-3.scope". It is empty when the cgroup names none.
 	Unit string
@@ -40,6 +44,7 @@ type Process struct {
 
 type procReading struct {
 	proc.Process
+	roomID   agentslice.RoomID
 	unit     string
 	cwd      string
 	outsider bool
@@ -54,13 +59,26 @@ func readProcesses(procRoot string) map[int]procReading {
 		dir := filepath.Join(procRoot, strconv.Itoa(pid))
 		r := procReading{Process: p, outsider: true}
 		if cg, err := os.ReadFile(filepath.Join(dir, "cgroup")); err == nil {
-			path := string(cg)
+			contents := string(cg)
 			for _, name := range dynaCgroups {
-				if strings.Contains(path, name) {
+				if strings.Contains(contents, name) {
 					r.outsider = false
 				}
 			}
-			r.unit = cgroupUnit(path)
+			cgroup := ""
+			for _, line := range strings.Split(contents, "\n") {
+				if group, ok := strings.CutPrefix(line, "0::"); ok && group != "" {
+					cgroup = group
+					break
+				}
+			}
+			r.roomID, _ = agentslice.RoomIDFromCgroup(cgroup)
+			r.unit = cgroupUnit(contents)
+			// Dyna launches agent work in scopes. A service in a room slice is a
+			// detached program that room launched, so keep its canonical owner.
+			if r.roomID != "" && strings.HasSuffix(r.unit, ".service") {
+				r.outsider = true
+			}
 		}
 		if cwd, err := os.Readlink(filepath.Join(dir, "cwd")); err == nil {
 			r.cwd = cwd
@@ -91,20 +109,23 @@ func TopOutside(procRoot string, interval time.Duration, sleep func(time.Duratio
 	before := readProcesses(procRoot)
 	sleep(interval)
 	after := readProcesses(procRoot)
-	type key struct{ unit, command string }
+	type key struct {
+		unit, command string
+		roomID        agentslice.RoomID
+	}
 	groups := map[key]*Process{}
 	var order []key
 	for pid, cur := range after {
 		if !cur.outsider {
 			continue
 		}
-		k := key{cur.unit, cur.Command}
+		k := key{cur.unit, cur.Command, cur.roomID}
 		if cur.unit == "" {
 			k.command = cur.Command + "\x00" + cur.cwd
 		}
 		g := groups[k]
 		if g == nil {
-			g = &Process{Command: cur.Command, Unit: cur.unit, Cwd: cur.cwd}
+			g = &Process{Command: cur.Command, RoomID: cur.roomID, Unit: cur.unit, Cwd: cur.cwd}
 			groups[k] = g
 			order = append(order, k)
 		}
