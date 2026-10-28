@@ -176,7 +176,7 @@ func sessionItem(it transcript.Item) Item {
 		item.Step, item.Label, item.ToolName = string(it.Tool.Step), toolLabel(it.Tool), it.Tool.Name
 		item.DurationMS = int(it.Tool.Dur.Milliseconds())
 		item.Aside, item.Failed, item.Done = transcript.ToolAside(it.Tool), it.Tool.Failed, it.Tool.Done
-		item.JobID, item.JobOp = it.Tool.JobID, it.Tool.JobOp
+		item.JobID, item.JobOp = it.Tool.JobID, string(it.Tool.JobOp)
 		if it.Tool.Failed {
 			item.Command, item.Output, item.Exit = tail(it.Tool.Detail, maxFailedCommand), tail(ansi.Strip(it.Tool.Output), maxFailedOutput), it.Tool.Exit
 		}
