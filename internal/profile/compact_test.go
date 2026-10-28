@@ -48,18 +48,3 @@ func TestCompactNativeRejectsWhatTheHarnessCannotTake(t *testing.T) {
 		}
 	}
 }
-
-// Pi takes no setting; Dyna runs its compact command once the last call's
-// prompt reaches the threshold.
-func TestCompactDueOnlyForTriggerHarnesses(t *testing.T) {
-	p := Profile{Harness: HarnessPi, Model: "m", Compact: &Compact{Tokens: 95000}}
-	if args, env, err := CompactNative(p); args != nil || env != nil || err != nil {
-		t.Fatalf("pi native = %q %v %v", args, env, err)
-	}
-	if CompactDue(p, 94999) || !CompactDue(p, 95000) {
-		t.Fatal("pi due at the wrong size")
-	}
-	if CompactDue(Profile{Harness: HarnessClaudeCode, Compact: &Compact{Tokens: 100000}}, 200000) || CompactDue(Profile{Harness: HarnessPi}, 100) {
-		t.Fatal("due without a trigger harness or a threshold")
-	}
-}

@@ -10,6 +10,7 @@ import (
 
 	accountadapters "dyna-agent/internal/account/service/adapters"
 	"dyna-agent/internal/harness/config"
+	"dyna-agent/internal/profile"
 )
 
 func TestPiDiscoveryHonorsCancellation(t *testing.T) {
@@ -65,6 +66,19 @@ func TestPiCompactionGenerationPreservesOverrides(t *testing.T) {
 	}
 }
 
+func TestPiProfileCompactionTargets(t *testing.T) {
+	profiles := []profile.Profile{
+		{Harness: profile.HarnessPi, Model: "p/shared", Models: []string{"p/shared", "p/fallback"}, Compact: &profile.Compact{Tokens: 200000}},
+		{Harness: profile.HarnessPi, Model: "p/shared", Compact: &profile.Compact{Tokens: 100000}},
+		{Harness: profile.HarnessPi, Model: "p/untouched"},
+		{Harness: profile.HarnessClaudeCode, Model: "p/fallback", Compact: &profile.Compact{Tokens: 50000}},
+	}
+	got := piProfileTargets(profiles)
+	if len(got) != 2 || got["p/shared"] != 100000 || got["p/fallback"] != 200000 {
+		t.Fatalf("targets = %v", got)
+	}
+}
+
 func TestPiCompactionReserves(t *testing.T) {
 	models := []accountadapters.Model{
 		{ID: "big/model", Context: 1000000},
@@ -72,14 +86,14 @@ func TestPiCompactionReserves(t *testing.T) {
 		{ID: "small/model", Context: 200000},
 		{ID: "unknown/model"},
 	}
-	got := piCompactionReserves(models, 200000)
+	got := piCompactionReserves(models, map[string]int64{"big/model": 200000, "medium/model": 200000, "small/model": 200000})
 	if got["big/model"] != 850000 || got["medium/model"] != 300050 || len(got) != 2 {
 		t.Fatalf("reserves = %v", got)
 	}
-	if got := piCompactionReserves(models, 0); len(got) != 0 {
+	if got := piCompactionReserves(models, nil); len(got) != 0 {
 		t.Fatalf("disabled reserves = %v", got)
 	}
-	if got := piCompactionReserves(models, 1); got["medium/model"] > 499950 {
+	if got := piCompactionReserves(models, map[string]int64{"medium/model": 1}); got["medium/model"] > 499950 {
 		t.Fatalf("reserve exceeds safe window: %v", got)
 	}
 }
