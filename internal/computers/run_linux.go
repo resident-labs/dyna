@@ -29,6 +29,7 @@ func (s *supervisor) prepareRun(ctx context.Context, r Request) (Meta, error) {
 		return Meta{}, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.meta, nil
+	meta := s.meta
+	s.mu.Unlock()
+	return meta, nil
 }

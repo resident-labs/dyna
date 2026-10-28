@@ -44,6 +44,10 @@ type ActionIntent struct {
 	At   time.Time `json:"at"`
 }
 
+type RestartAdmission struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 type Status struct {
 	LatestStatus     *ActionIntent `json:"latest_status,omitempty"`
 	ControlReason    *ActionIntent `json:"control_reason,omitempty"`
@@ -74,9 +78,23 @@ type Status struct {
 	StreamRSSKiB   int64             `json:"stream_rss_kib"`
 	Reason         string            `json:"reason,omitempty"`
 	Recording      bool              `json:"recording,omitempty"`
+	// Runs counts foreground computer run commands holding a lease.
+	Runs int `json:"runs,omitempty"`
 	// Keep stops the idle timeout from stopping the computer. It is stored
 	// with the computer and survives a service restart.
 	Keep bool `json:"keep,omitempty"`
+}
+
+// RestartReason reports active use that a computer service restart would
+// interrupt. A desktop without an app or foreground command is quiet.
+func (s Status) RestartReason() string {
+	if s.Runs > 0 {
+		return fmt.Sprintf("computer %s has %d foreground command(s) running", s.SessionID, s.Runs)
+	}
+	if (s.State == StateRunning || s.State == StateStarting) && len(s.Apps) > 0 {
+		return fmt.Sprintf("computer %s has %d app(s) open", s.SessionID, len(s.Apps))
+	}
+	return ""
 }
 
 // Recording describes a screen recording: running now, or the last one finished.

@@ -41,7 +41,7 @@ func computerRunFixture(t *testing.T) context.Context {
 			switch r.Op {
 			case "register":
 				return computers.Meta{SessionID: r.Session, WaylandDisplay: "run-wayland", Display: ":999"}, nil
-			case "run.prepare":
+			case "run.lease":
 				if r.Status != "Checking the foreground command" {
 					return nil, fmt.Errorf("bad intent: %q", r.Status)
 				}

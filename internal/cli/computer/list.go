@@ -60,7 +60,7 @@ func printComputerList(c *cobra.Command, values []computers.Status, all, asJSON 
 		return err
 	}
 	if at, ok := restartPendingSince(); ok {
-		fmt.Fprintf(c.OutOrStdout(), "restart pending since %s: the computer service restarts once no computer has an app open\n", at.Local().Format("2006-01-02 15:04"))
+		fmt.Fprintf(c.OutOrStdout(), "restart pending since %s: the computer service restarts once no computer has an app open or command running\n", at.Local().Format("2006-01-02 15:04"))
 	}
 	return nil
 }
