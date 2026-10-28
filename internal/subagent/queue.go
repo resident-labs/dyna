@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/sessionlife"
 )
 
 // QueueState is how far one queued post got toward its target session.
@@ -254,11 +255,11 @@ func (s *Store) deletePendingSteer(rooms *room.Store, info Meta, id string) erro
 // the queue row held before them, so their newest write is the queue's
 // version.
 func (s *Store) queueSig(id string) string {
-	meta, err := s.ReadMeta(id)
+	roomID, address, err := sessionlife.DeliveryAddress(s.root(), id)
 	if err != nil {
 		return ""
 	}
-	return s.deliverySignature(meta)
+	return s.deliverySignature(id, roomID, address)
 }
 
 // QueueSignature changes when claim, cancellation or delivery state changes.
