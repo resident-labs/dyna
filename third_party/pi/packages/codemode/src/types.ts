@@ -244,6 +244,8 @@ export interface CodemodeRun {
 
 export interface CodemodeExecuteOptions {
 	signal?: AbortSignal;
+	/** Called as the script produces each text, console, or image item. */
+	onOutput?(item: CodemodeOutputItem): void;
 	/** Overrides the sandbox default for this execution. */
 	timeoutMs?: number;
 	/**

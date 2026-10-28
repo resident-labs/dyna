@@ -146,11 +146,6 @@ func decodePi(line []byte) Record {
 			}
 		}
 		r.Events = []Event{{Kind: "tool", ID: p.ToolCallID, Name: p.ToolName, State: state, Input: compactJSON(p.Args), Output: output}}
-		// Nested calls arrive as full tool_execution events. Codemode snapshots
-		// repeat them with truncated arguments and must not create more rows.
-		if p.ToolName == "codemode" && p.Type == "tool_execution_update" {
-			r.Events = nil
-		}
 		if p.ToolCallID != "" && p.Type != "tool_execution_update" {
 			r.Signals = []ToolSignal{{ID: p.ToolCallID, Start: p.Type == "tool_execution_start"}}
 		}

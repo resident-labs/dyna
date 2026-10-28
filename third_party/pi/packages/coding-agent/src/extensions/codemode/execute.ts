@@ -67,6 +67,9 @@ function maxCodemodeWorkers(): number {
  * held by a script that waits on another script, for example an in-process subagent that uses codemode.
  */
 const CODEMODE_WORKER_WAIT_MS = 60_000;
+const OUTPUT_UPDATE_INTERVAL_MS = 100;
+const PROGRESS_OUTPUT_CHARS = 32 * 1024;
+const PROGRESS_OUTPUT_ITEMS = 100;
 let activeCodemodeWorkers = 0;
 /** Scripts waiting for a worker, in arrival order. */
 const codemodeWorkerWaiters: (() => void)[] = [];
@@ -512,7 +515,42 @@ export async function executeCodemode(
 	};
 
 	const snapshot = (): CodemodeToolDetails => ({ calls: calls.map((call) => ({ ...call })) });
-	const publish = () => onUpdate?.({ content: [], details: snapshot() });
+	const progressOutput: CodemodeOutputItem[] = [];
+	let progressOutputChars = 0;
+	let progressOutputOmitted = false;
+	let outputChanged = false;
+	let lastOutputUpdate = Number.NEGATIVE_INFINITY;
+	let outputUpdateTimer: ReturnType<typeof setTimeout> | undefined;
+	const publish = () => {
+		if (!onUpdate) return;
+		const items = formatOutput(progressOutput);
+		if (progressOutputOmitted) {
+			items.unshift({ type: "text", text: "[Earlier or oversized output omitted from progress.]" });
+		}
+		onUpdate({
+			content: [{ type: "text", text: "Script running\nOutput:\n" }, ...items],
+			details: { calls: [] },
+		});
+	};
+	const clearOutputUpdateTimer = () => {
+		if (outputUpdateTimer !== undefined) clearTimeout(outputUpdateTimer);
+		outputUpdateTimer = undefined;
+	};
+	const publishOutput = () => {
+		clearOutputUpdateTimer();
+		outputChanged = false;
+		lastOutputUpdate = performance.now();
+		publish();
+	};
+	const queueOutputUpdate = () => {
+		outputChanged = true;
+		const remaining = OUTPUT_UPDATE_INTERVAL_MS - (performance.now() - lastOutputUpdate);
+		if (remaining <= 0) {
+			publishOutput();
+			return;
+		}
+		if (outputUpdateTimer === undefined) outputUpdateTimer = setTimeout(publishOutput, remaining);
+	};
 	// Show the script as running before its first nested call, so the row's timer starts.
 	publish();
 
@@ -533,7 +571,6 @@ export async function executeCodemode(
 				status: "running",
 			};
 			calls.push(record);
-			publish();
 			const callStartedAt = performance.now();
 			// Only tools from ctx.tools are callable, so ctx is set here.
 			if (!ctx) throw new Error("Tool calls need a session");
@@ -546,7 +583,6 @@ export async function executeCodemode(
 			} else {
 				record.status = "ok";
 			}
-			publish();
 			return toScriptValue(tool, outcome);
 		},
 	}));
@@ -586,7 +622,7 @@ export async function executeCodemode(
 			globals: [
 				...createDiscoveryGlobals(callable, samples, options),
 				...(options.models && ctx
-					? createModelGlobals(ctx.modelRegistry, toolCallId, calls, publish, addModelUsage, addGeneratedImages)
+					? createModelGlobals(ctx.modelRegistry, toolCallId, calls, addModelUsage, addGeneratedImages)
 					: []),
 			],
 			timeoutMs: Math.max(1, Math.round(deadline - waitedMs)),
@@ -601,8 +637,36 @@ export async function executeCodemode(
 			},
 		});
 		const store = ctx ? readCodemodeStore(ctx.sessionManager.getBranch()) : {};
-		result = await sandbox.execute(code, { signal, store });
+		result = await sandbox.execute(code, {
+			signal,
+			store,
+			onOutput: (item) => {
+				progressOutput.push(item);
+				progressOutputChars += item.type === "text" ? item.text.length : item.data.length;
+				while (progressOutput.length > PROGRESS_OUTPUT_ITEMS || progressOutputChars > PROGRESS_OUTPUT_CHARS) {
+					progressOutputOmitted = true;
+					const first = progressOutput[0]!;
+					const excess = progressOutputChars - PROGRESS_OUTPUT_CHARS;
+					if (
+						progressOutput.length <= PROGRESS_OUTPUT_ITEMS &&
+						first.type === "text" &&
+						excess > 0 &&
+						first.text.length > excess
+					) {
+						progressOutput[0] = { ...first, text: first.text.slice(excess) };
+						progressOutputChars -= excess;
+						break;
+					}
+					progressOutput.shift();
+					progressOutputChars -= first.type === "text" ? first.text.length : first.data.length;
+				}
+				queueOutputUpdate();
+			},
+		});
+		// A script can end before the trailing timer fires.
+		if (outputChanged) publishOutput();
 	} finally {
+		clearOutputUpdateTimer();
 		await sandbox?.close();
 		if (reserved) {
 			reserved = false;
@@ -743,7 +807,6 @@ function createModelGlobals(
 	models: CodemodeModelRuntime,
 	toolCallId: string,
 	calls: CodemodeNestedCall[],
-	publish: () => void,
 	addUsage: (usage: Usage) => void,
 	addGeneratedImages: (count: number) => void,
 ): CodemodeTool[] {
@@ -796,7 +859,6 @@ function createModelGlobals(
 			status: "running",
 		};
 		calls.push(record);
-		publish();
 		const startedAt = performance.now();
 		const result = await limit(() => run(resolved, checked));
 		record.durationMs = performance.now() - startedAt;
@@ -806,7 +868,6 @@ function createModelGlobals(
 			record.cost = result.usage.cost.total;
 			addUsage(result.usage);
 		}
-		publish();
 		return result;
 	};
 	const implementations: Record<string, CodemodeTool["execute"]> = {
