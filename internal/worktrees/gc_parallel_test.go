@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // The scan inspects trees concurrently. Each result must still describe its own tree.
@@ -39,8 +38,9 @@ func TestScanInspectsTreesConcurrently(t *testing.T) {
 	}
 }
 
-// Removal workers must overlap. The hook holds each worker until four are in
-// it at once; a serial cleanup never reaches four and fails at the deadline.
+// Removal workers must overlap. The hook holds each worker after its rechecks
+// until four are waiting at once. A serial cleanup never gets there, so the
+// test blocks instead of passing.
 func TestGCRemovesTreesConcurrently(t *testing.T) {
 	repo := gcRepo(t)
 	const want = 4
@@ -50,31 +50,48 @@ func TestGCRemovesTreesConcurrently(t *testing.T) {
 		ageGCTree(t, path)
 		paths = append(paths, path)
 	}
-	var arrived sync.WaitGroup
-	arrived.Add(want)
-	met := make(chan struct{})
-	go func() { arrived.Wait(); close(met) }()
-	deadline, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err := GC(context.Background(), repo, GCOptions{
-		OwnerClosed: func(string) (bool, error) { return true, nil },
-		beforeRemove: func(string) {
-			arrived.Done()
-			select {
-			case <-met:
-			case <-deadline.Done():
-			}
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	arrived := make(chan struct{}, want)
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := GC(context.Background(), repo, GCOptions{
+			OwnerClosed: func(string) (bool, error) { return true, nil },
+			beforeLock: func(string) {
+				arrived <- struct{}{}
+				<-release
+			},
+		})
+		done <- err
+	}()
+	for range want {
+		<-arrived
 	}
-	if deadline.Err() != nil {
-		t.Fatal("removal rechecks never overlapped")
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 	for _, path := range paths {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("closed tree %s remains: %v", path, err)
 		}
+	}
+}
+
+// An owner that becomes active while its worker waits for the removal lock
+// must keep the tree.
+func TestGCRechecksOwnerAfterQueueing(t *testing.T) {
+	repo := gcRepo(t)
+	path := gcTree(t, repo, "dyna/queued", "owner")
+	ageGCTree(t, path)
+	var active atomic.Bool
+	trees, err := GC(context.Background(), repo, GCOptions{
+		OwnerClosed: func(string) (bool, error) { return !active.Load(), nil },
+		beforeLock:  func(string) { active.Store(true) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("tree of a reactivated owner was removed: %v; decisions: %#v", err, trees)
 	}
 }
