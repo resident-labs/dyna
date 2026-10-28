@@ -1001,7 +1001,7 @@ func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
 		err := s.stop()
 		return Stopped{s.state.State}, err
 	default:
-		return nil, fmt.Errorf("unknown computer operation %q", r.Op)
+		return nil, fmt.Errorf("unknown computer operation %q; dyna-computers.service predates it and needs a restart", r.Op)
 	}
 }
 func (s *supervisor) startStream() error {
