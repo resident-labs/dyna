@@ -270,4 +270,36 @@ esac
 	if roomPushes.Load() != pushes {
 		t.Fatal("--force-if-includes reached the remote with engine credentials")
 	}
+
+	// A branch without an upstream and no push.autoSetupRemote must stay
+	// local: git itself rejects the push without touching the network.
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "checkout", "-q", "-b", "topic").CombinedOutput(); err != nil {
+		t.Fatalf("create branch: %v %s", err, out)
+	}
+	pushes = roomPushes.Load()
+	noUpstream := exec.Command(guardedGit, "push", "origin")
+	noUpstream.Dir = rec.Repo
+	noUpstream.Env = env
+	_ = noUpstream.Run()
+	if roomPushes.Load() != pushes {
+		t.Fatal("a simple push without an upstream reached the remote with engine credentials")
+	}
+
+	// push.autoSetupRemote turns that push into an engine push, as git
+	// accepts it, and records the new upstream in the worker repository.
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "push.autoSetupRemote", "true").CombinedOutput(); err != nil {
+		t.Fatalf("set autoSetupRemote: %v %s", err, out)
+	}
+	pushes = roomPushes.Load()
+	setup := exec.Command(guardedGit, "push", "origin")
+	setup.Dir = rec.Repo
+	setup.Env = env
+	_ = setup.Run()
+	if roomPushes.Load() == pushes {
+		t.Fatal("push.autoSetupRemote did not push the branch through the engine")
+	}
+	remote, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "--get", "branch.topic.remote").Output()
+	if err == nil {
+		t.Fatalf("a failed push set an upstream: %s", remote)
+	}
 }
