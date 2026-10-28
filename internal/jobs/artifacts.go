@@ -37,14 +37,21 @@ func checkArtifact(p string) error {
 }
 
 // artifactScript runs on the node in the job's work folder. It writes a tar
-// stream of the named paths that exist and names each missing one on stderr.
-const artifactScript = `cd "$1" || exit 3; shift; keep=(); ` +
-	`for p in "$@"; do if [ -e "$p" ]; then keep+=("$p"); else printf '%s\n' "$p" >&2; fi; done; ` +
+// stream of the named paths and reports each refused one on stderr as
+// "missing<TAB>path" or "outside<TAB>path". A path counts only when its real
+// location, with every symlink on the way resolved, is inside the real work
+// folder, so a job cannot reach outside through a link it made. tar does not
+// follow symlinks inside a kept folder; it stores the links themselves.
+const artifactScript = `cd "$1" || exit 3; shift; root=$(pwd -P); keep=(); ` +
+	`for p in "$@"; do ` +
+	`if ! r=$(realpath -e -- "$p" 2>/dev/null); then printf 'missing\t%s\n' "$p" >&2; continue; fi; ` +
+	`case "$r/" in "$root"/*) keep+=("$p") ;; *) printf 'outside\t%s\n' "$p" >&2 ;; esac; ` +
+	`done; ` +
 	`[ ${#keep[@]} -eq 0 ] || tar -cf - -- "${keep[@]}"`
 
 // copyArtifacts copies the job's named outputs from its work folder on the
-// node to dest on this machine. A missing path does not fail the copy; the
-// returned note names it.
+// node to dest on this machine. A missing or refused path does not fail the
+// copy; the returned note names it.
 func copyArtifacts(ctx context.Context, x Executor, job Job, dest string) (string, error) {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return "", err
@@ -66,17 +73,34 @@ func copyArtifacts(ctx context.Context, x Executor, job Job, dest string) (strin
 		}
 		return "", fmt.Errorf("copy artifacts from %s: %w: %s", job.Node, err, strings.TrimSpace(missing.String()))
 	}
-	note := ""
-	if names := strings.Fields(missing.String()); len(names) > 0 {
-		note = "artifacts not found: " + strings.Join(names, ", ")
-	}
+	note := refusedNote(missing.String())
 	if out.written == 0 {
 		return note, nil
 	}
-	if output, err := exec.CommandContext(ctx, "tar", "-xf", archive.Name(), "-C", dest).CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, "tar", "--no-same-owner", "-xf", archive.Name(), "-C", dest).CombinedOutput(); err != nil {
 		return note, fmt.Errorf("unpack artifacts: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return note, nil
+}
+
+// refusedNote names the paths the node refused, from artifactScript's stderr.
+func refusedNote(report string) string {
+	var notFound, outside []string
+	for _, line := range strings.Split(report, "\n") {
+		if p, ok := strings.CutPrefix(line, "missing\t"); ok {
+			notFound = append(notFound, p)
+		} else if p, ok := strings.CutPrefix(line, "outside\t"); ok {
+			outside = append(outside, p)
+		}
+	}
+	var parts []string
+	if len(notFound) > 0 {
+		parts = append(parts, "artifacts not found: "+strings.Join(notFound, ", "))
+	}
+	if len(outside) > 0 {
+		parts = append(parts, "artifacts refused, outside the work folder: "+strings.Join(outside, ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // cappedWriter writes until left bytes are used, then fails.
