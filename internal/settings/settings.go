@@ -39,6 +39,7 @@ const (
 	KeySteeringToolWait      = "steering.maxToolWait"
 	KeyIdleUnloadMinutes     = "harness.idleUnloadMinutes"
 	KeyCompactAtTokens       = "harness.compactAtTokens"
+	KeyPiCodeMode            = "harness.piCodeMode"
 	KeyMaxCardBytes          = "content.maxCardBytes"
 	KeyMaxFileBytes          = "content.maxFileBytes"
 	KeyCIDiskFloorGB         = "machines.ciDiskFloorGB"
@@ -122,6 +123,7 @@ type Values struct {
 	HarnessIdleUnloadMinutes int
 	// HarnessCompactAtTokens sets the default context cap; zero disables it.
 	HarnessCompactAtTokens int64
+	PiCodeMode             string
 	// VoiceProvider, VoiceModel and VoiceURL choose the call's realtime
 	// voice provider.
 	VoiceProvider string
@@ -169,6 +171,7 @@ func Defaults() Values {
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
 		HarnessCompactAtTokens:   DefaultCompactAtTokens,
+		PiCodeMode:               "only",
 		VoiceProvider:            "openai",
 		VoiceAgent:               true,
 		Extra:                    map[string]any{},
@@ -376,6 +379,11 @@ func Load(path string) (Values, error) {
 		if n, ok := asInt(h["compactAtTokens"]); ok && n >= 0 {
 			v.HarnessCompactAtTokens = int64(n)
 			v.fromFile[KeyCompactAtTokens] = true
+		}
+		if mode, exists := h["piCodeMode"]; exists {
+			if err := v.Set(KeyPiCodeMode, fmt.Sprint(mode)); err != nil {
+				return Values{}, err
+			}
 		}
 		if n, ok := asInt(h["idleUnloadMinutes"]); ok && n >= 0 {
 			v.HarnessIdleUnloadMinutes = n
@@ -613,6 +621,12 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.HarnessCompactAtTokens = n
 		v.fromFile[key] = true
+	case KeyPiCodeMode:
+		if value != "only" && value != "off" {
+			return fmt.Errorf("%s must be only or off", key)
+		}
+		v.PiCodeMode = value
+		v.fromFile[key] = true
 	case KeyIdleUnloadMinutes:
 		n, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || n < 0 {
@@ -697,6 +711,7 @@ func (v Values) Save() error {
 	harnessSection := nested(raw, "harness")
 	harnessSection["idleUnloadMinutes"] = v.HarnessIdleUnloadMinutes
 	harnessSection["compactAtTokens"] = v.HarnessCompactAtTokens
+	harnessSection["piCodeMode"] = v.PiCodeMode
 	raw["harness"] = harnessSection
 	b, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
