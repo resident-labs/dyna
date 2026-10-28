@@ -38,6 +38,10 @@ var metaMu sync.Mutex
 
 func init() {
 	sessionlife.AfterDelete = func(sessions, id string) {
+		// metaSnapshot holds the same lock through loading and publication. A
+		// delete either evicts before that load or after its store, never between.
+		metaMu.Lock()
+		defer metaMu.Unlock()
 		infoCache.Delete(filepath.Join(sessions, id))
 	}
 }
