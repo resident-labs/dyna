@@ -2,6 +2,8 @@
 package runtime
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -319,6 +321,14 @@ func (m *BundleManager) installCandidate(ctx context.Context, harness, version s
 	if err != nil {
 		return Bundle{}, err
 	}
+	// An unstamped binary names only the fork level; the tarball it installs
+	// carries the exact build. Resolve the build now, so the bundle publishes
+	// and resolves under the version its manifest really has.
+	if a, aerr := Adapter(h); aerr == nil && a.distribution == distributionFork && version == piForkVersion && piForkBuild == "" {
+		if build, ok := forkTarballVersion(os.Getenv(piForkTarballEnv)); ok {
+			version = build
+		}
+	}
 	if !validVersion(version) {
 		return Bundle{}, errors.New("private bundles require an exact version, not a moving tag or range")
 	}
@@ -531,7 +541,7 @@ func (m *BundleManager) Rollback(ctx context.Context, harness string) (Bundle, e
 // installPiForkNPM installs Dyna's single tarball after checking its SHA-512.
 // Release builds download the stamped asset. Source builds use the stamped
 // local path. DYNA_PI_TARBALL explicitly overrides either source for QA.
-func installPiForkNPM(ctx context.Context, m *BundleManager, staging string, env []string, a RuntimeAdapter) (InstallArtifact, error) {
+func installPiForkNPM(ctx context.Context, m *BundleManager, staging, version string, env []string, a RuntimeAdapter) (InstallArtifact, error) {
 	tarball := os.Getenv(piForkTarballEnv)
 	expected := ""
 	if tarball == "" {
@@ -578,7 +588,7 @@ func installPiForkNPM(ctx context.Context, m *BundleManager, staging string, env
 		Version  string `json:"version"`
 		DynaFork int    `json:"dynaFork"`
 	}
-	if json.Unmarshal(data, &manifest) != nil || manifest.Name != piNPMPackage || manifest.Version != piForkVersion {
+	if json.Unmarshal(data, &manifest) != nil || manifest.Name != piNPMPackage || manifest.Version != version {
 		return InstallArtifact{}, errors.New("installed Pi fork package has the wrong identity or version")
 	}
 	if manifest.DynaFork < minimumPiForkLevel {
@@ -592,8 +602,8 @@ func installNPM(ctx context.Context, m *BundleManager, staging, version string, 
 	if a.NPMPackage == "" {
 		return InstallArtifact{}, errors.New("no exact private install recipe is verified for this harness")
 	}
-	if a.distribution == distributionFork && version == piForkVersion {
-		return installPiForkNPM(ctx, m, staging, env, a)
+	if a.distribution == distributionFork && (version == piForkVersion || isForkBuildVersion(version)) {
+		return installPiForkNPM(ctx, m, staging, version, env, a)
 	}
 	args := []string{"npm", "install", "--global", "--prefix", staging, "--package-lock"}
 	// Kimi's postinstall can rename a legacy kimi shim elsewhere on PATH;
@@ -663,6 +673,44 @@ func (m *BundleManager) published(ctx context.Context, h, version, parent, final
 		return Bundle{}, true, failure()
 	}
 	return Bundle{}, false, nil
+}
+
+// forkTarballVersion reads the exact fork build version from a packed
+// tarball's package manifest, so an unstamped binary installs the build the
+// tarball carries instead of the level-only fallback. A tarball without a
+// valid build version reads as absent.
+func forkTarballVersion(path string) (string, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		return "", false
+	}
+	defer gz.Close()
+	reader := tar.NewReader(gz)
+	for {
+		header, err := reader.Next()
+		if err != nil {
+			return "", false
+		}
+		if header.Name != "package/package.json" {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(reader, 4096))
+		if err != nil {
+			return "", false
+		}
+		var manifest struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(data, &manifest) != nil || !isForkBuildVersion(manifest.Version) {
+			return "", false
+		}
+		return manifest.Version, true
+	}
 }
 
 // packageIntegrity reads exact package metadata, never an unrelated dependency's

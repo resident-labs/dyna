@@ -126,12 +126,12 @@ func TestPiForkStampedLocalIntegrity(t *testing.T) {
 	m.Run = func(_ context.Context, args, _ []string) error {
 		return forkLayout(args[4], piForkVersion, minimumPiForkLevel)
 	}
-	artifact, err := installPiForkNPM(context.Background(), m, t.TempDir(), nil, a)
+	artifact, err := installPiForkNPM(context.Background(), m, t.TempDir(), piForkVersion, nil, a)
 	if err != nil || artifact.Integrity != piForkIntegrity {
 		t.Fatalf("artifact = %+v, %v; want the stamped integrity", artifact, err)
 	}
 	piForkIntegrity = "sha512-" + base64.StdEncoding.EncodeToString(make([]byte, 64))
-	if _, err := installPiForkNPM(context.Background(), m, t.TempDir(), nil, a); err == nil {
+	if _, err := installPiForkNPM(context.Background(), m, t.TempDir(), piForkVersion, nil, a); err == nil {
 		t.Fatal("accepted wrong integrity")
 	}
 }
@@ -239,5 +239,69 @@ func TestPinnedUnusablePiBundleIsProtected(t *testing.T) {
 	}
 	if _, err := os.Stat(old.Directory); !os.IsNotExist(err) {
 		t.Fatal("unused unusable bundle was not removed")
+	}
+}
+
+// A fork build names its Pi tree, so two builds at one level install as
+// distinct bundles. The fork recipe still owns every build of the level, and
+// a tarball whose manifest names another build never publishes.
+func TestForkBuildInstallsAsItsOwnVersion(t *testing.T) {
+	piTestHome(t)
+	m := manager(t)
+	const build = piForkVersion + ".0123456789ab"
+	m.Run = func(_ context.Context, args, _ []string) error {
+		return forkLayout(args[4], build, minimumPiForkLevel)
+	}
+	b := install(t, m, "pi", build)
+	if b.Version != build {
+		t.Fatalf("bundle version = %q, want %q", b.Version, build)
+	}
+	m.Run = func(_ context.Context, args, _ []string) error {
+		return forkLayout(args[4], piForkVersion, minimumPiForkLevel)
+	}
+	if base := install(t, m, "pi", piForkVersion); base.Version == b.Version {
+		t.Fatal("level-only version and its build collapsed into one bundle")
+	}
+	m.Run = func(_ context.Context, args, _ []string) error {
+		return forkLayout(args[4], piForkVersion+".ffffffffffff", minimumPiForkLevel)
+	}
+	if _, err := m.Install(context.Background(), "pi", piForkVersion+".deadbeefdead"); err == nil || !strings.Contains(err.Error(), "identity or version") {
+		t.Fatalf("tarball of another build accepted: %v", err)
+	}
+}
+
+// First use repairs an unusable selection: it installs the recommended fork,
+// selects it, and records the replaced selection as last good. A usable
+// selection, for example after a rollback, is left alone.
+func TestFirstUseRepairsUnusableSelection(t *testing.T) {
+	piTestHome(t)
+	m := manager(t)
+	seedBundle(t, m.Root, "1.4.0-dyna.4")
+	if err := m.writeMarker(".pi-selected", "1.4.0-dyna.4"); err != nil {
+		t.Fatal(err)
+	}
+	f := &FirstUse{Bundles: m}
+	b, installed, err := f.EnsureBundle(context.Background(), "pi", "")
+	if err != nil || !installed || b.Version != piForkVersion {
+		t.Fatalf("repair install = %+v, installed = %v, %v", b, installed, err)
+	}
+	selected, err := m.SelectedVersion("pi")
+	if err != nil || selected != piForkVersion {
+		t.Fatalf("selection after repair = %q, %v", selected, err)
+	}
+	last, err := m.LastGoodVersion("pi")
+	if err != nil || last != "1.4.0-dyna.4" {
+		t.Fatalf("last good after repair = %q, %v", last, err)
+	}
+	if err := m.writeMarker(".pi-selected", piForkVersion); err != nil {
+		t.Fatal(err)
+	}
+	m.Run = func(context.Context, []string, []string) error {
+		t.Fatal("first use reinstalled over a usable selection")
+		return nil
+	}
+	b, installed, err = f.EnsureBundle(context.Background(), "pi", "")
+	if err != nil || installed || b.Version != piForkVersion {
+		t.Fatalf("usable selection = %+v, installed = %v, %v", b, installed, err)
 	}
 }

@@ -146,7 +146,7 @@ func (r RecommendedVersionResolver) RecommendedVersions(ctx context.Context) []R
 			v := RecommendedVersion{Harness: a.Harness, Status: "unavailable"}
 			if a.distribution == distributionFork {
 				v.Source = piForkSource()
-				v.Version = piForkVersion
+				v.Version = piForkInstallVersion()
 				v.Status = "resolved"
 			} else if a.NPMPackage == "" {
 				v.Reason = "The adapter has no verified version metadata source."
