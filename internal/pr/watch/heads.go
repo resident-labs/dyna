@@ -480,8 +480,14 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	for _, r := range records {
 		keys = append(keys, r.Key)
 		// Readiness reads dependency state even when a dependency is not in the
-		// head batch. Include it so a merged dependency cannot disappear.
-		keys = append(keys, r.Dependencies...)
+		// head batch. A dependency may name the map key or the stable change ID.
+		for _, id := range r.Dependencies {
+			if dependency := st.RecordByID(id); dependency != nil {
+				keys = append(keys, dependency.Key)
+			} else {
+				keys = append(keys, id)
+			}
+		}
 	}
 	saveErr := s.Store.updateRecordsOrAll(keys, func(current *State) bool {
 		return ratesNeedAllRecords(current, rates, s.now())
