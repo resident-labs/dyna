@@ -571,7 +571,7 @@ func TestSchedulerRunsLocalCIAfterHostedCancellation(t *testing.T) {
 	s, r, repo, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, []Run{cancelledTrialRun()}, cancelledTrialChecks(), nil, false)
 	head := savedTrialHead(t, s, r)
 	job := registeredCIJob{record: r, head: head, branch: branch, trial: true}
-	conclusive, err := s.scheduledCIConclusive(t.Context(), job, repo, watchDynaDefinition(t))
+	conclusive, err := s.scheduledCIConclusive(t.Context(), job, repo, watchDynaDefinition(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
