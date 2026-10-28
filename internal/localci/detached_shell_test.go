@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 )
 
@@ -36,7 +37,7 @@ func nodeStubs(t *testing.T) string {
 // startOnShell runs the real start script with the check's script as input.
 func startOnShell(t *testing.T, stubs, detached, script string, env ...string) error {
 	t.Helper()
-	cmd := exec.Command("bash", "-o", "pipefail", "-c", detachedStartScript, "dyna-ci", detached, "unit.service", "", "", "")
+	cmd := exec.Command("bash", "-o", "pipefail", "-c", jobs.StartScript, "dyna-ci", detached, "unit.service", "", "", "")
 	cmd.Stdin = strings.NewReader(script)
 	// The host check kills the rest of its process group, so the script runs in a
 	// group of its own and never reaches the test binary.
@@ -248,7 +249,7 @@ func TestStopScriptNeedsAConfirmedStop(t *testing.T) {
 		{"manager does not answer", []string{"SYSTEMCTL_SHOW_EXIT=1"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command("bash", "-c", detachedStopScript, "dyna-ci", filepath.Join(t.TempDir(), "d"), "unit.service")
+			cmd := exec.Command("bash", "-c", jobs.StopScript, "dyna-ci", filepath.Join(t.TempDir(), "d"), "unit.service")
 			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), tc.env...)
 			if err := cmd.Run(); (err == nil) != tc.wantOK {
 				t.Fatalf("stop err = %v, want success %v", err, tc.wantOK)
