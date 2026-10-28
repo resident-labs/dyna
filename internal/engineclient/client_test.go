@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,14 +41,19 @@ func TestSocketPath(t *testing.T) {
 	if got, err := SocketPath(); err != nil || got != filepath.Join(root, "dyna", "engine.sock") {
 		t.Fatalf("path = %q, %v", got, err)
 	}
-	for _, invalid := range []string{"", "relative"} {
-		t.Setenv("XDG_RUNTIME_DIR", invalid)
-		if _, err := SocketPath(); err == nil {
-			t.Fatalf("accepted %q", invalid)
-		}
-		if err := noWait("").Call(t.Context(), "Health", nil, nil); !errors.Is(err, ErrNotRunning) {
-			t.Fatalf("missing runtime: %v", err)
-		}
+	t.Setenv("XDG_RUNTIME_DIR", "relative")
+	if _, err := SocketPath(); err == nil {
+		t.Fatal("accepted a relative runtime directory")
+	}
+	if err := noWait("").Call(t.Context(), "Health", nil, nil); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("invalid runtime: %v", err)
+	}
+
+	t.Setenv("XDG_RUNTIME_DIR", root)
+	socket := filepath.Join(root, "dyna", "engine.sock")
+	err := noWait("").Call(t.Context(), "Health", nil, nil)
+	if !errors.Is(err, ErrNotRunning) || !strings.Contains(err.Error(), socket) || strings.Contains(err.Error(), "systemctl") {
+		t.Fatalf("missing socket error = %v; want %q without a start command", err, socket)
 	}
 }
 

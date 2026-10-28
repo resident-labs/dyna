@@ -23,7 +23,7 @@ import (
 	"dyna-agent/internal/callspec"
 )
 
-var ErrNotRunning = errors.New("Dyna engine is not running; start it with systemctl --user start dyna-engine")
+var ErrNotRunning = errors.New("Dyna engine is not running")
 
 // RemoteError is an error the engine returned for a call, with the reply's
 // HTTP status.
@@ -115,7 +115,7 @@ func New(path string, opts ...Option) *Client {
 			}
 			conn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "unix", socket)
 			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
-				return nil, ErrNotRunning
+				return nil, fmt.Errorf("%w; tried socket %s", ErrNotRunning, socket)
 			}
 			return conn, err
 		},
@@ -178,7 +178,7 @@ func (c *Client) Call(ctx context.Context, method string, args []any, result any
 		}
 		left := giveUp.Sub(c.now())
 		if left <= 0 {
-			return fmt.Errorf("%w (waited %g s)", ErrNotRunning, c.restartWait.Seconds())
+			return fmt.Errorf("%w (waited %g s)", err, c.restartWait.Seconds())
 		}
 		if c.notices != nil && delay == 100*time.Millisecond {
 			fmt.Fprintln(c.notices, "dyna: waiting for the engine to start")
@@ -219,7 +219,10 @@ func (c *Client) send(ctx context.Context, method string, body []byte, result an
 	res, err := c.http.Do(req)
 	if err != nil {
 		if errors.Is(err, ErrNotRunning) {
-			return ErrNotRunning
+			var urlErr *url.Error
+			if errors.As(err, &urlErr) {
+				return urlErr.Err
+			}
 		}
 		return err
 	}
