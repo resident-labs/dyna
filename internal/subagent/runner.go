@@ -34,8 +34,9 @@ import (
 
 // EffectiveDir returns the working directory for a turn plus an optional prompt
 // note. When a session's saved directory no longer exists, for example after it
-// removes its own worktree, the turn runs in the room's repo checkout and the
-// note tells the model why. An empty note means the saved directory is intact.
+// removes its own worktree, the turn runs in the room's repo checkout, or, when
+// the room has none, in the parent session's directory; the note tells the
+// model why. An empty note means the saved directory is intact.
 func (m *Manager) EffectiveDir(meta Meta) (dir, note string) {
 	if info, err := os.Stat(meta.Dir); err == nil && info.IsDir() {
 		return meta.Dir, ""
@@ -44,16 +45,23 @@ func (m *Manager) EffectiveDir(meta Meta) (dir, note string) {
 	if missing == "" {
 		missing = "(none)"
 	}
-	fallback := ""
-	if rec, err := m.rooms().Resolve(meta.RoomID); err == nil {
-		if info, err := os.Stat(rec.Repo); rec.Repo != "" && err == nil && info.IsDir() {
-			fallback = rec.Repo
+	fallback, source := "", ""
+	if rec, err := m.rooms().Resolve(meta.RoomID); err == nil && rec.Repo != "" {
+		if info, err := os.Stat(rec.Repo); err == nil && info.IsDir() {
+			fallback, source = rec.Repo, "the room's repo checkout"
+		}
+	}
+	if fallback == "" && meta.ParentSession != "" {
+		if parent, err := m.store().ReadMeta(meta.ParentSession); err == nil && parent.Dir != "" {
+			if info, err := os.Stat(parent.Dir); err == nil && info.IsDir() {
+				fallback, source = parent.Dir, "the parent session's directory"
+			}
 		}
 	}
 	if fallback == "" {
 		return meta.Dir, ""
 	}
-	note = fmt.Sprintf("[DYNA WORKING DIRECTORY] Your saved working directory %s no longer exists. This turn runs in the room's repo checkout %s instead. Choose a task worktree before editing code.", missing, fallback)
+	note = fmt.Sprintf("[DYNA WORKING DIRECTORY] Your saved working directory %s no longer exists. This turn runs in %s %s instead. Choose a task worktree before editing code.", missing, source, fallback)
 	return fallback, note
 }
 
