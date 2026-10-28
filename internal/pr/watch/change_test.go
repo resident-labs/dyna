@@ -151,6 +151,8 @@ func TestClosingAChangeClosesItsReviewerAsTheEngine(t *testing.T) {
 		return closeFake(ctx, id)
 	}
 	t.Cleanup(authority.InEngine())
+	// The change's review turn ended, so the pool may close its session.
+	e.endReviewerTurn(assigned.Reviewer)
 	if err := e.s.CloseChange(r.ChangeID, r.Author); err != nil {
 		t.Fatal(err)
 	}
