@@ -54,6 +54,7 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	serveRoomOperations(t, rec)
 	private, err := home.Prepare(t.TempDir(), binPath, os.Environ())
 	if err != nil {
 		t.Fatal(err)

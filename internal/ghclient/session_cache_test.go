@@ -50,8 +50,8 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.Env["GH_TOKEN"] != "worker-secret" || session.Notice != "" {
-		t.Fatalf("first turn host=%q notice=%q, want the stored account", session.Env["GH_HOST"], session.Notice)
+	if session.Env["GH_TOKEN"] != "" || session.Notice != "" {
+		t.Fatalf("first turn host=%q notice=%q, want the stored account inside Dyna", session.Env["GH_HOST"], session.Notice)
 	}
 	if got := probeCount(t, probes); got != 1 {
 		t.Fatalf("first turn probed %d times, want 1", got)
@@ -65,8 +65,8 @@ esac
 	if got := probeCount(t, probes); got != 1 {
 		t.Fatalf("the turn after an engine restart probed GitHub %d times, want none", got-1)
 	}
-	if again.Env["GH_TOKEN"] != "worker-secret" || again.Notice != "" {
-		t.Fatalf("turn after restart host=%q notice=%q, want the stored account", again.Env["GH_HOST"], again.Notice)
+	if again.Env["GH_TOKEN"] != "" || again.Notice != "" {
+		t.Fatalf("turn after restart host=%q notice=%q, want the stored account inside Dyna", again.Env["GH_HOST"], again.Notice)
 	}
 }
 
