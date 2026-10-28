@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -197,5 +198,127 @@ func TestTrialRetriesOnceAndAlertsRootWhenLocalCINeverStarts(t *testing.T) {
 	advance()
 	if got := rootAlerts(); len(got) != 1 {
 		t.Fatalf("root was alerted %d times, want one", len(got))
+	}
+}
+
+// A saved result that still needs a retry has not decided the head. When its
+// replacement cannot start either, the wait must survive: the retry runs and
+// root is alerted, instead of the wait clearing on every tick (D-407 review).
+func TestTrialAlertsWhenASavedRetryResultNeverStarts(t *testing.T) {
+	ctx := context.Background()
+	s, r, _, repoKey, sent, clock := trialStartEnv(t, []string{"relay"})
+	st, err := s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := st.MergeTrials[repoKey]
+	repo, err := localci.CanonicalRepo(ctx, r.RepoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := localci.Result{Repo: repo, SHA: b.Head, RoomID: r.RoomID, Node: "worker", Status: localci.OutcomeError, Cause: localci.CauseEngineStop}
+	if err := s.ciRegistry().SaveResult(ctx, stopped); err != nil {
+		t.Fatal(err)
+	}
+	// This trial has no hosted run at all: the saved result is the only CI
+	// evidence, and its replacement never starts.
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		if filepath.Base(cmd.Path) == "git" {
+			return nil
+		}
+		for _, arg := range cmd.Args {
+			switch {
+			case strings.Contains(arg, "check-runs?"):
+				return writeFakeJSON(cmd.Stdout, checkRunsResponse{})
+			case strings.Contains(arg, "actions/runs?"):
+				return writeFakeJSON(cmd.Stdout, workflowRunsResponse{})
+			case strings.Contains(arg, "/statuses?"):
+				return writeFakeJSON(cmd.Stdout, []Status{})
+			}
+		}
+		return fmt.Errorf("unexpected endpoint")
+	}
+	advance := func() {
+		t.Helper()
+		batch := trialStartHead(t, s, repoKey)
+		if err := s.advanceMergeTrial(ctx, repoKey, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rootAlerts := func() int {
+		count := 0
+		for _, n := range *sent {
+			if n.NeedsRoot && n.Merge != nil && n.Merge.Type == room.MergeChecks {
+				count++
+			}
+		}
+		return count
+	}
+	advance()
+	*clock = clock.Add(3*time.Minute + time.Second)
+	advance()
+	*clock = clock.Add(3*time.Minute + time.Second)
+	advance()
+	if got := rootAlerts(); got != 1 {
+		t.Fatalf("root alerts = %d, want one alert for a retry result nothing replaced", got)
+	}
+}
+
+// A delivery failure must not spend the one root alert: the flag is saved only
+// after the notice was delivered, and the next tick delivers it (D-407 review).
+func TestTrialAlertSurvivesAFailedDelivery(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, repoKey, sent, clock := trialStartEnv(t, []string{"relay"})
+	advance := func() error {
+		batch := trialStartHead(t, s, repoKey)
+		return s.advanceMergeTrial(ctx, repoKey, batch)
+	}
+	rootAlerts := func() int {
+		count := 0
+		for _, n := range *sent {
+			if n.NeedsRoot && n.Merge != nil && n.Merge.Type == room.MergeChecks {
+				count++
+			}
+		}
+		return count
+	}
+	if err := advance(); err != nil {
+		t.Fatal(err)
+	}
+	*clock = clock.Add(3*time.Minute + time.Second)
+	if err := advance(); err != nil {
+		t.Fatal(err)
+	}
+	s.Deliver = func(context.Context, Record, Notice) (string, error) {
+		return "", errors.New("room store unavailable")
+	}
+	*clock = clock.Add(3*time.Minute + time.Second)
+	if err := advance(); err == nil {
+		t.Fatal("a failed alert delivery reported no error")
+	}
+	batch := trialStartHead(t, s, repoKey)
+	if batch.LocalCIWait == nil || batch.LocalCIWait.Alerted {
+		t.Fatalf("alert flag spent without delivery: %+v", batch.LocalCIWait)
+	}
+	s.Deliver = func(_ context.Context, _ Record, n Notice) (string, error) {
+		*sent = append(*sent, n)
+		return "msg", nil
+	}
+	if err := advance(); err != nil {
+		t.Fatal(err)
+	}
+	if got := rootAlerts(); got != 1 {
+		t.Fatalf("root alerts = %d after delivery retry, want one", got)
+	}
+	batch = trialStartHead(t, s, repoKey)
+	if batch.LocalCIWait == nil || !batch.LocalCIWait.Alerted {
+		t.Fatal("delivered alert did not set its flag")
+	}
+	*clock = clock.Add(30 * time.Minute)
+	if err := advance(); err != nil {
+		t.Fatal(err)
+	}
+	if got := rootAlerts(); got != 1 {
+		t.Fatalf("root was alerted %d times, want one", got)
 	}
 }

@@ -60,7 +60,10 @@ func (s *Service) watchTrialLocalCIStart(ctx context.Context, repo string, r Rec
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err == nil && s.registeredJobResultComplete(ctx, job, result) {
+	// A complete result whose action is still a retry has not decided the
+	// head: its replacement is the run this wait is for, so the wait survives
+	// until that replacement starts, decides, or the alert names it.
+	if err == nil && savedResultActionFor(result) == settleSavedResult && s.registeredJobResultComplete(ctx, job, result) {
 		return s.clearTrialLocalCIWait(repo, b)
 	}
 	plan, err := s.planRegisteredCI(ctx, job)
@@ -92,11 +95,14 @@ func (s *Service) watchTrialLocalCIStart(ctx context.Context, repo string, r Rec
 		}
 		return nil
 	case waited.Retried && !waited.Alerted && !now.Before(waited.Since.Add(trialLocalCIStartWait)):
-		waited.Alerted = true
-		if err := s.saveMergeTrial(repo, *b); err != nil {
+		// Deliver before the flag is saved, so a failed delivery or a stop
+		// between them cannot spend the one alert: the next tick delivers
+		// again, and postMergeNotice keeps a delivered alert single.
+		if err := s.alertTrialLocalCIUnstarted(ctx, b, plan); err != nil {
 			return err
 		}
-		return s.alertTrialLocalCIUnstarted(ctx, b, plan)
+		waited.Alerted = true
+		return s.saveMergeTrial(repo, *b)
 	}
 	return nil
 }
