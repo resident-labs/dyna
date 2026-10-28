@@ -131,6 +131,7 @@ func TestRestoreOwnerRefusesBundleWritesWithCallerDataRoot(t *testing.T) {
 		wantErr bool
 	}{
 		"install":                {[]string{"harness", "install", "pi"}, false, true},
+		"login":                  {[]string{"harness", "login", "pi"}, false, true},
 		"rm":                     {[]string{"harness", "rm", "pi", "--version", "1.0.0"}, false, true},
 		"rollback":               {[]string{"harness", "rollback", "pi"}, false, true},
 		"gc":                     {[]string{"harness", "gc"}, false, true},
@@ -157,6 +158,40 @@ func TestRestoreOwnerRefusesBundleWritesWithCallerDataRoot(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("RestoreOwner(%v) = %v; want no refusal", tc.args, err)
+			}
+		})
+	}
+}
+
+// A caller-chosen HOME with an inherited XDG_DATA_HOME — the harness's
+// private root or the owner's — must not steer `dyna engine run` into the
+// owner's live store: the inherited root gives way and the data folder follows
+// the caller's home (D-398).
+func TestRestoreOwnerEngineFollowsCallerHome(t *testing.T) {
+	for name, tc := range map[string]struct{ ownerXDG bool }{
+		"private XDG_DATA_HOME inherited": {false},
+		"owner XDG_DATA_HOME inherited":   {true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scope, owner, env := fixture(t)
+			if tc.ownerXDG {
+				env = append(slices.Clone(env), "XDG_DATA_HOME="+filepath.Join(owner, ".local", "share"))
+			}
+			out, err := Prepare(scope, "", env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			callerHome := filepath.Join(t.TempDir(), "caller-home")
+			setProcessEnv(t, merged(env, out))
+			t.Setenv("HOME", callerHome)
+			if err := RestoreOwner([]string{"engine", "run"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := os.LookupEnv(store.DataDirEnv); ok {
+				t.Fatalf("%s set; want the data folder from the caller's home", store.DataDirEnv)
+			}
+			if got, want := store.DataDir(), filepath.Join(callerHome, ".local", "share", "dyna"); got != want {
+				t.Fatalf("data folder %q; want %q", got, want)
 			}
 		})
 	}
