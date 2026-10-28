@@ -99,8 +99,8 @@ func CompactNative(p Profile) ([]string, map[string]string, error) {
 	}
 	switch p.Harness {
 	case HarnessPi:
-		// Pi's runtime generation writes each profile's target as a per-model
-		// compaction.modelOverrides[<model>].triggerTokens entry.
+		// Pi's runtime generation writes the active profile's target across
+		// its model chain as per-model modelOverrides triggerTokens entries.
 		return nil, nil, nil
 	case HarnessClaudeCode:
 		// The harness merges this --settings layer with the profile's own.

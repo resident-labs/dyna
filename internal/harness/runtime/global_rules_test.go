@@ -8,6 +8,7 @@ import (
 
 	"dyna-agent/internal/goals"
 	harnesshome "dyna-agent/internal/harness/home"
+	"dyna-agent/internal/profile"
 )
 
 // Global rules travel in each run's instructions now. A generation removes
@@ -36,14 +37,14 @@ func TestGenerationRemovesLegacyGlobalRulesFiles(t *testing.T) {
 			if err := os.WriteFile(target, []byte(goals.GlobalRulesMarker+"\n# Dyna global rules\n- u1 Old rule.\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			buildGeneration(t, r, h, home, id)
+			buildGeneration(t, r, h, home, id, profile.Profile{})
 			if _, err := os.Stat(target); !os.IsNotExist(err) {
 				t.Fatalf("the legacy Dyna file %s survived: %v", target, err)
 			}
 			if err := os.WriteFile(target, []byte("written by the harness\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			buildGeneration(t, r, h, home, id)
+			buildGeneration(t, r, h, home, id, profile.Profile{})
 			if raw, _ := os.ReadFile(target); string(raw) != "written by the harness\n" {
 				t.Fatalf("cleanup changed a file Dyna did not write: %q", raw)
 			}
