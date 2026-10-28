@@ -22,7 +22,9 @@ func TestBundleRemovalNamesTheHoldingSessionAndProcess(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(profile.DefaultPath()), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := defaultstore.WriteJSON(profile.DefaultPath(), map[string]any{"profiles": []any{}}, 0600); err != nil {
+	if err := defaultstore.WriteJSON(profile.DefaultPath(), struct {
+		Profiles []struct{} `json:"profiles"`
+	}{Profiles: []struct{}{}}, 0600); err != nil {
 		t.Fatal(err)
 	}
 	manager := manager(t)
@@ -30,7 +32,10 @@ func TestBundleRemovalNamesTheHoldingSessionAndProcess(t *testing.T) {
 	_ = install(t, manager, "pi", "2.0.0")
 	ctx := context.Background()
 	recordtest.Write(t, filepath.Join(defaultstore.DataDir(), "sessions"), "ses_holder",
-		map[string]any{"id": "ses_holder", "runtimePin": &Pin{Bundle: old}})
+		struct {
+			ID         string `json:"id"`
+			RuntimePin *Pin   `json:"runtimePin"`
+		}{ID: "ses_holder", RuntimePin: &Pin{Bundle: old}})
 	pins, err := OpenPins()
 	if err != nil || len(pins) != 1 {
 		t.Fatal(pins, err)
