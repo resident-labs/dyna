@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,10 +26,17 @@ type jobView struct {
 	ExitCode *int     `json:"exitCode,omitempty"`
 	Note     string   `json:"note,omitempty"`
 	Log      string   `json:"log,omitempty"`
+	// Artifacts names the kept outputs and how to fetch them.
+	Artifacts []string `json:"artifacts,omitempty"`
+	Fetch     string   `json:"fetch,omitempty"`
 }
 
 func view(job jobs.Job) jobView {
-	return jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, Log: "dyna job logs " + job.ID}
+	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, Log: "dyna job logs " + job.ID}
+	if len(job.Artifacts) > 0 {
+		v.Artifacts, v.Fetch = job.Artifacts, "dyna job fetch "+job.ID
+	}
+	return v
 }
 
 func printJSON(w io.Writer, v any) error {
@@ -50,14 +58,16 @@ func NewCommand() *cobra.Command {
 			"end of this command, an SSH drop and an engine restart. With no --node it\n" +
 			"runs on this machine, so one machine needs no setup. The job takes one of\n" +
 			"the machine's CI slots. Its log and exit code are stored; the session that\n" +
-			"submitted it is woken when the job ends.",
+			"submitted it is woken when the job ends. --artifact keeps named outputs of\n" +
+			"its work folder after it ends; dyna job fetch copies them here.",
 	}
-	cmd.AddCommand(runCmd(), showCmd(), logsCmd(), listCmd(), cancelCmd())
+	cmd.AddCommand(runCmd(), showCmd(), logsCmd(), listCmd(), cancelCmd(), fetchCmd())
 	return cmd
 }
 
 func runCmd() *cobra.Command {
 	var node, commit, image, memory string
+	var artifacts []string
 	var cpus int
 	var host bool
 	var timeout time.Duration
@@ -82,7 +92,7 @@ func runCmd() *cobra.Command {
 			err := engineclient.New("").Call(c.Context(), "RunJob", []any{map[string]any{
 				"node": node, "command": args, "repo": repo, "ref": commit,
 				"host": host, "image": image, "cpus": cpus, "memory": memory,
-				"timeoutSec": int(timeout / time.Second),
+				"timeoutSec": int(timeout / time.Second), "artifacts": artifacts,
 			}}, &job)
 			if err != nil {
 				return err
@@ -97,6 +107,41 @@ func runCmd() *cobra.Command {
 	c.Flags().DurationVar(&timeout, "timeout", 0, "deadline of the job (default 30m)")
 	c.Flags().StringVar(&image, "image", "", "run the command in this container image")
 	c.Flags().BoolVar(&host, "host", false, "run the command on the machine itself (the default without --image)")
+	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
+	return c
+}
+
+func fetchCmd() *cobra.Command {
+	var to string
+	c := &cobra.Command{
+		Use:   "fetch <id> [--to DIR]",
+		Short: "Copy a finished job's kept artifacts to a folder",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			var job jobs.Job
+			if err := engineclient.New("").Call(c.Context(), "JobShow", []any{args[0]}, &job); err != nil {
+				return err
+			}
+			if !job.State.Finished() {
+				return fmt.Errorf("job %s is still %s; fetch it after it ends", job.ID, job.State)
+			}
+			dir := jobs.ArtifactDir(job.LogPath)
+			if _, err := os.Stat(dir); err != nil {
+				return fmt.Errorf("job %s kept no artifacts (run it with --artifact PATH)", job.ID)
+			}
+			if err := os.MkdirAll(to, 0o755); err != nil {
+				return err
+			}
+			// cp keeps file modes, so a built binary stays executable, and a
+			// second fetch into the same folder replaces the first.
+			if out, err := exec.CommandContext(c.Context(), "cp", "-pR", dir+"/.", to).CombinedOutput(); err != nil {
+				return fmt.Errorf("copy the artifacts of job %s: %w: %s", job.ID, err, out)
+			}
+			_, err := fmt.Fprintf(c.OutOrStdout(), "copied the artifacts of job %s to %s\n", job.ID, to)
+			return err
+		},
+	}
+	c.Flags().StringVar(&to, "to", ".", "folder to copy the artifacts into")
 	return c
 }
 
