@@ -377,6 +377,8 @@ func checkWorkerPolicy(args []string) error {
 	}
 	if len(args) >= 3 {
 		switch args[0] + " " + args[1] + " " + args[2] {
+		case "codespace ports visibility":
+			return errAgentGitHubWrite
 		case "issue artifact download", "issue artifact list", "issue artifact view",
 			"repo autolink list", "repo autolink view", "repo deploy-key list",
 			"repo gitignore list", "repo gitignore view", "repo license list", "repo license view":
