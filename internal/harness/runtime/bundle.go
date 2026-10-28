@@ -677,8 +677,10 @@ func (m *BundleManager) published(ctx context.Context, h, version, parent, final
 
 // forkTarballVersion reads the exact fork build version from a packed
 // tarball's package manifest, so an unstamped binary installs the build the
-// tarball carries instead of the level-only fallback. A tarball without a
-// valid build version reads as absent.
+// tarball carries instead of the level-only fallback. The manifest is small
+// but well over four kilobytes, so the read is bounded the same way as every
+// version-metadata fetch. A tarball without a valid build version reads as
+// absent.
 func forkTarballVersion(path string) (string, bool) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -699,7 +701,7 @@ func forkTarballVersion(path string) (string, bool) {
 		if header.Name != "package/package.json" {
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(reader, 4096))
+		data, err := io.ReadAll(io.LimitReader(reader, 64<<10))
 		if err != nil {
 			return "", false
 		}
