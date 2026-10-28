@@ -66,6 +66,9 @@ type Service struct {
 	logf func(string, ...any)
 	// onRun tells a test that the service began to run a job, synchronously.
 	onRun func(Job)
+	// onPrepared tells a test that a run won its started write and is about
+	// to prepare the node work, synchronously.
+	onPrepared func(Job)
 	// onAbandoned tells a test that a run gave a job up because the row had
 	// ended elsewhere, synchronously.
 	onAbandoned func(Job)
@@ -367,19 +370,13 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 	}
 	// No live executor owns it: a queued row, or a running one this engine has
 	// not picked up. The row ends inside one transaction that works on the row
-	// as it lies: a start recorded in the meantime keeps its metadata, and the
-	// report tells what the table holds. The worker of a queued row skips it.
-	row, won, err := s.Store.Cancel(ctx, id, s.Store.now())
+	// as it lies: a start recorded in the meantime keeps its metadata. The
+	// canceller posts no event: the engine that runs the job posted its start
+	// and posts its end, so a terminal event can never precede a start or
+	// follow it out of order. The worker of a queued row skips it.
+	row, _, err := s.Store.Cancel(ctx, id, s.Store.now())
 	if err != nil {
 		return Job{}, err
-	}
-	if !won {
-		return row, nil
-	}
-	if s.Reporter != nil && !row.Started.IsZero() {
-		if err := s.Reporter.JobFinished(ctx, row); err != nil {
-			s.logger()("jobs: report cancelled job %s: %v", row.ID, err)
-		}
 	}
 	return row, nil
 }
@@ -492,6 +489,8 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 				s.onAbandoned(job)
 			}
 			return
+		} else if s.onPrepared != nil {
+			s.onPrepared(job)
 		}
 	}
 	job.Dir = path.Join(NodeBase(machine.Name), "jobs", job.ID)
@@ -637,12 +636,15 @@ func (s *Service) finish(job *Job, err error) {
 		s.logger()("jobs: record finished job %s: %v", job.ID, err)
 	}
 	if !won {
+		// The row ended elsewhere, almost always a cancellation this engine's
+		// tick then stopped. This run owns the job's events — it posted the
+		// start, or reattached the row whose owner did — so it posts the end
+		// too, after the start, exactly once.
 		job.State, job.ExitCode, job.Ended = row.State, row.ExitCode, row.Ended
-	} else {
-		if s.Reporter != nil {
-			if err := s.Reporter.JobFinished(ctx, *job); err != nil {
-				s.logger()("jobs: report finished job %s: %v", job.ID, err)
-			}
+	}
+	if s.Reporter != nil {
+		if err := s.Reporter.JobFinished(ctx, *job); err != nil {
+			s.logger()("jobs: report finished job %s: %v", job.ID, err)
 		}
 	}
 	if job.Dir != "" && !EngineStopping() {
