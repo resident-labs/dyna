@@ -239,7 +239,7 @@ func TestCacheRepairPreservesLinkedCaches(t *testing.T) {
 	}
 
 	// The generated setup command carries the repair before the shared run lock.
-	script := nodeSetupScript(base, filepath.Join(base, "repo.git"), filepath.Join(base, "runs", "run", "reports"), filepath.Join(base, "runs", "run", ".active"), []string{"go-build", "go-mod", "npm"})
+	script := nodeSetupScript(base, filepath.Join(base, "runs", "run", "reports"), filepath.Join(base, "runs", "run", ".active"), []string{"go-build", "go-mod", "npm"})
 	if parsed, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("setup command does not parse: %v: %s", err, parsed)
 	}
