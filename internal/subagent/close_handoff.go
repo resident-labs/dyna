@@ -169,6 +169,18 @@ func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
 			if item.State != QueueWaiting && item.State != QueueDelivering && (item.State != QueueForwarded || meta.ForwardedPosts[item.ID] == "") {
 				continue
 			}
+			// Root-seat posts remain with the seat when its session changes.
+			if meta.Role == RoleRoot {
+				if _, seat, err := m.rooms().SeatDelivery(meta.RoomID, item.ID); err != nil {
+					return err
+				} else if seat {
+					continue
+				}
+			}
+			// A model-transfer request belongs only to the old conversation.
+			if meta.Transfer != nil && item.ID == meta.Transfer.PostID {
+				continue
+			}
 			original, err := m.rooms().Message(meta.RoomID, item.ID)
 			if err != nil {
 				return err
