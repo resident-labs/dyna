@@ -473,9 +473,14 @@ func (r *Runtime) regenerateAccount(account NativeAccount) (harnessmgr.ConfigGen
 func (r *Runtime) EnsureCatalog() error {
 	return r.removeLegacySkillInstalls()
 }
-func OpenPins() ([]Bundle, error) {
+
+// OpenPins lists the bundles held in use by settings and open sessions, with
+// a holder name for each: the profile that selects the version, or the
+// session whose runtime pin holds it.
+func OpenPins() ([]PinnedBundle, error) {
 	var selected struct {
 		Profiles []struct {
+			Name    string `json:"name"`
 			Harness string `json:"harness"`
 			Version string `json:"runtimeVersion"`
 		} `json:"profiles"`
@@ -483,7 +488,7 @@ func OpenPins() ([]Bundle, error) {
 	if err := store.ReadJSON(profile.DefaultPath(), &selected); err != nil {
 		return nil, errors.New("Selected runtime versions could not be read; cleanup stopped.")
 	}
-	out := []Bundle{}
+	out := []PinnedBundle{}
 	for _, p := range selected.Profiles {
 		if p.Version == "" {
 			continue
@@ -492,10 +497,14 @@ func OpenPins() ([]Bundle, error) {
 		if err != nil || !validVersion(p.Version) {
 			return nil, errors.New("A selected private runtime version is invalid; cleanup stopped.")
 		}
-		out = append(out, Bundle{Harness: h, Version: p.Version})
+		holder := "A selected profile"
+		if p.Name != "" {
+			holder = "Profile " + p.Name
+		}
+		out = append(out, PinnedBundle{Bundle: Bundle{Harness: h, Version: p.Version}, Holder: holder})
 	}
 	root := filepath.Join(store.DataDir(), "sessions")
-	err := sessionlife.Each(root, true, func(_ string, raw []byte, err error) error {
+	err := sessionlife.Each(root, true, func(id string, raw []byte, err error) error {
 		var meta struct {
 			sessionlife.Snapshot
 			RuntimePin *Pin `json:"runtimePin"`
@@ -504,7 +513,11 @@ func OpenPins() ([]Bundle, error) {
 			return errors.New("session pins could not be read; bundle cleanup stopped")
 		}
 		if !meta.IsClosed() && meta.RuntimePin != nil {
-			out = append(out, meta.RuntimePin.Bundle)
+			holder := "Session " + id
+			if meta.ID != "" {
+				holder = "Session " + meta.ID
+			}
+			out = append(out, PinnedBundle{Bundle: meta.RuntimePin.Bundle, Holder: holder})
 		}
 		return nil
 	})
