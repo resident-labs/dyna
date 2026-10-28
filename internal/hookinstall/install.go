@@ -178,6 +178,9 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	if _, err = d.run(ctx, c.Build, "nice", "-n", "10", "go", "build", "-p", "2", "-ldflags", flags, "-o", filepath.Join(temp, "dyna"), "./cmd/dyna"); err != nil {
 		return err
 	}
+	if err = stampPiAsset(filepath.Join(temp, "dyna"), piPath); err != nil {
+		return err
+	}
 	if _, err = d.run(ctx, filepath.Join(c.Build, "desktop"), "nice", "-n", "10", "./build.sh", filepath.Join(temp, "dyna-desktop")); err != nil {
 		return err
 	}
@@ -220,6 +223,9 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 		}
 	}
 	if err = d.restartServer(ctx, filepath.Join(c.Bin, "dyna"), restartComputers); err != nil {
+		return err
+	}
+	if err = prunePiAssets(filepath.Dir(piPath), c.Bin); err != nil {
 		return err
 	}
 	state.Installed = head
@@ -362,33 +368,105 @@ func (d driver) packPiFork(ctx context.Context, head string) (string, string, er
 		return "", "", err
 	}
 	digest := sha512.Sum512(data)
-	if err := os.Chtimes(path, time.Now(), time.Now()); err != nil {
-		return "", "", err
+	return path, "sha512-" + base64.StdEncoding.EncodeToString(digest[:]), nil
+}
+
+// A fixed trailer ties each source-built binary and its backups to its asset.
+// It does not change the executable image. Release binaries have no trailer.
+const piAssetTrailer = "\ndyna-pi-fork:"
+
+func stampPiAsset(binary, asset string) error {
+	name := filepath.Base(asset)
+	if len(name) != 68 || !strings.HasSuffix(name, ".tgz") {
+		return fmt.Errorf("invalid Pi asset name")
+	}
+	f, err := os.OpenFile(binary, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(piAssetTrailer + name[:64] + "\n")
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
+// Keep all assets referenced by the current binary or retained backups. Keep
+// two recent assets as well when fewer than two are referenced.
+func prunePiAssets(dir, bin string) error {
+	binaries, err := filepath.Glob(filepath.Join(bin, "dyna.bak-*"))
+	if err != nil {
+		return err
+	}
+	binaries = append(binaries, filepath.Join(bin, "dyna"))
+	keep := make(map[string]bool)
+	for _, binary := range binaries {
+		f, err := os.Open(binary)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		size := int64(len(piAssetTrailer) + 64 + 1)
+		data := make([]byte, size)
+		info, statErr := f.Stat()
+		if statErr != nil {
+			f.Close()
+			return statErr
+		}
+		if info.Size() < size {
+			f.Close()
+			continue
+		}
+		_, err = f.ReadAt(data, info.Size()-size)
+		closeErr := f.Close()
+		if closeErr != nil {
+			return closeErr
+		}
+		if err != nil {
+			continue
+		}
+		value := string(data)
+		if !strings.HasPrefix(value, piAssetTrailer) || value[len(value)-1] != '\n' {
+			continue
+		}
+		hash := value[len(piAssetTrailer) : len(value)-1]
+		if len(hash) != 64 || strings.Trim(hash, "0123456789abcdef") != "" {
+			continue
+		}
+		keep[filepath.Join(dir, hash+".tgz")] = true
 	}
 	paths, err := filepath.Glob(filepath.Join(dir, "*.tgz"))
 	if err != nil {
-		return "", "", err
+		return err
 	}
-	sort.Slice(paths, func(i, j int) bool {
-		if paths[i] == path {
-			return true
+	type asset struct {
+		path     string
+		modified time.Time
+	}
+	var assets []asset
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
 		}
-		if paths[j] == path {
-			return false
+		assets = append(assets, asset{path, info.ModTime()})
+	}
+	sort.Slice(assets, func(i, j int) bool { return assets[i].modified.After(assets[j].modified) })
+	count := len(keep)
+	for _, a := range assets {
+		if keep[a.path] {
+			continue
 		}
-		a, _ := os.Stat(paths[i])
-		b, _ := os.Stat(paths[j])
-		if a == nil || b == nil {
-			return paths[i] > paths[j]
+		if count < 2 {
+			count++
+			continue
 		}
-		return a.ModTime().After(b.ModTime())
-	})
-	if len(paths) > 2 {
-		for _, old := range paths[2:] {
-			if err := os.Remove(old); err != nil {
-				return "", "", err
-			}
+		if err := os.Remove(a.path); err != nil {
+			return err
 		}
 	}
-	return path, "sha512-" + base64.StdEncoding.EncodeToString(digest[:]), nil
+	return nil
 }
