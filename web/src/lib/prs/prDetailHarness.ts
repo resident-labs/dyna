@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import type { Plugin } from 'esbuild'
 import { JSDOM } from 'jsdom'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 
@@ -43,13 +44,14 @@ export interface BundleOptions {
   component?: string
   api?: string
   format?: string
+  plugins?: Plugin[]
 }
-export async function bundle({ component = 'PRDetail', api = DETAIL_API, format = FORMAT }: BundleOptions = {}): Promise<Uint8Array> {
+export async function bundle({ component = 'PRDetail', api = DETAIL_API, format = FORMAT, plugins = [] }: BundleOptions = {}): Promise<Uint8Array> {
   const result = await build({
     bundle: true, write: false, loader: { '.svg': 'dataurl', '.png': 'dataurl' },
     stdin: { contents: `export { default } from './${component}.svelte'; export { mount, flushSync, unmount } from 'svelte'`, resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
-    plugins: [svelteEsbuildPlugin(), { name: 'pr-detail-stubs', setup(builder) {
+    plugins: [...plugins, svelteEsbuildPlugin(), { name: 'pr-detail-stubs', setup(builder) {
       builder.onLoad({ filter: /[/\\]format\.ts$/ }, () => ({ contents: format, loader: 'ts' }))
       // Keep new production exports available when a fixture replaces only a few.
       builder.onResolve({ filter: /^actual-api:/ }, ({ path }) => ({ path: path.slice('actual-api:'.length), namespace: 'actual-api' }))
