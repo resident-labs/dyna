@@ -455,6 +455,8 @@ func Summarize(e workeroutput.Event) Tool {
 	lower := strings.ToLower(name)
 	shellOp := shellop.Classify(lower)
 	switch {
+	case lower == "codemode":
+		t.Verb, t.Step, t.Detail = "ran a script", StepTool, str("code")
 	case lower == "command" || lower == "bash" || lower == "shell" || lower == "run_command" || lower == "run_terminal_cmd" || shellOp == shellop.Run:
 		cmd := e.Input
 		if c := str("command", "CommandLine", "cmd"); c != "" {
@@ -488,7 +490,7 @@ func Summarize(e workeroutput.Event) Tool {
 		t.Verb, t.Step, t.Target = "searched for", StepSearch, str("pattern", "query", "Query")
 	case lower == "glob" || lower == "list_dir" || lower == "ls" || lower == "find_by_name":
 		t.Verb, t.Step, t.Target = "listed", StepList, str("pattern", "path", "SearchDirectory", "Pattern")
-	case lower == "web_search" || lower == "websearch" || lower == "search_web":
+	case lower == "web_search" || lower == "websearch" || lower == "search_web" || lower == "mcp__dyna__web_search":
 		t.Verb, t.Step, t.Target = "searched the web", StepSearch, str("query", "Query")
 		if t.Target == "" && !strings.HasPrefix(e.Input, "{") {
 			t.Target = strings.TrimSpace(e.Input)
