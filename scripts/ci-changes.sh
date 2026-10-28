@@ -18,7 +18,9 @@ else
   # A manual run on an ordinary commit sends no base SHA.
   files=$(git diff --name-only HEAD^1 HEAD)
 fi
-has() { printf '%s\n' "$files" | grep -Eq "$1" && echo true || echo false; }
+# Without -q, grep consumes the whole list. A large subtree diff otherwise
+# gives printf SIGPIPE after an early match, and pipefail reports false.
+has() { printf '%s\n' "$files" | grep -E "$1" >/dev/null && echo true || echo false; }
 echo "relay=$(has '^(relay|\.github)/|^scripts/ci\.sh$')"
 echo "go=$(has '(\.go$|^internal/|^go\.(mod|sum)$|^desktop/|^web/|^install\.sh$|^\.github/|^scripts/ci\.sh$)')"
 echo "computers=$(has '^internal/(computers|computerweb)/|^\.github/')"
