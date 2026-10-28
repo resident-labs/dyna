@@ -35,3 +35,14 @@ test('an empty room guides profile setup and shows one enabled profile command',
   assert.doesNotMatch(ready, /\/worker Review/)
   assert.doesNotMatch(ready, /New profile/)
 })
+
+
+test('turn results and ordinary posts expose the same actions', () => {
+  const common = { ts: '2026-10-20T08:56:00Z', from: 'room:worker', to: ['room'], owner: false, completion: false, fromHue: 1, speaker: 'worker', text: 'hello' }
+  const post = { ...common, id: 'ordinary', kind: 'message' }
+  const turn = { ...common, id: 'turn', kind: 'turn', completion: true, turn: 1, notice: { kind: 'completed' }, payload: { session: 'room:worker', sessionId: 'ses_worker', turn: 1, state: 'completed', summary: 'hello' } }
+  const body = render(Feed, { props: { room, posts: [post, turn], onreply() {}, onforward() {}, onpin() {} } }).body
+  for (const label of ['Reply', 'Forward', 'Copy text', 'Copy link', 'Pin']) {
+    assert.equal((body.match(new RegExp(`aria-label="${label}"`, 'g')) ?? []).length, 2, label)
+  }
+})

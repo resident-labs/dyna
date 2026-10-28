@@ -5,7 +5,8 @@
   import { turnEvent } from './eventPayloads.ts'
   import type { TurnState } from './events.gen.ts'
   import FeedMessage from './FeedMessage.svelte'
-  import { short, turnText } from '../ui/format.ts'
+  import { short } from '../ui/format.ts'
+  import { turnMessage } from './turnMessage.ts'
 
   let { post, surface = 'feed', room = undefined, onaddress = undefined }: EventProps = $props()
 
@@ -15,18 +16,15 @@
   let state = $derived<TurnState>(payload?.state ?? 'completed')
   // The room feed replaces a completion's stored summary with the turn's full
   // result. Both forms lose the lead-in because the footer already names it.
-  let body = $derived(turnText(post.fullResult && post.text ? post.text : payload?.summary ?? ''))
-  let error = $derived(payload?.error ?? '')
+  let result = $derived(turnMessage(post))
   // A failed turn's worker stderr is diagnostic evidence. It stays behind a
   // closed disclosure, never in the row: the cause the body shows is the
   // error, and inspection commands live in the agent-facing detail only.
   let workerStderr = $derived(state === 'failed' ? payload?.workerStderr ?? '' : '')
   let name = $derived(short(payload?.session ?? post.speaker ?? post.from ?? '', room?.name))
   let message = $derived({
-    ...post,
-    from: payload?.session ?? post.from,
+    ...result,
     speaker: name,
-    text: body || error,
     human: false,
     owner: (payload?.session ?? post.from) === room?.name,
   })
