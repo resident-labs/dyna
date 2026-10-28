@@ -74,7 +74,7 @@ func (s *Store) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "shells.version", schemaVersion, func(conn *sql.Conn, old int) error {
+	apply := func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old == 0 {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
@@ -108,9 +108,22 @@ func (s *Store) db() (*sql.DB, error) {
 			}
 		}
 		return importLegacyExits(ctx, conn, s.Root)
-	})
-	if err != nil {
-		return nil, err
+	}
+	// A newly installed shell can start before the engine has migrated its
+	// schema. Wait for the engine rather than rejecting the caller's job.
+	pause := s.pause
+	if pause == nil {
+		pause = time.Sleep
+	}
+	for attempt := 0; ; attempt++ {
+		err = database.Migrate(db, "shells.version", schemaVersion, apply)
+		if err == nil {
+			break
+		}
+		if database.OwnsSchema() || !database.IsOlderSchema(err, "shells.version") || attempt == 120 {
+			return nil, err
+		}
+		pause(time.Second)
 	}
 	return db, nil
 }

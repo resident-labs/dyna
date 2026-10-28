@@ -201,6 +201,12 @@ func (e olderSchemaError) Error() string {
 
 func (olderSchemaError) Is(target error) bool { return target == errNotMigrated }
 
+// IsOlderSchema reports whether err names an older version of the given store.
+func IsOlderSchema(err error, key string) bool {
+	var old olderSchemaError
+	return errors.As(err, &old) && old.key == key
+}
+
 func openDatabase(dataDir string) (*sql.DB, error) {
 	path, err := filepath.Abs(filepath.Join(dataDir, "dyna.db"))
 	if err != nil {
