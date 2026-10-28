@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"path"
 
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
@@ -19,8 +20,14 @@ func DropCIRef(cache, sha string) string {
 // the same commit replaces whatever an interrupted first job left behind.
 func (x Executor) PushCommit(ctx context.Context, repo, cache, sha string) error {
 	var output TailBuffer
-	if err := x.NodeCommand(ctx, &output, &output, DropCIRef(cache, sha)); err != nil {
-		return fmt.Errorf("clear commit ref on node: %w: %s", err, &output)
+	// A node that never cached this repository, such as the first job of a
+	// repository that has no local CI, has no bare cache yet, and a push to a
+	// missing repository fails. The same call creates it, under a lock, so two
+	// first pushes create it once and the push costs no extra round trip.
+	q := shellquote.Quote
+	create := "mkdir -p " + q(path.Dir(cache)) + " && flock " + q(cache+".create.lock") + " bash -c " + q("[ -d "+q(cache)+" ] || git init -q --bare "+q(cache))
+	if err := x.NodeCommand(ctx, &output, &output, create+" && "+DropCIRef(cache, sha)); err != nil {
+		return fmt.Errorf("prepare the commit cache on node: %w: %s", err, &output)
 	}
 	dest := cache
 	var args []string
