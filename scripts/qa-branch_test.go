@@ -206,6 +206,105 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	}
 }
 
+func TestQABrowserControllerRunsStepsAndReportsFailures(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is unavailable")
+	}
+	module, err := filepath.Abs("testdata/browser_qa_steps_fake.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("actions", func(t *testing.T) {
+		screenshot := filepath.Join(t.TempDir(), "steps.png")
+		encodedPath, err := json.Marshal(screenshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := runQAStepsController(t, node, module, `[
+			{"viewport":{"width":1280,"height":800}},
+			{"goto":"/rooms"},
+			{"click":"button.save"},
+			{"type":{"selector":"input[name=name]","text":"QA"}},
+			{"waitFor":"text=Ready"},
+			{"screenshot":`+string(encodedPath)+`}
+		]`)
+		if err != nil {
+			t.Fatalf("QA steps: %v\n%s", err, out)
+		}
+		for _, want := range []string{
+			"QA fake viewport: 1280x800",
+			"QA fake goto: http://127.0.0.1:7457/rooms",
+			"QA fake click: button.save",
+			"QA fake type: input[name=name] <= QA",
+			"QA fake waitFor: text=Ready",
+			"QA fake screenshot: " + screenshot,
+			"QA steps complete.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%s", want, out)
+			}
+		}
+		if body, err := os.ReadFile(screenshot); err != nil || string(body) != "PNG" {
+			t.Errorf("step screenshot = %q, %v", body, err)
+		}
+	})
+
+	t.Run("failure diagnostics", func(t *testing.T) {
+		out, err := runQAStepsController(t, node, module, `[
+			{"waitFor":"body"},
+			{"goto":"https://evil.test/"}
+		]`)
+		if err == nil {
+			t.Fatalf("cross-origin goto succeeded:\n%s", out)
+		}
+		for _, want := range []string{
+			"QA step 2 failed: goto must stay on http://127.0.0.1:7457",
+			"QA blocked nothing yet.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %q:\n%s", want, out)
+			}
+		}
+		reportPath := ""
+		for _, line := range strings.Split(out, "\n") {
+			if value, ok := strings.CutPrefix(line, "QA page screenshot: "); ok {
+				reportPath = value
+			}
+		}
+		if reportPath == "" {
+			t.Fatalf("failure saved no diagnostic screenshot:\n%s", out)
+		}
+		if body, err := os.ReadFile(reportPath); err != nil || string(body) != "PNG" {
+			t.Errorf("diagnostic screenshot = %q, %v", body, err)
+		}
+	})
+}
+
+func runQAStepsController(t *testing.T, node, module, rawSteps string) (string, error) {
+	t.Helper()
+	steps, err := parseQASteps(strings.NewReader(rawSteps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(struct {
+		Endpoint    string
+		Module      string
+		Web         string
+		ReadMethods []string
+		Steps       []qaStep
+	}{"ws://127.0.0.1:123/devtools/browser/test", module, t.TempDir(), engine.ReadOnlyWebMethods(), steps})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", browserQAScript)
+	cmd.Env = append(os.Environ(), "DYNA_SCRATCH="+t.TempDir())
+	cmd.Stdin = bytes.NewReader(config)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func TestBrowserConnectionUsesManagedModule(t *testing.T) {
 	endpoint, module, err := browserConnection("ws://127.0.0.1:123/devtools/browser/test\nconst { chromium } = await import(\"/tmp/managed-playwright/index.mjs\");\n")
 	if err != nil || endpoint != "ws://127.0.0.1:123/devtools/browser/test" || module != "/tmp/managed-playwright/index.mjs" {
