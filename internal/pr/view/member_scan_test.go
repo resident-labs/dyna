@@ -116,10 +116,12 @@ func TestRoomWatchMemberEventKeepsPRDelta(t *testing.T) {
 		t.Fatal("watch stopped during its initial scan")
 	}
 	rows := view.CountRows(t)
+	scans := make(chan struct{}, 1)
+	e.svc.AfterWakeScan = func() { scans <- struct{}{} }
 	if _, err := e.mgr.Store.UpdateMeta(ordinaryMemberID, func(meta *subagent.Meta) { meta.Name = "changed" }); err != nil {
 		t.Fatal(err)
 	}
-	await := func(kind, id string) {
+	assertEvent := func(kind, id string) {
 		t.Helper()
 		for {
 			select {
@@ -127,13 +129,14 @@ func TestRoomWatchMemberEventKeepsPRDelta(t *testing.T) {
 				if event.Kind == kind && event.Change != nil && event.Change.ID == id {
 					return
 				}
-			case <-stopped:
-				t.Fatalf("watch stopped before %s event %s", kind, id)
+			default:
+				t.Fatalf("completed scan did not emit %s event %s", kind, id)
 			}
 		}
 	}
 	e.svc.SessionChanged(ordinaryMemberID)
-	await("members", ordinaryMemberID)
+	<-scans
+	assertEvent("members", ordinaryMemberID)
 	if err := state.UpdateRecords(t.Context(), root, []string{"one"}, func(st *state.State) error {
 		st.Records["one"].Title = "after"
 		return nil
@@ -141,7 +144,8 @@ func TestRoomWatchMemberEventKeepsPRDelta(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.svc.PRsChanged()
-	await("changes", "one")
+	<-scans
+	assertEvent("changes", "one")
 	if *rows != 1 {
 		t.Fatalf("member event and one external PR write built %d rows; want 1", *rows)
 	}
