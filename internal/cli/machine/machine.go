@@ -90,7 +90,7 @@ func listCommand() *cobra.Command {
 // that runs this engine.
 func writeTable(w io.Writer, list []machines.Machine) error {
 	out := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(out, "NAME\tROLES\tSTATUS\tSSH\tSLOTS\tENABLED\tLOCAL")
+	fmt.Fprintln(out, "NAME\tROLES\tSTATUS\tSSH\tROOMS\tSLOTS\tENABLED\tLOCAL")
 	for _, m := range list {
 		ssh, local := m.SSH, ""
 		if ssh == "" {
@@ -99,7 +99,7 @@ func writeTable(w io.Writer, list []machines.Machine) error {
 		if m.Local {
 			local = "*"
 		}
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%d\t%t\t%s\n", m.Name, m.RoleNames(), m.Status(), ssh, m.CISlots, m.Enabled, local)
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%d\t%t\t%s\n", m.Name, m.RoleNames(), m.Status(), ssh, roomList(m.Rooms), m.CISlots, m.Enabled, local)
 	}
 	return out.Flush()
 }

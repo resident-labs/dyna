@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/websvc"
 )
@@ -46,6 +47,23 @@ func find(list []machines.Machine, name string) (machines.Machine, bool) {
 		}
 	}
 	return machines.Machine{}, false
+}
+
+func TestMachineListShowsRooms(t *testing.T) {
+	storetest.DataDir(t)
+	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "dyna"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := writeTable(&out, []machines.Machine{{Name: "hermeslab", SSH: "pip@hermeslab", Rooms: []string{rec.ID}, Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ROOMS", "pip@hermeslab", "dyna"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("machine list misses %q:\n%s", want, out.String())
+		}
+	}
 }
 
 // The owner sets a machine's ssh connect timeout with edit and reads it back
