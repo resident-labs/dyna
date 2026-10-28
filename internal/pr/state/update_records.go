@@ -44,16 +44,19 @@ func UpdateRecords(ctx context.Context, root string, keys []string, fn func(*Sta
 		merged := scoped
 		merged.Records = make(map[string]*Record, len(snapshot.state.Records)+len(scoped.Records))
 		merged.Responses = make(map[string]map[string]CachedResponse, len(snapshot.state.Responses)+len(scoped.Responses))
+		merged.unchanged = make(map[string]*Record, len(snapshot.state.Records))
 		for key, record := range snapshot.state.Records {
 			// normalizeState changes only scalar fields on untouched rows. Copy the
 			// record itself so quota refresh cannot change a retained snapshot.
 			copy := *record
 			merged.Records[key] = &copy
+			merged.unchanged[key] = record
 		}
 		for key, entries := range snapshot.state.Responses {
 			merged.Responses[key] = entries
 		}
 		for key := range declared {
+			delete(merged.unchanged, key)
 			if record := scoped.Records[key]; record != nil {
 				merged.Records[key] = record
 				if entries, found := scoped.Responses[key]; found {
