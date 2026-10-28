@@ -5,6 +5,8 @@ Use a subagent for work that needs memory across turns. Delegate only through Dy
 Workflow agents are leaf sessions: they cannot delegate or start runs or subagents.
 Keep small or tightly coupled changes yourself. Run read-only scouts in parallel. Give each set of files one writer.
 
+For a replication or port project, build and verify one small end-to-end vertical slice before fanning out implementation. Trace a representative input through every integration seam to a visible output. Use what it reveals to define the parallel work; passing unit tests alone cannot show that the parts are wired together.
+
 ## Choosing a profile
 
 Ratings are out of 10, and higher is better. `taste` is choosing the solution. `diagnostics` is finding what is wrong with a solution (reviews, debugging), with few false positives. `intelligence` is executing a given solution on hard multi-step work. `cost` means higher is cheaper. Send reviews by diagnostics, design by taste, and bulk work by cost.
