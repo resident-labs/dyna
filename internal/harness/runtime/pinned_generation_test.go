@@ -103,13 +103,13 @@ func TestPrepareRebuildsPinWhoseDynaCommandIsGone(t *testing.T) {
 // installed bundle and rebuilds the pin's generation for it.
 func TestPrepareResumesALegacyForkPinOnASupportedBundle(t *testing.T) {
 	r, p := runtimeFixture(t, "pi")
-	// The level Dyna shipped before this change, still installed on disk.
-	installLegacyBundle(t, r.Bundles, "pi", "1.4.0-dyna.2")
+	// The level Dyna ships today: after this change it sits below the range.
+	installLegacyBundle(t, r.Bundles, "pi", "1.4.0-dyna.3")
 	_, first, err := r.Prepare(context.Background(), p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := Pin{AccountID: first.AccountID, Bundle: Bundle{Harness: "pi", Version: "1.4.0-dyna.2"}, Generation: first.Generation}
+	legacy := Pin{AccountID: first.AccountID, Bundle: Bundle{Harness: "pi", Version: "1.4.0-dyna.3"}, Generation: first.Generation}
 	selected, resumed, err := r.Prepare(context.Background(), p, &legacy)
 	if err != nil {
 		t.Fatal(err)
