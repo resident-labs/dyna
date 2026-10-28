@@ -48,6 +48,11 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 	}
 	pkg, name := bundlePackage(h)
 	version := strings.TrimPrefix(spec, pkg+"@")
+	dynaFork := 0
+	if spec != "" && spec == os.Getenv(piForkTarballEnv) {
+		version = piForkVersion
+		dynaFork = 1
+	}
 	dir := filepath.Join(root, "lib/node_modules", pkg)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -61,7 +66,11 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 	if err := os.Symlink(filepath.Join("..", "lib/node_modules", pkg, "cli.js"), filepath.Join(root, "bin", name)); err != nil {
 		return err
 	}
-	metadata, _ := json.Marshal(map[string]string{"name": pkg, "version": version})
+	metadata, _ := json.Marshal(struct {
+		Name     string `json:"name"`
+		Version  string `json:"version"`
+		DynaFork int    `json:"dynaFork,omitempty"`
+	}{pkg, version, dynaFork})
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), metadata, 0600); err != nil {
 		return err
 	}
@@ -70,6 +79,11 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 }
 func manager(t *testing.T) *BundleManager {
 	t.Helper()
+	tarball := filepath.Join(t.TempDir(), "pi-fork.tgz")
+	if err := os.WriteFile(tarball, []byte("Pi fork fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(piForkTarballEnv, tarball)
 	m := &BundleManager{Root: filepath.Join(t.TempDir(), "harnesses"), Run: fixtureInstall}
 	t.Cleanup(func() { _ = removeBundle(m.Root) })
 	// A shared first-use install keeps writing after a caller stops waiting, so
