@@ -111,7 +111,7 @@ type Job struct {
 // Topic is the hub topic a jobs-table write publishes under.
 const Topic = "jobs"
 
-const schemaVersion = 2
+const schemaVersion = 1
 
 const schema = `CREATE TABLE jobs (
 	id TEXT PRIMARY KEY,
@@ -167,10 +167,6 @@ func (s Store) db() (*sql.DB, error) {
 	apply := func(conn *sql.Conn, old int) error {
 		if old == 0 {
 			_, err := conn.ExecContext(context.Background(), schema)
-			return err
-		}
-		if old == 1 {
-			_, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
 			return err
 		}
 		return nil
@@ -290,62 +286,114 @@ func (s Store) SaveOpen(ctx context.Context, job Job) (Job, bool, error) {
 	return winner, won, err
 }
 
-// Cancel ends the row id inside one transaction that reads the row as it
-// lies. A job that never started ends cancelled at once. A started job keeps
-// running in the row and records a standing cancellation request, which the
-// engine that holds the executor — or the next one, after a restart —
-// carries to the recorded end. A row that already ended keeps its own end,
-// and won is then false.
-func (s Store) Cancel(ctx context.Context, id string, ended time.Time) (Job, bool, error) {
+// RequestCancel records one durable cancellation request on the row. It
+// never ends the row and never reports: the engine that owns the job - a
+// queued one on the next tick of any engine, a running one on the next tick
+// of the engine that holds its executor - carries the request to the
+// recorded end. A missing job reports not-found; a job that already ended
+// keeps its own end.
+func (s Store) RequestCancel(ctx context.Context, id string) error {
 	db, err := s.db()
 	if err != nil {
-		return Job{}, false, err
+		return err
 	}
-	winner, won := Job{}, false
+	taken := false
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
-		current, err := scanJob(conn.QueryRowContext(ctx, "SELECT "+columns+" FROM jobs WHERE id=?", id))
-		if errors.Is(err, sql.ErrNoRows) {
-			return os.ErrNotExist
-		}
+		res, err := conn.ExecContext(ctx, "UPDATE jobs SET cancel_requested=1 WHERE id=? AND state IN ('queued','running')", id)
 		if err != nil {
 			return err
 		}
-		if current.State.Finished() {
-			winner = current
-			return nil
-		}
-		if !current.Started.IsZero() {
-			// The job started: the request stands in the row until the engine
-			// that holds the executor stops the process and records the end,
-			// so an engine restart recovers it. The canceller reports nothing.
-			current.CancelRequested = true
-		} else {
-			// The job never started: it ends here, and the canceller reports
-			// the end, the only event the job will ever have.
-			current.State = StateCancelled
-			current.Ended = ended
-		}
-		encoded, err := json.Marshal(current.Command)
-		if err != nil {
-			return err
-		}
-		var exit any
-		if current.ExitCode != nil {
-			exit = *current.ExitCode
-		}
-		ms := func(t time.Time) int64 {
-			if t.IsZero() {
-				return 0
-			}
-			return t.UnixMilli()
-		}
-		if err := upsertJob(ctx, conn, current, encoded, exit, ms); err != nil {
-			return err
-		}
-		winner, won = current, true
-		return nil
+		taken = true
+		_, err = res.RowsAffected()
+		return err
 	})
-	return winner, won, err
+	if err != nil {
+		return err
+	}
+	if !taken {
+		return nil
+	}
+	// The row may have already ended, or carry the request already; only a
+	// missing job is an error.
+	if row, err := scanJob(db.QueryRowContext(ctx, "SELECT state FROM jobs WHERE id=?", id)); errors.Is(err, sql.ErrNoRows) {
+		return os.ErrNotExist
+	} else if err == nil && row.State.Finished() {
+		return os.ErrNotExist
+	}
+	return nil
+}
+
+// EndQueuedCancels ends every queued job that carries a cancellation
+// request, and returns the rows this call ended. Each end is one conditional
+// write, so when two engines sweep at once, only the one whose write took
+// the row reports it.
+func (s Store) EndQueuedCancels(ctx context.Context, ended time.Time) ([]Job, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	var stopped []Job
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE state='queued' AND cancel_requested=1 ORDER BY created_ms")
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			job, err := scanJob(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			job.State = StateCancelled
+			job.Ended = ended
+			encoded, err := json.Marshal(job.Command)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			var exit any
+			if job.ExitCode != nil {
+				exit = *job.ExitCode
+			}
+			ms := func(t time.Time) int64 {
+				if t.IsZero() {
+					return 0
+				}
+				return t.UnixMilli()
+			}
+			if err := upsertJob(ctx, conn, job, encoded, exit, ms); err != nil {
+				rows.Close()
+				return err
+			}
+			stopped = append(stopped, job)
+		}
+		return errors.Join(rows.Err(), rows.Close())
+	})
+	return stopped, err
+}
+
+// RequestedRunning returns every running job that carries a cancellation
+// request. The engine that holds the job's executor stops it on its next
+// tick; a restarted engine reattaches the row first.
+func (s Store) RequestedRunning(ctx context.Context) ([]Job, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE state='running' AND cancel_requested=1")
+	if err != nil {
+		return nil, err
+	}
+	var out []Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
 }
 
 // upsertJob writes the whole row of one job.
@@ -453,7 +501,7 @@ func (s Store) ClaimQueued(ctx context.Context) ([]Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE state='queued' ORDER BY created_ms")
+	rows, err := db.QueryContext(ctx, "SELECT "+columns+" FROM jobs WHERE state='queued' AND cancel_requested=0 ORDER BY created_ms")
 	if err != nil {
 		return nil, err
 	}
