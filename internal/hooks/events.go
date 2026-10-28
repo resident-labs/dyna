@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/shellquote"
 )
@@ -131,9 +134,7 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 		fetch := s.Fetch
 		if fetch == nil {
 			fetch = func(ctx context.Context, repo string) error {
-				refspec := "+refs/heads/" + branch.Name + ":refs/remotes/origin/" + branch.Name
-				_, err := repoid.Git(ctx, repo, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "origin", refspec)
-				return err
+				return fetchOrigin(ctx, repo, branch.Name)
 			}
 		}
 		fetchErr = fetch(ctx, r.Root)
@@ -268,4 +269,55 @@ func cleanupSnapshot(e Event) {
 	if err == nil {
 		_ = os.Remove(filepath.Dir(e.Worktree))
 	}
+}
+
+// runScopedFetch is the GitHub path of fetchOrigin: repository-scoped Git with
+// the account Dyna selected for that repository. A test replaces it.
+// runScopedFetch is the GitHub path of fetchOrigin: repository-scoped Git with
+// the account Dyna selected for that repository. plainGitFetch is its fallback.
+// Tests replace either.
+var (
+	runScopedFetch = ghclient.RunGit
+	plainGitFetch  = repoid.Git
+)
+
+// fetchOrigin follows origin's default branch for the engine's own schedule.
+// A GitHub origin fetches through ghclient.RunGit, which signs in with the
+// account Dyna selected for that repository — the same selection its API calls
+// use — and scopes the credential helper to that repository's URL, so other
+// hosts keep their configured helpers. Anywhere that selection cannot run (a
+// repository outside every Dyna room, no installed GitHub CLI, or a keyring
+// still locked after boot), the fetch falls back to plain Git: public
+// repositories keep updating and private ones keep their clear error for the
+// next tick, exactly as before.
+func fetchOrigin(ctx context.Context, repo, branch string) error {
+	refspec := "+refs/heads/" + branch + ":refs/remotes/origin/" + branch
+	args := []string{"fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "origin", refspec}
+	url, err := repoid.Git(ctx, repo, "remote", "get-url", "origin")
+	if err != nil {
+		return err
+	}
+	identity, err := repoid.RemoteIdentity(repo, url)
+	if err != nil {
+		return err
+	}
+	var scoped error
+	if host, name, hosted := strings.Cut(identity, "/"); hosted && host == "github.com" {
+		// HTTPS lets the selected account's credential answer; an insteadOf
+		// rule moves an SSH URL over without touching the named remote or its
+		// refspecs (the same rewrite lane fetches use).
+		cmd := gitexec.Command(ctx, repo, append([]string{"-c", "url.https://" + identity + ".git.insteadOf=" + url}, args...)...)
+		cmd.Dir = repo
+		if scoped = runScopedFetch(ghclient.WithRepository(ctx, host, name), "", cmd); scoped == nil {
+			return nil
+		}
+	}
+	_, plain := plainGitFetch(ctx, repo, args...)
+	// A repository that follows its branch without an account (public, outside
+	// every room) is a success; only a plain fetch that also fails reports, with
+	// the scoped error saying what the account path could not do.
+	if plain == nil {
+		return nil
+	}
+	return errors.Join(scoped, plain)
 }
