@@ -42,6 +42,8 @@ writes, last 5 min: 12, p50 3ms, p99 40ms, slowest 120ms (posts)
 writes in flight: 2, oldest 6s; waiting for the writer lock: 1
 events: revision 1234, 3 streams, largest lag 2, 1 dropped
 sqlite busy retries: 3
+database duration counts since start (<=1ms, <=10ms, <=100ms, <=1s, >1s): hold [0 0 0 0 0], commit [0 0 0 0 0], checkpoint [0 0 0 0 0]
+scheduled checkpoints since start: total frames observed 0, copied 0, incomplete 0, errors 0
 callers refused: 0
 safety sweep findings: 2
 `
