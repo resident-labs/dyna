@@ -34,7 +34,7 @@ func watchDynaRequiredChecks(t *testing.T) []localci.CheckName {
 }
 
 // expectedChecks is this test's own statement of the suite graph: the check names
-// each suite must report, with the go suite's eight shards spelled out. It is a
+// each suite must report, with the go suite's ten shards spelled out. It is a
 // literal list and never a read of the description, so a check or a suite the
 // description loses fails here instead of agreeing with itself.
 var expectedChecks = map[localci.Suite][]localci.CheckName{
@@ -52,6 +52,7 @@ var expectedChecks = map[localci.Suite][]localci.CheckName{
 		"frontend-check", "go-static", "desktop", "go-test",
 		"go-test-shard (0)", "go-test-shard (1)", "go-test-shard (2)", "go-test-shard (3)",
 		"go-test-shard (4)", "go-test-shard (5)", "go-test-shard (6)", "go-test-shard (7)",
+		"go-test-shard (8)", "go-test-shard (9)",
 	},
 }
 

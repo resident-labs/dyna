@@ -166,13 +166,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     env:
       GOCACHE: /home/runner/.cache/go-build
       GOMODCACHE: /home/runner/go/pkg/mod
-      CI_SHARD: ${{ matrix.shard }}/8
-      # The slowest package, internal/pr/watch, is split across shards 0 and 7.
-      CI_SLICE: ${{ matrix.shard == 0 && '0/2' || matrix.shard == 7 && '1/2' || '' }}
+      CI_SHARD: ${{ matrix.shard }}/10
+      # Split internal/pr/watch across shards 0, 7 and 8, and internal/subagent across 1 and 9.
+      CI_SLICE: ${{ matrix.shard == 0 && '0/3' || matrix.shard == 7 && '1/3' || matrix.shard == 8 && '2/3' || matrix.shard == 1 && '0/2' || matrix.shard == 9 && '1/2' || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6

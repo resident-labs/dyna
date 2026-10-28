@@ -8,26 +8,28 @@ cd "$(dirname "$0")/.."
 index=${1:?usage: scripts/ci-shard.sh INDEX COUNT}
 count=${2:?usage: scripts/ci-shard.sh INDEX COUNT}
 mod=$(go list -m)
-# Package suffix, shard indexes (comma-separated). A package on two shards runs
-# half its tests on each (see CI_SLICE in scripts/ci.sh). Use COUNT 8.
+# Package suffix, shard indexes (comma-separated). A sliced package runs its
+# assigned tests on each shard (see CI_SLICE in scripts/ci.sh). Use COUNT 10.
 #
-# The seconds are the per-package times measured in hosted CI run 40246748350
-# (2026-10-25). Keep them current when a package grows or a new one is added:
+# The seconds are measured or projected per-package times from hosted CI runs
+# 40760797903 and 40770845978 (2026-10-28). Keep them current when a package
+# grows or a new one is added:
 # spread shards 2, 5 and 6 carry the rest, so a heavy package left unpinned lands
 # wherever its position puts it and makes that shard the slow one.
 pinned=(
-  internal/pr/watch=0,7        # 29s per sliced half
-  internal/subagent=1          # 34s
-  internal/engine=3            # 26s
-  internal/notify=4            # 17s
-  internal/roomsvc=4           # 16s
-  internal/harness/runtime=3   # 14s
-  internal/hooks=6             # 13s
-  cmd/dyna=4                   # 11s
-  internal/workflow=1          # 11s
-  internal/pr/view=3           # 8s
-  internal/cli/workflows=2     # 7s
-  internal/harness=5           # 6s
+  internal/pr/watch=0,7,8      # 24s per sliced third
+  internal/subagent=1,9        # 20s per sliced half
+  internal/engine=3            # 15s
+  internal/notify=4            # 23s
+  internal/roomsvc=4           # 22s
+  internal/harness/runtime=3   # 13s
+  internal/hooks=6             # 9s
+  cmd/dyna=4                   # 8s
+  internal/workflow=5          # 14s
+  internal/pr/view=3           # 7s
+  internal/cli/workflows=2     # 9s
+  internal/harness=5           # 7s
+  internal/visual=3            # 26s
 )
 spread=(2 5 6)
 n=0
@@ -38,6 +40,9 @@ while read -r pkg; do
   done
   if [[ -z $want ]]; then
     want=${spread[$((n % ${#spread[@]}))]}
+    n=$((n + 1))
+  elif [[ $pkg == "$mod/internal/visual" ]]; then
+    # Keep the later spread packages on their measured shards.
     n=$((n + 1))
   fi
   for w in ${want//,/ }; do
