@@ -373,6 +373,10 @@ func isObject(raw []byte) bool {
 	return false
 }
 
+// AfterDelete notifies the metadata cache owner after a record deletion
+// commits. subagent registers it at package initialization.
+var AfterDelete = func(sessions, id string) {}
+
 // Delete removes session id's record, its copied steering, and its turn and
 // queue rows, for a session whose start failed before anything else used
 // it, or one that retention removes.
@@ -387,7 +391,7 @@ func Delete(sessions, id string) error {
 	if _, err := steeringDB(sessions); err != nil {
 		return err
 	}
-	return state.For(db).Write(context.Background(), Changed(id), func(conn *sql.Conn) error {
+	if err := state.For(db).Write(context.Background(), Changed(id), func(conn *sql.Conn) error {
 		if _, err := conn.ExecContext(context.Background(), "DELETE FROM session_records WHERE id = ?", id); err != nil {
 			return err
 		}
@@ -401,7 +405,11 @@ func Delete(sessions, id string) error {
 			return err
 		}
 		return deleteSteering(conn, id)
-	})
+	}); err != nil {
+		return err
+	}
+	AfterDelete(sessions, id)
+	return nil
 }
 
 // deletePromptReferences removes only blobs owned by the deleted session
