@@ -69,9 +69,7 @@ func TestGCRemovesTreesConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-met:
-	default:
+	if deadline.Err() != nil {
 		t.Fatal("removal rechecks never overlapped")
 	}
 	for _, path := range paths {
