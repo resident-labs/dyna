@@ -412,7 +412,7 @@ func (s *Service) Scan(signatures, work map[string]string, version *string, firs
 				}
 				items = append(items, row)
 			}
-			rows = append(rows, publishedRows(list.kind, roomID, items, head)...)
+			rows = append(rows, projection.publishedRows(list.kind, roomID, items, head)...)
 		}
 		input := scanWorkerInputs(st, roomID, byRoom[roomID], work, func(key string) bool { return changed == nil || changed.keys[key] })
 		wake[roomID] = work[roomID] != input
@@ -544,11 +544,21 @@ func changedRecords(root, since string, st watch.State, signatures map[string]st
 // publishedRows compares rows without Checked. A poll time alone is no new
 // content, and republishing every polled row made each app reload its PRs.
 func publishedRows(kind, roomID string, rows []ChangeView, head map[string]bool) []listchange.Item {
-	items := listchange.Rows(kind, roomID, rows, head, func(row ChangeView) string { return row.Key })
-	for i, row := range rows {
+	return versionedRows(kind, roomID, rows, head, func(row ChangeView) string {
 		row.Checked = time.Time{}
 		data, _ := json.Marshal(row)
-		items[i].Version = string(data)
+		return string(data)
+	})
+}
+
+func (p *projection) publishedRows(kind, roomID string, rows []ChangeView, head map[string]bool) []listchange.Item {
+	return versionedRows(kind, roomID, rows, head, p.rowVersion)
+}
+
+func versionedRows(kind, roomID string, rows []ChangeView, head map[string]bool, version func(ChangeView) string) []listchange.Item {
+	items := listchange.Rows(kind, roomID, rows, head, func(row ChangeView) string { return row.Key })
+	for i, row := range rows {
+		items[i].Version = version(row)
 	}
 	return items
 }
