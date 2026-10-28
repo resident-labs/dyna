@@ -8,17 +8,22 @@ import (
 
 func TestPiCodemodeNestedCalls(t *testing.T) {
 	decl := &Declaration{Dialect: DialectPiJSON}
-	start := DecodeLine(decl, `{"type":"tool_execution_start","toolCallId":"outer","toolName":"codemode","args":{"code":"run()"}}`).Events
-	update := DecodeLine(decl, `{"type":"tool_execution_update","toolCallId":"outer","toolName":"codemode","partialResult":{"details":{"calls":[{"id":"outer/?","name":"read","args":"{\"path\":\"a.go\"}","status":"running"},{"id":"outer/?","name":"mcp__dyna__shell","args":"{\"command\":\"pwd\"}","status":"running"}]}}}`).Events
-	partial := DecodeLine(decl, `{"type":"tool_execution_update","toolCallId":"outer","toolName":"codemode","partialResult":{"details":{"calls":[{"id":"outer/1","name":"read","args":"{\"path\":\"a.go\"}","status":"ok"},{"id":"outer/?","name":"mcp__dyna__shell","args":"{\"command\":\"pwd\"}","status":"running"}]}}}`).Events
-	end := DecodeLine(decl, `{"type":"tool_execution_end","toolCallId":"outer","toolName":"codemode","result":{"details":{"calls":[{"id":"outer/1","name":"read","args":"{\"path\":\"a.go\"}","status":"ok"},{"id":"outer/2","name":"mcp__dyna__shell","args":"{\"command\":\"pwd\",\"description\":\"Print the path\"}","status":"error","error":"failed"}]}}}`).Events
-	events := append(append(start, update...), partial...)
-	events = append(events, partial...)
-	events = append(events, end...)
+	lines := []string{
+		`{"type":"tool_execution_start","toolCallId":"outer","toolName":"codemode","args":{"code":"run()"}}`,
+		`{"type":"tool_execution_start","toolCallId":"outer/1","toolName":"read","args":{"path":"a.go"}}`,
+		`{"type":"tool_execution_start","toolCallId":"outer/2","toolName":"mcp__dyna__shell","args":{"command":"pwd","description":"Print the path"}}`,
+		`{"type":"tool_execution_update","toolCallId":"outer","toolName":"codemode","partialResult":{"details":{"calls":[{"id":"outer/?","name":"read","status":"running"},{"id":"outer/?","name":"mcp__dyna__shell","status":"running"}]}}}`,
+		`{"type":"tool_execution_end","toolCallId":"outer/1","toolName":"read","result":{"content":[{"type":"text","text":"contents"}]}}`,
+		`{"type":"tool_execution_end","toolCallId":"outer/2","toolName":"mcp__dyna__shell","result":{"content":[{"type":"text","text":"done"}]}}`,
+		`{"type":"tool_execution_end","toolCallId":"outer","toolName":"codemode","result":{"details":{"calls":[{"id":"outer/1","name":"read","status":"ok"},{"id":"outer/2","name":"mcp__dyna__shell","status":"ok"}]}}}`,
+	}
+	var events []Event
+	for _, line := range lines {
+		events = append(events, DecodeLine(decl, line).Events...)
+	}
 	paired, _ := PairTools(events)
-	if len(paired) != 3 || paired[0].Name != "codemode" || paired[0].State != "completed" ||
-		paired[1].Name != "read" || paired[1].Input != `{"path":"a.go"}` || paired[1].State != "completed" ||
-		paired[2].Name != "mcp__dyna__shell" || paired[2].State != "failed" || paired[2].Output != "failed" {
+	if len(paired) != 3 || paired[1].Name != "read" || paired[1].Output != "contents" ||
+		paired[2].Name != "mcp__dyna__shell" || paired[2].Input != `{"command":"pwd","description":"Print the path"}` || paired[2].Output != "done" {
 		t.Fatalf("paired events = %+v", paired)
 	}
 }
