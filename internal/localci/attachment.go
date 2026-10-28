@@ -248,13 +248,13 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 		}
 		launched := attachment{RunID: att.RunID}
 		for _, spec := range specs {
-			switch frames[spec.Dir].State {
-			case jobs.StateRunning, jobs.StateExited:
+			switch frames[spec.Dir].Unit {
+			case jobs.UnitRunning, jobs.UnitExited:
 				launched.Checks = append(launched.Checks, Suite(spec.ID))
 			default:
 				// Gone without an exit record: the run cannot be followed. A check
 				// without a folder was never launched and is simply not attached.
-				stale = stale || frames[spec.Dir].State != jobs.StateMissing
+				stale = stale || frames[spec.Dir].Unit != jobs.UnitMissing
 			}
 		}
 		stale = stale || len(launched.Checks) == 0
