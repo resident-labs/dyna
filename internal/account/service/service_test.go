@@ -73,7 +73,7 @@ func TestCatalogCarriesTheCompactRule(t *testing.T) {
 	s := New(Options{Models: func(context.Context, string, string, []string) ([]adapters.Model, error) { return nil, nil }})
 	s.installed = func() []Installation { return nil }
 	// The rule shows even when the harness is not installed.
-	if c, _ := s.ProfileModels(context.Background(), "pi", false); !c.Compact.Trigger || c.Compact.Reason != "" {
+	if c, _ := s.ProfileModels(context.Background(), "pi", false); c.Compact.Trigger || c.Compact.Min != 1 || c.Compact.Reason != "" {
 		t.Fatalf("pi rule = %+v", c.Compact)
 	}
 	if c, _ := s.ProfileModels(context.Background(), "mock", false); c.Compact.Reason == "" {
