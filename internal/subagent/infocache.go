@@ -12,8 +12,9 @@ import (
 	"sync"
 )
 
-// All metadata readers share parsed snapshots. The display paths also keep
-// a brief turn summary, keyed by its turn row's revision.
+// Open-session metadata readers share parsed snapshots. Closed history is
+// decoded for its caller but not retained. Display paths also keep a brief
+// turn summary, keyed by its turn row's revision.
 
 type turnBrief struct {
 	n       int
@@ -28,7 +29,6 @@ type infoEntry struct {
 	turnKey string
 	turn    turnBrief
 	hasTurn bool
-	raw     []byte
 	err     error
 }
 
@@ -70,7 +70,7 @@ func (s *Store) metaSnapshot(id string) (*infoEntry, error) {
 		}
 		return nil, err
 	}
-	entry := &infoEntry{metaKey: key, raw: data}
+	entry := &infoEntry{metaKey: key}
 	var record Meta
 	decode := s.decodeMeta
 	if decode == nil {
@@ -90,7 +90,9 @@ func (s *Store) metaSnapshot(id string) (*infoEntry, error) {
 			}
 		}
 	}
-	infoCache.Store(cacheKey, entry)
+	if entry.err != nil || entry.meta.Closed.IsZero() {
+		infoCache.Store(cacheKey, entry)
+	}
 	return entry, entry.err
 }
 
