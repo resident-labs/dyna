@@ -786,9 +786,9 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 	}
 	command := strings.Join(quoted, " ")
 	if job.Image != "" {
-		docker := "(docker)"
+		docker := "docker=(docker)"
 		if machine.SSH == "" {
-			docker = "(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
+			docker = "docker=(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
 		}
 		inner += docker + "; "
 		mount := ""
