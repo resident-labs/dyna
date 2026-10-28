@@ -76,11 +76,16 @@ func TestPickRenderGPUBypassesDisplayCard(t *testing.T) {
 		t.Fatalf("explicit setting chose %+v; want renderD128 on the NVIDIA card", gpu)
 	}
 
-	// A path that is not a render node, or one that does not exist, falls back
-	// to auto instead of leaving the computer without a GPU.
+	// A path that is not a render node, or one that no listed card owns
+	// (a stale number after a reboot), falls back to auto instead of leaving
+	// the computer without a GPU.
 	gpu, ok = pickRenderGPU("/dev/dri/card0", class)
 	if !ok || gpu.Node != "/dev/dri/renderD129" {
 		t.Fatalf("card path fell back to %+v; want renderD129", gpu)
+	}
+	gpu, ok = pickRenderGPU("/dev/dri/renderD999", class)
+	if !ok || gpu.Node != "/dev/dri/renderD129" {
+		t.Fatalf("stale node fell back to %+v; want renderD129", gpu)
 	}
 
 	// Both cards drive a display: keep the first node, the old behavior.
