@@ -63,10 +63,9 @@ type GCOptions struct {
 	OwnerClosed func(string) (bool, error)
 	// Path limits workflow cleanup to the worktree it created.
 	Path string
-	// history carries what ended workflow runs' journals said from the first
-	// scan into removal rechecks. Reading every journal again for each tree
-	// spent session cleanup's whole time budget. Sessions and running
-	// workflows are still read again before each removal.
+	// history carries ended workflow directory sets and versioned session
+	// ownership from the first scan into removal rechecks. Running workflows
+	// and session record versions are still read again before each removal.
 	history *runHistory
 	// beforeLock lets tests observe a removal worker that finished its parallel
 	// rechecks and waits for the removal lock; nil in production.
@@ -523,7 +522,14 @@ func (h *runHistory) clone() *runHistory {
 	if h == nil {
 		return nil
 	}
-	c := &runHistory{read: maps.Clone(h.read), refs: make(map[string][]ownerRef, len(h.refs))}
+	c := &runHistory{
+		read: maps.Clone(h.read),
+		refs: make(map[string][]ownerRef, len(h.refs)),
+		sessions: sessionHistory{
+			revision: h.sessions.revision,
+			owners:   slices.Clone(h.sessions.owners),
+		},
+	}
 	for k, v := range h.refs {
 		c.refs[k] = slices.Clone(v)
 	}
@@ -631,8 +637,8 @@ func treeUsage(ctx context.Context, path string) (int64, time.Time, error) {
 }
 
 // remove rechecks ownership, file activity, status and ancestry, then removes
-// the tree or returns it kept with the reason. Sessions and running workflows
-// are read again; only ended runs' journal history comes from the first scan.
+// the tree or returns it kept with the reason. Session versions and running
+// workflows are read again; unchanged metadata comes from the first scan.
 func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func()) (out Tree) {
 	// Whichever check stops it, a tree kept only because time ran out is
 	// retried by the scheduled cleanup.

@@ -173,6 +173,31 @@ func TestRevisionChangesAfterTheNewestRecordIsReplaced(t *testing.T) {
 	}
 }
 
+func TestCacheRevisionChangesAfterTheSameRecordIsReplaced(t *testing.T) {
+	sessions := t.TempDir()
+	id := "ses_20261020-000000-aaaaaaaa"
+	if err := Save(sessions, id, map[string]any{"id": id, "turns": 1}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := CacheRevision(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Delete(sessions, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(sessions, id, map[string]any{"id": id, "turns": 2}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := CacheRevision(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
+		t.Fatalf("CacheRevision stayed %q after same-ID replacement", after)
+	}
+}
+
 // A session folder replaced by a symlink to outside sessions must not be
 // read, and the failure must not look like a missing record: callers treat
 // a missing record as no evidence.

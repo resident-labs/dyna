@@ -26,6 +26,16 @@ type inferredOwners struct {
 	Runs     []ownerRef
 }
 
+type sessionOwner struct {
+	dir string
+	ref ownerRef
+}
+
+type sessionHistory struct {
+	revision string
+	owners   []sessionOwner
+}
+
 // SessionProtected checks registered and inferred session ownership before pruning.
 // An incomplete ownership scan is an error, not permission to remove a tree.
 func SessionProtected(ctx context.Context, rec Record) (bool, error) {
@@ -54,11 +64,13 @@ func SessionProtected(ctx context.Context, rec Record) (bool, error) {
 
 // inferOwners reads historical ownership without changing stores or worktrees.
 // An error means that ownership is incomplete; callers must keep the trees.
-// runHistory caches completed directory sets. The first terminal transition
-// seals them. Sessions and incomplete runs are always checked again.
+// runHistory caches completed run directory sets and session ownership at
+// a store revision. Incomplete runs are always checked again. A changed
+// session revision rebuilds the decoded session projection.
 type runHistory struct {
-	read map[string]bool       // run IDs with a complete directory set
-	refs map[string][]ownerRef // tree path -> owners in complete directory sets
+	read     map[string]bool       // run IDs with a complete directory set
+	refs     map[string][]ownerRef // tree path -> owners in complete directory sets
+	sessions sessionHistory
 }
 
 func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[string]inferredOwners, error) {
@@ -113,43 +125,77 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 			}
 		}
 	}
-	visitSession := func(name string, raw []byte, err error) error {
-		var meta struct {
-			sessionlife.Snapshot
-			Name, Room, Dir string
-			Service         bool
-		}
-		if err == nil {
-			err = json.Unmarshal(raw, &meta)
-		}
+	var revision string
+	reuseSessions := false
+	if history != nil {
+		var err error
+		revision, err = sessionlife.CacheRevision(runstore.SessionsDir())
 		if err != nil {
-			return fmt.Errorf("invalid ownership metadata %s: %w", name, err)
+			return nil, fmt.Errorf("infer session owner revision: %w", err)
 		}
-		if meta.ID != "" && meta.ID != name {
-			return errors.New("ownership metadata ID does not match directory")
-		}
-		meta.ID = name
-		// A service runs from a shared directory and never owns a tree.
-		if meta.Service {
-			return nil
-		}
-		address := meta.ID
-		if meta.Room != "" && meta.Name != "" {
-			address = meta.Room + ":" + meta.Name
-		}
-		return match(meta.Dir, ownerRef{ID: meta.ID, Address: address, Closed: meta.IsClosed()}, true)
+		reuseSessions = revision == history.sessions.revision
 	}
-	// Every record, closed ones too: a closed owner still proves ownership.
-	if err := sessionlife.Each(runstore.SessionsDir(), false, func(name string, raw []byte, err error) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	if reuseSessions {
+		for _, owner := range history.sessions.owners {
+			if err := match(owner.dir, owner.ref, true); err != nil {
+				return nil, fmt.Errorf("infer cached session owner %s: %w", owner.ref.ID, err)
+			}
 		}
-		if err := visitSession(name, raw, err); err != nil {
-			return fmt.Errorf("ownership entry %s: %w", name, err)
+	} else {
+		var decoded []sessionOwner
+		visitSession := func(name string, raw []byte, err error) error {
+			var meta struct {
+				sessionlife.Snapshot
+				Name, Room, Dir string
+				Service         bool
+			}
+			if err == nil {
+				err = json.Unmarshal(raw, &meta)
+			}
+			if err != nil {
+				return fmt.Errorf("invalid ownership metadata %s: %w", name, err)
+			}
+			if meta.ID != "" && meta.ID != name {
+				return errors.New("ownership metadata ID does not match directory")
+			}
+			meta.ID = name
+			// A service runs from a shared directory and never owns a tree.
+			if meta.Service {
+				return nil
+			}
+			address := meta.ID
+			if meta.Room != "" && meta.Name != "" {
+				address = meta.Room + ":" + meta.Name
+			}
+			ref := ownerRef{ID: meta.ID, Address: address, Closed: meta.IsClosed()}
+			if meta.Dir != "" {
+				decoded = append(decoded, sessionOwner{dir: meta.Dir, ref: ref})
+			}
+			return match(meta.Dir, ref, true)
 		}
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("infer session owners: %w", err)
+		// Every record, closed ones too: a closed owner still proves ownership.
+		if err := sessionlife.Each(runstore.SessionsDir(), false, func(name string, raw []byte, err error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := visitSession(name, raw, err); err != nil {
+				return fmt.Errorf("ownership entry %s: %w", name, err)
+			}
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("infer session owners: %w", err)
+		}
+		if history != nil {
+			after, err := sessionlife.CacheRevision(runstore.SessionsDir())
+			if err != nil {
+				return nil, fmt.Errorf("verify session owner revision: %w", err)
+			}
+			// Cache only a read that no canonical session write crossed.
+			if revision == after {
+				history.sessions.revision = revision
+				history.sessions.owners = decoded
+			}
+		}
 	}
 	runs, err := runstore.StoredMetadata()
 	if err != nil {
