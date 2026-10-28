@@ -1,7 +1,7 @@
 package view
 
 import (
-	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -39,7 +39,7 @@ type projection struct {
 	snapshot                         state.Snapshot
 	facts                            watch.ReviewFacts
 	mu                               sync.Mutex
-	rows                             map[string][]byte
+	rows                             map[string]ChangeView
 	pages                            map[projectionPage]listpage.Page[*watch.Record]
 }
 
@@ -110,7 +110,7 @@ func (s *Service) readProjection() (*projection, error) {
 		}
 	}
 	p := &projection{root: watcher.Store.Root, revision: snapshot.Revision(), version: version, members: members, rooms: rooms, priority: priority, until: priorityUntil, at: now, exits: exits,
-		state: st, snapshot: snapshot, facts: facts, rows: map[string][]byte{}, pages: map[projectionPage]listpage.Page[*watch.Record]{}}
+		state: st, snapshot: snapshot, facts: facts, rows: map[string]ChangeView{}, pages: map[projectionPage]listpage.Page[*watch.Record]{}}
 	// History pages and reviewer occupancy have time boundaries even when
 	// no writer commits another revision.
 	for _, r := range st.Records {
@@ -163,18 +163,33 @@ func (p *projection) row(r *watch.Record) ChangeView {
 	defer p.mu.Unlock()
 	// This uncached path remains until the canonical CI summary producer lands.
 	if r.Kind == "local" {
-		data, _ := json.Marshal(buildRow(p.facts, *r))
-		var row ChangeView
-		_ = json.Unmarshal(data, &row)
-		return row
+		return cloneChangeView(buildRow(p.facts, *r))
 	}
-	data, ok := p.rows[r.Key]
+	row, ok := p.rows[r.Key]
 	if !ok {
-		data, _ = json.Marshal(buildRow(p.facts, *r))
-		p.rows[r.Key] = data
+		row = buildRow(p.facts, *r)
+		p.rows[r.Key] = row
 	}
-	var row ChangeView
-	_ = json.Unmarshal(data, &row)
+	return cloneChangeView(row)
+}
+
+// cloneChangeView gives each caller independent mutable fields without a JSON
+// round trip through the cached row.
+func cloneChangeView(row ChangeView) ChangeView {
+	row.RequiredReviewers = slices.Clone(row.RequiredReviewers)
+	row.MissingRequiredReviewers = slices.Clone(row.MissingRequiredReviewers)
+	if row.QueuePosition != nil {
+		position := *row.QueuePosition
+		row.QueuePosition = &position
+	}
+	row.BotReviews = slices.Clone(row.BotReviews)
+	row.Checks = slices.Clone(row.Checks)
+	row.Overlaps = slices.Clone(row.Overlaps)
+	for i := range row.Overlaps {
+		row.Overlaps[i].Files = slices.Clone(row.Overlaps[i].Files)
+		row.Overlaps[i].Conflicts = slices.Clone(row.Overlaps[i].Conflicts)
+	}
+	row.Fixes = slices.Clone(row.Fixes)
 	return row
 }
 

@@ -520,6 +520,11 @@ type State struct {
 	// session that posted them. Dyna records each comment it posts instead of
 	// writing a marker into the comment body.
 	CommentSessions map[string]string `json:"commentSessions,omitempty"`
+
+	// unchanged identifies shared snapshot rows that UpdateRecords never exposed
+	// to its callback. The writer compares their pointer identity instead of
+	// walking every nested review and notice again. It is never persisted.
+	unchanged map[string]*Record
 }
 
 type Polling struct {
