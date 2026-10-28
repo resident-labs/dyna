@@ -63,7 +63,7 @@ func startOnShell(t *testing.T, stubs, detached, script string, env ...string) e
 func TestHostCheckKeepsItsExitRecordAndLog(t *testing.T) {
 	dir := t.TempDir()
 	stubs := nodeStubs(t)
-	if err := os.MkdirAll(filepath.Join(dir, "computer-smoke", "work"), 0o755); err != nil {
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true, inner: "echo ran-the-command; exit 0"}
@@ -224,7 +224,7 @@ func TestTeardownNeedsAnswersThatNothingSurvives(t *testing.T) {
 		{"unit query fails for an image check", image, []string{"SYSTEMCTL_SHOW_EXIT=1"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script := teardownScript(Node{Name: "local"}, "/cache", t.TempDir(), "r1", []nodeCheck{tc.check})
+			script := teardownScript(Node{Name: "local"}, filepath.Join(t.TempDir(), "cache.git"), t.TempDir(), "r1", []nodeCheck{tc.check})
 			cmd := exec.Command("bash", "-c", script)
 			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), tc.env...)
 			out, err := cmd.CombinedOutput()
