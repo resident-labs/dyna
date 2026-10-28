@@ -42,6 +42,11 @@ type Observer struct {
 	// is exact. Without a reliable count it returns 0 agents and the fallback
 	// stays.
 	AgentMemory func(ctx context.Context) (bytes uint64, agents int)
+	// RoomPids counts the processes in the rooms' own systemd slices, which a
+	// room's supervisors start outside every session scope, so the record
+	// shows them beside the running turns. Nil, or a machine without the
+	// slices, records zero.
+	RoomPids func(ctx context.Context) RoomPids
 	// Relieve stops idle agent processes when memory is short. It runs only in
 	// observe mode, after the sample's other work. Nil does nothing.
 	Relieve func(ctx context.Context) int
@@ -103,7 +108,14 @@ func (o *Observer) Sample(ctx context.Context) (err error) {
 	if running < limit {
 		return nil
 	}
-	return o.Record(bound, Observation{At: now, Running: running, Limit: limit})
+	// The rooms' own daemons explain a held sample, so their count joins the
+	// record. The read runs only on this path, under the sample's bound, so a
+	// machine that is not held, or has no room slices, pays nothing.
+	pids := RoomPids{}
+	if o.RoomPids != nil {
+		pids = o.RoomPids(bound)
+	}
+	return o.Record(bound, Observation{At: now, Running: running, Limit: limit, RoomPids: pids})
 }
 
 // Run starts a sample at each tick until ctx ends, and returns at once when it
