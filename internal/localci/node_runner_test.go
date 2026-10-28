@@ -481,7 +481,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	wanted := map[CheckName]bool{"frontend test (0)": true, "frontend test (1)": true, "frontend test (2)": true, "frontend test (3)": true, "frontend test (4)": true, "frontend test (5)": true, "frontend": true, "frontend-check": true, "go-static": true, "go-test": true,
 		"cross-build (linux/amd64)": true, "cross-build (linux/arm64)": true, "cross-build (darwin/amd64)": true, "cross-build (darwin/arm64)": true, "cross-build": true}
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 9; i++ {
 		wanted[CheckName(fmt.Sprintf("go-test-shard (%d)", i))] = true
 	}
 	for _, check := range got.result.Checks {
