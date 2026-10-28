@@ -73,11 +73,14 @@ func cleanCachesTick(ctx context.Context, dataDir string, now func() time.Time, 
 		cleaned, err := clean(ctx, node)
 		if err != nil {
 			if reportFailure != nil {
-				failure := cacheCleanFailure(node, err)
-				if !last.IsZero() {
-					failure.LastSuccessMS = last.UnixMilli()
+				generation, generationErr := store.CacheCleanGeneration(ctx, node.Name)
+				if generationErr != nil {
+					err = errors.Join(err, generationErr)
+				} else {
+					failure := cacheCleanFailure(node, err)
+					failure.Generation = generation
+					err = errors.Join(err, reportFailure(ctx, node, failure))
 				}
-				err = errors.Join(err, reportFailure(ctx, node, failure))
 			}
 			errs = append(errs, err)
 			soonest(at.Add(cacheCleanRetry))

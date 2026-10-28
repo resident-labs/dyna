@@ -120,6 +120,13 @@ const cacheCleanSchema = `CREATE TABLE IF NOT EXISTS local_ci_cache_cleans (
  cleaned_at TEXT NOT NULL
 );`
 
+// cacheCleanGenerationSchema identifies each successful real cleanup. It is
+// separate from the hourly schedule because direct disk recovery also counts.
+const cacheCleanGenerationSchema = `CREATE TABLE IF NOT EXISTS local_ci_cache_clean_generations (
+ node TEXT PRIMARY KEY,
+ generation INTEGER NOT NULL
+);`
+
 // warmSchema records the default branch commit each machine last warmed its act
 // cache from, so a machine warms once per commit.
 const warmSchema = `CREATE TABLE IF NOT EXISTS local_ci_warms (
@@ -191,6 +198,9 @@ func (s Store) open() (*sql.DB, error) {
 			}
 		}
 		if _, err := conn.ExecContext(context.Background(), cacheCleanSchema); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(context.Background(), cacheCleanGenerationSchema); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(context.Background(), warmSchema)
@@ -394,6 +404,38 @@ func (s Store) SaveCacheClean(ctx context.Context, node string, at time.Time) er
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: CachesEventKey(node).String()}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_cache_cleans(node,cleaned_at) VALUES(?,?)
 ON CONFLICT(node) DO UPDATE SET cleaned_at=excluded.cleaned_at`, node, at.UTC().Format(time.RFC3339Nano))
+		return err
+	})
+}
+
+// CacheCleanGeneration returns the number of successful real cleanups of node.
+// Zero means no cleanup has succeeded since Dyna added the generation.
+func (s Store) CacheCleanGeneration(ctx context.Context, node string) (int64, error) {
+	db, err := s.open()
+	if err != nil {
+		return 0, err
+	}
+	var generation int64
+	err = db.QueryRowContext(ctx, "SELECT generation FROM local_ci_cache_clean_generations WHERE node=?", node).Scan(&generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read cache cleanup generation of %s: %w", node, err)
+	}
+	return generation, nil
+}
+
+// AdvanceCacheCleanGeneration records one successful real cleanup atomically.
+// Concurrent scheduled and disk-recovery cleanups each get a new generation.
+func (s Store) AdvanceCacheCleanGeneration(ctx context.Context, node string) error {
+	db, err := s.open()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: CachesEventKey(node).String()}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_cache_clean_generations(node,generation) VALUES(?,1)
+ON CONFLICT(node) DO UPDATE SET generation=generation+1`, node)
 		return err
 	})
 }

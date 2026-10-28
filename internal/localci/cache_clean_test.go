@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -948,10 +949,10 @@ func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 	}
 }
 
-// TestCacheCleanFailureGenerationChangesAfterSuccess walks one machine through
-// failure, an hourly retry, success, and an identical later failure. Failed
-// retries keep one generation; the successful pass starts the next one.
-func TestCacheCleanFailureGenerationChangesAfterSuccess(t *testing.T) {
+// TestCacheCleanFailureGenerationChangesAfterDirectSuccess walks one machine
+// through failure, an hourly retry, a direct CleanCaches success, and an
+// identical scheduled failure. Every successful cleanup starts a new period.
+func TestCacheCleanFailureGenerationChangesAfterDirectSuccess(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := (machines.Store{DataDir: dir}).Save(t.Context(), machines.Machine{
 		Name: "node-a", SSH: "pip@node-a", Roles: []machines.Role{machines.RoleCI}, CISlots: 1, Enabled: true,
@@ -963,33 +964,46 @@ func TestCacheCleanFailureGenerationChangesAfterSuccess(t *testing.T) {
 	failure := &CacheCleanError{Node: "node-a", Path: "/var/tmp/dyna-local-ci/runs/old", Reason: "permission denied"}
 	clean := func(_ context.Context, node Node) (CacheCleanResult, error) {
 		cleanCalls++
-		if cleanCalls == 3 {
-			return CacheCleanResult{Node: node.Name}, nil
-		}
 		return CacheCleanResult{Node: node.Name}, failure
 	}
 	var generations []int64
 	report := func(_ context.Context, _ Node, failure CacheCleanError) error {
-		generations = append(generations, failure.LastSuccessMS)
+		generations = append(generations, failure.Generation)
 		return nil
 	}
-	passes := []time.Time{at, at.Add(time.Hour), at.Add(2 * time.Hour), at.Add(3 * time.Hour)}
-	for i, passAt := range passes {
-		_, err := cleanCachesTick(t.Context(), dir, func() time.Time { return passAt }, clean, report)
-		if i == 2 && err != nil {
-			t.Fatalf("successful pass: %v", err)
-		}
-		if i != 2 && err == nil {
-			t.Fatalf("failed pass %d returned no error", i+1)
+	pass := func(at time.Time) {
+		t.Helper()
+		if _, err := cleanCachesTick(t.Context(), dir, func() time.Time { return at }, clean, report); err == nil {
+			t.Fatalf("failed scheduled cleanup returned no error after %d clean calls at %s", cleanCalls, at)
 		}
 	}
-	if cleanCalls != 4 || len(generations) != 3 {
-		t.Fatalf("clean calls = %d, reports = %d, want four and three", cleanCalls, len(generations))
+	pass(at)
+	pass(at.Add(time.Hour))
+
+	// Disk recovery calls CleanCaches directly, without the scheduled tick.
+	directNode := Node{Name: "node-a", Slots: 1, Enabled: true}
+	runner := Runner{DataDir: dir, Node: &directNode}
+	legacy := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
+		fmt.Fprintln(out, "DYNA_CI_CACHE_CLEAN_FREED_KB=0")
+		return nil
+	}
+	newFakeMachine(t, legacy).attach(&runner)
+	if _, err := runner.CleanCaches(t.Context(), directNode, false); err != nil {
+		t.Fatalf("direct cleanup: %v", err)
+	}
+	directGeneration, err := (Store{DataDir: dir}).CacheCleanGeneration(t.Context(), directNode.Name)
+	if err != nil || directGeneration != 1 {
+		t.Fatalf("direct cleanup generation = %d, %v; want one", directGeneration, err)
+	}
+
+	pass(at.Add(2 * time.Hour))
+	if cleanCalls != 3 || len(generations) != 3 {
+		t.Fatalf("clean calls = %d, reports = %d, want three and three", cleanCalls, len(generations))
 	}
 	if generations[0] != 0 || generations[1] != 0 {
 		t.Fatalf("hourly retry changed its generation: %v", generations)
 	}
-	if want := passes[2].UnixMilli(); generations[2] != want {
-		t.Fatalf("later failure generation = %d, want last success %d", generations[2], want)
+	if generations[2] != directGeneration {
+		t.Fatalf("later failure generation = %d, want direct success %d", generations[2], directGeneration)
 	}
 }
