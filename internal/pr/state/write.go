@@ -129,6 +129,7 @@ func write(root string, st State) (err error) {
 	if err != nil {
 		return err
 	}
+	st.unchanged = nil
 	err = writer.Write(context.Background(), hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
 		// Refuse a stale preparation rather than overwrite an intervening write.
 		var current int64
@@ -199,6 +200,9 @@ func prepareRows(old State, oldIndex []byte, st State) (preparedRows, error) {
 	}
 	changed := !bytes.Equal(index, oldIndex)
 	for key, r := range st.Records {
+		if original, ok := st.unchanged[key]; ok && original == old.Records[key] {
+			continue
+		}
 		if old.Records[key] != nil && sameStored(old.Records[key], r) && reflect.DeepEqual(old.Responses[key], st.Responses[key]) {
 			continue
 		}

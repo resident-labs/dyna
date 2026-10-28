@@ -109,18 +109,23 @@ func byRoom(byID map[string]Info) map[string][]Info {
 	return out
 }
 
-// prOwned lists the room's links once and gives each session the roles it
-// holds. A link that is not active owns the session nothing.
+// prOwned reads only the rows linked to the given sessions in each room. A
+// link that is not active owns the session nothing.
 func (m *Manager) prOwned(byID map[string]Info) ([]owned, error) {
-	st, err := state.ReadLocked(state.Root(filepath.Dir(m.store().root())))
-	if err != nil {
-		return nil, err
-	}
+	root := state.Root(filepath.Dir(m.store().root()))
 	var out []owned
+	var errs []error
 	for roomID, infos := range byRoom(byID) {
 		owners := make(map[string]Info, len(infos))
+		ids := make([]string, 0, len(infos))
 		for _, info := range infos {
 			owners[info.ID] = info
+			ids = append(ids, info.ID)
+		}
+		st, err := state.ReadForSessions(root, roomID, ids...)
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
 		for _, roleLink := range links.RoleLinks(st, roomID) {
 			info, ok := owners[roleLink.Session]
@@ -141,7 +146,7 @@ func (m *Manager) prOwned(byID map[string]Info) ([]owned, error) {
 			}
 		}
 	}
-	return out, nil
+	return out, errors.Join(errs...)
 }
 
 func (m *Manager) goalOwned(byID map[string]Info) ([]owned, error) {
