@@ -2,11 +2,16 @@ package admission
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/database"
 )
 
 // put writes fixture files under root, creating directories as needed.
@@ -198,6 +203,62 @@ func TestObservationsSummarizeTheLastDay(t *testing.T) {
 	sum, err := o.Summarize(now.Add(-24 * time.Hour))
 	if err != nil || sum.Samples != 3 || sum.MostOver != 4 || sum.Held() != 3*SampleEvery {
 		t.Fatalf("summary = %+v, %v", sum, err)
+	}
+}
+
+// A recorded observation keeps the rooms' process counts, the sum in its own
+// column and the per-room breakdown as JSON beside it, and a database from
+// the release before the columns keeps its old rows with zero.
+func TestObservationsKeepRoomPidsAcrossTheMigration(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The previous release's store: version 1, three columns, one row.
+	if err := database.Migrate(db, "admission_observed.version", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(ctx, observedSchema)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2026, 10, 26, 11, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(`INSERT INTO admission_observed VALUES (?,?,?)`, old.Unix(), 7, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	o := Observed{DataDir: dir}
+	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	held := Observation{At: at, Running: 9, Limit: 5,
+		RoomPids: RoomPids{Total: 8, ByRoom: map[string]int{"dyna-room-dyna.slice": 3, "dyna-room-fl.slice": 5}}}
+	if err := o.Record(ctx, held); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT at, running, lim, room_pids, room_pids_by_room FROM admission_observed ORDER BY at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var at int64
+		var running, lim, roomPids int
+		var byRoom string
+		if err := rows.Scan(&at, &running, &lim, &roomPids, &byRoom); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d %d %d %d %s", at, running, lim, roomPids, byRoom))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		fmt.Sprintf("%d 7 5 0 ", old.Unix()), // the old row keeps the zero defaults
+		fmt.Sprintf("%d 9 5 8 {\"dyna-room-dyna.slice\":3,\"dyna-room-fl.slice\":5}", at.Unix()),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
 	}
 }
 

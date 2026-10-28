@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/admission"
+	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
@@ -41,8 +42,14 @@ func admissionObserver(sessions *subagent.Manager, load *sysload.Sampler, dataDi
 		// Memory and count come from one inventory: the sessions whose processes
 		// the load sampler found alive in their cgroup scopes.
 		AgentMemory: func(context.Context) (uint64, int) { return liveAgentMemory(load.Load().Groups) },
-		Relieve:     idleRelief(sessions).Run,
-		Record:      admission.Observed{DataDir: dataDir}.Record,
+		// A room's own daemons run under dyna-room-<id>.slice, outside every
+		// session scope, so their count comes from the cgroup tree itself.
+		RoomPids: func(context.Context) admission.RoomPids {
+			byRoom, total := agentslice.RoomPids()
+			return admission.RoomPids{ByRoom: byRoom, Total: total}
+		},
+		Relieve: idleRelief(sessions).Run,
+		Record:  admission.Observed{DataDir: dataDir}.Record,
 		Mode: func(context.Context) admission.Mode {
 			v, err := settings.Load(settings.DefaultPath())
 			if err != nil {
