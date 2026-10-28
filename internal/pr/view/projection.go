@@ -1,6 +1,7 @@
 package view
 
 import (
+	"encoding/json"
 	"slices"
 	"sort"
 	"strconv"
@@ -40,6 +41,7 @@ type projection struct {
 	facts                            watch.ReviewFacts
 	mu                               sync.Mutex
 	rows                             map[string]ChangeView
+	versions                         map[string]string
 	pages                            map[projectionPage]listpage.Page[*watch.Record]
 }
 
@@ -110,7 +112,7 @@ func (s *Service) readProjection() (*projection, error) {
 		}
 	}
 	p := &projection{root: watcher.Store.Root, revision: snapshot.Revision(), version: version, members: members, rooms: rooms, priority: priority, until: priorityUntil, at: now, exits: exits,
-		state: st, snapshot: snapshot, facts: facts, rows: map[string]ChangeView{}, pages: map[projectionPage]listpage.Page[*watch.Record]{}}
+		state: st, snapshot: snapshot, facts: facts, rows: map[string]ChangeView{}, versions: map[string]string{}, pages: map[projectionPage]listpage.Page[*watch.Record]{}}
 	// History pages and reviewer occupancy have time boundaries even when
 	// no writer commits another revision.
 	for _, r := range st.Records {
@@ -191,6 +193,21 @@ func cloneChangeView(row ChangeView) ChangeView {
 	}
 	row.Fixes = slices.Clone(row.Fixes)
 	return row
+}
+
+// version returns the row encoding used for change detection. Both list types
+// share it, and Checked stays out so poll-only timestamps do not redraw a row.
+func (p *projection) rowVersion(row ChangeView) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	version, ok := p.versions[row.Key]
+	if !ok {
+		row.Checked = time.Time{}
+		data, _ := json.Marshal(row)
+		version = string(data)
+		p.versions[row.Key] = version
+	}
+	return version
 }
 
 func (p *projection) page(room, before string, limit int, prs bool) (listpage.Page[*watch.Record], error) {
