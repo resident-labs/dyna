@@ -77,7 +77,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "dyna:", err)
 		os.Exit(2)
 	}
-	if filepath.Base(os.Args[0]) == "gh" && os.Getenv(ghclient.ReadOnlyEnv) == "1" {
+	if filepath.Base(os.Args[0]) == "gh" && os.Getenv(ghclient.ReadOnlyEnv) != "" {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		if err := ghclient.SessionCommand(ctx, os.Args[1:]); err != nil {

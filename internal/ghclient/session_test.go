@@ -63,8 +63,8 @@ esac
 		if err != nil {
 			t.Fatal(err)
 		}
-		if i == 0 && (target != filepath.Join(bin, "gh") || env[ReadOnlyEnv] != "") {
-			t.Fatal("write room did not receive plain gh")
+		if i == 0 && (target != "/real/dyna" || env[ReadOnlyEnv] != "worker") {
+			t.Fatal("write room did not receive the worker gh guard")
 		}
 		if i == 1 && (target != "/real/dyna" || env[ReadOnlyEnv] != "1") {
 			t.Fatal("read-only room did not receive the gh guard")
@@ -94,6 +94,65 @@ esac
 	}
 }
 
+func TestWriteRoomSessionGuard(t *testing.T) {
+	records := setupRooms(t, "work/service")
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("GH_SESSION_CALLS", calls)
+	installFakeGH(t, `#!/bin/sh
+case "$1 $2" in
+"auth status") echo '{"hosts":{"github.com":[{"login":"worker"}]}}';;
+"auth token") echo worker-secret;;
+"api --hostname") echo '{"permissions":{"push":true}}';;
+*) printf '%s\n' "$*" >> "$GH_SESSION_CALLS";;
+esac
+`)
+	scratch := t.TempDir()
+	session, err := SessionEnvironment(context.Background(), records[0].ID, scratch, "/real/dyna", os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range session.Env {
+		t.Setenv(key, value)
+	}
+	t.Setenv("DYNA_ROOM_ID", records[0].ID)
+	t.Chdir(records[0].Repo)
+	for _, args := range [][]string{
+		{"pr", "comment", "1", "--body", "not allowed"},
+		{"api", "repos/work/service/issues", "-X", "POST"},
+	} {
+		if err := SessionCommand(context.Background(), args); err == nil || !strings.Contains(err.Error(), "post in the room with dyna post instead") {
+			t.Fatalf("guard allowed %q: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"pr", "create", "--title", "test", "--body", "test"},
+		{"pr", "edit", "1", "--title", "test"},
+		{"pr", "ready", "1"},
+		{"pr", "view", "1"},
+	} {
+		if err := SessionCommand(context.Background(), args); err != nil {
+			t.Fatalf("guard refused %q: %v", args, err)
+		}
+	}
+	target, err := os.Readlink(filepath.Join(scratch, "github-bin", "gh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "/real/dyna" || session.Env[ReadOnlyEnv] != "worker" {
+		t.Fatalf("write room guard target=%q mode=%q", target, session.Env[ReadOnlyEnv])
+	}
+	raw, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "pr comment") || strings.Contains(string(raw), "api repos/work/service/issues -X POST") {
+		t.Fatalf("refused command reached gh: %s", raw)
+	}
+}
+
 func TestSessionRunsWithoutTheGitHubCLI(t *testing.T) {
 	records := setupRooms(t, "work/service")
 	// An empty PATH has no gh, so a turn in a GitHub repository must still run.
@@ -111,13 +170,16 @@ func TestSessionRunsWithoutTheGitHubCLI(t *testing.T) {
 			if !strings.Contains(session.Notice, "not installed") {
 				t.Fatalf("notice = %q, want the missing CLI line", session.Notice)
 			}
-			target, linkErr := os.Readlink(filepath.Join(scratch, "github-bin", "gh"))
+			target, err := os.Readlink(filepath.Join(scratch, "github-bin", "gh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantMode := "worker"
 			if access == ReadOnly {
-				if session.Env[ReadOnlyEnv] != "1" || target != "/real/dyna" {
-					t.Fatalf("read-only guard lost: read-only=%q target=%q", session.Env[ReadOnlyEnv], target)
-				}
-			} else if session.Env[ReadOnlyEnv] != "" || linkErr == nil {
-				t.Fatalf("write room received a gh target: %q", target)
+				wantMode = "1"
+			}
+			if session.Env[ReadOnlyEnv] != wantMode || target != "/real/dyna" {
+				t.Fatalf("guard mode=%q target=%q, want mode=%q and the dyna binary", session.Env[ReadOnlyEnv], target, wantMode)
 			}
 			if helper := gitConfigValue(session.Env, "credential.https://github.com/work/service.helper"); helper != "" {
 				t.Fatalf("git received a credential helper: %q", helper)
