@@ -31,7 +31,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CONFIG_DIR_NAME } from "../../config.ts";
+import { CONFIG_DIR_NAME, getAgentFileOverrides } from "../../config.ts";
 import {
 	type McpExposure,
 	type McpServerConfig,
@@ -145,7 +145,7 @@ function readConfigFile(path: string, scope: "global" | "project", state: McpCon
  */
 export function loadMcpConfig(options: { agentDir: string; cwd: string; projectTrusted: boolean }): LoadedMcpConfig {
 	const state: McpConfigState = { servers: new Map(), errors: [] };
-	readConfigFile(join(options.agentDir, "mcp.json"), "global", state);
+	readConfigFile(getAgentFileOverrides().mcpConfig ?? join(options.agentDir, "mcp.json"), "global", state);
 	const projectConfig = options.projectTrusted ? join(options.cwd, CONFIG_DIR_NAME, "mcp.json") : undefined;
 	if (projectConfig) readConfigFile(projectConfig, "project", state);
 	return {

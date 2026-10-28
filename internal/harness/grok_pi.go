@@ -10,6 +10,18 @@ import (
 )
 
 func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv invocation, err error) {
+	// The runtime owns the config file flags: prepare appends --settings,
+	// --mcp-config and --models-file after the user's own arguments, and the
+	// last flag wins in Pi's parser, so the user cannot override Dyna's files.
+	// A prepared profile snapshots the user's arguments; on an unprepared
+	// profile every argument is the user's own.
+	userArgs := p.ExtraArgs
+	if p.RuntimePermissionArgs != nil {
+		userArgs = p.RuntimePermissionArgs
+	}
+	if hasAnyOption(userArgs, "--settings", "--mcp-config", "--models-file") {
+		return inv, fmt.Errorf("pi extraArgs cannot override Dyna's settings, MCP or models files")
+	}
 	if hasAnyOption(p.ExtraArgs, "--mode", "--print", "-p", "--model", "--session", "--session-id", "--no-session", "--resume", "-r", "--continue", "-c", "--fork", "--export", "--compaction-trigger-tokens") {
 		return inv, fmt.Errorf("pi extraArgs conflict with reserved headless output, model, prompt, or session options")
 	}

@@ -39,7 +39,7 @@ func TestNativePluginGenerationsCarryOnlyCatalogResources(t *testing.T) {
 			var target string
 			switch h {
 			case "pi":
-				target = filepath.Join(home, "mcp.json")
+				target = filepath.Join(gen.Directory, "pi-mcp.json")
 			}
 			raw, err := os.ReadFile(target)
 			if err != nil {

@@ -95,6 +95,14 @@ See [Sessions and Context](sessions.md) for resuming, forking, naming, and stori
   Forks an existing session into a new session for the current project.
 - `--session-dir <dir>`<br>
   Overrides storage and lookup. It takes precedence over `PI_CODING_AGENT_SESSION_DIR` and the `sessionDir` setting.
+- `--settings <file>`<br>
+  Replaces the agent directory's `settings.json` for this process. Project settings (`.pi/settings.json`) still merge on top, exactly as they merge on the user file.
+- `--mcp-config <file>`<br>
+  Replaces the agent directory's `mcp.json` for this process. Project MCP configuration still merges on top when the project is trusted.
+- `--models-file <file>`<br>
+  Replaces the agent directory's `models.json` for this process.
+
+The three file flags require an existing file and exit with an error otherwise. `auth.json` and sessions always come from the agent directory.
 - `--no-session`<br>
   Uses an in-memory session that is not persisted.
 - `-n`, `--name <name>`<br>

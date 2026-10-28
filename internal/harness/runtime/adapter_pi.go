@@ -50,11 +50,17 @@ func piNativeEnv(home string) map[string]string {
 	return env
 }
 
-// piConfigArgs pins sessions into the private home. Pi has no settings flag, so
-// main materializes the settings view inside the agent directory;
-// --session-dir takes precedence over the sessionDir setting and environment.
-func piConfigArgs(home, _ string) []string {
-	return []string{"--session-dir", filepath.Join(home, "sessions")}
+// piConfigArgs pins sessions into the private home and points Pi at the
+// generation's own config files. Pi reads one agent directory, so these flags
+// keep each generation's settings and MCP servers per process; the account
+// home holds only the login, and --session-dir takes precedence over the
+// sessionDir setting and environment.
+func piConfigArgs(home, file string) []string {
+	return []string{
+		"--session-dir", filepath.Join(home, "sessions"),
+		"--settings", file,
+		"--mcp-config", filepath.Join(filepath.Dir(file), "pi-mcp.json"),
+	}
 }
 
 // piLoginArgs returns a complete argv for the interactive sign-in flow. Pi has

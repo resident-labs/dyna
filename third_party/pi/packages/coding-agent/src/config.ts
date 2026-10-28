@@ -617,7 +617,26 @@ export function getCustomThemesDir(): string {
 
 /** Get path to models.json */
 export function getModelsPath(): string {
-	return join(getAgentDir(), "models.json");
+	return getAgentFileOverrides().models ?? join(getAgentDir(), "models.json");
+}
+
+/** Per-process replacements for single agent-directory files, set once from CLI flags. */
+export interface AgentFileOverrides {
+	settings?: string;
+	mcpConfig?: string;
+	models?: string;
+}
+
+let agentFileOverrides: AgentFileOverrides = {};
+
+/** Set the per-process file overrides. Call once during startup, before any config loads. */
+export function setAgentFileOverrides(overrides: AgentFileOverrides): void {
+	agentFileOverrides = { ...overrides };
+}
+
+/** The per-process file overrides set by setAgentFileOverrides. */
+export function getAgentFileOverrides(): AgentFileOverrides {
+	return agentFileOverrides;
 }
 
 /** Get path to auth.json */

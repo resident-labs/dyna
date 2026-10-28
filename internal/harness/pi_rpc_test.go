@@ -189,9 +189,6 @@ func fakePiMain() {
 			} else {
 				emit(map[string]any{"type": "agent_settled", "aborted": true})
 			}
-		case "set_auto_retry":
-			logf("AUTO_RETRY %t", command.Enabled)
-			respond(command.ID, "set_auto_retry", nil)
 		case "compact":
 			logf("COMPACT")
 			respond(command.ID, "compact", map[string]any{"summary": "ok"})
@@ -328,9 +325,6 @@ func TestPiSessionTurnsReuseOneRPCProcess(t *testing.T) {
 	}
 	if !strings.Contains(log, "--mode rpc") || strings.Contains(log, "--print") {
 		t.Fatalf("pi did not run in rpc mode:\n%s", log)
-	}
-	if off, prompt := strings.Index(log, "AUTO_RETRY false"), strings.Index(log, "PROMPT task one"); off < 0 || off > prompt {
-		t.Fatalf("pi auto-retry was not turned off before the first prompt:\n%s", log)
 	}
 	if !strings.Contains(log, "PROMPT task two") {
 		t.Fatalf("second prompt never reached the session process:\n%s", log)

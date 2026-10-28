@@ -453,15 +453,6 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 	var startBoundary *int64
 	sendPrompt := func() error {
 		startBoundary = normalizedBoundary(normalizer)
-		// Pi's own retry edits the failed turn out of the context and reruns it,
-		// which lets the model continue from an assistant message and invent
-		// the next user message. Dyna's failure recovery resumes the session
-		// with a user message and backs off, so Pi must not retry by itself.
-		if resp, err := client.command(ctx, map[string]any{"type": "set_auto_retry", "enabled": false}, piPromptTimeout); err != nil {
-			return err
-		} else if !resp.Success {
-			return fmt.Errorf("pi refused set_auto_retry: %s", resp.Error)
-		}
 		resp, err := client.command(ctx, map[string]any{"type": "prompt", "message": spec.prompt}, piPromptTimeout)
 		if err != nil {
 			return err
