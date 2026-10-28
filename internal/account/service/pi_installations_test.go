@@ -69,7 +69,7 @@ func TestPrivateInstallationsResolveEachPiProvider(t *testing.T) {
 		})
 	})
 	bundles := &runtime.BundleManager{Root: filepath.Join(root, "harnesses"), Run: piBundleInstall}
-	if _, err := bundles.Install(context.Background(), "pi", "1.5.0-dyna.7"); err != nil {
+	if _, err := bundles.Install(context.Background(), "pi", "1.5.0-dyna.8"); err != nil {
 		t.Fatal(err)
 	}
 	st := &accountstore.Store{Root: filepath.Join(root, "accounts")}
