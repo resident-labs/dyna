@@ -85,6 +85,7 @@ not-state internal/fsutil/stable_executable.go SetLink 2 # the link that names t
 not-state internal/fsutil/stable_executable.go pruneImages 1 # removes superseded cache copies of the running dyna image, never one a live process runs
 not-state internal/ghclient/run.go runAnonymously 1 # removes the throwaway empty gh config directory it made for one credential-free read; no Dyna state
 not-state internal/ghclient/session.go SessionEnvironment 2 # private session gh launcher symlink; no queried runtime state
+not-state internal/ghclient/session_operation.go runIsolatedPush 2 # a throwaway bare Git repository under the system temp dir, removed after one push; never shared Dyna state
 not-state internal/harness/cliversion/cliversion.go outputFile 1 # an unlinked temporary output file, not state
 not-state internal/harness/config/config.go ConfigManager.update 1 # a harness CLI's own config files
 not-state internal/harness/config/config_edit.go ConfigManager.generateWithPreferences 2 # a harness CLI's own config files

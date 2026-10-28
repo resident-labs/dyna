@@ -77,7 +77,7 @@ func RunSessionGitPush(ctx context.Context, rec room.Record, request CommandRequ
 	if !plan.push || !plan.safe {
 		return CommandResult{Local: true}, nil
 	}
-	r, ok := sessionPushRepository(ctx, rec, request.Dir, plan)
+	r, ok := sessionPushRepository(ctx, rec, request.Dir, &plan)
 	if !ok {
 		return CommandResult{Local: true}, nil
 	}
@@ -191,13 +191,14 @@ func runLocalGit(ctx context.Context, args []string, env []string) error {
 	return cmd.Run()
 }
 
-func sessionPushRepository(ctx context.Context, rec room.Record, dir string, plan pushPlan) (repository, bool) {
+func sessionPushRepository(ctx context.Context, rec room.Record, dir string, plan *pushPlan) (repository, bool) {
 	if !plan.push || !plan.safe {
 		return repository{}, false
 	}
 	remote := plan.remote
 	if remote == "" {
 		remote = defaultPushRemote(ctx, dir)
+		plan.remote = remote
 	}
 	var urls []string
 	if strings.Contains(remote, "://") {
@@ -373,11 +374,16 @@ func parseGitPush(args []string) pushPlan {
 				return pushPlan{push: true, safe: false}
 			}
 			plan.leases = append(plan.leases, lease)
-		case arg == "--no-force-with-lease" || arg == "--force-if-includes" ||
-			arg == "--no-force-if-includes" || arg == "--thin" || arg == "--no-thin" ||
+		case arg == "--no-force-with-lease" || arg == "--no-force-if-includes" ||
+			arg == "--thin" || arg == "--no-thin" ||
 			arg == "--verbose" || arg == "-v" || arg == "--progress" || arg == "--no-progress":
 		case arg == "--force-with-lease":
 			// A lease without its ref covers every pushed ref.
+			return pushPlan{push: true, safe: false}
+		case arg == "--force-if-includes":
+			// The engine resolves leases itself, which would silently drop the
+			// include check this flag adds to a lease taken from a tracking
+			// ref. The local push keeps the exact behavior.
 			return pushPlan{push: true, safe: false}
 		case !strings.HasPrefix(arg, "-"):
 			if plan.remote == "" {
@@ -436,26 +442,72 @@ func planPushTargets(ctx context.Context, dir string, plan pushPlan) ([]pushTarg
 			return nil, false
 		}
 	}
-	if len(targets) == 0 {
-		// No refspec pushes the current branch to the same name, or to its
-		// configured upstream branch when it tracks this remote.
-		branch, err := repoid.Git(ctx, dir, "symbolic-ref", "--short", "HEAD")
-		if err != nil {
+	if len(targets) == 0 && !plan.delete {
+		specs, ok := defaultPushSpecs(ctx, dir, plan)
+		if !ok {
 			return nil, false
 		}
-		dst := fullRef(branch)
-		if remote, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".remote"); err == nil && remote == plan.remote {
-			if merge, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".merge"); err == nil && strings.HasPrefix(merge, "refs/") {
-				dst = merge
+		for _, spec := range specs {
+			if !add(spec) {
+				return nil, false
 			}
 		}
-		sha, err := repoid.Git(ctx, dir, "rev-parse", "--verify", "HEAD")
-		if err != nil {
-			return nil, false
-		}
-		targets = append(targets, pushTarget{src: sha, dst: dst})
 	}
 	return targets, true
+}
+
+// defaultPushSpecs is what a push without refspecs sends: the refspecs
+// remote.<name>.push configures, or one refspec for the configured push.default
+// mode. An ok of false keeps the push local, where git applies the configured
+// behavior without a credential.
+func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string, bool) {
+	if configured, err := repoid.Git(ctx, dir, "config", "--get-all", "remote."+plan.remote+".push"); err == nil {
+		return strings.Split(configured, "\n"), true
+	}
+	mode := "simple"
+	if configured, err := repoid.Git(ctx, dir, "config", "--get", "push.default"); err == nil && configured != "" {
+		mode = configured
+	}
+	branch, err := repoid.Git(ctx, dir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return nil, false
+	}
+	upstream := func() (string, bool) {
+		remote, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".remote")
+		if err != nil || remote != plan.remote {
+			return "", false
+		}
+		merge, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".merge")
+		if err != nil || !strings.HasPrefix(merge, "refs/heads/") {
+			return "", false
+		}
+		return merge, true
+	}
+	switch mode {
+	case "nothing":
+		// Git itself rejects this push before any network use.
+		return nil, false
+	case "current":
+		return []string{branch + ":" + branch}, true
+	case "upstream", "tracking":
+		merge, ok := upstream()
+		if !ok {
+			return nil, false
+		}
+		return []string{branch + ":" + merge}, true
+	case "simple":
+		if merge, ok := upstream(); ok {
+			if merge != "refs/heads/"+branch {
+				// Simple refuses a differently named upstream; git reports it.
+				return nil, false
+			}
+			return []string{branch + ":" + merge}, true
+		}
+		return []string{branch + ":" + branch}, true
+	default:
+		// matching and future modes keep their exact behavior locally.
+		return nil, false
+	}
 }
 
 func fullRef(ref string) string {
