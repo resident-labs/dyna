@@ -3,6 +3,7 @@
 package computers
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,8 +18,9 @@ import (
 // exhaust the memory behind the owner's desktop. The choice comes from
 // /sys/class/drm on any Linux distro, whatever the GPU vendor is.
 
-// sysfsDRMClass is the directory the render-node choice reads.
-const sysfsDRMClass = "/sys/class/drm"
+// sysfsDRMClass is the directory the render-node choice reads. It is a
+// var so a test can point it at a fake tree.
+var sysfsDRMClass = "/sys/class/drm"
 
 // nvidiaVendor is the PCI vendor id of NVIDIA, the one vendor whose
 // proprietary stack ignores Mesa's DRI_PRIME and needs GLVND variables.
@@ -206,6 +208,21 @@ func configuredRenderGPU() renderGPU {
 	return gpu
 }
 
+// gpuByNode re-reads one render node's identity from sysfs. A running
+// desktop keeps the node it started on, so its apps must resolve that node,
+// not the current setting; when sysfs no longer knows the node, the bare
+// path is all that remains.
+func gpuByNode(node string) renderGPU {
+	if name := filepath.Base(node); isRenderNodeName(name) {
+		for _, gpu := range listRenderGPUs(sysfsDRMClass) {
+			if filepath.Base(gpu.Node) == name {
+				return gpu
+			}
+		}
+	}
+	return renderGPU{Node: node}
+}
+
 // gpuEnvValues are the environment variables that point an app at one GPU.
 func gpuEnvValues(gpu renderGPU) map[string]string {
 	if gpu.Node == "" {
@@ -226,12 +243,42 @@ func gpuEnvValues(gpu renderGPU) map[string]string {
 	return nil
 }
 
-// gpuAppEnvironment moves app environment base onto one GPU. Owner values for
-// the same variables are dropped first, so a stale DRI_PRIME from the owner's
-// shell cannot pull apps back onto the display GPU.
-func gpuAppEnvironment(base []string, gpu renderGPU) []string {
+// gpuEnvForStatus returns the GPU variables for a computer's live status:
+// the variables its running desktop resolved at start, so every launch path
+// agrees without re-reading sysfs; a running status from an older daemon
+// without them falls back to the node lookup; anything else takes the choice
+// the next start will make.
+func gpuEnvForStatus(st Status) map[string]string {
+	if st.State == StateRunning {
+		if len(st.RenderEnv) > 0 {
+			return st.RenderEnv
+		}
+		if st.RenderNode != "" {
+			return gpuEnvValues(gpuByNode(st.RenderNode))
+		}
+	}
+	return gpuEnvValues(configuredRenderGPU())
+}
+
+// appGPUEnv resolves the GPU variables for app environments built outside the
+// daemon: the running desktop's variables when one answers, else the choice
+// the next start will make. The daemon never calls this; it owns the desktop
+// and uses its own gpu.
+func appGPUEnv(id string) map[string]string {
+	ctx, cancel := context.WithTimeout(context.Background(), runningCheckTimeout)
+	defer cancel()
+	if st, err := NewClient(id).Status(ctx); err == nil {
+		return gpuEnvForStatus(st)
+	}
+	return gpuEnvValues(configuredRenderGPU())
+}
+
+// mergeGPUEnvironment moves app environment base onto one GPU. Owner values
+// for the same variables are dropped first, so a stale DRI_PRIME from the
+// owner's shell cannot pull apps back onto the display GPU.
+func mergeGPUEnvironment(base []string, values map[string]string) []string {
 	drop := map[string]bool{"DRI_PRIME": true, "__GLX_VENDOR_LIBRARY_NAME": true, "__EGL_VENDOR_LIBRARY_FILENAMES": true}
-	out := make([]string, 0, len(base)+3)
+	out := make([]string, 0, len(base)+len(values))
 	for _, line := range base {
 		k, _, _ := strings.Cut(line, "=")
 		if drop[k] {
@@ -239,8 +286,13 @@ func gpuAppEnvironment(base []string, gpu renderGPU) []string {
 		}
 		out = append(out, line)
 	}
-	for k, v := range gpuEnvValues(gpu) {
+	for k, v := range values {
 		out = append(out, k+"="+v)
 	}
 	return out
+}
+
+// gpuAppEnvironment is mergeGPUEnvironment for a chosen GPU.
+func gpuAppEnvironment(base []string, gpu renderGPU) []string {
+	return mergeGPUEnvironment(base, gpuEnvValues(gpu))
 }

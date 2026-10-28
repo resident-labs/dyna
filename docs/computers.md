@@ -60,8 +60,8 @@ as `WLR_RENDER_DRM_DEVICE` and to apps as `DRI_PRIME` (Mesa, by PCI id) or, on t
 proprietary NVIDIA driver, `__GLX_VENDOR_LIBRARY_NAME=nvidia` and
 `__EGL_VENDOR_LIBRARY_FILENAMES`. Any values for those variables inherited from
 the owner are dropped first. `dyna computer status` shows the chosen node as
-`render_node`. The setting applies to computers started after the change; stop a
-running computer to move it. When the kernel or driver exposes GPU memory
+`render_node`. The setting applies to computers started after the change; a
+running computer keeps its GPU and its apps follow it until it stops. When the kernel or driver exposes GPU memory
 cheaply (sysfs `mem_info_vram_*` for amdgpu, `nvidia-smi` when installed),
 `dyna doctor examine` reports a GPU that is nearly full, and says when it could
 not check GPU memory at all.

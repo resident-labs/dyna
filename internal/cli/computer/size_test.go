@@ -47,6 +47,9 @@ func TestComputerSizeFlagsValidateAndShareResize(t *testing.T) {
 					return nil, fmt.Errorf("bad resize request: %s", data)
 				}
 				return computers.Status{Width: 390, Height: 844}, nil
+			case "status":
+				// The env command reads the desktop's GPU from its status.
+				return computers.Status{SessionID: r.Session, State: computers.StateIdleStopped}, nil
 			case "open":
 				return computers.Opened{PID: 123, App: computers.App{Title: "Terminal"}}, nil
 			default:
@@ -67,9 +70,10 @@ func TestComputerSizeFlagsValidateAndShareResize(t *testing.T) {
 		if out, err := call(args...); err != nil {
 			t.Fatalf("%v: %s %v", args, out, err)
 		}
-		want := []string{"register", "size"}
+		want := []string{"register", "size", "status"}
 		if args[0] == "open" {
-			want = append(want, "open")
+			// The daemon builds the app environment itself; the CLI only opens.
+			want = []string{"register", "size", "open"}
 		}
 		for _, op := range want {
 			if got := <-seen; got != op {
