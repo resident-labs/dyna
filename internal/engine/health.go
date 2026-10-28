@@ -23,9 +23,10 @@ type Health struct {
 	Writes  state.Health `json:"writes"`
 	// WritersWaiting counts writers waiting for the SQLite writer lock in
 	// the engine, whether or not their store has moved to internal/state.
-	WritersWaiting    int64     `json:"writersWaiting"`
-	Events            hub.Stats `json:"events"`
-	SQLiteBusyRetries int64     `json:"sqliteBusyRetries"`
+	WritersWaiting    int64            `json:"writersWaiting"`
+	Events            hub.Stats        `json:"events"`
+	SQLiteBusyRetries int64            `json:"sqliteBusyRetries"`
+	DatabaseMetrics   database.Metrics `json:"databaseMetrics"`
 	// CallersRefused counts socket callers the identity rules refused since
 	// the engine started; while enforcement is off they were still served.
 	CallersRefused int64 `json:"callersRefused"`
@@ -43,7 +44,7 @@ const maxWaiting = 10
 // engineHealth builds the Health call. writer is nil in a read-only engine.
 func engineHealth(status, connect string, started time.Time, writer *state.Writer, events *hub.Hub, callers *socketCallers, signals *workerSignals) func() Health {
 	return func() Health {
-		h := Health{Status: status, Ready: true, Connect: connect, Started: started, Writes: writer.Health(), WritersWaiting: database.Waiting(), Events: events.Stats(), SQLiteBusyRetries: database.BusyRetries(), CallersRefused: callers.Refused(), SweepFindings: signals.findings()}
+		h := Health{Status: status, Ready: true, Connect: connect, Started: started, Writes: writer.Health(), WritersWaiting: database.Waiting(), Events: events.Stats(), SQLiteBusyRetries: database.BusyRetries(), DatabaseMetrics: database.Measurements(), CallersRefused: callers.Refused(), SweepFindings: signals.findings()}
 		h.Degraded = h.Writes.Degraded || h.WritersWaiting > maxWaiting
 		return h
 	}
