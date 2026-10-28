@@ -333,7 +333,14 @@ func fastLandable(r Record) bool {
 // gate stays: a fresh head, the approval at that head, green CI, required
 // reviews, mergeability and the room pause. An approve-fast landing has no
 // base lease. A tested-head landing supplies one and gets a landed event.
+// The reviewer-requirement gate spans the final checks and the publication,
+// so a requirement cannot land between them.
 func (s *Service) fastLand(ctx context.Context, candidate Record, base *state.RepositoryFacts) error {
+	unlock, err := s.requirementLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	current, children, ready, err := s.prepareMerge(ctx, candidate)
 	if err != nil || !ready {
 		return err

@@ -18,6 +18,14 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// shortenRequirementWait keeps a refused requirement write fast in tests.
+func shortenRequirementWait(t *testing.T, wait time.Duration) {
+	t.Helper()
+	previous := requirementLockWait
+	requirementLockWait = wait
+	t.Cleanup(func() { requirementLockWait = previous })
+}
+
 // A head move resets required approvals, so each required reviewer must be
 // re-assigned at the new head. Without the notice a dormant named reviewer
 // never learns that its older verdict stopped counting, and the PR stalls
@@ -297,16 +305,39 @@ func TestRequiredReviewersAddAtomicallyAndBindCheckedAuthor(t *testing.T) {
 	}
 }
 
-// A requirement cannot land while a publisher validates or publishes a batch:
-// both take the merge publication lock.
-func TestRequiredReviewWriteIsRefusedWhilePublicationLockHeld(t *testing.T) {
+// A merge publisher holds merge-publish.lock for whole ticks, and trials run
+// for minutes, so a requirement write must not wait behind that lock (D-409).
+// Only the publisher's short final check-and-publish step may hold it back.
+func TestRequiredReviewWriteDoesNotWaitForTheMergePublisher(t *testing.T) {
 	e, r := namedReviewEnv(t)
 	unlock, err := e.s.mergeLock()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer unlock()
+	if err := e.s.RequireReviewers(r.Key, r.Author, r.RoomID, []string{namedReviewerID}); err != nil {
+		t.Fatalf("requirement waited behind the merge publisher: %v", err)
+	}
+	if got := e.record().RequiredReviewers; !reflect.DeepEqual(got, []string{namedReviewerID}) {
+		t.Fatalf("requirement did not land: %v", got)
+	}
+}
+
+// The final check-and-publish step still excludes a requirement write: one
+// that arrives inside it waits, and is refused only when that step outlives
+// the bounded wait, so no batch publishes with a requirement it was not
+// checked against.
+func TestRequiredReviewWriteWaitsOutAPublishersFinalStep(t *testing.T) {
+	e, r := namedReviewEnv(t)
+	shortenRequirementWait(t, 40*time.Millisecond)
+	// Separate opens contend within one process, so this stands in for a
+	// publisher holding the gate across its final step.
+	unlock, err := e.s.requirementLock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := e.s.RequireReviewers(r.Key, r.Author, r.RoomID, []string{namedReviewerID}); err == nil {
-		t.Fatal("requirement landed while a publisher held the lock")
+		t.Fatal("requirement landed inside a publisher's final step")
 	}
 	if got := e.record().RequiredReviewers; len(got) != 0 {
 		t.Fatalf("refused write changed state: %v", got)
@@ -320,6 +351,7 @@ func TestRequiredReviewWriteIsRefusedWhilePublicationLockHeld(t *testing.T) {
 // A requirement added by a hook during MergeFix publication is refused, so the
 // batch never publishes with a requirement it was not checked against.
 func TestRequiredReviewAddedDuringPublicationIsRefused(t *testing.T) {
+	shortenRequirementWait(t, 40*time.Millisecond)
 	e, fs, _ := mergeEnv(t, 1, 2)
 	fs[2].Pull.Base.Ref = fs[1].Pull.Head.Ref
 	const key = "github.com/owner/repo#1"
