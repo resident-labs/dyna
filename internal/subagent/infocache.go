@@ -12,9 +12,9 @@ import (
 	"sync"
 )
 
-// Open-session metadata readers share parsed snapshots. Closed history is
-// decoded for its caller but not retained. Display paths also keep a brief
-// turn summary, keyed by its turn row's revision.
+// Metadata readers share revisioned parsed snapshots without the raw JSON.
+// Display paths also keep a brief turn summary, keyed by its turn row's
+// revision. Existing closed-session maintenance bounds this history.
 
 type turnBrief struct {
 	n       int
@@ -90,13 +90,10 @@ func (s *Store) metaSnapshot(id string) (*infoEntry, error) {
 			}
 		}
 	}
-	if entry.err != nil || entry.meta.Closed.IsZero() {
-		infoCache.Store(cacheKey, entry)
-	} else {
-		// A close can race with the write-side eviction or with an older open
-		// read. Never leave that earlier full snapshot behind.
-		infoCache.Delete(cacheKey)
-	}
+	// A close changes the revision, so a stale open snapshot cannot satisfy a
+	// later read. Storing the decoded snapshot also avoids decoding closed
+	// history again on every room scan.
+	infoCache.Store(cacheKey, entry)
 	return entry, entry.err
 }
 
