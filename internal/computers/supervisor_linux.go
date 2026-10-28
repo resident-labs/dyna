@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/runprocs"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/shells"
@@ -87,6 +88,7 @@ type supervisor struct {
 	shot                               Shot
 	displayLock                        string
 	cgroup                             string
+	roomSlice                          string // the room's slice unit, when the computer's cgroup is a room scope
 	streamBackend                      StreamBackend
 	monitorWake                        chan struct{}
 	x11Conns                           map[*net.UnixConn]bool
@@ -109,7 +111,6 @@ func newComputer(ctx context.Context, id, room string, options SupervisorOptions
 		s.viewGrace = 15 * time.Second
 	}
 	s.meta = Meta{SessionID: id, Room: room, WaylandDisplay: publicName(id), Created: time.Now()}
-	s.cgroup = computerCgroup(id)
 	s.streamBackend = options.StreamBackend
 	s.startOutput = options.StartOutputTimeout
 	if s.streamBackend == nil {
@@ -141,10 +142,16 @@ func newComputer(ctx context.Context, id, room string, options SupervisorOptions
 		return nil, err
 	}
 	_ = os.Chmod(RuntimeDir(id), 0700)
-	if s.cgroup != "" {
-		_ = os.WriteFile(filepath.Join(RuntimeDir(id), "cgroup"), []byte(s.cgroup+"\n"), 0600)
-	} else {
-		_ = os.Remove(filepath.Join(RuntimeDir(id), "cgroup"))
+	// A room computer takes a scope below its room's slice when a desktop
+	// starts; until then it keeps whatever cgroup record an earlier daemon
+	// life left, so that life's scope can be adopted.
+	if s.meta.Room == "" || !roomSlicesOn() {
+		s.cgroup = computerCgroup(id)
+		if s.cgroup != "" {
+			_ = os.WriteFile(filepath.Join(RuntimeDir(id), "cgroup"), []byte(s.cgroup+"\n"), 0600)
+		} else {
+			_ = os.Remove(filepath.Join(RuntimeDir(id), "cgroup"))
+		}
 	}
 	public := filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), s.meta.WaylandDisplay)
 	_ = os.Remove(public)
@@ -366,6 +373,11 @@ func (s *supervisor) desktopEnv() []string {
 	if s.busAddress != "" {
 		values["DBUS_SESSION_BUS_ADDRESS"] = s.busAddress
 	}
+	// Apps that start their own systemd units join the room's slice, so a
+	// room's systemd-run shim keeps the computer inside the room's limits.
+	// An empty value clears a slice the daemon itself inherited, so a
+	// roomless computer never carries a foreign room's name into its apps.
+	values[mode.EnvRoomSlice] = s.roomSlice
 	env := mergeEnvironment(os.Environ(), values)
 	// Apps render on the node this desktop started on; the settings value can
 	// change while a desktop runs, and a running desktop must not mix GPUs.
@@ -458,6 +470,9 @@ func (s *supervisor) start() error {
 	return err
 }
 func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desktop, error) {
+	// The desktop's processes land in the computer's cgroup as they start, so
+	// the cgroup must exist first: a room computer takes its room scope now.
+	s.ensureCgroup(ctx)
 	config := filepath.Join(Dir(s.meta.SessionID), "config")
 	if err := os.MkdirAll(config, 0700); err != nil {
 		return nil, err
@@ -735,6 +750,10 @@ func (s *supervisor) cleanup(destroy bool) error {
 	if s.displayLock != "" {
 		_ = os.Remove(s.displayLock)
 	}
+	// A scope a previous daemon life left holds nothing but its anchor now;
+	// this computer is going away, so take that anchor with it before the
+	// record that names it goes away too.
+	s.killSavedScope()
 	_ = os.RemoveAll(RuntimeDir(s.meta.SessionID))
 	_ = os.RemoveAll(browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), s.meta.SessionID))
 	if destroy && saveErr == nil {
@@ -749,7 +768,9 @@ func (s *supervisor) cleanup(destroy bool) error {
 	}
 	s.state.RSSKiB = 0
 	s.state.MemoryCurrentKiB = 0
-	if s.cgroup != "" {
+	// A room scope belongs to systemd: killing its contents lets systemd
+	// remove it, and only the daemon's own leaf is unlinked here.
+	if s.cgroup != "" && underCgroup(s.cgroup, computerGroups.root) {
 		_ = os.Remove(s.cgroup)
 	}
 	s.record("stopped", nil)

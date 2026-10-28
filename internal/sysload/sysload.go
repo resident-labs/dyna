@@ -418,6 +418,10 @@ func (s *Sampler) readCgroups(root string, cur *reading, out *Load) bool {
 		"computers": {filepath.Join(dyna, "dyna-computers.service")},
 		"engine":    {filepath.Join(root, "app.slice", "dyna-engine.service"), filepath.Join(root, "app.slice", "dyna-serve.service")},
 	}
+	// A room computer runs in its own scope below its room's slice, outside
+	// the service cgroup; count those with the computers bucket.
+	roomComputers, _ := filepath.Glob(filepath.Join(dyna, "dyna-room.slice", "dyna-room-*.slice", "dyna-computer-*.scope"))
+	dirs["computers"] = append(dirs["computers"], roomComputers...)
 	names, _ := filepath.Glob(filepath.Join(dyna, "dyna-*.scope"))
 	for _, p := range names {
 		dirs[filepath.Base(p)] = []string{p}
