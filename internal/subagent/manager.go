@@ -1367,8 +1367,10 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	closedForCleanup = true
 	unlock()
 	locked = false
-	if err := m.forwardClosedInbox(ctx, info); err != nil {
-		return info, fmt.Errorf("forward pending posts: %w", err)
+	forwardErr := m.forwardClosedInbox(ctx, info)
+	if forwardErr != nil {
+		forwardErr = fmt.Errorf("forward pending posts: %w", forwardErr)
+		summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureHandoff})
 	}
 	if err := m.stopHarnessProcesses(ctx, info.ID); err != nil {
 		summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureProcessCleanup})
@@ -1376,23 +1378,23 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	destroyComputer(info.ID)
 	closedForCleanup = true
 	if err := m.withdrawClosedQuestions(info); err != nil {
-		return info, err
+		return info, errors.Join(forwardErr, err)
 	}
 	// A request the closing session holds moves to its heir, or to the owner.
 	moved, err := m.questionStore().ReassignHolder(info.RoomID, info.ID, heir.ID)
 	if err != nil {
-		return info, err
+		return info, errors.Join(forwardErr, err)
 	}
 	if len(moved) > 0 && m.HandOffTerminalRequests != nil {
 		if err := m.HandOffTerminalRequests(ctx, moved); err != nil {
-			return info, err
+			return info, errors.Join(forwardErr, err)
 		}
 	}
 	m.closeGoals(info, heir.ID)
 	store.appendJournal(info.ID, SessionClosedJournal{By: opts.by, Handoff: closeJournalLines(summary)})
 	closed, err := store.Info(info.ID)
 	closed.CloseSummary = summary
-	return closed, err
+	return closed, errors.Join(forwardErr, err)
 }
 
 // ExecSpawner runs each turn in a detached `dyna subagent _turn` process.

@@ -162,11 +162,12 @@ func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
 		if meta.Closed.IsZero() {
 			return nil
 		}
-		if meta.ForwardedPosts == nil {
-			meta.ForwardedPosts = map[string]string{}
+		forwardedIDs, err := m.store().forwardedPosts(meta.ID)
+		if err != nil {
+			return err
 		}
 		for _, item := range queue {
-			if item.State != QueueWaiting && item.State != QueueDelivering && (item.State != QueueForwarded || meta.ForwardedPosts[item.ID] == "") {
+			if item.State != QueueWaiting && item.State != QueueDelivering && (item.State != QueueForwarded || forwardedIDs[item.ID] == "") {
 				continue
 			}
 			// Root-seat posts remain with the seat when its session changes.
@@ -210,11 +211,11 @@ func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
 				return err
 			}
 			forwards = append(forwards, forwarded)
-			if meta.ForwardedPosts[item.ID] == "" {
-				meta.ForwardedPosts[item.ID] = id
-				if err := m.store().writeMeta(meta); err != nil {
+			if forwardedIDs[item.ID] == "" {
+				if err := m.store().recordForwarded(ctx, meta.ID, item.ID, id); err != nil {
 					return err
 				}
+				forwardedIDs[item.ID] = id
 			}
 		}
 		return nil

@@ -162,7 +162,6 @@ func cloneConsolidation(c ConsolidationState) ConsolidationState {
 func cloneMeta(m Meta) Meta {
 	m.InheritedReceipts = maps.Clone(m.InheritedReceipts)
 	m.ClosedPosts = maps.Clone(m.ClosedPosts)
-	m.ForwardedPosts = maps.Clone(m.ForwardedPosts)
 	m.ConsolidationHistory = slices.Clone(m.ConsolidationHistory)
 	for i := range m.ConsolidationHistory {
 		m.ConsolidationHistory[i] = cloneConsolidation(m.ConsolidationHistory[i])
