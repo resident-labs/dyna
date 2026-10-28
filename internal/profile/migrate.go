@@ -14,7 +14,7 @@ import (
 )
 
 // Migrate upgrades retained profile configuration before services start.
-// TODO: legacy/shim remove later — reads version 2 and 3 profiles and preserves unknown fields.
+// TODO: legacy/shim remove later — reads version 2 profiles and preserves unknown fields.
 func Migrate(path string) error {
 	resolved, err := filepath.EvalSymlinks(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -45,7 +45,7 @@ func Migrate(path string) error {
 	if err := json.Unmarshal(raw, &header); err != nil {
 		return err
 	}
-	if header.Version != 2 && header.Version != 3 {
+	if header.Version != 2 {
 		return nil
 	}
 	var rows []map[string]json.RawMessage
@@ -65,23 +65,6 @@ func Migrate(path string) error {
 		// is. Load refuses to run it, and the owner repairs it with the CLI or the
 		// app, so the migration must not fail and leave the engine read-only.
 		if _, known := HarnessDefinitionFor(p.Harness); !known {
-			continue
-		}
-		if p.Harness == HarnessPi || p.Harness == HarnessClaudeCode {
-			tokens := int64(200000)
-			switch p.Name {
-			case "haiku":
-				tokens = 100000
-			case "opus":
-				tokens = 500000
-			}
-			p.Compact = &Compact{Tokens: tokens}
-			row["compact"], err = json.Marshal(p.Compact)
-			if err != nil {
-				return err
-			}
-		}
-		if header.Version != 2 {
 			continue
 		}
 		oldArgs := slices.Clone(p.ExtraArgs)
@@ -118,7 +101,7 @@ func Migrate(path string) error {
 	if err != nil {
 		return err
 	}
-	doc["version"] = json.RawMessage("4")
+	doc["version"] = json.RawMessage("3")
 	transformed, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
@@ -137,10 +120,8 @@ func Migrate(path string) error {
 			return err
 		}
 	}
-	if header.Version == 2 {
-		if err := profileV2Backup(path+".v2.bak", raw); err != nil {
-			return err
-		}
+	if err := profileV2Backup(path+".v2.bak", raw); err != nil {
+		return err
 	}
 	return store.WriteJSON(path, json.RawMessage(transformed), info.Mode().Perm())
 }

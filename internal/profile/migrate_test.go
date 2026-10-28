@@ -33,8 +33,8 @@ func TestProfileV3MigrationPreservesUnknownFields(t *testing.T) {
 	if err := json.Unmarshal(after, &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Version != 4 {
-		t.Fatalf("version = %d, want 4", document.Version)
+	if document.Version != 3 {
+		t.Fatalf("version = %d, want 3", document.Version)
 	}
 	if document.FutureRoot["keep"] != 42 || !reflect.DeepEqual(document.Profiles[0]["futureProfile"], []any{"keep"}) {
 		t.Fatal("unknown root or profile field lost")
@@ -150,50 +150,10 @@ func TestProfileV3MigrationKeepsARetiredHarnessForRepair(t *testing.T) {
 	for _, p := range doc.Profiles {
 		byName[p.Name] = p
 	}
-	if doc.Version != 4 || len(byName) != 2 || byName["old-muse"].Harness != "muse" || byName["kept"].EffectiveDialect() != "pi-json" {
+	if doc.Version != 3 || len(byName) != 2 || byName["old-muse"].Harness != "muse" || byName["kept"].EffectiveDialect() != "pi-json" {
 		t.Fatalf("migrated document = %s", after)
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("Load accepted a profile of a retired harness")
-	}
-}
-
-func TestProfileV4MigrationTargetsAndClear(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles.json")
-	raw := `{"version":3,"profiles":[{"name":"pi","harness":"pi","taste":5,"intelligence":5,"cost":5},{"name":"haiku","harness":"claude-code","taste":5,"intelligence":5,"cost":5,"compact":{"tokens":150000}},{"name":"opus","harness":"pi","taste":5,"intelligence":5,"cost":5,"compact":{"tokens":100000}},{"name":"mock","harness":"mock","taste":5,"intelligence":5,"cost":5}]}`
-	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(path); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc Store
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if doc.Version != 4 || doc.Profiles[0].Compact == nil || doc.Profiles[0].Compact.Tokens != 200000 || doc.Profiles[1].Compact.Tokens != 100000 || doc.Profiles[2].Compact.Tokens != 500000 || doc.Profiles[3].Compact != nil {
-		t.Fatalf("migration: %s", data)
-	}
-	doc.Profiles[0].Compact = nil
-	data, err = json.Marshal(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(path); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(data) {
-		t.Fatalf("migration restored a cleared target: %s", after)
 	}
 }
