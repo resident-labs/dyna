@@ -3,6 +3,7 @@ package computerrestart
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -39,7 +40,11 @@ func TestQuiet(t *testing.T) {
 	}
 }
 
-func TestRestartNowDefersLegacyDaemon(t *testing.T) {
+// serveDaemon answers list with the given answer and every other operation
+// with the bare unknown-operation error a daemon from before that operation
+// gives.
+func serveDaemon(t *testing.T, list []computers.Status, listErr error) {
+	t.Helper()
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	socket := computers.ControlSocket("")
 	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
@@ -52,8 +57,11 @@ func TestRestartNowDefersLegacyDaemon(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- computers.Serve(ctx, listener, func(context.Context, computers.Request) (any, error) {
-			return nil, errors.New("invalid session id")
+		done <- computers.Serve(ctx, listener, func(_ context.Context, r computers.Request) (any, error) {
+			if r.Op == "list" {
+				return list, listErr
+			}
+			return nil, fmt.Errorf("unknown computer operation %q", r.Op)
 		})
 	}()
 	t.Cleanup(func() {
@@ -62,9 +70,58 @@ func TestRestartNowDefersLegacyDaemon(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	reason, err := RestartNow(ctx)
+}
+
+// stubSystemctl records systemctl argv through a PATH-visible stub, so a test
+// never reaches the real service manager. It returns the record path.
+func stubSystemctl(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	record := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + record + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	return record
+}
+
+// A daemon whose status list cannot be read keeps the restart deferred.
+func TestRestartNowDefersWhenLegacyStatusUnreadable(t *testing.T) {
+	serveDaemon(t, nil, errors.New("invalid session id"))
+	reason, err := RestartNow(context.Background())
 	if err != nil || !strings.Contains(reason, "predates protected foreground commands") {
 		t.Fatalf("legacy restart reason=%q err=%v", reason, err)
+	}
+}
+
+// D-419: a quiet daemon that predates atomic restart admission must restart
+// through the legacy quiet check. Waiting for admission support it only gains
+// by restarting deferred the update for hours and blocked every newer client.
+func TestRestartNowRestartsQuietLegacyDaemon(t *testing.T) {
+	serveDaemon(t, []computers.Status{}, nil)
+	record := stubSystemctl(t)
+	reason, err := RestartNow(context.Background())
+	if err != nil || reason != "" {
+		t.Fatalf("reason=%q err=%v; want a completed restart", reason, err)
+	}
+	got, rerr := os.ReadFile(record)
+	if rerr != nil || !strings.Contains(string(got), "try-restart\n"+userservices.Computers) {
+		t.Fatalf("restart call=%q (%v); want try-restart %s", got, rerr, userservices.Computers)
+	}
+}
+
+// A daemon that predates admission but reports an open app keeps the restart
+// deferred, with the reason its status list gives.
+func TestRestartNowDefersLegacyDaemonWithOpenApp(t *testing.T) {
+	serveDaemon(t, []computers.Status{{SessionID: "x", State: computers.StateRunning, Apps: []computers.App{{AppID: "a"}}}}, nil)
+	record := stubSystemctl(t)
+	reason, err := RestartNow(context.Background())
+	if err != nil || !strings.Contains(reason, "1 app(s) open") {
+		t.Fatalf("reason=%q err=%v; want the legacy status reason", reason, err)
+	}
+	if _, rerr := os.Stat(record); !os.IsNotExist(rerr) {
+		t.Fatalf("deferred restart still called systemctl: %v", rerr)
 	}
 }
 
