@@ -55,6 +55,7 @@ func serveRoomOperations(t *testing.T, rec room.Record) *roomOperationCalls {
 
 func TestWorkerCredentialsStayInsideDyna(t *testing.T) {
 	var pushAuthenticated, wrongRepoAuthenticated atomic.Bool
+	var roomPushes atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		login, token, ok := r.BasicAuth()
 		if ok && login == "worker" && token == "worker-secret" {
@@ -62,6 +63,7 @@ func TestWorkerCredentialsStayInsideDyna(t *testing.T) {
 				wrongRepoAuthenticated.Store(true)
 			} else {
 				pushAuthenticated.Store(true)
+				roomPushes.Add(1)
 			}
 		}
 		w.Header().Set("WWW-Authenticate", "Basic realm=git")
@@ -229,13 +231,43 @@ esac
 	redirected.Dir = rec.Repo
 	// The local fallback must reach the test server, so it trusts the fixture CA.
 	redirected.Env = append(append([]string{}, env...), "GIT_SSL_CAINFO="+certificate)
-	redirOut, redirErr := redirected.CombinedOutput()
-	t.Logf("redirected push: %s %v", redirOut, redirErr)
+	_ = redirected.Run()
 	leak, err := os.ReadFile(attackMarker)
 	if err != nil {
 		t.Fatal("the controlled repository helper never engaged")
 	}
 	if strings.Contains(string(leak), "worker-secret") {
 		t.Fatal("the engine token reached a controlled repository credential helper")
+	}
+
+	// push.default=nothing must reject a push without refspecs locally, not
+	// send the current branch with engine credentials.
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "push.default", "nothing").CombinedOutput(); err != nil {
+		t.Fatalf("set push.default: %v %s", err, out)
+	}
+	pushes := roomPushes.Load()
+	rejected := exec.Command(guardedGit, "push", "origin")
+	rejected.Dir = rec.Repo
+	rejected.Env = env
+	_ = rejected.Run()
+	if roomPushes.Load() != pushes {
+		t.Fatal("push.default=nothing reached the remote with engine credentials")
+	}
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "--unset", "push.default").CombinedOutput(); err != nil {
+		t.Fatalf("unset push.default: %v %s", err, out)
+	}
+
+	// --force-if-includes changes what a lease protects, and the engine
+	// resolves leases itself, so this form keeps its exact behavior locally.
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "update-ref", "refs/remotes/origin/main", "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("set tracking ref: %v %s", err, out)
+	}
+	pushes = roomPushes.Load()
+	leased := exec.Command(guardedGit, "push", "--force-with-lease=refs/heads/main", "--force-if-includes", "origin", "HEAD:main")
+	leased.Dir = rec.Repo
+	leased.Env = env
+	_ = leased.Run()
+	if roomPushes.Load() != pushes {
+		t.Fatal("--force-if-includes reached the remote with engine credentials")
 	}
 }
