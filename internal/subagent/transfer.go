@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness"
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionconv"
@@ -28,32 +29,34 @@ const startupLimit = harness.StartupLimit
 
 type TransferState struct {
 	// RootSeat collects a handoff for an external root without a replacement turn.
-	RootSeat          bool          `json:"rootSeat,omitempty"`
-	PausedFor         time.Duration `json:"pausedFor,omitempty"`
-	WaitFor           time.Duration `json:"waitFor,omitempty"`
-	ID                string        `json:"id"`
-	Session           string        `json:"session"`
-	Phase             string        `json:"phase"` // waiting, stopping, starting, completed, failed, cancelled
-	Profile           string        `json:"profile"`
-	Model             string        `json:"model,omitempty"`
-	PreviousProfile   string        `json:"previousProfile"`
-	PreviousModel     string        `json:"previousModel,omitempty"`
-	PreviousHarness   string        `json:"previousHarness,omitempty"`
-	PreviousDir       string        `json:"previousDir"`
-	PreviousResumable bool          `json:"previousResumable"`
-	OldTurns          int           `json:"oldTurns"`
-	Requested         time.Time     `json:"requested"`
-	Deadline          time.Time     `json:"deadline"`
-	StartupDeadline   time.Time     `json:"startupDeadline,omitempty"`
-	Ended             time.Time     `json:"ended,omitempty"`
-	Turn              int           `json:"turn,omitempty"`
-	PostID            string        `json:"postId"`
-	Posted            bool          `json:"posted,omitempty"`
-	WrittenHandoff    string        `json:"writtenHandoff,omitempty"`
-	Handoff           string        `json:"handoff,omitempty"`
-	Dir               string        `json:"dir,omitempty"`
-	Branch            string        `json:"branch,omitempty"`
-	Source            string        `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
+	RootSeat           bool                `json:"rootSeat,omitempty"`
+	Fresh              bool                `json:"fresh,omitempty"`
+	PausedFor          time.Duration       `json:"pausedFor,omitempty"`
+	WaitFor            time.Duration       `json:"waitFor,omitempty"`
+	ID                 string              `json:"id"`
+	Session            string              `json:"session"`
+	Phase              string              `json:"phase"` // waiting, stopping, starting, completed, failed, cancelled
+	Profile            string              `json:"profile"`
+	Model              string              `json:"model,omitempty"`
+	PreviousProfile    string              `json:"previousProfile"`
+	PreviousModel      string              `json:"previousModel,omitempty"`
+	PreviousHarness    string              `json:"previousHarness,omitempty"`
+	PreviousDir        string              `json:"previousDir"`
+	PreviousResumable  bool                `json:"previousResumable"`
+	PreviousRuntimePin *harnessruntime.Pin `json:"previousRuntimePin,omitempty"`
+	OldTurns           int                 `json:"oldTurns"`
+	Requested          time.Time           `json:"requested"`
+	Deadline           time.Time           `json:"deadline"`
+	StartupDeadline    time.Time           `json:"startupDeadline,omitempty"`
+	Ended              time.Time           `json:"ended,omitempty"`
+	Turn               int                 `json:"turn,omitempty"`
+	PostID             string              `json:"postId"`
+	Posted             bool                `json:"posted,omitempty"`
+	WrittenHandoff     string              `json:"writtenHandoff,omitempty"`
+	Handoff            string              `json:"handoff,omitempty"`
+	Dir                string              `json:"dir,omitempty"`
+	Branch             string              `json:"branch,omitempty"`
+	Source             string              `json:"source,omitempty"` // cooperative, transcript, native (same Pi session) or converted
 	// ConvertedSession is the target session id of a cross-harness
 	// conversion. It is saved before the file is written, so a restarted
 	// coordinator writes the same session again instead of a second one.
@@ -102,7 +105,7 @@ type TransferOptions struct {
 
 	// Fresh starts another native conversation after a completed transfer.
 	// Internal lifecycle services use this for periodic context refreshes.
-	Fresh bool `json:"-"`
+	Fresh bool `json:"fresh,omitempty"`
 
 	Profile     string `json:"profile"`
 	Model       string `json:"model,omitempty"`
@@ -137,21 +140,6 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 	if err != nil {
 		return TransferState{}, err
 	}
-	p, ok := ps.Get(opts.Profile)
-	if !ok || p.Disabled {
-		return TransferState{}, fmt.Errorf("unknown or disabled profile %q", opts.Profile)
-	}
-	candidate := *p
-	if opts.Model != "" {
-		candidate.Model = strings.TrimSpace(opts.Model)
-		candidate.Models = nil
-	}
-	if len(candidate.Model) > 256 || strings.ContainsAny(candidate.Model, "\r\n\x00") {
-		return TransferState{}, errors.New("invalid model name")
-	}
-	if err := candidate.Validate(); err != nil {
-		return TransferState{}, err
-	}
 	info, err := m.store().Resolve(ref)
 	if err != nil {
 		return TransferState{}, err
@@ -160,6 +148,24 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 	err = m.store().withLockContext(ctx, info.ID, func() error {
 		meta, err := m.store().ReadMeta(info.ID)
 		if err != nil {
+			return err
+		}
+		if opts.Profile == "" && opts.Fresh {
+			opts.Profile = meta.Profile
+		}
+		p, ok := ps.Get(opts.Profile)
+		if !ok || p.Disabled {
+			return fmt.Errorf("unknown or disabled profile %q", opts.Profile)
+		}
+		candidate := *p
+		if opts.Model != "" {
+			candidate.Model = strings.TrimSpace(opts.Model)
+			candidate.Models = nil
+		}
+		if len(candidate.Model) > 256 || strings.ContainsAny(candidate.Model, "\r\n\x00") {
+			return errors.New("invalid model name")
+		}
+		if err := candidate.Validate(); err != nil {
 			return err
 		}
 		if meta.Closing.Active() {
@@ -205,7 +211,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 		// the next target as active nor restore the previous profile.
 		supersede := opts.Fallback && meta.Transfer != nil && meta.Transfer.Phase == "starting" && meta.Transfer.Profile == meta.Profile
 		if old := meta.Transfer; old != nil {
-			same := old.Profile == opts.Profile && old.Model == candidate.Model && old.RootSeat == opts.rootSeat
+			same := old.Profile == opts.Profile && old.Model == candidate.Model && old.RootSeat == opts.rootSeat && old.Fresh == opts.Fresh
 			if old.Active() && !same && !supersede {
 				return errors.New("a transfer is already active; cancel it before choosing another model")
 			}
@@ -234,9 +240,9 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 				convertedSession = meta.Transfer.ConvertedSession
 			}
 		}
-		out = TransferState{RootSeat: opts.rootSeat, ID: token, Session: meta.ID, Phase: phase, Profile: opts.Profile, Model: candidate.Model,
+		out = TransferState{RootSeat: opts.rootSeat, Fresh: opts.Fresh, ID: token, Session: meta.ID, Phase: phase, Profile: opts.Profile, Model: candidate.Model,
 			PreviousProfile: meta.Profile, PreviousModel: meta.Model, PreviousHarness: meta.HarnessSession, PreviousDir: meta.Dir,
-			PreviousResumable: meta.Resumable, OldTurns: meta.Turns, Requested: now, WaitFor: time.Duration(opts.WaitSeconds) * time.Second,
+			PreviousResumable: meta.Resumable, PreviousRuntimePin: meta.RuntimePin, OldTurns: meta.Turns, Requested: now, WaitFor: time.Duration(opts.WaitSeconds) * time.Second,
 			Deadline: now.Add(time.Duration(opts.WaitSeconds) * time.Second), Source: source, Reason: reason,
 			ConvertedSession: convertedSession, PostID: transferPostID(token)}
 		if opts.Fallback {
@@ -254,7 +260,7 @@ func (m *Manager) requestTransfer(ctx context.Context, ref string, opts Transfer
 			// optional chain over.
 			meta.FallbackPath = nil
 		}
-		if previous := meta.Transfer; !plan.native && !plan.convert && !opts.rootSeat && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
+		if previous := meta.Transfer; !plan.native && !plan.convert && !opts.rootSeat && !opts.Fresh && previous != nil && previous.Phase == "failed" && previous.Source == "cooperative" {
 			out.WrittenHandoff, out.Handoff, out.Dir, out.Branch, out.Source = previous.WrittenHandoff, previous.WrittenHandoff, previous.Dir, previous.Branch, "cooperative"
 		}
 		// Freeze labels for records written before per-turn profile snapshots.
@@ -805,7 +811,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 			// A harness change must not keep the old harness's runtime pin; the
 			// next turn refuses a pin whose native harness differs. Clearing it
 			// here also covers a profile change that crosses harnesses (D-109).
-			if chosen.Harness != previousHarness {
+			if t.Fresh || chosen.Harness != previousHarness {
 				meta.RuntimePin = nil
 			}
 			t.Handoff = prompt // durable, so a dead worker can restart before turn creation
@@ -903,6 +909,9 @@ func (m *Manager) failTransfer(id, token string, cause error) error {
 	err := m.updateTransfer(id, token, func(meta *Meta, t *TransferState) error {
 		if t.Phase == "starting" {
 			meta.Profile, meta.Model, meta.HarnessSession, meta.Resumable, meta.Dir = t.PreviousProfile, t.PreviousModel, t.PreviousHarness, t.PreviousResumable, t.PreviousDir
+			if t.Fresh {
+				meta.RuntimePin = t.PreviousRuntimePin
+			}
 		}
 		t.Phase, t.Error, t.Ended = "failed", cause.Error(), m.transferNow()
 		return nil
