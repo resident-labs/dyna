@@ -129,7 +129,9 @@ func RunningEnvironment(ctx context.Context, id string, base []string) ([]string
 	if err != nil {
 		return nil, false
 	}
-	env, err := Environment(m, base)
+	// The status this path already read carries the running desktop's GPU
+	// variables, so the environment cannot disagree with the desktop.
+	env, err := buildEnvironment(m, base, gpuEnvForStatus(st))
 	if err != nil {
 		return nil, false
 	}
@@ -140,6 +142,14 @@ func RunningEnvironment(ctx context.Context, id string, base []string) ([]string
 func ShimDir(id string) string { return filepath.Join(Dir(id), "bin") }
 
 func Environment(m Meta, base []string) ([]string, error) {
+	// Apps follow the running desktop's GPU, whatever the setting says now;
+	// with no desktop, the next start's choice applies (D-352 review).
+	return buildEnvironment(m, base, appGPUEnv(m.SessionID))
+}
+
+// buildEnvironment is Environment for known GPU variables. The daemon calls
+// it with the desktop's own values, so it never asks itself for status.
+func buildEnvironment(m Meta, base []string, gpuEnv map[string]string) ([]string, error) {
 	shim, err := browserShims(m.SessionID, base)
 	if err != nil {
 		return nil, err
@@ -159,9 +169,9 @@ func Environment(m Meta, base []string) ([]string, error) {
 		ownerBus = envValue(base, "DBUS_SESSION_BUS_ADDRESS")
 	}
 	env := mergeEnvironment(base, map[string]string{OwnerBusKey: ownerBus, "DYNA_OWNER_WAYLAND_DISPLAY": ownerWayland, "DYNA_OWNER_DISPLAY": ownerDisplay, "WAYLAND_DISPLAY": m.WaylandDisplay, "DISPLAY": m.Display, "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "labwc", "PATH": shim + string(os.PathListSeparator) + envValue(base, "PATH")})
-	// Apps in the computer render on the configured render node, off the
-	// owner's display GPU by default (D-352).
-	env = gpuAppEnvironment(env, configuredRenderGPU())
+	// Apps in the computer render on the given node, off the owner's display
+	// GPU by default (D-352).
+	env = mergeGPUEnvironment(env, gpuEnv)
 	// Every launch path that builds an app's environment here (open, run, env,
 	// the browser) points it at the computer's own session bus.
 	env = mergeEnvironment(env, privateBusEnvironment(m.SessionID))

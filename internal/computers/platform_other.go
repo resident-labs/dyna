@@ -27,8 +27,11 @@ type renderGPU struct {
 	Vendor            uint32
 }
 
-// configuredRenderGPU is the no-GPU answer on systems without Dyna computers.
-func configuredRenderGPU() renderGPU { return renderGPU{} }
+// appGPUEnv is the no-GPU answer on systems without Dyna computers.
+func appGPUEnv(string) map[string]string { return nil }
 
-// gpuAppEnvironment leaves the environment unchanged off Linux.
-func gpuAppEnvironment(base []string, _ renderGPU) []string { return base }
+// gpuEnvForStatus is the no-GPU answer off Linux.
+func gpuEnvForStatus(st Status) map[string]string { return nil }
+
+// mergeGPUEnvironment leaves the environment unchanged off Linux.
+func mergeGPUEnvironment(base []string, _ map[string]string) []string { return base }
