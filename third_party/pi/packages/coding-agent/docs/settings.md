@@ -72,6 +72,7 @@ CLI tool options override this setting for one invocation. `--tools` with only `
 |---|---|---|---|
 | `compaction.enabled` | boolean | `true` | Enable automatic compaction. |
 | `compaction.reserveTokens` | number | `16384` | Free context tokens below which automatic compaction starts. |
+| `compaction.triggerTokens` | number | unset | Absolute context-token count that starts automatic compaction, ahead of the reserve-based limit; compaction starts above `min(triggerTokens, contextWindow - reserveTokens)`. Also accepted per model under `compaction.modelOverrides`. |
 | `compaction.keepRecentTokens` | number | `20000` | Recent tokens retained without summarization. |
 | `compaction.modelOverrides` | object | None | Per-model token settings keyed by exact `provider/modelId`. |
 
