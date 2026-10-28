@@ -319,9 +319,6 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 			return p, pin, err
 		}
 		env[piAgentDirKey] = active.Home
-		if !versionAtLeast(b.Version, "1.3.0") {
-			env["DYNA_PI_LEGACY_COMPACT"] = "1"
-		}
 	}
 	if pinsCredentials(a.Harness) {
 		env[pinnedSecretKey] = active.Home
