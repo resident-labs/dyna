@@ -374,7 +374,9 @@ func TestStampedTarballWithoutBuildInstallsItsBuild(t *testing.T) {
 	}
 	sum := sha512.Sum512(data)
 	oldURL, oldAsset, oldIntegrity, oldBuild := piForkURL, piForkAsset, piForkIntegrity, piForkBuild
-	t.Cleanup(func() { piForkURL, piForkAsset, piForkIntegrity, piForkBuild = oldURL, oldAsset, oldIntegrity, oldBuild })
+	t.Cleanup(func() {
+		piForkURL, piForkAsset, piForkIntegrity, piForkBuild = oldURL, oldAsset, oldIntegrity, oldBuild
+	})
 	piForkURL, piForkAsset, piForkIntegrity, piForkBuild = "", path, "sha512-"+base64.StdEncoding.EncodeToString(sum[:]), ""
 	m := manager(t)
 	t.Setenv(piForkTarballEnv, "")
