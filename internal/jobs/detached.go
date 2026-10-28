@@ -198,9 +198,14 @@ type NodeLostError struct {
 	Node string
 	// Gone is set when the node answered but the job has no unit and no exit
 	// record; otherwise the node did not answer for After.
-	Gone  bool
-	After time.Duration
-	Cause error
+	Gone bool
+	// Missing is set when the job has no folder on the node either: the
+	// unit was never launched. A run that reads this can launch the job
+	// fresh - the launch is idempotent, because every started unit has a
+	// folder.
+	Missing bool
+	After   time.Duration
+	Cause   error
 }
 
 func (e *NodeLostError) Error() string {
@@ -509,10 +514,14 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 			} else {
 				p.finish(w, &DetachedExit{Code: frame.Code})
 			}
-		case UnitGone, UnitMissing:
+		case UnitGone:
 			// A check that was launched has a folder. Without it, and without an
 			// exit record, nothing can say how the check ended.
 			p.finish(w, &NodeLostError{Node: p.x.Node.Name, Gone: true})
+		case UnitMissing:
+			// No folder means no engine ever launched the check: the unit never
+			// ran, and a restart may launch it afresh.
+			p.finish(w, &NodeLostError{Node: p.x.Node.Name, Gone: true, Missing: true})
 		}
 	}
 }
