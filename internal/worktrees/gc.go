@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +67,8 @@ type GCOptions struct {
 	// spent session cleanup's whole time budget. Sessions and running
 	// workflows are still read again before each removal.
 	history *runHistory
+	// beforeRemove lets tests observe each removal worker; nil in production.
+	beforeRemove func(path string)
 }
 
 // ManagedRoot is shared by session and workflow worktrees.
@@ -498,6 +501,18 @@ func scanBlocks(ctx context.Context, repo string, opts *GCOptions, blocks []stri
 	return trees, nil
 }
 
+// clone copies the cached history so a worker can extend it without a lock.
+func (h *runHistory) clone() *runHistory {
+	if h == nil {
+		return nil
+	}
+	c := &runHistory{read: maps.Clone(h.read), refs: make(map[string][]ownerRef, len(h.refs))}
+	for k, v := range h.refs {
+		c.refs[k] = slices.Clone(v)
+	}
+	return c
+}
+
 // scanParallelism bounds concurrent per-tree git and file inspection.
 const scanParallelism = 8
 
@@ -505,56 +520,54 @@ const scanParallelism = 8
 func inspectTree(ctx context.Context, repo, defaultRef string, opts *GCOptions, tp *Tree) {
 	t := *tp
 	defer func() { *tp = t }()
-	{
-		if info, err := os.Lstat(t.Path); err != nil {
-			t.protected = "worktree is missing or unreadable"
-		} else {
-			// The directory's own mtime is a lower bound on the newest file
-			// activity. Recent unknown trees cannot be removal candidates yet.
-			t.touched = info.ModTime()
-			t.Age = max(time.Since(t.touched), 0)
-			_, status, _, e := Fingerprint(ctx, t.Path, t.head)
-			t.Dirty = status != ""
-			if status != "" {
-				t.DirtyFiles = strings.Split(status, "\n")
+	if info, err := os.Lstat(t.Path); err != nil {
+		t.protected = "worktree is missing or unreadable"
+	} else {
+		// The directory's own mtime is a lower bound on the newest file
+		// activity. Recent unknown trees cannot be removal candidates yet.
+		t.touched = info.ModTime()
+		t.Age = max(time.Since(t.touched), 0)
+		_, status, _, e := Fingerprint(ctx, t.Path, t.head)
+		t.Dirty = status != ""
+		if status != "" {
+			t.DirtyFiles = strings.Split(status, "\n")
+		}
+		t.Ahead = -1
+		if defaultRef != "" {
+			if count, err := gitOutput(ctx, repo, "rev-list", "--count", t.head, "--not", defaultRef); err == nil {
+				t.Ahead, _ = strconv.Atoi(strings.TrimSpace(string(count)))
 			}
-			t.Ahead = -1
-			if defaultRef != "" {
-				if count, err := gitOutput(ctx, repo, "rev-list", "--count", t.head, "--not", defaultRef); err == nil {
-					t.Ahead, _ = strconv.Atoi(strings.TrimSpace(string(count)))
-				}
+		}
+		if e != nil {
+			t.protected = "cannot inspect git status: " + e.Error()
+			t.Dirty = true
+		}
+		if defaultRef != "" {
+			_, e = gitOutput(ctx, repo, "merge-base", "--is-ancestor", t.head, defaultRef)
+			t.Merged = e == nil
+		}
+		if usageNeeded(t, opts) {
+			size, touched, walkErr := treeUsage(ctx, t.Path)
+			t.Size, t.touched = size, touched
+			if walkErr != nil {
+				t.protected = "cannot inspect all worktree files: " + walkErr.Error()
 			}
-			if e != nil {
-				t.protected = "cannot inspect git status: " + e.Error()
-				t.Dirty = true
-			}
-			if defaultRef != "" {
-				_, e = gitOutput(ctx, repo, "merge-base", "--is-ancestor", t.head, defaultRef)
-				t.Merged = e == nil
-			}
-			if usageNeeded(t, opts) {
-				size, touched, walkErr := treeUsage(ctx, t.Path)
-				t.Size, t.touched = size, touched
-				if walkErr != nil {
-					t.protected = "cannot inspect all worktree files: " + walkErr.Error()
-				}
-				// Git metadata lives outside the worktree; it records checkout and commit activity.
-				gitDir, gitErr := gitOutput(ctx, t.Path, "rev-parse", "--absolute-git-dir")
-				if gitErr != nil {
+			// Git metadata lives outside the worktree; it records checkout and commit activity.
+			gitDir, gitErr := gitOutput(ctx, t.Path, "rev-parse", "--absolute-git-dir")
+			if gitErr != nil {
+				t.protected = "cannot inspect git metadata"
+			} else {
+				_, mt, e := treeUsage(ctx, strings.TrimSpace(string(gitDir)))
+				if e != nil {
 					t.protected = "cannot inspect git metadata"
-				} else {
-					_, mt, e := treeUsage(ctx, strings.TrimSpace(string(gitDir)))
-					if e != nil {
-						t.protected = "cannot inspect git metadata"
-					}
-					if mt.After(t.touched) {
-						t.touched = mt
-					}
 				}
-				t.Age = time.Since(t.touched)
-				if t.Age < 0 {
-					t.Age = 0
+				if mt.After(t.touched) {
+					t.touched = mt
 				}
+			}
+			t.Age = time.Since(t.touched)
+			if t.Age < 0 {
+				t.Age = 0
 			}
 		}
 	}
@@ -635,6 +648,9 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 		t.Action, t.Reason = "kept", reason
 		return t
 	}
+	// Rechecks above run in parallel; Git changes the shared worktree list one at a time.
+	removeMu.Lock()
+	defer removeMu.Unlock()
 	if out, e := gitOutput(ctx, repo, "worktree", "remove", t.Path); e != nil {
 		t.Action, t.Reason = "kept", fmt.Sprintf("git refused removal: %v: %s", e, strings.TrimSpace(string(out)))
 		return t
@@ -645,6 +661,9 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 	}
 	return t
 }
+
+// removeMu serializes the final Git removal and registry update across workers.
+var removeMu sync.Mutex
 
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second
@@ -712,6 +731,7 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		closed = SessionClosed
 	}
 	result := make([]Tree, 0, len(trees))
+	var pending []int
 	for _, t := range trees {
 		if opts.Session != "" && !ownedBy(t, opts.Session) {
 			continue
@@ -721,10 +741,33 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		}
 		t = decide(t, closed)
 		if t.Action == "would remove" && !opts.DryRun {
-			t = remove(ctx, repo, t, opts.history, closed)
+			pending = append(pending, len(result))
 		}
 		result = append(result, t)
 	}
+	// Each removal rereads ownership, status and process use right before it
+	// removes its own tree, so rechecks of different trees can overlap. Workers
+	// keep their own copy of the run history because it is not safe to share.
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(scanParallelism, len(pending)) {
+		wg.Add(1)
+		history := opts.history.clone()
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if opts.beforeRemove != nil {
+					opts.beforeRemove(result[i].Path)
+				}
+				result[i] = remove(ctx, repo, result[i], history, closed)
+			}
+		}()
+	}
+	for _, i := range pending {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 	if !opts.DryRun {
 		// Prune only drops metadata of missing trees, takes milliseconds, and
 		// runs again on the next cleanup. A spent cleanup budget must not fail it.
