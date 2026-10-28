@@ -67,7 +67,7 @@ const dynaMCPName = "dyna"
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
 // Version 11: Pi's MCP servers carry a request timeout and exposure.
 // Version 12: skills are a global catalog and no longer enter a generation.
-const generationInputsVersion = 13
+const generationInputsVersion = 14
 
 type generationInputs struct {
 	NativeFeatures                                 nativeFeaturePolicy
@@ -309,11 +309,6 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 	}
 	if h == "pi" || a.ConfigFile != "" {
 		if err = r.recordGenerationView(h, home, dir, true); err != nil {
-			return err
-		}
-	}
-	if h == "pi" {
-		if err = publishGenerationFile(dir, "pi-mcp.json", home, "mcp.json"); err != nil {
 			return err
 		}
 	}

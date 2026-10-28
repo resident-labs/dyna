@@ -33,6 +33,9 @@ export interface Args {
   sessionId?: string;
   fork?: string;
   sessionDir?: string;
+  settings?: string;
+  mcpConfig?: string;
+  modelsFile?: string;
   compactionTriggerTokens?: number;
   models?: string[];
   tools?: string[];
@@ -160,6 +163,12 @@ export function parseArgs(args: string[]): Args {
       result.fork = args[++i];
     } else if (arg === "--session-dir" && i + 1 < args.length) {
       result.sessionDir = args[++i];
+    } else if (arg === "--settings" && i + 1 < args.length) {
+      result.settings = args[++i];
+    } else if (arg === "--mcp-config" && i + 1 < args.length) {
+      result.mcpConfig = args[++i];
+    } else if (arg === "--models-file" && i + 1 < args.length) {
+      result.modelsFile = args[++i];
     } else if (arg === "--compaction-trigger-tokens" && i + 1 < args.length) {
       const value = Number(args[++i]);
       if (!Number.isInteger(value) || value < 0) {
@@ -377,6 +386,9 @@ ${chalk.bold("Options:")}
   --session-id <id>              Use exact project session ID, creating it if missing
   --fork <path|id>               Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup
+  --settings <file>              Replace the agent directory's settings.json for this process
+  --mcp-config <file>            Replace the agent directory's mcp.json for this process
+  --models-file <file>           Replace the agent directory's models.json for this process
   --no-session                   Don't save session (ephemeral)
   --name, -n <name>              Set session display name
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
