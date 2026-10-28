@@ -125,6 +125,7 @@
       <button class="dm-threads threads" class:on={threadsOpen} aria-expanded={threadsOpen} aria-label="Threads" title="Threads" onclick={onthreads}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg>{#if threadCount}<b>{threadCount}</b>{/if}</button>
       {/if}
     {:else if view === 'runs' && openRun}
+      <div class="run-crumbs">
       <button class="crumb" onclick={oncloserun}><span class="hash">#</span>runs</button>
       <span class="trail">
         {#each runTrail as m (m.id)}
@@ -133,7 +134,8 @@
         {/each}
       </span>
       <span class="slash" aria-hidden="true">/</span>
-      <span class="title">{runDetail?.run?.name ?? openRun}</span>
+      <span class="run-name" title={runDetail?.run?.name ?? openRun}>{runDetail?.run?.name ?? openRun}</span>
+      </div>
     {:else if workRow}
       <span class="title" title={room.repo}><span class="hash">#</span><span class="name">{workRow.label}</span></span>
       {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={onview} /></div>{/if}
@@ -212,13 +214,16 @@
   @media (hover: hover) {
     .crumb:hover { color: var(--ink); }
   }
+  .run-crumbs { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; white-space: nowrap; }
+  .run-crumbs .crumb, .run-crumbs .slash { flex: none; }
+  .run-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 600; }
   .slash { color: var(--faint); }
   .trail { display: contents; }
   .dm-crumb { max-width: 140px; }
   .who { display: inline-flex; align-items: center; gap: 8px; }
   .chip { font-size: 12px; color: var(--muted); background: var(--raise); border-radius: 4px; padding: 1px 7px; }
   .spacer { flex: 1; }
-  .meta { color: var(--faint); font-size: 13px; white-space: nowrap; }
+  .meta { color: var(--faint); font-size: 13px; white-space: nowrap; flex: none; }
   .meta em { font-style: normal; color: var(--gold); }
   .icon { color: var(--muted); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
@@ -260,6 +265,8 @@
        first and ends in an ellipsis on the narrowest phones. */
     .title, .crumb { min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .trail { gap: 4px; }
+    .run-crumbs { gap: 4px; }
+    .run-crumbs .trail { display: none; }
     .crumb { flex: 0 1 auto; max-width: 40%; }
     /* A phone shows only the nearest parent of the breadcrumb. In a session,
        its arrow replaces the room arrow and goes up one level. */
