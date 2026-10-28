@@ -17,7 +17,7 @@ func TestPrivateRuntimeUpdatePublishesBeforeSelection(t *testing.T) {
 	m := a.Bundles
 	t.Cleanup(func() { _ = removeBundle(m.Root) })
 	m.Run = fixtureInstall
-	old := install(t, m, "pi", "1.1.0")
+	old := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
