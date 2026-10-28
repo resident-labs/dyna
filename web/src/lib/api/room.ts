@@ -17,6 +17,10 @@ export interface Room {
   // checkIn is the room's own parent check-in cadence, as typed: a duration
   // such as 30m, or off. Empty uses the hook's global interval.
   checkIn?: string
+  // limits are the room's resource slice limits, as typed: a size such as
+  // 2G for memory, a count such as 512 for tasks, or off. Empty uses the
+  // machine default.
+  limits?: RoomLimits
   lastActivity: string
   unread: number
   running: number
@@ -25,6 +29,23 @@ export interface Room {
   pinOrder: number
   archived: boolean
   paused?: boolean
+}
+
+// RoomLimits is roomsvc.RoomLimits: one limit per field, as typed.
+export interface RoomLimits {
+  memoryHigh?: string
+  memoryMax?: string
+  tasksMax?: string
+}
+
+// RoomLimitField names one of a room's limits, as the engine call takes it.
+export type RoomLimitField = keyof RoomLimits
+
+// SetRoomLimitResult is roomsvc.SetRoomLimitResult: the saved value is the
+// source of truth, and applyWarning names why the live slice did not pick it
+// up, empty when it did.
+export interface SetRoomLimitResult {
+  applyWarning?: string
 }
 
 // Shot and Check are room.Shot and room.Check, the preview of an HTML card.
