@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"strings"
+
 	"golang.org/x/mod/semver"
 )
 
@@ -26,10 +28,15 @@ func supportedVersionRange(harness, version string) (bool, string) {
 }
 
 // versionAtLeast compares exact versions. Semantic versions compare by
-// precedence; vendor date formats that semver rejects compare as strings.
+// precedence, except a Dyna fork prerelease satisfies its upstream base
+// version. Vendor date formats that semver rejects compare as strings.
 func versionAtLeast(version, min string) bool {
 	if semver.IsValid("v"+version) && semver.IsValid("v"+min) {
-		return semver.Compare("v"+version, "v"+min) >= 0
+		if semver.Compare("v"+version, "v"+min) >= 0 {
+			return true
+		}
+		base, suffix, fork := strings.Cut(version, "-")
+		return fork && strings.HasPrefix(suffix, "dyna.") && semver.Compare("v"+base, "v"+min) >= 0
 	}
 	return version >= min
 }

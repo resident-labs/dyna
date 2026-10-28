@@ -30,6 +30,18 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 	}
 }
 
+func TestPiForkVersionSatisfiesUpstreamMinimum(t *testing.T) {
+	if !versionAtLeast("1.4.0-dyna.1", "1.4.0") {
+		t.Fatal("Dyna prerelease sorts below its upstream base version")
+	}
+	if ok, reason := supportedVersionRange("pi", "1.4.0-dyna.1"); !ok {
+		t.Fatalf("supported Pi fork was rejected: %s", reason)
+	}
+	if versionAtLeast("1.2.9-dyna.1", "1.3.0") {
+		t.Fatal("Dyna suffix raised an older upstream base version")
+	}
+}
+
 // The latest-version lookup respects the same ranges, so the Harnesses page
 // never recommends a version Dyna refuses to install.
 func TestRecommendedVersionsRespectSupportedRange(t *testing.T) {

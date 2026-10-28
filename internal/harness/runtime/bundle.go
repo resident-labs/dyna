@@ -4,6 +4,8 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -500,10 +502,69 @@ func (m *BundleManager) Rollback(ctx context.Context, harness string) (Bundle, e
 	return b, nil
 }
 
+// installPiForkNPM installs Dyna's single tarball after checking its SHA-512.
+// Release builds download the stamped asset. Development builds use the local
+// absolute path in DYNA_PI_TARBALL and record its computed integrity.
+func installPiForkNPM(ctx context.Context, m *BundleManager, staging string, env []string, a RuntimeAdapter) (InstallArtifact, error) {
+	tarball := os.Getenv(piForkTarballEnv)
+	expected := ""
+	if piForkURL != "" {
+		if piForkAsset == "" || filepath.Base(piForkAsset) != piForkAsset || !recommendedIntegrity(piForkIntegrity) {
+			return InstallArtifact{}, errors.New("Pi fork release metadata is incomplete")
+		}
+		tarball = filepath.Join(staging, piForkAsset)
+		expected = piForkIntegrity
+		args := []string{"curl", "--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", "134217728", "--output", tarball, piForkURL}
+		if RunBundleCommand(ctx, m, args, env) != nil {
+			return InstallArtifact{}, errors.New("Pi fork release download failed")
+		}
+	} else {
+		if tarball == "" {
+			return InstallArtifact{}, errors.New("development Pi fork tarball is missing; run scripts/pi-pack.sh <output-tarball> and set DYNA_PI_TARBALL to its absolute path")
+		}
+		if !filepath.IsAbs(tarball) || filepath.Clean(tarball) != tarball {
+			return InstallArtifact{}, errors.New("DYNA_PI_TARBALL must name an absolute, clean path")
+		}
+	}
+	data, err := os.ReadFile(tarball)
+	if err != nil {
+		return InstallArtifact{}, errors.New("cannot read the Pi fork tarball")
+	}
+	sum := sha512.Sum512(data)
+	integrity := "sha512-" + base64.StdEncoding.EncodeToString(sum[:])
+	if expected != "" && integrity != expected {
+		return InstallArtifact{}, errors.New("Pi fork tarball integrity does not match this Dyna release")
+	}
+	args := []string{"npm", "install", "--global", "--prefix", staging, "--package-lock", "--ignore-scripts", tarball}
+	if RunBundleCommand(ctx, m, args, env) != nil {
+		return InstallArtifact{}, errors.New("private bundle installation failed")
+	}
+	manifestPath := filepath.Join(staging, "lib", "node_modules", piNPMPackage, "package.json")
+	data, err = os.ReadFile(manifestPath)
+	if err != nil {
+		return InstallArtifact{}, errors.New("installed Pi fork package metadata is missing")
+	}
+	var manifest struct {
+		Name     string `json:"name"`
+		Version  string `json:"version"`
+		DynaFork int    `json:"dynaFork"`
+	}
+	if json.Unmarshal(data, &manifest) != nil || manifest.Name != piNPMPackage || manifest.Version != piForkVersion {
+		return InstallArtifact{}, errors.New("installed Pi fork package has the wrong identity or version")
+	}
+	if manifest.DynaFork < minimumPiForkLevel {
+		return InstallArtifact{}, errors.New("installed Pi package does not meet the required Dyna fork level")
+	}
+	return InstallArtifact{filepath.Join("bin", a.Binary), piNPMPackage, integrity}, nil
+}
+
 // installNPM owns npm installation, script policy, and exact integrity metadata.
 func installNPM(ctx context.Context, m *BundleManager, staging, version string, env []string, a RuntimeAdapter) (InstallArtifact, error) {
 	if a.NPMPackage == "" {
 		return InstallArtifact{}, errors.New("no exact private install recipe is verified for this harness")
+	}
+	if a.distribution == distributionFork && version == piForkVersion {
+		return installPiForkNPM(ctx, m, staging, env, a)
 	}
 	args := []string{"npm", "install", "--global", "--prefix", staging, "--package-lock"}
 	// Kimi's postinstall can rename a legacy kimi shim elsewhere on PATH;
