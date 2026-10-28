@@ -104,6 +104,8 @@ type Manager struct {
 
 	// ClosePRs hands live PR roles to the heir through the PR service.
 	ClosePRs func(context.Context, Info, Info) ([]sessionclose.Outcome, error)
+	// DeliverClosedForward routes a stored forwarded post through the root seat.
+	DeliverClosedForward func(context.Context, room.Message) error
 
 	// HandOffTerminalRequests tells each new holder, or the owner, about the
 	// terminal requests a closing session held.
@@ -1179,6 +1181,9 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 				return info, err
 			}
 		}
+		if err := m.forwardClosedInbox(ctx, info); err != nil {
+			return info, err
+		}
 		return info, m.withdrawClosedQuestions(info)
 	}
 	closedForCleanup := false
@@ -1305,7 +1310,12 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 			}
 		}
 	}()
-	defer unlock()
+	locked := true
+	defer func() {
+		if locked {
+			unlock()
+		}
+	}()
 	fresh, err := store.ReadMeta(info.ID)
 	if err != nil {
 		return info, err
@@ -1354,6 +1364,12 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		}
 	}
 	summary = append(summary, children...)
+	closedForCleanup = true
+	unlock()
+	locked = false
+	if err := m.forwardClosedInbox(ctx, info); err != nil {
+		return info, fmt.Errorf("forward pending posts: %w", err)
+	}
 	if err := m.stopHarnessProcesses(ctx, info.ID); err != nil {
 		summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureProcessCleanup})
 	}

@@ -75,6 +75,7 @@ func New(rooms *room.Store, sessions *subagent.Manager) *Service {
 	}
 	sessions.Rooms = rooms
 	s := &Service{Rooms: rooms, Sessions: sessions}
+	sessions.DeliverClosedForward = s.DeliverClosedForward
 	// Keep the repairing store and the configured manager dependencies when reporting.
 	if sessions.Store.ReportRepaired == nil {
 		sessions.Store.ReportRepaired = func(store *subagent.Store, id string, turn int) {

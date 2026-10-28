@@ -113,7 +113,7 @@ export interface MemberProfile {
 }
 
 // QueueState is subagent.QueueState.
-export type QueueState = 'waiting' | 'delivering' | 'delivered' | 'cancelled' | 'dismissed'
+export type QueueState = 'waiting' | 'delivering' | 'delivered' | 'forwarded' | 'cancelled' | 'dismissed'
 
 // QueueOrigin is subagent.QueueOrigin.
 export interface QueueOrigin {
@@ -134,6 +134,7 @@ export interface QueueItem {
   turn: number
   state: QueueState
   cancellable: boolean
+  forwardedTo?: string
 }
 
 // TransferState is subagent.TransferState, a model transfer of one session.

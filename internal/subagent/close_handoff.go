@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store"
@@ -143,6 +144,80 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]sessionc
 		}
 	}
 	return summary, errors.Join(errs...)
+}
+
+// forwardClosedInbox forwards each unread post once, without changing its
+// original delivery rows. A deterministic ID makes a retry after append safe.
+func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
+	queue, err := m.store().SessionQueue(m.rooms(), source.ID)
+	if err != nil {
+		return err
+	}
+	var forwards []room.Message
+	err = m.store().withLockContext(ctx, source.ID, func() error {
+		meta, err := m.store().ReadMeta(source.ID)
+		if err != nil {
+			return err
+		}
+		if meta.Closed.IsZero() {
+			return nil
+		}
+		if meta.ForwardedPosts == nil {
+			meta.ForwardedPosts = map[string]string{}
+		}
+		for _, item := range queue {
+			if item.State != QueueWaiting && item.State != QueueDelivering && (item.State != QueueForwarded || meta.ForwardedPosts[item.ID] == "") {
+				continue
+			}
+			original, err := m.rooms().Message(meta.RoomID, item.ID)
+			if err != nil {
+				return err
+			}
+			id := hashPostID("close-inbox:" + meta.ID + ":" + item.ID)
+			forwarded, err := m.rooms().Message(meta.RoomID, id)
+			if errors.Is(err, room.ErrPostNotFound) {
+				heir, err := m.closeHeir(Info{Meta: meta})
+				if err != nil {
+					return err
+				}
+				to := meta.Room
+				var bound map[string]string
+				if heir.ID != "" && heir.Role != RoleRoot {
+					to = heir.Address()
+					bound = map[string]string{to: heir.ID}
+				}
+				forwarded, err = m.rooms().Post(meta.RoomID, room.PostInput{
+					ID: id, From: room.EngineSender, To: []string{to}, SessionIDs: bound,
+					Wake: original.Wake, NeedsRoot: to == meta.Room,
+					Forward: room.NewForward(original),
+				})
+				if err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+			forwards = append(forwards, forwarded)
+			if meta.ForwardedPosts[item.ID] == "" {
+				meta.ForwardedPosts[item.ID] = id
+				if err := m.store().writeMeta(meta); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if m.DeliverClosedForward != nil {
+		for _, post := range forwards {
+			if err := m.DeliverClosedForward(ctx, post); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // failedOutcome reports whether a list already names a failed step, so the

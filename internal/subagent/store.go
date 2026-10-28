@@ -108,6 +108,8 @@ type Meta struct {
 	Room                 string               `json:"room,omitempty"`
 	// ClosedPosts excludes address reuse while this exact session was closed.
 	ClosedPosts map[string]bool `json:"closedPosts,omitempty"`
+	// ForwardedPosts maps handed-over input to its new post ID.
+	ForwardedPosts map[string]string `json:"forwardedPosts,omitempty"`
 	// RoomCursor is the byte offset in this session's room message log up
 	// to which posts addressed to this session have been accounted for at a turn boundary.
 	RoomCursor int64 `json:"roomCursor,omitempty"`
