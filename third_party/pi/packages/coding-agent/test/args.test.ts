@@ -21,6 +21,20 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--json flag", () => {
+		test("parses --json beside --list-models", () => {
+			const result = parseArgs(["--list-models", "--json"]);
+			expect(result.listModels).toBe(true);
+			expect(result.json).toBe(true);
+		});
+
+		test("--json without --list-models is an error", () => {
+			const result = parseArgs(["--json"]);
+			expect(result.json).toBe(true);
+			expect(result.diagnostics).toContainEqual({ type: "error", message: "--json requires --list-models" });
+		});
+	});
+
 	describe("--help flag", () => {
 		test("parses --help flag", () => {
 			const result = parseArgs(["--help"]);

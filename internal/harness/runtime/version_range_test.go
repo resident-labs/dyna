@@ -13,7 +13,9 @@ import (
 func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 	m := manager(t)
 	for _, tc := range []struct{ harness, version, reason string }{
-		{"pi", "1.2.9", "1.3.0"},
+		{"pi", "1.2.9", "Dyna's Pi fork"},
+		{"pi", "1.4.0", "Dyna's Pi fork"},
+		{"pi", "1.4.0-dyna.1", "Dyna's Pi fork"},
 	} {
 		_, err := m.Install(context.Background(), tc.harness, tc.version)
 		if err == nil || !strings.Contains(err.Error(), tc.reason) {
@@ -21,7 +23,7 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ harness, version string }{
-		{"pi", "1.3.0"},
+		{"pi", piForkVersion},
 		{"claude-code", "0.1.0"},
 	} {
 		if _, err := m.Install(context.Background(), tc.harness, tc.version); err != nil {
@@ -31,13 +33,16 @@ func TestInstallRejectsVersionsOutsideSupportedRange(t *testing.T) {
 }
 
 func TestPiForkVersionSatisfiesUpstreamMinimum(t *testing.T) {
-	if !versionAtLeast("1.4.0-dyna.1", "1.4.0") {
+	if !versionAtLeast(piForkVersion, "1.4.0") {
 		t.Fatal("Dyna prerelease sorts below its upstream base version")
 	}
-	if ok, reason := supportedVersionRange("pi", "1.4.0-dyna.1"); !ok {
+	if ok, reason := supportedVersionRange("pi", piForkVersion); !ok {
 		t.Fatalf("supported Pi fork was rejected: %s", reason)
 	}
-	if versionAtLeast("1.2.9-dyna.1", "1.3.0") {
+	if ok, reason := supportedVersionRange("pi", "1.4.0"); ok {
+		t.Fatalf("upstream npm Pi accepted: %s", reason)
+	}
+	if versionAtLeast("1.2.9-dyna.2", "1.3.0") {
 		t.Fatal("Dyna suffix raised an older upstream base version")
 	}
 }
@@ -46,7 +51,7 @@ func TestPiForkVersionSatisfiesUpstreamMinimum(t *testing.T) {
 // never recommends a version Dyna refuses to install.
 func TestRecommendedVersionsRespectSupportedRange(t *testing.T) {
 	for _, tc := range []struct{ harness, pkg, version, reason string }{
-		{"pi", piNPMPackage, "1.2.9", "1.3.0"},
+		{"pi", piNPMPackage, "1.2.9", "fork"},
 	} {
 		r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(*http.Request) (*http.Response, error) {
 			return recommendedResponse(200, recommendedMetadata(tc.pkg, tc.version)), nil

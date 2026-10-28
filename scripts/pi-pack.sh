@@ -9,7 +9,7 @@ if [ "$#" -ne 1 ]; then
 fi
 repo_root=$(git rev-parse --show-toplevel)
 vendor="$repo_root/third_party/pi"
-version="1.4.0-dyna.1"
+version="1.4.0-dyna.2"
 output=$1
 if [[ "$output" != /* ]]; then
   output="$repo_root/$output"
@@ -100,7 +100,7 @@ for (const file of files) {
   const path = join(stage, file);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   manifest.version = version;
-  manifest.dynaFork = 1;
+  manifest.dynaFork = 2;
   if (file !== "package.json") {
     // Match how upstream publishes its internal packages: no dependencies of
     // their own. npm treats bundleDependencies as complete and never installs
@@ -186,6 +186,33 @@ const bin = execFileSync(process.argv[2] + "/bin/pi", ["--version"], { encoding:
 if (bin !== version) {
   console.error("packed pi --version printed " + bin + ", expected " + version);
   process.exit(1);
+}
+
+// Dyna's model discovery reads this exact offline output.
+const listed = spawnSync(process.argv[2] + "/bin/pi", ["--offline", "--list-models", "--json"], { encoding: "utf8", maxBuffer: 1 << 24 });
+if (listed.status !== 0) {
+  console.error("pi --list-models --json exited with " + listed.status);
+  process.exit(1);
+}
+const entries = JSON.parse(listed.stdout);
+if (!Array.isArray(entries) || entries.length === 0) {
+  console.error("pi --list-models --json did not print a JSON array");
+  process.exit(1);
+}
+for (const entry of entries) {
+  if (
+    typeof entry.provider !== "string" ||
+    typeof entry.id !== "string" ||
+    typeof entry.name !== "string" ||
+    typeof entry.contextWindow !== "number" ||
+    typeof entry.maxTokens !== "number" ||
+    typeof entry.reasoning !== "boolean" ||
+    !Array.isArray(entry.thinkingLevels) ||
+    entry.thinkingLevels.some((level) => typeof level !== "string")
+  ) {
+    console.error("pi --list-models --json printed a malformed entry: " + JSON.stringify(entry));
+    process.exit(1);
+  }
 }
 
 // One codemode script with no network: this is the exact path that broke when
