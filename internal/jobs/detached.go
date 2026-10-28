@@ -143,18 +143,28 @@ done
 `
 
 // StopScript runs on the node. It takes the check's folder and its unit
-// name, asks the check to stop, and kills what is left.
+// name, asks the check to stop, and kills what is left. A check that recorded
+// its own exit, with the user manager confirming its unit down, is left
+// alone: the forced calls would only restate what the manager already
+// answered, and each is a round trip the run's tail pays per check.
 const StopScript = UnitStoppedFunction + `d=$1; unit=$2
-timeout 20s systemctl --user stop "$unit" >/dev/null 2>&1 || true
-systemctl --user kill --signal=KILL "$unit" >/dev/null 2>&1 || true
-systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
 if [ -s "$d/pid" ]; then
   pid=$(cat "$d/pid")
   kill -TERM -- "-$pid" 2>/dev/null || true
   for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 -- "-$pid" 2>/dev/null || break; sleep 1; done
   kill -KILL -- "-$pid" 2>/dev/null || true
   if kill -0 -- "-$pid" 2>/dev/null; then echo "check process group is still running" >&2; exit 1; fi
+elif [ -s "$d/exit.json" ] && unit_stopped "$unit"; then
+  # A check that recorded its own exit, with the user manager confirming its
+  # unit down, is gone: the forced stop, kill and reset calls would only
+  # restate it, and each is a round trip the run's tail pays per check. Every
+  # other case - an active or restarted unit, a missing exit record, or a
+  # manager that does not answer - takes the forced stop below.
+  :
 elif command -v systemctl >/dev/null 2>&1; then
+  timeout 20s systemctl --user stop "$unit" >/dev/null 2>&1 || true
+  systemctl --user kill --signal=KILL "$unit" >/dev/null 2>&1 || true
+  systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
   # The stop counts only when the user manager says the unit is down. A manager
   # that does not answer proves nothing, so that fails the call too.
   unit_stopped "$unit" || { echo "unit $unit is not confirmed stopped" >&2; exit 1; }

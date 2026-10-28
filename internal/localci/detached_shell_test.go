@@ -192,7 +192,7 @@ func teardownStubs(t *testing.T) string {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
 		"docker":    "#!/bin/sh\ncase \"$1\" in info) exit 0 ;; rm) exit ${DOCKER_RM_EXIT:-0} ;; ps) printf '%s' \"$DOCKER_PS_OUT\"; exit ${DOCKER_PS_EXIT:-0} ;; esac\nexit 0\n",
-		"systemctl": "#!/bin/sh\ncase \"$2\" in show) [ \"${SYSTEMCTL_SHOW_EXIT:-0}\" = 0 ] || exit \"$SYSTEMCTL_SHOW_EXIT\"; echo \"${UNIT_STATE:-inactive}\"; exit 0 ;; *) exit 0 ;; esac\n",
+		"systemctl": "#!/bin/sh\ncase \"$2\" in show) [ \"${SYSTEMCTL_SHOW_EXIT:-0}\" = 0 ] || exit \"$SYSTEMCTL_SHOW_EXIT\"; echo \"${UNIT_STATE:-inactive}\"; exit 0 ;; *) echo \"$@\" >> \"${SYSTEMCTL_CALLS:-/dev/null}\"; exit 0 ;; esac\n",
 		"git":       "#!/bin/sh\nexit 0\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o700); err != nil {
@@ -252,6 +252,86 @@ func TestStopScriptNeedsAConfirmedStop(t *testing.T) {
 			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), tc.env...)
 			if err := cmd.Run(); (err == nil) != tc.wantOK {
 				t.Fatalf("stop err = %v, want success %v", err, tc.wantOK)
+			}
+		})
+	}
+}
+
+// A check that recorded its own exit, with the user manager confirming its unit
+// down, is already gone: the stop must not send the forced stop, kill or reset
+// calls, because every check of a run pays for them in the cleanup tail. A
+// missing exit record, or a unit still up, keeps the forced path.
+func TestStopScriptSkipsTheForcedCallsForAConfirmedDeadUnit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		exitRecord string
+		state      string
+		forced     bool
+		wantOK     bool
+	}{
+		{"recorded exit and unit down", "{\"exitCode\":0}\n", "inactive", false, true},
+		{"no exit record", "", "inactive", true, true},
+		{"unit still up with a recorded exit", "{\"exitCode\":0}\n", "active", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			d := filepath.Join(dir, "d")
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tc.exitRecord != "" {
+				if err := os.WriteFile(filepath.Join(d, "exit.json"), []byte(tc.exitRecord), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := filepath.Join(dir, "calls")
+			cmd := exec.Command("bash", "-c", jobs.StopScript, "dyna-ci", d, "unit.service")
+			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), "UNIT_STATE="+tc.state, "SYSTEMCTL_CALLS="+calls)
+			err := cmd.Run()
+			if (err == nil) != tc.wantOK {
+				t.Fatalf("stop err = %v, want success %v", err, tc.wantOK)
+			}
+			called, readErr := os.ReadFile(calls)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatal(readErr)
+			}
+			if strings.Contains(string(called), "stop") != tc.forced {
+				t.Fatalf("forced calls = %q, want forced %v", called, tc.forced)
+			}
+		})
+	}
+}
+
+// A scope the user manager already reports down is not forced down again: a
+// finished run's teardown skips the scope's stop and kill for it, and a scope
+// that is still up keeps the forced stop and its confirmation.
+func TestTeardownSkipsTheScopeStopForAConfirmedDownScope(t *testing.T) {
+	host := nodeCheck{id: "host", host: true}
+	for _, tc := range []struct {
+		name   string
+		state  string
+		forced bool
+		wantOK bool
+	}{
+		{"scope already down", "inactive", false, true},
+		{"scope still up", "active", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			calls := filepath.Join(dir, "calls")
+			script := teardownScript(Node{Name: "local"}, filepath.Join(dir, "cache.git"), filepath.Join(dir, "run"), "r1", []nodeCheck{host})
+			cmd := exec.Command("bash", "-c", script)
+			cmd.Env = append(append(os.Environ(), "PATH="+teardownStubs(t)+":"+os.Getenv("PATH")), "UNIT_STATE="+tc.state, "SYSTEMCTL_CALLS="+calls)
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.wantOK {
+				t.Fatalf("teardown err = %v, want success %v: %s", err, tc.wantOK, out)
+			}
+			called, readErr := os.ReadFile(calls)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatal(readErr)
+			}
+			if strings.Contains(string(called), "dyna-ci-r1-host.scope") != tc.forced {
+				t.Fatalf("scope forced calls = %q, want forced %v", called, tc.forced)
 			}
 		})
 	}
