@@ -156,16 +156,14 @@ func match(patterns []struct {
 	if strings.TrimSpace(detail) == "" {
 		return "", false
 	}
-	// A structured provider code is stronger evidence than the message beside
-	// it. Pi can prefix the JSON body with the HTTP status.
+	// Only z.ai's provider-specific code outranks message disambiguation. An
+	// HTTP 429 code still needs the message to split short and spent limits.
 	if start := strings.IndexByte(detail, '{'); start >= 0 {
 		var body struct {
-			Code json.RawMessage `json:"code"`
+			Code string `json:"code"`
 		}
-		if json.Unmarshal([]byte(detail[start:]), &body) == nil && len(body.Code) > 0 {
-			if reason, ok := ClassifyJSONField(body.Code); ok {
-				return reason, true
-			}
+		if json.Unmarshal([]byte(detail[start:]), &body) == nil && body.Code == "1302" {
+			return Capacity, true
 		}
 	}
 	for _, entry := range patterns {

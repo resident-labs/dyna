@@ -32,6 +32,10 @@ func (a *Accounts) QuotaHeldOut(harness string, provider store.Provider, repo st
 	if limits == nil {
 		limits = map[string]time.Time{}
 	}
+	recorded, err := scopes.LimitRecordedAt(now)
+	if err != nil {
+		return time.Time{}, false
+	}
 	rules, err := scopes.Rules()
 	if err != nil {
 		return time.Time{}, false
@@ -57,7 +61,7 @@ func (a *Accounts) QuotaHeldOut(harness string, provider store.Provider, repo st
 	earliest := time.Time{}
 	for _, n := range open {
 		until, blocked := time.Time{}, false
-		if end, limited := limits[n.ID]; limited && !readingHasQuotaLeft(readings[n.ID], now) {
+		if end, limited := limits[n.ID]; limited && !readingHasQuotaLeft(readings[n.ID], recorded[n.ID], now) {
 			until, blocked = end, true
 		} else if end, spent := readingOutOfQuota(readings[n.ID], now); spent {
 			until, blocked = end, true
@@ -75,11 +79,11 @@ func (a *Accounts) QuotaHeldOut(harness string, provider store.Provider, repo st
 	return earliest, true
 }
 
-// readingHasQuotaLeft reports that a saved reading positively refutes a
-// failure hold. Every reported session or weekly window must have quota left;
-// a reading without either window says nothing about the hold.
-func readingHasQuotaLeft(o *store.Observation, now time.Time) bool {
-	if o == nil || o.Unavailable || o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now) {
+// readingHasQuotaLeft reports that a reading captured after the failure
+// positively refutes its hold. Every reported session or weekly window must
+// have quota left; a reading without either window says nothing about the hold.
+func readingHasQuotaLeft(o *store.Observation, failedAt, now time.Time) bool {
+	if o == nil || failedAt.IsZero() || !o.ObservedAt.After(failedAt) || o.Unavailable || o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now) {
 		return false
 	}
 	session, weekly := store.SessionWindow(o), store.WeeklyWindow(o)
