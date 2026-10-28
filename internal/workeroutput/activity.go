@@ -25,7 +25,7 @@ type Activity struct {
 	// view words for it (run, wait, read, edit, write, search, fetch, tool):
 	// what the call is, not its arguments. It is empty when the worker
 	// thinks, writes or compacts, which are not tool steps.
-	Step string `json:"step,omitempty"`
+	Step StepKind `json:"step,omitempty"`
 	// Steerable says a new message for the session ends this step early: the
 	// call is one of Dyna's shell tools, which return on steering (D-349), so
 	// the session reads the message at once. Every other call runs to its own
@@ -33,16 +33,19 @@ type Activity struct {
 	Steerable bool `json:"steerable,omitempty"`
 }
 
+// StepKind is the kind of tool call a worker is running.
+type StepKind string
+
 // The step kinds of a running tool call, as the session view words them.
 const (
-	StepRun    = "run"
-	StepWait   = "wait"
-	StepRead   = "read"
-	StepEdit   = "edit"
-	StepWrite  = "write"
-	StepSearch = "search"
-	StepFetch  = "fetch"
-	StepTool   = "tool"
+	StepRun    StepKind = "run"
+	StepWait   StepKind = "wait"
+	StepRead   StepKind = "read"
+	StepEdit   StepKind = "edit"
+	StepWrite  StepKind = "write"
+	StepSearch StepKind = "search"
+	StepFetch  StepKind = "fetch"
+	StepTool   StepKind = "tool"
 )
 
 const compactingText = "Compacting context…"
@@ -143,28 +146,34 @@ func toolActivity(e Event) Activity {
 // shares (see Activity.Step): run for a command, wait for a job wait, read,
 // edit, write, search and fetch for those tools, and tool for anything else.
 // lower is the lowercased tool name.
-func stepKindOf(lower string, op shellop.Operation) string {
+func stepKindOf(lower string, op shellop.Operation) StepKind {
 	bare := bareTool(lower)
-	if op == shellop.Output || bare == "shell_output" {
+	if op == shellop.Output {
 		return StepWait
 	}
-	if shellTools[bare] {
-		return StepRun
-	}
-	if kind := stepKinds[bare]; kind != "" {
-		return kind
+	if step, ok := stepRegistry[bare]; ok {
+		return step.kind
 	}
 	return StepTool
 }
 
-// stepKinds maps the file, search and fetch tools a harness names to the
-// session view's step kind for them. A tool that is not here is StepTool.
-var stepKinds = map[string]string{
-	"read": StepRead, "read_file": StepRead, "view_file": StepRead,
-	"edit": StepEdit, "multiedit": StepEdit, "edit_file": StepEdit, "apply_patch": StepEdit, "file_change": StepEdit,
-	"write": StepWrite, "write_file": StepWrite,
-	"grep": StepSearch, "grep_search": StepSearch, "codebase_search": StepSearch, "search": StepSearch, "web_search": StepSearch, "websearch": StepSearch, "search_web": StepSearch,
-	"webfetch": StepFetch, "web_fetch": StepFetch, "read_url_content": StepFetch,
+// stepSpec is a known tool's step kind and its tool-specific presentation.
+type stepSpec struct {
+	kind    StepKind
+	verb    string
+	jobLine string
+}
+
+// stepRegistry classifies each known tool and holds its presentation. A tool
+// that is not here is StepTool and uses the generic activity line.
+var stepRegistry = map[string]stepSpec{
+	"shell": {kind: StepRun}, "bash": {kind: StepRun}, "command": {kind: StepRun}, "command_execution": {kind: StepRun}, "run_command": {kind: StepRun}, "run_terminal_cmd": {kind: StepRun},
+	"shell_output": {kind: StepWait, jobLine: "reading shell output"}, "shell_jobs": {kind: StepRun, jobLine: "reading shell jobs"}, "shell_stop": {kind: StepRun, jobLine: "stopping a shell job"},
+	"read": {kind: StepRead, verb: "reading"}, "read_file": {kind: StepRead, verb: "reading"}, "view_file": {kind: StepRead, verb: "reading"},
+	"edit": {kind: StepEdit, verb: "editing"}, "multiedit": {kind: StepEdit, verb: "editing"}, "edit_file": {kind: StepEdit, verb: "editing"}, "apply_patch": {kind: StepEdit, verb: "editing"}, "file_change": {kind: StepEdit, verb: "editing"},
+	"write": {kind: StepWrite, verb: "writing"}, "write_file": {kind: StepWrite, verb: "writing"},
+	"grep": {kind: StepSearch}, "grep_search": {kind: StepSearch}, "codebase_search": {kind: StepSearch}, "search": {kind: StepSearch}, "web_search": {kind: StepSearch}, "websearch": {kind: StepSearch}, "search_web": {kind: StepSearch},
+	"webfetch": {kind: StepFetch}, "web_fetch": {kind: StepFetch}, "read_url_content": {kind: StepFetch},
 }
 
 // steerableStep reports whether a new message for the session ends this
@@ -187,23 +196,6 @@ func bareTool(name string) string {
 		return rest[i+2:]
 	}
 	return rest
-}
-
-// shellTools run a command or read a job's output; the harness's description,
-// when it gives one, is already the readable step.
-var shellTools = map[string]bool{
-	"shell": true, "bash": true, "command": true, "command_execution": true, "run_command": true, "run_terminal_cmd": true,
-	"shell_output": true, "shell_jobs": true, "shell_stop": true,
-}
-
-// shellJobSteps name the job tools that carry no command of their own.
-var shellJobSteps = map[string]string{"shell_output": "reading shell output", "shell_jobs": "reading shell jobs", "shell_stop": "stopping a shell job"}
-
-// fileSteps name what a running file tool does to the file it touches.
-var fileSteps = map[string]string{
-	"read": "reading", "read_file": "reading", "view_file": "reading",
-	"edit": "editing", "multiedit": "editing", "edit_file": "editing", "apply_patch": "editing", "file_change": "editing",
-	"write": "writing", "write_file": "writing",
 }
 
 // toolLine is a tool call in one line a person can read: the shell's
@@ -236,18 +228,19 @@ func toolLine(e Event) string {
 		plain = textutil.FirstLine(raw)
 	}
 	path := firstText(input.FilePath, input.Path, input.Target)
-	if verb, ok := fileSteps[lower]; ok {
+	spec := stepRegistry[lower]
+	if spec.verb != "" {
 		if path != "" {
-			return clip(verb + " " + filepath.Base(path))
+			return clip(spec.verb + " " + filepath.Base(path))
 		}
-		return verb + " a file"
+		return spec.verb + " a file"
 	}
-	if shellTools[lower] {
-		if step := firstText(input.Description, textutil.FirstLine(input.Command), plain); step != "" {
-			return clip(step)
+	if spec.kind == StepRun || spec.kind == StepWait {
+		if line := firstText(input.Description, textutil.FirstLine(input.Command), plain); line != "" {
+			return clip(line)
 		}
-		if step, ok := shellJobSteps[lower]; ok {
-			return step
+		if spec.jobLine != "" {
+			return spec.jobLine
 		}
 		return "running a command"
 	}
