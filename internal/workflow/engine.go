@@ -39,6 +39,9 @@ const (
 	worktreeJournalEntryLimit = 20
 )
 
+// Only flag a complete, unambiguous wait-only prompt; longer prompts may ask for judgment.
+var waitOnlyAgentPrompt = regexp.MustCompile(`(?i)^\s*(?:wait|poll) for file [^\s]+\s*$`)
+
 // processEnvAllowlist is deliberately small. Workflow scripts are not Node
 // programs, so process.env must not become an alternate path to host secrets.
 var processEnvAllowlist = []string{
@@ -409,6 +412,9 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 	}
 
 	prompt := call.Argument(0).String()
+	if waitOnlyAgentPrompt.MatchString(prompt) {
+		e.emitLog(runstore.LogProvenanceSystem, "agent() appears to only wait for a file; use run() for deterministic waiting and set a timeout")
+	}
 	opts := call.Argument(1)
 
 	profName, label, phase, lane, stage, cwd, planNodeID := "", "", "", "", "", e.opts.WorkDir, ""
