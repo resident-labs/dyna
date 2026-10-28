@@ -107,3 +107,73 @@ func (MachineLimitsEvent) eventSubject() string { return "room-limits" }
 // eventDedupe keys one notice per reason, so the same cause posts once and a
 // changed cause posts again.
 func (m MachineLimitsEvent) eventDedupe() string { return m.Reason }
+
+// RoomCapKind names one cap of a room's resource slice, after the cgroup file
+// that holds the limit.
+type RoomCapKind string
+
+// The caps of a room's slice.
+const (
+	// RoomCapMemoryHigh is where the kernel starts to throttle and reclaim
+	// the room's memory.
+	RoomCapMemoryHigh RoomCapKind = "memory.high"
+	// RoomCapMemoryMax is the hard memory limit: the OOM killer takes a
+	// process inside the room, never outside it.
+	RoomCapMemoryMax RoomCapKind = "memory.max"
+	// RoomCapPidsMax bounds the room's processes: a fork above it fails inside
+	// the room only.
+	RoomCapPidsMax RoomCapKind = "pids.max"
+)
+
+// RoomCapEvent tells a room's root and the owner that the room's work is
+// close to one cap of its resource slice: the kernel soon throttles its
+// memory or refuses its forks. It carries the two sizes and the room's
+// biggest process trees, so the card names what to rein in without reading
+// the post text.
+type RoomCapEvent struct {
+	// Room is the room's name, as the owner reads it.
+	Room string `json:"room"`
+	// Cap is the cap the room is close to.
+	Cap RoomCapKind `json:"cap"`
+	// Current and Limit are the room's use and the cap itself: bytes for the
+	// memory caps, processes for pids.max. The card reads them; the agent
+	// text reads Summary.
+	Current int `json:"current"`
+	Limit   int `json:"limit"`
+	// Summary is the short facts line the agent text reads.
+	Summary string `json:"summary"`
+	// TopByMemory and TopByCount list the room's biggest process trees, by
+	// resident memory and by process count.
+	TopByMemory []RoomCapTree `json:"topByMemory,omitempty"`
+	TopByCount  []RoomCapTree `json:"topByCount,omitempty"`
+	// Detail is the tree lines the room's root reads below the alert line.
+	Detail string `json:"detail,omitempty"`
+	// AtMS is when Dyna posted the alert, in milliseconds since the Unix
+	// epoch. Two cap periods of one room are two alerts, because each has its
+	// own time.
+	AtMS int `json:"atMs"`
+}
+
+func (RoomCapEvent) eventFamily() EventFamily { return FamilyMachine }
+func (RoomCapEvent) eventType() EventType     { return TypeRoomCap }
+
+// eventSubject is the room, so the alerts of one room fold into one card.
+func (e RoomCapEvent) eventSubject() string { return e.Room }
+
+// eventDedupe keys one alert per room, cap and time, so a retried alert of
+// the same crossing posts once and a later crossing posts again.
+func (e RoomCapEvent) eventDedupe() string {
+	return string(e.Cap) + "\x00" + strconv.Itoa(e.AtMS)
+}
+
+// RoomCapTree is one process tree inside the room's slice, as the alert lists
+// it: the tree's root command and PID, with the memory and process count of
+// everything under it.
+type RoomCapTree struct {
+	Command string `json:"command"`
+	PID     int    `json:"pid"`
+	// Memory is the resident memory of the whole tree, in bytes.
+	Memory int `json:"memory"`
+	// Count is the processes in the tree.
+	Count int `json:"count"`
+}

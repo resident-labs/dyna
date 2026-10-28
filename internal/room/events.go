@@ -138,6 +138,8 @@ const (
 	// TypeLimitsOff is the machine telling a room it cannot give each room
 	// its own resource slice, so the room shares the agent slice instead.
 	TypeLimitsOff EventType = "limits-off"
+	// TypeRoomCap is a room's work close to one cap of its resource slice.
+	TypeRoomCap EventType = "room-cap"
 
 	// FamilyCall reports how the owner answered a call request. The engine
 	// posts it, so the answer wears no invented voice and carries no raw ID in

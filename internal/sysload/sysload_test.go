@@ -449,3 +449,25 @@ func TestRecordKeepsAScopeThatEndedInsideTheMinute(t *testing.T) {
 	}
 	t.Fatalf("the ended session is missing from %+v", got[0].Groups)
 }
+
+// DynaSliceDir names the cgroup directory that holds dyna.slice, so a reader
+// outside this package finds the room slices below it. A tree without the
+// slice, or a process in no user manager, has none.
+func TestDynaSliceDirFindsTheUserManagerTree(t *testing.T) {
+	f := newTree(t, true)
+	if dir, ok := DynaSliceDir(f.proc, f.cgrp); !ok || dir != filepath.Join(f.cgrp, um) {
+		t.Fatalf("DynaSliceDir = %q, %v; want %q", dir, ok, filepath.Join(f.cgrp, um))
+	}
+	bare := newTree(t, false)
+	bare.write(bare.proc, "self/cgroup", "0::/user.slice/user-1000.slice/user@1000.service/app.slice/some.scope\n")
+	if _, ok := DynaSliceDir(bare.proc, bare.cgrp); ok {
+		t.Fatal("a tree without dyna.slice has no DynaSliceDir")
+	}
+	if _, ok := DynaSliceDir(f.proc, filepath.Join(f.cgrp, "missing")); ok {
+		t.Fatal("a cgroup root without the user manager has no DynaSliceDir")
+	}
+	f.write(f.proc, "self/cgroup", "0::/init.scope\n")
+	if _, ok := DynaSliceDir(f.proc, f.cgrp); ok {
+		t.Fatal("a process in no user manager has no DynaSliceDir")
+	}
+}
