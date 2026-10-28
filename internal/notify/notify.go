@@ -296,7 +296,9 @@ type Delivery struct {
 	Delivery string `json:"delivery"`
 	Turn     int    `json:"turn,omitempty"`
 	Pointer  bool   `json:"pointer,omitempty"`
-	Error    string `json:"error,omitempty"`
+	// VoiceCall identifies the owner's voice-call recipient independently of its address.
+	VoiceCall bool   `json:"voiceCall,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // Skip is a group member left out of a post at resolution time.
@@ -589,7 +591,7 @@ func (s *Service) recipientMode(msg room.Message, r recipient) room.DeliveryMode
 
 // deliver hands one stored post to one recipient.
 func (s *Service) deliver(msg room.Message, r recipient) Delivery {
-	d := Delivery{To: r.addr}
+	d := Delivery{To: r.addr, VoiceCall: r.kind == toVoice}
 	opts := room.FrameOptions{Room: r.rec.Name, Reader: r.addr, Reply: s.sessionStore().ReplyAddress(msg)}
 	if r.kind == toSession {
 		opts.Reply, opts.ReplyTo = r.session.ServiceContract().FrameReply(msg, opts.Reply)
