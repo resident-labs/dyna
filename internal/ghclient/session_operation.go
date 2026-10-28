@@ -495,16 +495,12 @@ func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string,
 	if err != nil {
 		return nil, nil, false
 	}
-	upstream := func() (string, bool) {
-		remote, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".remote")
-		if err != nil || remote != plan.remote {
-			return "", false
-		}
-		merge, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".merge")
-		if err != nil || !strings.HasPrefix(merge, "refs/heads/") {
-			return "", false
-		}
-		return merge, true
+	tracked, merge := "", ""
+	if value, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".remote"); err == nil {
+		tracked = value
+	}
+	if value, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".merge"); err == nil {
+		merge = value
 	}
 	switch mode {
 	case "nothing":
@@ -513,18 +509,25 @@ func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string,
 	case "current":
 		return []string{branch + ":" + branch}, nil, true
 	case "upstream", "tracking":
-		merge, ok := upstream()
-		if !ok {
+		if tracked != plan.remote || !strings.HasPrefix(merge, "refs/heads/") {
 			return nil, nil, false
 		}
 		return []string{branch + ":" + merge}, nil, true
 	case "simple":
-		if merge, ok := upstream(); ok {
+		if tracked == plan.remote {
+			if !strings.HasPrefix(merge, "refs/heads/") {
+				return nil, nil, false
+			}
 			if merge != "refs/heads/"+branch {
 				// Simple refuses a differently named upstream; git reports it.
 				return nil, nil, false
 			}
 			return []string{branch + ":" + merge}, nil, true
+		}
+		if tracked != "" {
+			// The branch tracks another remote. Simple pushes to the branch's
+			// own name, like current, and keeps the existing upstream.
+			return []string{branch + ":" + branch}, nil, true
 		}
 		if autoSetup(ctx, dir) {
 			return []string{branch + ":" + branch}, &UpstreamRef{

@@ -302,4 +302,39 @@ esac
 	if err == nil {
 		t.Fatalf("a failed push set an upstream: %s", remote)
 	}
+
+	// A branch that tracks one remote pushes to another remote under simple
+	// mode: git pushes the branch to its own name and keeps the upstream,
+	// with or without push.autoSetupRemote.
+	if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "remote", "add", "fork", roomURL).CombinedOutput(); err != nil {
+		t.Fatalf("add fork remote: %v %s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "branch.topic.remote", "origin"},
+		{"config", "branch.topic.merge", "refs/heads/topic"},
+		{"config", "--unset", "push.autoSetupRemote"},
+	} {
+		if out, err := exec.Command("/usr/bin/git", append([]string{"-C", rec.Repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v %s", args, err, out)
+		}
+	}
+	for _, auto := range []string{"false", "true"} {
+		if auto == "true" {
+			if out, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "push.autoSetupRemote", "true").CombinedOutput(); err != nil {
+				t.Fatalf("set autoSetupRemote: %v %s", err, out)
+			}
+		}
+		pushes = roomPushes.Load()
+		second := exec.Command(guardedGit, "push", "fork")
+		second.Dir = rec.Repo
+		second.Env = env
+		_ = second.Run()
+		if roomPushes.Load() == pushes {
+			t.Fatalf("push to a second remote (autoSetupRemote=%s) did not use the engine", auto)
+		}
+		remote, err := exec.Command("/usr/bin/git", "-C", rec.Repo, "config", "--get", "branch.topic.remote").Output()
+		if err != nil || strings.TrimSpace(string(remote)) != "origin" {
+			t.Fatalf("push to a second remote (autoSetupRemote=%s) changed the tracked remote: %v %s", auto, err, remote)
+		}
+	}
 }
