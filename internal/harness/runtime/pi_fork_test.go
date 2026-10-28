@@ -360,3 +360,31 @@ func TestForkTarballVersionReadsOversizedManifest(t *testing.T) {
 		t.Fatalf("forkTarballVersion = %q, %v; want %q", v, ok, build)
 	}
 }
+
+// D-417: a source build made by an older self-update stamps the local tarball
+// and its integrity but not its build. Installing the level-only version must
+// still publish the build that the stamped tarball's manifest names.
+func TestStampedTarballWithoutBuildInstallsItsBuild(t *testing.T) {
+	piTestHome(t)
+	const build = piForkVersion + ".0123456789ab"
+	path := packedForkTarball(t, build)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha512.Sum512(data)
+	oldURL, oldAsset, oldIntegrity, oldBuild := piForkURL, piForkAsset, piForkIntegrity, piForkBuild
+	t.Cleanup(func() {
+		piForkURL, piForkAsset, piForkIntegrity, piForkBuild = oldURL, oldAsset, oldIntegrity, oldBuild
+	})
+	piForkURL, piForkAsset, piForkIntegrity, piForkBuild = "", path, "sha512-"+base64.StdEncoding.EncodeToString(sum[:]), ""
+	m := manager(t)
+	t.Setenv(piForkTarballEnv, "")
+	m.Run = func(_ context.Context, args, _ []string) error {
+		return forkLayout(args[4], build, minimumPiForkLevel)
+	}
+	b, err := m.Install(context.Background(), "pi", piForkVersion)
+	if err != nil || b.Version != build {
+		t.Fatalf("Install = %q, %v; want the stamped tarball's build %q", b.Version, err, build)
+	}
+}
