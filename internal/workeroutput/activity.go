@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"dyna-agent/internal/shellop"
 	"dyna-agent/internal/textutil"
 )
 
@@ -134,16 +135,17 @@ func LastActivity(path string) Activity {
 // kind, and whether a new message for the session ends it early.
 func toolActivity(e Event) Activity {
 	name := strings.ToLower(strings.TrimSpace(e.Name))
-	return Activity{Text: toolLine(e), Step: stepKindOf(name), Steerable: steerableStep(name)}
+	op := shellop.Classify(name)
+	return Activity{Text: toolLine(e), Step: stepKindOf(name, op), Steerable: steerableStep(op)}
 }
 
 // stepKindOf names what a tool call is, in the closed set the session view
 // shares (see Activity.Step): run for a command, wait for a job wait, read,
 // edit, write, search and fetch for those tools, and tool for anything else.
 // lower is the lowercased tool name.
-func stepKindOf(lower string) string {
+func stepKindOf(lower string, op shellop.Operation) string {
 	bare := bareTool(lower)
-	if dynaShellOp(lower) == "output" || bare == "shell_output" {
+	if op == shellop.Output || bare == "shell_output" {
 		return StepWait
 	}
 	if shellTools[bare] {
@@ -169,24 +171,8 @@ var stepKinds = map[string]string{
 // running call early: Dyna's own shell run and shell wait return on steering
 // (D-349). Another server's tool of the same name, and every other call,
 // runs to its own end.
-func steerableStep(lower string) bool {
-	op := dynaShellOp(lower)
-	return op == "run" || op == "output"
-}
-
-// dynaShellOp names the job tool of Dyna's MCP server that a tool name calls,
-// in each harness's spelling, for example mcp__dyna__shell, dyna_shell or
-// dyna.shell. It mirrors transcript.dynaShellOp; the import direction keeps
-// the two apart. It returns "run", "output", "stop", or "" for any other
-// tool.
-func dynaShellOp(lower string) string {
-	name := strings.NewReplacer("__", "_", ".", "_", "/", "_", "-", "_", ":", "_").Replace(lower)
-	for _, tool := range []struct{ suffix, op string }{{"dyna_shell", "run"}, {"dyna_shell_output", "output"}, {"dyna_shell_stop", "stop"}} {
-		if name == tool.suffix || strings.HasSuffix(name, "_"+tool.suffix) {
-			return tool.op
-		}
-	}
-	return ""
+func steerableStep(op shellop.Operation) bool {
+	return op == shellop.Run || op == shellop.Output
 }
 
 // bareTool strips an MCP server prefix from a tool name, so

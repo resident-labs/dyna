@@ -31,7 +31,7 @@ func TestSummarizeLinksDynaShellCallsToTheirJob(t *testing.T) {
 		}
 	}
 	for name, op := range map[string]string{"mcp__dyna__shell_output": "output", "dyna_shell_stop": "stop", "dyna.shell_output": "output"} {
-		if tool := Summarize(toolCall(name, `{"job_id":"`+job2+`"}`, "")); tool.JobID != job2 || tool.JobOp != op {
+		if tool := Summarize(toolCall(name, `{"job_id":"`+job2+`"}`, "")); tool.JobID != job2 || string(tool.JobOp) != op {
 			t.Errorf("%s: tool = %#v", name, tool)
 		}
 	}

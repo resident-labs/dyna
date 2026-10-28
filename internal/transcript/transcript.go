@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/shellop"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/textutil"
@@ -77,7 +78,8 @@ type Tool struct {
 	// JobID and JobOp link a call of Dyna's shell tools to its shell job. JobOp
 	// is "run" (shell), "output" (shell_output) or "stop" (shell_stop).
 	// Description is the shell call's one-line title.
-	JobID, JobOp, Description string
+	JobID, Description string
+	JobOp              shellop.Operation
 }
 
 // StepKind is the kind of work one tool call did. It is a closed set, so the
@@ -406,19 +408,6 @@ var (
 	flagName     = regexp.MustCompile(`--name[ =]+(\S+)`)
 )
 
-// dynaShellOp names the job tool of Dyna's MCP server that a tool name calls,
-// in each harness's spelling, for example mcp__dyna__shell, dyna_shell or
-// dyna.shell. It returns "run", "output", "stop", or "" for any other tool.
-func dynaShellOp(lower string) string {
-	name := strings.NewReplacer("__", "_", ".", "_", "/", "_", "-", "_", ":", "_").Replace(lower)
-	for _, tool := range []struct{ suffix, op string }{{"dyna_shell", "run"}, {"dyna_shell_output", "output"}, {"dyna_shell_stop", "stop"}} {
-		if name == tool.suffix || strings.HasSuffix(name, "_"+tool.suffix) {
-			return tool.op
-		}
-	}
-	return ""
-}
-
 // jobLead finds the job in a result that starts "Job <id>." (see
 // shellmcp.exitLine). Results from before that lead name no job.
 var jobLead = regexp.MustCompile(`^\s*Job (sh_\d{8}-\d{6}-[0-9a-f]{8})\b`)
@@ -464,15 +453,16 @@ func Summarize(e workeroutput.Event) Tool {
 	}
 	name := e.Name
 	lower := strings.ToLower(name)
+	shellOp := shellop.Classify(lower)
 	switch {
-	case lower == "command" || lower == "bash" || lower == "shell" || lower == "run_command" || lower == "run_terminal_cmd" || dynaShellOp(lower) == "run":
+	case lower == "command" || lower == "bash" || lower == "shell" || lower == "run_command" || lower == "run_terminal_cmd" || shellOp == shellop.Run:
 		cmd := e.Input
 		if c := str("command", "CommandLine", "cmd"); c != "" {
 			cmd = c
 		}
 		t.Detail = UnwrapShell(cmd)
 		t.Verb, t.Target = shellSummary(t.Detail, e.Output)
-		if dynaShellOp(lower) == "run" {
+		if shellOp == shellop.Run {
 			t.Description, t.Step = str("description"), StepRun
 		}
 	case lower == "read" || lower == "read_file" || lower == "view_file":
@@ -531,7 +521,7 @@ func Summarize(e workeroutput.Event) Tool {
 	if t.Target == "" && t.Verb == "ran" {
 		t.Target = textutil.FirstLine(e.Input)
 	}
-	if t.JobOp = dynaShellOp(lower); t.JobOp == "run" {
+	if t.JobOp = shellOp; t.JobOp == shellop.Run {
 		if m := jobLead.FindStringSubmatch(mcpResultText(e.Output)); m != nil {
 			t.JobID = m[1]
 		}
