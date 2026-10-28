@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,8 +46,14 @@ func TestLegacyDaemonCannotStartUnprotectedRunOrRestart(t *testing.T) {
 	defer cancel()
 	client := buildServer(t, `{"error":"unknown computer operation run.lease"}`)
 	client.Session = "test"
-	if _, err := client.PrepareRun(ctx, "Checking legacy negotiation"); err == nil {
+	_, err := client.PrepareRun(ctx, "Checking legacy negotiation")
+	if err == nil {
 		t.Fatal("legacy daemon accepted an unprotected run")
+	}
+	// D-419: the bare unknown operation read like a bug; it must name the
+	// service restart that ends the version skew.
+	if !strings.Contains(err.Error(), "needs a restart") {
+		t.Fatalf("legacy run error = %v; want it to say the service needs a restart", err)
 	}
 	if _, err := buildServer(t, `{"error":"invalid session id"}`).BeginRestart(ctx); !errors.Is(err, ErrRestartAdmissionUnsupported) {
 		t.Fatalf("legacy restart admission error = %v", err)

@@ -23,13 +23,14 @@ func Quiet(list []computers.Status) string {
 }
 
 // RestartNow atomically closes foreground command admission and restarts the
-// service when quiet. An older daemon counts as busy because its legacy
-// commands have no leases and cannot be counted safely.
+// service when quiet. A daemon that predates admission never gains it without a
+// restart, so such a daemon restarts through the legacy quiet check instead of
+// waiting forever (D-419).
 func RestartNow(ctx context.Context) (string, error) {
 	admission, err := computers.NewClient("").BeginRestart(ctx)
 	if err != nil {
 		if errors.Is(err, computers.ErrRestartAdmissionUnsupported) {
-			return "computer daemon predates protected foreground commands; stop it after existing commands finish", nil
+			return restartLegacy(ctx)
 		}
 		if active, aerr := userservices.ComputersActive(ctx); aerr == nil && !active {
 			return "", nil
@@ -38,6 +39,26 @@ func RestartNow(ctx context.Context) (string, error) {
 	}
 	if admission.Reason != "" {
 		return admission.Reason, nil
+	}
+	if err := userservices.TryRestartComputers(ctx); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// restartLegacy finishes the restart of a daemon that predates atomic restart
+// admission: its status list is the best available quiet check. A daemon from
+// before run leases cannot report its commands, so a quiet list may close
+// during one of them; that bounded disturbance replaces the earlier indefinite
+// deferral, which blocked every newer client until someone stopped the daemon
+// by hand (D-419).
+func restartLegacy(ctx context.Context) (string, error) {
+	list, err := computers.NewClient("").List(ctx, "")
+	if err != nil {
+		return "computer daemon predates protected foreground commands; its status cannot be read", nil
+	}
+	if reason := Quiet(list); reason != "" {
+		return reason, nil
 	}
 	if err := userservices.TryRestartComputers(ctx); err != nil {
 		return "", err
