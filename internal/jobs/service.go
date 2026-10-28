@@ -787,7 +787,9 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 	command := strings.Join(quoted, " ")
 	if job.Image != "" {
 		// The container runs the argv itself, so an image needs no shell:
-		// alpine or distroless images have no bash.
+		// alpine or distroless images have no bash. The first word replaces the
+		// image's entrypoint, which would otherwise take the command as its
+		// own arguments.
 		docker := "docker=(docker)"
 		if machine.SSH == "" {
 			docker = "docker=(docker); if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi"
@@ -801,7 +803,7 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 		}
 		inner += "timeout --signal=TERM --kill-after=10s " + strconv.FormatInt(seconds, 10) + "s \"${docker[@]}\" run --rm --init --cpus=" + strconv.Itoa(resources.CPUs) +
 			" --memory=" + DockerMemory(resources.MemoryMiB) + " --memory-swap=" + DockerMemory(resources.MemoryMiB) +
-			" --pids-limit=512" + mount + " " + q(job.Image) + " " + command
+			" --pids-limit=512" + mount + " --entrypoint " + quoted[0] + " " + q(job.Image) + " " + strings.Join(quoted[1:], " ")
 	} else {
 		if job.SHA != "" {
 			inner += "cd " + q(work) + "; "

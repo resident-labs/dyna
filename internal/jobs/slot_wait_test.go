@@ -67,8 +67,9 @@ func TestJobScriptRunsItsCommand(t *testing.T) {
 }
 
 // A container job hands its command to the container runtime: the script
-// calls docker run with the image and the command's own words, so an image
-// without bash runs it too.
+// calls docker run with the command's first word as the entrypoint and the
+// rest as its arguments, so an image without bash, or with an entrypoint of
+// its own, still runs exactly the submitted argv.
 func TestContainerJobScriptRunsDocker(t *testing.T) {
 	machine := machines.Machine{Name: "jobs-test-" + filepath.Base(t.TempDir())}
 	t.Cleanup(func() { os.RemoveAll(NodeBase(machine.Name)) })
@@ -81,7 +82,7 @@ func TestContainerJobScriptRunsDocker(t *testing.T) {
 	cmd := exec.Command("bash", "-c", jobScript(machine, job, Resources{CPUs: 1, MemoryMiB: 512}))
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(out)), "docker run ") || !strings.HasSuffix(strings.TrimSpace(string(out)), " alpine:3 echo hi") {
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(out)), "docker run ") || !strings.HasSuffix(strings.TrimSpace(string(out)), " --entrypoint echo alpine:3 hi") {
 		t.Fatalf("container job script = %q, %v; want one docker run of alpine:3", out, err)
 	}
 }
