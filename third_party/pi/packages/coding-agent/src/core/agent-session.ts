@@ -76,6 +76,7 @@ import {
 	generateBranchSummary,
 	prepareCompaction,
 	shouldCompact,
+	withCompactionTriggerOverride,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
@@ -258,6 +259,8 @@ export interface AgentSessionConfig {
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
 	resourceLoader: ResourceLoader;
+	/** Process-wide compaction trigger from --compaction-trigger-tokens; wins over settings and model overrides. */
+	compactionTriggerTokens?: number;
 	/** SDK custom tools registered outside extensions */
 	customTools?: ToolDefinition[];
 	/** Canonical model/auth runtime used by coding-agent internals. */
@@ -486,6 +489,7 @@ export class AgentSession {
 		this.agent = config.agent;
 		this.sessionManager = config.sessionManager;
 		this.settingsManager = config.settingsManager;
+		this._compactionTriggerTokens = config.compactionTriggerTokens;
 		this._scopedModels = config.scopedModels ?? [];
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
@@ -763,13 +767,21 @@ export class AgentSession {
 		return this._nestedToolCalls.execute(parentToolCallId, name, args, options);
 	}
 
+	/** Process-wide compaction trigger override from --compaction-trigger-tokens. */
+	private _compactionTriggerTokens: number | undefined;
+
+	/** Compaction settings for model with the --compaction-trigger-tokens override applied. */
+	private _compactionSettings(model: Pick<Model<any>, "provider" | "id"> | undefined) {
+		return withCompactionTriggerOverride(this.settingsManager.getCompactionSettings(model), this._compactionTriggerTokens);
+	}
+
 	/** Whether `projection`, the current session projection, exceeds the compaction threshold of `model`. */
 	private _exceedsCompactionThreshold(model: Model<any>, projection: SessionProjection): boolean {
 		if (model.contextWindow <= 0) return false;
 		return shouldCompact(
 			estimateProjectedContextTokens(projection, this.sessionManager.getBranch()).tokens,
 			model.contextWindow,
-			this.settingsManager.getCompactionSettings(this.model),
+			this._compactionSettings(this.model),
 		);
 	}
 
@@ -2838,7 +2850,7 @@ export class AgentSession {
 				throw new Error(formatNoModelSelectedMessage());
 			}
 
-			const settings = this.settingsManager.getCompactionSettings(model);
+			const settings = this._compactionSettings(model);
 			const pathEntries = this.sessionManager.getBranch();
 
 			const preparation = prepareCompaction(pathEntries, settings);
@@ -3009,7 +3021,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()` for overflow recovery or queued messages
 	 */
 	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings(this.model);
+		const settings = this._compactionSettings(this.model);
 		if (!settings.enabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
@@ -3156,7 +3168,7 @@ export class AgentSession {
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		const model = this.model;
-		const settings = this.settingsManager.getCompactionSettings(model);
+		const settings = this._compactionSettings(model);
 		let abortController: AbortController | undefined;
 		let started = false;
 		let fromExtension = false;

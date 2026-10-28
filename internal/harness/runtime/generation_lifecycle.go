@@ -23,7 +23,6 @@ import (
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
 	"dyna-agent/internal/harness/runtime/genstate"
-	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellmcp"
@@ -68,7 +67,7 @@ const dynaMCPName = "dyna"
 // Version 10: Kimi merges only Dyna-owned tool policy into native config.
 // Version 11: Pi's MCP servers carry a request timeout and exposure.
 // Version 12: skills are a global catalog and no longer enter a generation.
-const generationInputsVersion = 14
+const generationInputsVersion = 13
 
 type generationInputs struct {
 	NativeFeatures                                 nativeFeaturePolicy
@@ -78,7 +77,6 @@ type generationInputs struct {
 	PartialReasons                                 []string
 	MCP                                            []harnessmgr.ManagedMCP
 	Preferences                                    map[string]any
-	PiCompactionTriggers                           map[string]int64
 }
 
 func (r *Runtime) generationLock(ctx context.Context) (func(), error) {
@@ -102,17 +100,17 @@ func (r *Runtime) generationLock(ctx context.Context) (func(), error) {
 	return func() { releaseAccountLock(f) }, nil
 }
 
-func (r *Runtime) generate(h, home, account string, lookup func(string) (string, bool), p profile.Profile) (harnessmgr.ConfigGeneration, error) {
+func (r *Runtime) generate(h, home, account string, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
 	unlock, err := r.generationLock(context.Background())
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
 	defer unlock()
-	return r.generateLocked(h, home, account, lookup, p)
+	return r.generateLocked(h, home, account, lookup)
 }
 
 // captureGeneration reads the catalog and preferences into one digest input.
-func (r *Runtime) captureGeneration(h, home, account string, lookup func(string) (string, bool), p profile.Profile) (harnessmgr.HarnessConfig, generationInputs, error) {
+func (r *Runtime) captureGeneration(h, home, account string, lookup func(string) (string, bool)) (harnessmgr.HarnessConfig, generationInputs, error) {
 	empty := harnessmgr.HarnessConfig{}
 	a, err := Adapter(h)
 	if err != nil {
@@ -142,7 +140,6 @@ func (r *Runtime) captureGeneration(h, home, account string, lookup func(string)
 	}
 	snapshot := harnessmgr.HarnessConfig{MCP: []harnessmgr.ManagedMCP{}, Skills: []harnessmgr.ManagedSkill{}}
 	inputs := generationInputs{Version: generationInputsVersion, NativeFeatures: nativeFeaturePolicies[h], Harness: h, Home: home, Format: a.ConfigFormat, MCPKey: a.MCPKey, ConfigFile: a.ConfigFile, PartialReasons: a.PartialReasons, Preferences: prefs}
-	inputs.PiCompactionTriggers = piProfileTriggers(p)
 	if a.NativeEnv != nil {
 		inputs.NativeEnv = a.NativeEnv(home)
 	}
@@ -195,26 +192,6 @@ func (r *Runtime) captureGeneration(h, home, account string, lookup func(string)
 	return snapshot, inputs, nil
 }
 
-// piProfileTriggers maps every model of the active profile's chain to the
-// profile's own compaction target, or nil when it sets none. Fallback models
-// share the target; Pi caps it at each model's window minus its reserve. No
-// other profile's target can reach this generation, because only the active
-// profile is consulted — models absent from every model list included.
-func piProfileTriggers(p profile.Profile) map[string]int64 {
-	if canonicalRuntimeID(p.Harness) != "pi" || p.Compact == nil || p.Compact.Tokens <= 0 {
-		return nil
-	}
-	models := p.EffectiveModels()
-	if len(models) == 0 {
-		return nil
-	}
-	triggers := make(map[string]int64, len(models))
-	for _, model := range models {
-		triggers[model] = p.Compact.Tokens
-	}
-	return triggers
-}
-
 func generationDigest(inputs generationInputs) (string, error) {
 	raw, err := json.Marshal(inputs)
 	if err != nil {
@@ -224,7 +201,7 @@ func generationDigest(inputs generationInputs) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (string, bool), p profile.Profile) (harnessmgr.ConfigGeneration, error) {
+func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
 	h = canonicalRuntimeID(h)
 	ownerHome, _ := os.UserHomeDir()
 	if home == "/" || home == ownerHome || home == r.Config.Home || safeAccountPath(home) != nil || checkedDir(home, false) != nil || inside(home, r.Generations) || inside(r.Generations, home) {
@@ -237,7 +214,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if err := r.EnsureCatalog(); err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
-	snapshot, inputs, err := r.captureGeneration(h, home, account, lookup, p)
+	snapshot, inputs, err := r.captureGeneration(h, home, account, lookup)
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
@@ -280,7 +257,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if h == "claude-code" {
 		g, err = r.Config.GenerateSnapshotAt(h, home, staging, published, snapshot, resolvedLookup, inputs.Preferences)
 	} else {
-		g, err = materializeNative(h, home, staging, published, inputs.CLI, snapshot, inputs.Preferences, inputs.PiCompactionTriggers, resolvedLookup)
+		g, err = materializeNative(h, home, staging, published, inputs.CLI, snapshot, inputs.Preferences, resolvedLookup)
 	}
 	if err != nil {
 		return g, err

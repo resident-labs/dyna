@@ -103,6 +103,8 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Process-wide compaction trigger from --compaction-trigger-tokens; wins over settings and model overrides. */
+	compactionTriggerTokens?: number;
 }
 
 /** Result from createAgentSession */
@@ -467,6 +469,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		excludedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		compactionTriggerTokens: options.compactionTriggerTokens,
 	});
 
 	const extensionsResult = resourceLoader.getExtensions();
