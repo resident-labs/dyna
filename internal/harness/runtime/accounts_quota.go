@@ -57,7 +57,7 @@ func (a *Accounts) QuotaHeldOut(harness string, provider store.Provider, repo st
 	earliest := time.Time{}
 	for _, n := range open {
 		until, blocked := time.Time{}, false
-		if end, limited := limits[n.ID]; limited {
+		if end, limited := limits[n.ID]; limited && !readingHasQuotaLeft(readings[n.ID], now) {
 			until, blocked = end, true
 		} else if end, spent := readingOutOfQuota(readings[n.ID], now); spent {
 			until, blocked = end, true
@@ -73,6 +73,25 @@ func (a *Accounts) QuotaHeldOut(harness string, provider store.Provider, repo st
 		earliest = now.Add(time.Minute)
 	}
 	return earliest, true
+}
+
+// readingHasQuotaLeft reports that a saved reading positively refutes a
+// failure hold. Every reported session or weekly window must have quota left;
+// a reading without either window says nothing about the hold.
+func readingHasQuotaLeft(o *store.Observation, now time.Time) bool {
+	if o == nil || o.Unavailable || o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now) {
+		return false
+	}
+	session, weekly := store.SessionWindow(o), store.WeeklyWindow(o)
+	if session == nil && weekly == nil {
+		return false
+	}
+	for _, window := range []*store.Window{session, weekly} {
+		if window != nil && (window.UsedPercent == nil || *window.UsedPercent >= store.NearCapUsedPercent) {
+			return false
+		}
+	}
+	return true
 }
 
 // readingOutOfQuota reports that a saved usage reading has no quota left, using

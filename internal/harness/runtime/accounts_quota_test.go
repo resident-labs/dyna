@@ -81,6 +81,32 @@ func TestQuotaHeldOutSkipsAccountsTheRepoRefuses(t *testing.T) {
 	}
 }
 
+// A current usage reading with quota left releases a failure hold early. The
+// z.ai coding plan reports a five-hour window but no weekly window.
+func TestQuotaHeldOutReleasesLimitWhenUsageHasQuotaLeft(t *testing.T) {
+	a := testAccounts(t)
+	account := signedPiAccount(t, &Runtime{Accounts: a}, store.ProviderZAI, "fixture-key")
+	now := time.Now().Truncate(time.Second)
+	scopes, err := a.scopes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := now.Add(time.Hour)
+	if err = scopes.MarkLimited(account.ID, until); err != nil {
+		t.Fatal(err)
+	}
+	used := 26.0
+	setReading(t, a, account, &store.Observation{ObservedAt: now, Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
+	if _, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", now); held {
+		t.Fatal("a usage reading with quota left did not release the failure hold")
+	}
+	used = 100
+	setReading(t, a, account, &store.Observation{ObservedAt: now, Windows: []store.Window{{ID: "five_hour", UsedPercent: &used}}})
+	if got, held := a.QuotaHeldOut("pi", store.ProviderZAI, "github.com/owner/repo", now); !held || !got.Equal(until) {
+		t.Fatalf("held = %v until %v with a spent session window, want %v", held, got, until)
+	}
+}
+
 // A profile whose every account has no quota left in its saved usage reading
 // is held out, even when no failover limit is stored. Service ranking reads
 // this hold, so it must not start that profile and fail the turn.
