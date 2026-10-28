@@ -33,13 +33,14 @@ func Command(o Options) *cobra.Command {
 	}
 	var roomRef, at, note string
 	var asJSON bool
-	root := &cobra.Command{Use: "issue <title|D-N>", Short: "File a quiet room issue for later triage", Long: "File a quiet room issue for later triage. Issues have room numbers such as D-12. Triage commands accept D-12, d12 or the original message ID. A lone issue reference reads that issue instead of filing one; dyna issue show D-12 does the same.", Args: cobra.ExactArgs(1)}
+	root := &cobra.Command{Use: "issue <title|D-N>", Short: "File a quiet room issue for later triage", Long: "File a quiet room issue for later triage. Issues have room numbers such as D-12. Triage commands accept D-12, d12 or the original message ID. A lone issue reference reads that issue instead of filing one; dyna issue show D-12 does the same. Filing in another room with --room needs a room's root or the owner, and a note that says what happened and how to reproduce it; a worker reports the problem to its own root with dyna post @root instead.", Args: cobra.ExactArgs(1)}
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print full issue data as JSON")
 	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (default: the current room)")
 	root.Flags().StringVar(&at, "at", "", "source file and line, such as internal/parser.go:12")
-	root.Flags().StringVar(&note, "note", "", "issue details")
-	// caller resolves the room and the filer. quiet allows filing into another room,
-	// which wakes nobody (D-111); every other command keeps the room rules.
+	root.Flags().StringVar(&note, "note", "", "issue details; an issue in another room needs a note that says what happened and how to reproduce it")
+	// caller resolves the room and the filer. quiet serves the note command,
+	// which reaches an existing issue in any room without filing a duplicate
+	// (D-111); every other command keeps the room rules.
 	caller := func(quiet bool) (*roomsvc.Service, room.Record, string, error) {
 		s := o.Service()
 		var r room.Record
@@ -161,11 +162,7 @@ func Command(o Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		s, r, by, err := caller(true)
-		if err != nil {
-			return err
-		}
-		i, err := s.Notify.Rooms.FileQuietIssue(r.ID, room.IssueInput{Title: a[0], Note: note, File: file, Line: line, Filer: by})
+		i, err := o.Service().FileIssue(c.Context(), roomRef, room.IssueInput{Title: a[0], Note: note, File: file, Line: line})
 		if err != nil {
 			return err
 		}
