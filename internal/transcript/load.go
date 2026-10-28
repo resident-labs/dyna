@@ -129,21 +129,23 @@ func (l *Loader) LoadTurn(ref string, n int) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	turns, err := l.Store.Turns(info.ID)
+	meta, err := l.Store.ReadMeta(info.ID)
 	if err != nil {
 		return Session{}, err
 	}
 	s := Session{Info: info, Before: t.Ended}
 	var following *subagent.Turn
-	for i, turn := range turns {
-		if turn.N == n {
-			if i > 0 {
-				s.Since = turns[i-1].Ended
-			}
-			if i+1 < len(turns) {
-				following = &turns[i+1]
-			}
-			break
+	if n >= 1 && n <= meta.Turns {
+		first := max(1, n-1)
+		turns, err := l.Store.TurnRange(info.ID, first, min(n+1, meta.Turns))
+		if err != nil {
+			return Session{}, err
+		}
+		if n > 1 {
+			s.Since = turns[n-1-first].Ended
+		}
+		if n < meta.Turns {
+			following = &turns[n+1-first]
 		}
 	}
 	events, omitted := c.read(path, t, following)
@@ -177,26 +179,19 @@ func (l *Loader) load(ref string, lastTurns, cursor int, forward bool) (Session,
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := Session{Info: info}
-	turns, err := l.Store.Turns(info.ID)
+	meta, err := l.Store.ReadMeta(info.ID)
 	if err != nil {
 		return s, err
 	}
-	start, end := 0, len(turns)
+	start, end := 0, meta.Turns
 	if cursor > 0 {
-		index := -1
-		for i, turn := range turns {
-			if turn.N == cursor {
-				index = i
-				break
-			}
-		}
-		if index < 0 {
+		if cursor > meta.Turns {
 			return s, fmt.Errorf("unknown turn cursor %d", cursor)
 		}
 		if forward {
-			start = index + 1
+			start = cursor
 		} else {
-			end = index
+			end = cursor - 1
 		}
 	}
 	if lastTurns > 0 {
@@ -206,28 +201,42 @@ func (l *Loader) load(ref string, lastTurns, cursor int, forward bool) (Session,
 			start = max(start, end-lastTurns)
 		}
 	}
+	first, last := start+1, end
 	if start > 0 {
-		s.Since = turns[start-1].Ended
+		first = start
+	}
+	if end > start && end < meta.Turns {
+		last = end + 1
+	}
+	var turns []subagent.Turn
+	if first <= last {
+		turns, err = l.Store.TurnRange(info.ID, first, last)
+		if err != nil {
+			return s, err
+		}
+	}
+	if start > 0 {
+		s.Since = turns[start-first].Ended
 		s.Omitted = true
 	}
-	s.Newer = end < len(turns)
+	s.Newer = end < meta.Turns
 	if s.Newer && end > start {
-		s.Before = turns[end-1].Ended
+		s.Before = turns[end-first].Ended
 	}
 	cache := c.done
 	// Reuse selected turns, then release events from pages outside this window.
 	c.done = make(map[int]cachedTurn, end-start)
 	path, _ := l.Store.NormalizedPath(info.ID)
-	for i := start; i < end; i++ {
-		t := turns[i]
+	for n := start + 1; n <= end; n++ {
+		t := turns[n-first]
 		if cached, ok := cache[t.N]; ok && t.Done() && reflect.DeepEqual(cached.src, t) {
 			c.done[t.N] = cached
 			s.Turns = append(s.Turns, cached.turn)
 			continue
 		}
 		var following *subagent.Turn
-		if i+1 < len(turns) {
-			following = &turns[i+1]
+		if n < meta.Turns {
+			following = &turns[n+1-first]
 		}
 		events, omitted := c.read(path, t, following)
 		ct := SessionTurn(t, events, omitted)
