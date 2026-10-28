@@ -372,9 +372,11 @@ func checkWorkerPolicy(args []string) error {
 	if isRead(args) {
 		return nil
 	}
-	if len(args) >= 2 && args[0] == "pr" {
-		switch args[1] {
-		case "create", "edit", "ready":
+	if len(args) >= 2 {
+		switch args[0] + " " + args[1] {
+		case "pr create", "pr edit", "pr ready",
+			"release list", "release view", "repo list",
+			"search code", "search commits", "search issues", "search prs", "search repos":
 			return nil
 		}
 	}
