@@ -38,6 +38,7 @@ const (
 	KeySubagentMaxDepth      = "subagent.maxDepth"
 	KeySteeringToolWait      = "steering.maxToolWait"
 	KeyIdleUnloadMinutes     = "harness.idleUnloadMinutes"
+	KeyCompactAtTokens       = "harness.compactAtTokens"
 	KeyMaxCardBytes          = "content.maxCardBytes"
 	KeyMaxFileBytes          = "content.maxFileBytes"
 	KeyCIDiskFloorGB         = "machines.ciDiskFloorGB"
@@ -59,6 +60,7 @@ const (
 	DefaultSubagentMaxDepth               = 3
 	DefaultSteeringToolWait               = 120 * time.Second
 	DefaultIdleUnloadMinutes              = 10
+	DefaultCompactAtTokens          int64 = 200000
 	DefaultShellSilenceMinutes            = 30
 	DefaultComputersReminderMinutes       = 2
 	DefaultComputersRenderNode            = "auto"
@@ -118,6 +120,8 @@ type Values struct {
 	// HarnessIdleUnloadMinutes is how long a session's harness process may sit
 	// idle before it is stopped; zero keeps it loaded.
 	HarnessIdleUnloadMinutes int
+	// HarnessCompactAtTokens sets the default context cap; zero disables it.
+	HarnessCompactAtTokens int64
 	// VoiceProvider, VoiceModel and VoiceURL choose the call's realtime
 	// voice provider.
 	VoiceProvider string
@@ -164,6 +168,7 @@ func Defaults() Values {
 		SubagentMaxDepth:         DefaultSubagentMaxDepth,
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
+		HarnessCompactAtTokens:   DefaultCompactAtTokens,
 		VoiceProvider:            "openai",
 		VoiceAgent:               true,
 		Extra:                    map[string]any{},
@@ -368,6 +373,10 @@ func Load(path string) (Values, error) {
 		}
 	}
 	if h, ok := raw["harness"].(map[string]any); ok {
+		if n, ok := asInt(h["compactAtTokens"]); ok && n >= 0 {
+			v.HarnessCompactAtTokens = int64(n)
+			v.fromFile[KeyCompactAtTokens] = true
+		}
 		if n, ok := asInt(h["idleUnloadMinutes"]); ok && n >= 0 {
 			v.HarnessIdleUnloadMinutes = n
 			v.fromFile[KeyIdleUnloadMinutes] = true
@@ -597,6 +606,13 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.SteeringMaxToolWait = d
 		v.fromFile[key] = true
+	case KeyCompactAtTokens:
+		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s must be a whole number of tokens, 0 or more", key)
+		}
+		v.HarnessCompactAtTokens = n
+		v.fromFile[key] = true
 	case KeyIdleUnloadMinutes:
 		n, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || n < 0 {
@@ -680,6 +696,7 @@ func (v Values) Save() error {
 	raw["steering"] = steer
 	harnessSection := nested(raw, "harness")
 	harnessSection["idleUnloadMinutes"] = v.HarnessIdleUnloadMinutes
+	harnessSection["compactAtTokens"] = v.HarnessCompactAtTokens
 	raw["harness"] = harnessSection
 	b, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
