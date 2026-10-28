@@ -156,6 +156,18 @@ func match(patterns []struct {
 	if strings.TrimSpace(detail) == "" {
 		return "", false
 	}
+	// A structured provider code is stronger evidence than the message beside
+	// it. Pi can prefix the JSON body with the HTTP status.
+	if start := strings.IndexByte(detail, '{'); start >= 0 {
+		var body struct {
+			Code json.RawMessage `json:"code"`
+		}
+		if json.Unmarshal([]byte(detail[start:]), &body) == nil && len(body.Code) > 0 {
+			if reason, ok := ClassifyJSONField(body.Code); ok {
+				return reason, true
+			}
+		}
+	}
 	for _, entry := range patterns {
 		if entry.pattern.MatchString(detail) {
 			return entry.reason, true
@@ -175,6 +187,10 @@ func Classify(detail string) (Reason, bool) { return match(protocolPatterns, det
 // field, never from model output.
 func ClassifyField(field string) (Reason, bool) {
 	field = strings.TrimSpace(field)
+	// z.ai 1302 is a short request or concurrency limit, not a spent plan.
+	if field == "1302" {
+		return Capacity, true
+	}
 	if status, err := strconv.Atoi(field); err == nil {
 		if reason, ok := StatusReason(status); ok {
 			return reason, true
