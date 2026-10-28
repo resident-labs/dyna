@@ -19,6 +19,7 @@ type RuntimeAdapter struct {
 	Harness      string
 	Binary       string
 	NPMPackage   string
+	distribution distributionKind
 	ConfigFormat string // json or toml
 	MCPKey       string
 	ConfigFile   string // relative native config path, when no generation flag exists
@@ -90,6 +91,7 @@ func RegisterRuntimeAdapter(a RuntimeAdapter) {
 		panic("duplicate runtime adapter")
 	}
 	a.NPMPackage = harnessDistributions[a.Harness].Package
+	a.distribution = harnessDistributions[a.Harness].Kind
 	a.PartialReasons = append(a.PartialReasons, nativeFeaturePolicies[a.Harness].NoSwitch...)
 	adapters.items[a.Harness] = a
 }

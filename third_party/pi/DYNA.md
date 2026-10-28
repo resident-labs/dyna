@@ -4,7 +4,7 @@ Dyna modified this vendored source. The upstream repository is `https://github.c
 
 ## Dyna changes
 
-P0 adds this documentation and changes no upstream Pi file. It changes no Pi behavior and removes no Dyna code. Release packaging and later fork behavior live in separate Dyna commits.
+P0 adds this documentation and changes no upstream Pi file. It changes no Pi behavior and removes no Dyna code. `scripts/pi-pack.sh` stages the built packages outside this tree, sets every internal fork package to `1.4.0-dyna.1`, and adds `dynaFork: 1` and bundled dependencies to the staged metadata. The upstream files stay unchanged.
 
 Each later Pi behavior change must add an entry here and name the Dyna code it removes.
 
@@ -17,6 +17,14 @@ git subtree pull --prefix=third_party/pi https://github.com/earendil-works/pi <t
 ```
 
 Keep the subtree commits in the Dyna history. Do not rebase or squash them away. Resolve any conflicts with Dyna's changes, then run the Pi build and coding-agent tests.
+
+## Pack and install a development build
+
+Run `scripts/pi-pack.sh /absolute/path/pi-coding-agent-1.4.0-dyna.1.tgz`. The script hydrates the pinned model catalog, builds offline, and writes one tarball with all internal `@earendil-works/*` runtime packages bundled. npm treats `bundleDependencies` as complete, so the script also strips the bundled packages' own dependency lists and merges every third-party package they need into the top-level manifest, pinned to the versions the vendored lockfile resolved. Third-party dependencies still come from npm.
+
+The script then verifies its own output: it installs the tarball into a temporary prefix the way Dyna does, compares the installed package set with the upstream npm package, runs `pi --version`, and executes one codemode script with no network. Set `PI_PACK_SKIP_BUILD=1` to reuse an existing install and build; the CI pi job does that.
+
+Development Dyna binaries read the tarball path from `DYNA_PI_TARBALL`. Set that environment variable to the absolute output path before installing Pi. A development install fails with a clear message when the variable is missing. Release binaries instead use their stamped GitHub release asset URL and SHA-512 integrity; they do not read this variable.
 
 ## Review
 

@@ -66,6 +66,11 @@ jobs:
         run: npm run build:offline
       - name: Test coding-agent configuration
         run: npm test --workspace=@earendil-works/pi-coding-agent -- test/args.test.ts test/config.test.ts test/settings-manager.test.ts
+      - name: Pack and verify the fork tarball
+        working-directory: .
+        env:
+          PI_PACK_SKIP_BUILD: "1"
+        run: bash scripts/pi-pack.sh "${RUNNER_TEMP}/pi-fork.tgz"
 
   relay:
     needs: changes
