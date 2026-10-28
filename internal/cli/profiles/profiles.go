@@ -177,10 +177,14 @@ func NewCommand() *cobra.Command {
 
 	var p profile.Profile
 	var outputDialect string
+	var compactTokens int64
 	add := &cobra.Command{
 		Use:   "add",
 		Short: "Register or update a worker profile",
 		RunE: func(c *cobra.Command, _ []string) error {
+			if c.Flags().Changed("compact") {
+				p.Compact = &profile.Compact{Tokens: compactTokens}
+			}
 			if c.Flags().Changed("models") {
 				p.Model, p.Models = profile.NormalizeModels("", p.Models)
 			}
@@ -195,6 +199,7 @@ func NewCommand() *cobra.Command {
 		},
 	}
 	f := add.Flags()
+	f.Int64Var(&compactTokens, "compact", 0, "compaction target in context tokens")
 	f.StringVar(&p.Name, "name", "", "unique profile name (required)")
 	f.StringVar(&p.Description, "desc", "", "personality/strengths description shown to agents")
 	f.StringVar(&p.Harness, "harness", profile.HarnessClaudeCode, "one of: "+strings.Join(profile.Harnesses, ", "))

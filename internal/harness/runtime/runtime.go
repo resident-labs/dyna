@@ -201,6 +201,9 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	if err != nil {
 		return p, pin, err
 	}
+	if ok, reason := supportedVersionRange(a.Harness, b.Version); !ok {
+		return p, pin, errors.New(reason)
+	}
 	pin.Bundle = b
 	home, err := r.Accounts.HarnessHome(a.Harness)
 	if err != nil {

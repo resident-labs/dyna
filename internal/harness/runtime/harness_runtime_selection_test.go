@@ -16,7 +16,7 @@ func TestPrivateRuntimeSnapshotReportsSelectionAndRecommendations(t *testing.T) 
 	m := NewBundleManager()
 	payload := []byte("#!/bin/sh\nexit 0\n")
 	sum := sha256.Sum256(payload)
-	for _, version := range []string{"1.1.0", "2.0.0"} {
+	for _, version := range []string{"1.3.0", "2.0.0"} {
 		dir := filepath.Join(m.Root, "pi", version)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -29,7 +29,7 @@ func TestPrivateRuntimeSnapshotReportsSelectionAndRecommendations(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if err := m.Select("pi", "1.1.0"); err != nil {
+	if err := m.Select("pi", "1.3.0"); err != nil {
 		t.Fatal(err)
 	}
 	a.privateRecommendations = func(context.Context) []RecommendedVersion {
@@ -39,7 +39,7 @@ func TestPrivateRuntimeSnapshotReportsSelectionAndRecommendations(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.SelectedVersions["pi"] != "1.1.0" || len(snapshot.Bundles) != 2 {
+	if snapshot.SelectedVersions["pi"] != "1.3.0" || len(snapshot.Bundles) != 2 {
 		t.Fatal("explicit selection was lost", snapshot)
 	}
 	if len(snapshot.RecommendedVersions) != 1 || snapshot.RecommendedVersions[0].Version != "3.0.0" {

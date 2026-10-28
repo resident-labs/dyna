@@ -47,7 +47,7 @@ func TestRecommendedVersionsAdapterSources(t *testing.T) {
 			packages = append(packages, pkg)
 			mu.Unlock()
 		}
-		version := "1.2.3"
+		version := "1.3.0"
 		return recommendedResponse(200, recommendedMetadata(pkg, version)), nil
 	})}
 	got := r.RecommendedVersions(context.Background())
@@ -76,13 +76,13 @@ func TestRecommendedVersionsMetadataFailure(t *testing.T) {
 		{"http", `secret response`, 503},
 		{"redirect", `secret response`, 302},
 		{"malformed", `{`, 200},
-		{"trailing", `{"name":"` + piNPMPackage + `","version":"1.1.0"} {}`, 200},
+		{"trailing", `{"name":"` + piNPMPackage + `","version":"1.3.0"} {}`, 200},
 		{"wrong-package", `{"name":"not-the-pi-package","version":"2.1.0"}`, 200},
 		{"tag", `{"name":"` + piNPMPackage + `","version":"latest"}`, 200},
-		{"range", `{"name":"` + piNPMPackage + `","version":"^1.1.0"}`, 200},
-		{"invalid-semver", `{"name":"` + piNPMPackage + `","version":"1.1.0-01"}`, 200},
-		{"missing-integrity", `{"name":"` + piNPMPackage + `","version":"1.1.0"}`, 200},
-		{"bad-integrity", `{"name":"` + piNPMPackage + `","version":"1.1.0","dist":{"integrity":"sha512-secret"}}`, 200},
+		{"range", `{"name":"` + piNPMPackage + `","version":"^1.3.0"}`, 200},
+		{"invalid-semver", `{"name":"` + piNPMPackage + `","version":"1.3.0-01"}`, 200},
+		{"missing-integrity", `{"name":"` + piNPMPackage + `","version":"1.3.0"}`, 200},
+		{"bad-integrity", `{"name":"` + piNPMPackage + `","version":"1.3.0","dist":{"integrity":"sha512-secret"}}`, 200},
 		{"oversized", strings.Repeat(" ", (64<<10)+1), 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,9 +102,9 @@ func TestRecommendedVersionsExactMetadataMismatch(t *testing.T) {
 			calls := 0
 			r := RecommendedVersionResolver{HTTPClient: recommendedClientFunc(func(req *http.Request) (*http.Response, error) {
 				calls++
-				body := recommendedMetadata(piNPMPackage, "1.1.0")
+				body := recommendedMetadata(piNPMPackage, "1.3.0")
 				if calls == 2 {
-					if !strings.HasSuffix(req.URL.Path, "/1.1.0") {
+					if !strings.HasSuffix(req.URL.Path, "/1.3.0") {
 						t.Fatalf("wrong exact source: %s", req.URL)
 					}
 					if change == "version" {

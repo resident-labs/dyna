@@ -26,7 +26,7 @@ func TestWaitInstallsWaitsForAnAbandonedInstall(t *testing.T) {
 		}}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go func() { _, _, _ = (&FirstUse{Bundles: m}).EnsureBundle(ctx, "claude", "1.1.0") }()
+		go func() { _, _, _ = (&FirstUse{Bundles: m}).EnsureBundle(ctx, "claude", "1.3.0") }()
 		<-started
 		// The caller stops waiting; the shared install keeps writing.
 		cancel()
@@ -42,7 +42,7 @@ func TestWaitInstallsWaitsForAnAbandonedInstall(t *testing.T) {
 		if err := <-waited; err != nil {
 			t.Fatal(err)
 		}
-		if _, err := m.Resolve("claude", "1.1.0"); err != nil {
+		if _, err := m.Resolve("claude", "1.3.0"); err != nil {
 			t.Fatalf("the install did not finish before WaitInstalls returned: %v", err)
 		}
 	})
