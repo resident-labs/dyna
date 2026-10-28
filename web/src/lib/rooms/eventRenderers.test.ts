@@ -310,6 +310,7 @@ const fixtures: Record<string, EventPayload> = {
   'terminal/request': { requestId: 'q3', asker: 'dyna:leaf', argv: ['gh', 'auth', 'login'], cwd: '/work', reason: 'sign in to GitHub' },
   'terminal/request.done': { requestId: 'q3', verdict: 'done', exit: { code: 0 }, note: 'logged in', detail: 'Exit code 0.' },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
+  'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', minutes: 30 },
   'shell/result': {
     shellId: 'sh_20261023-120000-0000000a',
     label: 'go test · the room package',
