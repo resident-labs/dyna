@@ -94,6 +94,44 @@ func TestClosedMetadataStaysCurrentAndShared(t *testing.T) {
 	}
 }
 
+func TestDeletionRacingSnapshotReadEvicts(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	id := NewID()
+	recordtest.Write(t, s.Root, id, Meta{ID: id, RoomID: "room", Room: "room", Closed: time.Now()})
+	decodeStarted, releaseDecode := make(chan struct{}), make(chan struct{})
+	s.decodeMeta = func(b []byte, v any) error {
+		close(decodeStarted)
+		<-releaseDecode
+		return json.Unmarshal(b, v)
+	}
+	afterDelete := sessionlife.AfterDelete
+	t.Cleanup(func() { sessionlife.AfterDelete = afterDelete })
+	deleteCommitted := make(chan struct{})
+	sessionlife.AfterDelete = func(sessions, id string) {
+		close(deleteCommitted)
+		afterDelete(sessions, id)
+	}
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := s.ReadMeta(id)
+		readDone <- err
+	}()
+	<-decodeStarted
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- sessionlife.Delete(s.Root, id) }()
+	<-deleteCommitted
+	close(releaseDecode)
+	if err := <-readDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleteDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := infoCache.Load(s.recordKey(id)); ok {
+		t.Fatal("a read that started before deletion restored the deleted snapshot")
+	}
+}
+
 func TestMetadataCacheUsesStoredServiceFlag(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	parent := Meta{ID: NewID(), RoomID: "room", Room: "room"}
