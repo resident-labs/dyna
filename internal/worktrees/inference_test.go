@@ -107,6 +107,42 @@ func TestInferOwnersRuns(t *testing.T) {
 	}
 }
 
+// A finished run with no directory evidence no longer uses any tree, but an
+// active run or one without an end time must still protect every candidate.
+func TestInferOwnersIgnoresFinishedRunWithoutDirectories(t *testing.T) {
+	tree := inferenceTestStore(t)
+	ended := "2026-01-01T00:00:00Z"
+	for id, meta := range map[string]map[string]any{
+		"wf_finished": {"status": "ok", "endedAt": ended},
+		"wf_running":  {"status": "running", "endedAt": ended},
+		"wf_no-end":   {"status": "ok"},
+	} {
+		meta["id"] = id
+		inferenceTestWrite(t, filepath.Join(runstore.RunsDir(), id, "meta.json"), meta)
+	}
+	got, err := inferOwners(context.Background(), []string{tree}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ownerRef{{ID: "wf_no-end", Address: "wf_no-end"}, {ID: "wf_running", Address: "wf_running"}}
+	if !reflect.DeepEqual(got[tree].Runs, want) {
+		t.Fatalf("runs = %#v; want %#v", got[tree].Runs, want)
+	}
+}
+
+func TestInferOwnersIgnoresServiceSessions(t *testing.T) {
+	tree := inferenceTestStore(t)
+	recordtest.Write(t, runstore.SessionsDir(), "svc", map[string]any{"id": "svc", "dir": tree, "service": true})
+	recordtest.Write(t, runstore.SessionsDir(), "worker", map[string]any{"id": "worker", "dir": tree})
+	got, err := inferOwners(context.Background(), []string{tree}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []ownerRef{{ID: "worker", Address: "worker"}}; !reflect.DeepEqual(got[tree].Sessions, want) {
+		t.Fatalf("sessions = %#v; want %#v", got[tree].Sessions, want)
+	}
+}
+
 func TestInferOwnersCanonicalPaths(t *testing.T) {
 	tree := inferenceTestStore(t)
 	alias := filepath.Join(t.TempDir(), "alias")

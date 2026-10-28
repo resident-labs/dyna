@@ -91,6 +91,7 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 		var meta struct {
 			sessionlife.Snapshot
 			Name, Room, Dir string
+			Service         bool
 		}
 		if err == nil {
 			err = json.Unmarshal(raw, &meta)
@@ -102,6 +103,10 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 			return errors.New("ownership metadata ID does not match directory")
 		}
 		meta.ID = name
+		// A service runs from a shared directory and never owns a tree.
+		if meta.Service {
+			return nil
+		}
 		address := meta.ID
 		if meta.Room != "" && meta.Name != "" {
 			address = meta.Room + ":" + meta.Name
@@ -148,8 +153,11 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 			return err
 		}
 		if !found || !set.Complete {
-			// Unknown directories cannot prove that any candidate tree is unused.
-			ref.Closed = false
+			// A finished run no longer uses any tree, even if its directories are unknown.
+			if ref.Closed {
+				return nil
+			}
+			// Unknown directories of an active or unknown run cannot prove that any tree is unused.
 			for key, item := range owners {
 				item.Runs = inferenceAddOwner(item.Runs, ref)
 				owners[key] = item
