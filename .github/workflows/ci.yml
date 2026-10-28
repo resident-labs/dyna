@@ -30,6 +30,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       computers: ${{ steps.filter.outputs.computers }}
       web: ${{ steps.filter.outputs.web }}
+      pi: ${{ steps.filter.outputs.pi }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -39,6 +40,32 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: bash scripts/ci-changes.sh >> "$GITHUB_OUTPUT"
+
+  pi:
+    needs: changes
+    if: needs.changes.outputs.pi == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: third_party/pi
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: third_party/pi/package-lock.json
+      # The upstream prepare script installs Husky hooks. CI does not need Git
+      # hooks, and the build and tests need no dependency install scripts.
+      - name: Install Pi dependencies
+        run: npm ci --ignore-scripts
+      - name: Hydrate the pinned model catalog offline
+        run: bash ../../scripts/pi-hydrate.sh
+      - name: Build Pi without live catalog updates
+        run: npm run build:offline
+      - name: Test coding-agent configuration
+        run: npm test --workspace=@earendil-works/pi-coding-agent -- test/args.test.ts test/config.test.ts test/settings-manager.test.ts
 
   relay:
     needs: changes
