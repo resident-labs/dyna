@@ -193,7 +193,34 @@ var (
 	// for, so a launch does not reread the configuration directory each time.
 	roomSliceMu   sync.Mutex
 	roomSliceDone = map[string]bool{}
+
+	// roomLocks holds one mutex per room, so a settings change and a launch
+	// that both write the same room's slice cannot interleave: an older
+	// change would otherwise move the live slice back after a newer one.
+	roomLocksMu sync.Mutex
+	roomLocks   = map[string]*sync.Mutex{}
 )
+
+// roomMutex returns the room's slice mutex, creating it once.
+func roomMutex(roomID string) *sync.Mutex {
+	roomLocksMu.Lock()
+	defer roomLocksMu.Unlock()
+	mu := roomLocks[roomID]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		roomLocks[roomID] = mu
+	}
+	return mu
+}
+
+// lockRoom holds this room's slice work and returns what releases it. The
+// caller reads the room's setting only under it, so an apply always sees the
+// newest saved limits and lands after every earlier apply.
+func lockRoom(roomID string) func() {
+	mu := roomMutex(roomID)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // ensureRoom installs or refreshes the shared slice and this room's slice,
 // and reloads the user manager once when either changed. Errors leave the
@@ -218,26 +245,29 @@ func ensureRoom(roomID string) {
 	if err != nil {
 		return
 	}
+	unlock := lockRoom(roomID)
 	room, err := WriteRoomSlice(dir, roomID, roomLimits(roomID, total))
-	if err != nil {
-		return
-	}
-	if shared || room {
+	if err == nil && (shared || room) {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		defer cancel()
 		_ = runCommand(ctx, "systemctl", "--user", "daemon-reload")
+	}
+	unlock()
+	if err != nil {
+		return
 	}
 	roomSliceMu.Lock()
 	roomSliceDone[roomID] = true
 	roomSliceMu.Unlock()
 }
 
-// ApplyRoomLimits applies one room's limits now. It rewrites the managed
-// slice file, and on a machine that can run room slices moves the live slice
-// with systemctl set-property --runtime; an off limit becomes infinity, so a
-// live slice loses a removed limit too. A machine without the user manager
-// or the delegated controllers keeps the file only: the room already heard
-// why it has no slice of its own.
+// ApplyRoomLimits applies one room's limits now, under the room's slice
+// lock: it reads the saved setting, rewrites the managed slice file, and on
+// a machine that can run room slices moves the live slice with systemctl
+// set-property --runtime; an off limit becomes infinity, so a live slice
+// loses a removed limit too. A machine without the user manager or the
+// delegated controllers keeps the file only: the room already heard why it
+// has no slice of its own.
 func ApplyRoomLimits(roomID string) error {
 	config, err := os.UserConfigDir()
 	if err != nil {
@@ -248,6 +278,8 @@ func ApplyRoomLimits(roomID string) error {
 		return err
 	}
 	dir := filepath.Join(config, "systemd", "user")
+	unlock := lockRoom(roomID)
+	defer unlock()
 	limits := roomLimits(roomID, total)
 	changed, err := WriteRoomSlice(dir, roomID, limits)
 	if err != nil {

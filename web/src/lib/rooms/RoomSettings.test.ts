@@ -402,15 +402,26 @@ test('the parent check-in field saves its value and restores the stored one afte
  assert.match(c.checkInError, /interval must be a duration/)
 })
 
-test('the limit fields save their values and restore the stored ones after a failed write', async () => {
+test('the limit fields save their values, keep them on a live-apply warning, and restore the stored ones after a failed write', async () => {
  let fail = false
+ let warn = false
  const saved: string[] = []
  const pageRoom = { id: 'r', limits: { memoryHigh: '2G' } as Record<string, string> }
- const c = page({ setRoomLimit: async (_room: string, field: string, value: string) => { if (fail) throw new Error('memory high must be a size such as 2G'); pageRoom.limits[field] = value } }, ['saveLimit'] as const, { room: pageRoom, onlimit: (_id: string, field: string, value: string) => { saved.push(field + '=' + value); pageRoom.limits[field] = value } })
+ const c = page({ setRoomLimit: async (_room: string, field: string, value: string) => {
+   if (fail) throw new Error('memory high must be a size such as 2G')
+   pageRoom.limits[field] = value
+   return warn ? { applyWarning: 'the live slice did not pick it up' } : {}
+ } }, ['saveLimit'] as const, { room: pageRoom, onlimit: (_id: string, field: string, value: string) => { saved.push(field + '=' + value); pageRoom.limits[field] = value } })
  c.limits.memoryHigh = ' 4G '
  await c.saveLimit('memoryHigh')
  assert.equal(pageRoom.limits.memoryHigh, '4G') // trimmed before it is sent
  assert.deepEqual(saved, ['memoryHigh=4G'])
+ warn = true
+ c.limits.tasksMax = '512'
+ await c.saveLimit('tasksMax')
+ assert.equal(c.limits.tasksMax, '512') // the saved value stays
+ assert.equal(pageRoom.limits.tasksMax, '512')
+ assert.match(c.limitError.tasksMax ?? '', /live slice did not pick it up/)
  fail = true
  c.limits.memoryMax = 'nonsense'
  await c.saveLimit('memoryMax')

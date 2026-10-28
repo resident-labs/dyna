@@ -2,6 +2,7 @@ package agentslice
 
 import (
 	"context"
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/testsafe"
 	"os"
 	"os/exec"
@@ -30,6 +31,9 @@ func fakeManager(t *testing.T) (config string, calls *[]string) {
 	t.Setenv("XDG_RUNTIME_DIR", runDir)
 	t.Setenv("XDG_CONFIG_HOME", config)
 	t.Setenv("DYNA_SLICE", "")
+	// A session launched in a room slice inherits DYNA_ROOM_SLICE; clearing
+	// it lets the tests see only what WrapRoom adds.
+	t.Setenv(mode.EnvRoomSlice, "")
 	underTest = false
 	t.Cleanup(func() { underTest = true })
 	var got []string

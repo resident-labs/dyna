@@ -41,6 +41,13 @@ export interface RoomLimits {
 // RoomLimitField names one of a room's limits, as the engine call takes it.
 export type RoomLimitField = keyof RoomLimits
 
+// SetRoomLimitResult is roomsvc.SetRoomLimitResult: the saved value is the
+// source of truth, and applyWarning names why the live slice did not pick it
+// up, empty when it did.
+export interface SetRoomLimitResult {
+  applyWarning?: string
+}
+
 // Shot and Check are room.Shot and room.Check, the preview of an HTML card.
 export interface Shot {
   width: number

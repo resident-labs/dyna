@@ -10,7 +10,7 @@ import type { MachinePatch } from './lib/api/machine.ts'
 import type { ChangePolicy, CIBudgetSettings, PolicyOverride, PRConfig } from './lib/api/change.ts'
 import type { CreateRoomInput } from './lib/api/file.ts'
 import type { ManagedMCP, ManagedSkill } from './lib/api/harness.ts'
-import type { Attachment, RoomLimitField } from './lib/api/room.ts'
+import type { Attachment, RoomLimitField, SetRoomLimitResult } from './lib/api/room.ts'
 import type { BulkSessionOptions, ConsolidationOptions, TransferOptions } from './lib/api/session.ts'
 import type { RunSource } from './lib/api/workflow.ts'
 import type { CardRef } from './lib/api/wire.ts'
@@ -240,7 +240,7 @@ export const api = {
   renameRoom: (ref: string, name: string) => app.RenameRoom(ref, name),
   setRoomRootProfile: (ref: string, name: string) => app.SetRoomRootProfile(ref, name),
   setRoomCheckIn: (ref: string, value: string) => app.SetRoomCheckIn(ref, value),
-  setRoomLimit: (ref: string, field: RoomLimitField, value: string) => app.SetRoomLimit(ref, field, value),
+  setRoomLimit: (ref: string, field: RoomLimitField, value: string): Promise<SetRoomLimitResult> => app.SetRoomLimit(ref, field, value),
   deleteRoom: (ref: string) => app.DeleteRoom(ref),
   pinRoom: (ref: string, order = 0) => app.PinRoom(ref, order),
   unpinRoom: (ref: string) => app.UnpinRoom(ref),

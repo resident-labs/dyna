@@ -1,6 +1,8 @@
 package room
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -131,5 +133,23 @@ func TestRoomSetLimitsSetsShowsAndClears(t *testing.T) {
 	}
 	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.swap", "1G"); err == nil || !strings.Contains(err.Error(), "unknown room limit") {
 		t.Fatalf("unknown limit err = %v", err)
+	}
+	// A failed live apply keeps the saved limit and says so: the value prints
+	// with a warning, not an error. A systemd user directory that is a file
+	// makes the apply fail after the store write, without touching systemd.
+	config := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(config, "dyna"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "systemd"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", config)
+	out, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.tasksMax", "256")
+	if err != nil || !strings.Contains(out, "256") || !strings.Contains(out, "warning") {
+		t.Fatalf("live-apply failure = %q, %v", out, err)
+	}
+	if l := stored(room.LimitTasksMax); l.Off || l.Value != 256 {
+		t.Fatalf("the saved limit was lost: %+v", l)
 	}
 }

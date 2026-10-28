@@ -138,10 +138,14 @@ func setCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := engineClient().Call(cmd.Context(), "SetRoomLimit", []any{rec.Name, string(field), args[2]}, nil); err != nil {
+			var result roomsvc.SetRoomLimitResult
+			if err := engineClient().Call(cmd.Context(), "SetRoomLimit", []any{rec.Name, string(field), args[2]}, &result); err != nil {
 				return fmt.Errorf("the room was not updated: %w", err)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", rec.Name, field.Label(), field.Format(limit))
+			if result.ApplyWarning != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "warning: %s\n", result.ApplyWarning)
+			}
 			return nil
 		},
 	}
