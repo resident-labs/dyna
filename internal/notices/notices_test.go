@@ -99,4 +99,16 @@ func TestFactsRoundTripAndBuildTheLine(t *testing.T) {
 	if got := list[3]; got.Sync == nil || !got.Sync.Rewritten || !strings.Contains(got.Line(), "rewritten") {
 		t.Fatalf("rewrite = %+v, line %q", got.Sync, got.Line())
 	}
+	// The managed tunnel reports a missing connector with typed facts: the
+	// binary it tried to run and the PATH it searched.
+	if _, err := s.Post(Notice{Key: "tunnel", Kind: KindTunnel, Severity: SeverityError, Tunnel: &TunnelFacts{Binary: "cloudflared", Path: "/usr/local/bin:/usr/bin:/bin"}}); err != nil {
+		t.Fatal(err)
+	}
+	list, err = s.List()
+	if err != nil || len(list) != 5 {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	if got := list[4]; got.Tunnel == nil || got.Tunnel.Binary != "cloudflared" || !strings.Contains(got.Line(), "cloudflared") {
+		t.Fatalf("tunnel = %+v, line %q", got.Tunnel, got.Line())
+	}
 }
