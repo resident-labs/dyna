@@ -125,6 +125,10 @@ func TestWaitHealthyAfterARestart(t *testing.T) {
 	if err == nil || err.Error() != "the engine is up, but read-only: migrate dyna.db: boom" {
 		t.Fatalf("a failed migration gave %v", err)
 	}
+	err = WaitHealthy(ctx, answers(Health{Status: healthStarting}), func(context.Context, time.Duration) error { return context.DeadlineExceeded })
+	if err == nil || err.Error() != "the engine did not become ready: context deadline exceeded" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a starting engine that timed out gave %v", err)
+	}
 	pauses = 0
 	if err := WaitHealthy(ctx, answers(engineclient.ErrNotRunning), pause); err == nil || !strings.HasPrefix(err.Error(), "the engine did not answer Health") {
 		t.Fatalf("an engine that never answers gave %v", err)

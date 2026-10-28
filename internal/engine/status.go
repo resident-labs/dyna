@@ -78,12 +78,14 @@ func WaitHealthy(ctx context.Context, call func(context.Context, string, []any, 
 			}
 		}
 	}
+	answered := false
 	for {
 		callCtx, cancel := context.WithTimeout(ctx, StatusTimeout)
 		var h Health
 		err := call(callCtx, "Health", nil, &h)
 		cancel()
 		if err == nil {
+			answered = true
 			if h.Status == healthStarting && !h.Ready {
 				// Migrations still run, but the listener is healthy. Keep waiting
 				// for the full API instead of calling this slow start a failure.
@@ -93,7 +95,10 @@ func WaitHealthy(ctx context.Context, call func(context.Context, string, []any, 
 				return nil
 			}
 		}
-		if pause(ctx, healthPoll) != nil {
+		if pauseErr := pause(ctx, healthPoll); pauseErr != nil {
+			if answered {
+				return fmt.Errorf("the engine did not become ready: %w", pauseErr)
+			}
 			return fmt.Errorf("the engine did not answer Health: %w", err)
 		}
 	}
