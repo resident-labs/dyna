@@ -15,3 +15,13 @@ func TestReviewTaskKeepsReviewerOutOfAuthorCheckout(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubReviewTaskPrefersPreparedDiff(t *testing.T) {
+	got := reviewTask(Record{Kind: "github", Key: "github.com/owner/repo#17", Repo: "owner/repo", Number: 17, Head: "abc"})
+	if !strings.Contains(got, "prepared diff") {
+		t.Errorf("task does not direct the reviewer to the prepared diff: %s", got)
+	}
+	if !strings.Contains(got, "If that file is missing") {
+		t.Errorf("task has no gh pr diff fallback: %s", got)
+	}
+}

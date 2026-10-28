@@ -989,7 +989,7 @@ func reviewTask(r Record) string {
 	base := fmt.Sprintf("Review %s at head %s. Do not merge or push changes.\n", changeLocation(r), r.Head)
 	command := "dyna git change verdict " + shellquote.Quote(changeID(r))
 	if changeKind(r) == "github" {
-		base += "Read the diff with gh pr diff.\n"
+		base += "Read the prepared diff file that the assignment context names; files marked generated are omitted from it. If that file is missing, read the diff with gh pr diff.\n"
 		command = "dyna git pr verdict " + shellquote.Quote(r.URL)
 	}
 	if len(r.ReviewRounds) > 0 {
