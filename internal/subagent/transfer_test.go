@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/mode"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
@@ -45,6 +46,39 @@ func completeTransfer(t *testing.T, e *testEnv, state TransferState) {
 	got, err := e.m.TransferStatus(state.Session)
 	if err != nil || got.Phase != "completed" {
 		t.Fatalf("not completed: %+v %v", got, err)
+	}
+}
+
+func TestFreshTransferDropsRuntimePinAndConversation(t *testing.T) {
+	e, _ := transferEnv(t)
+	info, _ := e.start("RESPOND: original work")
+	info, _ = e.wait(info.ID, 1)
+	oldPin := &harnessruntime.Pin{Bundle: harnessruntime.Bundle{Harness: "pi", Version: "1.0.0"}, Generation: "old"}
+	_, err := e.m.store().updateMetaContext(context.Background(), info.ID, func(meta *Meta) {
+		meta.RuntimePin = oldPin
+		meta.HarnessSession = "old-conversation"
+		meta.Resumable = true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Fresh: true, WaitSeconds: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Profile != "mock" || state.Phase != "waiting" {
+		t.Fatalf("fresh transfer must use the current profile and request a handoff: %+v", state)
+	}
+	if err := e.m.SubmitHandoff(context.Background(), info.ID, state.ID, "Continue the original work.", info.Dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	advance(t, e, state, 2)
+	meta, err := e.m.Store.ReadMeta(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ID != info.ID || meta.Name != info.Name || meta.RuntimePin != nil || meta.HarnessSession != "" || !strings.Contains(meta.Transfer.Handoff, "Continue the original work.") {
+		t.Fatalf("fresh transfer did not preserve identity and reset the runtime and conversation: %+v", meta)
 	}
 }
 
