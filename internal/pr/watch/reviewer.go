@@ -690,25 +690,25 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 	if err != nil {
 		return err
 	}
+	// busyIDs holds every reviewer in this room whose own turn is queued or
+	// running, busy or not: a live turn may still record its verdict, so record
+	// state alone neither closes the session nor frees capacity (D-411). A
+	// transient poll error once hid running reviews from Busy; the close then
+	// stopped a verdict shell mid-command, and a non-busy live turn could push
+	// the pool past its profile cap or double-review a moved head.
 	busyIDs := map[string]bool{}
 	busy := 0
-	for _, live := range facts.Busy {
-		if live.Info.RoomID == roomID {
-			busyIDs[live.Info.ID] = true
-			busy++
+	for id, live := range facts.Sessions {
+		if live.Info.RoomID != roomID || !prfacts.TurnLive(live.Info, live.Turn) {
+			continue
 		}
+		busyIDs[id] = true
+		busy++
 	}
 	failures := st.Reviewers[roomID].FailedProfiles
 	retired := map[string]bool{}
 	for id, live := range facts.Sessions {
 		if live.Info.RoomID != roomID || busyIDs[id] {
-			continue
-		}
-		// A live turn may still record its verdict, so record state alone never
-		// closes a reviewer: a transient poll error hid running reviews from
-		// Busy and the close stopped the verdict shell mid-command (D-411).
-		// The next pass closes the session once the turn ends.
-		if prfacts.TurnLive(live.Info, live.Turn) {
 			continue
 		}
 		failures = rolesession.RecordFailure(failures, live.Info, live.Turn, s.now())

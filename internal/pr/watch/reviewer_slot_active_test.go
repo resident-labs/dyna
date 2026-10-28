@@ -17,6 +17,8 @@ func TestReviewerWaitingForAuthorReleasesReviewSlot(t *testing.T) {
 	if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "changes", "Please fix the parser.", 0); err != nil {
 		t.Fatal(err)
 	}
+	// Recording the verdict ends the reviewer's turn, which frees its slot.
+	e.endReviewerTurn(r.Reviewer)
 	st = dispatchReviewPool(t, e)
 	facts, err := e.s.ReviewFacts(st)
 	if err != nil {
