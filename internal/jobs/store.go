@@ -102,12 +102,16 @@ type Job struct {
 	LogBytes int64
 	// Note says what Dyna clamped about the request.
 	Note string
+	// CancelRequested records a standing cancellation: the engine that
+	// holds the executor, or the next one after a restart, stops the process
+	// and records the end.
+	CancelRequested bool
 }
 
 // Topic is the hub topic a jobs-table write publishes under.
 const Topic = "jobs"
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 const schema = `CREATE TABLE jobs (
 	id TEXT PRIMARY KEY,
@@ -131,7 +135,8 @@ const schema = `CREATE TABLE jobs (
 	dir TEXT NOT NULL DEFAULT '',
 	unit TEXT NOT NULL DEFAULT '',
 	log_bytes INTEGER NOT NULL DEFAULT 0,
-	note TEXT NOT NULL DEFAULT ''
+	note TEXT NOT NULL DEFAULT '',
+	cancel_requested INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX jobs_open ON jobs(created_ms) WHERE state IN ('queued','running');`
 
@@ -164,9 +169,20 @@ func (s Store) db() (*sql.DB, error) {
 			_, err := conn.ExecContext(context.Background(), schema)
 			return err
 		}
+		if old == 1 {
+			_, err := conn.ExecContext(context.Background(), "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+			return err
+		}
 		return nil
 	}
 	return db, database.Migrate(db, "jobs.version", schemaVersion, apply)
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (s Store) now() time.Time {
@@ -274,11 +290,12 @@ func (s Store) SaveOpen(ctx context.Context, job Job) (Job, bool, error) {
 	return winner, won, err
 }
 
-// Cancel ends the row id at time ended, changing only its cancellation
-// fields inside one transaction that reads the row as it lies: whatever a
-// start recorded in the meantime — its start time, folder and unit — stays,
-// and the returned row is what the table holds after the call. A row that
-// already ended keeps its own end, and won is then false.
+// Cancel ends the row id inside one transaction that reads the row as it
+// lies. A job that never started ends cancelled at once. A started job keeps
+// running in the row and records a standing cancellation request, which the
+// engine that holds the executor — or the next one, after a restart —
+// carries to the recorded end. A row that already ended keeps its own end,
+// and won is then false.
 func (s Store) Cancel(ctx context.Context, id string, ended time.Time) (Job, bool, error) {
 	db, err := s.db()
 	if err != nil {
@@ -297,8 +314,17 @@ func (s Store) Cancel(ctx context.Context, id string, ended time.Time) (Job, boo
 			winner = current
 			return nil
 		}
-		current.State = StateCancelled
-		current.Ended = ended
+		if !current.Started.IsZero() {
+			// The job started: the request stands in the row until the engine
+			// that holds the executor stops the process and records the end,
+			// so an engine restart recovers it. The canceller reports nothing.
+			current.CancelRequested = true
+		} else {
+			// The job never started: it ends here, and the canceller reports
+			// the end, the only event the job will ever have.
+			current.State = StateCancelled
+			current.Ended = ended
+		}
 		encoded, err := json.Marshal(current.Command)
 		if err != nil {
 			return err
@@ -325,26 +351,28 @@ func (s Store) Cancel(ctx context.Context, id string, ended time.Time) (Job, boo
 // upsertJob writes the whole row of one job.
 func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exit any, ms func(time.Time) int64) error {
 	command := string(encoded)
-	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note`,
-		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note)
+	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested`,
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested))
 	return err
 }
 
-const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note"
+const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
 	var command string
 	var exit sql.NullInt64
+	var requested int
 	var host, timeout int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
 	job.Host = host == 1
+	job.CancelRequested = requested == 1
 	if exit.Valid {
 		code := int(exit.Int64)
 		job.ExitCode = &code

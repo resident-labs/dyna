@@ -198,12 +198,25 @@ func TestCancelStopsTheJob(t *testing.T) {
 // A running row whose engine died reattaches instead of launching again: the
 // node sees no second start, and the job still ends through the new engine.
 func TestEngineRestartReattachesWithoutASecondStart(t *testing.T) {
-	svc, fake, reporter, _ := newService(t, blockingJob("before the restart"))
+	onNode := make(chan struct{})
+	onNodeLegacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "before the restart")
+		onNode <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc, fake, _, _ := newService(t, onNodeLegacy)
 	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-reporter.started
+	// The start event goes out before the node work, so wait for the node
+	// itself: the stop below must land while the job runs.
+	<-onNode
 	// The engine stops without cancelling the job: the row stays running and
 	// the restarted engine reattaches.
 	SetEngineStoppingForTest(true)

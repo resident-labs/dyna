@@ -113,12 +113,14 @@ func (m *chanMutex) unlock() { <-m.ch }
 // 3: the row's stored log offset after an engine stop matches the log written
 // so far, and the restarted engine never repeats output.
 func TestLogOffsetSurvivesEngineStop(t *testing.T) {
-	svc, _, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+	onNode := make(chan struct{})
+	svc, _, _, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
 		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
 			fmt.Fprintln(out, "removed")
 			return nil
 		}
 		fmt.Fprintln(out, "before the restart")
+		onNode <- struct{}{}
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -126,7 +128,9 @@ func TestLogOffsetSurvivesEngineStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-reporter.started
+	// The start event goes out before the node work, so wait for the node
+	// itself: the stop below must land while the job runs.
+	<-onNode
 	SetEngineStoppingForTest(true)
 	svc.Stop()
 	SetEngineStoppingForTest(false)
@@ -578,11 +582,12 @@ func TestATerminalRowKeepsItsEnd(t *testing.T) {
 }
 
 // TestACancelAfterTheStartKeepsTheRunsRecord is the fail-first test for the
-// round-5 review finding: a standby reads a queued job, the owner records
-// the start, and only then does the standby commit its cancellation. The
-// cancellation changes only its own fields: the start time, folder and unit
-// the run recorded stay, so the row still reads as started and the finish
-// event is not suppressed.
+// round-5 review finding, carried into the round-7 request design: a standby
+// reads a queued job, the owner records the start, and only then does the
+// standby commit its cancellation. The started job does not end at once: its
+// row records a standing cancellation request and keeps running, so the
+// engine that holds the executor - or the next one, after a restart - stops
+// the process and records the end. Everything the start recorded stays.
 func TestACancelAfterTheStartKeepsTheRunsRecord(t *testing.T) {
 	store := Store{DataDir: t.TempDir()}
 	submitted := time.Now().Truncate(time.Millisecond)
@@ -605,46 +610,42 @@ func TestACancelAfterTheStartKeepsTheRunsRecord(t *testing.T) {
 	if _, won, err := store.SaveOpen(t.Context(), running); err != nil || !won {
 		t.Fatalf("record the start: won=%v err=%v", won, err)
 	}
-	// The stale engine cancels after that start.
-	ended := started.Add(time.Minute)
-	row, won, err := store.Cancel(t.Context(), job.ID, ended)
+	// The stale engine cancels after that start: the row keeps running with
+	// a standing request, and everything the start recorded stays.
+	row, won, err := store.Cancel(t.Context(), job.ID, started.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !won {
 		t.Fatal("the cancellation of an open row lost")
 	}
-	if row.State != StateCancelled {
-		t.Fatalf("the row is %s, want cancelled", row.State)
+	if row.State != StateRunning || !row.CancelRequested {
+		t.Fatalf("the row is %s with request=%v, want running with a standing request", row.State, row.CancelRequested)
 	}
-	if row.Started.IsZero() {
-		t.Fatal("the cancellation erased the recorded start, so the finish event would be suppressed")
+	if row.Started.IsZero() || row.Dir == "" || row.Unit == "" {
+		t.Fatalf("the cancellation erased the run record: started=%v dir=%q unit=%q", row.Started, row.Dir, row.Unit)
 	}
-	if row.Dir == "" || row.Unit == "" {
-		t.Fatal("the cancellation erased the job folder and unit")
-	}
-	if !row.Ended.Equal(ended) {
-		t.Fatalf("the row ended at %v, want %v", row.Ended, ended)
+	if !row.Ended.IsZero() {
+		t.Fatalf("the row ended at %v, want no end yet", row.Ended)
 	}
 	stored, err := store.Get(t.Context(), job.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.State != StateCancelled || stored.Started.IsZero() || stored.Dir == "" || stored.Unit == "" {
-		t.Fatalf("the stored row lost its run record: state=%s started=%v dir=%q unit=%q", stored.State, stored.Started, stored.Dir, stored.Unit)
+	if stored.State != StateRunning || !stored.CancelRequested || stored.Started.IsZero() || stored.Dir == "" || stored.Unit == "" {
+		t.Fatalf("the stored row lost its run record: state=%s request=%v started=%v dir=%q unit=%q", stored.State, stored.CancelRequested, stored.Started, stored.Dir, stored.Unit)
 	}
 }
 
-// TestACancelDuringTheRunsPreparePostsNothing is the fail-first test for
-// the round-6 review, first interleaving: a standby cancels after the owner
-// recorded the start in the table but before the owner posts the start
-// event. Nobody posts anything — no end without a start — the run abandons
-// the job, and the node never sees it. The prepare hook places the cancel
-// exactly in that window.
-func TestACancelDuringTheRunsPreparePostsNothing(t *testing.T) {
+// TestACancelDuringTheRunsPrepareEndsAfterItsStart is the fail-first test
+// for the round-6 review, first interleaving, under the round-7 request
+// design: a standby cancels after the owner posted the start, while the run
+// still prepares. The node never sees the job; the owner alone posts the
+// job's events, in order: the start, then the cancelled end. The prepare
+// hook places the cancel exactly in that window.
+func TestACancelDuringTheRunsPrepareEndsAfterItsStart(t *testing.T) {
 	owner, fake, ownerReporter, _ := newIdleService(t, blockingJob("never runs"))
 	cancelled := make(chan struct{})
-	abandoned := make(chan struct{})
 	owner.onPrepared = func(job Job) {
 		standby, _, standbyReporter, _ := newIdleService(t, blockingJob("never runs"))
 		standby.Store = owner.Store
@@ -661,26 +662,27 @@ func TestACancelDuringTheRunsPreparePostsNothing(t *testing.T) {
 		}
 		close(cancelled)
 	}
-	owner.onAbandoned = func(Job) { close(abandoned) }
 	owner.Start(t.Context())
 	if _, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}}); err != nil {
 		t.Fatal(err)
 	}
 	<-cancelled
-	<-abandoned
+	start := <-ownerReporter.started
+	end := <-ownerReporter.finished
 	owner.Stop()
+	if start.ID != end.ID {
+		t.Fatalf("start %s and end %s name different jobs", start.ID, end.ID)
+	}
+	if end.State != StateCancelled {
+		t.Fatalf("the job ended %s, want cancelled", end.State)
+	}
+	select {
+	case extra := <-ownerReporter.finished:
+		t.Fatalf("a second end %s arrived; the end is reported once", extra.State)
+	default:
+	}
 	if n := len(fake.StartCalls()); n != 0 {
 		t.Fatalf("the node started %d job(s) after the cancel", n)
-	}
-	select {
-	case event := <-ownerReporter.finished:
-		t.Fatalf("an end %s was posted with no start posted", event.State)
-	default:
-	}
-	select {
-	case start := <-ownerReporter.started:
-		t.Fatalf("a start of %s was posted after the cancel", start.ID)
-	default:
 	}
 	row, err := owner.Store.List(t.Context(), false)
 	if err != nil {
@@ -774,4 +776,168 @@ func standby2Cancel(t *testing.T, owner *Service, id string) (Job, error) {
 	standby.NewExecutor = owner.NewExecutor
 	defer standby.Stop()
 	return standby.Cancel(t.Context(), id)
+}
+
+// TestACancelOfAQueuedJobStillReportsItsEnd is the fail-first test for the
+// parent's rule that every submitted job ends with exactly one finished
+// event: a job cancelled while still queued - the owner or another session
+// may cancel it, not only the submitter - ends at once, and the canceller
+// posts that end, the only event the job will ever have. The session that
+// submitted it never polls.
+func TestACancelOfAQueuedJobStillReportsItsEnd(t *testing.T) {
+	standby, _, _, _ := newIdleService(t, blockingJob("never runs"))
+	standby.Start(t.Context())
+	defer standby.Stop()
+	job, err := standby.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The job sits queued: no engine claimed it, so nothing started it.
+	canceller, _, cancellerReporter, _ := newIdleService(t, blockingJob("never runs"))
+	canceller.Store = standby.Store
+	canceller.Machines = standby.Machines
+	canceller.NewExecutor = standby.NewExecutor
+	row, err := canceller.Cancel(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != StateCancelled {
+		t.Fatalf("the row is %s, want cancelled at once", row.State)
+	}
+	if !row.Started.IsZero() {
+		t.Fatal("a queued job recorded a start")
+	}
+	event := <-cancellerReporter.finished
+	if event.ID != job.ID || event.State != StateCancelled {
+		t.Fatalf("the canceller posted %s of %s, want cancelled of %s", event.State, event.ID, job.ID)
+	}
+	select {
+	case extra := <-cancellerReporter.finished:
+		t.Fatalf("a second end %s arrived; the end is reported once", extra.State)
+	default:
+	}
+}
+
+// TestAPrepareFailureAfterACancelEndsCancelledAfterItsStart is the
+// fail-first test for the round-7 review, second finding: a standby cancels
+// while the run prepares, and the preparation then fails before the node
+// sees the job. The start went out with the durable transition, so the
+// cancelled end follows it - no end ever precedes a start.
+func TestAPrepareFailureAfterACancelEndsCancelledAfterItsStart(t *testing.T) {
+	owner, _, ownerReporter, _ := newIdleService(t, blockingJob("never runs"))
+	cancelled := make(chan struct{})
+	owner.onPrepared = func(job Job) {
+		standby, _, standbyReporter, _ := newIdleService(t, blockingJob("never runs"))
+		standby.Store = owner.Store
+		standby.Machines = owner.Machines
+		standby.NewExecutor = owner.NewExecutor
+		if _, err := standby.Cancel(t.Context(), job.ID); err != nil {
+			t.Errorf("cancel: %v", err)
+		}
+		standby.Stop()
+		select {
+		case event := <-standbyReporter.finished:
+			t.Errorf("the canceller posted %s; the owner owns the events", event.State)
+		default:
+		}
+		// The preparation fails from here: the log path cannot be a file.
+		if err := os.Mkdir(job.LogPath, 0o700); err != nil {
+			t.Errorf("plant the blocking folder: %v", err)
+		}
+		close(cancelled)
+	}
+	owner.Start(t.Context())
+	if _, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}}); err != nil {
+		t.Fatal(err)
+	}
+	<-cancelled
+	start := <-ownerReporter.started
+	end := <-ownerReporter.finished
+	if end.ID != start.ID {
+		t.Fatalf("start %s and end %s name different jobs", start.ID, end.ID)
+	}
+	if end.State != StateCancelled {
+		t.Fatalf("the job ended %s, want the cancelled end the request stands for", end.State)
+	}
+	row, err := owner.Store.Get(t.Context(), start.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != StateCancelled {
+		t.Fatalf("the row is %s, want cancelled", row.State)
+	}
+	owner.Stop()
+}
+
+// TestACancelledRequestSurvivesAnOwnerRestart is the fail-first test for
+// the round-7 review, first finding: a standby cancels a running job and
+// the owner exits before its tick stops the process. The request stands in
+// the row, the next engine reattaches the still-running job, its tick stops
+// the node process, and the room receives the job's end exactly once.
+func TestACancelledRequestSurvivesAnOwnerRestart(t *testing.T) {
+	onNode := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		onNode <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	owner, fake, _, _ := newIdleService(t, legacy)
+	owner.Start(t.Context())
+	// The owner never stops: it dies with the job still running on the node.
+	job, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-onNode
+	standby, _, standbyReporter, _ := newIdleService(t, legacy)
+	standby.Store = owner.Store
+	standby.Machines = owner.Machines
+	standby.NewExecutor = owner.NewExecutor
+	row, err := standby.Cancel(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	standby.Stop()
+	if row.State != StateRunning || !row.CancelRequested {
+		t.Fatalf("the row is %s with request=%v, want running with a standing request", row.State, row.CancelRequested)
+	}
+	select {
+	case event := <-standbyReporter.finished:
+		t.Fatalf("the canceller posted %s; the owner that runs the job owns the end", event.State)
+	default:
+	}
+	// The next engine starts: it reattaches the running row and its claim
+	// tick carries the standing request to the recorded end.
+	next, _, nextReporter, _ := newIdleService(t, legacy)
+	next.Store = owner.Store
+	next.Machines = owner.Machines
+	next.NewExecutor = owner.NewExecutor
+	tick := make(chan time.Time)
+	next.after = func(time.Duration) <-chan time.Time { return tick }
+	next.Start(t.Context())
+	defer next.Stop()
+	tick <- time.Now()
+	event := <-nextReporter.finished
+	if event.ID != job.ID || event.State != StateCancelled {
+		t.Fatalf("the restarted engine posted %s of %s, want cancelled of %s", event.State, event.ID, job.ID)
+	}
+	select {
+	case extra := <-nextReporter.finished:
+		t.Fatalf("a second end %s arrived; the end is reported once", extra.State)
+	default:
+	}
+	if fake.StopCount() == 0 {
+		t.Fatal("the node process was never stopped")
+	}
+	final, err := next.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != StateCancelled || final.Started.IsZero() {
+		t.Fatalf("the row is %s with started=%v, want cancelled with its start kept", final.State, final.Started)
+	}
 }
