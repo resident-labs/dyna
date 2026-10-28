@@ -177,10 +177,12 @@ func ensureRoom(roomID string) {
 }
 
 // WrapRoom moves cmd into a new scope below this room's slice and returns the
-// scope's unit name. The room's processes also learn the slice through
-// DYNA_ROOM_SLICE, so scripts that start their own systemd units can join the
-// same limits. An empty room, a machine without the delegated controllers, or
-// a missing systemd user manager keeps today's behavior: the shared dyna.slice.
+// scope's unit name. The room's processes also learn their slice through
+// DYNA_ROOM_SLICE, so scripts that start their own systemd units join the
+// same limits; a degraded machine names the shared dyna.slice there. An
+// empty room, or a machine without the delegated controllers, keeps today's
+// behavior: the shared dyna.slice. Without a systemd user manager nothing
+// wraps at all.
 func WrapRoom(cmd *exec.Cmd, name, roomID string) string {
 	if strings.EqualFold(os.Getenv("DYNA_SLICE"), "off") {
 		return ""
@@ -190,7 +192,12 @@ func WrapRoom(cmd *exec.Cmd, name, roomID string) string {
 	}
 	if ok, reason := RoomSupport(); !ok {
 		roomLimitsOff(roomID, reason)
-		return wrap(cmd, name, Slice)
+		unit := wrap(cmd, name, Slice)
+		// The room shares the agent slice, and its scripts must hear that:
+		// the guide's systemd-run daemon command joins whatever this variable
+		// names, and without it such a daemon would leave the shared caps too.
+		cmd.Env = append(cmd.Environ(), mode.EnvRoomSlice+"="+Slice)
+		return unit
 	}
 	if _, ok := systemdRun(); !ok {
 		roomLimitsOff(roomID, "the systemd user manager is not running")
@@ -205,18 +212,32 @@ func WrapRoom(cmd *exec.Cmd, name, roomID string) string {
 	return unit
 }
 
-// RoomLimitsNotice, when set, hears once per process that this machine cannot
-// run room slices. The engine installs it and posts one typed notice to the
-// room; other binaries leave it nil and simply degrade.
+// RoomLimitsNotice, when set, hears that this machine cannot run room
+// slices, once per room and cause in this process; the posted event's own
+// Once rule keeps one card per room and cause across restarts. The engine
+// installs it; other binaries leave it nil and simply degrade.
 var RoomLimitsNotice func(roomID, reason string)
 
-var noticeOnce sync.Once
+var (
+	roomNoticeMu sync.Mutex
+	roomNoticed  = map[string]bool{}
+)
 
 func roomLimitsOff(roomID, reason string) {
 	if RoomLimitsNotice == nil {
 		return
 	}
-	noticeOnce.Do(func() { RoomLimitsNotice(roomID, reason) })
+	// One callback per room and cause: a second room hears its own notice, and
+	// a machine whose cause changed hears the new one.
+	key := roomID + "\x00" + reason
+	roomNoticeMu.Lock()
+	if roomNoticed[key] {
+		roomNoticeMu.Unlock()
+		return
+	}
+	roomNoticed[key] = true
+	roomNoticeMu.Unlock()
+	RoomLimitsNotice(roomID, reason)
 }
 
 var (

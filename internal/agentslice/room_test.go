@@ -182,8 +182,9 @@ func TestWrapRoomUsesTheRoomSlice(t *testing.T) {
 	}
 }
 
-// Without the delegated controllers, room launches stay in the shared slice
-// and one notice says why, once per process whatever the room.
+// Without the delegated controllers, room launches stay in the shared slice,
+// still tell their scripts which slice that is, and one notice per room says
+// why: a second room hears its own notice, and a repeat launch stays quiet.
 func TestWrapRoomDegradesWithoutControllers(t *testing.T) {
 	fakeManager(t)
 	root := fakeCgroups(t, "cpuset cpu io\n", "", 33554432) // no memory, no pids
@@ -196,18 +197,25 @@ func TestWrapRoomDegradesWithoutControllers(t *testing.T) {
 	RoomLimitsNotice = func(roomID, reason string) { noticed = append(noticed, roomID+" "+reason) }
 	t.Cleanup(func() { RoomLimitsNotice = old })
 
-	for _, room := range []string{"room-limits", "other"} {
+	for i, room := range []string{"room-limits", "other", "room-limits"} {
 		cmd := exec.Command("/bin/true")
 		WrapRoom(cmd, "x", room)
 		if args := strings.Join(cmd.Args, " "); !strings.Contains(args, "--slice="+Slice) {
 			t.Fatalf("degraded launch for %q left the shared slice: %q", room, args)
 		}
-		if got := envOf(cmd, mode.EnvRoomSlice); got != "" {
-			t.Fatalf("degraded launch exports %s=%q", mode.EnvRoomSlice, got)
+		// The room's scripts still land their daemons in the shared slice: the
+		// guide's systemd-run command relies on this variable.
+		if got := envOf(cmd, mode.EnvRoomSlice); got != Slice {
+			t.Fatalf("degraded launch %d exports %s=%q, want %q", i, mode.EnvRoomSlice, got, Slice)
 		}
 	}
-	if len(noticed) != 1 || !strings.Contains(noticed[0], "room-limits ") || !strings.Contains(noticed[0], "memory") {
-		t.Fatalf("notices = %q, want one that names the room and the missing memory controller", noticed)
+	if len(noticed) != 2 || !strings.Contains(noticed[0], "room-limits ") || !strings.Contains(noticed[1], "other ") {
+		t.Fatalf("notices = %q, want one each for room-limits and other, and none for the repeat", noticed)
+	}
+	for _, note := range noticed {
+		if !strings.Contains(note, "memory") {
+			t.Fatalf("notice %q does not name the missing memory controller", note)
+		}
 	}
 }
 
