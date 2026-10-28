@@ -264,19 +264,12 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		}
 		return os.LookupEnv(key)
 	}
-	// Discovery can start a Pi process. Run it before taking the generation
-	// lock so a slow catalog cannot block unrelated session starts.
+	// Discovery no longer runs before the generation lock; a pin re-checked
+	// under the lock that turns out unusable is simply rebuilt.
 	needsGeneration := pin.Generation == ""
 	if !needsGeneration {
 		prior, loadErr := loadNativeGeneration(a.Harness, pin.Generation, lookup)
 		needsGeneration = loadErr == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, prior, home, privateEnv["DYNA_BIN"])
-	}
-	var reserves map[string]int64
-	if needsGeneration && a.Harness == "pi" {
-		reserves, err = r.piGenerationReserves(ctx, home, active.ID, b)
-		if err != nil {
-			return p, pin, err
-		}
 	}
 	unlock, err := r.generationLock(ctx)
 	if err != nil {
@@ -288,13 +281,10 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		gen, err = loadNativeGeneration(a.Harness, pin.Generation, lookup)
 		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home, privateEnv["DYNA_BIN"]) {
 			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs.
-			if !needsGeneration && a.Harness == "pi" {
-				return p, pin, errors.New("Pi generation changed during startup; retry the turn")
-			}
-			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup, reserves)
+			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 		}
 	} else {
-		gen, err = r.generateLocked(a.Harness, home, active.ID, lookup, reserves)
+		gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 	}
 	if err != nil {
 		return p, pin, err
