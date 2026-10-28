@@ -198,14 +198,9 @@ type NodeLostError struct {
 	Node string
 	// Gone is set when the node answered but the job has no unit and no exit
 	// record; otherwise the node did not answer for After.
-	Gone bool
-	// Missing is set when the job has no folder on the node either: the
-	// unit was never launched. A run that reads this can launch the job
-	// fresh - the launch is idempotent, because every started unit has a
-	// folder.
-	Missing bool
-	After   time.Duration
-	Cause   error
+	Gone  bool
+	After time.Duration
+	Cause error
 }
 
 func (e *NodeLostError) Error() string {
@@ -345,12 +340,17 @@ type watch struct {
 type Poller struct {
 	x Executor
 	// Started is told about each job once it is launched, so the caller can
-	// record it for a restarted engine.
+	// record it for a restarted engine. It fires before the launch, so a
+	// crash at any point inside it leaves the record saying not launched.
 	Started func(RunSpec)
-	mu      sync.Mutex
-	active  map[string]*watch
-	kick    chan struct{}
-	exited  chan struct{}
+	// Launched is told once the node accepted the unit: the start call
+	// returned. The caller records it, so a restart can tell a launch the
+	// crashed engine completed from one that died inside the start.
+	Launched func(RunSpec)
+	mu       sync.Mutex
+	active   map[string]*watch
+	kick     chan struct{}
+	exited   chan struct{}
 }
 
 // NewPoller starts the poller of a run. The returned function stops it and waits
@@ -388,6 +388,9 @@ func (p *Poller) Run(ctx context.Context, spec RunSpec, out io.Writer) error {
 				return ctx.Err()
 			}
 			return fmt.Errorf("start check: %w", err)
+		}
+		if p.Launched != nil {
+			p.Launched(spec)
 		}
 	}
 	w := &watch{spec: spec, out: out, offset: spec.Offset, done: make(chan error, 1)}
@@ -514,14 +517,10 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 			} else {
 				p.finish(w, &DetachedExit{Code: frame.Code})
 			}
-		case UnitGone:
+		case UnitGone, UnitMissing:
 			// A check that was launched has a folder. Without it, and without an
 			// exit record, nothing can say how the check ended.
 			p.finish(w, &NodeLostError{Node: p.x.Node.Name, Gone: true})
-		case UnitMissing:
-			// No folder means no engine ever launched the check: the unit never
-			// ran, and a restart may launch it afresh.
-			p.finish(w, &NodeLostError{Node: p.x.Node.Name, Gone: true, Missing: true})
 		}
 	}
 }

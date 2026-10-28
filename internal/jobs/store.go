@@ -110,6 +110,12 @@ type Job struct {
 	// the boundary - the running row saved, the event not yet posted - reads
 	// it and posts the start before the job runs on.
 	StartPosted bool
+	// Launched records that the node accepted the unit: StartDetached
+	// returned. A running row without it - a crash or a node-side death
+	// inside the start, after the folder was made but before the unit ran -
+	// relaunches on the next engine instead of attaching to a unit that
+	// never was.
+	Launched bool
 }
 
 // Topic is the hub topic a jobs-table write publishes under.
@@ -141,7 +147,8 @@ const schema = `CREATE TABLE jobs (
 	log_bytes INTEGER NOT NULL DEFAULT 0,
 	note TEXT NOT NULL DEFAULT '',
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
-	start_posted INTEGER NOT NULL DEFAULT 0
+	start_posted INTEGER NOT NULL DEFAULT 0,
+	launched INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX jobs_open ON jobs(created_ms) WHERE state IN ('queued','running');`
 
@@ -291,6 +298,21 @@ func (s Store) SaveOpen(ctx context.Context, job Job) (Job, bool, error) {
 	return winner, won, err
 }
 
+// MarkLaunched records that the node accepted the unit, as soon as the
+// start call returns. It is one conditional column write, not a whole-row
+// save, so it can never race a poll's stale copy. A row that ends while
+// the start call was in flight keeps its own end and is not marked.
+func (s Store) MarkLaunched(ctx context.Context, id string) {
+	db, err := s.db()
+	if err != nil {
+		return
+	}
+	_ = state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "UPDATE jobs SET launched=1 WHERE id=? AND state='running'", id)
+		return err
+	})
+}
+
 // RequestCancel records one durable cancellation request on the row. It
 // never ends the row and never reports: the engine that owns the job - a
 // queued one on the next tick of any engine, a running one on the next tick
@@ -404,29 +426,30 @@ func (s Store) RequestedRunning(ctx context.Context) ([]Job, error) {
 // upsertJob writes the whole row of one job.
 func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exit any, ms func(time.Time) int64) error {
 	command := string(encoded)
-	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted`,
-		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested), boolInt(job.StartPosted))
+	_, err := conn.ExecContext(ctx, `INSERT INTO jobs(id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted,launched)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET room_id=excluded.room_id, session=excluded.session, node=excluded.node, command=excluded.command, repo=excluded.repo, sha=excluded.sha, host=excluded.host, image=excluded.image, cpus=excluded.cpus, memory_mib=excluded.memory_mib, timeout_s=excluded.timeout_s, state=excluded.state, exit_code=excluded.exit_code, log_path=excluded.log_path, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, dir=excluded.dir, unit=excluded.unit, log_bytes=excluded.log_bytes, note=excluded.note, cancel_requested=jobs.cancel_requested|excluded.cancel_requested, start_posted=jobs.start_posted|excluded.start_posted, launched=jobs.launched|excluded.launched`,
+		job.ID, job.RoomID, job.Session, job.Node, command, job.Repo, job.SHA, job.Host, job.Image, job.CPUs, job.MemoryMiB, int64(job.Timeout/time.Second), job.State, exit, job.LogPath, ms(job.Created), ms(job.Started), ms(job.Ended), job.Dir, job.Unit, job.LogBytes, job.Note, boolInt(job.CancelRequested), boolInt(job.StartPosted), boolInt(job.Launched))
 	return err
 }
 
-const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted"
+const columns = "id,room_id,session,node,command,repo,sha,host,image,cpus,memory_mib,timeout_s,state,exit_code,log_path,created_ms,started_ms,ended_ms,dir,unit,log_bytes,note,cancel_requested,start_posted,launched"
 
 func scanJob(row interface{ Scan(...any) error }) (Job, error) {
 	var job Job
 	var command string
 	var exit sql.NullInt64
-	var requested, posted int
+	var requested, posted, launched int
 	var host, timeout int64
 	var created, started, ended int64
-	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested, &posted); err != nil {
+	if err := row.Scan(&job.ID, &job.RoomID, &job.Session, &job.Node, &command, &job.Repo, &job.SHA, &host, &job.Image, &job.CPUs, &job.MemoryMiB, &timeout, &job.State, &exit, &job.LogPath, &created, &started, &ended, &job.Dir, &job.Unit, &job.LogBytes, &job.Note, &requested, &posted, &launched); err != nil {
 		return job, err
 	}
 	job.Timeout = time.Duration(timeout) * time.Second
 	job.Host = host == 1
 	job.CancelRequested = requested == 1
 	job.StartPosted = posted == 1
+	job.Launched = launched == 1
 	if exit.Valid {
 		code := int(exit.Int64)
 		job.ExitCode = &code
