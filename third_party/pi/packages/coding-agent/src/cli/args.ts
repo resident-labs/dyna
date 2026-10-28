@@ -33,6 +33,7 @@ export interface Args {
   sessionId?: string;
   fork?: string;
   sessionDir?: string;
+  compactionTriggerTokens?: number;
   models?: string[];
   tools?: string[];
   excludeTools?: string[];
@@ -159,6 +160,16 @@ export function parseArgs(args: string[]): Args {
       result.fork = args[++i];
     } else if (arg === "--session-dir" && i + 1 < args.length) {
       result.sessionDir = args[++i];
+    } else if (arg === "--compaction-trigger-tokens" && i + 1 < args.length) {
+      const value = Number(args[++i]);
+      if (!Number.isInteger(value) || value < 0) {
+        result.diagnostics.push({
+          type: "error",
+          message: "--compaction-trigger-tokens requires a non-negative integer",
+        });
+      } else {
+        result.compactionTriggerTokens = value;
+      }
     } else if (arg === "--models" && i + 1 < args.length) {
       result.models = args[++i]
         .split(",")
@@ -353,6 +364,7 @@ ${chalk.bold("Commands:")}
 
 ${chalk.bold("Options:")}
   --provider <name>              Provider to search for --model (requires --model)
+  --compaction-trigger-tokens <n> Absolute compaction trigger for this process; wins over settings
   --model <pattern>              Model pattern or ID (supports "provider/id" and optional ":<thinking>")
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)

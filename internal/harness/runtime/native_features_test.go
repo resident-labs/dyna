@@ -12,8 +12,6 @@ import (
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
-
-	"dyna-agent/internal/profile"
 )
 
 func TestNativeFeatureArgumentsAreIdempotentAndPreserveUserDenials(t *testing.T) {
@@ -85,7 +83,7 @@ func TestNativeFeaturesInFreshAndRestoredGenerations(t *testing.T) {
 	for _, h := range []string{"claude-code", "pi"} {
 		t.Run(h, func(t *testing.T) {
 			r, home, id := generationFixture(t, h)
-			fresh := buildGeneration(t, r, h, home, id, profile.Profile{})
+			fresh := buildGeneration(t, r, h, home, id)
 			restored, err := loadNativeGeneration(h, fresh.Directory, os.LookupEnv)
 			if err != nil {
 				t.Fatal(err)
@@ -160,7 +158,7 @@ func TestDynaShellServerJoinsDynaShellGenerations(t *testing.T) {
 	} {
 		t.Run(tc.h, func(t *testing.T) {
 			r, home, id := generationFixture(t, tc.h)
-			g := buildGeneration(t, r, tc.h, home, id, profile.Profile{})
+			g := buildGeneration(t, r, tc.h, home, id)
 			raw, err := os.ReadFile(filepath.Join(g.Directory, tc.file))
 			if err != nil {
 				t.Fatal(err)

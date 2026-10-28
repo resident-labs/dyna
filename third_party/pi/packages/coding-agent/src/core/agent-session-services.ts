@@ -62,6 +62,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
+	/** Process-wide compaction trigger from --compaction-trigger-tokens. */
+	compactionTriggerTokens?: number;
 }
 
 /**
@@ -229,5 +231,6 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
+		compactionTriggerTokens: options.compactionTriggerTokens,
 	});
 }
