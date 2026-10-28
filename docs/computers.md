@@ -30,9 +30,12 @@ restarts the service. It restarts at the first moment no computer has an app ope
 or a command lease; a running desktop with neither, however recent its input, does not hold
 it back. `dyna computer list` shows "restart pending since <time>" while one waits.
 
-A daemon from before run leases cannot report legacy commands. The updater
-defers its restart instead of risking those commands. After they finish, stop
-that old daemon manually to let the pending update continue.
+A daemon from before run leases cannot report legacy commands, yet waiting for
+atomic admission would defer forever, because the daemon gains that support only
+by restarting (D-419). Such a daemon restarts once its status list is quiet,
+which may close during one unreported command. A client that sends an operation
+the running daemon does not know hears that dyna-computers.service predates it
+and needs a restart.
 
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit

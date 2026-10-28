@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -177,6 +178,14 @@ func (c *Client) PrepareRun(ctx context.Context, status string) (*RunLease, erro
 	var meta Meta
 	if err = conn.call(ctx, Request{Session: c.Session, Op: "run.lease", Status: status}, &meta); err != nil {
 		conn.Close()
+		// A daemon already running from before this operation answers with the
+		// bare unknown operation (D-419). Say what unblocks the run instead of
+		// letting version skew read like a bug. Daemons that already name the
+		// restart keep their own answer.
+		var reply *ReplyError
+		if errors.As(err, &reply) && strings.Contains(reply.Message, "unknown computer operation") && !strings.Contains(reply.Message, "restart") {
+			return nil, fmt.Errorf("dyna-computers.service predates protected foreground commands and needs a restart: %w", err)
+		}
 		return nil, err
 	}
 	return &RunLease{Meta: meta, conn: conn}, nil
