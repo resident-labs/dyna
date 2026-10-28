@@ -14,6 +14,7 @@
   import HistoryList from './HistoryList.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import FeedMessage from './FeedMessage.svelte'
+  import { turnMessage } from './turnMessage.ts'
   import { focusWhen } from '../ui/focusWhen.ts'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
@@ -190,7 +191,7 @@
   }
 
   function snippet(p: Post) {
-    const t = postParts(p).text.replace(/\s+/g, ' ').trim()
+    const t = postParts(p.kind === 'turn' ? turnMessage(p) : p).text.replace(/\s+/g, ' ').trim()
     return t.length > 90 ? t.slice(0, 90) + '…' : t
   }
 
@@ -262,11 +263,12 @@
 
     {:else}
       {@const p = row.post}
+      {@const actionPost = p.kind === 'turn' ? turnMessage(p) : p}
       {@const parts = postParts(p)}
       {@const replyTo = p.replyTo}
       <!-- Every stored post owns the same actions. Kind selects its body only. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex -->
-      <article class="post {p.completion && p.kind !== 'turn' ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind ?? '') || (sealedEvent(p) && p.kind !== 'turn')} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, lookFields(p), room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
+      <article class="post {p.completion && p.kind !== 'turn' ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind ?? '') || (sealedEvent(p) && p.kind !== 'turn')} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, lookFields(p), room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(actionPost)} {...postHandlers(selection, p.id)}>
         {@render replyCue()}
         {#if (row.posts ?? [p]).some((post) => pinned.has(post.id))}<span class="post-pin" title="Pinned" transition:scale={{ start: 0.6, duration: motion(FAST) }}><PinIcon size={13} filled /></span>{/if}
           {#if replyTo}
@@ -307,7 +309,7 @@
       {/if}
       {#if p.forward}<ForwardQuote {room} post={p.forward} author={byId[p.forward.id]} onpost={jump} {onopenfile} />{/if}
       {#if parts.attachments.length || p.references?.length}<div class="post-files"><PostFiles roomId={room.id} post={p} {parts} onopen={onopenfile} /></div>{/if}
-          {#if !notes.has(index) && p.kind !== 'pr' && !sealedEvent(p)}<PostActions {room} {p} pinned={pinned.has(p.id)} show={selection.get() === p.id} {onreply} {onforward} {onpin} />{/if}
+          {#if !notes.has(index) && p.kind !== 'pr' && (!sealedEvent(p) || p.kind === 'turn')}<PostActions {room} p={actionPost} pinned={pinned.has(p.id)} show={selection.get() === p.id} {onreply} {onforward} {onpin} />{/if}
       </article>
     {/if}
   {/snippet}
