@@ -613,7 +613,7 @@ func PostCmd() *cobra.Command {
 			if err == nil {
 				err = notify.DeliveryError(result)
 			}
-			if postNeedsCallHint(cmd.Context(), result.Message) {
+			if postNeedsCallHint(cmd.Context(), result) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "No call is live; use `dyna call --reason` to ring the owner.")
 			}
 			if jsonOut {
@@ -899,12 +899,13 @@ func follow(ctx context.Context, rec room.Record, cutoff time.Time, seen map[str
 	})
 }
 
-// postNeedsCallHint checks only posts addressed to the voice call.
-func postNeedsCallHint(ctx context.Context, msg room.Message) bool {
+// postNeedsCallHint checks only posts delivered to the voice call.
+func postNeedsCallHint(ctx context.Context, result notify.Result) bool {
 	voice := false
-	for _, to := range msg.To {
-		if strings.HasSuffix(to, ":"+room.VoiceAgent) {
+	for _, delivery := range result.Deliveries {
+		if delivery.VoiceCall {
 			voice = true
+			break
 		}
 	}
 	if !voice {
@@ -917,7 +918,7 @@ func postNeedsCallHint(ctx context.Context, msg room.Message) bool {
 		RoomID string `json:"roomId"`
 	}
 	err := engineclient.New("").Call(ctx, "VoiceStatus", nil, &status)
-	return err != nil || !status.Live || status.RoomID != msg.RoomID
+	return err != nil || !status.Live || status.RoomID != result.Message.RoomID
 }
 
 func wokeLine(roomID string, msg room.Message) string {
