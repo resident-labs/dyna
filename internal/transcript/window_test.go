@@ -61,4 +61,31 @@ func TestSessionWindowBounds(t *testing.T) {
 			t.Fatalf("focused %d: %+v", n, got)
 		}
 	}
+	latest, err := loader.Load(id, 2)
+	if err != nil || len(latest.Turns) != 2 || latest.Info.Turns != 3 || latest.Turns[0].N != 2 || latest.Turns[1].N != 3 {
+		t.Fatalf("latest page = %+v, %v", latest, err)
+	}
+	for _, tc := range []struct {
+		name    string
+		load    func() (Session, error)
+		omitted bool
+		newer   bool
+	}{
+		{"before first", func() (Session, error) { return loader.LoadPage(id, 1, 3) }, false, true},
+		{"after last", func() (Session, error) { return loader.LoadAfter(id, 3, 3) }, true, false},
+	} {
+		got, err := tc.load()
+		if err != nil || len(got.Turns) != 0 || got.Omitted != tc.omitted || got.Newer != tc.newer {
+			t.Fatalf("%s = %+v, %v", tc.name, got, err)
+		}
+	}
+	if _, err := loader.LoadPage(id, 4, 3); err == nil {
+		t.Fatal("accepted a cursor after the latest turn")
+	}
+	emptyID := "ses_20261017-000001-bbbbbbbb"
+	recordtest.Write(t, store.Root, emptyID, subagent.Meta{ID: emptyID, Name: "empty", Room: "global", RoomID: "global", Created: time.Now()})
+	empty, err := loader.Load(emptyID, 3)
+	if err != nil || len(empty.Turns) != 0 || empty.Omitted || empty.Newer {
+		t.Fatalf("empty session = %+v, %v", empty, err)
+	}
 }
