@@ -22,12 +22,12 @@ func firstUse(t *testing.T, latest string) (*FirstUse, *atomic.Int32) {
 }
 
 func TestFirstUseInstallsMissingCLIOnce(t *testing.T) {
-	f, installs := firstUse(t, "1.2.3")
+	f, installs := firstUse(t, "1.3.0")
 	b, installed, err := f.EnsureBundle(context.Background(), "pi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !installed || b.Version != "1.2.3" || b.Executable == "" {
+	if !installed || b.Version != "1.3.0" || b.Executable == "" {
 		t.Fatalf("bundle = %#v, installed = %v", b, installed)
 	}
 	again, installed, err := f.EnsureBundle(context.Background(), "pi", "")
@@ -40,7 +40,7 @@ func TestFirstUseInstallsMissingCLIOnce(t *testing.T) {
 }
 
 func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
-	f, installs := firstUse(t, "1.2.3")
+	f, installs := firstUse(t, "1.3.0")
 	release := make(chan struct{})
 	// Run starts once the installer holds the per-harness lock, so the
 	// channel reports an install that Installing must see as running.
@@ -103,10 +103,10 @@ func TestFirstUseOfflineGivesClearError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot install claude") || !strings.Contains(err.Error(), "Connect to the internet") || strings.Contains(err.Error(), "PATH") {
 		t.Fatalf("err = %v", err)
 	}
-	f, _ = firstUse(t, "1.2.3")
+	f, _ = firstUse(t, "1.3.0")
 	f.Bundles.Run = func(context.Context, []string, []string) error { return errors.New("ENOTFOUND registry.npmjs.org") }
 	_, _, err = f.EnsureBundle(context.Background(), "pi", "")
-	if err == nil || !strings.Contains(err.Error(), "cannot install pi 1.2.3") || !strings.Contains(err.Error(), "Check the internet connection") || strings.Contains(err.Error(), "ENOTFOUND") {
+	if err == nil || !strings.Contains(err.Error(), "cannot install pi 1.3.0") || !strings.Contains(err.Error(), "Check the internet connection") || strings.Contains(err.Error(), "ENOTFOUND") {
 		t.Fatalf("err = %v", err)
 	}
 	// The failure is not cached: the next call tries again.
@@ -117,8 +117,8 @@ func TestFirstUseOfflineGivesClearError(t *testing.T) {
 }
 
 func TestFirstUseLatestVersion(t *testing.T) {
-	f, installs := firstUse(t, "1.2.3")
-	if v, err := f.LatestVersion(context.Background(), "claude"); err != nil || v != "1.2.3" || installs.Load() != 0 {
+	f, installs := firstUse(t, "1.3.0")
+	if v, err := f.LatestVersion(context.Background(), "claude"); err != nil || v != "1.3.0" || installs.Load() != 0 {
 		t.Fatalf("got %q, %v, %d installs", v, err, installs.Load())
 	}
 	f.Latest = func(context.Context, string) (string, error) {

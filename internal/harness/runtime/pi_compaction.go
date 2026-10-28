@@ -55,7 +55,7 @@ func piProfileTargets(profiles []profile.Profile) map[string]int64 {
 }
 
 // piGenerationReserves discovers only the selected account's available models.
-// An unavailable catalog or older Pi leaves the native defaults untouched.
+// An unavailable catalog leaves the native defaults untouched.
 func (r *Runtime) piGenerationReserves(ctx context.Context, home, account string, bundle Bundle) (map[string]int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (r *Runtime) piGenerationReserves(ctx context.Context, home, account string
 		return nil, err
 	}
 	targets := piProfileTargets(registry.Store.Profiles)
-	if len(targets) == 0 || bundle.Executable == "" || !versionAtLeast(bundle.Version, "1.3.0") {
+	if len(targets) == 0 || bundle.Executable == "" {
 		return nil, nil
 	}
 	n, err := r.Accounts.Find(account)
