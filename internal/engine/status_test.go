@@ -113,6 +113,10 @@ func TestWaitHealthyAfterARestart(t *testing.T) {
 		return nil
 	}
 	ctx := context.Background()
+	if err := WaitHealthy(ctx, answers(Health{Status: healthStarting}, Health{Ready: true}), pause); err != nil || pauses != 1 {
+		t.Fatalf("a migrating engine that becomes ready gave %v after %d pauses", err, pauses)
+	}
+	pauses = 0
 	if err := WaitHealthy(ctx, answers(engineclient.ErrNotRunning, engineclient.ErrNotRunning, Health{}), pause); err != nil || pauses != 2 {
 		t.Fatalf("an engine that comes up gave %v after %d pauses", err, pauses)
 	}
@@ -120,6 +124,10 @@ func TestWaitHealthyAfterARestart(t *testing.T) {
 	err := WaitHealthy(ctx, answers(Health{Status: "read-only: migrate dyna.db: boom"}), pause)
 	if err == nil || err.Error() != "the engine is up, but read-only: migrate dyna.db: boom" {
 		t.Fatalf("a failed migration gave %v", err)
+	}
+	err = WaitHealthy(ctx, answers(Health{Status: healthStarting}), func(context.Context, time.Duration) error { return context.DeadlineExceeded })
+	if err == nil || err.Error() != "the engine did not become ready: context deadline exceeded" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a starting engine that timed out gave %v", err)
 	}
 	pauses = 0
 	if err := WaitHealthy(ctx, answers(engineclient.ErrNotRunning), pause); err == nil || !strings.HasPrefix(err.Error(), "the engine did not answer Health") {
