@@ -372,11 +372,32 @@ func checkWorkerPolicy(args []string) error {
 	if isRead(args) {
 		return nil
 	}
+	if len(args) == 1 && args[0] == "status" {
+		return nil
+	}
+	if len(args) >= 3 {
+		switch args[0] + " " + args[1] + " " + args[2] {
+		case "issue artifact download", "issue artifact list", "issue artifact view",
+			"repo autolink list", "repo autolink view", "repo deploy-key list",
+			"repo gitignore list", "repo gitignore view", "repo license list", "repo license view":
+			return nil
+		}
+	}
 	if len(args) >= 2 {
 		switch args[0] + " " + args[1] {
 		case "pr create", "pr edit", "pr ready",
-			"release list", "release view", "repo list",
-			"search code", "search commits", "search issues", "search prs", "search repos":
+			"agent-task list", "agent-task view",
+			"attestation download", "attestation trusted-root", "attestation verify",
+			"cache list", "codespace list", "codespace logs", "codespace ports", "codespace view",
+			"discussion list", "discussion view", "extension browse", "extension list", "extension search",
+			"gist clone", "gist list", "gist view", "gpg-key list", "issue status", "label list", "org list",
+			"pr checkout", "pr status", "project field-list", "project item-list", "project list", "project view",
+			"release download", "release list", "release verify", "release verify-asset", "release view",
+			"repo clone", "repo list", "repo read-dir", "repo read-file",
+			"ruleset check", "ruleset list", "ruleset view", "run watch",
+			"search code", "search commits", "search issues", "search prs", "search repos",
+			"secret list", "skill list", "skill preview", "skill search", "ssh-key list",
+			"variable get", "variable list", "workflow list", "workflow view":
 			return nil
 		}
 	}
