@@ -13,6 +13,8 @@ import (
 
 	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/shellquote"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/testsafe"
 )
 
@@ -242,11 +244,13 @@ func roomSliceFixture(t *testing.T, room string) (serviceRoot, roomRoot string) 
 	if err := m.setup(serviceRoot, 123, "3221225472"); err != nil {
 		t.Fatal(err)
 	}
-	oldGroups, oldSupport, oldStart := computerGroups, roomSliceSupport, startRoomScope
-	computerGroups = m
+	oldGroups, oldSupport, oldStart, oldMount := computerGroups, roomSliceSupport, startRoomScope, cgroupMount
+	computerGroups, cgroupMount = m, base
 	roomSliceSupport = func() (bool, string) { return true, "" }
 	startRoomScope = func(context.Context, string, string) string { return "" }
-	t.Cleanup(func() { computerGroups, roomSliceSupport, startRoomScope = oldGroups, oldSupport, oldStart })
+	t.Cleanup(func() {
+		computerGroups, roomSliceSupport, startRoomScope, cgroupMount = oldGroups, oldSupport, oldStart, oldMount
+	})
 	roomRoot = computerGroups.roomSliceDir(room)
 	if roomRoot == "" {
 		t.Fatal("the fixture daemon is not below dyna.slice")
@@ -396,9 +400,15 @@ func TestRoomScopeIsAdoptedAcrossDaemonRestarts(t *testing.T) {
 	// A scope that died since the record was written is replaced by a new one.
 	fresh := fakeScope(t, roomRoot, "dyna-computer-fresh.scope")
 	startRoomScope = func(context.Context, string, string) string { return fresh }
+	forget := func() {
+		s.mu.Lock()
+		s.cgroup, s.roomSlice = "", ""
+		s.mu.Unlock()
+	}
 	// A dying scope still has its directory until systemd removes it, but its
 	// anchor is gone: populated 0, never adopted.
 	putCgroupFile(t, scope, "cgroup.events", "populated 0\nfrozen 0\n")
+	forget()
 	s.ensureCgroup(t.Context())
 	if s.cgroup != fresh {
 		t.Fatalf("dying record not replaced: cgroup %q, want %q", s.cgroup, fresh)
@@ -414,9 +424,143 @@ func TestRoomScopeIsAdoptedAcrossDaemonRestarts(t *testing.T) {
 	if err := os.WriteFile(recordScope(id), []byte(leaf+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	forget()
 	s.ensureCgroup(t.Context())
 	if s.cgroup != leaf {
 		t.Fatalf("foreign record adopted: cgroup %q, want the service leaf %q", s.cgroup, leaf)
+	}
+}
+
+// A scope that starts but cannot take the computer's controls is killed
+// before the computer falls back to the service leaf, so its anchor does not
+// linger with nothing to hold.
+func TestRoomScopeWithoutControlsIsKilled(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	serviceRoot, roomRoot := roomSliceFixture(t, "roomlimits")
+	scope := fakeScope(t, roomRoot, "dyna-computer-bad.scope")
+	if err := os.Remove(filepath.Join(scope, "memory.high")); err != nil {
+		t.Fatal(err)
+	}
+	startRoomScope = func(context.Context, string, string) string { return scope }
+	id := testSessionID(t, "badscope")
+	leaf := filepath.Join(serviceRoot, publicName(id))
+	for _, file := range []string{"memory.high", "memory.oom.group", "cpu.weight", "cgroup.kill"} {
+		putCgroupFile(t, leaf, file, "")
+	}
+	s, err := newComputer(t.Context(), id, "roomlimits", SupervisorOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	s.ensureCgroup(t.Context())
+	assertCgroupFile(t, scope, "cgroup.kill", "1")
+	if s.cgroup != leaf || s.roomSlice != "" {
+		t.Fatalf("cgroup %q, room slice %q; want the service leaf", s.cgroup, s.roomSlice)
+	}
+}
+
+// Stopping a computer takes its room scope down. Nothing may join the dead
+// scope afterwards: the record goes, and the next ensure asks for a new one.
+func TestStopForgetsTheRoomScope(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	_, roomRoot := roomSliceFixture(t, "roomlimits")
+	first := fakeScope(t, roomRoot, "dyna-computer-first.scope")
+	second := fakeScope(t, roomRoot, "dyna-computer-second.scope")
+	next := first
+	startRoomScope = func(context.Context, string, string) string { return next }
+	id := testSessionID(t, "stop")
+	s, err := newComputer(t.Context(), id, "roomlimits", SupervisorOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	s.ensureCgroup(t.Context())
+	s.mu.Lock()
+	_ = s.stop()
+	s.mu.Unlock()
+	assertCgroupFile(t, first, "cgroup.kill", "1")
+	if s.cgroup != "" || s.roomSlice != "" {
+		t.Fatalf("stopped computer keeps cgroup %q, room slice %q", s.cgroup, s.roomSlice)
+	}
+	if _, err := os.Stat(recordScope(id)); !os.IsNotExist(err) {
+		t.Fatalf("stopped computer keeps its cgroup record: %v", err)
+	}
+	putCgroupFile(t, first, "cgroup.events", "populated 0\n")
+	next = second
+	s.ensureCgroup(t.Context())
+	if s.cgroup != second {
+		t.Fatalf("restart cgroup = %q, want %q", s.cgroup, second)
+	}
+}
+
+// Destroying a computer without its daemon still kills the recorded room
+// scope, because no later cleanup can find the record once it is removed.
+func TestOfflineDestroyKillsTheRecordedRoomScope(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	_, roomRoot := roomSliceFixture(t, "roomlimits")
+	scope := fakeScope(t, roomRoot, "dyna-computer-live.scope")
+	id := testSessionID(t, "offline")
+	if err := os.MkdirAll(RuntimeDir(id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(Dir(id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteJSON(filepath.Join(Dir(id), "meta.json"), Meta{SessionID: id, Room: "roomlimits"}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordScope(id), []byte(scope+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := destroyOffline(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	assertCgroupFile(t, scope, "cgroup.kill", "1")
+	// A record that does not name a computer scope is never written to.
+	other := filepath.Join(roomRoot, "other.scope")
+	putCgroupFile(t, other, "cgroup.kill", "")
+	if err := os.MkdirAll(RuntimeDir(id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordScope(id), []byte(other+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	killRecordedScope(id)
+	assertCgroupFile(t, other, "cgroup.kill", "")
+}
+
+// The compositor, and so the session bus and everything that bus starts, gets
+// the computer's own room slice even when the daemon was started from another
+// room's environment.
+func TestCompositorGetsTheComputersRoomSlice(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	t.Setenv(mode.EnvRoomSlice, "dyna-room-foreign.slice")
+	_, roomRoot := roomSliceFixture(t, "roomlimits")
+	scope := fakeScope(t, roomRoot, "dyna-computer-env.scope")
+	startRoomScope = func(context.Context, string, string) string { return scope }
+	bin, out := t.TempDir(), filepath.Join(t.TempDir(), "slice")
+	script := "#!/bin/sh\nprintenv DYNA_ROOM_SLICE > " + shellquote.Quote(out) + "\nexit 1\n"
+	for name, body := range map[string]string{"labwc": script, "Xwayland": "#!/bin/sh\nexit 1\n", "setpriv": "#!/bin/sh\nexit 1\n"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	s, err := newComputer(t.Context(), testSessionID(t, "env"), "roomlimits", SupervisorOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	if err := s.start(); err == nil {
+		t.Fatal("the fake compositor exits, so the start must fail")
+	}
+	data, err := os.ReadFile(out)
+	if err != nil || strings.TrimSpace(string(data)) != agentslice.RoomSlice("roomlimits") {
+		t.Fatalf("compositor %s = %q, %v; want the computer's room slice", mode.EnvRoomSlice, data, err)
 	}
 }
 
