@@ -746,8 +746,14 @@ func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, 
 			scanStores()
 		case <-s.prWake:
 			scanPRs()
+			if s.AfterWakeScan != nil {
+				s.AfterWakeScan()
+			}
 		case <-s.sessionWake:
 			scanSessions()
+			if s.AfterWakeScan != nil {
+				s.AfterWakeScan()
+			}
 		}
 	}
 }

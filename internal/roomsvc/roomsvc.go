@@ -72,6 +72,9 @@ type Service struct {
 	// wants every post from before the engine started must read the stores
 	// only after this runs.
 	AfterFirstScan func()
+	// AfterWakeScan, when set, runs after a PR or session wake scan. It gives
+	// tests a completion barrier without a ticker or a real timeout.
+	AfterWakeScan func()
 	// CoordinatorExited recovers a registered workflow coordinator's spool.
 	CoordinatorExited func(run string)
 	coordinatorWake   chan struct{}
