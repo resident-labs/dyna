@@ -1,6 +1,8 @@
 package watch
 
 import (
+	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -98,7 +100,14 @@ func TestMovedBudgetTargetKeepsScopedRateEvidence(t *testing.T) {
 					t.Fatal("rate recovery recreated the removed target")
 				}
 			} else if !reflect.DeepEqual(*after.Records[r.Key], expected) {
-				t.Fatal("rate recovery changed the moved target's budget outcome")
+				// Get reads the stored row, whose JSON omits empty maps that the
+				// write callback left in memory. Compare the persisted form: the
+				// record a fresh process decodes is the outcome contract.
+				got, _ := json.Marshal(after.Records[r.Key])
+				want, _ := json.Marshal(&expected)
+				if !bytes.Equal(got, want) {
+					t.Fatalf("rate recovery changed the moved target's budget outcome\n after: %s\n want: %s", got, want)
+				}
 			}
 		})
 	}
