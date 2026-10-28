@@ -9,7 +9,9 @@ import (
 
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/workflow"
@@ -86,6 +88,31 @@ func TestStoppedRunFinishesInterruptedForEngineReport(t *testing.T) {
 	for _, warning := range warnings {
 		if strings.Contains(warning, "completion message") {
 			t.Fatalf("the runner posted a completion for a run the engine reports: %s", warning)
+		}
+	}
+}
+
+func TestForegroundRunDoesNotPostCompletion(t *testing.T) {
+	storetest.Isolate(t)
+	t.Setenv("DYNA_RUN_DETACHED", "0")
+	rec, err := room.DefaultStore().Create(room.CreateInput{Name: "foreground"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(mode.EnvRoom, rec.Name)
+	t.Setenv(mode.EnvRoomID, rec.ID)
+	profiles := &profile.Store{Profiles: []profile.Profile{{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5}}}
+	_, err = executeWithOutbox(context.Background(), Options{Name: "foreground", ScriptSrc: "return 'ok'", WorkDir: t.TempDir()}, profiles, Observer{}, func(string) coordinatorOutbox { return &captureOutbox{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, _, err := room.DefaultStore().Log(rec, room.LogOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range messages {
+		if _, ok := msg.RunResult(); ok {
+			t.Fatal("foreground run posted a completion")
 		}
 	}
 }
