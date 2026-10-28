@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -32,6 +33,19 @@ type Executor func(context.Context, Process) error
 func Execute(ctx context.Context, p Process) error {
 	if len(p.Args) == 0 || p.Timeout <= 0 {
 		return fmt.Errorf("process requires a command and a positive timeout")
+	}
+	if p.Dir != "" {
+		if _, err := os.Stat(p.Dir); err != nil {
+			// The child chdirs before it execs, and the kernel reports a failed
+			// chdir as a failed exec of the binary (Command sets SysProcAttr, so
+			// Go cannot rewrite it). Name the directory, so a gone checkout never
+			// reads as a missing Git.
+			var pathErr *fs.PathError
+			if errors.As(err, &pathErr) {
+				return &fs.PathError{Op: "chdir", Path: pathErr.Path, Err: pathErr.Err}
+			}
+			return err
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
