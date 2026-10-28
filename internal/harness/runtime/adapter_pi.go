@@ -2,8 +2,8 @@ package runtime
 
 import "path/filepath"
 
-// piNPMPackage is the official Pi 1.1+ package. The old Dyna catalog name
-// @mariozechner/pi-coding-agent is stale and must never be installed.
+// piNPMPackage is the official Pi 1.1+ package name. Dyna packages its own
+// fork under this name; older pinned bundles can still use the npm release.
 const piNPMPackage = "@earendil-works/pi-coding-agent"
 
 // piProviderEnv lists inherited provider credential and endpoint variables that

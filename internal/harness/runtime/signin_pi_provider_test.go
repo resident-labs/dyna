@@ -96,7 +96,7 @@ func TestPiSignInAgainWritesTheAccountItNames(t *testing.T) {
 	// there: the test never runs a real installer.
 	defaultBundles := NewBundleManager()
 	t.Cleanup(func() { _ = removeBundle(defaultBundles.Root) })
-	install(t, &BundleManager{Root: defaultBundles.Root, Run: fixtureInstall}, "pi", "1.3.0")
+	install(t, &BundleManager{Root: defaultBundles.Root, Run: fixtureInstall}, "pi", piForkVersion)
 	ctx := context.Background()
 	expired := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"old"}`)
 	active := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep"}`)
