@@ -6,25 +6,20 @@ import (
 	"testing"
 )
 
-func TestPiCodemodeNestedCalls(t *testing.T) {
+// Recorded fork output: codemode updates carry script output, not nested
+// call snapshots. The nested calls already have their own full events.
+func TestPiCodemodeUpdateStreamsScriptOutput(t *testing.T) {
 	decl := &Declaration{Dialect: DialectPiJSON}
-	lines := []string{
-		`{"type":"tool_execution_start","toolCallId":"outer","toolName":"codemode","args":{"code":"run()"}}`,
-		`{"type":"tool_execution_start","toolCallId":"outer/1","toolName":"read","args":{"path":"a.go"}}`,
-		`{"type":"tool_execution_start","toolCallId":"outer/2","toolName":"mcp__dyna__shell","args":{"command":"pwd","description":"Print the path"}}`,
-		`{"type":"tool_execution_update","toolCallId":"outer","toolName":"codemode","partialResult":{"details":{"calls":[{"id":"outer/?","name":"read","status":"running"},{"id":"outer/?","name":"mcp__dyna__shell","status":"running"}]}}}`,
-		`{"type":"tool_execution_end","toolCallId":"outer/1","toolName":"read","result":{"content":[{"type":"text","text":"contents"}]}}`,
-		`{"type":"tool_execution_end","toolCallId":"outer/2","toolName":"mcp__dyna__shell","result":{"content":[{"type":"text","text":"done"}]}}`,
-		`{"type":"tool_execution_end","toolCallId":"outer","toolName":"codemode","result":{"details":{"calls":[{"id":"outer/1","name":"read","status":"ok"},{"id":"outer/2","name":"mcp__dyna__shell","status":"ok"}]}}}`,
-	}
-	var events []Event
-	for _, line := range lines {
-		events = append(events, DecodeLine(decl, line).Events...)
-	}
+	line := `{"type":"tool_execution_update","toolCallId":"outer","toolName":"codemode","args":{"code":"console.log('reading')"},"partialResult":{"content":[{"type":"text","text":"Script running\nOutput:\n"},{"type":"text","text":"<console_output>\nreading\n</console_output>"}]}}`
+	events := DecodeLine(decl, line).Events
 	paired, _ := PairTools(events)
-	if len(paired) != 3 || paired[1].Name != "read" || paired[1].Output != "contents" ||
-		paired[2].Name != "mcp__dyna__shell" || paired[2].Input != `{"command":"pwd","description":"Print the path"}` || paired[2].Output != "done" {
-		t.Fatalf("paired events = %+v", paired)
+	if len(paired) != 1 {
+		t.Fatalf("paired events = %+v, want one codemode row and no nested rows", paired)
+	}
+	got := paired[0]
+	want := "Script running\nOutput:\n\n<console_output>\nreading\n</console_output>"
+	if got.Kind != "tool" || got.ID != "outer" || got.Name != "codemode" || got.State != "updated" || got.Output != want {
+		t.Fatalf("codemode row = %+v, want updated script output %q", got, want)
 	}
 }
 

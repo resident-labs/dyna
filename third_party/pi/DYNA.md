@@ -17,6 +17,8 @@ P4 adds `PI_NO_ENV_CREDENTIALS` (`packages/coding-agent/src/main.ts`). Provider 
 
 P6 makes `--session <id>` in RPC, JSON and print modes open a session from another project without asking whether to fork. A missing id prints `session not found: <id>` and exits with code 2 before runtime creation; interactive mode keeps its prompt. The pack version rises to `1.4.0-dyna.4` with `dynaFork: 4`. It lets Dyna delete the session-path rewrites in `internal/harness/grok_pi.go` and the `resumeReady` filesystem precheck in `internal/harness/harness.go`. `PiSessionPath` remains for session conversion in `internal/subagent`, which still reads the session file.
 
+P5 streams codemode script output (`packages/codemode/src/types.ts`, `src/runtime/execution.ts`, and `packages/coding-agent/src/extensions/codemode/execute.ts`): the sandbox reports each output item, and codemode partial results contain only the running header and a bounded preview of script output. Nested call previews stay off updates; the final tool result message keeps `nestedCalls` with full arguments. The pack version rises to `1.4.0-dyna.6` with `dynaFork: 6`. It lets Dyna delete the codemode `tool_execution_update` filter in `internal/workeroutput/pi.go`, so script output streams like other tool output.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:

@@ -177,6 +177,7 @@ interface ExecutionOptions {
 	executors: { tools: ReadonlyMap<string, CodemodeTool>; globals: ReadonlyMap<string, CodemodeTool> };
 	timeoutMs: number;
 	signal: AbortSignal | undefined;
+	onOutput?: CodemodeExecuteOptions["onOutput"];
 	memoryLimitBytes: number | undefined;
 	store: Record<string, string>;
 	deterministic?: { startedAt: number; seed: number };
@@ -196,6 +197,7 @@ class Execution {
 	/** Result numbers `deliver()` used. */
 	private readonly delivered = new Set<number>();
 	private readonly signal: AbortSignal | undefined;
+	private readonly onOutput: CodemodeExecuteOptions["onOutput"];
 	private readonly timer: ReturnType<typeof setTimeout> | undefined;
 	private readonly output: CodemodeOutputItem[] = [];
 	private readonly calls: CodemodeCall[] = [];
@@ -210,6 +212,7 @@ class Execution {
 		this.executors = options.executors;
 		this.control = options.control;
 		this.signal = options.signal;
+		this.onOutput = options.onOutput;
 
 		if (Number.isFinite(options.timeoutMs)) {
 			this.timer = setTimeout(() => {
@@ -333,6 +336,7 @@ class Execution {
 		switch (message.type) {
 			case "output":
 				this.output.push(message.item);
+				this.onOutput?.(message.item);
 				break;
 			case "call":
 				if (this.pending.has(message.id)) throw new BridgeError(`duplicate call id ${message.id}`);
@@ -508,6 +512,7 @@ export class CodemodeSandboxBase {
 			executors: { tools, globals: this.globalsByName },
 			timeoutMs: options.timeoutMs ?? this.timeoutMs,
 			signal: options.signal,
+			onOutput: options.onOutput,
 			memoryLimitBytes: this.memoryLimitBytes,
 			store: serializeStore(options.store),
 			launch: this.launch,
