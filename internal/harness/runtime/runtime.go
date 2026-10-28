@@ -321,6 +321,16 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	p.Env = env
 	p.RuntimePermissionArgs = append([]string{}, p.ExtraArgs...)
 	p.ExtraArgs = append(append([]string{}, p.ExtraArgs...), gen.Args...)
+	// The owner's shared model definitions join the invocation, not the
+	// generation: a generation keeps its saved argv while its inputs do not
+	// change, so a models.json that appears or disappears later must not be
+	// frozen into it.
+	if a.Harness == "pi" {
+		models := filepath.Join(home, "models.json")
+		if _, err := os.Stat(models); err == nil {
+			p.ExtraArgs = append(p.ExtraArgs, "--models-file", models)
+		}
+	}
 	if leaseOut != nil {
 		lease, err := r.leaseGenerationLocked(gen.Directory)
 		if err != nil {
