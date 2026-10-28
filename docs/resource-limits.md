@@ -5,7 +5,7 @@ Dyna runs each subagent turn and each detached workflow run in its own systemd s
 - Desktop apps win CPU when the machine is busy. They have `CPUWeight=100`, and `dyna.slice` has `CPUWeight=20`. An idle machine still gives agents every core.
 - Agents share CPU fairly. One agent's large test run cannot starve the others.
 - Memory above 65% of RAM makes the kernel slow down and reclaim Dyna work. At 80%, an out-of-memory kill hits a process inside Dyna, never the desktop.
-- A room that passes 40% of RAM is throttled and reclaimed; at 50% the OOM kill stays inside that room. Above its task cap (2048 to 8192, scaled from RAM), a fork inside the room fails while the desktop and every other room keep working.
+- With the machine defaults, a room that passes 40% of RAM is throttled and reclaimed; at 50% the OOM kill stays inside that room. Above its task cap (2048 to 8192, scaled from RAM), a fork inside the room fails while the desktop and every other room keep working.
 
 Agents need no flag. Shells, tests and builds that an agent starts stay in its turn scope.
 
