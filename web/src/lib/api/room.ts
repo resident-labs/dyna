@@ -293,6 +293,7 @@ export interface Delivery {
   delivery: string
   turn?: number
   pointer?: boolean
+  voiceCall?: boolean
   error?: string
 }
 
