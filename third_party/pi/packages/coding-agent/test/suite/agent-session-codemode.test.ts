@@ -15,7 +15,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ToolResultMessage, Usage } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "../../src/core/extensions/types.ts";
 import type { CustomEntry } from "../../src/core/session-manager.ts";
 import { createToolDefinitionFromAgentTool } from "../../src/core/tools/tool-definition-wrapper.ts";
@@ -120,6 +120,7 @@ describe("AgentSession codemode tool", () => {
 	const harnesses: Harness[] = [];
 
 	afterEach(() => {
+		vi.useRealTimers();
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 
@@ -243,6 +244,77 @@ describe("AgentSession codemode tool", () => {
 		// Nested calls never become transcript tool results; their events carry the parent id.
 		const toolResults = harness.session.messages.filter((message) => message.role === "toolResult");
 		expect(toolResults).toHaveLength(1);
+	});
+
+	it("streams script output without nested call previews", async () => {
+		let harness: Harness;
+		const updates = () =>
+			harness.eventsOfType("tool_execution_update").filter((event) => event.toolName === "codemode");
+		const progress = () =>
+			updates()
+				.flatMap((update) => update.partialResult.content)
+				.map((block) => (block.type === "text" ? block.text : ""))
+				.join("\n");
+		let flushedWhileWaiting = false;
+		const timedEchoTool: AgentTool<typeof echoSchema> = {
+			...echoTool,
+			execute: async (_id, params) => {
+				const before = updates().length;
+				await vi.advanceTimersByTimeAsync(100);
+				flushedWhileWaiting = updates().length > before && progress().includes("progress 8");
+				return { content: [{ type: "text", text: `echo: ${params.text}` }], details: {} };
+			},
+		};
+		harness = await createHarness({
+			initialActiveToolNames: ["codemode"],
+			extensionFactories: [
+				createCodemodeExtension(),
+				(pi) => pi.registerTool(createToolDefinitionFromAgentTool(timedEchoTool as AgentTool)),
+			],
+		});
+		harnesses.push(harness);
+		vi.useFakeTimers();
+		const argument = "x".repeat(500);
+		const largeOutput = "y".repeat(100_000);
+		harness.setResponses([
+			fauxAssistantMessage(
+				[
+					fauxToolCall("codemode", {
+						code: `// @options: {"max_output_tokens": 50000}
+							text("${largeOutput}");
+							for (let i = 0; i < 9; i++) text("progress " + i);
+							console.log("before");
+							await tools.echo({ text: "${argument}" });
+							console.log("after");
+						`,
+					}),
+				],
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("go");
+
+		expect(flushedWhileWaiting).toBe(true);
+		expect(updates().length).toBeGreaterThan(0);
+		for (const update of updates()) {
+			expect(update.partialResult.details).toEqual({ calls: [] });
+			const serialized = JSON.stringify(update.partialResult);
+			expect(serialized).not.toContain(argument);
+			expect(serialized).not.toContain(largeOutput);
+			expect(serialized.length).toBeLessThan(40_000);
+		}
+		expect(progress()).toContain("Script running");
+		expect(progress()).toContain("progress 8");
+		expect(progress()).toContain("<console_output>");
+		expect(progress()).toContain("before");
+		expect(progress()).toContain("after");
+
+		const result = codemodeResult(harness);
+		expect(resultText(result)).toContain(largeOutput);
+		expect(result.nestedCalls?.calls).toHaveLength(1);
+		expect(result.nestedCalls?.calls[0]?.arguments).toEqual({ text: argument });
 	});
 
 	it("routes nested calls through extension hooks", async () => {
