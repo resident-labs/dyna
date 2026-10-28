@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func alwaysFree(int) bool { return true }
@@ -193,6 +194,135 @@ func TestTrackFailsWhenNoPortBlockIsFree(t *testing.T) {
 	}
 	if _, err := Get(path); err == nil {
 		t.Fatal("record was written although its port allocation failed")
+	}
+}
+
+// onlyBlockFree makes every port outside 20000-20009 busy, so one record
+// holding block 20000 leaves the pool full.
+func onlyBlockFree(t *testing.T) {
+	t.Helper()
+	saved := portFree
+	portFree = func(port int) bool { return port >= 20000 && port < 20010 }
+	t.Cleanup(func() { portFree = saved })
+}
+
+func TestTrackReclaimsBlockOfMissingPath(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	onlyBlockFree(t)
+	paths := pathsWithBlock(t, 20000, 2)
+	// The first path does not exist on disk, so its record is proven stale.
+	if err := Track(Record{Path: paths[0]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Track(Record{Path: paths[1]}); err != nil {
+		t.Fatalf("Track() = %v; want the missing path's block reclaimed", err)
+	}
+	if _, err := Get(paths[0]); err == nil {
+		t.Fatal("stale record still registered")
+	}
+	if rec, err := Get(paths[1]); err != nil || rec.Port != 20000 {
+		t.Fatalf("Get() = %#v, %v; want port 20000", rec, err)
+	}
+}
+
+func TestTrackClearsPortOfReclaimableTreeAndKeepsRecord(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	onlyBlockFree(t)
+	paths := pathsWithBlock(t, 20000, 2)
+	if err := os.Mkdir(paths[0], 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(paths[0]) })
+	if err := Track(Record{Path: paths[0], Repo: "/repo", RunID: "wf_keep"}); err != nil {
+		t.Fatal(err)
+	}
+	saved := reclaimablePaths
+	t.Cleanup(func() { reclaimablePaths = saved })
+
+	// An active, dirty, unmerged or uncertain tree keeps its block.
+	reclaimablePaths = func(context.Context, string) map[string]bool { return nil }
+	if err := Track(Record{Path: paths[1]}); err == nil {
+		t.Fatal("Track() reassigned the block of a tree that must be kept")
+	}
+	if rec, err := Get(paths[0]); err != nil || rec.Port != 20000 {
+		t.Fatalf("kept tree = %#v, %v; want port 20000 unchanged", rec, err)
+	}
+
+	reclaimablePaths = func(_ context.Context, _ string) map[string]bool { return map[string]bool{paths[0]: true} }
+	if err := Track(Record{Path: paths[1]}); err != nil {
+		t.Fatalf("Track() = %v; want the reclaimable tree's block reused", err)
+	}
+	if rec, err := Get(paths[1]); err != nil || rec.Port != 20000 {
+		t.Fatalf("Get() = %#v, %v; want port 20000", rec, err)
+	}
+	old, err := Get(paths[0])
+	if err != nil || old.Port != 0 || old.RunID != "wf_keep" {
+		t.Fatalf("released record = %#v, %v; want it kept without a port", old, err)
+	}
+}
+
+func TestTrackReclaimsSeventeenthTreeWithOneScan(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	saved, savedPaths := portFree, reclaimablePaths
+	t.Cleanup(func() { portFree, reclaimablePaths = saved, savedPaths })
+	// Only the 17 blocks that records hold are free of sockets, so the pool is full.
+	portFree = func(port int) bool { return port >= 20000 && port < 20170 }
+	var target string
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 17; i++ {
+		path, err := os.MkdirTemp("", "dyna-wt-old-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.RemoveAll(path) })
+		rec := Record{Path: path, Repo: "/repo", Port: 20000 + 10*i, RetainedAt: base.Add(time.Duration(i) * time.Hour)}
+		if err := Track(rec); err != nil {
+			t.Fatal(err)
+		}
+		target = path
+	}
+	scans := 0
+	reclaimablePaths = func(_ context.Context, repo string) map[string]bool {
+		scans++
+		return map[string]bool{target: true}
+	}
+	path := pathsWithBlock(t, 20000, 1)[0]
+	if err := Track(Record{Path: path}); err != nil {
+		t.Fatalf("Track() = %v; want the 17th record's block reclaimed", err)
+	}
+	if rec, err := Get(path); err != nil || rec.Port != 20160 {
+		t.Fatalf("Get() = %#v, %v; want port 20160", rec, err)
+	}
+	if scans != 1 {
+		t.Fatalf("repository scans = %d; want 1", scans)
+	}
+}
+
+func TestReleaseRecordSkipsReplacedRecord(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	path := pathsWithBlock(t, 20000, 1)[0]
+	if err := Track(Record{Path: path, RunID: "wf_old"}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Get(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another caller replaces the record after the snapshot was read.
+	if err := Track(Record{Path: path, RunID: "wf_new"}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := registryDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, remove := range []bool{true, false} {
+		if ok, err := releaseRecord(context.Background(), db, snapshot, remove); err != nil || ok {
+			t.Fatalf("releaseRecord(remove=%v) = %v, %v; want no change", remove, ok, err)
+		}
+	}
+	if rec, err := Get(path); err != nil || rec.RunID != "wf_new" || rec.Port != snapshot.Port {
+		t.Fatalf("Get() = %#v, %v; want the replaced record intact", rec, err)
 	}
 }
 
