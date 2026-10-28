@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 35 {
+	if err != nil || len(items) != 36 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
@@ -170,6 +170,15 @@ func TestSettingsItemsAndSet(t *testing.T) {
 	}
 	if _, err := Set(t.Context(), settings.KeyCIDiskFloorGB, "-1"); err == nil {
 		t.Fatal("a negative disk floor must fail")
+	}
+	// The render node names the GPU computers start on and takes effect at
+	// the next computer start.
+	node, err := Set(t.Context(), settings.KeyComputersRenderNode, "/dev/dri/renderD129")
+	if err != nil || node.Value != "/dev/dri/renderD129" || node.Source != settings.SourceFile || node.LiveVsRestart != settings.LiveNextOpen {
+		t.Fatalf("Set render node = %+v, %v", node, err)
+	}
+	if _, err := Set(t.Context(), settings.KeyComputersRenderNode, "/dev/dri/card0"); err == nil {
+		t.Fatal("a card path must fail")
 	}
 }
 

@@ -55,18 +55,25 @@ type Status struct {
 	RefreshHz        int           `json:"refresh_hz"`
 	MemoryCurrentKiB int64         `json:"memory_current_kib,omitempty"`
 	Renderer         string        `json:"renderer"`
-	Apps             []App         `json:"apps"`
-	Control          ControlMode   `json:"control"`
-	Viewers          int           `json:"viewers"`
-	Stream           Stream        `json:"stream"`
-	IdleSeconds      int64         `json:"idle_seconds"`
-	RSSKiB           int64         `json:"rss_kib"`
-	StartedAt        time.Time     `json:"started_at"`
-	StartupMS        int64         `json:"startup_ms"`
-	ShotCapturedAt   time.Time     `json:"shot_captured_at"`
-	StreamRSSKiB     int64         `json:"stream_rss_kib"`
-	Reason           string        `json:"reason,omitempty"`
-	Recording        bool          `json:"recording,omitempty"`
+	// RenderNode is the GPU the desktop renders on, such as
+	// /dev/dri/renderD128; empty for the software renderer (D-352).
+	RenderNode string `json:"render_node,omitempty"`
+	// RenderEnv holds the GPU variables the running desktop resolved at its
+	// start (DRI_PRIME or the GLVND NVIDIA pair). App launches outside the
+	// daemon read these, so every path renders where the desktop renders.
+	RenderEnv      map[string]string `json:"render_env,omitempty"`
+	Apps           []App             `json:"apps"`
+	Control        ControlMode       `json:"control"`
+	Viewers        int               `json:"viewers"`
+	Stream         Stream            `json:"stream"`
+	IdleSeconds    int64             `json:"idle_seconds"`
+	RSSKiB         int64             `json:"rss_kib"`
+	StartedAt      time.Time         `json:"started_at"`
+	StartupMS      int64             `json:"startup_ms"`
+	ShotCapturedAt time.Time         `json:"shot_captured_at"`
+	StreamRSSKiB   int64             `json:"stream_rss_kib"`
+	Reason         string            `json:"reason,omitempty"`
+	Recording      bool              `json:"recording,omitempty"`
 	// Keep stops the idle timeout from stopping the computer. It is stored
 	// with the computer and survives a service restart.
 	Keep bool `json:"keep,omitempty"`

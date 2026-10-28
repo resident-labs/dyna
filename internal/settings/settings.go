@@ -27,6 +27,7 @@ const (
 	KeyLocalLaneRepos        = "lane.local.repos"
 	KeyComputersEnabled      = "computers.enabled"
 	KeyComputersReminder     = "computers.reminderMinutes"
+	KeyComputersRenderNode   = "computers.renderNode"
 	KeyAutoCheck             = "updater.autoCheck"
 	KeyRunsRetention         = "runs.retention"
 	KeyWorktreesRetention    = "worktrees.retention"
@@ -58,6 +59,7 @@ const (
 	DefaultSteeringToolWait               = 120 * time.Second
 	DefaultIdleUnloadMinutes              = 10
 	DefaultComputersReminderMinutes       = 2
+	DefaultComputersRenderNode            = "auto"
 	DefaultWorktreesMinFreeBytes    int64 = 10 << 30
 )
 
@@ -88,6 +90,9 @@ type Values struct {
 	// ComputersReminderMinutes is how often an open computer reminds its
 	// session to look at the screen; zero turns the reminder off.
 	ComputersReminderMinutes int
+	// ComputersRenderNode picks the GPU Dyna computers render on: auto, or a
+	// /dev/dri/renderD* path. Auto avoids the GPU that drives the display.
+	ComputersRenderNode string
 	// TODO: legacy/shim remove later — the seeded parent check-ins hook imports this interval once; remove the key with that import.
 	SessionCheckInInterval time.Duration
 	MaxCardBytes           int64
@@ -139,6 +144,7 @@ func Defaults() Values {
 		BrowserSaveBack:          true,
 		ComputersEnabled:         true,
 		ComputersReminderMinutes: DefaultComputersReminderMinutes,
+		ComputersRenderNode:      DefaultComputersRenderNode,
 		SessionCheckInInterval:   15 * time.Minute,
 		AdmissionMode:            AdmissionObserve,
 		LibraryReadmeMaxLines:    DefaultLibraryReadmeMaxLines,
@@ -231,6 +237,15 @@ func Load(path string) (Values, error) {
 		if n, ok := asInt(computers["reminderMinutes"]); ok && n >= 0 {
 			v.ComputersReminderMinutes = n
 			v.fromFile[KeyComputersReminder] = true
+		}
+		if value, exists := computers["renderNode"]; exists {
+			node, ok := value.(string)
+			if !ok {
+				return Values{}, fmt.Errorf("computers.renderNode must be auto or a /dev/dri/renderD* path")
+			}
+			if err := v.Set(KeyComputersRenderNode, node); err != nil {
+				return Values{}, err
+			}
 		}
 	}
 	if section, exists := raw["lane"]; exists {
@@ -474,6 +489,13 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.ComputersReminderMinutes = n
 		v.fromFile[key] = true
+	case KeyComputersRenderNode:
+		value = strings.TrimSpace(value)
+		if value != DefaultComputersRenderNode && !validRenderNodeName(value) {
+			return fmt.Errorf("%s must be auto or a /dev/dri/renderD* path", key)
+		}
+		v.ComputersRenderNode = value
+		v.fromFile[key] = true
 	case KeySessionCheckInInterval:
 		return v.setSession(key, value)
 	case KeyAdmissionMode:
@@ -601,6 +623,7 @@ func (v Values) Save() error {
 	computers := nested(raw, "computers")
 	computers["enabled"] = v.ComputersEnabled
 	computers["reminderMinutes"] = v.ComputersReminderMinutes
+	computers["renderNode"] = v.ComputersRenderNode
 	raw["computers"] = computers
 	v.saveBrowser(raw)
 	v.saveSessions(raw)
@@ -722,6 +745,17 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 
 func validWorktreesRoot(value string) bool {
 	return filepath.IsAbs(strings.TrimSpace(value)) || strings.HasPrefix(strings.TrimSpace(value), "~/")
+}
+
+// validRenderNodeName reports whether value is a render node path such as
+// /dev/dri/renderD128, whatever number the kernel gave it.
+func validRenderNodeName(value string) bool {
+	digits := strings.TrimPrefix(value, "/dev/dri/renderD")
+	if digits == value {
+		return false
+	}
+	_, err := strconv.Atoi(digits)
+	return err == nil
 }
 
 // parseRunsRetention accepts Go durations and whole days. Zero or off disables cleanup.
