@@ -141,6 +141,37 @@ func TestRoomComputerScopeCountsAsComputers(t *testing.T) {
 	near(t, "agents", l.Split.Agents, 0)
 }
 
+// A room computer that exits takes its lifetime counter with it. The computers
+// that stay busy must still show their own use, not drop to zero.
+func TestExitedRoomComputerDoesNotHideTheBusyOne(t *testing.T) {
+	f := newTree(t, true)
+	f.busy(0)
+	slice := "dyna.slice/dyna-room.slice/dyna-room-fl.slice/"
+	gone, busy := slice+"dyna-computer-gone-1.scope", slice+"dyna-computer-busy-2.scope"
+	f.cpu("dyna.slice", 0)
+	f.cpu(gone, 100_000_000) // 100 s of history
+	f.cpu(busy, 0)
+	s := f.sampler(4)
+	if err := s.sample(t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(f.cgrp, um, gone)); err != nil {
+		t.Fatal(err)
+	}
+	f.busy(1000)
+	f.cpu("dyna.slice", 10_000_000)
+	f.cpu(busy, 10_000_000) // 10 s of 40 core-s = 25%
+	if err := s.sample(t0.Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	l := s.Load()
+	if l.Split == nil {
+		t.Fatalf("load = %+v", l)
+	}
+	near(t, "computers", l.Split.Computers, 25)
+	near(t, "agents", l.Split.Agents, 0)
+}
+
 func TestFirstSampleHasNoCPUShare(t *testing.T) {
 	f := newTree(t, true)
 	f.busy(100)

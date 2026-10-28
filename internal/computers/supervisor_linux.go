@@ -88,7 +88,8 @@ type supervisor struct {
 	shot                               Shot
 	displayLock                        string
 	cgroup                             string
-	roomSlice                          string // the room's slice unit, when the computer's cgroup is a room scope
+	cgroupMu                           sync.Mutex // serializes ensureCgroup
+	roomSlice                          string     // the room's slice unit, when the computer's cgroup is a room scope
 	streamBackend                      StreamBackend
 	monitorWake                        chan struct{}
 	x11Conns                           map[*net.UnixConn]bool
@@ -147,11 +148,7 @@ func newComputer(ctx context.Context, id, room string, options SupervisorOptions
 	// life left, so that life's scope can be adopted.
 	if s.meta.Room == "" || !roomSlicesOn() {
 		s.cgroup = computerCgroup(id)
-		if s.cgroup != "" {
-			_ = os.WriteFile(filepath.Join(RuntimeDir(id), "cgroup"), []byte(s.cgroup+"\n"), 0600)
-		} else {
-			_ = os.Remove(filepath.Join(RuntimeDir(id), "cgroup"))
-		}
+		s.recordCgroup(s.cgroup)
 	}
 	public := filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), s.meta.WaylandDisplay)
 	_ = os.Remove(public)
@@ -278,6 +275,9 @@ func (s *supervisor) accept(l *net.UnixListener, x11 bool) {
 			return
 		}
 		go func() {
+			// The first client may connect before any desktop or browser
+			// start, so its processes need the computer's cgroup first.
+			s.ensureCgroup(s.ctx)
 			s.mu.Lock()
 			if s.ctx.Err() != nil {
 				s.mu.Unlock()
@@ -473,6 +473,9 @@ func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desk
 	// The desktop's processes land in the computer's cgroup as they start, so
 	// the cgroup must exist first: a room computer takes its room scope now.
 	s.ensureCgroup(ctx)
+	s.mu.Lock()
+	roomSlice := s.roomSlice
+	s.mu.Unlock()
 	config := filepath.Join(Dir(s.meta.SessionID), "config")
 	if err := os.MkdirAll(config, 0700); err != nil {
 		return nil, err
@@ -501,7 +504,7 @@ func (s *supervisor) startDesktop(ctx context.Context, width, height int) (*desk
 	}
 	for _, renderer := range renderers {
 		_ = os.Remove(ready)
-		values := map[string]string{"PATH": childBin + ":" + os.Getenv("PATH"), "WAYLAND_DISPLAY": "", "DISPLAY": "", "WLR_BACKENDS": "headless", "WLR_HEADLESS_OUTPUTS": "1", "WLR_LIBINPUT_NO_DEVICES": "1", "WLR_RENDERER": renderer, "XDG_CURRENT_DESKTOP": "labwc", "XDG_SESSION_TYPE": "wayland", "DYNA_COMPUTER_PROCESS": s.meta.SessionID}
+		values := map[string]string{"PATH": childBin + ":" + os.Getenv("PATH"), "WAYLAND_DISPLAY": "", "DISPLAY": "", "WLR_BACKENDS": "headless", "WLR_HEADLESS_OUTPUTS": "1", "WLR_LIBINPUT_NO_DEVICES": "1", "WLR_RENDERER": renderer, "XDG_CURRENT_DESKTOP": "labwc", "XDG_SESSION_TYPE": "wayland", "DYNA_COMPUTER_PROCESS": s.meta.SessionID, mode.EnvRoomSlice: roomSlice}
 		if renderer == "gles2" {
 			values["WLR_RENDER_DRM_DEVICE"] = gpu.Node
 		}
@@ -708,6 +711,12 @@ func (s *supervisor) stop() error {
 	s.apps = map[int]string{}
 	s.tracked = nil
 	s.state.Apps = []App{}
+	// killCgroup took the room scope down with its anchor; the next start
+	// asks systemd for a new one, and nothing may join the dead one meanwhile.
+	if s.roomSlice != "" {
+		s.cgroup, s.roomSlice = "", ""
+		s.recordCgroup("")
+	}
 	s.state.State = StateIdleStopped
 	s.state.RefreshHz = 0
 	s.state.Control = ControlAgent
@@ -750,10 +759,9 @@ func (s *supervisor) cleanup(destroy bool) error {
 	if s.displayLock != "" {
 		_ = os.Remove(s.displayLock)
 	}
-	// A scope a previous daemon life left holds nothing but its anchor now;
-	// this computer is going away, so take that anchor with it before the
-	// record that names it goes away too.
-	s.killSavedScope()
+	// The room scope holds its anchor past the daemon; this computer is going
+	// away, so take the anchor with it before the record that names it goes.
+	killRecordedScope(s.meta.SessionID)
 	_ = os.RemoveAll(RuntimeDir(s.meta.SessionID))
 	_ = os.RemoveAll(browserSocketDir(os.Getenv("XDG_RUNTIME_DIR"), s.meta.SessionID))
 	if destroy && saveErr == nil {
@@ -870,6 +878,12 @@ func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
 		defer s.browserMu.Unlock()
 	}
 
+	if r.Op == "browser.prepare" {
+		// The launcher joins the computer's cgroup once this returns, so the
+		// cgroup must exist before then even when no desktop runs yet.
+		s.ensureCgroup(ctx)
+		return prepareChromiumLaunch(ctx, s.meta.SessionID, r.BrowserArgs)
+	}
 	if r.Op == "browser.navigate" {
 		return s.openBrowser(ctx, r)
 	}
@@ -890,8 +904,6 @@ func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
 	case "browser.stop":
 		stopProfileBrowsers(s.meta.SessionID)
 		return map[string]bool{"stopped": true}, nil
-	case "browser.prepare":
-		return prepareChromiumLaunch(ctx, s.meta.SessionID, r.BrowserArgs)
 	case "status":
 		return s.status(), nil
 	case "view.open":
