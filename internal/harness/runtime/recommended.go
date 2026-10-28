@@ -144,7 +144,11 @@ func (r RecommendedVersionResolver) RecommendedVersions(ctx context.Context) []R
 		go func() {
 			defer pending.Done()
 			v := RecommendedVersion{Harness: a.Harness, Status: "unavailable"}
-			if a.NPMPackage == "" {
+			if a.distribution == distributionFork {
+				v.Source = piForkSource()
+				v.Version = piForkVersion
+				v.Status = "resolved"
+			} else if a.NPMPackage == "" {
 				v.Reason = "The adapter has no verified version metadata source."
 			} else {
 				v.Source = "https://registry.npmjs.org/" + url.PathEscape(a.NPMPackage) + "/latest"
