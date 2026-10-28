@@ -277,6 +277,9 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 	if r.Op == "run.lease" {
 		return d.leaseRun(ctx, s, r)
 	}
+	if r.Op == "open" {
+		return d.openApp(ctx, s, r)
+	}
 	return s.dispatch(ctx, r)
 }
 
@@ -289,6 +292,9 @@ func (d *daemon) beginRestart() RestartAdmission {
 	for _, s := range d.computers {
 		s.mu.Lock()
 		reason := s.state.RestartReason()
+		if reason == "" && s.appLaunches > 0 {
+			reason = fmt.Sprintf("computer %s has %d app launch(es) in progress", s.meta.SessionID, s.appLaunches)
+		}
 		s.mu.Unlock()
 		if reason != "" {
 			return RestartAdmission{Reason: reason}
@@ -296,6 +302,33 @@ func (d *daemon) beginRestart() RestartAdmission {
 	}
 	d.restarting = true
 	return RestartAdmission{}
+}
+
+// openApp holds a launch lease from admission until the window appears or
+// the launch fails. That closes the gap where an in-progress launch has no app
+// in status yet. Once restart admission closes, no new launch can start.
+func (d *daemon) openApp(ctx context.Context, s *supervisor, r Request) (Opened, error) {
+	d.mu.Lock()
+	if d.restarting {
+		d.mu.Unlock()
+		return Opened{}, fmt.Errorf("computer service restart is in progress; retry after it restarts")
+	}
+	if d.computers[s.meta.SessionID] != s {
+		d.mu.Unlock()
+		return Opened{}, fmt.Errorf("computer was destroyed while preparing the app")
+	}
+	s.mu.Lock()
+	s.appLaunches++
+	s.record("launches", nil)
+	s.mu.Unlock()
+	d.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.appLaunches--
+		s.record("launches", nil)
+		s.mu.Unlock()
+	}()
+	return s.openApp(ctx, r)
 }
 
 func (d *daemon) leaseRun(ctx context.Context, s *supervisor, r Request) (Meta, error) {
