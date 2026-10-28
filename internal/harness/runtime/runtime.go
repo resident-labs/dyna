@@ -271,10 +271,10 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		gen, err = loadNativeGeneration(a.Harness, pin.Generation, lookup)
 		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home, privateEnv["DYNA_BIN"]) {
 			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs.
-			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
+			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup, b)
 		}
 	} else {
-		gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
+		gen, err = r.generateLocked(a.Harness, home, active.ID, lookup, b)
 	}
 	if err != nil {
 		return p, pin, err
