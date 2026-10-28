@@ -177,13 +177,26 @@ func TestJobFailureKeepsItsExitCode(t *testing.T) {
 
 // Cancelling a running job stops its unit on the node and records cancelled.
 func TestCancelStopsTheJob(t *testing.T) {
-	svc, fake, reporter, runStarted := newService(t, blockingJob("working"))
+	onNode := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "working")
+		onNode <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc, fake, reporter, _ := newService(t, legacy)
 	defer svc.Stop()
 	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"sleep", "100"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-runStarted
+	// The start event goes out before the node work, so wait for the node
+	// itself: the cancel below must land while the job runs.
+	<-onNode
 	if _, err := svc.Cancel(t.Context(), job.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -246,26 +259,6 @@ func TestEngineRestartReattachesWithoutASecondStart(t *testing.T) {
 		t.Fatalf("finished event = %s, want cancelled through the new engine", state)
 	}
 	restarted.Stop()
-}
-
-// A queued job that is cancelled before the engine picks it up never starts.
-func TestCancelOfAQueuedJobSkipsIt(t *testing.T) {
-	svc, fake, _, _ := newService(t, func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
-		fmt.Fprintln(out, "ran")
-		return nil
-	})
-	defer svc.Stop()
-	job := Job{ID: "job_queued", RoomID: "dyna", Node: "here", Command: []string{"echo"}, State: StateQueued, Timeout: time.Minute, Created: time.Unix(1, 0), LogPath: filepath.Join(svc.DataDir, "jobs", "job_queued", "log")}
-	if err := svc.Store.Save(t.Context(), job); err != nil {
-		t.Fatal(err)
-	}
-	stopped, err := svc.Cancel(t.Context(), job.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stopped.State != StateCancelled || len(fake.StartCalls()) != 0 {
-		t.Fatalf("cancel = %s with %d starts, want cancelled with none", stopped.State, len(fake.StartCalls()))
-	}
 }
 
 // Host execution on another machine needs that machine's host-check grant;

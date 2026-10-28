@@ -315,8 +315,9 @@ func (s *Service) Start(ctx context.Context) {
 				return
 			}
 			workCtx := context.WithoutCancel(ctx)
+			s.endQueuedCancels(workCtx)
+			s.stopRequested(workCtx)
 			s.claim(workCtx)
-			s.stopCancelled(workCtx)
 		}
 	}()
 }
@@ -325,26 +326,43 @@ func (s *Service) Start(ctx context.Context) {
 // another engine queues while the owner runs reaches it within one interval.
 const claimEvery = 5 * time.Second
 
-// stopCancelled stops the jobs a cancellation asked for while this engine
-// still holds the executor: the request stands in the row, so a restart that
-// reattached the job recovers it here too.
-func (s *Service) stopCancelled(ctx context.Context) {
+// endQueuedCancels ends the queued jobs a cancellation asked for. The
+// engine whose sweep took the row posts the job's only event, its cancelled
+// end: the session that submitted it never polls.
+func (s *Service) endQueuedCancels(ctx context.Context) {
+	rows, err := s.Store.EndQueuedCancels(ctx, s.Store.now())
+	if err != nil {
+		s.logger()("jobs: end cancelled jobs: %v", err)
+		return
+	}
+	for _, row := range rows {
+		if s.Reporter != nil {
+			if err := s.Reporter.JobFinished(ctx, row); err != nil {
+				s.logger()("jobs: report cancelled job %s: %v", row.ID, err)
+			}
+		}
+	}
+}
+
+// stopRequested stops the running jobs a cancellation asked for while this
+// engine holds the executor: the request stands in the row, so a restart
+// that reattached the job recovers it here too.
+func (s *Service) stopRequested(ctx context.Context) {
+	rows, err := s.Store.RequestedRunning(ctx)
+	if err != nil {
+		s.logger()("jobs: read cancelled jobs: %v", err)
+		return
+	}
 	s.mu.Lock()
-	stops := make(map[string]func(), len(s.stops))
-	for key, stop := range s.stops {
-		if id, ok := strings.CutPrefix(key, "job:"); ok {
-			stops[id] = stop
+	stops := make(map[string]func(), len(rows))
+	for _, row := range rows {
+		if stop := s.stops["job:"+row.ID]; stop != nil {
+			stops[row.ID] = stop
 		}
 	}
 	s.mu.Unlock()
-	for id, stop := range stops {
-		row, err := s.Store.Get(ctx, id)
-		if err != nil {
-			continue
-		}
-		if row.CancelRequested && !row.State.Finished() {
-			stop()
-		}
+	for _, stop := range stops {
+		stop()
 	}
 }
 
@@ -361,30 +379,24 @@ func (s *Service) claim(ctx context.Context) {
 
 // Cancel stops a queued or running job. A queued job never starts.
 func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
-	s.mu.Lock()
-	stop := s.stops["job:"+id]
-	s.mu.Unlock()
-	if stop != nil {
-		stop()
-		return s.Store.Get(ctx, id)
-	}
-	// No live executor owns it: a queued row, or a running one this engine has
-	// not picked up. A job that never started ends here and the canceller
-	// reports its end, the only event the job will ever have: the session
-	// that submitted it never polls. A started job keeps running in the row
-	// with a standing cancellation request; the engine that runs it - or the
-	// next one, after a restart - stops the process and reports the end, so a
-	// terminal event can never precede a start or follow it out of order.
-	row, won, err := s.Store.Cancel(ctx, id, s.Store.now())
-	if err != nil {
+	// One durable request, then wake this engine's loop. Cancel never stops
+	// a process, never ends a row and never posts an event: the engine that
+	// owns the job carries the request to the recorded end - a queued row on
+	// the next tick of any engine, a running one on the next tick of the
+	// engine that holds its executor.
+	if err := s.Store.RequestCancel(ctx, id); err != nil {
 		return Job{}, err
 	}
-	if won && row.State == StateCancelled && s.Reporter != nil {
-		if err := s.Reporter.JobFinished(ctx, row); err != nil {
-			s.logger()("jobs: report cancelled job %s: %v", row.ID, err)
+	s.mu.Lock()
+	wake := s.wake
+	s.mu.Unlock()
+	if wake != nil {
+		select {
+		case wake <- struct{}{}:
+		default:
 		}
 	}
-	return row, nil
+	return s.Store.Get(ctx, id)
 }
 
 // Stop ends the service: it stops polling and cancels the engine-side waits.
@@ -475,11 +487,9 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		s.mu.Unlock()
 	}()
 
-	// A reattached row had its start posted by the run before the restart.
-	postedStart := job.State == StateRunning
 	machine, err := s.Machines.Get(context.Background(), job.Node)
 	if err != nil {
-		s.finish(&job, err, postedStart)
+		s.finish(&job, err)
 		return
 	}
 	conn := Conn{Name: machine.Name, SSH: machine.SSH, SSHConnectTimeout: machine.SSHConnectTimeout}
@@ -502,7 +512,6 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		}
 		// The start goes out with the durable transition, before any node work
 		// can fail: whatever ends the job later, its end follows its start.
-		postedStart = true
 		if s.Reporter != nil {
 			if err := s.Reporter.JobStarted(ctx, job); err != nil {
 				s.logger()("jobs: report started job %s: %v", job.ID, err)
@@ -518,7 +527,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	job.Note = resources.Note
 
 	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
-		s.finish(&job, err, postedStart)
+		s.finish(&job, err)
 		return
 	}
 	flag := os.O_WRONLY | os.O_CREATE
@@ -529,7 +538,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	logFile, err := os.OpenFile(job.LogPath, flag, 0o600)
 	if err != nil {
-		s.finish(&job, err, postedStart)
+		s.finish(&job, err)
 		return
 	}
 	defer logFile.Close()
@@ -545,7 +554,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if !reattach && job.SHA != "" {
 		cache := path.Join(NodeBase(machine.Name), RepoKey(job.Repo)+".git")
 		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA); err != nil {
-			s.finish(&job, err, postedStart)
+			s.finish(&job, err)
 			return
 		}
 	}
@@ -565,12 +574,12 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 			if s.onAbandoned != nil {
 				s.onAbandoned(job)
 			}
-			s.finish(&job, nil, postedStart)
+			s.finish(&job, nil)
 			return
 		} else if fresh, err := s.Store.Get(ctx, job.ID); err == nil && fresh.CancelRequested {
 			// A cancellation asked for the job while the run prepared. The
 			// node never sees it; the end follows the start already posted.
-			s.finish(&job, context.Canceled, postedStart)
+			s.finish(&job, nil)
 			return
 		}
 	}
@@ -595,7 +604,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	if runErr != nil && !job.State.Finished() {
 		s.stopUnit(x, spec)
 	}
-	s.finish(&job, runErr, postedStart)
+	s.finish(&job, runErr)
 }
 
 // stopUnit asks the node to stop the job's unit, best effort.
@@ -638,7 +647,7 @@ func ptr(code int) *int { return &code }
 // stored row keeps the log offset the run reached. The job folder on the
 // node, its checkout included, is removed at the end through the machine
 // connection: a fresh job gets a fresh folder.
-func (s *Service) finish(job *Job, err error, postedStart bool) {
+func (s *Service) finish(job *Job, err error) {
 	state, exit := StateFailed, (*int)(nil)
 	if err == nil {
 		state, exit = StatePassed, ptr(0)
@@ -663,14 +672,14 @@ func (s *Service) finish(job *Job, err error, postedStart bool) {
 		s.logger()("jobs: record finished job %s: %v", job.ID, err)
 	}
 	if !won {
-		// The row ended elsewhere, almost always the cancellation this
-		// engine's tick stopped. This run posts the end only when it posted
-		// the start: then its end follows its start, exactly once. A run
-		// that never posted a start leaves the end to the canceller.
+		// The row ended elsewhere. One engine ends a job, so this can only
+		// be a row this run already ended, or one another engine swept while
+		// this one still held a stale copy: the winner posted, so adopt its
+		// end quietly.
 		job.State, job.ExitCode, job.Ended = row.State, row.ExitCode, row.Ended
-		postedStart = false
+		return
 	}
-	if s.Reporter != nil && postedStart {
+	if s.Reporter != nil {
 		if err := s.Reporter.JobFinished(ctx, *job); err != nil {
 			s.logger()("jobs: report finished job %s: %v", job.ID, err)
 		}
