@@ -358,13 +358,6 @@ func (s *Service) claim(ctx context.Context) {
 
 // Cancel stops a queued or running job. A queued job never starts.
 func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
-	job, err := s.Store.Get(ctx, id)
-	if err != nil {
-		return Job{}, err
-	}
-	if job.State.Finished() {
-		return job, nil
-	}
 	s.mu.Lock()
 	stop := s.stops["job:"+id]
 	s.mu.Unlock()
@@ -373,24 +366,22 @@ func (s *Service) Cancel(ctx context.Context, id string) (Job, error) {
 		return s.Store.Get(ctx, id)
 	}
 	// No live executor owns it: a queued row, or a running one this engine has
-	// not picked up. Mark it cancelled; the worker of a queued row skips it.
-	// The write is conditional: a row that ended in the meantime keeps its
-	// own end and its own report.
-	job.State = StateCancelled
-	job.Ended = s.Store.now()
-	row, won, err := s.Store.SaveOpen(ctx, job)
+	// not picked up. The row ends inside one transaction that works on the row
+	// as it lies: a start recorded in the meantime keeps its metadata, and the
+	// report tells what the table holds. The worker of a queued row skips it.
+	row, won, err := s.Store.Cancel(ctx, id, s.Store.now())
 	if err != nil {
 		return Job{}, err
 	}
 	if !won {
 		return row, nil
 	}
-	if s.Reporter != nil && !job.Started.IsZero() {
-		if err := s.Reporter.JobFinished(ctx, job); err != nil {
-			s.logger()("jobs: report cancelled job %s: %v", job.ID, err)
+	if s.Reporter != nil && !row.Started.IsZero() {
+		if err := s.Reporter.JobFinished(ctx, row); err != nil {
+			s.logger()("jobs: report cancelled job %s: %v", row.ID, err)
 		}
 	}
-	return job, nil
+	return row, nil
 }
 
 // Stop ends the service: it stops polling and cancels the engine-side waits.

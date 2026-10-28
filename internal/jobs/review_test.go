@@ -570,3 +570,61 @@ func TestATerminalRowKeepsItsEnd(t *testing.T) {
 		t.Fatalf("the open-row write won=%v and read %s", won, row.State)
 	}
 }
+
+// TestACancelAfterTheStartKeepsTheRunsRecord is the fail-first test for the
+// round-5 review finding: a standby reads a queued job, the owner records
+// the start, and only then does the standby commit its cancellation. The
+// cancellation changes only its own fields: the start time, folder and unit
+// the run recorded stay, so the row still reads as started and the finish
+// event is not suppressed.
+func TestACancelAfterTheStartKeepsTheRunsRecord(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	submitted := time.Now().Truncate(time.Millisecond)
+	job := Job{ID: "job_late_cancel", RoomID: "dyna", Node: "here", Command: []string{"true"}, State: StateQueued, Created: submitted, LogPath: filepath.Join(t.TempDir(), "log")}
+	if err := store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	// The stale engine keeps this queued copy aside.
+	stale, err := store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The owner records the start while the stale copy sits aside.
+	started := submitted.Add(time.Second)
+	running := stale
+	running.State = StateRunning
+	running.Started = started
+	running.Dir = "/var/tmp/dyna-local-ci-1000/here/jobs/job_late_cancel"
+	running.Unit = "dyna-job-job_late_cancel.service"
+	if _, won, err := store.SaveOpen(t.Context(), running); err != nil || !won {
+		t.Fatalf("record the start: won=%v err=%v", won, err)
+	}
+	// The stale engine cancels after that start.
+	ended := started.Add(time.Minute)
+	row, won, err := store.Cancel(t.Context(), job.ID, ended)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !won {
+		t.Fatal("the cancellation of an open row lost")
+	}
+	if row.State != StateCancelled {
+		t.Fatalf("the row is %s, want cancelled", row.State)
+	}
+	if row.Started.IsZero() {
+		t.Fatal("the cancellation erased the recorded start, so the finish event would be suppressed")
+	}
+	if row.Dir == "" || row.Unit == "" {
+		t.Fatal("the cancellation erased the job folder and unit")
+	}
+	if !row.Ended.Equal(ended) {
+		t.Fatalf("the row ended at %v, want %v", row.Ended, ended)
+	}
+	stored, err := store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != StateCancelled || stored.Started.IsZero() || stored.Dir == "" || stored.Unit == "" {
+		t.Fatalf("the stored row lost its run record: state=%s started=%v dir=%q unit=%q", stored.State, stored.Started, stored.Dir, stored.Unit)
+	}
+}
