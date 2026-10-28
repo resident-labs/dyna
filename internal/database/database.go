@@ -207,6 +207,12 @@ func IsOlderSchema(err error, key string) bool {
 	return errors.As(err, &old) && old.key == key
 }
 
+// IsUpdatingSchema excludes an engine whose migration failed: retrying there
+// cannot make progress, and must not delay its read-only service.
+func IsUpdatingSchema(err error, key string) bool {
+	return !migrationFailed.Load() && IsOlderSchema(err, key)
+}
+
 func openDatabase(dataDir string) (*sql.DB, error) {
 	path, err := filepath.Abs(filepath.Join(dataDir, "dyna.db"))
 	if err != nil {

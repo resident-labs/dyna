@@ -122,6 +122,8 @@ type Store struct {
 	// pause waits between attempts to record an exit; nil sleeps. A test sets
 	// it so no timer decides the result.
 	pause func(time.Duration)
+	// schemaRetry replaces the external-process schema check in tests.
+	schemaRetry func(error) bool
 	// failWrite, when set, makes a write fail before it reaches the state
 	// store; its argument is "save" or the SQL of the write. A test sets it to
 	// act as a store that times out.

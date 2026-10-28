@@ -28,6 +28,12 @@ func TestShellWaitsForEngineSchemaUpgrade(t *testing.T) {
 	database.DisownSchema()
 	t.Cleanup(database.OwnSchema)
 	waits := 0
+	s.pause = func(time.Duration) { waits++ }
+	if _, err := s.ReadMeta(meta.ID); err == nil || waits != 0 {
+		t.Fatalf("failed engine migration: waits = %d, error = %v", waits, err)
+	}
+	// Simulate an external process, whose engine did not report a migration failure.
+	s.schemaRetry = func(err error) bool { return database.IsOlderSchema(err, "shells.version") }
 	s.pause = func(d time.Duration) {
 		waits++
 		if d != time.Second {
