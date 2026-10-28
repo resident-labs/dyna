@@ -704,6 +704,13 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		if live.Info.RoomID != roomID || busyIDs[id] {
 			continue
 		}
+		// A live turn may still record its verdict, so record state alone never
+		// closes a reviewer: a transient poll error hid running reviews from
+		// Busy and the close stopped the verdict shell mid-command (D-411).
+		// The next pass closes the session once the turn ends.
+		if prfacts.TurnLive(live.Info, live.Turn) {
+			continue
+		}
 		failures = rolesession.RecordFailure(failures, live.Info, live.Turn, s.now())
 		if err = s.closeReviewer(ctx, id); err != nil {
 			return err

@@ -35,6 +35,8 @@ func TestIdleVerdictReleasesAttachedReviewer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The verdict ended the reviewer's turn, so the pool may close it (D-411).
+	e.endReviewerTurn(first.Reviewer)
 	st = dispatchReviewPool(t, e)
 	if closed != 1 || e.reviewers[first.Reviewer].Status != subagent.StatusClosed {
 		t.Fatal("idle reviewer retained the completed round")

@@ -156,6 +156,8 @@ func TestDraftReviewWaitsForReadyTransition(t *testing.T) {
 	// Returning to draft releases the slot on the next reconciliation.
 	reviewer := ready.Reviewer
 	e.f.Draft = true
+	// The reviewer's turn has ended by then, so the pool may close it.
+	e.endReviewerTurn(reviewer)
 	e.tick()
 	if e.reviewers[reviewer].Status != "closed" || len(e.launches) != 1 {
 		t.Fatal("draft retained its live reviewer")
