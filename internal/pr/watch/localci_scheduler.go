@@ -550,7 +550,11 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	// A local change has no hosted provider, so only a hosted job can already
 	// hold conclusive evidence for its head.
 	if job.hosted() {
-		settled, err := s.scheduledCIConclusive(ctx, job, repo, plan.execution)
+		var required []string
+		if job.trial && plan.required != nil {
+			required = trialRequiredChecks(EffectivePolicy(st, job.record), plan)
+		}
+		settled, err := s.scheduledCIConclusive(ctx, job, repo, plan.execution, required)
 		if err != nil {
 			return false, err
 		}
@@ -1066,7 +1070,9 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 
 // Saved CI belongs to a PR head only after that head received a full poll.
 // Trial heads have separate push runs and must use their own exact-head facts.
-func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string, definition *localci.Definition) (bool, error) {
+// required names the checks a trial head still needs; a hosted read that misses
+// any of them settles nothing, exactly as the trial gate judges it.
+func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string, definition *localci.Definition, required []string) (bool, error) {
 	r := job.record
 	if !job.trial {
 		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(r.CI).Conclusive(), nil
@@ -1099,5 +1105,13 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 		return false, nil
 	}
 	ci, _, _, _ := s.registeredHostedStatus(snap, Record{}, ChangePolicy{})
-	return ci.Conclusive(), nil
+	if !ci.Conclusive() {
+		return false, nil
+	}
+	// A hosted pass cannot settle a head while a required check the hosted run
+	// never reports is still missing, such as the local cross builds a room
+	// requires. The trial gate keeps waiting for that check, so this scheduler
+	// must start the local run instead of skipping it for ever. A hosted
+	// failure stays settled: it vetoes the head whatever local CI would add.
+	return ci != VerdictPassed || len(missingRequiredCIChecks(required, localci.Result{}, snap)) == 0, nil
 }
