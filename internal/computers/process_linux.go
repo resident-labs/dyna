@@ -89,6 +89,12 @@ func startProcess(env []string, logPath string, args ...string) (*process, error
 	cmd.Stdout = f
 	cmd.Stderr = f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return startTracked(cmd)
+}
+
+// startTracked starts a prebuilt command the way the daemon owns its
+// children: with a death signal, a cleaned environment and reaper tracking.
+func startTracked(cmd *exec.Cmd) (*process, error) {
 	p := &process{cmd: cmd, done: make(chan struct{})}
 	ready := make(chan error, 1)
 	go func() {
@@ -256,6 +262,9 @@ func destroyOffline(ctx context.Context, id string) error {
 		return err
 	}
 	_ = os.Remove(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), m.WaylandDisplay))
+	// This path runs when the daemon is gone or hung, so the recorded room
+	// scope would otherwise keep its processes with no record left to find it.
+	killRecordedScope(id)
 	if err = os.RemoveAll(RuntimeDir(id)); err != nil {
 		return err
 	}

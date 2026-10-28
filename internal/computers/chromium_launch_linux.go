@@ -54,7 +54,6 @@ func LaunchChromium(ctx context.Context, id string, args []string) error {
 			_ = f.Close()
 		}
 	}()
-	joinBrowserCgroup(id)
 	lock, err := browserFileLock(ctx, filepath.Join(Dir(id), "chromium-launch.lock"), true)
 	if err != nil {
 		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
@@ -68,6 +67,9 @@ func LaunchChromium(ctx context.Context, id string, args []string) error {
 	if err := NewClient(id).Call(ctx, Request{Op: "browser.prepare", BrowserArgs: args}, &launch); err != nil {
 		return err
 	}
+	// browser.prepare made sure the computer has its cgroup, so this is the
+	// first point where joining it cannot miss.
+	joinBrowserCgroup(id)
 	// A prior Chromium left an endpoint file after exit. It cannot identify
 	// this launch and must never be used to close another process.
 	if err := os.Remove(filepath.Join(computerBrowserProfile(id), "DevToolsActivePort")); err != nil && !os.IsNotExist(err) {

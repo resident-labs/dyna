@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"dyna-agent/internal/mode"
 )
 
 func (s *supervisor) openApp(ctx context.Context, r Request) (Opened, error) {
@@ -53,6 +55,12 @@ func (s *supervisor) openApp(ctx context.Context, r Request) (Opened, error) {
 		return Opened{}, err
 	}
 	env = mergeEnvironment(env, map[string]string{"DYNA_COMPUTER_PROCESS": s.meta.SessionID})
+	s.mu.Lock()
+	// An app that starts its own systemd units joins the room's slice, so a
+	// room's systemd-run shim keeps the computer inside the room's limits;
+	// an empty value clears a slice the daemon itself inherited.
+	env = mergeEnvironment(env, map[string]string{mode.EnvRoomSlice: s.roomSlice})
+	s.mu.Unlock()
 	log := filepath.Join(Dir(s.meta.SessionID), fmt.Sprintf("app-%d.log", time.Now().UnixNano()))
 	p, err := startProcess(env, log, r.Command...)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,6 +112,73 @@ func TestSplitTwoSamples(t *testing.T) {
 	near(t, "other", l.Split.Other, 15)
 	if l.CPUs != 4 || l.Load != [3]float64{59.3, 45.1, 32.1} {
 		t.Fatalf("cpus/load = %d %v", l.CPUs, l.Load)
+	}
+}
+
+// A room computer runs in its own scope below its room's slice, outside the
+// service cgroup; the computers split still counts its CPU.
+func TestRoomComputerScopeCountsAsComputers(t *testing.T) {
+	f := newTree(t, true)
+	f.busy(0)
+	f.cpu("dyna.slice", 0)
+	f.cpu("dyna.slice/dyna-computers.service", 0)
+	scope := "dyna.slice/dyna-room.slice/dyna-room-fl.slice/dyna-computer-one-1a2b3c4d.scope"
+	f.cpu(scope, 0)
+	s := f.sampler(4)
+	if err := s.sample(t0); err != nil {
+		t.Fatal(err)
+	}
+	f.busy(1000)                    // 10 core-s = 25%
+	f.cpu("dyna.slice", 10_000_000) // 10 s, all of it the room computer
+	f.cpu(scope, 10_000_000)        // 10 s
+	if err := s.sample(t0.Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	l := s.Load()
+	if l.Split == nil {
+		t.Fatalf("load = %+v", l)
+	}
+	near(t, "computers", l.Split.Computers, 25)
+	near(t, "agents", l.Split.Agents, 0)
+}
+
+// A room computer that exits takes its lifetime counter with it. The computers
+// that stay busy must still show their own use, not drop to zero.
+func TestExitedRoomComputerDoesNotHideTheBusyOne(t *testing.T) {
+	f := newTree(t, true)
+	f.busy(0)
+	slice := "dyna.slice/dyna-room.slice/dyna-room-fl.slice/"
+	gone, busy := slice+"dyna-computer-gone-1.scope", slice+"dyna-computer-busy-2.scope"
+	f.cpu("dyna.slice", 0)
+	f.cpu(gone, 100_000_000) // 100 s of history
+	f.cpu(busy, 0)
+	s := f.sampler(4)
+	if err := s.sample(t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(f.cgrp, um, gone)); err != nil {
+		t.Fatal(err)
+	}
+	f.busy(1000)
+	f.cpu("dyna.slice", 10_000_000)
+	f.cpu(busy, 10_000_000) // 10 s of 40 core-s = 25%
+	if err := s.sample(t0.Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	l := s.Load()
+	if l.Split == nil {
+		t.Fatalf("load = %+v", l)
+	}
+	near(t, "computers", l.Split.Computers, 25)
+	near(t, "agents", l.Split.Agents, 0)
+	// The scope is a computer, never an agent session.
+	for _, g := range l.Groups {
+		if strings.HasPrefix(g.Name, "session:") {
+			t.Fatalf("room computer reported as a session: %+v", g)
+		}
+	}
+	if len(l.Top) != 0 {
+		t.Fatalf("room computer listed as a top agent: %+v", l.Top)
 	}
 }
 
