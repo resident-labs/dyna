@@ -498,6 +498,24 @@ type MergeTrial struct {
 	Changes       []MergeTrialChange `json:"changes"`
 	Created       time.Time          `json:"created"`
 	Logs          string             `json:"logs,omitempty"`
+
+	// LocalCIWait records a trial head that waits for a required local CI run
+	// which no machine has started. The merge queue uses it to bound that wait:
+	// one retry, then one root alert. It is nil while local CI runs, has a
+	// complete result, or is not required for the head.
+	LocalCIWait *MergeTrialLocalCIWait `json:"localCiWait,omitempty"`
+}
+
+// MergeTrialLocalCIWait is the merge queue's bound on a trial head that waits
+// for local CI that never started.
+type MergeTrialLocalCIWait struct {
+	// Since is when this unstarted wait was first seen, and it moves to the
+	// retry time once the retry ran, so the alert gets its own full window.
+	Since time.Time `json:"since"`
+	// Retried reports that the one bounded scheduling retry already ran.
+	Retried bool `json:"retried,omitempty"`
+	// Alerted reports that root was already alerted about this wait.
+	Alerted bool `json:"alerted,omitempty"`
 }
 
 type State struct {

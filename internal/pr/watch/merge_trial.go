@@ -473,6 +473,11 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			return s.stopMergeBatch(ctx, repo, *r, b, ci)
 		}
 		if ci.Status != VerdictPassed {
+			// A wait for CI that nothing runs needs its own bound: one retry, then
+			// one root alert (D-407).
+			if err := s.watchTrialLocalCIStart(ctx, repo, *r, &b); err != nil {
+				return err
+			}
 			if b.Reason != ci.Reason {
 				b.Reason = ci.Reason
 				if err := s.saveMergeTrial(repo, b); err != nil {

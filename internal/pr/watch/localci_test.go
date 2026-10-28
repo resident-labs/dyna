@@ -325,7 +325,7 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 		stale, want bool
 	}{{"passed", head, false, true}, {"failed", head, false, true}, {"pending", head, false, false}, {"passed", "old", false, false}, {"passed", head, true, false}} {
 		r.CI, r.Polling.PullHead, r.HeadStale = tc.ci, tc.polled, tc.stale
-		got, err := s.scheduledCIConclusive(context.Background(), registeredCIJob{record: r, head: head}, "repo", watchDynaDefinition(t))
+		got, err := s.scheduledCIConclusive(context.Background(), registeredCIJob{record: r, head: head}, "repo", watchDynaDefinition(t), nil)
 		if err != nil || got != tc.want {
 			t.Fatalf("ci=%s polled=%s stale=%t: settled=%t err=%v", tc.ci, tc.polled, tc.stale, got, err)
 		}
@@ -345,11 +345,11 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 		}
 		return writeFakeJSON(cmd.Stdout, emptyResponse{})
 	}
-	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t)); err != nil || !done {
+	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t), nil); err != nil || !done {
 		t.Fatalf("passing exact trial: %t %v", done, err)
 	}
 	run.HeadBranch = "main"
-	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t)); err != nil || done {
+	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo", watchDynaDefinition(t), nil); err != nil || done {
 		t.Fatalf("unrelated main push settled trial: %t %v", done, err)
 	}
 	// A settled trial result does not remove an already active run from the queue.
