@@ -8,23 +8,24 @@ cd "$(dirname "$0")/.."
 index=${1:?usage: scripts/ci-shard.sh INDEX COUNT}
 count=${2:?usage: scripts/ci-shard.sh INDEX COUNT}
 mod=$(go list -m)
-# Package suffix, shard indexes (comma-separated). A package on three shards runs
-# a third of its tests on each (see CI_SLICE in scripts/ci.sh). Use COUNT 9.
+# Package suffix, shard indexes (comma-separated). A sliced package runs its
+# assigned tests on each shard (see CI_SLICE in scripts/ci.sh). Use COUNT 10.
 #
-# The seconds are the per-package times measured in hosted CI run 40760797903
-# (2026-10-28). Keep them current when a package grows or a new one is added:
+# The seconds are measured or projected per-package times from hosted CI runs
+# 40760797903 and 40770845978 (2026-10-28). Keep them current when a package
+# grows or a new one is added:
 # spread shards 2, 5 and 6 carry the rest, so a heavy package left unpinned lands
 # wherever its position puts it and makes that shard the slow one.
 pinned=(
   internal/pr/watch=0,7,8      # 24s per sliced third
-  internal/subagent=1          # 30s
+  internal/subagent=1,9        # 20s per sliced half
   internal/engine=3            # 15s
   internal/notify=4            # 23s
   internal/roomsvc=4           # 22s
   internal/harness/runtime=3   # 13s
   internal/hooks=6             # 9s
   cmd/dyna=4                   # 8s
-  internal/workflow=1          # 14s
+  internal/workflow=5          # 14s
   internal/pr/view=3           # 7s
   internal/cli/workflows=2     # 9s
   internal/harness=5           # 7s

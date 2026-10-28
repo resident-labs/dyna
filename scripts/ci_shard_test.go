@@ -11,9 +11,9 @@ import (
 
 // TestShardMapCoversEveryPackageOnce pins the properties a shard map must
 // keep: every package is tested, heavy packages keep their measured assignments,
-// and no other package is repeated. Only the package the map splits across three
-// shards (CI_SLICE) may appear three times. A balanced map that loses a package
-// would show up as fewer tests, not a failure.
+// and no other package is repeated. Only packages with explicit CI_SLICE
+// assignments may repeat. A balanced map that loses a package would show up as
+// fewer tests, not a failure.
 func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 	packages := []string{
 		"dyna-agent/cmd/dyna",
@@ -30,9 +30,13 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 		"dyna-agent/internal/workflow",
 		"dyna-agent/internal/zzz-small",
 	}
+	sliced := map[string]string{
+		"dyna-agent/internal/pr/watch": "0,7,8",
+		"dyna-agent/internal/subagent": "1,9",
+	}
 	shards := map[string][]string{}
-	for i := 0; i < 9; i++ {
-		for _, pkg := range shardPackages(t, i, 9, packages) {
+	for i := 0; i < 10; i++ {
+		for _, pkg := range shardPackages(t, i, 10, packages) {
 			shards[pkg] = append(shards[pkg], fmt.Sprint(i))
 		}
 	}
@@ -41,14 +45,17 @@ func TestShardMapCoversEveryPackageOnce(t *testing.T) {
 		if len(got) == 0 {
 			t.Fatalf("%s is on no shard", pkg)
 		}
-		if pkg == "dyna-agent/internal/pr/watch" {
-			if strings.Join(got, ",") != "0,7,8" {
-				t.Fatalf("the only sliced package is on shards %v, want 0,7,8", got)
+		if want, ok := sliced[pkg]; ok {
+			if strings.Join(got, ",") != want {
+				t.Fatalf("sliced package %s is on shards %v, want %s", pkg, got, want)
 			}
 			continue
 		}
 		if pkg == "dyna-agent/internal/visual" && strings.Join(got, ",") != "3" {
 			t.Fatalf("internal/visual is on shards %v, want 3", got)
+		}
+		if pkg == "dyna-agent/internal/workflow" && strings.Join(got, ",") != "5" {
+			t.Fatalf("internal/workflow is on shards %v, want 5", got)
 		}
 		if len(got) != 1 {
 			t.Fatalf("%s is on shards %v, want exactly one", pkg, got)

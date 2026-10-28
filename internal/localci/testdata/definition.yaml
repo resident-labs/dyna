@@ -189,7 +189,7 @@ checks:
       GOMAXPROCS: "2"
       GOMEMLIMIT: 3GiB
       GOFLAGS: -p=2
-      CI_SHARD: 0/9
+      CI_SHARD: 0/10
       CI_SLICE: 0/3
     reports: go
 
@@ -202,8 +202,8 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 1/9
-      CI_SLICE: ""
+      CI_SHARD: 1/10
+      CI_SLICE: 0/2
     reports: go
 
   - id: go-test-shard-2
@@ -215,7 +215,7 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 2/9
+      CI_SHARD: 2/10
       CI_SLICE: ""
     reports: go
 
@@ -228,7 +228,7 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 3/9
+      CI_SHARD: 3/10
       CI_SLICE: ""
     reports: go
 
@@ -241,7 +241,7 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 4/9
+      CI_SHARD: 4/10
       CI_SLICE: ""
     reports: go
 
@@ -254,7 +254,7 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 5/9
+      CI_SHARD: 5/10
       CI_SLICE: ""
     reports: go
 
@@ -267,7 +267,7 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 6/9
+      CI_SHARD: 6/10
       CI_SLICE: ""
     reports: go
 
@@ -280,7 +280,7 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 7/9
+      CI_SHARD: 7/10
       CI_SLICE: 1/3
     reports: go
 
@@ -293,8 +293,21 @@ checks:
     caches: [go-build, go-mod]
     env:
       <<: *go-test-env
-      CI_SHARD: 8/9
+      CI_SHARD: 8/10
       CI_SLICE: 2/3
+    reports: go
+
+  - id: go-test-shard-9
+    name: go-test-shard (9)
+    providerGroup: go-test-shard
+    image: golang:1.26.3
+    hostUser: true
+    command: bash scripts/ci.sh go build && bash scripts/ci.sh go test
+    caches: [go-build, go-mod]
+    env:
+      <<: *go-test-env
+      CI_SHARD: 9/10
+      CI_SLICE: 1/2
     reports: go
 
 suites:
@@ -323,4 +336,4 @@ suites:
   - id: go
     group: go-test
     files: ['^\.github/', '^scripts/ci\.sh$', '\.go$', '^internal/', '^go\.(mod|sum)$', '^desktop/', '^web/', '^install\.sh$']
-    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7, go-test-shard-8]
+    checks: [frontend-0, frontend-1, frontend-2, frontend-3, frontend-4, frontend-5, frontend-build, frontend-check, go-static, go-test-shard-0, go-test-shard-1, go-test-shard-2, go-test-shard-3, go-test-shard-4, go-test-shard-5, go-test-shard-6, go-test-shard-7, go-test-shard-8, go-test-shard-9]
