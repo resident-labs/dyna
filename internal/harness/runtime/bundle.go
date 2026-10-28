@@ -38,6 +38,14 @@ type Bundle struct {
 	Directory  string `json:"directory"`
 }
 
+// PinnedBundle is one bundle held in use and what holds it: a profile
+// selection, an open session, or the process of a live lease. Removal
+// refusals name the holder, so the owner knows what to close first.
+type PinnedBundle struct {
+	Bundle
+	Holder string
+}
+
 // BundleManager installs bundles with temporary private HOME and XDG roots. Run receives
 // an argument vector and the complete environment; tests can replace it offline.
 type BundleManager struct {
@@ -886,7 +894,7 @@ func (m *BundleManager) writeMarker(name, version string) error {
 
 // GC keeps the newest two versions per harness, explicit selections, and exact
 // bundles pinned by open sessions or active native processes.
-func (m *BundleManager) GC(pinned []Bundle) error {
+func (m *BundleManager) GC(pinned []PinnedBundle) error {
 	unlock, err := m.lock(context.Background())
 	if err != nil {
 		return err
@@ -979,7 +987,7 @@ func (m *BundleManager) LeaseManaged(ctx context.Context, b Bundle) (*ResourceLe
 	}
 	return newResourceLease(ctx, filepath.Join(m.Root, ".leases"), "use-", b)
 }
-func (m *BundleManager) activeLeases() ([]Bundle, error) {
+func (m *BundleManager) activeLeases() ([]PinnedBundle, error) {
 	root := filepath.Join(m.Root, ".leases")
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
@@ -988,7 +996,7 @@ func (m *BundleManager) activeLeases() ([]Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := []Bundle{}
+	out := []PinnedBundle{}
 	paths, err := resourceLeasePaths(root, "use-")
 	if err != nil {
 		return nil, err
@@ -1006,7 +1014,7 @@ func (m *BundleManager) activeLeases() ([]Bundle, error) {
 		if json.Unmarshal(use.Data, &bundle) != nil || bundle.Harness == "" || bundle.Version == "" {
 			return nil, failure()
 		}
-		out = append(out, bundle)
+		out = append(out, PinnedBundle{Bundle: bundle, Holder: leaseHolder(use)})
 	}
 	for _, e := range entries {
 		if !strings.HasPrefix(e.Name(), "turn-") {
@@ -1032,14 +1040,14 @@ func (m *BundleManager) activeLeases() ([]Bundle, error) {
 			_ = os.Remove(path)
 			continue
 		}
-		out = append(out, use.Bundle)
+		out = append(out, PinnedBundle{Bundle: use.Bundle, Holder: fmt.Sprintf("Turn PID %d", use.PID)})
 	}
 	return out, nil
 }
 
 // Remove deletes only an unused Dyna-owned bundle. Account slots, native homes,
 // configuration generations and legacy recovery copies are outside its target.
-func (m *BundleManager) Remove(ctx context.Context, harness, version string, pinned []Bundle, confirmed bool) error {
+func (m *BundleManager) Remove(ctx context.Context, harness, version string, pinned []PinnedBundle, confirmed bool) error {
 	if !confirmed {
 		return errors.New("Confirm private bundle removal first.")
 	}
@@ -1077,7 +1085,7 @@ func (m *BundleManager) Remove(ctx context.Context, harness, version string, pin
 // Uninstall removes every Dyna copy of a harness and its selection, so no
 // older copy takes over. The next sign-in or session installs it again. Saved
 // accounts stay.
-func (m *BundleManager) Uninstall(ctx context.Context, harness string, pinned []Bundle, confirmed bool) error {
+func (m *BundleManager) Uninstall(ctx context.Context, harness string, pinned []PinnedBundle, confirmed bool) error {
 	if !confirmed {
 		return errors.New("Confirm private bundle removal first.")
 	}
@@ -1111,17 +1119,18 @@ func (m *BundleManager) Uninstall(ctx context.Context, harness string, pinned []
 	return nil
 }
 
-// checkUnused fails when a profile pin or live lease uses one of harness h's bundles.
-func (m *BundleManager) checkUnused(h string, bundles, pinned []Bundle) error {
+// checkUnused fails when a profile pin or live lease uses one of harness h's
+// bundles, naming the profile, session or process that holds it.
+func (m *BundleManager) checkUnused(h string, bundles []Bundle, pinned []PinnedBundle) error {
 	live, err := m.activeLeases()
 	if err != nil {
 		return err
 	}
-	for _, pin := range append(append([]Bundle{}, pinned...), live...) {
+	for _, pin := range append(append([]PinnedBundle{}, pinned...), live...) {
 		canonical, e := bundleHarness(pin.Harness)
 		for _, b := range bundles {
 			if e == nil && canonical == h && pin.Version == b.Version {
-				return errors.New("A profile, open session or native turn still uses this private bundle.")
+				return fmt.Errorf("%s still uses this private bundle.", pin.Holder)
 			}
 		}
 	}

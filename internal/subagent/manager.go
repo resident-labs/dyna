@@ -97,6 +97,9 @@ type Manager struct {
 	ConsolidationLaunch func(*Manager, string, string) error
 	TransferNow         func() time.Time
 	TransferSleep       func(context.Context, time.Duration) error
+	// HarnessStopper replaces the session-host key stop of a session's
+	// retained harness processes in tests; nil uses the real hosts.
+	HarnessStopper func(context.Context, string) error
 
 	// ClosePRs hands live PR roles to the heir through the PR service.
 	ClosePRs func(context.Context, Info, Info) ([]sessionclose.Outcome, error)
@@ -1143,6 +1146,25 @@ func (m *Manager) CloseForEngine(ctx context.Context, id, why string, opts Close
 }
 
 // closeSession also handles children of an already authorized close.
+// stopHarnessProcesses stops the harness processes a session retains, across
+// every host and account home, through each child's process guard. Close and
+// transfer call it so a session leaves no process behind that holds memory or
+// a runtime bundle lease. The bare id covers callers that keyed by
+// DYNA_SESSION.
+func (m *Manager) stopHarnessProcesses(ctx context.Context, id string) error {
+	closeKey := sessionhost.CloseKey
+	if m.HarnessStopper != nil {
+		closeKey = m.HarnessStopper
+	}
+	var failures []error
+	for _, key := range []string{"session/" + id, id} {
+		if err := closeKey(ctx, key); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
 func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions) (Info, error) {
 	store := m.store()
 	if info.Consolidating != "" {
@@ -1311,10 +1333,8 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		}
 	}
 	summary = append(summary, children...)
-	for _, key := range []string{"session/" + info.ID, info.ID} {
-		if err := sessionhost.CloseKey(ctx, key); err != nil {
-			summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureProcessCleanup})
-		}
+	if err := m.stopHarnessProcesses(ctx, info.ID); err != nil {
+		summary = append(summary, sessionclose.Outcome{Result: sessionclose.ResultFailed, Failure: sessionclose.FailureProcessCleanup})
 	}
 	destroyComputer(info.ID)
 	closedForCleanup = true
