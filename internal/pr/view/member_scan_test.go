@@ -98,39 +98,42 @@ func TestRoomWatchMemberEventKeepsPRDelta(t *testing.T) {
 	events, stopped := make(chan roomsvc.Event, 16), make(chan struct{})
 	go func() {
 		defer close(stopped)
-		e.svc.Watch(ctx, 20*time.Millisecond, func(event roomsvc.Event) { events <- event })
+		// Explicit wake channels drive every scan; the real ticker never fires.
+		e.svc.Watch(ctx, time.Hour, func(event roomsvc.Event) {
+			select {
+			case events <- event:
+			case <-base.Done():
+			}
+		})
 	}()
-	t.Cleanup(func() {
+	defer func() {
 		cancel()
-		select {
-		case <-stopped:
-		case <-time.After(5 * time.Second):
-			t.Error("watch did not stop")
-		}
-	})
+		<-stopped
+	}()
 	select {
 	case <-ctx.started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("watch did not finish its initial scan")
+	case <-stopped:
+		t.Fatal("watch stopped during its initial scan")
 	}
 	rows := view.CountRows(t)
 	if _, err := e.mgr.Store.UpdateMeta(ordinaryMemberID, func(meta *subagent.Meta) { meta.Name = "changed" }); err != nil {
 		t.Fatal(err)
 	}
-	e.svc.SessionChanged(ordinaryMemberID)
-	timeout := time.After(5 * time.Second)
-	for {
-		select {
-		case event := <-events:
-			if event.Kind == "members" && event.Change != nil && event.Change.ID == ordinaryMemberID {
-				goto memberEmitted
+	await := func(kind, id string) {
+		t.Helper()
+		for {
+			select {
+			case event := <-events:
+				if event.Kind == kind && event.Change != nil && event.Change.ID == id {
+					return
+				}
+			case <-stopped:
+				t.Fatalf("watch stopped before %s event %s", kind, id)
 			}
-		case <-timeout:
-			t.Fatal("watch did not emit the member event")
 		}
 	}
-
-memberEmitted:
+	e.svc.SessionChanged(ordinaryMemberID)
+	await("members", ordinaryMemberID)
 	if err := state.UpdateRecords(t.Context(), root, []string{"one"}, func(st *state.State) error {
 		st.Records["one"].Title = "after"
 		return nil
@@ -138,18 +141,9 @@ memberEmitted:
 		t.Fatal(err)
 	}
 	e.svc.PRsChanged()
-	for {
-		select {
-		case event := <-events:
-			if event.Kind == "changes" && event.Change != nil && event.Change.ID == "one" {
-				if *rows != 1 {
-					t.Fatalf("member event and one external PR write built %d rows; want 1", *rows)
-				}
-				return
-			}
-		case <-timeout:
-			t.Fatal("watch did not emit the external PR change")
-		}
+	await("changes", "one")
+	if *rows != 1 {
+		t.Fatalf("member event and one external PR write built %d rows; want 1", *rows)
 	}
 }
 
