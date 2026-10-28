@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -49,5 +50,18 @@ func TestWaitingCheckTakesTheFirstFreeSlot(t *testing.T) {
 	}
 	if got := strings.TrimSpace(out.String()); got != "slot=0 port=4226" {
 		t.Fatalf("the waiting check ran with %q, want slot 0 and its port", got)
+	}
+}
+
+// A job's own script runs its command on a real shell: nothing outside the
+// script prepares the job's folder, so the script must mark the job live
+// before its slot wrapper checks for it.
+func TestJobScriptRunsItsCommand(t *testing.T) {
+	machine := machines.Machine{Name: "jobs-test-" + filepath.Base(t.TempDir())}
+	t.Cleanup(func() { os.RemoveAll(NodeBase(machine.Name)) })
+	job := Job{Dir: t.TempDir(), Command: []string{"echo", "hello from a job"}, Timeout: 10 * time.Second}
+	out, err := exec.Command("bash", "-c", jobScript(machine, job, Resources{CPUs: 1, MemoryMiB: 512})).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "hello from a job" {
+		t.Fatalf("job script = %q, %v; want the command's output and exit 0", out, err)
 	}
 }

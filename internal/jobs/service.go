@@ -810,5 +810,11 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 	if slots < 1 {
 		slots = 1
 	}
-	return SlotScript(base, slots, 0, path.Join(job.Dir, ".active"), job.Timeout+AdmissionWait, inner)
+	// The slot wrapper runs the job only while its .active file exists. Local CI
+	// creates that file in its setup step; a job has none, so the script makes
+	// it here; if that fails, the wrapper's own check ends the job with 75. A
+	// cancel removes the job's folder, which ends a waiting wrapper.
+	active := path.Join(job.Dir, ".active")
+	return "mkdir -p " + q(job.Dir) + "; : > " + q(active) + "; " +
+		SlotScript(base, slots, 0, active, job.Timeout+AdmissionWait, inner)
 }
