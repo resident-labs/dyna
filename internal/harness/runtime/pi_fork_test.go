@@ -202,3 +202,42 @@ func TestGCRemovesUnusableOldPiBundle(t *testing.T) {
 		t.Fatal("GC removed a usable version", err)
 	}
 }
+
+// A live pin protects an old version like any other: GC keeps it and Remove
+// refuses while it is pinned; once unused, individual removal succeeds.
+func TestPinnedUnusablePiBundleIsProtected(t *testing.T) {
+	piTestHome(t)
+	m := manager(t)
+	install(t, m, "pi", "1.5.0-dyna.2")
+	install(t, m, "pi", "1.4.0-dyna.2")
+	seedBundle(t, m.Root, "1.0.0")
+	var old Bundle
+	bundles, err := m.listHarness("pi", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range bundles {
+		if b.Version == "1.0.0" {
+			old = b
+		}
+	}
+	if old.Directory == "" {
+		t.Fatal("unusable bundle lost its manifest data")
+	}
+	pin := []PinnedBundle{{Bundle: old}}
+	if err := m.GC(pin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old.Directory); err != nil {
+		t.Fatal("GC removed a pinned unusable bundle", err)
+	}
+	if err := m.Remove(context.Background(), "pi", "1.0.0", pin, true); err == nil {
+		t.Fatal("removed a pinned unusable bundle")
+	}
+	if err := m.Remove(context.Background(), "pi", "1.0.0", nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old.Directory); !os.IsNotExist(err) {
+		t.Fatal("unused unusable bundle was not removed")
+	}
+}
