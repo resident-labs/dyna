@@ -39,7 +39,7 @@ func piCompactionReserves(models []accountadapters.Model, target int64) map[stri
 
 // piGenerationReserves discovers only the selected account's available models.
 // An unavailable catalog or older Pi leaves the native defaults untouched.
-func (r *Runtime) piGenerationReserves(home, account string, bundle Bundle) (map[string]int64, error) {
+func (r *Runtime) piGenerationReserves(ctx context.Context, home, account string, bundle Bundle) (map[string]int64, error) {
 	v, err := settings.Load("")
 	if err != nil {
 		return nil, err
@@ -58,8 +58,11 @@ func (r *Runtime) piGenerationReserves(home, account string, bundle Bundle) (map
 	for key, value := range piNativeEnv(n.Home) {
 		env = append(env, key+"="+value)
 	}
-	models, err := accountadapters.Models(context.Background(), "pi", bundle.Executable, env)
+	models, err := accountadapters.Models(ctx, "pi", bundle.Executable, env)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, nil
 	}
 	return piCompactionReserves(models, v.HarnessCompactAtTokens), nil
