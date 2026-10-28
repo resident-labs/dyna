@@ -1257,6 +1257,25 @@ func combinedStatus(a, b Outcome) Outcome {
 	return OutcomePassed
 }
 
+// nodeCheckWorkPath gives each real worktree a unique final path segment. Git
+// uses that segment for its administrative directory under the shared bare
+// repository, so two checkouts both named work would share worktrees/work.
+// Workflow jobs use a local clone instead and keep their existing path.
+func nodeCheckWorkPath(runDir, runID string, check nodeCheck) string {
+	name := "work"
+	if check.job == nil {
+		name = "work-" + runID + "-" + string(check.id)
+	}
+	return path.Join(runDir, string(check.id), name)
+}
+
+// nodeWorktreeCommand serializes metadata mutations on one bare repository.
+// The lock belongs to the repository, not to a run, so separate engine
+// processes and parallel checks cannot prune or replace each other's metadata.
+func nodeWorktreeCommand(cache, arguments string) string {
+	return "flock " + shellquote.Quote(cache+".worktrees.lock") + " git --git-dir=" + shellquote.Quote(cache) + " worktree " + arguments
+}
+
 // teardownScript stops what a run's checks left on the machine, without removing
 // the run folder: the containers first, so a scope keeps its slot until its
 // container has stopped, then each check's scope and detached unit, then the
@@ -1302,9 +1321,9 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 		// nothing left to stop, and one that a lost poll left behind dies here. A
 		// unit that survives, or whose state cannot be read, fails the teardown.
 		script += "bash -c " + q(detachedStopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
-		script += "git --git-dir=" + q(cache) + " worktree remove --force " + q(path.Join(runDir, string(check.id), "work")) + " >/dev/null 2>&1 || true; "
+		script += nodeWorktreeCommand(cache, "remove --force "+q(nodeCheckWorkPath(runDir, runID, check))) + " >/dev/null 2>&1 || true; "
 	}
-	return script + "git --git-dir=" + q(cache) + " worktree prune"
+	return script + nodeWorktreeCommand(cache, "prune")
 }
 
 // nodeSetupScript prepares one run on its node. The prepare stage repairs a
@@ -1436,7 +1455,7 @@ func checkTmpFolder(setting string) string {
 }
 
 func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit string, check nodeCheck, timeout time.Duration, index int, noExpand bool, actImage, containerSocket, taggedWorkflow string) string {
-	work := path.Join(runDir, string(check.id), "work")
+	work := nodeCheckWorkPath(runDir, runID, check)
 	reportDir := path.Join(runDir, "reports", string(check.id))
 	name := "dyna-ci-" + runID + "-" + string(check.id)
 	q := shellquote.Quote
@@ -1460,7 +1479,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		// pushed.
 		cleanup += "rm -rf " + q(work) + " >/dev/null 2>&1 || true"
 	} else {
-		cleanup += "git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
+		cleanup += nodeWorktreeCommand(cache, "remove --force "+q(work)) + " >/dev/null 2>&1 || true"
 	}
 	// The exit markers go to the trailer file the detached wrapper appends to the
 	// log after the output has drained, past the limit it puts on the output.
@@ -1476,7 +1495,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			gitNodeStep("git -C "+q(work)+" fetch --quiet "+q(cache)+" +refs/dyna/ci/*:refs/dyna/ci/*") +
 			gitNodeStep("git -C "+q(work)+" checkout --quiet -B dyna-ci "+q(sha))
 	} else {
-		setup += gitNodeStep("git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(sha))
+		setup += gitNodeStep(nodeWorktreeCommand(cache, "add --detach "+q(work)+" "+q(sha)))
 	}
 	for _, cache := range check.caches {
 		setup += "mkdir -p " + q(repositoryCachePath(base, cache.Name)) + "; "
