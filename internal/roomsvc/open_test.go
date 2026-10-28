@@ -48,6 +48,9 @@ func TestOpenMatchesTheSeparateCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	members, _ := e.svc.Members("alpha", false)
+	for i := range members {
+		members[i].Responsibilities = nil // Open defers these advisory counts.
+	}
 	choices, _ := e.svc.MentionChoices("alpha")
 	pins, _ := e.svc.Pins("alpha")
 	runs, _ := e.svc.Runs("alpha")
