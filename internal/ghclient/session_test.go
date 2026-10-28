@@ -51,7 +51,7 @@ func TestSetBranchUpstreamRecordsTracking(t *testing.T) {
 	}
 	for key, want := range map[string]string{
 		"branch.topic.remote": "origin",
-		"branch.topic.merge": "refs/heads/topic",
+		"branch.topic.merge":  "refs/heads/topic",
 	} {
 		got, err := exec.Command("/usr/bin/git", "config", "--get", key).Output()
 		if err != nil || strings.TrimSpace(string(got)) != want {
