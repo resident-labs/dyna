@@ -10,7 +10,7 @@ import (
 	"dyna-agent/internal/store"
 )
 
-func TestIncompleteRunKeepsUnlistedTree(t *testing.T) {
+func TestFinishedIncompleteRunIgnoresUnlistedTree(t *testing.T) {
 	tree := inferenceTestStore(t)
 	t.Setenv("DYNA_RUN_ID", "wf_incomplete")
 	t.Setenv(runstore.SessionEnv, "")
@@ -36,8 +36,8 @@ func TestIncompleteRunKeepsUnlistedTree(t *testing.T) {
 			}
 		}
 		got, err := inferOwners(context.Background(), []string{tree}, history)
-		if err != nil || len(got[tree].Runs) != 1 || got[tree].Runs[0].Closed {
-			t.Fatalf("incomplete run did not protect unlisted tree: %#v, %v", got[tree], err)
+		if err != nil || len(got[tree].Runs) != 0 {
+			t.Fatalf("finished incomplete run owns an unlisted tree: %#v, %v", got[tree], err)
 		}
 		if history.read[run.Meta.ID] {
 			t.Fatal("cached incomplete directory evidence")
