@@ -1,6 +1,7 @@
 package ghclient
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -150,5 +151,65 @@ func TestReadOnlyGitFetchAndPush(t *testing.T) {
 	push := Command(ctx, "/usr/bin/git", dir, "push", remote, "HEAD:main")
 	if err := RunGit(ctx, gh, push); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("push: %v", err)
+	}
+}
+
+// The repository-scoped Git path signs in with the account Dyna selected for
+// that repository, not whichever account the host happens to have active: with
+// two saved accounts where only the second can read the repository, the
+// credential helper must answer with the second account's token. `git
+// credential fill` runs the same helper configuration a fetch would, without
+// contacting GitHub.
+func TestRunGitSelectsTheAccountThatCanRead(t *testing.T) {
+	records := setupRooms(t, "work/trial")
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	dir := records[0].Repo
+	bin := t.TempDir()
+	gh := filepath.Join(bin, "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status") printf '{"hosts":{"github.com":[{"login":"first"},{"login":"second"}]}}';;
+"auth token")
+	user=
+	prev=
+	for a in "$@"; do
+		if [ "$prev" = "--user" ]; then user=$a; fi
+		prev=$a
+	done
+	case $user in
+	first) printf token-first;;
+	*) printf token-second;;
+	esac;;
+"api --hostname")
+	if [ "$GH_TOKEN" = "token-first" ]; then
+		echo "gh: Not Found (HTTP 404)" >&2
+		exit 1
+	fi
+	printf 'HTTP/1.1 200 OK\r\n\r\n{"permissions":{"push":true}}';;
+"auth git-credential")
+	cat >/dev/null
+	printf 'username=second\npassword=%s\n' "$GH_TOKEN";;
+esac
+`
+	if err := os.WriteFile(gh, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := WithRepository(context.Background(), "github.com", "work/trial")
+	cmd := Command(ctx, "/usr/bin/git", dir, "credential", "fill")
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=work/trial.git\n")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := RunGit(ctx, gh, cmd); err != nil {
+		t.Fatalf("credential fill through the selected account: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "password=token-second") {
+		t.Fatalf("helper answered with the wrong account's token: %q", out.String())
+	}
+	if strings.Contains(out.String(), "token-first") {
+		t.Fatalf("the denied account's token reached Git: %q", out.String())
 	}
 }
