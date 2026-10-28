@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/jobs"
 	"time"
 
 	"dyna-agent/internal/machines"
@@ -228,8 +230,9 @@ suites:
 		started = append([]string{name}, args...)
 		return nil
 	}
-	limits := checkResources{CPUs: 16, MemoryMiB: 32 * 1024}.scope(true)
-	if err := runner.startDetached(t.Context(), detachSpec{Dir: "/run/x/detached", Unit: "dyna-ci-x.service", Script: "true", Limits: &limits}); err != nil {
+	limits := checkResources{CPUs: 16, MemoryMiB: 32 * 1024}.Scope(true)
+	spec := jobs.RunSpec{Dir: "/run/x/detached", Unit: "dyna-ci-x.service", Script: "true", Limits: &limits}
+	if err := runner.exec().StartDetached(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
 	if joined := strings.Join(started, " "); !strings.Contains(joined, "1600%") || !strings.Contains(joined, "32G") {
@@ -237,7 +240,7 @@ suites:
 	}
 	// A container keeps the GiB above its own limit that it always had, so the
 	// docker client fits in the scope.
-	if got := granted.scope(false).MemoryMiB; got != 33*1024 {
+	if got := granted.Scope(false).MemoryMiB; got != 33*1024 {
 		t.Fatalf("container scope memory = %d MiB, want 33 GiB", got)
 	}
 	// A reader cannot mean these, so the parse says so.

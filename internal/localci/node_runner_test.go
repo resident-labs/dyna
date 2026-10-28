@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 	"encoding/json"
@@ -156,8 +157,8 @@ func TestNodeRetriesReportCopyAndKeepsExitStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("a run without reports must report the copy failure")
 	}
-	if want := int(nodeLostBound/retryWait) + 1; copies != want {
-		t.Fatalf("copies = %d, want %d: one every %s until the node was unreachable for %s", copies, want, retryWait, nodeLostBound)
+	if want := int(jobs.NodeLostBound/(5*time.Second)) + 1; copies != want {
+		t.Fatalf("copies = %d, want %d: one every %s until the node was unreachable for %s", copies, want, 5*time.Second, jobs.NodeLostBound)
 	}
 	check := result.Checks[0]
 	if check.Status != OutcomeError || check.Cause != CauseReports || !strings.Contains(check.Error, "reports unavailable") {
@@ -195,7 +196,7 @@ func TestNodeKeepsSSHDropWhenCheckAndCopyBothLoseSSH(t *testing.T) {
 		return ctx.Err()
 	}
 	machine := newFakeMachine(t, legacy)
-	machine.down = func() bool { return len(machine.startCalls()) > 0 }
+	machine.Down = func() bool { return len(machine.StartCalls()) > 0 }
 	machine.attach(&runner)
 	result, err := runner.Run(t.Context(), Request{Definition: testDynaDefinition(t), Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
 	if err == nil {
@@ -359,14 +360,14 @@ func TestRunPushesACommitWhoseRefAPreviousRunLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := Runner{Node: &Node{Name: "local", Slots: 2, Enabled: true}}
-	if err := runner.pushCommitToNode(t.Context(), repo, cache, sha); err != nil {
+	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha); err != nil {
 		t.Fatalf("a second run of the commit could not push: %v", err)
 	}
 	if got := gitRun(cache, "rev-parse", "refs/dyna/ci/"+sha); got != sha {
 		t.Fatalf("node ref = %s, want %s", got, sha)
 	}
 	// A third run, now over the run's own ref, is a no-op rather than an error.
-	if err := runner.pushCommitToNode(t.Context(), repo, cache, sha); err != nil {
+	if err := runner.exec().PushCommit(t.Context(), repo, cache, sha); err != nil {
 		t.Fatalf("a repeated run of the same commit failed: %v", err)
 	}
 }
@@ -956,7 +957,7 @@ func TestHostCheckDoesNotLeakTheSlotLockToADaemon(t *testing.T) {
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "mkfifo " + ready + "; setsid sh -c 'echo > " + ready + "; read line < /dev/fd/3' 3<&3 </dev/null >/dev/null 2>&1 & echo $! > " + pidFile + "; read ready < " + ready + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{gate}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -1036,7 +1037,7 @@ func TestHostCheckKillsItsScopeBeforeItFinishes(t *testing.T) {
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf 'check-end\\n' >> " + events + "; exit 0"}
 	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	var out bytes.Buffer
@@ -1073,7 +1074,7 @@ func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
 	}
 	previous := EngineStopping()
 	MarkEngineStopping()
-	t.Cleanup(func() { engineStopping.Store(previous) })
+	t.Cleanup(func() { jobs.SetEngineStoppingForTest(previous) })
 	ctx, cancel = context.WithCancel(context.Background())
 	cancel()
 	if got := runCause(node, ctx, context.Canceled); got != CauseEngineStop {
@@ -1089,7 +1090,7 @@ func TestEngineStopCancellationHasItsOwnCause(t *testing.T) {
 // exactly the bound it always had.
 func TestCheckScopeTaskLimitFollowsTheCPUs(t *testing.T) {
 	for _, tc := range []struct{ cpus, want int }{{1, 768}, {2, 768}, {3, 768}, {4, 1024}, {16, 4096}} {
-		if got := (checkResources{CPUs: tc.cpus, MemoryMiB: 4096}).scope(true).TasksMax; got != tc.want {
+		if got := (checkResources{CPUs: tc.cpus, MemoryMiB: 4096}).Scope(true).TasksMax; got != tc.want {
 			t.Fatalf("%d CPUs runs with TasksMax=%d, want %d", tc.cpus, got, tc.want)
 		}
 	}
@@ -1130,7 +1131,7 @@ func TestWaitingForASlotKeepsTheSlotItAcquires(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The inner script names the port the way a check does, from its slot.
-	script := nodeSlotScript(dir, 2, 2, keepActive(t, dir), time.Hour, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
+	script := jobs.SlotScript(dir, 2, 2, keepActive(t, dir), time.Hour, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
 	var out, errOut bytes.Buffer
@@ -1184,7 +1185,7 @@ func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	ran := filepath.Join(dir, "ran")
-	script := nodeSlotScript(dir, 1, 0, active, time.Hour, "printf 'ran\\n' > "+shellquote.Quote(ran))
+	script := jobs.SlotScript(dir, 1, 0, active, time.Hour, "printf 'ran\\n' > "+shellquote.Quote(ran))
 	// The writer open blocks until the wrapper's fake sleep opens the reader, and
 	// then reports that it did.
 	writerReady := make(chan *os.File, 1)
@@ -1242,7 +1243,7 @@ func TestQueuedCheckEndsWhenItsRunIsCancelled(t *testing.T) {
 func TestEngineStopCoversEveryWayACheckEnds(t *testing.T) {
 	previous := EngineStopping()
 	MarkEngineStopping()
-	t.Cleanup(func() { engineStopping.Store(previous) })
+	t.Cleanup(func() { jobs.SetEngineStoppingForTest(previous) })
 	node := Node{Name: "local", Slots: 1, Enabled: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1304,7 +1305,7 @@ func runHostCheck(t *testing.T, node Node, home string, env ...string) (seen str
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
 		inner: "printf %s \"$TMPDIR\" > " + record + "; touch \"$TMPDIR/scratch\""}
 	inner := nodeCheckScript(node, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	// The wrapper kills the rest of its process group when the check ends.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+dir+":"+os.Getenv("PATH"))
@@ -1411,7 +1412,7 @@ func TestHostCheckDoesNotStartWithoutItsTempFolder(t *testing.T) {
 	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", nodeSlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
+	cmd := exec.Command("bash", "-c", jobs.SlotScript(dir, 1, 0, keepActive(t, dir), time.Hour, inner))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
 	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot make") {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/procident"
 	"dyna-agent/internal/state"
 )
@@ -232,28 +233,28 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 	base := cacheBase(r.Node.Name)
 	runDir := path.Join(base, "runs", att.RunID)
 	stale := len(att.Checks) == 0
-	var batch []*watch
+	var specs []jobs.RunSpec
 	for _, id := range att.Checks {
 		if !slices.ContainsFunc(checks, func(c nodeCheck) bool { return c.id == id }) {
 			stale = true
 		}
-		batch = append(batch, &watch{spec: detachSpec{ID: id, Dir: detachedDir(runDir, id), Unit: checkUnit(att.RunID, id)}})
+		specs = append(specs, jobs.RunSpec{ID: string(id), Dir: detachedDir(runDir, id), Unit: checkUnit(att.RunID, id)})
 	}
 	if !stale {
-		frames, err := r.pollNode(ctx, batch)
+		frames, err := r.exec().Poll(ctx, specs, nil)
 		if err != nil {
 			giveBack()
 			return nil, fmt.Errorf("reattach to the run of %s on %s: %w", sha[:12], r.Node.Name, err)
 		}
 		launched := attachment{RunID: att.RunID}
-		for _, w := range batch {
-			switch frames[w.spec.Dir].state {
-			case pollRunning, pollExited:
-				launched.Checks = append(launched.Checks, w.spec.ID)
+		for _, spec := range specs {
+			switch frames[spec.Dir].State {
+			case jobs.StateRunning, jobs.StateExited:
+				launched.Checks = append(launched.Checks, Suite(spec.ID))
 			default:
 				// Gone without an exit record: the run cannot be followed. A check
 				// without a folder was never launched and is simply not attached.
-				stale = stale || frames[w.spec.Dir].state != pollMissing
+				stale = stale || frames[spec.Dir].State != jobs.StateMissing
 			}
 		}
 		stale = stale || len(launched.Checks) == 0
@@ -268,11 +269,11 @@ func (r Runner) resumeRun(ctx context.Context, store Store, repo, sha, cache str
 	// keeper removes the folder when its own lifetime ends; the removal here only
 	// speeds that up.
 	var recorded []nodeCheck
-	for _, w := range batch {
-		if i := slices.IndexFunc(checks, func(c nodeCheck) bool { return c.id == w.spec.ID }); i >= 0 {
+	for _, spec := range specs {
+		if i := slices.IndexFunc(checks, func(c nodeCheck) bool { return c.id == Suite(spec.ID) }); i >= 0 {
 			recorded = append(recorded, checks[i])
 		} else {
-			recorded = append(recorded, nodeCheck{id: w.spec.ID})
+			recorded = append(recorded, nodeCheck{id: Suite(spec.ID)})
 		}
 	}
 	var out tailBuffer

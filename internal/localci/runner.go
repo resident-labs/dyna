@@ -11,26 +11,17 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-	"sync/atomic"
-	"syscall"
 	"time"
 
 	"dyna-agent/internal/cibudget"
-	"dyna-agent/internal/processguard"
-	"dyna-agent/internal/scratch"
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/store"
 )
-
-// admissionWait matches the explicit queue bound passed to the shared host gate.
-const admissionWait = 55 * time.Minute
-
-type Command func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error
 
 type Runner struct {
 	DataDir string
@@ -275,56 +266,8 @@ func (c FailureCause) Label() string {
 	return ""
 }
 
-// command runs one local command in the agent's own cgroup. Cancellation kills
-// its whole process group and bounds the pipe drain, so a check's shell that
-// dies cannot leave a child timeout or docker holding the output pipe open and
-// block the run before its cleanup.
-func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
-	c := processguard.Command(ctx, name, args...)
-	c.Dir = dir
-	tempEnv, removeTemp := scratch.NewRunTemp()
-	defer removeTemp()
-	c.Env = append(processguard.MetadataEnv(), tempEnv...)
-	c.Stdin = in
-	c.Stdout = out
-	c.Stderr = stderr
-	err := runAndReap(c)
-	// A cancelled command reports the context, not the signal that stopped it.
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	return err
-}
-
-// runAndReap runs cmd and cleans up after a command that exited while a child
-// it started kept the output pipe open, which os/exec reports as ErrWaitDelay
-// once cmd.WaitDelay passes. The command's group id is its own pid, so what is
-// left of the group is killed here instead of outliving the check.
-func runAndReap(c *exec.Cmd) error {
-	return runAndReapWith(c.Run, c, reapGroup)
-}
-
-// runAndReapWith is runAndReap with the run and the reaper given, so a test can
-// prove the decision without a real wait deadline or a real child.
-func runAndReapWith(run func() error, c *exec.Cmd, reap func(int) error) error {
-	err := run()
-	if errors.Is(err, exec.ErrWaitDelay) && c.Process != nil {
-		_ = reap(c.Process.Pid)
-	}
-	return err
-}
-
-// reapGroup kills what is left of a command's process group, whose id is the
-// command's own pid. Tests replace it to observe the pid without racing a
-// zombie.
-var reapGroup = func(pid int) error { return syscall.Kill(-pid, syscall.SIGKILL) }
-
 func (r Runner) run(ctx context.Context, dir string, out io.Writer, name string, args ...string) error {
-	fn := r.Command
-	if fn == nil {
-		fn = command
-	}
-	return fn(ctx, dir, nil, out, out, name, args...)
+	return r.exec().Run(ctx, dir, out, name, args...)
 }
 func repoKey(repo string) string {
 	sum := sha256.Sum256([]byte(repo))
@@ -389,18 +332,6 @@ func (w *boundedWriter) Write(p []byte) (int, error) {
 	w.remaining -= int64(n)
 	return n, err
 }
-
-type tailBuffer struct{ data []byte }
-
-func (b *tailBuffer) Write(p []byte) (int, error) {
-	n := len(p)
-	b.data = append(b.data, p...)
-	if len(b.data) > 16384 {
-		b.data = b.data[len(b.data)-16384:]
-	}
-	return n, nil
-}
-func (b *tailBuffer) String() string { return string(b.data) }
 
 func readArchive(input io.Reader, dir string) error {
 	tr := tar.NewReader(input)
@@ -546,15 +477,11 @@ func tail(s string) string {
 	return s
 }
 
-// engineStopping records that this process is stopping the engine, so a run this
-// stop cancels reports CauseEngineStop rather than a plain cancellation.
-var engineStopping atomic.Bool
-
 // MarkEngineStopping tells the runner that the engine is shutting down.
-func MarkEngineStopping() { engineStopping.Store(true) }
+func MarkEngineStopping() { jobs.MarkEngineStopping() }
 
 // EngineStopping reports whether the engine is shutting down.
-func EngineStopping() bool { return engineStopping.Load() }
+func EngineStopping() bool { return jobs.EngineStopping() }
 
 // ClearEngineStopping forgets the mark, for a test that shares the process.
-func ClearEngineStopping() { engineStopping.Store(false) }
+func ClearEngineStopping() { jobs.ClearEngineStopping() }
