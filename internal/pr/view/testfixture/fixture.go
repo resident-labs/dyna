@@ -88,7 +88,7 @@ esac
 	return log
 }
 
-func SaveState(t *testing.T, root string, st watch.State) {
+func SaveState(t testing.TB, root string, st watch.State) {
 	t.Helper()
 	if st.Version == 0 {
 		st.Version = 1

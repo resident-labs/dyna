@@ -1,6 +1,7 @@
 package view
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"slices"
 	"sort"
@@ -31,6 +32,7 @@ type projectionCache struct {
 // need a lock. No record points into the shared state snapshot.
 type projection struct {
 	root, revision, version, members string
+	review                           string
 	priority                         string
 	rooms                            int64
 	at                               time.Time
@@ -111,7 +113,18 @@ func (s *Service) readProjection() (*projection, error) {
 			return nil, err
 		}
 	}
-	p := &projection{root: watcher.Store.Root, revision: snapshot.Revision(), version: version, members: members, rooms: rooms, priority: priority, until: priorityUntil, at: now, exits: exits,
+	review := ""
+	if old != nil {
+		review = old.review
+		// A PR revision has its own delta cursor. Keep its dependency stable;
+		// only live inputs can require a full row rebuild here.
+		if old.root != watcher.Store.Root || old.members != members || old.rooms != rooms || old.priority != priority || old.exits != exits || !old.until.IsZero() && !now.Before(old.until) {
+			review = reviewDependency(facts)
+		}
+	} else {
+		review = reviewDependency(facts)
+	}
+	p := &projection{root: watcher.Store.Root, revision: snapshot.Revision(), version: version, members: members, rooms: rooms, review: review, priority: priority, until: priorityUntil, at: now, exits: exits,
 		state: st, snapshot: snapshot, facts: facts, rows: map[string]ChangeView{}, versions: map[string]string{}, pages: map[projectionPage]listpage.Page[*watch.Record]{}}
 	// History pages and reviewer occupancy have time boundaries even when
 	// no writer commits another revision.
@@ -156,8 +169,34 @@ func copyProjectionState(snapshot state.Snapshot, old *projection) watch.State {
 	return st
 }
 
+// dependency identifies non-record inputs whose changes rebuild every row.
+// Raw member and room revisions refresh facts in readProjection. Only a change
+// to the facts used by PR rows enters this token.
 func (p *projection) dependency() string {
-	return p.root + "\x00" + p.priority + "|" + p.members + "|" + strconv.FormatInt(p.rooms, 10) + "|" + strconv.FormatUint(p.exits, 10) + "|" + p.until.String()
+	return p.root + "\x00" + p.priority + "|" + p.review + "|" + strconv.FormatUint(p.exits, 10) + "|" + p.until.String()
+}
+
+// reviewDependency covers every live fact ReviewState and Queue read. Busy
+// keys represent sessions because their other fields do not change a PR row.
+func reviewDependency(facts watch.ReviewFacts) string {
+	need := make([]string, len(facts.Need))
+	for i, record := range facts.Need {
+		need[i] = record.Key
+	}
+	busy := make([]string, 0, len(facts.Busy))
+	for key := range facts.Busy {
+		busy = append(busy, key)
+	}
+	slices.Sort(busy)
+	data, _ := json.Marshal(struct {
+		Paused    map[string]bool
+		Need      []string
+		Busy      []string
+		Expedited map[string]string
+		Streaks   map[string]int
+	}{facts.Paused, need, busy, facts.ExpeditedGoals, facts.Streaks})
+	sum := sha256.Sum256(data)
+	return string(sum[:])
 }
 
 func (p *projection) row(r *watch.Record) ChangeView {
