@@ -87,6 +87,14 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "git-credential" {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		if err := ghclient.SessionCredential(ctx, os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if !home.KeepsPrivateRoots(os.Args[1:]) {
 		if err := store.CheckDataDir(); err != nil {
 			fmt.Fprintln(os.Stderr, "dyna:", err)

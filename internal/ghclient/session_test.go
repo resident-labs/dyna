@@ -41,7 +41,7 @@ func TestSessionUsesTheRoomAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_REPO", "unscoped/other")
-	bin := installFakeGH(t, `#!/bin/sh
+	installFakeGH(t, `#!/bin/sh
 case "$1 $2" in
 "auth status") echo '{"hosts":{"github.com":[{"login":"personal"},{"login":"work"}]}}';;
 "auth token") case "$*" in *personal*) echo personal-secret;; *work*) echo work-secret;; esac;;
@@ -55,9 +55,8 @@ esac
 			t.Fatal(err)
 		}
 		env := session.Env
-		want := []string{"personal-secret", "work-secret"}[i]
-		if env["GH_TOKEN"] != want || env["GH_HOST"] != "github.com" || env["GH_REPO"] != "" {
-			t.Fatal("session has the wrong repository credentials")
+		if env["GH_TOKEN"] != "" || env["GH_HOST"] != "github.com" || env["GH_REPO"] != "" {
+			t.Fatal("session did not hide the token and retain internal account access")
 		}
 		target, err := os.Readlink(filepath.Join(scratch, "github-bin", "gh"))
 		if err != nil {
@@ -71,7 +70,7 @@ esac
 		}
 		helperKey := "credential.https://github.com/" + []string{"resident-labs/personal", "work/private"}[i] + ".helper"
 		helper := gitConfigValue(env, helperKey)
-		if i == 0 && helper != "!"+shellquote.Quote(filepath.Join(bin, "gh"))+" auth git-credential" {
+		if i == 0 && helper != "!"+shellquote.Quote("/real/dyna")+" git-credential" {
 			t.Fatalf("write room git has no gh credential helper: %q", helper)
 		}
 		if i == 1 && helper != "" {
@@ -88,7 +87,7 @@ esac
 		if err != nil {
 			t.Fatal(err)
 		}
-		if child.Env["GH_TOKEN"] != want || child.Env["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
+		if child.Env["GH_TOKEN"] != "" || child.Env["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
 			t.Fatal("child changed account or accumulated duplicate Git guards")
 		}
 	}
@@ -118,6 +117,11 @@ esac
 		t.Setenv(key, value)
 	}
 	t.Setenv("DYNA_ROOM_ID", records[0].ID)
+	previousCredential := sessionCredential
+	sessionCredential = func(context.Context, repository) (Credential, error) {
+		return Credential{Login: "worker", Token: "worker-secret"}, nil
+	}
+	t.Cleanup(func() { sessionCredential = previousCredential })
 	t.Chdir(records[0].Repo)
 	for _, args := range [][]string{
 		{"pr", "comment", "1", "--body", "not allowed"},
@@ -198,7 +202,7 @@ func TestSessionRunsWithoutTheGitHubCLI(t *testing.T) {
 	}
 }
 
-func TestSessionPreservesEnterpriseTokenEnvironment(t *testing.T) {
+func TestSessionHidesEnterpriseTokenEnvironment(t *testing.T) {
 	for _, variable := range []string{"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		t.Run(variable, func(t *testing.T) {
 			records := setupRooms(t, "team/private")
@@ -212,8 +216,8 @@ func TestSessionPreservesEnterpriseTokenEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if env.Env["GH_ENTERPRISE_TOKEN"] != "enterprise-token" || env.Env["GH_HOST"] != "work.example" {
-				t.Fatal("enterprise owner authentication was lost")
+			if env.Env["GH_ENTERPRISE_TOKEN"] != "" || env.Env["GH_HOST"] != "work.example" {
+				t.Fatal("enterprise worker authentication was not kept inside Dyna")
 			}
 		})
 	}

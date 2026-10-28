@@ -34,8 +34,8 @@ type SessionEnv struct {
 	Notice string
 }
 
-// SessionEnvironment gives plain gh the room account without storing a token.
-// The token has the same trust level as credentials in the owner's shell.
+// SessionEnvironment gives guarded gh and git access to the room account.
+// Workers never receive the token or the owner's saved gh configuration.
 // The private scratch symlink selects the executable; it stores no runtime state.
 // GitHub tooling never fails the call: a rate limit, an unreachable API, a
 // missing CLI, or no usable sign-in starts the turn without GitHub commands,
@@ -91,7 +91,7 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 			token = source[fallbackKey]
 		}
 	}
-	out[tokenKey], out["GH_HOST"] = token, r.host
+	out[tokenKey], out["GH_HOST"] = "", r.host
 	if !filepath.IsAbs(scratchDir) || !filepath.IsAbs(dynaBinary) {
 		return SessionEnv{}, fmt.Errorf("GitHub session tools require absolute scratch and binary paths")
 	}
@@ -118,17 +118,14 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	}
 	out[BinaryEnv] = cmd.Path
 	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
-	if unavailable {
-		// The turn could not prove its account, so no other account may stand in:
-		// point the GitHub CLI at an empty configuration and give git no helper.
-		config := filepath.Join(bin, "config")
-		if err := os.MkdirAll(config, 0700); err != nil {
-			return SessionEnv{}, err
-		}
-		out["GH_CONFIG_DIR"] = config
+	// Saved gh logins stay behind Dyna, never in the worker's configuration.
+	config := filepath.Join(bin, "config")
+	if err := os.MkdirAll(config, 0700); err != nil {
+		return SessionEnv{}, err
 	}
+	out["GH_CONFIG_DIR"] = config
 	// Read-only rooms get no helper; its keys still clear a parent's helper.
-	credentials := sessionCredentialHelper(r, cmd.Path)
+	credentials := sessionCredentialHelper(r, dynaBinary)
 	if err := sessionGitConfig(ctx, rec, readOnly, credentials, !readOnly && token != "", values, out); err != nil {
 		return SessionEnv{}, err
 	}
@@ -160,11 +157,10 @@ func probeNotice(probe *accountProbeError) string {
 	return "GitHub is rate limited until " + probe.until.UTC().Format(time.RFC3339) + ", so GitHub commands may fail this turn; continue without them."
 }
 
-// sessionCredentialHelper lets plain git push to the room's repository with the
-// session's GH_TOKEN. The helper answers only for that repository's HTTPS URL,
-// and no token or configuration is saved to disk.
-func sessionCredentialHelper(r repository, ghPath string) [][2]string {
-	helper := "!" + shellquote.Quote(ghPath) + " auth git-credential"
+// sessionCredentialHelper lets git push to the room's repository. Dyna keeps
+// the token behind a helper that answers only git for this HTTPS repository.
+func sessionCredentialHelper(r repository, dynaPath string) [][2]string {
+	helper := "!" + shellquote.Quote(dynaPath) + " git-credential"
 	return [][2]string{
 		{"credential.https://" + r.host + ".useHttpPath", "true"},
 		{"credential.https://" + r.host + "/" + r.name + ".helper", helper},
