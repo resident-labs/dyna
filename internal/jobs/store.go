@@ -274,6 +274,54 @@ func (s Store) SaveOpen(ctx context.Context, job Job) (Job, bool, error) {
 	return winner, won, err
 }
 
+// Cancel ends the row id at time ended, changing only its cancellation
+// fields inside one transaction that reads the row as it lies: whatever a
+// start recorded in the meantime — its start time, folder and unit — stays,
+// and the returned row is what the table holds after the call. A row that
+// already ended keeps its own end, and won is then false.
+func (s Store) Cancel(ctx context.Context, id string, ended time.Time) (Job, bool, error) {
+	db, err := s.db()
+	if err != nil {
+		return Job{}, false, err
+	}
+	winner, won := Job{}, false
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic}, func(conn *sql.Conn) error {
+		current, err := scanJob(conn.QueryRowContext(ctx, "SELECT "+columns+" FROM jobs WHERE id=?", id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return os.ErrNotExist
+		}
+		if err != nil {
+			return err
+		}
+		if current.State.Finished() {
+			winner = current
+			return nil
+		}
+		current.State = StateCancelled
+		current.Ended = ended
+		encoded, err := json.Marshal(current.Command)
+		if err != nil {
+			return err
+		}
+		var exit any
+		if current.ExitCode != nil {
+			exit = *current.ExitCode
+		}
+		ms := func(t time.Time) int64 {
+			if t.IsZero() {
+				return 0
+			}
+			return t.UnixMilli()
+		}
+		if err := upsertJob(ctx, conn, current, encoded, exit, ms); err != nil {
+			return err
+		}
+		winner, won = current, true
+		return nil
+	})
+	return winner, won, err
+}
+
 // upsertJob writes the whole row of one job.
 func upsertJob(ctx context.Context, conn *sql.Conn, job Job, encoded []byte, exit any, ms func(time.Time) int64) error {
 	command := string(encoded)
