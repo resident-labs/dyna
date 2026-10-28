@@ -497,7 +497,11 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	// A crash at the start boundary - the running row saved, the start event
 	// not yet posted, the unit not yet launched - leaves a reattached row
 	// that must launch fresh and post its start. A row whose start went out
-	// attaches to the unit the crashed engine launched.
+	// attaches to the unit the crashed engine launched; a row whose start
+	// went out but whose unit never appeared - the crash fell between the
+	// record and the launch - is relaunched below, when the attach finds no
+	// folder on the node. The node's folder is the launch record: every
+	// started unit has one.
 	launch := !reattach || !job.StartPosted
 	if reattach && launch {
 		// The row's start event was lost to the crash; post it now, before
@@ -567,7 +571,7 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 
 	x := s.executor(conn)
-	if !reattach && job.SHA != "" {
+	if launch && job.SHA != "" {
 		cache := path.Join(NodeBase(machine.Name), RepoKey(job.Repo)+".git")
 		if err := x.PushCommit(ctx, job.Repo, cache, job.SHA); err != nil {
 			s.finish(&job, err)
@@ -610,6 +614,21 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	runCtx, timeoutCancel := context.WithTimeout(ctx, job.Timeout+AdmissionWait+2*time.Minute)
 	defer timeoutCancel()
 	runErr := poller.Run(runCtx, spec, logWriter)
+	var lost *NodeLostError
+	if errors.As(runErr, &lost) && lost.Missing {
+		// The row says the start went out, but the node has no folder for the
+		// job: the engine that recorded the start crashed before it launched
+		// the unit. Every started unit has a folder, so the launch is
+		// idempotent node-side and this run launches the job now. A
+		// cancellation that landed meanwhile keeps its end.
+		if fresh, err := s.Store.Get(ctx, job.ID); err == nil && fresh.CancelRequested {
+			s.finish(&job, nil)
+			return
+		}
+		spec.Attach = false
+		spec.Script = jobScript(machine, job, resources)
+		runErr = poller.Run(runCtx, spec, logWriter)
+	}
 	if runErr != nil && errors.Is(runErr, context.Canceled) && EngineStopping() {
 		// The engine is stopping: the job keeps running on its node and the
 		// restarted engine reattaches through this row. The offset write is

@@ -660,6 +660,11 @@ func TestACancelledRequestSurvivesAnOwnerRestart(t *testing.T) {
 		return ctx.Err()
 	}
 	owner, fake, _, _ := newIdleService(t, legacy)
+	// The owner's own claim tick never fires: a nil channel parks its loop,
+	// so no scheduling luck - a slow runner whose five seconds pass before
+	// the next engine starts - can let the owner end the job itself. Only
+	// the restarted engine carries the request to the end.
+	owner.after = func(time.Duration) <-chan time.Time { return nil }
 	owner.Start(t.Context())
 	// The owner never stops: it dies with the job still running on the node.
 	job, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
@@ -852,5 +857,114 @@ func TestARestartAtAStartNeverPostedLaunchesAndPosts(t *testing.T) {
 	}
 	if row.State != StatePassed || !row.StartPosted {
 		t.Fatalf("the row is %s with start_posted=%v, want passed with the start recorded", row.State, row.StartPosted)
+	}
+}
+
+// TestARestartBeforeTheLaunchRelaunchesTheJob is the fail-first test for
+// the round-10 review, first finding: an engine crashes after it saved the
+// start - start_posted is set - but before it launched the unit. The row
+// says running, the node has no folder. The restarted engine attaches,
+// learns the unit was never launched, and launches the job fresh: one
+// launch, one passed end, and no second start event for a start that
+// already went out.
+func TestARestartBeforeTheLaunchRelaunchesTheJob(t *testing.T) {
+	onNode := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "ran")
+		onNode <- struct{}{}
+		return nil
+	}
+	dead, fake, _, _ := newIdleService(t, legacy)
+	dir := dead.DataDir
+	started := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
+	job := Job{ID: "job_unlaunched", RoomID: "dyna", Node: "here", Command: []string{"echo", "hi"}, State: StateRunning, Started: started, StartPosted: true, Timeout: time.Minute, Created: started.Add(-time.Minute), LogPath: filepath.Join(dir, "jobs", "job_unlaunched", "log"), Dir: NodeBase("here") + "/jobs/job_unlaunched", Unit: "dyna-job-job_unlaunched.service"}
+	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
+		t.Fatal(err)
+	}
+	if err := dead.Store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	next, _, nextReporter, _ := newIdleService(t, legacy)
+	next.Store = dead.Store
+	next.Machines = dead.Machines
+	next.NewExecutor = dead.NewExecutor
+	next.Start(t.Context())
+	defer next.Stop()
+	<-onNode
+	end := <-nextReporter.finished
+	if end.State != StatePassed {
+		t.Fatalf("the job ended %s, want passed: a start recorded with no unit was never launched", end.State)
+	}
+	select {
+	case start := <-nextReporter.started:
+		t.Fatalf("a second start for %s arrived; the row already says the start went out", start.ID)
+	default:
+	}
+	if n := len(fake.StartCalls()); n != 1 {
+		t.Fatalf("the node saw %d launch(es), want one fresh launch", n)
+	}
+}
+
+// TestARecoveredLaunchPushesItsCommit is the fail-first test for the
+// round-10 review, second finding: a crash before the start was posted
+// makes the restart launch fresh, and a fresh launch of a job pinned to a
+// commit must push that commit to the node, or the job runs without its
+// commit. The row recovers with its start, its push, and its passed end.
+func TestARecoveredLaunchPushesItsCommit(t *testing.T) {
+	onNode := make(chan struct{}, 1)
+	var pushDest, pushRefspec string
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if name == "env" && len(args) > 5 && args[1] == "git" && args[2] == "push" {
+			pushDest, pushRefspec = args[4], args[5]
+			return nil
+		}
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "update-ref -d ") {
+			// The commit-ref drop before the push: node upkeep, not the job.
+			return nil
+		}
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, "ran")
+		onNode <- struct{}{}
+		return nil
+	}
+	dead, _, _, _ := newIdleService(t, legacy)
+	dir := dead.DataDir
+	started := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
+	sha := "c0ffee0000000000000000000000000000000000"
+	repo := filepath.Join(dir, "repo")
+	job := Job{ID: "job_recover_push", RoomID: "dyna", Node: "here", Command: []string{"go", "test"}, Repo: repo, SHA: sha, State: StateRunning, Started: started, Timeout: time.Minute, Created: started.Add(-time.Minute), LogPath: filepath.Join(dir, "jobs", "job_recover_push", "log"), Dir: NodeBase("here") + "/jobs/job_recover_push", Unit: "dyna-job-job_recover_push.service"}
+	if err := os.MkdirAll(filepath.Dir(job.LogPath), 0o700); err != nil { // not-state: log blobs live outside SQLite.
+		t.Fatal(err)
+	}
+	if err := dead.Store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	next, _, nextReporter, _ := newIdleService(t, legacy)
+	next.Store = dead.Store
+	next.Machines = dead.Machines
+	next.NewExecutor = dead.NewExecutor
+	next.Start(t.Context())
+	defer next.Stop()
+	start := <-nextReporter.started
+	if start.ID != job.ID {
+		t.Fatalf("started %s, want %s", start.ID, job.ID)
+	}
+	<-onNode
+	end := <-nextReporter.finished
+	if end.State != StatePassed {
+		t.Fatalf("the job ended %s, want passed", end.State)
+	}
+	if want := NodeBase("here") + "/" + RepoKey(repo) + ".git"; pushDest != want {
+		t.Fatalf("the recovered launch pushed to %q, want the node cache %q", pushDest, want)
+	}
+	if want := sha + ":refs/dyna/ci/" + sha; pushRefspec != want {
+		t.Fatalf("the recovered launch pushed %q, want %q", pushRefspec, want)
 	}
 }
