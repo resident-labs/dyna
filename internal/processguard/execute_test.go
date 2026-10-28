@@ -3,7 +3,9 @@ package processguard
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,23 @@ func TestExecuteBoundsProcessDescendants(t *testing.T) {
 	err := Execute(context.Background(), Process{Args: []string{"/bin/sh", "-c", "sleep 30 & wait"}, Env: MetadataEnv(), Timeout: 50 * time.Millisecond, Output: &output})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
 		t.Fatalf("timeout did not bound descendants: %v", err)
+	}
+}
+
+func TestExecuteNamesAMissingWorkingDirectory(t *testing.T) {
+	err := Execute(context.Background(), Process{
+		Dir:     filepath.Join(t.TempDir(), "gone"),
+		Args:    []string{"/usr/bin/git", "rev-parse", "--show-toplevel"},
+		Env:     MetadataEnv(),
+		Timeout: 10 * time.Second,
+	})
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a missing directory must stay ErrNotExist: %v", err)
+	}
+	// The kernel reports a failed chdir as a failed exec of the binary, which
+	// reads as Git being gone. The error must name the directory instead.
+	if !strings.Contains(err.Error(), "gone") || strings.Contains(err.Error(), "fork/exec") {
+		t.Fatalf("error must name the missing working directory, got: %v", err)
 	}
 }
 
