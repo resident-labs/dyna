@@ -201,6 +201,8 @@ var toolList = []toolDefinition{
 			"If it is still running then, it keeps running in the background and this returns its job ID. " +
 			"Dyna wakes you with the exit code and last lines of output when it ends, so do not poll. " +
 			"Each call starts a new shell in cwd, so cd does not carry over. stdin is closed: use non-interactive flags. " +
+			"Commands run inside your room's slice (DYNA_ROOM_SLICE), so their memory and process count are capped; " +
+			"start long-lived daemons with systemd-run --user, which joins that slice by itself. " +
 			"Output over 16 KB is cut in the middle, and the result names the full log file.",
 		InputSchema: inputSchema{
 			Type: "object",

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/sessionlife"
 )
 
 // A turn runner acts for its session, so its launch is recorded for the
@@ -19,6 +20,9 @@ func TestExecSpawnerRecordsTheTurn(t *testing.T) {
 	m := &Manager{Store: &Store{Root: filepath.Join(data, "sessions")}, Executable: runner}
 	id := "ses_20261020-000000-abcdefgh"
 	if err := os.MkdirAll(filepath.Join(data, "sessions", id), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionlife.Save(m.Store.Root, id, Meta{ID: id, Profile: "mock", RoomID: "rooms", Room: "rooms"}); err != nil {
 		t.Fatal(err)
 	}
 	lock, err := os.Create(filepath.Join(t.TempDir(), "turn.lock"))

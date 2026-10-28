@@ -85,3 +85,25 @@ func (m MachineScratchEvent) eventSubject() string { return m.Name }
 
 // eventDedupe keys one notice per machine and time, so a retried post posts once.
 func (m MachineScratchEvent) eventDedupe() string { return strconv.Itoa(m.AtMS) }
+
+// MachineLimitsEvent tells a room that this machine cannot give each room its
+// own resource slice. The room's work then shares the agent slice with every
+// other room and has no process cap. It carries the reason in plain words,
+// because the card explains what is missing, not a path or a log line.
+type MachineLimitsEvent struct {
+	// Reason is why the limits are off, for example a controller that systemd
+	// did not delegate to this user.
+	Reason string `json:"reason"`
+	// AtMS is when Dyna first noticed, in milliseconds since the Unix epoch.
+	AtMS int `json:"atMs"`
+}
+
+func (MachineLimitsEvent) eventFamily() EventFamily { return FamilyMachine }
+func (MachineLimitsEvent) eventType() EventType     { return TypeLimitsOff }
+
+// eventSubject keeps the notice out of any other machine note's rows.
+func (MachineLimitsEvent) eventSubject() string { return "room-limits" }
+
+// eventDedupe keys one notice per reason, so the same cause posts once and a
+// changed cause posts again.
+func (m MachineLimitsEvent) eventDedupe() string { return m.Reason }

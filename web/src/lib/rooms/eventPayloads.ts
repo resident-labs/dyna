@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineCacheEvent, isMachineEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineCacheEvent, MachineEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineCacheEvent, isMachineEvent, isMachineLimitsEvent, isMachineScratchEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isServiceWaitEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTerminalDoneEvent, isTerminalRequestEvent, isTurnEvent, isVoiceSessionEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineCacheEvent, MachineEvent, MachineLimitsEvent, MachineScratchEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, ServiceWaitEvent, SessionEvent, ShellEvent, SlowTestEvent, TerminalDoneEvent, TerminalRequestEvent, TurnEvent, VoiceSessionEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -151,6 +151,13 @@ export function machineCacheEvent(post: EventPost): MachineCacheEvent | undefine
 export function machineScratchEvent(post: EventPost): MachineScratchEvent | undefined {
   if (post.kind !== 'machine' || post.notice?.kind !== 'scratch-freed') return undefined
   return isMachineScratchEvent(post.payload) ? post.payload : undefined
+}
+
+// machineLimitsEvent returns the typed payload of a limits-off machine event:
+// why this machine cannot give each room its own resource slice.
+export function machineLimitsEvent(post: EventPost): MachineLimitsEvent | undefined {
+  if (post.kind !== 'machine' || post.notice?.kind !== 'limits-off') return undefined
+  return isMachineLimitsEvent(post.payload) ? post.payload : undefined
 }
 
 // callEvent returns the typed payload of the owner's answer to a call

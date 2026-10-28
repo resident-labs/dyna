@@ -417,7 +417,8 @@ function fixtureTip(payload: EventPayload): string {
     return payload.session
   }
   if ('verdict' in payload) return payload.detail || payload.verdict
-  return payload.detail || payload.reason
+  if ('reason' in payload) return payload.reason
+  return String(payload)
 }
 
 test('a failed turn states its cause and keeps worker stderr behind a disclosure', () => {

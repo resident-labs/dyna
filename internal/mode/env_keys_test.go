@@ -129,6 +129,7 @@ var nonStampKeys = map[string]string{
 	"DYNA_PORTS":                          "The assigned development-server ports for a worktree.",
 	"DYNA_SCRIPT_PATH":                    "The workflow source path supplied to its script runner.",
 	"DYNA_SLICE":                          "The resource cgroup slice, not a Dyna caller identity.",
+	"DYNA_ROOM_SLICE":                     "The room's resource slice unit, not a Dyna caller identity.",
 	"DYNA_BIN":                            "The path to the Dyna executable.",
 }
 
