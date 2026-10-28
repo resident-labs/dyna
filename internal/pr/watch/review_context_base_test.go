@@ -178,10 +178,15 @@ func TestReviewInputOmitsGeneratedFiles(t *testing.T) {
 }
 
 func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
-	// One topology per delta branch: an ordinary later-round delta between two
-	// heads on the same base, and a rebase whose amended tip makes range-diff
-	// print a commit interdiff that the filter must keep free of generated files.
-	for name, rebase := range map[string]bool{"ordinary": false, "rebase": true} {
+	// One topology per delta branch: new commits on the same base, a rebase
+	// whose amended tip makes range-diff print a commit interdiff, and a revert
+	// that restores a generated file to its base contents after an earlier round.
+	const (
+		newCommits = iota
+		rebasedAmend
+		revertedGenerated
+	)
+	for name, mode := range map[string]int{"ordinary": newCommits, "rebase": rebasedAmend, "revert": revertedGenerated} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			repo := t.TempDir()
@@ -203,7 +208,8 @@ func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
 			testCommit(t, repo, "generated/one.txt", genBefore, "add generated preset")
 			testCommit(t, repo, "src.txt", srcBefore, "add reviewed source")
 			previous := testGit(t, repo, "rev-parse", "HEAD")
-			if rebase {
+			switch mode {
+			case rebasedAmend:
 				testGit(t, repo, "checkout", "-q", "main")
 				testCommit(t, repo, "merged.txt", "a base commit merged after the fork\n", "merged on main")
 				testGit(t, repo, "checkout", "-q", "feature")
@@ -217,7 +223,12 @@ func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
 				}
 				testGit(t, repo, "add", "-A")
 				testGit(t, repo, "commit", "-q", "--amend", "--no-edit")
-			} else {
+			case revertedGenerated:
+				// The base-to-head diff no longer lists the generated file, so
+				// only paths from the delta itself can exclude the large revert.
+				testGit(t, repo, "rm", "-q", "generated/one.txt")
+				testCommit(t, repo, "src.txt", srcAfter, "change reviewed source")
+			default:
 				testCommit(t, repo, "generated/one.txt", genAfter, "change generated preset")
 				testCommit(t, repo, "src.txt", srcAfter, "change reviewed source")
 			}
