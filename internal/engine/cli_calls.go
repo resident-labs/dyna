@@ -14,6 +14,7 @@ var cliCalls = []string{
 	"SetSetting",
 	"SetRoomRootProfile",
 	"SetRoomCheckIn",
+	"SetRoomLimit",
 	"AddRoomRepo",
 	"RemoveRoomRepo",
 	"SaveProfile",

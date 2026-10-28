@@ -348,6 +348,7 @@ type workers struct {
 
 func engineWorkers(engineCtx context.Context, rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
 	wireRoomLimitsNotice(engineCtx, rooms.Notify)
+	wireRoomLimitsLookup(rooms.Notify.Rooms)
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms

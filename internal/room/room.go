@@ -66,6 +66,9 @@ type Record struct {
 	// CheckIn is this room's parent check-in cadence (see CheckIn). The zero
 	// value inherits the parent check-ins hook's global interval.
 	CheckIn CheckIn `json:"checkIn,omitempty"`
+	// Limits are this room's resource slice limits (see Limits). The zero
+	// value uses the machine defaults.
+	Limits Limits `json:"limits,omitempty"`
 	// Seat is the row's seat column, which only writeSeat writes.
 	Seat          Seat   `json:"-"`
 	DisplayName   string `json:"displayName,omitempty"`

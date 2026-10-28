@@ -95,32 +95,53 @@ func createCmd() *cobra.Command {
 // setCmd is `dyna room set`: one room setting, shown without a value.
 func setCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "set <room> checkInInterval [<duration|off|default>]",
+		Use:   "set <room> <setting> [<value>]",
 		Short: "Change a room setting",
 		Long: "Change a room setting, or show it without a value. Only the owner and the room's root may change one.\n" +
 			"checkInInterval is how often Dyna wakes a parent to check its children in this room: a duration such as 30m,\n" +
-			"off to stop check-ins in this room, or default to use the parent check-ins hook's global interval.",
+			"off to stop check-ins in this room, or default to use the parent check-ins hook's global interval.\n" +
+			"limits.memoryHigh, limits.memoryMax and limits.tasksMax are the room's resource limits: a size such as 2G for\n" +
+			"memory, a count such as 512 for tasks, off to remove one limit, or default to use the machine default.",
 		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[1] != "checkInInterval" {
-				return fmt.Errorf("unknown room setting %q; checkInInterval is the only setting this command changes", args[1])
+			if args[1] != "checkInInterval" && !strings.HasPrefix(args[1], "limits.") {
+				return fmt.Errorf("unknown room setting %q; checkInInterval and limits.memoryHigh, limits.memoryMax and limits.tasksMax are the settings this command changes", args[1])
 			}
 			rec, err := store().Resolve(args[0])
 			if err != nil {
 				return err
 			}
-			if len(args) == 2 {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s\n", rec.CheckIn.String())
+			if args[1] == "checkInInterval" {
+				if len(args) == 2 {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s\n", rec.CheckIn.String())
+					return nil
+				}
+				setting, err := room.ParseCheckIn(args[2])
+				if err != nil {
+					return err
+				}
+				if err := engineClient().Call(cmd.Context(), "SetRoomCheckIn", []any{rec.Name, args[2]}, nil); err != nil {
+					return fmt.Errorf("the room was not updated: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s parent check-ins: %s\n", rec.Name, setting.String())
 				return nil
 			}
-			setting, err := room.ParseCheckIn(args[2])
+			field, err := room.ParseLimitField(strings.TrimPrefix(args[1], "limits."))
 			if err != nil {
 				return err
 			}
-			if err := engineClient().Call(cmd.Context(), "SetRoomCheckIn", []any{rec.Name, args[2]}, nil); err != nil {
+			if len(args) == 2 {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\n", field.Format(rec.Limits.LimitOf(field)))
+				return nil
+			}
+			limit, err := field.Parse(args[2])
+			if err != nil {
+				return err
+			}
+			if err := engineClient().Call(cmd.Context(), "SetRoomLimit", []any{rec.Name, string(field), args[2]}, nil); err != nil {
 				return fmt.Errorf("the room was not updated: %w", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s parent check-ins: %s\n", rec.Name, setting.String())
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", rec.Name, field.Label(), field.Format(limit))
 			return nil
 		},
 	}
