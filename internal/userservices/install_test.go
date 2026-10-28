@@ -261,6 +261,20 @@ func TestWriteCarriesTheInstallPathIntoTheUnits(t *testing.T) {
 	}
 }
 
+func TestEngineUnitBoundsGoMemory(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(Options{Binary: "/opt/dyna/bin/dyna", Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, Engine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `Environment="GOMEMLIMIT=4GiB"`) {
+		t.Fatalf("the engine has no soft Go memory limit:\n%s", body)
+	}
+}
+
 // An engine that opted out of the tunnel gets no connector: no unit file, no
 // enable link, and an earlier connector is stopped.
 func TestInstallHonoursTheTunnelOptOut(t *testing.T) {
