@@ -331,7 +331,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		if e := r.cleanBeforeRun(control, node); e != nil {
 			log.Printf("local CI %s: free space check: %v", node.Name, e)
 		}
-		setup := nodeSetupScript(base, cache, reports, active, nodeCacheNames(checks))
+		setup := nodeSetupScript(base, reports, active, nodeCacheNames(checks))
 		setupErr := r.nodeCommand(control, &output, &output, setup)
 		// A repair is a fact whether or not the run then succeeded, so report it
 		// before the setup error returns.
@@ -1104,7 +1104,7 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 // linked go-build or go-mod path under the exclusive cache lock, before the run
 // takes its ordinary shared lock, and refuses any remaining unsafe link. A run
 // therefore never mounts or trims a cache that Dyna does not own.
-func nodeSetupScript(base, cache, reports, active string, cacheNames []string) string {
+func nodeSetupScript(base, reports, active string, cacheNames []string) string {
 	q := shellquote.Quote
 	// A setup that already started this run's keeper but lost the answer is
 	// repeated: the keeper holds the run's lock and a share of the cache lock, so
@@ -1113,8 +1113,7 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 	return "set -e; umask 077; " + baseLinkGuard(base) +
 		"mkdir -p " + q(base) + " " + q(reports) + "; " +
 		"if [ -s " + keeper + " ] && kill -0 \"$(cat " + keeper + ")\" 2>/dev/null; then :; else " +
-		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) + "fi; " +
-		"flock " + q(path.Join(base, "init.lock")) + " bash -c " + q("if [ ! -d "+q(cache)+" ]; then git init --bare "+q(cache)+"; fi")
+		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base, cacheNames) + runLocks(base, active) + "fi"
 }
 
 // killGroupLeftovers kills every process in the wrapper's group except the
