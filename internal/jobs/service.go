@@ -71,6 +71,10 @@ type Service struct {
 	pollers map[string]*Poller
 	stops   map[string]func()
 	stopped bool
+	// wake tells the claim loop that a job was queued. It is nil until the
+	// owner starts the service, so a standby engine only queues.
+	wake chan struct{}
+	wg   sync.WaitGroup
 }
 
 func (s *Service) logger() func(string, ...any) {
@@ -172,7 +176,17 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	if err := s.Store.Save(ctx, job); err != nil {
 		return Job{}, err
 	}
-	s.start(job)
+	// A standby engine, one without the worker lock, only queues the job. The
+	// owner claims and starts it, so exactly one executor ever runs a job.
+	s.mu.Lock()
+	wake := s.wake
+	s.mu.Unlock()
+	if wake != nil {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
 	return job, nil
 }
 
@@ -240,18 +254,47 @@ func (s *Service) resolveCommit(ctx context.Context, repo, ref string) (string, 
 // Start begins every queued job and reattaches to the running ones an earlier
 // engine left on the nodes. The engine calls it once, at start.
 func (s *Service) Start(ctx context.Context) {
-	queued, err := s.Store.ClaimQueued(ctx)
-	if err != nil {
-		s.logger()("jobs: read queued jobs: %v", err)
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
 	}
-	for _, job := range queued {
-		s.start(job)
-	}
+	wake := make(chan struct{}, 1)
+	s.wake = wake
+	s.mu.Unlock()
+	s.claim(ctx)
 	running, err := s.Store.Running(ctx)
 	if err != nil {
 		s.logger()("jobs: read running jobs: %v", err)
 	}
 	for _, job := range running {
+		s.start(job)
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wake:
+				s.mu.Lock()
+				stopped := s.stopped
+				s.mu.Unlock()
+				if stopped {
+					return
+				}
+				s.claim(context.WithoutCancel(ctx))
+			}
+		}
+	}()
+}
+
+// claim starts every queued job, oldest first.
+func (s *Service) claim(ctx context.Context) {
+	queued, err := s.Store.ClaimQueued(ctx)
+	if err != nil {
+		s.logger()("jobs: read queued jobs: %v", err)
+	}
+	for _, job := range queued {
 		s.start(job)
 	}
 }
@@ -300,6 +343,7 @@ func (s *Service) Stop() {
 			stop()
 		}
 	}
+	s.wg.Wait()
 }
 
 // poller returns the one poller of a node, so every job on it shares one poll
@@ -346,11 +390,13 @@ func (s *Service) start(job Job) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.stops["job:"+job.ID] = cancel
 	s.mu.Unlock()
+	s.wg.Add(1)
 	go s.run(job, ctx, cancel)
 }
 
 // run executes one job from submission or reattach to its recorded end.
 func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
+	defer s.wg.Done()
 	defer cancel()
 	if s.onRun != nil {
 		s.onRun(job)
@@ -394,6 +440,12 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 	}
 	defer logFile.Close()
 	logWriter := &logStore{job: &job, file: logFile}
+	// The log file is the durable record of what the engine wrote. A crash can
+	// lose the row offset between a poll write and its save, so the file size
+	// recovers it and the poll continues exactly where the file ends.
+	if fi, err := os.Stat(job.LogPath); err == nil && fi.Size() != job.LogBytes {
+		job.LogBytes = fi.Size()
+	}
 
 	x := s.executor(conn)
 	if !reattach && job.SHA != "" {
@@ -569,7 +621,14 @@ func jobScript(machine machines.Machine, job Job, resources Resources) string {
 		cache := path.Join(base, RepoKey(job.Repo)+".git")
 		inner += "flock " + q(cache+".worktrees.lock") + " git --git-dir=" + q(cache) + " worktree add --detach " + q(work) + " " + q(job.SHA) + " && "
 	}
-	command := strings.Join(job.Command, " ")
+	// Each word is quoted on its own, so the shell that runs the script builds
+	// exactly the argv the submitter passed: no boundary moves, no
+	// metacharacter of an argument runs.
+	quoted := make([]string, 0, len(job.Command))
+	for _, word := range job.Command {
+		quoted = append(quoted, q(word))
+	}
+	command := strings.Join(quoted, " ")
 	if job.Image != "" {
 		docker := "(docker)"
 		if machine.SSH == "" {

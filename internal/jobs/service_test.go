@@ -57,7 +57,9 @@ func (r *chanReporter) JobFinished(_ context.Context, job Job) error {
 // The legacy function answers every call that is not the detached protocol,
 // such as git and the folder removal. runStarted tells a test the service
 // began to run a job.
-func newService(t *testing.T, legacy jobstest.RunFunc) (*Service, *jobstest.Fake, *chanReporter, chan Job) {
+// newIdleService builds a service that no engine started, as a standby
+// engine's service is: a Submit only queues.
+func newIdleService(t *testing.T, legacy jobstest.RunFunc) (*Service, *jobstest.Fake, *chanReporter, chan Job) {
 	t.Helper()
 	dir := t.TempDir()
 	machine := machines.Machine{Name: "here", Enabled: true, CISlots: 2}
@@ -78,6 +80,29 @@ func newService(t *testing.T, legacy jobstest.RunFunc) (*Service, *jobstest.Fake
 		return x
 	}
 	return svc, fake, reporter, runStarted
+}
+
+// newService is the service of the engine that owns the worker lock: it
+// claims and starts what is submitted to it.
+func newService(t *testing.T, legacy jobstest.RunFunc) (*Service, *jobstest.Fake, *chanReporter, chan Job) {
+	t.Helper()
+	svc, fake, reporter, runStarted := newIdleService(t, legacy)
+	svc.Start(t.Context())
+	return svc, fake, reporter, runStarted
+}
+
+// blockingJob is a job that prints one line and runs until its context
+// ends, while folder cleanup and other node upkeep calls return at once.
+func blockingJob(line string) jobstest.RunFunc {
+	return func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		fmt.Fprintln(out, line)
+		<-ctx.Done()
+		return ctx.Err()
+	}
 }
 
 // exitWith is a command that exited with a status, as a real one does.
@@ -152,11 +177,7 @@ func TestJobFailureKeepsItsExitCode(t *testing.T) {
 
 // Cancelling a running job stops its unit on the node and records cancelled.
 func TestCancelStopsTheJob(t *testing.T) {
-	svc, fake, reporter, runStarted := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
-		fmt.Fprintln(out, "working")
-		<-ctx.Done()
-		return ctx.Err()
-	})
+	svc, fake, reporter, runStarted := newService(t, blockingJob("working"))
 	defer svc.Stop()
 	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"sleep", "100"}})
 	if err != nil {
@@ -177,11 +198,7 @@ func TestCancelStopsTheJob(t *testing.T) {
 // A running row whose engine died reattaches instead of launching again: the
 // node sees no second start, and the job still ends through the new engine.
 func TestEngineRestartReattachesWithoutASecondStart(t *testing.T) {
-	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
-		fmt.Fprintln(out, "before the restart")
-		<-ctx.Done()
-		return ctx.Err()
-	})
+	svc, fake, reporter, _ := newService(t, blockingJob("before the restart"))
 	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}})
 	if err != nil {
 		t.Fatal(err)
