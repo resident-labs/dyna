@@ -69,9 +69,12 @@ func writeTreeDiff(ctx context.Context, repo, from, to, path string, excluded ..
 	return writeDiff(ctx, repo, path, args...)
 }
 
-// generatedDiffFiles reads attributes at the reviewed head. It returns the
-// generated changes and literal pathspecs that leave them out of Git output.
-func generatedDiffFiles(ctx context.Context, repo, from, to string) ([]GeneratedDiffFile, []string, error) {
+// generatedDiffFiles classifies the files changed between from and to with
+// the .gitattributes at attrHead, which keeps every range on one head: a
+// marker removed at the assigned head makes the file reviewable again. It
+// returns the generated changes and literal pathspecs that leave them out of
+// Git output.
+func generatedDiffFiles(ctx context.Context, repo, from, to, attrHead string) ([]GeneratedDiffFile, []string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	numstat, err := gitCommand(ctx, repo, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--numstat", "-z", from+".."+to, "--").Output()
@@ -111,7 +114,7 @@ func generatedDiffFiles(ctx context.Context, repo, from, to string) ([]Generated
 	}
 	defer os.RemoveAll(indexDir)
 	indexPath := filepath.Join(indexDir, "index")
-	readTree := gitCommand(ctx, repo, "read-tree", to)
+	readTree := gitCommand(ctx, repo, "read-tree", attrHead)
 	readTree.Env = append(readTree.Env, "GIT_INDEX_FILE="+indexPath)
 	if err := readTree.Run(); err != nil {
 		return nil, nil, fmt.Errorf("read attributes at the assigned head: %w", err)
@@ -161,15 +164,16 @@ func writeReviewDelta(ctx context.Context, repo, base, from, to, path string, ex
 	}
 	// The base-to-head exclusions miss a generated file that a later round
 	// reverted to its base contents: the revert itself belongs to the delta, so
-	// the delta's own ranges add their generated paths too. On an attribute
-	// error the delta keeps the exclusions already known.
+	// the delta's own ranges add their generated paths too. Every range is
+	// classified with the assigned head's attributes. On an attribute error the
+	// delta keeps the exclusions already known.
 	ranges := [][2]string{{from, to}}
 	if oldBase != newBase {
 		ranges = [][2]string{{oldBase, from}, {newBase, to}}
 	}
 	excluded = slices.Clone(excluded)
 	for _, r := range ranges {
-		if _, deltaExcluded, e := generatedDiffFiles(ctx, repo, r[0], r[1]); e == nil {
+		if _, deltaExcluded, e := generatedDiffFiles(ctx, repo, r[0], r[1], to); e == nil {
 			excluded = append(excluded, deltaExcluded...)
 		}
 	}
@@ -267,7 +271,7 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		if e != nil {
 			diffBase = r.Base
 		}
-		generated, excluded, filterErr := generatedDiffFiles(ctx, r.RepoPath, diffBase, r.Head)
+		generated, excluded, filterErr := generatedDiffFiles(ctx, r.RepoPath, diffBase, r.Head, r.Head)
 		input.GeneratedFiles = generated
 		if filterErr != nil {
 			err = filterErr
