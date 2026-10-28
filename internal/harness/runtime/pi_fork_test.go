@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -303,5 +305,56 @@ func TestFirstUseRepairsUnusableSelection(t *testing.T) {
 	b, installed, err = f.EnsureBundle(context.Background(), "pi", "")
 	if err != nil || installed || b.Version != piForkVersion {
 		t.Fatalf("usable selection = %+v, installed = %v, %v", b, installed, err)
+	}
+}
+
+// packedForkTarball writes one npm-pack tarball whose package manifest has
+// the shape and size of a real one, padding it past four kilobytes.
+func packedForkTarball(t *testing.T, version string) string {
+	t.Helper()
+	dir := t.TempDir()
+	stage := filepath.Join(dir, "package")
+	if err := os.MkdirAll(stage, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"name": piNPMPackage, "version": version, "dynaFork": minimumPiForkLevel,
+		"description": strings.Repeat("padded to a real packed size ", 200),
+	}
+	raw, _ := json.Marshal(manifest)
+	if len(raw) <= 4096 {
+		t.Fatalf("test manifest is only %d bytes", len(raw))
+	}
+	if err := os.WriteFile(filepath.Join(stage, "package.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "fork.tgz")
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(out)
+	tw := tar.NewWriter(gz)
+	hdr := &tar.Header{Name: "package/package.json", Mode: 0o600, Size: int64(len(raw))}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if tw.Close() != nil || gz.Close() != nil || out.Close() != nil {
+		t.Fatal("closing the packed tarball failed")
+	}
+	return path
+}
+
+// The packed manifest is larger than four kilobytes; the build lookup must
+// still read it whole.
+func TestForkTarballVersionReadsOversizedManifest(t *testing.T) {
+	const build = piForkVersion + ".0123456789ab"
+	path := packedForkTarball(t, build)
+	v, ok := forkTarballVersion(path)
+	if !ok || v != build {
+		t.Fatalf("forkTarballVersion = %q, %v; want %q", v, ok, build)
 	}
 }
