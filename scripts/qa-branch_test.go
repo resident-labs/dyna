@@ -12,6 +12,43 @@ import (
 	"testing"
 )
 
+func TestParseQASteps(t *testing.T) {
+	steps, err := parseQASteps(strings.NewReader(`[
+		{"viewport":{"width":1280,"height":800}},
+		{"goto":"/rooms"},
+		{"click":"button.new-room"},
+		{"type":{"selector":"input[name=name]","text":"QA"}},
+		{"waitFor":"text=QA"},
+		{"screenshot":"/tmp/qa.png"}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 6 || steps[0].Viewport == nil || steps[0].Viewport.Width != 1280 || steps[0].Viewport.Height != 800 ||
+		steps[1].Goto == nil || *steps[1].Goto != "/rooms" ||
+		steps[2].Click == nil || *steps[2].Click != "button.new-room" ||
+		steps[3].Type == nil || steps[3].Type.Selector != "input[name=name]" || steps[3].Type.Text != "QA" ||
+		steps[4].WaitFor == nil || *steps[4].WaitFor != "text=QA" ||
+		steps[5].Screenshot == nil || *steps[5].Screenshot != "/tmp/qa.png" {
+		t.Fatalf("unexpected steps: %#v", steps)
+	}
+	for name, input := range map[string]string{
+		"empty list":       `[]`,
+		"no action":        `[{}]`,
+		"multiple actions": `[{"goto":"/","screenshot":"qa.png"}]`,
+		"bad viewport":     `[{"viewport":{"width":0,"height":800}}]`,
+		"empty selector":   `[{"click":""}]`,
+		"unknown field":    `[{"delay":1}]`,
+		"trailing value":   `[{"goto":"/"}] []`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseQASteps(strings.NewReader(input)); err == nil {
+				t.Fatalf("accepted %s", input)
+			}
+		})
+	}
+}
+
 func TestQAWebDirRequiresBuiltIndex(t *testing.T) {
 	if _, err := qaWebDir(""); err == nil {
 		t.Fatal("accepted missing directory")
@@ -62,7 +99,7 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, err := json.Marshal(map[string]any{
-		"Endpoint": "test-endpoint", "Module": module, "Web": dir,
+		"Endpoint": "ws://127.0.0.1:123/devtools/browser/test", "Module": module, "Web": dir,
 		"ReadMethods": engine.ReadOnlyWebMethods(),
 	})
 	if err != nil {
@@ -108,6 +145,14 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	out := strings.Join(printed, "\n")
 	if !strings.Contains(out, "QA policy checks passed: 29") {
 		t.Fatalf("missing policy checks: %s", out)
+	}
+	for _, want := range []string{
+		"QA page CDP target: qa-target",
+		"QA page CDP websocket: ws://127.0.0.1:123/devtools/page/qa-target",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q: %s", want, out)
+		}
 	}
 	// A control that needs a write, a socket or a newer server never appears in
 	// this tab, and the banner must say so before an agent blames the branch.

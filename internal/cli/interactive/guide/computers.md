@@ -204,13 +204,39 @@ both lines too. Read them together: a control that needs a write, a socket
 stream or a newer server field cannot work in this tab, and a branch bug looks
 different. The report never holds a URL, a header or a cookie.
 
-Use the existing `dyna browser` Playwright and CDP connection to inspect the
-QA context. Select the page where `globalThis.__dynaReadOnlyQA === true` in a page evaluation.
-A fresh CDP connection can list the QA page beside the installed app tabs. Set its
-viewport to desktop size and then 390 px width. Capture screenshots, a CDP
-performance trace, time to usable, long tasks over 200 ms, request count, and
-heap growth after repeated use. Keep trace and screenshot files in
-`$DYNA_SCRATCH`. Do not send posts or other writes as a QA test.
+The ready output prints `QA page CDP target:` and `QA page CDP websocket:`.
+Keep the launcher running and give the websocket URL to a CDP client to drive
+that exact page from another script. The target id also identifies the page in
+CDP target lists. You can still use the existing `dyna browser` connection and
+select the page where `globalThis.__dynaReadOnlyQA === true` in a page evaluation.
+
+For a bounded run, pass `--steps FILE`. The file holds a JSON list, and each
+item has exactly one action. This example captures desktop and phone views and
+then exits:
+
+```json
+[
+  {"viewport":{"width":1280,"height":800}},
+  {"goto":"/"},
+  {"waitFor":"body"},
+  {"screenshot":"/tmp/qa-desktop.png"},
+  {"viewport":{"width":390,"height":844}},
+  {"screenshot":"/tmp/qa-phone.png"}
+]
+```
+
+The other actions are `{"click":"button.save"}` and
+`{"type":{"selector":"input[name=name]","text":"QA"}}`. A `goto` is a
+path or URL on the QA origin. `waitFor` waits for a visible selector. Relative
+screenshot paths start at the repository root. Use paths in `$DYNA_SCRATCH`
+for QA files. Run `bash ./scripts/qa-branch.sh --help` for the full schema.
+The same read-only request policy applies to every step. Do not send posts or
+other writes as a QA test.
+
+For manual performance QA, set the viewport to desktop size and then 390 px
+width. Capture screenshots, a CDP performance trace, time to usable, long tasks
+over 200 ms, request count, and heap growth after repeated use. Keep trace and
+screenshot files in `$DYNA_SCRATCH`.
 
 Close the QA tab or press Ctrl+C to close the QA context and stop your QA
 browser. The installed engine stays running. The command
