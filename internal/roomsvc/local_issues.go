@@ -220,7 +220,8 @@ const minCrossRoomNote = 20
 // FileIssue files a quiet issue for the caller on ctx. The caller's own room
 // keeps the filing rules of D-111. Another room accepts only the owner or a
 // room's root, and the note must explain the problem: a worker reports the
-// problem to its own root instead (D-401).
+// problem to its own root instead (D-401). A caller with no room that is not
+// the owner files nowhere.
 func (s *Service) FileIssue(ctx context.Context, roomRef string, in room.IssueInput) (room.Issue, error) {
 	r, err := s.rooms().ResolveQuietWrite(roomRef)
 	if err != nil {
@@ -237,8 +238,13 @@ func (s *Service) FileIssue(ctx context.Context, roomRef string, in room.IssueIn
 	in.Filer = by
 	// The caller's own room: the stored room of a session or root seat, or
 	// the room stamp of an owner process, which may carry the name. An owner
-	// without a stamp has no room of its own, so no filing is cross-room.
+	// without a stamp has no room of its own, so no filing is cross-room for
+	// it; every other caller needs a room to file from, so a workflow worker
+	// or an unauthenticated actor files nowhere.
 	own := actor.Room
+	if actor.Role != authority.Owner && own == "" {
+		return room.Issue{}, errors.New("this caller has no room to file from; only the owner files without one")
+	}
 	if own == "" || own == r.ID || own == r.Name {
 		return s.rooms().FileIssue(r.ID, in)
 	}
