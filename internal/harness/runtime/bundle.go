@@ -237,13 +237,31 @@ var executableHashes sync.Map
 // runs beside the executable, such as a companion server.
 var errBundleUnusable = errors.New("bundle cannot be used")
 
-// read returns a verified published bundle. A bundle without the files its
-// adapter requires comes back with errBundleUnusable, so Resolve, Select,
-// Rollback, Lease and install reuse all refuse it.
+// read returns a verified published bundle. A bundle whose version Dyna's
+// verified recipes no longer support, or without the files its adapter
+// requires, comes back with errBundleUnusable, so Resolve, Select, Rollback,
+// Lease and install reuse all refuse it and name the reason. The manifest is
+// read and validated first, so its errors propagate unchanged; the range
+// refusal keeps the manifest data on the bundle, letting cleanup remove an
+// old version and protect the leases and pins of sessions that hold it.
 func (m *BundleManager) read(h, v string) (Bundle, error) {
-	b, err := m.readManifest(h, v)
-	if err != nil {
-		return Bundle{}, err
+	b, manifestErr := m.readManifest(h, v)
+	if ok, reason := supportedVersionRange(h, v); !ok {
+		unusable := fmt.Errorf("%w: %s %s is not supported: %s", errBundleUnusable, h, v, reason)
+		if manifestErr == nil {
+			return b, unusable
+		}
+		// An old version that is not installed cannot run either way; the
+		// range reason names the real problem. A manifest that exists but
+		// cannot be read propagates its error, so cleanup never sees an
+		// empty bundle and skips a directory it should have removed.
+		if _, statErr := os.Lstat(filepath.Join(m.Root, h, v)); os.IsNotExist(statErr) {
+			return Bundle{}, unusable
+		}
+		return Bundle{}, manifestErr
+	}
+	if manifestErr != nil {
+		return Bundle{}, manifestErr
 	}
 	a, _ := Adapter(h)
 	for _, name := range a.Requires {
@@ -836,11 +854,16 @@ func (m *BundleManager) Resolve(harness, version string) (Bundle, error) {
 	if version != "" && !validVersion(version) {
 		return Bundle{}, errors.New("private bundles require an exact version, not a moving tag or range")
 	}
-	if version == "" {
-		version = m.selected(h)
-	}
 	if version != "" {
 		return m.read(h, version)
+	}
+	if selected := m.selected(h); selected != "" {
+		if ok, _ := supportedVersionRange(h, selected); ok {
+			return m.read(h, selected)
+		}
+		// A selection outside the supported range must not pin every new
+		// session to a bundle that cannot run. Resolution falls through to
+		// the newest supported bundle, so first use installs the fork.
 	}
 	bundles, err := m.listHarness(h, false)
 	if err != nil {
@@ -1067,7 +1090,7 @@ func (m *BundleManager) Remove(ctx context.Context, harness, version string, pin
 	}
 	defer unlock()
 	bundle, err := m.read(h, version)
-	if err != nil {
+	if err != nil && !errors.Is(err, errBundleUnusable) {
 		return err
 	}
 	if m.selected(h) == version {

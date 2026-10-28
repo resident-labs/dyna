@@ -9,7 +9,7 @@ if [ "$#" -ne 1 ]; then
 fi
 repo_root=$(git rev-parse --show-toplevel)
 vendor="$repo_root/third_party/pi"
-version="1.4.0-dyna.1"
+version="1.4.0-dyna.2"
 output=$1
 if [[ "$output" != /* ]]; then
   output="$repo_root/$output"
@@ -100,7 +100,7 @@ for (const file of files) {
   const path = join(stage, file);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   manifest.version = version;
-  manifest.dynaFork = 1;
+  manifest.dynaFork = 2;
   if (file !== "package.json") {
     // Match how upstream publishes its internal packages: no dependencies of
     // their own. npm treats bundleDependencies as complete and never installs
@@ -153,8 +153,13 @@ printf 'Pi fork tarball: %s\nIntegrity: %s\n' "$output" "$integrity"
 base=$(node -e 'process.stdout.write(require(process.argv[1] + "/package.json").version)' "$vendor/packages/coding-agent")
 fork_prefix="$tmp/verify-fork"
 npm_prefix="$tmp/verify-npm"
-npm install --global --prefix "$fork_prefix" --package-lock --ignore-scripts "$output"
-npm install --global --prefix "$npm_prefix" --package-lock --ignore-scripts "@earendil-works/pi-coding-agent@$base"
+# One retry: the registry CDN intermittently 404s a tarball that exists.
+verify_install() {
+  npm install --global --prefix "$1" --package-lock --ignore-scripts "$2" ||
+    npm install --global --prefix "$1" --package-lock --ignore-scripts "$2"
+}
+verify_install "$fork_prefix" "$output"
+verify_install "$npm_prefix" "@earendil-works/pi-coding-agent@$base"
 node --input-type=module - "$fork_prefix" "$npm_prefix" "$version" <<'EOF'
 import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -186,6 +191,37 @@ const bin = execFileSync(process.argv[2] + "/bin/pi", ["--version"], { encoding:
 if (bin !== version) {
   console.error("packed pi --version printed " + bin + ", expected " + version);
   process.exit(1);
+}
+
+// Dyna's model discovery reads this exact offline output.
+const listed = spawnSync(process.argv[2] + "/bin/pi", ["--offline", "--list-models", "--json"], { encoding: "utf8", maxBuffer: 1 << 24 });
+if (listed.status !== 0) {
+  console.error("pi --list-models --json exited with " + listed.status);
+  process.exit(1);
+}
+const entries = JSON.parse(listed.stdout);
+if (!Array.isArray(entries)) {
+  console.error("pi --list-models --json did not print a JSON array");
+  process.exit(1);
+}
+// With no signed-in provider the catalog is empty; [] is the contract.
+if (entries.length === 0) {
+  console.log("pi --list-models --json printed an empty catalog (no provider credentials)");
+}
+for (const entry of entries) {
+  if (
+    typeof entry.provider !== "string" ||
+    typeof entry.id !== "string" ||
+    typeof entry.name !== "string" ||
+    typeof entry.contextWindow !== "number" ||
+    typeof entry.maxTokens !== "number" ||
+    typeof entry.reasoning !== "boolean" ||
+    !Array.isArray(entry.thinkingLevels) ||
+    entry.thinkingLevels.some((level) => typeof level !== "string")
+  ) {
+    console.error("pi --list-models --json printed a malformed entry: " + JSON.stringify(entry));
+    process.exit(1);
+  }
 }
 
 // One codemode script with no network: this is the exact path that broke when

@@ -887,7 +887,7 @@ export async function main(args: string[], options?: MainOptions) {
 	if (parsed.listModels !== undefined) {
 		reportDiagnostics(startupSettingsDiagnostics);
 		const searchPattern = typeof parsed.listModels === "string" ? parsed.listModels : undefined;
-		await listModels(modelRuntime, searchPattern, AbortSignal.timeout(15_000));
+		await listModels(modelRuntime, searchPattern, AbortSignal.timeout(15_000), parsed.json);
 		process.exit(0);
 	}
 
