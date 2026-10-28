@@ -23,7 +23,7 @@ func (s *supervisor) startBrowser(ctx context.Context) (Browser, error) {
 	var err error
 	if len(profileBrowserPIDs(s.meta.SessionID)) == 0 {
 		var env []string
-		env, err = Environment(s.meta, os.Environ())
+		env, err = buildEnvironment(s.meta, os.Environ(), gpuEnvValues(s.desktopGPU))
 		if err == nil {
 			launched, err = startProcess(env, filepath.Join(Dir(s.meta.SessionID), "browser.log"), chromiumWrapper(s.meta.SessionID), "about:blank")
 		}

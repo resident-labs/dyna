@@ -131,7 +131,7 @@ func NewCommand() *cobra.Command {
 		for _, line := range values {
 			key, _, _ := strings.Cut(line, "=")
 			switch key {
-			case "WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "PATH", "DYNA_OWNER_WAYLAND_DISPLAY", "DYNA_OWNER_DISPLAY":
+			case "WAYLAND_DISPLAY", "DISPLAY", "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "PATH", "DYNA_OWNER_WAYLAND_DISPLAY", "DYNA_OWNER_DISPLAY", "DRI_PRIME", "__GLX_VENDOR_LIBRARY_NAME", "__EGL_VENDOR_LIBRARY_FILENAMES":
 				fmt.Fprintln(c.OutOrStdout(), line)
 			}
 		}

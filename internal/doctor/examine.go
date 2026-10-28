@@ -131,13 +131,32 @@ func ExamineMachine(s Samples, machine string, now time.Time) (Report, error) {
 	if p.IO > maxPressure {
 		symptoms, ranks = append(symptoms, fmt.Sprintf("io pressure %.0f%%", p.IO)), append(ranks, disk)
 	}
+	// GPU memory is read live, not from samples: the kernel does not keep a
+	// history, and a near-full GPU matters even when load is low (D-352).
+	gpuNote := ""
+	var gpuFindings []Finding
+	if s.GPUs != nil {
+		var readings []GPUReading
+		readings, gpuNote = s.GPUs()
+		var symptom string
+		gpuFindings, symptom = gpuHealth(readings, gpuNote)
+		if symptom != "" {
+			symptoms = append(symptoms, symptom)
+		}
+	}
 	if len(symptoms) == 0 {
 		r.Healthy = true
 		r.Summary = fmt.Sprintf("%s: healthy (load %.1f/core, memory %.0f%%)", machine, m.Load, memPct)
+		if gpuNote != "" {
+			r.Summary += "; " + gpuNote
+		}
 		r.Fingerprint = "machine|healthy"
 		return r, nil
 	}
 	r.Summary = fmt.Sprintf("%s: %s", machine, strings.Join(symptoms, "; "))
+	if gpuNote != "" {
+		r.Summary += "; " + gpuNote
+	}
 	base, err := s.baseline(machine, now)
 	if err != nil {
 		return Report{}, err
@@ -166,6 +185,10 @@ func ExamineMachine(s Samples, machine string, now time.Time) (Report, error) {
 		} else {
 			fingerprint = append(fingerprint, res.name)
 		}
+	}
+	r.Findings = append(r.Findings, gpuFindings...)
+	if len(gpuFindings) > 0 {
+		fingerprint = append(fingerprint, "gpu")
 	}
 	r.Fingerprint = strings.Join(fingerprint, "|")
 	return r, nil

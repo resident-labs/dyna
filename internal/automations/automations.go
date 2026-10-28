@@ -190,7 +190,7 @@ func doctorPass(_ context.Context, _ int, log io.Writer) error {
 		},
 		Send: func(n doctoralert.Note) error { return doctoralert.PostNote(rooms, n) },
 	}
-	return doctor.Pass{DataDir: dataDir, Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now(), Alert: notifier.Alert, Clear: notifier.Recover}.Do(log)
+	return doctor.Pass{DataDir: dataDir, Machines: []string{host}, If: cond, Cooldown: doctor.DefaultCooldown, Now: time.Now(), GPUs: doctor.ReadGPUs, Alert: notifier.Alert, Clear: notifier.Recover}.Do(log)
 }
 
 // logger writes a pass's log lines to the hook run log, one line each.

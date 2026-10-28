@@ -212,6 +212,65 @@ func TestOpenForwardsCommandAndWaitsForWindow(t *testing.T) {
 	}
 }
 
+// `dyna computer env` must hand over the GPU selection too, so a caller that
+// establishes the computer environment renders where the desktop renders
+// (D-352 review).
+func TestEnvPrintsGPUVariables(t *testing.T) {
+	call := rootComputerFixture(t)
+	t.Setenv("DYNA_COMPUTERS_TEST_ENABLE", "1")
+	// The protocol fixture must work in the plain Go image without GUI tools.
+	bin := t.TempDir()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(git, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "labwc"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	socket := computers.ControlSocket("")
+	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- computers.Serve(ctx, listener, func(_ context.Context, r computers.Request) (any, error) {
+			switch r.Op {
+			case "register":
+				return computers.Meta{SessionID: r.Session, Room: r.Room}, nil
+			case "status":
+				return computers.Status{SessionID: r.Session, State: computers.StateRunning, RenderNode: "/dev/dri/renderD1", RenderEnv: map[string]string{"DRI_PRIME": "pci-0000_02_00_0"}}, nil
+			default:
+				return nil, fmt.Errorf("unexpected operation %s", r.Op)
+			}
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	out, err := call("env")
+	if err != nil {
+		t.Fatalf("env: %s %v", out, err)
+	}
+	if !strings.Contains(out, "DRI_PRIME=pci-0000_02_00_0") {
+		t.Fatalf("env output hides the GPU selection: %s", out)
+	}
+	if !strings.Contains(out, "XDG_CURRENT_DESKTOP=labwc") {
+		t.Fatalf("env output lost a desktop variable: %s", out)
+	}
+}
+
 func TestOpenRejectsURLAndInvalidTimeoutBeforeSetup(t *testing.T) {
 	for _, args := range [][]string{
 		{"open", "--status", "Checking a page", "https://example.test"},

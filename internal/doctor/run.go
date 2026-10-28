@@ -9,6 +9,9 @@ import (
 // Run is one `dyna doctor examine` call.
 type Run struct {
 	DataDir, Machine, Target, Trigger, If string
+	// GPUs reads live GPU memory during the examination; nil skips the GPU
+	// check (D-352). Production callers pass ReadGPUs; tests stay hermetic.
+	GPUs func() ([]GPUReading, string)
 	// Cooldown skips a run whose finding matches a report of the same
 	// target saved within it.
 	Cooldown time.Duration
@@ -37,6 +40,7 @@ func (r Run) Do() (Result, error) {
 		return Result{}, fmt.Errorf("unknown target %q; this version examines machine", r.Target)
 	}
 	samples := Samples{DataDir: r.DataDir}
+	samples.GPUs = r.GPUs
 	met := ""
 	if r.If != "" {
 		cond, err := ParseCondition(r.If)
