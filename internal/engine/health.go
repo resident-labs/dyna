@@ -12,8 +12,10 @@ import (
 // hangs or falls behind at once: writes that do not end, a long queue for
 // the writer lock, slow event streams, and SQLite lock contention.
 type Health struct {
-	// Status is "read-only mode", or empty for a normal engine.
+	// Status is "starting", "read-only mode", or empty for a normal engine.
 	Status string `json:"status,omitempty"`
+	// Ready reports that migrations finished and the full API can serve.
+	Ready bool `json:"ready"`
 	// Connect says why the engine did not join Resident Labs Connect, or is
 	// empty. It is not Status: a writable engine still takes posts.
 	Connect string       `json:"connect,omitempty"`
@@ -41,7 +43,7 @@ const maxWaiting = 10
 // engineHealth builds the Health call. writer is nil in a read-only engine.
 func engineHealth(status, connect string, started time.Time, writer *state.Writer, events *hub.Hub, callers *socketCallers, signals *workerSignals) func() Health {
 	return func() Health {
-		h := Health{Status: status, Connect: connect, Started: started, Writes: writer.Health(), WritersWaiting: database.Waiting(), Events: events.Stats(), SQLiteBusyRetries: database.BusyRetries(), CallersRefused: callers.Refused(), SweepFindings: signals.findings()}
+		h := Health{Status: status, Ready: true, Connect: connect, Started: started, Writes: writer.Health(), WritersWaiting: database.Waiting(), Events: events.Stats(), SQLiteBusyRetries: database.BusyRetries(), CallersRefused: callers.Refused(), SweepFindings: signals.findings()}
 		h.Degraded = h.Writes.Degraded || h.WritersWaiting > maxWaiting
 		return h
 	}

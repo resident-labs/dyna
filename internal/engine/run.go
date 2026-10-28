@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"text/tabwriter"
 	"time"
 
@@ -326,6 +327,10 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 
 var errRetryMigration = errors.New("retry engine migration")
 
+// fullAPIReady runs after the private socket swaps to its complete handler.
+// Tests use it to observe readiness without polling.
+var fullAPIReady = func() {}
+
 // Run owns the engine services until ctx is cancelled.
 func Run(ctx context.Context, f Options) error {
 	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
@@ -407,16 +412,58 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	ctx = authority.WithActor(ctx, authority.Actor{Role: authority.Owner})
 	dataDir, ownerData := store.DataDir(), store.OwnerDataDir()
 	group, _ := callerid.Cgroup("/proc", os.Getpid())
-	readOnly, migrateStatus, connectRefused, migrateCause := startMode(dataDir, f.ReadOnly, group, ownerData)
-	if !readOnly {
-		go dailyBackups(ctx, store.DataDir())
-		go keepCheckpointed(ctx, store.DataDir())
-	}
 	if f.Addr == "" {
 		f.Addr = defaultServeAddr
 	}
 	if f.CardAddr == "" {
 		f.CardAddr = "127.0.0.1:7458"
+	}
+	socketPath, err := engineclient.SocketPath()
+	if err != nil {
+		return err
+	}
+	if err := checkPrivateRuntime(launchedBySession.Load(), os.Getenv("XDG_RUNTIME_DIR")); err != nil {
+		return err
+	}
+	if err := checkSocketOwner(socketPath, dataDir); err != nil {
+		return err
+	}
+	listeners, err := claimEngineListeners(socketPath, dataDir, f, false)
+	if err != nil {
+		return err
+	}
+	defer listeners.close()
+	started := time.Now()
+	var servers []*http.Server
+	defer func() {
+		for _, server := range servers {
+			_ = server.Close()
+		}
+	}()
+	errs := make(chan error, 3)
+	var socketHandler, socketConnContext atomic.Value
+	if !f.ReadOnly {
+		// Own and serve the private socket before a pre-migration backup. Only
+		// Health answers until every store is ready; all other calls still wait.
+		socketHandler.Store(http.HandlerFunc(startupHealthHandler(started).ServeHTTP))
+		socketConnContext.Store(connContextFunc(func(ctx context.Context, _ net.Conn) context.Context { return ctx }))
+		socketServer := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				socketHandler.Load().(http.HandlerFunc).ServeHTTP(w, r)
+			}),
+			ReadHeaderTimeout: 10 * time.Second,
+			BaseContext:       func(net.Listener) context.Context { return requests },
+			ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
+				return socketConnContext.Load().(connContextFunc)(ctx, conn)
+			},
+		}
+		servers = append(servers, socketServer)
+		go func() { errs <- socketServer.Serve(listeners.socket) }()
+	}
+	readOnly, migrateStatus, connectRefused, migrateCause := startMode(dataDir, f.ReadOnly, group, ownerData)
+	if !readOnly {
+		go dailyBackups(ctx, store.DataDir())
+		go keepCheckpointed(ctx, store.DataDir())
 	}
 
 	store, err := devicestore.DefaultStore()
@@ -528,7 +575,6 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	terminals := terminalsvc.New(terminalOptions(rooms, f.TerminalIdle))
 	var workerDone <-chan struct{}
-	var servers []*http.Server
 	var background sync.WaitGroup
 	startService := func(fn func()) {
 		background.Add(1)
@@ -562,7 +608,6 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 		status = "read-only mode"
 	}
 	// The epoch is the engine start: events of one run share it.
-	started := time.Now()
 	events := hub.New(started.UnixMilli())
 	signals := newWorkerSignals(rooms.Notify.Rooms)
 	callRing := make(chan struct{}, 1)
@@ -700,28 +745,28 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if err != nil {
 		return err
 	}
-	socketPath, err := engineclient.SocketPath()
-	if err != nil {
-		return err
+	fullServers := httpServers(requests, srv)
+	if !f.ReadOnly {
+		if !readOnly {
+			// Fail soft: sessions keep the build they run until the next start.
+			if err := fsutil.RefreshScopeLinks(); err != nil {
+				log.Printf("scope link refresh: %v", err)
+			}
+		}
+		// Publish identity before the full handler. Health clients use short-lived
+		// connections; every new connection now gets normal caller verification.
+		socketConnContext.Store(connContextFunc(srv.UnixConnContext))
+		socketHandler.Store(http.HandlerFunc(fullServers[2].Handler.ServeHTTP))
+		fullAPIReady()
+		servers = append(servers, fullServers[:2]...)
+		go func() { errs <- fullServers[0].Serve(listeners.app) }()
+		go func() { errs <- fullServers[1].Serve(listeners.card) }()
+	} else {
+		servers = append(servers, fullServers...)
+		go func() { errs <- fullServers[0].Serve(listeners.app) }()
+		go func() { errs <- fullServers[1].Serve(listeners.card) }()
+		go func() { errs <- fullServers[2].Serve(listeners.socket) }()
 	}
-	if err := checkPrivateRuntime(launchedBySession.Load(), os.Getenv("XDG_RUNTIME_DIR")); err != nil {
-		return err
-	}
-	if err := checkSocketOwner(socketPath, dataDir); err != nil {
-		return err
-	}
-	listeners, err := claimEngineListeners(socketPath, dataDir, f, !readOnly)
-	if err != nil {
-		return err
-	}
-	defer listeners.socket.Close()
-	defer listeners.app.Close()
-	defer listeners.card.Close()
-	servers = httpServers(requests, srv)
-	errs := make(chan error, len(servers))
-	go func() { errs <- servers[0].Serve(listeners.app) }()
-	go func() { errs <- servers[1].Serve(listeners.card) }()
-	go func() { errs <- servers[2].Serve(listeners.socket) }()
 	if !readOnly {
 		startService(func() { maintenance.Loop(ctx, log.Printf, rooms.Notify.Sessions.RetainClosedSession) })
 	}
