@@ -24,10 +24,13 @@ const (
 	KindProvider NoticeKind = "provider"
 	// KindSync is a remote history split that needs the owner's eye.
 	KindSync NoticeKind = "sync"
+	// KindTunnel is the managed tunnel connector being missing, so remote
+	// access stays down until the owner installs it.
+	KindTunnel NoticeKind = "tunnel"
 )
 
 // noticeKinds lists every kind, so a stored kind can be checked on read.
-var noticeKinds = []NoticeKind{KindDisk, KindProvider, KindSync}
+var noticeKinds = []NoticeKind{KindDisk, KindProvider, KindSync, KindTunnel}
 
 // Severity is how much an owner notice matters.
 type Severity string
@@ -79,6 +82,14 @@ type SyncFacts struct {
 	Rewritten bool `json:"rewritten,omitempty"`
 }
 
+// TunnelFacts is a missing managed-tunnel connector: the binary the tunnel
+// service tried to run and the PATH it searched, so the owner can see where
+// an install is missing.
+type TunnelFacts struct {
+	Binary string `json:"binary"`
+	Path   string `json:"path"`
+}
+
 // Notice is one owner-facing alert. The fields a card shows are typed facts of
 // the notice's kind, so no card reads a stored sentence: a disk notice carries
 // Disk, a provider notice carries Provider and a sync notice carries Sync.
@@ -92,6 +103,7 @@ type Notice struct {
 	Disk     *DiskFacts     `json:"disk,omitempty"`
 	Provider *ProviderFacts `json:"provider,omitempty"`
 	Sync     *SyncFacts     `json:"sync,omitempty"`
+	Tunnel   *TunnelFacts   `json:"tunnel,omitempty"`
 	Command  string         `json:"command,omitempty"`
 	At       time.Time      `json:"at"`
 	// TODO: legacy/shim remove later — a notice saved before the typed facts
@@ -134,6 +146,8 @@ func (n Notice) Line() string {
 			other = "another remote"
 		}
 		return "Remote history split in " + n.Sync.Repo + " between " + n.Sync.Lane + " and " + other + "."
+	case n.Tunnel != nil:
+		return "The managed tunnel cannot find " + n.Tunnel.Binary + ", so the app stays unreachable from away. It searched PATH " + n.Tunnel.Path + "."
 	}
 	return n.Text
 }
@@ -151,7 +165,7 @@ func (n Notice) validate() error {
 		return fmt.Errorf("a %s notice needs a key", n.Kind)
 	}
 	set := 0
-	for _, has := range []bool{n.Disk != nil, n.Provider != nil, n.Sync != nil} {
+	for _, has := range []bool{n.Disk != nil, n.Provider != nil, n.Sync != nil, n.Tunnel != nil} {
 		if has {
 			set++
 		}
@@ -171,6 +185,10 @@ func (n Notice) validate() error {
 	case KindSync:
 		if n.Sync == nil || n.Sync.Repo == "" || n.Sync.Lane == "" {
 			return fmt.Errorf("a sync notice needs the repository and lane")
+		}
+	case KindTunnel:
+		if n.Tunnel == nil || n.Tunnel.Binary == "" {
+			return fmt.Errorf("a tunnel notice needs the missing binary")
 		}
 	}
 	return nil
@@ -220,6 +238,14 @@ func (s Store) List() ([]Notice, error) {
 func (s Store) Dismiss(id string) error {
 	return s.update(func(list *[]Notice) {
 		*list = slices.DeleteFunc(*list, func(n Notice) bool { return n.ID == id })
+	})
+}
+
+// DismissKey removes the notice with this Key when one is showing, so a
+// condition that healed clears its own alert without knowing its ID.
+func (s Store) DismissKey(key string) error {
+	return s.update(func(list *[]Notice) {
+		*list = slices.DeleteFunc(*list, func(n Notice) bool { return n.Key == key })
 	})
 }
 
