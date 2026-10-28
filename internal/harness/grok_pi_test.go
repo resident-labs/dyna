@@ -1,10 +1,13 @@
 package harness
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/store/storetest"
 )
 
 // Grok runs over ACP; its argv-policy tests live in grok_acp_test.go. These
@@ -30,6 +33,35 @@ func TestPiReservedFlagsAndLeafLaunch(t *testing.T) {
 	}
 	if _, err := buildInvocationWithExecution(profile.Profile{Harness: profile.HarnessPi, ExtraArgs: []string{"-e", "plugin.js"}}, "task", ExecutionOptions{DisableNativeSubagents: true}); err == nil {
 		t.Fatal("Pi leaf accepted explicit extension")
+	}
+}
+
+func TestPiResumeAndCompactUseSessionID(t *testing.T) {
+	storetest.Isolate(t)
+	home, err := harnessruntime.NewAccounts().HarnessHome(profile.HarnessPi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "00000000-0000-4000-8000-000000000001"
+	path := filepath.Join(sessionDir, "20260101-000000_"+id+".jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessPi}, "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, spec := range map[string]commandSpec{
+		"resume":  inv.resume(id, "next"),
+		"compact": inv.compact(id),
+	} {
+		if !hasOptionValue(spec.argv, "--session", id) {
+			t.Fatalf("%s did not use the session id: %v", name, spec.argv)
+		}
 	}
 }
 
