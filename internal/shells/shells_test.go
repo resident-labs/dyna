@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -324,6 +325,44 @@ func TestSweepDoesNotStopShellWithUnreadableOwnerEvidence(t *testing.T) {
 	}
 	if in, err := s.Info(meta.ID); err != nil || in.Status != "running" {
 		t.Fatalf("shell status = %s, %v", in.Status, err)
+	}
+}
+
+func TestStopKillsStampedDescendantsAfterGrace(t *testing.T) {
+	storetest.ClearStamp(t)
+	var waited time.Duration
+	var cleaned string
+	s := &Store{Root: filepath.Join(t.TempDir(), "shells"), pause: func(d time.Duration) { waited += d }}
+	meta := runningShell(t, s, "", false)
+	s.stopJobProcesses = func(id string) (bool, error) {
+		cleaned = id
+		return true, fmt.Errorf("survivor")
+	}
+	_, err := s.Stop(meta.ID, "owner")
+	if waited < 100*time.Millisecond || cleaned != meta.ID || err == nil || !strings.Contains(err.Error(), "survivor") {
+		t.Fatalf("grace = %v, cleaned = %q, error = %v", waited, cleaned, err)
+	}
+}
+
+func TestRoomlessShellReportsCleanupFailureToOwner(t *testing.T) {
+	storetest.ClearStamp(t)
+	data := t.TempDir()
+	rooms := &room.Store{Root: filepath.Join(data, "rooms")}
+	rec, err := rooms.Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := "ses_20261028-090000-12345678"
+	recordtest.Write(t, filepath.Join(data, "sessions"), owner, map[string]string{"id": owner, "name": "worker", "roomId": rec.ID})
+	s := &Store{Root: filepath.Join(data, "shells"), pause: func(time.Duration) {}}
+	meta := runningShell(t, s, owner, false)
+	s.stopJobProcesses = func(string) (bool, error) { return false, fmt.Errorf("cleanup failed") }
+	if _, err := s.Stop(meta.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := rooms.Messages(rec.ID)
+	if err != nil || len(messages) != 1 || messages[0].Kind != "alert" || messages[0].Notice.Kind != "shell" || len(messages[0].To) != 1 || messages[0].To[0] != "work:worker" {
+		t.Fatalf("owner notice = %+v, error = %v", messages, err)
 	}
 }
 

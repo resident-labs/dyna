@@ -703,6 +703,11 @@ var eventSpecs = []EventSpec{
 		Text:      "A session consolidation paused with an error:",
 		Producers: []EventProducer{ProducerEngine},
 	},
+	{
+		Family: FamilyAlert, Type: EventType(AlertShell), Renderer: "AlertCard",
+		Payload: reflect.TypeOf(AlertEvent{}), Wake: WakeTarget, Audience: AudienceSession, Once: true,
+		Text: "Shell process cleanup did not finish:", Producers: []EventProducer{ProducerShell},
+	},
 	// A failed service turn needs the root seat, once per turn.
 	{
 		Family:    FamilyService,

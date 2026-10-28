@@ -126,6 +126,17 @@ func jobProcesses(id string, have map[int]pinned) map[int]pinned {
 	return have
 }
 
+// stampedSurvivors reports live processes still carrying this job's stamp.
+func stampedSurvivors(id string) []int {
+	var survivors []int
+	for _, pid := range runprocs.Stamped(JobEnv + "=" + id) {
+		if state, _, ok := processStat(pid); ok && state != 'Z' && state != 'X' {
+			survivors = append(survivors, pid)
+		}
+	}
+	return survivors
+}
+
 // readGroup is processGroup; a test replaces it to simulate a reused number.
 var readGroup = processGroup
 
@@ -172,7 +183,27 @@ var beforeStop, afterContain func(pid int)
 // contained and no stopped member kept its group, so a child it started may
 // still run.
 func stopOrphans(id string) (bool, error) {
+	return stopPinnedJob(id, jobProcesses(id, map[int]pinned{}))
+}
+
+// captureJobProcesses retains group members before SIGTERM can reap the
+// stamped leader and erase the evidence that unstamped children belong to it.
+func captureJobProcesses(id string) func() (bool, error) {
 	set := jobProcesses(id, map[int]pinned{})
+	return func() (bool, error) {
+		// Exits during the grace period are expected, not containment failures.
+		for pid, p := range set {
+			if p.exited() {
+				_ = unix.Close(p.fd)
+				delete(set, pid)
+			}
+		}
+		return stopPinnedJob(id, set)
+	}
+}
+
+func stopPinnedJob(id string, set map[int]pinned) (bool, error) {
+	set = jobProcesses(id, set)
 	defer func() {
 		for _, p := range set {
 			_ = unix.Close(p.fd)

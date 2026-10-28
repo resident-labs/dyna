@@ -106,6 +106,10 @@ func TestNewEventWakeAndRecipientRules(t *testing.T) {
 			wakesRoot: true,
 			audience:  AudienceRoom,
 		},
+		"alert/shell": {
+			event: AlertEvent{Source: AlertShell, Summary: "Shell process cleanup did not finish.", Detail: "cleanup failed"},
+			to:    toSession, producer: ProducerShell, wakes: true, audience: AudienceSession,
+		},
 		"service/failed": {
 			event:     ServiceFailedEvent{Service: ServiceLibrarian, Session: session, Turn: 3, Error: "exit status 1", Profile: "deepseek", Model: "deepseek-flash"},
 			to:        toRoot,
