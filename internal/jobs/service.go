@@ -129,11 +129,13 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	if !machine.Enabled {
 		return Job{}, fmt.Errorf("machine %s is disabled", machine.Name)
 	}
+	// A job runs on the host unless it names an image.
+	host := in.Host || in.Image == ""
 	// Host execution on another machine runs the submitter's words there, so
 	// it needs the machine's host grant, exactly as a host CI check does. The
 	// local node is the machine the submitter already works on, so it needs no
 	// grant: a one-machine owner runs jobs with no setup.
-	if in.Host && machine.SSH != "" && !machine.HostChecksAllowed(in.RoomID) {
+	if host && machine.SSH != "" && !machine.HostChecksAllowed(in.RoomID) {
 		return Job{}, fmt.Errorf("machine %s allows host jobs only with a host-check grant; the owner or the room root allows them with: dyna machine edit %s --allow-host-checks", machine.Name, machine.Name)
 	}
 	id, err := s.Store.NewID()
@@ -142,7 +144,7 @@ func (s *Service) Submit(ctx context.Context, in Input) (Job, error) {
 	}
 	job := Job{
 		ID: id, RoomID: in.RoomID, Session: in.Session, Node: machine.Name,
-		Command: in.Command, Host: in.Host, Image: in.Image,
+		Command: in.Command, Host: host, Image: in.Image,
 		CPUs: in.CPUs, Timeout: in.Timeout,
 		State: StateQueued, Created: s.Store.now(),
 		LogPath: filepath.Join(LogDir(s.dataDir(), id), "log"),
