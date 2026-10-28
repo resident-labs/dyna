@@ -25,6 +25,7 @@ import {
 	isAuthCommandHelp,
 	parseAuthCommand,
 	printAuthCommandHelp,
+	runAuthStorageCommand,
 	validateAuthCommandArgs,
 } from "./cli/auth-command.ts";
 import { resolveCredentialForPrint } from "./cli/credential-print.ts";
@@ -160,6 +161,11 @@ async function runAuthCommand(args: string[]): Promise<boolean> {
 	try {
 		if (parsed.diagnostics.length > 0) {
 			throw new AuthCommandError(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		}
+		if (command.kind === "list" || command.kind === "set" || command.kind === "remove") {
+			const stdin = command.kind === "set" ? await readPipedStdin() : undefined;
+			await runAuthStorageCommand(command, stdin);
+			return true;
 		}
 		if (command.kind !== "check") {
 			const signal = AbortSignal.timeout(15_000);
