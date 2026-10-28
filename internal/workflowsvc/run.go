@@ -168,7 +168,7 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	run.Append(runstore.Event{T: "run_end", Status: status, DurMs: duration.Milliseconds()})
 	// The engine reports an update interruption because this runner may no
 	// longer be able to read the database after the update.
-	if finished && run.Meta.RoomID != "" && !stopped {
+	if finished && run.Meta.Detached && !stopped {
 		if _, nerr := notify.Default().CompleteRun(context.Background(), run.Meta.ID); nerr != nil {
 			warning("completion message: " + nerr.Error())
 		}
