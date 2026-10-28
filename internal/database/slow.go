@@ -26,24 +26,39 @@ var (
 	logf = log.Printf
 )
 
-// Read runs fn on one read-only transaction and logs it when it is held
-// longer than slowRead.
+// Read runs fn on one read-only transaction and logs it when its BEGIN wait,
+// body and COMMIT together take longer than slowRead.
 func Read(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
 	start := now()
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return err
 	}
+	began := now()
+	var committing time.Time
 	defer tx.Rollback()
 	defer func() {
-		if held := now().Sub(start); held > slowRead {
-			logf("database: slow read held %s (%s)", held.Round(time.Millisecond), holder())
+		finished := now()
+		if committing.IsZero() {
+			committing = finished
 		}
+		logSlowRead(began.Sub(start), committing.Sub(began), finished.Sub(committing))
 	}()
 	if err := fn(tx); err != nil {
 		return err
 	}
+	committing = now()
 	return tx.Commit()
+}
+
+// logSlowRead logs a slow read with its BEGIN wait, body and COMMIT apart.
+func logSlowRead(wait, body, commit time.Duration) {
+	held := wait + body + commit
+	if held <= slowRead {
+		return
+	}
+	logf("database: slow read held %s (body %s, commit %s) after waiting %s for BEGIN (%s)",
+		held.Round(time.Millisecond), body.Round(time.Millisecond), commit.Round(time.Millisecond), wait.Round(time.Millisecond), holder())
 }
 
 // logSlowWrite logs a writer transaction whose body and COMMIT together held
