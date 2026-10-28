@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/pr/state"
 )
 
 // testGit runs one git command in dir and returns its trimmed output.
@@ -172,5 +174,88 @@ func TestReviewInputOmitsGeneratedFiles(t *testing.T) {
 	}
 	if !strings.Contains(task, "generated files") || !strings.Contains(task, "line counts") {
 		t.Errorf("task does not explain omitted generated files: %s", task)
+	}
+}
+
+func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
+	// One topology per delta branch: an ordinary later-round delta between two
+	// heads on the same base, and a rebase whose amended tip makes range-diff
+	// print a commit interdiff that the filter must keep free of generated files.
+	for name, rebase := range map[string]bool{"ordinary": false, "rebase": true} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			repo := t.TempDir()
+			testGit(t, repo, "init", "-q", "-b", "main")
+			testGit(t, repo, "config", "user.name", "test")
+			testGit(t, repo, "config", "user.email", "test@example.com")
+			testCommit(t, repo, "base.txt", "base\n", "base")
+			testGit(t, repo, "checkout", "-q", "-b", "feature")
+			if err := os.MkdirAll(filepath.Join(repo, "generated"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			testCommit(t, repo, ".gitattributes", "generated/** linguist-generated\n", "mark generated files")
+			// range-diff pairs an amended commit only when its patch clearly beats
+			// the fixed cost of treating it as new, so the source file stays large.
+			srcBefore := "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"
+			srcAfter := srcBefore + "NEW LINE\n"
+			genBefore := "gen one\ngen two\ngen three\n"
+			genAfter := "gen CHANGED\ngen two\ngen three\n"
+			testCommit(t, repo, "generated/one.txt", genBefore, "add generated preset")
+			testCommit(t, repo, "src.txt", srcBefore, "add reviewed source")
+			previous := testGit(t, repo, "rev-parse", "HEAD")
+			if rebase {
+				testGit(t, repo, "checkout", "-q", "main")
+				testCommit(t, repo, "merged.txt", "a base commit merged after the fork\n", "merged on main")
+				testGit(t, repo, "checkout", "-q", "feature")
+				testGit(t, repo, "rebase", "-q", "main")
+				// Amend the tip so range-diff pairs it with the previous head's tip
+				// and prints their interdiff; range-diff shows no patch for new commits.
+				for path, body := range map[string]string{"generated/one.txt": genAfter, "src.txt": srcAfter} {
+					if err := os.WriteFile(filepath.Join(repo, path), []byte(body), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				testGit(t, repo, "add", "-A")
+				testGit(t, repo, "commit", "-q", "--amend", "--no-edit")
+			} else {
+				testCommit(t, repo, "generated/one.txt", genAfter, "change generated preset")
+				testCommit(t, repo, "src.txt", srcAfter, "change reviewed source")
+			}
+			head := testGit(t, repo, "rev-parse", "HEAD")
+			base := testGit(t, repo, "rev-parse", "main")
+			r := Record{Kind: "local", Key: "local-delta-" + name, Repo: "local", RepoPath: repo, Base: base, Head: head, Round: 2,
+				ReviewRounds: []state.ReviewRound{{Head: previous}}}
+			task, err := e.s.prepareReviewTask(context.Background(), r, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths, err := filepath.Glob(filepath.Join(e.s.Store.Root, "review-inputs", "*", "*.json"))
+			if err != nil || len(paths) != 1 {
+				t.Fatalf("context paths: %+v, %v", paths, err)
+			}
+			data, err := os.ReadFile(paths[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var input struct {
+				DeltaPath string `json:"deltaPath"`
+			}
+			if err := json.Unmarshal(data, &input); err != nil {
+				t.Fatal(err)
+			}
+			if input.DeltaPath == "" {
+				t.Fatalf("task has no delta:\n%s", task)
+			}
+			delta, err := os.ReadFile(input.DeltaPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(delta), "generated/one.txt") {
+				t.Errorf("generated file remains in the %s delta:\n%s", name, delta)
+			}
+			if !strings.Contains(string(delta), "src.txt") {
+				t.Errorf("reviewed source is missing from the %s delta:\n%s", name, delta)
+			}
+		})
 	}
 }

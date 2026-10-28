@@ -149,7 +149,7 @@ func generatedDiffFiles(ctx context.Context, repo, from, to string) ([]Generated
 
 // writeReviewDelta compares only the commits each head adds to the base branch.
 // Comparing the head trees would also include base changes brought in by a rebase.
-func writeReviewDelta(ctx context.Context, repo, base, from, to, path string) (bool, error) {
+func writeReviewDelta(ctx context.Context, repo, base, from, to, path string, excluded ...string) (bool, error) {
 	oldBase, err := gitRead(ctx, repo, "merge-base", base, from)
 	if err != nil {
 		return false, fmt.Errorf("previous review merge base: %w", err)
@@ -159,9 +159,11 @@ func writeReviewDelta(ctx context.Context, repo, base, from, to, path string) (b
 		return false, fmt.Errorf("current review merge base: %w", err)
 	}
 	if oldBase == newBase {
-		return writeTreeDiff(ctx, repo, from, to, path)
+		return writeTreeDiff(ctx, repo, from, to, path, excluded...)
 	}
-	return writeDiff(ctx, repo, path, "range-diff", "--no-ext-diff", "--no-textconv", "--no-color", oldBase+".."+from, newBase+".."+to)
+	args := []string{"range-diff", "--no-ext-diff", "--no-textconv", "--no-color", oldBase + ".." + from, newBase + ".." + to, "--"}
+	args = append(args, excluded...)
+	return writeDiff(ctx, repo, path, args...)
 }
 
 func writeDiff(ctx context.Context, repo, path string, args ...string) (bool, error) {
@@ -266,7 +268,7 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		input.DiffStat, _ = gitRead(ctx, r.RepoPath, statArgs...)
 		if from := deltaBase(input.Previous, seen); from != "" && from != r.Head {
 			input.DeltaPath = filepath.Join(dir, name+"-delta.patch")
-			truncated, e := writeReviewDelta(ctx, r.RepoPath, r.Base, from, r.Head, input.DeltaPath)
+			truncated, e := writeReviewDelta(ctx, r.RepoPath, r.Base, from, r.Head, input.DeltaPath, excluded...)
 			input.DiffTruncated = input.DiffTruncated || truncated
 			if e != nil {
 				input.DeltaPath = ""
