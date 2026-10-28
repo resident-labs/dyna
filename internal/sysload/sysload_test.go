@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -170,6 +171,15 @@ func TestExitedRoomComputerDoesNotHideTheBusyOne(t *testing.T) {
 	}
 	near(t, "computers", l.Split.Computers, 25)
 	near(t, "agents", l.Split.Agents, 0)
+	// The scope is a computer, never an agent session.
+	for _, g := range l.Groups {
+		if strings.HasPrefix(g.Name, "session:") {
+			t.Fatalf("room computer reported as a session: %+v", g)
+		}
+	}
+	if len(l.Top) != 0 {
+		t.Fatalf("room computer listed as a top agent: %+v", l.Top)
+	}
 }
 
 func TestFirstSampleHasNoCPUShare(t *testing.T) {
