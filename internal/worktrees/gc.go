@@ -68,8 +68,9 @@ type GCOptions struct {
 	// spent session cleanup's whole time budget. Sessions and running
 	// workflows are still read again before each removal.
 	history *runHistory
-	// beforeRemove lets tests observe each removal worker; nil in production.
-	beforeRemove func(path string)
+	// beforeLock lets tests observe a removal worker that finished its parallel
+	// rechecks and waits for the removal lock; nil in production.
+	beforeLock func(path string)
 }
 
 // ManagedRoot is shared by session and workflow worktrees.
@@ -632,7 +633,7 @@ func treeUsage(ctx context.Context, path string) (int64, time.Time, error) {
 // remove rechecks ownership, file activity, status and ancestry, then removes
 // the tree or returns it kept with the reason. Sessions and running workflows
 // are read again; only ended runs' journal history comes from the first scan.
-func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error)) (out Tree) {
+func remove(ctx context.Context, repo string, t Tree, history *runHistory, closed func(string) (bool, error), beforeLock func()) (out Tree) {
 	// Whichever check stops it, a tree kept only because time ran out is
 	// retried by the scheduled cleanup.
 	defer func() {
@@ -657,6 +658,18 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 		t.Action, t.Reason = "kept", "worktree changed during cleanup"
 		return t
 	}
+	// The rechecks above run in parallel and can queue here for a while. Read
+	// ownership and process use again once the lock is held, right before Git
+	// deletes the tree.
+	if beforeLock != nil {
+		beforeLock()
+	}
+	removeMu.Lock()
+	defer removeMu.Unlock()
+	if fresh := decide(latest[0], closed); fresh.Action != "would remove" {
+		t.Action, t.Reason = "kept", "worktree changed during cleanup: "+fresh.Reason
+		return t
+	}
 	if reason, e := processUse(ctx, t.Path); e != nil {
 		t.Action, t.Reason = "kept", "cannot check worktree process use: "+e.Error()
 		return t
@@ -664,9 +677,6 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 		t.Action, t.Reason = "kept", reason
 		return t
 	}
-	// Rechecks above run in parallel; Git changes the shared worktree list one at a time.
-	removeMu.Lock()
-	defer removeMu.Unlock()
 	if out, e := gitOutput(ctx, repo, "worktree", "remove", t.Path); e != nil {
 		t.Action, t.Reason = "kept", fmt.Sprintf("git refused removal: %v: %s", e, strings.TrimSpace(string(out)))
 		return t
@@ -772,10 +782,11 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				if opts.beforeRemove != nil {
-					opts.beforeRemove(result[i].Path)
+				var beforeLock func()
+				if opts.beforeLock != nil {
+					beforeLock = func() { opts.beforeLock(result[i].Path) }
 				}
-				result[i] = remove(ctx, repo, result[i], history, closed)
+				result[i] = remove(ctx, repo, result[i], history, closed, beforeLock)
 			}
 		}()
 	}
