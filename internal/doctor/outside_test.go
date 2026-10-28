@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/agentslice"
 )
 
 // fakeProc writes one process the way /proc shows it. The command and cgroup
@@ -33,8 +35,10 @@ func fakeProc(t *testing.T, root string, pid int, command, cgroup, cwd string, t
 // by unit, and leave Dyna's own processes out.
 func TestTopOutsideNamesBusyProgramsOutsideDyna(t *testing.T) {
 	root := t.TempDir()
-	swarm := "/user.slice/user@1000.service/app.slice/horizon-swarm-3.scope"
-	inside := "/user.slice/user@1000.service/dyna.slice/dyna-ses_x-12345678.scope"
+	const roomID = "room_20261028-062251-8827a7e0"
+	roomSlice := "/user.slice/user@1000.service/dyna.slice/dyna-room.slice/" + agentslice.RoomSlice(roomID)
+	swarm := roomSlice + "/horizon-swarm-3.service"
+	inside := roomSlice + "/dyna-ses_x-12345678.scope"
 	write := func(java uint64) {
 		fakeProc(t, root, 10, "java", swarm, "/srv/horizon", java, 1000)
 		fakeProc(t, root, 11, "java", swarm, "/srv/horizon", java, 1000)
@@ -48,7 +52,7 @@ func TestTopOutsideNamesBusyProgramsOutsideDyna(t *testing.T) {
 	}
 	p := got[0]
 	// Each java process used 200 ticks in 2 s: 1 core each.
-	if p.Command != "java" || p.Unit != "horizon-swarm-3.scope" || p.Count != 2 || p.Cores < 1.99 || p.Cores > 2.01 || p.Cwd != "/srv/horizon" {
+	if p.Command != "java" || p.RoomID != roomID || p.Unit != "horizon-swarm-3.service" || p.Count != 2 || p.Cores < 1.99 || p.Cores > 2.01 || p.Cwd != "/srv/horizon" {
 		t.Fatalf("group = %+v", p)
 	}
 }

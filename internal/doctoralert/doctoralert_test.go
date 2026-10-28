@@ -208,15 +208,15 @@ func TestAdviceNeverCallsASessionWithWorkFinished(t *testing.T) {
 	}
 }
 
-func TestLocateNamesTheRoomOfAnOutsideProgram(t *testing.T) {
+func TestLocateUsesCanonicalRoomAndLaunchIdentities(t *testing.T) {
 	infos := []subagent.Info{
 		{Meta: subagent.Meta{ID: "ses_20261026-155300-d1797343", Room: "dyna", RoomID: "r1"}},
 		{Meta: subagent.Meta{ID: "ses_20261026-155301-aaaaaaaa", Room: "horizon", RoomID: "r2"}},
 	}
 	got := Locate([]doctor.Process{
 		{Command: "cargo", Cwd: "/home/x/.dyna-worktrees/h/dyna-ses_20261026-155300-d1797343-e3401d93"},
-		{Command: "java", Unit: "horizon-swarm-3.scope", Cwd: "/srv"},
-		{Command: "chrome", Unit: "app-chrome.scope"},
+		{Command: "java", Unit: "swarm.service", RoomID: "r2", Cwd: "/srv"},
+		{Command: "chrome", Unit: "horizon-swarm-3.scope"},
 	}, infos)
 	if got[0].Room != "dyna" || got[1].Room != "horizon" || got[2].Room != "" {
 		t.Fatalf("rooms = %q %q %q", got[0].Room, got[1].Room, got[2].Room)

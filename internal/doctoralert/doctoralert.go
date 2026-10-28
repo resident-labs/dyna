@@ -10,9 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
+	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/hub"
@@ -119,30 +119,28 @@ type Outside struct {
 // Text is the line a note shows for it.
 func (o Outside) Text() string { return o.Process.Text(o.Room) }
 
-// Locate names the room of each outside program. A working folder inside a
-// session's worktree names that session's room. Else a unit named after a room,
-// such as horizon-swarm-3.scope for room horizon, names that room.
+// Locate names the room of each outside program. The canonical room slice in
+// its cgroup names the room directly. Otherwise a working folder inside a
+// session's worktree names that session's room. An unrelated unit name proves
+// no ownership.
 func Locate(procs []doctor.Process, infos []subagent.Info) []Outside {
-	sessionRoom := map[string]string{}
-	var rooms []string
+	sessionRoom := map[string]agentslice.RoomID{}
+	roomNames := map[agentslice.RoomID]string{}
 	for _, in := range infos {
 		if in.Room == "" {
 			continue
 		}
-		sessionRoom[in.ID] = in.Room
-		rooms = append(rooms, in.Room)
+		roomID := agentslice.RoomID(in.RoomID)
+		sessionRoom[in.ID] = roomID
+		roomNames[roomID] = in.Room
 	}
 	out := make([]Outside, len(procs))
 	for i, p := range procs {
-		out[i] = Outside{Process: p, Room: sessionRoom[doctor.SessionIn(p.Cwd)]}
-		if out[i].Room != "" {
-			continue
+		roomID := sessionRoom[doctor.SessionIn(p.Cwd)]
+		if p.RoomID != "" {
+			roomID = p.RoomID
 		}
-		for _, name := range rooms {
-			if strings.HasPrefix(p.Unit, name+"-") && len(name) > len(out[i].Room) {
-				out[i].Room = name
-			}
-		}
+		out[i] = Outside{Process: p, Room: roomNames[roomID]}
 	}
 	return out
 }
