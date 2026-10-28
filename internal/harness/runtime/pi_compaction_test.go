@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,28 @@ import (
 	accountadapters "dyna-agent/internal/account/service/adapters"
 	"dyna-agent/internal/harness/config"
 )
+
+func TestPiDiscoveryHonorsCancellation(t *testing.T) {
+	accounts := testAccounts(t)
+	n, err := accounts.Create("pi", "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := accounts.HarnessHome("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "pi")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = (&Runtime{Accounts: accounts}).piGenerationReserves(ctx, home, n.ID, Bundle{Version: "1.4.0", Executable: exe})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("discovery error = %v, want cancellation", err)
+	}
+}
 
 func TestPiCompactionGenerationPreservesOverrides(t *testing.T) {
 	dir := t.TempDir()
