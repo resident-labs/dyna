@@ -237,10 +237,14 @@ var executableHashes sync.Map
 // runs beside the executable, such as a companion server.
 var errBundleUnusable = errors.New("bundle cannot be used")
 
-// read returns a verified published bundle. A bundle without the files its
-// adapter requires comes back with errBundleUnusable, so Resolve, Select,
-// Rollback, Lease and install reuse all refuse it.
+// read returns a verified published bundle. A bundle whose version Dyna's
+// verified recipes no longer support, or without the files its adapter
+// requires, comes back with errBundleUnusable, so Resolve, Select, Rollback,
+// Lease and install reuse all refuse it and name the reason.
 func (m *BundleManager) read(h, v string) (Bundle, error) {
+	if ok, reason := supportedVersionRange(h, v); !ok {
+		return Bundle{}, fmt.Errorf("%w: %s %s is not supported: %s", errBundleUnusable, h, v, reason)
+	}
 	b, err := m.readManifest(h, v)
 	if err != nil {
 		return Bundle{}, err
@@ -836,11 +840,16 @@ func (m *BundleManager) Resolve(harness, version string) (Bundle, error) {
 	if version != "" && !validVersion(version) {
 		return Bundle{}, errors.New("private bundles require an exact version, not a moving tag or range")
 	}
-	if version == "" {
-		version = m.selected(h)
-	}
 	if version != "" {
 		return m.read(h, version)
+	}
+	if selected := m.selected(h); selected != "" {
+		if ok, _ := supportedVersionRange(h, selected); ok {
+			return m.read(h, selected)
+		}
+		// A selection outside the supported range must not pin every new
+		// session to a bundle that cannot run. Resolution falls through to
+		// the newest supported bundle, so first use installs the fork.
 	}
 	bundles, err := m.listHarness(h, false)
 	if err != nil {

@@ -17,19 +17,19 @@ func TestPrivateRuntimeSnapshotReportsSelectionAndRecommendations(t *testing.T) 
 	payload := []byte("#!/bin/sh\nexit 0\n")
 	sum := sha256.Sum256(payload)
 	for _, version := range []string{"1.3.0", "2.0.0"} {
-		dir := filepath.Join(m.Root, "pi", version)
+		dir := filepath.Join(m.Root, "claude-code", version)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "pi"), payload, 0700); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "claude"), payload, 0700); err != nil {
 			t.Fatal(err)
 		}
-		raw, _ := json.Marshal(map[string]string{"harness": "pi", "version": version, "executable": "pi", "sha256": hex.EncodeToString(sum[:])})
+		raw, _ := json.Marshal(map[string]string{"harness": "claude-code", "version": version, "executable": "claude", "sha256": hex.EncodeToString(sum[:])})
 		if err := os.WriteFile(filepath.Join(dir, "bundle.json"), raw, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := m.Select("pi", "1.3.0"); err != nil {
+	if err := m.Select("claude-code", "1.3.0"); err != nil {
 		t.Fatal(err)
 	}
 	a.privateRecommendations = func(context.Context) []RecommendedVersion {
@@ -39,17 +39,17 @@ func TestPrivateRuntimeSnapshotReportsSelectionAndRecommendations(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.SelectedVersions["pi"] != "1.3.0" || len(snapshot.Bundles) != 2 {
+	if snapshot.SelectedVersions["claude-code"] != "1.3.0" || len(snapshot.Bundles) != 2 {
 		t.Fatal("explicit selection was lost", snapshot)
 	}
 	if len(snapshot.RecommendedVersions) != 1 || snapshot.RecommendedVersions[0].Version != "3.0.0" {
 		t.Fatal("recommendation was lost")
 	}
-	if err := os.Remove(filepath.Join(m.Root, ".pi-selected")); err != nil {
+	if err := os.Remove(filepath.Join(m.Root, ".claude-code-selected")); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err = a.PrivateRuntimes(context.Background())
-	if err != nil || snapshot.SelectedVersions["pi"] != "2.0.0" {
+	if err != nil || snapshot.SelectedVersions["claude-code"] != "2.0.0" {
 		t.Fatal("newest fallback was lost", err)
 	}
 }
