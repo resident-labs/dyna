@@ -952,6 +952,9 @@ func (s *Service) Members(ref string, withClosed bool) ([]Member, error) {
 	return members, nil
 }
 
+// Tests count responsibility store passes through this function.
+var responsibilityCounts = (*subagent.Manager).ResponsibilityCounts
+
 // countResponsibilities fills each open session's responsibility counts from
 // one read of every store, so a member list costs the same as one close
 // check. The owner row, a closed session and a session whose lists cannot be
@@ -978,11 +981,11 @@ func (s *Service) countResponsibilities(members []Member, all []subagent.Info) {
 	if len(owners) == 0 {
 		return
 	}
-	counts, err := manager.ResponsibilityCounts(context.Background(), owners)
+	counts, err := responsibilityCounts(manager, context.Background(), owners)
 	if err != nil {
 		// A count is advisory, so a store that could not be read leaves the
 		// rows it covered empty instead of failing the member list.
-		log.Printf("room %s: responsibility counts: %v", members[0].Address, err)
+		log.Printf("member responsibility counts: %v", err)
 	}
 	for _, i := range rows {
 		if byKind := counts[members[i].ID]; len(byKind) > 0 {
