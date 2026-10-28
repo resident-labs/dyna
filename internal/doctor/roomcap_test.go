@@ -72,6 +72,56 @@ func TestRoomCapsReadsEveryRoomSlice(t *testing.T) {
 	}
 }
 
+// Memory alerts discount clean file cache on the active and inactive LRU
+// lists and reclaimable slab. Dirty, writeback, shared and non-LRU file memory
+// stays charged, as does all memory when the kernel statistics are incomplete.
+func TestRoomCapsMemoryDiscountsOnlyReclaimableCache(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stat string
+		want uint64
+	}{
+		{
+			name: "reclaimable file and slab",
+			stat: "active_file 200\ninactive_file 300\nfile_dirty 20\nfile_writeback 10\nshmem 30\nslab_reclaimable 300\n",
+			want: 260,
+		},
+		{
+			name: "non-reclaimable memory still counts",
+			stat: "active_file 60\ninactive_file 40\nfile_dirty 0\nfile_writeback 0\nshmem 0\nslab_reclaimable 0\n",
+			want: 900,
+		},
+		{
+			name: "incomplete statistics keep the raw reading",
+			stat: "active_file 200\ninactive_file 300\nfile_dirty 20\nfile_writeback 10\nslab_reclaimable 300\n",
+			want: 1000,
+		},
+		{
+			name: "inconsistent statistics cannot underflow usage",
+			stat: "active_file 200\ninactive_file 300\nfile_dirty 20\nfile_writeback 10\nshmem 30\nslab_reclaimable 2000\n",
+			want: 1000,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			fakeRoom(t, root, "room__1", "1000", "1100", "1200", "1", "100")
+			slice := filepath.Join(root, "dyna.slice", "dyna-room.slice", agentslice.RoomSlice("room__1"))
+			if err := os.WriteFile(filepath.Join(slice, "memory.stat"), []byte(tc.stat), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got := RoomCaps(root)
+			if len(got) != 1 || len(got[0].Caps) != 3 {
+				t.Fatalf("rooms = %+v", got)
+			}
+			for _, cap := range got[0].Caps[:2] {
+				if cap.Current != tc.want {
+					t.Errorf("%s current = %d, want %d", cap.Cap, cap.Current, tc.want)
+				}
+			}
+		})
+	}
+}
+
 // fakeRoomProc writes one process the way /proc shows it, with its parent.
 func fakeRoomProc(t *testing.T, root string, pid, ppid int, command string, pages uint64) {
 	t.Helper()

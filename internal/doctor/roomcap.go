@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"io/fs"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,7 +36,9 @@ const (
 
 // CapUse is one room slice's use of one cap.
 type CapUse struct {
-	Cap     Cap
+	Cap Cap
+	// Current is the use that the kernel cannot simply reclaim for memory
+	// caps, and the process count for pids.max.
 	Current uint64
 	Limit   uint64
 }
@@ -61,7 +64,7 @@ func RoomCaps(userRoot string) []RoomUse {
 			continue
 		}
 		use := RoomUse{RoomID: roomID, Slice: filepath.Base(dir)}
-		current, _ := cgroupUint(dir, "memory.current")
+		current := roomMemoryCurrent(dir)
 		for _, c := range []struct {
 			cap  Cap
 			file string
@@ -77,6 +80,57 @@ func RoomCaps(userRoot string) []RoomUse {
 		out = append(out, use)
 	}
 	return out
+}
+
+// roomMemoryCurrent reads the memory that counts against a room's limits
+// after reclaim. Clean file pages on the active and inactive LRU lists and
+// reclaimable slab can make room for new allocations. Dirty, writeback,
+// shared and non-LRU file pages stay charged. A missing, malformed or
+// inconsistent memory.stat keeps the raw memory.current reading: without all
+// of these fields the doctor cannot safely discount any cache.
+func roomMemoryCurrent(dir string) uint64 {
+	current, _ := cgroupUint(dir, "memory.current")
+	b, err := os.ReadFile(filepath.Join(dir, "memory.stat"))
+	if err != nil {
+		return current
+	}
+	stats := map[string]uint64{}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return current
+		}
+		stats[fields[0]] = value
+	}
+	names := [...]string{"active_file", "inactive_file", "file_dirty", "file_writeback", "shmem", "slab_reclaimable"}
+	values := make([]uint64, len(names))
+	for i, name := range names {
+		value, ok := stats[name]
+		if !ok {
+			return current
+		}
+		values[i] = value
+	}
+	file, carry := bits.Add64(values[0], values[1], 0)
+	if carry != 0 {
+		return current
+	}
+	for _, nonReclaimable := range values[2:5] {
+		if nonReclaimable > file {
+			file = 0
+			break
+		}
+		file -= nonReclaimable
+	}
+	reclaimable, carry := bits.Add64(file, values[5], 0)
+	if carry != 0 || reclaimable > current {
+		return current
+	}
+	return current - reclaimable
 }
 
 // cgroupUint reads one cgroup file that holds a whole number. "max", a
