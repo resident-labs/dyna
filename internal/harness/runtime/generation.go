@@ -51,7 +51,7 @@ func restoreGenerationHome(h, dir string, generation harnessmgr.ConfigGeneration
 
 // materializeNative writes a captured catalog to staging. All retained references
 // use published. Shared-home publication happens only after the atomic rename.
-func materializeNative(h, home, dir, published, cli string, c harnessmgr.HarnessConfig, prefs map[string]any, piReserves map[string]int64, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
+func materializeNative(h, home, dir, published, cli string, c harnessmgr.HarnessConfig, prefs map[string]any, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
 	a, err := Adapter(h)
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
@@ -123,37 +123,6 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 	root := map[string]any{}
 	for name, value := range prefs {
 		putRuntimePreference(root, name, value)
-	}
-	if len(piReserves) > 0 {
-		compaction, ok := root["compaction"].(map[string]any)
-		if !ok {
-			if _, exists := root["compaction"]; exists {
-				return g, errors.New("Pi compaction settings must be an object")
-			}
-			compaction = map[string]any{}
-			root["compaction"] = compaction
-		}
-		overrides, ok := compaction["modelOverrides"].(map[string]any)
-		if !ok {
-			if _, exists := compaction["modelOverrides"]; exists {
-				return g, errors.New("Pi compaction model overrides must be an object")
-			}
-			overrides = map[string]any{}
-			compaction["modelOverrides"] = overrides
-		}
-		for model, reserve := range piReserves {
-			entry, ok := overrides[model].(map[string]any)
-			if !ok {
-				if _, exists := overrides[model]; exists {
-					return g, fmt.Errorf("Pi compaction override for %q must be an object", model)
-				}
-				entry = map[string]any{}
-				overrides[model] = entry
-			}
-			if _, exists := entry["reserveTokens"]; !exists {
-				entry["reserveTokens"] = reserve
-			}
-		}
 	}
 	if a.MCPKey != "" {
 		root[a.MCPKey] = servers

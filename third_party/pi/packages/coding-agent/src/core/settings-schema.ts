@@ -2,7 +2,7 @@ import { ModelThinkingLevelSchema } from "@earendil-works/pi-ai/providers/model-
 import { type Static, type TSchemaOptions, Type } from "typebox";
 import { SETTINGS_DEFAULTS } from "./settings-defaults.ts";
 
-function nonNegativeSafeInteger(options: { default?: number } = {}) {
+function nonNegativeSafeInteger(options: { default?: number; description?: string } = {}) {
 	return Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER, ...options });
 }
 
@@ -13,12 +13,22 @@ function timeoutSetting(options?: TSchemaOptions) {
 const CompactionModelOverrideSchema = Type.Object({
 	reserveTokens: Type.Optional(nonNegativeSafeInteger()),
 	keepRecentTokens: Type.Optional(nonNegativeSafeInteger()),
+	triggerTokens: Type.Optional(
+		nonNegativeSafeInteger({
+			description: "Absolute context-token count that starts automatic compaction, before the reserve-based limit.",
+		}),
+	),
 });
 
 const CompactionSettingsSchema = Type.Object({
 	enabled: Type.Optional(Type.Boolean({ default: SETTINGS_DEFAULTS.compaction.enabled })),
 	reserveTokens: Type.Optional(nonNegativeSafeInteger({ default: SETTINGS_DEFAULTS.compaction.reserveTokens })),
 	keepRecentTokens: Type.Optional(nonNegativeSafeInteger({ default: SETTINGS_DEFAULTS.compaction.keepRecentTokens })),
+	triggerTokens: Type.Optional(
+		nonNegativeSafeInteger({
+			description: "Absolute context-token count that starts automatic compaction; compaction starts above min(triggerTokens, contextWindow - reserveTokens). Unset keeps the reserve-based limit.",
+		}),
+	),
 	modelOverrides: Type.Optional(
 		Type.Record(Type.String(), CompactionModelOverrideSchema, {
 			description: 'Per-model overrides keyed by exact "provider/modelId" strings.',

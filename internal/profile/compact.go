@@ -99,7 +99,8 @@ func CompactNative(p Profile) ([]string, map[string]string, error) {
 	}
 	switch p.Harness {
 	case HarnessPi:
-		// Pi's runtime generation sets model-specific reserves.
+		// The invocation passes the profile's target as
+		// --compaction-trigger-tokens; see piInvocation.
 		return nil, nil, nil
 	case HarnessClaudeCode:
 		// The harness merges this --settings layer with the profile's own.

@@ -116,6 +116,12 @@
           "maximum": 9007199254740991,
           "default": 20000
         },
+        "triggerTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Absolute context-token count that starts automatic compaction; compaction starts above min(triggerTokens, contextWindow - reserveTokens). Unset keeps the reserve-based limit."
+        },
         "modelOverrides": {
           "type": "object",
           "patternProperties": {
@@ -131,6 +137,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "triggerTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Absolute context-token count that starts automatic compaction, before the reserve-based limit."
                 }
               }
             }

@@ -53,7 +53,7 @@ export type {
 /** Cache-warming profile. "idle" also warms between agent runs. */
 export const CACHE_WARMING_MODES = ["off", "streaming", "idle"] as const satisfies readonly CacheWarmingMode[];
 
-const DEFAULT_COMPACTION_TOKEN_SETTINGS: Required<CompactionModelOverride> = {
+const DEFAULT_COMPACTION_TOKEN_SETTINGS: Required<Pick<CompactionModelOverride, "reserveTokens" | "keepRecentTokens">> = {
 	reserveTokens: SETTINGS_DEFAULTS.compaction.reserveTokens,
 	keepRecentTokens: SETTINGS_DEFAULTS.compaction.keepRecentTokens,
 };
@@ -833,7 +833,7 @@ export class SettingsManager {
 	private getCompactionTokenSetting(
 		field: keyof CompactionModelOverride,
 		model?: Pick<Model<string>, "provider" | "id">,
-	): number {
+	): number | undefined {
 		const compaction = this.settings.compaction;
 		const ordinary = compaction?.[field];
 		if (ordinary !== undefined && (typeof ordinary !== "number" || !Number.isSafeInteger(ordinary) || ordinary < 0)) {
@@ -855,15 +855,21 @@ export class SettingsManager {
 				`Invalid compaction.modelOverrides["${modelKey}"].${field} setting: ${String(override)}. Expected a non-negative safe integer.`,
 			);
 		}
-		return override ?? ordinary ?? DEFAULT_COMPACTION_TOKEN_SETTINGS[field];
+		const fallback = DEFAULT_COMPACTION_TOKEN_SETTINGS[field as keyof typeof DEFAULT_COMPACTION_TOKEN_SETTINGS];
+		return override ?? ordinary ?? fallback;
 	}
 
 	getCompactionReserveTokens(model?: Pick<Model<string>, "provider" | "id">): number {
-		return this.getCompactionTokenSetting("reserveTokens", model);
+		return this.getCompactionTokenSetting("reserveTokens", model) ?? SETTINGS_DEFAULTS.compaction.reserveTokens;
 	}
 
 	getCompactionKeepRecentTokens(model?: Pick<Model<string>, "provider" | "id">): number {
-		return this.getCompactionTokenSetting("keepRecentTokens", model);
+		return this.getCompactionTokenSetting("keepRecentTokens", model) ?? SETTINGS_DEFAULTS.compaction.keepRecentTokens;
+	}
+
+	/** Absolute compaction trigger, or undefined to keep the reserve-based limit. */
+	getCompactionTriggerTokens(model?: Pick<Model<string>, "provider" | "id">): number | undefined {
+		return this.getCompactionTokenSetting("triggerTokens", model);
 	}
 
 	/** Resolve each token setting through model override, ordinary setting, then built-in default. */
@@ -871,11 +877,13 @@ export class SettingsManager {
 		enabled: boolean;
 		reserveTokens: number;
 		keepRecentTokens: number;
+		triggerTokens: number | undefined;
 	} {
 		return {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(model),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(model),
+			triggerTokens: this.getCompactionTriggerTokens(model),
 		};
 	}
 
