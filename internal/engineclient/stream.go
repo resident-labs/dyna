@@ -36,7 +36,7 @@ func (c *Client) Stream(ctx context.Context, path string) (*websocket.Conn, erro
 	conn, res, err := dialer.DialContext(ctx, "ws://engine"+path, header)
 	if err != nil {
 		if errors.Is(err, ErrNotRunning) {
-			return nil, ErrNotRunning
+			return nil, err
 		}
 		if res != nil {
 			defer res.Body.Close()

@@ -2,7 +2,9 @@ package enginesocket
 
 import (
 	"dyna-agent/internal/testsafe"
+	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -16,10 +18,13 @@ func TestPathFollowsTheRuntimeFolder(t *testing.T) {
 	if got, err := Path(); err != nil || got != filepath.Join(runtime, "dyna", "engine.sock") {
 		t.Fatalf("path = %q, %v", got, err)
 	}
-	for _, invalid := range []string{"", "relative"} {
-		t.Setenv("XDG_RUNTIME_DIR", invalid)
-		if _, err := Path(); err == nil {
-			t.Fatalf("accepted %q", invalid)
-		}
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	fallback := filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "dyna", "engine.sock")
+	if got, err := Path(); err != nil || got != fallback {
+		t.Fatalf("fallback path = %q, %v; want %q", got, err, fallback)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", "relative")
+	if _, err := Path(); err == nil {
+		t.Fatal("accepted a relative runtime directory")
 	}
 }
