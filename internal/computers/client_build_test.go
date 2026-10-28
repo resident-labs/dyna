@@ -40,6 +40,19 @@ func buildServer(t *testing.T, reply string) *Client {
 	return &Client{Socket: socket}
 }
 
+func TestLegacyDaemonCannotStartUnprotectedRunOrRestart(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client := buildServer(t, `{"error":"unknown computer operation run.lease"}`)
+	client.Session = "test"
+	if _, err := client.PrepareRun(ctx, "Checking legacy negotiation"); err == nil {
+		t.Fatal("legacy daemon accepted an unprotected run")
+	}
+	if _, err := buildServer(t, `{"error":"invalid session id"}`).BeginRestart(ctx); !errors.Is(err, ErrRestartAdmissionUnsupported) {
+		t.Fatalf("legacy restart admission error = %v", err)
+	}
+}
+
 func TestClientBuildKeepsFailuresApart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
