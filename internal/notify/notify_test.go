@@ -818,3 +818,36 @@ func TestParentFollowsAdopt(t *testing.T) {
 		t.Fatalf("@parent = %v, want %v", got.addrs(), want)
 	}
 }
+
+func TestInterruptedRunReportsToLiveAuthor(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	rec := e.room()
+	author := e.start(rec, "author", nil)
+	const id = "wf_interrupted_author"
+	run := e.newRun(id, rec, &author)
+	if err := run.Finish(runstore.StatusInterrupted, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		result, err := e.svc.CompleteRun(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Message.OwnerReport || !result.Message.Wake || result.Message.SessionIDs[author.Address()] != author.ID {
+			t.Fatalf("report = %+v; want waking author report", result.Message)
+		}
+	}
+	messages, _, err := e.svc.Rooms.Log(rec, room.LogOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, msg := range messages {
+		if ev, ok := msg.RunResult(); ok && ev.RunID == id {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("got %d reports; want one", count)
+	}
+}
