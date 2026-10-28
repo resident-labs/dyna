@@ -96,15 +96,16 @@ func RestoreOwner(args []string) error {
 // dyna. The caller keeps them, and so do its children. A caller that set a
 // data root of its own — DYNA_DATA_DIR, XDG_DATA_HOME or HOME — has Dyna
 // resolve the data folder from that root, so Dyna never points it back at the
-// owner's live store (D-398): a chosen XDG_DATA_HOME rules, and a chosen HOME
-// drops an inherited XDG_DATA_HOME, whether the harness's private root or the
-// owner's, so the folder follows the caller's home. A dyna client command
-// whose caller changed only other roots still needs the owner's data folder
-// to reach the engine, so it gets that through store.DataDirEnv alone.
-// `dyna engine run` may serve any folder the caller picked, and a value the
-// caller already set stays.
+// owner's live store (D-398), for `dyna engine run` as for any command: a
+// chosen XDG_DATA_HOME rules, and a chosen HOME drops an inherited
+// XDG_DATA_HOME, whether the harness's private root or the owner's, so the
+// folder follows the caller's home. A dyna client command whose caller
+// changed only other roots still needs the owner's data folder to reach the
+// engine, so it gets that through store.DataDirEnv alone; `dyna engine run`
+// may serve any folder the caller picked, and a value the caller already set
+// stays.
 func keepOwnerData(args []string, record ownerEnv, callerRoots []string) error {
-	if len(args) == 0 || args[0] == "engine" || os.Getenv(store.DataDirEnv) != "" {
+	if os.Getenv(store.DataDirEnv) != "" {
 		return nil
 	}
 	if slices.Contains(callerRoots, "XDG_DATA_HOME") {
@@ -112,6 +113,9 @@ func keepOwnerData(args []string, record ownerEnv, callerRoots []string) error {
 	}
 	if slices.Contains(callerRoots, "HOME") {
 		return os.Unsetenv("XDG_DATA_HOME")
+	}
+	if len(args) == 0 || args[0] == "engine" {
+		return nil
 	}
 	data := record.Env["XDG_DATA_HOME"]
 	if data == "" && record.Env["HOME"] != "" {
