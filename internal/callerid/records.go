@@ -154,12 +154,14 @@ func (s Store) record(ctx context.Context, at time.Time, unit string, p Process,
 }
 
 // Launch says what a started process acts for. Launcher names the launch
-// path, for example "turn", "workflow" or "shell".
+// path, for example "turn", "workflow" or "shell". Room is the canonical
+// room id the work belongs to; it puts the launch in the room's own slice.
 type Launch struct {
 	DataDir  string
 	Name     string // labels the scope, for example the session ID
 	Actor    Identity
 	Launcher string
+	Room     string
 }
 
 // check refuses a launch that would record a wrong identity.
@@ -192,7 +194,7 @@ func Start(ctx context.Context, cmd *exec.Cmd, l Launch) error {
 		return err
 	}
 	// TODO: legacy/shim remove later — launchers outside the engine (the CLI and detached processes) write their own launch records; remove when item 2 moves each launch into the engine, which then records it.
-	unit := agentslice.Wrap(cmd, l.Name)
+	unit := agentslice.WrapRoom(cmd, l.Name, l.Room)
 	gate, held, err := os.Pipe()
 	if err != nil {
 		return err

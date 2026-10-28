@@ -12,6 +12,7 @@ not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CL
 not-state internal/account/native/kimi_code.go kimiCodeLock 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeManager.activate 2 # a harness CLI's own credential and config files
 violation internal/agentslice/agentslice.go WriteSlice 1
+not-state internal/agentslice/room.go WriteRoomSlice 1 # the room's managed systemd unit file: machine-local limits config the user manager reads, regenerated from RAM on change, never queried state
 not-state internal/cli/ci/ci.go NewCommand 1 # exports a JUnit report to a caller-selected artifact path
 not-state internal/cli/computer/browser_deps.go playwrightModule 2 # browser launcher files of one computer
 not-state internal/cli/computer/browser_holder.go holderPID 1 # browser launcher files of one computer

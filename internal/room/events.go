@@ -135,6 +135,9 @@ const (
 	TypeCacheRepaired EventType = "cache-repaired"
 	// TypeScratchFreed is a sweep that freed scratch space on a machine.
 	TypeScratchFreed EventType = "scratch-freed"
+	// TypeLimitsOff is the machine telling a room it cannot give each room
+	// its own resource slice, so the room shares the agent slice instead.
+	TypeLimitsOff EventType = "limits-off"
 
 	// FamilyCall reports how the owner answered a call request. The engine
 	// posts it, so the answer wears no invented voice and carries no raw ID in
