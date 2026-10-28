@@ -15,9 +15,16 @@ import (
 	"dyna-agent/internal/shellquote"
 )
 
-// ReadOnlyEnv marks the gh multicall guard, used only by read-only sessions.
+// ReadOnlyEnv marks the gh multicall guard and selects its session mode.
 const ReadOnlyEnv = "DYNA_GH_READ_ONLY"
 const BinaryEnv = "DYNA_GH_BINARY"
+
+type GuardMode string
+
+const (
+	GuardReadOnly GuardMode = "1"
+	GuardWorker   GuardMode = "worker"
+)
 const blockedPushURL = "file:///dev/null/Dyna GitHub writes are disabled: this room is read-only"
 
 // SessionEnv is the environment that gives a turn the room's GitHub account,
@@ -94,31 +101,23 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		values[key] = value
 	}
 	bin := filepath.Join(scratchDir, "github-bin")
-	out[ReadOnlyEnv] = ""
-	target := cmd.Path
-	if !installed {
-		// There is no gh to point PATH at, and read-only rooms still need their guard.
-		target = ""
-	}
+	out[ReadOnlyEnv] = string(GuardWorker)
 	if readOnly {
-		// The guard stands in for gh, so a read-only room stays read-only.
-		target, out[ReadOnlyEnv] = dynaBinary, "1"
+		out[ReadOnlyEnv] = string(GuardReadOnly)
 	}
-	if target != "" {
-		if err := os.MkdirAll(bin, 0700); err != nil {
-			return SessionEnv{}, err
-		}
-		next := filepath.Join(bin, "gh.next")
-		_ = os.Remove(next)
-		if err := os.Symlink(target, next); err != nil {
-			return SessionEnv{}, err
-		}
-		if err := os.Rename(next, filepath.Join(bin, "gh")); err != nil {
-			return SessionEnv{}, err
-		}
-		out[BinaryEnv] = cmd.Path
-		out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
+	if err := os.MkdirAll(bin, 0700); err != nil {
+		return SessionEnv{}, err
 	}
+	next := filepath.Join(bin, "gh.next")
+	_ = os.Remove(next)
+	if err := os.Symlink(dynaBinary, next); err != nil {
+		return SessionEnv{}, err
+	}
+	if err := os.Rename(next, filepath.Join(bin, "gh")); err != nil {
+		return SessionEnv{}, err
+	}
+	out[BinaryEnv] = cmd.Path
+	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
 	if unavailable {
 		// The turn could not prove its account, so no other account may stand in:
 		// point the GitHub CLI at an empty configuration and give git no helper.
