@@ -251,6 +251,16 @@ func diff(prev, cur *reading, out *Load) {
 		return Group{Name: name, Cores: cores(b.cpu, a.cpu), Memory: a.memory, IO: rate(b.io, a.io), Pressure: a.pressure}
 	}
 	engine, computers, agents := group("engine", "engine"), group("computers", "computers"), group("agents", "dyna")
+	// A room computer's scope is counted on its own and added to the computers.
+	for key := range cur.groups {
+		if strings.HasPrefix(key, roomComputerKey) {
+			g := group("", key)
+			computers.Cores += g.Cores
+			computers.Memory += g.Memory
+			computers.IO += g.IO
+			computers.Pressure = maxPressure(computers.Pressure, g.Pressure)
+		}
+	}
 	// Computers run inside dyna.slice, so take them out of the agents.
 	agents.Cores = max(0, agents.Cores-computers.Cores)
 	agents.Memory = sub(agents.Memory, computers.Memory)
@@ -419,9 +429,12 @@ func (s *Sampler) readCgroups(root string, cur *reading, out *Load) bool {
 		"engine":    {filepath.Join(root, "app.slice", "dyna-engine.service"), filepath.Join(root, "app.slice", "dyna-serve.service")},
 	}
 	// A room computer runs in its own scope below its room's slice, outside
-	// the service cgroup; count those with the computers bucket.
+	// the service cgroup. Each scope keeps its own counters, so one that exits
+	// cannot pull the computers total backwards.
 	roomComputers, _ := filepath.Glob(filepath.Join(dyna, "dyna-room.slice", "dyna-room-*.slice", "dyna-computer-*.scope"))
-	dirs["computers"] = append(dirs["computers"], roomComputers...)
+	for _, p := range roomComputers {
+		dirs[roomComputerKey+filepath.Base(p)] = []string{p}
+	}
 	names, _ := filepath.Glob(filepath.Join(dyna, "dyna-*.scope"))
 	for _, p := range names {
 		dirs[filepath.Base(p)] = []string{p}
@@ -434,7 +447,7 @@ groups:
 		var c counters
 		for _, dir := range list {
 			n, err := usage(dir)
-			if errors.Is(err, fs.ErrNotExist) && strings.HasSuffix(key, ".scope") {
+			if errors.Is(err, fs.ErrNotExist) && (strings.HasSuffix(key, ".scope") || strings.HasPrefix(key, roomComputerKey)) {
 				// The scope ended after the glob, so it has left.
 				continue groups
 			}
@@ -451,6 +464,9 @@ groups:
 	out.Memory.Dyna = cur.groups["dyna"].memory + cur.groups["engine"].memory
 	return ok
 }
+
+// roomComputerKey prefixes the group key of one room computer's scope.
+const roomComputerKey = "computer:"
 
 // usage reads usage_usec from a cgroup's cpu.stat.
 func usage(dir string) (uint64, error) {

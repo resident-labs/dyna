@@ -34,7 +34,7 @@ not-state internal/computers/cgroup_linux.go supervisor.killCgroup 3 # cgroup co
 not-state internal/computers/cgroup_linux.go writeCgroup 1 # cgroup control files
 not-state internal/computers/cgroup_linux.go supervisor.ensureCgroup 1 # cgroup record file in the computer's runtime directory
 not-state internal/computers/cgroup_linux.go supervisor.recordCgroup 2 # cgroup record file in the computer's runtime directory
-not-state internal/computers/cgroup_linux.go systemdRoomScope 2 # cgroup record file and scope log in the computer's directories
+not-state internal/computers/cgroup_linux.go systemdRoomScope 4 # cgroup record file and scope log in the computer's directories
 not-state internal/computers/child_shims_linux.go supervisor.childShims 1 # one computer's tool shims
 not-state internal/computers/chromium.go prepareChromium 1 # one computer's browser launch files
 not-state internal/computers/chromium_launch_linux.go LaunchChromium 1 # one computer's browser launch files
@@ -50,7 +50,7 @@ not-state internal/computers/process_linux.go startProcess 1 # one computer's pr
 not-state internal/computers/diagnostics.go clearFailedSetup 1 # removes a failure.json that an earlier release left; the reason itself lives in dyna.db
 not-state internal/computers/store.go browserShims 2 # one computer's browser launch files: the Chromium wrapper, tool shims and profile folders
 not-state internal/computers/stream_linux.go wayVNCBackend.Command 1 # one computer's stream files
-not-state internal/computers/supervisor_linux.go newComputer 3 # one computer's folders and its cgroup runtime file; its registration lives in dyna.db
+not-state internal/computers/supervisor_linux.go newComputer 1 # one computer's folders and its cgroup runtime file; its registration lives in dyna.db
 not-state internal/computers/supervisor_linux.go supervisor.cleanup 6 # removes one computer's process files: runtime folder, locks, browser sockets, profiles and cgroup
 not-state internal/computers/supervisor_linux.go supervisor.listenX11 6 # the X11 display's own lock files and sockets
 not-state internal/computers/supervisor_linux.go supervisor.record 1 # appends to the computer's append-only events.jsonl (rule r10); its status lives in dyna.db

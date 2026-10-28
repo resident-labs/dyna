@@ -262,6 +262,9 @@ func destroyOffline(ctx context.Context, id string) error {
 		return err
 	}
 	_ = os.Remove(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), m.WaylandDisplay))
+	// This path runs when the daemon is gone or hung, so the recorded room
+	// scope would otherwise keep its processes with no record left to find it.
+	killRecordedScope(id)
 	if err = os.RemoveAll(RuntimeDir(id)); err != nil {
 		return err
 	}
