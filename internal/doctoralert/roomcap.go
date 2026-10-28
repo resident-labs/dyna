@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/bits"
 	"time"
 
 	"dyna-agent/internal/database"
@@ -57,6 +58,7 @@ type CapNotifier struct {
 
 const capSchema = `CREATE TABLE IF NOT EXISTS room_cap_alerts (
  room_id TEXT NOT NULL, cap TEXT NOT NULL, at INTEGER NOT NULL,
+ sent INTEGER NOT NULL DEFAULT 1,
  PRIMARY KEY(room_id, cap)
 )`
 
@@ -65,9 +67,17 @@ func (n CapNotifier) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, database.Migrate(db, "room_cap_alerts.version", 1, func(conn *sql.Conn, old int) error {
-		_, err := conn.ExecContext(context.Background(), capSchema)
-		return err
+	return db, database.Migrate(db, "room_cap_alerts.version", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if _, err := conn.ExecContext(ctx, capSchema); err != nil {
+			return err
+		}
+		if old == 1 {
+			// Rows written by version 1 are alerts that were already sent.
+			_, err := conn.ExecContext(ctx, `ALTER TABLE room_cap_alerts ADD COLUMN sent INTEGER NOT NULL DEFAULT 1`)
+			return err
+		}
+		return nil
 	})
 }
 
@@ -78,10 +88,17 @@ func (n CapNotifier) now() time.Time {
 	return time.Now()
 }
 
+// capAlert is the durable state of one crossing. A pending row holds the
+// alert's original time until Send succeeds and the row becomes sent.
+type capAlert struct {
+	at   int64
+	sent bool
+}
+
 // Alert examines every room's caps and sends one note per cap that crossed
-// CapAlertShare with no alert active, then records it. A cap that fell back
-// under CapRearmShare re-arms. A room that fails to send is tried again at
-// the next pass, because only a sent note is recorded.
+// CapAlertShare with no alert active. It stores a pending row before Send, so
+// a retry reuses the crossing's time and therefore the same typed event ID.
+// A cap that fell back under CapRearmShare re-arms.
 func (n CapNotifier) Alert() error {
 	uses, err := n.Read()
 	if err != nil {
@@ -91,24 +108,29 @@ func (n CapNotifier) Alert() error {
 	if err != nil {
 		return err
 	}
-	now := n.now()
+	// The state row stores whole seconds, so the posted time does too.
+	now := n.now().Truncate(time.Second)
 	ctx := context.Background()
 	var errs []error
 	for _, use := range uses {
-		alerted := map[doctor.Cap]bool{}
-		rows, err := db.Query(`SELECT cap FROM room_cap_alerts WHERE room_id=?`, use.RoomID)
+		alerts := map[doctor.Cap]capAlert{}
+		rows, err := db.Query(`SELECT cap, at, sent FROM room_cap_alerts WHERE room_id=?`, use.RoomID)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		var scanErr error
 		for rows.Next() {
-			var cap string
-			if err := rows.Scan(&cap); err != nil {
+			var (
+				cap  string
+				at   int64
+				sent int
+			)
+			if err := rows.Scan(&cap, &at, &sent); err != nil {
 				scanErr = err
 				break
 			}
-			alerted[doctor.Cap(cap)] = true
+			alerts[doctor.Cap(cap)] = capAlert{at: at, sent: sent != 0}
 		}
 		if err := rows.Close(); err != nil {
 			errs = append(errs, err)
@@ -123,22 +145,37 @@ func (n CapNotifier) Alert() error {
 		var trees doctor.CapTrees
 		treesRead := false
 		for _, c := range use.Caps {
+			alert, recorded := alerts[c.Cap]
 			switch {
-			case c.Current*100 >= c.Limit*CapAlertShare && !alerted[c.Cap]:
+			case capAtLeast(c.Current, c.Limit, CapAlertShare) && (!recorded || !alert.sent):
+				at := now
+				if recorded {
+					// A pending alert keeps the time of its first attempt.
+					at = time.Unix(alert.at, 0)
+				} else {
+					err := state.For(db).Write(ctx, hub.Event{Topic: "doctor"}, func(conn *sql.Conn) error {
+						_, err := conn.ExecContext(ctx, `INSERT INTO room_cap_alerts (room_id, cap, at, sent) VALUES (?,?,?,0)`, use.RoomID, string(c.Cap), at.Unix())
+						return err
+					})
+					if err != nil {
+						errs = append(errs, err)
+						continue
+					}
+				}
 				if !treesRead && n.Trees != nil {
 					trees, treesRead = n.Trees(use.RoomID), true
 				}
-				if err := n.Send(CapNote{RoomID: use.RoomID, Cap: c.Cap, Current: c.Current, Limit: c.Limit, Trees: trees, At: now}); err != nil {
+				if err := n.Send(CapNote{RoomID: use.RoomID, Cap: c.Cap, Current: c.Current, Limit: c.Limit, Trees: trees, At: at}); err != nil {
 					errs = append(errs, fmt.Errorf("room %s cap %s: %w", use.RoomID, c.Cap, err))
 					continue
 				}
-				alerted[c.Cap] = true
+				alerts[c.Cap] = capAlert{at: at.Unix(), sent: true}
 				errs = append(errs, state.For(db).Write(ctx, hub.Event{Topic: "doctor"}, func(conn *sql.Conn) error {
-					_, err := conn.ExecContext(ctx, `INSERT OR REPLACE INTO room_cap_alerts VALUES (?,?,?)`, use.RoomID, string(c.Cap), now.Unix())
+					_, err := conn.ExecContext(ctx, `UPDATE room_cap_alerts SET sent=1 WHERE room_id=? AND cap=?`, use.RoomID, string(c.Cap))
 					return err
 				}))
-			case c.Current*100 < c.Limit*CapRearmShare && alerted[c.Cap]:
-				alerted[c.Cap] = false
+			case !capAtLeast(c.Current, c.Limit, CapRearmShare) && recorded:
+				delete(alerts, c.Cap)
 				errs = append(errs, state.For(db).Write(ctx, hub.Event{Topic: "doctor"}, func(conn *sql.Conn) error {
 					_, err := conn.ExecContext(ctx, `DELETE FROM room_cap_alerts WHERE room_id=? AND cap=?`, use.RoomID, string(c.Cap))
 					return err
@@ -147,4 +184,12 @@ func (n CapNotifier) Alert() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// capAtLeast reports current*100 >= limit*share. The full 128-bit products
+// matter: either side can overflow uint64 for a large memory cap.
+func capAtLeast(current, limit, share uint64) bool {
+	currentHi, currentLo := bits.Mul64(current, 100)
+	limitHi, limitLo := bits.Mul64(limit, share)
+	return currentHi > limitHi || (currentHi == limitHi && currentLo >= limitLo)
 }

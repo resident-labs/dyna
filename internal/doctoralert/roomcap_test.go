@@ -128,6 +128,84 @@ func TestCapAlertRetriesAFailedSend(t *testing.T) {
 	}
 }
 
+// Huge caps must not wrap either side of a threshold comparison: an almost
+// empty room stays quiet, and a room at or above its cap still alerts.
+func TestCapAlertComparesHugeCapsWithoutOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		current, limit uint64
+		want           int
+	}{
+		{name: "almost empty", current: 1, limit: 1 << 60, want: 0},
+		{name: "81 percent", current: (1 << 62) / 100 * 81, limit: 1 << 62, want: 1},
+		{name: "full", current: ^uint64(0), limit: ^uint64(0), want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, sent, _, _ := fakeCaps(t, 0)
+			n.Read = func() ([]doctor.RoomUse, error) {
+				return []doctor.RoomUse{{RoomID: "room_1", Caps: []doctor.CapUse{{Cap: doctor.CapMemoryMax, Current: tc.current, Limit: tc.limit}}}}, nil
+			}
+			for pass := 0; pass < 3; pass++ {
+				if err := n.Alert(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(*sent) != tc.want {
+				t.Fatalf("current %d, limit %d sent %d notes, want %d", tc.current, tc.limit, len(*sent), tc.want)
+			}
+		})
+	}
+}
+
+// If the real post commits but recording the sent state fails, the retry
+// keeps the crossing's original time. The typed event then has the same post
+// ID, so the room does not get a second card or root wake.
+func TestCapAlertRetryKeepsTheSameEventAfterAStateWriteFailure(t *testing.T) {
+	store := &room.Store{Root: t.TempDir()}
+	rec, err := store.Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _, now, _ := fakeCaps(t, 81)
+	n.Read = func() ([]doctor.RoomUse, error) {
+		return []doctor.RoomUse{{RoomID: rec.ID, Caps: []doctor.CapUse{{Cap: doctor.CapMemoryMax, Current: 81, Limit: 100}}}}, nil
+	}
+	n.Send = func(note CapNote) error { return PostCapNote(store, note) }
+	db, err := n.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER fail_cap_sent BEFORE UPDATE OF sent ON room_cap_alerts
+		WHEN NEW.sent = 1 BEGIN SELECT RAISE(ABORT, 'injected sent write failure'); END;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Alert(); err == nil || !strings.Contains(err.Error(), "injected sent write failure") {
+		t.Fatalf("the sent state write returned %v", err)
+	}
+	posts, err := store.Messages(rec.ID)
+	if err != nil || len(posts) != 1 {
+		t.Fatalf("after the real post, posts = %d, %v", len(posts), err)
+	}
+	firstID := posts[0].ID
+	*now = now.Add(time.Minute)
+	if _, err := db.Exec(`DROP TRIGGER fail_cap_sent`); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Alert(); err != nil {
+		t.Fatal(err)
+	}
+	posts, err = store.Messages(rec.ID)
+	if err != nil || len(posts) != 1 || posts[0].ID != firstID {
+		t.Fatalf("the retry changed the alert: posts = %+v, %v", posts, err)
+	}
+	if err := n.Alert(); err != nil {
+		t.Fatal(err)
+	}
+	if posts, err = store.Messages(rec.ID); err != nil || len(posts) != 1 {
+		t.Fatalf("a sent alert posted again: posts = %d, %v", len(posts), err)
+	}
+}
+
 // One room near two caps hears one note per cap, and a room with no caps
 // hears nothing.
 func TestCapAlertSendsOneNotePerCap(t *testing.T) {
