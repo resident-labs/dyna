@@ -259,6 +259,79 @@ func RecordRoom(root, key string) (string, error) {
 	return record.Record.RoomID, nil
 }
 
+// ReadRecord returns the committed record with key from its own row and cold
+// parts, derived against the same committed index metadata the shared
+// snapshot uses. It refreshes nothing and never installs into the shared
+// snapshot, so a single-record read costs one indexed row instead of a full
+// store refresh. A missing row, an empty store or a row whose body carries
+// no record reports found=false, so callers can still resolve change-ID
+// aliases through the snapshot. Saved HTTP responses stay out: Record never
+// carries them, and reading one PR must not pay for its response history.
+func ReadRecord(root, key string) (Record, bool, error) {
+	db, err := open(root)
+	if err != nil {
+		return Record{}, false, err
+	}
+	var index, body []byte
+	var haveIndex, haveRow bool
+	var parts storedParts
+	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
+		if err := r.QueryRowContext(context.Background(), "SELECT body FROM pr_state WHERE id=1").Scan(&index); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		} else {
+			haveIndex = true
+		}
+		if err := r.QueryRowContext(context.Background(), "SELECT body FROM pr_rows WHERE key=?", key).Scan(&body); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			return nil
+		}
+		haveRow = true
+		rows, err := r.QueryContext(context.Background(), "SELECT part, body FROM pr_record_parts WHERE key=? AND part<>'responses'", key)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		parts = storedParts{}
+		for rows.Next() {
+			var name string
+			var part []byte
+			if err := rows.Scan(&name, &part); err != nil {
+				return err
+			}
+			parts[partName(name)] = append([]byte{}, part...)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return Record{}, false, err
+	}
+	if !haveRow {
+		// No row for key: absent, not corrupt, and a change-ID alias may
+		// still resolve through the snapshot.
+		return Record{}, false, nil
+	}
+	disk, err := joinStored(body, parts)
+	if err != nil {
+		return Record{}, false, fmt.Errorf("invalid PR record %s: %w", key, err)
+	}
+	if disk.Record == nil || !haveIndex {
+		// A row without a record, or a row beside no index at all, is exactly
+		// the case the full read reports as untracked.
+		return Record{}, false, ErrNotTracked
+	}
+	st := newState()
+	if err := json.Unmarshal(index, &st); err != nil {
+		return Record{}, false, fmt.Errorf("invalid PR state: %w", err)
+	}
+	st.Records = map[string]*Record{key: disk.Record}
+	normalizeState(&st)
+	return *st.Records[key], true, nil
+}
+
 // ReadForSessions returns a State that holds only the room's PRs that any of
 // sessions authors or reviews, closed ones included. SQLite filters the rows,
 // so Go decodes a few records instead of every stored PR. The State has no
