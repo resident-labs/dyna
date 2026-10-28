@@ -119,7 +119,8 @@ const (
 	TypeRequestDone EventType   = "request.done"
 
 	// TypeSummary tells a check-in apart from any other event of its family.
-	TypeSummary EventType = "summary"
+	TypeSummary      EventType = "summary"
+	TypeShellSilence EventType = "output-silence"
 	// TypeInstructionBatch is one owner-facing summary of a shared instruction
 	// change. Each session still gets its own agent-facing note.
 	TypeInstructionBatch EventType = "instruction-batch"

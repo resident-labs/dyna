@@ -800,6 +800,17 @@ var eventSpecs = []EventSpec{
 		Text:              "Shell job {label} {state} with exit code {exitCode}.",
 		Producers:         []EventProducer{ProducerShell},
 	},
+	{
+		Family:            FamilyShell,
+		Type:              TypeShellSilence,
+		Renderer:          "ShellSilenceCard",
+		Payload:           reflect.TypeOf(ShellSilenceEvent{}),
+		Wake:              WakeTarget,
+		Once:              true,
+		RootOnOwnerReport: true,
+		Text:              "Shell job {label} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
+		Producers:         []EventProducer{ProducerShell},
+	},
 	// A workflow run result is the parent's work too, and stays out of the
 	// room watch for the same reason as a shell result.
 	{
