@@ -242,11 +242,11 @@ func (p *Profile) Validate() error {
 // Store is the on-disk profile registry.
 type Store struct {
 	Path     string    `json:"-"`
-	Version  int       `json:"version"` // 3 = explicit output declarations
+	Version  int       `json:"version"` // 4 = profile compaction targets
 	Profiles []Profile `json:"profiles"`
 }
 
-const storeVersion = 3
+const storeVersion = 4
 
 func DefaultPath() string {
 	dir, err := os.UserConfigDir()

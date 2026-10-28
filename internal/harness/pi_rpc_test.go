@@ -453,10 +453,11 @@ func TestPiCancelAbortsTheRPCRun(t *testing.T) {
 
 // TestPiCompactRunsOnTheSessionProcess compacts a due session over its
 // long-lived process instead of a second pi invocation.
-func TestPiCompactRunsOnTheSessionProcess(t *testing.T) {
+func TestLegacyPiCompactRunsOnTheSessionProcess(t *testing.T) {
 	logPath := installFakePi(t, false)
 	p := fakePiProfile(logPath, false)
 	p.Compact = &profile.Compact{Tokens: 1}
+	p.Env["DYNA_PI_LEGACY_COMPACT"] = "1"
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	workDir := t.TempDir()

@@ -38,18 +38,18 @@ const (
 	KeySubagentMaxDepth      = "subagent.maxDepth"
 	KeySteeringToolWait      = "steering.maxToolWait"
 	KeyIdleUnloadMinutes     = "harness.idleUnloadMinutes"
-	KeyCompactAtTokens       = "harness.compactAtTokens"
-	KeyPiCodeMode            = "harness.piCodeMode"
-	KeyMaxCardBytes          = "content.maxCardBytes"
-	KeyMaxFileBytes          = "content.maxFileBytes"
-	KeyCIDiskFloorGB         = "machines.ciDiskFloorGB"
-	SourceDefault            = "default"
-	SourceFile               = "file"
-	SourceEnv                = "env"
-	LiveRestart              = "restart"
-	LiveNextOpen             = "next-open"
-	LiveStored               = "stored"
-	LiveNextOperation        = "next-operation"
+
+	KeyPiCodeMode     = "harness.piCodeMode"
+	KeyMaxCardBytes   = "content.maxCardBytes"
+	KeyMaxFileBytes   = "content.maxFileBytes"
+	KeyCIDiskFloorGB  = "machines.ciDiskFloorGB"
+	SourceDefault     = "default"
+	SourceFile        = "file"
+	SourceEnv         = "env"
+	LiveRestart       = "restart"
+	LiveNextOpen      = "next-open"
+	LiveStored        = "stored"
+	LiveNextOperation = "next-operation"
 
 	WorktreesRetentionChanged = "changed"
 	WorktreesRetentionAll     = "all"
@@ -58,10 +58,10 @@ const (
 
 // Defaults for the subagent and steering keys.
 const (
-	DefaultSubagentMaxDepth               = 3
-	DefaultSteeringToolWait               = 120 * time.Second
-	DefaultIdleUnloadMinutes              = 10
-	DefaultCompactAtTokens          int64 = 200000
+	DefaultSubagentMaxDepth  = 3
+	DefaultSteeringToolWait  = 120 * time.Second
+	DefaultIdleUnloadMinutes = 10
+
 	DefaultShellSilenceMinutes            = 30
 	DefaultComputersReminderMinutes       = 2
 	DefaultComputersRenderNode            = "auto"
@@ -121,9 +121,7 @@ type Values struct {
 	// HarnessIdleUnloadMinutes is how long a session's harness process may sit
 	// idle before it is stopped; zero keeps it loaded.
 	HarnessIdleUnloadMinutes int
-	// HarnessCompactAtTokens sets the default context cap; zero disables it.
-	HarnessCompactAtTokens int64
-	PiCodeMode             string
+	PiCodeMode               string
 	// VoiceProvider, VoiceModel and VoiceURL choose the call's realtime
 	// voice provider.
 	VoiceProvider string
@@ -170,12 +168,12 @@ func Defaults() Values {
 		SubagentMaxDepth:         DefaultSubagentMaxDepth,
 		SteeringMaxToolWait:      DefaultSteeringToolWait,
 		HarnessIdleUnloadMinutes: DefaultIdleUnloadMinutes,
-		HarnessCompactAtTokens:   DefaultCompactAtTokens,
-		PiCodeMode:               "only",
-		VoiceProvider:            "openai",
-		VoiceAgent:               true,
-		Extra:                    map[string]any{},
-		fromFile:                 map[string]bool{},
+
+		PiCodeMode:    "only",
+		VoiceProvider: "openai",
+		VoiceAgent:    true,
+		Extra:         map[string]any{},
+		fromFile:      map[string]bool{},
 	}
 }
 
@@ -376,10 +374,6 @@ func Load(path string) (Values, error) {
 		}
 	}
 	if h, ok := raw["harness"].(map[string]any); ok {
-		if n, ok := asInt(h["compactAtTokens"]); ok && n >= 0 {
-			v.HarnessCompactAtTokens = int64(n)
-			v.fromFile[KeyCompactAtTokens] = true
-		}
 		if mode, exists := h["piCodeMode"]; exists {
 			if err := v.Set(KeyPiCodeMode, fmt.Sprint(mode)); err != nil {
 				return Values{}, err
@@ -614,13 +608,6 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.SteeringMaxToolWait = d
 		v.fromFile[key] = true
-	case KeyCompactAtTokens:
-		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-		if err != nil || n < 0 {
-			return fmt.Errorf("%s must be a whole number of tokens, 0 or more", key)
-		}
-		v.HarnessCompactAtTokens = n
-		v.fromFile[key] = true
 	case KeyPiCodeMode:
 		if value != "only" && value != "off" {
 			return fmt.Errorf("%s must be only or off", key)
@@ -710,7 +697,7 @@ func (v Values) Save() error {
 	raw["steering"] = steer
 	harnessSection := nested(raw, "harness")
 	harnessSection["idleUnloadMinutes"] = v.HarnessIdleUnloadMinutes
-	harnessSection["compactAtTokens"] = v.HarnessCompactAtTokens
+	delete(harnessSection, "compactAtTokens")
 	harnessSection["piCodeMode"] = v.PiCodeMode
 	raw["harness"] = harnessSection
 	b, err := json.MarshalIndent(raw, "", "  ")

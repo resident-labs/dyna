@@ -5,18 +5,19 @@ import (
 	"os"
 
 	accountadapters "dyna-agent/internal/account/service/adapters"
-	"dyna-agent/internal/settings"
+	"dyna-agent/internal/profile"
 )
 
 // piCompactionReserves uses Pi's rounded list-models window. Pi rounds to the
 // nearest 100 tokens below 1M and 100000 above it. The upper bound makes the
 // trigger no later than the target; the lower bound keeps the reserve safe.
-func piCompactionReserves(models []accountadapters.Model, target int64) map[string]int64 {
+func piCompactionReserves(models []accountadapters.Model, targets map[string]int64) map[string]int64 {
 	reserves := map[string]int64{}
-	if target <= 0 {
-		return reserves
-	}
 	for _, m := range models {
+		target := targets[m.ID]
+		if target <= 0 {
+			continue
+		}
 		window := m.Context
 		if window <= 16384 || window > 9007199254690991 || window-16384 <= target {
 			continue
@@ -37,14 +38,34 @@ func piCompactionReserves(models []accountadapters.Model, target int64) map[stri
 	return reserves
 }
 
+// piProfileTargets shares the smallest target between profiles using a model.
+func piProfileTargets(profiles []profile.Profile) map[string]int64 {
+	targets := map[string]int64{}
+	for _, p := range profiles {
+		if p.Harness != profile.HarnessPi || p.Compact == nil {
+			continue
+		}
+		for _, model := range p.EffectiveModels() {
+			if previous := targets[model]; previous == 0 || p.Compact.Tokens < previous {
+				targets[model] = p.Compact.Tokens
+			}
+		}
+	}
+	return targets
+}
+
 // piGenerationReserves discovers only the selected account's available models.
 // An unavailable catalog or older Pi leaves the native defaults untouched.
 func (r *Runtime) piGenerationReserves(ctx context.Context, home, account string, bundle Bundle) (map[string]int64, error) {
-	v, err := settings.Load("")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	registry, err := profile.ReadConfig(profile.DefaultPath())
 	if err != nil {
 		return nil, err
 	}
-	if v.HarnessCompactAtTokens == 0 || bundle.Executable == "" || !versionAtLeast(bundle.Version, "1.3.0") {
+	targets := piProfileTargets(registry.Store.Profiles)
+	if len(targets) == 0 || bundle.Executable == "" || !versionAtLeast(bundle.Version, "1.3.0") {
 		return nil, nil
 	}
 	n, err := r.Accounts.Find(account)
@@ -65,5 +86,5 @@ func (r *Runtime) piGenerationReserves(ctx context.Context, home, account string
 		}
 		return nil, nil
 	}
-	return piCompactionReserves(models, v.HarnessCompactAtTokens), nil
+	return piCompactionReserves(models, targets), nil
 }

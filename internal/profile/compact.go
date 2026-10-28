@@ -38,7 +38,7 @@ const claudeCompactBuffer = 33000
 
 var compactRules = map[string]CompactRule{
 	HarnessClaudeCode: {Min: 100000 - claudeCompactBuffer, Max: 1000000 - claudeCompactBuffer},
-	HarnessPi:         {Trigger: true, Min: 1},
+	HarnessPi:         {Min: 1},
 }
 
 // CompactRuleFor returns the rule for harness.
@@ -99,7 +99,7 @@ func CompactNative(p Profile) ([]string, map[string]string, error) {
 	}
 	switch p.Harness {
 	case HarnessPi:
-		// Dyna sends Pi's compact command instead; see CompactDue.
+		// Pi's runtime generation sets model-specific reserves.
 		return nil, nil, nil
 	case HarnessClaudeCode:
 		// The harness merges this --settings layer with the profile's own.
