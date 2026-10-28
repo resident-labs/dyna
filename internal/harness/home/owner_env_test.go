@@ -82,8 +82,44 @@ func TestRestoreOwnerKeepsCallerRoots(t *testing.T) {
 	}
 }
 
+// A harness shell that picks its own data roots never writes the owner's
+// live store (D-398). A QA command with scratch HOME and XDG_DATA_HOME keeps
+// them, and DYNA_DATA_DIR stays unset, so the data folder resolves from the
+// caller's roots alone.
+func TestRestoreOwnerKeepsCallerDataRoot(t *testing.T) {
+	for name, tc := range map[string]struct{ home, data bool }{
+		"HOME and XDG_DATA_HOME": {home: true, data: true},
+		"HOME only":              {home: true},
+		"XDG_DATA_HOME only":     {data: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scope, _, env := fixture(t)
+			out, err := Prepare(scope, "", env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			roots := t.TempDir()
+			setProcessEnv(t, merged(env, out))
+			if tc.home {
+				t.Setenv("HOME", filepath.Join(roots, "home"))
+			}
+			if tc.data {
+				t.Setenv("XDG_DATA_HOME", filepath.Join(roots, "data"))
+			}
+			if err := RestoreOwner([]string{"harness", "install", "pi"}); err != nil {
+				t.Fatal(err)
+			}
+			if value, ok := os.LookupEnv(store.DataDirEnv); ok {
+				t.Fatalf("%s = %q; want unset so the caller's data root rules", store.DataDirEnv, value)
+			}
+		})
+	}
+}
+
 // A game helper sets fresh XDG roots, then runs a dyna client command. The
 // caller keeps its roots, but the client must still reach the owner's data.
+// The caller leaves every data root (HOME, XDG_DATA_HOME, DYNA_DATA_DIR)
+// alone; a root it chose itself instead rules the data folder (D-398).
 func TestRestoreOwnerKeepsOwnerDataForClientsWithCallerRoots(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
@@ -99,14 +135,14 @@ func TestRestoreOwnerKeepsOwnerDataForClientsWithCallerRoots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fresh := filepath.Join(t.TempDir(), "fresh-data")
+			fresh := filepath.Join(t.TempDir(), "fresh-config")
 			setProcessEnv(t, merged(env, out))
-			t.Setenv("XDG_DATA_HOME", fresh)
+			t.Setenv("XDG_CONFIG_HOME", fresh)
 			if err := RestoreOwner(tc.args); err != nil {
 				t.Fatal(err)
 			}
-			if os.Getenv("XDG_DATA_HOME") != fresh {
-				t.Fatal("the caller's data root was replaced")
+			if os.Getenv("XDG_CONFIG_HOME") != fresh {
+				t.Fatal("the caller's config root was replaced")
 			}
 			got, set := os.LookupEnv(store.DataDirEnv)
 			if set != tc.want || tc.want && got != filepath.Join(owner, ".local", "share", "dyna") {
