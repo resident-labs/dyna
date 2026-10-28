@@ -138,7 +138,10 @@ not-state internal/harness/runtime/skill_cleanup.go Runtime.removeLegacySkillIns
 not-state internal/harness/runtime/skill_cleanup.go Runtime.removeOwnedSkillView 2 # removes Dyna-owned skill links from harness CLI config folders; real user files stay
 not-state internal/hookinstall/install.go Service.Locked 2 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go copyFile 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/install.go driver.packPiFork 2 # builds and publishes immutable Pi tarball artifacts, not queried state
 not-state internal/hookinstall/install.go driver.run 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/install.go prunePiAssets 1 # removes unreferenced Pi tarball artifacts after publication
+not-state internal/hookinstall/install.go stampPiAsset 1 # appends the asset reference to the staged executable artifact
 not-state internal/hookinstall/install.go pruneBackups 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Log 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.CleanupUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
