@@ -114,6 +114,33 @@ func TestSplitTwoSamples(t *testing.T) {
 	}
 }
 
+// A room computer runs in its own scope below its room's slice, outside the
+// service cgroup; the computers split still counts its CPU.
+func TestRoomComputerScopeCountsAsComputers(t *testing.T) {
+	f := newTree(t, true)
+	f.busy(0)
+	f.cpu("dyna.slice", 0)
+	f.cpu("dyna.slice/dyna-computers.service", 0)
+	scope := "dyna.slice/dyna-room.slice/dyna-room-fl.slice/dyna-computer-one-1a2b3c4d.scope"
+	f.cpu(scope, 0)
+	s := f.sampler(4)
+	if err := s.sample(t0); err != nil {
+		t.Fatal(err)
+	}
+	f.busy(1000)                    // 10 core-s = 25%
+	f.cpu("dyna.slice", 10_000_000) // 10 s, all of it the room computer
+	f.cpu(scope, 10_000_000)        // 10 s
+	if err := s.sample(t0.Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	l := s.Load()
+	if l.Split == nil {
+		t.Fatalf("load = %+v", l)
+	}
+	near(t, "computers", l.Split.Computers, 25)
+	near(t, "agents", l.Split.Agents, 0)
+}
+
 func TestFirstSampleHasNoCPUShare(t *testing.T) {
 	f := newTree(t, true)
 	f.busy(100)

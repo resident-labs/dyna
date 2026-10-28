@@ -89,6 +89,12 @@ func startProcess(env []string, logPath string, args ...string) (*process, error
 	cmd.Stdout = f
 	cmd.Stderr = f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return startTracked(cmd)
+}
+
+// startTracked starts a prebuilt command the way the daemon owns its
+// children: with a death signal, a cleaned environment and reaper tracking.
+func startTracked(cmd *exec.Cmd) (*process, error) {
 	p := &process{cmd: cmd, done: make(chan struct{})}
 	ready := make(chan error, 1)
 	go func() {

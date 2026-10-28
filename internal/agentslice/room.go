@@ -182,8 +182,9 @@ func ensureRoom(roomID string) {
 // same limits; a degraded machine names the shared dyna.slice there. An
 // empty room, or a machine without the delegated controllers, keeps today's
 // behavior: the shared dyna.slice. Without a systemd user manager nothing
-// wraps at all.
-func WrapRoom(cmd *exec.Cmd, name, roomID string) string {
+// wraps at all. properties name extra systemd unit properties, such as
+// MemoryHigh=..., for a caller that keeps a long-running cgroup in the scope.
+func WrapRoom(cmd *exec.Cmd, name, roomID string, properties ...string) string {
 	if strings.EqualFold(os.Getenv("DYNA_SLICE"), "off") {
 		return ""
 	}
@@ -205,7 +206,7 @@ func WrapRoom(cmd *exec.Cmd, name, roomID string) string {
 	}
 	slice := RoomSlice(roomID)
 	ensureRoom(roomID)
-	unit := wrap(cmd, name, slice)
+	unit := wrap(cmd, name, slice, properties...)
 	if unit != "" {
 		cmd.Env = append(cmd.Environ(), mode.EnvRoomSlice+"="+slice)
 	}

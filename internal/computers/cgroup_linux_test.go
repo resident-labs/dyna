@@ -3,12 +3,17 @@
 package computers
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/mode"
+	"dyna-agent/internal/testsafe"
 )
 
 func cgroupFixture(t *testing.T) string {
@@ -217,6 +222,201 @@ func TestCgroupDelegatedIntegration(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, file)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// roomSliceFixture builds the cgroup world of a daemon below dyna.slice: the
+// service root, and support and starter seams a test can replace. The room
+// scope starter is a no-op until a test replaces it.
+func roomSliceFixture(t *testing.T, room string) (serviceRoot, roomRoot string) {
+	t.Helper()
+	base := t.TempDir()
+	serviceRoot = filepath.Join(base, "dyna.slice", "dyna-computers.service")
+	for name, value := range map[string]string{
+		"cgroup.controllers": "cpuset cpu memory pids io", "cgroup.procs": "123\n", "cgroup.subtree_control": "",
+		"daemon/cgroup.procs": "",
+	} {
+		putCgroupFile(t, serviceRoot, name, value)
+	}
+	var m cgroupManager
+	if err := m.setup(serviceRoot, 123, "3221225472"); err != nil {
+		t.Fatal(err)
+	}
+	oldGroups, oldSupport, oldStart := computerGroups, roomSliceSupport, startRoomScope
+	computerGroups = m
+	roomSliceSupport = func() (bool, string) { return true, "" }
+	startRoomScope = func(context.Context, string, string) string { return "" }
+	t.Cleanup(func() { computerGroups, roomSliceSupport, startRoomScope = oldGroups, oldSupport, oldStart })
+	roomRoot = computerGroups.roomSliceDir(room)
+	if roomRoot == "" {
+		t.Fatal("the fixture daemon is not below dyna.slice")
+	}
+	return serviceRoot, roomRoot
+}
+
+// fakeScope fakes the scope systemd starts below a room's slice: a cgroup
+// directory whose control files the properties would have set, alive through
+// its anchor.
+func fakeScope(t *testing.T, roomRoot, name string) string {
+	t.Helper()
+	scope := filepath.Join(roomRoot, name)
+	for file, value := range map[string]string{"cgroup.events": "populated 1\nfrozen 0\n"} {
+		putCgroupFile(t, scope, file, value)
+	}
+	for _, file := range []string{"memory.high", "memory.oom.group", "cgroup.kill", "cgroup.procs"} {
+		putCgroupFile(t, scope, file, "")
+	}
+	return scope
+}
+
+func recordScope(id string) string { return filepath.Join(RuntimeDir(id), "cgroup") }
+
+// A computer of a room runs in its own scope below that room's slice, so the
+// room's limits bound its computers, and its apps tell their own systemd-run
+// calls which slice to join.
+func TestRoomComputerRunsBelowItsRoomSlice(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	_, roomRoot := roomSliceFixture(t, "roomlimits")
+	scope := fakeScope(t, roomRoot, "dyna-computer-one.scope")
+	startRoomScope = func(context.Context, string, string) string { return scope }
+	id := testSessionID(t, "room")
+	s, err := newComputer(t.Context(), id, "roomlimits", SupervisorOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	if s.cgroup != "" {
+		t.Fatalf("a room computer took a cgroup before its desktop started: %q", s.cgroup)
+	}
+	s.ensureCgroup(t.Context())
+	if s.cgroup != scope {
+		t.Fatalf("room computer cgroup = %q, want the room scope %q", s.cgroup, scope)
+	}
+	assertCgroupFile(t, scope, "memory.oom.group", "1")
+	assertCgroupFile(t, scope, "memory.high", "3221225472")
+	if s.roomSlice != agentslice.RoomSlice("roomlimits") {
+		t.Fatalf("room slice = %q, want %q", s.roomSlice, agentslice.RoomSlice("roomlimits"))
+	}
+	data, err := os.ReadFile(recordScope(id))
+	if err != nil || strings.TrimSpace(string(data)) != scope {
+		t.Fatalf("cgroup record = %q, %v; want %q", data, err, scope)
+	}
+	s.mu.Lock()
+	env := s.desktopEnv()
+	s.mu.Unlock()
+	if got := envValue(env, mode.EnvRoomSlice); got != agentslice.RoomSlice("roomlimits") {
+		t.Fatalf("app env %s = %q, want the room slice", mode.EnvRoomSlice, got)
+	}
+}
+
+// A computer without a room, or a machine without delegated room slices,
+// keeps the shared leaf below the computer service, as before.
+func TestComputersWithoutRoomSlicesKeepTheServiceLeaf(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		room    string
+		support bool
+	}{
+		{"roomless", "", true},
+		{"unsupported", "roomlimits", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_DATA_HOME", t.TempDir())
+			t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+			serviceRoot, roomRoot := roomSliceFixture(t, "roomlimits")
+			if !tc.support {
+				roomSliceSupport = func() (bool, string) { return false, "no controllers" }
+			}
+			started := false
+			startRoomScope = func(context.Context, string, string) string {
+				started = true
+				return fakeScope(t, roomRoot, "never.scope")
+			}
+			id := testSessionID(t, tc.name)
+			leaf := filepath.Join(serviceRoot, publicName(id))
+			for _, file := range []string{"memory.high", "memory.oom.group", "cpu.weight", "cgroup.kill"} {
+				putCgroupFile(t, leaf, file, "")
+			}
+			s, err := newComputer(t.Context(), id, tc.room, SupervisorOptions{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.cleanup(false) })
+			if s.cgroup != leaf {
+				t.Fatalf("cgroup = %q, want the service leaf %q", s.cgroup, leaf)
+			}
+			assertCgroupFile(t, leaf, "memory.high", "3221225472")
+			s.ensureCgroup(t.Context())
+			if s.cgroup != leaf || started {
+				t.Fatalf("ensure moved the computer: cgroup %q, scope started %v", s.cgroup, started)
+			}
+			if s.roomSlice != "" {
+				t.Fatalf("room slice = %q without a room scope", s.roomSlice)
+			}
+			s.mu.Lock()
+			env := s.desktopEnv()
+			s.mu.Unlock()
+			if got := envValue(env, mode.EnvRoomSlice); got != "" {
+				t.Fatalf("app env exports %s=%q without a room scope", mode.EnvRoomSlice, got)
+			}
+		})
+	}
+}
+
+// A scope a previous daemon life left below the room's slice is adopted
+// instead of starting a second one, so a crashed daemon's computer keeps its
+// cgroup; a dead or foreign record never is.
+func TestRoomScopeIsAdoptedAcrossDaemonRestarts(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", testsafe.ShortTempDir(t))
+	serviceRoot, roomRoot := roomSliceFixture(t, "roomlimits")
+	id := testSessionID(t, "adopt")
+	s, err := newComputer(t.Context(), id, "roomlimits", SupervisorOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.cleanup(false) })
+	scope := fakeScope(t, roomRoot, "dyna-computer-old.scope")
+	putCgroupFile(t, scope, "memory.high", "1")
+	if err := os.WriteFile(recordScope(id), []byte(scope+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	started := false
+	startRoomScope = func(context.Context, string, string) string {
+		started = true
+		return ""
+	}
+	s.ensureCgroup(t.Context())
+	if s.cgroup != scope || started {
+		t.Fatalf("live record not adopted: cgroup %q, started %v", s.cgroup, started)
+	}
+	assertCgroupFile(t, scope, "memory.high", "3221225472")
+
+	// A scope that died since the record was written is replaced by a new one.
+	fresh := fakeScope(t, roomRoot, "dyna-computer-fresh.scope")
+	startRoomScope = func(context.Context, string, string) string { return fresh }
+	// A dying scope still has its directory until systemd removes it, but its
+	// anchor is gone: populated 0, never adopted.
+	putCgroupFile(t, scope, "cgroup.events", "populated 0\nfrozen 0\n")
+	s.ensureCgroup(t.Context())
+	if s.cgroup != fresh {
+		t.Fatalf("dying record not replaced: cgroup %q, want %q", s.cgroup, fresh)
+	}
+
+	// A record outside the room's slice, such as a fallback leaf, is never
+	// adopted as a scope.
+	leaf := filepath.Join(serviceRoot, publicName(id))
+	for _, file := range []string{"memory.high", "memory.oom.group", "cpu.weight", "cgroup.kill"} {
+		putCgroupFile(t, leaf, file, "")
+	}
+	startRoomScope = func(context.Context, string, string) string { return "" }
+	if err := os.WriteFile(recordScope(id), []byte(leaf+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.ensureCgroup(t.Context())
+	if s.cgroup != leaf {
+		t.Fatalf("foreign record adopted: cgroup %q, want the service leaf %q", s.cgroup, leaf)
 	}
 }
 
