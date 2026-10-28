@@ -172,7 +172,7 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "localci.schema", 5, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "localci.schema", 6, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
 			// The machines migration drops this table, so it may be gone already.

@@ -2,6 +2,7 @@ package localci
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -21,6 +22,47 @@ func fixtureStore(t *testing.T) Store {
 	s := Store{DataDir: t.TempDir()}
 	t.Cleanup(func() { database.Close(s.DataDir) })
 	return s
+}
+
+// TestMigrationFromVersion5CreatesCacheCleanGeneration upgrades an existing
+// store, not just a fresh temporary one. The old table remains, and the new
+// generation starts at zero and advances after the reopen.
+func TestMigrationFromVersion5CreatesCacheCleanGeneration(t *testing.T) {
+	s := Store{DataDir: t.TempDir()}
+	t.Cleanup(func() { database.Close(s.DataDir) })
+	db, err := database.Open(s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = database.Migrate(db, "localci.schema", 5, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), cacheCleanSchema)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(s.DataDir); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := s.CacheCleanGeneration(t.Context(), "node-a")
+	if err != nil || generation != 0 {
+		t.Fatalf("upgraded generation = %d, %v; want zero", generation, err)
+	}
+	if err := s.AdvanceCacheCleanGeneration(t.Context(), "node-a"); err != nil {
+		t.Fatalf("advance upgraded generation: %v", err)
+	}
+	generation, err = s.CacheCleanGeneration(t.Context(), "node-a")
+	if err != nil || generation != 1 {
+		t.Fatalf("advanced generation = %d, %v; want one", generation, err)
+	}
+	db, err = s.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version string
+	if err := db.QueryRow("SELECT value FROM meta WHERE key='localci.schema'").Scan(&version); err != nil || version != "6" {
+		t.Fatalf("schema version = %q, %v; want 6", version, err)
+	}
 }
 
 func TestStoreRoomModes(t *testing.T) {
