@@ -1541,6 +1541,28 @@ func (s *Service) CompleteShell(ctx context.Context, e ShellExit) (Result, error
 	return s.appendCompletion(ctx, *plan)
 }
 
+// ShellSilence sends one owner-facing notice about a quiet output log.
+func (s *Service) ShellSilence(ctx context.Context, roomID, id, label string, minutes int) (Result, error) {
+	rec, err := s.Rooms.Resolve(roomID)
+	if err != nil {
+		return Result{}, err
+	}
+	ev := room.ShellSilenceEvent{ShellID: id, Label: label, Minutes: minutes}
+	_, err = s.Rooms.Message(roomID, room.EventID(ev))
+	if err == nil {
+		return Result{}, nil
+	}
+	if !errors.Is(err, room.ErrPostNotFound) {
+		return Result{}, err
+	}
+	plan, err := s.prepareEventCompletion(roomID, ev, []string{rec.Name}, 0, true)
+	if err != nil || plan == nil {
+		return Result{}, err
+	}
+	plan.Producer = room.ProducerShell
+	return s.appendCompletion(ctx, *plan)
+}
+
 // shellLabel labels a job's row: its command's first word and the short
 // description its caller gave, or the one of them it has.
 func shellLabel(command, description string) string {

@@ -470,6 +470,13 @@ export interface ShellEvent {
   detail?: string
 }
 
+// ShellSilenceEvent is the payload of the shell/output-silence events.
+export interface ShellSilenceEvent {
+  shellId: string
+  label: string
+  minutes: number
+}
+
 // RunEvent is the payload of the run/result events.
 export interface RunEvent {
   runId: string
@@ -496,10 +503,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | MachineCacheCleanFailedEvent | MachineScratchEvent | MachineLimitsEvent | RoomCapEvent | CallEvent | VoiceSessionEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | ServiceWaitEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | TerminalRequestEvent | TerminalDoneEvent | ShellEvent | ShellSilenceEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "voice-session" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "terminal" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "noted" | "added" | "edited" | "amended" | "items_done" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "cache-clean-failed" | "scratch-freed" | "limits-off" | "room-cap" | "joined" | "declined" | "withdrawn" | "ended" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "computer-reminder" | "doctor" | "engine" | "consolidation" | "waiting" | "helper-outcome" | "root-flush" | "request" | "request.done" | "output-silence" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -1249,6 +1256,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "Shell job {label} {state} with exit code {exitCode}.",
   },
   {
+    family: "shell",
+    type: "output-silence",
+    renderer: "ShellSilenceCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Shell job {label} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
+  },
+  {
     family: "run",
     type: "result",
     renderer: "RunResultCard",
@@ -1727,6 +1744,13 @@ export function isShellEvent(v: unknown): v is ShellEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isShellSilenceEvent(v: unknown): v is ShellSilenceEvent {
+  return isRecord(v) &&
+    typeof v.shellId === "string" &&
+    typeof v.label === "string" &&
+    Number.isInteger(v.minutes)
+}
+
 export function isRunEvent(v: unknown): v is RunEvent {
   return isRecord(v) &&
     typeof v.runId === "string" &&
@@ -1826,6 +1850,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "terminal" && type === "request") return isTerminalRequestEvent(v)
   if (family === "terminal" && type === "request.done") return isTerminalDoneEvent(v)
   if (family === "shell" && type === "result") return isShellEvent(v)
+  if (family === "shell" && type === "output-silence") return isShellSilenceEvent(v)
   if (family === "run" && type === "result") return isRunEvent(v)
   if (family === "turn" && type === "completed") return isTurnEvent(v)
   if (family === "turn" && type === "failed") return isTurnEvent(v)

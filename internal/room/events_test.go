@@ -74,7 +74,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyEngine, Renderers: []string{"EngineNoticeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyQuestion, Renderers: []string{"QuestionNoteCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyTerminal, Renderers: []string{"TerminalRequestCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom, AudienceSession}},
-	{Family: FamilyShell, Renderers: []string{"ShellResultRow"}, Producers: []EventProducer{ProducerShell}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession}},
+	{Family: FamilyShell, Renderers: []string{"ShellResultRow", "ShellSilenceCard"}, Producers: []EventProducer{ProducerShell}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession, AudienceRoom}},
 	{Family: FamilyRun, Renderers: []string{"RunResultCard"}, Producers: []EventProducer{ProducerWorkflow}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyTurn, Renderers: []string{"TurnCompletionRow"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 }
