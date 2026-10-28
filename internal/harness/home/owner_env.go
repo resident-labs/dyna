@@ -56,12 +56,16 @@ func RestoreOwner(args []string) error {
 	}
 	// Each root must still be private or already the owner's, as after a Git or
 	// tool bridge. Any other value is the caller's own choice.
+	var callerRoots []string
 	for key, private := range Roots(record.Scope) {
 		current, set := os.LookupEnv(key)
 		owner, ownerSet := record.Env[key]
 		if current != private && (set != ownerSet || current != owner) {
-			return keepOwnerData(args, record)
+			callerRoots = append(callerRoots, key)
 		}
+	}
+	if len(callerRoots) > 0 {
+		return keepOwnerData(args, record, callerRoots)
 	}
 	for _, key := range ownerRestoreKeys {
 		var err error
@@ -85,14 +89,20 @@ func RestoreOwner(args []string) error {
 	return os.Setenv("PATH", strings.Join(path, string(os.PathListSeparator)))
 }
 
-// keepOwnerData runs when the caller chose its own HOME or XDG roots, for
-// example a game helper that sets fresh ones before it runs dyna. The caller
-// keeps them, and so do its children. A dyna client command still needs the
-// owner's data folder to reach the engine, so it gets that through
-// store.DataDirEnv alone. `dyna engine run` may serve any folder the caller
-// picked, and a value the caller already set stays.
-func keepOwnerData(args []string, record ownerEnv) error {
+// keepOwnerData runs when the caller chose its own HOME or XDG roots
+// (callerRoots), for example a game helper that sets fresh ones before it runs
+// dyna. The caller keeps them, and so do its children. A caller that set a
+// data root of its own — DYNA_DATA_DIR, XDG_DATA_HOME or HOME — has Dyna
+// resolve the data folder from that root, so Dyna never points it back at the
+// owner's live store (D-398). A dyna client command whose caller changed only
+// other roots still needs the owner's data folder to reach the engine, so it
+// gets that through store.DataDirEnv alone. `dyna engine run` may serve any
+// folder the caller picked, and a value the caller already set stays.
+func keepOwnerData(args []string, record ownerEnv, callerRoots []string) error {
 	if len(args) == 0 || args[0] == "engine" || os.Getenv(store.DataDirEnv) != "" {
+		return nil
+	}
+	if slices.Contains(callerRoots, "HOME") || slices.Contains(callerRoots, "XDG_DATA_HOME") {
 		return nil
 	}
 	data := record.Env["XDG_DATA_HOME"]
