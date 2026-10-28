@@ -181,10 +181,13 @@ const schema = `CREATE TABLE IF NOT EXISTS doctor_room_alerts (
  PRIMARY KEY(machine, room_id)
 )`
 
-// Migrate brings the alert table in dataDir's dyna.db to this version. Only the
-// engine calls it, at start.
+// Migrate brings the alert tables in dataDir's dyna.db to this version. Only
+// the engine calls it, at start.
 func Migrate(dataDir string) error {
-	_, err := Notifier{DataDir: dataDir}.open()
+	if _, err := (Notifier{DataDir: dataDir}).open(); err != nil {
+		return err
+	}
+	_, err := (CapNotifier{DataDir: dataDir}).open()
 	return err
 }
 

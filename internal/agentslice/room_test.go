@@ -81,6 +81,21 @@ func TestRoomSliceStaysDeterministicForLongIDs(t *testing.T) {
 	}
 }
 
+// A slice name maps back to its room id, so a reader of the cgroup tree can
+// tell which room a slice holds. A name no room id made maps to nothing.
+func TestRoomIDFromSliceReversesRoomSlice(t *testing.T) {
+	for _, room := range []string{"roomlimits", "room.limits_2", "room-limits", "a/b", ".hidden", "spä ce"} {
+		if id, ok := RoomIDFromSlice(RoomSlice(room)); !ok || id != room {
+			t.Errorf("RoomIDFromSlice(RoomSlice(%q)) = %q, %v; want %q", room, id, ok, room)
+		}
+	}
+	for _, bad := range []string{"", "dyna.slice", "dyna-room-x", "dyna-room-.slice", `dyna-room-ro\xzz.slice`, `dyna-room-x\2dslice.slice`} {
+		if id, ok := RoomIDFromSlice(bad); ok {
+			t.Errorf("RoomIDFromSlice(%q) = %q, %v; want no room", bad, id, ok)
+		}
+	}
+}
+
 // The room's share scales with the machine's memory: a small machine still
 // gets a working process cap, and a large one stops at 8192 tasks.
 func TestDefaultRoomLimitsScaleWithMemory(t *testing.T) {
