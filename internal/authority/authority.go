@@ -248,6 +248,9 @@ var Rules = []Rule{
 	{Action: "subagent dismiss-pending", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "DismissSession", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "ChangeIssue", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
+	// Filing in another room speaks into a room the filer does not belong to,
+	// so only the owner and a room's root may do it (D-401).
+	{Action: "issue file cross-room", Allowed: []Role{Owner, Root}, Instead: "report the problem to your room's root with dyna post @root; only a room's root or the owner files an issue in another room"},
 	{Action: "LinkIssueGoal", Allowed: []Role{Owner, Root, Session, Worker}, Instead: "link issues through a goal you can change"},
 	{Action: "SetGitHubAccess", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "goal expedite", Allowed: []Role{Owner, Root}, Instead: "ask the owner or root to set room priority"},
