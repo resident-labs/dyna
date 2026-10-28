@@ -146,42 +146,10 @@ func decodePi(line []byte) Record {
 			}
 		}
 		r.Events = []Event{{Kind: "tool", ID: p.ToolCallID, Name: p.ToolName, State: state, Input: compactJSON(p.Args), Output: output}}
-		if p.ToolName == "codemode" {
-			// Pi publishes a complete snapshot of nested calls on each update.
-			// Their arguments are display previews, and may be truncated.
-			raw := p.PartialResult
-			if p.Type == "tool_execution_end" {
-				raw = p.Result
-			}
-			var result struct {
-				Details struct {
-					Calls []struct {
-						ID, Name, Args, Status, Error string
-					} `json:"calls"`
-				} `json:"details"`
-			}
-			_ = json.Unmarshal(raw, &result)
-			if p.Type == "tool_execution_update" {
-				r.Events = nil
-			}
-			for _, call := range result.Details.Calls {
-				// Pi shares this placeholder across concurrent running calls.
-				if strings.HasSuffix(call.ID, "/?") || call.ID == "" {
-					continue
-				}
-				callState := "updated"
-				switch call.Status {
-				case "ok":
-					if p.Type == "tool_execution_end" {
-						callState = "completed"
-					}
-				case "error", "cancelled":
-					if p.Type == "tool_execution_end" {
-						callState = "failed"
-					}
-				}
-				r.Events = append(r.Events, Event{Kind: "tool", ID: call.ID, Name: call.Name, State: callState, Input: call.Args, Output: call.Error})
-			}
+		// Nested calls arrive as full tool_execution events. Codemode snapshots
+		// repeat them with truncated arguments and must not create more rows.
+		if p.ToolName == "codemode" && p.Type == "tool_execution_update" {
+			r.Events = nil
 		}
 		if p.ToolCallID != "" && p.Type != "tool_execution_update" {
 			r.Signals = []ToolSignal{{ID: p.ToolCallID, Start: p.Type == "tool_execution_start"}}
