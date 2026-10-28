@@ -10,6 +10,8 @@ func TestRateLimitSplitsShortFromSpent(t *testing.T) {
 		want   Reason
 	}{
 		{"429 Rate limit reached for requests per minute. Please try again in 6s.", Capacity},
+		{"{\"code\":\"1302\",\"message\":\"Rate limit reached for requests\"}", Capacity},
+		{"{\"code\":\"1299\",\"message\":\"Rate limit reached for requests\"}", Quota},
 		{"429 too many requests, retry-after: 20", Capacity},
 		{"429 You exceeded your current quota, please try again in 3 seconds", Quota},
 		{"429 usage limit reached", Quota},
