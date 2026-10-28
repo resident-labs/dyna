@@ -745,13 +745,19 @@ func (s *Service) postsOf(rec room.Record, msgs []room.Message, book avatarBook,
 
 func decorate(m room.Message, roomName string, reads map[string]bool, book avatarBook) Post {
 	name := m.From
+	var turnSessionID string
+	turn := false
 	if ev, ok := m.TurnResult(); ok {
-		// The engine posts a turn end on the session's behalf: its name colors
-		// the row and finds the sender's avatar.
+		turn = true
+		// The engine posts a turn end on the session's behalf.
 		name = ev.Session
+		turnSessionID = ev.SessionID
 	}
 	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName), Reply: replyTarget(m, roomName, book)}
-	if !p.Owner {
+	if turnSessionID != "" {
+		p.FromEmoji = book.byID[turnSessionID]
+	}
+	if p.FromEmoji == "" && (!p.Owner || turn) {
 		p.FromEmoji = book.forPost(name, m.TS)
 	}
 	p.Unread = countsUnread(m, roomName) && !reads[m.ID]

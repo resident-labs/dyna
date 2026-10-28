@@ -15,6 +15,28 @@ import (
 // rows (internal/room/postindex.go), never the address strings of a post. One
 // test per rule.
 
+func TestTurnResultUsesSessionAvatar(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	store := e.svc.Notify.Rooms
+	post, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Text: "A post"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name},
+		Event: room.TurnEvent{Session: lead.Address(), SessionID: lead.ID, Turn: 1, State: room.TurnCompleted, Summary: "Finished"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book := e.svc.avatars(rec.ID)
+	want := decorate(post, rec.Name, nil, book).FromEmoji
+	got := decorate(turn, rec.Name, nil, book).FromEmoji
+	if want == "" || got != want {
+		t.Fatalf("turn avatar = %q, post avatar = %q", got, want)
+	}
+}
+
 // A post written in the DM is the DM's own post. A post the session writes
 // elsewhere, and a completion, are not.
 func TestSessionDMReadsThePostsWrittenInIt(t *testing.T) {
