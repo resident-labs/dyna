@@ -465,3 +465,108 @@ func TestStandbyCancelStopsTheOwnersJob(t *testing.T) {
 		t.Fatalf("the stored row is %s, want cancelled", row.State)
 	}
 }
+
+// TestACancelBetweenClaimAndStartKeepsTheRowCancelled is the fail-first test
+// for review finding 1 of round 4: a standby cancels after the owner claims
+// a queued job but before the owner records the start. The row keeps its
+// cancelled end and the node never sees the job. The run hook places the
+// cancel exactly between the claim and the started write.
+func TestACancelBetweenClaimAndStartKeepsTheRowCancelled(t *testing.T) {
+	// The node run of the job is the old, racy behaviour: the unit starts and
+	// the job prints one line. The fixed behaviour abandons the run instead.
+	ranOnNode := make(chan struct{})
+	run := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			fmt.Fprintln(out, "removed")
+			return nil
+		}
+		close(ranOnNode)
+		fmt.Fprintln(out, "ran")
+		return nil
+	}
+	owner, fake, ownerReporter, _ := newIdleService(t, run)
+	cancelled := make(chan struct{})
+	abandoned := make(chan struct{})
+	owner.onRun = func(job Job) {
+		// The run hook places the cancel exactly between the claim and the
+		// write that records the start.
+		standby, _, _, _ := newIdleService(t, run)
+		standby.Store = owner.Store
+		standby.Machines = owner.Machines
+		standby.NewExecutor = owner.NewExecutor
+		if _, err := standby.Cancel(t.Context(), job.ID); err != nil {
+			t.Errorf("cancel: %v", err)
+		}
+		standby.Stop()
+		close(cancelled)
+	}
+	owner.onAbandoned = func(Job) { close(abandoned) }
+	owner.Start(t.Context())
+	job, err := owner.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-abandoned:
+	case <-ranOnNode:
+		t.Fatal("the node started the job although the cancel had won the row")
+	}
+	owner.Stop()
+	if n := len(fake.StartCalls()); n != 0 {
+		t.Fatalf("the node started %d job(s) after the cancel", n)
+	}
+	select {
+	case event := <-ownerReporter.finished:
+		t.Fatalf("a never-started job reported %s", event.State)
+	default:
+	}
+	row, err := owner.Store.Get(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != StateCancelled {
+		t.Fatalf("the stored row is %s, want cancelled", row.State)
+	}
+}
+
+// TestATerminalRowKeepsItsEnd is the fail-first test for review finding 1 of
+// round 4 on the finish side: a write that reaches the table after the row
+// already ended never overwrites the row, whatever state it carries.
+func TestATerminalRowKeepsItsEnd(t *testing.T) {
+	store := Store{DataDir: t.TempDir()}
+	job := Job{ID: "job_cancel_race", RoomID: "dyna", Node: "here", Command: []string{"true"}, State: StateRunning, LogPath: filepath.Join(t.TempDir(), "log")}
+	if err := store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	// Another engine ends the row while this one still holds its copy.
+	job.State = StateCancelled
+	if err := store.Save(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	// The stale engine writes its own end; the row keeps the cancelled one.
+	late := job
+	late.State = StatePassed
+	row, won, err := store.SaveOpen(t.Context(), late)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if won {
+		t.Fatal("a write over a terminal row won")
+	}
+	if row.State != StateCancelled {
+		t.Fatalf("the row is %s, want cancelled", row.State)
+	}
+	// A write on an open row still goes through.
+	open := Job{ID: "job_open_race", RoomID: "dyna", Node: "here", Command: []string{"true"}, State: StateRunning, LogPath: filepath.Join(t.TempDir(), "log2")}
+	if err := store.Save(t.Context(), open); err != nil {
+		t.Fatal(err)
+	}
+	open.State = StatePassed
+	row, won, err = store.SaveOpen(t.Context(), open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !won || row.State != StatePassed {
+		t.Fatalf("the open-row write won=%v and read %s", won, row.State)
+	}
+}
