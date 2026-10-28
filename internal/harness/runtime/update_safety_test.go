@@ -53,7 +53,7 @@ func rewriteFixtureExecutable(t *testing.T, root, script string) {
 // agent on that harness.
 func TestInstallAndSelectRejectsNewVersionThatCannotStart(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\nexit 3\n")
-	old := install(t, m, "pi", "1.1.0")
+	old := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestInstallAndSelectRejectsNewVersionThatCannotStart(t *testing.T) {
 // and answer with a version. Silence counts as broken.
 func TestInstallAndSelectRejectsNewVersionWithoutVersionAnswer(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho no-version-here\n")
-	old := install(t, m, "pi", "1.1.0")
+	old := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +87,11 @@ func TestInstallAndSelectRejectsNewVersionWithoutVersionAnswer(t *testing.T) {
 // binary that reports an incompatible build is rejected too.
 func TestInstallAndSelectRejectsUnsupportedReportedVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 1.0.9\n")
-	old := install(t, m, "pi", "1.1.0")
+	old := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.2.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.4.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("mismatched update accepted: %v", err)
 	}
 	if got, err := m.Resolve("pi", ""); err != nil || got.Version != old.Version {
@@ -104,7 +104,7 @@ func TestInstallAndSelectRejectsUnsupportedReportedVersion(t *testing.T) {
 func TestProbeRejectsHangingVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\nsleep 30\n")
 	m.ProbeTimeout = 200 * time.Millisecond
-	old := install(t, m, "pi", "1.1.0")
+	old := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestProbeRejectsHangingVersion(t *testing.T) {
 // keeps it on disk, and one rollback command restores it.
 func TestRollbackRestoresLastGoodVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 2.0.0\n")
-	first := install(t, m, "pi", "1.1.0")
+	first := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", first.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -151,14 +151,14 @@ func TestRollbackRestoresLastGoodVersion(t *testing.T) {
 
 // Rolling back with no update on record has no target and changes nothing.
 func TestRollbackWithoutUpdateFails(t *testing.T) {
-	m := scriptedManager(t, "#!/bin/sh\necho 1.1.0\n")
-	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.1.0"); err != nil {
+	m := scriptedManager(t, "#!/bin/sh\necho 1.3.0\n")
+	if _, err := m.InstallAndSelect(context.Background(), "pi", "1.3.0"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.Rollback(context.Background(), "pi"); err == nil || !strings.Contains(err.Error(), "No earlier good version") {
 		t.Fatalf("rollback without update: %v", err)
 	}
-	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "1.1.0" {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "1.3.0" {
 		t.Fatalf("selection changed: %+v %v", got, err)
 	}
 }
@@ -167,7 +167,7 @@ func TestRollbackWithoutUpdateFails(t *testing.T) {
 // sits outside the newest two.
 func TestGCKeepsLastGoodVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 4.0.0\n")
-	oldest := install(t, m, "pi", "1.1.0")
+	oldest := install(t, m, "pi", "1.3.0")
 	install(t, m, "pi", "2.0.0")
 	install(t, m, "pi", "3.0.0")
 	install(t, m, "pi", "4.0.0")
@@ -194,7 +194,7 @@ func TestGCKeepsLastGoodVersion(t *testing.T) {
 // Remove must not delete the rollback target.
 func TestRemoveKeepsLastGoodVersion(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 2.0.0\n")
-	old := install(t, m, "pi", "1.1.0")
+	old := install(t, m, "pi", "1.3.0")
 	if err := m.Select("pi", old.Version); err != nil {
 		t.Fatal(err)
 	}
@@ -212,13 +212,13 @@ func TestRemoveKeepsLastGoodVersion(t *testing.T) {
 // not even during the probe.
 func TestFailedUpdateLeavesFirstUseDefaultAlone(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\nexit 3\n")
-	if _, err := m.Install(context.Background(), "pi", "1.1.0"); err != nil {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err == nil || !strings.Contains(err.Error(), "startup check") {
 		t.Fatalf("broken update accepted: %v", err)
 	}
-	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "1.1.0" {
+	if got, err := m.Resolve("pi", ""); err != nil || got.Version != "1.3.0" {
 		t.Fatalf("effective default changed: %+v %v", got, err)
 	}
 	if got, err := m.LastGoodVersion("pi"); err != nil || got != "" {
@@ -233,17 +233,17 @@ func TestFailedUpdateLeavesFirstUseDefaultAlone(t *testing.T) {
 // prior default as its rollback target.
 func TestUpdateFromFirstUseStateRecordsRollbackTarget(t *testing.T) {
 	m := scriptedManager(t, "#!/bin/sh\necho 2.0.0\n")
-	if _, err := m.Install(context.Background(), "pi", "1.1.0"); err != nil {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.InstallAndSelect(context.Background(), "pi", "2.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := m.LastGoodVersion("pi"); err != nil || got != "1.1.0" {
-		t.Fatalf("rollback target = %q, %v; want the prior effective default 1.1.0", got, err)
+	if got, err := m.LastGoodVersion("pi"); err != nil || got != "1.3.0" {
+		t.Fatalf("rollback target = %q, %v; want the prior effective default 1.3.0", got, err)
 	}
 	back, err := m.Rollback(context.Background(), "pi")
-	if err != nil || back.Version != "1.1.0" {
+	if err != nil || back.Version != "1.3.0" {
 		t.Fatalf("rollback: %+v %v", back, err)
 	}
 }
@@ -269,10 +269,10 @@ func (c *lockWaitCtx) Done() <-chan struct{} {
 func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := manager(t)
-	// 1.1.0 is only the implicit default: no selection marker exists. Seed it
+	// 1.3.0 is only the implicit default: no selection marker exists. Seed it
 	// before the notification wrapper, so the seed sends no notification.
 	m.Run = fixtureInstall
-	if _, err := m.Install(context.Background(), "pi", "1.1.0"); err != nil {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0"); err != nil {
 		t.Fatal(err)
 	}
 	started := make(chan string, 2)
@@ -348,7 +348,7 @@ func TestConcurrentUpdatesRecordEachReplacedDefault(t *testing.T) {
 func TestProbeCleansUpItsScope(t *testing.T) {
 	for _, script := range []string{"#!/bin/sh\necho 2.0.0\n", "#!/bin/sh\nexit 3\n"} {
 		m := scriptedManager(t, script)
-		old := install(t, m, "pi", "1.1.0")
+		old := install(t, m, "pi", "1.3.0")
 		if err := m.Select("pi", old.Version); err != nil {
 			t.Fatal(err)
 		}

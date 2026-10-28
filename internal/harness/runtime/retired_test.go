@@ -19,7 +19,7 @@ func TestGCDropsRetiredCursorAccountsAndFolders(t *testing.T) {
 	}
 	cursorHome := filepath.Join(a.Root, "cursor-agent", "0123456789abcdef0123456789abcdef")
 	bundle := filepath.Join(bundles.Root, "cursor-agent", "2026.10.16-e3cb207")
-	for _, dir := range []string{cursorHome, bundle, filepath.Join(bundles.Root, "pi", "1.1.0")} {
+	for _, dir := range []string{cursorHome, bundle, filepath.Join(bundles.Root, "pi", "1.3.0")} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func TestGCDropsRetiredCursorAccountsAndFolders(t *testing.T) {
 			t.Fatalf("%s still exists: %v", dir, err)
 		}
 	}
-	for _, dir := range []string{survivor.Home, filepath.Join(bundles.Root, "pi", "1.1.0")} {
+	for _, dir := range []string{survivor.Home, filepath.Join(bundles.Root, "pi", "1.3.0")} {
 		if _, err := os.Stat(dir); err != nil {
 			t.Fatalf("removed %s: %v", dir, err)
 		}
@@ -58,7 +58,7 @@ func TestGCRemovesTheRetiredQwenBundle(t *testing.T) {
 	a := testAccounts(t)
 	bundles := &BundleManager{Root: filepath.Join(filepath.Dir(a.Root), "harnesses")}
 	qwen := filepath.Join(bundles.Root, "qwen-audio-agent", "2.0.1")
-	survivor := filepath.Join(bundles.Root, "pi", "1.1.0")
+	survivor := filepath.Join(bundles.Root, "pi", "1.3.0")
 	for _, dir := range []string{qwen, survivor} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)

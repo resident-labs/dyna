@@ -69,25 +69,20 @@ wizard's last step is the same editor.
 | Harness | Native setting |
 | --- | --- |
 | `claude-code` | `--settings {"autoCompactWindow":N+33000}`. Claude Code 2.1.302 showed a 33K compaction buffer, and the window must be 100K to 1M, so N is 67K to 967K. The buffer is not yet verified on 2.1.304. |
-| `pi` | none; Dyna runs `pi --mode rpc --session <id>` with `{"type":"compact"}` |
+| `pi` | Generated model reserve based on the profile target |
 
-For Claude Code profiles without an explicit threshold, Dyna uses the owner setting `harness.compactAtTokens` (200,000 by default). Dyna clamps this default to Claude's 67,000–967,000 token range. The generated launch setting overrides native Claude settings, including profile `--settings`. Set `harness.compactAtTokens` to `0` to leave native settings unchanged. An explicit profile threshold takes precedence over the owner setting.
+Each profile sets its own target. A profile without a target leaves the
+harness default unchanged. Existing profile targets remain unchanged. New profiles
+start at 200,000 tokens in the editor.
+For Claude Code, the generated launch setting overrides native Claude settings,
+including profile `--settings`.
 
-For an explicit Pi profile threshold, Dyna uses Pi's compact command. Its decoder reports `Record.ContextTokens`, the prompt size of
-each model call. The session stores the last one, and before the next resumed
-turn `profile.CompactDue` decides whether Dyna runs the compact command first.
-The harness still does the compaction; Dyna only chooses when to ask. A failed
-compact command becomes a `compact_failed` session event, and the turn runs.
-
-Dyna also sets a default Pi native compaction target with `harness.compactAtTokens`.
-The default is 200000 tokens; 0 disables the default cap. Dyna generates model
-reserves for models in the selected account's Pi catalog on Pi 1.3.0 or later.
-Unknown models and unavailable catalogs keep Pi's native defaults. Pi reports
-rounded windows, so Dyna uses a conservative upper bound and may compact earlier.
-The generated model reserve takes precedence over an ordinary project-wide Pi
-reserve. A project model override takes precedence over Dyna's generated value.
-Existing pinned sessions keep their prior generation until a fresh start. Pi may
-also decline compaction when it cannot split the history.
+For Pi, Dyna generates native model reserves from profile targets. When profiles
+share a model, Dyna uses the smallest target. Pi reports rounded windows, so
+compaction may start earlier. Unknown models and unavailable catalogs keep Pi's
+native defaults. Dyna supports Pi 1.3.0 and later. A project model override takes precedence over Dyna's generated
+value. Existing pinned sessions keep their prior generation until a fresh start.
+Pi may decline compaction when it cannot split the history.
 
 ## Rendering
 

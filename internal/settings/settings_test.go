@@ -308,30 +308,6 @@ func TestDefaultPathUsesConfigDirectory(t *testing.T) {
 	}
 }
 
-func TestCompactAtTokensSetting(t *testing.T) {
-	v := Defaults()
-	if v.HarnessCompactAtTokens != 200000 {
-		t.Fatalf("default = %d", v.HarnessCompactAtTokens)
-	}
-	for _, bad := range []string{"-1", "x", "1.5"} {
-		if err := v.Set(KeyCompactAtTokens, bad); err == nil {
-			t.Fatalf("accepted %q", bad)
-		}
-	}
-	if err := v.Set(KeyCompactAtTokens, "0"); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "settings.json")
-	v.path = path
-	if err := v.Save(); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(path)
-	if err != nil || loaded.HarnessCompactAtTokens != 0 {
-		t.Fatalf("loaded = %d, error = %v", loaded.HarnessCompactAtTokens, err)
-	}
-}
-
 func TestIdleUnloadMinutesSettingValidatesAndConverts(t *testing.T) {
 	v := Defaults()
 	if v.HarnessIdleUnload() != 10*time.Minute {
