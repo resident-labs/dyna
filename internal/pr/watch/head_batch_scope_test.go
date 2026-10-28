@@ -1,28 +1,11 @@
 package watch
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/pr/facts"
 )
-
-func headBatchFixtureBody(r *Record, at time.Time) []byte {
-	repo := map[string]any{"defaultBranchRef": map[string]string{"name": "main"}}
-	repo[fmt.Sprintf("p%d", r.Number)] = map[string]any{
-		"number": r.Number, "title": "Ready", "state": "OPEN", "merged": false,
-		"updatedAt": at.Format(time.RFC3339), "headRefOid": r.Head, "headRefName": "feature",
-		"baseRefOid": strings.Repeat("c", 40), "baseRefName": "main", "author": map[string]string{"login": "owner", "__typename": "User"},
-		"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]string{"state": "SUCCESS"}}}}},
-	}
-	body, _ := json.Marshal(map[string]any{"data": map[string]any{"r0": repo, "rateLimit": map[string]any{"remaining": 4999, "resetAt": at.Add(time.Hour).Format(time.RFC3339)}}})
-	return body
-}
 
 func TestUpdateRecordsOrAllRecoversUndeclaredRecordPolling(t *testing.T) {
 	e := newEnv(t)
@@ -70,9 +53,9 @@ func TestHeadBatchReadinessSeesMergedDependency(t *testing.T) {
 	e := newEnv(t)
 	r := e.track()
 	dependency := r
-	dependency.Key, dependency.ChangeID, dependency.Number = "github.com/owner/repo#2", "github.com/owner/repo#2", 2
+	dependency.Key, dependency.ChangeID, dependency.Number = "github.com/owner/repo#2", "stable-dependency", 2
 	dependency.State, dependency.Watching = "merged", false
-	r.Dependencies = []string{dependency.Key}
+	r.Dependencies = []string{dependency.ChangeID}
 	r.DefaultBranch = "main"
 	mergeable := true
 	r.Mergeable, r.Checks = &mergeable, nil
@@ -83,12 +66,8 @@ func TestHeadBatchReadinessSeesMergedDependency(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	body := headBatchFixtureBody(&r, e.clock)
-	e.s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
-		fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n")
-		_, err := cmd.Stdout.Write(body)
-		return err
-	}
+	e.f.Pull.Head.SHA = r.Head
+	e.write()
 	st, err := e.s.Store.Read()
 	if err != nil {
 		t.Fatal(err)
