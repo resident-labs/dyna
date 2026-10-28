@@ -28,6 +28,7 @@ import (
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/turntext"
 	"dyna-agent/internal/visual"
 )
 
@@ -423,6 +424,14 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 			return Result{}, fmt.Errorf("cannot forward: %w", err)
 		}
 		fwd = room.NewForward(orig)
+		if ev, ok := orig.TurnResult(); ok {
+			fwd.From = ev.Session
+			if ev.SessionID != "" {
+				if text, _, ok := turntext.Render(s.Sessions.Store, ev.SessionID, ev.Session, ev.Turn, string(ev.State)); ok {
+					fwd.Text = text
+				}
+			}
+		}
 	}
 	turn := 0
 	if in.Sender.Kind == SenderSession {
