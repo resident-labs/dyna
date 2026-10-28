@@ -347,10 +347,14 @@ type Poller struct {
 	// returned. The caller records it, so a restart can tell a launch the
 	// crashed engine completed from one that died inside the start.
 	Launched func(RunSpec)
-	mu       sync.Mutex
-	active   map[string]*watch
-	kick     chan struct{}
-	exited   chan struct{}
+	// applied, when set, is told after one poll's bytes reached the run's
+	// writer. Tests use it to wait for output that is durably written, not
+	// merely requested.
+	applied func(dir string)
+	mu      sync.Mutex
+	active  map[string]*watch
+	kick    chan struct{}
+	exited  chan struct{}
 }
 
 // NewPoller starts the poller of a run. The returned function stops it and waits
@@ -506,6 +510,9 @@ func (p *Poller) apply(batch []*watch, frames map[string]Frame) {
 		if len(frame.Payload) > 0 {
 			_, _ = w.out.Write(frame.Payload)
 			w.offset += int64(len(frame.Payload))
+			if p.applied != nil {
+				p.applied(w.spec.Dir)
+			}
 		}
 		if w.offset < frame.Size {
 			continue
