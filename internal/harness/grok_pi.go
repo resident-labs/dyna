@@ -2,8 +2,8 @@ package harness
 
 import (
 	"fmt"
+	"strings"
 
-	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/workeroutput"
 )
@@ -47,22 +47,10 @@ func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv 
 	// The id is preassigned on the command line; no stdout record is needed.
 	inv.sessionID = func(string) string { return id }
 	inv.resume = func(sessionID, prompt string) commandSpec {
-		// --session opens an existing session or fails. --session-id would
-		// silently create a fresh conversation if the original disappeared.
-		// The absolute file path skips Pi's project lookup: opening by id from
-		// another directory makes Pi ask whether to fork on stdin, which no
-		// headless turn can answer.
-		arg := sessionID
-		if path, err := harnessruntime.PiSessionPath(sessionID); err == nil {
-			arg = path
-		}
-		return commandSpec{argv: append(base(), "--session", arg), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
-	}
-	// A missing session file fails before any process starts, so a recovery
-	// nudge never targets a session that does not exist.
-	inv.resumeReady = func(sessionID string) error {
-		_, err := harnessruntime.PiSessionPath(sessionID)
-		return err
+		// --session opens an existing session across projects or exits with
+		// "session not found". --session-id would silently create a fresh
+		// conversation if the original disappeared.
+		return commandSpec{argv: append(base(), "--session", sessionID), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
 	}
 	inv.fork = func(sourcePath, prompt string) commandSpec {
 		// --fork copies the source session into this turn's directory and
@@ -70,15 +58,29 @@ func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv 
 		// so the next turn resumes the fork instead of forking again.
 		return commandSpec{argv: append(base(), "--fork", sourcePath, "--session-id", id), prompt: prompt, parseOutput: workeroutput.PiOutput, rpc: true}
 	}
-	// Compaction runs on the session's rpc process, not a second pi. It opens
-	// the session by file path for the same reason a resume does, so Pi never
-	// asks whether to fork on stdin.
+	// Compaction runs on the session's rpc process, not a second pi.
 	inv.compact = func(sessionID string) commandSpec {
-		arg := sessionID
-		if path, err := harnessruntime.PiSessionPath(sessionID); err == nil {
-			arg = path
-		}
-		return commandSpec{argv: append(base(), "--session", arg), rpc: true}
+		return commandSpec{argv: append(base(), "--session", sessionID), rpc: true}
 	}
 	return inv, nil
+}
+
+// piMissingSessionError recognizes the stable headless Pi startup error
+// for the exact --session id in this invocation. Other stderr keeps the
+// ordinary failure and recovery path.
+func piMissingSessionError(p profile.Profile, argv []string, a attempt) error {
+	if a.runErr == nil || a.contextDone || p.Harness != profile.HarnessPi {
+		return nil
+	}
+	id := piOptionValue(argv, "--session")
+	if id == "" {
+		return nil
+	}
+	want := "session not found: " + id
+	for _, line := range strings.Split(a.stderr, "\n") {
+		if strings.TrimSpace(line) == want {
+			return fmt.Errorf("worker %s cannot resume harness session %s: pi session %s has no session file", p.Name, id, id)
+		}
+	}
+	return nil
 }
