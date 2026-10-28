@@ -315,6 +315,23 @@ const fixtures: Record<string, EventPayload> = {
   'terminal/request.done': { requestId: 'q3', verdict: 'done', exit: { code: 0 }, note: 'logged in', detail: 'Exit code 0.' },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
   'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', minutes: 30 },
+  'job/started': {
+    jobId: 'job_0123456789ab',
+    node: 'pve',
+    label: 'make test',
+    state: 'running',
+    parent: 'dyna:jobs-step1',
+  },
+  'job/finished': {
+    jobId: 'job_0123456789ab',
+    node: 'pve',
+    label: 'make test',
+    state: 'failed',
+    exitCode: 2,
+    durationMs: 41_200,
+    parent: 'dyna:jobs-step1',
+    detail: 'log: dyna job logs job_0123456789ab',
+  },
   'shell/result': {
     shellId: 'sh_20261023-120000-0000000a',
     label: 'go test · the room package',
@@ -433,6 +450,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('minutes' in payload) return String(payload.minutes)
   if ('questionId' in payload) return payload.questionId
   if ('shellId' in payload) return payload.label
+  if ('jobId' in payload) return payload.label
   if ('runId' in payload) return payload.name
   if ('voice' in payload) return payload.session
   if ('call' in payload) return payload.type === 'withdrawn' ? 'Call request' : 'the call'

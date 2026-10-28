@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/shellquote"
@@ -68,174 +69,10 @@ type nodeCheck struct {
 	branch string
 }
 
-// A check's default resources. The slot pool hands every check two CPUs and the
-// default container memory, so a repository that asks for nothing keeps exactly
-// the limits it had before a check could ask for more.
-const (
-	defaultCheckCPUs          = 2
-	defaultContainerMemoryMiB = int64(4096)
-	defaultHostMemoryMiB      = int64(5120)
-	// hostTasksMax is the least a check may start, and what every scope that is
-	// not a check keeps.
-	hostTasksMax = 768
-	// tasksPerCPU is how many more tasks a check may start for each CPU it was
-	// given. A compiler and its linker threads need many tasks per CPU, so a
-	// large build with a fixed bound runs out of them.
-	tasksPerCPU = 256
-	// sccachePortBase is the first port a check's own sccache server may use. A
-	// shared server would be killed with the check that started it, while other
-	// checks still use it, so each check gets a server of its own.
-	sccachePortBase = 4226
-)
-
-// checkResources is the CPU count and memory one check runs with, after the node
-// bounded the repository's request.
-type checkResources struct {
-	CPUs      int
-	MemoryMiB int64
-	// Note says what Dyna clamped, and is empty when the check got what it
-	// asked for.
-	Note string
-}
-
-// clampCheckResources bounds a check's request by the machine. The slot pool
-// gives two CPUs and the default container memory per slot, and a probe of the
-// machine bounds both again. A request within the bound is granted. A default is
-// never clamped, so a small machine keeps the limits its checks already had.
-func clampCheckResources(check nodeCheck, node Node) checkResources {
-	resources := checkResources{CPUs: defaultCheckCPUs, MemoryMiB: defaultContainerMemoryMiB}
-	if check.host {
-		resources.MemoryMiB = defaultHostMemoryMiB
-	}
-	if check.cpus > 0 {
-		resources.CPUs = check.cpus
-	}
-	if check.memoryMiB > 0 {
-		resources.MemoryMiB = check.memoryMiB
-	}
-	cpuLimit := node.Slots * defaultCheckCPUs
-	memoryLimit := int64(node.Slots) * defaultContainerMemoryMiB
-	if node.CPUs > 0 {
-		cpuLimit = min(cpuLimit, node.CPUs)
-	}
-	if node.MemoryBytes > 0 {
-		// A probe total sits a little below the nominal size, so the bound is
-		// a whole GiB and reads as one number in the run report.
-		probed := int64(node.MemoryBytes / (1 << 20))
-		memoryLimit = min(memoryLimit, probed-probed%1024)
-	}
-	cpuLimit = max(cpuLimit, defaultCheckCPUs)
-	memoryLimit = max(memoryLimit, defaultContainerMemoryMiB)
-	if check.host {
-		memoryLimit = max(memoryLimit, defaultHostMemoryMiB)
-	}
-	var clamped []string
-	if resources.CPUs > cpuLimit {
-		clamped = append(clamped, fmt.Sprintf("cpus from %d to %d", resources.CPUs, cpuLimit))
-		resources.CPUs = cpuLimit
-	}
-	if resources.MemoryMiB > memoryLimit {
-		clamped = append(clamped, "memory from "+memoryLabel(resources.MemoryMiB)+" to "+memoryLabel(memoryLimit))
-		resources.MemoryMiB = memoryLimit
-	}
-	if len(clamped) > 0 {
-		resources.Note = "Dyna clamped " + strings.Join(clamped, " and ")
-	}
-	return resources
-}
-
-// memoryLabel writes a memory size in MiB or GiB, as a person reads it.
-func memoryLabel(mib int64) string {
-	if mib%1024 == 0 {
-		return strconv.FormatInt(mib/1024, 10) + " GiB"
-	}
-	return strconv.FormatInt(mib, 10) + " MiB"
-}
-
-// dockerMemory writes a memory size in the unit docker reads.
-func dockerMemory(mib int64) string {
-	if mib%1024 == 0 {
-		return strconv.FormatInt(mib/1024, 10) + "g"
-	}
-	return strconv.FormatInt(mib, 10) + "m"
-}
-
-// systemdMemory writes a memory size in the unit systemd reads.
-func systemdMemory(mib int64) string {
-	if mib%1024 == 0 {
-		return strconv.FormatInt(mib/1024, 10) + "G"
-	}
-	return strconv.FormatInt(mib, 10) + "M"
-}
-
-// scopeLimits bound one systemd scope.
-type scopeLimits struct {
-	CPUs      int
-	MemoryMiB int64
-	TasksMax  int
-}
-
-// defaultScopeLimits bound a scope that is not a check, such as node setup or
-// cleanup.
-var defaultScopeLimits = scopeLimits{CPUs: defaultCheckCPUs, MemoryMiB: defaultHostMemoryMiB, TasksMax: hostTasksMax}
-
-// scope is the systemd scope limit a granted check runs in. A container keeps
-// one GiB above its own memory limit for the docker client, as it always had. A
-// host check has no container limit, so the scope is its only memory bound.
-func (c checkResources) scope(host bool) scopeLimits {
-	memory := c.MemoryMiB
-	if !host {
-		memory += 1024
-	}
-	return scopeLimits{CPUs: c.CPUs, MemoryMiB: memory, TasksMax: tasksMaxFor(c.CPUs)}
-}
-
-// tasksMaxFor bounds the tasks a check with this many CPUs may start: a compiler
-// and its linker threads need many tasks per CPU, so the bound follows the CPUs
-// the check was given and never drops below the fixed minimum.
-func tasksMaxFor(cpus int) int {
-	if cpus < 1 {
-		cpus = 1
-	}
-	if tasks := tasksPerCPU * cpus; tasks > hostTasksMax {
-		return tasks
-	}
-	return hostTasksMax
-}
-
-// nodeDropCIRef removes the commit ref a previous run of the same commit left on
-// the node. An interrupted run can leave one that points at a missing object, and
-// neither a plain nor a forced push can replace such a ref.
-func nodeDropCIRef(cache, sha string) string {
-	return "git --git-dir=" + shellquote.Quote(cache) + " update-ref -d " + shellquote.Quote("refs/dyna/ci/"+sha) + " 2>/dev/null || true"
-}
-
-// pushCommitToNode gives the node the commit under its own ref, so a second run
-// of the same commit replaces whatever an interrupted first run left behind.
-func (r Runner) pushCommitToNode(ctx context.Context, repo, cache, sha string) error {
-	var output tailBuffer
-	if err := r.nodeCommand(ctx, &output, &output, nodeDropCIRef(cache, sha)); err != nil {
-		return fmt.Errorf("clear commit ref on node: %w: %s", err, &output)
-	}
-	dest := cache
-	var args []string
-	if r.Node.SSH != "" {
-		dest = r.Node.SSH + ":" + cache
-		// The push dials like every other node command, so it waits as long as
-		// the machine's connect timeout allows, for this one command only.
-		args = []string{"-c", "core.sshCommand=ssh -o BatchMode=yes -o " + machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout)}
-	}
-	// --no-verify skips the repository's own pre-push hooks. A Git LFS hook
-	// would upload to this bare CI remote and fail the push. GIT_LFS_SKIP_PUSH
-	// is set on this command only: the process guard strips GIT_* from every
-	// child, so the variable has to be set again for git itself.
-	args = append(args, "push", "--no-verify", dest, sha+":refs/dyna/ci/"+sha)
-	push := append([]string{"GIT_LFS_SKIP_PUSH=1", "git"}, args...)
-	if err := r.run(ctx, repo, &output, "env", push...); err != nil {
-		return fmt.Errorf("push commit to node: %w: %s", err, &output)
-	}
-	return nil
-}
+// sccachePortBase is the first port a check's own sccache server may use. A
+// shared server would be killed with the check that started it, while other
+// checks still use it, so each check gets a server of its own.
+const sccachePortBase = 4226
 
 // ErrHostChecksDisabled means a repository asked for host execution on a
 // machine whose owner has not allowed it. The repository cannot enable it.
@@ -298,69 +135,6 @@ func nodeCacheNames(checks []nodeCheck) []string {
 	return names
 }
 
-// nodeExec runs a script on the node once, with positional arguments and input.
-// The script is the argument of bash, and every call is short: the engine never
-// holds one connection for the length of a check.
-func (r Runner) nodeExec(ctx context.Context, in io.Reader, out, stderr io.Writer, script string, args ...string) error {
-	fn := r.Command
-	if fn == nil {
-		fn = command
-	}
-	argv := []string{"-o", "pipefail", "-c", script}
-	if len(args) > 0 {
-		argv = append(append(argv, "dyna-ci"), args...)
-	}
-	name, argv := r.nodeProgram("bash", argv)
-	return fn(ctx, "", in, out, stderr, name, argv...)
-}
-
-// nodeCommand runs a short, repeatable script on the node and retries it while
-// the connection fails. Its output reaches out and stderr only when the call
-// ends, so a retry never repeats half a reply.
-func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, script string) error {
-	var stdout, diagnostics bytes.Buffer
-	err := r.retry(ctx, longCallTimeout, func(ctx context.Context) error {
-		stdout.Reset()
-		diagnostics.Reset()
-		return r.nodeExec(ctx, nil, &stdout, &diagnostics, script)
-	})
-	_, _ = out.Write(stdout.Bytes())
-	_, _ = stderr.Write(diagnostics.Bytes())
-	return err
-}
-
-// nodeProgram wraps a program in ssh when the node is another machine. The
-// dial deadline is the machine's own connect timeout, the same one its probe
-// uses, so a node that does not answer costs a run the same bounded wait
-// everywhere instead of whatever an ambient ssh config happens to set. Local CI also never shares a multiplexed
-// connection: an alias with ControlMaster can hand a command a stream the
-// shared master truncated after the remote exit status arrived, which ssh
-// reports as success. Each command owns its end-to-end connection, so a
-// transport death fails the command with a drop instead (D-166).
-func (r Runner) nodeProgram(name string, args []string) (string, []string) {
-	if r.Node.SSH == "" {
-		return name, args
-	}
-	remote := shellquote.Quote(name)
-	for _, arg := range args {
-		remote += " " + shellquote.Quote(arg)
-	}
-	return "ssh", append([]string{"-o", "BatchMode=yes", "-o", machines.SSHConnectTimeoutOption(r.Node.SSHConnectTimeout), "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"}, r.Node.SSH, remote)
-}
-
-// sleepContext waits for d or until the context ends, so a cancelled run
-// stops waiting between ssh dial retries.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 // systemdNeedsNoExpandFlag reports whether the node's systemd-run must be told
 // not to expand environment variables in a command's arguments. The script Dyna
 // passes holds $ signs of its own, and a systemd that expands them rewrites it,
@@ -371,10 +145,10 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 // argument, because a loud failure on an old systemd is better than a script
 // that was quietly rewritten.
 func (r Runner) systemdNeedsNoExpandFlag(ctx context.Context) bool {
-	name, args := r.nodeProgram("systemd-run", []string{"--version"})
+	name, args := r.exec().NodeProgram("systemd-run", []string{"--version"})
 	fn := r.Command
 	if fn == nil {
-		fn = command
+		fn = jobs.RunCommand
 	}
 	var out bytes.Buffer
 	if err := fn(ctx, "", nil, &out, io.Discard, name, args...); err != nil {
@@ -568,7 +342,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
 		}
 		output.Reset()
-		if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
+		if err := r.exec().PushCommit(control, repo, cache, sha); err != nil {
 			// No check has started, so the git error would otherwise be an empty
 			// result and the trial would report an unknown job.
 			cause := runCause(node, control, err)
@@ -659,20 +433,20 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 	}()
 	// One poller follows every check of this run with one call at a time.
-	poller, stopPoller := r.newPoller(control)
+	poller, stopPoller := r.exec().NewPoller(control)
 	defer stopPoller()
 	var attachedMu sync.Mutex
-	poller.started = func(spec detachSpec) {
+	poller.Started = func(spec jobs.RunSpec) {
 		attachedMu.Lock()
 		defer attachedMu.Unlock()
-		attached.Checks = append(attached.Checks, spec.ID)
+		attached.Checks = append(attached.Checks, Suite(spec.ID))
 		if e := localStore.saveAttachment(control, attachKey, sha, node.Name, attached); e != nil {
 			log.Printf("local CI %s: record started check: %v", node.Name, e)
 		}
 	}
 	resumed := func(id Suite) bool { return resume != nil && resume.has(id) }
 	noExpand := r.systemdNeedsNoExpandFlag(control)
-	jobs := make(chan int, len(checks))
+	queue := make(chan int, len(checks))
 	order := make([]int, len(checks))
 	for i := range checks {
 		order[i] = i
@@ -687,9 +461,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return checks[order[i]].priority > checks[order[j]].priority
 	})
 	for _, index := range order {
-		jobs <- index
+		queue <- index
 	}
-	close(jobs)
+	close(queue)
 	var wg sync.WaitGroup
 	workers := min(node.Slots, len(checks))
 	if req.Parallelism > 0 {
@@ -699,7 +473,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for i := range jobs {
+			for i := range queue {
 				check := checks[i]
 				sr := SuiteResult{Suite: check.id, CheckName: check.name, Group: check.group, Node: node.Name, Status: "passed", Note: check.resources.Note}
 				checkCtx, stop := context.WithTimeout(control, admissionWait+req.Timeout+time.Minute)
@@ -714,8 +488,8 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				} else {
 					writer = io.MultiWriter(&output, blob)
 				}
-				spec := detachSpec{
-					ID:     check.id,
+				spec := jobs.RunSpec{
+					ID:     string(check.id),
 					Dir:    detachedDir(runDir, check.id),
 					Unit:   checkUnit(runID, check.id),
 					Attach: resumed(check.id),
@@ -726,7 +500,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				if !check.host {
 					// A host check runs its command in its own scope from inside the
 					// script, so the unit that holds the script stays unbounded.
-					limits := check.resources.scope(false)
+					limits := check.resources.Scope(false)
 					spec.Limits = &limits
 				}
 				runErr := poller.Run(checkCtx, spec, writer)
@@ -868,23 +642,23 @@ func (r Runner) fetchReports(ctx context.Context, reportRoot, reports string) er
 	return r.retry(ctx, longCallTimeout, func(ctx context.Context) error {
 		archive, err := os.CreateTemp(reportRoot, "reports-*.tar") // not-state: temporary report transport.
 		if err != nil {
-			return &permanentError{err}
+			return &jobs.PermanentError{Err: err}
 		}
 		defer os.Remove(archive.Name())
 		defer archive.Close()
 		var stderr tailBuffer
-		if err := r.nodeExec(ctx, nil, &boundedWriter{writer: archive, remaining: 70 << 20}, &stderr, script); err != nil {
+		if err := r.exec().NodeExec(ctx, nil, &boundedWriter{writer: archive, remaining: 70 << 20}, &stderr, script); err != nil {
 			err = fmt.Errorf("%w: %s", err, stderr.String())
 			if errors.Is(err, errReportsTooLarge) {
-				return &permanentError{err}
+				return &jobs.PermanentError{Err: err}
 			}
 			return err
 		}
 		if _, err := archive.Seek(0, io.SeekStart); err != nil {
-			return &permanentError{err}
+			return &jobs.PermanentError{Err: err}
 		}
 		if err := readArchive(archive, reportRoot); err != nil {
-			return &permanentError{err}
+			return &jobs.PermanentError{Err: err}
 		}
 		return nil
 	})
@@ -1024,7 +798,7 @@ func endCause(node Node, ctx context.Context, err error, markers [][]string, con
 	if unreachable(node, err) {
 		return CauseSSHDrop
 	}
-	code, hasExit := commandExitStatus(err)
+	code, hasExit := jobs.CommandExitStatus(err)
 	if len(markers) == 0 {
 		if hasExit {
 			switch {
@@ -1091,9 +865,9 @@ func runCause(node Node, ctx context.Context, err error) FailureCause {
 // that stayed unreachable beyond the bound, or a call that ssh ended with 255
 // after its retries.
 func unreachable(node Node, err error) bool {
-	var lost *nodeLostError
+	var lost *jobs.NodeLostError
 	if errors.As(err, &lost) {
-		return !lost.gone
+		return !lost.Gone
 	}
 	var exit *exec.ExitError
 	return node.SSH != "" && errors.As(err, &exit) && exit.ExitCode() == 255
@@ -1117,7 +891,7 @@ func checkExitCode(err error, markers [][]string) int {
 		}
 		return 0
 	}
-	code, _ := commandExitStatus(err)
+	code, _ := jobs.CommandExitStatus(err)
 	return code
 }
 
@@ -1283,7 +1057,7 @@ func nodeWorktreeCommand(cache, arguments string) string {
 // folder is left to the removal that stops the run's keeper first: deleting it
 // here would take the keeper's process ID away before anything could stop it.
 func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) string {
-	script := unitStoppedFunction + "set -e; docker=(docker); "
+	script := jobs.UnitStoppedFunction + "set -e; docker=(docker); "
 	if node.SSH == "" {
 		script += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
 	}
@@ -1320,7 +1094,7 @@ func teardownScript(node Node, cache, runDir, runID string, checks []nodeCheck) 
 		// The check's detached unit goes last: a check that ended on its own has
 		// nothing left to stop, and one that a lost poll left behind dies here. A
 		// unit that survives, or whose state cannot be read, fails the teardown.
-		script += "bash -c " + q(detachedStopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
+		script += "bash -c " + q(jobs.StopScript) + " dyna-ci " + q(detachedDir(runDir, check.id)) + " " + q(checkUnit(runID, check.id)) + "; "
 		script += nodeWorktreeCommand(cache, "remove --force "+q(nodeCheckWorkPath(runDir, runID, check))) + " >/dev/null 2>&1 || true; "
 	}
 	return script + nodeWorktreeCommand(cache, "prune")
@@ -1343,44 +1117,13 @@ func nodeSetupScript(base, cache, reports, active string, cacheNames []string) s
 		"flock " + q(path.Join(base, "init.lock")) + " bash -c " + q("if [ ! -d "+q(cache)+" ]; then git init --bare "+q(cache)+"; fi")
 }
 
-// Slots belong to checks, across repositories and runner processes. A waiter
-// tries every slot before blocking on one slot without polling.
 // killGroupLeftovers kills every process in the wrapper's group except the
-// wrapper itself and its parent. The parent is the detached wrapper that writes
-// the check's exit record after the check returns, and it shares the group. A check that leaves a child behind, such as a compiler daemon
-// or a shell that outlived its deadline, must not hold the check's output pipe
-// or the next check's slot.
+// wrapper itself and its parent. The parent is the detached wrapper that
+// writes the check's exit record after the check returns, and it shares the
+// group. A check that leaves a child behind, such as a compiler daemon or a
+// shell that outlived its deadline, must not hold the check's output pipe or
+// the next check's slot.
 const killGroupLeftovers = `pgid=$(ps -o pgid= -p $$ | tr -d " "); for p in $(pgrep -g "$pgid" 2>/dev/null); do [ "$p" = "$$" ] || [ "$p" = "$PPID" ] || kill -KILL "$p" 2>/dev/null || true; done`
-
-// nodeSlotScript runs inner while holding one of the node's slots. A wrapper
-// that waits for a slot installs its deadline and its signal trap first, and
-// watches its own run while it waits: a run that is cancelled or removed leaves
-// no queued wrapper holding a slot on the machine.
-func nodeSlotScript(base string, slots, index int, active string, deadline time.Duration, inner string) string {
-	q := shellquote.Quote
-	seconds := int64((deadline + time.Second - 1) / time.Second)
-	return "set -euo pipefail; trap 'exit 143' HUP INT TERM; " +
-		"mkdir -p " + q(path.Join(base, "slots")) + "; " +
-		fmt.Sprintf("deadline=$(( $(date +%%s) + %d )); ", int(seconds)) +
-		"acquired=0; " +
-		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		"if [ \"$acquired\" = 0 ]; then printf 'local CI: every slot is busy, waiting for any free slot\\n' >&2; " +
-		"while [ \"$acquired\" = 0 ]; do " +
-		// Every poll tries every slot, so a waiting check takes the first one that
-		// frees up instead of queueing behind one named slot.
-		fmt.Sprintf("for slot in $(seq 0 %d); do exec 9>\"%s/slots/$slot.lock\"; if flock -n 9; then acquired=1; break; fi; done; ", slots-1, base) +
-		"[ \"$acquired\" = 0 ] || break; " +
-		// The run's keeper holds this file, and it goes when the run is cancelled
-		// or removed: a queued check then has nothing left to wait for.
-		"[ -e " + q(active) + " ] || exit 75; " +
-		"[ \"$(date +%s)\" -lt \"$deadline\" ] || exit 75; " +
-		"sleep ${DYNA_CI_SLOT_POLL:-1}; " +
-		"done; fi; " +
-		// A slot that came free after the run was removed must not start the
-		// check: the run is checked once more right before its work begins.
-		"[ -e " + q(active) + " ] || exit 75; " +
-		"[ \"$(date +%s)\" -lt \"$deadline\" ] || exit 75; " + inner
-}
 
 // survivorSweep removes what a failed teardown left on the node: containers
 // labelled dyna.run and dyna-ci-* systemd units that are older than six hours
@@ -1586,7 +1329,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			`done < <(find ` + q(artifacts) + ` -name '*.zip' -type f 2>/dev/null); ` +
 			"rm -rf " + unpacked + "; "
 		setup += "( exit $check_status )"
-		return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
+		return jobs.SlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 	}
 	if check.host {
 		setup += "cd " + q(work) + "; : > " + q(path.Join(reportDir, commandStartedFile)) + "; " + checkTmpFolder(node.CheckTmp) + "trap " + q(cleanup+`; rm -rf "$isolated"`) + " EXIT; "
@@ -1620,10 +1363,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 		if noExpand {
 			scopeArgs = append(scopeArgs, systemdver.NoExpandFlag)
 		}
-		limits := check.resources.scope(true)
+		limits := check.resources.Scope(true)
 		scopeArgs = append(scopeArgs, "--unit", name,
 			"-p", "CPUQuota="+strconv.Itoa(limits.CPUs*100)+"%",
-			"-p", "MemoryMax="+systemdMemory(limits.MemoryMiB),
+			"-p", "MemoryMax="+jobs.SystemdMemory(limits.MemoryMiB),
 			"-p", "TasksMax="+strconv.Itoa(limits.TasksMax),
 			"--", "nice", "-n", "10")
 		scope := "systemd-run"
@@ -1649,7 +1392,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 			serverPort = " SCCACHE_SERVER_PORT=$(( " + strconv.Itoa(sccachePortBase) + " + slot ))"
 		}
 		setup += hostEnvironment(environment) + serverPort + " bash -o pipefail -c " + q(check.inner) + " 9>&- || check_status=$?; " + release + killGroupLeftovers + "; ( exit $check_status )"
-		return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
+		return jobs.SlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 	}
 	if node.SSH == "" {
 		setup += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
@@ -1667,7 +1410,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// A stable source path lets build tools reuse results across run IDs. Each
 	// check keeps a separate host worktree and report directory.
 	args := `"${docker[@]}" run --rm --init --cpus=` + strconv.Itoa(check.resources.CPUs) +
-		" --memory=" + dockerMemory(check.resources.MemoryMiB) + " --memory-swap=" + dockerMemory(check.resources.MemoryMiB) +
+		" --memory=" + jobs.DockerMemory(check.resources.MemoryMiB) + " --memory-swap=" + jobs.DockerMemory(check.resources.MemoryMiB) +
 		` --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --label dyna.run=` + q(runID) + ` --name ` + q(name) + user +
 		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
 	environment := map[string]string{
@@ -1695,7 +1438,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha, baseCommit stri
 	// Both host and container deadlines survive a disconnected SSH client.
 	// The container's command gets no slot lock either, for the same reason.
 	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner) + " 9>&-"
-	return nodeSlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
+	return jobs.SlotScript(base, node.Slots, index, path.Join(runDir, ".active"), timeout+admissionWait, setup)
 }
 
 func dockerEnvironment(environment map[string]string) string {

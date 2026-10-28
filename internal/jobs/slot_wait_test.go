@@ -1,4 +1,4 @@
-package localci
+package jobs
 
 import (
 	"bytes"
@@ -11,6 +11,16 @@ import (
 
 	"dyna-agent/internal/shellquote"
 )
+
+// keepActive marks a job as live for a slot script, as the job's keeper does.
+func keepActive(t *testing.T, dir string) string {
+	t.Helper()
+	active := filepath.Join(dir, ".active")
+	if err := os.WriteFile(active, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return active
+}
 
 // A waiting check takes the first slot that frees up, not one named slot: with
 // every slot busy, the second poll finds slot 0 free and runs there, instead of
@@ -29,7 +39,7 @@ func TestWaitingCheckTakesTheFirstFreeSlot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := nodeSlotScript(dir, 3, 1, keepActive(t, dir), 2*time.Second, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
+	script := SlotScript(dir, 3, 1, keepActive(t, dir), 2*time.Second, `printf 'slot=%s port=%s\n' "$slot" "$(( 4226 + slot ))"`)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "DYNA_CI_SLOT_POLL=0.01")
 	var out, errOut bytes.Buffer

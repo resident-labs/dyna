@@ -641,7 +641,8 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 			log.Printf("seed built-in hooks: %v", err)
 		}
 	}
-	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load}, readOnly)
+	jobsSvc := newJobsService(rooms)
+	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, say: voice.NewSayer(), hooks: hookService, sync: lanesync.New(), health: health, load: load, jobs: jobsSvc}, readOnly)
 	if err != nil {
 		return err
 	}
@@ -724,7 +725,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 			}
 		})
 	}
-	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, hookService, started, func(ev roomsvc.Event) {
+	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, hookService, started, jobsSvc, func(ev roomsvc.Event) {
 		if ev.Kind == "call-requests" {
 			wakeWorker(callRing)
 		}

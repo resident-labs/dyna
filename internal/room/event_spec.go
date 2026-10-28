@@ -816,6 +816,37 @@ var eventSpecs = []EventSpec{
 		Text:              "Shell job {label} has no output log growth for {minutes} minutes. Partial lines may be buffered; this does not mean the job is stuck.",
 		Producers:         []EventProducer{ProducerShell},
 	},
+	// A job's life belongs to the session that submitted it: the start is
+	// quiet, the result wakes the session like a shell result does. Both stay
+	// out of the room watch; the session DM and the job card carry them.
+	{
+		Family:    FamilyJob,
+		Type:      TypeStarted,
+		Renderer:  "JobCard",
+		Payload:   reflect.TypeOf(JobEvent{}),
+		Quiet:     true,
+		NoWatch:   true,
+		Wake:      WakeNever,
+		Once:      true,
+		Audience:  AudienceSession,
+		Blocks:    []string{"detail"},
+		Text:      "Job {label} started on {node}.",
+		Producers: []EventProducer{ProducerJobs},
+	},
+	{
+		Family:            FamilyJob,
+		Type:              TypeJobFinished,
+		Renderer:          "JobCard",
+		Payload:           reflect.TypeOf(JobEvent{}),
+		NoWatch:           true,
+		Wake:              WakeTarget,
+		Once:              true,
+		RootOnOwnerReport: true,
+		Audience:          AudienceSession,
+		Blocks:            []string{"detail"},
+		Text:              "Job {label} on {node} {state} with exit code {exitCode}.",
+		Producers:         []EventProducer{ProducerJobs},
+	},
 	// A workflow run result is the parent's work too, and stays out of the
 	// room watch for the same reason as a shell result.
 	{
@@ -876,6 +907,7 @@ type eventEnum struct {
 const checkinText = "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting."
 
 var eventEnums = []eventEnum{
+	{Type: reflect.TypeOf(JobState("")), Values: enumValues(jobStates)},
 	{Type: reflect.TypeOf(PRType("")), Values: enumValues(prTypes)},
 	{Type: reflect.TypeOf(MergeStep("")), Values: enumValues(mergeSteps)},
 	{Type: reflect.TypeOf(IssueChange("")), Values: enumValues(issueChanges)},
