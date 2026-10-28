@@ -189,6 +189,20 @@ func sessionPushRepository(ctx context.Context, rec room.Record, dir string, arg
 	}
 	var urls []string
 	if strings.Contains(remote, "://") {
+		// A repository can rewrite the URL it was given (url.<base>.insteadOf),
+		// and a rewritten URL may name an external transport such as ext::, which
+		// runs a repository-chosen command. The engine never pushes through a
+		// rewrite: when any configured rewrite matches the target URL, the push
+		// stays local, where no account credential exists.
+		rewrites, err := urlRewrites(ctx, dir)
+		if err != nil {
+			return repository{}, false
+		}
+		for _, base := range rewrites {
+			if strings.HasPrefix(remote, base) {
+				return repository{}, false
+			}
+		}
 		urls = []string{remote}
 	} else {
 		out, err := repoid.Git(ctx, dir, "remote", "get-url", "--push", "--all", remote)
@@ -206,6 +220,28 @@ func sessionPushRepository(ctx context.Context, rec room.Record, dir string, arg
 		selected = r
 	}
 	return selected, selected.name != ""
+}
+
+// urlRewrites returns the configured URL rewrite prefixes (url.<base>.
+// insteadOf and url.<base>.pushInsteadOf values) of a repository.
+func urlRewrites(ctx context.Context, dir string) ([]string, error) {
+	raw, err := repoid.GitRaw(ctx, dir, "config", "--null", "--get-regexp", `^url\.`)
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var prefixes []string
+	for _, record := range strings.Split(raw, "\x00") {
+		key, value, _ := strings.Cut(record, "\n")
+		key = strings.ToLower(key)
+		if strings.HasSuffix(key, ".insteadof") || strings.HasSuffix(key, ".pushinsteadof") {
+			prefixes = append(prefixes, value)
+		}
+	}
+	return prefixes, nil
 }
 
 func defaultPushRemote(ctx context.Context, dir string) string {

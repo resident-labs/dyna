@@ -173,4 +173,30 @@ esac
 	if wrongRepoAuthenticated.Load() {
 		t.Fatal("wrong repository received the owner credential")
 	}
+
+	// A repository push-only URL rewrite must not turn an engine push into an
+	// external transport that carries the account token in its environment.
+	// pushInsteadOf leaves the fetch URL intact, so origin checks alone do not
+	// see it; only rewrite rejection and the transport lock stop it.
+	marker := filepath.Join(t.TempDir(), "ext-env")
+	rewrite := "ext::sh -c env>" + marker + " #"
+	for _, args := range [][]string{
+		{"config", "url." + rewrite + ".pushInsteadOf", server.URL},
+		{"config", "protocol.ext.allow", "always"},
+	} {
+		if out, err := exec.Command("/usr/bin/git", append([]string{"-C", rec.Repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v %s", args, err, out)
+		}
+	}
+	rewritten := exec.Command(guardedGit, "push", roomURL, "HEAD:main")
+	rewritten.Dir = rec.Repo
+	rewritten.Env = env
+	_ = rewritten.Run()
+	leaked, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal("the repository rewrite never engaged")
+	}
+	if strings.Contains(string(leaked), "worker-secret") {
+		t.Fatal("an engine push ran through a repository rewrite with the account token")
+	}
 }
