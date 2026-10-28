@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/proc"
 	"dyna-agent/internal/userservices"
 )
 
@@ -144,36 +145,25 @@ type procInfo struct {
 }
 
 func processes() map[int]procInfo {
-	out := map[int]procInfo{}
-	entries, _ := os.ReadDir("/proc")
-	for _, entry := range entries {
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil {
-			continue
-		}
-		if p, ok := processInfo(pid); ok {
-			out[pid] = p
-		}
+	inventory := proc.ListStat("/proc")
+	out := make(map[int]procInfo, len(inventory))
+	for pid, p := range inventory {
+		out[pid] = procInfoFrom(p)
 	}
 	return out
 }
 func processInfo(pid int) (procInfo, bool) {
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	p, err := proc.ReadStat("/proc", pid)
 	if err != nil {
 		return procInfo{}, false
 	}
-	line := string(b)
-	end := strings.LastIndex(line, ")")
-	begin := strings.Index(line, "(")
-	if end < begin || begin < 0 {
-		return procInfo{}, false
+	return procInfoFrom(p), true
+}
+func procInfoFrom(p proc.Process) procInfo {
+	return procInfo{
+		pid: p.PID, ppid: p.ParentPID, start: strconv.FormatUint(p.StartTime, 10),
+		name: p.Command, state: p.State,
 	}
-	fields := strings.Fields(line[end+1:])
-	if len(fields) < 20 {
-		return procInfo{}, false
-	}
-	ppid, _ := strconv.Atoi(fields[1])
-	return procInfo{pid: pid, ppid: ppid, start: fields[19], name: line[begin+1 : end], state: fields[0]}, true
 }
 func descendants(all map[int]procInfo, roots map[int]string) map[int]string {
 	out := map[int]string{}
