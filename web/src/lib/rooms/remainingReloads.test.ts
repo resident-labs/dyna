@@ -249,8 +249,9 @@ test('list-only events do not reload room summaries', () => {
 })
 test('a room snapshot supersedes an older mention request for the same visit', async () => {
   const old = deferred<string[]>(), updates: unknown[] = []
+  let membersCalls = 0
   const data = createRoomData({
-    members: async () => [member('old')],
+    members: async () => [member(++membersCalls === 1 ? 'old' : 'new')],
     mentions: () => old.promise,
     openRoom: async () => ({ members: [member('new')], choices: ['@new'] }),
   }, {
