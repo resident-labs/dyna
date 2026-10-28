@@ -154,8 +154,9 @@ func matchesRepository(ctx context.Context, rec room.Record, r repository) bool 
 }
 
 var mutation = regexp.MustCompile(`\bmutation\b`)
+var errAgentGitHubWrite = errors.New("GitHub writes are not allowed for agents; post in the room with dyna post instead")
 
-func isRead(args []string) bool {
+func commandArgs(args []string) []string {
 	for len(args) > 0 {
 		if (args[0] == "--repo" || args[0] == "-R") && len(args) > 1 {
 			args = args[2:]
@@ -167,6 +168,11 @@ func isRead(args []string) bool {
 		}
 		break
 	}
+	return args
+}
+
+func isRead(args []string) bool {
+	args = commandArgs(args)
 	if len(args) == 0 {
 		return false
 	}
@@ -359,6 +365,77 @@ func fetchPublicRepo(ctx context.Context, r repository) bool {
 		Private bool `json:"private"`
 	}
 	return resp.StatusCode == http.StatusOK && json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body) == nil && !body.Private
+}
+
+func checkWorkerPolicy(args []string) error {
+	args = commandArgs(args)
+	if isRead(args) {
+		return nil
+	}
+	if len(args) == 1 && args[0] == "status" {
+		return nil
+	}
+	if len(args) >= 2 && args[0] == "codespace" && args[1] == "ports" && codespacePortsListFlags(args[2:]) {
+		return nil
+	}
+	if len(args) >= 3 {
+		switch args[0] + " " + args[1] + " " + args[2] {
+		case "issue artifact download", "issue artifact list", "issue artifact view",
+			"repo autolink list", "repo autolink view", "repo deploy-key list",
+			"repo gitignore list", "repo gitignore view", "repo license list", "repo license view":
+			return nil
+		}
+	}
+	if len(args) >= 2 {
+		switch args[0] + " " + args[1] {
+		case "pr create", "pr edit", "pr ready",
+			"agent-task list", "agent-task view",
+			"attestation download", "attestation trusted-root", "attestation verify",
+			"cache list", "codespace list", "codespace logs", "codespace view",
+			"discussion list", "discussion view", "extension browse", "extension list", "extension search",
+			"gist clone", "gist list", "gist view", "gpg-key list", "issue status", "label list", "org list",
+			"pr checkout", "pr status", "project field-list", "project item-list", "project list", "project view",
+			"release download", "release list", "release verify", "release verify-asset", "release view",
+			"repo clone", "repo list", "repo read-dir", "repo read-file",
+			"ruleset check", "ruleset list", "ruleset view", "run watch",
+			"search code", "search commits", "search issues", "search prs", "search repos",
+			"secret list", "skill list", "skill preview", "skill search", "ssh-key list",
+			"variable get", "variable list", "workflow list", "workflow view":
+			return nil
+		}
+	}
+	return errAgentGitHubWrite
+}
+
+func codespacePortsListFlags(args []string) bool {
+	valueFlags := map[string]bool{
+		"-c": true, "--codespace": true, "-q": true, "--jq": true, "--json": true,
+		"-R": true, "--repo": true, "--repo-owner": true, "-t": true, "--template": true,
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return i == len(args)-1
+		}
+		if arg == "--help" || arg == "-h" {
+			continue
+		}
+		if valueFlags[arg] {
+			i++
+			if i >= len(args) {
+				return false
+			}
+			continue
+		}
+		if name, _, ok := strings.Cut(arg, "="); ok && valueFlags[name] {
+			continue
+		}
+		if len(arg) > 2 && valueFlags[arg[:2]] {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func checkPolicy(ctx context.Context, cmdDir string, r repository, args []string) error {
