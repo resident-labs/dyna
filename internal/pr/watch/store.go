@@ -192,10 +192,14 @@ func (s *Store) Get(key string) (Record, error) {
 	}
 	r, ok := snapshot.Record(key)
 	if !ok {
-		return Record{}, fmt.Errorf("PR is not tracked")
+		return Record{}, state.ErrNotTracked
 	}
 	return r, nil
 }
+
+// RoomOf reads one tracked PR's room from its hot row, without refreshing
+// the shared snapshot. A caller that needs more than routing uses Get.
+func (s *Store) RoomOf(key string) (string, error) { return state.RecordRoom(s.Root, key) }
 
 // ciNoticeTokens are the notice token prefixes of CI results and budgets.
 var ciNoticeTokens = []string{"ci:", "ci-budget:", "test-budget:", "test-budget-policy:", "test-report-error:", "no-junit-report"}

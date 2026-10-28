@@ -3,6 +3,7 @@ package pr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -213,7 +214,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		cur, err := s.Store.Get(r.Key())
+		roomID, err := s.Store.RoomOf(r.Key())
 		if err != nil {
 			return err
 		}
@@ -222,11 +223,11 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		if room, err := s.Notify.Rooms.Resolve(cur.RoomID); err != nil || prview.CheckoutOfRoom(c.Context(), room, dir) != nil {
+		if room, err := s.Notify.Rooms.Resolve(roomID); err != nil || prview.CheckoutOfRoom(c.Context(), room, dir) != nil {
 			dir = ""
 		}
 		var rec watch.Record
-		if err := engineclient.New("").Call(c.Context(), "TransferPR", []any{cur.RoomID, r.Key(), *role, to.ID, dir}, &rec); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "TransferPR", []any{roomID, r.Key(), *role, to.ID, dir}, &rec); err != nil {
 			return err
 		}
 		if *transferJSON {
@@ -545,13 +546,13 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				return fmt.Errorf("read findings JSON: %w", err)
 			}
 		}
-		rec, err := s.Store.Get(r.Key())
+		roomID, err := s.Store.RoomOf(r.Key())
 		if err != nil {
 			return err
 		}
 		result := watch.ReviewResult{Verdict: prstate.ReviewVerdict(a[1]), Findings: findings, Summary: summary, Head: *head, ReviewID: *reviewID, StopReason: prstate.StopReason(*reason)}
 		var saved prview.VerdictResult
-		if err := engineclient.New("").Call(c.Context(), "RecordReviewResult", []any{rec.RoomID, rec.Key, result}, &saved); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "RecordReviewResult", []any{roomID, r.Key(), result}, &saved); err != nil {
 			return err
 		}
 		if saved.Notice != "" {
@@ -594,12 +595,12 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		rec, err := s.Store.Get(ref.Key())
+		roomID, err := s.Store.RoomOf(ref.Key())
 		if err != nil {
 			return err
 		}
 		var result prview.LearnedPRNoise
-		if err := engineclient.New("").Call(c.Context(), "LearnPRNoise", []any{rec.RoomID, ref.Key(), a[1], *noiseReason}, &result); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "LearnPRNoise", []any{roomID, ref.Key(), a[1], *noiseReason}, &result); err != nil {
 			return err
 		}
 		return output(c, result)
@@ -622,17 +623,17 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		rec, err := s.Store.Get(ref.Key())
+		roomID, err := s.Store.RoomOf(ref.Key())
 		if err != nil {
 			return err
 		}
 		var comments []prview.HeldPRComment
-		if err := engineclient.New("").Call(c.Context(), "HeldPRComments", []any{rec.RoomID}, &comments); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "HeldPRComments", []any{roomID}, &comments); err != nil {
 			return err
 		}
 		for _, comment := range comments {
 			if comment.Key == ref.Key() && comment.ID == args[1] {
-				return engineclient.New("").Call(c.Context(), "AdmitPRComment", []any{rec.RoomID, ref.Key(), args[1], comment.Version}, nil)
+				return engineclient.New("").Call(c.Context(), "AdmitPRComment", []any{roomID, ref.Key(), args[1], comment.Version}, nil)
 			}
 		}
 		return fmt.Errorf("comment %q is not held", args[1])
@@ -642,23 +643,23 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		rec, err := s.Store.Get(ref.Key())
+		roomID, err := s.Store.RoomOf(ref.Key())
 		if err != nil {
 			return err
 		}
-		return engineclient.New("").Call(c.Context(), "DismissPRComment", []any{rec.RoomID, ref.Key(), args[1]}, nil)
+		return engineclient.New("").Call(c.Context(), "DismissPRComment", []any{roomID, ref.Key(), args[1]}, nil)
 	}}
 	held := &cobra.Command{Use: "held <number|url>", Short: "Owner: list held outside comments", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		s, ref, err := resolve(c, args[0])
 		if err != nil {
 			return err
 		}
-		rec, err := s.Store.Get(ref.Key())
+		roomID, err := s.Store.RoomOf(ref.Key())
 		if err != nil {
 			return err
 		}
 		var comments []prview.HeldPRComment
-		if err := engineclient.New("").Call(c.Context(), "HeldPRComments", []any{rec.RoomID}, &comments); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "HeldPRComments", []any{roomID}, &comments); err != nil {
 			return err
 		}
 		out := []prview.HeldPRComment{}
@@ -677,22 +678,22 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 
 // prWrite changes one tracked PR through an engine call, so the engine checks
 // the caller (requirements item 3) instead of this process writing the store.
+// The room lookup reads only that PR's hot row; the engine still re-reads the
+// record and re-checks the room, the author and the open state.
 func prWrite(c *cobra.Command, s *watch.Service, key, call string, args ...any) error {
-	rec, err := s.Store.Get(key)
+	roomID, err := s.Store.RoomOf(key)
 	if err != nil {
 		return err
 	}
-	return engineclient.New("").Call(c.Context(), call, append([]any{rec.RoomID, key}, args...), nil)
+	return engineclient.New("").Call(c.Context(), call, append([]any{roomID, key}, args...), nil)
 }
 
 // publicationRoom uses the tracked room, or resolves the CLI room for an untracked PR.
 func publicationRoom(s *watch.Service, ref watch.Ref) (string, error) {
-	st, err := s.Store.Read()
-	if err != nil {
+	if roomID, err := s.Store.RoomOf(ref.Key()); err == nil {
+		return roomID, nil
+	} else if !errors.Is(err, prstate.ErrNotTracked) {
 		return "", err
-	}
-	if rec := st.Records[ref.Key()]; rec != nil {
-		return rec.RoomID, nil
 	}
 	return mergeRoomFor(s, "")
 }
