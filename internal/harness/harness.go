@@ -796,8 +796,7 @@ func (r *journaledRun) compactBeforeTurn() error {
 			return fmt.Errorf("worker %s cannot resume harness session %s: %w", r.p.Name, r.session.ResumeID, err)
 		}
 	}
-	if r.inv.compact != nil && (profile.CompactDue(r.p, r.session.ContextTokens) ||
-		(r.p.Harness == profile.HarnessPi && r.p.Env["DYNA_PI_LEGACY_COMPACT"] == "1" && r.p.Compact != nil && r.session.ContextTokens >= r.p.Compact.Tokens)) {
+	if r.inv.compact != nil && profile.CompactDue(r.p, r.session.ContextTokens) {
 		completed, err := runCompaction(r.ctx, r.p, r.cwd, r.inv.compact(r.session.ResumeID), r.steering, r.exec, r.admitNativeAttempt)
 		if isNativeAdmissionError(err) {
 			return err
