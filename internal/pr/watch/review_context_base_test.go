@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/pr/state"
 )
 
 // testGit runs one git command in dir and returns its trimmed output.
@@ -102,5 +104,186 @@ func TestReviewInputUsesCurrentBaseAndAssignedHeadChecks(t *testing.T) {
 	}
 	if len(input.GitHubChecks) != 1 || input.GitHubChecks[0].ID != 2 || input.GitHubChecks[0].State != "pending" {
 		t.Fatalf("checks = %+v, want the pending check read for the assigned head", input.GitHubChecks)
+	}
+}
+
+func TestReviewInputOmitsGeneratedFiles(t *testing.T) {
+	e := newEnv(t)
+	repo := t.TempDir()
+	testGit(t, repo, "init", "-q", "-b", "main")
+	testGit(t, repo, "config", "user.name", "test")
+	testGit(t, repo, "config", "user.email", "test@example.com")
+	testCommit(t, repo, "base.txt", "base\n", "base")
+	base := testGit(t, repo, "rev-parse", "HEAD")
+	testGit(t, repo, "checkout", "-q", "-b", "feature")
+	if err := os.MkdirAll(filepath.Join(repo, "generated"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	testCommit(t, repo, ".gitattributes", "generated/** linguist-generated\nmanual.txt -diff\nplain.txt linguist-generated=false\n", "mark generated files")
+	testCommit(t, repo, "generated/one.txt", "one\ntwo\nthree\n", "add generated preset")
+	testCommit(t, repo, "manual.txt", "manual\nlines\n", "add generated manual")
+	testCommit(t, repo, "plain.txt", "plain\n", "add reviewed source")
+	head := testGit(t, repo, "rev-parse", "HEAD")
+	// Attributes must come from the assigned head, not the current checkout.
+	testGit(t, repo, "checkout", "-q", "main")
+	r := Record{Kind: "local", Key: "local-generated", Repo: "local", RepoPath: repo, Base: base, Head: head, Round: 1}
+	task, err := e.s.prepareReviewTask(context.Background(), r, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(filepath.Join(e.s.Store.Root, "review-inputs", "*", "*.json"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("context paths: %+v, %v", paths, err)
+	}
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input struct {
+		DiffPath       string `json:"diffPath"`
+		DiffStat       string `json:"diffStat"`
+		GeneratedFiles []struct {
+			Path    string `json:"path"`
+			Added   int    `json:"added"`
+			Deleted int    `json:"deleted"`
+		} `json:"generatedFiles"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.GeneratedFiles) != 2 {
+		t.Fatalf("generated files = %+v, want two entries with line counts", input.GeneratedFiles)
+	}
+	if got := input.GeneratedFiles[0]; got.Path != "generated/one.txt" || got.Added != 3 || got.Deleted != 0 {
+		t.Fatalf("first generated file = %+v", got)
+	}
+	if got := input.GeneratedFiles[1]; got.Path != "manual.txt" || got.Added != 2 || got.Deleted != 0 {
+		t.Fatalf("second generated file = %+v", got)
+	}
+	patch, err := os.ReadFile(input.DiffPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"generated/one.txt", "manual.txt"} {
+		if strings.Contains(string(patch), "diff --git a/"+path+" ") || strings.Contains(input.DiffStat, path) {
+			t.Errorf("generated path %q remains in reviewer diff or stat", path)
+		}
+	}
+	if !strings.Contains(string(patch), "plain.txt") || !strings.Contains(input.DiffStat, "plain.txt") {
+		t.Errorf("linguist-generated=false file was omitted: %s", patch)
+	}
+	if !strings.Contains(task, "generated files") || !strings.Contains(task, "line counts") {
+		t.Errorf("task does not explain omitted generated files: %s", task)
+	}
+}
+
+func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
+	// One topology per delta branch: new commits on the same base, a rebase
+	// whose amended tip makes range-diff print a commit interdiff, a revert
+	// that restores a generated file to its base contents after an earlier
+	// round, and a rebase whose assigned head drops the generated marker so
+	// the file becomes reviewable again.
+	const (
+		newCommits = iota
+		rebasedAmend
+		revertedGenerated
+	)
+	for name, c := range map[string]struct {
+		mode            int
+		dropMarker      bool
+		wantGeneratedIn bool
+	}{
+		"ordinary": {mode: newCommits},
+		"rebase":   {mode: rebasedAmend},
+		"revert":   {mode: revertedGenerated},
+		"unmarked": {mode: rebasedAmend, dropMarker: true, wantGeneratedIn: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			repo := t.TempDir()
+			testGit(t, repo, "init", "-q", "-b", "main")
+			testGit(t, repo, "config", "user.name", "test")
+			testGit(t, repo, "config", "user.email", "test@example.com")
+			testCommit(t, repo, "base.txt", "base\n", "base")
+			testGit(t, repo, "checkout", "-q", "-b", "feature")
+			if err := os.MkdirAll(filepath.Join(repo, "generated"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			testCommit(t, repo, ".gitattributes", "generated/** linguist-generated\n", "mark generated files")
+			// range-diff pairs an amended commit only when its patch clearly beats
+			// the fixed cost of treating it as new, so the source file stays large;
+			// the unmarked amend adds its own hunts to the interdiff and needs the
+			// extra shared size to keep the pairing.
+			srcBefore := strings.Repeat("source line\n", 40)
+			srcAfter := srcBefore + "NEW LINE\n"
+			genBefore := "gen one\ngen two\ngen three\n"
+			genAfter := "gen CHANGED\ngen two\ngen three\n"
+			testCommit(t, repo, "generated/one.txt", genBefore, "add generated preset")
+			testCommit(t, repo, "src.txt", srcBefore, "add reviewed source")
+			previous := testGit(t, repo, "rev-parse", "HEAD")
+			switch c.mode {
+			case rebasedAmend:
+				testGit(t, repo, "checkout", "-q", "main")
+				testCommit(t, repo, "merged.txt", "a base commit merged after the fork\n", "merged on main")
+				testGit(t, repo, "checkout", "-q", "feature")
+				testGit(t, repo, "rebase", "-q", "main")
+				// Amend the tip so range-diff pairs it with the previous head's tip
+				// and prints their interdiff; range-diff shows no patch for new commits.
+				amend := map[string]string{"generated/one.txt": genAfter, "src.txt": srcAfter}
+				if c.dropMarker {
+					amend[".gitattributes"] = ""
+				}
+				for path, body := range amend {
+					if err := os.WriteFile(filepath.Join(repo, path), []byte(body), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				testGit(t, repo, "add", "-A")
+				testGit(t, repo, "commit", "-q", "--amend", "--no-edit")
+			case revertedGenerated:
+				// The base-to-head diff no longer lists the generated file, so
+				// only paths from the delta itself can exclude the large revert.
+				testGit(t, repo, "rm", "-q", "generated/one.txt")
+				testCommit(t, repo, "src.txt", srcAfter, "change reviewed source")
+			default:
+				testCommit(t, repo, "generated/one.txt", genAfter, "change generated preset")
+				testCommit(t, repo, "src.txt", srcAfter, "change reviewed source")
+			}
+			head := testGit(t, repo, "rev-parse", "HEAD")
+			base := testGit(t, repo, "rev-parse", "main")
+			r := Record{Kind: "local", Key: "local-delta-" + name, Repo: "local", RepoPath: repo, Base: base, Head: head, Round: 2,
+				ReviewRounds: []state.ReviewRound{{Head: previous}}}
+			task, err := e.s.prepareReviewTask(context.Background(), r, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths, err := filepath.Glob(filepath.Join(e.s.Store.Root, "review-inputs", "*", "*.json"))
+			if err != nil || len(paths) != 1 {
+				t.Fatalf("context paths: %+v, %v", paths, err)
+			}
+			data, err := os.ReadFile(paths[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var input struct {
+				DeltaPath string `json:"deltaPath"`
+			}
+			if err := json.Unmarshal(data, &input); err != nil {
+				t.Fatal(err)
+			}
+			if input.DeltaPath == "" {
+				t.Fatalf("task has no delta:\n%s", task)
+			}
+			delta, err := os.ReadFile(input.DeltaPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(delta), "generated/one.txt"); got != c.wantGeneratedIn {
+				t.Errorf("generated file in the %s delta = %v, want %v:\n%s", name, got, c.wantGeneratedIn, delta)
+			}
+			if !strings.Contains(string(delta), "src.txt") {
+				t.Errorf("reviewed source is missing from the %s delta:\n%s", name, delta)
+			}
+		})
 	}
 }
