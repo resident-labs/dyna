@@ -172,6 +172,7 @@ try {
           console.log('QA page screenshot: ' + step.screenshot);
         }
       } catch (error) {
+        await report();
         throw new Error('QA step ' + (index + 1) + ' failed: ' + error.message, { cause: error });
       }
     }
