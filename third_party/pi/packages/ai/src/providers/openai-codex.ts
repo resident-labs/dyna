@@ -12,6 +12,7 @@ export function openaiCodexProvider(): Provider<"openai-codex-responses"> {
 		auth: {
 			oauth: lazyOAuth({
 				name: "OpenAI (ChatGPT Plus/Pro)",
+				envVars: ["PI_OAUTH_CALLBACK_HOST"],
 				isSubscription: true,
 				load: loadOpenAICodexOAuth,
 			}),

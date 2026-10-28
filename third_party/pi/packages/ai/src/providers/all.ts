@@ -180,6 +180,17 @@ export function builtinProviders(): Provider[] {
 	];
 }
 
+/** Process environment variables that built-in providers read for credentials or endpoints. */
+export function builtinProviderEnvVars(): string[] {
+	const envVars = new Set<string>();
+	for (const provider of builtinProviders()) {
+		for (const auth of [provider.auth.apiKey, provider.auth.oauth]) {
+			for (const envVar of auth?.envVars ?? []) envVars.add(envVar);
+		}
+	}
+	return [...envVars];
+}
+
 /** A `Models` collection with every built-in provider registered. */
 export function builtinModels(options?: CreateModelsOptions): MutableModels {
 	const models = createModels(options);

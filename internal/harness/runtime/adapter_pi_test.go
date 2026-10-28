@@ -96,9 +96,16 @@ func TestPiNativeEnvStaysPrivate(t *testing.T) {
 			t.Fatalf("env %s=%q leaves the private home", key, value)
 		}
 	}
-	for _, key := range piProviderEnv {
-		if value, ok := env[key]; !ok || value != "" {
-			t.Fatalf("inherited provider env %s must be cleared", key)
+}
+
+func TestPiNativeEnvDisablesInheritedProviderCredentials(t *testing.T) {
+	env := piNativeEnv(t.TempDir())
+	if env["PI_NO_ENV_CREDENTIALS"] != "1" {
+		t.Fatalf("PI_NO_ENV_CREDENTIALS = %q, want 1", env["PI_NO_ENV_CREDENTIALS"])
+	}
+	for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL"} {
+		if value, ok := env[key]; ok {
+			t.Fatalf("piNativeEnv still names provider variable %s=%q", key, value)
 		}
 	}
 }
@@ -150,12 +157,12 @@ func TestPiInstallUsesApprovedRecipe(t *testing.T) {
 	piTestHome(t)
 	m := manager(t)
 	m.Run = func(ctx context.Context, args, env []string) error {
-		if !reflect.DeepEqual(args, []string{"npm", "install", "--global", "--prefix", args[4], "--package-lock", "--ignore-scripts", piNPMPackage + "@1.3.0-dyna.2"}) {
+		if !reflect.DeepEqual(args, []string{"npm", "install", "--global", "--prefix", args[4], "--package-lock", "--ignore-scripts", piNPMPackage + "@1.3.0-dyna.3"}) {
 			t.Fatalf("install argv = %q", args)
 		}
 		return fixtureInstall(ctx, args, env)
 	}
-	b := install(t, m, "pi", "1.3.0-dyna.2")
+	b := install(t, m, "pi", "1.3.0-dyna.3")
 	raw, err := os.ReadFile(filepath.Join(b.Directory, "bundle.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -183,11 +190,11 @@ func TestPiInstallRejectsLooseVersionsAndBadBundles(t *testing.T) {
 		t.Fatal("rejected versions reached installer")
 	}
 	m.Run = func(context.Context, []string, []string) error { return errors.New("npm exploded: secret-token-value") }
-	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.2"); err == nil || strings.Contains(err.Error(), "secret-token-value") {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.3"); err == nil || strings.Contains(err.Error(), "secret-token-value") {
 		t.Fatal("installer error was lost or exposed", err)
 	}
 	m.Run = func(context.Context, []string, []string) error { return nil }
-	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.2"); err == nil {
+	if _, err := m.Install(context.Background(), "pi", "1.3.0-dyna.3"); err == nil {
 		t.Fatal("accepted missing executable")
 	}
 }
@@ -215,10 +222,10 @@ func TestPiInstallRecordsPackageIntegrityFallback(t *testing.T) {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"@earendil-works/pi-coding-agent","version":"1.3.0-dyna.2","_integrity":"sha512-Zml4dHVyZQ=="}`), 0600)
+		return os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"@earendil-works/pi-coding-agent","version":"1.3.0-dyna.3","_integrity":"sha512-Zml4dHVyZQ=="}`), 0600)
 	}
 
-	b := install(t, m, "pi", "1.3.0-dyna.2")
+	b := install(t, m, "pi", "1.3.0-dyna.3")
 	raw, _ := os.ReadFile(filepath.Join(b.Directory, "bundle.json"))
 	var manifest bundleManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {

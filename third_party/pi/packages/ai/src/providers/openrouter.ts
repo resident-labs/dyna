@@ -68,6 +68,7 @@ export function openrouterProvider(): Provider<"anthropic-messages" | "openai-co
 			apiKey: envApiKeyAuth("OpenRouter API key", ["OPENROUTER_API_KEY"]),
 			oauth: lazyOAuth({
 				name: "OpenRouter OAuth",
+				envVars: ["PI_OAUTH_CALLBACK_HOST"],
 				loginLabel: "Sign in with OpenRouter",
 				load: loadOpenRouterOAuth,
 			}),

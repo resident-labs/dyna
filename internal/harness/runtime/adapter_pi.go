@@ -6,30 +6,6 @@ import "path/filepath"
 // fork under this name; older pinned bundles can still use the npm release.
 const piNPMPackage = "@earendil-works/pi-coding-agent"
 
-// piProviderEnv lists inherited provider credential and endpoint variables that
-// docs/providers.md of the pinned package documents for Pi. The private account
-// clears them so it can never silently use the owner's personal provider
-// identity, credentials, or endpoints.
-var piProviderEnv = []string{
-	"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_IDENTITY_TOKEN_FILE",
-	"ANTHROPIC_SERVICE_ACCOUNT_ID", "ANTHROPIC_WORKSPACE_ID",
-	"ANT_LING_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "NVIDIA_API_KEY",
-	"GEMINI_API_KEY", "COPILOT_GITHUB_TOKEN", "MISTRAL_API_KEY", "GROQ_API_KEY",
-	"CEREBRAS_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY",
-	"ZAI_API_KEY", "ZAI_CODING_CN_API_KEY", "OPENCODE_API_KEY", "RADIUS_API_KEY",
-	"TYPESAFE_API_KEY", "HF_TOKEN", "FIREWORKS_API_KEY", "TOGETHER_API_KEY",
-	"BASETEN_API_KEY", "KIMI_API_KEY", "META_API_KEY", "MINIMAX_API_KEY",
-	"MINIMAX_CN_API_KEY", "MOONSHOT_API_KEY", "QWEN_TOKEN_PLAN_API_KEY",
-	"QWEN_TOKEN_PLAN_CN_API_KEY", "XIAOMI_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY",
-	"XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
-	"AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-	"AWS_BEARER_TOKEN_BEDROCK", "AWS_WEB_IDENTITY_TOKEN_FILE",
-	"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME",
-	"GOOGLE_CLOUD_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
-	"CLOUDFLARE_API_KEY", "CLOUDFLARE_ACCOUNT_ID",
-}
-
 func init() {
 	RegisterRuntimeAdapter(RuntimeAdapter{
 		Harness:      "pi",
@@ -67,9 +43,9 @@ func piNativeEnv(home string) map[string]string {
 		"PI_OFFLINE":    "1",
 		// PI_SKIP_VERSION_CHECK stops the pi.dev latest-version request.
 		"PI_SKIP_VERSION_CHECK": "1",
-	}
-	for _, key := range piProviderEnv {
-		env[key] = ""
+		// Pi deletes inherited provider credentials and endpoints before auth
+		// resolution, so its tools and MCP servers inherit the clean environment.
+		"PI_NO_ENV_CREDENTIALS": "1",
 	}
 	return env
 }
