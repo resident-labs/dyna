@@ -642,38 +642,41 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 			out.Reason = "cleanup ran out of time; the scheduled cleanup retries it"
 		}
 	}()
-	latest, e := scan(ctx, repo, &GCOptions{Path: t.Path, history: history})
-	if e != nil || len(latest) != 1 {
-		t.Action, t.Reason = "kept", "cannot recheck worktree before removal"
+	// recheck reads ownership, file activity, status, HEAD and process use
+	// again; it returns why the tree must stay, or "" when removal may go on.
+	recheck := func() string {
+		latest, e := scan(ctx, repo, &GCOptions{Path: t.Path, history: history})
+		if e != nil || len(latest) != 1 {
+			return "cannot recheck worktree before removal"
+		}
+		if fresh := decide(latest[0], closed); fresh.Action != "would remove" || fresh.head != t.head {
+			return "worktree changed during cleanup: " + fresh.Reason
+		}
+		// Git also checks for changes when removing the directory.
+		_, status, _, e := Fingerprint(ctx, t.Path, t.head)
+		head, e2 := gitOutput(ctx, t.Path, "rev-parse", "HEAD")
+		if e != nil || status != "" || e2 != nil || strings.TrimSpace(string(head)) != t.head {
+			return "worktree changed during cleanup"
+		}
+		if reason, e := processUse(ctx, t.Path); e != nil {
+			return "cannot check worktree process use: " + e.Error()
+		} else {
+			return reason
+		}
+	}
+	// The first pass runs in parallel and drops trees that already changed. A
+	// worker can then queue for the removal lock while its tree changes, so the
+	// whole recheck runs again once the lock is held, right before deletion.
+	if reason := recheck(); reason != "" {
+		t.Action, t.Reason = "kept", reason
 		return t
 	}
-	if fresh := decide(latest[0], closed); fresh.Action != "would remove" || fresh.head != t.head {
-		t.Action, t.Reason = "kept", "worktree changed during cleanup: "+fresh.Reason
-		return t
-	}
-	// Git also checks for changes when removing the directory.
-	_, status, _, e := Fingerprint(ctx, t.Path, t.head)
-	head, e2 := gitOutput(ctx, t.Path, "rev-parse", "HEAD")
-	if e != nil || status != "" || e2 != nil || strings.TrimSpace(string(head)) != t.head {
-		t.Action, t.Reason = "kept", "worktree changed during cleanup"
-		return t
-	}
-	// The rechecks above run in parallel and can queue here for a while. Read
-	// ownership and process use again once the lock is held, right before Git
-	// deletes the tree.
 	if beforeLock != nil {
 		beforeLock()
 	}
 	removeMu.Lock()
 	defer removeMu.Unlock()
-	if fresh := decide(latest[0], closed); fresh.Action != "would remove" {
-		t.Action, t.Reason = "kept", "worktree changed during cleanup: "+fresh.Reason
-		return t
-	}
-	if reason, e := processUse(ctx, t.Path); e != nil {
-		t.Action, t.Reason = "kept", "cannot check worktree process use: "+e.Error()
-		return t
-	} else if reason != "" {
+	if reason := recheck(); reason != "" {
 		t.Action, t.Reason = "kept", reason
 		return t
 	}
