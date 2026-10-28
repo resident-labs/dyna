@@ -179,14 +179,25 @@ func TestReviewInputOmitsGeneratedFiles(t *testing.T) {
 
 func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
 	// One topology per delta branch: new commits on the same base, a rebase
-	// whose amended tip makes range-diff print a commit interdiff, and a revert
-	// that restores a generated file to its base contents after an earlier round.
+	// whose amended tip makes range-diff print a commit interdiff, a revert
+	// that restores a generated file to its base contents after an earlier
+	// round, and a rebase whose assigned head drops the generated marker so
+	// the file becomes reviewable again.
 	const (
 		newCommits = iota
 		rebasedAmend
 		revertedGenerated
 	)
-	for name, mode := range map[string]int{"ordinary": newCommits, "rebase": rebasedAmend, "revert": revertedGenerated} {
+	for name, c := range map[string]struct {
+		mode            int
+		dropMarker      bool
+		wantGeneratedIn bool
+	}{
+		"ordinary": {mode: newCommits},
+		"rebase":   {mode: rebasedAmend},
+		"revert":   {mode: revertedGenerated},
+		"unmarked": {mode: rebasedAmend, dropMarker: true, wantGeneratedIn: true},
+	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			repo := t.TempDir()
@@ -200,15 +211,17 @@ func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
 			}
 			testCommit(t, repo, ".gitattributes", "generated/** linguist-generated\n", "mark generated files")
 			// range-diff pairs an amended commit only when its patch clearly beats
-			// the fixed cost of treating it as new, so the source file stays large.
-			srcBefore := "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"
+			// the fixed cost of treating it as new, so the source file stays large;
+			// the unmarked amend adds its own hunts to the interdiff and needs the
+			// extra shared size to keep the pairing.
+			srcBefore := strings.Repeat("source line\n", 40)
 			srcAfter := srcBefore + "NEW LINE\n"
 			genBefore := "gen one\ngen two\ngen three\n"
 			genAfter := "gen CHANGED\ngen two\ngen three\n"
 			testCommit(t, repo, "generated/one.txt", genBefore, "add generated preset")
 			testCommit(t, repo, "src.txt", srcBefore, "add reviewed source")
 			previous := testGit(t, repo, "rev-parse", "HEAD")
-			switch mode {
+			switch c.mode {
 			case rebasedAmend:
 				testGit(t, repo, "checkout", "-q", "main")
 				testCommit(t, repo, "merged.txt", "a base commit merged after the fork\n", "merged on main")
@@ -216,7 +229,11 @@ func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
 				testGit(t, repo, "rebase", "-q", "main")
 				// Amend the tip so range-diff pairs it with the previous head's tip
 				// and prints their interdiff; range-diff shows no patch for new commits.
-				for path, body := range map[string]string{"generated/one.txt": genAfter, "src.txt": srcAfter} {
+				amend := map[string]string{"generated/one.txt": genAfter, "src.txt": srcAfter}
+				if c.dropMarker {
+					amend[".gitattributes"] = ""
+				}
+				for path, body := range amend {
 					if err := os.WriteFile(filepath.Join(repo, path), []byte(body), 0600); err != nil {
 						t.Fatal(err)
 					}
@@ -261,8 +278,8 @@ func TestReviewDeltaOmitsGeneratedFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(string(delta), "generated/one.txt") {
-				t.Errorf("generated file remains in the %s delta:\n%s", name, delta)
+			if got := strings.Contains(string(delta), "generated/one.txt"); got != c.wantGeneratedIn {
+				t.Errorf("generated file in the %s delta = %v, want %v:\n%s", name, got, c.wantGeneratedIn, delta)
 			}
 			if !strings.Contains(string(delta), "src.txt") {
 				t.Errorf("reviewed source is missing from the %s delta:\n%s", name, delta)
