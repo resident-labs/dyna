@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"dyna-agent/internal/profile"
@@ -9,7 +10,7 @@ import (
 )
 
 func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv invocation, err error) {
-	if hasAnyOption(p.ExtraArgs, "--mode", "--print", "-p", "--model", "--session", "--session-id", "--no-session", "--resume", "-r", "--continue", "-c", "--fork", "--export") {
+	if hasAnyOption(p.ExtraArgs, "--mode", "--print", "-p", "--model", "--session", "--session-id", "--no-session", "--resume", "-r", "--continue", "-c", "--fork", "--export", "--compaction-trigger-tokens") {
 		return inv, fmt.Errorf("pi extraArgs conflict with reserved headless output, model, prompt, or session options")
 	}
 	id, err := newSessionID()
@@ -37,6 +38,12 @@ func piInvocation(p profile.Profile, prompt string, exec ExecutionOptions) (inv 
 		}
 		if p.Model != "" {
 			args = append(args, "--model", p.Model)
+		}
+		// One process-wide trigger covers every model of the chain, fallbacks
+		// included, so the profile's target follows the session, not the shared
+		// account settings. No target, no flag: the settings file governs.
+		if p.Compact != nil && p.Compact.Tokens > 0 {
+			args = append(args, "--compaction-trigger-tokens", strconv.FormatInt(p.Compact.Tokens, 10))
 		}
 		return append(args, p.ExtraArgs...)
 	}

@@ -281,10 +281,10 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		gen, err = loadNativeGeneration(a.Harness, pin.Generation, lookup)
 		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home, privateEnv["DYNA_BIN"]) {
 			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs.
-			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup, p)
+			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 		}
 	} else {
-		gen, err = r.generateLocked(a.Harness, home, active.ID, lookup, p)
+		gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 	}
 	if err != nil {
 		return p, pin, err
@@ -452,7 +452,7 @@ func (r *Runtime) regenerateAccount(account NativeAccount) (harnessmgr.ConfigGen
 	if err != nil {
 		return harnessmgr.ConfigGeneration{}, err
 	}
-	return r.generate(account.Harness, home, account.ID, os.LookupEnv, profile.Profile{})
+	return r.generate(account.Harness, home, account.ID, os.LookupEnv)
 }
 
 // EnsureCatalog removes skill material that older Dyna versions wrote into

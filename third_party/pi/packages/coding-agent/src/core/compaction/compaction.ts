@@ -273,6 +273,15 @@ export function shouldCompact(contextTokens: number, contextWindow: number, sett
 	return contextTokens > threshold;
 }
 
+/**
+ * Apply the --compaction-trigger-tokens process override. It wins over the
+ * compaction.triggerTokens setting and over model overrides; undefined keeps
+ * the resolved settings untouched.
+ */
+export function withCompactionTriggerOverride(settings: CompactionSettings, override: number | undefined): CompactionSettings {
+	return override === undefined ? settings : { ...settings, triggerTokens: override };
+}
+
 // ============================================================================
 // Cut point detection
 // ============================================================================

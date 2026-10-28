@@ -15,7 +15,6 @@ import (
 	"dyna-agent/internal/database"
 	harnessmgr "dyna-agent/internal/harness/config"
 	"dyna-agent/internal/harness/runtime/genstate"
-	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/store"
 )
@@ -44,7 +43,7 @@ func TestPiCodeModeGeneration(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
 	addGenerationMCP(t, r, "pi", "example")
 	read := func() map[string]any {
-		g := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+		g := buildGeneration(t, r, "pi", home, id)
 		raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
 		if err != nil {
 			t.Fatal(err)
@@ -82,9 +81,9 @@ func TestPiCodeModeGeneration(t *testing.T) {
 	}
 }
 
-func buildGeneration(t *testing.T, r *Runtime, h, home, id string, p profile.Profile) harnessmgr.ConfigGeneration {
+func buildGeneration(t *testing.T, r *Runtime, h, home, id string) harnessmgr.ConfigGeneration {
 	t.Helper()
-	g, err := r.generate(h, home, id, os.LookupEnv, p)
+	g, err := r.generate(h, home, id, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,12 +135,12 @@ func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
 			if err := r.Config.AddMCP(authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner}), harnessmgr.ManagedMCP{Name: "tools", MCPDefinition: harnessmgr.MCPDefinition{Command: "tools", EnvKeys: []string{"MCP_TOKEN"}}, EnabledHarnesses: []string{h}}); err != nil {
 				t.Fatal(err)
 			}
-			a := buildGeneration(t, r, h, home, id, profile.Profile{})
+			a := buildGeneration(t, r, h, home, id)
 			if !privateGenerationRoots(a.Env, home) {
 				t.Fatalf("%s generation lacks private HOME/XDG roots", h)
 			}
 			t.Setenv("MCP_TOKEN", "second-secret-canary")
-			b := buildGeneration(t, r, h, home, id, profile.Profile{})
+			b := buildGeneration(t, r, h, home, id)
 			if a.Directory != b.Directory || strings.Join(a.Args, "\x00") != strings.Join(b.Args, "\x00") {
 				t.Fatal("equal effective inputs did not reuse the generation")
 			}
@@ -172,7 +171,7 @@ func TestGenerationContentReuseAndSecretRotation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = r.generate(h, home, id, func(string) (string, bool) { return "", false }, profile.Profile{}); err == nil {
+			if _, err = r.generate(h, home, id, func(string) (string, bool) { return "", false }); err == nil {
 				t.Fatal("reuse accepted a missing secret reference")
 			}
 		})
@@ -184,7 +183,7 @@ func TestGenerationGCKeepsAllReferencesAndPreferences(t *testing.T) {
 	var gens []harnessmgr.ConfigGeneration
 	for _, name := range []string{"open", "closed", "active", "released", "current"} {
 		addGenerationMCP(t, r, "pi", name)
-		gens = append(gens, buildGeneration(t, r, "pi", home, id, profile.Profile{}))
+		gens = append(gens, buildGeneration(t, r, "pi", home, id))
 	}
 	writeGenerationSession(t, "open", Pin{Generation: gens[0].Directory}, false)
 	writeGenerationSession(t, "closed", Pin{Generation: gens[1].Directory}, true)
@@ -216,7 +215,7 @@ func TestGenerationGCKeepsAllReferencesAndPreferences(t *testing.T) {
 
 func TestGenerationLeaseNativeProbeAndRunnerRelease(t *testing.T) {
 	r, home, id := generationFixture(t, "claude-code")
-	g := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+	g := buildGeneration(t, r, "claude-code", home, id)
 	lease := leaseGeneration(t, r, g.Directory)
 	if err := lease.Bind(json.RawMessage(`{"guard":"native"}`)); err != nil {
 		t.Fatal(err)
@@ -249,7 +248,7 @@ func TestGenerationLeaseNativeProbeAndRunnerRelease(t *testing.T) {
 
 func TestGenerationLeaseDeadOwnerAndBindingReplacement(t *testing.T) {
 	r, home, id := generationFixture(t, "claude-code")
-	g := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+	g := buildGeneration(t, r, "claude-code", home, id)
 	lease := leaseGeneration(t, r, g.Directory)
 	if err := lease.Bind(json.RawMessage(`{"attempt":1}`)); err != nil {
 		t.Fatal(err)
@@ -279,7 +278,7 @@ func TestGenerationLeaseDeadOwnerAndBindingReplacement(t *testing.T) {
 	}
 	assertGenerationExists(t, g.Directory, false)
 	// An abandoned pre-start record with a dead owner can expire.
-	g = buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+	g = buildGeneration(t, r, "claude-code", home, id)
 	prestart := genstate.Lease{ID: genstate.NewID(), Generation: g.Directory, OwnerPID: 1 << 30}
 	if err := r.generationState().Create(context.Background(), prestart); err != nil {
 		t.Fatal(err)
@@ -295,7 +294,7 @@ func TestGenerationLeaseDeadOwnerAndBindingReplacement(t *testing.T) {
 // stays while that process can still read it.
 func TestGenerationGCAdoptsALegacyLeaseWrittenAfterMigration(t *testing.T) {
 	r, home, id := generationFixture(t, "claude-code")
-	g := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+	g := buildGeneration(t, r, "claude-code", home, id)
 	uses := filepath.Join(r.Generations, ".uses")
 	if err := os.MkdirAll(uses, 0700); err != nil {
 		t.Fatal(err)
@@ -335,7 +334,7 @@ func TestGenerationGCAdoptsALegacyLeaseWrittenAfterMigration(t *testing.T) {
 // generation, and collects it.
 func TestGenerationGCClearsALegacyViewItSuperseded(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	superseded := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	superseded := buildGeneration(t, r, "pi", home, id)
 	views := filepath.Join(r.Generations, ".views")
 	if err := os.MkdirAll(views, 0700); err != nil {
 		t.Fatal(err)
@@ -354,7 +353,7 @@ func TestGenerationGCClearsALegacyViewItSuperseded(t *testing.T) {
 	}
 	// A complete publication replaces the view, as the new build records it.
 	addGenerationMCP(t, r, "pi", "later")
-	current := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	current := buildGeneration(t, r, "pi", home, id)
 	if err := r.recordGenerationView("pi", home, current.Directory, false); err != nil {
 		t.Fatal(err)
 	}
@@ -369,9 +368,9 @@ func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 	for _, failure := range []string{"session", "lease", "candidate-link", "root-link"} {
 		t.Run(failure, func(t *testing.T) {
 			r, home, id := generationFixture(t, "claude-code")
-			a := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+			a := buildGeneration(t, r, "claude-code", home, id)
 			addGenerationMCP(t, r, "claude-code", "later")
-			b := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+			b := buildGeneration(t, r, "claude-code", home, id)
 			outside := filepath.Join(t.TempDir(), "sentinel")
 			if err := os.WriteFile(outside, []byte("keep"), 0600); err != nil {
 				t.Fatal(err)
@@ -419,7 +418,7 @@ func TestGenerationGCScanFailuresDeleteNothing(t *testing.T) {
 
 func TestGenerationReuseRebuildsTampering(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	g := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	g := buildGeneration(t, r, "pi", home, id)
 	original, err := os.ReadFile(filepath.Join(g.Directory, "settings.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -427,7 +426,7 @@ func TestGenerationReuseRebuildsTampering(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(g.Directory, "settings.json"), []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if rebuilt := buildGeneration(t, r, "pi", home, id, profile.Profile{}); rebuilt.Directory != g.Directory {
+	if rebuilt := buildGeneration(t, r, "pi", home, id); rebuilt.Directory != g.Directory {
 		t.Fatal("rebuild moved the generation")
 	}
 	if raw, err := os.ReadFile(filepath.Join(g.Directory, "settings.json")); err != nil || string(raw) != string(original) {
@@ -441,7 +440,7 @@ func TestGenerationLifecycleSelectionAndLeaseAreAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := r.generateLocked("claude-code", home, id, os.LookupEnv, profile.Profile{})
+	g, err := r.generateLocked("claude-code", home, id, os.LookupEnv)
 	if err != nil {
 		unlock()
 		t.Fatal(err)
@@ -497,7 +496,7 @@ func TestConcurrentGenerationReusePublishesOneCompleteDirectory(t *testing.T) {
 	paths := make(chan string, 8)
 	for range 8 {
 		wg.Go(func() {
-			g, err := r.generate("pi", home, id, os.LookupEnv, profile.Profile{})
+			g, err := r.generate("pi", home, id, os.LookupEnv)
 			if err != nil {
 				t.Error(err)
 				return
@@ -539,7 +538,7 @@ func writeGenerationJSON(path string, value any, mode os.FileMode) error {
 
 func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	a := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	a := buildGeneration(t, r, "pi", home, id)
 	// The old skill view can disappear while the shared config still refers to A.
 	// A failed config replacement must preserve both the old and pending targets.
 	if err := os.RemoveAll(filepath.Join(home, "skills")); err != nil {
@@ -557,7 +556,7 @@ func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	addGenerationMCP(t, r, "pi", "changed")
-	pending, err := r.generate("pi", home, id, os.LookupEnv, profile.Profile{})
+	pending, err := r.generate("pi", home, id, os.LookupEnv)
 	if err == nil {
 		t.Fatal("unsafe shared config publication succeeded")
 	}
@@ -580,8 +579,8 @@ func TestGenerationGCProtectsPartialSharedConfigPublication(t *testing.T) {
 func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
 	addGenerationMCP(t, r, "pi", "tools")
-	fresh := buildGeneration(t, r, "pi", home, id, profile.Profile{})
-	_, inputs, err := r.captureGeneration("pi", home, id, os.LookupEnv, profile.Profile{})
+	fresh := buildGeneration(t, r, "pi", home, id)
+	_, inputs, err := r.captureGeneration("pi", home, id, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +615,7 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 	if _, err = validateOwnedGeneration(stale); err != nil {
 		t.Fatal("stale fixture is not a valid generation:", err)
 	}
-	got := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	got := buildGeneration(t, r, "pi", home, id)
 	if got.Directory == stale || strings.Join(got.Args, " ") != strings.Join(fresh.Args, " ") {
 		t.Fatalf("reused the older generation: %s %q", got.Directory, got.Args)
 	}
@@ -626,7 +625,7 @@ func TestGenerationNotReusedAcrossInputsVersions(t *testing.T) {
 // invalidate the sealed generation.
 func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	g := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	g := buildGeneration(t, r, "pi", home, id)
 	view := filepath.Join(home, "skills")
 	// Older builds linked the whole view to one generation; publication migrates it.
 	if err := os.RemoveAll(view); err != nil {
@@ -635,7 +634,7 @@ func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
 	if err := os.Symlink(filepath.Join(g.Directory, "skills"), view); err != nil {
 		t.Fatal(err)
 	}
-	g = buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	g = buildGeneration(t, r, "pi", home, id)
 	system := filepath.Join(view, ".system", "imagegen", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(system), 0755); err != nil {
 		t.Fatal(err)
@@ -643,7 +642,7 @@ func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
 	if err := os.WriteFile(system, []byte("harness system skill"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if again := buildGeneration(t, r, "pi", home, id, profile.Profile{}); again.Directory != g.Directory {
+	if again := buildGeneration(t, r, "pi", home, id); again.Directory != g.Directory {
 		t.Fatal("harness skill write invalidated the generation")
 	}
 	if _, err := validateOwnedGeneration(g.Directory); err != nil {
@@ -659,7 +658,7 @@ func TestHarnessSkillWritesKeepGenerationSealed(t *testing.T) {
 
 func TestGenerationLifecycleErrorNamesCheckAndPath(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
-	g := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	g := buildGeneration(t, r, "pi", home, id)
 	manifest := filepath.Join(g.Directory, "mcp.json")
 	if err := os.WriteFile(manifest, []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
@@ -679,10 +678,10 @@ func TestGenerationLifecycleErrorNamesCheckAndPath(t *testing.T) {
 
 func TestGenerationGCDeletesChangedUnpinnedGeneration(t *testing.T) {
 	r, home, id := generationFixture(t, "claude-code")
-	a := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+	a := buildGeneration(t, r, "claude-code", home, id)
 	defer leaseGeneration(t, r, a.Directory).Close()
 	addGenerationMCP(t, r, "claude-code", "later")
-	b := buildGeneration(t, r, "claude-code", home, id, profile.Profile{})
+	b := buildGeneration(t, r, "claude-code", home, id)
 	if err := os.WriteFile(filepath.Join(b.Directory, "settings.json"), []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +698,7 @@ func TestGenerationGCDeletesChangedUnpinnedGeneration(t *testing.T) {
 func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
 	r, home, id := generationFixture(t, "pi")
 	addGenerationMCP(t, r, "pi", "retired-tool")
-	retired := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	retired := buildGeneration(t, r, "pi", home, id)
 
 	// Rename the retired copy, and a view of it, the way an old Codex install
 	// names them. Its directory name and payload hash stay valid, so only the
@@ -723,7 +722,7 @@ func TestGenerationGCSkipsAReplacedHarness(t *testing.T) {
 	// A later Pi generation republishes the view, so nothing points at the
 	// retired copy any more.
 	addGenerationMCP(t, r, "pi", "live-tool")
-	live := buildGeneration(t, r, "pi", home, id, profile.Profile{})
+	live := buildGeneration(t, r, "pi", home, id)
 	writeGenerationSession(t, "open", Pin{Generation: live.Directory}, false)
 	if live.Directory == retired.Directory {
 		t.Fatal("the fixture built one directory twice")

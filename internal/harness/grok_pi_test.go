@@ -13,7 +13,7 @@ import (
 // Grok runs over ACP; its argv-policy tests live in grok_acp_test.go. These
 // cover the pi rpc invocation that shares this file's source.
 func TestPiReservedFlagsAndLeafLaunch(t *testing.T) {
-	for _, flag := range []string{"--mode=text", "--print", "-p", "--session", "--session-id", "--no-session", "--resume", "--continue", "--fork", "--model=x", "--export"} {
+	for _, flag := range []string{"--mode=text", "--print", "-p", "--session", "--session-id", "--no-session", "--resume", "--continue", "--fork", "--model=x", "--export", "--compaction-trigger-tokens=1"} {
 		if _, err := buildInvocation(profile.Profile{Harness: profile.HarnessPi, ExtraArgs: []string{flag}}, "task"); err == nil {
 			t.Errorf("pi accepted reserved %s", flag)
 		}
@@ -62,6 +62,29 @@ func TestPiResumeAndCompactUseSessionID(t *testing.T) {
 		if !hasOptionValue(spec.argv, "--session", id) {
 			t.Fatalf("%s did not use the session id: %v", name, spec.argv)
 		}
+	}
+}
+
+func TestPiCompactionTriggerFlag(t *testing.T) {
+	// One process-wide flag covers every model of the chain, fallbacks
+	// included, and no other profile's settings can change it.
+	withTarget := profile.Profile{Harness: profile.HarnessPi, Model: "openai-codex/gpt-6.1-terra", Compact: &profile.Compact{Tokens: 200000}}
+	inv, err := buildInvocation(withTarget, "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []commandSpec{inv.initial, inv.resume("00000000-0000-4000-8000-000000000001", "next"), inv.compact("00000000-0000-4000-8000-000000000001")} {
+		if !hasOptionValue(spec.argv, "--compaction-trigger-tokens", "200000") {
+			t.Fatalf("compaction trigger missing from %v", spec.argv)
+		}
+	}
+	without := profile.Profile{Harness: profile.HarnessPi, Model: "openai-codex/gpt-6.1-terra"}
+	inv, err = buildInvocation(without, "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasArg(inv.initial.argv, "--compaction-trigger-tokens") {
+		t.Fatalf("profile without a target got a trigger: %v", inv.initial.argv)
 	}
 }
 
