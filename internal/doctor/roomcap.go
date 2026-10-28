@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/proc"
 )
 
 // A room's agent work runs in its own cgroup slice, with a memory and a
@@ -116,17 +117,17 @@ type CapTrees struct {
 // scopes below its slice, so a tree roots at a process whose parent is
 // outside the slice: each names a program the room started.
 func TopTrees(sliceDir, procRoot string, n int) CapTrees {
-	procs := map[int]procInfo{}
+	procs := map[int]proc.Process{}
 	for pid := range sliceProcs(sliceDir) {
-		if info, ok := readProc(procRoot, pid); ok {
+		if info, err := proc.Read(procRoot, pid); err == nil {
 			procs[pid] = info
 		}
 	}
 	children := map[int][]int{}
 	roots := make([]int, 0, len(procs))
 	for pid, info := range procs {
-		if _, inside := procs[info.ppid]; inside {
-			children[info.ppid] = append(children[info.ppid], pid)
+		if _, inside := procs[info.ParentPID]; inside {
+			children[info.ParentPID] = append(children[info.ParentPID], pid)
 		} else {
 			roots = append(roots, pid)
 		}
@@ -135,14 +136,14 @@ func TopTrees(sliceDir, procRoot string, n int) CapTrees {
 	trees := make([]CapTree, 0, len(roots))
 	for _, root := range roots {
 		info := procs[root]
-		tree := CapTree{Command: info.command, PID: root, Memory: info.memory, Count: 1}
+		tree := CapTree{Command: info.Command, PID: root, Memory: info.Memory, Count: 1}
 		stack := append([]int(nil), children[root]...)
 		for len(stack) > 0 {
 			last := len(stack) - 1
 			pid := stack[last]
 			stack = stack[:last]
 			tree.Count++
-			tree.Memory += procs[pid].memory
+			tree.Memory += procs[pid].Memory
 			stack = append(stack, children[pid]...)
 		}
 		trees = append(trees, tree)
@@ -169,46 +170,6 @@ func TopTrees(sliceDir, procRoot string, n int) CapTrees {
 		out.ByCount = out.ByCount[:n]
 	}
 	return out
-}
-
-// procInfo is what the tree grouping reads of one process.
-type procInfo struct {
-	command string
-	ppid    int
-	memory  uint64
-}
-
-// readProc reads one process's command, parent and resident memory from
-// /proc. A process that left between the cgroup read and this read is absent.
-func readProc(procRoot string, pid int) (procInfo, bool) {
-	dir := filepath.Join(procRoot, strconv.Itoa(pid))
-	stat, err := os.ReadFile(filepath.Join(dir, "stat"))
-	if err != nil {
-		return procInfo{}, false
-	}
-	// The command is in parentheses and may hold spaces; the fields after the
-	// last ")" start at the state, field 3, so the parent is the second.
-	s := string(stat)
-	open, end := strings.IndexByte(s, '('), strings.LastIndexByte(s, ')')
-	if open < 0 || end < open {
-		return procInfo{}, false
-	}
-	fields := strings.Fields(s[end+1:])
-	if len(fields) < 2 {
-		return procInfo{}, false
-	}
-	ppid, err := strconv.Atoi(fields[1])
-	if err != nil {
-		return procInfo{}, false
-	}
-	var memory uint64
-	if statm, err := os.ReadFile(filepath.Join(dir, "statm")); err == nil {
-		if f := strings.Fields(string(statm)); len(f) > 1 {
-			pages, _ := strconv.ParseUint(f[1], 10, 64)
-			memory = pages * uint64(os.Getpagesize())
-		}
-	}
-	return procInfo{command: s[open+1 : end], ppid: ppid, memory: memory}, true
 }
 
 // sliceProcs reads the PIDs of every cgroup.procs at and below dir: the room's
