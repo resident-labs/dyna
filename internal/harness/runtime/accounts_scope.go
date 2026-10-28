@@ -276,20 +276,17 @@ func (a *Accounts) chooseUsage(ctx context.Context, candidates []NativeAccount, 
 			readings = found
 		}
 	}
-	// A blocked reading removes its account. A reading without a weekly
-	// window cannot be scored (the harness reports other buckets) and leaves
-	// the account pickable, ranked last.
+	// An ineligible reading removes its account. An eligible reading without a
+	// numeric score leaves the account pickable, ranked last.
 	score := func(o *store.Observation) float64 {
-		switch {
-		case o == nil:
-			return 0
-		case o.Unavailable || o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now):
+		decision := store.DecideUsage(o, now)
+		if !decision.Eligible {
 			return -1
-		case store.WeeklyWindow(o) == nil:
-			return 0
-		default:
-			return store.Score(o, now)
 		}
+		if decision.Score < 0 {
+			return 0
+		}
+		return decision.Score
 	}
 	type ranked struct {
 		n     NativeAccount

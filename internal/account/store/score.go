@@ -12,30 +12,42 @@ import (
 // (NEAR_CAP_SESSION and NEAR_CAP_WEEKLY, both 0.90).
 const NearCapUsedPercent = 90.0
 
-// Score ranks how much work an account can still take: spare weekly room ×
-// plan size ÷ (days to the weekly reset)². It returns -1 when the account
-// cannot take work now: no weekly reading, a session or weekly window at or
-// past NearCapUsedPercent, an unavailable reading, or a rate limit that has
-// not cleared. Squaring the days spends room that is about to reset before
-// room that will keep: an untouched account's weekly clock has not started,
-// so it can wait. The shape comes from the owner's claude-accounts-usage swap
-// tool.
-func Score(o *Observation, now time.Time) float64 {
-	if o == nil || o.Unavailable {
-		return -1
+// UsageDecision separates whether an account can take work from whether its
+// saved usage has enough weekly data for a numeric rank. Score is -1 when the
+// account is ineligible or its usage cannot be ranked.
+type UsageDecision struct {
+	Eligible bool
+	Score    float64
+}
+
+// DecideUsage applies the shared account-eligibility rules. A missing reading
+// or weekly window is eligible but unranked. A weekly window without a
+// percentage is also eligible but unranked. An unavailable reading or active
+// rate limit is ineligible. With a weekly window, a reported session or weekly
+// window at NearCapUsedPercent is also ineligible.
+func DecideUsage(o *Observation, now time.Time) UsageDecision {
+	decision := UsageDecision{Score: -1}
+	if o == nil {
+		decision.Eligible = true
+		return decision
 	}
-	if o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now) {
-		return -1
+	if o.Unavailable || o.RateLimitedUntil != nil && o.RateLimitedUntil.After(now) {
+		return decision
 	}
 	weekly := WeeklyWindow(o)
-	if weekly == nil || weekly.UsedPercent == nil {
-		return -1
+	if weekly == nil {
+		decision.Eligible = true
+		return decision
 	}
 	if w := SessionWindow(o); w != nil && w.UsedPercent != nil && *w.UsedPercent >= NearCapUsedPercent {
-		return -1
+		return decision
 	}
-	if *weekly.UsedPercent >= NearCapUsedPercent {
-		return -1
+	if weekly.UsedPercent != nil && *weekly.UsedPercent >= NearCapUsedPercent {
+		return decision
+	}
+	decision.Eligible = true
+	if weekly.UsedPercent == nil {
+		return decision
 	}
 	// Without a readable reset time, a full week is the honest guess.
 	days := 7.0
@@ -49,7 +61,17 @@ func Score(o *Observation, now time.Time) float64 {
 	if spare < 0 {
 		spare = 0
 	}
-	return spare * planSize(o.Plan) / (days * days)
+	decision.Score = spare * planSize(o.Plan) / (days * days)
+	return decision
+}
+
+// Score ranks how much work an account can still take: spare weekly room ×
+// plan size ÷ (days to the weekly reset)². Squaring the days spends room that
+// is about to reset before room that will keep: an untouched account's weekly
+// clock has not started, so it can wait. The shape comes from the owner's
+// claude-accounts-usage swap tool.
+func Score(o *Observation, now time.Time) float64 {
+	return DecideUsage(o, now).Score
 }
 
 // WeeklyWindow returns the 7-day usage window: seven_day (Claude),
