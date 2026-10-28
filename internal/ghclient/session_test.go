@@ -35,6 +35,31 @@ func gitConfigValue(env map[string]string, key string) string {
 	return ""
 }
 
+// TestSetBranchUpstreamRecordsTracking covers the success path of a
+// push.autoSetupRemote engine push: the guard records the tracking
+// configuration in the worker repository, as git would.
+func TestSetBranchUpstreamRecordsTracking(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("/usr/bin/git", "init", "-q", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	t.Setenv(GitBinaryEnv, "/usr/bin/git")
+	t.Chdir(dir)
+	ref := &UpstreamRef{Branch: "topic", Remote: "origin", Merge: "refs/heads/topic"}
+	if err := setBranchUpstream(context.Background(), os.Environ(), ref); err != nil {
+		t.Fatalf("setBranchUpstream: %v", err)
+	}
+	for key, want := range map[string]string{
+		"branch.topic.remote": "origin",
+		"branch.topic.merge": "refs/heads/topic",
+	} {
+		got, err := exec.Command("/usr/bin/git", "config", "--get", key).Output()
+		if err != nil || strings.TrimSpace(string(got)) != want {
+			t.Fatalf("%s = %q (%v), want %q", key, got, err, want)
+		}
+	}
+}
+
 func TestSessionUsesTheRoomAccount(t *testing.T) {
 	records := setupRooms(t, "resident-labs/personal", "work/private")
 	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {

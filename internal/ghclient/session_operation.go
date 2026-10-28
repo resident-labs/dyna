@@ -31,10 +31,19 @@ type CommandRequest struct {
 
 // CommandResult contains command output, never a credential.
 type CommandResult struct {
-	Stdout   []byte `json:"stdout,omitempty"`
-	Stderr   []byte `json:"stderr,omitempty"`
-	ExitCode int    `json:"exitCode"`
-	Local    bool   `json:"local,omitempty"`
+	Stdout        []byte       `json:"stdout,omitempty"`
+	Stderr        []byte       `json:"stderr,omitempty"`
+	ExitCode      int          `json:"exitCode"`
+	Local         bool         `json:"local,omitempty"`
+	TrackUpstream *UpstreamRef `json:"trackUpstream,omitempty"`
+}
+
+// UpstreamRef is the tracking configuration a successful push with
+// push.autoSetupRemote records, the local half of what git would do.
+type UpstreamRef struct {
+	Branch string `json:"branch"`
+	Remote string `json:"remote"`
+	Merge  string `json:"merge"`
 }
 
 // SessionExitError preserves a remote command's exit status without adding a
@@ -84,12 +93,16 @@ func RunSessionGitPush(ctx context.Context, rec room.Record, request CommandRequ
 	// Targets resolve against the worker repository before the push; the push
 	// itself runs from a bare repository the engine owns, so no worker
 	// configuration is read between validation and execution.
-	targets, ok := planPushTargets(ctx, request.Dir, plan)
+	targets, track, ok := planPushTargets(ctx, request.Dir, plan)
 	if !ok {
 		return CommandResult{Local: true}, nil
 	}
 	ctx = WithRepository(ctx, r.host, r.name)
-	return runIsolatedPush(ctx, r, request.Dir, plan, targets)
+	result, err := runIsolatedPush(ctx, r, request.Dir, plan, targets)
+	if err == nil && track != nil && result.ExitCode == 0 {
+		result.TrackUpstream = track
+	}
+	return result, err
 }
 
 func validateCommandRequest(request CommandRequest) error {
@@ -177,6 +190,11 @@ func SessionGitCommand(ctx context.Context, args []string, launchEnv []string) e
 	}
 	if result.Local {
 		return runLocalGit(ctx, args, launchEnv)
+	}
+	if result.TrackUpstream != nil && result.ExitCode == 0 {
+		if err := setBranchUpstream(ctx, launchEnv, result.TrackUpstream); err != nil {
+			return err
+		}
 	}
 	return finishSessionOperation(result)
 }
@@ -410,8 +428,10 @@ type pushTarget struct {
 // planPushTargets resolves a push plan against the worker repository: which
 // objects to send and which remote refs to update. Resolution only reads the
 // repository; the push itself runs elsewhere. A plan that does not resolve
-// stays local, where the worker's git reports the reason.
-func planPushTargets(ctx context.Context, dir string, plan pushPlan) ([]pushTarget, bool) {
+// stays local, where the worker's git reports the reason. The returned
+// upstream, when not nil, is tracking configuration to record after a
+// successful push, the local half of push.autoSetupRemote.
+func planPushTargets(ctx context.Context, dir string, plan pushPlan) ([]pushTarget, *UpstreamRef, bool) {
 	var targets []pushTarget
 	add := func(spec string) bool {
 		force := strings.HasPrefix(spec, "+")
@@ -439,30 +459,33 @@ func planPushTargets(ctx context.Context, dir string, plan pushPlan) ([]pushTarg
 	}
 	for _, spec := range plan.refspecs {
 		if !add(spec) {
-			return nil, false
+			return nil, nil, false
 		}
 	}
+	var track *UpstreamRef
 	if len(targets) == 0 && !plan.delete {
-		specs, ok := defaultPushSpecs(ctx, dir, plan)
+		specs, upstream, ok := defaultPushSpecs(ctx, dir, plan)
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
+		track = upstream
 		for _, spec := range specs {
 			if !add(spec) {
-				return nil, false
+				return nil, nil, false
 			}
 		}
 	}
-	return targets, true
+	return targets, track, true
 }
 
 // defaultPushSpecs is what a push without refspecs sends: the refspecs
 // remote.<name>.push configures, or one refspec for the configured push.default
 // mode. An ok of false keeps the push local, where git applies the configured
-// behavior without a credential.
-func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string, bool) {
+// behavior without a credential. The returned upstream, when not nil, is
+// tracking configuration to record after a successful push.
+func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string, *UpstreamRef, bool) {
 	if configured, err := repoid.Git(ctx, dir, "config", "--get-all", "remote."+plan.remote+".push"); err == nil {
-		return strings.Split(configured, "\n"), true
+		return strings.Split(configured, "\n"), nil, true
 	}
 	mode := "simple"
 	if configured, err := repoid.Git(ctx, dir, "config", "--get", "push.default"); err == nil && configured != "" {
@@ -470,7 +493,7 @@ func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string,
 	}
 	branch, err := repoid.Git(ctx, dir, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	upstream := func() (string, bool) {
 		remote, err := repoid.Git(ctx, dir, "config", "--get", "branch."+branch+".remote")
@@ -486,28 +509,61 @@ func defaultPushSpecs(ctx context.Context, dir string, plan pushPlan) ([]string,
 	switch mode {
 	case "nothing":
 		// Git itself rejects this push before any network use.
-		return nil, false
+		return nil, nil, false
 	case "current":
-		return []string{branch + ":" + branch}, true
+		return []string{branch + ":" + branch}, nil, true
 	case "upstream", "tracking":
 		merge, ok := upstream()
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
-		return []string{branch + ":" + merge}, true
+		return []string{branch + ":" + merge}, nil, true
 	case "simple":
 		if merge, ok := upstream(); ok {
 			if merge != "refs/heads/"+branch {
 				// Simple refuses a differently named upstream; git reports it.
-				return nil, false
+				return nil, nil, false
 			}
-			return []string{branch + ":" + merge}, true
+			return []string{branch + ":" + merge}, nil, true
 		}
-		return []string{branch + ":" + branch}, true
+		if autoSetup(ctx, dir) {
+			return []string{branch + ":" + branch}, &UpstreamRef{
+				Branch: branch,
+				Remote: plan.remote,
+				Merge:  "refs/heads/" + branch,
+			}, true
+		}
+		// Git rejects a simple push without an upstream; git reports it.
+		return nil, nil, false
 	default:
 		// matching and future modes keep their exact behavior locally.
-		return nil, false
+		return nil, nil, false
 	}
+}
+
+func autoSetup(ctx context.Context, dir string) bool {
+	value, err := repoid.Git(ctx, dir, "config", "--get", "push.autoSetupRemote")
+	return err == nil && (value == "true" || value == "on" || value == "yes" || value == "1")
+}
+
+// setBranchUpstream records a branch's tracking configuration in the worker
+// repository, the local half of push.autoSetupRemote after an engine push.
+func setBranchUpstream(ctx context.Context, env []string, ref *UpstreamRef) error {
+	binary := os.Getenv(GitBinaryEnv)
+	if !isExecutable(binary) {
+		return nil
+	}
+	for _, args := range [][]string{
+		{"config", "branch." + ref.Branch + ".remote", ref.Remote},
+		{"config", "branch." + ref.Branch + ".merge", ref.Merge},
+	} {
+		cmd := processguard.Command(ctx, binary, args...)
+		cmd.Env = env
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func fullRef(ref string) string {
