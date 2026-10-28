@@ -37,8 +37,11 @@ const (
 	// envFakePiRejectFirst refuses the first plain prompt of the turn, the
 	// way a real pi refuses a prompt while its session creation stalls.
 	envFakePiRejectFirst = "DYNA_TEST_FAKE_PI_REJECT_FIRST"
-	// envFakePiSessions names the sessions directory PiSessionPath reads,
-	// for launches that carry no --session-dir of their own.
+	// envFakePiMissing makes a --session launch fail like headless Pi when
+	// its exact session id does not exist.
+	envFakePiMissing = "DYNA_TEST_FAKE_PI_MISSING_SESSION"
+	// envFakePiSessions names the shared sessions directory for launches
+	// that carry no --session-dir of their own.
 	envFakePiSessions = "DYNA_TEST_FAKE_PI_SESSIONS"
 )
 
@@ -55,6 +58,10 @@ func fakePiMain() {
 		_ = f.Close()
 	}
 	logf("SPAWN %d %s", os.Getpid(), strings.Join(os.Args[1:], " "))
+	if id := fakePiOption(os.Args, "--session"); id != "" && id == os.Getenv(envFakePiMissing) {
+		fmt.Fprintf(os.Stderr, "session not found: %s\n", id)
+		os.Exit(2)
+	}
 	out := bufio.NewWriter(os.Stdout)
 	emit := func(record map[string]any) {
 		b, err := json.Marshal(record)
@@ -209,9 +216,8 @@ func fakePiOption(argv []string, option string) string {
 	return ""
 }
 
-// fakePiSessions is the sessions directory installFakePi prepared: the
-// same one PiSessionPath reads, so the fake can persist session files a
-// later resume finds.
+// fakePiSessions is the shared sessions directory installFakePi prepared,
+// so the fake can persist session files like a real Pi.
 var fakePiSessions string
 
 // installFakePi puts a `pi` on PATH that re-runs the test binary in fake
@@ -605,11 +611,32 @@ func TestPiLaunchKeysByCallerSessionNotNativeID(t *testing.T) {
 	}
 }
 
+func TestPiMissingSessionFailsBeforePrompt(t *testing.T) {
+	logPath := installFakePi(t, false)
+	p := fakePiProfile(logPath, false)
+	const id = "missing-session"
+	p.Env[envFakePiMissing] = id
+	source := &armedSource{armed: true, message: "do not send"}
+	_, err := RunWithOptions(context.Background(), p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{
+		Source: source,
+	}, SessionOptions{ResumeID: id}, ExecutionOptions{})
+	want := "worker p cannot resume harness session " + id + ": pi session " + id + " has no session file"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	log := readTestFile(t, logPath)
+	if got := strings.Count(log, "SPAWN "); got != 1 {
+		t.Fatalf("SPAWN count = %d, want one Pi exit to map:\n%s", got, log)
+	}
+	if strings.Contains(log, "PROMPT ") || strings.Contains(log, "STEER ") {
+		t.Fatalf("missing session received a prompt or steering:\n%s", log)
+	}
+}
+
 // TestPiMissingSessionFileNeverGetsANudge recovers a first attempt that
 // failed before pi wrote its session file: the same-session nudge must not
-// target a session that does not exist (a real pi exits with "No session
-// found matching"), so the turn starts a fresh session with the original
-// prompt instead.
+// target a session that does not exist (a real pi exits with "session not
+// found"), so the turn starts a fresh session with the original prompt instead.
 func TestPiMissingSessionFileNeverGetsANudge(t *testing.T) {
 	logPath := installFakePi(t, false)
 	p := fakePiProfile(logPath, false)
