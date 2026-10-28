@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife/recordtest"
 )
@@ -43,6 +45,65 @@ func TestRecheckSeesNewOpenOwner(t *testing.T) {
 	}
 	if got := decide(trees[0], func(string) (bool, error) { return true, nil }); got.Action != "kept" || !strings.Contains(got.Reason, "inferred owner is still open") {
 		t.Fatalf("recheck missed the new open owner: %#v", got)
+	}
+}
+
+// Session record versions identify immutable metadata. A recheck reuses the
+// decoded ownership projection while those versions stay unchanged.
+func TestRecheckReusesUnchangedSessionHistory(t *testing.T) {
+	tree := inferenceTestStore(t)
+	id := "ses_closed"
+	recordtest.Write(t, runstore.SessionsDir(), id, map[string]any{
+		"id": id, "dir": tree, "closed": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	history := &runHistory{}
+	first, err := inferOwners(context.Background(), []string{tree}, history)
+	if err != nil || len(first[tree].Sessions) != 1 || !first[tree].Sessions[0].Closed {
+		t.Fatalf("first inference = %#v, %v", first, err)
+	}
+	// Change only the bytes, not the version, to make another decode fail.
+	// Canonical writers always change the version with the metadata.
+	db, err := database.Open(filepath.Dir(runstore.SessionsDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE session_records SET meta = '{' WHERE id = ?", id); err != nil {
+		t.Fatal(err)
+	}
+	again, err := inferOwners(context.Background(), []string{tree}, history)
+	if err != nil || len(again[tree].Sessions) != 1 || again[tree].Sessions[0].ID != id {
+		t.Fatalf("recheck decoded an unchanged session record: %#v, %v", again, err)
+	}
+}
+
+// A recheck follows session moves and reopening, and damaged new metadata
+// remains an error instead of falling back to the cached ownership evidence.
+func TestRecheckReadsChangedSessionHistory(t *testing.T) {
+	tree := inferenceTestStore(t)
+	moved := t.TempDir()
+	id := "ses_moving"
+	write := func(dir string, closed time.Time) {
+		t.Helper()
+		recordtest.Write(t, runstore.SessionsDir(), id, map[string]any{"id": id, "dir": dir, "closed": closed})
+	}
+	write(tree, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	history := &runHistory{}
+	if _, err := inferOwners(context.Background(), []string{tree, moved}, history); err != nil {
+		t.Fatal(err)
+	}
+	write(moved, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	got, err := inferOwners(context.Background(), []string{tree, moved}, history)
+	if err != nil || len(got[tree].Sessions) != 0 || len(got[moved].Sessions) != 1 || !got[moved].Sessions[0].Closed {
+		t.Fatalf("session move = %#v, %v", got, err)
+	}
+	write(moved, time.Time{})
+	got, err = inferOwners(context.Background(), []string{moved}, history)
+	if err != nil || len(got[moved].Sessions) != 1 || got[moved].Sessions[0].Closed {
+		t.Fatalf("reopened session = %#v, %v", got, err)
+	}
+	recordtest.WriteRaw(t, runstore.SessionsDir(), id, []byte("{"))
+	if _, err := inferOwners(context.Background(), []string{moved}, history); err == nil {
+		t.Fatal("recheck ignored damaged changed metadata")
 	}
 }
 

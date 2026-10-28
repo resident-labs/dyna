@@ -652,6 +652,25 @@ func Revision(sessions string) (string, error) {
 	return revision(db)
 }
 
+// CacheRevision returns the all-record revision and delete counter as one
+// token. The counter keeps a cache invalid when deleting the newest record
+// lets a later write reuse its row revision, even for the same session ID.
+func CacheRevision(sessions string) (string, error) {
+	db, ok, err := readable(sessions)
+	if err != nil || !ok {
+		return "", err
+	}
+	rev, err := revision(db)
+	if err != nil {
+		return "", err
+	}
+	var deletes string
+	if err := db.QueryRow("SELECT COALESCE((SELECT value FROM meta WHERE key = ?), '0')", DeletesKey).Scan(&deletes); err != nil {
+		return "", err
+	}
+	return rev + "|d" + deletes, nil
+}
+
 func revision(db *sql.DB) (string, error) {
 	var id string
 	var top, rows int64
