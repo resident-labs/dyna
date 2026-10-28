@@ -290,6 +290,10 @@ const fixtures: Record<string, EventPayload> = {
     remedy: 'systemctl --user restart dyna-engine.service',
     detail: 'only the engine creates and migrates dyna.db',
   },
+  'alert/shell': {
+    source: 'shell', summary: 'A stopped shell still has running processes.',
+    detail: 'Shell cleanup failed.',
+  },
   'alert/consolidation': {
     source: 'consolidation',
     summary: 'Consolidation c1 paused in phase committing: goal g1 is not open',

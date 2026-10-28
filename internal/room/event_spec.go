@@ -705,8 +705,8 @@ var eventSpecs = []EventSpec{
 	},
 	{
 		Family: FamilyAlert, Type: EventType(AlertShell), Renderer: "AlertCard",
-		Payload: reflect.TypeOf(AlertEvent{}), Wake: WakeRoot, Once: true,
-		Text: "A stopped shell has processes still running:", Producers: []EventProducer{ProducerShell},
+		Payload: reflect.TypeOf(AlertEvent{}), Wake: WakeTarget, Audience: AudienceSession, Once: true,
+		Text: "Shell process cleanup did not finish:", Producers: []EventProducer{ProducerShell},
 	},
 	// A failed service turn needs the root seat, once per turn.
 	{
