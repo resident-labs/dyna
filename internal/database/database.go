@@ -193,7 +193,7 @@ type olderSchemaError struct {
 }
 
 func (e olderSchemaError) Error() string {
-	if migrationFailed.Load() {
+	if migrationFailed.Load() || e.have == 0 {
 		return fmt.Sprintf("%v: %s is version %d, this dyna needs %d", errNotMigrated, e.key, e.have, e.need)
 	}
 	return fmt.Sprintf("Dyna is updating; retry in a minute (%s is version %d, this dyna needs %d). If it stays this way, restart the engine: systemctl --user restart dyna-engine.service", e.key, e.have, e.need)
@@ -210,7 +210,8 @@ func IsOlderSchema(err error, key string) bool {
 // IsUpdatingSchema excludes an engine whose migration failed: retrying there
 // cannot make progress, and must not delay its read-only service.
 func IsUpdatingSchema(err error, key string) bool {
-	return !migrationFailed.Load() && IsOlderSchema(err, key)
+	var old olderSchemaError
+	return !migrationFailed.Load() && errors.As(err, &old) && old.key == key && old.have > 0
 }
 
 func openDatabase(dataDir string) (*sql.DB, error) {
