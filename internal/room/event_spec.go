@@ -357,6 +357,18 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Room limits are off: {reason}. This room shares the agent slice with every other room and has no process cap.",
 	},
+	// A room whose work nears one cap of its resource slice hears it once per
+	// cap and crossing: its root can rein the room in before the kernel
+	// throttles its memory or refuses its forks.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeRoomCap,
+		Renderer: "RoomCapCard",
+		Payload:  reflect.TypeOf(RoomCapEvent{}),
+		Wake:     WakeRoot,
+		Once:     true,
+		Text:     "Room {room} is near its {cap} cap: {summary}.",
+	},
 	// The owner's answer to a call request is a fact of the room: root asked for
 	// the call and stops waiting when it reads the answer.
 	{
@@ -873,6 +885,9 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(CallState("")), Values: enumValues(callStates)},
 	{Type: reflect.TypeOf(VoiceSessionState("")), Values: enumValues(voiceSessionStates)},
 	{Type: reflect.TypeOf(VoiceEndReason("")), Values: enumValues(voiceEndReasons)},
+	{Type: reflect.TypeOf(RoomCapKind("")), Values: []string{
+		string(RoomCapMemoryHigh), string(RoomCapMemoryMax), string(RoomCapPidsMax),
+	}},
 }
 
 // eventObjects are the struct types that an event payload embeds. The
@@ -884,6 +899,7 @@ var eventObjects = []reflect.Type{
 	reflect.TypeOf(InstructionChange{}),
 	reflect.TypeOf(AlertFinding{}),
 	reflect.TypeOf(ReviewFinding{}),
+	reflect.TypeOf(RoomCapTree{}),
 }
 
 // eventOpenStrings are named string types whose values are open, such as a
