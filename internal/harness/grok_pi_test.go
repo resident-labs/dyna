@@ -101,3 +101,25 @@ func TestPiRuntimeSessionDirectorySurvivesResume(t *testing.T) {
 		}
 	}
 }
+
+// A profile Dyna prepared carries the runtime-owned config file flags in
+// ExtraArgs; the invocation must accept them and still reject the same flags
+// when the user supplied them.
+func TestPiInvocationAcceptsRuntimeOwnedConfigFlags(t *testing.T) {
+	prepared := profile.Profile{
+		Harness:               profile.HarnessPi,
+		ExtraArgs:             []string{"--session-dir", t.TempDir(), "--settings", "s.json", "--mcp-config", "m.json", "--models-file", "models.json"},
+		RuntimePermissionArgs: []string{},
+	}
+	if _, err := buildInvocation(prepared, "task"); err != nil {
+		t.Fatal(err)
+	}
+	user := profile.Profile{Harness: profile.HarnessPi, ExtraArgs: []string{"--settings", "own.json"}, RuntimePermissionArgs: []string{"--settings", "own.json"}}
+	if _, err := buildInvocation(user, "task"); err == nil {
+		t.Fatal("pi accepted a user-supplied --settings")
+	}
+	bare := profile.Profile{Harness: profile.HarnessPi, ExtraArgs: []string{"--models-file", "own.json"}}
+	if _, err := buildInvocation(bare, "task"); err == nil {
+		t.Fatal("pi accepted a user-supplied --models-file on an unprepared profile")
+	}
+}
