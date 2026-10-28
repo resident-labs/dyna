@@ -75,7 +75,7 @@ func TestListMetaSkipsUnassignedLegacyHistory(t *testing.T) {
 			t.Fatalf("legacy routing allowed: %v", err)
 		}
 		// History remains readable without assigning a room or changing files.
-		meta, _, err := s.readMetaRecord(id)
+		meta, err := s.readMetaRecord(id)
 		if err != nil || meta.ID != id {
 			t.Fatalf("metadata lost: %+v, %v", meta, err)
 		}
