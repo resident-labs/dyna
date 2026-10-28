@@ -14,6 +14,9 @@ import (
 	"dyna-agent/internal/mode"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -53,11 +56,17 @@ func TestFreshTransferDropsRuntimePinAndConversation(t *testing.T) {
 	e, _ := transferEnv(t)
 	info, _ := e.start("RESPOND: original work")
 	info, _ = e.wait(info.ID, 1)
+	stampParent(t, info)
+	child, _ := e.start("RESPOND: child work")
+	child, _ = e.wait(child.ID, 1)
+	writePRLink(t, info, "author", "open", true)
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_fresh", Session: info.ID, ParentSession: info.ID, Status: "running", StartedAt: time.Now()})
 	oldPin := &harnessruntime.Pin{Bundle: harnessruntime.Bundle{Harness: "pi", Version: "1.0.0"}, Generation: "old"}
 	_, err := e.m.store().updateMetaContext(context.Background(), info.ID, func(meta *Meta) {
 		meta.RuntimePin = oldPin
 		meta.HarnessSession = "old-conversation"
 		meta.Resumable = true
+		meta.Model = "session-model-override"
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +75,7 @@ func TestFreshTransferDropsRuntimePinAndConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Profile != "mock" || state.Phase != "waiting" {
+	if state.Profile != "mock" || state.Model != "session-model-override" || state.Phase != "waiting" {
 		t.Fatalf("fresh transfer must use the current profile and request a handoff: %+v", state)
 	}
 	if err := e.m.SubmitHandoff(context.Background(), info.ID, state.ID, "Continue the original work.", info.Dir, ""); err != nil {
@@ -79,6 +88,25 @@ func TestFreshTransferDropsRuntimePinAndConversation(t *testing.T) {
 	}
 	if meta.ID != info.ID || meta.Name != info.Name || meta.RuntimePin != nil || meta.HarnessSession != "" || !strings.Contains(meta.Transfer.Handoff, "Continue the original work.") {
 		t.Fatalf("fresh transfer did not preserve identity and reset the runtime and conversation: %+v", meta)
+	}
+	advance(t, e, state, 1)
+	e.wait(info.ID, 0)
+	advance(t, e, state, 1)
+	meta, err = e.m.Store.ReadMeta(info.ID)
+	if err != nil || meta.Transfer.Phase != "completed" || meta.Depth != info.Depth || meta.ParentSession != info.ParentSession {
+		t.Fatalf("fresh transfer changed hierarchy or failed: %+v, %v", meta, err)
+	}
+	currentChild, err := e.m.Store.ReadMeta(child.ID)
+	if err != nil || currentChild.ParentSession != info.ID || currentChild.Depth != child.Depth {
+		t.Fatalf("fresh transfer changed child: %+v, %v", currentChild, err)
+	}
+	links, err := e.m.TrackedPRs(info.ID)
+	if err != nil || len(links) != 1 || !links[0].Active() {
+		t.Fatalf("fresh transfer changed PR ownership: %+v, %v", links, err)
+	}
+	run, err := runstore.ReadMeta("wf_fresh")
+	if err != nil || run.Session != info.ID || run.ParentSession != info.ID || run.Status != "running" {
+		t.Fatalf("fresh transfer changed workflow run ownership: %+v, %v", run, err)
 	}
 }
 
