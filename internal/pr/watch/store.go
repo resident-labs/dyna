@@ -185,7 +185,15 @@ func (s *Store) readRecordResponses(key string) (map[string]cachedResponse, erro
 	return snapshot.Responses(key), nil
 }
 
+// Get reads one tracked PR from its own row and cold parts, so a
+// single-PR action never refreshes or decodes every stored PR. A key that is
+// no row's primary key, such as a change ID, still resolves through the
+// shared snapshot, which is the only place aliases can be found.
 func (s *Store) Get(key string) (Record, error) {
+	r, found, err := state.ReadRecord(s.Root, key)
+	if err != nil || found {
+		return r, err
+	}
 	snapshot, err := state.ReadSnapshot(s.Root)
 	if err != nil {
 		return Record{}, err
