@@ -8,9 +8,9 @@ import (
 
 // checkoutDir returns a checkout of the record's repository that is still on
 // disk. A record keeps the worktree of the session that tracked it, and closing
-// that session removes the worktree. Git then reports "fork/exec /usr/bin/git:
-// no such file or directory" for the missing command directory, which names git
-// instead of the folder that is gone (D-131).
+// that session removes the worktree. Git then fails with "chdir <dir>: no such
+// file or directory" for the missing command directory (D-131; processguard
+// rewrites the kernel's exec-shaped wording).
 //
 // RepoPath is a checkout Dyna resolved and matched against the record's
 // repository before storing it. LookupDir and Dir are only the directories the
