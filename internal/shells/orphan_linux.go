@@ -126,6 +126,17 @@ func jobProcesses(id string, have map[int]pinned) map[int]pinned {
 	return have
 }
 
+// stampedSurvivors reports live processes still carrying this job's stamp.
+func stampedSurvivors(id string) []int {
+	var survivors []int
+	for _, pid := range runprocs.Stamped(JobEnv + "=" + id) {
+		if state, _, ok := processStat(pid); ok && state != 'Z' && state != 'X' {
+			survivors = append(survivors, pid)
+		}
+	}
+	return survivors
+}
+
 // readGroup is processGroup; a test replaces it to simulate a reused number.
 var readGroup = processGroup
 

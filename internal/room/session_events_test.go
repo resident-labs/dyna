@@ -106,6 +106,10 @@ func TestNewEventWakeAndRecipientRules(t *testing.T) {
 			wakesRoot: true,
 			audience:  AudienceRoom,
 		},
+		"alert/shell": {
+			event: AlertEvent{Source: AlertShell, Summary: "A stopped shell still has running processes.", Detail: "Shell sh_example has surviving stamped processes: [123]"},
+			to:    "work", producer: ProducerShell, wakes: true, wakesRoot: true, audience: AudienceRoom,
+		},
 		"service/failed": {
 			event:     ServiceFailedEvent{Service: ServiceLibrarian, Session: session, Turn: 3, Error: "exit status 1", Profile: "deepseek", Model: "deepseek-flash"},
 			to:        toRoot,

@@ -31,6 +31,7 @@ import (
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/harness/home"
 	"dyna-agent/internal/procident"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
@@ -866,8 +867,18 @@ func (s *Store) Stop(id, by string) (Info, error) {
 	}
 	// The group leader can exit before a child that started a new session.
 	// The job stamp identifies those children without touching the supervisor.
-	_, cleanupErr := cleanup()
-	logErr = errors.Join(logErr, cleanupErr)
+	_, _ = cleanup()
+	if pids := stampedSurvivors(id); len(pids) > 0 && in.RoomID != "" {
+		rooms := &room.Store{Root: filepath.Join(filepath.Dir(s.Root), "rooms")}
+		if rec, resolveErr := rooms.Resolve(in.RoomID); resolveErr == nil {
+			_, _ = rooms.PostEventInput(room.PostEventInput{
+				RoomID: rec.ID, Producer: room.ProducerShell, To: []string{rec.Name},
+				Event: room.AlertEvent{Source: room.AlertShell,
+					Summary: "A stopped shell still has running processes.",
+					Detail:  fmt.Sprintf("Shell %s has surviving stamped processes: %v", id, pids)},
+			})
+		}
+	}
 	in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
 	return in, errors.Join(logErr, err)
 }
