@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -131,5 +133,72 @@ func TestPiForkStampedLocalIntegrity(t *testing.T) {
 	piForkIntegrity = "sha512-" + base64.StdEncoding.EncodeToString(make([]byte, 64))
 	if _, err := installPiForkNPM(context.Background(), m, t.TempDir(), nil, a); err == nil {
 		t.Fatal("accepted wrong integrity")
+	}
+}
+
+// seedBundle writes a published-bundle directory by hand, standing in for an
+// old installation that predates the required fork level.
+func seedBundle(t *testing.T, root, version string) {
+	t.Helper()
+	dir := filepath.Join(root, "pi", version)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("#!/bin/sh\necho " + version + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "pi"), payload, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(payload)
+	raw, _ := json.Marshal(map[string]string{"harness": "pi", "version": version, "executable": "pi", "sha256": hex.EncodeToString(sum[:])})
+	if err := os.WriteFile(filepath.Join(dir, "bundle.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An old version below the required fork level stays visible to cleanup with
+// its manifest data, so uninstall and removal can still act on it.
+func TestUnusablePiBundleStaysVisibleToCleanup(t *testing.T) {
+	piTestHome(t)
+	m := manager(t)
+	install(t, m, "pi", "1.5.0-dyna.2")
+	seedBundle(t, m.Root, "1.4.0")
+	bundles, err := m.listHarness("pi", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old *Bundle
+	for i := range bundles {
+		if bundles[i].Version == "1.4.0" {
+			old = &bundles[i]
+		}
+	}
+	if old == nil || old.Directory == "" || old.Executable == "" {
+		t.Fatalf("unusable bundle lost its manifest data: %+v", old)
+	}
+	if usable, err := m.listHarness("pi", false); err != nil || len(usable) != 1 {
+		t.Fatalf("unusable bundle visible to resolution: %+v %v", usable, err)
+	}
+	if err := m.Uninstall(context.Background(), "pi", nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(m.Root, "pi", "1.4.0")); !os.IsNotExist(err) {
+		t.Fatal("uninstall kept an unusable old version")
+	}
+}
+
+func TestGCRemovesUnusableOldPiBundle(t *testing.T) {
+	piTestHome(t)
+	m := manager(t)
+	install(t, m, "pi", "1.5.0-dyna.2")
+	install(t, m, "pi", "1.4.0-dyna.2")
+	seedBundle(t, m.Root, "1.0.0")
+	if err := m.GC(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(m.Root, "pi", "1.0.0")); !os.IsNotExist(err) {
+		t.Fatal("GC kept an unusable old version")
+	}
+	if _, err := m.Resolve("pi", "1.4.0-dyna.2"); err != nil {
+		t.Fatal("GC removed a usable version", err)
 	}
 }
