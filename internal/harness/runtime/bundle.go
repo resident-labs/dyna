@@ -503,28 +503,31 @@ func (m *BundleManager) Rollback(ctx context.Context, harness string) (Bundle, e
 }
 
 // installPiForkNPM installs Dyna's single tarball after checking its SHA-512.
-// Release builds download the stamped asset. Development builds use the local
-// absolute path in DYNA_PI_TARBALL and record its computed integrity.
+// Release builds download the stamped asset. Source builds use the stamped
+// local path. DYNA_PI_TARBALL explicitly overrides either source for QA.
 func installPiForkNPM(ctx context.Context, m *BundleManager, staging string, env []string, a RuntimeAdapter) (InstallArtifact, error) {
 	tarball := os.Getenv(piForkTarballEnv)
 	expected := ""
-	if piForkURL != "" {
-		if piForkAsset == "" || filepath.Base(piForkAsset) != piForkAsset || !recommendedIntegrity(piForkIntegrity) {
-			return InstallArtifact{}, errors.New("Pi fork release metadata is incomplete")
-		}
-		tarball = filepath.Join(staging, piForkAsset)
+	if tarball == "" {
 		expected = piForkIntegrity
-		args := []string{"curl", "--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", "134217728", "--output", tarball, piForkURL}
-		if RunBundleCommand(ctx, m, args, env) != nil {
-			return InstallArtifact{}, errors.New("Pi fork release download failed")
+		if !recommendedIntegrity(expected) {
+			return InstallArtifact{}, errors.New("Pi fork build metadata is incomplete; set DYNA_PI_TARBALL for development")
 		}
-	} else {
-		if tarball == "" {
-			return InstallArtifact{}, errors.New("development Pi fork tarball is missing; run scripts/pi-pack.sh <output-tarball> and set DYNA_PI_TARBALL to its absolute path")
+		if piForkURL != "" {
+			if piForkAsset == "" || filepath.Base(piForkAsset) != piForkAsset {
+				return InstallArtifact{}, errors.New("Pi fork release metadata is incomplete")
+			}
+			tarball = filepath.Join(staging, piForkAsset)
+			args := []string{"curl", "--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", "134217728", "--output", tarball, piForkURL}
+			if RunBundleCommand(ctx, m, args, env) != nil {
+				return InstallArtifact{}, errors.New("Pi fork release download failed")
+			}
+		} else {
+			tarball = piForkAsset
 		}
-		if !filepath.IsAbs(tarball) || filepath.Clean(tarball) != tarball {
-			return InstallArtifact{}, errors.New("DYNA_PI_TARBALL must name an absolute, clean path")
-		}
+	}
+	if !filepath.IsAbs(tarball) || filepath.Clean(tarball) != tarball {
+		return InstallArtifact{}, errors.New("Pi fork tarball must name an absolute, clean path")
 	}
 	data, err := os.ReadFile(tarball)
 	if err != nil {
