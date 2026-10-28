@@ -98,6 +98,26 @@ func TestRoomIDFromSliceReversesRoomSlice(t *testing.T) {
 	}
 }
 
+func TestRoomIDFromCgroupRequiresTheCanonicalRoomSlicePath(t *testing.T) {
+	const room = "room_20261028-062251-8827a7e0"
+	slice := RoomSlice(room)
+	cgroup := "/user.slice/user@1000.service/dyna.slice/dyna-room.slice/" + slice + "/swarm.service"
+	if id, ok := RoomIDFromCgroup(cgroup); !ok || id != room {
+		t.Fatalf("RoomIDFromCgroup(%q) = %q, %v; want %q", cgroup, id, ok, room)
+	}
+	for _, bad := range []string{
+		"",
+		"dyna.slice/dyna-room.slice/" + slice,
+		"/user.slice/app.slice/" + slice,
+		"/user.slice/dyna.slice/dyna-room.slice/dyna-room-ro\\xzz.slice/swarm.service",
+		"/user.slice/dyna.slice/dyna-room.slice/" + slice + "/../" + slice,
+	} {
+		if id, ok := RoomIDFromCgroup(bad); ok {
+			t.Errorf("RoomIDFromCgroup(%q) = %q, %v; want no room", bad, id, ok)
+		}
+	}
+}
+
 // The room's share scales with the machine's memory: a small machine still
 // gets a working process cap, and a large one stops at 8192 tasks.
 func TestDefaultRoomLimitsScaleWithMemory(t *testing.T) {
