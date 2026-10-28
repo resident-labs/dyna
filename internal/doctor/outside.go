@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"dyna-agent/internal/proc"
 )
 
 // OutsideGroup is the name of the sample group that holds the machine's load
@@ -37,10 +39,7 @@ type Process struct {
 }
 
 type procReading struct {
-	pid      int
-	command  string
-	ticks    uint64
-	memory   uint64
+	proc.Process
 	unit     string
 	cwd      string
 	outsider bool
@@ -50,38 +49,10 @@ type procReading struct {
 var dynaCgroups = []string{"/dyna.slice", "/dyna-engine.service", "/dyna-serve.service", "/dyna-computers.service"}
 
 func readProcesses(procRoot string) map[int]procReading {
-	entries, _ := os.ReadDir(procRoot)
 	out := map[int]procReading{}
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		dir := filepath.Join(procRoot, e.Name())
-		stat, err := os.ReadFile(filepath.Join(dir, "stat"))
-		if err != nil {
-			continue
-		}
-		// The command is in parentheses and may hold spaces; the fields after
-		// the last ")" start at the state, field 3.
-		s := string(stat)
-		open, end := strings.IndexByte(s, '('), strings.LastIndexByte(s, ')')
-		if open < 0 || end < open {
-			continue
-		}
-		fields := strings.Fields(s[end+1:])
-		if len(fields) < 22 {
-			continue
-		}
-		utime, _ := strconv.ParseUint(fields[11], 10, 64)
-		stime, _ := strconv.ParseUint(fields[12], 10, 64)
-		var pages uint64
-		if statm, err := os.ReadFile(filepath.Join(dir, "statm")); err == nil {
-			if f := strings.Fields(string(statm)); len(f) > 1 {
-				pages, _ = strconv.ParseUint(f[1], 10, 64)
-			}
-		}
-		r := procReading{pid: pid, command: s[open+1 : end], ticks: utime + stime, memory: pages * uint64(os.Getpagesize()), outsider: true}
+	for pid, p := range proc.List(procRoot) {
+		dir := filepath.Join(procRoot, strconv.Itoa(pid))
+		r := procReading{Process: p, outsider: true}
 		if cg, err := os.ReadFile(filepath.Join(dir, "cgroup")); err == nil {
 			path := string(cg)
 			for _, name := range dynaCgroups {
@@ -127,20 +98,20 @@ func TopOutside(procRoot string, interval time.Duration, sleep func(time.Duratio
 		if !cur.outsider {
 			continue
 		}
-		k := key{cur.unit, cur.command}
+		k := key{cur.unit, cur.Command}
 		if cur.unit == "" {
-			k.command = cur.command + "\x00" + cur.cwd
+			k.command = cur.Command + "\x00" + cur.cwd
 		}
 		g := groups[k]
 		if g == nil {
-			g = &Process{Command: cur.command, Unit: cur.unit, Cwd: cur.cwd}
+			g = &Process{Command: cur.Command, Unit: cur.unit, Cwd: cur.cwd}
 			groups[k] = g
 			order = append(order, k)
 		}
 		g.Count++
-		g.Memory += cur.memory
-		if prev, ok := before[pid]; ok && cur.ticks >= prev.ticks && interval > 0 {
-			g.Cores += float64(cur.ticks-prev.ticks) / clockTicks / interval.Seconds()
+		g.Memory += cur.Memory
+		if prev, ok := before[pid]; ok && cur.CPUTicks >= prev.CPUTicks && interval > 0 {
+			g.Cores += float64(cur.CPUTicks-prev.CPUTicks) / clockTicks / interval.Seconds()
 		}
 	}
 	list := make([]Process, 0, len(order))
