@@ -17,7 +17,7 @@
   import PRNoiseRules from '../prs/PRNoiseRules.svelte'
   import { normalizePolicy, parseChecks, checksText, saveRoomPolicy, budgetForm, parseTestAllow } from '../prs/pr.ts'
   import type { BudgetForm, PolicyForm, NormalizedPolicy } from '../prs/pr.ts'
-  import type { Room, ProfileChoice } from '../api/room.ts'
+  import type { Room, RoomLimits, ProfileChoice, RoomLimitField } from '../api/room.ts'
   import type { ChangePolicy, PRConfig, ReviewerStatus } from '../api/change.ts'
   import type { HookLogTarget } from '../settings/hookLog.ts'
   import type { RoomControlValue } from './roomSessionControls.ts'
@@ -46,6 +46,7 @@
     profiles?: ProfileChoice[]
     onrootprofile?: (roomId: string, profile: string) => void
     oncheckin?: (roomId: string, value: string) => void
+    onlimit?: (roomId: string, field: RoomLimitField, value: string) => void
     start?: string
     hookRun?: HookLogTarget | null
     reviewer?: ReviewerStatus | null
@@ -58,7 +59,7 @@
     onopenglobal?: () => unknown
     onclose: () => void
   }
-  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
+  let { room, profiles = [], onrootprofile = () => {}, oncheckin = () => {}, onlimit = () => {}, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
   let rootProfile = $state(untrack(() => room.rootProfile || ''))
   let rootProfileBusy = $state(false)
   let rootProfileError = $state('')
@@ -105,6 +106,39 @@
       }
     } finally {
       checkInBusy = false
+    }
+  }
+  // The limit fields take the same values as the CLI: a size such as 2G for
+  // memory, a count such as 512 for tasks, off, or empty for the machine
+  // default. Each saves when it commits.
+  let limits = $state<RoomLimits>(untrack(() => ({ ...room.limits })))
+  let limitBusy = $state<Record<string, boolean>>({})
+  let limitError = $state<Record<string, string>>({})
+  $effect(() => { limits = { ...room.limits } })
+
+  async function saveLimit(field: RoomLimitField) {
+    const target = room.id
+    const value = (limits[field] ?? '').trim()
+    limitBusy = { ...limitBusy, [field]: true }
+    limitError = { ...limitError, [field]: '' }
+    try {
+      const res = await api.setRoomLimit(target, field, value)
+      const saved = { ...limits }
+      saved[field] = value
+      limits = saved
+      onlimit(target, field, value)
+      // The saved value is what the room keeps; a live-apply failure is a
+      // warning on the kept value, not a failed save.
+      if (res.applyWarning) limitError = { ...limitError, [field]: res.applyWarning }
+    } catch (e) {
+      if (room.id === target) {
+        const stored = { ...limits }
+        stored[field] = room.limits?.[field] ?? ''
+        limits = stored
+        limitError = { ...limitError, [field]: errorText(e) }
+      }
+    } finally {
+      limitBusy = { ...limitBusy, [field]: false }
     }
   }
   const nav: { id: string; label: string }[] = [
@@ -312,6 +346,21 @@
       <Row title="Parent check-ins" help="How often Dyna wakes a parent to check its children in this room: a duration such as 30m, off, or empty for the global interval." error={checkInError}>
         {#snippet control()}
           <input class="field" aria-label="Parent check-ins" type="text" placeholder="default" spellcheck="false" bind:value={checkIn} disabled={checkInBusy} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} onchange={saveCheckIn} />
+        {/snippet}
+      </Row>
+      <Row title="Memory high" help="Where the kernel starts to throttle this room's processes: a size such as 2G, off, or empty for the machine default." error={limitError.memoryHigh}>
+        {#snippet control()}
+          <input class="field" aria-label="Memory high" type="text" placeholder="default" spellcheck="false" bind:value={limits.memoryHigh} disabled={limitBusy.memoryHigh} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} onchange={() => saveLimit('memoryHigh')} />
+        {/snippet}
+      </Row>
+      <Row title="Memory max" help="The hard memory limit: the kernel kills a process of this room, never outside it. A size such as 2G, off, or empty for the machine default." error={limitError.memoryMax}>
+        {#snippet control()}
+          <input class="field" aria-label="Memory max" type="text" placeholder="default" spellcheck="false" bind:value={limits.memoryMax} disabled={limitBusy.memoryMax} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} onchange={() => saveLimit('memoryMax')} />
+        {/snippet}
+      </Row>
+      <Row title="Tasks" help="The most processes and threads this room may run: a count such as 512, off, or empty for the machine default." error={limitError.tasksMax}>
+        {#snippet control()}
+          <input class="field" aria-label="Tasks" type="text" placeholder="default" spellcheck="false" bind:value={limits.tasksMax} disabled={limitBusy.tasksMax} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} onchange={() => saveLimit('tasksMax')} />
         {/snippet}
       </Row>
     </Group>

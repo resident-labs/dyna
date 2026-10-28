@@ -110,6 +110,62 @@ func RoomSliceUnit(roomID string, limits RoomLimits) string {
 	return b.String()
 }
 
+// RoomLimitOverride is one limit of a room's saved setting: the zero value
+// keeps the machine default, Off removes the limit, and a positive Value
+// replaces the default (bytes for memory, a count for tasks).
+type RoomLimitOverride struct {
+	Off   bool
+	Value int64
+}
+
+// RoomLimitsSetting is a room's saved slice limits, as the engine reports
+// them from the room record.
+type RoomLimitsSetting struct {
+	MemoryHigh RoomLimitOverride
+	MemoryMax  RoomLimitOverride
+	TasksMax   RoomLimitOverride
+}
+
+// Apply returns base with this setting's overrides in place: a set value
+// replaces the default, off removes the limit, and default keeps it.
+func (s RoomLimitsSetting) Apply(base RoomLimits) RoomLimits {
+	if v := s.MemoryHigh; v.Off {
+		base.MemoryHigh = 0
+	} else if v.Value > 0 {
+		base.MemoryHigh = v.Value
+	}
+	if v := s.MemoryMax; v.Off {
+		base.MemoryMax = 0
+	} else if v.Value > 0 {
+		base.MemoryMax = v.Value
+	}
+	if v := s.TasksMax; v.Off {
+		base.TasksMax = 0
+	} else if v.Value > 0 {
+		base.TasksMax = int(v.Value)
+	}
+	return base
+}
+
+// RoomLimitsLookup, when set, returns one room's saved limit setting. The
+// engine installs it, reading the room record; other binaries leave it nil
+// and every room runs with the machine defaults.
+var RoomLimitsLookup func(roomID string) (RoomLimitsSetting, bool)
+
+// roomLimits resolves the limits one room runs under: its saved setting over
+// the machine defaults.
+func roomLimits(roomID string, total uint64) RoomLimits {
+	limits := DefaultRoomLimits(total)
+	if RoomLimitsLookup == nil {
+		return limits
+	}
+	over, ok := RoomLimitsLookup(roomID)
+	if !ok {
+		return limits
+	}
+	return over.Apply(limits)
+}
+
 // WriteRoomSlice installs the managed room slice without contacting systemd.
 // Like WriteSlice, it rewrites only a managed file whose content changed, so
 // a local edit that removed the header is kept.
@@ -137,7 +193,34 @@ var (
 	// for, so a launch does not reread the configuration directory each time.
 	roomSliceMu   sync.Mutex
 	roomSliceDone = map[string]bool{}
+
+	// roomLocks holds one mutex per room, so a settings change and a launch
+	// that both write the same room's slice cannot interleave: an older
+	// change would otherwise move the live slice back after a newer one.
+	roomLocksMu sync.Mutex
+	roomLocks   = map[string]*sync.Mutex{}
 )
+
+// roomMutex returns the room's slice mutex, creating it once.
+func roomMutex(roomID string) *sync.Mutex {
+	roomLocksMu.Lock()
+	defer roomLocksMu.Unlock()
+	mu := roomLocks[roomID]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		roomLocks[roomID] = mu
+	}
+	return mu
+}
+
+// lockRoom holds this room's slice work and returns what releases it. The
+// caller reads the room's setting only under it, so an apply always sees the
+// newest saved limits and lands after every earlier apply.
+func lockRoom(roomID string) func() {
+	mu := roomMutex(roomID)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // ensureRoom installs or refreshes the shared slice and this room's slice,
 // and reloads the user manager once when either changed. Errors leave the
@@ -162,18 +245,75 @@ func ensureRoom(roomID string) {
 	if err != nil {
 		return
 	}
-	room, err := WriteRoomSlice(dir, roomID, DefaultRoomLimits(total))
-	if err != nil {
-		return
-	}
-	if shared || room {
+	unlock := lockRoom(roomID)
+	room, err := WriteRoomSlice(dir, roomID, roomLimits(roomID, total))
+	if err == nil && (shared || room) {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 		defer cancel()
 		_ = runCommand(ctx, "systemctl", "--user", "daemon-reload")
 	}
+	unlock()
+	if err != nil {
+		return
+	}
 	roomSliceMu.Lock()
 	roomSliceDone[roomID] = true
 	roomSliceMu.Unlock()
+}
+
+// ApplyRoomLimits applies one room's limits now, under the room's slice
+// lock: it reads the saved setting, rewrites the managed slice file, and on
+// a machine that can run room slices moves the live slice with systemctl
+// set-property --runtime; an off limit becomes infinity, so a live slice
+// loses a removed limit too. A machine without the user manager or the
+// delegated controllers keeps the file only: the room already heard why it
+// has no slice of its own.
+func ApplyRoomLimits(roomID string) error {
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	total, err := totalMemory()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(config, "systemd", "user")
+	unlock := lockRoom(roomID)
+	defer unlock()
+	limits := roomLimits(roomID, total)
+	changed, err := WriteRoomSlice(dir, roomID, limits)
+	if err != nil {
+		return err
+	}
+	if _, ok := systemdRun(); !ok {
+		return nil
+	}
+	if changed {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		_ = runCommand(ctx, "systemctl", "--user", "daemon-reload")
+	}
+	if ok, _ := RoomSupport(); !ok {
+		return nil
+	}
+	props := []string{
+		"MemoryHigh=" + memoryLimit(limits.MemoryHigh),
+		"MemoryMax=" + memoryLimit(limits.MemoryMax),
+		"TasksMax=" + memoryLimit(int64(limits.TasksMax)),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	args := append([]string{"--user", "set-property", "--runtime", RoomSlice(roomID)}, props...)
+	return runCommand(ctx, "systemctl", args...)
+}
+
+// memoryLimit writes one limit the way systemctl set-property reads it: a
+// count, or infinity when the limit is off.
+func memoryLimit(v int64) string {
+	if v > 0 {
+		return strconv.FormatInt(v, 10)
+	}
+	return "infinity"
 }
 
 // WrapRoom moves cmd into a new scope below this room's slice and returns the

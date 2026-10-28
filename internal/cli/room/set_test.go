@@ -1,11 +1,14 @@
 package room
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/enginetest"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
 	dynastore "dyna-agent/internal/store"
 	"dyna-agent/internal/websvc"
@@ -20,6 +23,7 @@ func serveRoomSet(t *testing.T) {
 	calls, err := websvc.Bind([]websvc.Binding{
 		{Name: "CreateRoomRecord", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.CreateRoomRecord},
 		{Name: "SetRoomCheckIn", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.SetRoomCheckIn},
+		{Name: "SetRoomLimit", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.SetRoomLimit},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -75,5 +79,77 @@ func TestRoomSetCheckInIntervalSetsShowsAndClears(t *testing.T) {
 	}
 	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "mergeMaxParallel", "3"); err == nil || !strings.Contains(err.Error(), "unknown room setting") {
 		t.Fatalf("unknown key err = %v", err)
+	}
+}
+
+// The limits settings set, show and clear through the same command, with the
+// values the room's slice uses.
+func TestRoomSetLimitsSetsShowsAndClears(t *testing.T) {
+	clearStamp(t)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // the engine call rewrites the room's slice file
+	serveRoomSet(t)
+	t.Chdir(t.TempDir())
+	if _, err := execCmd(t, RoomCmd(), "create", "cozy"); err != nil {
+		t.Fatal(err)
+	}
+	stored := func(field room.LimitField) room.Limit {
+		t.Helper()
+		rec, err := store().Resolve("cozy")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec.Limits.LimitOf(field)
+	}
+	if shown, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.memoryHigh"); err != nil || strings.TrimSpace(shown) != "default" {
+		t.Fatalf("initial value = %q, %v", shown, err)
+	}
+	if out, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.memoryHigh", "2G"); err != nil || !strings.Contains(out, "2G") {
+		t.Fatalf("set 2G = %q, %v", out, err)
+	}
+	if l := stored(room.LimitMemoryHigh); l.Off || l.Value != 2<<30 {
+		t.Fatalf("stored memoryHigh = %+v", l)
+	}
+	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.tasksMax", "512"); err != nil {
+		t.Fatal(err)
+	}
+	if shown, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.tasksMax"); err != nil || strings.TrimSpace(shown) != "512" {
+		t.Fatalf("shown tasks = %q, %v", shown, err)
+	}
+	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.memoryMax", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if l := stored(room.LimitMemoryMax); !l.Off {
+		t.Fatal("off was not stored")
+	}
+	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.memoryHigh", "default"); err != nil {
+		t.Fatal(err)
+	}
+	if l := stored(room.LimitMemoryHigh); l != (room.Limit{}) {
+		t.Fatalf("default did not clear the limit: %+v", l)
+	}
+	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.memoryHigh", "huge"); err == nil || !strings.Contains(err.Error(), "size") {
+		t.Fatalf("bad size err = %v", err)
+	}
+	if _, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.swap", "1G"); err == nil || !strings.Contains(err.Error(), "unknown room limit") {
+		t.Fatalf("unknown limit err = %v", err)
+	}
+	// A failed live apply keeps the saved limit and says so: the value prints
+	// with a warning, not an error. A systemd user directory that is a file
+	// makes the apply fail after the store write, without touching systemd.
+	config := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(config, "dyna"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "systemd"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", config)
+	out, err := execCmd(t, RoomCmd(), "set", "cozy", "limits.tasksMax", "256")
+	if err != nil || !strings.Contains(out, "256") || !strings.Contains(out, "warning") {
+		t.Fatalf("live-apply failure = %q, %v", out, err)
+	}
+	if l := stored(room.LimitTasksMax); l.Off || l.Value != 256 {
+		t.Fatalf("the saved limit was lost: %+v", l)
 	}
 }
