@@ -41,7 +41,11 @@ func TestServiceInstallationAndTransientTransition(t *testing.T) {
 					}
 					return "", nil
 				}
-				o := Options{Binary: "/test/bin/dyna", Dir: dir, RestartComputers: changed, Run: run, Environment: []string{"DYNA_COMPUTERS_ENABLED=0", "DYNA_OWNER_DISPLAY=:9", "DYNA_OWNER_WAYLAND_DISPLAY=owner-display", "DYNA_COMPUTER_MEMORY_HIGH=123456", "PATH=/test/tools", "DBUS_SESSION_BUS_ADDRESS=unix:path=/fake-bus"}}
+				o := Options{Binary: "/test/bin/dyna", Dir: dir, RestartComputers: changed, Run: run,
+					AttemptRestart: func(ctx context.Context) (string, error) {
+						_, err := run(ctx, "try-restart", Computers)
+						return "", err
+					}, Environment: []string{"DYNA_COMPUTERS_ENABLED=0", "DYNA_OWNER_DISPLAY=:9", "DYNA_OWNER_WAYLAND_DISPLAY=owner-display", "DYNA_COMPUTER_MEMORY_HIGH=123456", "PATH=/test/tools", "DBUS_SESSION_BUS_ADDRESS=unix:path=/fake-bus"}}
 				// Repeat while the old transient unit is active. Installing its file
 				// must not turn the next landing into a destructive restart either.
 				for range 2 {
@@ -419,6 +423,10 @@ func TestInstallAllowsSlowHealthyStartAndRestartsComputers(t *testing.T) {
 		return "", nil
 	}
 	o := Options{Binary: "/test/bin/dyna", Dir: environment(t), RestartComputers: true, Run: run,
+		AttemptRestart: func(ctx context.Context) (string, error) {
+			_, err := run(ctx, "try-restart", Computers)
+			return "", err
+		},
 		Environment: []string{"PATH=/test/tools"},
 		Healthy: func(ctx context.Context) error {
 			deadline, ok := ctx.Deadline()
@@ -454,13 +462,20 @@ func TestComputerRestartWaitsForQuiet(t *testing.T) {
 			dir := t.TempDir()
 			var calls []string
 			var out strings.Builder
+			run := func(_ context.Context, args ...string) (string, error) {
+				calls = append(calls, strings.Join(args, " "))
+				return "Transient=no\nLoadState=loaded\n", nil
+			}
 			o := Options{Binary: "/test/bin/dyna", Dir: dir, RestartComputers: tc.changed, Output: &out,
 				Environment: []string{"PATH=/test/tools"},
-				Quiet:       func(context.Context) (string, error) { return tc.busy, nil },
-				Run: func(_ context.Context, args ...string) (string, error) {
-					calls = append(calls, strings.Join(args, " "))
-					return "Transient=no\nLoadState=loaded\n", nil
-				}}
+				AttemptRestart: func(ctx context.Context) (string, error) {
+					if tc.busy == "" {
+						_, err := run(ctx, "try-restart", Computers)
+						return "", err
+					}
+					return tc.busy, nil
+				},
+				Run: run}
 			if err := Install(context.Background(), o); err != nil {
 				t.Fatal(err)
 			}

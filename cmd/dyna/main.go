@@ -233,7 +233,7 @@ func newEngineCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		o := userservices.Options{Binary: exe, Dir: units, RestartComputers: restartComputers, NoTunnel: noTunnel, Quiet: computerrestart.QuietNow, Output: c.OutOrStdout(),
+		o := userservices.Options{Binary: exe, Dir: units, RestartComputers: restartComputers, NoTunnel: noTunnel, AttemptRestart: computerrestart.RestartNow, Output: c.OutOrStdout(),
 			Healthy: func(ctx context.Context) error { return engine.WaitHealthy(ctx, engineclient.New("").Call, nil) }}
 		if writeOnly {
 			return userservices.Write(o)

@@ -111,6 +111,7 @@ func fakeInstaller(t *testing.T, j Job, branch, fail string, calls *[]string, de
 			return userservices.Install(ctx, userservices.Options{
 				Binary: p.Args[0], Dir: j.Config.Units, Environment: p.Env, Output: p.Output,
 				RestartComputers: strings.Contains(command, "--restart-computers"),
+				AttemptRestart:   func(context.Context) (string, error) { return "", nil },
 				Run: func(_ context.Context, args ...string) (string, error) {
 					cmd := strings.Join(args, " ")
 					*calls = append(*calls, cmd)

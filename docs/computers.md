@@ -23,11 +23,16 @@ missing, the computer works as before. Shells keep the missing-socket address
 described below.
 
 A new build installs without stopping busy computers: the service restarts later.
-The service keeps starting new desktops on the running build while the restart
-waits. It restarts at the first moment no computer has an app open or a
-`dyna computer run` command active; a running desktop with neither, however
-recent its input, does not hold it back.
-`dyna computer list` shows "restart pending since <time>" while one waits.
+Each `dyna computer run` command holds a daemon lease until it exits. The service
+keeps starting new desktops on the running build while the restart waits. The
+final quiet check closes new command admission before systemd restarts the
+service. It restarts at the first moment no computer has an app open or command
+lease; a running desktop with neither, however recent its input, does not hold
+it back. `dyna computer list` shows "restart pending since <time>" while one waits.
+
+A daemon from before run leases cannot report legacy commands. The updater
+defers its restart instead of risking those commands. After they finish, stop
+that old daemon manually to let the pending update continue.
 
 During the first upgrade, an active transient `dyna-computers.service` keeps
 its sockets and desktops. The installer writes and enables the persistent unit

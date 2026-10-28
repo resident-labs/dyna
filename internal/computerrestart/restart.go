@@ -4,43 +4,45 @@ package computerrestart
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"dyna-agent/internal/computers"
 	"dyna-agent/internal/userservices"
 )
 
-// Quiet is the one quiet check. It reads the same statuses that
-// "dyna computer list --all --json" shows. It returns "" when no computer has
-// a foreground command or a running computer has an app open. A desktop with
-// no app or command counts as quiet however recently it had input.
+// Quiet is the preliminary quiet check used to avoid a restart request when
+// active use is already known. BeginRestart makes the final decision atomic.
 func Quiet(list []computers.Status) string {
 	for _, st := range list {
-		if st.Runs > 0 {
-			return fmt.Sprintf("computer %s has %d foreground command(s) running", st.SessionID, st.Runs)
-		}
-		if st.State != computers.StateRunning && st.State != computers.StateStarting {
-			continue
-		}
-		if len(st.Apps) > 0 {
-			return fmt.Sprintf("computer %s has %d app(s) open", st.SessionID, len(st.Apps))
+		if reason := st.RestartReason(); reason != "" {
+			return reason
 		}
 	}
 	return ""
 }
 
-// QuietNow checks the live daemon. If the service is active but does not answer,
-// activity is unknown, which counts as busy.
-func QuietNow(ctx context.Context) (string, error) {
-	list, err := computers.NewClient("").List(ctx, "")
+// RestartNow atomically closes foreground command admission and restarts the
+// service when quiet. An older daemon counts as busy because its legacy
+// commands have no leases and cannot be counted safely.
+func RestartNow(ctx context.Context) (string, error) {
+	admission, err := computers.NewClient("").BeginRestart(ctx)
 	if err != nil {
+		if errors.Is(err, computers.ErrRestartAdmissionUnsupported) {
+			return "computer daemon predates protected foreground commands; stop it after existing commands finish", nil
+		}
 		if active, aerr := userservices.ComputersActive(ctx); aerr == nil && !active {
 			return "", nil
 		}
 		return "computer activity is unknown: " + err.Error(), nil
 	}
-	return Quiet(list), nil
+	if admission.Reason != "" {
+		return admission.Reason, nil
+	}
+	if err := userservices.TryRestartComputers(ctx); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // Recheck bounds how long Wait goes without looking when no event or input
@@ -54,14 +56,14 @@ type Deps struct {
 	List    func(context.Context) ([]computers.Status, error)
 	Events  func(context.Context) (<-chan computers.Event, error)
 	Active  func(context.Context) (bool, error)
-	Restart func(context.Context) error
+	Restart func(context.Context) (string, error)
 }
 
 // Live wires Deps to the running daemon and systemd.
 func Live(dir string) Deps {
 	c := computers.NewClient("")
 	return Deps{Dir: dir, Recheck: Recheck, List: func(ctx context.Context) ([]computers.Status, error) { return c.List(ctx, "") },
-		Events: c.Subscribe, Active: userservices.ComputersActive, Restart: userservices.TryRestartComputers}
+		Events: c.Subscribe, Active: userservices.ComputersActive, Restart: RestartNow}
 }
 
 // Wait finishes a deferred restart. It does nothing without the marker. It
@@ -88,10 +90,13 @@ func Wait(ctx context.Context, d Deps) error {
 			}
 		}
 		if reason == "" {
-			if err := d.Restart(ctx); err != nil {
+			reason, err = d.Restart(ctx)
+			if err != nil {
 				return err
 			}
-			return userservices.ClearRestartPending(d.Dir)
+			if reason == "" {
+				return userservices.ClearRestartPending(d.Dir)
+			}
 		}
 		// Without an event stream, or when the list failed, look again after
 		// Recheck. An open stream wakes the loop on every computer event.

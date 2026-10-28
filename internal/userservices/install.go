@@ -39,11 +39,12 @@ type Options struct {
 	// and an installed one is stopped. Install keeps the setting an existing
 	// engine unit already carries.
 	NoTunnel bool
-	// Quiet returns why restarting the computer service would disturb users, or
-	// "" when it is safe. Nil means always safe.
-	Quiet  func(context.Context) (string, error)
-	Run    func(context.Context, ...string) (string, error)
-	Output io.Writer
+	// AttemptRestart checks computer activity and closes command admission
+	// before restarting the service. It returns why the restart was deferred.
+	// The function performs the restart itself when it returns no reason.
+	AttemptRestart func(context.Context) (string, error)
+	Run            func(context.Context, ...string) (string, error)
+	Output         io.Writer
 	// Pause waits between engine state checks after a failed restart. Tests set it
 	// to return at once.
 	Pause func(context.Context, time.Duration) error
@@ -471,11 +472,17 @@ func Install(ctx context.Context, o Options) error {
 	if transient {
 		fmt.Fprintln(o.Output, "Keeping the transient computer service and its live desktops; the persistent unit applies after it stops.")
 	} else if o.RestartComputers {
-		busy := ""
-		if o.Quiet != nil {
-			if busy, err = o.Quiet(ctx); err != nil {
-				return fmt.Errorf("check computer activity: %w", err)
+		if o.AttemptRestart == nil {
+			return fmt.Errorf("restart %s: atomic restart admission is not configured", Computers)
+		}
+		busy, err := o.AttemptRestart(ctx)
+		if err != nil {
+			// A failed restart can leave the old daemon alive with admission
+			// closed. Keep the update pending so the engine retries it.
+			if markErr := MarkRestartPending(o.Dir); markErr != nil {
+				return errors.Join(err, markErr)
 			}
+			return fmt.Errorf("restart %s: %w", Computers, err)
 		}
 		if busy != "" {
 			if err := MarkRestartPending(o.Dir); err != nil {
@@ -483,9 +490,6 @@ func Install(ctx context.Context, o Options) error {
 			}
 			fmt.Fprintf(o.Output, "Deferred restart of %s: %s. The engine restarts it at the first quiet moment.\n", Computers, busy)
 		} else {
-			if _, err := run("try-restart", Computers); err != nil {
-				return err
-			}
 			if err := ClearRestartPending(o.Dir); err != nil {
 				return err
 			}

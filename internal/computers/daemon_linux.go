@@ -15,13 +15,14 @@ import (
 )
 
 type daemon struct {
-	mu        sync.Mutex
-	computers map[string]*supervisor
-	options   SupervisorOptions
-	ctx       context.Context
-	subMu     sync.Mutex
-	subs      map[uint64]subscriber
-	nextSub   uint64
+	mu         sync.Mutex
+	computers  map[string]*supervisor
+	options    SupervisorOptions
+	ctx        context.Context
+	restarting bool
+	subMu      sync.Mutex
+	subs       map[uint64]subscriber
+	nextSub    uint64
 }
 type subscriber struct {
 	session string
@@ -135,6 +136,9 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 	if r.Op == "version" {
 		return callspec.Build, nil
 	}
+	if r.Op == "restart.begin" {
+		return d.beginRestart(), nil
+	}
 	if r.Op == "list" {
 		d.mu.Lock()
 		items := make([]*supervisor, 0, len(d.computers))
@@ -169,6 +173,7 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 			s.StreamRSSKiB = 0
 			s.Stream = Stream{}
 			s.Viewers = 0
+			s.Runs = 0
 			s.Control = ControlAgent
 			out = append(out, s)
 		}
@@ -233,6 +238,7 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 				state.StreamRSSKiB = 0
 				state.Stream = Stream{}
 				state.Viewers = 0
+				state.Runs = 0
 				state.Control = ControlAgent
 				return state, nil
 			}
@@ -268,5 +274,61 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 		return Stopped{StateDestroyed}, nil
 	}
 	d.mu.Unlock()
+	if r.Op == "run.lease" {
+		return d.leaseRun(ctx, s, r)
+	}
 	return s.dispatch(ctx, r)
+}
+
+// beginRestart checks active use and closes run admission under the same lock
+// that leaseRun uses. Once it returns a quiet answer, no new foreground command
+// can appear before the caller asks systemd to restart the service.
+func (d *daemon) beginRestart() RestartAdmission {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, s := range d.computers {
+		s.mu.Lock()
+		reason := s.state.RestartReason()
+		s.mu.Unlock()
+		if reason != "" {
+			return RestartAdmission{Reason: reason}
+		}
+	}
+	d.restarting = true
+	return RestartAdmission{}
+}
+
+func (d *daemon) leaseRun(ctx context.Context, s *supervisor, r Request) (Meta, error) {
+	if _, err := s.prepareRun(ctx, r); err != nil {
+		return Meta{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Meta{}, err
+	}
+	connection := ConnectionID(ctx)
+	d.mu.Lock()
+	if d.restarting {
+		d.mu.Unlock()
+		return Meta{}, fmt.Errorf("computer service restart is in progress; retry after it restarts")
+	}
+	if d.computers[s.meta.SessionID] != s {
+		d.mu.Unlock()
+		return Meta{}, fmt.Errorf("computer was destroyed while preparing the command")
+	}
+	s.mu.Lock()
+	s.runs[connection] = struct{}{}
+	s.state.Runs = len(s.runs)
+	meta := s.meta
+	s.record("runs", nil)
+	s.mu.Unlock()
+	d.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		s.mu.Lock()
+		delete(s.runs, connection)
+		s.state.Runs = len(s.runs)
+		s.record("runs", nil)
+		s.mu.Unlock()
+	}()
+	return meta, nil
 }

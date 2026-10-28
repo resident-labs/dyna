@@ -862,9 +862,6 @@ func (s *supervisor) readApps() {
 	}
 }
 func (s *supervisor) dispatch(ctx context.Context, r Request) (any, error) {
-	if r.Op == "run.prepare" {
-		return s.prepareRun(ctx, r)
-	}
 	if r.Op == "size" {
 		return s.resize(ctx, r)
 	}

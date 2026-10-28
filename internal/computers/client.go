@@ -166,20 +166,38 @@ type RunLease struct {
 }
 
 // PrepareRun records the command intent and holds its run lease until Close.
-// The daemon also releases the lease if the client disconnects.
+// The daemon also releases the lease if the client disconnects. The distinct
+// operation makes an older daemon reject the run instead of leaving it
+// unprotected during an update.
 func (c *Client) PrepareRun(ctx context.Context, status string) (*RunLease, error) {
 	conn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var meta Meta
-	if err = conn.call(ctx, Request{Session: c.Session, Op: "run.prepare", Status: status}, &meta); err != nil {
+	if err = conn.call(ctx, Request{Session: c.Session, Op: "run.lease", Status: status}, &meta); err != nil {
 		conn.Close()
 		return nil, err
 	}
 	return &RunLease{Meta: meta, conn: conn}, nil
 }
 func (r *RunLease) Close() error { return r.conn.Close() }
+
+// ErrRestartAdmissionUnsupported means the daemon predates atomic restart
+// admission. Its legacy foreground commands cannot be counted safely.
+var ErrRestartAdmissionUnsupported = errors.New("the computer daemon does not support protected foreground commands")
+
+// BeginRestart atomically checks active computer use and closes run admission
+// when the service is quiet. The caller must restart the service after a quiet
+// answer. While admission is closed, new foreground commands are rejected.
+func (c *Client) BeginRestart(ctx context.Context) (v RestartAdmission, err error) {
+	err = c.Call(ctx, Request{Op: "restart.begin"}, &v)
+	var reply *ReplyError
+	if errors.As(err, &reply) {
+		err = fmt.Errorf("%w: %v", ErrRestartAdmissionUnsupported, err)
+	}
+	return
+}
 
 // ViewLease owns the control connection that keeps a viewer alive. Close it on
 // WebSocket disconnect. The daemon releases human control on EOF automatically.

@@ -3,8 +3,10 @@ package computerrestart
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,35 @@ func TestQuiet(t *testing.T) {
 	}
 }
 
+func TestRestartNowDefersLegacyDaemon(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	socket := computers.ControlSocket("")
+	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- computers.Serve(ctx, listener, func(context.Context, computers.Request) (any, error) {
+			return nil, errors.New("invalid session id")
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	reason, err := RestartNow(ctx)
+	if err != nil || !strings.Contains(reason, "predates protected foreground commands") {
+		t.Fatalf("legacy restart reason=%q err=%v", reason, err)
+	}
+}
+
 func TestWaitRestartsWhenAppsClose(t *testing.T) {
 	dir := t.TempDir()
 	if err := userservices.MarkRestartPending(dir); err != nil {
@@ -51,9 +82,9 @@ func TestWaitRestartsWhenAppsClose(t *testing.T) {
 		Dir:    dir,
 		List:   func(context.Context) ([]computers.Status, error) { l := lists[0]; lists = lists[1:]; return l, nil },
 		Events: func(context.Context) (<-chan computers.Event, error) { return events, nil },
-		Restart: func(context.Context) error {
+		Restart: func(context.Context) (string, error) {
 			restarts++
-			return nil
+			return "", nil
 		},
 	})
 	if err != nil || restarts != 1 || len(lists) != 0 {
@@ -64,10 +95,35 @@ func TestWaitRestartsWhenAppsClose(t *testing.T) {
 	}
 }
 
+func TestWaitHonorsAtomicRestartAdmission(t *testing.T) {
+	dir := t.TempDir()
+	if err := userservices.MarkRestartPending(dir); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan computers.Event, 1)
+	events <- computers.Event{}
+	attempts := 0
+	err := Wait(context.Background(), Deps{
+		Dir:    dir,
+		List:   func(context.Context) ([]computers.Status, error) { return nil, nil },
+		Events: func(context.Context) (<-chan computers.Event, error) { return events, nil },
+		Restart: func(context.Context) (string, error) {
+			attempts++
+			if attempts == 1 {
+				return "a command acquired a lease", nil
+			}
+			return "", nil
+		},
+	})
+	if err != nil || attempts != 2 {
+		t.Fatalf("attempts=%d err=%v; want one deferred and one completed restart", attempts, err)
+	}
+}
+
 func TestWaitWithoutMarkerDoesNothing(t *testing.T) {
 	err := Wait(context.Background(), Deps{Dir: t.TempDir(),
 		List:    func(context.Context) ([]computers.Status, error) { t.Fatal("listed"); return nil, nil },
-		Restart: func(context.Context) error { t.Fatal("restarted"); return nil }})
+		Restart: func(context.Context) (string, error) { t.Fatal("restarted"); return "", nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +136,7 @@ func TestWaitKeepsMarkerWhenRestartFails(t *testing.T) {
 		List:    func(context.Context) ([]computers.Status, error) { return nil, errors.New("no daemon") },
 		Events:  func(context.Context) (<-chan computers.Event, error) { return nil, errors.New("no daemon") },
 		Active:  func(context.Context) (bool, error) { return false, nil },
-		Restart: func(context.Context) error { return errors.New("boom") }})
+		Restart: func(context.Context) (string, error) { return "", errors.New("boom") }})
 	if err == nil || !userservices.RestartIsPending(dir) {
 		t.Fatalf("err=%v pending=%v", err, userservices.RestartIsPending(dir))
 	}
@@ -111,7 +167,7 @@ func waitWith(t *testing.T, answers []answer, events func(context.Context) (<-ch
 			}
 			return active, nil
 		},
-		Restart: func(context.Context) error { restarts++; return nil }})
+		Restart: func(context.Context) (string, error) { restarts++; return "", nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

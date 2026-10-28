@@ -5,6 +5,7 @@ package computers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,7 +48,10 @@ func TestPrepareRunPersistsIntentWithoutStartingDesktop(t *testing.T) {
 		case event := <-events:
 			if event.Type == "runs" && event.SessionID == lease.SessionID && event.Status != nil && event.Status.Runs == 0 {
 				var meta Meta
-				if err := client.Call(ctx, Request{Op: "run.prepare"}, &meta); err == nil {
+				if err := client.Call(ctx, Request{Op: "run.prepare", Status: "Legacy command"}, &meta); err == nil {
+					t.Fatal("new daemon accepted an unprotected legacy run")
+				}
+				if err := client.Call(ctx, Request{Op: "run.lease"}, &meta); err == nil {
 					t.Fatal("run preparation accepted missing intent")
 				}
 				return
@@ -55,6 +59,31 @@ func TestPrepareRunPersistsIntentWithoutStartingDesktop(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("run disconnect did not release its lease:", ctx.Err())
 		}
+	}
+}
+
+func TestRestartAdmissionBlocksNewRunLeases(t *testing.T) {
+	id := recordTestID(t)
+	done := make(chan struct{})
+	close(done)
+	s := &supervisor{
+		meta: Meta{SessionID: id}, state: Status{SessionID: id, Control: ControlAgent},
+		inputGate: make(chan struct{}, 1), runs: map[string]struct{}{"active": {}},
+		compositor: &process{done: done}, emit: func(Event) {},
+	}
+	s.state.Runs = 1
+	d := &daemon{computers: map[string]*supervisor{id: s}}
+	if reason := d.beginRestart().Reason; !strings.Contains(reason, "foreground command") {
+		t.Fatalf("active run did not defer restart: %q", reason)
+	}
+	delete(s.runs, "active")
+	s.state.Runs = 0
+	if reason := d.beginRestart().Reason; reason != "" {
+		t.Fatalf("idle computer did not admit restart: %q", reason)
+	}
+	ctx := context.WithValue(context.Background(), connectionKey{}, "new-run")
+	if _, err := d.leaseRun(ctx, s, Request{Status: "Checking restart admission"}); err == nil || !strings.Contains(err.Error(), "restart is in progress") {
+		t.Fatalf("new run entered after restart admission closed: %v", err)
 	}
 }
 
