@@ -38,6 +38,7 @@ var computerCodePaths = []string{
 	"internal/scratch",
 	"internal/sessionlife",
 	"internal/settings",
+	"internal/shellop",
 	"internal/shellquote",
 	"internal/shells",
 	"internal/state",
