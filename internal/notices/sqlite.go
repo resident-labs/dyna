@@ -161,6 +161,12 @@ func decodeFacts(n *Notice, facts string) error {
 			return fmt.Errorf("notice %s sync facts: %w", n.ID, err)
 		}
 		n.Sync = &f
+	case KindTunnel:
+		var f TunnelFacts
+		if err := json.Unmarshal([]byte(facts), &f); err != nil {
+			return fmt.Errorf("notice %s tunnel facts: %w", n.ID, err)
+		}
+		n.Tunnel = &f
 	}
 	return nil
 }
@@ -177,6 +183,8 @@ func encodeFacts(n Notice) (string, error) {
 		raw, err = json.Marshal(n.Provider)
 	case n.Sync != nil:
 		raw, err = json.Marshal(n.Sync)
+	case n.Tunnel != nil:
+		raw, err = json.Marshal(n.Tunnel)
 	default:
 		return "", nil
 	}

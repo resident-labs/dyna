@@ -94,6 +94,14 @@ test('a sync notice names the repository and both lanes, or the rewrite', () => 
   rewrite.done()
 })
 
+test('a tunnel notice names the missing binary and the PATH it searched', () => {
+  const view = render(notice({ kind: 'tunnel', severity: 'error', tunnel: { binary: 'cloudflared', path: '/usr/local/bin:/usr/bin:/bin' } }))
+  assert.match(view.text, /Tunnel connector missing/)
+  assert.match(view.text, /cloudflared/)
+  assert.match(view.text, /not found on PATH \/usr\/local\/bin:\/usr\/bin:\/bin/)
+  view.done()
+})
+
 test('the card runs its action and dismisses', () => {
   let ran = 0
   let dismissed = 0

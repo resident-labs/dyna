@@ -21,6 +21,7 @@
     disk: 'Low disk space',
     provider: 'Provider limit reached',
     sync: 'Remote history split',
+    tunnel: 'Tunnel connector missing',
   }
 
   let title = $derived(notice.kind === 'sync' && notice.sync?.rewritten ? 'Remote history rewritten' : titles[notice.kind] ?? 'Dyna alert')
@@ -61,6 +62,12 @@
       <span class="where">{notice.sync.repo}</span>
       {' '}
       <span class="value">{notice.sync.rewritten ? `${notice.sync.lane} was rewritten` : `${notice.sync.lane} and ${notice.sync.other ?? 'another remote'} no longer share a history`}</span>
+    </p>
+  {:else if notice.kind === 'tunnel' && notice.tunnel}
+    <p class="facts one">
+      <span class="where">{notice.tunnel.binary}</span>
+      {' '}
+      <span class="value">not found on PATH {notice.tunnel.path}</span>
     </p>
   {:else}
     <!-- TODO: legacy/shim remove later — a notice saved before the typed
