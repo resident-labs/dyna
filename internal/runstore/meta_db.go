@@ -108,6 +108,12 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	}); err != nil {
 		return db, err
 	}
+	if err := database.Migrate(db, "runs.update-notices", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), "CREATE TABLE run_update_notices (run TEXT PRIMARY KEY)")
+		return err
+	}); err != nil {
+		return db, err
+	}
 	return db, migrateDirectories(db, dataDir)
 }
 

@@ -270,6 +270,17 @@ func (e *engine) settle(o outcome) {
 	e.settleOnce.Do(func() { e.done <- o })
 }
 
+// stopForUpdate settles the whole run as stopped for a dyna update: no new
+// step starts, running steps are canceled, and the coordinator reports the
+// outcome so the engine can report it once (D-402).
+// A nil abortRoot cannot happen for a step: it is set before the script runs.
+func (e *engine) stopForUpdate(cause error) {
+	if e.shared.abortRoot == nil {
+		return
+	}
+	e.shared.abortRoot(fmt.Errorf("%w: %v", ErrStoppedForUpdate, cause))
+}
+
 // finish delivers the script outcome unless a profile call cap was exceeded
 // anywhere in this run's tree (root or a nested workflow()). A cap failure is
 // surfaced only after every accepted worker owned by this engine has written
@@ -679,6 +690,12 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			failBeforeRun(err)
 			return
 		}
+		// Stop before a replaced binary starts more work (D-402).
+		if executableReplaced() {
+			e.stopForUpdate(updateReplacementCause)
+			failBeforeRun(updateReplacementCause)
+			return
+		}
 		emitA(runstore.Event{T: "agent_run", ID: id, Label: label, Profile: prof.Name, Phase: phase})
 		start := time.Now()
 
@@ -741,6 +758,11 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			// stop the session before this call gives up its slots, so a script
 			// that ended with the agent still running leaves nothing running.
 			e.closeAgent(id)
+			// State a newer dyna wrote fails every call this binary would make;
+			// stop once and let the engine report the interruption (D-402).
+			if newerSchemaError(err) {
+				e.stopForUpdate(err)
+			}
 		}
 		var resultAny any
 		rawOut := ""

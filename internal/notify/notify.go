@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -828,7 +829,7 @@ func (s *Service) completeTargets(ctx context.Context, roomID, from string, targ
 }
 
 func (s *Service) prepareCompletion(roomID, from string, targets []string, kind, text string, turn int, includeOwner bool) (*subagent.ReportPlan, error) {
-	rec, plan, err := s.planCompletion(roomID, targets, includeOwner)
+	rec, plan, err := s.planCompletion(roomID, targets, includeOwner, false)
 	if err != nil || plan == nil {
 		return nil, err
 	}
@@ -841,7 +842,11 @@ func (s *Service) prepareCompletion(roomID, from string, targets []string, kind,
 // mention tokens and owner report as a completion post. The registry writes the
 // post kind and its text, so the poster cannot choose them.
 func (s *Service) prepareEventCompletion(roomID string, ev room.Event, targets []string, turn int, includeOwner bool) (*subagent.ReportPlan, error) {
-	rec, plan, err := s.planCompletion(roomID, targets, includeOwner)
+	return s.prepareEventCompletionWithFallback(roomID, ev, targets, turn, includeOwner, false)
+}
+
+func (s *Service) prepareEventCompletionWithFallback(roomID string, ev room.Event, targets []string, turn int, includeOwner, fallbackOwner bool) (*subagent.ReportPlan, error) {
+	rec, plan, err := s.planCompletion(roomID, targets, includeOwner, fallbackOwner)
 	if err != nil || plan == nil {
 		return nil, err
 	}
@@ -869,7 +874,7 @@ type completionPlan struct {
 // planCompletion resolves a completion's recipients. A target is a session
 // address or the room name (the owner). A session target that is closed or in
 // another room falls back to the owner.
-func (s *Service) planCompletion(roomID string, targets []string, includeOwner bool) (room.Record, *completionPlan, error) {
+func (s *Service) planCompletion(roomID string, targets []string, includeOwner, fallbackOwner bool) (room.Record, *completionPlan, error) {
 	if roomID == "" {
 		return room.Record{}, nil, errNoRoom
 	}
@@ -892,6 +897,8 @@ func (s *Service) planCompletion(roomID string, targets []string, includeOwner b
 		if target != rec.Name {
 			if info, err := s.sessionStore().DeliveryTarget(target); err == nil && info.Status != subagent.StatusClosed && info.RoomID == rec.ID {
 				r = recipient{kind: toSession, addr: info.Address(), rec: rec, session: info}
+			} else if fallbackOwner {
+				ownerReport = true
 			} else if !includeOwner {
 				continue
 			}
@@ -1445,15 +1452,38 @@ func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error)
 	if meta.Status == "running" {
 		return Result{}, fmt.Errorf("run %s is still running", runID)
 	}
-	ev := room.RunEvent{RunID: meta.ID, Name: meta.Name, State: runState(completionKind(meta.Status)), Parent: meta.ParentSession}
+	state := runState(completionKind(meta.Status))
+	if meta.Status == runstore.StatusInterrupted {
+		state = room.RunInterrupted
+	}
+	ev := room.RunEvent{RunID: meta.ID, Name: meta.Name, State: state, Parent: meta.ParentSession}
 	if !meta.StartedAt.IsZero() && !meta.EndedAt.IsZero() {
 		ev.DurationMS = int(meta.EndedAt.Sub(meta.StartedAt).Milliseconds())
 	}
 	ev.Steps, ev.Agents = runCounts(runID)
 	ev.Summary, ev.Detail = runResult(meta)
-	plan, err := s.prepareEventCompletion(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, meta.ParentSession == "")
+	if meta.Status == runstore.StatusInterrupted {
+		ev.Summary = "A Dyna update stopped this workflow. Review its work before restarting it."
+		ev.Detail = fmt.Sprintf("Restart: dyna run <script.js> --resume %s. Resume can repeat steps. Full output: dyna runs show %s", meta.ID, meta.ID)
+	}
+	plan, err := s.prepareEventCompletionWithFallback(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, meta.ParentSession == "", meta.Status == runstore.StatusInterrupted)
 	if err != nil || plan == nil {
 		return Result{}, err
+	}
+	// A retry after the author closes or ownership moves must reach the
+	// current recipient. Keep a stable ID per recipient so retries stay quiet.
+	if meta.Status == runstore.StatusInterrupted {
+		previous, err := s.Rooms.Message(meta.RoomID, room.EventID(ev))
+		if err == nil && (!maps.Equal(previous.SessionIDs, plan.Post.SessionIDs) || previous.OwnerReport != plan.Post.OwnerReport) {
+			recipients, err := json.Marshal(plan.Post.SessionIDs)
+			if err != nil {
+				return Result{}, err
+			}
+			key := sha256.Sum256([]byte(fmt.Sprintf("run-update-recipient\x00%s\x00%t\x00%s", meta.ID, plan.Post.OwnerReport, recipients)))
+			plan.Post.ID = fmt.Sprintf("msg_%x", key[:8])
+		} else if err != nil && !errors.Is(err, room.ErrPostNotFound) {
+			return Result{}, err
+		}
 	}
 	plan.Producer = room.ProducerWorkflow
 	return s.appendCompletion(ctx, *plan)

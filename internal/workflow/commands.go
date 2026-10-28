@@ -359,6 +359,13 @@ func (e *engine) exec(call goja.FunctionCall) goja.Value {
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
+		// Stop before a replaced binary starts more work (D-402).
+		if executableReplaced() {
+			e.stopForUpdate(updateReplacementCause)
+			emit(runstore.Event{T: "exec_end", Status: "error", Error: updateReplacementCause.Error()})
+			reject(updateReplacementCause)
+			return
+		}
 		attach, attachStderr := "", ""
 		if hasPrior {
 			if aerr := e.opts.Commands.Attach(e.ctx, prior.Shell); aerr != nil {
@@ -439,6 +446,11 @@ func (e *engine) execAttempt(argv []string, o commandOptions, id int, label, lin
 		var err error
 		shell, err = e.opts.Commands.Start(e.ctx, CommandSpec{Argv: argv, Cwd: o.cwd, Env: o.env, Name: "run " + e.runID() + ": " + textutil.ClipOneLine(label, 80), StderrPath: stderrPath})
 		if err != nil {
+			// State a newer dyna wrote fails every command this binary starts;
+			// stop once and let the engine report the interruption (D-402).
+			if newerSchemaError(err) {
+				e.stopForUpdate(err)
+			}
 			return nil, "", stderrPath, fmt.Errorf("start command: %w", err)
 		}
 	}
