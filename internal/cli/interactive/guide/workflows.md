@@ -69,6 +69,8 @@ export const meta = {
 
 ### `agent(prompt, opts?)`
 
+Use `run()` instead when a command can do the work deterministically. This includes polling for a file, a status, or a receipt. Use `agent()` when the step needs model judgment, not just waiting. Give waiting commands a timeout and handle failures.
+
 Returns a promise for worker text or validated JSON. Options:
 
 - `profile`: eligible profile name.
@@ -94,6 +96,8 @@ A non-zero exit, a timeout, or output that is not JSON rejects, so `parallel()` 
 const gate = await run(['python3', 'bridge.py', 'landed', '--unit', unit], { label: 'wait-' + unit, parse: 'json', timeout: 6 * 3600 })
 await agent('Review the landing: ' + JSON.stringify(gate.json), { schema })
 ```
+
+For long-running workflows, read a changing manifest at each dispatch instead of loading it once at startup. For example, call `run()` to read the current manifest before choosing the next unit. The script owns this reload: Dyna does not automatically reload a workflow's variables or source.
 
 ### `parallel(thunks)`
 
