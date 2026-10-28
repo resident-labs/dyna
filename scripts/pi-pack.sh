@@ -153,8 +153,13 @@ printf 'Pi fork tarball: %s\nIntegrity: %s\n' "$output" "$integrity"
 base=$(node -e 'process.stdout.write(require(process.argv[1] + "/package.json").version)' "$vendor/packages/coding-agent")
 fork_prefix="$tmp/verify-fork"
 npm_prefix="$tmp/verify-npm"
-npm install --global --prefix "$fork_prefix" --package-lock --ignore-scripts "$output"
-npm install --global --prefix "$npm_prefix" --package-lock --ignore-scripts "@earendil-works/pi-coding-agent@$base"
+# One retry: the registry CDN intermittently 404s a tarball that exists.
+verify_install() {
+  npm install --global --prefix "$1" --package-lock --ignore-scripts "$2" ||
+    npm install --global --prefix "$1" --package-lock --ignore-scripts "$2"
+}
+verify_install "$fork_prefix" "$output"
+verify_install "$npm_prefix" "@earendil-works/pi-coding-agent@$base"
 node --input-type=module - "$fork_prefix" "$npm_prefix" "$version" <<'EOF'
 import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
