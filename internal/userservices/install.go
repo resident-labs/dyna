@@ -120,8 +120,9 @@ const (
 	// times, one second apart, before reporting the failure.
 	engineChecks = 30
 	// healthBound is how long the restarted engine has to answer Health. It
-	// covers a few systemd restarts (RestartSec=3) of an engine that dies.
-	healthBound = 30 * time.Second
+	// covers startup recovery and a few systemd restarts (RestartSec=3) of an
+	// engine that dies. A slow but healthy start still finishes the install.
+	healthBound = 2 * time.Minute
 )
 
 // Dir uses the same XDG location as the install hook's captured configuration.

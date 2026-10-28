@@ -391,6 +391,36 @@ func TestInstallChecksEngineHealthAfterTheRestart(t *testing.T) {
 	}
 }
 
+func TestInstallAllowsSlowHealthyStartAndRestartsComputers(t *testing.T) {
+	var calls []string
+	run := func(_ context.Context, args ...string) (string, error) {
+		command := strings.Join(args, " ")
+		calls = append(calls, command)
+		if strings.Contains(command, "show "+Computers) {
+			return "Transient=no\nActiveState=active\nLoadState=loaded\n", nil
+		}
+		return "", nil
+	}
+	o := Options{Binary: "/test/bin/dyna", Dir: environment(t), RestartComputers: true, Run: run,
+		Environment: []string{"PATH=/test/tools"},
+		Healthy: func(ctx context.Context) error {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				return errors.New("the health check has no bound")
+			}
+			if remaining := time.Until(deadline); remaining <= 30*time.Second {
+				return fmt.Errorf("a slow start has only %s to answer Health", remaining.Round(time.Millisecond))
+			}
+			return nil
+		}}
+	if err := Install(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(calls, "\n"), "try-restart "+Computers) {
+		t.Fatalf("a late but healthy start did not restart computers: %v", calls)
+	}
+}
+
 func TestComputerRestartWaitsForQuiet(t *testing.T) {
 	for name, tc := range map[string]struct {
 		changed        bool
