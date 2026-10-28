@@ -3,7 +3,7 @@
 The shared computer daemon uses cgroup v2 when it runs in the dedicated,
 delegated `dyna-computers.service`. Before starting computer processes, it
 moves itself into the service’s `daemon` leaf. It then enables
-`+memory +cpu +pids` at the service root. Each computer gets a sibling leaf.
+`+memory +cpu +pids` at the service root. Without room slices, each computer gets a sibling leaf.
 A dedicated `dyna-computers-*.service` instance also supports these controls.
 A direct daemon start outside these services uses tracked processes instead.
 
