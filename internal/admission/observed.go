@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"dyna-agent/internal/database"
@@ -24,6 +25,21 @@ type Observation struct {
 	At      time.Time
 	Running int
 	Limit   int
+	// RoomPids is what the rooms' own systemd slices held: the processes a
+	// room's supervisors started outside every session scope, which the
+	// running count does not see. A machine without room slices records zero.
+	RoomPids RoomPids
+}
+
+// RoomPids is the rooms' own process count of one observation: what runs in
+// the per-room dyna-room-*.slice cgroups, processes and threads together as
+// pids.current reports them, the same number TasksMax caps.
+type RoomPids struct {
+	// Total is the sum of every room's count.
+	Total int
+	// ByRoom is each room's count, keyed by the room's slice unit name, the
+	// same name DYNA_ROOM_SLICE exports.
+	ByRoom map[string]int
 }
 
 // Observed stores observations in the shared dyna.db of DataDir.
@@ -34,8 +50,16 @@ func (o Observed) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, database.Migrate(db, "admission_observed.version", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), observedSchema)
+	return db, database.Migrate(db, "admission_observed.version", 2, func(conn *sql.Conn, from int) error {
+		if from < 1 {
+			if _, err := conn.ExecContext(context.Background(), observedSchema); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.ExecContext(context.Background(), `ALTER TABLE admission_observed ADD COLUMN room_pids INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(context.Background(), `ALTER TABLE admission_observed ADD COLUMN room_pids_by_room TEXT NOT NULL DEFAULT ''`)
 		return err
 	})
 }
@@ -53,8 +77,17 @@ func (o Observed) Record(ctx context.Context, ob Observation) error {
 	if err != nil {
 		return err
 	}
+	byRoom := ""
+	if len(ob.RoomPids.ByRoom) > 0 {
+		raw, err := json.Marshal(ob.RoomPids.ByRoom)
+		if err != nil {
+			return err
+		}
+		byRoom = string(raw)
+	}
 	return state.For(db).Write(ctx, hub.Event{Topic: "admission"}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, `INSERT INTO admission_observed VALUES (?,?,?)`, ob.At.Unix(), ob.Running, ob.Limit); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO admission_observed (at, running, lim, room_pids, room_pids_by_room) VALUES (?,?,?,?,?)`,
+			ob.At.Unix(), ob.Running, ob.Limit, ob.RoomPids.Total, byRoom); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, `DELETE FROM admission_observed WHERE at < ?`, ob.At.Add(-KeepObserved).Unix())

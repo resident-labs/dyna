@@ -3,10 +3,16 @@ package admission
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/agentslice"
 )
 
 type fixedSource struct {
@@ -150,6 +156,93 @@ func TestARunningSampleSkipsLaterTicksAndNeverBlocksShutdown(t *testing.T) {
 	<-done // Run returned although the sample is still blocked
 	if got := b.calls.Load(); got != 1 {
 		t.Fatalf("Running was called %d times, want 1: ticks must not start a second sample", got)
+	}
+}
+
+// fakeRoomCgroups writes a cgroup v2 tree whose user manager runs one
+// dyna-room-<id>.slice per entry, beside the noise a real tree has: the
+// intermediate slice's own files, a session scope, and a room whose
+// pids.current is gone. It returns the root and the /proc/self/cgroup file
+// that names the user manager.
+func fakeRoomCgroups(t *testing.T, rooms map[string]int) (root, self string) {
+	t.Helper()
+	root = t.TempDir()
+	dir := filepath.Join(root, "user.slice", "user-1000.slice", "user@1000.service", "dyna.slice", "dyna-room.slice")
+	for _, d := range []string{dir, filepath.Join(dir, "dyna-ses_1.scope"), filepath.Join(dir, "dyna-room-gone.slice")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, text := range map[string]string{
+		// The intermediate slice's own count and process list are not rooms.
+		"pids.current": "999\n",
+		"cgroup.procs": "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, pids := range rooms {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name, "pids.current"), []byte(strconv.Itoa(pids)+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selfDir := t.TempDir()
+	self = filepath.Join(selfDir, "self")
+	if err := os.WriteFile(self, []byte("0::/user.slice/user-1000.slice/user@1000.service/dyna.slice/dyna-ses_1.scope\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root, self
+}
+
+// A held sample records what each room's own slice holds: the daemons a
+// room's supervisors started outside every session scope, which the
+// running-turn count never sees. The noise beside the room slices is not
+// counted, and a room whose pids.current is gone is skipped.
+func TestSampleRecordsRoomSliceProcesses(t *testing.T) {
+	root, self := fakeRoomCgroups(t, map[string]int{
+		"dyna-room-roomlimits.slice": 3,
+		"dyna-room-other.slice":      5,
+	})
+	o, seen := observerFor(fixedSource{r: busy}, 6, &memState{})
+	o.RoomPids = func(context.Context) RoomPids {
+		byRoom, total := agentslice.RoomPidsAt(root, self)
+		return RoomPids{ByRoom: byRoom, Total: total}
+	}
+	if err := o.Sample(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*seen) != 1 {
+		t.Fatalf("observations = %+v, want one held sample", *seen)
+	}
+	pids := (*seen)[0].RoomPids
+	want := map[string]int{"dyna-room-roomlimits.slice": 3, "dyna-room-other.slice": 5}
+	if pids.Total != 8 || !reflect.DeepEqual(pids.ByRoom, want) {
+		t.Fatalf("room pids = %+v, want total 8 of %v", pids, want)
+	}
+}
+
+// Without a cgroup root there are no room counts and no error: the sample
+// still records, with zero.
+func TestSampleRecordsZeroRoomPidsWithoutACgroupRoot(t *testing.T) {
+	selfDir := t.TempDir()
+	self := filepath.Join(selfDir, "self")
+	if err := os.WriteFile(self, []byte("0::/user.slice/user-1000.slice/user@1000.service/dyna.slice/dyna-ses_1.scope\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, seen := observerFor(fixedSource{r: busy}, 6, &memState{})
+	o.RoomPids = func(context.Context) RoomPids {
+		byRoom, total := agentslice.RoomPidsAt(filepath.Join(t.TempDir(), "no-such-root"), self)
+		return RoomPids{ByRoom: byRoom, Total: total}
+	}
+	if err := o.Sample(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*seen) != 1 || (*seen)[0].RoomPids.Total != 0 || len((*seen)[0].RoomPids.ByRoom) != 0 {
+		t.Fatalf("observations = %+v; want one sample with zero room pids", *seen)
 	}
 }
 
