@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -223,6 +224,39 @@ func OpenRecordsInRoom(root, roomID string) ([]Record, error) {
 		}
 	}
 	return records, nil
+}
+
+// ErrNotTracked reports a PR key with no readable record: no stored row, or
+// a row whose body carries no record. Store.Get and RecordRoom return it.
+var ErrNotTracked = errors.New("PR is not tracked")
+
+// RecordRoom returns the room of one tracked PR from its hot row alone. It
+// refreshes nothing and never installs into the shared snapshot, so a routing
+// lookup costs one indexed read instead of a full store refresh. Missing and
+// null records are ErrNotTracked, matching Store.Get for the same key.
+func RecordRoom(root, key string) (string, error) {
+	db, err := open(root)
+	if err != nil {
+		return "", err
+	}
+	var body []byte
+	err = appstate.For(db).Read(context.Background(), func(r appstate.Reader) error {
+		return r.QueryRowContext(context.Background(), "SELECT body FROM pr_rows WHERE key=?", key).Scan(&body)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotTracked
+	}
+	if err != nil {
+		return "", err
+	}
+	record, err := joinStored(body, nil)
+	if err != nil {
+		return "", fmt.Errorf("invalid PR record %s: %w", key, err)
+	}
+	if record.Record == nil {
+		return "", ErrNotTracked
+	}
+	return record.Record.RoomID, nil
 }
 
 // ReadForSessions returns a State that holds only the room's PRs that any of
