@@ -45,7 +45,13 @@ export function azureProvider(): Provider<"azure-openai-responses" | "openai-com
 	return createProvider({
 		id: "azure",
 		name: "Azure",
-		auth: { apiKey: envApiKeyAuth("Azure OpenAI API key", ["AZURE_OPENAI_API_KEY"]) },
+		auth: {
+			apiKey: envApiKeyAuth(
+				"Azure OpenAI API key",
+				["AZURE_OPENAI_API_KEY"],
+				["AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"],
+			),
+		},
 		models: Object.values(AZURE_MODELS),
 		api: {
 			"azure-openai-responses": azureOpenAIResponsesApi(),

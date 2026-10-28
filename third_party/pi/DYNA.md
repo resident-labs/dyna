@@ -10,6 +10,8 @@ Each later Pi behavior change must add an entry here and name the Dyna code it r
 
 P1 adds `--json` to `--list-models` (`packages/coding-agent/src/cli/args.ts`, `src/cli/list-models.ts`, `src/main.ts`): one JSON array on stdout with `provider`, `id`, `name`, exact `contextWindow` and `maxTokens`, `reasoning`, and the `thinkingLevels` that `--thinking` accepts for each model. The text table is unchanged without `--json`. The pack version rises to `1.4.0-dyna.2` with `dynaFork: 2`. It lets Dyna delete the `--list-models` table parser and `piTokens` in `internal/account/service/adapters/pi.go`, which read rounded sizes; Dyna now decodes this JSON and takes efforts from `thinkingLevels`.
 
+P4 adds `PI_NO_ENV_CREDENTIALS` (`packages/coding-agent/src/main.ts`). Provider auth definitions declare the environment variables they read for credentials and endpoints, and the CLI deletes those variables before provider resolution or child-process startup. Stored credentials and `--api-key` remain available. The pack version rises to `1.4.0-dyna.3` with `dynaFork: 3`. It lets Dyna delete `piProviderEnv` and its clearing loop in `internal/harness/runtime/adapter_pi.go`; Dyna now sets only `PI_NO_ENV_CREDENTIALS=1`, and Pi's own registry covers new providers.
+
 ## Update
 
 Run this command from the Dyna repository root, replacing `<tag>` with the new upstream tag:
@@ -22,7 +24,7 @@ Keep the subtree commits in the Dyna history. Do not rebase or squash them away.
 
 ## Pack and install a development build
 
-Run `scripts/pi-pack.sh /absolute/path/pi-coding-agent-1.4.0-dyna.2.tgz`. The script hydrates the pinned model catalog, builds offline, and writes one tarball with all internal `@earendil-works/*` runtime packages bundled. npm treats `bundleDependencies` as complete, so the script also strips the bundled packages' own dependency lists and merges every third-party package they need into the top-level manifest, pinned to the versions the vendored lockfile resolved. Third-party dependencies still come from npm.
+Run `scripts/pi-pack.sh /absolute/path/pi-coding-agent-1.4.0-dyna.3.tgz`. The script hydrates the pinned model catalog, builds offline, and writes one tarball with all internal `@earendil-works/*` runtime packages bundled. npm treats `bundleDependencies` as complete, so the script also strips the bundled packages' own dependency lists and merges every third-party package they need into the top-level manifest, pinned to the versions the vendored lockfile resolved. Third-party dependencies still come from npm.
 
 The script then verifies its own output: it installs the tarball into a temporary prefix the way Dyna does, compares the installed package set with the upstream npm package, runs `pi --version`, and executes one codemode script with no network. Set `PI_PACK_SKIP_BUILD=1` to reuse an existing install and build; the CI pi job does that.
 

@@ -432,7 +432,7 @@ func signedPiAccount(t *testing.T, r *Runtime, provider store.Provider, key stri
 // the credential home follows the account.
 func TestPiPrepareUsesTheActiveProviderAccountHome(t *testing.T) {
 	r := &Runtime{Bundles: manager(t), Accounts: testAccounts(t), Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(defaultstore.DataDir(), "harnesses", "generations")}
-	install(t, r.Bundles, "pi", "1.4.0-dyna.2")
+	install(t, r.Bundles, "pi", "1.4.0-dyna.3")
 	shared, err := r.Accounts.HarnessHome("pi")
 	if err != nil {
 		t.Fatal(err)

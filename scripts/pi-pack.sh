@@ -9,7 +9,7 @@ if [ "$#" -ne 1 ]; then
 fi
 repo_root=$(git rev-parse --show-toplevel)
 vendor="$repo_root/third_party/pi"
-version="1.4.0-dyna.2"
+version="1.4.0-dyna.3"
 output=$1
 if [[ "$output" != /* ]]; then
   output="$repo_root/$output"
@@ -100,7 +100,7 @@ for (const file of files) {
   const path = join(stage, file);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   manifest.version = version;
-  manifest.dynaFork = 2;
+  manifest.dynaFork = 3;
   if (file !== "package.json") {
     // Match how upstream publishes its internal packages: no dependencies of
     // their own. npm treats bundleDependencies as complete and never installs

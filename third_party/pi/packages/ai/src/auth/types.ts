@@ -171,6 +171,9 @@ export interface ApiKeyAuth {
 	/** Display name, e.g. "Anthropic API key". */
 	name: string;
 
+	/** Process environment variables read for credentials or provider endpoints. */
+	envVars?: readonly string[];
+
 	/** Interactive setup (prompt for key/provider env). Absent = ambient-only. */
 	login?(interaction: ProviderAuthInteraction): Promise<ApiKeyCredential>;
 
@@ -221,6 +224,9 @@ export interface LoginOptions {
 export interface OAuthAuth {
 	/** Display name, e.g. "Anthropic (Claude Pro/Max)". */
 	name: string;
+
+	/** Environment variables used for OAuth credentials or endpoints. */
+	envVars?: readonly string[];
 
 	/** Whether access through this auth method is backed by a provider subscription. */
 	isSubscription?: boolean;

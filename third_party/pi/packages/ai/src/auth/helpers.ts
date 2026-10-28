@@ -6,9 +6,14 @@ import type { ApiKeyAuth, OAuthAuth } from "./types.ts";
  * Providers with non-standard resolution (provider env, ambient files, IAM)
  * write their own `ApiKeyAuth`.
  */
-export function envApiKeyAuth(name: string, envVars: readonly string[]): ApiKeyAuth {
+export function envApiKeyAuth(
+	name: string,
+	envVars: readonly string[],
+	endpointEnvVars: readonly string[] = [],
+): ApiKeyAuth {
 	return {
 		name,
+		envVars: [...envVars, ...endpointEnvVars],
 		login: async (interaction) => {
 			interaction.signal.throwIfAborted();
 			const key = await interaction.prompt({ type: "secret", message: `Enter ${name}` });
@@ -39,6 +44,7 @@ export function envApiKeyAuth(name: string, envVars: readonly string[]): ApiKeyA
  */
 export function lazyOAuth(input: {
 	name: string;
+	envVars?: readonly string[];
 	isSubscription?: boolean;
 	loginLabel?: string;
 	load: () => Promise<OAuthAuth>;
@@ -50,6 +56,7 @@ export function lazyOAuth(input: {
 	};
 	return {
 		name: input.name,
+		envVars: input.envVars,
 		isSubscription: input.isSubscription,
 		loginLabel: input.loginLabel,
 		login: async (interaction, options) => (await loaded()).login(interaction, options),

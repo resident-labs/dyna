@@ -7,6 +7,7 @@
 
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
+import { builtinProviderEnvVars } from "@earendil-works/pi-ai/providers/all";
 import { setCapabilityOverrides } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { type Args, type Mode, normalizeSessionName, parseArgs, printHelp } from "./cli/args.ts";
@@ -572,6 +573,9 @@ export interface MainOptions {
 }
 
 export async function main(args: string[], options?: MainOptions) {
+	if (isTruthyEnvFlag(process.env.PI_NO_ENV_CREDENTIALS)) {
+		for (const envVar of builtinProviderEnvVars()) delete process.env[envVar];
+	}
 	resetTimings();
 	// Commands and startup selectors can load user-authored themes before runtime creation.
 	setThemeJsonValidator(validateThemeJson);

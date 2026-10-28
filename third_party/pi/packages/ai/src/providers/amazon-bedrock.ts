@@ -10,6 +10,18 @@ import { AMAZON_BEDROCK_MODELS } from "./amazon-bedrock.models.ts";
  */
 const bedrockAuth: ApiKeyAuth = {
 	name: "AWS credentials or bearer token",
+	envVars: [
+		"AWS_BEARER_TOKEN_BEDROCK",
+		"AWS_PROFILE",
+		"AWS_ACCESS_KEY_ID",
+		"AWS_SECRET_ACCESS_KEY",
+		"AWS_SESSION_TOKEN",
+		"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI",
+		"AWS_WEB_IDENTITY_TOKEN_FILE",
+		"AWS_REGION",
+		"AWS_DEFAULT_REGION",
+	],
 	login: async (interaction) => {
 		interaction.signal.throwIfAborted();
 		const method = await interaction.prompt({

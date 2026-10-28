@@ -26,8 +26,8 @@ var harnessDistributions = map[string]harnessDistribution{
 }
 
 const (
-	piForkVersion      = "1.4.0-dyna.2"
-	minimumPiForkLevel = 2
+	piForkVersion      = "1.4.0-dyna.3"
+	minimumPiForkLevel = 3
 	piForkTarballEnv   = "DYNA_PI_TARBALL"
 )
 

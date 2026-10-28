@@ -19,6 +19,16 @@ import { ANTHROPIC_MODELS } from "./anthropic.models.ts";
 function anthropicApiKeyAuth(): ApiKeyAuth {
 	return {
 		name: "Anthropic API key",
+		envVars: [
+			ANTHROPIC_AUTH_TOKEN_ENV,
+			ANTHROPIC_OAUTH_TOKEN_ENV,
+			ANTHROPIC_API_KEY_ENV,
+			ANTHROPIC_FEDERATION_RULE_ID_ENV,
+			ANTHROPIC_ORGANIZATION_ID_ENV,
+			ANTHROPIC_IDENTITY_TOKEN_FILE_ENV,
+			ANTHROPIC_SERVICE_ACCOUNT_ID_ENV,
+			ANTHROPIC_WORKSPACE_ID_ENV,
+		],
 		login: async (interaction) => {
 			interaction.signal.throwIfAborted();
 			const key = await interaction.prompt({ type: "secret", message: "Enter Anthropic API key" });
@@ -80,6 +90,7 @@ export function anthropicProvider(): Provider<"anthropic-messages"> {
 			apiKey: anthropicApiKeyAuth(),
 			oauth: lazyOAuth({
 				name: "Anthropic (Claude Pro/Max)",
+				envVars: ["PI_OAUTH_CALLBACK_HOST"],
 				isSubscription: true,
 				load: loadAnthropicOAuth,
 			}),
