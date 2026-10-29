@@ -220,8 +220,13 @@ func TestJobScratchEnvironment(t *testing.T) {
 		remote := machines.Machine{Name: "remote", SSH: "build@remote", Enabled: true, HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
 		svc.Machines = fakeMachines{local: remote, byName: map[string]machines.Machine{"remote": remote}}
 		const want = "a remote job cannot use the caller's DYNA_SCRATCH; send files with --workspace or --artifact"
-		for _, command := range []string{"$DYNA_SCRATCH/run.sh", "${DYNA_SCRATCH}/run.sh", filepath.Join(scratchDir, "run.sh")} {
-			_, err := svc.Submit(t.Context(), Input{Node: "remote", RoomID: "dyna", Session: session, Command: []string{command}, Host: true})
+		for _, command := range [][]string{
+			{"$DYNA_SCRATCH/run.sh"},
+			{"${DYNA_SCRATCH}/run.sh"},
+			{filepath.Join(scratchDir, "run.sh")},
+			{"bash", "-c", "cat " + filepath.Join(scratchDir, "input")},
+		} {
+			_, err := svc.Submit(t.Context(), Input{Node: "remote", RoomID: "dyna", Session: session, Command: command, Host: true})
 			var scratchErr *RemoteScratchError
 			if !errors.As(err, &scratchErr) {
 				t.Errorf("remote command %q error = %v, want RemoteScratchError", command, err)
