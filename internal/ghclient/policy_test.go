@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -122,6 +123,105 @@ func TestActingRoomKeepsClonePoliciesSeparate(t *testing.T) {
 	}
 	if _, err := roomFor(WithRoom(context.Background(), records[0].ID), "", repository{"github.com", "other/repo"}); err == nil {
 		t.Fatal("acting room accepted another repository")
+	}
+}
+
+func TestAgentRepositoryWritePolicy(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	lookups := 0
+	previous := parentRepo
+	parentRepo = func(ctx context.Context, cmd *exec.Cmd, r repository) (string, bool) {
+		lookups++
+		if r != (repository{"github.com", "fork/project"}) {
+			t.Errorf("parent lookup = %+v, want the room origin", r)
+			return "", false
+		}
+		return fetchParentRepo(ctx, cmd, r)
+	}
+	t.Cleanup(func() { parentRepo = previous })
+	exe := filepath.Join(t.TempDir(), "gh")
+	script := `#!/bin/sh
+case "$1 $2" in
+"auth status")
+ if [ -n "$TEST_ORIGIN_WRITER" ]; then
+  echo '{"hosts":{"github.com":[{"login":"writer"}]}}'
+ else
+  echo '{"hosts":{"github.com":[{"login":"reader"}]}}'
+ fi;;
+"auth token") case "$*" in *reader*) echo reader-secret;; *writer*) echo writer-secret;; esac;;
+"api --hostname")
+ # The metadata read without --include simulates a private fork: it needs the token.
+ case "$GH_TOKEN" in reader-secret|writer-secret);; *) exit 1;; esac
+ case "$4 $5:$GH_TOKEN" in
+ "repos/fork/project --include:reader-secret") echo '{"permissions":{"push":false}}';;
+ "repos/fork/project --include:writer-secret") echo '{"permissions":{"push":true}}';;
+ "repos/upstream/project --include:reader-secret") echo '{"permissions":{"push":false}}';;
+ "repos/fork/project :reader-secret") echo '{"parent":{"full_name":"upstream/project"}}';;
+ *) exit 1;;
+ esac;;
+"issue create")
+ case "$*" in
+ *fork/project*) [ "$GH_TOKEN" = writer-secret ];;
+ *upstream/project*) [ "$GH_TOKEN" = reader-secret ];;
+ *) exit 1;;
+ esac;;
+*) exit 0;;
+esac
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(BinaryEnv, exe)
+	for _, tt := range []struct {
+		name        string
+		access      string
+		args        []string
+		wantError   string
+		wantLookups int
+	}{
+		{"read-only fork credential pr create on parent", ReadWrite, []string{"pr", "create", "--repo", "upstream/project"}, "", 1},
+		{"pr edit on parent", ReadWrite, []string{"pr", "edit", "--repo", "upstream/project"}, "", 1},
+		{"pr ready on parent", ReadWrite, []string{"pr", "ready", "--repo", "upstream/project"}, "", 1},
+		{"issue create on origin", ReadWrite, []string{"issue", "create", "--repo", "fork/project"}, "", 0},
+		{"issue create on parent", ReadWrite, []string{"issue", "create", "--repo", "upstream/project"}, "", 1},
+		{"read-only issue create on origin", ReadOnly, []string{"issue", "create", "--repo", "fork/project"}, errReadOnly.Error(), 0},
+		{"read-only issue create on parent", ReadOnly, []string{"issue", "create", "--repo", "upstream/project"}, errReadOnly.Error(), 0},
+		{"issue comment on origin", ReadWrite, []string{"issue", "comment", "1", "--repo", "fork/project"}, errAgentGitHubWrite.Error(), 0},
+		{"issue comment on parent", ReadWrite, []string{"issue", "comment", "1", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
+		{"pr comment on origin", ReadWrite, []string{"pr", "comment", "1", "--repo", "fork/project"}, errAgentGitHubWrite.Error(), 0},
+		{"pr comment on parent", ReadWrite, []string{"pr", "comment", "1", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
+		{"pr review on origin", ReadWrite, []string{"pr", "review", "--approve", "--repo", "fork/project"}, errAgentGitHubWrite.Error(), 0},
+		{"pr review on parent", ReadWrite, []string{"pr", "review", "--approve", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
+		{"pr merge on parent", ReadWrite, []string{"pr", "merge", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
+		{"read-only pr create on parent", ReadOnly, []string{"pr", "create", "--repo", "upstream/project"}, errReadOnly.Error(), 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := SetAccess(room.DefaultStore(), records[0].ID, tt.access); err != nil {
+				t.Fatal(err)
+			}
+			lookups = 0
+			writer := ""
+			for _, arg := range tt.args {
+				if arg == "fork/project" {
+					writer = "1"
+				}
+			}
+			t.Setenv("TEST_ORIGIN_WRITER", writer)
+			ctx := WithRoom(context.Background(), records[0].ID)
+			err := checkWorkerPolicy(tt.args)
+			if err == nil {
+				err = Run(ctx, Command(ctx, exe, records[0].Repo, tt.args...))
+			}
+			if tt.wantError == "" && err != nil {
+				t.Fatalf("policy error = %v", err)
+			}
+			if tt.wantError != "" && (err == nil || err.Error() != tt.wantError) {
+				t.Fatalf("policy error = %v, want %q", err, tt.wantError)
+			}
+			if lookups != tt.wantLookups {
+				t.Fatalf("parent lookups = %d, want %d", lookups, tt.wantLookups)
+			}
+		})
 	}
 }
 
