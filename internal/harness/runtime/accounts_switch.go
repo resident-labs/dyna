@@ -899,10 +899,13 @@ func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*Nati
 			if entry.Label == "" {
 				entry.Label = selected.Label
 			}
-			entry.NeedsLogin = false
+			entry.ClearSignInFailure()
 			entry.UpdatedAt = time.Now().UTC()
 			return nil
 		}, true)
+		if resultErr == nil {
+			resultErr = a.recordSignIn(ctx, n)
+		}
 		if resultErr == nil {
 			resultErr = a.setActive(n.Harness, id)
 		}

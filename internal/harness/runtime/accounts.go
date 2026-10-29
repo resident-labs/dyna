@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -777,6 +778,7 @@ func chmodAccountNode(path string, mode os.FileMode, mayDisappear bool) error {
 
 // Capture records a completed saved-slot sign-in without refreshing or calling a provider.
 func (a *Accounts) Capture(ctx context.Context, id, executable string) (result NativeAccount, err error) {
+	var signedIn bool
 	err = a.transaction(func(state *store.State) error {
 		entry := state.Find(id)
 		n, e := a.native(entry)
@@ -811,13 +813,30 @@ func (a *Accounts) Capture(ctx context.Context, id, executable string) (result N
 			if entry.Label == "" {
 				entry.Label = captured[0].Label
 			}
-			entry.NeedsLogin = false
+			entry.ClearSignInFailure()
+			signedIn = true
 		}
 		entry.UpdatedAt = time.Now().UTC()
 		result, e = a.native(entry)
 		return e
 	}, true)
+	if err == nil && signedIn {
+		err = a.recordSignIn(ctx, result)
+	}
 	return
+}
+
+// recordSignIn writes a renewed attempt, so the account's last renewal failure
+// no longer shows after a successful sign-in or import.
+func (a *Accounts) recordSignIn(ctx context.Context, n NativeAccount) error {
+	err := (&store.Store{Root: a.Root, Quiet: a.Quiet}).RecordRenewal(ctx, store.Renewal{
+		AccountID: n.ID, Harness: n.Harness, Provider: n.Provider,
+		AttemptedAt: time.Now(), Result: store.RenewalResultRenewed, Reason: "signed in",
+	})
+	if err != nil {
+		return fmt.Errorf("sign-in saved, but its renewal history was not written: %w", err)
+	}
+	return nil
 }
 
 // Saved login snapshots are private credential files, never index metadata.
