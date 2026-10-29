@@ -50,8 +50,7 @@ import type { EventSpecEntry } from './events.gen.ts'
 import type { EventNotice, Question, Room } from '../api/room.ts'
 import type { EventPayload } from './events.gen.ts'
 import type { HookFold } from './feedRows.ts'
-import type { ApprovalProgress } from './eventPayloads.ts'
-import type { ApprovalDecision } from '../api/approvals.ts'
+import type { ApprovalDecision, ApprovalOpen } from '../api/approvals.ts'
 import type { PostSelection } from '../ui/postSelect.ts'
 export { sealedEvent } from './eventPayloads.ts'
 
@@ -107,9 +106,11 @@ export interface EventProps {
   request?: Question
   onreviewrequest?: (id: string) => void
   ondeclinerequest?: (id: string, reason: string) => Promise<unknown>
-  // approval is where an approval request stands; ondecideapproval is the
-  // owner's decision on it.
-  approval?: ApprovalProgress
+  // approval is the engine's open request behind a request post, and latest
+  // says the post is the newest for it. ondecideapproval is the owner's
+  // decision on it.
+  approval?: ApprovalOpen
+  latest?: boolean
   ondecideapproval?: (id: string, action: ApprovalDecision, reason: string) => Promise<unknown>
 }
 

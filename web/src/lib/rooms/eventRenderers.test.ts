@@ -32,7 +32,7 @@ const built = await build({
       export { default as MergeCard } from './MergeCard.svelte';
       export { default as PRCard } from '../prs/PRCard.svelte';
       export { eventRenderers, eventComponents, eventKey, rendererFor, sealedEvent } from './eventRenderers.ts';
-      export { approvalProgress, hookEvent, mergeDecision, mergeEvent, prEvent, reviewEvent, worktreeEvent } from './eventPayloads.ts';
+      export { hookEvent, mergeDecision, mergeEvent, prEvent, reviewEvent, worktreeEvent } from './eventPayloads.ts';
       export { eventSpecs } from './events.gen.ts';
       export { mount, unmount, flushSync } from 'svelte';`,
     resolveDir: rooms,
@@ -971,19 +971,20 @@ test('a single-PR merge card keeps the singular title', () => {
 })
 
 // mountApproval mounts the approval request card and returns its target, so a
-// test reads the card's text and presses its buttons.
-function mountApproval(approval: { holder: string; decided?: 'approve' | 'deny' | 'pass' | 'auto'; state?: 'expired' } | undefined, ondecideapproval?: (id: string, action: string, reason: string) => Promise<unknown>) {
-  const post = postFor('approval', 'requested', fixtures['approval/requested'] as EventPayload)
+// test reads the card's text and presses its buttons. open is the engine's
+// open request for it, or undefined when none is open.
+function mountApproval(open: { id: string; at: string } | undefined, ondecideapproval?: (id: string, action: string, reason: string) => Promise<unknown>, at = 'owner', latest = true) {
+  const post = postFor('approval', 'requested', { ...(fixtures['approval/requested'] as EventPayload), at } as EventPayload)
   const target = document.createElement('div')
   document.body.append(target)
-  const mounted = web.mount(web.eventComponents.ApprovalRequestCard, { target, props: { post, notice: post.notice, surface: 'feed', approval, ondecideapproval } })
+  const mounted = web.mount(web.eventComponents.ApprovalRequestCard, { target, props: { post, notice: post.notice, surface: 'feed', approval: open, latest, ondecideapproval } })
   web.flushSync()
   return { target, close: () => { web.unmount(mounted); target.remove() } }
 }
 
 test('a pending approval for the owner is a card with the full text and decides through the call', async () => {
   const calls: string[][] = []
-  const { target, close } = mountApproval({ holder: 'owner' }, async (id, action, reason) => { calls.push([id, action, reason]) })
+  const { target, close } = mountApproval({ id: 'A-12', at: 'owner' }, async (id, action, reason) => { calls.push([id, action, reason]) })
   const text = target.textContent ?? ''
   for (const want of ['dyna:leaf', 'gh pr create', 'acme/app', 'Fix the cache', 'Posted by the swarm.']) assert.ok(text.includes(want), `${want} missing: ${text}`)
   assert.doesNotMatch(text, /A-12/, 'the request ID is not a label')
@@ -998,28 +999,25 @@ test('a pending approval for the owner is a card with the full text and decides 
   close()
 })
 
-test('a request that is decided, expired or held by another session is a quiet row', () => {
-  const cases: [{ holder: string; decided?: 'approve'; state?: 'expired' } | undefined, RegExp][] = [
-    [{ holder: 'owner', decided: 'approve' }, /approved/],
-    [{ holder: 'owner', state: 'expired' }, /expired/],
-    [{ holder: 'dyna:parent' }, /waits on/],
+test('a request that is settled, held by another session or superseded is a quiet row', () => {
+  const cases: [Parameters<typeof mountApproval>, RegExp][] = [
+    [[undefined], /asked to run/],
+    [[{ id: 'A-12', at: 'dyna:parent' }, undefined, 'dyna:parent'], /waits on dyna:parent/],
+    [[{ id: 'A-12', at: 'owner' }, undefined, 'dyna:parent', false], /asked to run/],
   ]
-  for (const [approval, want] of cases) {
-    const { target, close } = mountApproval(approval)
-    assert.equal(target.querySelectorAll('button').length, 0, 'a settled request has no buttons')
+  for (const [args, want] of cases) {
+    const { target, close } = mountApproval(...args)
+    assert.equal(target.querySelectorAll('button').length, 0, 'a request that does not wait on the owner has no buttons')
     assert.match(target.textContent ?? '', want)
     close()
   }
 })
 
-test('approval progress follows a pass, a decision and a result', () => {
-  const requested = (at: string) => postFor('approval', 'requested', { ...(fixtures['approval/requested'] as EventPayload), at } as EventPayload)
-  const decided = (action: string, at?: string) => postFor('approval', 'decided', { requestId: 'A-12', actor: 'x', action, at } as EventPayload)
-  const open = web.approvalProgress([requested('dyna:parent'), decided('pass', 'owner')])
-  assert.deepEqual(open['A-12'], { holder: 'owner' })
-  const closed = web.approvalProgress([requested('owner'), decided('deny'), postFor('approval', 'result', fixtures['approval/result'] as EventPayload)])
-  assert.equal(closed['A-12']?.decided, 'deny')
-  assert.equal(closed['A-12']?.state, 'failed')
+test('a request passed from a session to the owner becomes the owner card', () => {
+  // The post still names the first holder; the engine's open request names the owner.
+  const { target, close } = mountApproval({ id: 'A-12', at: 'owner' }, undefined, 'dyna:parent')
+  assert.ok(Array.from(target.querySelectorAll('button')).some((b) => b.textContent === 'Approve'))
+  close()
 })
 
 test('an approval result shows its output behind a toggle and a failed one starts open', () => {

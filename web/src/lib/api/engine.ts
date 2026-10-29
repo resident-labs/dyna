@@ -9,7 +9,7 @@ import type { Reference } from '../rooms/references.ts'
 import type { HookInput } from '../settings/hooks.ts'
 import type { ActivityRollup } from '../settings/accounts/activity.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
-import type { ApprovalDecideInput } from './approvals.ts'
+import type { ApprovalDecideInput, ApprovalOpen } from './approvals.ts'
 import type { AccountsSnapshot, Catalog } from './account.ts'
 import type { ChangeDetail, ChangePolicy, ChangeView, HeldComment, MergeControlStatus, CIBudgetSettings, MergeHistoryEntry, MergeQueueItem, PolicyOverride, PRConfig, PRNoiseList, ReviewerStatus } from './change.ts'
 import type { ComputerInfo } from './computer.ts'
@@ -236,6 +236,7 @@ export interface Engine {
   // Terminal requests: owner-only. argv is the command the owner edited, or null to run the filed one.
   TermRequestRun(room: string, id: string, argv: string[] | null, cols: number, rows: number): Promise<TermInfo>
   TermRequestPreview(room: string, id: string): Promise<string>
+  ApprovalList(room: string): Promise<ApprovalOpen[] | null>
   ApprovalDecide(input: ApprovalDecideInput): Promise<unknown>
   TermRequestReport(room: string, id: string, verdict: TerminalVerdict, note: string, shareLines: boolean): Promise<null>
   Terms(): Promise<TermInfo[] | null>
