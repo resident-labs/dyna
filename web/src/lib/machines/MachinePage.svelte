@@ -250,7 +250,7 @@
           {#snippet trail()}<input class="num" type="number" min="0" step="1" aria-label="IO-heavy limit" value={machine.maxIOHeavy ?? 0} disabled={busy} onchange={setIOHeavy} />{/snippet}
         </Row>
         <Row dense text="Disk limit %">
-          {#snippet meta()}<span class="note">0 keeps the default, 90. Above this used percent the node admits no new work.</span>{/snippet}
+          {#snippet meta()}<span class="note">0 keeps the default: at least 20 GiB and 5% of the disk stay free. A set percent is the used share above which the node admits no new work.</span>{/snippet}
           {#snippet trail()}<input class="num" type="number" min="0" max="100" step="1" aria-label="Disk limit percent" value={machine.maxDiskPercent ?? 0} disabled={busy} onchange={setDiskPercent} />{/snippet}
         </Row>
         {#if machine.roles.includes('ci')}

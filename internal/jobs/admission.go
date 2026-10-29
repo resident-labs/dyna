@@ -627,7 +627,10 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 			portsUsed[row.Port] = true
 		}
 	}
-	diskBlocked := machineErr == nil && machine.DiskUsedPercent() >= machine.DiskLimitPercent()
+	diskBlock := ""
+	if machineErr == nil {
+		diskBlock = machine.DiskBlock()
+	}
 	var writes []rowWrite
 	for index, unit := range ordered {
 		d := unit.demand
@@ -651,8 +654,8 @@ func passNode(ctx context.Context, conn *sql.Conn, now time.Time, node string, m
 		switch {
 		case machineErr != nil:
 			why = "machine " + node + " is not registered"
-		case diskBlocked:
-			why = fmt.Sprintf("disk %d%% at the %d%% limit", machine.DiskUsedPercent(), machine.DiskLimitPercent())
+		case diskBlock != "":
+			why = diskBlock
 		case d.Heavy && heavyHeld >= limits.IOHeavyLimit():
 			why = fmt.Sprintf("%d of %d IO-heavy jobs running", heavyHeld, limits.IOHeavyLimit())
 		case capacityCPUs > 0 && d.CPUs > freeCPUs:
