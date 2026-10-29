@@ -171,3 +171,20 @@ func TestQuotaHeldOutSkipsSpentUsage(t *testing.T) {
 		t.Fatal("a harness with one account under the cap was held out")
 	}
 }
+
+// D-500: a failed usage read keeps the windows of its last good reading. Its
+// weekly reset is not an end of the failed read, so once the short rate limit
+// has passed, the account is not held to that reset.
+func TestFailedReadDoesNotHoldToItsWeeklyReset(t *testing.T) {
+	now := time.Date(2026, 10, 29, 16, 10, 0, 0, time.UTC)
+	used := 100.0
+	weekly := []store.Window{{ID: "seven_day", UsedPercent: &used, ResetsAt: now.Add(6 * 24 * time.Hour).Format(time.RFC3339Nano)}}
+	expired := now.Add(-time.Minute)
+	if end, spent := readingOutOfQuota(&store.Observation{Unavailable: true, RateLimitedUntil: &expired, Windows: weekly}, now); spent {
+		t.Fatalf("failed read held the account to %v after its rate limit ended", end)
+	}
+	live := now.Add(5 * time.Minute)
+	if end, spent := readingOutOfQuota(&store.Observation{Unavailable: true, RateLimitedUntil: &live, Windows: weekly}, now); !spent || !end.Equal(live) {
+		t.Fatalf("rate limit held = %v until %v, want until %v", spent, end, live)
+	}
+}
