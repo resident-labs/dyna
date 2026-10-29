@@ -303,6 +303,13 @@ func readingRefutesStatedHold(o *store.Observation, now time.Time) bool {
 	if session == nil || session.UsedPercent == nil || weekly == nil || weekly.UsedPercent == nil {
 		return false
 	}
+	// A stated hold names no window, so a window at or near its cap, including a
+	// model-scoped limit, keeps the hold.
+	for _, w := range o.Windows {
+		if w.UsedPercent == nil || *w.UsedPercent >= store.NearCapUsedPercent {
+			return false
+		}
+	}
 	return store.DecideUsage(o, now).Eligible
 }
 
