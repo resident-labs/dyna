@@ -21,7 +21,7 @@ func TestHeldPRStaysOutOfTheMergeQueueWhenGitHubIsReady(t *testing.T) {
 		RepositoryFacts: map[string]state.RepositoryFacts{defaultRepo(r): {CheckedAt: time.Unix(2000, 0), MergeTrialCI: true}},
 	}
 	r.Hold = &state.Hold{Reason: "wait for the owner", At: time.Unix(1500, 0)}
-	rows := mergeQueue(st, nil)
+	rows := mergeQueue(st, nil, nil)
 	if len(rows) != 1 || rows[0].State != "held" {
 		t.Fatalf("queue = %+v, want the held pull request to stay held", rows)
 	}

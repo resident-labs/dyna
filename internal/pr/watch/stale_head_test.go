@@ -214,7 +214,7 @@ func TestCancelledLocalBranchReadKeepsReview(t *testing.T) {
 }
 
 func queueState(st State, changeID string) string {
-	for _, item := range mergeQueue(st, nil) {
+	for _, item := range mergeQueue(st, nil, nil) {
 		if item.ChangeID == changeID {
 			return item.State
 		}

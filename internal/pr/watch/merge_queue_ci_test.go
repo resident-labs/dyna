@@ -26,14 +26,14 @@ func TestQueueTakesAPRWithoutHeadCIStraightToItsTrial(t *testing.T) {
 		Records:         map[string]*Record{r.Key: &r},
 		RepositoryFacts: map[string]state.RepositoryFacts{defaultRepo(r): {CheckedAt: time.Unix(2000, 0), MergeTrialCI: true}},
 	}
-	rows := mergeQueue(st, nil)
+	rows := mergeQueue(st, nil, nil)
 	if len(rows) != 1 || rows[0].State != "ready" {
 		t.Fatalf("queue = %+v, want the pull request ready for its trial", rows)
 	}
 	// A head whose CI is still running keeps waiting.
 	r.CI = "pending"
 	st.Records[r.Key] = &r
-	if rows := mergeQueue(st, nil); len(rows) != 1 || rows[0].State != "ci" {
+	if rows := mergeQueue(st, nil, nil); len(rows) != 1 || rows[0].State != "ci" {
 		t.Fatalf("pending head = %+v, want it to wait for CI", rows)
 	}
 }
@@ -57,7 +57,7 @@ func TestQueueTrialGateIsPerRoom(t *testing.T) {
 		Records:         map[string]*Record{local.Key: local, hosted.Key: hosted},
 		RepositoryFacts: map[string]state.RepositoryFacts{"github.com/owner/repo": {CheckedAt: base, MergeTrialCI: false}},
 	}
-	rows := mergeQueue(st, func(roomID string) bool { return roomID == "room_local" })
+	rows := mergeQueue(st, func(roomID string) bool { return roomID == "room_local" }, nil)
 	if len(rows) != 2 {
 		t.Fatalf("queue = %+v, want both rooms", rows)
 	}
@@ -72,7 +72,7 @@ func TestQueueTrialGateIsPerRoom(t *testing.T) {
 		t.Fatalf("hosted-mode room = %q, want trial-unavailable", got[hosted.Key])
 	}
 	// The hosted capability alone decides when no room runs local trials.
-	if rows := mergeQueue(st, nil); len(rows) != 2 || rows[0].State != "trial-unavailable" || rows[1].State != "trial-unavailable" {
+	if rows := mergeQueue(st, nil, nil); len(rows) != 2 || rows[0].State != "trial-unavailable" || rows[1].State != "trial-unavailable" {
 		t.Fatalf("queue without a local room = %+v", rows)
 	}
 }
@@ -169,7 +169,7 @@ func TestObservedRepositoryFactIgnoresTheRoomMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := mergeQueue(st, e.s.LocalTrialRooms(t.Context()))
+	rows := mergeQueue(st, e.s.LocalTrialRooms(t.Context()), nil)
 	if len(rows) != 1 || rows[0].State != "ready" {
 		t.Fatalf("queue = %+v, want the local-mode room ready", rows)
 	}
@@ -192,7 +192,7 @@ func TestQueueTrialGateKeepsForksOutOfTheLocalOverride(t *testing.T) {
 		Records:         map[string]*Record{same.Key: same, fork.Key: fork},
 		RepositoryFacts: map[string]state.RepositoryFacts{"github.com/owner/repo": {CheckedAt: time.Unix(1000, 0)}},
 	}
-	rows := mergeQueue(st, func(roomID string) bool { return roomID == "room_local" })
+	rows := mergeQueue(st, func(roomID string) bool { return roomID == "room_local" }, nil)
 	got := map[string]string{}
 	for _, row := range rows {
 		got[row.ChangeID] = row.State
@@ -263,7 +263,7 @@ func TestLocalModeRepoWithoutHostedCIReachesItsTrial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := mergeQueue(st, e.s.LocalTrialRooms(t.Context()))
+	rows := mergeQueue(st, e.s.LocalTrialRooms(t.Context()), nil)
 	if len(rows) != 1 || rows[0].State != "ready" {
 		t.Fatalf("queue = %+v, want the approved pull request ready for its trial", rows)
 	}
