@@ -68,6 +68,8 @@ type fakeProc struct {
 	capped   bool
 	cancel   context.CancelFunc
 	vanished bool
+	entered  chan struct{}
+	done     chan struct{}
 }
 
 // Start records one launch the machine received.
@@ -168,7 +170,7 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(m.t.Context())
-	proc := &fakeProc{cancel: cancel, modified: m.now, capped: m.capLogs}
+	proc := &fakeProc{cancel: cancel, modified: m.now, capped: m.capLogs, entered: make(chan struct{}), done: make(chan struct{})}
 	m.procs[dir] = proc
 	m.mu.Unlock()
 	callName, callArgs := "bash", []string{"-o", "pipefail", "-c", string(body)}
@@ -177,6 +179,7 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		callArgs = []string{"--user", "--scope", "--quiet", "--unit", pos[1], "-p", "CPUQuota=" + pos[2], "-p", "MemoryMax=" + pos[3], "-p", "TasksMax=" + pos[4], "--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c", string(body)}
 	}
 	go func() {
+		close(proc.entered)
 		log := fakeLog{m: m, proc: proc}
 		err := m.legacy(ctx, "", nil, log, log, callName, callArgs...)
 		code := 0
@@ -193,10 +196,16 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		m.mu.Lock()
 		proc.exited, proc.code = true, code
 		m.mu.Unlock()
+		close(proc.done)
 		if m.ExitHook != nil {
 			m.ExitHook(code)
 		}
 	}()
+	// Hold the start reply until the job goroutine has entered, so polling
+	// cannot begin, and quiet time cannot count, while the scheduler has not
+	// yet given the job its turn: the fake clock advances through poll pauses,
+	// and a poll that outruns the job could idle it before its first write.
+	<-proc.entered
 	return nil
 }
 
@@ -272,8 +281,16 @@ func (m *Fake) stop(dir string) {
 	m.mu.Lock()
 	proc := m.procs[dir]
 	m.mu.Unlock()
-	if proc != nil {
-		proc.cancel()
+	if proc == nil {
+		return
+	}
+	proc.cancel()
+	// The node's stop call answers only after the log writer's session has
+	// ended, so late output the unit buffered is on the log by then. The fake
+	// job's last writes model that writer, so the stop waits for its exit.
+	select {
+	case <-proc.done:
+	case <-m.t.Context().Done():
 	}
 }
 
