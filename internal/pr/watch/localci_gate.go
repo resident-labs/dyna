@@ -121,7 +121,7 @@ func registeredCheckSummaries(result localci.Result) []CheckSummary {
 	for _, check := range result.Checks {
 		name := string(check.Name())
 		state, status, conclusion := checkSummaryState(check.Status)
-		excerpt := failureExcerpt(check.Error+"\n"+strings.Join(check.Failures, "\n")+"\n"+check.LogTail, true)
+		excerpt := failureExcerpt(check.Error+"\n"+strings.Join(check.Failures, "\n")+"\n"+check.FailureText(), true)
 		if state != "failure" {
 			excerpt = ""
 		}
