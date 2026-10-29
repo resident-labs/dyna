@@ -73,6 +73,8 @@ not-state internal/database/database.go Migrate 1 # the schema and meta bootstra
 not-state internal/database/database.go openDatabase 2 # the schema and meta bootstrap primitive under internal/state; only the engine migrates (item 41)
 not-state internal/database/outside.go appendLine 1 # outside-writes.jsonl, the item 41 report of dyna.db writes outside the engine; a log file, one line per call site, capped at 1 MB
 not-state internal/database/slow.go Read 1 # a read-only transaction (state.Read's snapshot); it writes nothing
+not-state internal/database/statement_cache.go cacheConn.BeginTx 1 # driver wrapper forwards transactions and holds no durable state
+not-state internal/database/statement_cache.go cacheConn.ExecContext 2 # driver wrapper forwards writes and holds no durable state
 violation internal/devicegrant/grant.go Store.Delete 1
 violation internal/devicegrant/grant.go Store.Put 1
 not-state internal/engine/socket.go writeSocketOwner 1 # a record beside the engine socket that names the data folder it serves; it is not Dyna state and is read only by the bind check
