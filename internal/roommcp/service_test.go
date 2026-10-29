@@ -99,6 +99,8 @@ type fixture struct {
 	other    room.Record
 	server   *fakeServer
 	dataDir  string
+	// ids is what the argument scanner reads from the host.
+	ids Identities
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -121,11 +123,12 @@ func newFixture(t *testing.T) *fixture {
 	if err := Migrate(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	svc, err := NewService(dataDir, accounts, rooms, sessions)
+	f := &fixture{rooms: rooms, accounts: accounts, room: rec, other: other, server: newFakeServer(t), dataDir: dataDir}
+	f.svc, err = NewService(dataDir, accounts, rooms, sessions, func(context.Context, room.Record) (Identities, error) { return f.ids, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{svc: svc, rooms: rooms, accounts: accounts, room: rec, other: other, server: newFakeServer(t), dataDir: dataDir}
+	return f
 }
 
 var owner = authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner})
@@ -199,6 +202,8 @@ func TestManagementAuthority(t *testing.T) {
 		{"root attaches", f.svc.Attach(root, f.room.ID, "board")},
 		{"root allows", f.svc.Allow(root, f.room.ID, "board", []string{"claim_issue"}, false)},
 		{"root removes", f.svc.Remove(root, f.room.ID, "board")},
+		{"root adds block term", f.svc.BlockTerm(root, f.room.ID, "board", "term", false)},
+		{"root allows login", f.svc.AllowLogin(root, f.room.ID, "board", "login", false)},
 		{"session detaches", f.svc.Detach(session, f.room.ID, "board")},
 		{"session grants", f.svc.Grant(session, f.room.ID, "board", GrantSession, "ses_b", false)},
 		{"root in another room detaches", f.svc.Detach(crossRoom, f.room.ID, "board")},
