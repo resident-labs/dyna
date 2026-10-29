@@ -113,7 +113,7 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	if out[OwnerEnvKey], err = ownerRecord(nativeScope, resolved["dyna"], owner); err != nil {
 		return nil, err
 	}
-	files := map[string][]byte{"gitconfig": []byte(globalConfig(owner, home, config, resolved["git"]))}
+	files := map[string][]byte{"gitconfig": []byte(globalConfig(owner, home, config))}
 	for name, target := range resolved {
 		files["bin/"+name] = []byte(bridge(owner, target, name == "dyna"))
 	}
@@ -565,7 +565,7 @@ func gitQuote(value string) string {
 	value = strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n", "\t", "\\t", "\b", "\\b").Replace(value)
 	return "\"" + value + "\""
 }
-func globalConfig(owner map[string]string, home, config, git string) string {
+func globalConfig(owner map[string]string, home, config string) string {
 	result := "[core]\n\texcludesFile = " + gitQuote(filepath.Join(config, "git/ignore")) + "\n\tattributesFile = " + gitQuote(filepath.Join(config, "git/attributes")) + "\n"
 	paths := []string{filepath.Join(config, "git/config"), filepath.Join(home, ".gitconfig")}
 	if explicit, ok := owner["GIT_CONFIG_GLOBAL"]; ok {
@@ -577,14 +577,11 @@ func globalConfig(owner map[string]string, home, config, git string) string {
 	for _, path := range paths {
 		result += "[include]\n\tpath = " + gitQuote(path) + "\n"
 	}
-	// The owner's files supply tools, aliases and signing, but never who an agent
-	// commit comes from: this section follows them, so it wins. A repository's
-	// own config or GIT_AUTHOR_* still overrides it.
-	identity := "[user]\n\tname = " + gitQuote(AgentGitName) + "\n\temail = " + gitQuote(AgentGitEmail) + "\n"
-	if key := ownerSigningKey(git, home, config, result); key != "" {
-		identity += "\tsigningKey = " + gitQuote(key) + "\n"
-	}
-	return result + identity
+	// The owner's files supply tools and aliases, but never who an agent commit
+	// comes from, and never a signature: this section follows them, so it wins.
+	// Signing with the owner's key would tie agent commits to the owner through
+	// the public key. A repository's own config or GIT_AUTHOR_* still overrides it.
+	return result + "[user]\n\tname = " + gitQuote(AgentGitName) + "\n\temail = " + gitQuote(AgentGitEmail) + "\n[commit]\n\tgpgSign = false\n[tag]\n\tgpgSign = false\n"
 }
 
 // limitedOutput prevents an inherited executable from returning unbounded data.
@@ -678,39 +675,4 @@ func goDefaults(path string, env []string) map[string]string {
 		}
 	}
 	return result
-}
-
-// ownerSigningKey returns the key selector that the owner's Git config picks
-// by default. When signing is on, by the owner's config, a repository's config or
-// git commit -S, and no user.signingKey is named, Git
-// selects the key by the committer address, which the agent identity replaces.
-// The owner's address then becomes the explicit selector, whether or not
-// the owner's own config turns signing on; it is a key lookup
-// in the owner's keyring and never appears in a commit. It returns "" when no
-// selector is needed or Git cannot read the owner's config.
-func ownerSigningKey(git, home, config, includes string) string {
-	if git == "" {
-		return ""
-	}
-	file, err := os.CreateTemp("", "dyna-gitconfig-probe-")
-	if err != nil {
-		return ""
-	}
-	defer os.Remove(file.Name())
-	_, werr := file.WriteString(includes)
-	if cerr := file.Close(); werr != nil || cerr != nil {
-		return ""
-	}
-	read := func(args ...string) string {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, git, append([]string{"config", "--file", file.Name(), "--includes"}, args...)...)
-		cmd.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + config, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
-		out, _ := cmd.Output()
-		return strings.TrimSpace(string(out))
-	}
-	if read("--get", "user.signingkey") != "" {
-		return ""
-	}
-	return read("--get", "user.email")
 }
