@@ -821,11 +821,10 @@ func RemapSpawnGoalsTx(conn *sql.Conn, remap func(room, goal string) (parent, it
 			continue
 		}
 		meta["goal"], meta["item"] = parent, item
-		body, err := json.Marshal(meta)
-		if err != nil {
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "UPDATE session_records SET meta=? WHERE id=?", string(body), r.id); err != nil {
+		// SaveTx rewrites the meta with its typed columns and digest in one
+		// statement; a direct meta update would drift the digest and make
+		// every later ownership scan reject the record.
+		if err := SaveTx(conn, r.id, meta); err != nil {
 			return err
 		}
 	}
