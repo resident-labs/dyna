@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/approvals"
 	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/notify"
 	prview "dyna-agent/internal/pr/view"
@@ -42,6 +43,8 @@ type Service struct {
 	Notify *notify.Service
 	// PRs supplies PR views used by room events and service composition.
 	PRs *prview.Service
+	// Approvals owns held agent writes and their room events.
+	Approvals *approvals.Service
 
 	mu           sync.Mutex
 	issueStartMu sync.Mutex
@@ -210,6 +213,7 @@ func New(n *notify.Service) *Service {
 	}
 	s := &Service{Notify: n, results: newResultCache(), prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
+	s.Approvals = approvals.New(n.Rooms, n.Sessions.Store)
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]sessionclose.Outcome, error) {
 		return s.PRs.Watcher().CloseSession(ctx, from, heir)
 	}

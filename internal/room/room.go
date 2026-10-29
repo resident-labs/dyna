@@ -56,7 +56,11 @@ var (
 type Record struct {
 	MergeMaxParallel int          `json:"mergeMaxParallel,omitempty"`
 	GitHubAccess     GitHubAccess `json:"githubAccess,omitempty"`
-	RootProfile      string       `json:"rootProfile,omitempty"`
+	// ApprovalWait and ApprovalExpiry are this room's held-write wait and expiry.
+	// Zero uses the defaults in internal/approvals.
+	ApprovalWait   time.Duration `json:"approvalWait,omitempty"`
+	ApprovalExpiry time.Duration `json:"approvalExpiry,omitempty"`
+	RootProfile    string        `json:"rootProfile,omitempty"`
 	// Upstream is the parent repository, as host/owner/repo, of this room's
 	// fork checkout (see ParseUpstream). Empty means the room has no parent.
 	Upstream string `json:"upstream,omitempty"`
