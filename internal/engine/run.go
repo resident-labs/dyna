@@ -326,7 +326,11 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			return
 		case sessionlife.Topic:
 			// Clients get member changes from the room watch, once each.
-			rooms.SessionChanged(ev.Key)
+			if ev.Key == "" {
+				rooms.SessionsChanged()
+			} else {
+				rooms.SessionChanged(ev.Key)
+			}
 			return
 		}
 		events.Publish(ev)

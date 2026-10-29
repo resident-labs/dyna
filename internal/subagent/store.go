@@ -651,6 +651,62 @@ func (s *Store) updateMetaContext(ctx context.Context, id string, fn func(*Meta)
 	return out, err
 }
 
+// updateMetasContext applies fn to each session in ids under that session's
+// lock, then saves every session fn changed in one dyna.db write. It returns
+// the saved sessions. The write publishes one session event with an empty
+// key, which tells clients that every session may have changed.
+func (s *Store) updateMetasContext(ctx context.Context, ids []string, fn func(*Meta) bool) ([]Meta, error) {
+	var locked []string
+	for _, id := range ids {
+		dir, err := s.Dir(id)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(dir); err == nil {
+			locked = append(locked, id)
+		}
+	}
+	var saved []Meta
+	err := sessionlife.WithSessionLocks(s.root(), locked, func() error {
+		var metas []Meta
+		for _, id := range locked {
+			m, err := s.ReadMeta(id)
+			if err != nil {
+				continue
+			}
+			if fn(&m) {
+				metas = append(metas, normalizeMeta(m))
+			}
+		}
+		if err := ctx.Err(); err != nil || len(metas) == 0 {
+			return err
+		}
+		db, err := database.Open(filepath.Dir(s.root()))
+		if err != nil {
+			return err
+		}
+		err = state.For(db).Write(ctx, hub.Event{Topic: sessionlife.Topic}, func(conn *sql.Conn) error {
+			for _, m := range metas {
+				if err := sessionlife.SaveTx(conn, m.ID, m); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		for _, m := range metas {
+			if err := s.metaWritten(m); err != nil {
+				return err
+			}
+		}
+		saved = metas
+		return nil
+	})
+	return saved, err
+}
+
 // ReadTurn loads one turn and its prompt text from the same dyna.db snapshot.
 func (s *Store) ReadTurn(id string, n int) (Turn, error) {
 	b, _, err := s.readTurnRow(id, n)
