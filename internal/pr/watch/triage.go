@@ -34,15 +34,18 @@ type Triager interface {
 type Rules struct {
 	Learned     []NoiseRule
 	TrustedBots []string
+	// DeliverOutside keeps comments from outside commenters. When it is false
+	// they are held until the owner admits them.
+	DeliverOutside bool
 }
 
-// Rules admits trusted comments and holds all other external input.
+// Rules keeps outside input and holds it only when DeliverOutside is false.
 func (r Rules) Triage(pr PRContext, events []Event) []Decision {
 	out := make([]Decision, len(events))
 	seen := map[string]bool{}
 	for i, e := range events {
 		d := rule(pr, e)
-		if d.Reason != "owner" && d.Reason != "author_marker" && !trustedEvent(e, r.TrustedBots) {
+		if d.Reason != "owner" && d.Reason != "author_marker" && !r.DeliverOutside && !trustedEvent(e, r.TrustedBots) {
 			d = Decision{Action: "hold", Reason: "outside_commenter"}
 		}
 		if d.Action == "keep" && d.Reason != "owner" {

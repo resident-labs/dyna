@@ -26,6 +26,7 @@
 
 <article aria-label="Held PR comment">
   <strong>Held: outside commenter {comment.commenter} · PR #{comment.number}</strong>
+  <p class="why">Held because pr.outsideComments is hold. Admit sends it to the author as external data. Dismiss drops it.</p>
   <blockquote>{comment.body}</blockquote>
   <div class="actions">
     <button class="admit" disabled={!!busy} onclick={() => resolve('admit')}>{busy === 'admit' ? 'Admitting…' : 'Admit'}</button>
@@ -38,6 +39,7 @@
 <style>
   article { margin: 8px 0; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; }
   strong { font-size: 13px; overflow-wrap: anywhere; }
+  .why { margin: 4px 0 0; color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
   .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .admit, .dismiss { padding: 5px 10px; border-radius: 6px; background: var(--raise); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
   .admit:hover:not(:disabled), .dismiss:hover:not(:disabled) { background: var(--raise-hover); color: var(--ink); }
