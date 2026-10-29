@@ -47,6 +47,9 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		}
 		return outsideReadError(r, cmd.Args[1:], err)
 	}
+	if err := refuseOwnerIdentity(cmd); err != nil {
+		return err
+	}
 	token, login := "", ""
 	if r.name != "" {
 		var err error
