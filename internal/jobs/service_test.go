@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -214,6 +215,76 @@ func TestCancelStopsTheJob(t *testing.T) {
 	}
 }
 
+// A running job whose log stays unchanged for its idle duration is stopped
+// and ends through the one usual finished event.
+func TestIdleTimeoutStopsTheJob(t *testing.T) {
+	svc, fake, reporter, _ := newService(t, blockingJob("working"))
+	defer svc.Stop()
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := <-reporter.finished
+	if finished.ID != job.ID || finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+		t.Fatalf("finished = %+v, want one idle timeout", finished)
+	}
+	if fake.StopCount() != 1 {
+		t.Fatalf("stop calls = %d, want 1", fake.StopCount())
+	}
+	select {
+	case extra := <-reporter.finished:
+		t.Fatalf("unexpected second finished event: %+v", extra)
+	default:
+	}
+}
+
+// Output before each idle deadline keeps a running job alive, even after it
+// has run for longer than the idle duration in all.
+func TestOutputPreventsIdleTimeout(t *testing.T) {
+	var fake *jobstest.Fake
+	svc, fake, reporter, _ := newService(t, func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		for range 4 {
+			polls := fake.PollCount()
+			fmt.Fprintln(out, "working")
+			for fake.PollCount() == polls {
+				runtime.Gosched()
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+			}
+		}
+		return nil
+	})
+	defer svc.Stop()
+	idle := 5 * time.Second
+	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"build"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished := <-reporter.finished; finished.State != StatePassed {
+		t.Fatalf("finished = %+v, want output to keep the job alive", finished)
+	}
+}
+
+// The submit boundary rejects a non-positive idle duration and one beyond the
+// job's own deadline. Zero on Job, rather than Input, means no idle timeout.
+func TestIdleTimeoutValidation(t *testing.T) {
+	svc, _, _, _ := newIdleService(t, nil)
+	for _, idle := range []time.Duration{0, -time.Second} {
+		if _, err := svc.Submit(t.Context(), Input{Command: []string{"true"}, Idle: &idle}); err == nil {
+			t.Fatalf("idle %s was accepted, want a positive duration", idle)
+		}
+	}
+	idle, timeout := 10*time.Minute, 5*time.Minute
+	if _, err := svc.Submit(t.Context(), Input{Command: []string{"true"}, Idle: &idle, Timeout: timeout}); err == nil {
+		t.Fatal("an idle timeout beyond the job timeout was accepted")
+	}
+}
+
 // A running row whose engine died reattaches instead of launching again: the
 // node sees no second start, and the job still ends through the new engine.
 func TestEngineRestartReattachesWithoutASecondStart(t *testing.T) {
@@ -265,6 +336,46 @@ func TestEngineRestartReattachesWithoutASecondStart(t *testing.T) {
 		t.Fatalf("finished event = %s, want cancelled through the new engine", state)
 	}
 	restarted.Stop()
+}
+
+// The node log's modification time, not the restarted engine's start time,
+// carries the idle deadline across an engine restart.
+func TestIdleDeadlineSurvivesEngineRestart(t *testing.T) {
+	onNode := make(chan struct{})
+	legacy := func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {
+		if len(args) > 0 && strings.Contains(args[len(args)-1], "rm -rf -- ") {
+			return nil
+		}
+		fmt.Fprintln(out, "working")
+		onNode <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	svc, fake, _, _ := newService(t, legacy)
+	idle := 5 * time.Second
+	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-onNode
+	SetEngineStoppingForTest(true)
+	svc.Stop()
+	SetEngineStoppingForTest(false)
+	if err := fake.WaitFunc()(t.Context(), 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	reporter := newChanReporter()
+	restarted := &Service{
+		Store: svc.Store, Machines: svc.Machines, Reporter: reporter, DataDir: svc.DataDir,
+		logf: func(string, ...any) {},
+	}
+	restarted.NewExecutor = svc.NewExecutor
+	restarted.Start(t.Context())
+	defer restarted.Stop()
+	finished := <-reporter.finished
+	if finished.ID != job.ID || finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+		t.Fatalf("finished after restart = %+v, want the stored idle deadline", finished)
+	}
 }
 
 // Host execution on another machine needs that machine's host-check grant;
@@ -345,7 +456,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	job := Job{
 		ID: "job_round", RoomID: "dyna", Session: "ses_1", Node: "here",
 		Command: []string{"echo", "with spaces"}, Repo: "/repo/.git", SHA: strings.Repeat("a", 40),
-		Host: true, CPUs: 4, MemoryMiB: 8192, Timeout: 90 * time.Minute,
+		Host: true, CPUs: 4, MemoryMiB: 8192, Timeout: 90 * time.Minute, Idle: 20 * time.Minute,
 		State: StateRunning, LogPath: filepath.Join(dir, "log"),
 		Created: time.Unix(1000, 0), Started: time.Unix(1001, 0),
 		Dir: "/node/jobs/job_round", Unit: "dyna-job-job_round.service", LogBytes: 42,
@@ -358,7 +469,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Session != job.Session || !got.Host || got.Timeout != job.Timeout || got.SHA != job.SHA {
+	if got.Session != job.Session || !got.Host || got.Timeout != job.Timeout || got.Idle != job.Idle || got.SHA != job.SHA {
 		t.Fatalf("round trip = %+v", got)
 	}
 	if len(got.Command) != 2 || got.Command[1] != "with spaces" {
