@@ -97,6 +97,7 @@ type Metadata struct {
 	Kind           Kind         `json:"kind"`
 	Harness        string       `json:"harness"`
 	Integration    string       `json:"integration,omitempty"`
+	RoomID         string       `json:"roomId,omitempty"`
 	Identity       string       `json:"identity"`
 	Label          string       `json:"label"`
 	NeedsLogin     bool         `json:"needsLogin,omitempty"`
@@ -125,6 +126,8 @@ const (
 	ProviderExa Provider = "exa"
 	// ProviderTavily is the Tavily Search API key the web search tool uses last.
 	ProviderTavily Provider = "tavily"
+	// ProviderMCPBearer is a bearer credential scoped to one room MCP server.
+	ProviderMCPBearer Provider = "mcp-bearer"
 )
 
 // Kind is how an account signed in: an interactive sign-in or a pasted key.
@@ -335,6 +338,32 @@ func (state *State) Save(harness, integration, identity, label string, credentia
 	meta := Metadata{ID: hex.EncodeToString(id), Provider: provider, Kind: kind, Harness: harness, Integration: integration, Identity: identity, Label: label, CreatedAt: now, UpdatedAt: now}
 	state.Entries = append(state.Entries, Entry{Metadata: meta, Credential: credential})
 	return meta, nil
+}
+
+// SaveMCPBearer saves a bearer credential bound to exactly one room and server.
+func (state *State) SaveMCPBearer(room, server, token string) (Metadata, error) {
+	if room == "" || server == "" || token == "" {
+		return Metadata{}, errors.New("A room, server and token are required.")
+	}
+	identity, err := json.Marshal([]string{room, server})
+	if err != nil {
+		return Metadata{}, err
+	}
+	payload, err := json.Marshal(struct {
+		Token string `json:"token"`
+	}{Token: token})
+	if err != nil {
+		return Metadata{}, err
+	}
+	meta, err := state.Save("room-mcp", "", string(identity), server, Credential{Schema: "mcp-bearer/v1", Payload: payload})
+	if err != nil {
+		return Metadata{}, err
+	}
+	entry := state.Find(meta.ID)
+	entry.Provider = ProviderMCPBearer
+	entry.Kind = KindAPIKey
+	entry.RoomID = room
+	return entry.Metadata, nil
 }
 
 func (state *State) Find(id string) *Entry {
