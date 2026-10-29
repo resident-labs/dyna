@@ -690,7 +690,7 @@ var eventSpecs = []EventSpec{
 		Payload:   reflect.TypeOf(AlertEvent{}),
 		Wake:      WakeRoot,
 		Once:      true,
-		Text:      "The engine has been read-only for more than 2 minutes because migration failed:",
+		Text:      "The engine is read-only because migration failed:",
 		Producers: []EventProducer{ProducerEngine},
 	},
 	{
