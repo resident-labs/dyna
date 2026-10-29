@@ -27,7 +27,7 @@ P8 adds the native headless auth commands `pi auth login [--provider <id>] --jso
 
 ## Test repairs
 
-The large-session test follow-up adds an optional `maxStringLength` parameter to `loadEntriesFromFile` (`packages/coding-agent/src/core/session-manager.ts`). The default remains Node's `buffer.constants.MAX_STRING_LENGTH`. Files within the limit use one whole-file read; larger files use the existing streaming reader. The test injects a 64 KiB limit, so an 80 KiB fixture exercises the same streaming branch without a 512 MB file. This repair removes no Dyna code, adds no Dyna dependency, and leaves the fork level unchanged.
+The large-session test follow-up adds an optional `maxStringLength` parameter to `loadEntriesFromFile` (`packages/coding-agent/src/core/session-manager.ts`). The default remains Node's `buffer.constants.MAX_STRING_LENGTH`, which preserves the existing 1 MiB production read chunks. The parameter bounds each read chunk, and the loader always retains its streaming behavior. The test injects a 64 KiB limit, so an 80 KiB fixture requires multiple streamed reads without a 512 MB file. This repair removes no Dyna code, adds no Dyna dependency, and leaves the fork level unchanged.
 
 ## Known upstream test failures
 
