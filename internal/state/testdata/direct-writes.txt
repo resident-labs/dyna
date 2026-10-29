@@ -106,7 +106,7 @@ not-state internal/harness/pi_rpc.go runPiTurn 2 # append-only turn output log, 
 not-state internal/harness/sessionhost/client.go socketHost.connect 1 # removes a dead session host's socket before it starts a new host
 not-state internal/harness/sessionhost/wire.go lockFile 1 # flock lock file for one session host, not state
 not-state internal/harness/runtime/accounts_switch.go Accounts.Remove 2 # removes a harness CLI's private homes; the account record goes through the accounts store
-not-state internal/harness/runtime/accounts_switch.go Accounts.SwitchWithProgress 1 # creates the harness's private home folder; the account registry and selection live in dyna.db
+not-state internal/harness/runtime/accounts_switch.go Accounts.switchTo 1 # creates the harness's private home folder; the account registry and selection live in dyna.db
 not-state internal/harness/runtime/accounts_switch.go Accounts.dropNewEntries 1 # removes the private homes a failed switch created
 not-state internal/harness/runtime/accounts_switch.go openAccountLock 1 # flock lock file, not state
 not-state internal/harness/runtime/accounts_switch.go writePrivateAccountJSONChecked 2 # the one writer of a harness CLI's private home files (login markers, leases, service config, provider keys); the account selection lives in dyna.db
