@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
+	"dyna-agent/internal/store"
 )
 
 func alwaysFree(int) bool { return true }
@@ -329,6 +331,27 @@ func TestReleaseRecordSkipsReplacedRecord(t *testing.T) {
 	}
 	if rec, err := Get(path); err != nil || rec.RunID != "wf_new" || rec.Port != snapshot.Port {
 		t.Fatalf("Get() = %#v, %v; want the replaced record intact", rec, err)
+	}
+}
+
+func TestGCReleasesWorkflowPortWithoutSessionStore(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	repo := initRepo(t)
+	tree := addGitWorktree(t, repo)
+	id := "wf_finished"
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: id, Status: "ok", EndedAt: time.Now()})
+	if err := Track(Record{Path: tree, Repo: repo, RunID: id}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "uncommitted"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GC(context.Background(), repo, GCOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := Get(tree)
+	if err != nil || rec.Port != 0 {
+		t.Fatalf("finished workflow's port = %d, %v; want released", rec.Port, err)
 	}
 }
 

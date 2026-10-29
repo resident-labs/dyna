@@ -20,6 +20,7 @@ type portGuard struct {
 }
 
 type portOwnerRevision struct {
+	hasSessions               bool
 	sessionID                 string
 	sessionRevision, sessions int64
 	deletes, goals            string
@@ -28,21 +29,21 @@ type portOwnerRevision struct {
 
 func readPortOwnerRevision(ctx context.Context, q state.Reader) (portOwnerRevision, error) {
 	var r portOwnerRevision
-	err := q.QueryRowContext(ctx, `SELECT
-COALESCE((SELECT id FROM session_records ORDER BY revision DESC LIMIT 1), ''),
-COALESCE((SELECT MAX(revision) FROM session_records), 0),
-(SELECT COUNT(*) FROM session_records),
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_records'),
 COALESCE((SELECT value FROM meta WHERE key='sessions.deletes'), '0'),
 COALESCE((SELECT value FROM meta WHERE key='goals.revision'), '0'),
-(SELECT n FROM runs_rev)`).Scan(&r.sessionID, &r.sessionRevision, &r.sessions, &r.deletes, &r.goals, &r.runs)
+(SELECT n FROM runs_rev)`).Scan(&r.hasSessions, &r.deletes, &r.goals, &r.runs)
+	if err != nil || !r.hasSessions {
+		return r, err
+	}
+	err = q.QueryRowContext(ctx, `SELECT
+COALESCE((SELECT id FROM session_records ORDER BY revision DESC LIMIT 1), ''),
+COALESCE(MAX(revision), 0), COUNT(*) FROM session_records`).Scan(&r.sessionID, &r.sessionRevision, &r.sessions)
 	return r, err
 }
 
 func beginPortGuard(ctx context.Context, db *sql.DB) (*portGuard, error) {
-	// Initialize the canonical tables before taking the revision snapshot.
-	if err := sessionlife.Owners(runstore.SessionsDir(), func(sessionlife.OwnerRow) error { return nil }); err != nil {
-		return nil, err
-	}
+	// Workflow and goal tables can be absent on a fresh store.
 	if _, err := runstore.StoredMetadata(); err != nil {
 		return nil, err
 	}
