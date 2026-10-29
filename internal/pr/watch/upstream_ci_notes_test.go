@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -40,11 +41,14 @@ func TestUpstreamPRSendsNoCIBudgetNotes(t *testing.T) {
 // the room's checkouts. A fork head is read-only here, so its failure stays quiet
 // while the failure count still updates.
 func TestUpstreamPRFailureNoticeFollowsHeadRepo(t *testing.T) {
-	const extraDir = "/extra/checkout"
+	const extraDir, brokenDir = "/extra/checkout", "/broken/checkout"
 	checkouts := map[string]string{extraDir: "github.com/mine/extra"}
 	original := resolveCheckoutRepo
 	t.Cleanup(func() { resolveCheckoutRepo = original })
 	resolveCheckoutRepo = func(_ context.Context, dir string) (repoid.Repo, error) {
+		if dir == brokenDir {
+			return repoid.Repo{}, errors.New("checkout unavailable")
+		}
 		id, ok := checkouts[dir]
 		if !ok {
 			id = "github.com/mine/repo"
@@ -54,10 +58,12 @@ func TestUpstreamPRFailureNoticeFollowsHeadRepo(t *testing.T) {
 	for _, tc := range []struct {
 		name, head string
 		notified   bool
+		broken     bool
 	}{
-		{"read-only fork", "someone/repo", false},
-		{"room's own fork", "mine/repo", true},
-		{"room's extra repository fork", "mine/extra", true},
+		{"read-only fork", "someone/repo", false, false},
+		{"room's own fork", "mine/repo", true, false},
+		{"room's extra repository fork", "mine/extra", true, false},
+		{"unresolved room checkout keeps notices", "someone/repo", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -66,6 +72,9 @@ func TestUpstreamPRFailureNoticeFollowsHeadRepo(t *testing.T) {
 			if err := rooms.UpdatePreferences(e.author.RoomID, func(rec *room.Record) error {
 				rec.Upstream = "github.com/owner/repo"
 				rec.ExtraRepos = []string{extraDir}
+				if tc.broken {
+					rec.ExtraRepos = append(rec.ExtraRepos, brokenDir)
+				}
 				return nil
 			}); err != nil {
 				t.Fatal(err)
