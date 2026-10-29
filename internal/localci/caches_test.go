@@ -14,39 +14,31 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/shellquote"
 )
 
-// TestCleanBeforeRunFollowsTheConfiguredDiskFloor checks that cache recovery
-// uses machines.ciDiskFloorGB. It also checks the two edges: a settings file
-// that cannot be read keeps the default floor, and a zero floor turns recovery
-// off.
+// TestCleanBeforeRunFollowsTheNodeDiskRule checks that cache recovery uses
+// the node's one disk rule: a run whose free space blocks the queue removes
+// Dyna's own caches first, a run whose free space admits work leaves them,
+// and a node that was never probed has no rule to judge, so nothing is
+// cleaned.
 func TestCleanBeforeRunFollowsTheConfiguredDiskFloor(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		settings string
-		freeGiB  int
-		cleaned  bool
+		name    string
+		node    Node
+		freeGiB int
+		cleaned bool
 	}{
-		{"configured floor cleans below it", `{"version":1,"machines":{"ciDiskFloorGB":40}}`, 30, true},
-		{"configured floor keeps space above it", `{"version":1,"machines":{"ciDiskFloorGB":40}}`, 50, false},
-		{"zero floor never recovers", `{"version":1,"machines":{"ciDiskFloorGB":0}}`, 1, false},
-		{"broken settings keep the default floor", `{`, 10, true},
-		{"no settings file keeps the default floor", "", 30, false},
+		{"floor rule cleans below its floor", Node{Disk: machines.Disk{Total: 100 << 30}}, 3, true},
+		{"floor rule keeps space at and above its floor", Node{Disk: machines.Disk{Total: 100 << 30}}, 10, false},
+		{"percent rule cleans over its share", Node{Disk: machines.Disk{Total: 100 << 30}, MaxDiskPercent: 90}, 5, true},
+		{"percent rule keeps space under its limit", Node{Disk: machines.Disk{Total: 100 << 30}, MaxDiskPercent: 90}, 20, false},
+		{"never probed cleans nothing", Node{}, 1, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			config := t.TempDir()
-			t.Setenv("XDG_CONFIG_HOME", config)
-			if tc.settings != "" {
-				dir := filepath.Join(config, "dyna")
-				if err := os.MkdirAll(dir, 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(tc.settings), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			node := Node{Name: "local", Slots: 1, Enabled: true}
+			node := tc.node
+			node.Name, node.Slots, node.Enabled = "local", 1, true
 			cleaned := false
 			runner := Runner{DataDir: t.TempDir(), Node: &node}
 			legacy := func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, args ...string) error {

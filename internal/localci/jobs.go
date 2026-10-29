@@ -84,10 +84,12 @@ func (s nodeSource) GetLocal(ctx context.Context) (machines.Machine, error) {
 	return s.machine(), nil
 }
 
-// machine turns the node into a machine record: its probed CPUs and memory,
-// which bound what a check may ask for.
+// machine turns the node into a machine record: its probed CPUs, memory and
+// disk, and its disk percent limit. The CPUs and memory bound what a check
+// may ask for, and the admission queue reads the disk through this record, so
+// it holds new work while the node's disk blocks.
 func (s nodeSource) machine() machines.Machine {
-	return machines.Machine{Name: s.node.Name, Enabled: true, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes}}
+	return machines.Machine{Name: s.node.Name, Enabled: true, MaxDiskPercent: s.node.MaxDiskPercent, Capabilities: machines.Capabilities{CPUs: s.node.CPUs, MemTotal: s.node.MemoryBytes, Disk: s.node.Disk}}
 }
 
 // exec builds the node executor of this runner.

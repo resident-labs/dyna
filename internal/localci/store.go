@@ -44,6 +44,12 @@ type Node struct {
 	// count bounds the request instead.
 	CPUs        int    `json:"cpus,omitempty"`
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
+	// Disk and MaxDiskPercent carry the machine's one disk rule from its last
+	// probe. The admission queue holds new work while the disk blocks, and
+	// cache recovery frees space up to the boundary the rule keeps. A zero
+	// Disk means no probe read the machine, so neither applies.
+	Disk           machines.Disk `json:"disk"`
+	MaxDiskPercent int           `json:"maxDiskPercent,omitempty"`
 	// ContainerSocket is the DOCKER_HOST a workflow job on this machine uses,
 	// so a machine with a rootless Podman socket runs the job through it.
 	ContainerSocket string `json:"containerSocket,omitempty"`
@@ -230,7 +236,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
+		node := Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, HostChecksGrants: m.HostChecksGrants, CPUs: m.Capabilities.CPUs, MemoryBytes: m.Capabilities.MemTotal, Disk: m.Capabilities.Disk, MaxDiskPercent: m.MaxDiskPercent, Rooms: m.Rooms, Suites: m.Suites, ContainerSocket: m.DockerHost(), SSHConnectTimeout: m.SSHConnectTimeout, CheckTmp: m.CheckTmp}
 		nodes = append(nodes, node)
 	}
 	return nodes, nil

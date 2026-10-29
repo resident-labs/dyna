@@ -9,6 +9,34 @@ import (
 	"time"
 )
 
+// TestKeepFreeBytesMatchesTheBlockBoundary checks that the recovery boundary
+// and the admission rule are one boundary: free space at or over
+// KeepFreeBytes admits work, and less than it blocks, with and without a
+// percent limit.
+func TestKeepFreeBytesMatchesTheBlockBoundary(t *testing.T) {
+	total := uint64(100) << 30
+	if keep := KeepFreeBytes(0, total); keep != 10<<30 {
+		t.Fatalf("KeepFreeBytes without a limit = %d bytes, want the disk's tenth", keep)
+	}
+	for _, tc := range []struct {
+		maxPercent int
+		free       uint64
+		blocks     bool
+	}{
+		{0, 10 << 30, false},
+		{0, 10<<30 - 1, true},
+		{90, 10<<30 + 1, false},
+		{90, 10 << 30, true},
+	} {
+		if blocked := diskBlock(tc.maxPercent, Disk{Total: total, Free: tc.free}) != ""; blocked != tc.blocks {
+			t.Fatalf("diskBlock(max %d%%, %d GiB free) blocked = %v, want %v", tc.maxPercent, tc.free>>30, blocked, tc.blocks)
+		}
+	}
+	if keep := KeepFreeBytes(90, 0); keep != 0 {
+		t.Fatalf("KeepFreeBytes for a never-probed disk = %d, want 0", keep)
+	}
+}
+
 // lowDiskProbe is what a machine prints when its disk is too full for the
 // queue's floor: 3 GiB free of 1800 GiB, under the 5% share the queue keeps.
 const lowDiskProbe = `os=Linux

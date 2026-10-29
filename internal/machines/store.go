@@ -244,19 +244,18 @@ func (m Machine) DiskBlock() string {
 	return diskBlock(m.MaxDiskPercent, m.Capabilities.Disk)
 }
 
-// diskBlock is DiskBlock for one disk reading.
+// diskBlock is DiskBlock for one disk reading. KeepFreeBytes is the
+// boundary it judges: the node blocks while its free space is under it.
 func diskBlock(maxPercent int, disk Disk) string {
 	if disk.Total == 0 {
 		return ""
 	}
-	if maxPercent > 0 {
-		if used := int(100 * (disk.Total - disk.Free) / disk.Total); used >= maxPercent {
+	if keep := KeepFreeBytes(maxPercent, disk.Total); disk.Free < keep {
+		if maxPercent > 0 {
+			used := int(100 * (disk.Total - disk.Free) / disk.Total)
 			return fmt.Sprintf("disk %d%% at the %d%% limit", used, maxPercent)
 		}
-		return ""
-	}
-	if floor := diskFloorBytes(disk.Total); disk.Free < floor {
-		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, floor>>30)
+		return fmt.Sprintf("disk has %d GiB free, below the %d GiB floor", disk.Free>>30, keep>>30)
 	}
 	return ""
 }
@@ -298,6 +297,23 @@ const (
 	DiskFloorShare      = 5
 	DiskFloorCapDivisor = 10
 )
+
+// KeepFreeBytes is the least free space the node's disk rule keeps for a
+// disk of this size: with a percent limit, the free space that holds the used
+// percent under it; without one, the floor DiskBlock judges. It is zero for a
+// disk that was never probed. Cache recovery cleans to this boundary, so a
+// node whose caches and scratch reach it admits work again.
+func KeepFreeBytes(maxPercent int, total uint64) uint64 {
+	if total == 0 {
+		return 0
+	}
+	if maxPercent > 0 {
+		// One byte over the limit's share holds the whole-point used percent
+		// under the limit.
+		return total - total*uint64(maxPercent)/100 + 1
+	}
+	return diskFloorBytes(total)
+}
 
 // HasHostChecksGrants reports whether anyone allows host checks on this
 // machine, whatever the room.
