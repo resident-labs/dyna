@@ -88,6 +88,33 @@ func issuePath(ref Ref) string {
 	return fmt.Sprintf("repos/%s/issues/%d", ref.Repo, ref.Number)
 }
 
+// eventsPrefix starts the request cache keys of one issue's events pages.
+func eventsPrefix(ref Ref) string {
+	return strings.ToLower(ref.Host) + "/" + issuePath(ref) + "/events"
+}
+
+// savedEvents loads the saved events pages as request cache entries, so the
+// next poll sends their ETags and a GitHub 304 reuses each saved page.
+func savedEvents(raw string) (map[string]cachedResponse, error) {
+	pages := map[string]cachedResponse{}
+	if raw == "" {
+		return pages, nil
+	}
+	return pages, json.Unmarshal([]byte(raw), &pages)
+}
+
+// eventsJSON keeps the events pages a read used, for the next poll.
+func eventsJSON(used map[string]cachedResponse, prefix string) (string, error) {
+	pages := map[string]cachedResponse{}
+	for key, page := range used {
+		if strings.HasPrefix(key, prefix) {
+			pages[key] = page
+		}
+	}
+	b, err := json.Marshal(pages)
+	return string(b), err
+}
+
 // issueComments reads the comments of an issue updated at or after since.
 // An empty since reads every comment.
 func issueComments(ctx context.Context, gh GitHub, ref Ref, since string) ([]Comment, error) {
@@ -205,6 +232,9 @@ func (s *Service) WatchIssue(ctx context.Context, rec room.Record, ref Ref) erro
 	}
 	saved := cache.used[strings.ToLower(ref.Host)+"/"+issuePath(ref)]
 	w.ETag, w.Body = saved.ETag, string(saved.Body)
+	if w.Events, err = eventsJSON(cache.used, eventsPrefix(ref)); err != nil {
+		return err
+	}
 	return s.issueStore().Save(ctx, w)
 }
 
@@ -239,10 +269,12 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 	}
 	ref := Ref{Host: w.Host, Repo: w.Repo, Number: w.Number}
 	key := strings.ToLower(w.Host) + "/" + issuePath(ref)
-	cache := &requestCache{
-		entries: map[string]cachedResponse{key: {ETag: w.ETag, Body: json.RawMessage(w.Body)}},
-		used:    map[string]cachedResponse{}, now: s.now,
+	entries, err := savedEvents(w.Events)
+	if err != nil {
+		return err
 	}
+	entries[key] = cachedResponse{ETag: w.ETag, Body: json.RawMessage(w.Body)}
+	cache := &requestCache{entries: entries, used: map[string]cachedResponse{}, now: s.now}
 	gh := s.github(rec.ID)
 	gh.requests = cache
 	var issue issueObject
@@ -272,6 +304,9 @@ func (s *Service) pollIssueWatch(ctx context.Context, w issuewatch.Watch) error 
 	}
 	saved := cache.used[key]
 	next.ETag, next.Body = saved.ETag, string(saved.Body)
+	if next.Events, err = eventsJSON(cache.used, eventsPrefix(ref)); err != nil {
+		return err
+	}
 	// A stale token means the watch was removed or re-watched during this poll.
 	// Its cursor then stays as the newer save left it.
 	_, err = s.issueStore().Advance(ctx, next)
