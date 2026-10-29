@@ -58,7 +58,7 @@ func TestRunStepSkipsStepsAfterExternalCancel(t *testing.T) {
 }
 
 // A removal needs its repository scanned first, so the worktree step must not
-// stop at the per-step share. It still leaves stepShare for the later steps.
+// stop at the per-step share. It still leaves sweepReserve for the sweeps.
 func TestWorktreeCleanupIsNotCutAtTheStepShare(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -75,8 +75,22 @@ func TestWorktreeCleanupIsNotCutAtTheStepShare(t *testing.T) {
 	if _, err := Run(context.Background(), Options{Repos: []string{"repo"}}); err != nil {
 		t.Fatal(err)
 	}
-	if left <= stepShare || left > runTimeout-stepShare {
-		t.Fatalf("worktree cleanup had %v left, want more than %v and at most %v so later steps keep %v", left, stepShare, runTimeout-stepShare, stepShare)
+	if left <= stepShare || left > runTimeout-sweepReserve {
+		t.Fatalf("worktree cleanup had %v left, want more than %v and at most %v so the sweeps keep %v", left, stepShare, runTimeout-sweepReserve, sweepReserve)
+	}
+}
+
+// Steps before the sweeps stop sweepReserve before the pass deadline, so their
+// work cannot use the sweeps' time. A pass with less time than the reserve gives
+// all of it to those steps.
+func TestEarlierStepsCannotUseTheSweepReserve(t *testing.T) {
+	passEnd := time.Now().Add(runTimeout)
+	if got := passEnd.Sub(workDeadline(passEnd)); got != sweepReserve {
+		t.Fatalf("earlier steps stop %v before the pass end, want %v", got, sweepReserve)
+	}
+	short := time.Now().Add(3 * time.Second)
+	if got := workDeadline(short); !got.Equal(short) {
+		t.Fatalf("short pass gave earlier steps deadline %v, want the whole pass %v", got, short)
 	}
 }
 
