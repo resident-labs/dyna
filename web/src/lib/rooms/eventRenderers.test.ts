@@ -32,7 +32,7 @@ const built = await build({
       export { default as MergeCard } from './MergeCard.svelte';
       export { default as PRCard } from '../prs/PRCard.svelte';
       export { eventRenderers, eventComponents, eventKey, rendererFor, sealedEvent } from './eventRenderers.ts';
-      export { hookEvent, mergeDecision, mergeEvent, prEvent, reviewEvent, worktreeEvent } from './eventPayloads.ts';
+      export { approvalProgress, hookEvent, mergeDecision, mergeEvent, prEvent, reviewEvent, worktreeEvent } from './eventPayloads.ts';
       export { eventSpecs } from './events.gen.ts';
       export { mount, unmount, flushSync } from 'svelte';`,
     resolveDir: rooms,
@@ -327,6 +327,9 @@ const fixtures: Record<string, EventPayload> = {
   'engine/root-flush': { minutes: 15 },
   'terminal/request': { requestId: 'q3', asker: 'dyna:leaf', argv: ['gh', 'auth', 'login'], cwd: '/work', reason: 'sign in to GitHub' },
   'terminal/request.done': { requestId: 'q3', verdict: 'done', exit: { code: 0 }, note: 'logged in', detail: 'Exit code 0.' },
+  'approval/requested': { requestId: 'A-12', kind: 'gh', class: 'owner', requester: 'dyna:leaf', at: 'owner', repository: 'acme/app', command: 'gh pr create', title: 'Fix the cache', body: 'Fixes the stale cache.\n\nPosted by the swarm.' },
+  'approval/decided': { requestId: 'A-12', actor: 'dyna:parent', action: 'deny', reason: 'wrong branch' },
+  'approval/result': { requestId: 'A-12', state: 'failed', exitCode: 1, url: 'https://github.com/acme/app/pull/9', output: ['gh: not found', 'exit 1'] },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
   'shell/output-silence': { shellId: 'sh_20261023-120000-0000000a', label: 'build', minutes: 30 },
   'job/queued': {
@@ -476,6 +479,9 @@ test('a stopped job card states its cause without an exit code', () => {
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
   if ('resultBytes' in payload) return `${payload.server} / ${payload.tool}`
+  if ('requester' in payload) return payload.title ?? ''
+  if ('action' in payload) return payload.actor
+  if ('requestId' in payload && 'state' in payload) return payload.url ?? ''
   if ('kind' in payload && 'changeId' in payload) return payload.label
   if ('note' in payload) return payload.note ?? ''
   if ('hook' in payload) return payload.label || payload.hook
@@ -962,4 +968,68 @@ test('a single-PR merge card keeps the singular title', () => {
   assert.match(text, /Merged #242 into main/, `a one-PR title lost its shape: ${text}`)
   const direct = renderMergeCard({ ...base, reasonKind: 'tested-head' as const }).text
   assert.match(direct, /Landed without a trial: this head contains the base tip and passed its required CI\./)
+})
+
+// mountApproval mounts the approval request card and returns its target, so a
+// test reads the card's text and presses its buttons.
+function mountApproval(approval: { holder: string; decided?: 'approve' | 'deny' | 'pass' | 'auto'; state?: 'expired' } | undefined, ondecideapproval?: (id: string, action: string, reason: string) => Promise<unknown>) {
+  const post = postFor('approval', 'requested', fixtures['approval/requested'] as EventPayload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.ApprovalRequestCard, { target, props: { post, notice: post.notice, surface: 'feed', approval, ondecideapproval } })
+  web.flushSync()
+  return { target, close: () => { web.unmount(mounted); target.remove() } }
+}
+
+test('a pending approval for the owner is a card with the full text and decides through the call', async () => {
+  const calls: string[][] = []
+  const { target, close } = mountApproval({ holder: 'owner' }, async (id, action, reason) => { calls.push([id, action, reason]) })
+  const text = target.textContent ?? ''
+  for (const want of ['dyna:leaf', 'gh pr create', 'acme/app', 'Fix the cache', 'Posted by the swarm.']) assert.ok(text.includes(want), `${want} missing: ${text}`)
+  assert.doesNotMatch(text, /A-12/, 'the request ID is not a label')
+  const buttons = () => Array.from(target.querySelectorAll('button'))
+  need(buttons().find((b) => b.textContent === 'Approve'), 'the Approve button').click()
+  for (let i = 0; i < 4; i++) await Promise.resolve()
+  web.flushSync()
+  assert.deepEqual(calls, [['A-12', 'approve', '']])
+  need(buttons().find((b) => b.textContent === 'Deny…'), 'the Deny button').click()
+  web.flushSync()
+  assert.equal(need(buttons().find((b) => b.textContent === 'Deny'), 'the confirm button').disabled, true, 'a denial needs a reason')
+  close()
+})
+
+test('a request that is decided, expired or held by another session is a quiet row', () => {
+  const cases: [{ holder: string; decided?: 'approve'; state?: 'expired' } | undefined, RegExp][] = [
+    [{ holder: 'owner', decided: 'approve' }, /approved/],
+    [{ holder: 'owner', state: 'expired' }, /expired/],
+    [{ holder: 'dyna:parent' }, /waits on/],
+  ]
+  for (const [approval, want] of cases) {
+    const { target, close } = mountApproval(approval)
+    assert.equal(target.querySelectorAll('button').length, 0, 'a settled request has no buttons')
+    assert.match(target.textContent ?? '', want)
+    close()
+  }
+})
+
+test('approval progress follows a pass, a decision and a result', () => {
+  const requested = (at: string) => postFor('approval', 'requested', { ...(fixtures['approval/requested'] as EventPayload), at } as EventPayload)
+  const decided = (action: string, at?: string) => postFor('approval', 'decided', { requestId: 'A-12', actor: 'x', action, at } as EventPayload)
+  const open = web.approvalProgress([requested('dyna:parent'), decided('pass', 'owner')])
+  assert.deepEqual(open['A-12'], { holder: 'owner' })
+  const closed = web.approvalProgress([requested('owner'), decided('deny'), postFor('approval', 'result', fixtures['approval/result'] as EventPayload)])
+  assert.equal(closed['A-12']?.decided, 'deny')
+  assert.equal(closed['A-12']?.state, 'failed')
+})
+
+test('an approval result shows its output behind a toggle and a failed one starts open', () => {
+  const post = postFor('approval', 'result', fixtures['approval/result'] as EventPayload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.ApprovalResultCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  assert.ok(target.querySelector('details[open]'), 'a failed result opens by itself')
+  assert.match(target.querySelector('pre')?.textContent ?? '', /gh: not found/)
+  web.unmount(mounted)
+  target.remove()
 })
