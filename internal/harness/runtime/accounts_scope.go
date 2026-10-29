@@ -188,9 +188,15 @@ func (a *Accounts) turnAccount(harness string, provider store.Provider, p profil
 // that runs p's provider and may run in dir's repo has a stated usage hold for p's
 // model, it returns that account's ID as heldID and pins it on the returned
 // profile, so the probe runs that model on the account whose limit the provider
-// named. The global selection does not change. Otherwise it selects as
-// SelectAccount does and heldID is "".
+// named. The global selection does not change. Only a harness that keeps each
+// account's credentials in its own home can run a probe on a held account; a
+// harness with one shared sign-in would run the probe on the active account.
+// Otherwise it selects as SelectAccount does and heldID is "".
 func (r *Runtime) SelectProbeAccount(ctx context.Context, p profile.Profile, dir string) (profile.Profile, string, error) {
+	if !pinsPerAccount(p.Harness) {
+		selected, err := r.SelectAccount(ctx, p, dir)
+		return selected, "", err
+	}
 	provider := ProviderForModel(p.Harness, p.Model)
 	repo := RepoIdentity(ctx, dir)
 	held, ok, err := r.Accounts.StatedHoldAccount(p.Harness, provider, p.Model, repo, time.Now())
