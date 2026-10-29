@@ -26,11 +26,7 @@ func WithRepository(ctx context.Context, host, repo string) context.Context {
 
 // AccountFor selects an account without exposing its token.
 func AccountFor(ctx context.Context, executable, host, repo string) (string, error) {
-	cmd := Command(ctx, executable, "")
-	if _, err := roomFor(ctx, "", repository{host, repo}); err != nil {
-		return "", err
-	}
-	login, _, err := selectAccount(ctx, cmd, repository{host, repo})
+	login, _, err := selectAccount(ctx, Command(ctx, executable, ""), repository{host, repo})
 	return login, err
 }
 
@@ -299,12 +295,19 @@ func accountProofKey(ctx context.Context, cmd *exec.Cmd, r repository, rec room.
 	return key + ":read"
 }
 
+// selectAccount chooses the account for r. The room's upstream repository, the
+// parent of a fork checkout, gets a read-only account, as checkPolicy allows
+// only reads of it.
 func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, string, error) {
 	rec, err := roomFor(ctx, cmd.Dir, r)
+	write := Access(ctx, rec) == ReadWrite
+	if errors.Is(err, errNotInRoom) && matchesUpstream(rec, r) {
+		err, write = nil, false
+	}
 	if err != nil {
 		return "", "", err
 	}
-	return selectAccountForRoom(ctx, cmd, r, rec, Access(ctx, rec) == ReadWrite)
+	return selectAccountForRoom(ctx, cmd, r, rec, write)
 }
 
 // selectAccountAfterPolicy uses the room that checkPolicy just admitted. A
