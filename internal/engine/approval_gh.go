@@ -27,7 +27,7 @@ func ghApprovalExecutor(rooms *room.Store) approvals.ExecuteFunc {
 			return approvals.Result{}, err
 		}
 		defer cleanup()
-		ctx = ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms)
+		ctx = ghclient.WithAgentText(ghclient.WithRooms(ghclient.WithRoom(ctx, r.Room), rooms))
 		cmd := ghclient.Command(ctx, "", payload.Cwd, argv...)
 		stdout, stderr := boundedio.New(1024*1024), boundedio.New(64*1024)
 		cmd.Stdout, cmd.Stderr = stdout, stderr
