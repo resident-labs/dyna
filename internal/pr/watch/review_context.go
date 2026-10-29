@@ -422,7 +422,7 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 		if reviewerHears(decision) {
 			c.Body = clip(Sanitize(c.Body), 4000)
 			if decision.Reason != "owner" {
-				c.Body = quotedComment(c.Body)
+				c.Body = externalComment(c.Body)
 			}
 			out = append(out, c)
 		}

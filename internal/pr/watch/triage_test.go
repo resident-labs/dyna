@@ -99,6 +99,7 @@ func TestBatchTriagePreservesOrderAndOwnerWake(t *testing.T) {
 	if got := notices.batches[r.Author]; len(got) != 2 || !strings.Contains(got[0], "first owner note") || !strings.Contains(got[1], "second owner note") {
 		t.Fatalf("filter dropped owner comments: %+v", got)
 	}
+	holdOutsideComments(t)
 	triage.invalid = true
 	e.addComment(23, "issue-comments", "unknown human", "other")
 	e.s.routeComments(&st, &r, Snapshot{OwnerLogin: "owner", Comments: e.f.Comments}, notices)

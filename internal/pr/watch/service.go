@@ -812,7 +812,10 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 	var events []Event
 	for _, c := range snap.Comments {
 		k, v := commentKey(c), commentVersion(c)
-		if r.Seen[k] == v && (!trustChanged || r.CommentDecisions[k].Reason == "owner_dismissed") {
+		_, held := r.HeldComments[k]
+		// With outside input delivered, a held comment goes back through triage once.
+		redeliver := held && policy.DeliverOutside
+		if r.Seen[k] == v && !redeliver && (!trustChanged || r.CommentDecisions[k].Reason == "owner_dismissed") {
 			continue
 		}
 		r.Seen[k] = v
@@ -858,10 +861,17 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 				r.HeldComments = map[string]state.HeldComment{}
 			}
 			r.HeldComments[e.ID] = state.HeldComment{ID: e.ID, Commenter: e.Commenter, Body: e.Text, URL: commentURL(snap, e.ID), Version: r.Seen[e.ID]}
-			r.Notices = append(r.Notices, Notice{ID: "msg_" + digest(r.Key + "/held/" + e.ID + "/" + r.Seen[e.ID])[:16], Kind: "held-comment", CommentID: e.ID, Text: fmt.Sprintf("PR #%d: Held: outside commenter. Review this comment in Dyna to admit or dismiss it.", r.Number)})
+			r.Notices = append(r.Notices, Notice{ID: "msg_" + digest(r.Key + "/held/" + e.ID + "/" + r.Seen[e.ID])[:16], Kind: "held-comment", CommentID: e.ID, Text: fmt.Sprintf("PR #%d: Held: outside commenter because pr.outsideComments is hold. Review this comment in Dyna to admit or dismiss it.", r.Number)})
 			continue
 		}
-		delete(r.HeldComments, e.ID)
+		if _, wasHeld := r.HeldComments[e.ID]; wasHeld {
+			delete(r.HeldComments, e.ID)
+			for i := range r.Notices {
+				if n := &r.Notices[i]; n.Kind == "held-comment" && n.CommentID == e.ID && !n.Done {
+					n.SupersededBy = "outside-comment-delivered"
+				}
+			}
+		}
 		if decision.Action == "drop" {
 			n.drops[decision.Reason]++
 			if id, ok := strings.CutPrefix(decision.Reason, "learned_noise:"); ok {
