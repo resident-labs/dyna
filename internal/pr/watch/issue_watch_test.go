@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/pr/issuewatch"
@@ -123,6 +124,44 @@ func TestIssueWatchReadsEventsAfterNotModified(t *testing.T) {
 	}
 	if got := len(after) - len(before); got != 2 {
 		t.Fatalf("poll after 304 posted %d messages, want a close and a reopen", got)
+	}
+}
+
+// An unchanged issue costs two conditional reads: the issue and each events
+// page answer 304, and the saved events pages supply the log. The close and
+// reopen saved earlier are still new against the cursor, so both post.
+func TestIssueWatchRevalidatesSavedEventPages(t *testing.T) {
+	e := newEnv(t)
+	const stamp = "2026-10-29T10:00:00Z"
+	base := "repos/owner/repo/issues/3"
+	e.f.Raw[base] = "HTTP/2.0 304 Not Modified\r\n\r\n"
+	e.f.Raw[base+"/events?per_page=100"] = "HTTP/2.0 304 Not Modified\r\n\r\n"
+	e.write()
+	watch := issuewatch.Watch{Room: e.author.RoomID, Host: "github.com", Repo: "owner/repo", Number: 3,
+		State: "open", Updated: stamp, CommentAt: stamp, EventID: 40, ETag: `"etag-1"`,
+		Body:   `{"title":"Crash","state":"open","updated_at":"` + stamp + `"}`,
+		Events: `{"github.com/repos/owner/repo/issues/3/events?per_page=100":{"etag":"etag-2","body":[{"id":41,"event":"closed"},{"id":42,"event":"reopened"}]}}`}
+	dir := e.s.dataDir()
+	if err := (issuewatch.Store{DataDir: dir}).Save(t.Context(), watch); err != nil {
+		t.Fatal(err)
+	}
+	before, err := room.DefaultStore().Messages(e.author.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.pollIssueWatches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := room.DefaultStore().Messages(e.author.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(after) - len(before); got != 2 {
+		t.Fatalf("poll with saved event pages posted %d messages, want a close and a reopen", got)
+	}
+	watches, err := (issuewatch.Store{DataDir: dir}).List(t.Context())
+	if err != nil || len(watches) != 1 || !strings.Contains(watches[0].Events, `"etag":"etag-2"`) {
+		t.Fatalf("saved events after poll: %+v err=%v, want the events page kept", watches, err)
 	}
 }
 
