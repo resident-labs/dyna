@@ -15,7 +15,7 @@ const asyncWrapPrefix = "(async () => {\n"
 var exportMetaRe = regexp.MustCompile(`(?m)^(\s*)export(\s+const\s+meta\s*=)`)
 
 var hookNames = map[string]bool{
-	"agent": true, "workflow": true, "phase": true, "log": true,
+	"agent": true, "job": true, "workflow": true, "phase": true, "log": true,
 	"parallel": true, "pipeline": true,
 }
 

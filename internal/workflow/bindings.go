@@ -13,6 +13,33 @@ import (
 	"dyna-agent/internal/textutil"
 )
 
+// planAsyncContextTracker restores the script plan context around promise jobs.
+// Goja calls Grab when it queues a reaction and Resumed before running it.
+// The any values are required by goja.AsyncContextTracker and hold goja.Value or nil.
+type planAsyncContextTracker struct {
+	vm *goja.Runtime
+}
+
+func (t planAsyncContextTracker) Grab() any {
+	value := t.vm.Get("__planALS").ToObject(t.vm).Get("current")
+	if goja.IsNull(value) || goja.IsUndefined(value) {
+		return nil
+	}
+	return value
+}
+
+func (t planAsyncContextTracker) Resumed(tracking any) {
+	value := goja.Null()
+	if tracking != nil {
+		value = tracking.(goja.Value)
+	}
+	_ = t.vm.Get("__planALS").ToObject(t.vm).Set("current", value)
+}
+
+func (t planAsyncContextTracker) Exited() {
+	_ = t.vm.Get("__planALS").ToObject(t.vm).Set("current", goja.Null())
+}
+
 func (e *engine) bind(vm *goja.Runtime) error {
 	e.vm = vm
 	// console.Enable uses goja_nodejs internally, which also installs a module

@@ -44,11 +44,13 @@ type Engine struct {
 	// JobSubmitErrors returns errors after storing new jobs, simulating a lost
 	// submission response. A retry with the same key recovers the stored row.
 	JobSubmitErrors []error
-	jobMu           sync.Mutex
-	jobRows         map[string]jobs.Job
-	jobStarts       []callspec.RunJobInput
-	jobWaits        []string
-	jobStops        []string
+	// JobExitCodes gives a submitted job ID its final exit code.
+	JobExitCodes map[string]int
+	jobMu        sync.Mutex
+	jobRows      map[string]jobs.Job
+	jobStarts    []callspec.RunJobInput
+	jobWaits     []string
+	jobStops     []string
 }
 
 type agent struct {
@@ -197,8 +199,12 @@ func (f *Engine) waitJob(ctx context.Context, id string, result any) error {
 		f.jobMu.Lock()
 		job = f.jobRows[id]
 		if !job.State.Finished() {
-			code := 0
-			job.State, job.ExitCode = jobs.StatePassed, &code
+			code, configured := f.JobExitCodes[id]
+			job.State = jobs.StatePassed
+			if configured && code != 0 {
+				job.State = jobs.StateFailed
+			}
+			job.ExitCode = &code
 			f.jobRows[id] = job
 		}
 		f.jobMu.Unlock()

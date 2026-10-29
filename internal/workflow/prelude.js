@@ -40,6 +40,7 @@ function applyPlanCtx(opts, explicitCtx) {
     if (ctx.groupId) opts.__planGroupId = String(ctx.groupId);
     if (ctx.stage != null) opts.__stageIndex = ctx.stage;
     if (ctx.item != null) opts.__itemIndex = ctx.item;
+    if (ctx.path != null) opts.__planPath = ctx.path.slice();
   }
   return opts;
 }
@@ -76,7 +77,7 @@ globalThis.__planWorkflow = function (planNodeId, nameOrRef, workflowArgs) {
 globalThis.__planParallel = async function (planGroupId, thunks) {
   __groupStart(String(planGroupId), "parallel");
   try {
-    return await parallel(thunks);
+    return await __executeParallel(thunks, String(planGroupId));
   } finally {
     __groupEnd(String(planGroupId), "parallel");
   }
@@ -85,7 +86,9 @@ globalThis.__planPipeline = async function (planGroupId, items, ...stages) {
   __groupStart(String(planGroupId), "pipeline");
   try {
     return await executePipeline(items, stages, (stage, cur, item, i, s) => {
-      const ctx = Object.freeze({ groupId: String(planGroupId), stage: s, item: i });
+      const parent = __planALS.current;
+      const path = parent && parent.path ? parent.path : [];
+      const ctx = Object.freeze({ groupId: String(planGroupId), stage: s, item: i, path: path.concat(['p:' + s + ':' + i]) });
       __planContexts.add(ctx);
       const prev = __planALS.current;
       __planALS.current = ctx;
@@ -134,10 +137,21 @@ globalThis.run = function (command, opts) {
   return __exec(command, applyPlanCtx(opts));
 };
 
+globalThis.__planJob = function (planNodeId, ...args) {
+  let ctx;
+  const last = args[args.length - 1];
+  if (last && __planContexts.has(last)) {
+    ctx = args.pop();
+  }
+  const opts = applyPlanCtx({}, ctx);
+  opts.__planNodeId = String(planNodeId);
+  return __job(args[0], opts);
+};
+
 // job(spec) -> Promise<{ id, node, state, exitCode, log }>
 // Runs one command through the engine job queue. Durations use Go syntax.
 globalThis.job = function (spec) {
-  return __job(spec);
+  return __job(spec, applyPlanCtx({}));
 };
 
 // post(to, text, data?) or post(to, { text, data }) -> { id, deliveries, skipped?, error? }
@@ -174,15 +188,39 @@ globalThis.workflow = function (nameOrRef, workflowArgs, planNodeId) {
 
 // parallel(thunks) -> Promise<any[]>  (barrier; failures resolve to null)
 globalThis.parallel = async function (thunks) {
+  return await __executeParallel(thunks, "");
+};
+
+async function __executeParallel(thunks, groupId) {
+  const parent = __planALS.current;
+  const parentPath = parent && parent.path ? parent.path : [];
   const settled = await Promise.allSettled(
-    thunks.map((t) => Promise.resolve().then(t))
+    thunks.map((t, i) => Promise.resolve().then(() => {
+      const ctx = Object.freeze({
+        groupId: groupId || (parent && parent.groupId) || "",
+        stage: parent && parent.stage,
+        item: parent && parent.item,
+        path: parentPath.concat(['b:' + i]),
+      });
+      __planContexts.add(ctx);
+      const prev = __planALS.current;
+      __planALS.current = ctx;
+      let result;
+      try {
+        result = Reflect.apply(t, undefined, []);
+      } catch (e) {
+        __planALS.current = prev;
+        throw e;
+      }
+      return Promise.resolve(result).finally(() => { __planALS.current = prev; });
+    }))
   );
   return settled.map((r) => {
     if (r.status === "fulfilled") return r.value;
     __logSystem("parallel: task failed: " + String((r.reason && r.reason.message) || r.reason));
     return null;
   });
-};
+}
 
 // pipeline(items, ...stages) -> Promise<any[]>  (no barrier between stages;
 // a stage that throws drops that item to null and skips its remaining stages)

@@ -25,7 +25,7 @@ import (
 
 // ExtractorVersion is hashed into planHash. Bump when graph or instrumentation
 // metadata extraction rules change.
-const ExtractorVersion = "7"
+const ExtractorVersion = "8"
 
 const (
 	StatusComplete    = "complete"
@@ -35,6 +35,7 @@ const (
 	KindWorkflow = "workflow"
 	KindPhase    = "phase"
 	KindAgent    = "agent"
+	KindJob      = "job"
 	KindParallel = "parallel"
 	KindPipeline = "pipeline"
 	KindBranch   = "branch"
