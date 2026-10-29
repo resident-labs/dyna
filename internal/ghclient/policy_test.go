@@ -363,6 +363,33 @@ func TestRoomUpstreamReadsWithoutActingRoom(t *testing.T) {
 	}
 }
 
+// In a fork checkout, gh pr create without --repo would pick the parent. The
+// refusal names both repositories, and an explicit --repo passes.
+func TestForkCheckoutPRCreateNeedsExplicitRepo(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().SetUpstream(records[0].ID, "github.com/upstream/project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetAccess(room.DefaultStore(), records[0].ID, ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRoom(context.Background(), records[0].ID)
+	own := repository{"github.com", "fork/project"}
+	err := checkPolicy(ctx, records[0].Repo, own, []string{"pr", "create", "--fill"})
+	if err == nil || !strings.Contains(err.Error(), "upstream/project") || !strings.Contains(err.Error(), "fork/project") {
+		t.Fatalf("implicit pr create = %v; want a refusal naming both repositories", err)
+	}
+	for _, args := range [][]string{
+		{"pr", "create", "--repo", "fork/project", "--fill"},
+		{"pr", "create", "--fill", "-R", "fork/project"},
+		{"--repo=fork/project", "pr", "create"},
+	} {
+		if err := checkPolicy(ctx, records[0].Repo, own, args); err != nil {
+			t.Fatalf("%q: %v", args, err)
+		}
+	}
+}
+
 // Two rooms can share an upstream. A command in one room's checkout resolves to that room.
 func TestSharedRoomUpstreamResolvesToCheckoutRoom(t *testing.T) {
 	records := setupRooms(t, "fork/project", "fork/other")
