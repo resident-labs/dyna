@@ -492,10 +492,8 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 		return watch.Record{}, false, err
 	}
 	if explicit {
-		checkout, err := repoid.Resolve(ctx, dir)
-		want, wantErr := repoid.RemoteIdentity("", "https://"+ref.Host+"/"+ref.Repo)
-		if err != nil || wantErr != nil || checkout.ID != want {
-			return watch.Record{}, false, fmt.Errorf("%s is not a checkout of %s/%s", dir, ref.Host, ref.Repo)
+		if err := checkoutOfPR(ctx, p.GH, ref, dir, rec.Upstream); err != nil {
+			return watch.Record{}, false, err
 		}
 	}
 	r, created, err := p.Track(ctx, actor, ref, info, dir)
@@ -512,6 +510,37 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 	}
 	r.GoalID, err = s.linkGoal(ctx, p, r, info, created, goal)
 	return r, created, err
+}
+
+// checkoutOfPR accepts dir when it is a checkout of the PR's base repository.
+// A fork checkout is also accepted when upstream, the room's parent setting,
+// is the base and the PR's head repository is the checkout's own repository,
+// that is, the fork that opened the PR. The head is fetched only in that case.
+func checkoutOfPR(ctx context.Context, gh watch.GitHub, ref watch.Ref, dir, upstream string) error {
+	notCheckout := fmt.Errorf("%s is not a checkout of %s/%s", dir, ref.Host, ref.Repo)
+	base, err := repoid.RemoteIdentity("", "https://"+ref.Host+"/"+ref.Repo)
+	if err != nil {
+		return notCheckout
+	}
+	checkout, err := repoid.Resolve(ctx, dir)
+	if err != nil {
+		return notCheckout
+	}
+	if checkout.ID == base {
+		return nil
+	}
+	if upstream != base {
+		return notCheckout
+	}
+	pull, err := gh.Pull(ctx, ref)
+	if err != nil {
+		return err
+	}
+	head, err := repoid.RemoteIdentity("", "https://"+ref.Host+"/"+pull.Head.Repo.FullName)
+	if err != nil || checkout.ID != head {
+		return notCheckout
+	}
+	return nil
 }
 
 // authorIn resolves the room and the author a caller names for new work. Only
