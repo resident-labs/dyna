@@ -55,3 +55,32 @@ func TestLabelChangeReachesAuthorAsPRUpdate(t *testing.T) {
 	}
 	t.Fatal("no notice reports the added label")
 }
+
+// Adding the same label again after a removal is a new change for the author.
+func TestRepeatedLabelAddReachesAuthorAgain(t *testing.T) {
+	e := newEnv(t)
+	e.setCI("success", 1)
+	e.track()
+	e.tick()
+	steps := []struct {
+		updated string
+		labels  []Label
+	}{
+		{"2026-10-29T14:00:00Z", []Label{{Name: "needs-tests"}}},
+		{"2026-10-29T14:01:00Z", nil},
+		{"2026-10-29T14:02:00Z", []Label{{Name: "needs-tests"}}},
+	}
+	for _, s := range steps {
+		e.f.Pull.Updated, e.f.Pull.Labels = s.updated, s.labels
+		e.tick()
+	}
+	added := 0
+	for _, n := range e.record().Notices {
+		if strings.Contains(n.Text, "added needs-tests") {
+			added++
+		}
+	}
+	if added != 2 {
+		t.Fatalf("label add notices = %d, want 2", added)
+	}
+}
