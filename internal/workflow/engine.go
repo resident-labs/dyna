@@ -116,6 +116,7 @@ type sharedState struct {
 	agentSeq          int
 	execSeq           int // run() and job() steps; counted apart from agents and their cap
 	jobNamespace      string
+	jobOccurrences    map[string]int
 	workflowSeq       int
 	profSems          map[string]chan struct{}
 	profCalls         map[string]int
@@ -156,7 +157,7 @@ func execute(ctx context.Context, o Options, shared *sharedState, depth int, wor
 		}
 		worktreeWarning = warning
 		shared = &sharedState{
-			scratchID: runstore.NewID(), jobNamespace: jobNamespace,
+			scratchID: runstore.NewID(), jobNamespace: jobNamespace, jobOccurrences: map[string]int{},
 			sem:      make(chan struct{}, maxConc),
 			cmdSem:   newCommandLimit(o.MaxCommands),
 			profSems: map[string]chan struct{}{}, profCalls: map[string]int{}, worktreeRetention: worktreeRetention,
