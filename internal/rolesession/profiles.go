@@ -291,8 +291,9 @@ type FailureCache struct {
 }
 
 // cachedTurn is the latest turn read for one session, and the turn count it
-// was read at. A newer turn count means the turn is new. A pointer keeps the
-// per-session map entry small, so a scan copies no turn it did not read.
+// was read at. A newer turn count means the turn is new. The turn keeps only
+// the fields the failure rules read, not the prompt or the result. A pointer
+// keeps the per-session map entry small.
 type cachedTurn struct {
 	turns int
 	turn  subagent.Turn
@@ -319,7 +320,7 @@ func (c *FailureCache) Recent(now time.Time, snapshot func() ([]subagent.Info, e
 				// Not kept, so the next scan reads this session again.
 				continue
 			}
-			cached = &cachedTurn{turns: info.Turns, turn: t}
+			cached = &cachedTurn{turns: info.Turns, turn: subagent.Turn{Status: t.Status, Profile: t.Profile, Created: t.Created, Ended: t.Ended, Error: t.Error, FailureReason: t.FailureReason}}
 		}
 		turns[info.ID] = cached
 		t := cached.turn
