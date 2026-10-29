@@ -165,3 +165,39 @@ func TestServiceFailureCarriesWorkerStderr(t *testing.T) {
 		t.Fatalf("service failure text lost the worker stderr: %q", ev.Detail)
 	}
 }
+
+// A turn that failed before it recorded a profile still names what runs: the
+// one fallback rule reads the turn's own profile first, else the session's.
+func TestServiceFailureReportsTheSessionProfileWhenTheTurnHasNone(t *testing.T) {
+	e := newTestEnv(t, withImmediateTurns)
+	rec := e.room()
+	info, _, err := e.mgr.Start(context.Background(), subagent.StartOptions{
+		Goal: "Keep the library current", Role: subagent.RoleLibrarian, Name: "librarian",
+		Room: rec.Name, Dir: t.TempDir(), Profile: "mock", Task: "SLEEP:0\nRESPOND: first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info = e.wait(info.ID, 1)
+	_, err = e.mgr.Store.UpdateTurn(info.ID, 1, func(turn *subagent.Turn) {
+		turn.Status, turn.Error = subagent.TurnError, "worker failed to start: no harness event within 2m0s of startup"
+		turn.Profile, turn.Model = "", ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.CompleteSessionTurn(e.ctx, info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := res.Message.ServiceFailed()
+	if !ok || ev.Service != room.ServiceLibrarian {
+		t.Fatalf("service failure event = %+v, %v", ev, ok)
+	}
+	if ev.Profile != "mock" {
+		t.Fatalf("failure profile = %q, want the session's mock", ev.Profile)
+	}
+	if !strings.Contains(ev.Detail, "Profile: mock") {
+		t.Fatalf("service failure text lost the session profile: %q", ev.Detail)
+	}
+}
