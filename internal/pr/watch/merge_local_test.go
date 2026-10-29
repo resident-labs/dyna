@@ -68,7 +68,7 @@ func (f *fakeLocalCI) Nodes(context.Context) ([]localci.Node, error) {
 	if len(f.nodes) > 0 {
 		return f.nodes, nil
 	}
-	return []localci.Node{{Name: "hermes", Slots: 16, Enabled: true}}, nil
+	return []localci.Node{{Name: "hermes", Enabled: true}}, nil
 }
 func (f *fakeLocalCI) Mode(context.Context, string) (string, error) { return localci.ModeLocal, nil }
 func (f *fakeLocalCI) SaveResult(_ context.Context, result localci.Result) error {
@@ -553,7 +553,7 @@ func TestLocalTrialFailsWhenNoMachineAllowsItsSuite(t *testing.T) {
 	r := records[0]
 	// This machine runs only the relay suite, and a trial runs every workflow
 	// suite of its base definition.
-	ci.nodes = []localci.Node{{Name: "hermes", Slots: 16, Enabled: true, Suites: []string{string(localci.SuiteRelay)}}}
+	ci.nodes = []localci.Node{{Name: "hermes", Enabled: true, Suites: []string{string(localci.SuiteRelay)}}}
 	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
 	if err != nil {
 		t.Fatal(err)
@@ -598,8 +598,8 @@ func TestLocalTrialFailsWhenAnotherRoomOwnsTheSuite(t *testing.T) {
 	// This room's machine runs only the go suite. The machine that takes every
 	// suite belongs to another room, so it is not a candidate.
 	ci.nodes = []localci.Node{
-		{Name: "room-ci", Slots: 16, Enabled: true, Suites: []string{string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
-		{Name: "other-room-ci", Slots: 16, Enabled: true, Rooms: []string{"room_other"}},
+		{Name: "room-ci", Enabled: true, Suites: []string{string(localci.SuiteGo)}, Rooms: []string{r.RoomID}},
+		{Name: "other-room-ci", Enabled: true, Rooms: []string{"room_other"}},
 	}
 	trial, err := e.s.localTrialCI(context.Background(), r, r.Head)
 	if err != nil {

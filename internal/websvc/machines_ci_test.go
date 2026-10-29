@@ -27,7 +27,7 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 		}
 		return 0, 0
 	}}
-	hermes, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 16, Enabled: true})
+	hermes, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", SSH: "pip@hermes", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +42,8 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 			listed = m
 		}
 	}
-	if listed.CI == nil || listed.CI.Running != 2 || listed.CI.Waiting != 5 || listed.CISlots != 16 {
-		t.Fatalf("hermes CI = %+v, slots %d; want 2 running and 5 waiting", listed.CI, listed.CISlots)
+	if listed.CI == nil || listed.CI.Running != 2 || listed.CI.Waiting != 5 {
+		t.Fatalf("hermes CI = %+v; want 2 running and 5 waiting", listed.CI)
 	}
 
 	detail, err := api.Machine(t.Context(), hermes.ID)
@@ -57,13 +57,7 @@ func TestMachineCIWorkAndRuns(t *testing.T) {
 		t.Fatalf("run suites = %v, want the suites the run prepared", got)
 	}
 
-	// The engine host has no CI role, so it keeps no queue figure. An engine
-	// that runs no local CI reports no work for any machine.
-	for _, m := range list {
-		if m.Local && m.CI != nil {
-			t.Fatalf("local CI = %+v, want no figure without the ci role", m.CI)
-		}
-	}
+	// An engine that runs no local CI reports no work for any machine.
 	api.CI = nil
 	api.CIQueue = nil
 	quiet, err := api.Machine(t.Context(), hermes.ID)

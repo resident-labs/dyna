@@ -22,7 +22,7 @@ func TestRepositoryDefinitionDrivesNonGoRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Enabled: true}}
 	legacy := func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		if fakeSystemdVersion(out, name, args) {
 			return nil
@@ -56,7 +56,7 @@ func TestRepositoryDefinitionDrivesNonGoRun(t *testing.T) {
 
 func TestHostCheckNeedsMachineConsent(t *testing.T) {
 	definition := parseRepositoryDefinition(t, true)
-	node := &Node{Name: "local", Slots: 1, Enabled: true}
+	node := &Node{Name: "local", Enabled: true}
 	runner := Runner{DataDir: t.TempDir(), Node: node, Command: func(context.Context, string, io.Reader, io.Writer, io.Writer, string, ...string) error {
 		t.Fatal("host check ran a command without machine consent")
 		return nil
@@ -85,7 +85,7 @@ func TestHostCheckNeedsMachineConsent(t *testing.T) {
 // room's repository commands stay in their container until someone allows them.
 func TestHostChecksRunOnlyForTheGrantedRoom(t *testing.T) {
 	definition := parseRepositoryDefinition(t, true)
-	node := &Node{Name: "local", Slots: 1, Enabled: true,
+	node := &Node{Name: "local", Enabled: true,
 		HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorRoot, Room: "room_a"}}}
 	if !node.HostChecksAllowed("room_a") {
 		t.Fatal("the granting room was refused")
@@ -102,7 +102,7 @@ func TestHostChecksRunOnlyForTheGrantedRoom(t *testing.T) {
 		t.Fatalf("host check for another room = %v, want ErrHostChecksDisabled", err)
 	}
 	// The owner's grant covers every room, including work that names none.
-	owner := &Node{Name: "local", Slots: 1, Enabled: true,
+	owner := &Node{Name: "local", Enabled: true,
 		HostChecksGrants: []machines.HostChecksGrant{{By: machines.GrantorOwner}}}
 	if !owner.HostChecksAllowed("room_b") || !owner.HostChecksAllowed("") {
 		t.Fatal("the owner's grant did not cover every room")

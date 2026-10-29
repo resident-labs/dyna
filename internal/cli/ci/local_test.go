@@ -12,8 +12,8 @@ import (
 
 func TestFindNodeSelectsMachines(t *testing.T) {
 	nodes := []localci.Node{
-		{Name: "this-box", Slots: 2, Enabled: true},
-		{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true},
+		{Name: "this-box", Enabled: true},
+		{Name: "hermes", SSH: "pip@hermeslab", Enabled: true},
 		{Name: "paused", SSH: "ari@paused", Enabled: false},
 	}
 	for _, tc := range []struct {
@@ -56,7 +56,7 @@ func TestDefaultNodeUsesTheOnlyEnabledMachine(t *testing.T) {
 
 func TestLocalCICommandsRegistered(t *testing.T) {
 	root := NewCommand()
-	for _, name := range []string{"run", "show", "tests", "node", "mode"} {
+	for _, name := range []string{"run", "show", "tests", "mode"} {
 		cmd, _, err := root.Find([]string{name})
 		if err != nil || cmd.Name() != name {
 			t.Fatalf("%s missing: %v", name, err)

@@ -68,7 +68,7 @@ func TestHostCheckKeepsItsExitRecordAndLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true, inner: "echo ran-the-command; exit 0"}
-	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	script := nodeCheckScript(Node{Name: "local"}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
 	detached := detachedDir(dir, check.id)
 	if err := startOnShell(t, stubs, detached, script); err != nil {
 		t.Fatal(err)
