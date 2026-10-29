@@ -107,6 +107,9 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		}
 		defer cleanup()
 		for _, arg := range cmd.Args {
+			if text, ok := strings.CutPrefix(arg, "body="); ok {
+				return text
+			}
 			if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
 				data, err := os.ReadFile(path)
 				if err != nil {
@@ -139,18 +142,69 @@ func TestAttributionEndsPublishedBodies(t *testing.T) {
 		args []string
 		want string
 	}{
-		"body file":      {[]string{"pr", "create", "--title", "t", "--body-file", "body.md"}, "Body text\n\nOpened by an agent.\n"},
-		"inline body":    {[]string{"issue", "create", "-b", "Inline"}, "Inline\n\nOpened by an agent.\n"},
-		"attached body":  {[]string{"issue", "create", "--body=Inline"}, "Inline\n\nOpened by an agent.\n"},
+		"body file":      {[]string{"pr", "create", "--title", "t", "--body-file", "body.md"}, "Opened by an agent.\n\nBody text\n"},
+		"inline body":    {[]string{"issue", "create", "-b", "Inline"}, "Opened by an agent.\n\nInline\n"},
+		"attached body":  {[]string{"issue", "create", "--body=Inline"}, "Opened by an agent.\n\nInline\n"},
 		"create no body": {[]string{"pr", "create", "--title", "t"}, "Opened by an agent.\n"},
-		"already there":  {[]string{"pr", "edit", "1", "--body", "Done\n\nOpened by an agent."}, "Done\n\nOpened by an agent.\n"},
+		"already there":  {[]string{"pr", "edit", "1", "--body", "Opened by an agent.\n\nDone"}, "Opened by an agent.\n\nDone\n"},
 		"edit no body":   {[]string{"pr", "edit", "1", "--title", "t"}, ""},
 		"not a body":     {[]string{"pr", "view", "1"}, ""},
+		"issue comment":  {[]string{"issue", "comment", "3", "--body", "Hi"}, "Opened by an agent.\n\nHi\n"},
+		"pr comment":     {[]string{"pr", "comment", "3", "-F", "body.md"}, "Opened by an agent.\n\nBody text\n"},
+		"review comment": {[]string{"pr", "review", "3", "--comment", "-b", "Fine"}, "Opened by an agent.\n\nFine\n"},
+		"approve":        {[]string{"pr", "review", "3", "--approve"}, ""},
+		"comment edit":   {[]string{"api", "-X", "PATCH", "repos/fork/project/issues/comments/9", "-f", "body=Hi"}, "Opened by an agent.\n\nHi"},
+		"comment delete": {[]string{"api", "-X", "DELETE", "repos/fork/project/issues/comments/9"}, ""},
+		// The room's own variant of the line, with other words, counts as attributed.
+		"variant there": {[]string{"pr", "comment", "3", "--body", "Opened by an agent. Other words\n\nHi"}, "Opened by an agent. Other words\n\nHi\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := body(t, tt.args...); got != tt.want {
 				t.Fatalf("body = %q, want %q", got, tt.want)
 			}
 		})
+	}
+	// A marker such as "> 🤖" spans the leading punctuation and the first word.
+	if got := withAttributionFirst("> 🤖 Opened by the swarm\n\nHi", "> 🤖 Opened by an agent."); got != "> 🤖 Opened by the swarm\n\nHi" {
+		t.Fatalf("a variant of the line was doubled: %q", got)
+	}
+	if got := withAttributionFirst("> quote\n\nHi", "> 🤖 Opened by an agent."); !strings.HasPrefix(got, "> 🤖 Opened by an agent.\n\n> quote") {
+		t.Fatalf("a quote was taken for the line: %q", got)
+	}
+}
+
+func TestAgentCommentEditsNeedTheRoomAccountsComment(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	if err := room.DefaultStore().UpdatePreferences(records[0].ID, func(r *room.Record) error {
+		r.Upstream, r.GitHubAccess = "github.com/up/project", room.GitHubReadWrite
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	patch := []string{"api", "-X", "PATCH", "repos/up/project/pulls/comments/7", "-f", "body=x"}
+	for name, args := range map[string][]string{
+		"room repo":   {"api", "--method=DELETE", "repos/fork/project/issues/comments/7"},
+		"upstream":    patch,
+		"other write": {"api", "-X", "PATCH", "repos/fork/project/issues/7", "-f", "body=x"},
+	} {
+		if err := checkWorkerPolicy(args); (err == nil) == (name == "other write") {
+			t.Fatalf("%s: worker policy error = %v", name, err)
+		}
+	}
+	if err := checkPolicy(ctx, "", repository{"github.com", "up/project"}, patch); err != nil {
+		t.Fatalf("upstream comment edit refused: %v", err)
+	}
+	previous := commentAuthor
+	t.Cleanup(func() { commentAuthor = previous })
+	commentAuthor = func(context.Context, *exec.Cmd, repository, string, commentCall) (string, error) {
+		return "Room-Bot", nil
+	}
+	cmd := exec.Command("gh", patch...)
+	if err := refuseForeignComment(ctx, cmd, repository{"github.com", "up/project"}, "token", "room-bot"); err != nil {
+		t.Fatalf("own comment refused: %v", err)
+	}
+	if err := refuseForeignComment(ctx, cmd, repository{"github.com", "up/project"}, "token", "someone-else"); err == nil {
+		t.Fatal("a comment of another author was allowed")
 	}
 }
