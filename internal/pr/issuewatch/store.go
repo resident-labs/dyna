@@ -13,11 +13,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-// schemaVersion 2 adds the events column. Version 1 stores of this branch
-// migrate by adding it.
-const schemaVersion = 2
-
-const addEvents = `ALTER TABLE issue_watches ADD COLUMN events TEXT NOT NULL DEFAULT ''`
+const schemaVersion = 1
 
 const schema = `
 CREATE TABLE issue_watches (
@@ -33,6 +29,7 @@ CREATE TABLE issue_watches (
 	event_id   INTEGER NOT NULL DEFAULT 0,
 	etag       TEXT    NOT NULL DEFAULT '',
 	body       TEXT    NOT NULL DEFAULT '',
+	events     TEXT    NOT NULL DEFAULT '',
 	watch_id   TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (room, host, repo, number)
 );`
@@ -79,18 +76,9 @@ func (s Store) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "issuewatch.version", schemaVersion, func(conn *sql.Conn, old int) error {
-		ctx := context.Background()
-		if old < 1 {
-			if _, err := conn.ExecContext(ctx, schema); err != nil {
-				return err
-			}
-		}
-		if old < 2 {
-			_, err := conn.ExecContext(ctx, addEvents)
-			return err
-		}
-		return nil
+	err = database.Migrate(db, "issuewatch.version", schemaVersion, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), schema)
+		return err
 	})
 	if err != nil {
 		return nil, err
