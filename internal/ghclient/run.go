@@ -62,6 +62,9 @@ func RunWithAccount(ctx context.Context, cmd *exec.Cmd, before func(string) erro
 		if err != nil {
 			return err
 		}
+		if err := refuseForeignComment(ctx, cmd, r, token, login); err != nil {
+			return err
+		}
 	}
 	if before != nil {
 		if err := before(login); err != nil {
