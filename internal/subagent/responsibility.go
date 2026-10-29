@@ -80,7 +80,7 @@ func (m *Manager) ownedBy(ctx context.Context, infos []Info, repair bool) ([]own
 		}
 	}
 	err := errors.Join(
-		sessionlife.WithPublication(ctx, state.Root(base), "state.lock", collect(func() ([]owned, error) { return m.prOwned(byID) })),
+		sessionlife.WithPublication(ctx, state.Root(base), "state.lock", collect(func() ([]owned, error) { return m.prOwned(byID, repair) })),
 		collect(func() ([]owned, error) { return m.goalOwned(byID) })(),
 		collect(func() ([]owned, error) { return m.itemOwned(byID) })(),
 		collect(func() ([]owned, error) { return m.questionOwned(byID) })(),
@@ -110,9 +110,14 @@ func byRoom(byID map[string]Info) map[string][]Info {
 }
 
 // prOwned reads only the rows linked to the given sessions in each room. A
-// link that is not active owns the session nothing.
-func (m *Manager) prOwned(byID map[string]Info) ([]owned, error) {
+// link that is not active owns the session nothing. Only the close path
+// (repair) reads the store fresh; a count uses the shared snapshot.
+func (m *Manager) prOwned(byID map[string]Info, repair bool) ([]owned, error) {
 	root := state.Root(filepath.Dir(m.store().root()))
+	read := state.ReadForSessions
+	if repair {
+		read = state.ReadForSessionsFresh
+	}
 	var out []owned
 	var errs []error
 	for roomID, infos := range byRoom(byID) {
@@ -122,7 +127,7 @@ func (m *Manager) prOwned(byID map[string]Info) ([]owned, error) {
 			owners[info.ID] = info
 			ids = append(ids, info.ID)
 		}
-		st, err := state.ReadForSessions(root, roomID, ids...)
+		st, err := read(root, roomID, ids...)
 		if err != nil {
 			errs = append(errs, err)
 			continue
