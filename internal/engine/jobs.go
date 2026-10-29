@@ -136,6 +136,7 @@ type runJobInput struct {
 	IO string `json:"io"`
 	// Resources are named units the job holds for its whole run.
 	Resources []string `json:"resources"`
+	Workspace bool     `json:"workspace"`
 }
 
 func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) {
@@ -156,7 +157,7 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 		Node: in.Node, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
-		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources,
+		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources, Workspace: in.Workspace,
 	}
 	if in.IO != "" && in.IO != "heavy" && in.IO != "light" {
 		return jobs.Job{}, fmt.Errorf("io must be heavy or light, not %q", in.IO)
