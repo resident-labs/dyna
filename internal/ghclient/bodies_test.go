@@ -2,6 +2,7 @@ package ghclient
 
 import (
 	"context"
+	"dyna-agent/internal/room"
 	"errors"
 	"io"
 	"os"
@@ -85,5 +86,71 @@ func TestOwnerIdentityIgnoredForDynaCalls(t *testing.T) {
 	cmd := exec.Command("gh", "pr", "edit", "1", "--body", "by Pat Example")
 	if err := refuseOwnerIdentity(context.Background(), cmd); err != nil {
 		t.Fatalf("owner edit refused: %v", err)
+	}
+}
+
+func TestAttributionEndsPublishedBodies(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	ctx := WithAgentText(WithRoom(context.Background(), records[0].ID))
+	own := repository{"github.com", "fork/project"}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "body.md"), []byte("Body text\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	body := func(t *testing.T, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("gh", args...)
+		cmd.Dir = dir
+		cleanup, err := withAttribution(ctx, cmd, own)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		for _, arg := range cmd.Args {
+			if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(data)
+			}
+		}
+		return ""
+	}
+	// Dyna's own calls, such as the owner's PR edit, are never changed.
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
+		t.Fatal(err)
+	}
+	owner := exec.Command("gh", "pr", "edit", "1", "--body", "Owner text")
+	if _, err := withAttribution(WithRoom(context.Background(), records[0].ID), owner, own); err != nil || owner.Args[len(owner.Args)-1] != "Owner text" {
+		t.Fatalf("owner edit changed: %q, %v", owner.Args, err)
+	}
+	if err := room.DefaultStore().SetAttribution(records[0].ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Without a setting, the command runs as given.
+	if got := body(t, "pr", "create", "--body-file", "body.md"); got != "" {
+		t.Fatalf("no attribution set, body file = %q", got)
+	}
+	if err := room.DefaultStore().SetAttribution(records[0].ID, "Opened by an agent."); err != nil {
+		t.Fatal(err)
+	}
+	for name, tt := range map[string]struct {
+		args []string
+		want string
+	}{
+		"body file":      {[]string{"pr", "create", "--title", "t", "--body-file", "body.md"}, "Body text\n\nOpened by an agent.\n"},
+		"inline body":    {[]string{"issue", "create", "-b", "Inline"}, "Inline\n\nOpened by an agent.\n"},
+		"attached body":  {[]string{"issue", "create", "--body=Inline"}, "Inline\n\nOpened by an agent.\n"},
+		"create no body": {[]string{"pr", "create", "--title", "t"}, "Opened by an agent.\n"},
+		"already there":  {[]string{"pr", "edit", "1", "--body", "Done\n\nOpened by an agent."}, "Done\n\nOpened by an agent.\n"},
+		"edit no body":   {[]string{"pr", "edit", "1", "--title", "t"}, ""},
+		"not a body":     {[]string{"pr", "view", "1"}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := body(t, tt.args...); got != tt.want {
+				t.Fatalf("body = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
