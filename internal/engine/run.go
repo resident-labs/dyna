@@ -584,6 +584,7 @@ func run(signalCtx context.Context, f Options, noUpdate bool) (runErr error) {
 	}
 	dropDynaEnv()
 	rooms := roomsvc.New(nil)
+	rooms.Notify.Sessions.CloseApprovals = rooms.Approvals.CloseSession
 	files := &filesvc.Service{Rooms: rooms.Notify.Rooms, SessionInRoom: rooms.SessionInRoom, AttachmentBytes: rooms.AttachmentBytes}
 	rooms.Notify.Sessions.Executable, err = fsutil.RunningExecutable()
 	if err != nil {

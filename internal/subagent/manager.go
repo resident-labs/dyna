@@ -107,6 +107,8 @@ type Manager struct {
 
 	// ClosePRs hands live PR roles to the heir through the PR service.
 	ClosePRs func(context.Context, Info, Info) ([]sessionclose.Outcome, error)
+	// CloseApprovals cancels the closing requester's requests and moves held ones.
+	CloseApprovals func(context.Context, Info, Info) error
 	// DeliverClosedForward routes a stored forwarded post through the root seat.
 	DeliverClosedForward func(context.Context, room.Message) error
 
@@ -1198,7 +1200,17 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		if err := m.forwardClosedInbox(ctx, info); err != nil {
 			return info, err
 		}
-		return info, m.withdrawClosedQuestions(info)
+		if err := m.withdrawClosedQuestions(info); err != nil {
+			return info, err
+		}
+		if m.CloseApprovals != nil {
+			heir, err := m.closeHeir(info)
+			if err != nil {
+				return info, err
+			}
+			return info, m.CloseApprovals(ctx, info, heir)
+		}
+		return info, nil
 	}
 	closedForCleanup := false
 	defer func() {
@@ -1401,6 +1413,11 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	}
 	if len(moved) > 0 && m.HandOffTerminalRequests != nil {
 		if err := m.HandOffTerminalRequests(ctx, moved); err != nil {
+			return info, errors.Join(forwardErr, err)
+		}
+	}
+	if m.CloseApprovals != nil {
+		if err := m.CloseApprovals(ctx, info, heir); err != nil {
 			return info, errors.Join(forwardErr, err)
 		}
 	}
