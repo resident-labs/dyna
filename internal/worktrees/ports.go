@@ -64,12 +64,13 @@ func blockFree(start int, isFree func(int) bool) bool {
 }
 
 // reclaimPortBlock frees one port block when the pool is full. A record whose
-// directory is proven absent is deleted. Otherwise the oldest record whose tree
-// is clean, merged and has a closed owner, and whose block is free of sockets,
-// only loses its port; the tree stays. Cleanup rules run once per repository,
-// so the cost does not grow with the number of trees. Every change compares
-// the record read earlier, so a record that another caller replaced meanwhile
-// is left alone. It reports whether a block was freed.
+// directory is proven absent is deleted. Otherwise the oldest record whose
+// recorded and inferred owners are all closed, and whose block is free of
+// sockets, only loses its port; the tree stays. Dirty and unmerged trees are
+// eligible because no file or branch changes. Ownership scans run once per
+// repository, so the cost does not grow with the number of trees. Every change
+// compares the record read earlier, so a record that another caller replaced
+// meanwhile is left alone. It reports whether a block was freed.
 func reclaimPortBlock(ctx context.Context, db *sql.DB, records []Record, except string) bool {
 	var held []Record
 	freed := false
@@ -151,9 +152,11 @@ func releaseRecord(ctx context.Context, db *sql.DB, orig Record, remove bool) (b
 	return released, err
 }
 
-// reclaimablePaths applies cleanup's keep rules to every tree of repo with one
-// scan, without fetching or removing anything. It returns the cleaned paths of
-// the trees cleanup would remove; an uncertain scan returns none. Tests replace it.
+// reclaimablePaths returns trees whose recorded and inferred owners are all
+// closed. It ignores file and merge status because reclaiming a port preserves
+// the tree. Locked, unknown, unreadable and open-owned trees keep their ports.
+// One scan covers every tree of repo without fetching or removing anything.
+// An uncertain scan returns none. Tests replace it.
 var reclaimablePaths = func(ctx context.Context, repo string) map[string]bool {
 	trees, err := scan(ctx, repo, &GCOptions{history: &runHistory{}})
 	if err != nil {
@@ -161,11 +164,51 @@ var reclaimablePaths = func(ctx context.Context, repo string) map[string]bool {
 	}
 	out := map[string]bool{}
 	for _, t := range trees {
-		if decide(t, SessionClosed).Action == "would remove" {
+		if portReclaimable(t) {
 			out[filepath.Clean(t.Path)] = true
 		}
 	}
 	return out
+}
+
+// portReclaimable requires positive proof that every owner is closed. Unlike
+// tree removal, port reclamation does not care about dirty files or ancestry.
+func portReclaimable(t Tree) bool {
+	if t.protected != "" || t.sessionID == "unverified" {
+		return false
+	}
+	known := false
+	if t.runID != "" {
+		closed, err := workflowClosed(t.runID)
+		if err != nil || !closed {
+			return false
+		}
+		known = true
+	}
+	if t.sessionID != "" {
+		closed, err := SessionClosed(t.sessionID)
+		if err != nil || !closed {
+			return false
+		}
+		known = true
+	}
+	for _, owner := range t.inferred.Sessions {
+		if !owner.Closed {
+			return false
+		}
+		closed, err := SessionClosed(owner.ID)
+		if err != nil || !closed {
+			return false
+		}
+		known = true
+	}
+	for _, owner := range t.inferred.Runs {
+		if !owner.Closed {
+			return false
+		}
+		known = true
+	}
+	return known
 }
 
 // portFree decides whether a port is free. Tests replace it to force a busy host.
@@ -211,6 +254,79 @@ func PortEnvForDir(ctx context.Context, dir string) map[string]string {
 	return map[string]string{"DYNA_PORT": "", "DYNA_PORTS": "", "PORT": ""}
 }
 
+// ensurePort allocates a released block without replacing any other record
+// field. The transaction reloads the current row, so concurrent retention or
+// ownership updates survive, and a removed record is never recreated.
+func ensurePort(ctx context.Context, path string) (Record, error) {
+	safe, err := recordKey(path)
+	if err != nil {
+		return Record{}, err
+	}
+	db, err := registryDB()
+	if err != nil {
+		return Record{}, err
+	}
+	for {
+		records, err := loadRecords(ctx, db, "")
+		if err != nil {
+			return Record{}, err
+		}
+		current := -1
+		for i := range records {
+			if records[i].Path == safe {
+				current = i
+				break
+			}
+		}
+		if current < 0 {
+			return Record{}, fmt.Errorf("worktree %s is not registered", safe)
+		}
+		if records[current].Port != 0 {
+			return records[current], nil
+		}
+		port, err := allocatePort(safe, records, portFree)
+		if err != nil {
+			if reclaimPortBlock(ctx, db, records, safe) {
+				continue
+			}
+			return Record{}, fmt.Errorf("allocate worktree port: %w", err)
+		}
+		var allocated Record
+		// Worktree records have no change-bus consumer.
+		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			current, err := loadRecords(ctx, conn, "WHERE path=?", safe)
+			if err != nil {
+				return err
+			}
+			if len(current) != 1 {
+				return fmt.Errorf("worktree %s is not registered", safe)
+			}
+			if current[0].Port != 0 {
+				allocated = current[0]
+				return nil
+			}
+			records, err := loadRecords(ctx, conn, "")
+			if err != nil {
+				return err
+			}
+			for _, other := range records {
+				if other.Path != safe && other.Port == port {
+					return errPortClaimed
+				}
+			}
+			current[0].Port = port
+			if err := saveRecord(ctx, conn, current[0]); err != nil {
+				return err
+			}
+			allocated = current[0]
+			return nil
+		})
+		if !errors.Is(err, errPortClaimed) {
+			return allocated, err
+		}
+	}
+}
+
 // ForDir returns the record of the registered worktree that contains dir.
 // Git reports physical paths, while records keep the configured path, so the
 // match resolves symlinks on both sides.
@@ -229,6 +345,9 @@ func ForDir(ctx context.Context, dir string) (Record, error) {
 	}
 	for _, rec := range records {
 		if got, err := filepath.EvalSymlinks(rec.Path); err == nil && got == want {
+			if rec.Port == 0 {
+				return ensurePort(ctx, rec.Path)
+			}
 			return rec, nil
 		}
 	}
