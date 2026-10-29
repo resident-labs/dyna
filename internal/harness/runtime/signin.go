@@ -313,11 +313,25 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	replaced := a.privateLogins[id]
 	login := &privateRuntimeLogin{flow: flow, signIn: signIn, harness: harness}
 	a.privateLogins[id] = login
+	hold := scratchPathsOf(replaced)
+	for _, path := range hold {
+		if a.settlingScratch == nil {
+			a.settlingScratch = map[string]bool{}
+		}
+		a.settlingScratch[path] = true
+	}
 	a.privateLoginMu.Unlock()
 	if replaced != nil {
 		// A flow can outlive its login child, so a new sign-in for the same
 		// card settles the flow it replaces instead of abandoning its folder.
+		// Its folder stays owned until that settlement ends, so a concurrent
+		// sign-in's sweep cannot take it while the settlement still runs.
 		_ = settlePrivateLogin(replaced)
+		a.privateLoginMu.Lock()
+		for _, path := range hold {
+			delete(a.settlingScratch, path)
+		}
+		a.privateLoginMu.Unlock()
 	}
 	go func() {
 		a.watchPrivateSignIn(ctx, login, spec, cmd, out, writer, cancel, func() {

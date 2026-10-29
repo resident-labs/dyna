@@ -334,6 +334,65 @@ func TestPiProviderFlowSweepSparesTheFlowItsFinishIsCompleting(t *testing.T) {
 	}
 }
 
+// Replacing a flow unregisters it before its settlement joins a finish that
+// is still completing, so the replaced flow stays owned until the settlement
+// ends: another sign-in start that races the replacement must spare its
+// folder, and the settlement itself removes it.
+func TestPiSignInReplacementKeepsItsFolderOwnedUntilSettled(t *testing.T) {
+	r := providerKeysRuntime(t)
+	bundle := install(t, r.Bundles, "pi", "1.3.0-dyna.9")
+	target := seedPiAccount(t, r, "kimi-code", `{"type":"api_key","key":"keep-a"}`)
+	if _, err := r.beginPiProviderSignIn(bundle.Executable, target.ID, store.ProviderKimiCode); err != nil {
+		t.Fatal(err)
+	}
+	login := r.findPrivateLogin(piProviderSignInID)
+	if login == nil || login.flow == nil {
+		t.Fatal("the sign-in flow is not running")
+	}
+	<-login.signIn.done
+	cwd := login.flow.Cwd
+	stale := time.Now().Add(-2 * signInTimeout)
+	if err := os.Chtimes(cwd, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	// The replacement settlement stops inside the old flow cancel, the way it
+	// would wait for a finish still completing from the folder.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	orig := login.flow.Cancel
+	login.flow.Cancel = func() error {
+		close(entered)
+		<-release
+		return orig()
+	}
+	replaced := make(chan error, 1)
+	go func() {
+		_, err := r.beginPiProviderSignIn(bundle.Executable, target.ID, store.ProviderKimiCode)
+		replaced <- err
+	}()
+	<-entered
+	// The old flow is unregistered and its settlement has not finished, so a
+	// concurrent sign-in start must spare its folder.
+	flow, err := r.piProviderFlow(bundle.Executable, target.ID, store.ProviderKimiCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = flow.Cancel() })
+	if _, err := os.Stat(cwd); err != nil {
+		t.Fatalf("a sweep took the folder of a flow mid-settlement: %v", err)
+	}
+	close(release)
+	if err := <-replaced; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(cwd); !os.IsNotExist(err) {
+		t.Fatalf("the settled flow kept its folder: %v", err)
+	}
+	if err := r.CancelPrivateRuntimeLogin(piProviderSignInID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The split gives every provider of the shared login its own account and home,
 // and writes only that provider's entry into the home. The shared login keeps
 // serving turns that started before the split.
