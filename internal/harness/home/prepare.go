@@ -579,8 +579,10 @@ func globalConfig(owner map[string]string, home, config string) string {
 	}
 	// The owner's files supply tools, aliases and signing, but never who an agent
 	// commit comes from: this section follows them, so it wins. A repository's
-	// own config or GIT_AUTHOR_* still overrides it.
-	return result + "[user]\n\tname = " + gitQuote(AgentGitName) + "\n\temail = " + gitQuote(AgentGitEmail) + "\n"
+	// own config or GIT_AUTHOR_* still overrides it. The owner's signing key
+	// belongs to the owner, and Git would pick a key by the agent address, so
+	// agent commits and tags are unsigned.
+	return result + "[user]\n\tname = " + gitQuote(AgentGitName) + "\n\temail = " + gitQuote(AgentGitEmail) + "\n[commit]\n\tgpgSign = false\n[tag]\n\tgpgSign = false\n"
 }
 
 // limitedOutput prevents an inherited executable from returning unbounded data.
