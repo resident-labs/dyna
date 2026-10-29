@@ -13,23 +13,49 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/sessionlife"
 )
 
 // Service owns approval routing, persistence and delivery.
 type Service struct {
-	Rooms    *room.Store
-	Sessions *subagent.Store
-	DataDir  string
-	Now      func() time.Time
+	Rooms       *room.Store
+	SessionRoot string
+	Now         func() time.Time
 
 	mu      sync.Mutex
 	changes map[string]chan struct{}
+
+	execMu    sync.Mutex
+	executors map[Kind]ExecuteFunc
+	running   map[string]bool
+	runCtx    context.Context
 }
 
 // New pairs approvals with the room and session stores.
-func New(rooms *room.Store, sessions *subagent.Store) *Service {
-	return &Service{Rooms: rooms, Sessions: sessions, changes: map[string]chan struct{}{}}
+func New(rooms *room.Store, sessionRoot string) *Service {
+	return &Service{Rooms: rooms, SessionRoot: sessionRoot, changes: map[string]chan struct{}{}, executors: map[Kind]ExecuteFunc{}, running: map[string]bool{}, runCtx: context.Background()}
+}
+
+// sessionMeta is the stored session ancestry and identity that approvals need.
+// Keeping this small avoids coupling the approval core to harness integrations.
+type sessionMeta struct {
+	ID            string
+	Name          string
+	Role          string
+	RoomID        string
+	Room          string
+	ParentSession string
+	Closed        time.Time
+	Closing       *sessionlife.Closing
+}
+
+func (m sessionMeta) Address() string       { return m.Room + ":" + m.Name }
+func (m sessionMeta) EffectiveName() string { return m.Name }
+
+func (s *Service) session(id string) (sessionMeta, error) {
+	var meta sessionMeta
+	err := sessionlife.Load(s.SessionRoot, id, &meta)
+	return meta, err
 }
 
 func (s *Service) now() time.Time {
@@ -65,7 +91,7 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 	if err != nil {
 		return Request{}, err
 	}
-	requester, err := s.Sessions.ReadMeta(actor.Session)
+	requester, err := s.session(actor.Session)
 	if err != nil {
 		return Request{}, err
 	}
@@ -90,8 +116,9 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 	auto := in.Class == ClassAgent && actor.Role == authority.Root
 	if auto {
 		r.State = StateApproved
+		r.Result = &Result{Actor: requester.Address()}
 	}
-	if existing, err := s.duplicate(r.Room, r.Requester, r.PayloadHash); err != nil {
+	if existing, err := s.duplicate(r.Room, r.Requester, r.Kind, r.Class, r.PayloadHash); err != nil {
 		return Request{}, err
 	} else if existing.ID != "" {
 		if err := s.postRequested(existing, nil); err != nil {
@@ -120,6 +147,9 @@ func (s *Service) Create(ctx context.Context, actor authority.Actor, in CreateIn
 		return Request{}, err
 	}
 	s.changed(r.Room, r.ID)
+	if auto {
+		s.trigger(r)
+	}
 	return s.public(r)
 }
 
@@ -147,7 +177,7 @@ func (s *Service) Decide(ctx context.Context, actor authority.Actor, in Decision
 	if actor.Role == authority.Owner {
 		actorID, actorName = Owner, Owner
 	} else {
-		info, err := s.Sessions.ReadMeta(actor.Session)
+		info, err := s.session(actor.Session)
 		if err != nil {
 			return Request{}, err
 		}
@@ -164,6 +194,7 @@ func (s *Service) Decide(ctx context.Context, actor authority.Actor, in Decision
 	var result *Result
 	switch in.Action {
 	case ActionApprove:
+		result = &Result{Actor: actorName}
 	case ActionDeny:
 		state = StateDenied
 		result = &Result{Actor: actorName, Reason: strings.TrimSpace(in.Reason)}
@@ -211,6 +242,9 @@ func (s *Service) Decide(ctx context.Context, actor authority.Actor, in Decision
 		}
 	}
 	s.changed(r.Room, r.ID)
+	if state == StateApproved {
+		s.trigger(r)
+	}
 	return s.public(r)
 }
 
@@ -227,7 +261,7 @@ func (s *Service) Cancel(ctx context.Context, actor authority.Actor, roomRef, id
 	if actor.Session == "" || actor.Session != r.Requester {
 		return Request{}, errors.New("only the requester can cancel an approval")
 	}
-	requester, err := s.Sessions.ReadMeta(r.Requester)
+	requester, err := s.session(r.Requester)
 	if err != nil {
 		return Request{}, err
 	}
@@ -375,8 +409,12 @@ func (s *Service) expire(ctx context.Context, r Request) error {
 
 // CloseSession cancels the closing requester's requests and moves requests it
 // held to the already selected open heir, or to the owner.
-func (s *Service) CloseSession(ctx context.Context, info, heir subagent.Info) error {
-	requests, err := s.pending(info.RoomID)
+func (s *Service) CloseSession(ctx context.Context, roomID, closingID, heirID string) error {
+	info, err := s.session(closingID)
+	if err != nil {
+		return err
+	}
+	requests, err := s.pending(roomID)
 	if err != nil {
 		return err
 	}
@@ -394,7 +432,7 @@ func (s *Service) CloseSession(ctx context.Context, info, heir subagent.Info) er
 				s.changed(r.Room, r.ID)
 			}
 		case r.atID == info.ID:
-			next := heir.ID
+			next := heirID
 			if next == "" {
 				next = Owner
 			}
@@ -415,14 +453,14 @@ func (s *Service) CloseSession(ctx context.Context, info, heir subagent.Info) er
 }
 
 func (s *Service) nextHolder(roomID, sessionID string) (string, error) {
-	info, err := s.Sessions.ReadMeta(sessionID)
+	info, err := s.session(sessionID)
 	if err != nil {
 		return "", err
 	}
 	seen := map[string]bool{sessionID: true}
 	for id := info.ParentSession; id != "" && !seen[id]; {
 		seen[id] = true
-		parent, err := s.Sessions.ReadMeta(id)
+		parent, err := s.session(id)
 		if err != nil {
 			return "", err
 		}
@@ -450,7 +488,7 @@ func (s *Service) holderName(id string) (string, error) {
 	if id == Owner {
 		return Owner, nil
 	}
-	info, err := s.Sessions.ReadMeta(id)
+	info, err := s.session(id)
 	if err != nil {
 		return "", err
 	}
@@ -461,7 +499,7 @@ func (s *Service) holderAddress(rec room.Record, id string) (string, map[string]
 	if id == Owner {
 		return rec.Name, nil, nil
 	}
-	info, err := s.Sessions.ReadMeta(id)
+	info, err := s.session(id)
 	if err != nil {
 		return "", nil, err
 	}
@@ -474,7 +512,7 @@ func (s *Service) postRequested(r Request, in *CreateInput) error {
 	if err != nil {
 		return err
 	}
-	requester, err := s.Sessions.ReadMeta(r.Requester)
+	requester, err := s.session(r.Requester)
 	if err != nil {
 		return err
 	}
@@ -531,7 +569,7 @@ func (s *Service) postDecided(r Request, actor string, action Action, reason, ne
 }
 
 func (s *Service) postResult(r Request, quiet bool) error {
-	requester, err := s.Sessions.ReadMeta(r.Requester)
+	requester, err := s.session(r.Requester)
 	if err != nil {
 		return err
 	}
