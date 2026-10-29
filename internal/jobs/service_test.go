@@ -240,6 +240,25 @@ func TestIdleTimeoutStopsTheJob(t *testing.T) {
 	}
 }
 
+// A failed idle stop leaves the job open. The existing poll retries the stop
+// and only the confirmed stop produces the finished event.
+func TestIdleTimeoutRetriesFailedStop(t *testing.T) {
+	svc, fake, reporter, _ := newService(t, blockingJob("working"))
+	defer svc.Stop()
+	fake.FailStops(1)
+	idle := 5 * time.Second
+	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished := <-reporter.finished; finished.State != StateTimedOut || finished.Note != "no output for 5s" {
+		t.Fatalf("finished = %+v, want timed_out after the retry", finished)
+	}
+	if got := fake.StopCount(); got != 2 {
+		t.Fatalf("stop calls = %d, want the failed call and one retry", got)
+	}
+}
+
 // An idle stop drains every log chunk that the regular 256 KiB polls have
 // not copied yet before the finished event.
 func TestIdleTimeoutDrainsRemainingLog(t *testing.T) {
