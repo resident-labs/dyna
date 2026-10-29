@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/jobs"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/roommcp"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runsvc"
 	"dyna-agent/internal/store"
@@ -39,6 +40,7 @@ type services struct {
 	events    *hub.Hub
 	git       *gitsvc.Service
 	rooms     *roomsvc.Service
+	roommcp   *roommcp.Service
 	terminals *terminalsvc.Service
 	runtime   *harnessruntime.Runtime
 	accounts  *service.Service
@@ -487,6 +489,18 @@ func bindings(s services) []websvc.Binding {
 		// account, so no two copies renew one refresh token.
 		{Name: "AccountsImport", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.accountsImport},
 		{Name: "ProfileModels", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.accounts.ProfileModels},
+		{Name: "RoomMCPSetToken", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.SetToken},
+		{Name: "RoomMCPRemoveToken", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.RemoveToken},
+		{Name: "RoomMCPRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Remove},
+		{Name: "RoomMCPAttach", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Attach},
+		{Name: "RoomMCPAllow", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.Allow},
+		{Name: "RoomMCPBlockTerm", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.BlockTerm},
+		{Name: "RoomMCPAllowLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyOwner, Method: s.roommcp.AllowLogin},
+		// Root may detach, list tools and grant read. The service checks the caller's room and role.
+		{Name: "RoomMCPDetach", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Detach},
+		{Name: "RoomMCPTools", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Tools},
+		{Name: "RoomMCPGrant", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyCLI, Method: s.roommcp.Grant},
+		{Name: "RoomMCPList", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.roomMCPList},
 		{Name: "UsageRollup", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.UsageRollup},
 		{Name: "ProfileUsage", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ProfileUsage},
 		{Name: "Computers", Access: websvc.Read, Scope: websvc.ScopeComputers, Method: s.computers.Computers},
@@ -498,6 +512,14 @@ func bindings(s services) []websvc.Binding {
 		{Name: "VoiceSay", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voiceSay},
 		{Name: "VoiceStop", Access: websvc.Write, Scope: websvc.ScopeOperate, Policy: policyOwner, Method: s.voice.Stop},
 	}...)
+}
+
+// roomMCPList answers an engine that runs read-only, which has no MCP service.
+func (s services) roomMCPList(ctx context.Context, roomRef string) ([]roommcp.ServerView, error) {
+	if s.roommcp == nil {
+		return nil, websvc.ErrReadOnly
+	}
+	return s.roommcp.List(ctx, roomRef)
 }
 
 func callsFor(s services, readOnly bool) (map[string]websvc.Call, map[string]websvc.Scope, error) {
