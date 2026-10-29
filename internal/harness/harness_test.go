@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
+	"dyna-agent/internal/workeroutput"
 )
 
 // noBoundaryWait is steering.maxToolWait for fake CLIs that print no output
@@ -768,6 +769,19 @@ func TestModelFallbackDoesNotReplayUnresumableActivity(t *testing.T) {
 		JournalOptions{}, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
 	if err == nil || result.Model != "a" || IsModelCoolingDown(p.Name, "b", cooldownNow()) {
 		t.Fatalf("unresumable work was replayed: %#v, %v", result, err)
+	}
+}
+
+// A Pi model streams thinking deltas whose completed block arrives only
+// minutes later. Those deltas are startup activity, so the startup bound
+// treats the run as started instead of aborting a healthy slow first
+// thought (D-434).
+func TestStartupActivityCountsStreamedDeltas(t *testing.T) {
+	var r runState
+	r.observeLine(&workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON},
+		`{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"I'm resuming."}}`)
+	if !r.hasStartupActivity() {
+		t.Fatal("a streamed thinking delta did not count as startup activity")
 	}
 }
 
