@@ -81,6 +81,44 @@ return await Promise.all([
 	}
 }
 
+func TestJobResumeRejectsPartialConcurrentJournal(t *testing.T) {
+	script := `
+async function branch(shouldYield, skip) {
+  if (skip) return -1
+  if (shouldYield) await Promise.resolve()
+  return (await job({command: ['same']})).exitCode
+}
+return await Promise.all([
+  branch(args.wait === 'a', args.skip === 'a'),
+  branch(args.wait === 'b', args.skip === 'b'),
+])
+`
+	source, err := runstore.Create("partial job source", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &enginefake.Engine{JobExitCodes: map[string]int{"job_1": 0, "job_2": 7}}
+	raw, _, err := runCommandScript(t, script, Options{Run: source, Args: map[string]any{"wait": "a", "skip": "a"}, Engine: fake, JobNamespace: source.Meta.ID})
+	if err != nil || raw != `[-1,0]` {
+		t.Fatalf("partial source = %s, %v", raw, err)
+	}
+	entries, err := runstore.ReadJournal(source.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := runstore.Create("partial job resumed", script, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = runCommandScript(t, script, Options{Run: resumed, Args: map[string]any{"wait": "b"}, Engine: fake, Cache: NewCache(entries), JobNamespace: source.Meta.ID})
+	if err == nil {
+		t.Fatal("partial concurrent journal replay succeeded")
+	}
+	if got := len(fake.JobStarts()); got != 1 {
+		t.Fatalf("RunJob calls = %d, want no partial-journal replay submission", got)
+	}
+}
+
 func TestJobResumeParallelIdenticalCallsKeepResults(t *testing.T) {
 	script := `
 async function branch(shouldYield) {

@@ -98,6 +98,7 @@ func (c *Cache) addExecs(entries []runstore.JournalEntry) {
 // Any submitted job ID stays resumable after an interrupted wait.
 func (c *Cache) addJobs(entries []runstore.JournalEntry) {
 	calls := map[string]map[int]bool{}
+	unsafe := map[string]bool{}
 	for _, e := range entries {
 		if e.RequestHash == "" || e.PositionHash == "" {
 			continue
@@ -107,9 +108,10 @@ func (c *Cache) addJobs(entries []runstore.JournalEntry) {
 			calls[identity] = map[int]bool{}
 		}
 		calls[identity][e.ID] = true
+		unsafe[identity] = unsafe[identity] || e.JobReplayUnsafe
 	}
 	for identity, invocations := range calls {
-		c.ambiguousJobs[identity] = len(invocations) > 1
+		c.ambiguousJobs[identity] = len(invocations) > 1 || unsafe[identity]
 	}
 	last := map[int]runstore.JournalEntry{}
 	for _, e := range entries {
