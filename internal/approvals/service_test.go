@@ -14,17 +14,16 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
-	"dyna-agent/internal/subagent"
 )
 
 type fixture struct {
 	service *Service
 	rooms   *room.Store
 	rec     room.Record
-	root    subagent.Meta
-	parent  subagent.Meta
-	child   subagent.Meta
-	sibling subagent.Meta
+	root    sessionMeta
+	parent  sessionMeta
+	child   sessionMeta
+	sibling sessionMeta
 	now     time.Time
 }
 
@@ -47,9 +46,9 @@ func newFixture(t *testing.T) *fixture {
 			t.Error(err)
 		}
 	})
-	sessions := &subagent.Store{Root: filepath.Join(dataDir, "sessions")}
+	sessions := filepath.Join(dataDir, "sessions")
 	f := &fixture{rooms: rooms, rec: rec, now: time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)}
-	f.root = f.session(t, sessions, "root", "", subagent.RoleRoot)
+	f.root = f.session(t, sessions, "root", "", "root")
 	f.parent = f.session(t, sessions, "parent", f.root.ID, "")
 	f.child = f.session(t, sessions, "child", f.parent.ID, "")
 	f.sibling = f.session(t, sessions, "sibling", f.parent.ID, "")
@@ -58,18 +57,18 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-func (f *fixture) session(t *testing.T, store *subagent.Store, name, parent, role string) subagent.Meta {
+func (f *fixture) session(t *testing.T, store, name, parent, role string) sessionMeta {
 	t.Helper()
-	meta := subagent.Meta{ID: subagent.NewID(), Name: name, Role: role, RoomID: f.rec.ID, Room: f.rec.Name, ParentSession: parent, Created: f.now, LastActivity: f.now}
-	if err := sessionlife.SaveContext(context.Background(), store.Root, meta.ID, meta); err != nil {
+	meta := sessionMeta{ID: "ses_test_" + name, Name: name, Role: role, RoomID: f.rec.ID, Room: f.rec.Name, ParentSession: parent}
+	if err := sessionlife.SaveContext(context.Background(), store, meta.ID, meta); err != nil {
 		t.Fatal(err)
 	}
 	return meta
 }
 
-func (f *fixture) actor(meta subagent.Meta) authority.Actor {
+func (f *fixture) actor(meta sessionMeta) authority.Actor {
 	role := authority.Session
-	if meta.Role == subagent.RoleRoot {
+	if meta.Role == "root" {
 		role = authority.Root
 	}
 	return authority.Actor{Role: role, Session: meta.ID, Room: f.rec.ID}
@@ -153,6 +152,14 @@ func TestDuplicateCancelAndExpiry(t *testing.T) {
 	if err != nil || duplicate.ID != r.ID {
 		t.Fatalf("duplicate = %+v, %v; want %s", duplicate, err, r.ID)
 	}
+	ownerClass, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("fake"), Class: ClassOwner, Payload: json.RawMessage(`{"operation":"write"}`)})
+	if err != nil || ownerClass.ID == r.ID {
+		t.Fatalf("owner-class request reused agent request: %+v, %v", ownerClass, err)
+	}
+	otherKind, err := f.service.Create(context.Background(), f.actor(f.child), CreateInput{Kind: Kind("other"), Class: ClassAgent, Payload: json.RawMessage(`{"operation":"write"}`)})
+	if err != nil || otherKind.ID == r.ID {
+		t.Fatalf("other kind reused fake request: %+v, %v", otherKind, err)
+	}
 	f.now = f.now.Add(DefaultExpiry + time.Second)
 	if err := f.service.ExpireDue(context.Background()); err != nil {
 		t.Fatal(err)
@@ -172,14 +179,14 @@ func TestDuplicateCancelAndExpiry(t *testing.T) {
 func TestCloseSessionMovesHolderAndCancelsRequester(t *testing.T) {
 	f := newFixture(t)
 	held := f.create(t, ClassAgent)
-	if err := f.service.CloseSession(context.Background(), subagent.Info{Meta: f.parent}, subagent.Info{Meta: f.root}); err != nil {
+	if err := f.service.CloseSession(context.Background(), f.rec.ID, f.parent.ID, f.root.ID); err != nil {
 		t.Fatal(err)
 	}
 	moved, err := f.service.Get(f.actor(f.child), f.rec.ID, held.ID)
 	if err != nil || moved.At != "root" {
 		t.Fatalf("moved holder = %+v, %v", moved, err)
 	}
-	if err := f.service.CloseSession(context.Background(), subagent.Info{Meta: f.child}, subagent.Info{Meta: f.root}); err != nil {
+	if err := f.service.CloseSession(context.Background(), f.rec.ID, f.child.ID, f.root.ID); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, err := f.service.Get(f.actor(f.child), f.rec.ID, held.ID)

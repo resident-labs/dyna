@@ -59,6 +59,9 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		go func() {
 			defer close(approvalDone)
 			if !readOnly {
+				if err := rooms.Approvals.RunApproved(watch); err != nil && watch.Err() == nil {
+					log.Printf("approval recovery: %v", err)
+				}
 				expireApprovals(watch, rooms.Approvals, t)
 			}
 		}()
