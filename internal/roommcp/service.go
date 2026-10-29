@@ -201,8 +201,9 @@ func (s *Service) setAttached(ctx context.Context, roomID, name string, attached
 	})
 }
 
-// open starts a fresh connection from the saved token and replaces any live one.
-func (s *Service) open(ctx context.Context, roomID, name string) (serverRuntime, error) {
+// dial builds a connection from the saved token. Nothing can use it until the
+// caller registers it.
+func (s *Service) dial(ctx context.Context, roomID, name string) (serverRuntime, error) {
 	var rawURL, id string
 	err := s.db.QueryRowContext(ctx, "SELECT url,credential_id FROM room_mcp_servers WHERE room=? AND name=?", roomID, name).Scan(&rawURL, &id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -232,13 +233,22 @@ func (s *Service) open(ctx context.Context, roomID, name string) (serverRuntime,
 	lifetime, cancel := context.WithCancel(context.Background())
 	rt := serverRuntime{client: client, lifetime: lifetime, cancel: cancel}
 	rt.initialize = sync.OnceValue(func() error { return client.Initialize(lifetime) })
+	return rt, nil
+}
+
+// open starts a fresh connection and replaces any live one. Attach uses it.
+func (s *Service) open(ctx context.Context, roomID, name string) (serverRuntime, error) {
+	rt, err := s.dial(ctx, roomID, name)
+	if err != nil {
+		return serverRuntime{}, err
+	}
 	key := serverKey{roomID, name}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if previous, ok := s.active[key]; ok {
 		previous.cancel()
 	}
 	s.active[key] = rt
-	s.mu.Unlock()
 	return rt, nil
 }
 
@@ -253,7 +263,11 @@ func (s *Service) forget(key serverKey, rt serverRuntime) {
 	}
 }
 
-// connection returns the live connection, opening one after an engine restart.
+// connection returns the live connection. After an engine restart it dials a
+// new one and registers it only if the server is still attached. Detach clears
+// the flag, then drops the live connection under the same lock, so a stale call
+// either sees the cleared flag or registers a connection that detach then ends.
+// No call can use a connection that was not checked.
 func (s *Service) connection(ctx context.Context, roomID, name string) (serverRuntime, error) {
 	key := serverKey{roomID, name}
 	s.mu.Lock()
@@ -262,19 +276,23 @@ func (s *Service) connection(ctx context.Context, roomID, name string) (serverRu
 	if ok {
 		return rt, nil
 	}
-	rt, err := s.open(ctx, roomID, name)
+	fresh, err := s.dial(ctx, roomID, name)
 	if err != nil {
 		return serverRuntime{}, err
 	}
-	// Detach clears the attached flag before it drops the connection. Read the
-	// flag after the new connection is registered: either this read sees the
-	// detach, or the detach's drop cancels this connection.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rt, ok := s.active[key]; ok {
+		fresh.cancel()
+		return rt, nil
+	}
 	var attached bool
 	if err := s.db.QueryRowContext(ctx, "SELECT attached FROM room_mcp_servers WHERE room=? AND name=?", roomID, name).Scan(&attached); err != nil || !attached {
-		s.forget(key, rt)
+		fresh.cancel()
 		return serverRuntime{}, errors.New("MCP server is detached")
 	}
-	return rt, nil
+	s.active[key] = fresh
+	return fresh, nil
 }
 
 // pin reads the server's tool list and stores it. A new tool starts off, and a
