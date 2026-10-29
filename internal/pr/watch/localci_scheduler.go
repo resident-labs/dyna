@@ -46,6 +46,65 @@ type registeredCIRuns struct {
 	runs   map[string]*registeredCIRun
 }
 
+// has reports whether key already has a run. The caller holds the runs lock.
+func (runs *registeredCIRuns) has(key string) bool {
+	return runs.runs[key] != nil
+}
+
+// add admits run under key unless admission is closed or the key already has a
+// run. The caller holds the runs lock.
+func (runs *registeredCIRuns) add(key string, run *registeredCIRun) bool {
+	if runs.closed.Load() || runs.has(key) {
+		return false
+	}
+	runs.runs[key] = run
+	return true
+}
+
+// finish removes key only when it still belongs to run. It takes the runs lock
+// itself and reports whether it removed the run.
+func (runs *registeredCIRuns) finish(key string, run *registeredCIRun) bool {
+	runs.Lock()
+	defer runs.Unlock()
+	if runs.runs[key] != run {
+		return false
+	}
+	delete(runs.runs, key)
+	return true
+}
+
+// cancelUnwanted cancels runs whose nodes no longer take CI and hosted runs
+// that no desired job names. The caller holds the runs lock.
+func (runs *registeredCIRuns) cancelUnwanted(desired map[string]registeredCIJob, enabled []localci.Node) {
+	for key, run := range runs.runs {
+		ready := false
+		for _, node := range enabled {
+			ready = ready || node.Name == run.node
+		}
+		_, wanted := desired[key]
+		// A local head's run belongs to the trial or the sync operation that
+		// asked for it, and the list of wanted hosted jobs never names it.
+		if !ready || !run.local && !wanted {
+			run.cancel()
+		}
+	}
+}
+
+// closeAdmission stops new admissions and copies the runs admitted so far.
+// Admission closes before this method waits for the run lock, which a tick
+// holds over its work, so a finishing tick cannot add a run that the snapshot
+// then misses.
+func (runs *registeredCIRuns) closeAdmission() []localCIStopTarget {
+	runs.closed.Store(true)
+	var targets []localCIStopTarget
+	runs.Lock()
+	for _, run := range runs.runs {
+		targets = append(targets, localCIStopTarget{label: ciRunLabel(run), cancel: run.cancel, stopped: run.stopped})
+	}
+	runs.Unlock()
+	return targets
+}
+
 // registeredCIRun is one local CI run in flight. node, slots and cancel belong
 // to the scheduler; the other fields describe the run to a reader of
 // RunningCI.
@@ -140,15 +199,7 @@ type localCIStopTarget struct {
 // scheduled runs' lock, which a tick holds over its own work, so a tick that is
 // still finishing cannot add a run that the snapshot then misses.
 func (s *Service) closeLocalCIAdmission() []localCIStopTarget {
-	runs := s.nodeRuns()
-	runs.closed.Store(true)
-	var targets []localCIStopTarget
-	runs.Lock()
-	for _, run := range runs.runs {
-		targets = append(targets, localCIStopTarget{label: ciRunLabel(run), cancel: run.cancel, stopped: run.stopped})
-	}
-	runs.Unlock()
-	return targets
+	return s.nodeRuns().closeAdmission()
 }
 
 // CancelLocalCI closes admission and cancels the local CI runs this process
@@ -351,18 +402,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			jobs = append(jobs, job)
 		}
 	}
-	for key, run := range runs.runs {
-		ready := false
-		for _, node := range enabled {
-			ready = ready || node.Name == run.node
-		}
-		_, wanted := desired[key]
-		// A local head's run belongs to the trial or the sync operation that
-		// asked for it, and the list of wanted hosted jobs never names it.
-		if !ready || !run.local && !wanted {
-			run.cancel()
-		}
-	}
+	runs.cancelUnwanted(desired, enabled)
 	for _, job := range jobs {
 		// A stopping engine admits no new run: the runs it has are being torn
 		// down, and a keeper would outlive the process.
@@ -493,7 +533,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	if runs.runs[key] != nil {
+	if runs.has(key) {
 		return false, nil
 	}
 	// A machine with room in the shared node queue must exist before the plan
@@ -567,7 +607,10 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		trial: job.trial, local: !job.hosted(),
 		head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
 	}
-	runs.runs[key] = run
+	if !runs.add(key, run) {
+		cancel()
+		return false, nil
+	}
 	go s.executeRegisteredCI(runCtx, job, plan, repo, *chosen, key, run, retriedFrom, resumed)
 	return true, nil
 }
@@ -873,12 +916,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	defer func() {
 		run.cancel()
 		runs := s.nodeRuns()
-		runs.Lock()
-		ended := runs.runs[key] == run
-		if ended {
-			delete(runs.runs, key)
-		}
-		runs.Unlock()
+		ended := runs.finish(key, run)
 		if ended {
 			s.runningCIChanged()
 		}
