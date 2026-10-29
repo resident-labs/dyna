@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -133,5 +134,74 @@ func TestSweepKeepsRowAdmittedWhileItRuns(t *testing.T) {
 	row, err := queue.get(ctx, "check")
 	if err != nil || row.State != "admitted" {
 		t.Fatalf("row = %+v, err = %v, want the admitted reservation kept", row, err)
+	}
+}
+
+// The projections of one node's queue tell one story: the machine page's
+// held counts, the snapshot counts and the free-CPU figure all shape the
+// same read, so the page can never disagree with what admission holds.
+func TestSnapshotWorkAndFreeCPUsShapeOneQueue(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	node := machines.Machine{Name: "node", Enabled: true}
+	node.Capabilities.CPUs = 8
+	queue := Admission{DataDir: dir}
+	store := Store{DataDir: dir}
+	job := Job{ID: "job", Node: "node", Command: []string{"go", "test"}, State: StateRunning, Created: time.Now().Add(-time.Hour), Started: time.Now().Add(-30 * time.Minute), CPUs: 3, MemoryMiB: 1024}
+	if err := store.Save(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	// One check runs and one waits, each asking for 2 of the 8 CPUs.
+	if err := queue.upsert(ctx, Demand{ID: "run-check", Node: "node", Room: "r2", CPUs: 2, MemoryMiB: 512}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.upsert(ctx, Demand{ID: "wait-check", Node: "node", Room: "r2", CPUs: 2, MemoryMiB: 512}, false); err != nil {
+		t.Fatal(err)
+	}
+	work, err := queue.Work(ctx, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if work.Capacity.CPUsUsed != 5 {
+		t.Fatalf("CPUs used = %d, want the job's 3 plus the running check's 2", work.Capacity.CPUsUsed)
+	}
+	running, waiting, err := queue.Snapshot(ctx, "node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running != len(work.Running) || waiting != len(work.Waiting) {
+		t.Fatalf("snapshot counts %d running and %d waiting, work lists %d and %d", running, waiting, len(work.Running), len(work.Waiting))
+	}
+	waitingCPUs := 0
+	for _, item := range work.Waiting {
+		waitingCPUs += item.CPUs
+	}
+	if free := queue.FreeCPUs(ctx, "node", 8); free != 8-work.Capacity.CPUsUsed-waitingCPUs {
+		t.Fatalf("free CPUs = %d, want capacity less the %d held and %d waiting", free, work.Capacity.CPUsUsed, waitingCPUs)
+	}
+}
+
+// A backlog of newer open jobs elsewhere must not hide a node's older running
+// work: the queue reads all of one node's open jobs, with no list limit, so
+// the free-CPU figure keeps counting it.
+func TestFreeCPUsCountsRunningWorkBeyondTheListLimit(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store := Store{DataDir: dir}
+	queue := Admission{DataDir: dir}
+	base := time.Now().Add(-2 * time.Hour).Truncate(time.Millisecond)
+	old := Job{ID: "old", Node: "busy", Command: []string{"go", "test"}, State: StateRunning, Created: base, Started: base, CPUs: 4}
+	if err := store.Save(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	// Newer queued work on other nodes fills the store's list limit of 200.
+	for i := 0; i < 200; i++ {
+		job := Job{ID: fmt.Sprintf("newer-%d", i), Node: "elsewhere", Command: []string{"x"}, State: StateQueued, Created: base.Add(time.Duration(i+1) * time.Minute)}
+		if err := store.Save(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if free := queue.FreeCPUs(ctx, "busy", 8); free != 4 {
+		t.Fatalf("free CPUs = %d, want 4 after the older running job's 4", free)
 	}
 }
