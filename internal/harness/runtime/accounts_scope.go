@@ -165,8 +165,11 @@ func (r *Runtime) SelectAccount(ctx context.Context, p profile.Profile, dir stri
 
 // resetSentence says when label's account resets. A time that is only a stored
 // guess (in limits, not in stated) is never shown: the sentence says the
-// provider named no time.
+// provider named no time. A credit hold has no end, so it says so.
 func resetSentence(label string, at time.Time, limits, stated map[string]time.Time) string {
+	if at.Equal(reposcope.OpenEnded) {
+		return label + " has no reset time; it runs again after credits or a successful check."
+	}
 	guess := false
 	for _, end := range limits {
 		guess = guess || end.Equal(at)
@@ -191,7 +194,7 @@ func resetSentence(label string, at time.Time, limits, stated map[string]time.Ti
 // turn may have switched since. The active account is kept when it qualifies.
 // It never picks an account the repo rules refuse. With none left, it names
 // the earliest reset.
-func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failedID, repo, executable string, until time.Time, stated bool) (from, to NativeAccount, err error) {
+func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failedID, repo, executable string, hold reposcope.Hold) (from, to NativeAccount, err error) {
 	if from, err = a.Find(failedID); err != nil {
 		return from, to, err
 	}
@@ -199,14 +202,7 @@ func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failed
 	if err != nil {
 		return from, to, err
 	}
-	// An end that the provider did not state still keeps the account out for
-	// now, but no message shows it as a reset time.
-	if stated {
-		err = scopes.MarkReset(from.ID, until)
-	} else {
-		err = scopes.MarkLimited(from.ID, until)
-	}
-	if err != nil {
+	if err = scopes.Hold(from.ID, hold); err != nil {
 		return from, to, err
 	}
 	rules, err := scopes.Rules()
@@ -226,7 +222,7 @@ func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failed
 		return from, to, err
 	}
 	// The stored limit is the later of the old and new ends, so it is the reset.
-	earliest, earliestLabel := until, from.Label
+	earliest, earliestLabel := hold.Until, from.Label
 	if end, hit := limits[from.ID]; hit {
 		earliest = end
 	}
@@ -252,6 +248,46 @@ func (a *Accounts) Failover(ctx context.Context, provider store.Provider, failed
 	}
 	to = *chosen
 	return from, to, a.Switch(ctx, to.ID, executable)
+}
+
+// FiveHourWindow is the store ID of the five-hour usage window that Kimi reports.
+const FiveHourWindow = "five_hour"
+
+// LimitOf returns the account's stored usage-limit hold, ended or not.
+func (a *Accounts) LimitOf(id string) (reposcope.Hold, error) {
+	scopes, err := a.scopes()
+	if err != nil {
+		return reposcope.Hold{}, err
+	}
+	return scopes.LimitOf(id)
+}
+
+// ClearLimit removes the account's hold, because a turn on it succeeded.
+func (a *Accounts) ClearLimit(id string) error {
+	scopes, err := a.scopes()
+	if err != nil {
+		return err
+	}
+	return scopes.ClearLimit(id)
+}
+
+// WindowReset probes the account's usage and returns when the named window
+// resets. It returns zero when the probe fails or the window has no reset.
+func (a *Accounts) WindowReset(ctx context.Context, id, windowID string) time.Time {
+	n, err := a.Find(id)
+	if err != nil {
+		return time.Time{}
+	}
+	observation := a.refreshReading(ctx, n)
+	if observation == nil {
+		return time.Time{}
+	}
+	for _, w := range observation.Windows {
+		if reset, err := time.Parse(time.RFC3339Nano, w.ResetsAt); err == nil && w.ID == windowID && reset.After(time.Now()) {
+			return reset
+		}
+	}
+	return time.Time{}
 }
 
 // usageProbeTimeout bounds one saved-usage probe during an account choice.

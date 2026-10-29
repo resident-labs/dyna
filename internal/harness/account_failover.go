@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	harnessruntime "dyna-agent/internal/harness/runtime"
@@ -32,13 +33,40 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 		return nil, err
 	}
 	now := time.Now()
-	until := UnavailableUntil(failure.Error(), now)
-	stated := !UsageResetAt(failure.Error(), now).IsZero()
-	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, until, stated)
+	prev, err := rt.Accounts.LimitOf(accountID)
 	if err != nil {
 		return nil, err
 	}
-	return &AccountSwitch{From: from.Label, To: to.Label, Until: until, Stated: stated}, nil
+	// The window reset is probed only when the failure text states none.
+	var current time.Time
+	if UsageResetAt(failure.Error(), now).IsZero() {
+		current = rt.Accounts.WindowReset(ctx, accountID, harnessruntime.FiveHourWindow)
+	}
+	hold := quotaHold(failure.Error(), now, prev, current)
+	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, hold)
+	if err != nil {
+		return nil, err
+	}
+	return &AccountSwitch{From: from.Label, To: to.Label, Until: hold.Until, Stated: hold.Stated}, nil
+}
+
+// clearAccountHold drops a stored hold after a turn on the account succeeded.
+// A hold store error is logged, because the turn itself already succeeded.
+func clearAccountHold(accountID string) {
+	if accountID == "" {
+		return
+	}
+	rt := harnessruntime.New()
+	hold, err := rt.Accounts.LimitOf(accountID)
+	if err != nil || hold.Until.IsZero() {
+		if err != nil {
+			log.Printf("read account hold %s: %v", accountID, err)
+		}
+		return
+	}
+	if err := rt.Accounts.ClearLimit(accountID); err != nil {
+		log.Printf("clear account hold %s: %v", accountID, err)
+	}
 }
 
 // accountFailoverPrompt continues an exact session that ran on the account
@@ -54,7 +82,11 @@ const accountFailoverPrompt = "Your account hit its usage limit, so Dyna moved t
 // error says when the first one resets.
 func withAccountFailover(ctx context.Context, p profile.Profile, cwd string, exec ExecutionOptions, once func(opts ExecutionOptions, resumeID string) (Result, error)) (Result, error) {
 	res, err := once(exec, "")
-	if err == nil || isNativeAdmissionError(err) || ctx.Err() != nil || exec.ProcessRunner != nil || !providerfailure.Is(err, providerfailure.Quota) {
+	if err == nil {
+		clearAccountHold(res.AccountID)
+		return res, nil
+	}
+	if isNativeAdmissionError(err) || ctx.Err() != nil || exec.ProcessRunner != nil || !providerfailure.Is(err, providerfailure.Quota) {
 		return res, err
 	}
 	worked := res.SessionID != "" || res.Output != "" || res.Usage.Total() > 0
