@@ -64,7 +64,9 @@ func fakePiAuthCommands(ctx context.Context, executable, home string, argv []str
 	}
 	path := filepath.Join(home, "auth.json")
 	entries := map[string]json.RawMessage{}
+	existed := false
 	if raw, err := os.ReadFile(path); err == nil {
+		existed = true
 		if json.Unmarshal(raw, &entries) != nil {
 			return nil, errFakePiAuthCommand
 		}
@@ -80,7 +82,8 @@ func fakePiAuthCommands(ctx context.Context, executable, home string, argv []str
 			return nil, errFakePiAuthCommand
 		}
 		// Pi's apply contract: one JSON edit of set, remove and expect on
-		// stdin, one read and one write, and the resulting entries on stdout.
+		// stdin, one read and one write, and the found and resulting entries
+		// on stdout.
 		var op struct {
 			Set    map[string]json.RawMessage  `json:"set"`
 			Remove []string                    `json:"remove"`
@@ -92,20 +95,27 @@ func fakePiAuthCommands(ctx context.Context, executable, home string, argv []str
 		if op.Expect != nil && !sameFixtureEntries(entries, *op.Expect) {
 			return nil, errFakePiAuthChanged
 		}
+		var before map[string]json.RawMessage
+		if existed {
+			before = make(map[string]json.RawMessage, len(entries))
+			for id, entry := range entries {
+				before[id] = append(json.RawMessage(nil), entry...)
+			}
+		}
 		for _, id := range op.Remove {
 			delete(entries, id)
 		}
 		for id, entry := range op.Set {
 			entries[id] = append(json.RawMessage(nil), entry...)
 		}
-		out, err := json.Marshal(entries)
+		fileOut, err := json.Marshal(entries)
 		if err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(path, out, 0600); err != nil {
+		if err := os.WriteFile(path, fileOut, 0600); err != nil {
 			return nil, err
 		}
-		return out, nil
+		return json.Marshal(piAuthState{Before: before, After: entries})
 	}
 	return nil, errFakePiAuthCommand
 }
@@ -144,14 +154,15 @@ func installFakePiAuth(t *testing.T, accounts *Accounts) {
 }
 
 // The whole key edit is one auth apply command, so the complete edit takes
-// Pi's lock once and the secret rides on stdin, never in an argument list.
+// Pi's lock once and the secret rides on stdin, never in an argument list. A
+// read spawns no command, so the edit is the flow's only call.
 func TestPiAPIKeyEditRunsOneAuthApplyWithTheKeyOnStdin(t *testing.T) {
 	r := providerKeysRuntime(t)
 	var calls []string
 	old := piAuthRunner
 	piAuthRunner = func(ctx context.Context, executable, home string, argv []string, stdin []byte) ([]byte, error) {
 		calls = append(calls, strings.Join(argv, " ")+" <<"+string(stdin))
-		return json.Marshal(map[string]json.RawMessage{})
+		return json.Marshal(piAuthState{After: map[string]json.RawMessage{}})
 	}
 	t.Cleanup(func() { piAuthRunner = old })
 
@@ -163,24 +174,21 @@ func TestPiAPIKeyEditRunsOneAuthApplyWithTheKeyOnStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(calls) != 2 {
-		t.Fatalf("calls = %d, want the list and one apply:\n%s", len(calls), strings.Join(calls, "\n"))
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want one apply and no other command:\n%s", len(calls), strings.Join(calls, "\n"))
 	}
-	if !strings.HasPrefix(calls[1], "auth apply <<") {
-		t.Fatalf("the key edit did not run one auth apply:\n%s", calls[1])
+	if !strings.HasPrefix(calls[0], "auth apply <<") {
+		t.Fatalf("the key edit did not run one auth apply:\n%s", calls[0])
 	}
-	if !strings.Contains(calls[1], `"set":{"zai":{"key":"sk-secret-123","type":"api_key"}}`) {
-		t.Fatalf("the apply did not set the zai entry on stdin:\n%s", calls[1])
-	}
-	if strings.Contains(calls[0], "sk-secret-123") {
-		t.Fatal("the API key appears outside the apply stdin")
+	if !strings.Contains(calls[0], `"set":{"zai":{"key":"sk-secret-123","type":"api_key"}}`) {
+		t.Fatalf("the apply did not set the zai entry on stdin:\n%s", calls[0])
 	}
 }
 
 // An apply diffs against the login it finds under the lock, so an entry
-// another process added between the list and the apply survives, and Dyna
+// another process added between Dyna's read and the apply survives, and Dyna
 // sees the login as the file now holds it.
-func TestAnApplyKeepsEntriesAddedAfterTheList(t *testing.T) {
+func TestAnApplyKeepsEntriesAddedAfterTheRead(t *testing.T) {
 	r := providerKeysRuntime(t)
 	account, err := r.Accounts.CreateProvider("pi", piProvider("zai"), store.KindAPIKey, "zai login")
 	if err != nil {
@@ -190,12 +198,12 @@ func TestAnApplyKeepsEntriesAddedAfterTheList(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"zai":{"type":"api_key","key":"old"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	listed := false
+	applied := false
 	old := piAuthRunner
 	piAuthRunner = func(ctx context.Context, executable, h string, argv []string, stdin []byte) ([]byte, error) {
-		if argv[1] == "list" && !listed {
-			listed = true
-			// A token refresh writes its own entry between Dyna's list and apply.
+		if argv[1] == "apply" && !applied {
+			applied = true
+			// A token refresh writes its own entry between Dyna's read and the apply.
 			if err := os.WriteFile(filepath.Join(h, "auth.json"), []byte(`{"zai":{"type":"api_key","key":"old"},"zzz":{"type":"oauth","access":"new"}}`), 0600); err != nil {
 				return nil, err
 			}
@@ -228,11 +236,11 @@ func TestARestoreRefusesWhenTheLoginChangedAfterTheEdit(t *testing.T) {
 	}
 	home := account.Home
 	stale := map[string]json.RawMessage{"zai": json.RawMessage(`{"type":"oauth","access":"stale","refresh":"r","expires":1,"accountId":"w"}`)}
-	before := []byte(`{"zai":{"type":"oauth","access":"old","refresh":"r","expires":1,"accountId":"w"}}`)
+	before := map[string]json.RawMessage{"zai": json.RawMessage(`{"type":"oauth","access":"old","refresh":"r","expires":1,"accountId":"w"}`)}
 	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"zai":{"type":"oauth","access":"stale","refresh":"r","expires":1,"accountId":"w"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accounts.restorePiAuth(context.Background(), home, before, true, stale); err != nil {
+	if err := r.Accounts.restorePiAuth(context.Background(), home, before, stale); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(home, "auth.json"))
@@ -244,7 +252,79 @@ func TestARestoreRefusesWhenTheLoginChangedAfterTheEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "auth.json"), refreshed, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accounts.restorePiAuth(context.Background(), home, before, true, stale); err == nil {
+	if err := r.Accounts.restorePiAuth(context.Background(), home, before, stale); err == nil {
+		t.Fatal("the restore of a changed login succeeded, want a refusal")
+	}
+	raw, err = os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil || string(raw) != string(refreshed) {
+		t.Fatalf("the refused restore changed the login: %s %v", raw, err)
+	}
+}
+
+// A login read is a plain read of auth.json, so it works wherever Pi is not
+// installed yet; only edits need Pi's own commands.
+func TestAPiLoginReadWorksWithoutPi(t *testing.T) {
+	r := providerKeysRuntime(t)
+	r.Accounts.PiExecutable = func() (string, error) { return "", ErrPiMissing }
+	account, err := r.Accounts.CreateProvider("pi", piProvider("zai"), store.KindOAuth, "zai login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := `{"type":"oauth","access":"a","refresh":"r","expires":1,"accountId":"w"}`
+	if err := os.WriteFile(filepath.Join(account.Home, "auth.json"), []byte(`{"zai":`+login+`}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := r.Accounts.piEditAuth(context.Background(), account.Home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(entries["zai"]) != login {
+		t.Fatalf("entries = %s, want the zai login read without Pi", entries["zai"])
+	}
+}
+
+// A provider key write works wherever Pi is not installed yet: nothing then
+// runs Pi's commands or holds its lock, so Dyna saves the key by replacing
+// the login by rename, and the key reads back.
+func TestAProviderKeyWriteWorksWithoutPi(t *testing.T) {
+	r := providerKeysRuntime(t)
+	r.Accounts.PiExecutable = func() (string, error) { return "", ErrPiMissing }
+	if _, err := r.AddProviderKey(context.Background(), "pi", store.ProviderBrave, "brave", "brave-key"); err != nil {
+		t.Fatal(err)
+	}
+	key, err := r.Accounts.PiProviderKey(context.Background(), store.ProviderBrave, "", "")
+	if err != nil || key != "brave-key" {
+		t.Fatalf("key = %q, %v; want the saved key read back without Pi", key, err)
+	}
+}
+
+// A restore without Pi refuses when the login moved on, and puts the entries
+// the failed edit found back when the login still holds what it wrote.
+func TestARestoreWithoutPiStillRefusesAChangedLogin(t *testing.T) {
+	r := providerKeysRuntime(t)
+	r.Accounts.PiExecutable = func() (string, error) { return "", ErrPiMissing }
+	account, err := r.Accounts.CreateProvider("pi", piProvider("zai"), store.KindOAuth, "zai login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := account.Home
+	stale := map[string]json.RawMessage{"zai": json.RawMessage(`{"type":"oauth","access":"stale","refresh":"r","expires":1,"accountId":"w"}`)}
+	before := map[string]json.RawMessage{"zai": json.RawMessage(`{"type":"oauth","access":"old","refresh":"r","expires":1,"accountId":"w"}`)}
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"zai":{"type":"oauth","access":"stale","refresh":"r","expires":1,"accountId":"w"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Accounts.restorePiAuth(context.Background(), home, before, stale); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil || !strings.Contains(string(raw), `"access":"old"`) {
+		t.Fatalf("the matching restore did not put the earlier login back: %s %v", raw, err)
+	}
+	refreshed := []byte(`{"zai":{"type":"oauth","access":"fresh","refresh":"r","expires":1,"accountId":"w"}}`)
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), refreshed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Accounts.restorePiAuth(context.Background(), home, before, stale); err == nil {
 		t.Fatal("the restore of a changed login succeeded, want a refusal")
 	}
 	raw, err = os.ReadFile(filepath.Join(home, "auth.json"))
@@ -275,14 +355,14 @@ func TestWritePiAccountAuthReplacesInOneApply(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(calls) != 2 {
-		t.Fatalf("calls = %d, want the list and one apply:\n%s", len(calls), strings.Join(calls, "\n"))
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want one apply and no other command:\n%s", len(calls), strings.Join(calls, "\n"))
 	}
-	if !strings.Contains(calls[1], `"remove":["drop"]`) {
-		t.Fatalf("the unwanted provider was not removed:\n%s", calls[1])
+	if !strings.Contains(calls[0], `"remove":["drop"]`) {
+		t.Fatalf("the unwanted provider was not removed:\n%s", calls[0])
 	}
-	if !strings.Contains(calls[1], `"set":{"keep":{"type":"api_key","key":"new"}}`) {
-		t.Fatalf("the wanted provider was not set:\n%s", calls[1])
+	if !strings.Contains(calls[0], `"set":{"keep":{"type":"api_key","key":"new"}}`) {
+		t.Fatalf("the wanted provider was not set:\n%s", calls[0])
 	}
 	raw, err := os.ReadFile(filepath.Join(home, "auth.json"))
 	if err != nil || string(raw) != `{"keep":{"type":"api_key","key":"new"}}` {

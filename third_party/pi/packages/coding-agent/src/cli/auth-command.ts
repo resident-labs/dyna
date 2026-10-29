@@ -61,7 +61,7 @@ export function printAuthCommandHelp(): void {
 
 Auth commands require at least one of --provider or --model. Checks refresh expired OAuth credentials by default; --no-refresh prevents this. --credentials emits the credential, or includes it in JSON output.
 
-Auth storage commands read and write the login file under its own lock: list prints the stored providers (--json prints the entries), set stores one entry read as JSON from stdin, remove drops one provider (a missing entry is not an error), apply performs a whole edit of one JSON object on stdin under one lock: an optional "set" object of entries, an optional "remove" array of provider ids, and an optional "expect" object that makes the command refuse unless the file still holds exactly it; apply prints the resulting entries as one JSON object.`);
+Auth storage commands read and write the login file under its own lock: list prints the stored providers (--json prints the entries), set stores one entry read as JSON from stdin, remove drops one provider (a missing entry is not an error), apply performs a whole edit of one JSON object on stdin under one lock: an optional "set" object of entries, an optional "remove" array of provider ids, and an optional "expect" object that makes the command refuse unless the file still holds exactly it; apply prints one JSON object with the entries it found under the lock (null when the login file did not exist) and the resulting entries, so a caller can put back exactly what the edit replaced.`);
 }
 
 export function parseAuthCommand(args: string[]): AuthCommand | undefined {
@@ -232,7 +232,7 @@ export async function runAuthStorageCommand(
 				throw new AuthCommandError("The login file changed since it was read.");
 			}
 			const next = applyAuthEdit(entries, edit);
-			return { result: next, next: JSON.stringify(next, null, 2) };
+			return { result: { before: current === undefined ? null : entries, after: next }, next: JSON.stringify(next, null, 2) };
 		});
 		console.log(JSON.stringify(result));
 		return;

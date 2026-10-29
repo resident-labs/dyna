@@ -126,6 +126,7 @@ not-state internal/harness/runtime/native_files.go nativeFilesManager.Activate 1
 not-state internal/harness/runtime/owner_login_import.go Runtime.copyPersonalLogin 1 # copies the owner's login into a harness CLI's private home
 not-state internal/harness/runtime/preferences.go Runtime.ImportPreferences 2 # writes an immutable settings-layer blob; its index lives in dyna.db
 not-state internal/harness/runtime/probe.go BundleManager.Probe 1 # removes the throwaway probe scope and its private HOME
+not-state internal/harness/runtime/provider_keys.go writePiAuthFile 3 # saves a Pi home's login by rename when Pi is not installed; a harness CLI private home
 not-state internal/harness/runtime/resource_lease.go ResourceLease.Bind 1 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go ResourceLease.Close 1 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go newResourceLease 3 # flock-held process lease; a crash frees a flock, a row could not
