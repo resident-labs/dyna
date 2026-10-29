@@ -788,11 +788,30 @@ func missingRequiredCIChecks(required []selectedHostedCheck, result localci.Resu
 			}
 		}
 	}
+	// A required external check reruns in a new suite: only its latest result
+	// per app and name can answer the name, so a pending rerun keeps this gate
+	// waiting even after an older suite passed. Actions checks stay
+	// suite-distinct.
+	latestExternal := map[string]Check{}
+	for _, check := range hosted.currentSuiteChecks() {
+		if check.App.Slug != "github-actions" {
+			key := fmt.Sprintf("%d/%s/%s", check.App.ID, check.App.Slug, check.Name)
+			if old, ok := latestExternal[key]; !ok || check.ID > old.ID {
+				latestExternal[key] = check
+			}
+		}
+	}
 	hostedPassed := map[hostedCheckID]bool{}
 	hostedNamePassed := map[string]bool{}
 	for _, check := range hosted.currentSuiteChecks() {
 		if checkState(check.Status, check.Conclusion) != "success" {
 			continue
+		}
+		if check.App.Slug != "github-actions" {
+			key := fmt.Sprintf("%d/%s/%s", check.App.ID, check.App.Slug, check.Name)
+			if latestExternal[key].ID != check.ID {
+				continue
+			}
 		}
 		id := hostedCheckID{Name: check.Name, Suite: check.CheckSuite.ID, Selected: true}
 		hostedPassed[id] = true

@@ -231,6 +231,25 @@ func TestCancelledMatrixJobTemplateWithLocalShardsIsReady(t *testing.T) {
 	}
 }
 
+// A required external check can pass in an old suite and then start a rerun in
+// a new one. The rerun is the live evidence, so a local pass must wait for it:
+// an older suite's success cannot answer the required name.
+func TestPendingExternalRerunHoldsLocalPass(t *testing.T) {
+	record, plan, result := localPassGateFixture(t)
+	policy := ChangePolicy{RequiredChecks: []string{"security"}}
+	passed := Check{ID: 1, Name: "security", Status: "completed", Conclusion: "success"}
+	passed.App.Slug = "scanner"
+	passed.CheckSuite.ID = 1
+	rerun := passed
+	rerun.ID, rerun.Status, rerun.Conclusion, rerun.CheckSuite.ID = 2, "in_progress", "", 2
+	snap := Snapshot{Checks: []Check{passed, rerun}}
+	snap.Pull.Head.SHA = record.Head
+	observation := (&Service{}).registeredLocalObservation(record, snap, policy, plan, result, false, true)
+	if observation.Status != VerdictPending || !slices.Contains(observation.Jobs, "security") {
+		t.Fatalf("an old success released the head before the required rerun finished: %+v", observation)
+	}
+}
+
 // A hosted job that reached failure is real evidence and still blocks the
 // local pass: dropping cancelled jobs from selection must never hide a failed
 // one.
