@@ -197,6 +197,31 @@ func TestWatchEmitsRunEventForStatusChange(t *testing.T) {
 	}
 }
 
+// TestWatchEmitsRunEventWhenAnArchivedRunReturns: an unarchived run keeps its
+// old row revision, so the watcher must load it from its folder to emit.
+func TestWatchEmitsRunEventWhenAnArchivedRunReturns(t *testing.T) {
+	e := newEnv(t)
+	alpha := e.room("alpha")
+	run := runstore.Meta{ID: "wf_20261016-000005-eeeeeeee", Name: "w", Status: "ok", RoomID: alpha.ID, StartedAt: time.Now()}
+	writeRun(t, run, nil, "")
+	var version int64
+	var got []Event
+	emit := func(ev Event) { got = append(got, ev) }
+	e.svc.scanRuns(&version, true, emit)
+	if _, err := runstore.ArchiveRun(run.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.scanRuns(&version, false, emit)
+	if _, err := runstore.UnarchiveRun(run.ID); err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	e.svc.scanRuns(&version, false, emit)
+	if len(got) != 1 || got[0].Kind != "runs" || got[0].RoomID != alpha.ID {
+		t.Fatalf("events after unarchive = %+v", got)
+	}
+}
+
 // TestRunCountsRecountWhenARunEnds: a crashed run's unfinished agent stops
 // counting as working once the run is no longer running, although its
 // events file did not grow.
