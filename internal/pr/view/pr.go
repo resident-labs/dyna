@@ -241,6 +241,36 @@ func (s *Service) UntrackPR(ctx context.Context, roomRef, key string) error {
 	return p.Untrack(ctx, key)
 }
 
+// PRHold returns the hold on the tracked change that repo and ref name in roomRef, or
+// nil when no hold applies. ref is a PR URL, or a branch name in repo. A change that
+// is not tracked in the room has no hold.
+func (s *Service) PRHold(roomRef, repo, ref string) (*state.Hold, error) {
+	rec, err := s.Notify.Rooms.Resolve(roomRef)
+	if err != nil {
+		return nil, err
+	}
+	projection, err := s.readProjection()
+	if err != nil {
+		return nil, err
+	}
+	return holdFor(projection.state.Records, rec.ID, repo, ref), nil
+}
+
+// holdFor returns a hold on a change in roomID that repo and ref name. A branch
+// names an open change in its repository only. Several matches return a hold if
+// any has one, so an ambiguous name never lifts a hold.
+func holdFor(records map[string]*state.Record, roomID, repo, ref string) *state.Hold {
+	for _, r := range records {
+		if r.RoomID != roomID || r.Hold == nil {
+			continue
+		}
+		if r.URL == ref || (repo != "" && r.State == state.PROpen && r.Repo == repo && r.Branch == ref) {
+			return r.Hold
+		}
+	}
+	return nil
+}
+
 // EditPR changes a PR title or body through the engine.
 func (s *Service) EditPR(ctx context.Context, roomRef, key string, edit watch.PREdit) error {
 	p, _, err := s.authorPRInRoom(ctx, "git pr edit", roomRef, key)
