@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 
@@ -47,6 +48,23 @@ func (s services) approvalCancel(ctx context.Context, room, id string) (approval
 
 func (s services) approvalWait(ctx context.Context, room, id string, timeout time.Duration) (approvals.Request, error) {
 	return s.rooms.Approvals.Wait(ctx, authority.Of(ctx), room, id, timeout)
+}
+
+// expireApprovals shares the engine timer set and stops with its context.
+// A one-minute sweep is enough for room expiries, which are measured in hours.
+func expireApprovals(ctx context.Context, service *approvals.Service, t *timers) {
+	wake := make(chan struct{}, 1)
+	for {
+		if err := service.ExpireDue(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("approval expiry: %v", err)
+		}
+		t.at(timerApprovals, t.now().Add(time.Minute), func() { wakeWorker(wake) })
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+		}
+	}
 }
 
 func (s services) approvalSettings(ctx context.Context, in approvals.SettingsInput) (approvals.Settings, error) {
