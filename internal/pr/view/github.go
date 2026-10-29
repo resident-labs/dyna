@@ -496,7 +496,7 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 		if err != nil {
 			return watch.Record{}, false, err
 		}
-		if err := checkoutOfPR(ctx, p.GH, ref, dir, rec.UpstreamOf(root)); err != nil {
+		if err := checkoutOfPR(ctx, ref, dir, rec.UpstreamOf(root)); err != nil {
 			return watch.Record{}, false, err
 		}
 	}
@@ -517,10 +517,9 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 }
 
 // checkoutOfPR accepts dir when it is a checkout of the PR's base repository.
-// A fork checkout is also accepted when upstream, the room's parent setting,
-// is the base and the PR's head repository is the checkout's own repository,
-// that is, the fork that opened the PR. The head is fetched only in that case.
-func checkoutOfPR(ctx context.Context, gh watch.GitHub, ref watch.Ref, dir, upstream string) error {
+// A checkout of the room's upstream, the parent setting, is also accepted for a
+// PR into that upstream from any fork. Such a PR is read only (D-503).
+func checkoutOfPR(ctx context.Context, ref watch.Ref, dir, upstream string) error {
 	notCheckout := fmt.Errorf("%s is not a checkout of %s/%s", dir, ref.Host, ref.Repo)
 	base, err := repoid.RemoteIdentity("", "https://"+ref.Host+"/"+ref.Repo)
 	if err != nil {
@@ -534,14 +533,6 @@ func checkoutOfPR(ctx context.Context, gh watch.GitHub, ref watch.Ref, dir, upst
 		return nil
 	}
 	if upstream != base {
-		return notCheckout
-	}
-	pull, err := gh.Pull(ctx, ref)
-	if err != nil {
-		return err
-	}
-	head, err := repoid.RemoteIdentity("", "https://"+ref.Host+"/"+pull.Head.Repo.FullName)
-	if err != nil || checkout.ID != head {
 		return notCheckout
 	}
 	return nil
