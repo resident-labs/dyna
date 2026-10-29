@@ -33,7 +33,7 @@ func Run(ctx context.Context, p profile.Profile) error {
 	result, err := harness.RunWithOptions(ctx, p, definition.ProbePrompt, dir, false,
 		harness.JournalOptions{NormalizedOutputPath: outputPath, Output: p.EffectiveOutput()},
 		harness.SteeringOptions{}, harness.SessionOptions{OnSession: func(string) {}},
-		harness.ExecutionOptions{HealthProbe: true, KillOnCancel: true, DisableNativeSubagents: true})
+		harness.ExecutionOptions{HealthProbe: true, ProbeHeldAccount: true, KillOnCancel: true, DisableNativeSubagents: true})
 	if err != nil {
 		harnesshealth.New("").RecordProbe(p, result.CLIVersion, result.Observed, false)
 		return err

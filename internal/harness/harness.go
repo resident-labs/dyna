@@ -62,6 +62,9 @@ type Result struct {
 	Compaction *Compaction
 	// AccountID is the saved account the turn ran on, for Dyna-managed harnesses.
 	AccountID string
+	// HeldAccountProbed is set when a held-account probe ran on the account whose
+	// stated usage hold it was meant to clear. Only that success clears a stated hold.
+	HeldAccountProbed bool
 	// AccountSwitch is set when the turn hit its account's usage limit and
 	// ran again on another account.
 	AccountSwitch *AccountSwitch
@@ -324,6 +327,10 @@ type ExecutionOptions struct {
 	// preparation, so generated configuration cannot widen those permissions.
 	ConstrainProfile func(profile.Profile) (profile.Profile, error)
 
+	// ProbeHeldAccount runs the health probe on the account whose stated usage
+	// hold ends first, so a successful probe clears that hold.
+	ProbeHeldAccount bool
+
 	// SkipComputer prevents provisioning a desktop for a managed service turn.
 	SkipComputer bool
 	// HealthProbe leaves health persistence to the caller after probe validation.
@@ -525,9 +532,18 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		p.RuntimeVersion = session.RuntimePin.Bundle.Version
 	}
 	accountID := ""
+	heldAccountProbed := false
 	// A ProcessRunner replaces the process, so no private copy is needed.
 	if p.DynaManaged() && exec.ProcessRunner == nil {
-		withRepo, err := harnessruntime.New().SelectAccount(ctx, p, cwd)
+		rt := harnessruntime.New()
+		var withRepo profile.Profile
+		var heldID string
+		var err error
+		if exec.ProbeHeldAccount {
+			withRepo, heldID, err = rt.SelectProbeAccount(ctx, p, cwd)
+		} else {
+			withRepo, err = rt.SelectAccount(ctx, p, cwd)
+		}
 		if err != nil {
 			return Result{}, notReady(ctx, p, err)
 		}
@@ -539,6 +555,8 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		}
 		defer release()
 		p, accountID = selected, pin.AccountID
+		// The pin can differ from the held account when another switch moved it.
+		heldAccountProbed = heldID != "" && pin.AccountID == heldID
 		if session.OnRuntime != nil {
 			if err := session.OnRuntime(pin); err != nil {
 				return Result{}, notReady(ctx, p, err)
@@ -579,6 +597,7 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 	}
 	result, err := runJournaledState(ctx, p, prompt, cwd, allowRecovery, nudgeDelay, journal, steeringOpts, session, exec, state, accountID)
 	result.AccountID = accountID
+	result.HeldAccountProbed = heldAccountProbed
 	if ctx.Err() == nil && !isNativeAdmissionError(err) {
 		err = classifyFailure(err, state.capacityTries)
 	}

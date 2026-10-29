@@ -186,6 +186,49 @@ func TestFailoverRefreshesTheChosenReadingFirst(t *testing.T) {
 	}
 }
 
+// D-500: a successful usage probe never ends a provider-stated hold. The stated
+// limit may be a model-scoped one that the reading omits, so no reading shows
+// that it reset. Only a successful turn or the hold's end time clears it.
+func TestSuccessfulProbeKeepsAStatedHold(t *testing.T) {
+	reset := time.Now().Add(6 * 24 * time.Hour)
+	for _, tc := range []struct {
+		label, body string
+	}{
+		{"spent", usageBody(10, 100, reset)},
+		{"unrelated", `{"five_hour":{"utilization":10}}`},
+		{"weekly without utilization", `{"five_hour":{"utilization":10},"seven_day":{"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"session without utilization", `{"five_hour":{},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"no session window", `{"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"model-scoped limit spent", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":100,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`},
+		{"model-scoped limit healthy", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":20,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`},
+		{"model-scoped limit omitted", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"open", usageBody(10, 20, reset)},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			a := testAccounts(t)
+			n := signedClaude(t, a, tc.label, "aaaaaaaa-bbbb-cccc-dddd-00000000000e")
+			scopes, err := a.scopes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := scopes.Hold(n.ID, reposcope.Hold{Until: time.Now().Add(2 * time.Hour), Stated: true}); err != nil {
+				t.Fatal(err)
+			}
+			fixtureUsageEndpoint(t, map[string]string{tc.label + "-access": tc.body})
+			if a.refreshReading(context.Background(), n) == nil {
+				t.Fatal("the probe recorded no reading")
+			}
+			got, err := a.LimitOf(n.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Until.IsZero() {
+				t.Fatalf("stated hold cleared by the %s reading", tc.label)
+			}
+		})
+	}
+}
+
 func weeklyOf(o *store.Observation) *store.Window {
 	for i := range o.Windows {
 		if o.Windows[i].ID == "seven_day" {
