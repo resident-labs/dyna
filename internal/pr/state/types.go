@@ -261,10 +261,14 @@ type Record struct {
 	ReleaseReviewersAfterReplay []string           `json:"releaseReviewersAfterReplay,omitempty"`
 	MergeTrialFailure           *MergeTrialFailure `json:"mergeTrialFailure,omitempty"`
 	IsDraft                     bool               `json:"isDraft,omitempty"`
-	Hold                        *Hold              `json:"hold,omitempty"`
-	Mergeable                   *bool              `json:"mergeable,omitempty"`
-	DefaultBranch               string             `json:"defaultBranch,omitempty"`
-	ChecksAt                    time.Time          `json:"checksAt,omitempty"`
+	// Labels are the PR's label names at the last poll. LabelsSeen marks a
+	// baseline, so the first poll records labels without notifying the author.
+	Labels        []string  `json:"labels,omitempty"`
+	LabelsSeen    bool      `json:"labelsSeen,omitempty"`
+	Hold          *Hold     `json:"hold,omitempty"`
+	Mergeable     *bool     `json:"mergeable,omitempty"`
+	DefaultBranch string    `json:"defaultBranch,omitempty"`
+	ChecksAt      time.Time `json:"checksAt,omitempty"`
 
 	CIBudgetHead   string            `json:"ciBudgetHead,omitempty"`
 	CIBudgetErrors map[string]string `json:"ciBudgetErrors,omitempty"`
