@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +132,131 @@ func TestLifecycleCleansOnlySafeOwnedWorktrees(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A pool that nears exhaustion tells the root seat of every room once, as a
+// typed machine event. The persisted band keeps a second report quiet until
+// use drops below 90% and climbs again.
+func TestWorktreePortCapacityAlertsEveryRoomOnce(t *testing.T) {
+	e := newTestEnv(t)
+	other, err := e.m.rooms().Create(room.CreateInput{Name: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		e.m.deliverPortCapacityAlerts([]*worktrees.PortCapacityAlert{{Used: 900, Limit: 1000, Threshold: 90, Generation: 1}})
+	}
+	alerts := func(roomID string) []room.Message {
+		t.Helper()
+		posts, err := e.m.rooms().Messages(roomID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []room.Message
+		for _, p := range posts {
+			if p.Kind == string(room.FamilyMachine) && p.Notice.Kind == string(room.TypeWorktreePorts) {
+				got = append(got, p)
+			}
+		}
+		return got
+	}
+	for _, rec := range []room.Record{e.room, other} {
+		got := alerts(rec.ID)
+		if len(got) != 1 {
+			t.Fatalf("room %s port alerts = %d, want one", rec.Name, len(got))
+		}
+		post := got[0]
+		if post.From != room.EngineSender || !post.Wake || len(post.To) != 1 || post.To[0] != rec.Name+":"+room.RootAgent {
+			t.Fatalf("port alert delivery = %+v", post)
+		}
+		alert, ok := post.WorktreePorts()
+		if !ok || alert.Used != 900 || alert.Limit != 1000 || alert.Threshold != 90 || alert.Generation != 1 {
+			t.Fatalf("port alert payload = %+v, %v", alert, ok)
+		}
+	}
+}
+
+// A transient posting failure does not lose the alert: delivery is not
+// acknowledged, so the next observation delivers it again. The room store's
+// Once rule keeps an already-delivered room at one card.
+func TestWorktreePortCapacityRetriesUndeliveredAlert(t *testing.T) {
+	e := newTestEnv(t)
+	other, err := e.m.rooms().Create(room.CreateInput{Name: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooms := map[string]string{e.room.Name: e.room.ID, other.Name: other.ID}
+	realPost := postPortAlert
+	var failedRoom string
+	var posts int
+	postPortAlert = func(m *Manager, rec room.Record, alert *worktrees.PortCapacityAlert) error {
+		posts++
+		if failedRoom == "" {
+			failedRoom = rec.Name
+			return fmt.Errorf("transient store failure")
+		}
+		return realPost(m, rec, alert)
+	}
+	realObserve := observePortCapacity
+	observePortCapacity = func() ([]*worktrees.PortCapacityAlert, error) {
+		return []*worktrees.PortCapacityAlert{{Used: 900, Limit: 1000, Threshold: 90, Generation: 1}}, nil
+	}
+	t.Cleanup(func() {
+		postPortAlert = realPost
+		observePortCapacity = realObserve
+	})
+	alerts := func(roomID string) int {
+		messages, err := e.m.rooms().Messages(roomID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := 0
+		for _, p := range messages {
+			if p.Kind == string(room.FamilyMachine) && p.Notice.Kind == string(room.TypeWorktreePorts) {
+				found++
+			}
+		}
+		return found
+	}
+	e.m.ReportWorktreePortCapacity()
+	healthy := other
+	if failedRoom == other.Name {
+		healthy = e.room
+	}
+	if got := alerts(healthy.ID); got != 1 {
+		t.Fatalf("healthy room alerts = %d, want 1", got)
+	}
+	if got := alerts(rooms[failedRoom]); got != 0 {
+		t.Fatalf("failed room alerts = %d, want 0 until retry", got)
+	}
+	e.m.ReportWorktreePortCapacity()
+	if got := alerts(rooms[failedRoom]); got != 1 {
+		t.Fatalf("retried room alerts = %d, want 1", got)
+	}
+	if got := alerts(healthy.ID); got != 1 {
+		t.Fatalf("healthy room alerts after retry = %d, want 1", got)
+	}
+	if posts != 4 {
+		t.Fatalf("post attempts = %d, want one failure and one per room per sweep", posts)
+	}
+}
+
+// The reporter reads the real registry: a pool below the band posts nothing.
+func TestWorktreePortCapacityReporterReadsRegistry(t *testing.T) {
+	e := newTestEnv(t)
+	if err := worktrees.Track(worktrees.Record{Path: filepath.Join(os.TempDir(), "dyna-wt-cap-one")}); err != nil {
+		t.Fatal(err)
+	}
+	e.m.ReportWorktreePortCapacity()
+	posts, err := e.m.rooms().Messages(e.room.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range posts {
+		if p.Kind == string(room.FamilyMachine) && p.Notice.Kind == string(room.TypeWorktreePorts) {
+			t.Fatalf("unexpected port alert: %+v", p)
+		}
 	}
 }
 

@@ -131,14 +131,22 @@ func releaseRecord(ctx context.Context, db *sql.DB, orig Record, remove bool) (b
 			return err
 		}
 		if remove {
-			_, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, orig.Path)
+			if _, err = conn.ExecContext(ctx, `DELETE FROM worktree_records WHERE path=?`, orig.Path); err != nil {
+				return err
+			}
 		} else {
 			cleared := orig
 			cleared.Port = 0
-			err = saveRecord(ctx, conn, cleared)
+			if err = saveRecord(ctx, conn, cleared); err != nil {
+				return err
+			}
 		}
-		released = err == nil
-		return err
+		// A release that drops use below the 90% band rearms the next alert period.
+		if err = rearmPortCapacity(ctx, conn); err != nil {
+			return err
+		}
+		released = true
+		return nil
 	})
 	return released, err
 }
