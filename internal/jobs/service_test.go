@@ -277,15 +277,19 @@ func TestIdleStopAcceptsSuccessfulExit(t *testing.T) {
 		}
 	})
 	defer svc.Stop()
+	stopFailed := make(chan struct{})
+	fake.StopHook = func(call int, failed bool) {
+		if call == 1 && failed {
+			close(stopFailed)
+		}
+	}
 	fake.FailStops(1)
 	idle := 5 * time.Second
 	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for fake.StopCount() == 0 {
-		runtime.Gosched()
-	}
+	<-stopFailed
 	close(exit)
 	if finished := <-reporter.finished; finished.State != StateTimedOut || finished.Note != "no output for 5s" {
 		t.Fatalf("finished = %+v, want the confirmed idle stop", finished)
@@ -297,19 +301,24 @@ func TestIdleStopAcceptsSuccessfulExit(t *testing.T) {
 func TestIdleStopRetriesAfterOutputResumes(t *testing.T) {
 	svc, fake, reporter, _ := newService(t, blockingJob("working"))
 	defer svc.Stop()
+	stopRetried := make(chan struct{})
+	fake.StopHook = func(call int, failed bool) {
+		if call == 1 && failed {
+			// The failure hook returns before the watch requeues. Output is
+			// therefore active before any retry can reach the fake.
+			fake.OutputEveryPoll()
+		}
+		if call == 2 {
+			close(stopRetried)
+		}
+	}
 	fake.FailStops(1)
 	idle := 5 * time.Second
 	_, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for fake.StopCount() == 0 {
-		runtime.Gosched()
-	}
-	fake.OutputEveryPoll()
-	for fake.StopCount() < 2 {
-		runtime.Gosched()
-	}
+	<-stopRetried
 	if finished := <-reporter.finished; finished.State != StateTimedOut || finished.Note != "no output for 5s" {
 		t.Fatalf("finished = %+v, want the confirmed idle stop", finished)
 	}
@@ -320,35 +329,41 @@ func TestIdleStopRetriesAfterOutputResumes(t *testing.T) {
 func TestIdleStopSurvivesRunCancellation(t *testing.T) {
 	svc, fake, reporter, _ := newService(t, blockingJob("working"))
 	defer svc.Stop()
+	firstStop := make(chan struct{})
+	allowRetries := make(chan struct{})
+	retryingAfterCancel := make(chan struct{})
+	fake.StopHook = func(call int, failed bool) {
+		if call == 1 && failed {
+			close(firstStop)
+			<-allowRetries
+		}
+		if call == 3 && failed {
+			close(retryingAfterCancel)
+		}
+	}
 	fake.FailStops(1_000_000)
 	idle := 5 * time.Second
 	job, err := svc.Submit(t.Context(), Input{RoomID: "dyna", Command: []string{"server"}, Idle: &idle, Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for fake.StopCount() == 0 {
-		runtime.Gosched()
-	}
-	calls := fake.StopCount()
+	<-firstStop
 	if _, err := svc.Cancel(context.Background(), job.ID); err != nil {
 		t.Fatal(err)
 	}
-	// Two more calls prove that the cancelled run is still reconciling its
-	// idle stop. A finished event here is the bug: the unit may still run.
-	for fake.StopCount() < calls+2 {
-		select {
-		case finished := <-reporter.finished:
-			t.Fatalf("finished before the idle stop was confirmed: %+v", finished)
-		default:
-		}
-		runtime.Gosched()
+	close(allowRetries)
+	// Calls two and three prove that the cancelled run is still reconciling
+	// its idle stop. A finished event here is the bug: the unit may still run.
+	select {
+	case <-retryingAfterCancel:
+	case finished := <-reporter.finished:
+		t.Fatalf("finished before the idle stop was confirmed: %+v", finished)
 	}
-	target := calls + 2
 	fake.FailStops(0)
 	if finished := <-reporter.finished; finished.State != StateCancelled || finished.Note != "cancelled" {
 		t.Fatalf("finished = %+v, want cancellation after the confirmed stop", finished)
 	}
-	if fake.StopCount() <= target {
+	if fake.StopCount() <= 3 {
 		t.Fatalf("stop calls = %d, want a successful call after the failures", fake.StopCount())
 	}
 }
