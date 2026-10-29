@@ -527,7 +527,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// is visible. A resumed check already runs on the node, so it only
 				// takes its place back.
 				queue := r.queue()
-				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB, Timeout: req.Timeout, Ahead: req.Ahead}
+				source := req.Source
+				source.Head = sha[:7]
+				demand := jobs.Demand{Node: node.Name, ID: runID + "-" + string(check.id), Room: req.RoomID, Heavy: check.heavy, CPUs: check.resources.CPUs, MemoryMiB: check.resources.MemoryMiB, Timeout: req.Timeout, Ahead: req.Ahead, Check: string(check.name), Source: source}
 				runErr := recordCheck(check.id)
 				port := 0
 				if runErr != nil {

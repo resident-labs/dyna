@@ -30,6 +30,24 @@ test('an idle node says nothing runs and no work waits', async () => {
   ui.unmount(component)
 })
 
+test('a check row shows its check name, what it tests and its commit, never its admission ID', async () => {
+  const { ui, component } = await mountCard({
+    capacity,
+    running: [
+      unit({ kind: 'check', id: 'e95ecf25d36c-1793252114266057703-frontend-check', label: 'frontend-check', source: { kind: 'pull-request', number: 924, trial: false, head: 'e95ecf2' } }),
+      unit({ kind: 'check', id: 'd5c344a2b19c-1793252239515981475-go-test-shard-1', label: 'go-test-shard-1', source: { kind: 'pull-request', number: 924, trial: true, head: 'd5c344a' } }),
+    ],
+    waiting: [],
+  })
+  const text = document.body.textContent ?? ''
+  assert.match(text, /frontend-check · PR #924/)
+  assert.match(text, /go-test-shard-1 · merge trial/)
+  assert.match(text, /e95ecf2/)
+  assert.match(text, /d5c344a/)
+  assert.doesNotMatch(text, /1793252114266057703|1793252239515981475/)
+  ui.unmount(component)
+})
+
 test('running work shows its holds and waiting work shows the queue words in order', async () => {
   const { ui, component } = await mountCard({
     capacity: { ...capacity, diskBlock: 'disk 91% at the 90% limit', resources: [{ name: 'display', used: 1, limit: 1 }] },
