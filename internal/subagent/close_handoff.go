@@ -186,6 +186,11 @@ func (m *Manager) forwardClosedInbox(ctx context.Context, source Info) error {
 			if err != nil {
 				return err
 			}
+			// The heir already has the current standing instructions. Leaving
+			// this note queued also makes a later close retry skip it again.
+			if _, ok := original.InstructionNote(); ok {
+				continue
+			}
 			id := hashPostID("close-inbox:" + meta.ID + ":" + item.ID)
 			forwarded, err := m.rooms().Message(meta.RoomID, id)
 			if errors.Is(err, room.ErrPostNotFound) {
