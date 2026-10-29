@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 )
@@ -37,6 +38,11 @@ type ForegroundOptions struct {
 var ErrWaitInterrupted = errors.New("stopped waiting for workflow cleanup")
 
 var mkdirWorkflowDir = os.MkdirAll
+
+// startingRunPublished runs right after the starting run row is durable and
+// before its folder is created. Tests use it to observe the publication
+// protocol.
+var startingRunPublished = func(id string) {}
 
 // LaunchOptions selects the executable and complete child environment.
 // A nil Env inherits the current process environment.
@@ -69,20 +75,25 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	if childEnv == nil {
 		childEnv = os.Environ()
 	}
-	// The starting row exists before the folder does, so cleanup never sees a
-	// staged run that no owner protects. The worker's own create replaces the
-	// row; every failure below finishes it.
+	// The starting row and its folder appear under the runs publication lock,
+	// the same lock cleanup holds for its final ownership recheck and removal,
+	// so cleanup never observes a starting run without either its row or its
+	// folder. The worker's own create replaces the row; every failure below
+	// finishes it.
 	failed := runstore.Meta{ID: id, Name: opts.Name, Session: envValue(childEnv, mode.EnvSession), RoomID: envValue(childEnv, mode.EnvRoomID), Room: envValue(childEnv, mode.EnvRoom)}
 	if failed.Session != "" && envValue(childEnv, mode.EnvMode) == mode.Subagent {
 		failed.ParentSession = failed.Session
 	}
-	if err := runstore.RecordStartingRun(failed); err != nil {
+	if err := sessionlife.WithPublication(ctx, runstore.RunsDir(), "publication.lock", func() error {
+		if err := runstore.RecordStartingRun(failed); err != nil {
+			return err
+		}
+		startingRunPublished(id)
+		return mkdirWorkflowDir(dir, 0o755)
+	}); err != nil {
 		return "", err
 	}
 	start := func() (cmd *exec.Cmd, ended <-chan error, err error) {
-		if err := mkdirWorkflowDir(dir, 0o755); err != nil {
-			return nil, nil, err
-		}
 		if err := os.WriteFile(filepath.Join(dir, "script.js"), []byte(opts.ScriptSrc), 0o600); err != nil {
 			return nil, nil, err
 		}

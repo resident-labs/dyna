@@ -684,23 +684,38 @@ func remove(ctx context.Context, repo string, t Tree, history *runHistory, close
 	}
 	removeMu.Lock()
 	defer removeMu.Unlock()
-	if reason := recheck(); reason != "" {
-		t.Action, t.Reason = "kept", reason
-		return t
-	}
-	if out, e := gitOutput(ctx, repo, "worktree", "remove", t.Path); e != nil {
-		t.Action, t.Reason = "kept", fmt.Sprintf("git refused removal: %v: %s", e, strings.TrimSpace(string(out)))
-		return t
-	}
-	t.Action = "removed"
-	if e := MarkRemoved(t.Path); e != nil && managedPath(t.Path) {
-		t.Reason += "; registry: " + e.Error()
+	// The final recheck and the removal hold the runs publication lock, the
+	// same lock a workflow launch holds while it publishes its starting run
+	// and its folder. A removal can never interleave with a run that is
+	// becoming visible: either the recheck reads the run and keeps the tree,
+	// or the removal completes before the run is published at all.
+	if err := sessionlife.WithPublication(ctx, runstore.RunsDir(), "publication.lock", func() error {
+		if reason := recheck(); reason != "" {
+			t.Action, t.Reason = "kept", reason
+			return nil
+		}
+		beforeWorktreeRemoval(t.Path)
+		if out, e := gitOutput(ctx, repo, "worktree", "remove", t.Path); e != nil {
+			t.Action, t.Reason = "kept", fmt.Sprintf("git refused removal: %v: %s", e, strings.TrimSpace(string(out)))
+			return nil
+		}
+		t.Action = "removed"
+		if e := MarkRemoved(t.Path); e != nil && managedPath(t.Path) {
+			t.Reason += "; registry: " + e.Error()
+		}
+		return nil
+	}); err != nil {
+		t.Action, t.Reason = "kept", "cannot serialize removal with run publication: "+err.Error()
 	}
 	return t
 }
 
 // removeMu serializes the final Git removal and registry update across workers.
 var removeMu sync.Mutex
+
+// beforeWorktreeRemoval runs right before the worktree is deleted. Tests use
+// it to observe the locks the removal holds.
+var beforeWorktreeRemoval = func(path string) {}
 
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second

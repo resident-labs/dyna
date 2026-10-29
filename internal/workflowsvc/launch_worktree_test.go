@@ -6,9 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/worktrees"
 )
@@ -36,6 +38,31 @@ func ageTreeFiles(t *testing.T, paths ...string) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// A launch holds the runs publication lock while it publishes its starting
+// run row and creates its folder, so cleanup never sees one without the other.
+func TestLaunchPublishesItsStartingRunUnderThePublicationLock(t *testing.T) {
+	storetest.Isolate(t)
+	previous := startingRunPublished
+	startingRunPublished = func(string) {
+		if err := os.MkdirAll(runstore.RunsDir(), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		lock, err := os.OpenFile(filepath.Join(runstore.RunsDir(), "publication.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Close()
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+			t.Error("launch does not hold the runs publication lock while it publishes its starting run")
+		}
+	}
+	t.Cleanup(func() { startingRunPublished = previous })
+	if _, err := Launch(t.Context(), Options{ScriptSrc: "return 1"}, LaunchOptions{Executable: filepath.Join(t.TempDir(), "missing-dyna")}); err == nil {
+		t.Fatal("launch of a missing executable succeeded")
 	}
 }
 
