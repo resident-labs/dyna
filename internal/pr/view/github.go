@@ -492,7 +492,11 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 		return watch.Record{}, false, err
 	}
 	if explicit {
-		if err := checkoutOfPR(ctx, p.GH, ref, dir, rec.Upstream); err != nil {
+		root, err := room.RepoRoot(dir)
+		if err != nil {
+			return watch.Record{}, false, err
+		}
+		if err := checkoutOfPR(ctx, p.GH, ref, dir, rec.UpstreamOf(root)); err != nil {
 			return watch.Record{}, false, err
 		}
 	}
