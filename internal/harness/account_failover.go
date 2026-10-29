@@ -44,6 +44,7 @@ func failoverAccount(ctx context.Context, p profile.Profile, cwd string, account
 		current = rt.Accounts.WindowReset(ctx, accountID, window)
 	}
 	hold := quotaHold(failure.Error(), now, prev, current)
+	hold.Model = p.Model
 	from, to, err := rt.Accounts.Failover(ctx, harnessruntime.ProviderForModel(p.Harness, p.Model), accountID, harnessruntime.RepoIdentity(ctx, cwd), b.Executable, hold)
 	if err != nil {
 		return nil, err
@@ -65,8 +66,8 @@ func probeWindowFor(text string) string {
 }
 
 // clearAccountHold drops the account's hold after a turn on the account succeeded.
-// A stated hold stays unless the turn was a held-account probe, because a turn on
-// another model does not prove the provider's limit ended. A hold recorded after
+// A stated hold stays unless the turn was a held-account probe of the hold's model,
+// because a turn on another model does not prove the provider's limit ended. A hold recorded after
 // the turn began stays, so a concurrent failure is kept. A hold store error is
 // logged, because the turn itself already succeeded.
 func clearAccountHold(res Result, turnStart time.Time) {
