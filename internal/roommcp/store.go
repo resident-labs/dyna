@@ -24,7 +24,10 @@ CREATE TABLE room_mcp_grants (
  subject TEXT NOT NULL, granted_by TEXT NOT NULL,
  PRIMARY KEY (room, server, kind, subject),
  FOREIGN KEY (room, server) REFERENCES room_mcp_servers(room, name) ON DELETE CASCADE
-);
+);`
+
+// schemaScanner is version 2: the argument scanner's block terms and allowed logins.
+const schemaScanner = `
 CREATE TABLE room_mcp_block_terms (
  room TEXT NOT NULL, server TEXT NOT NULL, hash TEXT NOT NULL, words INTEGER NOT NULL,
  PRIMARY KEY (room, server, hash),
@@ -42,9 +45,14 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "room_mcp.schema", 1, func(conn *sql.Conn, old int) error {
-		if old == 0 {
-			_, err := conn.ExecContext(context.Background(), schema)
+	return database.Migrate(db, "room_mcp.schema", 2, func(conn *sql.Conn, old int) error {
+		if old < 1 {
+			if _, err := conn.ExecContext(context.Background(), schema); err != nil {
+				return err
+			}
+		}
+		if old < 2 {
+			_, err := conn.ExecContext(context.Background(), schemaScanner)
 			return err
 		}
 		return nil

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -37,20 +39,38 @@ type Host struct {
 	Run func(ctx context.Context, dir, name string, args ...string) (string, error)
 }
 
-func (h Host) run(ctx context.Context, dir, name string, args ...string) string {
+// run runs a command and returns its standard output. A command that exits
+// with status 1 has nothing to report, such as an unset git key or a signed-out
+// GitHub CLI, so it gives empty output. Any other failure is an error: the
+// scanner must not treat an unfinished lookup as an empty answer.
+func (h Host) run(ctx context.Context, dir, name string, args ...string) (string, error) {
+	var out string
+	var err error
 	if h.Run != nil {
-		out, _ := h.Run(ctx, dir, name, args...)
-		return out
+		out, err = h.Run(ctx, dir, name, args...)
+	} else {
+		ctx, cancel := context.WithTimeout(ctx, commandLimit)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Dir = dir
+		var buf bytes.Buffer
+		cmd.Stdout = &buf
+		err = cmd.Run()
+		out = buf.String()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, commandLimit)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	// A missing key or a missing tool leaves the answer empty.
-	_ = cmd.Run()
-	return out.String()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return out, nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return "", nil
+	case name == "gh" && errors.Is(err, exec.ErrNotFound):
+		return "", nil
+	}
+	return "", fmt.Errorf("%s: %w", name, err)
 }
 
 // Identities implements IdentitySource.
@@ -75,11 +95,19 @@ func (h Host) Identities(ctx context.Context, rec room.Record) (Identities, erro
 			continue
 		}
 		for _, key := range []string{"user.name", "user.email"} {
-			if value := strings.TrimSpace(h.run(ctx, repo.Path, "git", "config", "--get", key)); value != "" {
+			value, err := h.run(ctx, repo.Path, "git", "config", "--get", key)
+			if err != nil {
+				return Identities{}, err
+			}
+			if value = strings.TrimSpace(value); value != "" {
 				ids.Personal = append(ids.Personal, value)
 			}
 		}
-		for _, match := range remoteOwner.FindAllStringSubmatch(h.run(ctx, repo.Path, "git", "config", "--get-regexp", `^remote\..*\.url$`), -1) {
+		remotes, err := h.run(ctx, repo.Path, "git", "config", "--get-regexp", `^remote\..*\.url$`)
+		if err != nil {
+			return Identities{}, err
+		}
+		for _, match := range remoteOwner.FindAllStringSubmatch(remotes, -1) {
 			ids.Logins = append(ids.Logins, match[1])
 		}
 	}
@@ -88,7 +116,14 @@ func (h Host) Identities(ctx context.Context, rec room.Record) (Identities, erro
 			Login string `json:"login"`
 		} `json:"hosts"`
 	}
-	if json.Unmarshal([]byte(h.run(ctx, "", "gh", "auth", "status", "--json", "hosts")), &status) == nil {
+	hosts, err := h.run(ctx, "", "gh", "auth", "status", "--json", "hosts")
+	if err != nil {
+		return Identities{}, err
+	}
+	if hosts != "" {
+		if err := json.Unmarshal([]byte(hosts), &status); err != nil {
+			return Identities{}, fmt.Errorf("read GitHub logins: %w", err)
+		}
 		for _, accounts := range status.Hosts {
 			for _, account := range accounts {
 				ids.Logins = append(ids.Logins, account.Login)
