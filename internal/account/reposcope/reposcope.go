@@ -233,6 +233,17 @@ func (s *Store) ClearLimit(accountID string) error {
 	})
 }
 
+// ClearOpenEnded removes the account's hold only when it has no reset time, so
+// a successful probe or refresh ends a credits hold and leaves timed holds alone.
+func (s *Store) ClearOpenEnded(accountID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), writeWait)
+	defer cancel()
+	return state.For(s.db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "DELETE FROM account_limits WHERE account_id=? AND until=?", accountID, OpenEnded.Unix())
+		return err
+	})
+}
+
 // Stated returns the limit ends that the provider stated and that are still
 // after now. A limit end not in it is a guess.
 func (s *Store) Stated(now time.Time) (map[string]time.Time, error) {

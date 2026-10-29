@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -271,6 +272,19 @@ func (a *Accounts) ClearLimit(id string) error {
 	return scopes.ClearLimit(id)
 }
 
+// clearOpenEndedHold removes a no-timer hold after a successful probe or
+// refresh. A timed or stated hold stays. A failed clear only logs, because the
+// probe or refresh itself succeeded.
+func (a *Accounts) clearOpenEndedHold(id string) {
+	scopes, err := a.scopes()
+	if err == nil {
+		err = scopes.ClearOpenEnded(id)
+	}
+	if err != nil {
+		log.Printf("clear no-timer hold for account %s: %v", id, err)
+	}
+}
+
 // WindowReset probes the account's usage and returns when the named window
 // resets. It returns zero when the probe fails or the window has no reset.
 func (a *Accounts) WindowReset(ctx context.Context, id, windowID string) time.Time {
@@ -442,5 +456,6 @@ func (a *Accounts) refreshReading(ctx context.Context, n NativeAccount) *store.O
 	}, true); err != nil {
 		return nil
 	}
+	a.clearOpenEndedHold(n.ID)
 	return &observation
 }
