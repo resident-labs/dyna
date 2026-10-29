@@ -355,8 +355,96 @@ func TestCrossRoomPostLivesInRecipientRoom(t *testing.T) {
 	if res.Message.RoomID != f.b.ID || res.Message.From != f.a.Name+":decoder" {
 		t.Fatalf("message = %#v", res.Message)
 	}
-	if msgs, _ := f.svc.Rooms.Messages(f.a.ID); len(msgs) != 0 {
-		t.Fatalf("sender room stored %#v", msgs)
+	if msgs, _ := f.svc.Rooms.Messages(f.a.ID); len(msgs) != 1 || msgs[0].ID != res.Message.ID {
+		t.Fatalf("sender room stored %#v, want one copy of %s", msgs, res.Message.ID)
+	}
+}
+
+// A session writes from room a to a whole room b. Room a keeps the same single
+// copy, and the copy delivers nothing.
+func TestSessionPostToWholeRoomShowsInSenderRoom(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name}, Text: "hello room"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := f.svc.Rooms.Messages(f.a.ID)
+	if len(msgs) != 1 || msgs[0].ID != sent.Message.ID || !reflect.DeepEqual(msgs[0].To, []string{f.b.Name}) || msgs[0].Wake {
+		t.Fatalf("sender room = %#v", msgs)
+	}
+}
+
+// A session writes from room a to a session of room b. The post lives in b.
+// Room a keeps a copy with the same ID, and the copy delivers nothing.
+func TestSessionCrossRoomPostShowsInSenderRoom(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, Text: "hello other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, err := f.svc.Rooms.Message(f.a.ID, sent.Message.ID)
+	if err != nil || copied.Text != "hello other" || copied.From != f.a.Name+":decoder" || !reflect.DeepEqual(copied.To, []string{f.b.Name + ":other"}) || !reflect.DeepEqual(copied.Via, []string{"@" + f.b.Name + ":other"}) || copied.Wake {
+		t.Fatalf("copy in the sender's room = %#v, %v", copied, err)
+	}
+	if copied.AuthorSessionID() != f.decoder.ID {
+		t.Fatalf("copy binds session %q, want %q, so a reply reaches the session", copied.AuthorSessionID(), f.decoder.ID)
+	}
+	if len(sent.Deliveries) != 1 || sent.Deliveries[0].To != f.b.Name+":other" {
+		t.Fatalf("deliveries = %#v", sent.Deliveries)
+	}
+}
+
+// A session's cross-room post keeps its files and its forward in the sender's
+// copy. The files are stored in room a, so the copy never fails after room b
+// has the post.
+func TestSessionCrossRoomPostCopiesFilesAndForward(t *testing.T) {
+	f := newFixture(t)
+	sent, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, Text: "see the file", Files: []File{{Name: "note.txt", Data: []byte("hi")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, err := f.svc.Rooms.Message(f.a.ID, sent.Message.ID)
+	if err != nil || len(copied.Attachments) != 1 {
+		t.Fatalf("copy attachments = %#v, %v", copied.Attachments, err)
+	}
+	path, err := f.svc.Rooms.AttachmentPath(f.a.ID, copied.Attachments[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "hi" {
+		t.Fatalf("copied file = %q, %v", data, err)
+	}
+
+	orig, err := f.svc.Rooms.Post(f.b.ID, room.PostInput{From: f.b.Name + ":other", To: []string{f.b.Name}, Text: "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwd, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, ForwardOf: orig.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copiedFwd, err := f.svc.Rooms.Message(f.a.ID, fwd.Message.ID)
+	if err != nil || copiedFwd.Forward == nil || copiedFwd.Forward.ID != orig.ID {
+		t.Fatalf("copy forward = %#v, %v", copiedFwd.Forward, err)
+	}
+}
+
+// A refused cross-room post, here a card without text, saves no file in
+// either room.
+func TestRefusedSessionCrossRoomPostSavesNoFiles(t *testing.T) {
+	f := newFixture(t)
+	files := []File{{Name: "note.txt", Data: []byte("hi")}, {Name: "card.html", Data: []byte("<p>x</p>"), Render: room.RenderHTML}}
+	if _, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.decoder), Mentions: []string{"@" + f.b.Name + ":other"}, Files: files}); err == nil {
+		t.Fatal("a card without text was accepted")
+	}
+	for _, r := range []room.Record{f.a, f.b} {
+		dir, err := f.svc.Rooms.FilesDir(r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entries, err := os.ReadDir(dir); err != nil && !os.IsNotExist(err) || len(entries) != 0 {
+			t.Fatalf("room %s files = %v, %v", r.Name, entries, err)
+		}
 	}
 }
 
