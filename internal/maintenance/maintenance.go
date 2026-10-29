@@ -330,7 +330,11 @@ func cleanWorktrees(ctx context.Context, result *Result, repos []string, gc work
 		if err != nil {
 			errs = append(errs, fmt.Errorf("worktree cleanup %s: %w", repo, err))
 		}
+		deferred := 0
 		for _, tree := range trees {
+			if tree.Deferred {
+				deferred++
+			}
 			if seen[tree.Path] {
 				continue
 			}
@@ -342,6 +346,9 @@ func cleanWorktrees(ctx context.Context, result *Result, repos []string, gc work
 				reason, _, _ := strings.Cut(tree.Reason, "; owner inferred from")
 				result.Kept[reason]++
 			}
+		}
+		if deferred > 0 {
+			errs = append(errs, fmt.Errorf("worktree cleanup %s: removal incomplete, %d tree(s) deferred", repo, deferred))
 		}
 	}
 	return errors.Join(errs...)
