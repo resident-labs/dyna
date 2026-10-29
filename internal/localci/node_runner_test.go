@@ -987,6 +987,93 @@ func TestHostCheckLeavesADetachedDaemonRunning(t *testing.T) {
 	}
 }
 
+// A host check stops its detached sccache server before removing the server's
+// temporary folder. The stub server acknowledges its stop through a fifo, so
+// the test needs neither a sleep nor a process poll.
+func TestHostCheckStopsSccacheBeforeRemovingItsTempFolder(t *testing.T) {
+	dir := t.TempDir()
+	fakeNodeTools(t, dir)
+	state := filepath.Join(dir, "sccache-state")
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ready", "stopped"} {
+		if err := syscall.Mkfifo(filepath.Join(state, name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const server = `#!/bin/sh
+trap 'printf "stopped\n" > "$SCCACHE_STATE/stopped"; exit 0' TERM
+printf "%s\n" "$$" > "$SCCACHE_STATE/pid"
+printf "ready\n" > "$SCCACHE_STATE/ready"
+read line < /dev/fd/3
+`
+	if err := os.WriteFile(filepath.Join(dir, "sccache-server"), []byte(server), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const stub = `#!/bin/sh
+case "${1:-}" in
+  --start-server)
+    setsid sccache-server 3<&3 </dev/null >/dev/null 2>&1 &
+    read ready < "$SCCACHE_STATE/ready"
+    ;;
+  --stop-server)
+    printf '%s\n' "$SCCACHE_SERVER_PORT" > "$SCCACHE_STATE/stopped-port"
+    printf '%s\n' "$TMPDIR" > "$SCCACHE_STATE/stopped-tmpdir"
+    if [ -d "$TMPDIR" ]; then : > "$SCCACHE_STATE/tmpdir-present"; fi
+    kill -TERM "$(cat "$SCCACHE_STATE/pid")"
+    read stopped < "$SCCACHE_STATE/stopped"
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "sccache"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nodeCheckWorkPath(dir, "run", nodeCheck{id: SuiteComputerSmoke}), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gate, gateWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = gateWriter.Close()
+		_ = gate.Close()
+		if pid, readErr := os.ReadFile(filepath.Join(state, "pid")); readErr == nil {
+			if value, convErr := strconv.Atoi(strings.TrimSpace(string(pid))); convErr == nil {
+				_ = syscall.Kill(value, syscall.SIGKILL)
+			}
+		}
+	})
+	check := nodeCheck{id: SuiteComputerSmoke, name: "computer-smoke", host: true,
+		inner: "sccache --start-server", env: map[string]string{"SCCACHE_STATE": state}}
+	inner := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), strings.Repeat("b", 40), check, time.Minute, 0, false, DefaultActImage, machines.DefaultContainerSocket, "")
+	cmd := exec.Command("bash", "-c", inner)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.ExtraFiles = []*os.File{gate}
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("check: %v: %s", runErr, output)
+	}
+	port, err := os.ReadFile(filepath.Join(state, "stopped-port"))
+	if err != nil {
+		t.Fatalf("the check left its sccache server running: %v", err)
+	}
+	if got := strings.TrimSpace(string(port)); got != "4226" {
+		t.Fatalf("stopped sccache port = %q, want 4226", got)
+	}
+	tmpdir, err := os.ReadFile(filepath.Join(state, "stopped-tmpdir"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "tmpdir-present")); err != nil {
+		t.Fatalf("the server stopped after its temporary folder was removed: %v", err)
+	}
+	if _, err := os.Stat(strings.TrimSpace(string(tmpdir))); !os.IsNotExist(err) {
+		t.Fatalf("the check kept its temporary folder: %v", err)
+	}
+}
+
 // A detached descendant can hold the check's output open, which keeps a
 // transport that waits for the pipe alive after the wrapper exits. The node
 // must therefore kill it before the wrapper finishes, not after a transport
