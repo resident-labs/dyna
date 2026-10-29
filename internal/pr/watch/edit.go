@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/ghclient"
 )
 
 // PREdit names the pull request fields to replace. A nil field stays unchanged.
@@ -23,6 +26,11 @@ func (s *Service) Edit(ctx context.Context, key string, edit PREdit) error {
 	r, err := s.Store.Get(key)
 	if err != nil {
 		return err
+	}
+	// An edit by a session, a worker or the root carries agent text, which the gh
+	// policy checks. The owner's own edit passes unchanged.
+	if authority.Of(ctx).Role != authority.Owner {
+		ctx = ghclient.WithAgentText(ctx)
 	}
 	ref := refRecord(r)
 	args := []string{"pr", "edit", ref.URL()}
