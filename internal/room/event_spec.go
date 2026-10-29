@@ -380,6 +380,17 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Room {room} is near its {cap} cap: {summary}.",
 	},
+	// The host-wide worktree port pool alerts every room before new trees
+	// cannot start. A persisted generation and threshold bound repeats.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeWorktreePorts,
+		Renderer: "WorktreePortsCard",
+		Payload:  reflect.TypeOf(WorktreePortsEvent{}),
+		Wake:     WakeRoot,
+		Once:     true,
+		Text:     "Worktree port pool holds {used} of {limit} blocks ({threshold}%). Run dyna git worktrees gc before allocation fails.",
+	},
 	// The owner's answer to a call request is a fact of the room: root asked for
 	// the call and stops waiting when it reads the answer.
 	{
