@@ -162,19 +162,30 @@ func (a *Runtime) sweepStaleSignInScratch(dir string) {
 }
 
 // ownedSignInScratch lists the scratch folders that registered sign-in
-// flows still hold, so no other cleanup path can take them.
+// flows still hold and replaced flows have not finished settling, so no
+// other cleanup path can take them.
 func (a *Runtime) ownedSignInScratch() map[string]bool {
 	a.privateLoginMu.Lock()
 	defer a.privateLoginMu.Unlock()
-	owned := make(map[string]bool, 2*len(a.privateLogins))
+	owned := make(map[string]bool, len(a.settlingScratch)+2*len(a.privateLogins))
+	for path := range a.settlingScratch {
+		owned[path] = true
+	}
 	for _, login := range a.privateLogins {
-		if login.flow == nil || !strings.HasPrefix(filepath.Base(login.flow.Cwd), signInScratchPrefix) {
-			continue
+		for _, path := range scratchPathsOf(login) {
+			owned[path] = true
 		}
-		owned[login.flow.Cwd] = true
-		owned[login.flow.Cwd+".home"] = true
 	}
 	return owned
+}
+
+// scratchPathsOf lists the scratch folders a login's flow owns: its working
+// folder and the paired home a Pi sign-in uses. A flowless login owns none.
+func scratchPathsOf(login *privateRuntimeLogin) []string {
+	if login == nil || login.flow == nil || !strings.HasPrefix(filepath.Base(login.flow.Cwd), signInScratchPrefix) {
+		return nil
+	}
+	return []string{login.flow.Cwd, login.flow.Cwd + ".home"}
 }
 
 // addPiSignIn stores each provider a finished sign-in saved in scratch in that
