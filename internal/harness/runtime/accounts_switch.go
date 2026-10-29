@@ -478,6 +478,22 @@ func (a *Accounts) SwitchIfIdle(ctx context.Context, id, executable string) erro
 	return err
 }
 
+// keepActive refuses a guarded switch when keep rejects harness h's active account.
+// Callers run it under the account lock, so no other switch can interleave.
+func (a *Accounts) keepActive(h string, keep func(active string) bool) error {
+	if keep == nil {
+		return nil
+	}
+	active, err := a.activeID(h)
+	if err != nil {
+		return err
+	}
+	if !keep(active) {
+		return errSwitchKept
+	}
+	return nil
+}
+
 // Switch swaps only login state. Native history and other runtime files stay in place.
 // It never renews a saved credential or permits two runtime account homes.
 func (a *Accounts) Switch(ctx context.Context, id, executable string) error {
@@ -487,12 +503,23 @@ func (a *Accounts) Switch(ctx context.Context, id, executable string) error {
 // SwitchWithProgress cancels only before the activation boundary. Once the
 // callback runs, activation and rollback finish under their own bounded context.
 func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string, onActivate func()) error {
+	return a.switchTo(ctx, id, executable, onActivate, nil)
+}
+
+// errSwitchKept reports that a guarded switch found a different active account than
+// the one it expected. The switch changed nothing.
+var errSwitchKept = errors.New("account switch kept the active account")
+
+// switchTo runs SwitchWithProgress. When keep is set, it receives the harness's
+// active account ID under the same lock as the switch. A false result refuses the
+// switch with errSwitchKept before any login state changes.
+func (a *Accounts) switchTo(ctx context.Context, id, executable string, onActivate func(), keep func(active string) bool) error {
 	target, err := a.Find(id)
 	if err != nil {
 		return err
 	}
 	if pinsPerAccount(target.Harness) {
-		return a.switchPinned(ctx, id, executable, onActivate)
+		return a.switchPinned(ctx, id, executable, onActivate, keep)
 	}
 	release, err := a.switchGate(ctx, target.Harness)
 	if err != nil {
@@ -549,6 +576,9 @@ func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string
 		oldID, err := a.activeID(n.Harness)
 		if err != nil {
 			return err
+		}
+		if keep != nil && !keep(oldID) {
+			return errSwitchKept
 		}
 		current, err := shared.Capture(ctx, "")
 		if err != nil && !errors.Is(err, native.ErrNotSignedIn) {
