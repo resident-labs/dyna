@@ -553,33 +553,38 @@ func (a Admission) sweep(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_ = db // one shared handle per data folder; never closed
-	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", a.now().UnixMilli()); err != nil {
-			return err
-		}
-		rows, err := conn.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0 AND state='waiting'")
-		if err != nil {
-			return err
-		}
-		var dead []string
-		for rows.Next() {
-			var id string
-			var pid int
-			var start uint64
-			if err := rows.Scan(&id, &pid, &start); err != nil {
-				rows.Close()
-				return err
-			}
-			if !ownerAlive(pid, start) {
-				dead = append(dead, id)
-			}
-		}
-		if err := rows.Err(); err != nil {
+	// Readers sweep too, and a write publishes an event that makes an open
+	// machine page read again. Look first, and write only when a row goes.
+	now := a.now().UnixMilli()
+	var stale int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now).Scan(&stale); err != nil {
+		return err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT id,owner_pid,owner_start FROM admissions WHERE engine=0 AND state='waiting'")
+	if err != nil {
+		return err
+	}
+	var dead []string
+	for rows.Next() {
+		var id string
+		var pid int
+		var start uint64
+		if err := rows.Scan(&id, &pid, &start); err != nil {
 			rows.Close()
 			return err
 		}
-		if err := rows.Close(); err != nil {
+		if !ownerAlive(pid, start) {
+			dead = append(dead, id)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	if stale == 0 && len(dead) == 0 {
+		return nil
+	}
+	return state.For(db).Write(ctx, hub.Event{Topic: AdmissionTopic}, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM admissions WHERE state='released' OR (state='admitted' AND expires_ms<=?)", now); err != nil {
 			return err
 		}
 		for _, id := range dead {
