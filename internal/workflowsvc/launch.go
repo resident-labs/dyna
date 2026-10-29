@@ -36,6 +36,8 @@ type ForegroundOptions struct {
 // ErrWaitInterrupted means the caller stopped waiting while cleanup continues.
 var ErrWaitInterrupted = errors.New("stopped waiting for workflow cleanup")
 
+var mkdirWorkflowDir = os.MkdirAll
+
 // LaunchOptions selects the executable and complete child environment.
 // A nil Env inherits the current process environment.
 type LaunchOptions struct {
@@ -60,100 +62,112 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	}
 	id := runstore.NewID()
 	dir := filepath.Join(runstore.RunsDir(), id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
 	if opts.Name == "" {
 		opts.Name = MetaName(opts.ScriptSrc, opts.ScriptPath)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "script.js"), []byte(opts.ScriptSrc), 0o600); err != nil {
+	childEnv := launch.Env
+	if childEnv == nil {
+		childEnv = os.Environ()
+	}
+	// The starting row exists before the folder does, so cleanup never sees a
+	// staged run that no owner protects. The worker's own create replaces the
+	// row; every failure below finishes it.
+	failed := runstore.Meta{ID: id, Name: opts.Name, Session: envValue(childEnv, mode.EnvSession), RoomID: envValue(childEnv, mode.EnvRoomID), Room: envValue(childEnv, mode.EnvRoom)}
+	if failed.Session != "" && envValue(childEnv, mode.EnvMode) == mode.Subagent {
+		failed.ParentSession = failed.Session
+	}
+	if err := runstore.RecordStartingRun(failed); err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(opts)
-	if err != nil {
-		return "", err
-	}
-	optionsPath := filepath.Join(dir, "launch.json")
-	if err := os.WriteFile(optionsPath, data, 0o600); err != nil {
-		return "", err
-	}
-	var log *os.File
-	if launch.Foreground == nil {
-		// Detached callers need their plan before returning. Foreground execution
-		// keeps plan errors and warnings in Execute's existing run lifecycle.
-		if _, err := plan.Ensure(dir, opts.ScriptSrc, plan.Options{WriteAncestry: plan.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); err != nil {
-			if errors.Is(err, plan.ErrAncestry) {
-				return "", err
-			}
-			if launch.OnWarning != nil {
-				launch.OnWarning("plan persist: " + err.Error())
-			}
+	start := func() (cmd *exec.Cmd, ended <-chan error, err error) {
+		if err := mkdirWorkflowDir(dir, 0o755); err != nil {
+			return nil, nil, err
 		}
-		log, err = os.Create(filepath.Join(dir, "daemon.log"))
+		if err := os.WriteFile(filepath.Join(dir, "script.js"), []byte(opts.ScriptSrc), 0o600); err != nil {
+			return nil, nil, err
+		}
+		data, err := json.Marshal(opts)
 		if err != nil {
-			return "", err
+			return nil, nil, err
 		}
-		defer log.Close()
+		optionsPath := filepath.Join(dir, "launch.json")
+		if err := os.WriteFile(optionsPath, data, 0o600); err != nil {
+			return nil, nil, err
+		}
+		var log *os.File
+		if launch.Foreground == nil {
+			// Detached callers need their plan before returning. Foreground execution
+			// keeps plan errors and warnings in Execute's existing run lifecycle.
+			if _, err := plan.Ensure(dir, opts.ScriptSrc, plan.Options{WriteAncestry: plan.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); err != nil {
+				if errors.Is(err, plan.ErrAncestry) {
+					return nil, nil, err
+				}
+				if launch.OnWarning != nil {
+					launch.OnWarning("plan persist: " + err.Error())
+				}
+			}
+			if log, err = os.Create(filepath.Join(dir, "daemon.log")); err != nil {
+				return nil, nil, err
+			}
+			defer log.Close()
+		}
+		launch.Executable, err = launchExecutable(launch.Executable)
+		if err != nil {
+			return nil, nil, err
+		}
+		cmd = exec.Command(launch.Executable, "run-worker", optionsPath)
+		cmd.Env = childEnv
+		detached := "1"
+		cmd.Stdout, cmd.Stderr = log, log
+		if foreground := launch.Foreground; foreground != nil {
+			detached = "0"
+			if foreground.Output != "" {
+				cmd.Args = append(cmd.Args, "--output", foreground.Output)
+			}
+			if foreground.Quiet {
+				cmd.Args = append(cmd.Args, "--quiet")
+			}
+			cmd.Stdout, cmd.Stderr = foreground.Stdout, foreground.Stderr
+			// With no CommandContext watcher, WaitDelay bounds only pipe drains
+			// after process exit. It never interrupts cooperative finalization.
+			cmd.WaitDelay = time.Second
+		}
+		cmd.Env = append(cmd.Env, "DYNA_RUN_ID="+id, "DYNA_RUN_DETACHED="+detached)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		// A workflow run acts as authority's worker role, never as a session.
+		// The run's environment carries the room it was started in, so the worker
+		// lands in that room's slice.
+		record := callerid.Launch{DataDir: store.DataDir(), Name: id, Actor: callerid.Identity{Kind: callerid.Worker, Run: id}, Launcher: "workflow", Room: envValue(cmd.Env, mode.EnvRoomID)}
+		started, wait := make(chan error, 1), make(chan error, 1)
+		go func() {
+			if launch.Foreground != nil {
+				// Keep the creating OS thread alive through Wait, including after a
+				// second interrupt lets the CLI stop waiting for finalization.
+				unlock := foregroundParent(cmd)
+				defer unlock()
+			}
+			err := callerid.Start(ctx, childenv.Clean(cmd), record)
+			if err == nil && launch.Foreground == nil {
+				_ = cmd.Process.Release()
+			}
+			started <- err
+			if err == nil && launch.Foreground != nil {
+				wait <- cmd.Wait()
+			}
+		}()
+		if err := <-started; err != nil {
+			return nil, nil, err
+		}
+		return cmd, wait, nil
 	}
-	launch.Executable, err = launchExecutable(launch.Executable)
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.Command(launch.Executable, "run-worker", optionsPath)
-	cmd.Env = launch.Env
-	if cmd.Env == nil {
-		cmd.Env = os.Environ()
-	}
-	detached := "1"
-	cmd.Stdout, cmd.Stderr = log, log
-	if foreground := launch.Foreground; foreground != nil {
-		detached = "0"
-		if foreground.Output != "" {
-			cmd.Args = append(cmd.Args, "--output", foreground.Output)
+	cmd, ended, startErr := start()
+	if startErr != nil {
+		// The run is published as failed: the owner then finds the failure in
+		// its run list and a close check sees a finished run.
+		if recordErr := runstore.RecordLaunchFailure(failed, startErr); recordErr != nil {
+			return "", errors.Join(startErr, fmt.Errorf("record failed run %s: %w", id, recordErr))
 		}
-		if foreground.Quiet {
-			cmd.Args = append(cmd.Args, "--quiet")
-		}
-		cmd.Stdout, cmd.Stderr = foreground.Stdout, foreground.Stderr
-		// With no CommandContext watcher, WaitDelay bounds only pipe drains
-		// after process exit. It never interrupts cooperative finalization.
-		cmd.WaitDelay = time.Second
-	}
-	cmd.Env = append(cmd.Env, "DYNA_RUN_ID="+id, "DYNA_RUN_DETACHED="+detached)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	// A workflow run acts as authority's worker role, never as a session.
-	// The run's environment carries the room it was started in, so the worker
-	// lands in that room's slice.
-	record := callerid.Launch{DataDir: store.DataDir(), Name: id, Actor: callerid.Identity{Kind: callerid.Worker, Run: id}, Launcher: "workflow", Room: envValue(cmd.Env, mode.EnvRoomID)}
-	runEnv := cmd.Env
-	started, ended := make(chan error, 1), make(chan error, 1)
-	go func() {
-		if launch.Foreground != nil {
-			// Keep the creating OS thread alive through Wait, including after a
-			// second interrupt lets the CLI stop waiting for finalization.
-			unlock := foregroundParent(cmd)
-			defer unlock()
-		}
-		err := callerid.Start(ctx, childenv.Clean(cmd), record)
-		if err == nil && launch.Foreground == nil {
-			_ = cmd.Process.Release()
-		}
-		started <- err
-		if err == nil && launch.Foreground != nil {
-			ended <- cmd.Wait()
-		}
-	}()
-	if err := <-started; err != nil {
-		// The folder stays, so publish it as failed: the owner then finds the
-		// failure in its run list and a close check sees a finished run.
-		failed := runstore.Meta{ID: id, Name: opts.Name, Session: envValue(runEnv, mode.EnvSession), RoomID: envValue(runEnv, mode.EnvRoomID), Room: envValue(runEnv, mode.EnvRoom)}
-		if failed.Session != "" && envValue(runEnv, mode.EnvMode) == mode.Subagent {
-			failed.ParentSession = failed.Session
-		}
-		if recordErr := runstore.RecordLaunchFailure(failed, err); recordErr != nil {
-			err = errors.Join(err, fmt.Errorf("record failed run %s: %w", id, recordErr))
-		}
-		return "", err
+		return "", startErr
 	}
 	if launch.Foreground == nil {
 		return id, nil
