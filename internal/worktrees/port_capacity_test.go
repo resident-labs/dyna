@@ -304,6 +304,30 @@ func TestObservePortCapacityKeepsUndeliveredCrossings(t *testing.T) {
 	assertPending(t, observePortCapacity(t))
 }
 
+func TestAllocatedPortBlocksCountsOnlyPortHolders(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	if err := Migrate(store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(store.DataDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedPortRecords(t, db, 0, 3)
+	if err := state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		return saveRecord(context.Background(), conn, Record{Path: "/capacity/unported"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := AllocatedPortBlocks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
+		t.Fatalf("AllocatedPortBlocks() = %d; want 3 records with a port block", got)
+	}
+}
+
 func ack(t *testing.T, generation, threshold int) {
 	t.Helper()
 	if err := AckPortAlertDelivery(generation, threshold); err != nil {
