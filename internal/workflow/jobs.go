@@ -40,12 +40,12 @@ type jobCallSpec struct {
 
 // jobPlanCall is the stable source and branch identity injected by the plan.
 type jobPlanCall struct {
-	NodeID        string   `json:"__planNodeId"`
-	GroupID       string   `json:"__planGroupId"`
-	StageIndex    *int     `json:"__stageIndex"`
-	ItemIndex     *int     `json:"__itemIndex"`
-	Path          []string `json:"__planPath"`
-	FunctionScope bool     `json:"__planFunctionScope"`
+	NodeID       string   `json:"__planNodeId"`
+	GroupID      string   `json:"__planGroupId"`
+	StageIndex   *int     `json:"__stageIndex"`
+	ItemIndex    *int     `json:"__itemIndex"`
+	Path         []string `json:"__planPath"`
+	ReplayUnsafe bool     `json:"__planReplayUnsafe"`
 }
 
 func jobPositionHash(workflowID string, plan jobPlanCall) string {
@@ -102,6 +102,9 @@ func parseJobCall(call goja.FunctionCall, workDir string) (callspec.RunJobInput,
 	}, nil
 }
 
+// jobKey keeps request identity independent of position and occurrence.
+// Concurrent calls with different commands or options cannot share a key or
+// recovered job, even when their plan position is identical.
 func jobKey(namespace, requestHash, positionHash string, occurrence int) string {
 	payload, _ := json.Marshal(struct {
 		Namespace    string
@@ -180,7 +183,7 @@ func (e *engine) job(call goja.FunctionCall) goja.Value {
 	requestHash := jobRequestHash(spec)
 	positionHash := jobPositionHash(e.workflowID, plan)
 	identity := requestHash + "\n" + positionHash
-	replayUnsafe := plan.FunctionScope && len(plan.Path) == 0
+	replayUnsafe := plan.ReplayUnsafe
 	e.shared.mu.Lock()
 	e.shared.execSeq++
 	id := e.shared.execSeq

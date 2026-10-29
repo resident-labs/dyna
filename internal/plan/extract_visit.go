@@ -188,6 +188,7 @@ func (ex *extractor) visitLoop(node ast.Node, body ast.Statement, ctx walkCtx, s
 	inner := ctx
 	inner.parentID = id
 	inner.inLoop = true
+	inner.loopDepth++
 	inner.lastFlow = new(string)
 	inner.card = Cardinality{Kind: CardUnknown, Reason: "loop"}
 	ex.visitStmt(body, inner, sc.child())
@@ -273,6 +274,7 @@ func (ex *extractor) visitCall(call *ast.CallExpression, ctx walkCtx, sc *scope)
 		ex.visitExpr(recv, ctx, sc)
 		inner := ctx
 		inner.inLoop = true
+		inner.loopDepth++
 		if n, ok := closedArrayLen(recv); ok {
 			inner.card = Cardinality{Kind: CardExact, Min: intPtr(n), Max: intPtr(n), Reason: "literal map"}
 		} else {
