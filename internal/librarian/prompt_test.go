@@ -36,7 +36,7 @@ func TestTaskStatesMaintainModeAndTheReadmeGate(t *testing.T) {
 		"dyna library check-readme",
 		"(120 lines)",
 		"do not open a pull request",
-		"prove that no pull request on another repository uses it",
+		"prove that no pull request on any other repository uses it",
 		"search/issues -f q='is:pr head:<branch>'",
 		"gh pr create --repo github.com/fork/app --body-file FILE",
 		"dyna git pr track",
