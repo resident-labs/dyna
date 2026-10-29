@@ -122,6 +122,28 @@ func TestSettledRunRemovesItsFolderWhenTheEngineStops(t *testing.T) {
 	}
 }
 
+// A resumed run that returns before its workers observe the checks keeps the
+// record and folder during an engine stop, so the next engine can reattach.
+func TestResumedRunThatFailsToStartKeepsItsChecksDuringAnEngineStop(t *testing.T) {
+	f := newReattachFixture(t)
+	f.stopEngineDuringRun(t)
+	f.request.OnStart = func(context.Context) error {
+		MarkEngineStopping()
+		return errors.New("shutdown before the first check")
+	}
+	if _, err := f.runner.Run(t.Context(), f.request); err == nil || !strings.Contains(err.Error(), "shutdown before the first check") {
+		t.Fatalf("run error = %v, want the OnStart failure", err)
+	}
+	if got := f.removed.Load(); got != 0 {
+		t.Fatalf("run folder removals = %d, want 0 while the checks may still run", got)
+	}
+	store := Store{DataDir: f.runner.DataDir}
+	key, _ := canonicalKey(f.request.Repo)
+	if rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40)); err != nil || len(rows) != 1 {
+		t.Fatalf("records = %+v, %v, want the record kept for a restarted engine", rows, err)
+	}
+}
+
 // A check that ran through an engine restart keeps its result: the next engine
 // follows the same check, does not start it again, and reads its reports (D-238).
 func TestRestartedEngineReattachesToARunningCheck(t *testing.T) {
