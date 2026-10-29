@@ -650,7 +650,7 @@ func (s *Service) observeBase(st *State, r *Record, snap Snapshot, pollTime []ti
 func (s *Service) observePoll(st *State, r *Record, snap Snapshot, pollTime []time.Time) (previousPullHead string) {
 	if snap.Pull.State != "closed" {
 		r.Checks = savedCheckSummaries(*r, snap)
-		if snap.localCI != nil && snap.localCI.BudgetNote != "" {
+		if snap.localCI != nil && snap.localCI.BudgetNote != "" && !upstreamPR(*r, s.roomUpstreams()) {
 			notice(r, r.Author, snap.localCI.BudgetNote, "informational:ci-budget:local:"+snap.Pull.Head.SHA+":"+digest(snap.localCI.BudgetNote))
 		}
 		r.BotReviews = snap.BotReviews(EffectivePolicy(*st, *r).RequiredChecks...)
@@ -767,16 +767,21 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 		n.changes = append(n.changes, "ci:"+ciKey)
 		if ci == "failed" {
 			r.Failures++
+			// A read-only upstream pull request keeps its failure count, but its CI notes
+			// go to the upstream maintainers, not to this room's author.
+			quiet := s.readOnlyUpstreamPR(*r)
 			if r.Failures >= 3 {
 				if !r.CIPaused {
 					r.CIPaused = true
 					r.PauseReason = "CI wakes paused after 3 consecutive failures; use dyna git pr resume or wait for passing CI"
-					text := fmt.Sprintf("PR #%d failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show %s. Failed jobs: %s.", r.Number, r.URL, strings.Join(jobs, ", "))
-					n.batchLogs[r.Author] = logs
-					n.raise(r.Author, noticeFacts{Type: room.PRCIPaused, Summary: strings.Join(jobs, ", ")})
-					n.addCI(r.Author, text)
+					if !quiet {
+						text := fmt.Sprintf("PR #%d failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show %s. Failed jobs: %s.", r.Number, r.URL, strings.Join(jobs, ", "))
+						n.batchLogs[r.Author] = logs
+						n.raise(r.Author, noticeFacts{Type: room.PRCIPaused, Summary: strings.Join(jobs, ", ")})
+						n.addCI(r.Author, text)
+					}
 				}
-			} else if _, budget := ParseBudgetFailureKey(ciKey); !r.CIPaused && !budget {
+			} else if _, budget := ParseBudgetFailureKey(ciKey); !r.CIPaused && !budget && !quiet {
 				names := strings.Join(jobs, ", ")
 				if names == "" {
 					names = "failed workflow"
