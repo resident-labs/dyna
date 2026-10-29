@@ -139,6 +139,14 @@ func TestAgentRepositoryWritePolicy(t *testing.T) {
 		return fetchParentRepo(ctx, cmd, r)
 	}
 	t.Cleanup(func() { parentRepo = previous })
+	previousHead := pullHeadRepo
+	pullHeadRepo = func(_ context.Context, _ *exec.Cmd, r repository, number string) (string, bool) {
+		if r.name != "upstream/project" {
+			t.Errorf("pull head lookup on %q, want the upstream", r.name)
+		}
+		return map[string]string{"7": "fork/project", "8": "someone/project"}[number], true
+	}
+	t.Cleanup(func() { pullHeadRepo = previousHead })
 	exe := filepath.Join(t.TempDir(), "gh")
 	script := `#!/bin/sh
 case "$1 $2" in
@@ -180,16 +188,20 @@ esac
 		wantLookups int
 	}{
 		{"read-only fork credential pr create on parent", ReadWrite, []string{"pr", "create", "--repo", "upstream/project"}, "", 1},
-		{"pr edit on parent", ReadWrite, []string{"pr", "edit", "--repo", "upstream/project"}, "", 1},
+		{"pr edit of a fork-head pull on parent", ReadWrite, []string{"pr", "edit", "7", "--repo", "upstream/project"}, "", 1},
+		{"pr edit of another head on parent", ReadWrite, []string{"pr", "edit", "8", "--repo", "upstream/project"}, errUpstreamEdit.Error(), 1},
+		{"pr edit by branch on parent", ReadWrite, []string{"pr", "edit", "feature", "--repo", "upstream/project"}, errUpstreamEdit.Error(), 1},
 		{"pr ready on parent", ReadWrite, []string{"pr", "ready", "--repo", "upstream/project"}, "", 1},
 		{"issue create on origin", ReadWrite, []string{"issue", "create", "--repo", "fork/project"}, "", 0},
 		{"issue create on parent", ReadWrite, []string{"issue", "create", "--repo", "upstream/project"}, "", 1},
 		{"read-only issue create on origin", ReadOnly, []string{"issue", "create", "--repo", "fork/project"}, errReadOnly.Error(), 0},
 		{"read-only issue create on parent", ReadOnly, []string{"issue", "create", "--repo", "upstream/project"}, errReadOnly.Error(), 0},
 		{"issue comment on origin", ReadWrite, []string{"issue", "comment", "1", "--repo", "fork/project"}, "", 0},
-		{"issue comment on parent", ReadWrite, []string{"issue", "comment", "1", "--repo", "upstream/project"}, errNotInRoom.Error(), 0},
+		{"issue comment on parent", ReadWrite, []string{"issue", "comment", "1", "--repo", "upstream/project"}, "", 1},
 		{"pr comment on origin", ReadWrite, []string{"pr", "comment", "1", "--repo", "fork/project"}, "", 0},
-		{"pr comment on parent", ReadWrite, []string{"pr", "comment", "1", "--repo", "upstream/project"}, errNotInRoom.Error(), 0},
+		{"pr comment on parent", ReadWrite, []string{"pr", "comment", "1", "--repo", "upstream/project"}, "", 1},
+		{"pr review comment on parent", ReadWrite, []string{"pr", "review", "1", "--comment", "--repo", "upstream/project"}, "", 1},
+		{"read-only pr comment on parent", ReadOnly, []string{"pr", "comment", "1", "--repo", "upstream/project"}, errReadOnly.Error(), 1},
 		{"pr review on origin", ReadWrite, []string{"pr", "review", "--approve", "--repo", "fork/project"}, errAgentGitHubWrite.Error(), 0},
 		{"pr review on parent", ReadWrite, []string{"pr", "review", "--approve", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
 		{"pr merge on parent", ReadWrite, []string{"pr", "merge", "--repo", "upstream/project"}, errAgentGitHubWrite.Error(), 0},
@@ -539,5 +551,21 @@ func TestWorkerAllowsRoutineCollaborationWrites(t *testing.T) {
 				t.Fatalf("checkWorkerPolicy(%v) allowed = %v, want %v", tt.args, got, tt.allowed)
 			}
 		})
+	}
+}
+
+// The head repository is named without a host, so a same-named repository on
+// another host must not pass for the room's fork.
+func TestEditsForkPullRequiresTheOriginHost(t *testing.T) {
+	records := setupRooms(t, "fork/project")
+	previous := pullHeadRepo
+	pullHeadRepo = func(context.Context, *exec.Cmd, repository, string) (string, bool) { return "fork/project", true }
+	t.Cleanup(func() { pullHeadRepo = previous })
+	command := []string{"pr", "edit", "7"}
+	for host, want := range map[string]bool{"github.com": true, "ghe.example": false} {
+		got := editsForkPull(context.Background(), records[0], records[0].Repo, repository{host, "upstream/project"}, command)
+		if got != want {
+			t.Errorf("host %s: editsForkPull = %v, want %v", host, got, want)
+		}
 	}
 }
