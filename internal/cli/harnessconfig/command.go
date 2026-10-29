@@ -46,7 +46,7 @@ func shellCommand() *cobra.Command {
 				}
 			}
 		}
-		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch, Steer: steerWatch}
+		tools := &shellmcp.Tools{Store: shells.DefaultStore(), Exe: exe, Owner: owner, Cwd: sessionCwd(subagent.DefaultStore(), owner, cwd), Resolve: sessionResolver(subagent.DefaultStore()), Search: engineSearch, RoomMCP: engineRoomMCP(), Steer: steerWatch}
 		// An update replaces the binary this server started from; when the
 		// state it serves moves past this build, restart on that binary so a
 		// schema bump never cuts the session's shells off (D-171).
@@ -89,6 +89,28 @@ func engineSearch(ctx context.Context, in callspec.WebSearchRequest) (callspec.W
 		return callspec.WebSearchResponse{}, err
 	}
 	return answer, nil
+}
+
+// engineRoomMCP reaches the room's outside MCP servers through the engine. The
+// engine holds each token and reads the caller from the socket.
+func engineRoomMCP() *shellmcp.RoomMCP {
+	return &shellmcp.RoomMCP{
+		Access: func(ctx context.Context) (bool, error) {
+			var granted bool
+			err := engineClient().Call(ctx, "RoomMCPAccess", nil, &granted)
+			return granted, err
+		},
+		Tools: func(ctx context.Context) (string, error) {
+			var text string
+			err := engineClient().Call(ctx, "RoomMCPAgentTools", nil, &text)
+			return text, err
+		},
+		Invoke: func(ctx context.Context, in callspec.RoomMCPCallRequest) (string, error) {
+			var text string
+			err := engineClient().Call(ctx, "RoomMCPCall", []any{in}, &text)
+			return text, err
+		},
+	}
 }
 
 // sessionResolver finds the open session whose harness session has the given
