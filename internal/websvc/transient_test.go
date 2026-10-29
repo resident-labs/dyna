@@ -2,9 +2,12 @@ package websvc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/callspec"
 )
@@ -31,5 +34,38 @@ func TestCallCanceledByEngineStopAnswers503WithCode(t *testing.T) {
 	}
 	if status, code := callFailure(nil, errors.New("a refusal")); status != http.StatusUnprocessableEntity || code != "" {
 		t.Fatalf("refusal: %d %q", status, code)
+	}
+}
+
+// A write that runs past its deadline answers with the outcome-unknown code and
+// message, and stays 422 so the caller does not send it again. A late read keeps
+// the plain line and no code.
+func TestLateWriteReplyCarriesOutcomeUnknownCode(t *testing.T) {
+	old := deadline
+	deadline = func(string) time.Duration { return 10 * time.Millisecond }
+	t.Cleanup(func() { deadline = old })
+	stall := func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	calls, err := Bind([]Binding{
+		{Name: "RemoveRule", Access: Write, Scope: ScopeRead, Method: stall},
+		{Name: "Slow", Access: Read, Scope: ScopeRead, Method: stall},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t)
+	e.srv.o.Calls = calls
+	e.srv.o.CallScopes = map[string]Scope{"RemoveRule": ScopeRead, "Slow": ScopeRead}
+	var write callErrorResponse
+	response := e.do(asCaller(e.srv.UnixHandler(), owner), req{url: "http://engine/api/RemoveRule", body: "[]"})
+	if err := json.Unmarshal(response.Body.Bytes(), &write); err != nil || response.Code != http.StatusUnprocessableEntity || write.Code != callspec.CodeOutcomeUnknown || !strings.HasPrefix(write.Error, "outcome unknown: engine did not answer RemoveRule in 0.01 s") {
+		t.Fatalf("late write = %d %+v, %v", response.Code, write, err)
+	}
+	var read callErrorResponse
+	response = e.do(asCaller(e.srv.UnixHandler(), owner), req{url: "http://engine/api/Slow", body: "[]"})
+	if err := json.Unmarshal(response.Body.Bytes(), &read); err != nil || response.Code != http.StatusUnprocessableEntity || read.Code != "" || read.Error != "engine did not answer Slow in 0.01 s" {
+		t.Fatalf("late read = %d %+v, %v", response.Code, read, err)
 	}
 }

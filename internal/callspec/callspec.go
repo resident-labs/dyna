@@ -23,6 +23,11 @@ const CodeEngineStopping = "engine_stopping"
 // the same request again once the engine serves calls.
 const CodeEngineStarting = "engine_starting"
 
+// CodeOutcomeUnknown is the reply code of a write that ran past its deadline.
+// The engine may still apply it, so the caller reads the state it changes
+// before it sends the call again.
+const CodeOutcomeUnknown = "outcome_unknown"
+
 // ErrRetryable marks a write the engine could not apply yet but may apply
 // later, so the caller keeps the request and sends it again with the same
 // request ID instead of dropping it.
@@ -174,6 +179,12 @@ func Late(method string, d time.Duration) error { return lateError{method, d} }
 func IsLate(err error) bool {
 	var late lateError
 	return errors.As(err, &late)
+}
+
+// OutcomeUnknown is the error of a write that ran past its deadline. The engine
+// and the client both return it, so a caller reads the same line either way.
+func OutcomeUnknown(method string, err error) error {
+	return fmt.Errorf("outcome unknown: %w; the engine may still apply %s, so read the state it changes before you repeat it", err, method)
 }
 
 // VersionHeader carries the build of the sender, both ways on every call.
