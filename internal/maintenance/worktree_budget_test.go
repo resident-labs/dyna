@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/store"
 )
 
 func TestRunStepGivesLaterStepTimeAfterSlowStep(t *testing.T) {
@@ -50,6 +52,18 @@ func TestRunStepSkipsStepsAfterExternalCancel(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("second step err = %v, want context.Canceled", err)
+	}
+}
+
+// Each call opens the report database again, as a new hook process does, so
+// the turn must come from storage rather than from process memory.
+func TestWorktreeTurnSurvivesProcessRestart(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	for want := 0; want < 3; want++ {
+		got, err := nextWorktreeTurn(context.Background(), store.DataDir())
+		if err != nil || got != want {
+			t.Fatalf("turn = %d, %v; want %d", got, err, want)
+		}
 	}
 }
 
