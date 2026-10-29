@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"dyna-agent/internal/account/store"
@@ -43,6 +44,15 @@ var ownerIdentities = func() ([]string, error) {
 // them name a file instead of holding the text.
 var textFlags = map[string]bool{"--title": false, "-t": false, "--body": false, "-b": false, "--body-file": true, "-F": true}
 
+// generatedTextFlags make gh build the title or body from commits, a template
+// or an editor, so the text cannot be read before gh publishes it.
+var generatedTextFlags = map[string]bool{
+	"--fill": true, "-f": true, "--fill-first": true, "--fill-verbose": true,
+	"--template": true, "-T": true, "--web": true, "-w": true, "--editor": true, "-e": true,
+}
+
+var errUninspectableText = errors.New("this command builds its title or body from commits, a template, an editor or the browser, so Dyna cannot check it; pass --title and --body-file instead")
+
 // publicText returns the title and body that a create or edit command would
 // publish. A body read from standard input is read here and put back.
 func publicText(cmd *exec.Cmd) (string, error) {
@@ -52,7 +62,17 @@ func publicText(cmd *exec.Cmd) (string, error) {
 	}
 	var text strings.Builder
 	for i := 2; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
 		name, value, attached := strings.Cut(args[i], "=")
+		if len(args[i]) > 2 && args[i][0] == '-' && args[i][1] != '-' {
+			// A short flag may carry its value: -bTEXT or -b=TEXT.
+			name, value, attached = args[i][:2], strings.TrimPrefix(args[i][2:], "="), true
+		}
+		if generatedTextFlags[name] {
+			return "", errUninspectableText
+		}
 		isFile, known := textFlags[name]
 		if !known {
 			if createValueFlags[name] && !attached {
@@ -79,6 +99,9 @@ func publicText(cmd *exec.Cmd) (string, error) {
 			cmd.Stdin = bytes.NewReader(data)
 			value = string(data)
 		default:
+			if !filepath.IsAbs(value) {
+				value = filepath.Join(cmd.Dir, value)
+			}
 			data, err := os.ReadFile(value)
 			if err != nil {
 				return "", err
