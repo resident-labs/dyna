@@ -487,6 +487,11 @@ func (a *Accounts) Switch(ctx context.Context, id, executable string) error {
 // SwitchWithProgress cancels only before the activation boundary. Once the
 // callback runs, activation and rollback finish under their own bounded context.
 func (a *Accounts) SwitchWithProgress(ctx context.Context, id, executable string, onActivate func()) error {
+	return a.switchTo(ctx, id, executable, onActivate)
+}
+
+// switchTo runs SwitchWithProgress.
+func (a *Accounts) switchTo(ctx context.Context, id, executable string, onActivate func()) error {
 	target, err := a.Find(id)
 	if err != nil {
 		return err
