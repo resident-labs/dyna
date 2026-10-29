@@ -101,6 +101,20 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 	if err != nil {
 		return result, err
 	}
+	var attemptedAt time.Time
+	defer func() {
+		if attemptedAt.IsZero() {
+			return
+		}
+		outcome, reason := renewalOutcome(result, err)
+		recordErr := (&store.Store{Root: a.Root, Quiet: a.Quiet}).RecordRenewal(context.Background(), store.Renewal{
+			AccountID: n.ID, Harness: n.Harness, Provider: n.Provider,
+			AttemptedAt: attemptedAt, Result: outcome, Reason: reason,
+		})
+		if recordErr != nil {
+			err = errors.Join(err, recordErr)
+		}
+	}()
 	if !pinsCredentials(n.Harness) && !ownHomeLogin(n) {
 		release, err := a.switchGate(ctx, n.Harness)
 		if err != nil {
@@ -250,6 +264,7 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 				}
 				return manager.Refresh(ctx, c)
 			}
+			attemptedAt = time.Now().UTC()
 			next, err := refresh()
 			if errors.Is(err, accountnative.ErrInvalidGrant) {
 				recovered, recoveryErr := recover()
@@ -281,6 +296,27 @@ func (a *Accounts) RefreshCredentials(ctx context.Context, id, executable string
 		})
 	})
 	return result, err
+}
+
+// renewalOutcome maps provider and local errors to public, non-secret facts.
+func renewalOutcome(result CredentialRefreshResult, err error) (store.RenewalResult, string) {
+	switch {
+	case errors.Is(err, accountnative.ErrInvalidGrant):
+		return store.RenewalResultInvalidGrant, "invalid_grant"
+	case errors.Is(err, accountnative.ErrNotSignedIn), errors.Is(err, accountnative.ErrNoIdentity),
+		errors.Is(err, accountnative.ErrUnsupported), errors.Is(err, os.ErrNotExist):
+		return store.RenewalResultNoCredential, "no_credential"
+	case errors.Is(err, context.DeadlineExceeded):
+		return store.RenewalResultTransient, "deadline exceeded"
+	case errors.Is(err, context.Canceled):
+		return store.RenewalResultTransient, "canceled"
+	case err != nil:
+		return store.RenewalResultTransient, "transient"
+	case result.Refreshed:
+		return store.RenewalResultRenewed, ""
+	default:
+		return store.RenewalResultTransient, "no renewed credential"
+	}
 }
 
 // ownHomeLogin reports a login that its account holds in its own home, which a

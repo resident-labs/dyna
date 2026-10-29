@@ -163,6 +163,32 @@ func TestListShowsTheReadingAgeAndStaleMark(t *testing.T) {
 	}
 }
 
+func TestListShowsLastRenewal(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		at     time.Time
+		result store.RenewalResult
+		reason string
+		want   string
+	}{
+		{name: "renewed", at: time.Now().Add(-4 * time.Minute), result: store.RenewalResultRenewed, want: "renewed 4m ago"},
+		{name: "invalid grant", at: time.Now().Add(-2 * time.Minute), result: store.RenewalResultInvalidGrant, reason: "invalid_grant", want: "renewal failed 2m ago: invalid_grant"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := service.AccountsSnapshot{Providers: []service.ProviderAccounts{{Provider: store.ProviderAnthropic, Accounts: []service.ScopeAccount{{
+				Account: service.Account{ID: strings.Repeat("a", 32), Provider: store.ProviderAnthropic, Label: "Work", Status: "ready", LastRenewal: &store.Renewal{
+					AttemptedAt: tc.at, Result: tc.result, Reason: tc.reason,
+				}},
+			}}}}}
+			var out bytes.Buffer
+			writeAccounts(&out, snap, "")
+			if text := out.String(); !strings.Contains(text, tc.want) {
+				t.Fatalf("list = %q, want %q", text, tc.want)
+			}
+		})
+	}
+}
+
 // D-148: a forced refresh is one short command, because rule r5 still names the
 // removed `dyna usage --refresh` and `accounts list --refresh` is easy to miss.
 func TestRefreshAsksEveryProviderForCurrentUsage(t *testing.T) {

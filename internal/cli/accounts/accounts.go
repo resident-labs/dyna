@@ -369,7 +369,7 @@ func writeAccounts(out io.Writer, snap service.AccountsSnapshot, room string) {
 			if a.ActiveHere {
 				mark = "*"
 			}
-			fmt.Fprintf(out, "%s %s  %s  %s  %s%s%s\n", mark, label(a.Account), kind(a.Account), a.Status, usage(a.Account), reading(a.Account), elsewhere(a, room))
+			fmt.Fprintf(out, "%s %s  %s  %s  %s%s%s%s\n", mark, label(a.Account), kind(a.Account), a.Status, usage(a.Account), reading(a.Account), renewal(a.Account), elsewhere(a, room))
 		}
 	}
 }
@@ -393,6 +393,32 @@ func reading(a service.Account) string {
 		out += "  (stale)"
 	}
 	return out
+}
+
+// renewal shows the last engine renewal attempt without exposing provider text.
+func renewal(a service.Account) string {
+	r := a.LastRenewal
+	if r == nil {
+		return ""
+	}
+	age := max(time.Duration(0), time.Since(r.AttemptedAt))
+	when := "just now"
+	switch {
+	case age >= 24*time.Hour:
+		when = fmt.Sprintf("%dd ago", int(age/(24*time.Hour)))
+	case age >= time.Hour:
+		when = fmt.Sprintf("%dh ago", int(age/time.Hour))
+	case age >= time.Minute:
+		when = fmt.Sprintf("%dm ago", int(age/time.Minute))
+	}
+	if r.Result == store.RenewalResultRenewed {
+		return "  (renewed " + when + ")"
+	}
+	reason := r.Reason
+	if reason == "" {
+		reason = string(r.Result)
+	}
+	return fmt.Sprintf("  (renewal failed %s: %s)", when, reason)
 }
 
 func label(a service.Account) string {
