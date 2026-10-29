@@ -56,6 +56,15 @@ func (s *Store) update(fn func(*State) error) error {
 	return storeUpdateResult(updateStore(context.Background(), s.Root, finishStoreUpdate(fn)))
 }
 
+// cleanupScope selects every row finishUpdate could change.
+func cleanupScope(row state.RecordScope) bool {
+	return !row.Watching || row.State != state.PROpen || row.HasResponses
+}
+
+func (s *Store) updateSelected(selectRow func(state.RecordScope) bool, fn func(*State) error) error {
+	return storeUpdateResult(state.UpdateSelectedRecords(context.Background(), s.Root, selectRow, finishStoreUpdate(fn)))
+}
+
 // updateRecords gives a hot callback only its declared, isolated rows and
 // metadata. The shared state writer merges them under the same PR fence.
 func (s *Store) updateRecords(keys []string, fn func(*State) error) error {
