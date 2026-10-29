@@ -37,7 +37,7 @@ func TestTaskStatesMaintainModeAndTheReadmeGate(t *testing.T) {
 		"(120 lines)",
 		"do not open a pull request",
 		"prove that no pull request on another repository uses it",
-		"gh api --paginate",
+		"search/issues -f q='is:pr head:<branch>'",
 		"gh pr create --repo github.com/fork/app --body-file FILE",
 		"dyna git pr track",
 		"Never merge",
