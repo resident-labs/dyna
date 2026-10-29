@@ -535,6 +535,7 @@ func (ex *extractor) visitFunction(fn *ast.FunctionLiteral, ctx walkCtx, sc *sco
 	if fn == nil {
 		return
 	}
+	ctx.functionDepth++
 	nameScope := sc.child()
 	inner := nameScope
 	if fn.Name != nil {
@@ -582,6 +583,7 @@ func (ex *extractor) visitArrow(fn *ast.ArrowFunctionLiteral, ctx walkCtx, sc *s
 	if fn == nil {
 		return
 	}
+	ctx.functionDepth++
 	inner := sc.child()
 	for _, declaration := range fn.DeclarationList {
 		ex.bindVarDecl(declaration, inner)
