@@ -41,6 +41,31 @@ func ageTreeFiles(t *testing.T, paths ...string) {
 	}
 }
 
+// A folder-creation failure after the starting row is committed must finish
+// the row: a run left running with no worker would protect worktrees forever.
+func TestLaunchFinishesStartingRunWhenFolderCreationFails(t *testing.T) {
+	storetest.Isolate(t)
+	previous := mkdirWorkflowDir
+	mkdirWorkflowDir = func(string, os.FileMode) error {
+		return os.ErrPermission
+	}
+	t.Cleanup(func() { mkdirWorkflowDir = previous })
+	_, err := Launch(t.Context(), Options{ScriptSrc: "return 1"}, LaunchOptions{Executable: filepath.Join(t.TempDir(), "missing-dyna")})
+	if err == nil {
+		t.Fatal("launch with a failed folder creation succeeded")
+	}
+	metas, err := runstore.StoredMetadata()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected one recorded run, got %d", len(metas))
+	}
+	if m := metas[0]; m.Status == "running" || m.Starting {
+		t.Fatalf("run %s stays %s (starting=%v) after a failed folder creation", m.ID, m.Status, m.Starting)
+	}
+}
+
 // A launch holds the runs publication lock while it publishes its starting
 // run row and creates its folder, so cleanup never sees one without the other.
 func TestLaunchPublishesItsStartingRunUnderThePublicationLock(t *testing.T) {
