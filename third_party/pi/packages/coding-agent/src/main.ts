@@ -204,7 +204,6 @@ async function runAuthCommand(
 			let result: AuthRefreshResult;
 			try {
 				const modelRuntime = await ModelRuntime.create({
-					modelsPath: null,
 					allowModelNetwork: false,
 					refreshOnCreate: false,
 				});

@@ -65,9 +65,9 @@ func TestResourceRunnerCrashHelper(t *testing.T) {
 func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	accounts := testAccounts(t)
 	bundles := manager(t)
-	old := install(t, bundles, "pi", "1.3.0-dyna.8")
-	_ = install(t, bundles, "pi", "2.0.0-dyna.8")
-	_ = install(t, bundles, "pi", "3.0.0-dyna.8")
+	old := install(t, bundles, "pi", "1.3.0-dyna.9")
+	_ = install(t, bundles, "pi", "2.0.0-dyna.9")
+	_ = install(t, bundles, "pi", "3.0.0-dyna.9")
 	raw, _ := json.Marshal(old)
 	ready := filepath.Join(t.TempDir(), "grandchild.pid")
 	// The helper writes its grandchild's PID into this pipe, which blocks
