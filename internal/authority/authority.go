@@ -169,6 +169,7 @@ var Rules = []Rule{
 	{Action: "git pr track", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to track work"},
 	{Action: "git change open", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to open work"},
 	{Action: "request question", Allowed: []Role{Root}, Instead: "questions to the owner are root-only; use dyna post @parent instead, or file a terminal request with dyna request terminal for a terminal step"},
+	{Action: "approvals settings", Allowed: []Role{Owner}, Instead: "ask the owner to change approval settings"},
 	{Action: "request withdraw", Allowed: []Role{Root, Session, Worker}, Instead: "the human owner only answers questions; root asks and withdraws with dyna request question"},
 	{Action: "room create", Allowed: []Role{Owner, Root}, Instead: "use dyna post @parent for room changes"},
 	{Action: "room edit", Allowed: []Role{Owner, Root}, Instead: "use dyna post @parent for room changes"},

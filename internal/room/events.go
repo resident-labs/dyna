@@ -116,11 +116,16 @@ const (
 	FamilyService  EventFamily = "service"
 	FamilyEngine   EventFamily = "engine"
 	FamilyQuestion EventFamily = "question"
+	FamilyApproval EventFamily = "approval"
 	// FamilyTerminal is a session's request for the owner to run a command in
 	// a terminal, and how it ended.
 	FamilyTerminal  EventFamily = "terminal"
 	TypeRequest     EventType   = "request"
 	TypeRequestDone EventType   = "request.done"
+
+	TypeApprovalRequested EventType = "requested"
+	TypeApprovalDecided   EventType = "decided"
+	TypeApprovalResult    EventType = "result"
 
 	// TypeJobQueued is a detached job that waits for its node, with the
 	// reason it waits.

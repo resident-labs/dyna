@@ -31,7 +31,8 @@
   import { sealedEvent, rendererFor } from './eventRenderers.ts'
   import UnknownEventRow from './UnknownEventRow.svelte'
   import type { EventPost } from './eventRenderers.ts'
-  import { prEvent, terminalDoneEvent, terminalRequestEvent } from './eventPayloads.ts'
+  import { approvalRequestedEvent, prEvent, terminalDoneEvent, terminalRequestEvent } from './eventPayloads.ts'
+  import type { ApprovalDecision, ApprovalOpen } from '../api/approvals.ts'
   import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
   import type { Attachment, Post, ProfileChoice, Question, Room } from '../api/room.ts'
@@ -69,12 +70,14 @@
     onquestion?: (post: Post) => void
     onreviewrequest?: (id: string) => void
     ondeclinerequest?: (id: string, reason: string) => Promise<unknown>
+    approvals?: ApprovalOpen[]
+    ondecideapproval?: (id: string, action: ApprovalDecision, reason: string) => Promise<unknown>
     onacceptcall?: (request: CallRequest) => void
     ondeclinecall?: (request: CallRequest) => void
     ongoal?: (id: string) => unknown
     stuck?: boolean
   }
-  let { room, label = ROOM_CHAT, intro = true, posts = [], profiles = [], onnewprofile = null, questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onreviewrequest, ondeclinerequest, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
+  let { room, label = ROOM_CHAT, intro = true, posts = [], profiles = [], onnewprofile = null, questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onreviewrequest, ondeclinerequest, approvals = [], ondecideapproval, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
 
   let scroller = $state<HTMLDivElement>()
   // The list's jump and scroll calls, which only it knows how to make.
@@ -104,6 +107,9 @@
     expanded = next
   }
 
+  let openApprovals = $derived(Object.fromEntries(approvals.map((a) => [a.id, a])))
+  // The newest request post of each request: a pass may post a new one.
+  let newestApproval = $derived(Object.fromEntries(posts.flatMap((p) => { const e = approvalRequestedEvent(p); return e ? [[e.requestId, p.id]] : [] })))
   let questionsById = $derived(Object.fromEntries(questions.map((q) => [q.id, q])))
   // Only questions to the owner wait for an answer here. Older questions
   // between agents read as plain posts.
@@ -289,7 +295,7 @@
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? terminalDoneEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} focus={flash?.key === row.key ? flash.id : ''} />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} request={questionsById[terminalRequestEvent(p)?.requestId ?? terminalDoneEvent(p)?.requestId ?? '']} {onreviewrequest} {ondeclinerequest} approval={openApprovals[approvalRequestedEvent(p)?.requestId ?? '']} latest={newestApproval[approvalRequestedEvent(p)?.requestId ?? ''] === p.id} {ondecideapproval} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <UnknownEventRow />
         {/if}

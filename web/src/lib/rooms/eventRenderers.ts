@@ -42,11 +42,15 @@ import EngineNoticeCard from './EngineNoticeCard.svelte'
 import QuestionNoteCard from './QuestionNoteCard.svelte'
 import TerminalRequestCard from './TerminalRequestCard.svelte'
 import ReviewResultCard from './ReviewResultCard.svelte'
+import ApprovalRequestCard from './ApprovalRequestCard.svelte'
+import ApprovalDecisionRow from './ApprovalDecisionRow.svelte'
+import ApprovalResultCard from './ApprovalResultCard.svelte'
 import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
 import type { EventNotice, Question, Room } from '../api/room.ts'
 import type { EventPayload } from './events.gen.ts'
 import type { HookFold } from './feedRows.ts'
+import type { ApprovalDecision, ApprovalOpen } from '../api/approvals.ts'
 import type { PostSelection } from '../ui/postSelect.ts'
 export { sealedEvent } from './eventPayloads.ts'
 
@@ -102,6 +106,12 @@ export interface EventProps {
   request?: Question
   onreviewrequest?: (id: string) => void
   ondeclinerequest?: (id: string, reason: string) => Promise<unknown>
+  // approval is the engine's open request behind a request post, and latest
+  // says the post is the newest for it. ondecideapproval is the owner's
+  // decision on it.
+  approval?: ApprovalOpen
+  latest?: boolean
+  ondecideapproval?: (id: string, action: ApprovalDecision, reason: string) => Promise<unknown>
 }
 
 // GoalRef is the part of a goal a card reads.
@@ -117,6 +127,7 @@ export type EventRenderer = Component<EventProps>
 export const eventComponents: Record<string, EventRenderer> = {
   WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, MachineCacheCard, MachineCacheCleanCard, MachineScratchCard, MachineLimitsCard, RoomCapCard, WorktreePortsCard,
   CallCard, VoiceSessionCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, ServiceWaitCard, HelperOutcomeRow, MCPCallRow, EngineNoticeCard, QuestionNoteCard, TerminalRequestCard, ReviewResultCard,
+  ApprovalRequestCard, ApprovalDecisionRow, ApprovalResultCard,
   ShellResultRow, ShellSilenceCard, RunResultCard, JobCard, TurnCompletionRow,
 }
 
