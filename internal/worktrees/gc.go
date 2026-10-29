@@ -63,6 +63,8 @@ type GCOptions struct {
 	OwnerClosed func(string) (bool, error)
 	// Path limits workflow cleanup to the worktree it created.
 	Path string
+	// Timing receives where GC spent its time. GC fills it in when non-nil.
+	Timing *Timing
 	// history carries ended workflow directory sets and versioned session
 	// ownership from the first scan into removal rechecks. Running workflows
 	// and session record versions are still read again before each removal.
@@ -70,6 +72,13 @@ type GCOptions struct {
 	// beforeLock lets tests observe a removal worker that finished its parallel
 	// rechecks and waits for the removal lock; nil in production.
 	beforeLock func(path string)
+}
+
+// Timing adds up the time GC spends on each phase of a cleanup.
+type Timing struct {
+	Fetch  time.Duration // git fetch of the default branch
+	Scan   time.Duration // listing and inspecting trees
+	Remove time.Duration // rechecking and removing trees
 }
 
 // ManagedRoot is shared by session and workflow worktrees.
@@ -730,6 +739,15 @@ var removeMu sync.Mutex
 // it to observe the locks the removal holds.
 var beforeWorktreeRemoval = func(path string) {}
 
+// phaseErr names the cleanup phase that failed, so a pass report says where a
+// repository stopped. A nil error stays nil.
+func phaseErr(phase string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", phase, err)
+}
+
 // pruneTimeout bounds git worktree prune on its own context.
 const pruneTimeout = 10 * time.Second
 
@@ -776,27 +794,38 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 	if !opts.DryRun {
 		defer func() { _ = releaseClosedPorts(ctx, repo) }()
 	}
+	if opts.Timing == nil {
+		opts.Timing = &Timing{}
+	}
 	blocks, err := worktreeBlocks(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
+	scan := func() ([]Tree, error) {
+		started := time.Now()
+		defer func() { opts.Timing.Scan += time.Since(started) }()
+		return scanBlocks(ctx, repo, &opts, blocks)
+	}
 	// The first entry is always protected. With no linked worktrees, no
 	// removal depends on remote ancestry, including in local-only repositories.
 	if len(blocks) > 1 {
-		if reason, fetchErr := refreshDefaultBranch(ctx, repo); reason != "" || fetchErr != nil {
-			trees, scanErr := scanBlocks(ctx, repo, &opts, blocks)
+		started := time.Now()
+		reason, fetchErr := refreshDefaultBranch(ctx, repo)
+		opts.Timing.Fetch += time.Since(started)
+		if reason != "" || fetchErr != nil {
+			trees, scanErr := scan()
 			for i := range trees {
 				trees[i].Action = "kept"
 				trees[i].Reason = reason
 			}
-			return trees, errors.Join(fetchErr, scanErr)
+			return trees, errors.Join(phaseErr("fetch", fetchErr), phaseErr("scan", scanErr))
 		}
 	}
 
 	opts.history = &runHistory{}
-	trees, err := scanBlocks(ctx, repo, &opts, blocks)
+	trees, err := scan()
 	if err != nil {
-		return nil, err
+		return nil, phaseErr("scan", err)
 	}
 	closed := opts.OwnerClosed
 	if closed == nil {
@@ -845,11 +874,13 @@ func GC(ctx context.Context, repo string, opts GCOptions) ([]Tree, error) {
 			}
 		}()
 	}
+	removeStarted := time.Now()
 	for _, i := range pending {
 		jobs <- i
 	}
 	close(jobs)
 	wg.Wait()
+	opts.Timing.Remove += time.Since(removeStarted)
 	if len(removedRecords) > 0 {
 		// The batch commits on its own context: a cleanup whose deadline
 		// expired keeps the progress its workers already made, and the next
