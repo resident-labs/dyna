@@ -58,7 +58,7 @@ func baseRemote(ctx context.Context, dir, base string) string {
 }
 
 // UpstreamBase names the default branch of the configured remote whose
-// repository is upstream, such as parent/main. It reads the branch from the
+// repository is upstream, such as refs/remotes/parent/main. It reads the branch from the
 // remote and fetches nothing: pinBase fetches a remote-tracking base first.
 func UpstreamBase(ctx context.Context, repo, upstream string) (string, error) {
 	out, err := gitOutput(ctx, repo, "remote")
@@ -84,7 +84,8 @@ func UpstreamBase(ctx context.Context, repo, upstream string) (string, error) {
 		for _, line := range strings.Split(string(head), "\n") {
 			target, name, found := strings.Cut(line, "\t")
 			if found && name == "HEAD" && strings.HasPrefix(target, "ref: refs/heads/") {
-				return remote + "/" + strings.TrimPrefix(target, "ref: refs/heads/"), nil
+				// The qualified name keeps a local branch with the same short name from winning.
+				return "refs/remotes/" + remote + "/" + strings.TrimPrefix(target, "ref: refs/heads/"), nil
 			}
 		}
 		return "", fmt.Errorf("remote %s does not report a default branch", remote)
