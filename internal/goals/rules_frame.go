@@ -36,11 +36,11 @@ func RoomOfScope(scope string) string {
 // sections, one item per rule. Sessions and workflow workers both use them.
 func (s *Store) InstructionSections(roomID string) []instructions.Section {
 	section := func(name, scope, heading string) instructions.Section {
-		view, err := s.RulesView(scope)
-		if scope == "" || err != nil || len(view.Rules) == 0 {
+		rules, err := s.Rules(scope)
+		if scope == "" || err != nil || len(rules) == 0 {
 			return instructions.Section{Name: name}
 		}
-		return instructions.Section{Name: name, Text: heading, Items: RuleLines(view.Rules)}
+		return instructions.Section{Name: name, Text: heading, Items: RuleLines(rules)}
 	}
 	return []instructions.Section{
 		section("Global rules", Global, "[DYNA GLOBAL RULES] Standing rules for every Dyna room, set by the owner and agents. Follow them. Owner rules win if two conflict. Room rules win over these. Change them with `dyna rules --global`."),
