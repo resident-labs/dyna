@@ -196,6 +196,9 @@ func TestSuccessfulProbeKeepsAStatedHoldUnlessQuotaIsBack(t *testing.T) {
 	}{
 		{"spent", usageBody(10, 100, reset), true},
 		{"unrelated", `{"five_hour":{"utilization":10}}`, true},
+		{"weekly without utilization", `{"five_hour":{"utilization":10},"seven_day":{"resets_at":"2026-11-04T13:05:15Z"}}`, true},
+		{"session without utilization", `{"five_hour":{},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`, true},
+		{"no session window", `{"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`, true},
 		{"open", usageBody(10, 20, reset), false},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
@@ -218,6 +221,33 @@ func TestSuccessfulProbeKeepsAStatedHoldUnlessQuotaIsBack(t *testing.T) {
 			}
 			if kept := !got.Until.IsZero(); kept != tc.kept {
 				t.Fatalf("stated hold kept = %v after the %s reading, want %v", kept, tc.label, tc.kept)
+			}
+		})
+	}
+}
+
+// D-500: a reading refutes a stated hold only when it has both windows with a
+// percentage, and quota left. Other providers may report a window with no
+// percentage, and that is not a refutation.
+func TestReadingRefutesStatedHoldNeedsBothPercentages(t *testing.T) {
+	now := time.Now()
+	pct := func(v float64) *float64 { return &v }
+	session := store.Window{ID: "five_hour", UsedPercent: pct(10)}
+	weekly := store.Window{ID: "seven_day", UsedPercent: pct(20)}
+	for _, tc := range []struct {
+		name    string
+		windows []store.Window
+		want    bool
+	}{
+		{"both with quota left", []store.Window{session, weekly}, true},
+		{"weekly without a percentage", []store.Window{session, {ID: "seven_day"}}, false},
+		{"session without a percentage", []store.Window{{ID: "five_hour"}, weekly}, false},
+		{"no session window", []store.Window{weekly}, false},
+		{"weekly spent", []store.Window{session, {ID: "seven_day", UsedPercent: pct(100)}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := readingRefutesStatedHold(&store.Observation{Windows: tc.windows}, now); got != tc.want {
+				t.Fatalf("readingRefutesStatedHold = %v, want %v", got, tc.want)
 			}
 		})
 	}
