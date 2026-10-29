@@ -191,7 +191,7 @@ func apiFileArguments(args []string) ([]fileArgument, error) {
 
 func apiFieldFile(index int, value, prefix string) (fileArgument, bool) {
 	_, raw, ok := strings.Cut(value, "=")
-	if !ok || !strings.HasPrefix(raw, "@") || strings.HasPrefix(raw, "@@") {
+	if !ok || !strings.HasPrefix(raw, "@") {
 		return fileArgument{}, false
 	}
 	path := strings.TrimPrefix(raw, "@")

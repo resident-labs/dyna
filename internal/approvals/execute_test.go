@@ -18,6 +18,23 @@ func TestDisplayBodyUsesImmutableFileSnapshot(t *testing.T) {
 	}
 }
 
+func TestDisplayBodyUsesAPIFileSnapshots(t *testing.T) {
+	tests := []struct {
+		argv []string
+		path string
+	}{
+		{argv: []string{"api", "repos/o/r/issues", "--input=payload.json"}, path: "payload.json"},
+		{argv: []string{"api", "repos/o/r/issues", "-F", "title=title", "-F", "body=@body.md"}, path: "body.md"},
+		{argv: []string{"api", "repos/o/r/issues", "-Fbody=@@name"}, path: "@name"},
+	}
+	for _, tt := range tests {
+		payload := GHPayload{Argv: tt.argv, Files: []FileSnapshot{{Path: tt.path, Data: []byte("approved API body")}}}
+		if got := payload.DisplayBody(); got != "approved API body" {
+			t.Fatalf("body = %q for %q", got, tt.argv)
+		}
+	}
+}
+
 func TestApprovedRequestExecutesAndDeliversResult(t *testing.T) {
 	f := newFixture(t)
 	code := 0
