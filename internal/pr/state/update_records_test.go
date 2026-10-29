@@ -354,3 +354,38 @@ func TestUpdateRecordsPrunesUntouchedRowsWithoutChangingRetainedSnapshot(t *test
 		t.Fatal("pruning lost a live row or changed a retained snapshot")
 	}
 }
+
+func TestSelectedUpdateKeepsRetainedSnapshot(t *testing.T) {
+	root := newRoot(t)
+	initial := bigState(2)
+	keys := make([]string, 0, len(initial.Records))
+	for key := range initial.Records {
+		keys = append(keys, key)
+	}
+	selected, other := keys[0], keys[1]
+	initial.Records[selected].CIBudgetNotes = map[string]string{"nested": "old"}
+	if err := Write(root, initial); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ReadSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOther := before.state.Records[other]
+	err = UpdateSelectedRecords(t.Context(), root, func(row RecordScope) bool { return row.Key == selected }, func(st *State) error {
+		st.Records[selected].CIBudgetNotes["nested"] = "new"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := ReadSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, _ := before.Record(selected)
+	fresh, _ := after.Record(selected)
+	if old.CIBudgetNotes["nested"] != "old" || fresh.CIBudgetNotes["nested"] != "new" || after.state.Records[other] != oldOther {
+		t.Fatal("selected update changed a retained snapshot or replaced the unaffected record")
+	}
+}
