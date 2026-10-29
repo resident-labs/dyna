@@ -7,7 +7,7 @@ node's queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
+`dyna job run [--node N | --label L]... [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--workspace] [--timeout 2h] [--idle 20m] [--image IMG | --host] [--network none] [--mount NAME:PATH[:ro|rw]]... [--device PATH]... [--artifact PATH]... -- CMD`
 
 - With no `--node` or `--label`, the job runs on the local node (the engine
   host), so a one-node owner needs no setup.
@@ -33,6 +33,21 @@ node's queue, and store their log and exit code.
   arguments, so any image works, with or without a shell.
   Host execution on a remote node needs that node's host-check grant
   (`dyna node edit N --allow-host-checks`); the local node needs none.
+- `--network none` disables container networking. `--network`, `--mount` and
+  `--device` need `--image`; Dyna keeps Docker's default network when the flag
+  is absent.
+- The owner or a room root registers a named mount for one room and node:
+  `dyna node edit hermeslab --mount horizon-vanilla=/srv/vanilla:ro --room horizon`.
+  A writable registration ends in `:rw`. The job selects it without naming a
+  host path: `--mount horizon-vanilla:/data`. The container gets the
+  registration's access mode by default. It can ask for `:ro` to reduce a
+  writable registration, but Dyna refuses `:rw` on a read-only registration.
+  Dyna also refuses unknown names and registrations of another room. Named
+  mounts cannot replace the job's own `/workspace`.
+- A node's device allow list is room-scoped too. For example,
+  `dyna node edit hermeslab --device /dev/dri --room horizon` lets that room's
+  jobs request `--device /dev/dri`. Dyna refuses every device that is not
+  registered for the job's room on the selected node.
 - The job joins the node's queue, so jobs and local CI checks share one
   admission bound per node. `--io heavy` marks a job that saturates the
   disk; a node runs only a few heavy units at once. A job that waits shows why

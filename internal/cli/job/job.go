@@ -2,6 +2,7 @@
 package job
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,14 +77,18 @@ func NewCommand() *cobra.Command {
 	return cmd
 }
 
+var callRunJob = func(ctx context.Context, request callspec.RunJobInput, job *jobs.Job) error {
+	return engineclient.New("").Call(ctx, "RunJob", []any{request}, job)
+}
+
 func runCmd() *cobra.Command {
-	var node, commit, image, memory, ioWeight string
-	var artifacts, resourceNames, labels []string
+	var node, commit, image, memory, ioWeight, network string
+	var artifacts, resourceNames, labels, mounts, devices []string
 	var cpus int
 	var host, workspace bool
 	var timeout, idle time.Duration
 	c := &cobra.Command{
-		Use:   "run [--node N | --label L] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG | --host] -- CMD",
+		Use:   "run [--node N | --label L] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--workspace] [--timeout D] [--idle D] [--image IMG | --host] [--network none] [--mount NAME:PATH] [--device PATH] -- CMD",
 		Short: "Submit a job and return",
 		Args: func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -107,7 +112,8 @@ func runCmd() *cobra.Command {
 			}
 			request := callspec.RunJobInput{
 				Node: node, Labels: labels, Command: args, Repo: repo, Ref: commit,
-				Host: host, Image: image, CPUs: cpus, Memory: memory,
+				Host: host, Image: image, Network: network, Mounts: mounts, Devices: devices,
+				CPUs: cpus, Memory: memory,
 				Timeout: int(timeout / time.Second), IO: ioWeight, Artifacts: artifacts,
 				Resources: resourceNames, Workspace: workspace,
 			}
@@ -116,7 +122,7 @@ func runCmd() *cobra.Command {
 				request.Idle = &seconds
 			}
 			var job jobs.Job
-			err := engineclient.New("").Call(c.Context(), "RunJob", []any{request}, &job)
+			err := callRunJob(c.Context(), request, &job)
 			if err != nil {
 				return err
 			}
@@ -131,6 +137,9 @@ func runCmd() *cobra.Command {
 	c.Flags().DurationVar(&timeout, "timeout", 0, "deadline of the job (default 30m)")
 	c.Flags().DurationVar(&idle, "idle", 0, "stop a running job after this long without output (default: none)")
 	c.Flags().StringVar(&image, "image", "", "run the command in this container image")
+	c.Flags().StringVar(&network, "network", "", "container network; only none is supported")
+	c.Flags().StringArrayVar(&mounts, "mount", nil, "mount NAME:CONTAINER_PATH[:ro|rw] from this room's node registrations (repeatable)")
+	c.Flags().StringArrayVar(&devices, "device", nil, "allow this container to use a device on this room's node allow list (repeatable)")
 	c.Flags().BoolVar(&host, "host", false, "run the command on the node itself (the default without --image)")
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
 	c.Flags().StringVar(&ioWeight, "io", "light", "the job's IO weight: a node runs only a few heavy jobs at once")

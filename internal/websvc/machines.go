@@ -220,6 +220,10 @@ type MachinePatch struct {
 	MaxDiskPercent *int `json:"maxDiskPercent,omitempty"`
 	// Resources replaces the node's declared named resource counts.
 	Resources *map[machines.ResourceName]int `json:"resources,omitempty"`
+	// Mounts and Devices upsert room-scoped container registrations. Other
+	// registrations stay unchanged, so one room's edit cannot replace another's.
+	Mounts  *[]machines.NamedMount  `json:"mounts,omitempty"`
+	Devices *[]machines.DeviceGrant `json:"devices,omitempty"`
 }
 
 // MachineLive is what this engine's own machine uses now. The engine fills
@@ -412,6 +416,30 @@ func applyMachinePatch(m *machines.Machine, patch MachinePatch) error {
 	}
 	if patch.Resources != nil {
 		m.Resources = *patch.Resources
+	}
+	if patch.Mounts != nil {
+		for _, update := range *patch.Mounts {
+			at := slices.IndexFunc(m.Mounts, func(stored machines.NamedMount) bool {
+				return stored.Name == update.Name && stored.Room == update.Room
+			})
+			if at >= 0 {
+				m.Mounts[at] = update
+			} else {
+				m.Mounts = append(m.Mounts, update)
+			}
+		}
+	}
+	if patch.Devices != nil {
+		for _, update := range *patch.Devices {
+			at := slices.IndexFunc(m.Devices, func(stored machines.DeviceGrant) bool {
+				return stored.Path == update.Path && stored.Room == update.Room
+			})
+			if at >= 0 {
+				m.Devices[at] = update
+			} else {
+				m.Devices = append(m.Devices, update)
+			}
+		}
 	}
 	return nil
 }

@@ -155,6 +155,20 @@ func showCommand() *cobra.Command {
 				}
 				fmt.Fprintf(out, "Resources: %s\n", strings.Join(parts, ", "))
 			}
+			if len(m.Mounts) > 0 {
+				parts := make([]string, 0, len(m.Mounts))
+				for _, mount := range m.Mounts {
+					parts = append(parts, fmt.Sprintf("%s=%s:%s (room %s)", mount.Name, mount.Source, mount.Mode, roomName(mount.Room)))
+				}
+				fmt.Fprintf(out, "Mounts:   %s\n", strings.Join(parts, ", "))
+			}
+			if len(m.Devices) > 0 {
+				parts := make([]string, 0, len(m.Devices))
+				for _, device := range m.Devices {
+					parts = append(parts, fmt.Sprintf("%s (room %s)", device.Path, roomName(device.Room)))
+				}
+				fmt.Fprintf(out, "Devices:  %s\n", strings.Join(parts, ", "))
+			}
 			fmt.Fprintf(out, "Host checks: %t (%s)\n", m.HasHostChecksGrants(), hostChecksWho(m))
 			fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
 			fmt.Fprintf(out, "Owner labels:  %s\n", labelList(m.Labels))
@@ -315,7 +329,8 @@ func addCommand() *cobra.Command {
 func editCommand() *cobra.Command {
 	var rename, ssh string
 	var maxIOHeavy, maxDiskPercent int
-	var resourceEdits, labels, unlabels []string
+	var resourceEdits, labels, unlabels, mountEdits, deviceEdits []string
+	var registrationRoom string
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
 	var rooms []string
@@ -407,6 +422,39 @@ func editCommand() *cobra.Command {
 				}
 				patch.Resources, changed = &updated, true
 			}
+			if c.Flags().Changed("mount") || c.Flags().Changed("device") {
+				if !c.Flags().Changed("room") || registrationRoom == "" {
+					return fmt.Errorf("--mount and --device need --room")
+				}
+				ids, err := resolveRooms([]string{registrationRoom})
+				if err != nil {
+					return err
+				}
+				roomID := ids[0]
+				if c.Flags().Changed("mount") {
+					updates := make([]machines.NamedMount, 0, len(mountEdits))
+					for _, edit := range mountEdits {
+						mount, err := machines.ParseNamedMount(edit, roomID)
+						if err != nil {
+							return err
+						}
+						updates = append(updates, mount)
+					}
+					patch.Mounts = &updates
+				}
+				if c.Flags().Changed("device") {
+					updates := make([]machines.DeviceGrant, 0, len(deviceEdits))
+					for _, edit := range deviceEdits {
+						device, err := machines.ParseDeviceGrant(edit, roomID)
+						if err != nil {
+							return err
+						}
+						updates = append(updates, device)
+					}
+					patch.Devices = &updates
+				}
+				changed = true
+			}
 			if allowHostChecks || disallowHostChecks {
 				patch.AllowHostChecks, changed = &allowHostChecks, true
 			}
@@ -436,6 +484,9 @@ func editCommand() *cobra.Command {
 	cmd.Flags().IntVar(&maxIOHeavy, "max-io-heavy", 0, "IO-heavy jobs and checks this node runs at once (0: one per 16 CPUs, at least 1)")
 	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the node admits no new work (0: keep at least 20 GiB and 5% of the disk free, capped at 10% of the disk)")
 	cmd.Flags().StringArrayVar(&resourceEdits, "resource", nil, "set a named resource count, such as ghidra=1 (repeatable; NAME=0 removes it)")
+	cmd.Flags().StringArrayVar(&mountEdits, "mount", nil, "register NAME=HOST_PATH:ro|rw for container jobs (repeatable; needs --room)")
+	cmd.Flags().StringArrayVar(&deviceEdits, "device", nil, "allow a host device path for container jobs (repeatable; needs --room)")
+	cmd.Flags().StringVar(&registrationRoom, "room", "", "room that owns the --mount or --device registration")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd

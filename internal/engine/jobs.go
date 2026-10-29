@@ -148,6 +148,10 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 	if err != nil {
 		return jobs.Job{}, err
 	}
+	mounts, err := jobs.ParseMountRequests(in.Mounts)
+	if err != nil {
+		return jobs.Job{}, err
+	}
 	var idle *time.Duration
 	if in.Idle != nil {
 		duration := time.Duration(*in.Idle) * time.Second
@@ -156,6 +160,7 @@ func (s services) runJob(ctx context.Context, in runJobInput) (jobs.Job, error) 
 	input := jobs.Input{
 		IdempotencyKey: in.IdempotencyKey, RequestHash: in.RequestHash, Node: in.Node, Labels: labels, Command: in.Command,
 		Repo: in.Repo, Ref: in.Ref, Host: in.Host, Image: in.Image,
+		Network: jobs.NetworkMode(in.Network), Mounts: mounts, Devices: in.Devices,
 		CPUs: in.CPUs, Memory: in.Memory, Timeout: time.Duration(in.Timeout) * time.Second, Idle: idle,
 		Artifacts: in.Artifacts, Heavy: in.IO == "heavy", Resources: resources, Workspace: in.Workspace,
 	}

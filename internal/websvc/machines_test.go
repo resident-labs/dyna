@@ -110,6 +110,31 @@ func TestMachinesListAndPatch(t *testing.T) {
 	}
 }
 
+func TestContainerRegistrationPatchPreservesOtherRooms(t *testing.T) {
+	api := machineAPI(t)
+	node, err := api.Store.Save(t.Context(), machines.Machine{
+		Name: "pve", SSH: "pip@pve", Enabled: true,
+		Mounts:  []machines.NamedMount{{Name: "other", Source: "/srv/other", Room: "room_other", Mode: machines.MountRO}},
+		Devices: []machines.DeviceGrant{{Path: "/dev/other", Room: "room_other"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root, Session: "root", Room: "room_dyna"})
+	mounts := []machines.NamedMount{{Name: "data", Source: "/srv/data", Room: "room_dyna", Mode: machines.MountRO}}
+	devices := []machines.DeviceGrant{{Path: "/dev/dri", Room: "room_dyna"}}
+	if _, err := api.SaveNode(root, node.ID, MachinePatch{Mounts: &mounts, Devices: &devices}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := api.Store.GetByID(t.Context(), node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Mounts) != 2 || len(stored.Devices) != 2 {
+		t.Fatalf("an own-room patch replaced another room's registrations: %#v, %#v", stored.Mounts, stored.Devices)
+	}
+}
+
 // A room root allows host checks for its own room, so the page names that room
 // and another room's root cannot take the owner's grant away.
 func TestHostChecksGrantsNameTheirRoom(t *testing.T) {
