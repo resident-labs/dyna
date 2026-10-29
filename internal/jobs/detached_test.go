@@ -184,7 +184,7 @@ func TestOnePollCoversEveryCheck(t *testing.T) {
 
 // A poll reply that ends inside a log is dropped whole, and the offset stays.
 func TestPollReplyCutShortAdvancesNothing(t *testing.T) {
-	if _, err := ParsePoll(strings.NewReader("DYNA_DETACH dir=/d state=running code= size=10 bytes=10\nhalf")); err == nil {
+	if _, err := ParsePoll(strings.NewReader("DYNA_DETACH dir=/d state=running code= size=10 mtime=1000 bytes=10\nhalf")); err == nil {
 		t.Fatal("a cut reply was accepted")
 	}
 }

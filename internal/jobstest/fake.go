@@ -55,6 +55,7 @@ type fakeProc struct {
 	log      []byte
 	exited   bool
 	code     int
+	modified time.Time
 	cancel   context.CancelFunc
 	vanished bool
 }
@@ -140,7 +141,7 @@ func (m *Fake) start(in io.Reader, pos []string) error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(m.t.Context())
-	proc := &fakeProc{cancel: cancel}
+	proc := &fakeProc{cancel: cancel, modified: m.now}
 	m.procs[dir] = proc
 	m.mu.Unlock()
 	callName, callArgs := "bash", []string{"-o", "pipefail", "-c", string(body)}
@@ -237,7 +238,7 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 			if m.folders[dir] {
 				state = "gone"
 			}
-			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 bytes=0\n\n", dir, state)
+			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 mtime=0 bytes=0\n\n", dir, state)
 			continue
 		}
 		state, code := "running", ""
@@ -248,7 +249,7 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 		}
 		size := len(proc.log)
 		chunk := proc.log[min(offset, size):min(size, offset+256<<10)]
-		fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code=%s size=%d bytes=%d\n%s\n", dir, state, code, size, len(chunk), chunk)
+		fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code=%s size=%d mtime=%d bytes=%d\n%s\n", dir, state, code, size, proc.modified.Unix(), len(chunk), chunk)
 	}
 	return nil
 }
@@ -263,6 +264,9 @@ func (l fakeLog) Write(p []byte) (int, error) {
 	l.m.mu.Lock()
 	defer l.m.mu.Unlock()
 	l.proc.log = append(l.proc.log, p...)
+	if len(p) > 0 {
+		l.proc.modified = l.m.now
+	}
 	return len(p), nil
 }
 

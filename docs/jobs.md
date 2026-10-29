@@ -7,7 +7,7 @@ machine's node queue, and store their log and exit code.
 
 ## Run a job
 
-`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--timeout 2h] [--image IMG | --host] [--artifact PATH]... -- CMD`
+`dyna job run [--node N] [--commit REF] [--cpus N] [--memory 16g] [--io heavy|light] [--resource NAME]... [--timeout 2h] [--idle 20m] [--image IMG | --host] [--artifact PATH]... -- CMD`
 
 - With no `--node`, the job runs on the local node (the engine host), so a
   one-machine owner needs no setup.
@@ -26,6 +26,9 @@ machine's node queue, and store their log and exit code.
   disk; a node runs only a few heavy units at once. A job that waits shows why
   in `dyna job show`.
 
+- `--idle D` stops a running job as `timed_out` after its log has no new
+  output for D. D must be positive and no longer than `--timeout`. The default
+  is no idle timeout.
 - `--artifact PATH` keeps a file or folder of the work folder after the job
   ends, such as `--artifact target/release/app`. Repeat it for more paths. The
   engine copies them back before it posts the job's end and removes the folder,

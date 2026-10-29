@@ -27,6 +27,7 @@ type jobView struct {
 	ExitCode   *int     `json:"exitCode,omitempty"`
 	Note       string   `json:"note,omitempty"`
 	WaitReason string   `json:"waitReason,omitempty"`
+	Idle       string   `json:"idle,omitempty"`
 	Log        string   `json:"log,omitempty"`
 	// Artifacts names the kept outputs and how to fetch them.
 	Artifacts []string `json:"artifacts,omitempty"`
@@ -35,6 +36,9 @@ type jobView struct {
 
 func view(job jobs.Job) jobView {
 	v := jobView{ID: job.ID, Node: job.Node, State: string(job.State), Command: job.Command, Repo: job.Repo, SHA: job.SHA, ExitCode: job.ExitCode, Note: job.Note, WaitReason: job.WaitReason, Log: "dyna job logs " + job.ID}
+	if job.Idle > 0 {
+		v.Idle = job.Idle.String()
+	}
 	if len(job.Artifacts) > 0 {
 		v.Artifacts, v.Fetch = job.Artifacts, "dyna job fetch "+job.ID
 	}
@@ -74,9 +78,9 @@ func runCmd() *cobra.Command {
 	var artifacts, resourceNames []string
 	var cpus int
 	var host bool
-	var timeout time.Duration
+	var timeout, idle time.Duration
 	c := &cobra.Command{
-		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--timeout D] [--image IMG | --host] -- CMD",
+		Use:   "run [--node N] [--commit REF] [--cpus N] [--memory SIZE] [--resource NAME] [--timeout D] [--idle D] [--image IMG | --host] -- CMD",
 		Short: "Submit a job and return",
 		Args: func(c *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -99,13 +103,17 @@ func runCmd() *cobra.Command {
 			if commit != "" {
 				repo, _ = os.Getwd()
 			}
-			var job jobs.Job
-			err = engineclient.New("").Call(c.Context(), "RunJob", []any{map[string]any{
+			request := map[string]any{
 				"node": node, "command": args, "repo": repo, "ref": commit,
 				"host": host, "image": image, "cpus": cpus, "memory": memory,
 				"timeoutSec": int(timeout / time.Second), "io": ioWeight, "artifacts": artifacts,
 				"resources": resources,
-			}}, &job)
+			}
+			if c.Flags().Changed("idle") {
+				request["idleSec"] = int(idle / time.Second)
+			}
+			var job jobs.Job
+			err = engineclient.New("").Call(c.Context(), "RunJob", []any{request}, &job)
 			if err != nil {
 				return err
 			}
@@ -117,6 +125,7 @@ func runCmd() *cobra.Command {
 	c.Flags().IntVar(&cpus, "cpus", 0, "CPUs the job may use")
 	c.Flags().StringVar(&memory, "memory", "", "memory the job may use, such as 16g or 512m")
 	c.Flags().DurationVar(&timeout, "timeout", 0, "deadline of the job (default 30m)")
+	c.Flags().DurationVar(&idle, "idle", 0, "stop a running job after this long without output (default: none)")
 	c.Flags().StringVar(&image, "image", "", "run the command in this container image")
 	c.Flags().BoolVar(&host, "host", false, "run the command on the machine itself (the default without --image)")
 	c.Flags().StringArrayVar(&artifacts, "artifact", nil, "keep this path of the job's work folder after it ends, such as target/release/app (repeatable)")
