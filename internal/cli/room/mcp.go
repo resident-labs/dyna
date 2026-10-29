@@ -161,6 +161,23 @@ func mcpCmd() *cobra.Command {
 	grant.Flags().StringVar(&profile, "profile", "", "the profile to grant")
 	grant.Flags().BoolVar(&revoke, "revoke", false, "remove the grant")
 
+	var removeTerm bool
+	blockTerm := &cobra.Command{Use: "block-term <name> <term> [--remove]", Short: "Block a term from every call's arguments (owner only)", Long: "Add a word or phrase, such as your name, that must never appear in the arguments of a call. Dyna stores only a hash, so the list is not a second copy of personal data.", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		if err := call(c, "RoomMCPBlockTerm", nil, a[0], a[1], removeTerm); err != nil {
+			return err
+		}
+		return done(c, "updated the block terms of %s", a[0])
+	}}
+	blockTerm.Flags().BoolVar(&removeTerm, "remove", false, "remove the term")
+	var removeLogin bool
+	allowLogin := &cobra.Command{Use: "allow-login <name> <login> [--remove]", Short: "Let a GitHub login appear in a call's arguments (owner only)", Long: "Dyna blocks every GitHub login it knows from a call's arguments. Allow the logins this server may see, such as a fork account.", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		if err := call(c, "RoomMCPAllowLogin", nil, a[0], a[1], removeLogin); err != nil {
+			return err
+		}
+		return done(c, "updated the allowed logins of %s", a[0])
+	}}
+	allowLogin.Flags().BoolVar(&removeLogin, "remove", false, "remove the login")
+
 	list := &cobra.Command{Use: "list", Short: "List this room's MCP servers", Long: "List the servers, whether each is attached, and how many tools are pinned and allowed. It never shows a token.", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		var servers []roommcp.ServerView
 		if err := call(c, "RoomMCPList", &servers); err != nil {
@@ -179,6 +196,6 @@ func mcpCmd() *cobra.Command {
 		return nil
 	}}
 
-	cmd.AddCommand(token, attach, tools, allow, grant, detach, remove, list)
+	cmd.AddCommand(token, attach, tools, allow, grant, detach, remove, blockTerm, allowLogin, list)
 	return cmd
 }
