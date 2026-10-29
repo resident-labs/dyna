@@ -10,6 +10,11 @@ import (
 // Close closes an open tracked PR on GitHub, then ends its Dyna tracking.
 // The room's GitHub credential stays behind the engine's command path.
 func (s *Service) Close(ctx context.Context, key, reason string) error {
+	unlock, err := s.publicationGate(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	reason = strings.TrimSpace(reason)
 	r, err := s.Store.Get(key)
 	if err != nil {
@@ -27,6 +32,8 @@ func (s *Service) Close(ctx context.Context, key, reason string) error {
 	if _, err := s.github(r.RoomID).command(ctx, "", false, "pr", "close", "--", r.URL); err != nil {
 		return err
 	}
+	snap := Snapshot{Pull: Pull{State: "closed"}}
+	var out processEffects
 	if err := s.Store.update(func(st *State) error {
 		current := st.Records[key]
 		if current == nil {
@@ -35,9 +42,7 @@ func (s *Service) Close(ctx context.Context, key, reason string) error {
 		if err := sameAuthor(current, r.Author); err != nil {
 			return err
 		}
-		endRecord(current, false, s.now())
-		current.Watching = false
-		current.PauseReason = "PR is closed"
+		s.closeRecord(current, snap, newPollNotices(current), &out)
 		if reason != "" {
 			id := "msg_" + digest(current.Key + "/outcome/closed")[:16]
 			for i := range current.Notices {
@@ -56,5 +61,5 @@ func (s *Service) Close(ctx context.Context, key, reason string) error {
 	if err := s.flush(ctx, key); err != nil {
 		postErr = fmt.Errorf("PR closed on GitHub, but the room post failed: %w", err)
 	}
-	return errors.Join(postErr, s.cleanupEndedRoom(ctx, r.RoomID))
+	return errors.Join(postErr, s.finishProcess(ctx, key, snap, out))
 }
