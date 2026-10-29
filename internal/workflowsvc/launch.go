@@ -84,13 +84,22 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	if failed.Session != "" && envValue(childEnv, mode.EnvMode) == mode.Subagent {
 		failed.ParentSession = failed.Session
 	}
+	rowCommitted := false
 	if err := sessionlife.WithPublication(ctx, runstore.RunsDir(), "publication.lock", func() error {
 		if err := runstore.RecordStartingRun(failed); err != nil {
 			return err
 		}
+		rowCommitted = true
 		startingRunPublished(id)
 		return mkdirWorkflowDir(dir, 0o755)
 	}); err != nil {
+		if rowCommitted {
+			// The starting row is committed and no worker will replace it, so
+			// finish it the same way a worker start failure does.
+			if recordErr := runstore.RecordLaunchFailure(failed, err); recordErr != nil {
+				return "", errors.Join(err, fmt.Errorf("record failed run %s: %w", id, recordErr))
+			}
+		}
 		return "", err
 	}
 	start := func() (cmd *exec.Cmd, ended <-chan error, err error) {
