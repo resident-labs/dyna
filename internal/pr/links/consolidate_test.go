@@ -47,7 +47,7 @@ func TestConsolidationMovesOpenPRAuthorsRegardlessOfWatch(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := legacyRoot(t)
-			r := &prstate.Record{Key: "pr", RoomID: "room", Author: "source", Parent: "source", State: tc.state, Watching: tc.watching,
+			r := &prstate.Record{Key: "pr", RoomID: "room", Author: "source", Parent: "source", State: prstate.PRState(tc.state), Watching: tc.watching,
 				Notices: []prstate.Notice{{ID: "pending", Target: "source"}},
 			}
 			if err := prstate.Write(root, prstate.State{Version: 1, Records: map[string]*prstate.Record{"pr": r}}); err != nil {
@@ -63,7 +63,7 @@ func TestConsolidationMovesOpenPRAuthorsRegardlessOfWatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := st.Records["pr"]
-			if got.Author != tc.owner || got.Parent != tc.owner || got.Notices[0].Target != tc.owner || got.Watching != tc.watching || got.State != tc.state {
+			if got.Author != tc.owner || got.Parent != tc.owner || got.Notices[0].Target != tc.owner || got.Watching != tc.watching || got.State != prstate.PRState(tc.state) {
 				t.Fatalf("ownership or watch state changed incorrectly: %+v", got)
 			}
 			if tc.state == "open" && (len(got.FormerAuthors) != 1 || got.FormerAuthors[0] != "source") {

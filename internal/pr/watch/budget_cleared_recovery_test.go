@@ -114,7 +114,7 @@ func requireClearedBudgetRecovery(t *testing.T, start, outcome string) {
 	e.tick()
 	recovered := e.record()
 	ci, key, _, _ := (Snapshot{Pull: e.f.Pull, Runs: e.f.Runs}).CIStatus()
-	if ci != "passed" || recovered.CI != ci || recovered.CIKey != key || recovered.CIReason != "" ||
+	if ci != "passed" || string(recovered.CI) != ci || recovered.CIKey != key || recovered.CIReason != "" ||
 		recovered.Failures != 0 || recovered.CIPaused || recovered.PauseReason != "" || recovered.CIBudgetRuns["81/1"] != outcome {
 		t.Fatalf("cleared budget did not reconcile passing CI and reset failures: CI=%s, key=%s, failures=%d, paused=%v, outcome=%s",
 			recovered.CI, recovered.CIKey, recovered.Failures, recovered.CIPaused, recovered.CIBudgetRuns["81/1"])

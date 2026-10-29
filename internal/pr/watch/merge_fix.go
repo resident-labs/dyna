@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"fmt"
 	"os/user"
 
@@ -27,7 +28,7 @@ func (s *Service) MergeFix(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if changeKind(r) != "github" || !r.Watching || r.State != "open" {
+	if changeKind(r) != "github" || !r.Watching || r.State != state.PROpen {
 		return fmt.Errorf("repair merge requires an open tracked GitHub PR")
 	}
 	if s.Notify == nil || s.Notify.Rooms == nil {

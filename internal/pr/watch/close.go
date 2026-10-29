@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/pr/state"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,7 +21,7 @@ func (s *Service) Close(ctx context.Context, key, reason string) error {
 	if err != nil {
 		return err
 	}
-	if !r.Watching || r.State != "open" || changeKind(r) != "github" {
+	if !r.Watching || r.State != state.PROpen || changeKind(r) != "github" {
 		return fmt.Errorf("PR is not open and tracked")
 	}
 	if s.Notify == nil || s.Notify.Rooms == nil {

@@ -40,7 +40,7 @@ func tickKeys(st State) []string {
 		if r == nil {
 			return 4
 		}
-		if !r.Watching || r.State != "open" {
+		if !r.Watching || r.State != state.PROpen {
 			return 3
 		}
 		if r.Checked.IsZero() || r.HeadSeen.After(r.Checked) {
@@ -397,7 +397,7 @@ func (s *Service) runBudgets(ctx context.Context, result pollResult, pauses map[
 	}
 	var processErr error
 	// Full polling defers passing-CI failure resets until budgets succeed.
-	resetFailures := err == nil && (final.CI == "passed" || final.CI == "absent") && (final.Failures > 0 || final.CIPaused)
+	resetFailures := err == nil && (final.CI == state.CIPassed || final.CI == state.CIAbsent) && (final.Failures > 0 || final.CIPaused)
 	if budgetChanged || resetFailures || s.budgetCIUnreconciled(final, result.snap, policy) {
 		// A later failure cannot undo an earlier committed run's outcome.
 		// Keep failure resets pending until the budget phase succeeds.

@@ -249,7 +249,7 @@ func TestNoPRWorkflowsAndGraceWindow(t *testing.T) {
 				if tc.immediate {
 					want = "absent"
 				}
-				if got := e.record().CI; got != want {
+				if got := string(e.record().CI); got != want {
 					t.Fatalf("fresh CI = %s, want %s", got, want)
 				}
 				e.clock = r.HeadSeen.Add(5 * time.Minute)
@@ -273,7 +273,7 @@ func TestNoPRWorkflowsAndGraceWindow(t *testing.T) {
 					e.f.Checks = []Check{actionsCheck(check)}
 					e.clock = e.clock.Add(6 * time.Minute)
 					process()
-					if got := e.record().CI; got != want {
+					if got := string(e.record().CI); got != want {
 						t.Fatalf("late %s CI = %s, want %s", state, got, want)
 					}
 				}

@@ -260,7 +260,7 @@ func (s *Service) localOnlyPRHeadJobs(ctx context.Context, st State) ([]register
 	var jobs []registeredCIJob
 	modes := map[string]string{}
 	for _, r := range st.Records {
-		if r == nil || changeKind(*r) != "github" || !r.Watching || r.State != "open" || r.Head == "" || !headVerified(*r) ||
+		if r == nil || changeKind(*r) != "github" || !r.Watching || r.State != state.PROpen || r.Head == "" || !headVerified(*r) ||
 			!strings.EqualFold(r.HeadRepo, r.Repo) || strings.HasPrefix(r.Branch, "dyna/merge-trial/") {
 			continue
 		}
@@ -1118,7 +1118,7 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string, definition *localci.Definition, required []string) (bool, error) {
 	r := job.record
 	if !job.trial {
-		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(r.CI).Conclusive(), nil
+		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(string(r.CI)).Conclusive(), nil
 	}
 	var snap Snapshot
 	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), job.head, &snap); err != nil {

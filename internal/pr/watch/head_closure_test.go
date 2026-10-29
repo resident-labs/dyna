@@ -55,7 +55,7 @@ func TestHeadRefreshStoresClosureTime(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := saved.Record
-			if got.State != want || !got.ClosedAt.Equal(observed) || !got.Polling.Next.IsZero() {
+			if string(got.State) != want || !got.ClosedAt.Equal(observed) || !got.Polling.Next.IsZero() {
 				t.Fatalf("pass %d: stored terminal record = %+v; want %s at %s", pass, got, want, observed)
 			}
 		}
