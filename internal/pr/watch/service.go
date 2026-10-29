@@ -654,7 +654,17 @@ func applyHead(r *Record, snap Snapshot, previousPullHead string, n *pollNotices
 		}
 	}
 	if changedHead {
+		ci := r.CI
 		resetReview(r, snap.Pull.Head.SHA)
+		if snap.Pull.State == "closed" {
+			// This same pass closes the PR: applyCI will not run to replace
+			// the reset's pending CI, and a required reviewer must not wake
+			// for a head the PR will never land.
+			r.CI = ci
+			for _, id := range r.RequiredReviewers {
+				retireSessionReviewNotices(r, id, "change-ended")
+			}
+		}
 	}
 	if changedHead || refreshedHead {
 		n.changes = append(n.changes, "head:"+r.Head)

@@ -29,3 +29,23 @@ func TestResetReviewClearsReviewerAndKeepsCIPauseReason(t *testing.T) {
 		t.Fatalf("new head kept pause reason %q while CI wakes are not paused", waking.PauseReason)
 	}
 }
+
+// One poll can first see a new head and a closed PR together. The reset must
+// not leave a pending CI behind (applyCI never runs on the closed path) and
+// must not leave a required-review assignment for a head that cannot land.
+func TestApplyHeadClosedPRKeepsCIAndRetiresReviewAssignments(t *testing.T) {
+	r := &Record{Kind: "github", State: "open", Watching: true, Head: strings.Repeat("a", 40),
+		CI: "passed", RequiredReviewers: []string{"dyna:rev"}}
+	snap := Snapshot{}
+	snap.Pull.State = "closed"
+	snap.Pull.Head.SHA = strings.Repeat("b", 40)
+	applyHead(r, snap, "", newPollNotices(r), &processEffects{})
+	if r.CI != "passed" {
+		t.Fatalf("closing head set CI to %q; the record keeps its last CI state", r.CI)
+	}
+	for _, notice := range r.Notices {
+		if !notice.Done && notice.SupersededBy == "" && reviewNotice(notice) {
+			t.Fatalf("closing head left a pending review notice for %s", notice.Target)
+		}
+	}
+}
