@@ -130,7 +130,14 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 		case "ping":
 			send(response{ID: req.ID, Result: struct{}{}})
 		case "tools/list":
-			send(response{ID: req.ID, Result: toolListResult{Tools: tools.tools()}})
+			list := tools.tools()
+			// The room MCP tools appear only for a session that holds a grant.
+			if tools.RoomMCP != nil {
+				if granted, err := tools.RoomMCP.Access(ctx); err == nil && granted {
+					list = append(list, roomMCPToolList...)
+				}
+			}
+			send(response{ID: req.ID, Result: toolListResult{Tools: list}})
 		case "tools/call":
 			var p struct {
 				Name      string          `json:"name"`
