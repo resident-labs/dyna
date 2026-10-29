@@ -91,14 +91,20 @@ func TestHoldAndReleaseUseGitHubDraftAndPostReason(t *testing.T) {
 	if got, err := os.ReadFile(calls); err != nil || string(got) != string(log) {
 		t.Fatalf("invalid holds contacted GitHub: %q %v", got, err)
 	}
+	if err := s.SetDraft(context.Background(), key, true, "still waiting"); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(gh, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetDraft(context.Background(), key, false, ""); err == nil {
 		t.Fatal("reported release after GitHub failed")
 	}
+	if held, err := s.Store.Get(key); err != nil || held.Hold == nil {
+		t.Fatalf("failed release dropped the hold: %+v %v", held.Hold, err)
+	}
 	messages, err = rooms.Messages(rm.ID)
-	if err != nil || len(messages) != 2 {
+	if err != nil || len(messages) != 3 {
 		t.Fatalf("failed request created a room post: %+v %v", messages, err)
 	}
 	saved, err := s.Store.Get(key)

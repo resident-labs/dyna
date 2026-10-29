@@ -48,6 +48,8 @@ func TestPRReadyChecksHoldForEveryTargetForm(t *testing.T) {
 		{"pr", "ready", "fix/held"},
 		{"pr", "ready"},
 		{"pr", "ready", "--repo", "other/repo", "7"},
+		{"pr", "ready", "--repo", "github.com/other/repo", "7"},
+		{"pr", "ready", "-R", "github.com/owner/repo", "fix/held"},
 	}
 	for _, args := range cases {
 		var held *HeldError
@@ -59,6 +61,8 @@ func TestPRReadyChecksHoldForEveryTargetForm(t *testing.T) {
 		"owner/repo fix/held",
 		"owner/repo fix/held",
 		"other/repo https://github.com/other/repo/pull/7",
+		"other/repo https://github.com/other/repo/pull/7",
+		"owner/repo fix/held",
 	}
 	if !slices.Equal(asked, want) {
 		t.Fatalf("engine asked for %v, want %v", asked, want)
