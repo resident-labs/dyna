@@ -186,22 +186,23 @@ func TestFailoverRefreshesTheChosenReadingFirst(t *testing.T) {
 	}
 }
 
-// D-500: a successful usage probe ends a provider-stated hold only when the
-// fresh reading shows weekly quota left. A spent or partial reading keeps it.
-func TestSuccessfulProbeKeepsAStatedHoldUnlessQuotaIsBack(t *testing.T) {
+// D-500: a successful usage probe never ends a provider-stated hold. The stated
+// limit may be a model-scoped one that the reading omits, so no reading shows
+// that it reset. Only a successful turn or the hold's end time clears it.
+func TestSuccessfulProbeKeepsAStatedHold(t *testing.T) {
 	reset := time.Now().Add(6 * 24 * time.Hour)
 	for _, tc := range []struct {
 		label, body string
-		kept        bool
 	}{
-		{"spent", usageBody(10, 100, reset), true},
-		{"unrelated", `{"five_hour":{"utilization":10}}`, true},
-		{"weekly without utilization", `{"five_hour":{"utilization":10},"seven_day":{"resets_at":"2026-11-04T13:05:15Z"}}`, true},
-		{"session without utilization", `{"five_hour":{},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`, true},
-		{"no session window", `{"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`, true},
-		{"model-scoped limit spent", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":100,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`, true},
-		{"model-scoped limit healthy", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":20,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`, false},
-		{"open", usageBody(10, 20, reset), false},
+		{"spent", usageBody(10, 100, reset)},
+		{"unrelated", `{"five_hour":{"utilization":10}}`},
+		{"weekly without utilization", `{"five_hour":{"utilization":10},"seven_day":{"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"session without utilization", `{"five_hour":{},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"no session window", `{"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"model-scoped limit spent", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":100,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`},
+		{"model-scoped limit healthy", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"},"limits":[{"kind":"weekly","percent":20,"resets_at":"2026-11-04T13:05:15Z","scope":{"model":{"display_name":"Opus"}}}]}`},
+		{"model-scoped limit omitted", `{"five_hour":{"utilization":10},"seven_day":{"utilization":20,"resets_at":"2026-11-04T13:05:15Z"}}`},
+		{"open", usageBody(10, 20, reset)},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			a := testAccounts(t)
@@ -221,36 +222,8 @@ func TestSuccessfulProbeKeepsAStatedHoldUnlessQuotaIsBack(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if kept := !got.Until.IsZero(); kept != tc.kept {
-				t.Fatalf("stated hold kept = %v after the %s reading, want %v", kept, tc.label, tc.kept)
-			}
-		})
-	}
-}
-
-// D-500: a reading refutes a stated hold only when it has both windows with a
-// percentage, and quota left. Other providers may report a window with no
-// percentage, and that is not a refutation.
-func TestReadingRefutesStatedHoldNeedsBothPercentages(t *testing.T) {
-	now := time.Now()
-	pct := func(v float64) *float64 { return &v }
-	session := store.Window{ID: "five_hour", UsedPercent: pct(10)}
-	weekly := store.Window{ID: "seven_day", UsedPercent: pct(20)}
-	for _, tc := range []struct {
-		name    string
-		windows []store.Window
-		want    bool
-	}{
-		{"both with quota left", []store.Window{session, weekly}, true},
-		{"weekly without a percentage", []store.Window{session, {ID: "seven_day"}}, false},
-		{"session without a percentage", []store.Window{{ID: "five_hour"}, weekly}, false},
-		{"no session window", []store.Window{weekly}, false},
-		{"weekly spent", []store.Window{session, {ID: "seven_day", UsedPercent: pct(100)}}, false},
-		{"model-scoped spent", []store.Window{session, weekly, {ID: "scoped:Opus", UsedPercent: pct(100)}}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := readingRefutesStatedHold(&store.Observation{Windows: tc.windows}, now); got != tc.want {
-				t.Fatalf("readingRefutesStatedHold = %v, want %v", got, tc.want)
+			if got.Until.IsZero() {
+				t.Fatalf("stated hold cleared by the %s reading", tc.label)
 			}
 		})
 	}
