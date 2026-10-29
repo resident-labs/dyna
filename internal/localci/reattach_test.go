@@ -25,6 +25,7 @@ type reattachFixture struct {
 	started chan struct{}
 	release chan struct{}
 	setups  atomic.Int32
+	removed atomic.Int32
 }
 
 func newReattachFixture(t *testing.T) *reattachFixture {
@@ -48,6 +49,8 @@ func newReattachFixture(t *testing.T) *reattachFixture {
 			f.setups.Add(1)
 		case strings.Contains(script, "tar -C"):
 			return fakeNodeReports(out, checks, false)
+		case strings.Contains(script, "rm -rf --one-file-system") && !strings.Contains(script, "trap "):
+			f.removed.Add(1)
 		case name == "systemd-run":
 			f.started <- struct{}{}
 			select {
@@ -86,6 +89,36 @@ func (f *reattachFixture) stopEngineDuringRun(t *testing.T) {
 	ClearEngineStopping()
 	if f.machine.StopCount() != 0 {
 		t.Fatal("an engine stop stopped the check on the machine")
+	}
+}
+
+// A run whose checks all ended removes its folder even while the engine stops,
+// so no keeper waits three hours for a .active file that nothing removes (D-489).
+func TestSettledRunRemovesItsFolderWhenTheEngineStops(t *testing.T) {
+	f := newReattachFixture(t)
+	previous := EngineStopping()
+	t.Cleanup(func() { jobs.SetEngineStoppingForTest(previous) })
+	done := make(chan Result, 1)
+	go func() {
+		result, _ := f.runner.Run(t.Context(), f.request)
+		done <- result
+	}()
+	<-f.started
+	MarkEngineStopping()
+	close(f.release)
+	if result := <-done; result.Status != OutcomePassed {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := f.removed.Load(); got != 1 {
+		t.Fatalf("run folder removals = %d, want 1", got)
+	}
+	store := Store{DataDir: f.runner.DataDir}
+	key, err := canonicalKey(f.request.Repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := store.attachmentRows(t.Context(), key, strings.Repeat("a", 40)); err != nil || len(rows) != 0 {
+		t.Fatalf("the finished run kept its record: %+v, %v", rows, err)
 	}
 }
 
