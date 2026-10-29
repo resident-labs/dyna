@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/worktrees"
 )
 
 func TestRunStepGivesLaterStepTimeAfterSlowStep(t *testing.T) {
@@ -52,6 +53,29 @@ func TestRunStepSkipsStepsAfterExternalCancel(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("second step err = %v, want context.Canceled", err)
+	}
+}
+
+// A removal needs its repository scanned first, so the worktree step must not
+// stop at the per-step share. It still ends at the pass deadline.
+func TestWorktreeCleanupIsNotCutAtTheStepShare(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("DYNA_ARCHIVE_DIR", "")
+	var left time.Duration
+	old := gcWorktrees
+	gcWorktrees = func(ctx context.Context, _ string, _ worktrees.GCOptions) ([]worktrees.Tree, error) {
+		deadline, _ := ctx.Deadline()
+		left = time.Until(deadline)
+		return nil, nil
+	}
+	t.Cleanup(func() { gcWorktrees = old })
+	if _, err := Run(context.Background(), Options{Repos: []string{"repo"}}); err != nil {
+		t.Fatal(err)
+	}
+	if left <= stepShare {
+		t.Fatalf("worktree cleanup had %v left, want more than the %v step share", left, stepShare)
 	}
 }
 

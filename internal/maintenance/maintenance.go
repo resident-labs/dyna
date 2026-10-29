@@ -198,14 +198,17 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 	}
 	// Each pass starts the worktree cleanup at the next repository, so a slow
 	// repository cannot hold back the others on every pass. The turn is stored,
-	// because each hook run is a new process.
-	step("worktrees", func(ctx context.Context) error {
+	// because each hook run is a new process. This step takes the pass deadline,
+	// not stepShare: a removal needs its repository fetched and scanned first, and
+	// a cap that stops the scan would stop every removal. Trees left unfinished
+	// at the deadline are kept and marked deferred, so the next pass retries them.
+	errs = append(errs, runStep(ctx, &result, "worktrees", runTimeout, func(ctx context.Context) error {
 		turn, err := nextWorktreeTurn(ctx, store.DataDir())
 		if err != nil {
 			return err
 		}
 		return cleanWorktrees(ctx, &result, fromTurn(repos, turn), worktrees.GCOptions{Session: opts.Session, OwnerClosed: opts.OwnerClosed})
-	})
+	}))
 	step("scratch", func(ctx context.Context) error {
 		cleaned, err := scratch.Sweep(ctx, scratch.Options{Only: opts.Session, Lookup: scratchOwner, Logf: opts.Logf})
 		result.add("scratch", Pruned{Items: len(cleaned.Removed), Bytes: cleaned.BytesFreed})
