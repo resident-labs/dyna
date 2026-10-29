@@ -238,9 +238,12 @@ func roomFor(ctx context.Context, cmdDir string, r repository) (room.Record, err
 			return rec, nil
 		}
 	}
+	var upstreams []room.Record
 	for _, rec := range records {
 		if matchesRepository(ctx, rec, r) {
 			matches = append(matches, rec)
+		} else if matchesUpstream(rec, r) {
+			upstreams = append(upstreams, rec)
 		}
 	}
 	if len(matches) == 1 {
@@ -248,6 +251,10 @@ func roomFor(ctx context.Context, cmdDir string, r repository) (room.Record, err
 	}
 	if len(matches) > 1 {
 		return room.Record{}, errors.New("GitHub repository belongs to multiple rooms; an acting room or checkout is required")
+	}
+	// A room's upstream is readable without an acting room. checkPolicy still refuses writes to it.
+	if len(upstreams) == 1 {
+		return upstreams[0], errNotInRoom
 	}
 	return room.Record{}, errors.New("GitHub access requires a Dyna room for this repository")
 }
