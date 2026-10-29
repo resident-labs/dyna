@@ -103,6 +103,47 @@ func (s Store) ProcessLaunch(p Process) (Launched, bool, error) {
 	return l, err == nil, err
 }
 
+// WorkflowDaemonAlive reports whether run still has its recorded coordinator.
+// The process start time prevents a reused PID from keeping a dead run alive.
+func (s Store) WorkflowDaemonAlive(ctx context.Context, run string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT pid,start FROM caller_records
+WHERE run=? AND actor='worker' AND session='' AND CAST(worker AS INTEGER)=0 AND launcher='workflow'`, run)
+	if err != nil {
+		return false, err
+	}
+	var processes []Process
+	for rows.Next() {
+		var p Process
+		var start int64
+		if err := rows.Scan(&p.PID, &start); err != nil {
+			rows.Close()
+			return false, err
+		}
+		if p.PID <= 0 || start <= 0 {
+			rows.Close()
+			return false, fmt.Errorf("run %s has an invalid workflow launch record", run)
+		}
+		p.Start = uint64(start)
+		processes = append(processes, p)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return false, err
+	}
+	for _, recorded := range processes {
+		current, err := ProcessOf(recorded.PID)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if current == recorded {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s Store) identity(query string, args ...any) (Identity, bool, error) {
 	var id Identity
 	err := s.db.QueryRow(query, args...).Scan(&id.Kind, &id.Session, &id.Run, &id.Agent)
