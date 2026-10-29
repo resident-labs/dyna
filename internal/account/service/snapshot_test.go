@@ -93,6 +93,15 @@ func TestPublishShowsZAIStatedFailoverReset(t *testing.T) {
 	if !account.QuotaBlocked || account.QuotaBlockedUntil == nil || !account.QuotaBlockedUntil.Equal(reset) {
 		t.Fatalf("blocking quota metadata = %+v, want the stated reset", account)
 	}
+
+	withoutWindow := s.publish([]Account{{ID: "zai-account", Harness: "pi", Provider: accountstore.ProviderZAI}}, nil, nil).Accounts[0]
+	if len(withoutWindow.Windows) != 1 {
+		t.Fatalf("windows = %+v, want a five-hour window from the failover", withoutWindow.Windows)
+	}
+	summary = windowsSummary(withoutWindow, now)
+	if !strings.Contains(summary, "5-hour 100%") || !strings.Contains(summary, reset.Local().Format("Mon 15:04")) || !withoutWindow.QuotaBlocked {
+		t.Fatalf("account without a saved window shows %q and %+v", summary, withoutWindow)
+	}
 }
 
 func TestBlockingQuotaMetadata(t *testing.T) {
