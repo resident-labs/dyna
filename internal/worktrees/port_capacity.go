@@ -2,6 +2,7 @@ package worktrees
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -65,12 +66,16 @@ func ObservePortCapacity() ([]*PortCapacityAlert, error) {
 		if rawBand <= current.band && len(current.pending) == 0 && !measure {
 			return nil, nil
 		}
+		var observation portUseObservation
 		if measure {
 			records, err := loadRecords(ctx, db, "")
 			if err == nil {
 				// Filesystem, ownership and socket checks stay outside the write
-				// transaction. An allocation during measurement retries the step.
-				current.used -= reclaimablePortBlockCount(ctx, records)
+				// transaction. Any record change during measurement retries the step.
+				observation = newPortUseObservation(ctx, records)
+				if observation.measured {
+					current.used = observation.used
+				}
 			}
 			// A registry read error leaves the raw count in place.
 		}
@@ -83,6 +88,15 @@ func ObservePortCapacity() ([]*PortCapacityAlert, error) {
 			}
 			if current.used != raw {
 				return errPortCapacityChanged
+			}
+			if observation.measured {
+				matches, err := observedRecordsMatch(ctx, conn, observation)
+				if err != nil {
+					return err
+				}
+				if !matches {
+					return errPortCapacityChanged
+				}
 			}
 			current.used = used
 			if err := applyPortAlertState(ctx, conn, &current); err != nil {
@@ -167,47 +181,89 @@ func AckPortAlertDelivery(generation, threshold int) error {
 	})
 }
 
-// observePortUseAfterRelease measures the projected post-release count before
-// the release takes the SQLite write lock. The raw result lets the transaction
-// reject a stale projection. An inactive period or a read error skips the scan.
-func observePortUseAfterRelease(ctx context.Context, db *sql.DB, released []Record) (int, int, bool) {
-	current, err := readPortAlertState(ctx, db)
-	if err != nil || current.band == 0 {
-		return 0, 0, false
-	}
-	records, err := loadRecords(ctx, db, "")
-	if err != nil {
-		return 0, 0, false
-	}
-	paths := make(map[string]bool, len(released))
-	for _, rec := range released {
-		paths[rec.Path] = true
-	}
+type portUseObservation struct {
+	fingerprint [sha256.Size]byte
+	used        int
+	measured    bool
+}
+
+func newPortUseObservation(ctx context.Context, records []Record) portUseObservation {
 	raw := 0
-	for i := range records {
-		if paths[records[i].Path] {
-			records[i].Port = 0
-		}
-		if records[i].Port != 0 {
+	for _, rec := range records {
+		if rec.Port != 0 {
 			raw++
 		}
 	}
-	return raw - reclaimablePortBlockCount(ctx, records), raw, true
+	body, err := json.Marshal(records)
+	if err != nil {
+		return portUseObservation{}
+	}
+	return portUseObservation{
+		fingerprint: sha256.Sum256(body),
+		used:        raw - reclaimablePortBlockCount(ctx, records),
+		measured:    true,
+	}
+}
+
+func observedRecordsMatch(ctx context.Context, conn *sql.Conn, observation portUseObservation) (bool, error) {
+	records, err := loadRecords(ctx, conn, "")
+	if err != nil {
+		return false, err
+	}
+	body, err := json.Marshal(records)
+	if err != nil {
+		return false, err
+	}
+	return sha256.Sum256(body) == observation.fingerprint, nil
+}
+
+// observePortUseAfterRelease measures the projected post-release count before
+// the release takes the SQLite write lock. Its fingerprint covers the exact
+// projected record set. An inactive period or a read error skips the scan.
+func observePortUseAfterRelease(ctx context.Context, db *sql.DB, releases []portRelease) portUseObservation {
+	current, err := readPortAlertState(ctx, db)
+	if err != nil || current.band == 0 {
+		return portUseObservation{}
+	}
+	records, err := loadRecords(ctx, db, "")
+	if err != nil {
+		return portUseObservation{}
+	}
+	byPath := make(map[string]bool, len(releases))
+	for _, release := range releases {
+		byPath[release.record.Path] = release.remove
+	}
+	projected := make([]Record, 0, len(records))
+	for _, rec := range records {
+		remove, released := byPath[rec.Path]
+		if released && remove {
+			continue
+		}
+		if released {
+			rec.Port = 0
+		}
+		projected = append(projected, rec)
+	}
+	return newPortUseObservation(ctx, projected)
 }
 
 // rearmPortCapacity runs inside a transaction that releases a port block.
-// When the release drops effective use below the 90% band, the next period can
-// alert again without waiting for another allocation. A stale projection or a
-// measurement error conservatively keeps the transaction's raw count.
-func rearmPortCapacity(ctx context.Context, conn *sql.Conn, used, raw int, measured bool) error {
+// Raw use below 90% is always safe. Effective rearming also requires the exact
+// measured record set; any concurrent change conservatively skips the rearm.
+func rearmPortCapacity(ctx context.Context, conn *sql.Conn, observation portUseObservation) error {
 	current, err := readPortAlertState(ctx, conn)
 	if err != nil {
 		return err
 	}
-	if measured && current.used == raw {
-		current.used = used
+	if current.band == 0 {
+		return nil
 	}
-	if current.band == 0 || portCapacityBand(current.used) != 0 {
+	rearm := portCapacityBand(current.used) == 0
+	if !rearm && observation.measured && portCapacityBand(observation.used) == 0 {
+		matches, err := observedRecordsMatch(ctx, conn, observation)
+		rearm = err == nil && matches
+	}
+	if !rearm {
 		return nil
 	}
 	return writePortAlertMeta(ctx, conn, map[string]string{portAlertBandKey: "0"})
