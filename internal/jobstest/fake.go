@@ -56,6 +56,8 @@ type fakeProc struct {
 	exited   bool
 	code     int
 	modified time.Time
+	activity time.Time
+	capped   bool
 	cancel   context.CancelFunc
 	vanished bool
 }
@@ -179,6 +181,16 @@ func (m *Fake) Mkdir(dir string) {
 	m.folders[dir] = true
 }
 
+// CapLogs makes every running fake job discard later output, as the node's
+// retained-log cap does. The fake still runs and can end normally.
+func (m *Fake) CapLogs() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, proc := range m.procs {
+		proc.capped = true
+	}
+}
+
 // VanishAll makes every unit disappear without an exit record, as a machine
 // that rebooted does.
 func (m *Fake) VanishAll() {
@@ -238,7 +250,7 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 			if m.folders[dir] {
 				state = "gone"
 			}
-			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 mtime=0 bytes=0\n\n", dir, state)
+			fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code= size=0 quiet_s=0 bytes=0\n\n", dir, state)
 			continue
 		}
 		state, code := "running", ""
@@ -249,7 +261,15 @@ func (m *Fake) poll(out io.Writer, pos []string) error {
 		}
 		size := len(proc.log)
 		chunk := proc.log[min(offset, size):min(size, offset+256<<10)]
-		fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code=%s size=%d mtime=%d bytes=%d\n%s\n", dir, state, code, size, proc.modified.Unix(), len(chunk), chunk)
+		modified := proc.modified
+		if !proc.activity.IsZero() {
+			modified = proc.activity
+		}
+		quiet := time.Duration(0)
+		if !modified.IsZero() && m.now.After(modified) {
+			quiet = m.now.Sub(modified)
+		}
+		fmt.Fprintf(out, "DYNA_DETACH dir=%s state=%s code=%s size=%d quiet_s=%d bytes=%d\n%s\n", dir, state, code, size, quiet/time.Second, len(chunk), chunk)
 	}
 	return nil
 }
@@ -263,9 +283,14 @@ type fakeLog struct {
 func (l fakeLog) Write(p []byte) (int, error) {
 	l.m.mu.Lock()
 	defer l.m.mu.Unlock()
-	l.proc.log = append(l.proc.log, p...)
+	if !l.proc.capped {
+		l.proc.log = append(l.proc.log, p...)
+	}
 	if len(p) > 0 {
-		l.proc.modified = l.m.now
+		l.proc.activity = l.m.now
+		if !l.proc.capped {
+			l.proc.modified = l.m.now
+		}
 	}
 	return len(p), nil
 }

@@ -701,9 +701,11 @@ func (s *Service) run(job Job, ctx context.Context, cancel context.CancelFunc) {
 		_, _, _ = s.Store.SaveOpen(context.WithoutCancel(ctx), logWriter.snapshot())
 		return
 	}
-	if runErr != nil && !job.State.Finished() {
+	var idle *idleTimeoutError
+	if runErr != nil && !job.State.Finished() && !errors.As(runErr, &idle) {
 		s.stopUnit(x, spec)
 	}
+	// An idle run already stopped its unit and drained its log in Poller.Run.
 	s.finish(&job, runErr)
 }
 
