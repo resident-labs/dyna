@@ -241,6 +241,15 @@ func (s *Service) UntrackPR(ctx context.Context, roomRef, key string) error {
 	return p.Untrack(ctx, key)
 }
 
+// ClosePR closes a PR through the engine and records its outcome in Dyna.
+func (s *Service) ClosePR(ctx context.Context, roomRef, key, reason string) error {
+	p, _, err := s.authorPRInRoom(ctx, "git pr close", roomRef, key)
+	if err != nil {
+		return err
+	}
+	return p.Close(ctx, key, reason)
+}
+
 func (s *Service) ResumePR(ctx context.Context, roomRef, key string) error {
 	p, _, err := s.authorPRInRoom(ctx, "git pr resume", roomRef, key)
 	if err != nil {

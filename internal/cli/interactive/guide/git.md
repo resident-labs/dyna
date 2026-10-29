@@ -332,6 +332,10 @@ suites:
 
 The full reference is `docs/local-ci.md` in the dyna repository.
 
+## Close an abandoned pull request
+
+Use `dyna git pr close <number|url> [--reason <text>]` to close a tracked PR on GitHub without merging it. The engine uses the room's GitHub credential and stops tracking the PR. It posts the PR's typed closed event. The reason stays in Dyna; the command does not add a GitHub comment.
+
 ## Hold and release
 
 Use `dyna git pr hold <number|url> "<reason>"` to make a tracked PR a GitHub draft.

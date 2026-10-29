@@ -300,6 +300,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "TrackPRRef", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: s.rooms.PRs.TrackPRRef},
 		{Name: "TransferPR", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: s.rooms.PRs.TransferPR},
 		{Name: "SetPRDraft", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.SetPRDraft},
+		{Name: "ClosePR", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.ClosePR},
 		{Name: "RequirePRReviewers", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RequirePRReviewers},
 		{Name: "ReleasePRReviewers", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.ReleasePRReviewers},
 		{Name: "GitHubList", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.GitHubList},
