@@ -14,15 +14,22 @@ import (
 // authority wrappers, and a pointer to the patches the saved call receives.
 func guardedSaveNode() (map[string]websvc.Call, *[]websvc.MachinePatch) {
 	patches := &[]websvc.MachinePatch{}
-	calls := map[string]websvc.Call{"SaveNode": func(_ context.Context, args []json.RawMessage) (any, error) {
+	saveNode := func(_ context.Context, _ string, raw json.RawMessage) (any, error) {
 		var patch websvc.MachinePatch
-		if err := json.Unmarshal(args[1], &patch); err != nil {
+		if err := json.Unmarshal(raw, &patch); err != nil {
 			return nil, err
 		}
 		*patches = append(*patches, patch)
 		return nil, nil
-	}}
-	protectMachineCalls(calls)
+	}
+	table := []websvc.Binding{{Name: "SaveNode", Access: websvc.Write, Scope: websvc.ScopeAdmin, Policy: policyMachine, Method: saveNode}}
+	calls, err := websvc.Bind(table)
+	if err != nil {
+		panic(err)
+	}
+	if err := applyCallerPolicies(calls, table); err != nil {
+		panic(err)
+	}
 	return calls, patches
 }
 

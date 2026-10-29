@@ -10,38 +10,18 @@ import (
 	"dyna-agent/internal/websvc"
 )
 
-// machineCalls are the machine writes that act for their caller. SaveNode is
-// here rather than in ownerCalls because a room root decides a machine's
-// operating settings, as the owner does.
-var machineCalls = []string{"SaveNode"}
-
 // hostChecksCommand is the command that allows host checks on a machine, which
 // a refusal names so the owner can run it.
 const hostChecksCommand = "dyna node edit <name> --allow-host-checks"
 
-// protectMachineCalls lets the owner change any machine field and a room root
-// change its operating settings: host checks, the SSH connect timeout and the
-// container socket. A root speaks for its room and operates its machines as the
-// owner does. The other fields decide where the engine sends work, so they stay
-// the owner's, and a repository file, a session or a
-// workflow worker passes neither.
-func protectMachineCalls(calls map[string]websvc.Call) {
-	for _, name := range machineCalls {
-		call := calls[name]
-		calls[name] = func(ctx context.Context, args []json.RawMessage) (any, error) {
-			if err := checkMachineWrite(authority.Of(ctx), args); err != nil {
-				return nil, err
-			}
-			return call(ctx, args)
-		}
-	}
-	// This wrapper must be outermost, so the check sees mutationActor.
-	protectCalls(calls, machineCalls, "changing a node", nil)
-}
-
-// checkMachineWrite refuses a machine change that the actor may not make. A
-// call without a readable patch passes here, because the binder refuses it.
-func checkMachineWrite(actor authority.Actor, args []json.RawMessage) error {
+// checkMachineWrite is the machine policy's check: the owner changes any
+// machine field and a room root changes its operating settings — host checks,
+// the SSH connect timeout and the container socket. A root speaks for its room
+// and operates its machines as the owner does. The other fields decide where
+// the engine sends work, so they stay the owner's, and a repository file, a
+// session or a workflow worker passes neither.
+func checkMachineWrite(ctx context.Context, _ string, args []json.RawMessage) error {
+	actor := authority.Of(ctx)
 	if actor.Role == authority.Owner {
 		return nil
 	}

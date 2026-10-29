@@ -43,7 +43,7 @@ func TestOwnerCallsUseCallerPower(t *testing.T) {
 	for i := range args {
 		args[i] = json.RawMessage("null")
 	}
-	for _, name := range ownerCalls {
+	for _, name := range policyNames(policyOwner) {
 		t.Run(name, func(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestPairedRemoteDevicePassesEveryOwnerCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range ownerCalls {
+	for _, name := range policyNames(policyOwner) {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "https://owner.example/api/"+name, strings.NewReader(string(body)))
 			req.RemoteAddr = "203.0.113.20:4321"

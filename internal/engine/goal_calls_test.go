@@ -138,29 +138,10 @@ func TestUnverifiedGoalCallerKeepsSessionAuthority(t *testing.T) {
 	}
 }
 
-// Every call that the caller policy wraps is a bound call, so a renamed or
-// misspelled name cannot leave a session or goal mutation unwrapped.
-func TestProtectedCallsAreBound(t *testing.T) {
-	bound := map[string]bool{}
-	for _, b := range bindings(testServices(t, false)) {
-		bound[b.Name] = true
-	}
-	for _, name := range sessionCalls {
-		if !bound[name] {
-			t.Errorf("session call %s is not bound", name)
-		}
-	}
-	for _, name := range prCalls {
-		if !bound[name] {
-			t.Errorf("PR call %s is not bound", name)
-		}
-	}
-	for _, name := range issueCalls {
-		if !bound[name] {
-			t.Errorf("issue call %s is not bound", name)
-		}
-	}
-}
+// The old check that every protected name was a bound call is gone: a
+// policy rides on its binding, so it cannot name a call the table does not
+// bind. TestCallerPoliciesMatchMain in policy_calls_test.go proves the move
+// kept every name.
 
 // CloseForEngine and StartForEngine check no caller, so no engine call may
 // reach them.

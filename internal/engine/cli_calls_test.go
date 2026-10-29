@@ -49,7 +49,7 @@ func TestCLICallsKeepExistingRoleAccess(t *testing.T) {
 				caller = websvc.Caller{Kind: websvc.Worker, Run: actor.Run}
 			}
 			ctx := localCallerContext(t, caller, actor)
-			for _, name := range cliCalls {
+			for _, name := range policyNames(policyCLI) {
 				_, err := calls[name](ctx, args)
 				if err == nil || !strings.Contains(err.Error(), "got 64") {
 					t.Errorf("%s refused %s before argument validation: %v", name, role, err)
