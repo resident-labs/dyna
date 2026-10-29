@@ -54,13 +54,12 @@ func migrateHistory(db *sql.DB) error {
 		var records []record
 		for rows.Next() {
 			var r record
-			var meta []byte
-			var instructions instructionRead
-			if err := rows.Scan(&r.id, &meta, &instructions.hashes[0], &instructions.hashes[1], &instructions.bodies[0], &instructions.bodies[1]); err != nil {
+			instructions, err := scanInstructionRead(rows, &r.id, &r.raw)
+			if err != nil {
 				rows.Close()
 				return err
 			}
-			r.raw, err = instructions.join(meta)
+			r.raw, err = instructions.join(r.raw)
 			if err != nil {
 				rows.Close()
 				return err
