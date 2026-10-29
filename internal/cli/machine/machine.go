@@ -447,7 +447,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&connectTimeout, "ssh-connect-timeout", 0, "how long ssh waits to connect to the machine, such as 60s (0 restores the default of 10s)")
 	cmd.Flags().StringVar(&checkTmp, "check-tmp", "", "folder that holds each host check's temporary folder, such as /dev/shm (empty uses the machine's TMPDIR, else /tmp)")
 	cmd.Flags().IntVar(&maxIOHeavy, "max-io-heavy", 0, "IO-heavy jobs and checks this machine runs at once (0: one per 16 CPUs, at least 1)")
-	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the machine admits no new work (0: keep at least 20 GiB and 5% of the disk free)")
+	cmd.Flags().IntVar(&maxDiskPercent, "max-disk-percent", 0, "used-disk percent above which the machine admits no new work (0: keep at least 20 GiB and 5% of the disk free, capped at 10% of the disk)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
