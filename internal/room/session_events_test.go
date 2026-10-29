@@ -99,7 +99,7 @@ func TestNewEventWakeAndRecipientRules(t *testing.T) {
 			audience:  AudienceRoom,
 		},
 		"alert/engine": {
-			event:     AlertEvent{Source: AlertEngine, Summary: "The engine has been read-only for more than 2 minutes because migration failed.", Detail: "busy"},
+			event:     AlertEvent{Source: AlertEngine, Summary: "The engine is read-only because migration failed.", Detail: "busy"},
 			to:        "work",
 			producer:  ProducerEngine,
 			wakes:     true,

@@ -1179,7 +1179,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "root",
     once: true,
     audience: "room",
-    text: "The engine has been read-only for more than 2 minutes because migration failed:",
+    text: "The engine is read-only because migration failed:",
   },
   {
     family: "alert",

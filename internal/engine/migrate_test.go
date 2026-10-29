@@ -14,6 +14,7 @@ import (
 
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
@@ -63,7 +64,7 @@ func TestEngineStartCreatesNoProfiles(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
 	keepSchemaOwner(t)
-	if readOnly, status, _ := startStores(dir, false); readOnly {
+	if readOnly, status, _ := startStores(dir, false, ""); readOnly {
 		t.Fatalf("start = read-only: %s", status)
 	}
 	t.Cleanup(func() { database.Close(dir) })
@@ -84,7 +85,7 @@ func TestReadOnlyEngineMigratesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close(dir) })
-	if err := ownStores(dir, true); err != nil {
+	if err := ownStores(dir, true, dir); err != nil {
 		t.Fatal(err)
 	}
 	var keys int
@@ -109,7 +110,7 @@ func TestFailedMigrationStartsReadOnlyWithTheCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	keepSchemaOwner(t)
-	readOnly, status, _ := startStores(dir, false)
+	readOnly, status, _ := startStores(dir, false, "")
 	if !readOnly || status != "read-only: migrate dyna.db: table things: no such column" {
 		t.Fatalf("failed migration gave readOnly=%v status=%q", readOnly, status)
 	}
@@ -126,9 +127,144 @@ func TestFailedMigrationStartsReadOnlyWithTheCause(t *testing.T) {
 	}
 	database.OwnSchema() // as an engine whose migrations succeed
 	migrateStores = func(string) error { return nil }
-	if readOnly, status, _ := startStores(dir, false); readOnly || status != "" {
+	if readOnly, status, _ := startStores(dir, false, ""); readOnly || status != "" {
 		t.Fatalf("good migration gave readOnly=%v status=%q", readOnly, status)
 	}
+}
+
+// A development executable cannot migrate the owner's default data folder.
+// The installed path, a custom folder, and the explicit owner recovery switch
+// keep upgrades, tests, and hand recovery possible.
+func TestLiveMigrationRequiresInstalledExecutable(t *testing.T) {
+	exe, err := fsutil.InstalledExecutable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPaths := func(t *testing.T) (ownerData, installed string) {
+		root := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+		home := filepath.Join(root, "home")
+		return filepath.Join(home, ".local", "share", "dyna"), filepath.Join(home, ".local", "bin", "dyna")
+	}
+
+	t.Run("refuses before creating the database", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, _ := newPaths(t)
+		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
+		t.Cleanup(func() { database.Close(ownerData) })
+		if _, err := os.Stat(filepath.Join(ownerData, "dyna.db")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("uninstalled executable created dyna.db: %v", err)
+		}
+		if !readOnly || cause == nil || !strings.Contains(status, "only the installed engine") || !strings.Contains(status, "DYNA_ALLOW_DEV_MIGRATION=1") {
+			t.Fatalf("uninstalled live migration: readOnly=%v status=%q cause=%v", readOnly, status, cause)
+		}
+	})
+
+	t.Run("refuses a symlink to a missing default folder", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, _ := newPaths(t)
+		alias := filepath.Join(t.TempDir(), "live")
+		if err := os.Symlink(ownerData, alias); err != nil {
+			t.Fatal(err)
+		}
+		readOnly, status, _, cause := startMode(alias, false, "", ownerData)
+		t.Cleanup(func() { database.Close(alias) })
+		if _, err := os.Stat(filepath.Join(ownerData, "dyna.db")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("symlinked uninstalled executable created dyna.db: %v", err)
+		}
+		if !readOnly || cause == nil || !strings.Contains(status, "only the installed engine") {
+			t.Fatalf("symlinked live migration: readOnly=%v status=%q cause=%v; want an identity refusal", readOnly, status, cause)
+		}
+	})
+
+	t.Run("accepts the symlinked installed executable", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, installed := newPaths(t)
+		if err := os.MkdirAll(filepath.Dir(installed), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(exe, installed); err != nil {
+			t.Fatal(err)
+		}
+		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
+		t.Cleanup(func() { database.Close(ownerData) })
+		if readOnly || cause != nil {
+			t.Fatalf("installed live migration: readOnly=%v status=%q cause=%v", readOnly, status, cause)
+		}
+	})
+
+	t.Run("accepts a custom install marker without environment", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, _ := newPaths(t)
+		installDir := filepath.Join(t.TempDir(), "opt", "dyna")
+		if err := os.MkdirAll(installDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		binary, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		customExecutable := filepath.Join(installDir, "dyna")
+		if err := os.WriteFile(customExecutable, binary, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		savedExecutable := installedExecutable
+		installedExecutable = func() (string, error) { return customExecutable, nil }
+		t.Cleanup(func() { installedExecutable = savedExecutable })
+		if err := os.WriteFile(filepath.Join(installDir, installMarker), []byte(customExecutable+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("DYNA_INSTALL_DIR", "")
+		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
+		t.Cleanup(func() { database.Close(ownerData) })
+		if readOnly || cause != nil {
+			t.Fatalf("custom installed live migration: readOnly=%v status=%q cause=%v", readOnly, status, cause)
+		}
+	})
+
+	t.Run("refuses a sibling development binary", func(t *testing.T) {
+		keepSchemaOwner(t)
+		ownerData, _ := newPaths(t)
+		installDir := t.TempDir()
+		installed := filepath.Join(installDir, "dyna")
+		development := filepath.Join(installDir, "dyna-dev")
+		for _, path := range []string{installed, development} {
+			if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(installDir, installMarker), []byte(installed+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		savedExecutable := installedExecutable
+		installedExecutable = func() (string, error) { return development, nil }
+		t.Cleanup(func() { installedExecutable = savedExecutable })
+		readOnly, status, _, cause := startMode(ownerData, false, "", ownerData)
+		t.Cleanup(func() { database.Close(ownerData) })
+		if _, err := os.Stat(filepath.Join(ownerData, "dyna.db")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("sibling development executable created dyna.db: %v", err)
+		}
+		if !readOnly || cause == nil || !strings.Contains(status, "only the installed engine") {
+			t.Fatalf("sibling development migration: readOnly=%v status=%q cause=%v; want a refusal", readOnly, status, cause)
+		}
+	})
+
+	t.Run("preserves custom folders and owner recovery", func(t *testing.T) {
+		for _, recovery := range []bool{false, true} {
+			keepSchemaOwner(t)
+			ownerData, _ := newPaths(t)
+			dataDir := filepath.Join(t.TempDir(), "scratch")
+			if recovery {
+				dataDir = ownerData
+				t.Setenv("DYNA_ALLOW_DEV_MIGRATION", "1")
+			}
+			readOnly, status, _, cause := startMode(dataDir, false, "", ownerData)
+			t.Cleanup(func() { database.Close(dataDir) })
+			if readOnly || cause != nil {
+				t.Fatalf("recovery=%v: readOnly=%v status=%q cause=%v", recovery, readOnly, status, cause)
+			}
+		}
+	})
 }
 
 // keepSchemaOwner restores this process's schema ownership after the test,
@@ -144,7 +280,7 @@ func keepSchemaOwner(t *testing.T) {
 	})
 }
 
-// The fake clock covers a live blocker, one delayed alert, and recovery after
+// The fake clock covers a live blocker, one immediate alert, and recovery after
 // PID reuse. Migration must not run while the old writer still owns that PID.
 func TestMigrationRecoversAfterOldWriterExits(t *testing.T) {
 	keepSchemaOwner(t)
@@ -172,7 +308,7 @@ func TestMigrationRecoversAfterOldWriterExits(t *testing.T) {
 		}
 		return nil
 	}
-	readOnly, status, _ := startStores(dir, false)
+	readOnly, status, _ := startStores(dir, false, "")
 	if !readOnly {
 		t.Fatal("live old writer did not block migration")
 	}
@@ -180,15 +316,19 @@ func TestMigrationRecoversAfterOldWriterExits(t *testing.T) {
 	set := clock.timers(t.Context())
 	defer set.close()
 	alerts := 0
+	var woke []string
 	recoverStores(set, fmt.Errorf("migrate dyna.db: %w", blocker), func(int) (callerid.Process, error) { return live, nil }, func() {
-		readOnly, status, _ = startStores(dir, false)
+		readOnly, status, _ = startStores(dir, false, "")
 	}, func(cause error) {
 		alerts++
-		migrationAlert(rooms, cause)
+		migrationAlert(rooms, cause, func(roomID string) { woke = append(woke, roomID) })
 	})
+	if !readOnly || attempts != 1 || alerts != 1 || len(woke) != 1 || woke[0] != rec.ID {
+		t.Fatalf("immediate alert: readOnly=%v attempts=%d alerts=%d woke=%v; want true, 1, 1, root wake", readOnly, attempts, alerts, woke)
+	}
 	clock.advance(3 * time.Minute)
-	if !readOnly || attempts != 1 || alerts != 1 {
-		t.Fatalf("blocked: readOnly=%v attempts=%d alerts=%d; want true, 1, 1", readOnly, attempts, alerts)
+	if alerts != 1 {
+		t.Fatalf("immediate alert repeated after 3 minutes: %d", alerts)
 	}
 	posts, err := rooms.Messages(rec.ID)
 	if err != nil || len(posts) != 1 {

@@ -48,6 +48,7 @@ func TestOnlyTheLiveEngineJoinsConnect(t *testing.T) {
 func TestFailedMigrationKeepsConnect(t *testing.T) {
 	const unit = "/user.slice/user-1000.slice/user@1000.service/app.slice/dyna-engine.service"
 	dir := t.TempDir()
+	t.Setenv("DYNA_ALLOW_DEV_MIGRATION", "1")
 	saved := migrateStores
 	t.Cleanup(func() { migrateStores = saved })
 	keepSchemaOwner(t)

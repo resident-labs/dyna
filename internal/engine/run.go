@@ -334,7 +334,13 @@ var fullAPIReady = func() {}
 // Run owns the engine services until ctx is cancelled.
 func Run(ctx context.Context, f Options) error {
 	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
+	allowDevMigration := os.Getenv("DYNA_ALLOW_DEV_MIGRATION") == "1"
 	for {
+		// run drops DYNA_* before workers start. Restore the owner's recovery
+		// choice only for a migration retry, never in a worker environment.
+		if allowDevMigration {
+			_ = os.Setenv("DYNA_ALLOW_DEV_MIGRATION", "1")
+		}
 		err := run(ctx, f, noUpdate)
 		if !errors.Is(err, errRetryMigration) {
 			return err
@@ -683,7 +689,18 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	engineTimers := newTimers(ctx, time.Now, afterFunc)
 	retryMigration := make(chan struct{})
 	recoverStores(engineTimers, migrateCause, callerid.ProcessOf, func() { close(retryMigration) }, func(cause error) {
-		migrationAlert(rooms.Notify.Rooms, cause)
+		migrationAlert(rooms.Notify.Rooms, cause, func(roomID string) {
+			root, open, err := rooms.Notify.Sessions.RootSession(roomID)
+			if err != nil {
+				log.Printf("dyna engine: find root for read-only alert in room %s: %v", roomID, err)
+				return
+			}
+			if open {
+				if err := rooms.Notify.Sessions.TickSessionTargets(ctx, []string{root.ID}); err != nil {
+					log.Printf("dyna engine: wake root for read-only alert in room %s: %v", roomID, err)
+				}
+			}
+		})
 	})
 	if writer != nil {
 		pruneRequests(ctx, engineTimers, writer)
