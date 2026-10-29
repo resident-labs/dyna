@@ -339,7 +339,7 @@ func (s *Service) ownerPosts(rec room.Record) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	elsewhere, err := s.rooms().OtherHomes(rec.ID)
+	elsewhere, err := s.rooms().OtherHomesOf(rec.ID, ids)
 	if err != nil {
 		return nil, err
 	}
