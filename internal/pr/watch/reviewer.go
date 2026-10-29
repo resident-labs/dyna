@@ -374,7 +374,8 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 			}
 			facts.Paused[r.RoomID] = paused
 		}
-		if !facts.Paused[r.RoomID] && needsReview(st, *r) {
+		// Maintainers review a PR into an upstream, so Dyna never queues one (D-503).
+		if !facts.Paused[r.RoomID] && needsReview(st, *r) && !facts.UpstreamPR(*r) {
 			facts.Need = append(facts.Need, r)
 		}
 		// The pool releases a closed PR's reviewer within a pass. Older closed
