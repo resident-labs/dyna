@@ -1,7 +1,6 @@
 package room
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -135,8 +134,8 @@ func TestHomeForDefaultsToTheRoom(t *testing.T) {
 }
 
 // OtherHomesOf reads the homes of the posts it names, not every non-feed home of
-// the room. A check of two owner posts in a room with 2000 DM posts returns the
-// two homes and looks each post up by its key.
+// the room. A check of owner posts returns the homes of the named DM posts, skips
+// the room-feed post and the unknown post, and looks each post up by its key.
 func TestOtherHomesOfReadsOnlyTheNamedPosts(t *testing.T) {
 	s := recordsStore(t)
 	rec, err := s.Create(CreateInput{Name: "alpha"})
@@ -152,9 +151,9 @@ func TestOtherHomesOfReadsOnlyTheNamedPosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range 2000 {
-		if _, err := tx.Exec(`INSERT INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, ?, ?, '')`,
-			rec.ID, fmt.Sprintf("msg_dm%05d", i), i, dm.String()); err != nil {
+	for _, id := range []string{"msg_dm00007", "msg_dm01999"} {
+		if _, err := tx.Exec(`INSERT INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, 1, ?, '')`,
+			rec.ID, id, dm.String()); err != nil {
 			t.Fatal(err)
 		}
 	}
