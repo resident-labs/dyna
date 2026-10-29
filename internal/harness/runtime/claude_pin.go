@@ -169,7 +169,7 @@ func (a *Accounts) adoptSharedCredentials(ctx context.Context, n NativeAccount, 
 
 // switchPinned records the new active account without waiting for turns.
 // Running turns keep the credentials folder of the account they started with.
-func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onActivate func(), keep func(active string) bool) error {
+func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onActivate func()) error {
 	if onActivate != nil {
 		onActivate()
 	}
@@ -178,12 +178,7 @@ func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onAc
 		return err
 	}
 	if n.Harness == "pi" {
-		return a.transaction(func(*store.State) error {
-			if err := a.keepActive(n.Harness, keep); err != nil {
-				return err
-			}
-			return a.selectPinned(n)
-		}, true)
+		return a.selectPinned(n)
 	}
 	return a.transaction(func(state *store.State) error {
 		entry := state.Find(id)
@@ -199,9 +194,6 @@ func (a *Accounts) switchPinned(ctx context.Context, id, executable string, onAc
 			return err
 		}
 		if err = os.MkdirAll(home, 0700); err != nil {
-			return err
-		}
-		if err := a.keepActive(n.Harness, keep); err != nil {
 			return err
 		}
 		login, err := a.syncPin(ctx, n, executable)

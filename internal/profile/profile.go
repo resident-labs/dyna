@@ -47,6 +47,8 @@ type Profile struct {
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 	// RuntimeRepo is the repository identity of the turn, set by the runner.
 	RuntimeRepo string `json:"-"`
+	// RuntimeAccount pins the account one turn runs on, without changing the global selection. A held-account probe sets it.
+	RuntimeAccount string `json:"-"`
 	// RuntimePermissionArgs snapshots user arguments before generated tool denials.
 	// A non-nil empty slice identifies a prepared default profile.
 	RuntimePermissionArgs []string `json:"-"`
