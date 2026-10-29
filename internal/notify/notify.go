@@ -1115,6 +1115,47 @@ func serviceProducer(role room.ServiceRole) room.EventProducer {
 	return room.ProducerHelper
 }
 
+// effectiveTurnProfile names the profile and model a turn reports: the
+// turn's own when it recorded one, else the session's, so a turn that failed
+// before its harness wrote them still names what runs.
+func effectiveTurnProfile(meta subagent.Meta, turn subagent.Turn) (profile, model string) {
+	if turn.Profile != "" {
+		return turn.Profile, turn.Model
+	}
+	return meta.Profile, meta.Model
+}
+
+// profileLine is a failure detail's profile line under its label, or "" when
+// no profile is known.
+func profileLine(label, profile, model string) string {
+	if profile == "" {
+		return ""
+	}
+	if model != "" {
+		return label + profile + " / " + model
+	}
+	return label + profile
+}
+
+// workerStderrLine is the evidence line for the worker's own stderr, kept out
+// of the failure's cause text: it may hold harmless warnings on a turn that
+// timed out (D-108).
+func workerStderrLine(turn subagent.Turn) string {
+	if stderr := strings.TrimSpace(turn.WorkerStderr); stderr != "" {
+		return "Worker stderr: " + stderr
+	}
+	return ""
+}
+
+// appendNonEmpty adds a detail line that its builder could fill; an empty
+// line says the fact is unknown, so it never reaches the reader.
+func appendNonEmpty(lines []string, line string) []string {
+	if line != "" {
+		return append(lines, line)
+	}
+	return lines
+}
+
 // serviceFailureText is the alert a failed service turn posts: what failed,
 // then the session it ran as, then how to inspect it. A service changes with
 // `dyna services`, so the alert offers no child-failure recovery.
@@ -1123,25 +1164,12 @@ func serviceFailureText(meta subagent.Meta, turn subagent.Turn, role string, man
 		fmt.Sprintf("Service %s failed turn %d: %s", role, turn.N, strings.TrimSpace(turn.Error)),
 		"Session: " + meta.Address(),
 	}
-	profile, model := turn.Profile, turn.Model
-	if profile == "" {
-		profile, model = meta.Profile, meta.Model
-	}
-	if profile != "" {
-		line := "Profile: " + profile
-		if model != "" {
-			line += " / " + model
-		}
-		lines = append(lines, line)
-	}
+	profile, model := effectiveTurnProfile(meta, turn)
+	lines = appendNonEmpty(lines, profileLine("Profile: ", profile, model))
 	if manage {
 		lines = append(lines, "Inspect: dyna services log "+role+" · restart: dyna services restart "+role)
 	}
-	// The worker's own stderr is evidence, kept out of the failure's cause
-	// text: it may hold harmless warnings on a turn that timed out (D-108).
-	if stderr := strings.TrimSpace(turn.WorkerStderr); stderr != "" {
-		lines = append(lines, "Worker stderr: "+stderr)
-	}
+	lines = appendNonEmpty(lines, workerStderrLine(turn))
 	return strings.Join(lines, "\n")
 }
 
@@ -1257,10 +1285,7 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 		if err != nil || plan == nil {
 			return plan, err
 		}
-		profile, model := turn.Profile, turn.Model
-		if profile == "" {
-			profile, model = meta.Profile, meta.Model
-		}
+		profile, model := effectiveTurnProfile(meta, turn)
 		plan.Service = &room.ServiceFailedEvent{
 			Service: serviceRole(role),
 			Session: meta.Address(),
@@ -1395,22 +1420,9 @@ func (s *Service) turnReportDetail(meta subagent.Meta, turn subagent.Turn, state
 	if state != room.TurnFailed {
 		return strings.Join(lines, "\n")
 	}
-	profile, model := turn.Profile, turn.Model
-	if profile == "" {
-		profile, model = meta.Profile, meta.Model
-	}
-	if profile != "" {
-		line := "Failed model: " + profile
-		if model != "" {
-			line += " / " + model
-		}
-		lines = append(lines, line)
-	}
-	// The worker's own stderr is evidence, kept out of the failure's cause
-	// text: it may hold harmless warnings on a turn that timed out (D-108).
-	if stderr := strings.TrimSpace(turn.WorkerStderr); stderr != "" {
-		lines = append(lines, "Worker stderr: "+stderr)
-	}
+	profile, model := effectiveTurnProfile(meta, turn)
+	lines = appendNonEmpty(lines, profileLine("Failed model: ", profile, model))
+	lines = appendNonEmpty(lines, workerStderrLine(turn))
 	lines = append(lines,
 		fmt.Sprintf("Inspect: dyna subagent output %s --turn %d --transcript", meta.ID, turn.N))
 	if s.sessionStore().TransferFallbackFollows(meta, turn) {
