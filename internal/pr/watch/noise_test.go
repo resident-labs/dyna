@@ -219,7 +219,7 @@ func TestLearnedZeroOutcomeKeepsStructuredNonzeroCounts(t *testing.T) {
 		t.Fatalf("nonzero outcomes must wake the author in one batch: %+v", e.sent)
 	}
 	for _, body := range useful {
-		if !strings.Contains(e.sent[0].Text, quotedComment(body)) {
+		if !strings.Contains(e.sent[0].Text, body) {
 			t.Errorf("nonzero outcome missing from author batch: %q", body)
 		}
 	}

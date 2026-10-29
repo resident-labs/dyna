@@ -228,7 +228,7 @@ setting. New reviewer assignments always use `local`. Agents, including root
 and workflow workers, cannot publish GitHub PR comments or reviews through
 the CLI or engine service. Only the owner can publish GitHub feedback or
 select the GitHub publishing setting. Existing GitHub feedback remains public.
-The owner can admit held feedback with `dyna git pr admit <pr> <kind:id>`.
+With `pr.outsideComments` set to `hold`, the owner can admit held feedback with `dyna git pr admit <pr> <kind:id>`.
 
 See `dyna guide git`.
 
@@ -250,14 +250,15 @@ configured trusted bots. The default list is `coderabbitai` and
 `copilot-pull-request-reviewer`. Set `pr.trustedBots` to a JSON list of bot
 logins; an empty list trusts no bots.
 
-All other comments are held in SQLite. They never enter author notices or
-reviewer context. Each held comment appears in the home alerts card and as
-a quiet notice in its PR room, with owner-only **Admit** and **Dismiss** actions.
+By default, all other comments reach author notices and reviewer context as
+external data. With `pr.outsideComments` set to `hold`, they are kept in SQLite
+instead. Each held comment appears in the home alerts card and as a quiet
+notice in its PR room, with owner-only **Admit** and **Dismiss** actions.
 The PR page shows only the held count. The owner can also run
 `dyna git pr admit <pr> <kind:id>` or `dyna git pr dismiss <pr> <kind:id>`.
 Admission covers only the exact held version; an edit is held again.
 
-Non-owner comments are quoted as data, never instructions. Trusted comments
+Non-owner comments are wrapped as external data, never instructions. Trusted comments
 still pass the noise filter, which drops exact known rate-limit messages,
 progress placeholders, and duplicate bot issue/review comments. Repeated
 inline text can refer to different code locations, so it is kept.
