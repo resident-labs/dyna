@@ -784,6 +784,39 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Question {questionId} was withdrawn: {reason}",
 	},
+	// An approval request wakes only its current holder. A request for the
+	// owner stays quiet because no session needs to start.
+	{
+		Family:   FamilyApproval,
+		Type:     TypeApprovalRequested,
+		Renderer: "ApprovalRequestCard",
+		Payload:  reflect.TypeOf(ApprovalRequestedEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "Approval {requestId} from {requester} waits on {at}: {title}",
+	},
+	// Decisions stay quiet except for a pass, which wakes the new holder.
+	{
+		Family:   FamilyApproval,
+		Type:     TypeApprovalDecided,
+		Renderer: "ApprovalDecisionRow",
+		Payload:  reflect.TypeOf(ApprovalDecidedEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "Approval {requestId}: {actor} chose {action}.",
+	},
+	// The final result belongs to the requester and wakes that session.
+	{
+		Family:   FamilyApproval,
+		Type:     TypeApprovalResult,
+		Renderer: "ApprovalResultCard",
+		Payload:  reflect.TypeOf(ApprovalResultEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Audience: AudienceSession,
+		Blocks:   []string{"reason", "output"},
+		Text:     "Approval {requestId} ended: {state}.",
+	},
 	// A terminal request wakes the session that holds it. A request that waits
 	// for the owner wakes no session; the poster turns the wake off.
 	{
@@ -959,6 +992,9 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
 	{Type: reflect.TypeOf(HelperOutcomeReason("")), Values: enumValues(helperOutcomeReasons)},
 	{Type: reflect.TypeOf(TerminalVerdict("")), Values: enumValues(terminalVerdicts)},
+	{Type: reflect.TypeOf(ApprovalClass("")), Values: enumValues([]ApprovalClass{ApprovalClassAgent, ApprovalClassOwner})},
+	{Type: reflect.TypeOf(ApprovalAction("")), Values: enumValues([]ApprovalAction{ApprovalApprove, ApprovalDeny, ApprovalPass, ApprovalAuto})},
+	{Type: reflect.TypeOf(ApprovalState("")), Values: enumValues([]ApprovalState{ApprovalDone, ApprovalFailed, ApprovalDenied, ApprovalExpired, ApprovalCancelled})},
 	{Type: reflect.TypeOf(ShellState("")), Values: enumValues(shellStates)},
 	{Type: reflect.TypeOf(RunState("")), Values: enumValues(runStates)},
 	{Type: reflect.TypeOf(TurnState("")), Values: enumValues(turnStates)},
