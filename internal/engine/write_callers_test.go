@@ -20,7 +20,6 @@ var handlerCallerChecks = map[string]string{
 	"AdmitNativeAttempt":          "checkAdmissionCaller requires the verified session runner or the run coordinator and its own execution and request prefix.",
 	"AttachSeat":                  "Checks root attach with authority.Of(ctx).",
 	"FinishRun":                   "checkRunCoordinator requires the run's verified coordinator and its own request prefix.",
-	"GitPush":                     "workerGitHubRoom requires the caller's verified room from authority.Of(ctx); the push is confined to that room's repository and write policy.",
 	"StartRunAgent":               "checkRunAgentCoordinator requires the run's verified coordinator.",
 	"CloseRunAgent":               "checkRunAgentCoordinator requires the run's verified coordinator.",
 	"CloseRunAgents":              "checkRunAgentCoordinator requires the run's verified coordinator.",
